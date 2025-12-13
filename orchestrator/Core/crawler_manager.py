@@ -7,6 +7,7 @@ Zweck:
 Verantwortlich für den "Deep Ingest" von Dokumentation.
 Lädt Webseiten rekursiv, parst PDFs und bereitet Inhalte für die Vektor-DB auf.
 Beachtet strikt robots.txt und Rate-Limits.
+Integriert zentrale Sicherheitsvalidierung (SSRF-Schutz).
 """
 
 import time
@@ -19,7 +20,7 @@ from pathlib import Path
 from typing import List, Set, Optional, Dict, Any
 from io import BytesIO
 
-# Third-party imports (via pyproject.toml v1.6.0)
+# Third-party imports
 from bs4 import BeautifulSoup
 from langchain_core.documents import Document
 try:
@@ -32,6 +33,9 @@ except ImportError:
     detect = None
 
 from orchestrator.utils.logging import get_logger
+# NEU: Import der zentralen Validierungslogik
+# Bitte Pfad anpassen, falls validation.py woanders liegt (z.B. orchestrator.Core.validation)
+from orchestrator.utils.validation import validate_url
 
 class CrawlerManager:
     """
@@ -42,6 +46,7 @@ class CrawlerManager:
     - Rate Limiting
     - Language Filtering
     - Native PDF Support
+    - Centralized Security Validation (SSRF Protection)
     """
 
     def __init__(self, framework_manager):
@@ -83,13 +88,21 @@ class CrawlerManager:
             if url in self.visited:
                 continue
             
-            # 1. Security & Politeness Checks
+            # ---------------------------------------------------------
+            # NEU: 1. Strenge Sicherheitsvalidierung (SSRF / Format)
+            # ---------------------------------------------------------
+            if not validate_url(url):
+                self.logger.warning(f"Security Alert: Skipping unsafe or invalid URL: {url}")
+                self.visited.add(url)
+                continue
+
+            # 2. Politeness Checks (Robots.txt)
             if not self._can_fetch(url):
                 self.logger.warning(f"Skipping {url} (Disallowed by robots.txt)")
                 self.visited.add(url) # Mark as visited to avoid re-check
                 continue
                 
-            # 2. Fetch Content
+            # 3. Fetch Content
             self.logger.info(f"Crawling ({pages_crawled}/{self.max_pages}): {url}")
             try:
                 time.sleep(self.rate_limit) # Politeness delay
@@ -104,7 +117,7 @@ class CrawlerManager:
                 self.visited.add(url)
                 pages_crawled += 1
                 
-                # 3. Process Content
+                # 4. Process Content
                 doc = None
                 new_links = []
                 
@@ -116,7 +129,7 @@ class CrawlerManager:
                 if doc:
                     documents.append(doc)
                 
-                # 4. Enqueue new links if depth allows
+                # 5. Enqueue new links if depth allows
                 if depth < self.max_depth:
                     for link in new_links:
                         if link not in self.visited:
