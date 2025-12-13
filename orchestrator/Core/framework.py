@@ -1,19 +1,14 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Framework Core (v2.3 )
+LLM Cross-Compiler Framework - Framework Core (v2.4.0)
 DIREKTIVE: Goldstandard, Central Dependency Injection.
 
 Der Kernel des Systems. Initialisiert alle Manager in strikter,
-sicherheitskritischer Reihenfolge.
+sicherheitskritischer Reihenfolge und verknüpft die Komponenten.
 
-BOOT SEQUENCE:
-1. Config & Logging
-2. Secrets Manager (CRITICAL) - Must be ready before any API calls.
-3. Docker & Infrastructure
-4. Core Logic (Targets, Models)
-5. AI Services (Ditto, RAG)
-6. Guardians (Self-Healing)
-7. Operations (Deployment, Orchestrator)
+Updates v2.4.0:
+- Dependency Injection für DittoManager in Orchestrator (für IMatrix-Flow).
+- Version Bump auf v2.4.0 (Smart Calibration Update).
 """
 
 import os
@@ -44,7 +39,7 @@ from orchestrator.Core.orchestrator import LLMOrchestrator
 @dataclass
 class FrameworkInfo:
     name: str = "LLM Cross-Compiler Framework"
-    version: str = "2.3.0"
+    version: str = "2.4.0"
     edition: str = "Enterprise"
     installation_path: Path = Path(".")
 
@@ -139,8 +134,12 @@ class FrameworkManager:
             
             # Orchestrator - needs everything
             self.orchestrator = LLMOrchestrator(self.config)
-            # Inject Dependencies manually (Cleaner than passing Framework blob)
+            
+            # === DEPENDENCY INJECTION ===
+            # Connect the Brain (Ditto) and the Guardian (Self-Healing) to the Orchestrator
             self.orchestrator.inject_self_healing(self.self_healing_manager)
+            if self.ditto_manager:
+                self.orchestrator.inject_ditto(self.ditto_manager) # NEW: IMatrix Dataset Provider
             
             # Updater
             self.updater = UpdateManager(self)
