@@ -1,0 +1,88 @@
+---
+# LLM Cross-Compiler Framework - Target Template
+# Füllen Sie diese Datei aus, um ein neues Hardware-Ziel zu definieren.
+
+metadata:
+  name: "[Hardware-Familie]"
+  description: "Beschreibung der Hardware-Familie (z.B. Raspberry Pi Familie)"
+  maintainer: "[Ihr Name oder Organisation]"
+  version: "1.0.0"
+  created: "YYYY-MM-DD"
+  
+  # Klassifizierung
+  category: "embedded_soc" # z.B. embedded_soc, desktop_gpu, npu
+  architecture_family: "[aarch64, x86_64, etc.]"
+  vendor: "[Hersteller]"
+
+# Unterstützte Hardware
+supported_boards:
+  - name: "[Board Name 1]"
+    description: "[CPU, GPU, NPU Spezifikationen]"
+    specifications:
+      cpu_cores: 4
+      cpu_arch: "cortex-a72"
+      npu: "Keine"
+      memory_max: "8GB"
+      
+  - name: "[Board Name 2]"
+    description: "[Spezifikationen]"
+
+# Docker-Konfiguration
+docker:
+  image_name: "llm-framework/[ihr-target-name]"
+  registry: "ghcr.io"
+  build_context: "."
+  dockerfile: "Dockerfile"
+  
+  # Build-Argumente
+  build_args:
+    LLAMA_CPP_COMMIT: "b3626"
+    BUILD_JOBS: "4"
+    PYTHON_VERSION: "3.11"
+
+# Modul-Definitionen (Standard-Pipeline)
+modules:
+  source: "modules/source_module.sh"
+  config: "modules/config_module.sh"
+  convert: "modules/convert_module.sh" 
+  target: "modules/target_module.sh"
+  
+  module_info:
+    source:
+      description: "Environment & Tools Setup"
+    config:
+      description: "Hardware Detection & CMake Toolchain Generation"
+      inputs: ["target_hardware_config.txt"]
+      outputs: ["cross_compile_toolchain.cmake", "build_config.sh"]
+    convert:
+      description: "Model Format Conversion (HF/ONNX/PyTorch → GGUF)"
+      inputs: ["model_directory"]
+      outputs: ["model.fp16.gguf"]
+    target:
+      description: "Quantization & Cross-Compilation"
+      inputs: ["model.fp16.gguf", "cmake_toolchain"]
+      outputs: ["deployment_package.zip"]
+
+# Hardware-Optimierungsprofile
+optimization_profiles:
+  default:
+    cpu_flags: "-mcpu=native -march=native"
+    cmake_flags: "-DGGML_NATIVE=ON"
+    memory_profile: "medium_memory"
+    recommended_quantization: ["Q4_K_M", "Q8_0"]
+    
+  performance:
+    cpu_flags: "-mcpu=cortex-a76 -mfpu=neon-fp-armv8"
+    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON" 
+    memory_profile: "high_memory"
+    recommended_quantization: ["Q6_K", "Q8_0"]
+
+# Anforderungen
+requirements:
+  framework:
+    docker_version: ">=20.10"
+    python_version: ">=3.10"
+    
+  host_system:
+    memory_gb: 8
+    disk_gb: 20

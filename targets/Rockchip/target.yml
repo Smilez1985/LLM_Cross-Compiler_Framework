@@ -1,0 +1,296 @@
+---
+# LLM Cross-Compiler Framework - Rockchip Target Configuration
+# Professional target definition for Radxa/Rockchip hardware family
+
+metadata:
+  name: "Rockchip Family"
+  description: "Cross-compilation for Radxa and Rockchip SoC boards (RK3566, RK3588, RK3576, RK3568)"
+  maintainer: "LLM Framework Core Team"
+  version: "1.0.0"
+  created: "2024-11-03"
+  updated: "2024-11-03"
+  
+  # Target classification
+  category: "embedded_soc"
+  architecture_family: "aarch64"
+  vendor: "rockchip"
+  
+  # Documentation links
+  documentation_url: "https://docs.radxa.com/"
+  community_url: "https://forum.radxa.com/"
+  datasheet_url: "https://www.rock-chips.com/a/en/products/"
+
+# Supported hardware boards
+supported_boards:
+  - name: "RK3566"
+    description: "Quad-core ARM Cortex-A55, Mali-G52 GPU"
+    specifications:
+      cpu_cores: 4
+      cpu_arch: "cortex-a55"
+      cpu_max_freq: "1.8GHz"
+      gpu: "Mali-G52"
+      npu: "1 TOPS"
+      memory_max: "8GB LPDDR4"
+      typical_boards: ["Radxa ZERO 3W", "Radxa CM3", "ROCK 3C"]
+      
+  - name: "RK3568" 
+    description: "Quad-core ARM Cortex-A55, Mali-G52 GPU"
+    specifications:
+      cpu_cores: 4
+      cpu_arch: "cortex-a55"
+      cpu_max_freq: "2.0GHz"
+      gpu: "Mali-G52"
+      npu: "1 TOPS"
+      memory_max: "8GB LPDDR4"
+      typical_boards: ["ROCK 3A", "Radxa E25"]
+      
+  - name: "RK3576"
+    description: "Octa-core ARM (4xA72 + 4xA53), Mali-G52 GPU" 
+    specifications:
+      cpu_cores: 8
+      cpu_arch: "big-little"
+      cpu_big: "4x cortex-a72"
+      cpu_little: "4x cortex-a53" 
+      cpu_max_freq: "2.2GHz"
+      gpu: "Mali-G52"
+      npu: "6 TOPS"
+      memory_max: "16GB LPDDR5"
+      typical_boards: ["ROCK 5ITX"]
+      
+  - name: "RK3588"
+    description: "Octa-core ARM (4xA76 + 4xA55), Mali-G610 GPU"
+    specifications:
+      cpu_cores: 8
+      cpu_arch: "big-little"
+      cpu_big: "4x cortex-a76"
+      cpu_little: "4x cortex-a55"
+      cpu_max_freq: "2.4GHz" 
+      gpu: "Mali-G610"
+      npu: "6 TOPS"
+      memory_max: "32GB LPDDR5"
+      typical_boards: ["ROCK 5B", "Radxa CM5", "Orange Pi 5"]
+
+# Docker configuration
+docker:
+  image_name: "llm-framework/rockchip"
+  registry: "ghcr.io"
+  build_context: "."
+  dockerfile: "Dockerfile"
+  
+  # Build arguments
+  build_args:
+    LLAMA_CPP_COMMIT: "b3626"
+    BUILD_JOBS: "4"
+    PYTHON_VERSION: "3.11"
+    
+  # Image tags
+  tags:
+    - "latest"
+    - "v1.0.0"
+    - "stable"
+  
+  # Resource requirements for building
+  build_requirements:
+    memory_gb: 8
+    disk_gb: 20
+    cpu_cores: 4
+
+# Module definitions  
+modules:
+  source: "modules/source_module.sh"
+  config: "modules/config_module.sh"
+  convert: "modules/convert_module.sh" 
+  target: "modules/target_module.sh"
+  
+  # Module metadata
+  module_info:
+    source:
+      description: "Environment & Tools Setup"
+      dependencies: ["python3", "git", "cmake", "make"]
+      runtime: "host"
+      
+    config:
+      description: "Hardware Detection & CMake Toolchain Generation"
+      dependencies: ["crossbuild-essential-arm64"]
+      runtime: "container"
+      inputs: ["target_hardware_config.txt"]
+      outputs: ["cross_compile_toolchain.cmake", "build_config.sh"]
+      
+    convert:
+      description: "Model Format Conversion (HF/ONNX/PyTorch → GGUF)"
+      dependencies: ["torch", "transformers", "numpy"]
+      runtime: "container"
+      inputs: ["model_directory"]
+      outputs: ["model.fp16.gguf"]
+      
+    target:
+      description: "Quantization & Cross-Compilation"
+      dependencies: ["llama-quantize", "llama-cli"]
+      runtime: "container"
+      inputs: ["model.fp16.gguf", "cmake_toolchain"]
+      outputs: ["deployment_package.zip"]
+
+# Hardware optimization profiles
+optimization_profiles:
+  rk3566_default:
+    cpu_flags: "-mcpu=cortex-a55 -mfpu=neon-fp-armv8"
+    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON"
+    memory_profile: "low_memory"
+    recommended_quantization: ["Q4_0", "Q4_K_M", "Q5_0"]
+    
+  rk3568_default:
+    cpu_flags: "-mcpu=cortex-a55 -mfpu=neon-fp-armv8" 
+    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON"
+    memory_profile: "medium_memory"
+    recommended_quantization: ["Q4_K_M", "Q5_K_M", "Q8_0"]
+    
+  rk3576_performance:
+    cpu_flags: "-mcpu=cortex-a72 -mfpu=neon-fp-armv8"
+    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON"
+    memory_profile: "high_memory"
+    recommended_quantization: ["Q5_K_M", "Q6_K", "Q8_0"]
+    
+  rk3588_performance:
+    cpu_flags: "-mcpu=cortex-a76 -mfpu=neon-fp-armv8"
+    cmake_flags: "-DGGML_NATIVE=ON -DGGML_NEON=ON" 
+    memory_profile: "high_memory"
+    recommended_quantization: ["Q6_K", "Q8_0", "F16"]
+
+# Framework requirements
+requirements:
+  framework:
+    docker_version: ">=20.10"
+    docker_compose_version: ">=2.0"
+    python_version: ">=3.10"
+    poetry_version: ">=1.5"
+    
+  host_system:
+    memory_gb: 8
+    disk_gb: 20
+    network: "required"
+    
+  target_system:
+    architecture: "aarch64"
+    kernel_version: ">=5.10"
+    memory_mb: ">=512"
+    
+# Supported model formats
+supported_formats:
+  input:
+    - name: "Hugging Face"
+      extensions: [".safetensors", ".bin"] 
+      description: "Transformers model with config.json"
+      requirements: ["config.json", "tokenizer.json"]
+      
+    - name: "PyTorch"
+      extensions: [".pth", ".pt"]
+      description: "PyTorch checkpoint files"
+      requirements: ["state_dict"]
+      
+    - name: "ONNX"
+      extensions: [".onnx"]
+      description: "ONNX model format"
+      requirements: ["onnx runtime"]
+      
+    - name: "SafeTensors"
+      extensions: [".safetensors"]
+      description: "Standalone SafeTensors file"
+      requirements: ["metadata"]
+      
+  output:
+    - name: "GGUF"
+      extensions: [".gguf"]
+      description: "llama.cpp quantized format"
+      quantization_methods:
+        - "Q4_0"    # 4-bit integer (fast, smaller)
+        - "Q4_1"    # 4-bit integer (better quality)
+        - "Q5_0"    # 5-bit integer (balanced)
+        - "Q5_1"    # 5-bit integer (better quality)
+        - "Q8_0"    # 8-bit integer (high quality)
+        - "Q2_K"    # 2-bit k-quantization
+        - "Q3_K_S"  # 3-bit k-quantization (small)
+        - "Q3_K_M"  # 3-bit k-quantization (medium)
+        - "Q4_K_S"  # 4-bit k-quantization (small)
+        - "Q4_K_M"  # 4-bit k-quantization (medium, recommended)
+        - "Q5_K_S"  # 5-bit k-quantization (small)
+        - "Q5_K_M"  # 5-bit k-quantization (medium)
+        - "Q6_K"    # 6-bit k-quantization (high quality)
+
+# Performance benchmarks (reference values)
+performance_benchmarks:
+  granite_350m:
+    rk3566:
+      q4_k_m:
+        memory_usage_mb: 180
+        first_token_ms: 800
+        tokens_per_second: 12
+        cpu_usage_percent: 85
+        
+    rk3588:
+      q4_k_m:
+        memory_usage_mb: 180 
+        first_token_ms: 450
+        tokens_per_second: 25
+        cpu_usage_percent: 60
+        
+  llama2_7b:
+    rk3588:
+      q4_k_m:
+        memory_usage_mb: 4200
+        first_token_ms: 2000
+        tokens_per_second: 8
+        cpu_usage_percent: 95
+
+# Validation and testing
+validation:
+  unit_tests:
+    - "test_docker_build"
+    - "test_module_execution" 
+    - "test_cross_compilation"
+    - "test_quantization"
+    
+  integration_tests:
+    - "test_full_pipeline"
+    - "test_model_accuracy"
+    - "test_performance_regression"
+    
+  compatibility_tests:
+    - "test_rk3566_deployment"
+    - "test_rk3588_deployment"
+    - "test_different_models"
+
+# Community and contribution
+community:
+  contribution_guide: "docs/contributing.md"
+  issue_template: ".github/ISSUE_TEMPLATE.md"
+  pr_template: ".github/PULL_REQUEST_TEMPLATE.md"
+  
+  maintainers:
+    - name: "Framework Core Team"
+      github: "@llm-framework"
+      role: "primary"
+      
+  contributors:
+    - name: "Community Contributors"
+      github: "@community"
+      role: "development"
+
+# Changelog and versioning
+changelog:
+  v1.0.0:
+    date: "2024-11-03"
+    changes:
+      - "Initial release"
+      - "Complete RK3566/RK3588 support"
+      - "4-module architecture"
+      - "Professional GUI with wizard"
+      - "Docker-based cross-compilation"
+      - "Hardware optimization profiles"
+    breaking_changes: []
+    
+  planned:
+    v1.1.0:
+      - "RK3576 optimization profiles"
+      - "NPU utilization support"
+      - "Performance auto-tuning"
+      - "Extended model format support"

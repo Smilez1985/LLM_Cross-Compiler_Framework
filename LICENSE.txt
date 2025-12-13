@@ -1,0 +1,126 @@
+MIT License
+
+Copyright (c) 2024 LLM Cross-Compiler Framework Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+================================================================================
+
+ADDITIONAL TERMS AND CONDITIONS FOR LLM CROSS-COMPILER FRAMEWORK
+
+1. ATTRIBUTION REQUIREMENTS
+   When redistributing or building upon this software, you must retain the
+   original copyright notice and provide clear attribution to the LLM
+   Cross-Compiler Framework project.
+
+2. COMMUNITY CONTRIBUTIONS
+   Contributions to this project are welcome and encouraged. By contributing,
+   you agree that your contributions will be licensed under the same MIT
+   License terms.
+
+3. HARDWARE TARGET MODULES
+   Hardware-specific target modules (contained in the targets/ directory)
+   may include additional license terms or requirements specific to the
+   hardware vendor's SDKs or toolchains. Please review individual target
+   documentation for specific requirements.
+
+4. THIRD-PARTY DEPENDENCIES
+   This software depends on various third-party libraries and tools, each
+   subject to their own license terms:
+   
+   - llama.cpp: MIT License
+   - PyTorch: BSD-style License
+   - Transformers (Hugging Face): Apache License 2.0
+   - Docker: Apache License 2.0
+   - PySide6: LGPL/Commercial License
+   - Poetry: MIT License
+   - Rich: MIT License
+   - Click: BSD License
+   - PyYAML: MIT License
+
+5. DOCKER IMAGES AND CONTAINERS
+   Docker images built using this framework may include additional software
+   components subject to their own licensing terms. Users are responsible
+   for ensuring compliance with all applicable licenses when distributing
+   or deploying Docker images.
+
+6. MODEL LICENSES
+   This framework is designed to work with AI models that may be subject to
+   their own licensing terms. Users must ensure compliance with the licensing
+   terms of any models they process using this framework.
+
+7. COMMERCIAL USE
+   This software may be used for commercial purposes under the MIT License
+   terms. However, users should be aware that some AI models and hardware
+   SDKs may have restrictions on commercial use.
+
+8. NO WARRANTY
+   This software is provided "as is" without warranty of any kind. The
+   authors and contributors are not liable for any damages arising from
+   the use of this software.
+
+9. EXPORT REGULATIONS
+   Users are responsible for compliance with applicable export control laws
+   and regulations when using this software in international contexts.
+
+10. TRADEMARK NOTICE
+    "LLM Cross-Compiler Framework" is a trademark of the project maintainers.
+    Use of the trademark is subject to the project's trademark policy.
+
+================================================================================
+
+ACKNOWLEDGMENTS
+
+This project builds upon the work of many open-source projects and communities:
+
+- The llama.cpp project for efficient LLM inference
+- Hugging Face for the transformers ecosystem and model hub
+- The broader AI/ML open-source community
+- Hardware vendors who provide open development tools
+- All community contributors who have submitted targets and improvements
+
+Special thanks to the Radxa community for early testing and feedback on the
+Rockchip target implementation.
+
+================================================================================
+
+CONTACT INFORMATION
+
+For questions about this license or the LLM Cross-Compiler Framework:
+
+- Project Repository: https://github.com/llm-framework/llm-cross-compiler-framework
+- Issue Tracker: https://github.com/llm-framework/llm-cross-compiler-framework/issues
+- Discussions: https://github.com/llm-framework/llm-cross-compiler-framework/discussions
+- Email: legal@llm-framework.org
+
+For security issues, please use our security contact: security@llm-framework.org
+
+================================================================================
+
+VERSION HISTORY
+
+v1.0.0 (2024-11-03): Initial release with MIT License
+- Framework core and orchestrator
+- Rockchip target implementation
+- Module creation wizard
+- CLI and GUI interfaces
+- Community contribution system
+
+Future versions will maintain backward compatibility with the MIT License
+terms while potentially adding clarifications for new features or components.

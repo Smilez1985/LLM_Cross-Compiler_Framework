@@ -1,0 +1,126 @@
+config_module.sh:
+
+Workflow:
+
+Stufe 1 (Auf Ziel-Hardware):
+bash# Auf RK3566/Target-PC ausführen
+./hardware_probe.sh  # → target_hardware_config.txt
+
+Stufe 2 (Im Docker-Container):
+
+bash# Im Build-Container
+./config_module.sh --hardware-config target_hardware_config.txt
+# → Generiert: cross_compile_toolchain.cmake + build_config.sh
+
+Was das config_module.sh leistet:
+✅ Variable Substitution - Liest hardware_probe.sh Ausgabe ein
+✅ Multi-Arch Support - AArch64, x86_64, ARMv7
+✅ CPU-Specific Flags - Cortex-A55/A72/A76, Native x86
+✅ SIMD-Detection - NEON, AVX2, AVX512 → GGML-Flags
+✅ Cross-Compilation - Automatische Toolchain-Erkennung
+✅ CMake Integration - Vollständige Toolchain-Datei
+✅ Professional Validation - Compiler-Tests, Syntax-Checks
+
+
+-----------------------
+convert_module.sh - das Format-Conversion-Modul
+
+Verwendung im Container:
+
+bash# Im Docker-Container
+./convert_module.sh \
+  --input /build-cache/models/granite-h-350m \
+  --output /build-cache/output/granite-h-350m.fp16.gguf \
+  --model-name granite-h-350m
+
+
+Was das convert_module.sh leistet:
+
+✅ Multi-Format Support - HuggingFace, PyTorch, ONNX, SafeTensors → GGUF FP16
+✅ Intelligente Format-Detection - Automatische Erkennung des Input-Formats
+✅ Robust Validation - Input/Output Validation mit Integritäts-Checks
+✅ Container-Native - Direkt mit Docker-Python (kein VENV-Overhead)
+✅ Professional Error Handling - Cleanup, Backups, ausführliche Logs
+✅ Conversion Statistics - Compression-Ratio, Timing, File-Größen
+✅ llama.cpp Integration - Nutzt bewährte convert_hf_to_gguf.py
+✅ Functional Testing - Testet GGUF-Output mit llama-cli falls verfügbar
+
+
+-----------------------
+
+target_module.sh - das Quantization & Packaging-Modul! 
+
+
+Was das target_module.sh leistet:
+✅ Multi-Quantization Support - Q4_0, Q4_K_M, Q8_0, alle llama.cpp Methoden
+✅ Cross-Compilation - Nutzt config_module.sh Toolchain für Target-Hardware
+✅ Professional Packaging - Deployment-ready mit Dokumentation
+✅ Automated Testing - Functional tests + validation
+✅ Helper Scripts - test_model.sh, deploy.sh für einfache Nutzung
+✅ Complete Manifest - JSON mit allen Build-Details
+✅ Container-Native - Kein VENV-Overhead, direkt mit Docker-Python
+
+
+Verwendung der kompletten Pipeline:
+
+
+bash# 1. Environment Setup
+./source_module.sh
+
+# 2. Hardware Config (mit hardware_probe.sh Datei)
+./config_module.sh --hardware-config target_hardware_config.txt
+
+# 3. Model Conversion
+./convert_module.sh --input granite-h-350m --output granite.fp16.gguf
+
+# 4. Quantization & Packaging
+./target_module.sh --input granite.fp16.gguf --quantization Q4_K_M --model-name granite-h-350m
+
+--------------------------------
+
+
+Das Framework kann theoretisch:
+🎯 Community-Ready - Neue Targets einfach hinzufügen
+🎯 Production-Ready - Professional packaging & deployment
+🎯 Multi-Architecture - Rockchip, NVIDIA, Intel, Raspberry Pi
+
+
+-------------------------------
+
+Container-System:
+✅ Erweitertes Dockerfile - Multi-stage, alle 4 Module, professionelle Sicherheit
+✅ Intelligent Entrypoint - Interactive Mode, Pipeline Mode, System Tests
+✅ Professional docker-compose - Volume Management, Health Checks, Orchestrierung
+✅ Production-Ready - Non-root user, Resource Limits, Restart Policies
+
+
+Einfache Nutzung:
+
+bash# 1. Framework starten
+docker-compose up -d
+
+# 2. Interaktiver Modus
+
+docker-compose exec rockchip-builder interactive
+
+# 3. Komplette Pipeline
+
+docker-compose exec rockchip-builder pipeline \
+  /build-cache/models/granite-h-350m \
+  granite-h-350m \
+  Q4_K_M
+
+# 4. Einzelne Module
+
+docker-compose exec rockchip-builder convert \
+  --input /build-cache/models/granite-h-350m \
+  --model-name granite
+
+
+Framework Status - Fast komplett! 🚀
+✅ 4 Module - source, config, convert, target
+✅ Container System - Dockerfile + docker-compose + entrypoint
+✅ Rockchip Target - Vollständig implementiert
+✅ GUI/Orchestrator - PySide6 Interface
+✅ Documentation - README, how2.txt
+

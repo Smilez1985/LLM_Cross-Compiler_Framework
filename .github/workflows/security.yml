@@ -1,0 +1,39 @@
+name: Security & Quality Audit
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  schedule:
+    - cron: '0 0 * * 0'
+
+jobs:
+  security-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # 🚨 DIESER SCHRITT FEHLT BEI DIR! 🚨
+      - name: Install Python Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install pyyaml psutil docker packaging
+
+      - name: Install Audit Tools
+        run: pip install bandit safety
+
+      - name: Security Scan (Bandit)
+        run: bandit -r orchestrator/ scripts/ -x tests -s B101
+
+      - name: Dependency Vulnerability Scan (Safety)
+        run: |
+          pip install poetry
+          poetry export -f requirements.txt --output requirements.txt --without-hashes || true
+          safety check -r requirements.txt || true

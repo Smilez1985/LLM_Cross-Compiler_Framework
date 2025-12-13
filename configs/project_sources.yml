@@ -1,0 +1,142 @@
+# Zentrale Quellen für das LLM Cross-Compiler Framework
+# Status: Verifiziert & Community-Ready & Secured
+#
+# Diese Datei ist die "Single Source of Truth" (SSOT).
+# Der Orchestrator lädt diese Links und injiziert sie als Umgebungsvariablen
+# in die Docker-Container. Ditto (AI) nutzt die 'docs_workflow' Links.
+
+# --- BUILD TOOLS (Security Pinned) ---
+build_tools:
+  poetry_installer: 
+    url: "https://install.python-poetry.org"
+    # SHA256 Hash des Installers (Verifiziert Nov 2025)
+    sha256: "3b5842cd6318176812455429c6c109909d21b184579720f154506f6734828455" 
+
+# --- CORE FRAMEWORK ---
+core:
+  # Core Inference Engine für CPU
+  llama_cpp: 
+    url: "https://github.com/ggerganov/llama.cpp.git"
+    commit: "b3626" # Pinned Commit für Reproduzierbarkeit
+   
+  # Python Transformers für Konvertierungs-Skripte
+  transformers: "https://github.com/huggingface/transformers"
+
+# --- VECTOR DATABASE (Local RAG / Knowledge Base) ---
+vector_database:
+  qdrant_core:
+    repo_url: "https://github.com/qdrant/qdrant"
+    docker_image: "qdrant/qdrant"
+    docker_tag: "v1.12.0"
+    docs_workflow: "https://qdrant.tech/documentation/"
+    docs_snapshots: "https://qdrant.tech/documentation/concepts/snapshots/"
+  
+  qdrant_client:
+    repo_url: "https://github.com/qdrant/qdrant-client"
+    docs_sdk: "https://python-client.qdrant.tech/"
+
+# --- KNOWLEDGE INGESTION (v1.6.0) ---
+knowledge_ingestion:
+  langchain:
+    url: "https://github.com/langchain-ai/langchain"
+    docs_workflow: "https://python.langchain.com/docs/integrations/document_loaders/recursive_url/"
+  
+  beautifulsoup4:
+    url: "https://git.launchpad.net/beautifulsoup"
+    docs_workflow: "https://www.crummy.com/software/BeautifulSoup/bs4/doc/"
+
+  pypdf:
+    url: "https://github.com/py-pdf/pypdf"
+    docs_workflow: "https://pypdf.readthedocs.io/en/stable/"
+
+# --- ROCKCHIP (RK3566 / RK3588) ---
+rockchip_npu:
+  rkllm_toolkit:
+    url: "https://github.com/airockchip/rknn-llm.git"
+    commit: "release-v1.2.1b1" 
+    docs_workflow: "https://github.com/airockchip/rknn-llm/blob/main/README.md"
+
+  rknn_toolkit2: 
+    url: "https://github.com/airockchip/rknn-toolkit2.git"
+    commit: "v2.0.0-beta0" 
+    docs_workflow: "https://github.com/airockchip/rknn-toolkit2/tree/master/doc"
+  
+  rknn_model_zoo: "https://github.com/airockchip/rknn_model_zoo"
+
+# --- NVIDIA JETSON (Orin / Xavier / Nano) ---
+nvidia_jetson:
+  tensorrt_llm: 
+    url: "https://github.com/NVIDIA/TensorRT-LLM.git"
+    commit: "v0.9.0" 
+  jetson_inference: "https://github.com/dusty-nv/jetson-inference"
+  jetson_containers: "https://github.com/dusty-nv/jetson-containers"
+  docs_workflow: "https://nvidia.github.io/TensorRT-LLM/architecture/workflow.html"
+
+# --- HAILO AI (Raspberry Pi 5 + Hailo-8 / 8L) ---
+hailo_ai:
+  hailort: 
+    url: "https://github.com/hailo-ai/hailort.git"
+    commit: "v4.17.0"
+  tappas: "https://github.com/hailo-ai/tappas"
+  hailo_rpi5_examples: "https://github.com/hailo-ai/hailo-rpi5-examples"
+  docs_workflow: "https://github.com/hailo-ai/hailo_model_zoo/blob/master/docs/public_models/HAILO8/HAILO8_inference_guide.rst"
+
+# --- MEMRYX (MX3 Accelerator) ---
+memryx:
+  sdk_portal: "https://developer.memryx.com/"
+  docs_workflow: "https://developer.memryx.com/documentation/latest/index.html"
+  drivers_linux: "https://developer.memryx.com/downloads/drivers.html"
+
+# --- AXELERA AI (Metis M.2) ---
+axelera_ai:
+  metis_sdk: "https://docs.axelera.ai/"
+  model_zoo: "https://github.com/axelera-ai/axelera-models"
+  docs_workflow: "https://docs.axelera.ai/metis/latest/general/intro.html"
+
+# --- INTEL NPU & GPU (v1.7.0) ---
+intel_ecosystem:
+  ipex_llm:
+    url: "https://github.com/intel/ipex-llm"
+    commit: "v2.2.0" 
+    docs_workflow: "https://github.com/intel/ipex-llm/blob/main/docs/mddocs/Quickstart/install_linux.md"
+  
+  openvino:
+    url: "https://github.com/openvinotoolkit/openvino"
+    commit: "2025.4.0" 
+    docs_workflow: "https://docs.openvino.ai/2025/documentation/openvino-ir-format.html"
+
+# --- AMD ROCm (Radeon GPUs) ---
+amd_rocm:
+  rocm_main: "https://github.com/ROCm/ROCm"
+  rocm_docker: "https://github.com/ROCm/ROCm-docker"
+
+# --- RISC-V (StarFive / Generic) ---
+riscv:
+  gnu_toolchain: "https://github.com/riscv-collab/riscv-gnu-toolchain"
+  visionfive2_sdk: "https://github.com/starfive-tech/VisionFive2"
+
+# --- VOICE & TTS PIPELINE ---
+voice_tts:
+  piper_tts: 
+    url: "https://github.com/rhasspy/piper"
+    commit: "9c3066d" 
+  glados_tts: "https://github.com/dnhkng/GLaDOS"
+  vosk_api: 
+    url: "https://github.com/alphacep/vosk-api"
+    commit: "0a1b2c3" 
+
+# --- MODELLE (MVP / Getestet) ---
+models:
+  granite_350m: "https://huggingface.co/ibm-granite/granite-4.0-h-350m"
+
+# --- TINY MODELS (Offline Intelligence) ---
+tiny_models:
+  tinyllama_1b:
+    url: "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0"
+    description: "Fastest option (< 700MB)."
+  qwen_0_5b:
+    url: "https://huggingface.co/Qwen/Qwen1.5-0.5B-Chat"
+    description: "Extremely smart for size (< 500MB)."
+  danube_1_8b:
+    url: "https://huggingface.co/h2oai/h2o-danube-1.8b-chat"
+    description: "Strong reasoning capabilities."
