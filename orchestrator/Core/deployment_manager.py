@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Deployment Manager (v2.3.0)
+LLM Cross-Compiler Framework - Deployment Manager (v2.3.1)
 DIREKTIVE: Goldstandard Deployment with Slim-RAG Strategy.
 
 Features:
 - Package Generation with Multi-Container Support.
 - Air-Gap Image Export (Docker Tarballs).
 - Slim-RAG: Target gets empty DB structure, learns locally.
+- Centralized Security Validation.
 """
 
 import os
@@ -29,6 +30,9 @@ except ImportError:
 
 import docker
 from orchestrator.utils.logging import get_logger
+
+# NEU: Import der zentralen Validierungslogik
+from orchestrator.utils.validation import validate_ip_address
 
 class DeploymentManager:
     def __init__(self, framework_manager=None):
@@ -215,8 +219,20 @@ class DeploymentManager:
 
     # --- EXECUTION (SSH / SCP) ---
     def deploy_artifact(self, artifact_path: Path, target_ip: str, user: str, password: Optional[str] = None) -> bool:
+        """
+        Deployt das Artefakt auf das Zielsystem.
+        Führt zuerst Sicherheitschecks durch.
+        """
+        # ---------------------------------------------------------
+        # NEU: 1. Zentrale Validierung der IP-Adresse
+        # ---------------------------------------------------------
+        if not validate_ip_address(target_ip):
+            self.logger.error(f"Security/Format Error: Invalid IP address provided: {target_ip}")
+            return False
+
+        # 2. Verbindungscheck (Port Reachability)
         if not self._check_conn(target_ip):
-            self.logger.error(f"Target {target_ip} not reachable.")
+            self.logger.error(f"Target {target_ip} not reachable (Port 22 check failed).")
             return False
         
         target_dir = "/tmp/llm_deploy"
