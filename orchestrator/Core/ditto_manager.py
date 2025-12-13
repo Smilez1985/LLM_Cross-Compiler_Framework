@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Ditto Manager (AI Hardware Agent) v2.3.0
+LLM Cross-Compiler Framework - Ditto Manager (AI Hardware Agent) v2.4.0
 DIREKTIVE: Goldstandard. RAG-Enabled Expert System.
 
 This manager orchestrates the AI-based analysis of hardware probes.
-It fetches context, manages chat memory, and handles offline inference.
+It fetches context, manages chat memory, handles offline inference,
+and prepares calibration datasets for quantization.
 
-Updates v2.3.0:
-- Integrated SecretsManager for secure API Key retrieval (Keyring).
-- Added `analyze_error_log` for Self-Healing integration.
-- Preserved NativeInferenceEngine for offline capability.
-- Robust ConfigManager handling in constructor.
+Updates v2.4.0:
+- Added `prepare_calibration_dataset` for IMatrix/Smart Calibration.
+- Integrated Smart Fallbacks for offline dataset generation.
+- robust API Key handling (SSOT).
 """
 
 import json
@@ -18,6 +18,7 @@ import os
 import logging
 import requests
 import threading
+import random
 from pathlib import Path
 from typing import Dict, Optional, Any, List, Union
 
@@ -38,9 +39,6 @@ except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
 from orchestrator.utils.logging import get_logger
-# Lazy import ModuleGenerator only when needed to avoid circular imports? 
-# Better: Import at top if structure allows, or inside method.
-# We will import inside method save_module to be safe against circular dependency with framework init.
 
 # RAG Integration
 try:
@@ -114,7 +112,7 @@ class NativeInferenceEngine:
 
 class DittoCoder:
     """
-    AI Agent for Hardware Analysis, Chat, and System Diagnosis.
+    AI Agent for Hardware Analysis, Chat, System Diagnosis, and Smart Calibration.
     """
     
     def __init__(self, provider: str = "OpenAI", model: str = "gpt-4o", 
@@ -158,7 +156,6 @@ class DittoCoder:
         self.base_url = base_url
         
         # SecretsManager Integration
-        # Wenn kein API Key übergeben wurde (oder dummy), versuche ihn aus dem Keyring zu laden.
         final_key = api_key
         if self.framework and hasattr(self.framework, 'secrets_manager') and self.framework.secrets_manager:
             # Mapping Provider -> Key Name
@@ -177,7 +174,7 @@ class DittoCoder:
                     self.logger.info(f"Loaded API Key for {provider} from secure Keyring.")
 
         if final_key and final_key != "sk-dummy":
-            # LiteLLM erwartet oft spezifische Env Vars, wir setzen sie sicherheitshalber
+            # LiteLLM usually expects specific Env Vars
             if "OpenAI" in provider: os.environ["OPENAI_API_KEY"] = final_key
             elif "Anthropic" in provider: os.environ["ANTHROPIC_API_KEY"] = final_key
             elif "Google" in provider: os.environ["GEMINI_API_KEY"] = final_key
@@ -272,11 +269,21 @@ class DittoCoder:
             if not self.native_engine:
                 # Use robust config access
                 models_dir = getattr(self.config, 'models_dir', 'models')
-                model_base = Path(self.framework.info.installation_path) / models_dir / "tiny_models" if self.framework else Path(models_dir) / "tiny_models"
+                # Try to find tiny_models path based on config or installation path
+                if self.framework:
+                    base = Path(self.framework.info.installation_path)
+                else:
+                    base = Path(".")
+                
+                model_base = base / models_dir / "tiny_models"
                 
                 if model_base.exists() and any(model_base.iterdir()):
-                    target = next(x for x in model_base.iterdir() if x.is_dir())
-                    self.native_engine = NativeInferenceEngine(str(target))
+                    # Pick first available model
+                    try:
+                        target = next(x for x in model_base.iterdir() if x.is_dir())
+                        self.native_engine = NativeInferenceEngine(str(target))
+                    except StopIteration:
+                        return "Error: Offline Mode active but no Tiny Model found (empty dir)."
                 else:
                     return "Error: Offline Mode active but no Tiny Model found. Please download one via Wizard."
             
@@ -330,7 +337,6 @@ class DittoCoder:
 
     def analyze_error_log(self, log_content: str, context_info: str) -> Dict[str, Any]:
         """
-        NEU: Dedicated Method for Self-Healing Manager.
         Analyzes a build log and returns a structured JSON fix proposal.
         """
         # 1. RAG Check for similar errors
@@ -457,6 +463,60 @@ class DittoCoder:
         except Exception as e:
             self.logger.error(f"AI Analysis failed: {e}")
             raise e
+
+    def prepare_calibration_dataset(self, output_path: Path, language: str = "en") -> bool:
+        """
+        v2.4.0: Generates or downloads a calibration dataset for IMatrix quantization.
+        Called by FrameworkManager before Build.
+        """
+        if output_path.exists() and output_path.stat().st_size > 0:
+            self.logger.info(f"Calibration dataset already exists: {output_path.name}")
+            return True
+            
+        self.logger.info(f"Preparing calibration dataset at {output_path}...")
+        
+        # 1. Try to download standard dataset (WikiText Subset)
+        # We use a known public domain text or standard URL
+        dataset_url = "https://raw.githubusercontent.com/ggerganov/llama.cpp/master/prompts/chat-with-bob.txt"
+        
+        if not self.offline_mode:
+            try:
+                self.logger.info(f"Downloading dataset from {dataset_url}...")
+                resp = requests.get(dataset_url, timeout=10)
+                if resp.status_code == 200:
+                    with open(output_path, 'w', encoding='utf-8') as f:
+                        f.write(resp.text)
+                        # Append some technical context for better calibration on code
+                        f.write("\n\n" + ("def function(): pass\n" * 50)) 
+                    return True
+            except Exception as e:
+                self.logger.warning(f"Download failed: {e}. Switching to synthetic generation.")
+
+        # 2. Synthetic Generation (Fallback / Offline)
+        try:
+            with open(output_path, 'w', encoding='utf-8') as f:
+                # Basic English calibration
+                f.write("The quick brown fox jumps over the lazy dog.\n" * 50)
+                
+                # Technical / Code context (Important for coding models)
+                code_snippet = """
+                import os
+                def optimize_tensor(t):
+                    return t * 0.5
+                class NeuralNetwork:
+                    def __init__(self):
+                        self.layers = []
+                """
+                f.write((code_snippet + "\n") * 20)
+                
+                # Conversational padding
+                f.write("User: Hello AI.\nAssistant: Hello! How can I help you regarding hardware acceleration?\n" * 20)
+                
+            self.logger.info("Generated synthetic calibration dataset.")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to generate dataset: {e}")
+            return False
 
     def save_module(self, module_name: str, config: Dict[str, Any], targets_dir: Path):
         """Wrapper um den ModuleGenerator aufzurufen."""
