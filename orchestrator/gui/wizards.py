@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Wizards
+LLM Cross-Compiler Framework - Wizards (v2.3.0 Enterprise)
 DIREKTIVE: Goldstandard, vollständige Implementierung.
 
 Dieser Wizard führt den Benutzer durch die Erstellung eines neuen Hardware-Targets.
@@ -8,9 +8,10 @@ Er unterstützt zwei Modi:
 1. Standard Import: Deterministisches Parsen von hardware_probe.sh/.ps1 Ausgaben.
 2. AI Auto-Discovery: Intelligente Analyse und Optimierungsvorschläge durch Ditto (LLM).
 
-Updates v1.7.1:
-- Added 'SpriteAnimationWidget' for manual sprite sheet animation (since source images are strips).
-- Integrated Dynamic Ditto Avatar (States: Thinking, Reading, Success, Error).
+Updates v2.3.0:
+- Updated probe result filename to `target_hardware_config.txt`.
+- Robust Framework/Config access.
+- Improved asset handling for Avatar.
 """
 
 import threading
@@ -67,7 +68,7 @@ class SpriteAnimationWidget(QLabel):
             
         # Calculate dimensions
         self.total_width = self.sprite_sheet.width()
-        self.frame_width = self.total_width // frame_count
+        self.frame_width = self.total_width // frame_count if frame_count > 0 else 1
         self.frame_height = self.sprite_sheet.height()
         
         self.setFixedSize(120, 120) # Fixed UI size
@@ -120,9 +121,14 @@ class CrawlWorker(QThread):
                 self.progress.emit(f"Crawling root: {url}...")
                 
                 # Global Config Override (Temporary for this crawl)
-                if self.rag_manager.framework.config:
-                    self.rag_manager.framework.config.crawler_max_depth = self.options.get("depth", 2)
-                    self.rag_manager.framework.config.crawler_max_pages = self.options.get("max_pages", 50)
+                if hasattr(self.rag_manager.framework, 'config'):
+                    # Careful: modifying config at runtime. Might need mutex if threaded app heavily used.
+                    # For wizard context it's fine.
+                    # Check if config is object or dict (v2.3 uses ConfigManager object)
+                    cfg = self.rag_manager.framework.config
+                    if hasattr(cfg, 'crawler_max_depth'):
+                         cfg.crawler_max_depth = self.options.get("depth", 2)
+                         cfg.crawler_max_pages = self.options.get("max_pages", 50)
 
                 result = self.rag_manager.ingest_url(url)
                 
@@ -153,10 +159,11 @@ class ModuleCreationWizard(QWizard):
         
         # Access assets & framework via parent app root if available
         self.assets_dir = None
-        if parent and hasattr(parent, 'app_root'):
-            self.assets_dir = parent.app_root / "assets"
-        if parent and hasattr(parent, 'framework_manager'):
-            self.framework_manager = parent.framework_manager
+        if parent:
+            if hasattr(parent, 'app_root'):
+                self.assets_dir = parent.app_root / "assets"
+            if hasattr(parent, 'framework_manager'):
+                self.framework_manager = parent.framework_manager
             
         self.setWindowTitle(tr("wiz.title"))
         self.setWizardStyle(QWizard.ModernStyle)
@@ -272,7 +279,6 @@ class ModuleCreationWizard(QWizard):
     def _set_avatar_state(self, state: str):
         """
         Switches the Avatar Widget based on state.
-        Uses SpriteAnimationWidget for animated states.
         """
         if not self.assets_dir: return
         
@@ -284,15 +290,6 @@ class ModuleCreationWizard(QWizard):
             self.avatar_container.removeWidget(widget)
             widget.deleteLater()
 
-        # Define mapping: state -> (filename, is_sprite, frame_count)
-        # filenames are looked up in assets/ folder. extension can be png or jpg.
-        # Based on user input:
-        # - ditto.png (Static)
-        # - ditto_think.png (Sprite Sheet, 4 frames)
-        # - ditto_read.png (Sprite Sheet, 6 frames)
-        # - ditto_success.png (Static)
-        # - ditto_fail.png (Static)
-        
         mapping = {
             "default": ("ditto.png", False, 1),
             "think": ("ditto_think.png", True, 4),
@@ -305,25 +302,22 @@ class ModuleCreationWizard(QWizard):
         filename, is_sprite, frames = config
         path = self.assets_dir / filename
         
-        # Fallback check for jpg if png missing (user migration)
+        # Fallback check
         if not path.exists():
             path_jpg = path.with_suffix(".jpg")
             if path_jpg.exists(): path = path_jpg
         
         if not path.exists():
-            # Fallback Label if asset missing
             lbl = QLabel("Ditto")
             lbl.setAlignment(Qt.AlignCenter)
             self.avatar_container.addWidget(lbl)
             return
 
         if is_sprite:
-            # Animated Widget
             widget = SpriteAnimationWidget(str(path), frame_count=frames, interval=200)
             widget.start()
             self.avatar_container.addWidget(widget)
         else:
-            # Static Image
             lbl = QLabel()
             lbl.setPixmap(QPixmap(str(path)).scaled(100, 100, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             lbl.setAlignment(Qt.AlignCenter)
@@ -347,7 +341,7 @@ class ModuleCreationWizard(QWizard):
         self.sdk_edit.setPlaceholderText("e.g. CUDA, RKNN, OpenVINO")
         layout.addRow(tr("wiz.lbl.sdk"), self.sdk_edit)
         
-        # Auto-Detect Button (Manually added here, logic integrated)
+        # Auto-Detect Button
         self.detect_cb = QCheckBox("Auto-fill from Probe Result")
         self.detect_cb.stateChanged.connect(self.load_probe_data)
         layout.addRow("", self.detect_cb)
@@ -361,19 +355,17 @@ class ModuleCreationWizard(QWizard):
     def load_probe_data(self):
         if not self.detect_cb.isChecked(): return
         
-        # --- FIX: Dateiname angepasst ---
+        # Use standard probe filename
         probe_file = Path("target_hardware_config.txt") 
-        # --------------------------------
         
         if probe_file.exists():
             try:
-                # Simple parsing of KEY=VALUE
                 data = {}
-                with open(probe_file, 'r') as f:
+                with open(probe_file, 'r', encoding='utf-8', errors='ignore') as f:
                     for line in f:
-                        if "=" in line:
+                        if "=" in line and not line.startswith("#"):
                             k, v = line.strip().split("=", 1)
-                            data[k] = v
+                            data[k.strip()] = v.strip()
                 
                 # Auto-fill
                 if "CPU_MODEL" in data:
@@ -417,7 +409,6 @@ class ModuleCreationWizard(QWizard):
         
         layout.addWidget(QLabel(tr("wiz.lbl.packages")))
         self.packages_edit = QLineEdit()
-        # Standard-Pakete ohne Compiler, der wird dynamisch hinzugefügt
         self.packages_edit.setText("build-essential cmake git python3-pip")
         layout.addWidget(self.packages_edit)
         
@@ -438,7 +429,7 @@ class ModuleCreationWizard(QWizard):
         self.cmake_flags.setPlaceholderText("-DGGML_CUDA=ON")
         layout.addRow(tr("wiz.lbl.cmake_flags"), self.cmake_flags)
         
-        # Hidden field for AI logic (Bash Case Statement)
+        # Hidden field for AI logic
         self.quant_logic = QTextEdit()
         self.quant_logic.setVisible(False) 
         layout.addRow(self.quant_logic)
@@ -503,6 +494,10 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
             return
 
         # Show Input Dialog
+        if not URLInputDialog:
+             QMessageBox.critical(self, "Error", "URLInputDialog not available.")
+             return
+             
         dlg = URLInputDialog(self)
         if dlg.exec() == QDialog.Accepted:
             urls = dlg.get_urls()
@@ -511,7 +506,7 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
             if not urls:
                 return
 
-            self._set_avatar_state("read") # ANIMATED SPRITE
+            self._set_avatar_state("read")
             self.crawl_log.setVisible(True)
             self.crawl_log.clear()
             self.crawl_log.appendPlainText(f"Initializing Crawler for {len(urls)} URLs...")
@@ -547,17 +542,12 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
     # --- STANDARD IMPORT LOGIC (Rule Based) ---
 
     def run_standard_import(self):
-        """
-        Parses target_hardware_config.txt using regex and deterministic rules.
-        No AI involved. Robust and fast.
-        """
         path, _ = QFileDialog.getOpenFileName(self, tr("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
         if not path: return
         
         self.status_label.setText("Parsing probe data...")
         
         try:
-            # Read config file into dictionary
             config = {}
             with open(path, 'r', encoding='utf-8', errors='ignore') as f:
                 for line in f:
@@ -577,6 +567,9 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
                 "armv7l": "armv7l"
             }
             detected_arch = config.get("Architecture", "").lower()
+            if not detected_arch:
+                 detected_arch = config.get("ARCH", "").lower() # Fallback for new probe script
+                 
             if detected_arch in arch_map:
                 self.arch_combo.setCurrentText(arch_map[detected_arch])
             
@@ -649,6 +642,10 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
     # --- AI LOGIC (Ditto) ---
 
     def configure_ai(self):
+        if not AIConfigurationDialog:
+             QMessageBox.critical(self, "Error", "AIConfigurationDialog not available.")
+             return
+             
         dialog = AIConfigurationDialog(self)
         if dialog.exec() == QDialog.Accepted:
             self.ai_config = dialog.get_config()
@@ -678,8 +675,8 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
     def _ai_worker(self, path):
         try:
             fm_config = None
-            if self.wizard() and self.wizard().parent() and hasattr(self.wizard().parent(), 'framework_manager'):
-                fm_config = self.wizard().parent().framework_manager.config
+            if self.framework_manager:
+                fm_config = self.framework_manager.config
 
             coder = DittoCoder(
                 provider=self.ai_config.get("provider"),
@@ -687,7 +684,7 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
                 api_key=self.ai_config.get("api_key"),
                 base_url=self.ai_config.get("base_url"),
                 config_manager=fm_config,
-                framework_manager=self.framework_manager # Pass Framework Manager for RAG
+                framework_manager=self.framework_manager 
             )
             config = coder.generate_module_content(path)
             self.signals.analysis_finished.emit(config)
