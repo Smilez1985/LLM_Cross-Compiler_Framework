@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Validation Utilities
+LLM Cross-Compiler Framework - Validation Utilities (v2.3.0)
 DIREKTIVE: Goldstandard, professionell geschrieben.
 
 Comprehensive validation system for configurations, data structures,
@@ -16,6 +16,11 @@ Key Responsibilities:
 - Target hardware validation
 - Model format validation
 - Build configuration validation
+
+Updates v2.3.0:
+- Integrated centralized logging.
+- refined Docker validation.
+- Enhanced path security checks.
 """
 
 import os
@@ -36,6 +41,14 @@ import urllib.parse
 import yaml
 import psutil
 from packaging import version
+
+# Centralized Logging Integration
+try:
+    from orchestrator.utils.logging import get_logger
+    logger = get_logger("ValidationUtils")
+except ImportError:
+    import logging
+    logger = logging.getLogger("ValidationUtils")
 
 
 # ============================================================================
@@ -356,6 +369,7 @@ def validate_path(path: Union[str, Path],
         )
         
     except Exception as e:
+        logger.error(f"Path validation error for {path}: {e}")
         return ValidationResult(
             valid=False,
             severity=ValidationSeverity.ERROR,
@@ -372,9 +386,6 @@ def _validate_path_security(path: Path) -> ValidationResult:
         # Resolve path to check for traversal
         resolved_path = path.resolve()
         
-        # Check for suspicious patterns
-        path_str = str(resolved_path)
-        
         # Check for path traversal attempts
         if ".." in path.parts:
             return ValidationResult(
@@ -385,14 +396,8 @@ def _validate_path_security(path: Path) -> ValidationResult:
                 details={"security_issue": "path_traversal"}
             )
         
-        # Check for absolute path when relative expected
-        # (This is more of a guideline check)
-        if path.is_absolute():
-            # Could be a warning rather than error in many cases
-            pass
-        
         # Check for world-writable files/directories (Unix)
-        if hasattr(os, 'stat') and path.exists():
+        if hasattr(os, 'stat') and path.exists() and platform.system() != 'Windows':
             stat_info = path.stat()
             mode = stat_info.st_mode
             
@@ -476,6 +481,7 @@ def validate_directory_writable(directory: Union[str, Path]) -> ValidationResult
         )
         
     except Exception as e:
+        logger.error(f"Directory write test failed for {directory}: {e}")
         return ValidationResult(
             valid=False,
             severity=ValidationSeverity.ERROR,
@@ -1444,7 +1450,7 @@ def validate_ip_address(ip: str) -> ValidationResult:
         )
 
 
-def create_comprehensive_validation_report(config: Dict[str, Any],
+def create_comprehensive_validation_report(config: Dict[str, Any], 
                                          system_requirements: Optional[SystemRequirements] = None,
                                          validate_docker: bool = True,
                                          validate_paths: List[str] = None) -> ValidationReport:
@@ -1521,9 +1527,9 @@ try:
     
     _init_validation = validate_system_requirements(basic_requirements)
     if not _init_validation.overall_valid:
-        # Log warnings but don't break import
+        # Log warnings using logger but don't break import
         for error in _init_validation.get_errors():
-            print(f"Validation Warning: {error.message}")
+            logger.warning(f"Validation Warning on Import: {error.message}")
             
 except Exception:
     # Don't break import if validation fails
