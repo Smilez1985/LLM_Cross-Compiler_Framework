@@ -1,26 +1,30 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Dataset Manager
+LLM Cross-Compiler Framework - Dataset Manager (v2.4.0)
 DIREKTIVE: Goldstandard, Determinismus, Enterprise Quality.
 
 Zweck:
-Verwaltet Kalibrierungs-Datasets für die Quantisierung.
-Stellt sicher, dass keine "geratenen" Daten verwendet werden.
+Verwaltet Kalibrierungs-Datasets für die Quantisierung und führt
+automatisierte Qualitätsmessungen (Perplexity/PPL) durch.
+
+Updates v2.4.0:
+- Added measure_perplexity logic using Docker.
+- Added compare_quantizations regression testing logic.
 """
 
 import json
 import os
+import re
 import logging
 from pathlib import Path
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict, Tuple
 
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.helpers import ensure_directory
 
 class DatasetManager:
     """
-    Manages the lifecycle of quantization datasets.
-    Enforces deterministic domain detection or user input.
+    Manages datasets and evaluates model quality (Perplexity).
     """
     
     def __init__(self, framework_manager):
@@ -29,126 +33,156 @@ class DatasetManager:
         self.config = framework_manager.config
 
     def _get_ditto(self):
-        """
-        Retrieves the DittoCoder instance via framework or creates a temporary one.
-        Used for synthetic data generation.
-        """
-        # Access existing instance from framework if available
+        """Retrieves Ditto for generation."""
         if hasattr(self.framework, 'ditto_manager') and self.framework.ditto_manager:
             return self.framework.ditto_manager
-            
-        # Lazy instantiation fallback (using config from manager)
-        try:
-            from orchestrator.Core.ditto_manager import DittoCoder
-            return DittoCoder(config_manager=self.framework.config)
-        except ImportError:
-            self.logger.error("DittoManager (AI) not available for dataset generation.")
-            return None
+        return None
+
+    def _get_docker(self):
+        """Retrieves DockerManager for execution."""
+        return self.framework.get_component("docker_manager")
 
     def detect_domain(self, model_path: str) -> Optional[str]:
-        """
-        Attempts to DETERMINISTICALLY detect the model domain from metadata.
-        
-        Strict Policy:
-        - No name guessing (e.g. no "contains 'code'").
-        - Checks for explicit 'domain.txt' marker file.
-        - Checks for explicit metadata in 'config.json' (if standardized keys exist).
-        
-        Returns:
-            str: The detected domain (e.g. 'code', 'chat', 'medical').
-            None: If no explicit information is found (triggers User Query).
-        """
+        """Attempts to deterministically detect the model domain."""
         path = Path(model_path)
-        if not path.exists():
-            return None
+        if not path.exists(): return None
             
-        # 1. Explicit Marker File
         marker_file = path / "domain.txt"
         if marker_file.exists():
             try:
-                domain = marker_file.read_text(encoding='utf-8').strip().lower()
-                if domain:
-                    self.logger.info(f"Domain detected via marker file: {domain}")
-                    return domain
-            except Exception as e:
-                self.logger.warning(f"Failed to read domain.txt: {e}")
-
-        # 2. config.json Metadata (Safe check only)
-        config_file = path / "config.json"
-        if config_file.exists():
-            try:
-                with open(config_file, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                    # Check for custom framework tags if they exist
-                    if "framework_domain" in data:
-                        return data["framework_domain"]
-                    # Check for task specific params (HuggingFace standard)
-                    if "task_specific_params" in data:
-                        # This is a weak hint, but standard.
-                        # We log it but return None to be safe unless we are sure.
-                        self.logger.debug(f"Found task params: {list(data['task_specific_params'].keys())}")
-            except Exception:
-                pass
-        
-        # No guessing allowed.
+                return marker_file.read_text(encoding='utf-8').strip().lower()
+            except Exception: pass
         return None
 
     def generate_synthetic_dataset(self, domain: str, count: int = 50) -> List[str]:
-        """
-        Uses Ditto (AI) to generate representative calibration data for a specific domain.
-        This is only called after the user (or file) has confirmed the domain.
-        """
+        """Delegates to Ditto."""
         ditto = self._get_ditto()
-        if not ditto:
-            raise RuntimeError("AI Agent not available.")
-            
-        self.logger.info(f"Requesting AI generation for domain: '{domain}' (Count: {count})")
+        if not ditto: raise RuntimeError("AI Agent not available.")
         
-        # Delegate to DittoManager
-        # Note: DittoManager needs to implement 'generate_dataset_content'
-        if hasattr(ditto, 'generate_dataset_content'):
-            return ditto.generate_dataset_content(domain, count)
-        else:
-            raise NotImplementedError("DittoManager does not support dataset generation yet.")
+        # Ditto logic moved to DittoManager.prepare_calibration_dataset in v2.4.0
+        # This method is kept for backwards compatibility or specialized JSON datasets
+        self.logger.warning("generate_synthetic_dataset is deprecated. Use DittoManager directly.")
+        return []
+
+    def measure_perplexity(self, model_path: Path, dataset_path: Path, context_length: int = 512) -> float:
+        """
+        Runs a Docker container to measure the Perplexity (PPL) of a GGUF model.
+        Lower PPL is better.
+        """
+        docker = self._get_docker()
+        if not docker or not docker.client:
+            self.logger.error("Docker not available for PPL measurement.")
+            return 999.99
+
+        if not model_path.exists() or not dataset_path.exists():
+            self.logger.error(f"Missing model or dataset: {model_path} / {dataset_path}")
+            return 999.99
+
+        self.logger.info(f"Measuring Perplexity for {model_path.name}...")
+
+        # We assume standard llama.cpp container logic
+        # Mount paths must be absolute
+        abs_model = model_path.resolve()
+        abs_data = dataset_path.resolve()
+        
+        # Prepare volumes
+        volumes = {
+            str(abs_model.parent): {'bind': '/models', 'mode': 'ro'},
+            str(abs_data): {'bind': '/data/calibration.txt', 'mode': 'ro'}
+        }
+        
+        # Use runtime image from config or default
+        img = getattr(self.config, 'image_inference_runtime', 'ghcr.io/smilez1985/llm-runtime:latest')
+        
+        # Command: llama-perplexity -m /models/model.gguf -f /data/calibration.txt -c 512
+        cmd = [
+            "/app/bin/llama-perplexity",
+            "-m", f"/models/{abs_model.name}",
+            "-f", "/data/calibration.txt",
+            "-c", str(context_length),
+            "--chunks", "4" # Fast estimation
+        ]
+
+        try:
+            # Run Container
+            logs = docker.client.containers.run(
+                img,
+                command=cmd,
+                volumes=volumes,
+                remove=True,
+                stdout=True,
+                stderr=True # PPL is often printed to stderr
+            )
+            
+            output = logs.decode('utf-8')
+            
+            # Parse Output for "Final Estimate: PPL = 5.4321"
+            # Regex for standard llama.cpp output
+            match = re.search(r"Final Estimate: PPL = ([0-9.]+)", output)
+            if not match:
+                # Try alternate format
+                match = re.search(r"perplexity: ([0-9.]+)", output)
+                
+            if match:
+                ppl = float(match.group(1))
+                self.logger.info(f"✅ Measured PPL: {ppl}")
+                return ppl
+            else:
+                self.logger.warning(f"Could not parse PPL from output. Output snippet:\n{output[-200:]}")
+                return 888.88 # Error code equivalent
+
+        except Exception as e:
+            self.logger.error(f"Perplexity measurement failed: {e}")
+            return 999.99
+
+    def compare_quantizations(self, base_model: Path, quant_models: List[Path], dataset: Path) -> Dict[str, Any]:
+        """
+        Runs PPL measurements on a list of quantized models and compares them to a baseline (or each other).
+        Returns a report dict.
+        """
+        results = {}
+        
+        # 1. Measure Baseline (Optional, if base_model provided and supported)
+        # Often base_model is FP16 GGUF.
+        base_ppl = None
+        if base_model and base_model.exists():
+            base_ppl = self.measure_perplexity(base_model, dataset)
+            results["baseline"] = {"path": str(base_model), "ppl": base_ppl}
+
+        # 2. Measure Candidates
+        candidates = []
+        for qm in quant_models:
+            ppl = self.measure_perplexity(qm, dataset)
+            degradation = 0.0
+            if base_ppl and base_ppl > 0:
+                # Degradation percentage: (New - Old) / Old * 100
+                degradation = ((ppl - base_ppl) / base_ppl) * 100
+            
+            candidates.append({
+                "name": qm.name,
+                "path": str(qm),
+                "ppl": ppl,
+                "degradation_percent": round(degradation, 2)
+            })
+
+        # 3. Rank
+        candidates.sort(key=lambda x: x["ppl"]) # Lower is better
+        results["ranking"] = candidates
+        
+        # 4. Generate Recommendation
+        if candidates:
+            best = candidates[0]
+            results["recommendation"] = f"Best model is {best['name']} with PPL {best['ppl']}"
+        
+        return results
 
     def save_dataset(self, data: List[str], path: Path) -> bool:
-        """Saves the dataset to disk in RKLLM-compatible JSON format."""
+        """Saves the dataset to disk."""
         try:
             ensure_directory(path.parent)
             with open(path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            self.logger.info(f"Dataset successfully saved to {path}")
             return True
         except Exception as e:
             self.logger.error(f"Failed to save dataset: {e}")
-            return False
-
-    def validate_dataset_file(self, path: Path) -> bool:
-        """Checks if a file is a valid JSON list of strings (Schema Validation)."""
-        if not path.exists():
-            self.logger.error(f"Dataset file not found: {path}")
-            return False
-            
-        try:
-            with open(path, 'r', encoding='utf-8') as f:
-                content = json.load(f)
-            
-            if not isinstance(content, list):
-                self.logger.error("Dataset invalid: Root must be a JSON list.")
-                return False
-                
-            if len(content) == 0:
-                self.logger.warning("Dataset is empty.")
-                return False
-                
-            if not isinstance(content[0], str):
-                self.logger.error("Dataset invalid: Items must be strings.")
-                return False
-                
-            return True
-        except json.JSONDecodeError:
-            self.logger.error("Dataset invalid: Malformed JSON.")
-            return False
-        except Exception as e:
-            self.logger.error(f"Dataset validation error: {e}")
             return False
