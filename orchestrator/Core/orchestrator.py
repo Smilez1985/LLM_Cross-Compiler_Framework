@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Core Orchestrator
+LLM Cross-Compiler Framework - Core Orchestrator (v2.4.0)
 DIREKTIVE: Goldstandard, vollständig, professionell geschrieben.
 
 Zweck:
 Verwaltet den gesamten Build-Lebenszyklus, von der Anfrage bis zum Artefakt.
-Integriert Builder, ModuleGenerator und (neu) Self-Healing.
+Integriert Builder, ModuleGenerator, Self-Healing und Smart Calibration (Ditto).
+
+Updates v2.4.0:
+- Integrated Ditto Manager for IMatrix/Smart Calibration workflow.
+- Updated BuildRequest with IMatrix flags.
+- Pre-Build Dataset preparation phase.
 """
 
 import os
@@ -21,16 +26,20 @@ from datetime import datetime
 from enum import Enum
 
 from orchestrator.utils.logging import get_logger
-# FIX: BuildJob entfernt (da lokal definiert), BuildConfiguration hinzugefügt
 from orchestrator.Core.builder import BuildEngine, BuildStatus, OptimizationLevel, ModelFormat, BuildConfiguration
 from orchestrator.Core.module_generator import ModuleGenerator
 
-# NEU: Self-Healing Integration (Optional Import)
+# Optional Imports for Dependency Injection
 try:
     from orchestrator.Core.self_healing_manager import SelfHealingManager, HealingProposal
 except ImportError:
     SelfHealingManager = None
     HealingProposal = None
+
+try:
+    from orchestrator.Core.ditto_manager import DittoCoder
+except ImportError:
+    DittoCoder = None
 
 # ============================================================================
 # DATENKLASSEN & ENUMS
@@ -53,7 +62,7 @@ class OrchestrationStatus(Enum):
     QUEUED = "queued"
     PREPARING = "preparing"
     BUILDING = "building"
-    HEALING = "healing" # NEU: System repariert sich selbst
+    HEALING = "healing"
     COMPLETED = "completed"
     ERROR = "error"
     CANCELLED = "cancelled"
@@ -74,6 +83,10 @@ class BuildRequest:
     description: str = ""
     use_gpu: bool = False
     
+    # NEW v2.4.0: Smart Calibration Flags
+    use_imatrix: bool = False
+    dataset_path: Optional[str] = None
+    
     def __post_init__(self):
         if not self.request_id:
             self.request_id = f"req_{uuid.uuid4().hex[:8]}"
@@ -92,7 +105,6 @@ class WorkflowState:
     artifacts: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
-    # NEU: Aktiver Heilungsvorschlag für GUI
     healing_proposal: Optional[Any] = None 
 
     @property
@@ -100,7 +112,6 @@ class WorkflowState:
         if self.total_builds == 0: return 0
         return int((self.completed_builds / self.total_builds) * 100)
 
-# FIX: BuildJob lokal definiert, da er im Builder nicht existiert
 @dataclass
 class BuildJob:
     job_id: str
@@ -132,14 +143,14 @@ class LLMOrchestrator:
         self._active_tasks: Dict[str, asyncio.Task] = {}
         self._lock = asyncio.Lock()
         
-        # NEU: Self-Healing Referenz (wird injected)
+        # Dependency Injection Containers
         self.self_healing = None 
+        self.ditto = None # NEW: For IMatrix Dataset Generation
 
     async def initialize(self) -> bool:
         """Asynchrone Initialisierung"""
         self.logger.info("Initializing Orchestrator...")
         # Check Docker connectivity via BuildEngine
-        # NOTE: Updated check logic as check_docker might be internal
         if hasattr(self.build_engine, 'check_docker'):
              if not self.build_engine.check_docker():
                 self.logger.error("Docker not ready. Orchestrator functionality limited.")
@@ -165,7 +176,7 @@ class LLMOrchestrator:
             
             self.logger.info(f"Request {request.request_id} queued (Priority: {request.priority.name})")
             
-            # Worker triggern (falls noch nicht läuft)
+            # Worker triggern
             self._ensure_worker_running()
             
             return request.request_id
@@ -187,16 +198,22 @@ class LLMOrchestrator:
             return True
         return False
 
+    # --- DEPENDENCY INJECTION ---
+
     def inject_self_healing(self, manager):
         """Dependency Injection für SelfHealingManager"""
         self.self_healing = manager
         self.logger.info("Self-Healing Manager injected into Orchestrator.")
 
+    def inject_ditto(self, manager):
+        """Dependency Injection für DittoManager (IMatrix Support)"""
+        self.ditto = manager
+        self.logger.info("Ditto Manager (AI Agent) injected into Orchestrator.")
+
     # --- INTERNAL WORKER ---
 
     def _ensure_worker_running(self):
         # Einfache Implementierung: Fire & Forget Task pro Request in _process_queue
-        # In einer echten Queue würde hier ein dauerhafter Worker-Pool laufen.
         asyncio.create_task(self._process_next_item())
 
     async def _process_next_item(self):
@@ -220,14 +237,11 @@ class LLMOrchestrator:
         finally:
             self._active_tasks.pop(request.request_id, None)
             self._queue.task_done()
-            # Nächsten Job holen (Rekursion / Loop)
             self._ensure_worker_running()
 
-    # FIX: Mapper Methode hinzugefügt
     def _map_job_to_config(self, job: BuildJob, req: BuildRequest) -> BuildConfiguration:
         """Konvertiert internen Job zu Builder Config"""
         base_img = "debian:bookworm-slim"
-        # Optional: Config override prüfen
         if hasattr(self.config, 'image_base_debian'):
             base_img = self.config.image_base_debian
 
@@ -242,7 +256,10 @@ class LLMOrchestrator:
             quantization=job.quantization,
             use_gpu=req.use_gpu,
             base_image=base_img,
-            source_format=ModelFormat.HUGGINGFACE
+            source_format=ModelFormat.HUGGINGFACE,
+            # Pass IMatrix Config
+            use_imatrix=req.use_imatrix,
+            dataset_path=req.dataset_path
         )
 
     async def _run_build_pipeline(self, req: BuildRequest):
@@ -253,7 +270,41 @@ class LLMOrchestrator:
         
         self.logger.info(f"Starting pipeline for {req.request_id}")
         
-        # 1. Expand Build Matrix (Models x Targets x Quantizations)
+        # 0. Smart Calibration / IMatrix Preparation (NEW v2.4.0)
+        # ------------------------------------------------------------------
+        # Falls IMatrix gewünscht ist, müssen wir Ditto bitten, ein Dataset zu liefern.
+        if req.use_imatrix:
+            state.current_stage = "Preparing Calibration Data"
+            if not self.ditto:
+                self.logger.warning("IMatrix requested but Ditto Manager not available. Skipping Smart Calibration.")
+                req.use_imatrix = False
+                state.warnings.append("IMatrix disabled (Ditto offline).")
+            else:
+                self.logger.info("IMatrix enabled. Requesting dataset from Ditto...")
+                # Pfad definieren
+                calib_dir = Path(self.config.cache_dir) / "calibration"
+                if not calib_dir.exists(): calib_dir.mkdir(parents=True, exist_ok=True)
+                
+                # Default Dataset Name aus Config
+                ds_name = getattr(self.config, 'default_calibration_dataset', 'wiki.train.raw')
+                ds_path = calib_dir / ds_name
+                
+                # Ditto call (Synchroner Call, da Request-basiert, evtl. in Executor auslagern)
+                # Wir machen es hier direkt, da requests schnell sein sollten oder offline generiert.
+                try:
+                    success = self.ditto.prepare_calibration_dataset(ds_path)
+                    if success:
+                        req.dataset_path = str(ds_path)
+                        self.logger.info(f"Calibration dataset ready: {ds_path}")
+                    else:
+                        req.use_imatrix = False
+                        state.warnings.append("Failed to prepare dataset. IMatrix disabled.")
+                except Exception as e:
+                    self.logger.error(f"Error during dataset preparation: {e}")
+                    req.use_imatrix = False
+        # ------------------------------------------------------------------
+
+        # 1. Expand Build Matrix
         build_jobs: List[BuildJob] = []
         
         for model in req.models:
@@ -263,17 +314,14 @@ class LLMOrchestrator:
                     state.warnings.append(f"Target '{target}' not found. Skipping.")
                     continue
                 
-                # Formate
                 formats = req.target_formats if req.target_formats else [ModelFormat.GGUF]
                 
                 for fmt in formats:
-                    # Quantization (wenn leer, dann 'default' / 'fp16')
                     quants = req.quantization_options if req.quantization_options else [None]
                     
                     for q in quants:
                         job_id = f"{req.request_id}_{len(build_jobs)+1:03d}"
                         
-                        # Pfad-Logik
                         out_dir = Path(req.output_base_dir) / target / model.split("/")[-1]
                         if q: out_dir = out_dir / q
                         
@@ -295,25 +343,23 @@ class LLMOrchestrator:
         self.logger.info(f"Generated {len(build_jobs)} build jobs.")
         
         # 2. Execution Loop
-        loop = asyncio.get_running_loop() # FIX: Für run_in_executor
+        loop = asyncio.get_running_loop()
         
         for job in build_jobs:
             state.current_stage = f"Building {job.source_model} for {job.target_architecture}"
             
-            # --- START BUILD (FIXED & PATCHED) ---
             try:
                 # 1. Map Job to Config
                 build_config = self._map_job_to_config(job, req)
                 
-                # 2. Execute Async (Non-Blocking)
-                # Wir rufen build_model im ThreadPool auf, damit der Async Loop nicht blockiert
+                # 2. Execute Async (Non-Blocking) 
                 returned_id = await loop.run_in_executor(
                     None, 
                     self.build_engine.build_model, 
                     build_config
                 )
                 
-                # 3. Poll for Completion (Da build_model async zurückkehrt aber im Hintergrund läuft)
+                # 3. Poll for Completion
                 success = False
                 while True:
                     status = self.build_engine.get_build_status(returned_id)
@@ -328,40 +374,30 @@ class LLMOrchestrator:
                         job.error_log = "\n".join(status.errors)
                         break
                         
-                    await asyncio.sleep(1) # Nicht blockierendes Warten
+                    await asyncio.sleep(1)
                     
             except Exception as e:
                 self.logger.error(f"Execution Error: {e}")
                 job.error_log = str(e)
                 success = False
             
-            # --- SELF-HEALING LOOP (NEU v2.0) ---
+            # --- SELF-HEALING LOOP ---
             if not success and self.self_healing:
                 self.logger.warning(f"Build failed for {job.job_id}. Activating Self-Healing...")
-                
-                # Update Status for GUI
                 state.status = OrchestrationStatus.HEALING
                 
-                # 1. Log Analyse
                 error_log = job.error_log if hasattr(job, 'error_log') else "Unknown Error"
                 context = f"Target: {job.target_architecture}, Model: {job.source_model}"
                 
                 proposal = self.self_healing.analyze_error(error_log, context)
                 
                 if proposal:
-                    state.healing_proposal = proposal # Expose to GUI
+                    state.healing_proposal = proposal 
                     self.logger.info(f"Healing Proposal: {proposal.fix_command}")
-                    
-                    # Hier könnte Auto-Fix Logik greifen
-                    # z.B. wenn config.auto_heal == True -> apply_fix -> retry
-                
                 else:
                     self.logger.error("Self-Healing found no solution.")
                 
-                # Reset Status to continue or fail
                 state.status = OrchestrationStatus.BUILDING
-
-            # --- END BUILD ---
 
             if success:
                 state.completed_builds += 1
