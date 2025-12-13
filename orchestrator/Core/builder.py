@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Build Engine (v2.3.0)
+LLM Cross-Compiler Framework - Build Engine (v2.4.0-IMatrix)
 DIREKTIVE: Goldstandard, vollständig, professionell geschrieben.
 
 Core logic for orchestrating Docker builds, container execution, and artifact management.
-Handles security scans, GPU passthrough, and dynamic volume mounting.
+Handles security scans, GPU passthrough, dynamic volume mounting, and IMatrix generation.
 
-Updates v2.3.0:
-- Integration with ConfigManager for centralized Docker images.
-- Robust initialization (Standalone Config vs Framework).
-- Enhanced Docker Buildx detection.
+Updates v2.4.0-IMatrix:
+- Added IMatrix ("Per-Path") generation logic.
+- Two-stage build process: 1. Generate IMatrix (if requested), 2. Build Model.
+- Integration with Dataset for importance matrix calculation.
+- Robust ConfigManager integration (retained from v2.3).
 """
 
 import os
@@ -34,7 +35,7 @@ import yaml
 import docker
 from docker.models.containers import Container
 from docker.models.images import Image
-from docker.types import DeviceRequest 
+from docker.types import DeviceRequest
 
 from orchestrator.utils.logging import get_logger
 
@@ -53,6 +54,7 @@ class BuildStatus(Enum):
     QUEUED = "queued"
     PREPARING = "preparing"
     BUILDING = "building"
+    CALIBRATING = "calibrating" # New status for IMatrix
     CONVERTING = "converting"
     OPTIMIZING = "optimizing"
     PACKAGING = "packaging"
@@ -118,6 +120,7 @@ class BuildConfiguration:
     # Features
     model_task: str = "LLM" 
     use_gpu: bool = False
+    use_imatrix: bool = False # New flag for IMatrix generation
     dataset_path: Optional[str] = None
 
 @dataclass
@@ -156,9 +159,10 @@ class BuildEngine:
     Responsible for:
     1. Docker Environment Setup
     2. Image Building
-    3. Container Execution (with GPU/Volume support)
-    4. Security Scanning
-    5. Artifact Extraction
+    3. IMatrix Generation (Optional)
+    4. Container Execution (with GPU/Volume support)
+    5. Security Scanning
+    6. Artifact Extraction
     """
     
     def __init__(self, config_or_framework, max_concurrent_builds: int = 2, default_timeout: int = 3600):
@@ -166,7 +170,7 @@ class BuildEngine:
         self.max_concurrent_builds = max_concurrent_builds
         self.default_timeout = default_timeout
         
-        # --- Robust Initialization (v2.3.0) ---
+        # --- Robust Initialization ---
         self.framework = None
         self.config = None
         
@@ -190,28 +194,31 @@ class BuildEngine:
                 self.docker_client = docker.from_env()
             except Exception as e:
                 self.logger.error(f"Docker client not available: {e}")
-                # We don't raise here to allow the engine to exist, but builds will fail later
         
         self._lock = threading.Lock()
         self._builds: Dict[str, BuildProgress] = {}
         self._active_containers: Dict[str, Container] = {}
         self._executor = ThreadPoolExecutor(max_workers=max_concurrent_builds)
         
-        # Safe Attribute Access for Config
-        def get_cfg(key, default):
-            return getattr(self.config, key, default) if not hasattr(self.config, 'get') else self.config.get(key, default)
-
-        # Paths
-        self.targets_dir = self.base_dir / get_cfg("targets_dir", "targets")
-        self.models_dir = self.base_dir / get_cfg("models_dir", "models")
-        self.output_dir = self.base_dir / get_cfg("output_dir", "output")
-        self.cache_dir = self.base_dir / get_cfg("cache_dir", "cache")
+        # Paths initialization using centralized config getter
+        self.targets_dir = self.base_dir / self._get_conf("targets_dir", "targets")
+        self.models_dir = self.base_dir / self._get_conf("models_dir", "models")
+        self.output_dir = self.base_dir / self._get_conf("output_dir", "output")
+        self.cache_dir = self.base_dir / self._get_conf("cache_dir", "cache")
         
         self._ensure_directories()
         if self.docker_client:
             self._validate_docker_environment()
         
         self.logger.info(f"Build Engine initialized (max_workers: {max_concurrent_builds})")
+
+    def _get_conf(self, key: str, default: Any = None) -> Any:
+        """Centralized safe configuration retrieval."""
+        if self.config:
+            if hasattr(self.config, 'get'):
+                return self.config.get(key, default)
+            return getattr(self.config, key, default)
+        return default
     
     def _ensure_directories(self):
         dirs = [self.targets_dir, self.models_dir, self.output_dir, self.cache_dir, 
@@ -221,13 +228,14 @@ class BuildEngine:
     def _validate_docker_environment(self):
         try:
             self.docker_client.ping()
-            # Optional check for buildx
-            try:
-                subprocess.run(["docker", "buildx", "version"], capture_output=True, check=True)
-            except Exception:
-                self.logger.warning("Docker BuildX not available, standard build will be used.")
+            if shutil.which("docker"):
+                try:
+                    subprocess.run(["docker", "buildx", "version"], capture_output=True, check=True)
+                except Exception:
+                    self.logger.warning("Docker BuildX not available, standard build will be used.")
+            else:
+                 self.logger.warning("Docker executable not found in PATH.")
         except Exception as e:
-            # Only warn here, don't crash app on boot if docker is down
             self.logger.warning(f"Docker environment check failed: {e}")
 
     def list_available_targets(self) -> List[Dict[str, Any]]:
@@ -347,16 +355,24 @@ class BuildEngine:
             # 4. Build Docker Image
             image = self._build_docker_image(config, prog, df_path)
             
-            # 5. Security Scan (Trivy)
+            # 5. Security Scan
             self._scan_image_security(image.tags[0], prog)
             
-            # 6. Run Build Modules (Container)
+            # 5a. Generate IMatrix (NEW: Smart Calibration)
+            # Only if use_imatrix is True AND a dataset is provided
+            if config.use_imatrix:
+                if config.dataset_path and os.path.exists(config.dataset_path):
+                    self._generate_imatrix(config, prog, image, target_path)
+                else:
+                    prog.add_warning("IMatrix requested but no dataset found. Skipping IMatrix generation.")
+            
+            # 6. Run Build Modules (Main Conversion/Quantization)
             self._execute_build_modules(config, prog, image, target_path)
             
             # 7. Extract Artifacts
             self._extract_artifacts(config, prog)
             
-            # 8. Create Golden Artifact (v1.7.0 - Includes Auto-Docs)
+            # 8. Create Golden Artifact
             self._create_golden_artifact(config, prog)
             
             # 9. Cleanup
@@ -387,7 +403,7 @@ class BuildEngine:
         
         build_temp = self.cache_dir / "builds" / config.build_id
         ensure_directory(build_temp)
-        for d in ["output", "logs"]: ensure_directory(build_temp / d)
+        for d in ["output", "logs", "imatrix"]: ensure_directory(build_temp / d)
         
         # Dump config for debugging
         with open(build_temp / "build_config.json", 'w') as f:
@@ -400,7 +416,6 @@ class BuildEngine:
         build_temp = self.cache_dir / "builds" / config.build_id
         df_path = build_temp / "Dockerfile"
         
-        # Determine which Dockerfile to use
         src_df_name = "Dockerfile.gpu" if config.use_gpu else "Dockerfile"
         src_df = target_path / src_df_name
         
@@ -434,28 +449,19 @@ class BuildEngine:
         tag = f"llm-framework/{config.target_arch.lower()}:{config.build_id.lower()}"
         context = self.base_dir
         
-        # Resolve relative path for context
         try:
             rel_df = path.relative_to(context)
         except ValueError:
-            # If path is not subpath of base_dir (e.g. symlink or temp), copy context?
-            # For robustness, we assume temp dir is accessible.
-            # Docker build context is usually self.base_dir
             rel_df = path.absolute()
         
         progress.add_log(f"Building Docker Image: {tag}")
         
         try:
-            # Construct args
             buildargs = config.build_args.copy()
             if sys.platform != "win32":
                 buildargs["USER_ID"] = str(os.getuid())
                 buildargs["GROUP_ID"] = str(os.getgid())
 
-            # Use python docker client for build
-            # Note: low-level API or high-level. High level is simpler but less verbose logs.
-            # We use low-level to stream logs.
-            
             resp = self.docker_client.api.build(
                 path=str(context),
                 dockerfile=str(rel_df),
@@ -477,16 +483,11 @@ class BuildEngine:
             raise RuntimeError(f"Image build failed: {e}")
 
     def _scan_image_security(self, image_tag: str, progress: BuildProgress):
-        """Runs Trivy security scan on the image."""
         progress.add_log(f"Scanning image {image_tag} for vulnerabilities...")
         try:
             scan_cmd = ["image", "--exit-code", "1", "--severity", "HIGH,CRITICAL", image_tag]
+            trivy_image = self._get_conf('image_trivy', "aquasec/trivy:latest")
             
-            # --- FIX V2.3: Use Central Config Image ---
-            get_cfg = getattr(self.config, 'get', lambda k, d=None: getattr(self.config, k, d))
-            trivy_image = get_cfg('image_trivy', "aquasec/trivy:latest")
-            
-            # Secure way: Run trivy container
             log_stream = self.docker_client.containers.run(
                 trivy_image, 
                 command=scan_cmd,
@@ -497,21 +498,91 @@ class BuildEngine:
                 remove=True, 
                 stream=True
             )
-            
-            for line in log_stream: 
-                progress.add_log(f"TRIVY: {line.decode().strip()}")
-                
+            for line in log_stream: progress.add_log(f"TRIVY: {line.decode().strip()}")
             progress.add_log("Security scan passed.")
-            
         except docker.errors.ContainerError:
             progress.add_warning(f"Security vulnerabilities found! Review logs above.")
         except Exception as e:
             progress.add_warning(f"Security scan failed to run: {e}")
 
+    def _generate_imatrix(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path):
+        """
+        NEW in v2.4.0: Runs a pre-build container to generate the importance matrix.
+        """
+        progress.current_stage = "Calculating IMatrix"
+        progress.status = BuildStatus.CALIBRATING
+        progress.progress_percent = 50
+        progress.add_log("Starting IMatrix Generation (Smart Calibration)...")
+        
+        build_temp = self.cache_dir / "builds" / config.build_id
+        imatrix_dir = build_temp / "imatrix"
+        
+        # Volumes for IMatrix run
+        vols = {
+            str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
+            str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "rw"},
+            str(target_path / "modules"): {"bind": "/app/modules", "mode": "ro"},
+            # IMPORTANT: Mount dataset
+            str(config.dataset_path): {"bind": "/build-cache/dataset.txt", "mode": "ro"}
+        }
+        
+        env = {
+            "JOB_TYPE": "imatrix", # Signal to build.sh to run --imatrix mode
+            "BUILD_ID": config.build_id,
+            "MODEL_SOURCE": config.model_source,
+            "DATASET_PATH": "/build-cache/dataset.txt"
+        }
+        
+        # SSOT Repo Injection
+        source_repos = self._get_conf("source_repositories", {})
+        if source_repos:
+            for k, v in source_repos.items():
+                if isinstance(v, dict) and 'url' in v:
+                    env[f"{k.split('.')[-1].upper()}_REPO_OVERRIDE"] = v['url']
+
+        # GPU Handling for Calculation
+        device_requests = []
+        if config.use_gpu and shutil.which("nvidia-smi"):
+             device_requests = [DeviceRequest(count=-1, capabilities=[['gpu']])]
+             
+        try:
+            container = self.docker_client.containers.create(
+                image=image.id,
+                command=["/app/modules/build.sh"],
+                volumes=vols,
+                environment=env,
+                name=f"llm-imatrix-{config.build_id}",
+                user="0:0",
+                device_requests=device_requests
+            )
+            
+            container.start()
+            for line in container.logs(stream=True, follow=True):
+                progress.add_log(f"IMATRIX: {line.decode().strip()}")
+                
+            res = container.wait(timeout=config.build_timeout)
+            if res.get('StatusCode', 1) != 0:
+                raise RuntimeError("IMatrix calculation failed.")
+                
+            # Verify Output
+            if (imatrix_dir / "imatrix.dat").exists():
+                progress.add_log("✅ IMatrix successfully generated.")
+            else:
+                progress.add_warning("IMatrix generation finished but 'imatrix.dat' not found.")
+                
+        except Exception as e:
+            progress.add_error(f"IMatrix generation error: {e}")
+            raise # Re-raise to stop build or handle via policy? 
+                  # For now we fail hard if requested IMatrix fails.
+        finally:
+            try: container.remove(force=True)
+            except: pass
+
     def _execute_build_modules(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path):
         progress.current_stage = "Running modules"
+        progress.status = BuildStatus.BUILDING
         progress.progress_percent = 60
-        progress.add_log("Starting Build Container...")
+        progress.add_log("Starting Main Build Container...")
         
         build_temp = self.cache_dir / "builds" / config.build_id
         
@@ -524,6 +595,7 @@ class BuildEngine:
         
         # 2. Environment Setup
         env = {
+            "JOB_TYPE": "build", # Default mode
             "BUILD_ID": config.build_id,
             "MODEL_SOURCE": config.model_source,
             "MODEL_TASK": config.model_task, 
@@ -534,39 +606,34 @@ class BuildEngine:
             "TARGET_FORMAT": config.target_format.value
         }
         
-        # Inject SSOT Vars from Config
-        get_cfg = getattr(self.config, 'get', lambda k, d=None: getattr(self.config, k, d))
-        source_repos = get_cfg("source_repositories", {})
+        # Check for IMatrix from previous step
+        imatrix_file = build_temp / "imatrix" / "imatrix.dat"
+        if config.use_imatrix and imatrix_file.exists():
+            vols[str(build_temp / "imatrix")] = {"bind": "/build-cache/imatrix", "mode": "ro"}
+            env["USE_IMATRIX"] = "1"
+            env["IMATRIX_PATH"] = "/build-cache/imatrix/imatrix.dat"
+            progress.add_log("Using generated IMatrix for Quantization.")
         
+        # Inject SSOT Vars
+        source_repos = self._get_conf("source_repositories", {})
         if source_repos:
             for k, v in source_repos.items():
                 if isinstance(v, dict) and 'url' in v:
-                    key_parts = k.split('.')
-                    name = key_parts[-1].upper()
-                    env[f"{name}_REPO_OVERRIDE"] = v['url']
-                elif isinstance(v, str):
-                    name = k.split('.')[-1].upper()
-                    env[f"{name}_REPO_OVERRIDE"] = v
+                    env[f"{k.split('.')[-1].upper()}_REPO_OVERRIDE"] = v['url']
 
-        # 3. Dataset Injection
+        # Dataset Injection (Optional for Build, but good for validation)
         if config.dataset_path and os.path.exists(config.dataset_path):
             vols[str(config.dataset_path)] = {"bind": "/build-cache/dataset.txt", "mode": "ro"}
             env["DATASET_PATH"] = "/build-cache/dataset.txt"
-            progress.add_log(f"Mounted Calibration Dataset: {config.dataset_path}")
 
         # 4. GPU Logic
         device_requests = []
         devices = []
-        
         if config.use_gpu:
             if shutil.which("nvidia-smi"):
-                progress.add_log("Enabling GPU Passthrough (NVIDIA)...")
                 device_requests = [DeviceRequest(count=-1, capabilities=[['gpu']])]
             elif os.path.exists("/dev/dri"):
-                progress.add_log("Enabling GPU Passthrough (Intel/VAAPI)...")
                 devices = ["/dev/dri:/dev/dri"]
-            else:
-                progress.add_warning("GPU usage requested but no supported GPU detected.")
 
         # 5. Run Container
         container = self.docker_client.containers.create(
@@ -575,7 +642,7 @@ class BuildEngine:
             volumes=vols, 
             environment=env, 
             name=f"llm-build-{config.build_id}", 
-            user="0:0", # Use root inside for build operations usually
+            user="0:0",
             device_requests=device_requests,
             devices=devices
         )
@@ -585,7 +652,6 @@ class BuildEngine:
             
         container.start()
         
-        # Stream Logs
         for line in container.logs(stream=True, follow=True):
             progress.add_log(f"CONT: {line.decode().strip()}")
             
@@ -647,7 +713,8 @@ class BuildEngine:
             f"- **Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
             f"- **Target Architecture:** {config.target_arch}\n"
             f"- **Target Format:** {config.target_format.value.upper()}\n"
-            f"- **Quantization:** {config.quantization or 'FP16'}\n\n"
+            f"- **Quantization:** {config.quantization or 'FP16'}\n"
+            f"- **IMatrix (Smart Calibration):** {'Enabled' if config.use_imatrix else 'Disabled'}\n\n"
             f"## 🛡️ Security & Integrity\n"
             f"- **Primary Artifact Hash (SHA256):** `{model_hash}`\n"
             f"- **Base Image:** {config.base_image}\n\n"
