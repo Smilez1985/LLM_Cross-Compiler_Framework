@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Logging Utilities
+LLM Cross-Compiler Framework - Logging Utilities (v2.3.0)
 DIREKTIVE: Goldstandard, vollständig, professionell geschrieben.
 
 Enterprise-grade logging system with structured logging, performance metrics,
@@ -212,14 +212,14 @@ class StructuredFormatter(logging.Formatter):
         if record.exc_info:
             log_entry.exception_type = record.exc_info[0].__name__
             log_entry.exception_message = str(record.exc_info[1])
-            log_entry.stack_trace = traceback.format_exception(*record.exc_info)
+            log_entry.stack_trace = "".join(traceback.format_exception(*record.exc_info))
         
         # Add extra fields
         for key, value in record.__dict__.items():
             if key not in ['name', 'msg', 'args', 'levelname', 'levelno', 'pathname', 'filename',
-                          'module', 'lineno', 'funcName', 'created', 'msecs', 'relativeCreated',
-                          'thread', 'threadName', 'processName', 'process', 'message', 'exc_info',
-                          'exc_text', 'stack_info', 'thread_id']:
+                           'module', 'lineno', 'funcName', 'created', 'msecs', 'relativeCreated',
+                           'thread', 'threadName', 'processName', 'process', 'message', 'exc_info',
+                           'exc_text', 'stack_info', 'thread_id']:
                 log_entry.extra_fields[key] = value
         
         return log_entry.to_json()
@@ -271,7 +271,10 @@ class MemoryHandler(logging.Handler):
             with self._lock:
                 if self.entries.full():
                     # Remove oldest entry
-                    self.entries.get_nowait()
+                    try:
+                        self.entries.get_nowait()
+                    except queue.Empty:
+                        pass
                 
                 # Add new entry
                 formatted_message = self.format(record)
@@ -421,8 +424,8 @@ class LoggingManager:
         logging.addLevelName(LogLevel.TRACE.value, "TRACE")
     
     def initialize(self, config_file: Optional[Path] = None, 
-                  default_level: LogLevel = LogLevel.INFO,
-                  enable_memory_handler: bool = True):
+                   default_level: LogLevel = LogLevel.INFO,
+                   enable_memory_handler: bool = True):
         """
         Initialize the logging system.
         
@@ -522,7 +525,12 @@ class LoggingManager:
             root_logger.removeHandler(handler)
         
         # Set root level to lowest configured level
-        min_level = min([config.level.value for config in self.logger_configs.values()])
+        # Safely calculate min level
+        if self.logger_configs:
+            min_level = min([config.level.value for config in self.logger_configs.values()])
+        else:
+            min_level = LogLevel.INFO.value
+            
         root_logger.setLevel(min_level)
         
         # Add memory handler if enabled
