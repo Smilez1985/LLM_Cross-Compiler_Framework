@@ -10,6 +10,9 @@ Updates v2.0.0:
 - Added Settings for Chat Context, Telemetry, and Offline Mode.
 Updates v2.3.0:
 - Added Centralized Docker Image Definitions.
+Updates v2.4.0:
+- Added defaults for IMatrix/Smart Calibration.
+- Added SSOT for Source Repositories.
 """
 
 import os
@@ -93,6 +96,12 @@ class ConfigSchema:
                         value = list(value)
                     elif isinstance(value, str):
                         value = [v.strip() for v in value.split(',')]
+                elif self.field_type == dict:
+                    if isinstance(value, str):
+                        try:
+                            value = json.loads(value)
+                        except:
+                            errors.append(f"Invalid dict format for {self.field_name}")
             except (ValueError, TypeError):
                 errors.append(f"Invalid type for {self.field_name}: expected {self.field_type.__name__}")
         
@@ -245,12 +254,18 @@ class ConfigManager:
             ConfigSchema("docker_registry", str, False, "ghcr.io", "Docker registry URL"),
             ConfigSchema("docker_namespace", str, False, "llm-framework", "Docker namespace"),
             
-            # --- NEW V2.3: Centralized Image Definitions (Fixed Hardcoding) ---
+            # --- SSOT: Centralized Image Definitions (v2.3) ---
             ConfigSchema("image_trivy", str, False, "aquasec/trivy:latest", "Security Scanner Image"),
             ConfigSchema("image_qdrant", str, False, "qdrant/qdrant:v1.16.0", "Vector DB Image"),
             ConfigSchema("image_base_debian", str, False, "debian:bookworm-slim", "Base Build Image"),
             ConfigSchema("image_inference_runtime", str, False, "ghcr.io/smilez1985/llm-runtime:latest", "Inference Image"),
-            # ------------------------------------------------------------------
+            
+            # --- SSOT: Repositories (v2.3) ---
+            ConfigSchema("source_repositories", dict, False, {}, "Map of Git Repositories (llama.cpp, etc.)"),
+
+            # --- IMatrix & Smart Calibration Defaults (v2.4) ---
+            ConfigSchema("default_enable_imatrix", bool, False, False, "Enable IMatrix generation by default"),
+            ConfigSchema("default_calibration_dataset", str, False, "wiki.train.raw", "Default dataset filename"),
 
             # GUI & API
             ConfigSchema("gui_theme", str, False, "dark", "GUI theme"),
@@ -436,6 +451,7 @@ class ConfigManager:
         """
         Saves current configuration to config.yml (User Scope).
         Updated v2.0.0: Includes chat, telemetry and offline mode settings.
+        Updated v2.4.0: Includes SSOT for images and repositories.
         """
         config_file = self.config_dir / "config.yml"
         data = {}
@@ -456,7 +472,9 @@ class ConfigManager:
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",
                 # v2.3
-                "image_trivy", "image_qdrant", "image_base_debian", "image_inference_runtime"
+                "image_trivy", "image_qdrant", "image_base_debian", "image_inference_runtime",
+                # v2.4 (SSOT & IMatrix)
+                "source_repositories", "default_enable_imatrix", "default_calibration_dataset"
             ]
             
             for key, val in self.config_values.items():
