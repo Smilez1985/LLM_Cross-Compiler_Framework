@@ -1,138 +1,130 @@
 # 🚀 LLM Cross-Compiler Framework
-**DITTO: Definitive Inference Target Translation On-Edge**
+### DITTO: Definitive Inference Target Translation On-Edge
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Docker](https://img.shields.io/badge/docker-20.10+-blue.svg)](https://docs.docker.com/get-docker/)
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-green.svg)]()
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)]()
-[![GitHub Stars](https://img.shields.io/github/stars/Smilez1985/llm_conversion_framework?style=social)](https://github.com/Smilez1985/llm_conversion_framework)
-[![GitHub Forks](https://img.shields.io/github/forks/Smilez1985/llm_conversion_framework?style=social)](https://github.com/Smilez1985/llm_conversion_framework)
+**Enterprise-grade toolchain for cross-compiling, quantizing, and deploying Local LLMs to Rockchip NPU targets (RK3588, RK3576, RK3566).**
 
-> **Note:** For documentation in German, see [README_DE.md](README_DE.md).
-
-**The Autonomous MLOps Platform for Edge AI.**  
-A self-managing, self-healing framework that compiles, optimizes, and deploys Large Language Models to any hardware (Rockchip, NVIDIA, Intel, etc.) without dependency hell.
+This framework automates the entire lifecycle of Edge AI deployment: from downloading models from HuggingFace, converting them to GGUF format, applying hardware-specific quantization, to air-gapped deployment on embedded devices.
 
 ---
 
-## 🌟 What's New in v2.0.0 (The Brain Update)
+## 🚀 Key Features
 
-We transformed the framework from a "Tool" into an **Intelligent System**.
+### 🛡️ Enterprise Security (v2.3)
+The framework enforces strict security validation across all modules to ensure safe operation in corporate environments:
+* **SSRF Protection:** The Crawler utilizes centralized validation logic to strictly block access to localhost, private IP ranges, and non-HTTP schemes.
+* **Deployment Hardening:** Target IP addresses are validated against strict patterns before any socket connection or SSH handshake is attempted.
+* **Audit-Ready:** Automated CI scripts (`ci_image_audit.sh`) verify Docker container efficiency and layer security without host dependencies.
 
-* 🧠 **Native Offline Intelligence:** Ditto runs locally (TinyLlama/Qwen) without Internet or external Docker containers. Zero dependencies.
-* 🚑 **Self-Healing Architecture:** Builds don't just fail; they diagnose themselves. The framework detects driver mismatches or missing libraries and proposes exact fix commands.
-* 🛡️ **Guardian Layers:**
-    * **Consistency Gate:** Prevents doomed builds by checking SDK vs. Driver compatibility *before* execution.
-    * **Knowledge Insurance:** Automatic RAG snapshots allow rollbacks if the AI learns incorrect information.
-    * **Ethics Gate:** Warns about restrictive model licenses before download.
-* 🔮 **Self-Awareness:** Ditto now indexes its own source code (`/app`), allowing it to answer deep architectural questions about the framework itself.
-
-[View Full Changelog](CHANGELOG.md) | [Upgrade Guide](docs/upgrade_v2.0.md)
-
----
-
-## ⚡ Key Features
-
-### 🏗️ Multi-Architecture Support
-Compile models for any target architecture from a single x86 host. Supports **Rockchip NPU** (RKNN), **NVIDIA GPU** (TensorRT), **Intel XPU** (IPEX/OpenVINO), and more.
-
-### 🤖 Autonomous AI Agent (Ditto)
-Ditto isn't just a wizard anymore.
-* **Deep Ingest:** Crawls documentation websites and PDFs to learn new SDKs.
-* **Chat Interface:** Ask questions like *"Why did my build fail?"* or *"How do I optimize for 8GB RAM?"*.
-* **Memory:** Remembers your hardware context but keeps the chat clean via "Rolling Context Compression".
-
-### 🚀 Zero-Dependency Deployment
-Push your optimized models to the edge with a single click.
-* **Secure:** Credentials exist only in RAM.
-* **Robust:** "Network Guard" pauses transfer on connection loss.
-* **Simple:** Generates a standalone `deploy.sh` on the target.
-
-### 🛡️ Security-First Architecture
-* **Socket Proxy:** Isolates Docker to prevent root escapes.
-* **Trivy Scanning:** Audits every build image for CVEs.
-* **Sanitization:** Telemetry (Opt-In) automatically strips API keys and user paths.
+### 🏗️ Core Architecture
+* **Cross-Compilation:** Native Docker container ensures reproducible builds for AArch64 architectures on x86 hosts.
+* **Smart Quantization:** Automated selection of quantization methods (e.g., `Q4_K_M`) balanced for specific NPU constraints.
+* **Slim-RAG Strategy:** Deploys a "clean slate" Vector DB structure to the target. The device learns locally; no massive pre-built databases are transferred.
+* **Polite Crawler:** A respectful documentation ingest engine that honors `robots.txt`, handles rate limits, and parses PDFs/HTML for RAG context.
 
 ---
 
-## 📂 Project Structure
-```
-.
-├── Launch-LLM-Conversion-Framework.bat # One-Click Installer & Launcher
-├── assets/                             # UI Resources (Ditto Avatars)
-├── orchestrator/
-│   ├── gui/                            # PySide6 GUI (Chat, Wizard, Monitoring)
-│   ├── Core/                           # The Brain
-│   │   ├── self_healing_manager.py     # Auto-Diagnosis
-│   │   ├── consistency_manager.py      # Pre-Flight Checks
-│   │   ├── ditto_manager.py            # Native Inference
-│   │   └── rag_manager.py              # Knowledge Base & Snapshots
-├── targets/                            # Hardware Modules (Rockchip, Intel, etc.)
-├── community/
-│   └── knowledge/                      # Shared RAG Snapshots
-└── output/                             # Golden Artifacts
-```
+## 📋 Prerequisites
+
+Before installing the framework, ensure your system meets the following requirements:
+
+### Windows Users ⚠️
+* **Docker Desktop** must be installed and running.
+* **WSL 2 Backend** must be enabled in Docker settings.
+* This is mandatory for the cross-compilation containers to function correctly.
+
+### Linux Users
+* A standard installation of **Docker** is required (the installer can attempt to set this up automatically).
 
 ---
 
-## 📟 Supported Hardware
+## 📦 Installation
 
-| Family | Status | Chips | Features |
-|--------|--------|-------|----------|
-| **Rockchip** | ✅ Production | RK3588, RK3566, RK3576 | RKLLM, RKNN, W8A8 |
-| **NVIDIA** | ✅ Production | Orin, Xavier, RTX 30/40 | TensorRT, CUDA 12 |
-| **Intel** | ✅ Production | Arc A-Series, Core Ultra | IPEX-LLM, OpenVINO |
-| **Raspberry Pi** | 🚧 Beta | Pi 5 + Hailo-8L | HailoRT, PCIe |
-| **RISC-V** | 🌐 Community | VisionFive 2 | Vector Ext. (V) |
+We have simplified the installation process into single-file installers ("Single Source of Truth").
 
----
+### Windows
+1. **Run as Admin:** Right-click `install.bat` and select **"Run as Administrator"**.
+2. **Process:** The script will check for Python 3.11 (installing via Winget if missing), create an isolated `.venv`, install all dependencies, and create Desktop shortcuts.
 
-## 📥 Installation & Usage
-
-### Windows (One-Click)
-
-1. Download the repository.
-2. Double-click **Launch-LLM-Conversion-Framework.bat**.
-3. It automatically installs Python/Git if missing, sets up the environment, and updates itself.
-
-### Linux (Headless / CI)
+### Linux / macOS
+1. Open your terminal in the repository root.
+2. Run the installer:
 ```bash
-make setup  # Checks groups & permissions
-make up     # Starts Orchestrator
-docker exec -it llm-orchestrator llm-cli
+   sudo ./install.sh
+```
+3. **Process:** The script installs system dependencies, fixes Docker group permissions for your user, and deploys the framework to `/opt/llm-conversion-framework`.
+
+---
+
+## 🖥️ Usage Guide
+
+### 1. The Orchestrator GUI
+Start via the Desktop Shortcut (Windows) or command line.
+
+* **Source Tab:** Search and download models directly from HuggingFace. Validates SHA256 integrity.
+* **Convert Tab:** Manages the conversion pipeline.
+    * *Input:* Raw PyTorch/Safetensors model.
+    * *Output:* NPU-optimized GGUF format.
+    * *Opt-in:* Toggle specific hardware flags for your target board.
+* **Deploy Tab:** Connection management for Edge Devices.
+    * *Features:* SSH Key management, Air-Gap package generation (ZIP with Docker images), and one-click deployment.
+
+### 2. The Wizard (CLI)
+For headless servers or Linux users, the Wizard provides an interactive guide.
+
+**Start:**
+```bash
+./start_framework.bat   # Windows
+llm-framework           # Linux (if installed globally)
+```
+
+**Workflow:**
+1. **Select Operation:** Download / Convert / Quantize / Deploy.
+2. **Target Selection:** Choose your board (e.g., "Orange Pi 5").
+3. **Optimization:** The wizard suggests the best quantization based on target RAM.
+
+### 3. Containerized Build System
+Ensure cross-platform compatibility by running the core logic in Docker.
+```bash
+make build              # Build the image
+make test-container     # Run isolated tests
 ```
 
 ---
 
-## 🛠️ The Workflow
+## 🤝 Community & Collaboration
 
-1. **Probe:** Run `./hardware_probe.sh` on your target device.
-2. **Import:** Load the profile in the GUI.
-3. **Consult:** Ask Ditto: *"Is this model compatible with my 8GB RAM?"*
-4. **Build:** Select Model & Format (GGUF/RKNN). The Consistency Gate ensures compatibility.
-5. **Deploy:** Click "Deploy to Target" to push the Golden Artifact via SSH.
+We believe in the power of open collaboration.
+
+* **Share Target Modules:** If you have generated a config module for a new board using the Wizard, please contribute it back via Pull Request.
+* **RAG Knowledge:** We encourage sharing non-sensitive RAG datasets to improve the collective intelligence of edge devices.
 
 ---
 
-## 🤝 Community & Governance
+## 🛠️ Configuration
 
-- **Knowledge Sharing:** Export your RAG snapshots to `community/knowledge/` to help others.
-- **Telemetry:** Opt-In anonymous reporting helps us fix bugs faster. (We never track prompts or private keys).
-- **Support:** Open a [GitHub Discussion](https://github.com/Smilez1985/llm_conversion_framework/discussions).
+**Location:** `configs/user_config.yml` (or in your Data directory).
+```yaml
+crawler_respect_robots: true
+crawler_max_depth: 2
+enable_rag_knowledge: true
+target_architecture: "aarch64"
+```
+
+---
+
+## 🙏 Credits
+
+* **[llama.cpp](https://github.com/ggerganov/llama.cpp)** - The core of inference
+* **[Hugging Face](https://huggingface.co/)** - For the model ecosystem
+* **[Ditto](https://github.com/yoheinakajima/ditto)** - AI-Agent Framework for automatic hardware module generation (developed by [@yoheinakajima](https://github.com/yoheinakajima))
+* **[Qdrant](https://qdrant.tech/)** - Vector database for our Local Knowledge Base
+* **[Radxa Community](https://forum.radxa.com/)** - For support with RK3566 integration
+* **[Docker](https://www.docker.com/)** - Containerization Platform
+* **[PySide6](https://doc.qt.io/qtforpython-6/)** - Professional GUI Framework
+* **[Poetry](https://python-poetry.org/)** - Modern Python Dependency Management
 
 ---
 
 ## 📄 License
 
-Licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
-
----
-
-<div align="center">
-
-[⭐ Star us on GitHub](https://github.com/Smilez1985/llm_conversion_framework) | [📖 Docs](#) | [💬 Discord](#)
-
-**Empowering developers to run AI everywhere.**
-
-</div>
+This project is licensed under the **MIT License**.
