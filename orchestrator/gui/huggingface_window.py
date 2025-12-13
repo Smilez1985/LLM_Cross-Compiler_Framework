@@ -1,23 +1,37 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Hugging Face Browser
+LLM Cross-Compiler Framework - Hugging Face Browser (v2.3.0)
 DIREKTIVE: Goldstandard, GUI, Internationalisierung.
+
+Features:
+- Suche nach Modellen auf Hugging Face.
+- Filterung nach Lizenz/Gated Status.
+- Asynchroner Download manager.
+- Token-Handling für geschützte Modelle (Llama-3 etc.).
+
+Updates v2.3.0:
+- Integrated `AskTokenDialog` locally for robustness.
+- Improved threading and error handling.
+- Dark Mode Styling.
 """
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, 
-    QHeaderView, QLabel, QMessageBox, QComboBox, QDialog, QListWidget
+    QHeaderView, QLabel, QMessageBox, QComboBox, QDialog, 
+    QListWidget, QDialogButtonBox, QFormLayout, QCheckBox
 )
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QIcon, QColor
+from PySide6.QtGui import QColor
 
-from orchestrator.gui.dialogs import AskTokenDialog
-# Localization Import
-try:
-    from orchestrator.utils.localization import tr
-except ImportError:
-    def tr(key): return key
+from orchestrator.utils.localization import get_instance as get_i18n
+
+# Helper for Translation
+def tr(key, default=None):
+    i18n = get_i18n()
+    return i18n.t(key, default) if i18n else (default or key)
+
+# --- WORKERS ---
 
 class SearchWorker(QThread):
     finished = Signal(list)
@@ -67,30 +81,90 @@ class DownloadWorker(QThread):
         try:
             path = self.manager.download_file(self.repo_id, self.filename, self.token)
             if path: self.finished.emit(path)
-            else: self.error.emit("Download returned None")
+            else: self.error.emit("Download returned None (Check logs)")
         except Exception as e:
             self.error.emit(str(e))
+
+# --- DIALOGS ---
+
+class AskTokenDialog(QDialog):
+    """
+    Dialog to request HF Token for gated models.
+    Supports saving to SecretsManager via Framework.
+    """
+    def __init__(self, repo_id, parent=None):
+        super().__init__(parent)
+        self.repo_id = repo_id
+        self.token = None
+        self.setWindowTitle(tr("dlg.token.title", "Authentication Required"))
+        self.setMinimumWidth(400)
+        
+        layout = QVBoxLayout(self)
+        
+        lbl = QLabel(tr("dlg.token.info", f"Model '{repo_id}' is gated.\nPlease enter your Hugging Face Access Token."))
+        lbl.setWordWrap(True)
+        layout.addWidget(lbl)
+        
+        self.token_input = QLineEdit()
+        self.token_input.setEchoMode(QLineEdit.Password)
+        self.token_input.setPlaceholderText("hf_...")
+        layout.addWidget(self.token_input)
+        
+        # Checkbox to save token
+        self.chk_save = QCheckBox(tr("chk.save_token", "Save Token securely (Keyring)"))
+        layout.addWidget(self.chk_save)
+        
+        # Try to pre-fill from secrets if available
+        # Accessing secrets via parent's framework reference if possible, else skip
+        self.framework = getattr(parent, 'framework_manager', None) if parent else None
+        if self.framework and self.framework.secrets_manager:
+            stored = self.framework.secrets_manager.get_secret("hf_token")
+            if stored:
+                self.token_input.setText(stored)
+                self.chk_save.setChecked(True)
+        
+        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.validate)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        
+    def validate(self):
+        t = self.token_input.text().strip()
+        if not t:
+            QMessageBox.warning(self, "Error", tr("dlg.token.err_empty", "Token cannot be empty!"))
+            return
+        
+        self.token = t
+        
+        # Save if requested
+        if self.chk_save.isChecked() and self.framework and self.framework.secrets_manager:
+            self.framework.secrets_manager.set_secret("hf_token", t)
+            
+        self.accept()
 
 class FileSelectionDialog(QDialog):
     def __init__(self, repo_id, files, parent=None):
         super().__init__(parent)
-        self.setWindowTitle(f"{tr('btn.browse_hf')} - {repo_id}")
+        self.setWindowTitle(f"Browse: {repo_id}")
         self.resize(600, 450)
         self.selected_file = None
         
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel(tr("hf.files_available") if tr("hf.files_available") != "hf.files_available" else "Available Files:"))
+        layout.addWidget(QLabel(tr("hf.files_available", "Available Files:")))
         
         self.list_widget = QListWidget()
-        # Prioritize GGUF files
-        priority_files = sorted([f for f in files if f.endswith('.gguf') or f.endswith('.bin')])
+        # Prioritize GGUF/Bin files
+        priority_files = sorted([f for f in files if f.lower().endswith('.gguf') or f.lower().endswith('.bin')])
         other_files = sorted([f for f in files if f not in priority_files])
+        
+        # Color coding via HTML is tricky in ListWidget items directly, stick to order
         self.list_widget.addItems(priority_files + other_files)
         
         layout.addWidget(self.list_widget)
         
-        btn = QPushButton(tr("hf.download_selected") if tr("hf.download_selected") != "hf.download_selected" else "Download Selected")
+        btn = QPushButton(tr("hf.download_selected", "Download Selected"))
         btn.clicked.connect(self.accept_selection)
+        btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
         layout.addWidget(btn)
 
     def accept_selection(self):
@@ -98,6 +172,8 @@ class FileSelectionDialog(QDialog):
         if item:
             self.selected_file = item.text()
             self.accept()
+
+# --- MAIN WINDOW ---
 
 class HuggingFaceWindow(QMainWindow):
     def __init__(self, framework_manager, parent=None):
@@ -112,14 +188,14 @@ class HuggingFaceWindow(QMainWindow):
         self.setCentralWidget(central)
         layout = QVBoxLayout(central)
 
-        # Search
+        # Search Bar
         hbox = QHBoxLayout()
         self.search_edit = QLineEdit()
-        self.search_edit.setPlaceholderText("Search models (e.g. 'llama-3', 'mistral')...")
+        self.search_edit.setPlaceholderText("Search models (e.g. 'llama-3', 'mistral', 'gemma')...")
         self.search_edit.returnPressed.connect(self.start_search)
         hbox.addWidget(self.search_edit)
         
-        self.search_btn = QPushButton(tr("btn.search") if tr("btn.search") != "btn.search" else "Search")
+        self.search_btn = QPushButton(tr("btn.search", "Search"))
         self.search_btn.clicked.connect(self.start_search)
         hbox.addWidget(self.search_btn)
         layout.addLayout(hbox)
@@ -138,17 +214,20 @@ class HuggingFaceWindow(QMainWindow):
         self.table = QTableWidget(0, 4)
         self.table.setHorizontalHeaderLabels(["Model ID", "Downloads", "Likes", "Access"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.cellDoubleClicked.connect(self.on_download_request)
+        self.table.setStyleSheet("QTableWidget { background-color: #1e1e1e; color: #eee; gridline-color: #333; } QHeaderView::section { background-color: #333; color: white; }")
         layout.addWidget(self.table)
         
-        self.status_label = QLabel(tr("status.ready"))
+        self.status_label = QLabel(tr("status.ready", "Ready."))
         layout.addWidget(self.status_label)
 
     def start_search(self):
         query = self.search_edit.text()
         if not query: return
         
-        self.status_label.setText("Searching...")
+        self.status_label.setText("Searching Hugging Face...")
         self.search_btn.setEnabled(False)
         self.table.setRowCount(0)
         
@@ -164,7 +243,7 @@ class HuggingFaceWindow(QMainWindow):
         self.search_btn.setEnabled(True)
 
     def on_search_error(self, err):
-        self.status_label.setText(f"{tr('status.error')}: {err}")
+        self.status_label.setText(f"Error: {err}")
         self.search_btn.setEnabled(True)
         
     def apply_filter(self):
@@ -191,10 +270,10 @@ class HuggingFaceWindow(QMainWindow):
             status_text = "🔒 Gated" if gated else "✅ Free"
             item = QTableWidgetItem(status_text)
             if gated:
-                item.setForeground(QColor("orange"))
-                item.setToolTip("Authentication required. Double click to select file.")
+                item.setForeground(QColor("#FFA500")) # Orange
+                item.setToolTip("Authentication required.")
             else:
-                item.setForeground(QColor("green"))
+                item.setForeground(QColor("#4CAF50")) # Green
             
             self.table.setItem(row, 3, item)
 
@@ -205,29 +284,42 @@ class HuggingFaceWindow(QMainWindow):
         
         token = None
         if is_gated:
-            # AskTokenDialog from dialogs.py
+            # AskTokenDialog (Defined locally above)
             dlg = AskTokenDialog(model_id, self)
             if dlg.exec():
                 token = dlg.token
             else:
                 return # Cancelled
         
+        # Check license via ModelManager (Ethics Gate)
+        lic_info = self.model_manager.check_license(model_id)
+        if lic_info.get("is_restrictive"):
+            res = QMessageBox.warning(self, "License Warning", f"{lic_info['message']}\nContinue anyway?", QMessageBox.Yes | QMessageBox.No)
+            if res == QMessageBox.No: return
+
         # List files first
         self.status_label.setText(f"Listing files for {model_id}...")
         self.list_worker = FileListWorker(self.model_manager, model_id, token)
         self.list_worker.finished.connect(lambda files: self.show_file_selection(model_id, files, token))
-        self.list_worker.error.connect(lambda e: QMessageBox.critical(self, tr("status.error"), str(e)))
+        self.list_worker.error.connect(lambda e: QMessageBox.critical(self, "Error", str(e)))
         self.list_worker.start()
 
     def show_file_selection(self, model_id, files, token):
+        self.status_label.setText("Select file to download...")
         dlg = FileSelectionDialog(model_id, files, self)
         if dlg.exec() and dlg.selected_file:
             self.download_file(model_id, dlg.selected_file, token)
+        else:
+            self.status_label.setText("Ready.")
 
     def download_file(self, model_id, filename, token):
         self.status_label.setText(f"Downloading {filename}...")
         
         self.dl_worker = DownloadWorker(self.model_manager, model_id, filename, token)
-        self.dl_worker.finished.connect(lambda p: QMessageBox.information(self, tr("msg.success"), f"Saved to: {p}"))
-        self.dl_worker.error.connect(lambda e: QMessageBox.critical(self, tr("status.error"), f"Download failed:\n{e}"))
+        self.dl_worker.finished.connect(lambda p: self._on_download_success(p))
+        self.dl_worker.error.connect(lambda e: QMessageBox.critical(self, "Error", f"Download failed:\n{e}"))
         self.dl_worker.start()
+
+    def _on_download_success(self, path):
+        self.status_label.setText("Download complete.")
+        QMessageBox.information(self, "Success", f"Model saved to:\n{path}")
