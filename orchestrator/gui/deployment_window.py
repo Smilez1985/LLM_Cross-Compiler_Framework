@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Deployment Window (v2.0 Functional)
+LLM Cross-Compiler Framework - Deployment Window (v2.3.0 Functional)
 DIREKTIVE: Goldstandard GUI & Threading.
 
 Zweck:
 Verbindet die GUI mit dem DeploymentManager.
 Führt Paketierung und Deployment asynchron im Hintergrund aus (QThread).
+
+Updates v2.3.0:
+- Safe config access via ConfigManager.get().
+- Improved file browsing for artifacts.
+- Robust SecretsManager integration.
 """
 
 from pathlib import Path
@@ -14,9 +19,10 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
     QCheckBox, QGroupBox, QHeaderView, QMessageBox, QListWidget,
-    QProgressBar, QInputDialog, QLineEdit
+    QProgressBar, QInputDialog, QLineEdit, QListWidgetItem
 )
 from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtGui import QIcon
 from orchestrator.utils.localization import get_instance as get_i18n
 
 class DeploymentWorker(QThread):
@@ -45,7 +51,10 @@ class DeploymentWorker(QThread):
         try:
             # 1. Paketierung
             self.progress.emit("📦 Generating Deployment Package...")
-            output_dir = Path(self.framework.config.output_dir)
+            
+            # Safe config access
+            get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
+            output_dir = Path(get_cfg("output_dir", "output"))
             
             pkg_path = dep_mgr.create_deployment_package(
                 artifact_path=self.artifact_path,
@@ -79,8 +88,11 @@ class DeploymentWindow(QWidget):
     def __init__(self, framework_manager, parent=None):
         super().__init__(parent)
         self.framework = framework_manager
-        self.target_manager = framework_manager.get_component("target_manager")
-        self.secrets_manager = framework_manager.get_component("secrets_manager")
+        
+        # Access components safely
+        self.target_manager = getattr(framework_manager, 'target_manager', None)
+        self.secrets_manager = getattr(framework_manager, 'secrets_manager', None)
+        
         self.i18n = get_i18n()
         self.worker = None
         
@@ -170,19 +182,32 @@ class DeploymentWindow(QWidget):
     def refresh_data(self):
         # Artifacts
         self.list_artifacts.clear()
-        output_dir = Path(self.framework.config.output_dir)
+        
+        # Safe config access
+        get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
+        output_dir = Path(get_cfg("output_dir", "output"))
+        
         if output_dir.exists():
             for item in output_dir.glob("*"):
                 # Zeige nur relevante Dateien (z.B. ZIPs oder Ordner, aber keine Logs)
                 if item.name.startswith("deploy_"): continue # Verstecke bereits erstellte Pakete
                 if item.is_dir() or item.suffix in ['.zip', '.tar.gz', '.bin']:
-                    self.list_artifacts.addItem(item.name)
+                    list_item = QListWidgetItem(item.name)
+                    # Add simple visual distinction
+                    if item.is_dir():
+                        list_item.setText(f"📁 {item.name}")
+                    else:
+                        list_item.setText(f"📦 {item.name}")
+                    self.list_artifacts.addItem(list_item)
         
         # Profiles
         self.cb_profiles.clear()
         if self.target_manager:
             profiles = self.target_manager.list_hardware_profiles()
-            self.cb_profiles.addItems(profiles)
+            if profiles:
+                self.cb_profiles.addItems(profiles)
+            else:
+                self.cb_profiles.addItem("Generic Profile (Default)")
         else:
             self.cb_profiles.addItem("Error: TargetManager not loaded")
 
@@ -198,7 +223,12 @@ class DeploymentWindow(QWidget):
             QMessageBox.warning(self, "Warning", "Please select a Hardware Profile.")
             return
 
-        artifact_path = Path(self.framework.config.output_dir) / artifact_item.text()
+        # Strip icon prefix if present
+        raw_name = artifact_item.text().replace("📁 ", "").replace("📦 ", "")
+        
+        get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
+        artifact_path = Path(get_cfg("output_dir", "output")) / raw_name
+        
         target_ip = self.txt_ip.text().strip()
         user = self.txt_user.text().strip()
 
@@ -210,8 +240,8 @@ class DeploymentWindow(QWidget):
         # Fallback: Wenn kein PW im Keyring, frage User (Session only)
         if not password:
             pwd, ok = QInputDialog.getText(self, "SSH Password", 
-                                         f"Enter password for {user}@{target_ip}:", 
-                                         QLineEdit.Password)
+                                           f"Enter password for {user}@{target_ip}:", 
+                                           QLineEdit.Password)
             if ok and pwd:
                 password = pwd
             else:
