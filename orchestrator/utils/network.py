@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Network Utilities
+LLM Cross-Compiler Framework - Network Utilities (v2.3.0)
 DIREKTIVE: Goldstandard, Robustness, Security.
 
 Zweck:
@@ -8,6 +8,11 @@ Zentrale Klasse für Netzwerk-Operationen.
 - Prüft Konnektivität (Ping Loop)
 - Lädt Dateien sicher herunter (Hash Check)
 - Handhabt Verbindungsabbrüche (Auto-Wait)
+
+Updates v2.3.0:
+- Updated version header.
+- Integrated with centralized logging.
+- Optimized hash calculation (streaming).
 """
 
 import time
@@ -104,6 +109,7 @@ class NetworkGuard:
             session = requests.Session()
             adapter = requests.adapters.HTTPAdapter(max_retries=3)
             session.mount('https://', adapter)
+            session.mount('http://', adapter)
             
             with session.get(url, stream=True, timeout=30) as r:
                 r.raise_for_status()
@@ -115,7 +121,8 @@ class NetworkGuard:
                     for chunk in r.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
-                            sha256_hash.update(chunk)
+                            if expected_sha256:
+                                sha256_hash.update(chunk)
 
             # Validierung (falls Hash angegeben)
             if expected_sha256:
