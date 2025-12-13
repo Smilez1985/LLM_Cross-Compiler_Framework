@@ -1,18 +1,14 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Builder Tab (v2.3.1 Enterprise)
-DIREKTIVE: Goldstandard GUI Component. Support for Remote & Offline Probing.
+LLM Cross-Compiler Framework - Builder Tab (v2.4.0)
+DIREKTIVE: Goldstandard GUI Component. IMatrix Enabled.
 
 Der Haupt-Tab für die Konfiguration und den Start von Builds.
-Integriert:
-- Hardware-Probing (Import von USB/HDD oder Remote via SSH)
-- AI-Driven Optimization (Via DittoManager)
-- Visuelles Feedback
+Integriert Hardware-Probing, AI-Optimierung und Smart Calibration.
 
-Updates v2.3.1:
-- Added "Import Probe File" for manual cross-compilation workflows.
-- Added "Remote SSH Scan" for convenience.
-- Split Scan button into a Dropdown Menu.
+Updates v2.4.0:
+- Added Smart Calibration (IMatrix) Controls.
+- Updated BuildRequest handling for IMatrix parameters.
 """
 
 import os
@@ -27,7 +23,8 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QComboBox, QPushButton, QGroupBox, QCheckBox, 
     QMessageBox, QFileDialog, QStackedWidget,
-    QTextEdit, QFormLayout, QMenu, QDialog, QLineEdit, QDialogButtonBox
+    QTextEdit, QFormLayout, QMenu, QDialog, QLineEdit, QDialogButtonBox,
+    QToolTip
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect
 from PySide6.QtGui import QPixmap, QAction
@@ -348,10 +345,26 @@ class BuilderTab(QWidget):
         self.opt_combo.addItems(["BALANCED", "SPEED", "SIZE", "AGGRESSIVE"])
         self.chk_gpu = QCheckBox("Use Host GPU for Build Process")
         if platform.system() == "Linux": self.chk_gpu.setChecked(True)
+        
+        # NEW v2.4.0: IMatrix / Smart Calibration
+        self.chk_imatrix = QCheckBox("Enable Smart Calibration (IMatrix)")
+        self.chk_imatrix.setToolTip("Uses AI-generated data to improve quantization quality by analyzing model importance.")
+        self.dataset_path = None
+        self.btn_dataset = QPushButton("Custom Dataset...")
+        self.btn_dataset.setEnabled(False)
+        self.btn_dataset.clicked.connect(self._browse_dataset)
+        self.chk_imatrix.toggled.connect(self.btn_dataset.setEnabled)
+        
+        row_dataset = QHBoxLayout()
+        row_dataset.addWidget(self.chk_imatrix)
+        row_dataset.addWidget(self.btn_dataset)
+
         build_layout.addRow("Quantization:", self.quant_combo)
         build_layout.addRow("Format:", self.format_combo)
         build_layout.addRow("Optimization:", self.opt_combo)
+        build_layout.addRow("Calibration:", row_dataset)
         build_layout.addRow("", self.chk_gpu)
+        
         build_group.setLayout(build_layout)
         left_col.addWidget(build_group)
         
@@ -506,6 +519,13 @@ class BuilderTab(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Select Model", "", "Models (*.bin *.gguf *.safetensors);;All Files (*)")
         if path: self.model_input.setCurrentText(path)
 
+    def _browse_dataset(self):
+        """NEW: Browse for custom calibration dataset"""
+        path, _ = QFileDialog.getOpenFileName(self, "Select Calibration Text", "", "Text Files (*.txt);;All Files (*)")
+        if path: 
+            self.dataset_path = path
+            self._log(f"Selected Dataset: {Path(path).name}")
+
     def _run_ai_optimizer(self):
         ditto = self.framework.get_component("ditto_manager")
         if not ditto:
@@ -566,7 +586,10 @@ class BuilderTab(QWidget):
             parallel_builds=True,
             output_base_dir=output_dir,
             description="Builder Tab Job",
-            use_gpu=self.chk_gpu.isChecked()
+            use_gpu=self.chk_gpu.isChecked(),
+            # NEW v2.4.0: Pass IMatrix config
+            use_imatrix=self.chk_imatrix.isChecked(),
+            dataset_path=self.dataset_path
         )
         
         try:
