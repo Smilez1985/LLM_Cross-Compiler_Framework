@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Command Line Interface (v2.3.0)
+LLM Cross-Compiler Framework - Command Line Interface (v2.4.0)
 DIREKTIVE: Goldstandard, vollständig, professionell geschrieben.
 
 Professional CLI for automation, CI/CD integration, and power users.
 Supports all framework operations including Source Management, Module Generation, 
-AI Assistance, and now Deployment/Self-Healing.
+AI Assistance, Deployment, Self-Healing, and Smart Calibration (IMatrix).
 
-Updates v2.3.0:
-- Updated version string.
-- Robust asyncio loop handling.
-- Enhanced path resolution for scripts.
+Updates v2.4.0:
+- Added --imatrix and --dataset flags to build command.
+- Integrated Smart Calibration workflow visualization.
+- Added 'config repos' to manage SSOT source repositories.
 """
 
 import sys
@@ -73,7 +73,7 @@ class TargetConfig:
 # ============================================================================
 
 console = Console()
-__version__ = "2.3.0"
+__version__ = "2.4.0"
 
 DEFAULT_CONFIG = {
     "targets_dir": "targets",
@@ -111,9 +111,6 @@ class FrameworkContext:
             
         try:
             # Framework Manager initialisieren
-            # Convert dictionary config to FrameworkConfig object (if needed by your FrameworkManager implementation)
-            # Assuming FrameworkManager accepts a FrameworkConfig object or similar.
-            # If FrameworkConfig is a dataclass:
             try:
                 framework_config = FrameworkConfig(**self.config)
             except TypeError:
@@ -228,10 +225,11 @@ def model_format_from_string(format_str: str) -> ModelFormat:
 @pass_context
 def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str):
     """
-    🚀 LLM Cross-Compiler Framework CLI v2.3.0
+    🚀 LLM Cross-Compiler Framework CLI v2.4.0
     
     Professional command-line interface for cross-compiling Large Language Models
-    for edge hardware. Supports automation, CI/CD integration, Deployment, and Self-Healing.
+    for edge hardware. Supports automation, CI/CD integration, Deployment, 
+    Self-Healing and Smart Calibration (IMatrix).
     """
     # Setup logging
     setup_cli_logging("DEBUG" if verbose else log_level)
@@ -506,10 +504,14 @@ def build():
 @click.option('--parallel', is_flag=True, default=True, help='Enable parallel builds')
 @click.option('--follow', '-F', is_flag=True, help='Follow build output in real-time')
 @click.option('--gpu/--no-gpu', default=False, help='Enable GPU passthrough')
+# --- NEU v2.4.0: IMatrix Flags ---
+@click.option('--imatrix/--no-imatrix', default=False, help='Enable Smart Calibration (IMatrix) for quantization')
+@click.option('--dataset', type=click.Path(exists=True), help='Custom calibration dataset path (txt)')
 @pass_context
 def start_build(ctx: FrameworkContext, model: str, target: str, format: str, 
                 quantization: Optional[str], output_dir: Optional[str], 
-                optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool):
+                optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
+                imatrix: bool, dataset: Optional[str]):
     """Start a new build job"""
     
     try:
@@ -550,7 +552,10 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str,
             parallel_builds=parallel,
             output_base_dir=output_dir,
             description=f"CLI build: {model} -> {target} ({format})",
-            use_gpu=gpu
+            use_gpu=gpu,
+            # Pass IMatrix Flags to Orchestrator
+            use_imatrix=imatrix,
+            dataset_path=dataset
         )
         
         loop = asyncio.new_event_loop()
@@ -566,7 +571,8 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str,
                     f"[bold]Format:[/bold] {format}\n"
                     f"[bold]Quantization:[/bold] {quantization or 'None'}\n"
                     f"[bold]Output:[/bold] {output_dir}\n"
-                    f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}",
+                    f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"
+                    f"[bold]Smart Calibration (IMatrix):[/bold] {'✅ Enabled' if imatrix else '❌ Disabled'}",
                     title=f"🚀 Starting Build: {request_id}"
                 ))
             
@@ -896,6 +902,42 @@ def config():
 def show_config(ctx: FrameworkContext):
     """Show current configuration"""
     console.print(json.dumps(ctx.config, indent=2, default=str))
+
+@config.command('repos')
+@click.option('--add', nargs=2, help="Add repo override: <name> <url>")
+@click.option('--remove', help="Remove repo override: <name>")
+@pass_context
+def config_repos(ctx: FrameworkContext, add, remove):
+    """Manage SSOT Source Repositories"""
+    cm = ctx.framework_manager.config
+    current_repos = getattr(cm, 'source_repositories', {}) or {}
+    
+    if add:
+        name, url = add
+        current_repos[name.lower()] = url
+        cm.set("source_repositories", current_repos)
+        cm.save_user_config()
+        console.print(f"[green]Added repo override: {name} -> {url}[/green]")
+    elif remove:
+        if remove.lower() in current_repos:
+            del current_repos[remove.lower()]
+            cm.set("source_repositories", current_repos)
+            cm.save_user_config()
+            console.print(f"[green]Removed repo override: {remove}[/green]")
+        else:
+            console.print(f"[yellow]Repo {remove} not found.[/yellow]")
+    else:
+        # List
+        if not current_repos:
+            console.print("[yellow]No repository overrides defined.[/yellow]")
+        else:
+            table = Table(title="Source Repositories (SSOT)")
+            table.add_column("Key", style="cyan")
+            table.add_column("URL", style="green")
+            for k, v in current_repos.items():
+                url = v['url'] if isinstance(v, dict) else v
+                table.add_row(k, url)
+            console.print(table)
 
 if __name__ == "__main__":
     cli()
