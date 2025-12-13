@@ -1,139 +1,130 @@
 # 🚀 LLM Cross-Compiler Framework
-**DITTO: Definitive Inference Target Translation On-Edge**
+### DITTO: Definitive Inference Target Translation On-Edge
 
+**Professionelle Toolchain zur Cross-Kompilierung, Quantisierung und zum Deployment lokaler LLMs auf Rockchip NPU Targets (RK3588, RK3576, RK3566).**
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Docker](https://img.shields.io/badge/docker-20.10+-blue.svg)](https://docs.docker.com/get-docker/)
-[![Status](https://img.shields.io/badge/Status-Production%20Ready-green.svg)]()
-[![Version](https://img.shields.io/badge/version-2.0.0-blue.svg)]()
-[![GitHub Stars](https://img.shields.io/github/stars/Smilez1985/llm_conversion_framework?style=social)](https://github.com/Smilez1985/llm_conversion_framework)
-[![GitHub Forks](https://img.shields.io/github/forks/Smilez1985/llm_conversion_framework?style=social)](https://github.com/Smilez1985/llm_conversion_framework)
-
-> **Hinweis:** Für die englische Dokumentation siehe [README.md](README.md).
-
-**Die autonome MLOps-Plattform für Edge-AI.**  
-Ein selbstverwaltendes, selbstheilendes Framework, das Large Language Models (LLMs) für jede Hardware (Rockchip, NVIDIA, Intel, etc.) kompiliert, optimiert und deployt – ohne "Dependency-Hölle".
+Dieses Framework automatisiert den gesamten Lebenszyklus von Edge AI: vom Download der Modelle (HuggingFace) über die Konvertierung ins GGUF-Format und hardwarespezifische Quantisierung bis hin zum Air-Gap-Deployment auf Embedded-Geräten.
 
 ---
 
-## 🌟 Was ist neu in v2.0.0 (The Brain Update)
+## 🚀 Hauptfunktionen
 
-Wir haben das Framework von einem "Werkzeug" in ein **Intelligentes System** verwandelt.
+### 🛡️ Enterprise Security (v2.3)
+Das Framework erzwingt strenge Sicherheitsvalidierungen in allen Modulen für den sicheren Einsatz in Unternehmensumgebungen:
+* **SSRF-Schutz:** Der Crawler nutzt eine zentralisierte Validierungslogik, um Zugriffe auf Localhost, private IP-Bereiche und Nicht-HTTP-Schemata strikt zu blockieren.
+* **Deployment-Härtung:** Ziel-IP-Adressen werden gegen strenge Muster validiert, bevor jegliche Socket-Verbindung oder SSH-Handshake versucht wird.
+* **Audit-Ready:** Automatisierte CI-Skripte (`ci_image_audit.sh`) prüfen Docker-Container auf Effizienz und Layer-Sicherheit ohne Host-Abhängigkeiten.
 
-* 🧠 **Native Offline-Intelligenz:** Ditto läuft jetzt lokal (TinyLlama/Qwen) ohne Internet oder externe Docker-Container. Null Abhängigkeiten.
-* 🚑 **Selbstheilende Architektur:** Builds schlagen nicht einfach fehl; sie diagnostizieren sich selbst. Das Framework erkennt Treiber-Konflikte oder fehlende Bibliotheken und schlägt exakte Reparatur-Befehle vor.
-* 🛡️ **Guardian Layers (Schutzschichten):**
-    * **Konsistenz-Gate:** Verhindert zum Scheitern verurteilte Builds, indem es SDK- und Treiber-Kompatibilität *vor* der Ausführung prüft.
-    * **Wissens-Versicherung:** Automatische RAG-Snapshots ermöglichen Rollbacks, falls die KI falsche Informationen lernt.
-    * **Ethik-Gate:** Warnt vor dem Download bei Modellen mit restriktiven Lizenzen.
-* 🔮 **Selbstbewusstsein:** Ditto indiziert nun seinen eigenen Quellcode (`/app`), wodurch er tiefe architektonische Fragen zum Framework selbst beantworten kann.
-
-[Vollständigen Changelog ansehen](CHANGELOG.md) | [Upgrade Guide](docs/upgrade_v2.0.md)
-
----
-
-## ⚡ Hauptfunktionen
-
-### 🏗️ Multi-Architektur Support
-Kompilieren Sie Modelle für jede Zielarchitektur von einem einzigen x86-Host aus. Unterstützt **Rockchip NPU** (RKNN), **NVIDIA GPU** (TensorRT), **Intel XPU** (IPEX/OpenVINO) und mehr.
-
-### 🤖 Autonomer KI-Agent (Ditto)
-Ditto ist nicht mehr nur ein Wizard.
-* **Deep Ingest:** Crawlt Dokumentations-Webseiten und PDFs, um neue SDKs zu erlernen.
-* **Chat-Interface:** Stellen Sie Fragen wie *"Warum ist mein Build fehlgeschlagen?"* oder *"Wie optimiere ich für 8GB RAM?"*.
-* **Gedächtnis:** Erinnert sich an Ihren Hardware-Kontext, hält den Chat aber durch "Rolling Context Compression" sauber.
-
-### 🚀 Zero-Dependency Deployment
-Schieben Sie Ihre optimierten Modelle mit einem Klick auf das Edge-Gerät.
-* **Sicher:** Zugangsdaten existieren nur im RAM.
-* **Robust:** "Network Guard" pausiert den Transfer bei Verbindungsabbruch.
-* **Einfach:** Generiert ein eigenständiges `deploy.sh` auf dem Zielgerät.
-
-### 🛡️ Security-First Architektur
-* **Socket Proxy:** Isoliert Docker, um Root-Ausbrüche zu verhindern.
-* **Trivy Scanning:** Prüft jedes Build-Image auf CVEs (Sicherheitslücken).
-* **Sanitization:** Telemetrie (Opt-In) entfernt automatisch API-Keys und Benutzerpfade.
+### 🏗️ Kernarchitektur
+* **Cross-Compilation:** Native Docker-Container garantieren reproduzierbare Builds für AArch64-Architekturen auf x86-Hosts.
+* **Smarte Quantisierung:** Automatische Auswahl von Quantisierungsmethoden (z.B. `Q4_K_M`), balanciert für spezifische NPU-Speicherlimits.
+* **Slim-RAG Strategie:** Deployt eine "leere" Vektor-DB-Struktur auf das Zielgerät. Das Gerät lernt lokal; es werden keine massiven Datenbanken transferiert.
+* **Polite Crawler:** Eine respektvolle Ingest-Engine, die `robots.txt` beachtet, Rate-Limits einhält und PDFs/HTML für den RAG-Kontext parst.
 
 ---
 
-## 📂 Projektstruktur
-```
-.
-├── Launch-LLM-Conversion-Framework.bat # One-Click Installer & Launcher
-├── assets/                             # UI Ressourcen (Ditto Avatare)
-├── orchestrator/
-│   ├── gui/                            # PySide6 GUI (Chat, Wizard, Monitoring)
-│   ├── Core/                           # Das Gehirn
-│   │   ├── self_healing_manager.py     # Auto-Diagnose
-│   │   ├── consistency_manager.py      # Pre-Flight Checks
-│   │   ├── ditto_manager.py            # Native Inferenz
-│   │   └── rag_manager.py              # Wissensbasis & Snapshots
-├── targets/                            # Hardware Module (Rockchip, Intel, etc.)
-├── community/
-│   └── knowledge/                      # Geteilte RAG Snapshots
-└── output/                             # Golden Artifacts
-```
+## 📋 Voraussetzungen
+
+Vor der Installation muss sichergestellt sein, dass das System folgende Anforderungen erfüllt:
+
+### Windows Nutzer ⚠️
+* **Docker Desktop** muss installiert sein und laufen.
+* Das **WSL 2 Backend** muss in den Docker-Einstellungen aktiviert sein.
+* Dies ist zwingend erforderlich, damit die Cross-Compilation-Container korrekt arbeiten.
+
+### Linux Nutzer
+* Eine Standard-Installation von **Docker** ist erforderlich (das Installationsskript kann dies meist automatisch einrichten).
 
 ---
 
-## 📟 Unterstützte Hardware
+## 📦 Installation
 
-| Familie | Status | Chips | Features |
-|---------|--------|-------|----------|
-| **Rockchip** | ✅ Production | RK3588, RK3566, RK3576 | RKLLM, RKNN, W8A8 |
-| **NVIDIA** | ✅ Production | Orin, Xavier, RTX 30/40 | TensorRT, CUDA 12 |
-| **Intel** | ✅ Production | Arc A-Series, Core Ultra | IPEX-LLM, OpenVINO |
-| **Raspberry Pi** | 🚧 Beta | Pi 5 + Hailo-8L | HailoRT, PCIe |
-| **RISC-V** | 🌐 Community | VisionFive 2 | Vector Ext. (V) |
+Wir haben den Installationsprozess in zwei "Single Source of Truth" Skripten zusammengefasst.
 
----
+### Windows
+1. **Als Admin ausführen:** Rechtsklick auf `install.bat` und "Als Administrator ausführen" wählen.
+2. **Prozess:** Das Skript prüft auf Python 3.11 (installiert via Winget falls fehlend), erstellt ein isoliertes `.venv`, installiert alle Abhängigkeiten und legt Desktop-Verknüpfungen an.
 
-## 📥 Installation & Nutzung
-
-### Windows (One-Click)
-
-1. Laden Sie das Repository herunter.
-2. Doppelklicken Sie auf **Launch-LLM-Conversion-Framework.bat**.
-3. Installiert automatisch Python/Git falls fehlend, richtet die Umgebung ein und aktualisiert sich selbst.
-
-### Linux (Headless / CI)
+### Linux / macOS
+1. Terminal im Repository-Root öffnen.
+2. Installer starten:
 ```bash
-make setup  # Prüft Gruppen & Rechte
-make up     # Startet Orchestrator
-docker exec -it llm-orchestrator llm-cli
+   sudo ./install.sh
+```
+3. **Prozess:** Installiert Systemabhängigkeiten, korrigiert Docker-Gruppenrechte für den User und deployt das Framework nach `/opt/llm-conversion-framework`.
+
+---
+
+## 🖥️ Bedienungsanleitung
+
+### 1. Die Orchestrator GUI
+Start über die Desktop-Verknüpfung (Windows) oder CLI.
+
+* **Source Tab:** Suche und Download von Modellen direkt von HuggingFace. Validiert SHA256-Integrität.
+* **Convert Tab:** Steuert die Konvertierungs-Pipeline.
+    * *Input:* Rohes PyTorch/Safetensors Modell.
+    * *Output:* NPU-optimiertes GGUF-Format.
+    * *Opt-in:* Hardware-Flags für spezifische Boards aktivierbar.
+* **Deploy Tab:** Verbindungsmanagement zu Edge-Geräten.
+    * *Features:* SSH-Key-Management, Generierung von Air-Gap-Paketen (ZIP inkl. Docker-Images) und One-Click-Deployment.
+
+### 2. Der Wizard (CLI)
+Für Headless-Server oder Linux-Nutzer bietet der Wizard eine interaktive Anleitung.
+
+**Start:**
+```bash
+./start_framework.bat   # Windows
+llm-framework           # Linux (falls global installiert)
+```
+
+**Workflow:**
+1. **Operation wählen:** Download / Convert / Quantize / Deploy.
+2. **Target wählen:** Wähle dein Board (z.B. "Orange Pi 5").
+3. **Optimierung:** Der Wizard schlägt die beste Quantisierung basierend auf dem Ziel-RAM vor.
+
+### 3. Containerisiertes Build-System
+Die Kernlogik läuft in Docker, um Plattformunabhängigkeit zu sichern.
+```bash
+make build              # Image bauen
+make test-container     # Isolierte Tests ausführen
 ```
 
 ---
 
-## 🛠️ Der Workflow
+## 🤝 Community & Zusammenarbeit
 
-1. **Probe:** Führen Sie `./hardware_probe.sh` auf Ihrem Zielgerät aus.
-2. **Import:** Laden Sie das Profil in der GUI.
-3. **Konsultieren:** Fragen Sie Ditto: *"Ist dieses Modell mit meinen 8GB RAM kompatibel?"*
-4. **Bauen:** Wählen Sie Modell & Format (GGUF/RKNN). Das Konsistenz-Gate sichert die Kompatibilität.
-5. **Deployen:** Klicken Sie auf "Deploy to Target", um das Golden Artifact via SSH zu übertragen.
+Wir glauben an die Kraft offener Zusammenarbeit.
+
+* **Target Module teilen:** Wenn du mit dem Wizard ein Config-Modul für ein neues Board generiert hast, stelle es bitte per Pull Request bereit.
+* **RAG Wissen:** Wir ermutigen zum Teilen von nicht-sensitiven RAG-Datensätzen, um die kollektive Intelligenz der Edge-Geräte zu verbessern.
 
 ---
 
-## 🤝 Community & Governance
+## 🛠️ Konfiguration
 
-- **Wissen teilen:** Exportieren Sie Ihre RAG-Snapshots nach `community/knowledge/`, um anderen zu helfen.
-- **Telemetrie:** Opt-In anonyme Berichterstattung hilft uns, Bugs schneller zu beheben. (Wir tracken niemals Prompts oder private Keys).
-- **Support:** Öffnen Sie eine [GitHub Discussion](https://github.com/Smilez1985/llm_conversion_framework/discussions).
+**Ort:** `configs/user_config.yml` (oder im Datenverzeichnis).
+```yaml
+crawler_respect_robots: true
+crawler_max_depth: 2
+enable_rag_knowledge: true
+target_architecture: "aarch64"
+```
+
+---
+
+## 🙏 Danksagung
+
+* **[llama.cpp](https://github.com/ggerganov/llama.cpp)** - Das Herzstück der Inferenz
+* **[Hugging Face](https://huggingface.co/)** - Für das Modell-Ökosystem
+* **[Ditto](https://github.com/yoheinakajima/ditto)** - AI-Agent Framework für automatische Hardware-Modul-Generierung (entwickelt von [@yoheinakajima](https://github.com/yoheinakajima))
+* **[Qdrant](https://qdrant.tech/)** - Vektor-Datenbank für unsere Lokale Wissensdatenbank
+* **[Radxa Community](https://forum.radxa.com/)** - Für den Support bei der RK3566 Integration
+* **[Docker](https://www.docker.com/)** - Containerization Platform
+* **[PySide6](https://doc.qt.io/qtforpython-6/)** - Professional GUI Framework
+* **[Poetry](https://python-poetry.org/)** - Modern Python Dependency Management
 
 ---
 
 ## 📄 Lizenz
 
-Lizenziert unter der **MIT License**. Siehe [LICENSE](LICENSE) für Details.
-
----
-
-<div align="center">
-
-[⭐ Star us on GitHub](https://github.com/Smilez1985/llm_conversion_framework) | [📖 Dokumentation](#) | [💬 Discord](#)
-
-**Empowering developers to run AI everywhere.**
-
-</div>
+Dieses Projekt ist lizenziert unter der **MIT License**.
