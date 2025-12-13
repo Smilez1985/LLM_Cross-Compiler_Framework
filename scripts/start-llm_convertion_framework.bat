@@ -1,42 +1,86 @@
 @echo off
-setlocal
+setlocal EnableDelayedExpansion
 
-:: Titel setzen
+:: ============================================================
+:: LLM Cross-Compiler Framework - Windows Launcher
+:: DIREKTIVE: Goldstandard, Robustheit, Pfad-Unabhängigkeit.
+:: ============================================================
+
+:: Sicherstellen, dass wir im Verzeichnis des Skripts arbeiten
+:: (Wichtig bei "Als Administrator ausführen" oder Verknüpfungen)
+cd /d "%~dp0"
+
 title LLM Conversion Framework Orchestrator
 
-:: 1. Update Check
-:: Wir prüfen, ob ein Updater existiert und führen ihn aus.
-:: HINWEIS: Da du 'updater.sh' nanntest, gehen wir davon aus, dass Git Bash installiert ist
-:: oder du eigentlich eine .bat meinst. Hier eine robuste Lösung:
+:: --- BANNER ---
+cls
+echo ========================================================
+echo   LLM Cross-Compiler Framework - Orchestrator
+echo ========================================================
+echo.
 
-if exist "updater.sh" (
-    echo [INFO] Suche nach Updates...
-    :: Versucht, das sh-Skript via Git Bash auszuführen, falls vorhanden
-    if exist "%ProgramFiles%\Git\bin\bash.exe" (
-        "%ProgramFiles%\Git\bin\bash.exe" updater.sh
-    ) else (
-        echo [WARNUNG] updater.sh gefunden, aber keine Git Bash. Überspringe Update.
-    )
-)
-
+:: --- 1. UPDATE CHECK ---
+:: Prüft auf Updates vor dem Start
 if exist "updater.bat" (
     echo [INFO] Suche nach Updates...
     call updater.bat
+) else if exist "updater.sh" (
+    :: Fallback für Git-Umgebungen auf Windows
+    if exist "%ProgramFiles%\Git\bin\bash.exe" (
+        echo [INFO] Führe Updater via Git Bash aus...
+        "%ProgramFiles%\Git\bin\bash.exe" updater.sh
+    )
 )
 
-:: 2. GUI Starten
-echo [INFO] Starte Orchestrator GUI...
+:: --- 2. ENVIRONMENT SETUP ---
+echo [INFO] Initialisiere Umgebung...
 
-:: Hier wird angenommen, dass 'python_embed' und 'orchestrator' im gleichen Ordner liegen
-:: wie diese .bat Datei (da sie ja ins Root kopiert wurde).
+set "PYTHON_EXE="
+
+:: Priorität 1: Embedded Python (Portable)
 if exist "python_embed\python.exe" (
-    .\python_embed\python.exe orchestrator\main.py
+    set "PYTHON_EXE=python_embed\python.exe"
+    echo [INFO] Nutze Embedded Python.
 ) else (
-    echo [FEHLER] Python Umgebung nicht gefunden (python_embed\python.exe fehlt).
-    echo Bitte sicherstellen, dass das Framework korrekt installiert ist.
+    :: Priorität 2: Virtual Environment (Dev Mode)
+    if exist ".venv\Scripts\python.exe" (
+        set "PYTHON_EXE=.venv\Scripts\python.exe"
+        echo [INFO] Nutze Virtual Environment (.venv).
+    ) else (
+        :: Priorität 3: System Python (Fallback)
+        python --version >nul 2>&1
+        if !ERRORLEVEL! EQU 0 (
+            set "PYTHON_EXE=python"
+            echo [WARNUNG] Kein lokales Python gefunden. Nutze System-Python.
+        )
+    )
+)
+
+if not defined PYTHON_EXE (
+    echo.
+    echo [FEHLER] Keine Python-Laufzeitumgebung gefunden!
+    echo Bitte sicherstellen, dass der Ordner 'python_embed' existiert
+    echo oder ein '.venv' eingerichtet ist.
+    echo.
+    pause
+    exit /b 1
+)
+
+:: Setze PYTHONPATH, damit Imports wie 'from orchestrator...' funktionieren
+set "PYTHONPATH=%~dp0"
+
+:: --- 3. GUI START ---
+echo [INFO] Starte Orchestrator GUI...
+echo.
+
+"%PYTHON_EXE%" orchestrator\main.py
+
+:: --- 4. EXIT HANDLING ---
+:: Falls Python mit Fehler abstürzt, Fenster offen lassen
+if %ERRORLEVEL% NEQ 0 (
+    echo.
+    echo [FEHLER] Der Orchestrator wurde unerwartet beendet (Code: %ERRORLEVEL%).
     pause
 )
 
-:: Fenster schließt sich automatisch, wenn die GUI beendet wird, 
-:: es sei denn, es gab einen Crash (dann bleibt es kurz offen).
-if %ERRORLEVEL% NEQ 0 pause
+endlocal
