@@ -1,268 +1,612 @@
-# Zentrale Quellen für das LLM Cross-Compiler Framework
-# Status: Verifiziert & Community-Ready & Secured
-# Version: 2.0.0 (Major Update - Added Inference Backends & Optimization Tools)
+# ============================================================================
+# LLM CONVERSION FRAMEWORK - SINGLE SOURCE OF TRUTH (SSOT)
+# ============================================================================
+# Version: 2.1.0 (Major Update - OpenVINO, Quantization, Deployment Philosophy)
+# Status: Production-Ready & Community-Verified
+# Last Updated: 2025-12-28
+# Maintainer: LLM Conversion Framework Team
 #
-# Diese Datei ist die "Single Source of Truth" (SSOT).
-# Der Orchestrator lädt diese Links und injiziert sie als Umgebungsvariablen
-# in die Docker-Container. Ditto (AI) nutzt die 'docs_workflow' Links.
+# Diese Datei ist die zentrale Wissensquelle für das Framework.
+# Der Orchestrator lädt diese Links und injiziert sie als Umgebungsvariablen.
+# Ditto (AI Wizard) nutzt die 'docs_workflow' Links für kontextuelle Hilfe.
 
 # ============================================================================
-# CHANGELOG v2.0.0
+# CHANGELOG v2.1.0
 # ============================================================================
-# + Added: INFERENCE_BACKENDS (llama.cpp, vLLM, ncnn)
-# + Added: OPTIMIZATION_FRAMEWORKS (MLC-LLM/TVM, ONNX-MLIR)
-# + Added: FINE_TUNING_TOOLS (PEFT, Axolotl)
-# + Added: MODEL_FORMATS (ONNX, GGUF standards)
-# + Added: DEPLOYMENT_TOOLS (Reference only)
-# + Added: MOBILE_EDGE (ncnn, platform guides)
-# * Updated: llama.cpp to latest stable
-# * Updated: TensorRT-LLM to v0.10.0
-# * Enhanced: Documentation workflows
+# + Added: DEPLOYMENT_PHILOSOPHY (Direct Hardware Deployment)
+# + Added: QUANTIZATION (Complete reference - FP32/16/8, INT8/4, all GGUF)
+# + Added: OPENVINO (Full Intel ecosystem integration)
+# + Added: INTEL_TARGETS (CPU/GPU/NPU specific configs)
+# + Added: OPENVINO_WORKFLOW (Export, quantize, deploy)
+# * Enhanced: INFERENCE_BACKENDS (clear integration status)
+# * Enhanced: OPTIMIZATION_FRAMEWORKS (learning priorities)
+# * Updated: DEPLOYMENT section (corrected philosophy)
+# * Updated: NOTES (backend selection, quantization decision tree)
+# * Restructured: Logical flow (Philosophy → Backends → Hardware → Deploy)
 
-# --- BUILD TOOLS (Security Pinned) ---
+# ============================================================================
+# DEPLOYMENT PHILOSOPHY - FRAMEWORK CORE VALUE
+# ============================================================================
+deployment_philosophy:
+  core_principle: "DIRECT TO HARDWARE DEPLOYMENT"
+  
+  what_we_build:
+    - "Optimized binary that runs DIRECTLY on target hardware"
+    - "No intermediate servers required (Ollama, vLLM)"
+    - "Self-contained executable with minimal dependencies"
+    - "Production-ready output from framework"
+    - "Optional: User can add wrapper layers (FastAPI, gRPC)"
+  
+  what_we_dont_build:
+    - "Inference servers (user choice if needed)"
+    - "Cloud deployment layers"
+    - "API wrappers (user adds if desired)"
+    - "Model serving infrastructure"
+  
+  typical_workflow:
+    step_1:
+      action: "Framework builds optimized binary"
+      output: "./output/model_optimized"
+    
+    step_2:
+      action: "Copy binary to target device"
+      command: "scp ./output/model_optimized device:/opt/"
+    
+    step_3:
+      action: "Run directly on hardware"
+      command: "./model_optimized --prompt 'Hello' --threads 4"
+    
+    step_4:
+      result: "Direct inference. No server. No middleware."
+  
+  optional_integration:
+    description: "Users MAY wrap output with serving layers"
+    examples:
+      - "Ollama (model management)"
+      - "vLLM (high-throughput serving)"
+      - "Custom FastAPI/Flask wrapper"
+      - "gRPC service"
+    note: "Framework provides optimized binary. Serving is user choice."
+
+# ============================================================================
+# BUILD TOOLS (Security Pinned)
+# ============================================================================
 build_tools:
   poetry_installer: 
     url: "https://install.python-poetry.org"
     sha256: "3b5842cd6318176812455429c6c109909d21b184579720f154506f6734828455"
+    description: "Python dependency management"
   
   cmake:
     url: "https://cmake.org/download/"
     min_version: "3.24.0"
     docs_workflow: "https://cmake.org/cmake/help/latest/"
+    description: "Build system (for C++ backends)"
 
 # ============================================================================
 # INFERENCE BACKENDS (Priority: CRITICAL)
 # ============================================================================
-# These are the actual inference engines that run LLMs on hardware.
-# Framework should support multiple backends per hardware target.
+# These are the actual inference engines that execute LLMs on hardware.
+# Framework generates optimized builds using these backends.
 
 inference_backends:
   # --- CPU-Optimized (Universal) ---
   llama_cpp:
     repo_url: "https://github.com/ggerganov/llama.cpp"
-    commit: "b4009" # Latest stable (Dec 2024)
+    commit: "b4009"
     docs_workflow: "https://github.com/ggerganov/llama.cpp/blob/master/docs/build.md"
     docs_quantization: "https://github.com/ggerganov/llama.cpp/blob/master/examples/quantize/README.md"
     docs_backend_guide: "https://github.com/ggerganov/llama.cpp/blob/master/docs/backend.md"
+    
     features:
       - "GGUF format (industry standard)"
       - "CPU/GPU/NPU backends"
-      - "Extensive quantization (Q4_0 to Q8_0, K-quants)"
-      - "Cross-platform (x86, ARM, RISC-V)"
+      - "Extensive quantization (Q2_K → Q8_0, IQ variants)"
+      - "Cross-platform (x86_64, ARM64, RISC-V)"
+      - "Metal (macOS), Vulkan, CUDA support"
+    
+    quantization_formats:
+      - "Q2_K, Q3_K_S/M/L, Q4_0/1, Q4_K_S/M"
+      - "Q5_0/1, Q5_K_S/M, Q6_K, Q8_0"
+      - "IQ1_S, IQ2_XXS, IQ3_XXS (experimental)"
+    
     priority: "CRITICAL"
     integration_status: "ACTIVE"
+    use_case: "Universal CPU inference, fallback for all platforms"
   
-  # --- High-Throughput Server (Production) ---
+  # --- High-Throughput Server (Optional Wrapper) ---
   vllm:
     repo_url: "https://github.com/vllm-project/vllm"
     commit: "v0.6.3"
     docs_workflow: "https://docs.vllm.ai/en/latest/getting_started/installation.html"
     docs_optimization: "https://docs.vllm.ai/en/latest/models/performance.html"
     docs_deployment: "https://docs.vllm.ai/en/latest/serving/deploying_with_docker.html"
+    
     features:
       - "PagedAttention (memory efficient)"
       - "Continuous batching"
       - "Production-ready serving"
-      - "High throughput"
+      - "High throughput (multi-user)"
+    
     priority: "HIGH"
-    integration_status: "REFERENCE" # Framework builds, vLLM serves
-    use_case: "Suggest for production deployment after build"
+    integration_status: "REFERENCE"
+    use_case: "OPTIONAL: User wraps framework output for production serving"
+    note: "Framework builds binary. vLLM serves it (user choice)."
   
   # --- Mobile/Embedded (Lightweight) ---
   ncnn:
     repo_url: "https://github.com/Tencent/ncnn"
-    commit: "20240820" # Stable release
+    commit: "20240820"
     docs_workflow: "https://github.com/Tencent/ncnn/wiki/how-to-build"
     docs_android: "https://github.com/Tencent/ncnn/wiki/how-to-build#build-for-android"
     docs_vulkan: "https://github.com/Tencent/ncnn/wiki/use-ncnn-with-alexnet"
+    
     features:
       - "Minimal dependencies (<1MB)"
       - "Vulkan GPU support (mobile)"
-      - "ARM optimization (NEON)"
+      - "ARM NEON optimization"
       - "Android/iOS ready"
+    
     priority: "HIGH"
     integration_status: "PLANNED"
-    use_case: "Mobile/embedded targets (Android, iOS)"
-
+    use_case: "Mobile/embedded targets (Android, iOS, embedded Linux)"
+  
   # --- ONNX Runtime (Cross-Platform) ---
   onnxruntime:
     repo_url: "https://github.com/microsoft/onnxruntime"
     commit: "v1.19.2"
     docs_workflow: "https://onnxruntime.ai/docs/get-started/with-python.html"
     docs_execution_providers: "https://onnxruntime.ai/docs/execution-providers/"
+    
     features:
       - "Cross-platform inference"
-      - "Multiple execution providers"
+      - "Multiple execution providers (CPU, CUDA, TensorRT, etc.)"
       - "ONNX format support"
+    
     priority: "MEDIUM"
     integration_status: "REFERENCE"
+    use_case: "Cross-validation, ONNX workflow alternative"
 
 # ============================================================================
-# OPTIMIZATION FRAMEWORKS (Priority: CRITICAL)
+# OPTIMIZATION FRAMEWORKS (Priority: HIGH - Learn From)
 # ============================================================================
-# Advanced compilation & optimization tools that transform models
-# for optimal hardware execution.
+# Advanced compilation & optimization frameworks.
+# We LEARN FROM their architectures, don't integrate directly.
 
 optimization_frameworks:
-  # --- Universal ML Compiler (Auto-Tuning) ---
+  # --- Universal ML Compiler (Auto-Tuning Patterns) ---
   mlc_llm:
     repo_url: "https://github.com/mlc-ai/mlc-llm"
     commit: "v0.1.1"
     docs_workflow: "https://llm.mlc.ai/docs/get_started/quick_start.html"
     docs_compilation: "https://llm.mlc.ai/docs/compilation/compile_models.html"
     docs_deployment: "https://llm.mlc.ai/docs/deploy/index.html"
+    
     features:
       - "Universal deployment (any hardware)"
       - "Auto-tuning for optimization"
       - "Mobile/Edge focus"
       - "Prebuilt model library"
+    
     priority: "CRITICAL"
     integration_status: "LEARN_FROM"
+    
     learn_from:
-      - "Auto-tuning architecture"
-      - "IR abstraction layers"
-      - "Prebuilt model library concept"
-      - "Multi-backend support"
+      auto_tuning: "Automatic hardware-specific optimization search"
+      ir_abstraction: "Clean IR layers (high → mid → low level)"
+      model_library: "Community prebuilt model concept (Knowledge Snapshots)"
+      multi_backend: "Unified interface for multiple hardware backends"
   
+  # --- Apache TVM (Auto-Scheduler Patterns) ---
   tvm:
     repo_url: "https://github.com/apache/tvm"
     commit: "v0.17.0"
     docs_workflow: "https://tvm.apache.org/docs/tutorial/introduction.html"
     docs_autoscheduler: "https://tvm.apache.org/docs/how_to/tune_with_autoscheduler/index.html"
+    
     features:
       - "Deep learning compiler"
       - "Auto-scheduler (performance tuning)"
       - "Hardware abstraction"
+    
     priority: "HIGH"
     integration_status: "LEARN_FROM"
+    
     learn_from:
-      - "AutoScheduler concept"
-      - "Hardware-specific optimization"
-      - "Search space exploration"
+      autoscheduler: "Search-based optimization (explore config space)"
+      hardware_specific: "Per-hardware optimal schedules"
+      caching: "Cache optimal configs for reuse"
   
-  # --- ONNX Compiler (Universal IR) ---
+  # --- ONNX-MLIR (Universal IR Patterns) ---
   onnx_mlir:
     repo_url: "https://github.com/onnx/onnx-mlir"
-    commit: "main" # Active development
+    commit: "main"
     docs_workflow: "https://github.com/onnx/onnx-mlir/blob/main/docs/BuildOnLinux.md"
+    
     features:
       - "ONNX → Optimized code"
       - "MLIR-based compilation"
       - "Hardware-agnostic optimization"
+    
     priority: "HIGH"
     integration_status: "REFERENCE"
-    use_case: "Universal model format (ONNX) support"
+    use_case: "Universal model format (ONNX) support patterns"
 
 # ============================================================================
 # MODEL FORMATS & CONVERSION (Priority: HIGH)
 # ============================================================================
-# Standard model formats and conversion tools
-
 model_formats:
-  # --- GGUF (llama.cpp standard) ---
+  # --- GGUF (llama.cpp Standard) ---
   gguf_spec:
     docs_spec: "https://github.com/ggerganov/ggml/blob/master/docs/gguf.md"
     description: "Binary format for LLM inference (industry standard)"
+    features:
+      - "Model weights + metadata in single file"
+      - "Version control built-in"
+      - "Extensible format"
   
-  # --- ONNX (Universal format) ---
+  # --- ONNX (Universal Format) ---
   onnx:
     repo_url: "https://github.com/onnx/onnx"
     commit: "v1.16.2"
     docs_workflow: "https://onnx.ai/onnx/intro/converters.html"
     docs_operators: "https://onnx.ai/onnx/operators/"
+    
     features:
       - "Framework-agnostic format"
-      - "PyTorch/TensorFlow export"
+      - "PyTorch/TensorFlow/JAX export"
       - "Hardware optimization ready"
+    
     priority: "HIGH"
     integration_status: "PLANNED"
+    use_case: "Universal input format for framework"
   
   # --- Conversion Tools ---
   optimum:
     repo_url: "https://github.com/huggingface/optimum"
     docs_workflow: "https://huggingface.co/docs/optimum/index"
     description: "HuggingFace optimization & export tools"
-    use_case: "PyTorch → ONNX → Optimized formats"
+    use_case: "PyTorch → ONNX → Hardware-optimized formats"
+
+# ============================================================================
+# QUANTIZATION - COMPLETE REFERENCE
+# ============================================================================
+quantization:
+  # --- FLOATING POINT FORMATS ---
+  floating_point:
+    fp32:
+      bits: 32
+      size_multiplier: "1.0x"
+      quality: "100% (reference baseline)"
+      use_case: "Training, validation baseline"
+      hardware: "Universal (CPU/GPU)"
+      example_size_7b: "~28GB"
+    
+    fp16:
+      bits: 16
+      size_multiplier: "0.5x"
+      quality: "~99.9%"
+      use_case: "GPU inference (NVIDIA Tensor Cores, AMD, Apple Metal)"
+      hardware: "Modern GPUs, Apple Silicon"
+      example_size_7b: "~14GB"
+      note: "Recommended for GPU deployments"
+    
+    bf16:
+      bits: 16
+      size_multiplier: "0.5x"
+      quality: "~99.9%"
+      use_case: "Training, TPU inference"
+      hardware: "Google TPU, NVIDIA Ampere+, Intel Xeon"
+      example_size_7b: "~14GB"
+      note: "Wider dynamic range than FP16"
+    
+    fp8:
+      bits: 8
+      size_multiplier: "0.25x"
+      quality: "~99%"
+      use_case: "Latest NVIDIA GPUs (H100+)"
+      hardware: "NVIDIA H100, H200"
+      example_size_7b: "~7GB"
+      note: "Experimental, cutting edge"
+  
+  # --- INTEGER QUANTIZATION ---
+  integer_formats:
+    int8:
+      bits: 8
+      size_multiplier: "0.25x"
+      quality: "~97-99%"
+      use_case: "NPU/GPU inference (production standard)"
+      hardware: "TensorRT, RKNN, OpenVINO, CoreML, Hailo"
+      example_size_7b: "~7GB"
+      calibration: "Required (PTQ with calibration dataset)"
+      note: "Most common hardware quantization format"
+    
+    int4:
+      bits: 4
+      size_multiplier: "0.125x"
+      quality: "~93-96%"
+      use_case: "Extreme memory constraint"
+      hardware: "Modern NPUs, GPTQ/AWQ support"
+      example_size_7b: "~3.5GB"
+      note: "Significant quality trade-off, use advanced methods (GPTQ/AWQ)"
+    
+    int16:
+      bits: 16
+      size_multiplier: "0.5x"
+      quality: "~99.9%"
+      use_case: "Rare (FP16 generally preferred)"
+      hardware: "Limited support"
+      note: "Use FP16 instead in most cases"
+  
+  # --- GGUF QUANTIZATION (llama.cpp) ---
+  gguf_formats:
+    # K-quants (Recommended)
+    q2_k:
+      bits: 2.5
+      size_multiplier: "0.28x"
+      quality: "~85-88%"
+      example_size_7b: "~2.8GB"
+      recommended: false
+      note: "Extreme compression, noticeable quality loss"
+    
+    q3_k_s:
+      bits: 3.5
+      size_multiplier: "0.36x"
+      quality: "~90-92%"
+      example_size_7b: "~3.6GB"
+      recommended: false
+    
+    q3_k_m:
+      bits: 3.7
+      size_multiplier: "0.38x"
+      quality: "~91-93%"
+      example_size_7b: "~3.8GB"
+      recommended: "Only if 3-bit required"
+    
+    q3_k_l:
+      bits: 3.9
+      size_multiplier: "0.40x"
+      quality: "~92-94%"
+      example_size_7b: "~4.0GB"
+      recommended: false
+    
+    q4_k_s:
+      bits: 4.25
+      size_multiplier: "0.53x"
+      quality: "~95-96%"
+      example_size_7b: "~3.7GB"
+      recommended: "For speed priority"
+      use_case: "Fast inference, acceptable quality"
+    
+    q4_k_m:
+      bits: 4.5
+      size_multiplier: "0.56x"
+      quality: "~96-97%"
+      example_size_7b: "~3.9GB"
+      recommended: "⭐⭐⭐ BEST GENERAL PURPOSE"
+      use_case: "Optimal balance: quality/speed/size"
+    
+    q5_k_s:
+      bits: 5.25
+      size_multiplier: "0.66x"
+      quality: "~97.5-98%"
+      example_size_7b: "~4.6GB"
+      recommended: "For quality priority"
+    
+    q5_k_m:
+      bits: 5.5
+      size_multiplier: "0.69x"
+      quality: "~98-99%"
+      example_size_7b: "~4.8GB"
+      recommended: "⭐⭐ HIGH QUALITY"
+      use_case: "Minimal quality loss if RAM allows"
+    
+    q6_k:
+      bits: 6
+      size_multiplier: "0.78x"
+      quality: "~99%"
+      example_size_7b: "~5.5GB"
+      recommended: "⭐ NEAR-LOSSLESS"
+      use_case: "Memory not constrained"
+    
+    q8_0:
+      bits: 8
+      size_multiplier: "1.00x"
+      quality: "~99.5%"
+      example_size_7b: "~7GB"
+      recommended: "VALIDATION BASELINE"
+      use_case: "Quality comparison, validation"
+    
+    # Legacy formats (not recommended)
+    q4_0:
+      note: "Legacy, use Q4_K_M instead"
+    q4_1:
+      note: "Legacy, use Q4_K_M instead"
+    q5_0:
+      note: "Legacy, use Q5_K_M instead"
+    q5_1:
+      note: "Legacy, use Q5_K_M instead"
+    
+    # Importance Matrix (experimental)
+    iq1_s:
+      bits: 1.5
+      quality: "~75-80%"
+      note: "Experimental, poor quality"
+      recommended: false
+    
+    iq2_xxs:
+      bits: 2.2
+      quality: "~82-85%"
+      note: "Very low memory, experimental"
+      recommended: false
+    
+    iq3_xxs:
+      bits: 3.0
+      quality: "~88-90%"
+      note: "Low memory alternative"
+      recommended: false
+  
+  # --- ADVANCED METHODS ---
+  advanced_methods:
+    gptq:
+      description: "Gradient-based Post-Training Quantization"
+      bits: 4
+      quality: "~96-98%"
+      use_case: "GPU inference (better than naive INT4)"
+      hardware: "CUDA, ROCm"
+      tools: ["AutoGPTQ", "GPTQ-for-LLaMa"]
+      calibration: "Required (calibration dataset)"
+      example_size_7b: "~3.5GB"
+    
+    awq:
+      description: "Activation-aware Weight Quantization"
+      bits: 4
+      quality: "~97-99%"
+      use_case: "GPU inference (state-of-the-art 4-bit)"
+      hardware: "NVIDIA CUDA"
+      tools: ["AutoAWQ", "vLLM (native)"]
+      calibration: "Activation-aware (better than GPTQ)"
+      example_size_7b: "~3.5GB"
+      note: "Best quality for 4-bit quantization"
+    
+    nf4:
+      description: "4-bit NormalFloat (QLoRA)"
+      bits: 4
+      quality: "~96-97%"
+      use_case: "Fine-tuning (QLoRA), not inference"
+      hardware: "CUDA (bitsandbytes)"
+      tools: ["bitsandbytes", "PEFT"]
+      note: "Optimized for training"
+  
+  # --- QUANTIZATION DECISION TREE ---
+  decision_tree:
+    by_hardware:
+      nvidia_gpu:
+        recommended: "FP16 or AWQ-4bit"
+        reasoning: "Tensor Cores optimized for FP16"
+        alternative: "INT8 with TensorRT"
+      
+      intel_cpu:
+        recommended: "Q4_K_M (llama.cpp) or INT8 (OpenVINO)"
+        reasoning: "Best CPU inference formats"
+        alternative: "Q5_K_M if RAM allows"
+      
+      intel_gpu:
+        recommended: "FP16 (OpenVINO)"
+        reasoning: "GPU prefers FP16"
+        alternative: "INT8 (OpenVINO)"
+      
+      intel_npu:
+        recommended: "INT8 (OpenVINO)"
+        reasoning: "NPU requires INT8"
+        note: "No FP16 support on NPU"
+      
+      rockchip_npu:
+        recommended: "INT8 (RKNN)"
+        reasoning: "NPU optimized for INT8"
+        note: "Use RKNN-Toolkit2 quantization"
+      
+      mobile_android:
+        recommended: "INT8 (ncnn) or Q4_K_M"
+        reasoning: "Mobile NPU support + small footprint"
+      
+      mobile_ios:
+        recommended: "FP16 (CoreML) or INT8"
+        reasoning: "Apple Neural Engine optimization"
+      
+      cpu_only:
+        recommended: "Q4_K_M (llama.cpp)"
+        reasoning: "Best CPU inference format"
+        alternative: "Q5_K_M if RAM allows"
+    
+    by_memory:
+      ram_2gb:
+        recommended: "Q3_K_M or Q4_K_S"
+        note: "Very constrained, consider smaller model"
+      
+      ram_4gb:
+        recommended: "Q4_K_M"
+        note: "⭐ Sweet spot for 7B models"
+      
+      ram_8gb:
+        recommended: "Q5_K_M"
+        note: "Excellent quality possible"
+      
+      ram_16gb_plus:
+        recommended: "Q6_K or Q8_0"
+        note: "Maximum quality, or use FP16 on GPU"
+    
+    by_use_case:
+      chatbot:
+        recommended: "Q4_K_M"
+        note: "Interactive, quality matters"
+      
+      code_generation:
+        recommended: "Q5_K_M"
+        note: "Precision important"
+      
+      summarization:
+        recommended: "Q4_K_S"
+        note: "Speed more important than precision"
+      
+      embeddings:
+        recommended: "FP16 or Q8_0"
+        note: "Quality critical for embeddings"
 
 # ============================================================================
 # FINE-TUNING TOOLS (Priority: MEDIUM)
 # ============================================================================
-# Parameter-efficient fine-tuning for model customization
-
 fine_tuning_tools:
-  # --- PEFT (LoRA, QLoRA, etc.) ---
   peft:
     repo_url: "https://github.com/huggingface/peft"
     commit: "v0.13.2"
     docs_workflow: "https://huggingface.co/docs/peft/index"
     docs_lora: "https://huggingface.co/docs/peft/conceptual_guides/lora"
     docs_qlora: "https://huggingface.co/docs/peft/developer_guides/quantization"
+    
     features:
       - "LoRA (Low-Rank Adaptation)"
       - "QLoRA (Quantized LoRA)"
       - "Prefix Tuning"
       - "Minimal compute fine-tuning"
+    
     priority: "MEDIUM"
     integration_status: "DOCUMENT"
     use_case: "Fine-tune → Merge → Deploy pipeline"
+    
+    workflow:
+      - "Fine-tune model with LoRA/QLoRA"
+      - "Merge adapter weights into base model"
+      - "Export merged model"
+      - "Quantize for edge deployment"
+      - "Deploy with framework"
   
-  # --- Training Framework (Reference) ---
   axolotl:
     repo_url: "https://github.com/axolotl-ai-cloud/axolotl"
     docs_workflow: "https://docs.axolotl.ai/"
+    
     features:
       - "Declarative config (YAML)"
       - "Multi-GPU training"
       - "LoRA/QLoRA support"
+    
     priority: "LOW"
     integration_status: "REFERENCE"
-    note: "Don't build training - reference for config patterns"
+    note: "Don't build training into framework - reference for config patterns"
 
 # ============================================================================
-# DEPLOYMENT TOOLS (Priority: LOW - Reference Only)
-# ============================================================================
-# Post-build deployment & serving (framework integrates WITH these, not builds them)
-
-deployment_tools:
-  # --- LlamaIndex (RAG Framework) ---
-  llama_index:
-    repo_url: "https://github.com/run-llama/llama_index"
-    commit: "v0.11.23"
-    docs_workflow: "https://docs.llamaindex.ai/en/stable/getting_started/installation/"
-    docs_local_models: "https://docs.llamaindex.ai/en/stable/module_guides/models/llms/usage_custom/"
-    priority: "LOW"
-    integration_status: "REFERENCE"
-    use_case: "Document RAG deployment patterns"
-  
-  # --- Model Registry & Deployment ---
-  mlem:
-    repo_url: "https://github.com/iterative/mlem"
-    docs_workflow: "https://mlem.ai/doc/get-started"
-    priority: "LOW"
-    integration_status: "REFERENCE"
-    use_case: "Model versioning patterns"
-  
-  # --- Router/Load Balancer ---
-  glide:
-    repo_url: "https://github.com/EinStack/glide"
-    docs_workflow: "https://github.com/EinStack/glide/blob/develop/docs/README.md"
-    priority: "LOW"
-    integration_status: "REFERENCE"
-    use_case: "Multi-model routing patterns"
-
-# ============================================================================
-# CORE FRAMEWORK (Existing - Enhanced)
+# CORE FRAMEWORK
 # ============================================================================
 core:
-  # Python Transformers für Konvertierungs-Skripte
   transformers:
     repo_url: "https://github.com/huggingface/transformers"
     commit: "v4.46.0"
     docs_workflow: "https://huggingface.co/docs/transformers/index"
     docs_onnx_export: "https://huggingface.co/docs/transformers/serialization"
+    description: "Model loading, tokenization, export"
 
 # ============================================================================
-# VECTOR DATABASE (Local RAG / Knowledge Base)
+# VECTOR DATABASE (Local RAG)
 # ============================================================================
 vector_database:
   qdrant_core:
@@ -276,15 +620,14 @@ vector_database:
     repo_url: "https://github.com/qdrant/qdrant-client"
     docs_sdk: "https://python-client.qdrant.tech/"
   
-  # --- Alternative: Lightweight for embedded ---
   chromadb:
     repo_url: "https://github.com/chroma-core/chroma"
     docs_workflow: "https://docs.trychroma.com/"
     priority: "LOW"
-    use_case: "Embedded/offline RAG (smaller footprint than Qdrant)"
+    use_case: "Lightweight alternative (smaller footprint)"
 
 # ============================================================================
-# KNOWLEDGE INGESTION (v1.6.0)
+# KNOWLEDGE INGESTION
 # ============================================================================
 knowledge_ingestion:
   langchain:
@@ -295,57 +638,317 @@ knowledge_ingestion:
   beautifulsoup4:
     repo_url: "https://git.launchpad.net/beautifulsoup"
     docs_workflow: "https://www.crummy.com/software/BeautifulSoup/bs4/doc/"
-
+  
   pypdf:
     repo_url: "https://github.com/py-pdf/pypdf"
     docs_workflow: "https://pypdf.readthedocs.io/en/stable/"
 
 # ============================================================================
-# HARDWARE TARGETS - VENDORS
+# HARDWARE TARGETS - ROCKCHIP
 # ============================================================================
-
-# --- ROCKCHIP (RK3566 / RK3588) ---
 rockchip_npu:
   rkllm_toolkit:
     repo_url: "https://github.com/airockchip/rknn-llm"
     commit: "release-v1.2.1b1"
     docs_workflow: "https://github.com/airockchip/rknn-llm/blob/main/README.md"
     docs_api: "https://github.com/airockchip/rknn-llm/blob/main/doc/RKLLM_API_Reference.md"
-
+    
+    platforms:
+      - "RK3566"
+      - "RK3568"
+      - "RK3588"
+      - "RK3576"
+    
+    quantization: "INT8 (NPU optimized)"
+    use_case: "LLM inference on Rockchip NPU"
+  
   rknn_toolkit2:
     repo_url: "https://github.com/airockchip/rknn-toolkit2"
     commit: "v2.0.0-beta0"
     docs_workflow: "https://github.com/airockchip/rknn-toolkit2/tree/master/doc"
     docs_quantization: "https://github.com/airockchip/rknn-toolkit2/blob/master/doc/02_Rockchip_RKNPU_API_Reference_RKNN_API_V2.0.0beta0_EN.pdf"
+    use_case: "Vision/general models on Rockchip NPU"
   
   rknn_model_zoo:
     repo_url: "https://github.com/airockchip/rknn_model_zoo"
     use_case: "Reference models for RKNN"
 
-# --- NVIDIA JETSON (Orin / Xavier / Nano) ---
+# ============================================================================
+# HARDWARE TARGETS - NVIDIA
+# ============================================================================
 nvidia_jetson:
   tensorrt_llm:
     repo_url: "https://github.com/NVIDIA/TensorRT-LLM"
-    commit: "v0.10.0" # Updated from v0.9.0
+    commit: "v0.10.0"
     docs_workflow: "https://nvidia.github.io/TensorRT-LLM/quick-start-guide.html"
     docs_architecture: "https://nvidia.github.io/TensorRT-LLM/architecture/workflow.html"
     docs_optimization: "https://nvidia.github.io/TensorRT-LLM/performance.html"
+    
+    platforms:
+      - "Jetson Orin (AGX, NX, Nano)"
+      - "Jetson Xavier (AGX, NX)"
+      - "Jetson Nano (limited)"
+    
     features:
       - "Kernel fusion"
-      - "FP8/INT8 quantization"
+      - "FP8/FP16/INT8/INT4 quantization"
       - "Multi-GPU support"
       - "Production optimized"
+    
+    quantization:
+      recommended: "FP16 (GPU native)"
+      alternatives: ["INT8", "AWQ-4bit", "FP8 (Orin)"]
+    
     priority: "CRITICAL"
   
   jetson_inference:
     repo_url: "https://github.com/dusty-nv/jetson-inference"
     docs_workflow: "https://github.com/dusty-nv/jetson-inference/blob/master/docs/building-repo-2.md"
+    use_case: "Vision pipelines, example code"
   
   jetson_containers:
     repo_url: "https://github.com/dusty-nv/jetson-containers"
     docs_workflow: "https://github.com/dusty-nv/jetson-containers/tree/master/docs"
+    use_case: "Pre-built Docker containers for Jetson"
 
-# --- HAILO AI (Raspberry Pi 5 + Hailo-8 / 8L) ---
+# ============================================================================
+# HARDWARE TARGETS - INTEL (EXPANDED)
+# ============================================================================
+intel_ecosystem:
+  # --- OpenVINO (Primary Intel Backend) ---
+  openvino:
+    repo_url: "https://github.com/openvinotoolkit/openvino"
+    commit: "2025.4.0"
+    pypi_package: "openvino==2025.4.0"
+    
+    # Installation
+    installation:
+      pip:
+        command: "pip install openvino==2025.4.0"
+        url: "https://docs.openvino.ai/2025/get-started/install-openvino/install-openvino-pip.html"
+      
+      docker:
+        image: "openvino/ubuntu20_runtime:2025.4.0"
+        url: "https://hub.docker.com/r/openvino/ubuntu20_runtime"
+    
+    # Documentation
+    docs:
+      getting_started: "https://docs.openvino.ai/2025/get-started.html"
+      workflow: "https://docs.openvino.ai/2025/openvino-workflow.html"
+      llm_guide: "https://docs.openvino.ai/2025/learn-openvino/llm_inference_guide.html"
+      ir_format: "https://docs.openvino.ai/2025/documentation/openvino-ir-format.html"
+      model_optimization: "https://docs.openvino.ai/2025/openvino-workflow/model-optimization.html"
+    
+    # Hardware Support
+    hardware_support:
+      cpu:
+        url: "https://docs.openvino.ai/2025/openvino-workflow/running-inference/inference-devices-and-modes/cpu-device.html"
+        supported:
+          - "Intel Core (6th gen+)"
+          - "Intel Xeon"
+          - "AMD Ryzen (limited)"
+        optimizations: ["AVX2", "AVX512", "VNNI", "AMX"]
+      
+      gpu:
+        url: "https://docs.openvino.ai/2024/get-started/configurations/configurations-intel-gpu.html"
+        supported:
+          - "Intel Integrated Graphics (Gen9+)"
+          - "Intel Arc Graphics (A-series)"
+          - "Intel Iris Xe"
+          - "Intel Data Center GPU Flex/Max"
+        quantization: "FP16 (recommended), INT8"
+      
+      npu:
+        description: "Intel Neural Processing Unit"
+        supported:
+          - "Intel Core Ultra (Meteor Lake)"
+          - "Intel Core Ultra (Arrow Lake)"
+          - "Intel Core Ultra (Lunar Lake)"
+        quantization: "INT8 (required)"
+        power: "<5W (very low power)"
+        url: "https://docs.openvino.ai/2025/openvino-workflow/running-inference/inference-devices-and-modes/npu-device.html"
+      
+      auto:
+        description: "Automatic device selection"
+        url: "https://docs.openvino.ai/2025/openvino-workflow/running-inference/inference-devices-and-modes/auto-device-selection.html"
+    
+    # Model Optimization
+    optimization:
+      nncf:
+        repo_url: "https://github.com/openvinotoolkit/nncf"
+        description: "Neural Network Compression Framework"
+        features:
+          - "Post-training quantization (PTQ)"
+          - "Quantization-aware training (QAT)"
+          - "Pruning"
+          - "Mixed precision"
+        url: "https://docs.openvino.ai/2025/openvino-workflow/model-optimization.html"
+      
+      quantization:
+        int8:
+          method: "NNCF PTQ"
+          quality: "97-99%"
+          calibration: "Required (100-1000 samples)"
+        
+        fp16:
+          method: "Model conversion"
+          quality: "99.9%"
+          use_case: "GPU inference"
+    
+    # Generative AI Workflow
+    generative_ai:
+      overview:
+        url: "https://docs.openvino.ai/2025/openvino-workflow-generative.html"
+      
+      tokenizers:
+        repo_url: "https://github.com/openvinotoolkit/openvino_tokenizers"
+        packages: "https://storage.openvinotoolkit.org/repositories/openvino_tokenizers/packages/"
+        url: "https://docs.openvino.ai/2025/openvino-workflow-generative/ov-tokenizers.html"
+        installation: "pip install openvino-tokenizers==2025.4.0"
+        
+        features:
+          - "Fast C++ tokenization"
+          - "HuggingFace compatibility"
+          - "Integrated preprocessing"
+    
+    # HuggingFace Integration
+    integrations:
+      optimum_intel:
+        repo_url: "https://github.com/huggingface/optimum-intel"
+        docs: "https://huggingface.co/docs/optimum-intel/openvino/inference"
+        installation: "pip install optimum[openvino]"
+        
+        features:
+          - "Auto model conversion (HF → OpenVINO IR)"
+          - "Integrated quantization"
+          - "Pipeline compatibility"
+        
+        workflow: "HuggingFace → Optimum-Intel → OpenVINO IR → Deploy"
+    
+    # Model Server (Optional)
+    model_server:
+      repo_url: "https://github.com/openvinotoolkit/model_server"
+      url: "https://docs.openvino.ai/2025/ovms_what_is_openvino_model_server.html"
+      
+      features:
+        - "gRPC/REST API"
+        - "Multi-model serving"
+        - "Dynamic batching"
+      
+      use_case: "OPTIONAL: Production serving (user choice)"
+    
+    priority: "CRITICAL"
+    integration_status: "ACTIVE"
+    use_case: "Intel CPU/GPU/NPU inference (optimized)"
+  
+  # --- IPEX-LLM (Alternative) ---
+  ipex_llm:
+    repo_url: "https://github.com/intel/ipex-llm"
+    commit: "v2.2.0"
+    docs_quickstart: "https://github.com/intel/ipex-llm/blob/main/docs/mddocs/Quickstart/install_linux.md"
+    docs_optimization: "https://github.com/intel/ipex-llm/blob/main/docs/mddocs/Overview/KeyFeatures/optimize_model.md"
+    
+    features:
+      - "INT4/INT8/FP16 quantization"
+      - "Intel GPU acceleration (Arc/Flex/Max)"
+      - "CPU optimization (AVX512, AMX)"
+      - "Low-bit quantization"
+    
+    hardware_support:
+      cpu: ["Intel Core 11th gen+", "Intel Xeon Ice Lake+"]
+      gpu: ["Intel Arc", "Intel Data Center GPU Flex/Max", "Intel Iris Xe"]
+      npu: ["Intel Core Ultra (experimental)"]
+    
+    priority: "MEDIUM"
+    integration_status: "REFERENCE"
+    use_case: "Alternative to OpenVINO for LLM-specific optimization"
+
+# Intel Hardware Targets (Framework Integration)
+intel_targets:
+  intel_cpu:
+    platforms:
+      - "Intel Core (6th gen+)"
+      - "Intel Xeon"
+    
+    recommended_backend: "OpenVINO"
+    alternative_backend: "llama.cpp"
+    
+    quantization:
+      recommended: "INT8 (OpenVINO)"
+      alternative: "Q4_K_M (llama.cpp)"
+    
+    optimization_flags:
+      avx2: "-march=haswell -mavx2"
+      avx512: "-march=skylake-avx512 -mavx512f"
+      vnni: "-march=cascadelake -mavx512vnni"
+  
+  intel_gpu:
+    platforms:
+      - "Intel Arc Graphics"
+      - "Intel Iris Xe"
+      - "Intel Data Center GPU Flex"
+    
+    recommended_backend: "OpenVINO"
+    
+    quantization:
+      recommended: "FP16"
+      alternative: "INT8"
+    
+    configuration:
+      url: "https://docs.openvino.ai/2024/get-started/configurations/configurations-intel-gpu.html"
+      device_name: "GPU.0"
+  
+  intel_npu:
+    platforms:
+      - "Intel Core Ultra (Meteor Lake+)"
+    
+    recommended_backend: "OpenVINO"
+    
+    quantization:
+      required: "INT8"
+      note: "NPU only supports INT8"
+    
+    power: "<5W (very low)"
+    use_case: "Always-on AI, battery-powered devices"
+
+# OpenVINO Workflow (Framework Integration)
+openvino_workflow:
+  export:
+    from_huggingface:
+      method: "Optimum-Intel"
+      description: "Automatic HF → OpenVINO IR conversion"
+    
+    from_pytorch:
+      method: "Direct export"
+      tool: "openvino.convert_model()"
+    
+    from_onnx:
+      method: "Direct read or convert"
+      tool: "openvino.runtime.Core().read_model()"
+  
+  quantization:
+    using_nncf:
+      method: "Post-training quantization"
+      tool: "nncf.quantize()"
+      calibration: "Required (100-1000 samples)"
+    
+    using_optimum:
+      method: "Integrated quantization"
+      tool: "OVQuantizer.from_pretrained()"
+  
+  compilation:
+    device_selection: ["CPU", "GPU", "NPU", "AUTO"]
+    performance_hints: ["LATENCY", "THROUGHPUT"]
+  
+  deployment:
+    standalone: "Direct Python execution"
+    model_server: "OpenVINO Model Server (optional)"
+
+# ============================================================================
+# HARDWARE TARGETS - OTHER
+# ============================================================================
+
+# --- HAILO AI ---
 hailo_ai:
   hailort:
     repo_url: "https://github.com/hailo-ai/hailort"
@@ -354,7 +957,6 @@ hailo_ai:
   
   tappas:
     repo_url: "https://github.com/hailo-ai/tappas"
-    docs_workflow: "https://github.com/hailo-ai/tappas/blob/master/README.rst"
   
   hailo_rpi5_examples:
     repo_url: "https://github.com/hailo-ai/hailo-rpi5-examples"
@@ -363,36 +965,22 @@ hailo_ai:
     repo_url: "https://github.com/hailo-ai/hailo_model_zoo"
     docs_workflow: "https://github.com/hailo-ai/hailo_model_zoo/blob/master/docs/public_models/HAILO8/HAILO8_inference_guide.rst"
   
-  note: "Hailo primarily for Vision/Voice, NOT LLM inference"
+  note: "⚠️ Hailo primarily for Vision/Voice, NOT LLM inference"
+  use_case: "Computer vision, Whisper STT (not LLM)"
 
-# --- MEMRYX (MX3 Accelerator) ---
+# --- MEMRYX ---
 memryx:
   sdk_portal: "https://developer.memryx.com/"
   docs_workflow: "https://developer.memryx.com/documentation/latest/index.html"
   drivers_linux: "https://developer.memryx.com/downloads/drivers.html"
 
-# --- AXELERA AI (Metis M.2) ---
+# --- AXELERA AI ---
 axelera_ai:
   metis_sdk: "https://docs.axelera.ai/"
   model_zoo: "https://github.com/axelera-ai/axelera-models"
   docs_workflow: "https://docs.axelera.ai/metis/latest/general/intro.html"
 
-# --- INTEL NPU & GPU (v1.7.0) ---
-intel_ecosystem:
-  ipex_llm:
-    repo_url: "https://github.com/intel/ipex-llm"
-    commit: "v2.2.0"
-    docs_workflow: "https://github.com/intel/ipex-llm/blob/main/docs/mddocs/Quickstart/install_linux.md"
-    docs_optimization: "https://github.com/intel/ipex-llm/blob/main/docs/mddocs/Overview/KeyFeatures/optimize_model.md"
-  
-  openvino:
-    repo_url: "https://github.com/openvinotoolkit/openvino"
-    commit: "2025.4.0"
-    docs_workflow: "https://docs.openvino.ai/2025/get-started.html"
-    docs_llm: "https://docs.openvino.ai/2025/learn-openvino/llm_inference_guide.html"
-    docs_format: "https://docs.openvino.ai/2025/documentation/openvino-ir-format.html"
-
-# --- AMD ROCm (Radeon GPUs) ---
+# --- AMD ROCm ---
 amd_rocm:
   rocm_main:
     repo_url: "https://github.com/ROCm/ROCm"
@@ -401,8 +989,10 @@ amd_rocm:
   rocm_docker:
     repo_url: "https://github.com/ROCm/ROCm-docker"
     docs_workflow: "https://rocm.docs.amd.com/en/latest/deploy/docker.html"
+  
+  quantization: "FP16 (recommended), GPTQ-4bit"
 
-# --- RISC-V (StarFive / Generic) ---
+# --- RISC-V ---
 riscv:
   gnu_toolchain:
     repo_url: "https://github.com/riscv-collab/riscv-gnu-toolchain"
@@ -416,7 +1006,6 @@ riscv:
 # MOBILE & EMBEDDED PLATFORMS
 # ============================================================================
 mobile_edge:
-  # --- Android ---
   android:
     ndk:
       url: "https://developer.android.com/ndk/downloads"
@@ -425,9 +1014,9 @@ mobile_edge:
     vulkan:
       docs_workflow: "https://developer.android.com/ndk/guides/graphics/getting-started"
     
-    reference_backend: "ncnn" # See inference_backends.ncnn
+    reference_backend: "ncnn"
+    quantization: "INT8 (ncnn) or Q4_K_M (llama.cpp)"
   
-  # --- iOS ---
   ios:
     coreml:
       docs_workflow: "https://developer.apple.com/documentation/coreml"
@@ -435,8 +1024,9 @@ mobile_edge:
     
     metal:
       docs_workflow: "https://developer.apple.com/metal/"
+    
+    quantization: "FP16 (CoreML) or INT8"
   
-  # --- Embedded Linux ---
   embedded_linux:
     buildroot:
       repo_url: "https://github.com/buildroot/buildroot"
@@ -446,88 +1036,118 @@ mobile_edge:
       docs_workflow: "https://docs.yoctoproject.org/"
 
 # ============================================================================
-# VOICE & TTS PIPELINE
+# VOICE & TTS
 # ============================================================================
 voice_tts:
-  # --- TTS (Text-to-Speech) ---
   piper_tts:
     repo_url: "https://github.com/rhasspy/piper"
     commit: "9c3066d"
     docs_workflow: "https://github.com/rhasspy/piper/blob/master/README.md"
+    description: "Fast, local text-to-speech"
   
   glados_tts:
     repo_url: "https://github.com/dnhkng/GLaDOS"
     description: "GLaDOS voice TTS (novelty)"
   
-  # --- STT (Speech-to-Text) ---
   vosk_api:
     repo_url: "https://github.com/alphacep/vosk-api"
     commit: "0a1b2c3"
     docs_workflow: "https://alphacephei.com/vosk/install"
+    description: "Offline speech recognition"
   
   whisper_cpp:
     repo_url: "https://github.com/ggerganov/whisper.cpp"
     docs_workflow: "https://github.com/ggerganov/whisper.cpp/blob/master/README.md"
+    
     features:
       - "Offline STT"
       - "Multi-language"
       - "Efficient C++ implementation"
+    
+    use_case: "Edge speech-to-text"
 
 # ============================================================================
-# MODELS - BASE & TESTED
+# MODELS
 # ============================================================================
 models:
-  # --- Tested/Verified ---
+  # Tested/Verified
   granite_350m:
     url: "https://huggingface.co/ibm-granite/granite-4.0-h-350m"
     size: "~700MB"
     use_case: "Lightweight reasoning"
   
-  # --- Recommended for Edge ---
+  # Recommended for Edge
   qwen_2_5_coder:
     url: "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct"
     size: "~4.5GB (Q4)"
-    use_case: "Code generation on edge"
+    use_case: "Code generation"
   
   llama_3_2:
     url: "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct"
     size: "~2GB (Q4)"
-    use_case: "General purpose, efficient"
+    use_case: "General purpose"
 
-# --- TINY MODELS (Offline Intelligence) ---
 tiny_models:
   tinyllama_1b:
     url: "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0"
-    description: "Fastest option (< 700MB)."
+    description: "Fastest (< 700MB)"
     recommended_quant: "Q4_K_M"
   
   qwen_0_5b:
     url: "https://huggingface.co/Qwen/Qwen1.5-0.5B-Chat"
-    description: "Extremely smart for size (< 500MB)."
+    description: "Smart for size (< 500MB)"
     recommended_quant: "Q4_K_M"
   
   danube_1_8b:
     url: "https://huggingface.co/h2oai/h2o-danube-1.8b-chat"
-    description: "Strong reasoning capabilities."
+    description: "Strong reasoning"
     recommended_quant: "Q5_K_M"
   
   phi_3_mini:
     url: "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct"
-    description: "Microsoft's efficient model (3.8B params, ~2GB Q4)"
+    description: "Microsoft efficient (3.8B, ~2GB Q4)"
     recommended_quant: "Q4_K_M"
 
 # ============================================================================
-# QUALITY & VALIDATION TOOLS (Reference)
+# DEPLOYMENT TOOLS (Reference Only - Optional User Wrappers)
+# ============================================================================
+deployment_tools:
+  llama_index:
+    repo_url: "https://github.com/run-llama/llama_index"
+    commit: "v0.11.23"
+    docs_workflow: "https://docs.llamaindex.ai/en/stable/getting_started/installation/"
+    docs_local_models: "https://docs.llamaindex.ai/en/stable/module_guides/models/llms/usage_custom/"
+    
+    priority: "LOW"
+    integration_status: "REFERENCE"
+    use_case: "RAG deployment patterns (optional user integration)"
+  
+  mlem:
+    repo_url: "https://github.com/iterative/mlem"
+    docs_workflow: "https://mlem.ai/doc/get-started"
+    
+    priority: "LOW"
+    integration_status: "REFERENCE"
+    use_case: "Model versioning patterns"
+  
+  glide:
+    repo_url: "https://github.com/EinStack/glide"
+    docs_workflow: "https://github.com/EinStack/glide/blob/develop/docs/README.md"
+    
+    priority: "LOW"
+    integration_status: "REFERENCE"
+    use_case: "Multi-model routing patterns"
+
+# ============================================================================
+# QUALITY & VALIDATION (Reference)
 # ============================================================================
 quality_tools:
-  # --- LLM Evaluation ---
   deepchecks:
     url: "https://www.deepchecks.com/llm-tools/"
     priority: "LOW"
     integration_status: "REFERENCE"
     use_case: "Quality validation patterns"
   
-  # --- MLOps & Monitoring (Reference only) ---
   fiddler:
     url: "https://www.fiddler.ai/llmops"
     repo_url: "https://github.com/fiddler-labs"
@@ -545,66 +1165,92 @@ quality_tools:
 # FRAMEWORK METADATA
 # ============================================================================
 metadata:
-  ssot_version: "2.0.0"
+  ssot_version: "2.1.0"
   last_updated: "2025-12-28"
   maintainer: "LLM Conversion Framework Team"
   
   integration_priorities:
     critical:
-      - llama.cpp
-      - mlc_llm
-      - tensorrt_llm
+      - "llama.cpp"
+      - "tensorrt_llm"
+      - "openvino"
+      - "rknn_toolkit"
+    
     high:
-      - vllm
-      - ncnn
-      - onnx
-      - peft
+      - "ncnn"
+      - "onnx"
+      - "peft"
+      - "ipex_llm"
+    
     medium:
-      - llama_index
-      - axolotl
+      - "mlc_llm (learn from)"
+      - "tvm (learn from)"
+    
     low:
-      - deployment_tools
-      - quality_tools
+      - "vllm (optional wrapper)"
+      - "deployment_tools (reference)"
+      - "quality_tools (reference)"
   
   roadmap:
-    v2.1:
-      - "Implement llama.cpp backend integration"
-      - "Add ONNX input format support"
-      - "Document TensorRT-LLM optimization guide"
     v2.2:
-      - "MLC-LLM auto-tuning patterns"
-      - "ncnn mobile targets"
-      - "PEFT fine-tuning → deployment pipeline"
+      - "Implement llama.cpp backend integration"
+      - "Add OpenVINO backend (Intel CPU/GPU/NPU)"
+      - "ONNX input format support"
+      - "TensorRT-LLM optimization guides"
+    
     v2.3:
-      - "vLLM deployment suggestions"
+      - "ncnn mobile targets (Android/iOS)"
+      - "Auto-tuner (TVM-inspired)"
+      - "PEFT fine-tuning → deployment pipeline"
+    
+    v2.4:
       - "Knowledge Snapshot v2.0 schema"
       - "Multi-backend wizard support"
+      - "Performance benchmarking suite"
 
 # ============================================================================
-# NOTES & BEST PRACTICES
+# BEST PRACTICES & NOTES
 # ============================================================================
 notes:
   backend_selection:
-    - "CPU-only: llama.cpp (recommended)"
-    - "NVIDIA: TensorRT-LLM (best performance)"
-    - "Rockchip: RKNN (NPU acceleration)"
-    - "Mobile: ncnn (lightweight)"
-    - "Universal: MLC-LLM (if complex requirements)"
+    universal_cpu: "llama.cpp (works everywhere)"
+    intel_cpu: "OpenVINO (2-3x faster) or llama.cpp (fallback)"
+    intel_gpu: "OpenVINO FP16 (5-10x faster than CPU)"
+    intel_npu: "OpenVINO INT8 (low power, always-on)"
+    nvidia_gpu: "TensorRT-LLM (best performance)"
+    rockchip_npu: "RKNN INT8 (NPU acceleration)"
+    mobile_android: "ncnn (lightweight) or llama.cpp (universal)"
+    mobile_ios: "CoreML (Apple Neural Engine) or llama.cpp"
   
-  quantization_guide:
-    - "Q4_K_M: Best general purpose (4-bit)"
-    - "Q5_K_M: Better quality, slightly larger"
-    - "Q8_0: Maximum quality, 2x size"
-    - "INT8: For TensorRT/NPU (hardware specific)"
+  quantization_quick_guide:
+    best_general: "Q4_K_M (llama.cpp) - optimal balance"
+    high_quality: "Q5_K_M or Q6_K - minimal loss"
+    maximum_quality: "Q8_0 or FP16 - validation baseline"
+    hardware_specific:
+      - "Intel NPU: INT8 (required)"
+      - "NVIDIA GPU: FP16 or AWQ-4bit"
+      - "Rockchip NPU: INT8 (RKNN)"
+      - "CPU-only: Q4_K_M (llama.cpp)"
   
   deployment_workflow:
-    - "1. Build with framework (optimized binary)"
-    - "2. Test locally (validate performance)"
-    - "3. Deploy with vLLM/Ollama (production serving)"
-    - "4. Monitor with your choice (we don't build this)"
+    step_1: "Framework builds optimized binary (direct hardware)"
+    step_2: "Test locally (validate performance)"
+    step_3: "Deploy directly to device (no server needed)"
+    step_4: "OPTIONAL: User adds serving layer (vLLM, FastAPI, etc.)"
+    
+    note: "Framework = Build tool, NOT serving platform"
   
   security:
-    - "Always verify SHA256 hashes before installing"
+    - "Always verify SHA256 hashes"
     - "Pin commits for reproducibility"
     - "Use Docker for isolation"
-    - "Scan dependencies with tools like Safety"
+    - "Scan dependencies (Safety, Bandit)"
+    - "Validate model checksums"
+  
+  performance_expectations:
+    cpu_generic: "5-15 tokens/sec (depends on model size)"
+    cpu_optimized: "15-30 tokens/sec (Intel/AMD with optimizations)"
+    gpu_nvidia: "40-120 tokens/sec (depends on GPU)"
+    gpu_intel: "20-60 tokens/sec (Arc/Iris Xe)"
+    npu_intel: "10-20 tokens/sec (low power <5W)"
+    npu_rockchip: "8-15 tokens/sec (RK3588)"
