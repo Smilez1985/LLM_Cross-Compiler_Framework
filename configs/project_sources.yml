@@ -1,28 +1,269 @@
 # Zentrale Quellen für das LLM Cross-Compiler Framework
 # Status: Verifiziert & Community-Ready & Secured
+# Version: 2.0.0 (Major Update - Added Inference Backends & Optimization Tools)
 #
 # Diese Datei ist die "Single Source of Truth" (SSOT).
 # Der Orchestrator lädt diese Links und injiziert sie als Umgebungsvariablen
 # in die Docker-Container. Ditto (AI) nutzt die 'docs_workflow' Links.
 
+# ============================================================================
+# CHANGELOG v2.0.0
+# ============================================================================
+# + Added: INFERENCE_BACKENDS (llama.cpp, vLLM, ncnn)
+# + Added: OPTIMIZATION_FRAMEWORKS (MLC-LLM/TVM, ONNX-MLIR)
+# + Added: FINE_TUNING_TOOLS (PEFT, Axolotl)
+# + Added: MODEL_FORMATS (ONNX, GGUF standards)
+# + Added: DEPLOYMENT_TOOLS (Reference only)
+# + Added: MOBILE_EDGE (ncnn, platform guides)
+# * Updated: llama.cpp to latest stable
+# * Updated: TensorRT-LLM to v0.10.0
+# * Enhanced: Documentation workflows
+
 # --- BUILD TOOLS (Security Pinned) ---
 build_tools:
   poetry_installer: 
     url: "https://install.python-poetry.org"
-    # SHA256 Hash des Installers (Verifiziert Nov 2025)
-    sha256: "3b5842cd6318176812455429c6c109909d21b184579720f154506f6734828455" 
+    sha256: "3b5842cd6318176812455429c6c109909d21b184579720f154506f6734828455"
+  
+  cmake:
+    url: "https://cmake.org/download/"
+    min_version: "3.24.0"
+    docs_workflow: "https://cmake.org/cmake/help/latest/"
 
-# --- CORE FRAMEWORK ---
+# ============================================================================
+# INFERENCE BACKENDS (Priority: CRITICAL)
+# ============================================================================
+# These are the actual inference engines that run LLMs on hardware.
+# Framework should support multiple backends per hardware target.
+
+inference_backends:
+  # --- CPU-Optimized (Universal) ---
+  llama_cpp:
+    repo_url: "https://github.com/ggerganov/llama.cpp"
+    commit: "b4009" # Latest stable (Dec 2024)
+    docs_workflow: "https://github.com/ggerganov/llama.cpp/blob/master/docs/build.md"
+    docs_quantization: "https://github.com/ggerganov/llama.cpp/blob/master/examples/quantize/README.md"
+    docs_backend_guide: "https://github.com/ggerganov/llama.cpp/blob/master/docs/backend.md"
+    features:
+      - "GGUF format (industry standard)"
+      - "CPU/GPU/NPU backends"
+      - "Extensive quantization (Q4_0 to Q8_0, K-quants)"
+      - "Cross-platform (x86, ARM, RISC-V)"
+    priority: "CRITICAL"
+    integration_status: "ACTIVE"
+  
+  # --- High-Throughput Server (Production) ---
+  vllm:
+    repo_url: "https://github.com/vllm-project/vllm"
+    commit: "v0.6.3"
+    docs_workflow: "https://docs.vllm.ai/en/latest/getting_started/installation.html"
+    docs_optimization: "https://docs.vllm.ai/en/latest/models/performance.html"
+    docs_deployment: "https://docs.vllm.ai/en/latest/serving/deploying_with_docker.html"
+    features:
+      - "PagedAttention (memory efficient)"
+      - "Continuous batching"
+      - "Production-ready serving"
+      - "High throughput"
+    priority: "HIGH"
+    integration_status: "REFERENCE" # Framework builds, vLLM serves
+    use_case: "Suggest for production deployment after build"
+  
+  # --- Mobile/Embedded (Lightweight) ---
+  ncnn:
+    repo_url: "https://github.com/Tencent/ncnn"
+    commit: "20240820" # Stable release
+    docs_workflow: "https://github.com/Tencent/ncnn/wiki/how-to-build"
+    docs_android: "https://github.com/Tencent/ncnn/wiki/how-to-build#build-for-android"
+    docs_vulkan: "https://github.com/Tencent/ncnn/wiki/use-ncnn-with-alexnet"
+    features:
+      - "Minimal dependencies (<1MB)"
+      - "Vulkan GPU support (mobile)"
+      - "ARM optimization (NEON)"
+      - "Android/iOS ready"
+    priority: "HIGH"
+    integration_status: "PLANNED"
+    use_case: "Mobile/embedded targets (Android, iOS)"
+
+  # --- ONNX Runtime (Cross-Platform) ---
+  onnxruntime:
+    repo_url: "https://github.com/microsoft/onnxruntime"
+    commit: "v1.19.2"
+    docs_workflow: "https://onnxruntime.ai/docs/get-started/with-python.html"
+    docs_execution_providers: "https://onnxruntime.ai/docs/execution-providers/"
+    features:
+      - "Cross-platform inference"
+      - "Multiple execution providers"
+      - "ONNX format support"
+    priority: "MEDIUM"
+    integration_status: "REFERENCE"
+
+# ============================================================================
+# OPTIMIZATION FRAMEWORKS (Priority: CRITICAL)
+# ============================================================================
+# Advanced compilation & optimization tools that transform models
+# for optimal hardware execution.
+
+optimization_frameworks:
+  # --- Universal ML Compiler (Auto-Tuning) ---
+  mlc_llm:
+    repo_url: "https://github.com/mlc-ai/mlc-llm"
+    commit: "v0.1.1"
+    docs_workflow: "https://llm.mlc.ai/docs/get_started/quick_start.html"
+    docs_compilation: "https://llm.mlc.ai/docs/compilation/compile_models.html"
+    docs_deployment: "https://llm.mlc.ai/docs/deploy/index.html"
+    features:
+      - "Universal deployment (any hardware)"
+      - "Auto-tuning for optimization"
+      - "Mobile/Edge focus"
+      - "Prebuilt model library"
+    priority: "CRITICAL"
+    integration_status: "LEARN_FROM"
+    learn_from:
+      - "Auto-tuning architecture"
+      - "IR abstraction layers"
+      - "Prebuilt model library concept"
+      - "Multi-backend support"
+  
+  tvm:
+    repo_url: "https://github.com/apache/tvm"
+    commit: "v0.17.0"
+    docs_workflow: "https://tvm.apache.org/docs/tutorial/introduction.html"
+    docs_autoscheduler: "https://tvm.apache.org/docs/how_to/tune_with_autoscheduler/index.html"
+    features:
+      - "Deep learning compiler"
+      - "Auto-scheduler (performance tuning)"
+      - "Hardware abstraction"
+    priority: "HIGH"
+    integration_status: "LEARN_FROM"
+    learn_from:
+      - "AutoScheduler concept"
+      - "Hardware-specific optimization"
+      - "Search space exploration"
+  
+  # --- ONNX Compiler (Universal IR) ---
+  onnx_mlir:
+    repo_url: "https://github.com/onnx/onnx-mlir"
+    commit: "main" # Active development
+    docs_workflow: "https://github.com/onnx/onnx-mlir/blob/main/docs/BuildOnLinux.md"
+    features:
+      - "ONNX → Optimized code"
+      - "MLIR-based compilation"
+      - "Hardware-agnostic optimization"
+    priority: "HIGH"
+    integration_status: "REFERENCE"
+    use_case: "Universal model format (ONNX) support"
+
+# ============================================================================
+# MODEL FORMATS & CONVERSION (Priority: HIGH)
+# ============================================================================
+# Standard model formats and conversion tools
+
+model_formats:
+  # --- GGUF (llama.cpp standard) ---
+  gguf_spec:
+    docs_spec: "https://github.com/ggerganov/ggml/blob/master/docs/gguf.md"
+    description: "Binary format for LLM inference (industry standard)"
+  
+  # --- ONNX (Universal format) ---
+  onnx:
+    repo_url: "https://github.com/onnx/onnx"
+    commit: "v1.16.2"
+    docs_workflow: "https://onnx.ai/onnx/intro/converters.html"
+    docs_operators: "https://onnx.ai/onnx/operators/"
+    features:
+      - "Framework-agnostic format"
+      - "PyTorch/TensorFlow export"
+      - "Hardware optimization ready"
+    priority: "HIGH"
+    integration_status: "PLANNED"
+  
+  # --- Conversion Tools ---
+  optimum:
+    repo_url: "https://github.com/huggingface/optimum"
+    docs_workflow: "https://huggingface.co/docs/optimum/index"
+    description: "HuggingFace optimization & export tools"
+    use_case: "PyTorch → ONNX → Optimized formats"
+
+# ============================================================================
+# FINE-TUNING TOOLS (Priority: MEDIUM)
+# ============================================================================
+# Parameter-efficient fine-tuning for model customization
+
+fine_tuning_tools:
+  # --- PEFT (LoRA, QLoRA, etc.) ---
+  peft:
+    repo_url: "https://github.com/huggingface/peft"
+    commit: "v0.13.2"
+    docs_workflow: "https://huggingface.co/docs/peft/index"
+    docs_lora: "https://huggingface.co/docs/peft/conceptual_guides/lora"
+    docs_qlora: "https://huggingface.co/docs/peft/developer_guides/quantization"
+    features:
+      - "LoRA (Low-Rank Adaptation)"
+      - "QLoRA (Quantized LoRA)"
+      - "Prefix Tuning"
+      - "Minimal compute fine-tuning"
+    priority: "MEDIUM"
+    integration_status: "DOCUMENT"
+    use_case: "Fine-tune → Merge → Deploy pipeline"
+  
+  # --- Training Framework (Reference) ---
+  axolotl:
+    repo_url: "https://github.com/axolotl-ai-cloud/axolotl"
+    docs_workflow: "https://docs.axolotl.ai/"
+    features:
+      - "Declarative config (YAML)"
+      - "Multi-GPU training"
+      - "LoRA/QLoRA support"
+    priority: "LOW"
+    integration_status: "REFERENCE"
+    note: "Don't build training - reference for config patterns"
+
+# ============================================================================
+# DEPLOYMENT TOOLS (Priority: LOW - Reference Only)
+# ============================================================================
+# Post-build deployment & serving (framework integrates WITH these, not builds them)
+
+deployment_tools:
+  # --- LlamaIndex (RAG Framework) ---
+  llama_index:
+    repo_url: "https://github.com/run-llama/llama_index"
+    commit: "v0.11.23"
+    docs_workflow: "https://docs.llamaindex.ai/en/stable/getting_started/installation/"
+    docs_local_models: "https://docs.llamaindex.ai/en/stable/module_guides/models/llms/usage_custom/"
+    priority: "LOW"
+    integration_status: "REFERENCE"
+    use_case: "Document RAG deployment patterns"
+  
+  # --- Model Registry & Deployment ---
+  mlem:
+    repo_url: "https://github.com/iterative/mlem"
+    docs_workflow: "https://mlem.ai/doc/get-started"
+    priority: "LOW"
+    integration_status: "REFERENCE"
+    use_case: "Model versioning patterns"
+  
+  # --- Router/Load Balancer ---
+  glide:
+    repo_url: "https://github.com/EinStack/glide"
+    docs_workflow: "https://github.com/EinStack/glide/blob/develop/docs/README.md"
+    priority: "LOW"
+    integration_status: "REFERENCE"
+    use_case: "Multi-model routing patterns"
+
+# ============================================================================
+# CORE FRAMEWORK (Existing - Enhanced)
+# ============================================================================
 core:
-  # Core Inference Engine für CPU
-  llama_cpp: 
-    url: "https://github.com/ggerganov/llama.cpp.git"
-    commit: "b3626" # Pinned Commit für Reproduzierbarkeit
-   
   # Python Transformers für Konvertierungs-Skripte
-  transformers: "https://github.com/huggingface/transformers"
+  transformers:
+    repo_url: "https://github.com/huggingface/transformers"
+    commit: "v4.46.0"
+    docs_workflow: "https://huggingface.co/docs/transformers/index"
+    docs_onnx_export: "https://huggingface.co/docs/transformers/serialization"
 
-# --- VECTOR DATABASE (Local RAG / Knowledge Base) ---
+# ============================================================================
+# VECTOR DATABASE (Local RAG / Knowledge Base)
+# ============================================================================
 vector_database:
   qdrant_core:
     repo_url: "https://github.com/qdrant/qdrant"
@@ -34,52 +275,95 @@ vector_database:
   qdrant_client:
     repo_url: "https://github.com/qdrant/qdrant-client"
     docs_sdk: "https://python-client.qdrant.tech/"
+  
+  # --- Alternative: Lightweight for embedded ---
+  chromadb:
+    repo_url: "https://github.com/chroma-core/chroma"
+    docs_workflow: "https://docs.trychroma.com/"
+    priority: "LOW"
+    use_case: "Embedded/offline RAG (smaller footprint than Qdrant)"
 
-# --- KNOWLEDGE INGESTION (v1.6.0) ---
+# ============================================================================
+# KNOWLEDGE INGESTION (v1.6.0)
+# ============================================================================
 knowledge_ingestion:
   langchain:
-    url: "https://github.com/langchain-ai/langchain"
+    repo_url: "https://github.com/langchain-ai/langchain"
+    commit: "v0.3.14"
     docs_workflow: "https://python.langchain.com/docs/integrations/document_loaders/recursive_url/"
   
   beautifulsoup4:
-    url: "https://git.launchpad.net/beautifulsoup"
+    repo_url: "https://git.launchpad.net/beautifulsoup"
     docs_workflow: "https://www.crummy.com/software/BeautifulSoup/bs4/doc/"
 
   pypdf:
-    url: "https://github.com/py-pdf/pypdf"
+    repo_url: "https://github.com/py-pdf/pypdf"
     docs_workflow: "https://pypdf.readthedocs.io/en/stable/"
+
+# ============================================================================
+# HARDWARE TARGETS - VENDORS
+# ============================================================================
 
 # --- ROCKCHIP (RK3566 / RK3588) ---
 rockchip_npu:
   rkllm_toolkit:
-    url: "https://github.com/airockchip/rknn-llm.git"
-    commit: "release-v1.2.1b1" 
+    repo_url: "https://github.com/airockchip/rknn-llm"
+    commit: "release-v1.2.1b1"
     docs_workflow: "https://github.com/airockchip/rknn-llm/blob/main/README.md"
+    docs_api: "https://github.com/airockchip/rknn-llm/blob/main/doc/RKLLM_API_Reference.md"
 
-  rknn_toolkit2: 
-    url: "https://github.com/airockchip/rknn-toolkit2.git"
-    commit: "v2.0.0-beta0" 
+  rknn_toolkit2:
+    repo_url: "https://github.com/airockchip/rknn-toolkit2"
+    commit: "v2.0.0-beta0"
     docs_workflow: "https://github.com/airockchip/rknn-toolkit2/tree/master/doc"
+    docs_quantization: "https://github.com/airockchip/rknn-toolkit2/blob/master/doc/02_Rockchip_RKNPU_API_Reference_RKNN_API_V2.0.0beta0_EN.pdf"
   
-  rknn_model_zoo: "https://github.com/airockchip/rknn_model_zoo"
+  rknn_model_zoo:
+    repo_url: "https://github.com/airockchip/rknn_model_zoo"
+    use_case: "Reference models for RKNN"
 
 # --- NVIDIA JETSON (Orin / Xavier / Nano) ---
 nvidia_jetson:
-  tensorrt_llm: 
-    url: "https://github.com/NVIDIA/TensorRT-LLM.git"
-    commit: "v0.9.0" 
-  jetson_inference: "https://github.com/dusty-nv/jetson-inference"
-  jetson_containers: "https://github.com/dusty-nv/jetson-containers"
-  docs_workflow: "https://nvidia.github.io/TensorRT-LLM/architecture/workflow.html"
+  tensorrt_llm:
+    repo_url: "https://github.com/NVIDIA/TensorRT-LLM"
+    commit: "v0.10.0" # Updated from v0.9.0
+    docs_workflow: "https://nvidia.github.io/TensorRT-LLM/quick-start-guide.html"
+    docs_architecture: "https://nvidia.github.io/TensorRT-LLM/architecture/workflow.html"
+    docs_optimization: "https://nvidia.github.io/TensorRT-LLM/performance.html"
+    features:
+      - "Kernel fusion"
+      - "FP8/INT8 quantization"
+      - "Multi-GPU support"
+      - "Production optimized"
+    priority: "CRITICAL"
+  
+  jetson_inference:
+    repo_url: "https://github.com/dusty-nv/jetson-inference"
+    docs_workflow: "https://github.com/dusty-nv/jetson-inference/blob/master/docs/building-repo-2.md"
+  
+  jetson_containers:
+    repo_url: "https://github.com/dusty-nv/jetson-containers"
+    docs_workflow: "https://github.com/dusty-nv/jetson-containers/tree/master/docs"
 
 # --- HAILO AI (Raspberry Pi 5 + Hailo-8 / 8L) ---
 hailo_ai:
-  hailort: 
-    url: "https://github.com/hailo-ai/hailort.git"
+  hailort:
+    repo_url: "https://github.com/hailo-ai/hailort"
     commit: "v4.17.0"
-  tappas: "https://github.com/hailo-ai/tappas"
-  hailo_rpi5_examples: "https://github.com/hailo-ai/hailo-rpi5-examples"
-  docs_workflow: "https://github.com/hailo-ai/hailo_model_zoo/blob/master/docs/public_models/HAILO8/HAILO8_inference_guide.rst"
+    docs_workflow: "https://hailo.ai/developer-zone/documentation/hailort-v4-17-0/"
+  
+  tappas:
+    repo_url: "https://github.com/hailo-ai/tappas"
+    docs_workflow: "https://github.com/hailo-ai/tappas/blob/master/README.rst"
+  
+  hailo_rpi5_examples:
+    repo_url: "https://github.com/hailo-ai/hailo-rpi5-examples"
+  
+  hailo_model_zoo:
+    repo_url: "https://github.com/hailo-ai/hailo_model_zoo"
+    docs_workflow: "https://github.com/hailo-ai/hailo_model_zoo/blob/master/docs/public_models/HAILO8/HAILO8_inference_guide.rst"
+  
+  note: "Hailo primarily for Vision/Voice, NOT LLM inference"
 
 # --- MEMRYX (MX3 Accelerator) ---
 memryx:
@@ -96,47 +380,231 @@ axelera_ai:
 # --- INTEL NPU & GPU (v1.7.0) ---
 intel_ecosystem:
   ipex_llm:
-    url: "https://github.com/intel/ipex-llm"
-    commit: "v2.2.0" 
+    repo_url: "https://github.com/intel/ipex-llm"
+    commit: "v2.2.0"
     docs_workflow: "https://github.com/intel/ipex-llm/blob/main/docs/mddocs/Quickstart/install_linux.md"
+    docs_optimization: "https://github.com/intel/ipex-llm/blob/main/docs/mddocs/Overview/KeyFeatures/optimize_model.md"
   
   openvino:
-    url: "https://github.com/openvinotoolkit/openvino"
-    commit: "2025.4.0" 
-    docs_workflow: "https://docs.openvino.ai/2025/documentation/openvino-ir-format.html"
+    repo_url: "https://github.com/openvinotoolkit/openvino"
+    commit: "2025.4.0"
+    docs_workflow: "https://docs.openvino.ai/2025/get-started.html"
+    docs_llm: "https://docs.openvino.ai/2025/learn-openvino/llm_inference_guide.html"
+    docs_format: "https://docs.openvino.ai/2025/documentation/openvino-ir-format.html"
 
 # --- AMD ROCm (Radeon GPUs) ---
 amd_rocm:
-  rocm_main: "https://github.com/ROCm/ROCm"
-  rocm_docker: "https://github.com/ROCm/ROCm-docker"
+  rocm_main:
+    repo_url: "https://github.com/ROCm/ROCm"
+    docs_workflow: "https://rocm.docs.amd.com/en/latest/"
+  
+  rocm_docker:
+    repo_url: "https://github.com/ROCm/ROCm-docker"
+    docs_workflow: "https://rocm.docs.amd.com/en/latest/deploy/docker.html"
 
 # --- RISC-V (StarFive / Generic) ---
 riscv:
-  gnu_toolchain: "https://github.com/riscv-collab/riscv-gnu-toolchain"
-  visionfive2_sdk: "https://github.com/starfive-tech/VisionFive2"
+  gnu_toolchain:
+    repo_url: "https://github.com/riscv-collab/riscv-gnu-toolchain"
+    docs_workflow: "https://github.com/riscv-collab/riscv-gnu-toolchain/blob/master/README.md"
+  
+  visionfive2_sdk:
+    repo_url: "https://github.com/starfive-tech/VisionFive2"
+    docs_workflow: "https://doc-en.rvspace.org/VisionFive2/PDF/VisionFive2_SDK_Quick_Start_Guide.pdf"
 
-# --- VOICE & TTS PIPELINE ---
+# ============================================================================
+# MOBILE & EMBEDDED PLATFORMS
+# ============================================================================
+mobile_edge:
+  # --- Android ---
+  android:
+    ndk:
+      url: "https://developer.android.com/ndk/downloads"
+      docs_workflow: "https://developer.android.com/ndk/guides"
+    
+    vulkan:
+      docs_workflow: "https://developer.android.com/ndk/guides/graphics/getting-started"
+    
+    reference_backend: "ncnn" # See inference_backends.ncnn
+  
+  # --- iOS ---
+  ios:
+    coreml:
+      docs_workflow: "https://developer.apple.com/documentation/coreml"
+      docs_conversion: "https://coremltools.readme.io/docs/pytorch-conversion"
+    
+    metal:
+      docs_workflow: "https://developer.apple.com/metal/"
+  
+  # --- Embedded Linux ---
+  embedded_linux:
+    buildroot:
+      repo_url: "https://github.com/buildroot/buildroot"
+      docs_workflow: "https://buildroot.org/docs.html"
+    
+    yocto:
+      docs_workflow: "https://docs.yoctoproject.org/"
+
+# ============================================================================
+# VOICE & TTS PIPELINE
+# ============================================================================
 voice_tts:
-  piper_tts: 
-    url: "https://github.com/rhasspy/piper"
-    commit: "9c3066d" 
-  glados_tts: "https://github.com/dnhkng/GLaDOS"
-  vosk_api: 
-    url: "https://github.com/alphacep/vosk-api"
-    commit: "0a1b2c3" 
+  # --- TTS (Text-to-Speech) ---
+  piper_tts:
+    repo_url: "https://github.com/rhasspy/piper"
+    commit: "9c3066d"
+    docs_workflow: "https://github.com/rhasspy/piper/blob/master/README.md"
+  
+  glados_tts:
+    repo_url: "https://github.com/dnhkng/GLaDOS"
+    description: "GLaDOS voice TTS (novelty)"
+  
+  # --- STT (Speech-to-Text) ---
+  vosk_api:
+    repo_url: "https://github.com/alphacep/vosk-api"
+    commit: "0a1b2c3"
+    docs_workflow: "https://alphacephei.com/vosk/install"
+  
+  whisper_cpp:
+    repo_url: "https://github.com/ggerganov/whisper.cpp"
+    docs_workflow: "https://github.com/ggerganov/whisper.cpp/blob/master/README.md"
+    features:
+      - "Offline STT"
+      - "Multi-language"
+      - "Efficient C++ implementation"
 
-# --- MODELLE (MVP / Getestet) ---
+# ============================================================================
+# MODELS - BASE & TESTED
+# ============================================================================
 models:
-  granite_350m: "https://huggingface.co/ibm-granite/granite-4.0-h-350m"
+  # --- Tested/Verified ---
+  granite_350m:
+    url: "https://huggingface.co/ibm-granite/granite-4.0-h-350m"
+    size: "~700MB"
+    use_case: "Lightweight reasoning"
+  
+  # --- Recommended for Edge ---
+  qwen_2_5_coder:
+    url: "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct"
+    size: "~4.5GB (Q4)"
+    use_case: "Code generation on edge"
+  
+  llama_3_2:
+    url: "https://huggingface.co/meta-llama/Llama-3.2-3B-Instruct"
+    size: "~2GB (Q4)"
+    use_case: "General purpose, efficient"
 
 # --- TINY MODELS (Offline Intelligence) ---
 tiny_models:
   tinyllama_1b:
     url: "https://huggingface.co/TinyLlama/TinyLlama-1.1B-Chat-v1.0"
     description: "Fastest option (< 700MB)."
+    recommended_quant: "Q4_K_M"
+  
   qwen_0_5b:
     url: "https://huggingface.co/Qwen/Qwen1.5-0.5B-Chat"
     description: "Extremely smart for size (< 500MB)."
+    recommended_quant: "Q4_K_M"
+  
   danube_1_8b:
     url: "https://huggingface.co/h2oai/h2o-danube-1.8b-chat"
     description: "Strong reasoning capabilities."
+    recommended_quant: "Q5_K_M"
+  
+  phi_3_mini:
+    url: "https://huggingface.co/microsoft/Phi-3-mini-4k-instruct"
+    description: "Microsoft's efficient model (3.8B params, ~2GB Q4)"
+    recommended_quant: "Q4_K_M"
+
+# ============================================================================
+# QUALITY & VALIDATION TOOLS (Reference)
+# ============================================================================
+quality_tools:
+  # --- LLM Evaluation ---
+  deepchecks:
+    url: "https://www.deepchecks.com/llm-tools/"
+    priority: "LOW"
+    integration_status: "REFERENCE"
+    use_case: "Quality validation patterns"
+  
+  # --- MLOps & Monitoring (Reference only) ---
+  fiddler:
+    url: "https://www.fiddler.ai/llmops"
+    repo_url: "https://github.com/fiddler-labs"
+    priority: "LOW"
+    integration_status: "REFERENCE"
+  
+  nightfall:
+    url: "https://help.nightfall.ai/"
+    repo_url: "https://github.com/nightfallai"
+    priority: "LOW"
+    integration_status: "REFERENCE"
+    note: "Security scanning patterns"
+
+# ============================================================================
+# FRAMEWORK METADATA
+# ============================================================================
+metadata:
+  ssot_version: "2.0.0"
+  last_updated: "2025-12-28"
+  maintainer: "LLM Conversion Framework Team"
+  
+  integration_priorities:
+    critical:
+      - llama.cpp
+      - mlc_llm
+      - tensorrt_llm
+    high:
+      - vllm
+      - ncnn
+      - onnx
+      - peft
+    medium:
+      - llama_index
+      - axolotl
+    low:
+      - deployment_tools
+      - quality_tools
+  
+  roadmap:
+    v2.1:
+      - "Implement llama.cpp backend integration"
+      - "Add ONNX input format support"
+      - "Document TensorRT-LLM optimization guide"
+    v2.2:
+      - "MLC-LLM auto-tuning patterns"
+      - "ncnn mobile targets"
+      - "PEFT fine-tuning → deployment pipeline"
+    v2.3:
+      - "vLLM deployment suggestions"
+      - "Knowledge Snapshot v2.0 schema"
+      - "Multi-backend wizard support"
+
+# ============================================================================
+# NOTES & BEST PRACTICES
+# ============================================================================
+notes:
+  backend_selection:
+    - "CPU-only: llama.cpp (recommended)"
+    - "NVIDIA: TensorRT-LLM (best performance)"
+    - "Rockchip: RKNN (NPU acceleration)"
+    - "Mobile: ncnn (lightweight)"
+    - "Universal: MLC-LLM (if complex requirements)"
+  
+  quantization_guide:
+    - "Q4_K_M: Best general purpose (4-bit)"
+    - "Q5_K_M: Better quality, slightly larger"
+    - "Q8_0: Maximum quality, 2x size"
+    - "INT8: For TensorRT/NPU (hardware specific)"
+  
+  deployment_workflow:
+    - "1. Build with framework (optimized binary)"
+    - "2. Test locally (validate performance)"
+    - "3. Deploy with vLLM/Ollama (production serving)"
+    - "4. Monitor with your choice (we don't build this)"
+  
+  security:
+    - "Always verify SHA256 hashes before installing"
+    - "Pin commits for reproducibility"
+    - "Use Docker for isolation"
+    - "Scan dependencies with tools like Safety"
