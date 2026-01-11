@@ -454,6 +454,9 @@ voice_tts:
   glados_tts:
     repo_url: "https://github.com/dnhkng/GLaDOS"
     note: "GLaDOS voice TTS (novelty/fun)."
+    repo_url: " https://huggingface.co/systemofapwne/piper-de-glados"
+    repo_url: " https://huggingface.co/systemofapwne/piper-de-glados/edit/main/README.md"
+    repo_url: "  https://huggingface.co/systemofapwne/piper-de-glados/tree/main"
 
 # ============================================================================
 # MODELS - TESTED & RECOMMENDED
