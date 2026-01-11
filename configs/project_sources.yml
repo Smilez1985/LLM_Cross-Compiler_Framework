@@ -451,12 +451,26 @@ voice_tts:
     docs_workflow: "https://alphacephei.com/vosk/install"
     note: "Offline speech recognition."
   
+# --- VOICE MODELS (PotatOS Personality Matrix) ---
+  
   glados_tts:
-    repo_url: "https://github.com/dnhkng/GLaDOS"
-    note: "GLaDOS voice TTS (novelty/fun)."
-    repo_url: " https://huggingface.co/systemofapwne/piper-de-glados"
-    repo_url: " https://huggingface.co/systemofapwne/piper-de-glados/edit/main/README.md"
-    repo_url: "  https://huggingface.co/systemofapwne/piper-de-glados/tree/main"
+    repo_id: "systemofapwne/piper-de-glados"
+    note: "German GLaDOS (Medium Quality) - Optimized for RK3566"
+    # Wir definieren hier Quell-Pfad (Repo) und Ziel-Name (Lokal)
+    files:
+      - source: "de/de_DE/glados/medium/de_DE-glados-medium.onnx"
+        target: "glados_medium.onnx"
+      - source: "de/de_DE/glados/medium/de_DE-glados-medium.onnx.json"
+        target: "glados_medium.onnx.json"
+
+  turret_tts:
+    repo_id: "systemofapwne/piper-de-glados"
+    note: "German Turret (Medium Quality) - For Critical Errors"
+    files:
+      - source: "de/de_DE/glados-turret/medium/de_DE-glados-turret-medium.onnx"
+        target: "turret_medium.onnx"
+      - source: "de/de_DE/glados-turret/medium/de_DE-glados-turret-medium.onnx.json"
+        target: "turret_medium.onnx.json"
 
 # ============================================================================
 # MODELS - TESTED & RECOMMENDED
