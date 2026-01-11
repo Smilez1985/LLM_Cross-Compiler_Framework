@@ -472,6 +472,97 @@ voice_tts:
       - source: "de/de_DE/glados-turret/medium/de_DE-glados-turret-medium.onnx.json"
         target: "turret_medium.onnx.json"
 
+        # ==============================================================================
+#  VOICE MODELS (Piper TTS / ONNX)
+#  SSOT für Audio-Persönlichkeiten
+# ==============================================================================
+
+# --- GLaDOS (Deutsch) ---
+# Repo: systemofapwne/piper-de-glados
+# Ideal für: Die Hauptpersönlichkeit von PotatOS
+
+glados_tts_high:
+  repo_id: "systemofapwne/piper-de-glados"
+  note: "GLaDOS High (Studio Quality) - PC/Server only (114MB)"
+  files:
+    - source: "de/de_DE/glados/high/de_DE-glados-high.onnx"
+      target: "glados_high.onnx"
+    - source: "de/de_DE/glados/high/de_DE-glados-high.onnx.json"
+      target: "glados_high.onnx.json"
+
+glados_tts_medium:
+  repo_id: "systemofapwne/piper-de-glados"
+  note: "GLaDOS Medium (Balanced) - RECOMMENDED for RK3566 (64MB)"
+  files:
+    - source: "de/de_DE/glados/medium/de_DE-glados-medium.onnx"
+      target: "glados_medium.onnx"
+    - source: "de/de_DE/glados/medium/de_DE-glados-medium.onnx.json"
+      target: "glados_medium.onnx.json"
+
+glados_tts_low:
+  repo_id: "systemofapwne/piper-de-glados"
+  note: "GLaDOS Low (Power Save) - Schnelle Inferenz, geringere Qualität"
+  files:
+    - source: "de/de_DE/glados/low/de_DE-glados-low.onnx"
+      target: "glados_low.onnx"
+    - source: "de/de_DE/glados/low/de_DE-glados-low.onnx.json"
+      target: "glados_low.onnx.json"
+
+# --- TURRET (Deutsch) ---
+# Repo: systemofapwne/piper-de-glados
+# Ideal für: Fehlermeldungen, System-Status, Panik-Modus
+
+turret_tts_high:
+  repo_id: "systemofapwne/piper-de-glados"
+  note: "Turret High - PC/Server only"
+  files:
+    - source: "de/de_DE/glados-turret/high/de_DE-glados-turret-high.onnx"
+      target: "turret_high.onnx"
+    - source: "de/de_DE/glados-turret/high/de_DE-glados-turret-high.onnx.json"
+      target: "turret_high.onnx.json"
+
+turret_tts_medium:
+  repo_id: "systemofapwne/piper-de-glados"
+  note: "Turret Medium - RECOMMENDED for RK3566"
+  files:
+    - source: "de/de_DE/glados-turret/medium/de_DE-glados-turret-medium.onnx"
+      target: "turret_medium.onnx"
+    - source: "de/de_DE/glados-turret/medium/de_DE-glados-turret-medium.onnx.json"
+      target: "turret_medium.onnx.json"
+
+# (Hinweis: Turret Low existiert im Repo nicht explizit, Medium wird als Standard genutzt)
+
+# --- THORSTEN (Deutsch) ---
+# Repo: Thorsten-Voice/Piper
+# Ideal für: "Ditto" Standard-Stimme (freundlich, neutral)
+
+thorsten_tts_high:
+  repo_id: "Thorsten-Voice/Piper"
+  note: "Thorsten High - Beste deutsche Open-Source Stimme"
+  files:
+    - source: "de_DE-thorsten-high.onnx"
+      target: "thorsten_high.onnx"
+    - source: "de_DE-thorsten-high.onnx.json"
+      target: "thorsten_high.onnx.json"
+
+thorsten_tts_medium:
+  repo_id: "Thorsten-Voice/Piper"
+  note: "Thorsten Medium - Guter Kompromiss"
+  files:
+    - source: "de_DE-thorsten-medium.onnx"
+      target: "thorsten_medium.onnx"
+    - source: "de_DE-thorsten-medium.onnx.json"
+      target: "thorsten_medium.onnx.json"
+
+thorsten_tts_low:
+  repo_id: "Thorsten-Voice/Piper"
+  note: "Thorsten Low - Maximale Geschwindigkeit"
+  files:
+    - source: "de_DE-thorsten-low.onnx"
+      target: "thorsten_low.onnx"
+    - source: "de_DE-thorsten-low.onnx.json"
+      target: "thorsten_low.onnx.json"
+
 # ============================================================================
 # MODELS - TESTED & RECOMMENDED
 # ============================================================================
