@@ -35,7 +35,7 @@ except ImportError:
 from orchestrator.utils.logging import get_logger
 # NEU: Import der zentralen Validierungslogik
 # Bitte Pfad anpassen, falls validation.py woanders liegt (z.B. orchestrator.Core.validation)
-from orchestrator.utils.validation import validate_url
+from orchestrator.utils.validation import validate_public_url
 
 class CrawlerManager:
     """
@@ -54,10 +54,11 @@ class CrawlerManager:
         self.config = framework_manager.config
         
         # Configuration Settings
-        self.respect_robots = self.config.crawler_respect_robots
-        self.max_depth = self.config.crawler_max_depth
-        self.max_pages = self.config.crawler_max_pages
-        self.rate_limit = 1.0 # Seconds between requests
+        self.respect_robots = self.config.get("crawler_respect_robots", True)
+        self.max_depth = int(self.config.get("crawler_max_depth", 2))
+        self.max_pages = int(self.config.get("crawler_max_pages", 50))
+        self.rate_limit = float(self.config.get("crawler_rate_limit", 1.0))
+        self.download_pdfs = self.config.get("crawler_download_pdfs", True)
         
         # State
         self.visited: Set[str] = set()
@@ -91,8 +92,12 @@ class CrawlerManager:
             # ---------------------------------------------------------
             # NEU: 1. Strenge Sicherheitsvalidierung (SSRF / Format)
             # ---------------------------------------------------------
-            if not validate_url(url):
+            if not validate_public_url(url):
                 self.logger.warning(f"Security Alert: Skipping unsafe or invalid URL: {url}")
+                self.visited.add(url)
+                continue
+
+            if not self.download_pdfs and urlparse(url).path.lower().endswith('.pdf'):
                 self.visited.add(url)
                 continue
 
@@ -106,8 +111,16 @@ class CrawlerManager:
             self.logger.info(f"Crawling ({pages_crawled}/{self.max_pages}): {url}")
             try:
                 time.sleep(self.rate_limit) # Politeness delay
-                response = self.session.get(url, timeout=10)
-                
+                # Redirects are re-queued so their targets pass the SSRF check too.
+                response = self.session.get(url, timeout=10, allow_redirects=False)
+
+                if response.is_redirect:
+                    self.visited.add(url)
+                    location = urljoin(url, response.headers.get('Location', ''))
+                    if location and location not in self.visited:
+                        queue.insert(0, (location, depth))
+                    continue
+
                 if response.status_code != 200:
                     self.logger.warning(f"Failed to fetch {url}: Status {response.status_code}")
                     self.visited.add(url)
@@ -122,7 +135,8 @@ class CrawlerManager:
                 new_links = []
                 
                 if 'application/pdf' in content_type or url.endswith('.pdf'):
-                    doc = self._process_pdf(response.content, url)
+                    if self.download_pdfs:
+                        doc = self._process_pdf(response.content, url)
                 elif 'text/html' in content_type:
                     doc, new_links = self._process_html(response.text, url, base_domain)
                 

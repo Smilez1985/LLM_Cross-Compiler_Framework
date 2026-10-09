@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
     QWizard, QWizardPage, QVBoxLayout, QLabel, QFormLayout, 
     QLineEdit, QComboBox, QRadioButton, QButtonGroup, QTextEdit, 
     QMessageBox, QGroupBox, QPushButton, QFileDialog, QProgressBar,
-    QDialog, QHBoxLayout, QWidget, QPlainTextEdit, QStackedWidget
+    QDialog, QHBoxLayout, QWidget, QPlainTextEdit, QStackedWidget, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QSize, QTimer, QRect
 from PySide6.QtGui import QPixmap, QPainter
@@ -115,20 +115,19 @@ class CrawlWorker(QThread):
     def run(self):
         try:
             total_docs = 0
+
+            # CrawlerManager reads these keys from the config when it is created.
+            cfg = getattr(self.rag_manager.framework, 'config', None)
+            if cfg is not None and hasattr(cfg, 'set'):
+                cfg.set("crawler_max_depth", int(self.options.get("max_depth", 2)))
+                cfg.set("crawler_respect_robots", bool(self.options.get("respect_robots", True)))
+                cfg.set("crawler_download_pdfs", bool(self.options.get("download_pdfs", True)))
+                cfg.set("crawler_rate_limit", float(self.options.get("request_delay", 1)))
+
             for url in self.urls:
                 if not self._is_running: break
-                
+
                 self.progress.emit(f"Crawling root: {url}...")
-                
-                # Global Config Override (Temporary for this crawl)
-                if hasattr(self.rag_manager.framework, 'config'):
-                    # Careful: modifying config at runtime. Might need mutex if threaded app heavily used.
-                    # For wizard context it's fine.
-                    # Check if config is object or dict (v2.3 uses ConfigManager object)
-                    cfg = self.rag_manager.framework.config
-                    if hasattr(cfg, 'crawler_max_depth'):
-                         cfg.crawler_max_depth = self.options.get("depth", 2)
-                         cfg.crawler_max_pages = self.options.get("max_pages", 50)
 
                 result = self.rag_manager.ingest_url(url)
                 
@@ -162,8 +161,7 @@ class ModuleCreationWizard(QWizard):
         if parent:
             if hasattr(parent, 'app_root'):
                 self.assets_dir = parent.app_root / "assets"
-            if hasattr(parent, 'framework_manager'):
-                self.framework_manager = parent.framework_manager
+            self.framework_manager = getattr(parent, 'framework_manager', None) or getattr(parent, 'framework', None)
             
         self.setWindowTitle(tr("wiz.title"))
         self.setWizardStyle(QWizard.ModernStyle)
@@ -646,7 +644,7 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
              QMessageBox.critical(self, "Error", "AIConfigurationDialog not available.")
              return
              
-        dialog = AIConfigurationDialog(self)
+        dialog = AIConfigurationDialog(self.framework_manager, self)
         if dialog.exec() == QDialog.Accepted:
             self.ai_config = dialog.get_config()
             self.btn_import_ai.setEnabled(True)

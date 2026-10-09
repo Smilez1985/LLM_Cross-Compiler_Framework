@@ -133,6 +133,8 @@ class DittoCoder:
         # Configuration
         self.provider = provider
         self.model_name = model
+        self.base_url = base_url
+        self.litellm_model = self._format_model_name(provider, model)
         self.offline_mode = False
         
         # Settings from ConfigManager
@@ -191,6 +193,25 @@ class DittoCoder:
         if not get_fn("enable_rag_knowledge", False): return None
         
         return self.framework.get_component("rag_manager")
+
+    def reinitialize(self, provider: Optional[str] = None, model: Optional[str] = None,
+                     api_key: Optional[str] = None, base_url: Optional[str] = None,
+                     offline_mode: Optional[bool] = None):
+        """Applies a new provider/model selection at runtime (e.g. from the GUI)."""
+        if provider:
+            self.provider = provider
+        if model:
+            self.model_name = model
+        if base_url is not None:
+            self.base_url = base_url or None
+        if offline_mode is not None:
+            self.offline_mode = offline_mode
+
+        self.litellm_model = self._format_model_name(self.provider, self.model_name)
+        if not self.offline_mode:
+            self._setup_cloud_provider(self.provider, self.model_name, api_key, self.base_url)
+
+        self.logger.info(f"Ditto reconfigured: Provider={self.provider}, Model={self.model_name}, Offline={self.offline_mode}")
 
     # --- RAG / DOCS ---
     

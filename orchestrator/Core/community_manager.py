@@ -28,6 +28,7 @@ from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.helpers import redact_secrets
 
 # Fallback Helper
 def ensure_directory(path: Path):
@@ -308,7 +309,4 @@ class CommunityManager:
                 return False
 
     def _sanitize_content(self, text: str) -> str:
-        if not text: return ""
-        text = re.sub(r'(sk-[a-zA-Z0-9]{20,})', 'sk-REDACTED', text)
-        text = re.sub(r'(hf_[a-zA-Z0-9]{20,})', 'hf_REDACTED', text)
-        return text
+        return redact_secrets(text)

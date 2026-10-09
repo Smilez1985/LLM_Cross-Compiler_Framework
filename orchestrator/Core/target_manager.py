@@ -45,15 +45,16 @@ class TargetManager:
 
         # Scan subdirectories
         for item in self.targets_dir.iterdir():
-            if item.is_dir():
+            if item.is_dir() and not item.name.startswith(("_", ".")):
                 config_file = item / "target.yml"
                 if config_file.exists():
                     try:
                         with open(config_file, 'r', encoding='utf-8') as f:
                             data = yaml.safe_load(f)
                             # Basic Validation
-                            if 'metadata' in data and 'id' in data['metadata']:
-                                tid = data['metadata']['id']
+                            if isinstance(data, dict) and isinstance(data.get('metadata'), dict):
+                                tid = data['metadata'].get('id') or item.name
+                                data['metadata']['id'] = tid
                                 self._targets[tid] = data
                                 self.logger.debug(f"Loaded target: {tid}")
                             else:
@@ -72,6 +73,11 @@ class TargetManager:
         if not self._initialized: self.initialize()
         # Return list of metadata for UI/CLI
         return [t['metadata'] for t in self._targets.values()]
+
+    def list_hardware_profiles(self) -> List[str]:
+        """Target IDs selectable as deployment profiles (see get_docker_flags_for_profile)."""
+        if not self._initialized: self.initialize()
+        return sorted(self._targets.keys())
 
     def get_docker_flags_for_profile(self, target_id: str) -> List[str]:
         """

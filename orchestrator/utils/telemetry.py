@@ -23,6 +23,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime
 
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.helpers import redact_secrets
 
 GITHUB_REPO_URL = "https://github.com/Smilez1985/llm_conversion_framework/issues/new"
 
@@ -118,9 +119,8 @@ class TelemetryManager:
         """
         if not text: return ""
         
-        # 1. API Keys (Basic Pattern Matching)
-        text = re.sub(r'(sk-[a-zA-Z0-9]{20,})', 'sk-REDACTED', text)
-        text = re.sub(r'(hf_[a-zA-Z0-9]{20,})', 'hf_REDACTED', text)
+        # 1. API Keys / Tokens
+        text = redact_secrets(text)
         
         # 2. User Paths (Robust)
         # Replaces /home/username with /home/USER

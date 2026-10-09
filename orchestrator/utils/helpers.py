@@ -119,6 +119,22 @@ def is_admin() -> bool:
     except:
         return False
 
+_SECRET_PATTERNS = [
+    (re.compile(r'(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}'), 'sk-REDACTED'),   # OpenAI (incl. sk-proj-), Anthropic (sk-ant-)
+    (re.compile(r'(?<![A-Za-z0-9])hf_[A-Za-z0-9]{20,}'), 'hf_REDACTED'),     # HuggingFace
+    (re.compile(r'AIza[0-9A-Za-z_-]{35}'), 'AIza-REDACTED'),        # Google / Gemini
+    (re.compile(r'(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{36,}'), 'gh-REDACTED'),
+    (re.compile(r'github_pat_[A-Za-z0-9_]{22,}'), 'gh-REDACTED'),
+]
+
+def redact_secrets(text: str) -> str:
+    """Replaces known API key/token formats before text leaves the machine."""
+    if not text:
+        return ""
+    for pattern, replacement in _SECRET_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return text
+
 def sanitize_filename(name: str) -> str:
     """Removes illegal characters for filenames."""
     name = str(name).strip().replace(" ", "_")
