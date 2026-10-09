@@ -187,6 +187,13 @@ class ConfigManager:
                  enable_templates: bool = False,
                  enable_dynamic_updates: bool = False):
         self.logger = get_logger(__name__)
+
+        config_file: Optional[Path] = None
+        if config_dir is not None:
+            config_dir = Path(config_dir)
+            if config_dir.suffix.lower() in ('.yml', '.yaml', '.json'):
+                config_file = config_dir
+                config_dir = config_dir.parent
         self.config_dir = config_dir or self._detect_config_directory()
         self._lock = threading.RLock()
         
@@ -206,7 +213,8 @@ class ConfigManager:
         
         self._initialize_core_schemas()
         self._ensure_directories()
-        
+        self.load_configuration(config_file if config_file and config_file.exists() else None)
+
         self.logger.info(f"Configuration Manager initialized (advanced_mode: {advanced_mode})")
     
     def _detect_config_directory(self) -> Path:
@@ -286,7 +294,14 @@ class ConfigManager:
             ConfigSchema("crawler_respect_robots", bool, False, True, "Respect robots.txt rules"),
             ConfigSchema("crawler_max_depth", int, False, 2, "Max recursion depth for crawler"),
             ConfigSchema("crawler_max_pages", int, False, 50, "Max pages to crawl per session"),
-            
+            ConfigSchema("crawler_rate_limit", float, False, 1.0, "Delay between crawler requests (seconds)", ["min:0"]),
+            ConfigSchema("crawler_download_pdfs", bool, False, True, "Download and parse PDF files while crawling"),
+
+            # AI Agent (Ditto) Selection
+            ConfigSchema("ai_provider", str, False, "OpenAI", "AI provider (OpenAI/Anthropic/Google/Ollama/Custom)"),
+            ConfigSchema("ai_model", str, False, "gpt-4o", "AI model name"),
+            ConfigSchema("ai_base_url", str, False, "", "Base URL for Ollama/Custom endpoints"),
+
             # UX History
             ConfigSchema("input_history", list, False, [], "History of user inputs"),
             
@@ -468,6 +483,8 @@ class ConfigManager:
                 "language", "ai_security_level", "gui_theme", "docker_registry",
                 "enable_rag_knowledge", 
                 "crawler_respect_robots", "crawler_max_depth", "crawler_max_pages",
+                "crawler_rate_limit", "crawler_download_pdfs",
+                "ai_provider", "ai_model", "ai_base_url",
                 "input_history",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",

@@ -55,7 +55,7 @@ class FrameworkManager:
         
         # Init Config & Logger first
         self.config = ConfigManager(config_file)
-        setup_logging(self.config.log_level, self.config.logs_dir)
+        setup_logging(level=self.config.log_level)
         self.logger = get_logger("FrameworkKernel")
         
         self.logger.info(f"Booting {self.info.name} v{self.info.version} ({self.info.edition})...")
@@ -91,7 +91,7 @@ class FrameworkManager:
                 return False
 
             # 2. Telemetry (Opt-In check happens inside)
-            self.telemetry = TelemetryManager(self.config)
+            self.telemetry = TelemetryManager(self)
             
             # 3. Docker Connectivity
             self.docker_manager = DockerManager(self.config)
@@ -112,13 +112,13 @@ class FrameworkManager:
             self.logger.info("[Boot Phase 3] AI & Knowledge Services")
             
             # RAG (Optional)
-            if self.config.enable_rag_knowledge:
-                self.rag_manager = RAGManager(self.config)
-                # Async Connect via Thread or check later? For CLI speed, we lazy load or check quick.
-                # Hier simple init.
-            
+            self.ensure_rag_manager()
+
             # Ditto (The Brain) - needs Secrets!
             self.ditto_manager = DittoCoder(
+                provider=self.config.get("ai_provider", "OpenAI"),
+                model=self.config.get("ai_model", "gpt-4o"),
+                base_url=self.config.get("ai_base_url") or None,
                 config_manager=self.config,
                 framework_manager=self # Pass self to access secrets_manager
             )
@@ -142,7 +142,7 @@ class FrameworkManager:
                 self.orchestrator.inject_ditto(self.ditto_manager) # NEW: IMatrix Dataset Provider
             
             # Updater
-            self.updater = UpdateManager(self)
+            self.updater = UpdateManager(self.app_root)
 
             self._initialized = True
             self.logger.info("Framework successfully initialized.")
@@ -151,6 +151,12 @@ class FrameworkManager:
         except Exception as e:
             self.logger.critical(f"Fatal Error during framework initialization: {e}", exc_info=True)
             return False
+
+    def ensure_rag_manager(self) -> Optional[RAGManager]:
+        """Creates the RAG manager on demand once RAG is enabled (also at runtime via GUI)."""
+        if self.rag_manager is None and self.config.get("enable_rag_knowledge", False):
+            self.rag_manager = RAGManager(self)
+        return self.rag_manager
 
     def get_component(self, name: str) -> Any:
         """Service Locator für CLI/GUI Zugriff."""
@@ -168,14 +174,11 @@ class FrameworkManager:
             "deployment_manager": self.deployment_manager,
             "community_manager": self.community_manager,
             "orchestrator": self.orchestrator,
-            "docker_client": self.docker_manager.client if self.docker_manager else None
+            "docker_client": getattr(getattr(self.docker_manager, "builder", None), "docker_client", None)
         }
         return components.get(name)
 
     def shutdown(self):
         """Graceful Shutdown."""
         self.logger.info("Shutting down Framework...")
-        # Close DB connections, stop threads if needed
-        if self.telemetry:
-            self.telemetry.flush()
         self.logger.info("Shutdown complete.")

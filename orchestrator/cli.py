@@ -33,7 +33,7 @@ from rich.table import Table
 from rich.panel import Panel
 from rich.prompt import Prompt, Confirm
 
-from orchestrator.Core.framework import FrameworkManager, FrameworkConfig
+from orchestrator.Core.framework import FrameworkManager
 from orchestrator.Core.orchestrator import LLMOrchestrator, BuildRequest, WorkflowType, PriorityLevel, OrchestrationStatus
 from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel
 from orchestrator.Core.module_generator import ModuleGenerator
@@ -96,6 +96,7 @@ class FrameworkContext:
     
     def __init__(self):
         self.config: Dict[str, Any] = DEFAULT_CONFIG.copy()
+        self.config_path: Optional[str] = None
         self.framework_manager: Optional[FrameworkManager] = None
         self.orchestrator: Optional[LLMOrchestrator] = None
         self.build_engine: Optional[BuildEngine] = None
@@ -111,15 +112,7 @@ class FrameworkContext:
             
         try:
             # Framework Manager initialisieren
-            try:
-                framework_config = FrameworkConfig(**self.config)
-            except TypeError:
-                # Fallback if config has extra keys
-                valid_keys = FrameworkConfig.__annotations__.keys()
-                filtered_config = {k: v for k, v in self.config.items() if k in valid_keys}
-                framework_config = FrameworkConfig(**filtered_config)
-
-            self.framework_manager = FrameworkManager(framework_config)
+            self.framework_manager = FrameworkManager(self.config_path)
             
             if not self.framework_manager.initialize():
                 raise RuntimeError("Framework Manager initialization failed")
@@ -236,6 +229,7 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     
     # Load configuration
     ctx.config.update(load_config_file(config))
+    ctx.config_path = config
     ctx.verbose = verbose
     ctx.quiet = quiet
     

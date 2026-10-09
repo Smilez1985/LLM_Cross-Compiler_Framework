@@ -11,6 +11,8 @@ Features:
 """
 
 import os
+import re
+import shlex
 import time
 import socket
 import logging
@@ -33,6 +35,10 @@ from orchestrator.utils.logging import get_logger
 
 # NEU: Import der zentralen Validierungslogik
 from orchestrator.utils.validation import validate_ip_address
+
+DEFAULT_INFERENCE_IMAGE = "ghcr.io/smilez1985/llm-runtime:latest"
+DEFAULT_QDRANT_IMAGE = "qdrant/qdrant:v1.16.0"
+SSH_USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
 
 class DeploymentManager:
     def __init__(self, framework_manager=None):
@@ -67,22 +73,25 @@ class DeploymentManager:
             # B. Configs (User Profiles, Prompts)
             self._bundle_user_configs(temp_path / "data" / "configs")
 
-            # C. Docker Images & RAG Setup
+            # C. Docker Images & RAG Setup (image names come from the central config)
             use_docker = docker_config.get("use_docker", False)
+            cfg = self.framework.config
+            inference_image = cfg.get("image_inference_runtime", DEFAULT_INFERENCE_IMAGE)
+            qdrant_image = cfg.get("image_qdrant", DEFAULT_QDRANT_IMAGE) if cfg.get("enable_rag_knowledge", False) else None
             if use_docker:
-                images = ["ghcr.io/llm-framework/inference-node:latest"]
-                
-                # RAG Logic: Check if enabled
-                if self.framework.config.enable_rag_knowledge:
-                    images.append("qdrant/qdrant:latest")
+                images = [inference_image]
+
+                if qdrant_image:
+                    images.append(qdrant_image)
                     # WICHTIG: Slim RAG Strategy
                     # Wir erstellen nur die Struktur, kopieren aber KEINE Host-Daten.
                     self._setup_slim_vector_db(temp_path)
-                
+
                 self._export_docker_images(images, temp_path / "images")
 
             # D. Script Generation (Deploy + Compose Logic)
-            script_content = self._generate_deploy_script(artifact_path.name, flags_str, use_docker)
+            script_content = self._generate_deploy_script(
+                artifact_path.name, flags_str, use_docker, inference_image, qdrant_image)
             
             deploy_script_path = temp_path / "deploy.sh"
             with open(deploy_script_path, "w", newline='\n') as f:
@@ -174,45 +183,55 @@ class DeploymentManager:
                         for chunk in iter(lambda: f_in.read(4096), b""): sha.update(chunk)
                     f.write(f"{sha.hexdigest()}  {p.relative_to(directory)}\n")
 
-    def _generate_deploy_script(self, artifact, flags, use_docker) -> str:
+    def _generate_deploy_script(self, artifact, flags, use_docker,
+                                inference_image: str = DEFAULT_INFERENCE_IMAGE,
+                                qdrant_image: Optional[str] = None) -> str:
         script = [
             "#!/bin/bash",
             "set -e",
-            "echo '[1/5] Checking Integrity...'",
+            "echo '[1/3] Checking Integrity...'",
             "sha256sum -c checksums.sha256",
             ""
         ]
-        
+
         if use_docker:
-            # Multi-Container Logic
             script.extend([
-                "echo '[2/5] Loading Images (Air-Gap Support)...'",
-                "for img in images/*.tar; do docker load -i \"$img\"; done",
+                "echo '[2/3] Loading Images (Air-Gap Support)...'",
+                "for img in images/*.tar; do if [ -e \"$img\" ]; then docker load -i \"$img\"; fi; done",
                 "",
-                "echo '[3/5] Starting Stack (Inference + Local Memory)...'",
-                "# Create Network",
+                "echo '[3/3] Starting Stack...'",
                 "docker network create llm-net || true",
-                "",
-                "# 1. Qdrant Sidecar (Local Long-Term Memory)",
-                "# Nutzt ./data/qdrant für Persistenz auf dem Target",
-                "docker run -d --name qdrant-sidecar \\",
-                "  --network llm-net \\",
-                "  -v $(pwd)/data/qdrant:/qdrant/storage \\",
-                "  --restart unless-stopped \\",
-                "  qdrant/qdrant:latest",
-                "",
-                "# 2. Inference Node (with Hardware Access)",
-                f"docker run -d --name llm-node \\",
-                "  --network llm-net \\",
-                f"  {flags} \\", # Hardware Flags (NPU/GPU)
-                "  -e QDRANT_HOST=qdrant-sidecar \\",
-                "  -v $(pwd)/data:/app/data \\",
-                "  --restart unless-stopped \\",
-                "  ghcr.io/llm-framework/inference-node:latest",
                 ""
             ])
+            if qdrant_image:
+                script.extend([
+                    "# Qdrant Sidecar (Local Long-Term Memory, persisted in ./data/qdrant)",
+                    "docker run -d --name qdrant-sidecar \\",
+                    "  --network llm-net \\",
+                    "  -v \"$(pwd)/data/qdrant:/qdrant/storage\" \\",
+                    "  --restart unless-stopped \\",
+                    f"  {shlex.quote(qdrant_image)}",
+                    ""
+                ])
+            node = [
+                "# Inference Node (with Hardware Access)",
+                "docker run -d --name llm-node \\",
+                "  --network llm-net \\",
+            ]
+            if flags:
+                node.append(f"  {flags} \\")  # Hardware Flags (NPU/GPU) from the target profile
+            if qdrant_image:
+                node.append("  -e QDRANT_HOST=qdrant-sidecar \\")
+            node.extend([
+                "  -v \"$(pwd)/data:/app/data\" \\",
+                "  --restart unless-stopped \\",
+                f"  {shlex.quote(inference_image)}",
+                ""
+            ])
+            script.extend(node)
         else:
-            script.append(f"chmod +x {artifact} && ./{artifact}")
+            quoted = shlex.quote(f"./{artifact}")
+            script.append(f"chmod +x {quoted} && {quoted}")
 
         script.append("echo 'Deployment Complete. System is ready.'")
         return "\n".join(script)
@@ -230,6 +249,11 @@ class DeploymentManager:
             self.logger.error(f"Security/Format Error: Invalid IP address provided: {target_ip}")
             return False
 
+        # A leading '-' would be parsed by ssh/scp as an option (e.g. -oProxyCommand=...).
+        if not SSH_USER_PATTERN.match(user or ""):
+            self.logger.error(f"Security/Format Error: Invalid SSH user name: {user!r}")
+            return False
+
         # 2. Verbindungscheck (Port Reachability)
         if not self._check_conn(target_ip):
             self.logger.error(f"Target {target_ip} not reachable (Port 22 check failed).")
@@ -244,9 +268,15 @@ class DeploymentManager:
 
     def _check_conn(self, ip, port=22):
         try:
-            socket.create_connection((ip, port), timeout=2)
-            return True
-        except: return False
+            with socket.create_connection((ip, port), timeout=2):
+                return True
+        except OSError:
+            return False
+
+    @staticmethod
+    def _remote_install_cmd(target_dir: str, package_name: str) -> str:
+        d, pkg = shlex.quote(target_dir), shlex.quote(package_name)
+        return f"cd {d} && unzip -o {pkg} && chmod +x deploy.sh && ./deploy.sh"
 
     def _deploy_paramiko(self, artifact, ip, user, pw, target_dir):
         ssh = paramiko.SSHClient()
@@ -263,7 +293,7 @@ class DeploymentManager:
             
             # Execute
             self.logger.info("Installing on target...")
-            cmd = f"cd {target_dir} && unzip -o {artifact.name} && chmod +x deploy.sh && ./deploy.sh"
+            cmd = self._remote_install_cmd(target_dir, artifact.name)
             stdin, stdout, stderr = ssh.exec_command(cmd)
             
             # Stream Output
@@ -286,9 +316,9 @@ class DeploymentManager:
         """Fallback auf System SSH/SCP calls."""
         try:
             target = f"{user}@{ip}"
-            subprocess.run(["ssh", target, f"mkdir -p {target_dir}"], check=True)
+            subprocess.run(["ssh", target, f"mkdir -p {shlex.quote(target_dir)}"], check=True)
             subprocess.run(["scp", str(artifact), f"{target}:{target_dir}/"], check=True)
-            cmd = f"cd {target_dir} && unzip -o {artifact.name} && chmod +x deploy.sh && ./deploy.sh"
+            cmd = self._remote_install_cmd(target_dir, artifact.name)
             res = subprocess.run(["ssh", target, cmd], capture_output=True, text=True)
             self.logger.info(res.stdout)
             if res.stderr: self.logger.warning(res.stderr)

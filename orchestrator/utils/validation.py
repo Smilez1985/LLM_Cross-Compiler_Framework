@@ -131,7 +131,11 @@ class ValidationResult:
     details: Dict[str, Any] = field(default_factory=dict)
     validation_type: ValidationType = ValidationType.CONFIGURATION
     timestamp: datetime = field(default_factory=datetime.now)
-    
+
+    # Callers write `if not validate_x(...)`; without this every result is truthy.
+    def __bool__(self) -> bool:
+        return bool(self.valid)
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary"""
         return {
@@ -1403,6 +1407,46 @@ def validate_url(url: str) -> ValidationResult:
             validation_type=ValidationType.CONFIGURATION,
             details={"url": url, "exception": str(e)}
         )
+
+
+def validate_public_url(url: str) -> ValidationResult:
+    """Validate that a URL is http(s) and only resolves to public addresses (SSRF guard)."""
+    def _fail(message: str) -> ValidationResult:
+        return ValidationResult(
+            valid=False,
+            severity=ValidationSeverity.ERROR,
+            message=message,
+            validation_type=ValidationType.SECURITY,
+            details={"url": url}
+        )
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception as e:
+        return _fail(f"URL validation error: {e}")
+
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return _fail(f"Only http(s) URLs with a host are allowed: {url}")
+
+    try:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        infos = socket.getaddrinfo(parsed.hostname, port, proto=socket.IPPROTO_TCP)
+    except (socket.gaierror, ValueError) as e:
+        return _fail(f"Host could not be resolved: {parsed.hostname} ({e})")
+
+    for info in infos:
+        addr = ipaddress.ip_address(info[4][0].split("%")[0])
+        if (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast
+                or addr.is_reserved or addr.is_unspecified):
+            return _fail(f"URL resolves to non-public address {addr}: {url}")
+
+    return ValidationResult(
+        valid=True,
+        severity=ValidationSeverity.SUCCESS,
+        message=f"Public URL valid: {url}",
+        validation_type=ValidationType.SECURITY,
+        details={"url": url, "host": parsed.hostname}
+    )
 
 
 def validate_email(email: str) -> ValidationResult:

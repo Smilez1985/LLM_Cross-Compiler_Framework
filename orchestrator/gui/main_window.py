@@ -33,7 +33,8 @@ from orchestrator.Core.orchestrator import OrchestrationStatus
 from orchestrator.utils.localization import get_instance as get_i18n
 
 # GUI Components
-from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog
+from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog, AIConfigurationDialog
+from orchestrator.gui.wizards import ModuleCreationWizard
 from orchestrator.gui.builder_tab import BuilderTab
 from orchestrator.gui.chat_window import ChatWindow
 from orchestrator.gui.deployment_window import DeploymentWindow
@@ -114,6 +115,15 @@ class MainOrchestrator(QMainWindow):
         act_ssh = QAction("Set Target SSH Password", self)
         act_ssh.triggered.connect(lambda: self._open_secret_dialog("target_password", "SSH Password (Root)"))
         sec_menu.addAction(act_ssh)
+
+        tools_menu = menubar.addMenu("Tools")
+        act_ai = QAction("Configure AI Agent (Ditto)...", self)
+        act_ai.triggered.connect(self._open_ai_config)
+        tools_menu.addAction(act_ai)
+
+        act_wizard = QAction("Create Hardware Module...", self)
+        act_wizard.triggered.connect(self._open_module_wizard)
+        tools_menu.addAction(act_wizard)
 
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About", self)
@@ -241,6 +251,20 @@ class MainOrchestrator(QMainWindow):
             
         dlg = SecretInputDialog(self.framework, key, name, self)
         dlg.exec()
+
+    def _open_ai_config(self):
+        dlg = AIConfigurationDialog(self.framework, self)
+        if dlg.exec():
+            cfg = dlg.get_config()
+            mode = "Offline" if cfg.get("offline_mode") else f"{cfg.get('provider')} / {cfg.get('model')}"
+            self.status.showMessage(f"AI Agent configured: {mode}", 5000)
+
+    def _open_module_wizard(self):
+        targets_dir = self.app_root / self.framework.config.get("targets_dir", "targets")
+        wizard = ModuleCreationWizard(targets_dir, self)
+        wizard.exec()
+        if self.framework.target_manager:
+            self.framework.target_manager.initialize()
 
     def trigger_healing_dialog(self, proposal):
         """Shows the Self-Healing Proposal Dialog."""

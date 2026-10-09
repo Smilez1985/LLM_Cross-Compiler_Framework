@@ -50,7 +50,7 @@ class SecretsManager:
             self.config_dir = framework_manager
             self.audit_log_file = self.config_dir / "audit.log"
         else:
-            self.config_dir = Path(framework_manager.config.configs_dir) if hasattr(framework_manager.config, 'configs_dir') else Path("config")
+            self.config_dir = Path(getattr(framework_manager.config, 'config_dir', None) or "config")
             self.audit_log_file = (Path(framework_manager.config.logs_dir) if hasattr(framework_manager.config, 'logs_dir') else Path("logs")) / "audit.log"
             
         self.secrets_file = self.config_dir / "secrets.store"
