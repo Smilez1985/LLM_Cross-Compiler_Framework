@@ -5,6 +5,8 @@ Findings in handover/2026-10-10/review-phase1-2-findings.json (index in "kept"):
 dataset refused; 20/37 `-o` and the deploy commands use different folders; 21 '~' in output_dir; 28/38 upper-case
 boards refused; 29 aliases the module scripts accept refused; 30 GUI submits no quantization for an empty field;
 31 GUI board not editable for targets without capabilities; 32 stale default after a target refresh.
+Follow-up round: the CLI resolves target names case-insensitively and refuses unknown ones; a target without
+capabilities gets neither another target's board nor its default quantization.
 """
 
 import io
@@ -631,6 +633,22 @@ class TestCliBuildStart:
         out = Path(cli.submitted[0].output_base_dir)
         assert out.parent == Path(os.environ["HOME"]) / "llm-builds" and out.name.startswith("build_")
 
+    @pytest.mark.parametrize("name", ["rockchip", "ROCKCHIP"])
+    def test_target_name_in_another_case_is_validated_and_canonical(self, cli, name):
+        refused = cli.invoke("build", "start", "-m", HF_MODEL, "-t", name, "-f", "rkllm", "-q", "w4a16")
+        assert refused.code == 2 and "not supported for rkllm on rk3588" in refused.out, refused.out
+        assert cli.submitted == []
+        accepted = cli.invoke("build", "start", "-m", HF_MODEL, "-t", name, "-f", "gguf", "-b", "RK3566")
+        assert accepted.code == 0, accepted.out
+        req = cli.submitted[0]
+        assert (req.targets, req.target_board, req.quantization_options) == (["Rockchip"], "rk3566", ["Q4_0"])
+
+    def test_unknown_target_exits_2_and_submits_nothing(self, cli):
+        result = cli.invoke("build", "start", "-m", HF_MODEL, "-t", "NoSuchTarget")
+        assert result.code == 2, result.out
+        assert "Unknown target 'NoSuchTarget'" in result.out and "Rockchip" in result.out
+        assert cli.submitted == []
+
     def test_target_without_capabilities_gets_a_lower_case_board(self, mixed_framework, tmp_path, monkeypatch):
         cli = make_cli(mixed_framework, tmp_path, monkeypatch)
         result = cli.invoke("build", "start", "-m", HF_MODEL, "-t", "MyJetson", "-b", " Orin-NX ", "-q", "Custom_Q")
@@ -1074,8 +1092,6 @@ class TestBuilderTabWithoutCapabilities:
         assert tab.quant_combo.currentText() == tab._capabilities().formats["gguf"].default_for(board)
         assert not tab._quant_user_set
 
-    @pytest.mark.xfail(strict=True, reason="BUG: _update_boards carries the Rockchip board id into a target "
-                                           "without capabilities as typed text (finding 31 not fully fixed)")
     @pytest.mark.parametrize("board", ["rk3588", "rk3566"])
     def test_rockchip_board_is_not_carried_into_a_capability_less_target(self, tab, board):
         # Finding 31: a wizard target must not be built with a Rockchip board id nobody chose for it.
@@ -1085,6 +1101,24 @@ class TestBuilderTabWithoutCapabilities:
         select(tab.target_combo, "MyJetson")
         assert tab._selected_board() is None, f"board {tab._selected_board()!r} came from the Rockchip target"
         assert submit(tab).target_board is None
+
+    @pytest.mark.parametrize("fmt, board, default", [("rkllm", "rk3576", "w4a16"), ("gguf", "rk3566", "Q4_0")])
+    def test_rockchip_default_quantization_is_not_carried_into_it(self, tab, fmt, board, default):
+        # w4a16 exists only on rk3576; without a board the target's scripts build for their own default board.
+        select(tab.target_combo, "Rockchip")
+        select(tab.format_combo, fmt)
+        select(tab.board_combo, board)
+        assert tab.quant_combo.currentText() == default and not tab._quant_user_set
+        select(tab.target_combo, "MyJetson")
+        req = submit(tab)
+        assert (req.target_board, req.quantization_options) == (None, []), "the target's own defaults"
+
+    def test_a_chosen_quantization_survives_the_switch(self, tab):
+        select(tab.target_combo, "Rockchip")
+        select(tab.format_combo, "gguf")
+        pick_quant(tab, "Q5_K_M")
+        select(tab.target_combo, "MyJetson")
+        assert submit(tab).quantization_options == ["Q5_K_M"]
 
 
 @pytest.mark.usefixtures("qapp", "gui_messages")
@@ -1100,8 +1134,6 @@ class TestBuilderTabFreshWithoutCapabilities:
         assert tab.board_combo.isEditable()
         assert [tab.board_combo.itemData(i) for i in range(tab.board_combo.count())] == [None]
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the constructor's static board list leaves 'rk3588' as typed "
-                                           "board text for a target without capabilities (finding 31)")
     def test_fresh_tab_submits_no_board(self, tab):
         assert tab._selected_board() is None, f"board {tab._selected_board()!r} nobody chose"
         assert submit(tab).target_board is None
@@ -1109,3 +1141,10 @@ class TestBuilderTabFreshWithoutCapabilities:
     def test_choosing_none_explicitly_submits_no_board(self, tab):
         tab.board_combo.setCurrentIndex(tab.board_combo.findText("(none)"))
         assert submit(tab).target_board is None
+
+    @pytest.mark.parametrize("fmt", ["gguf", "rkllm"])
+    def test_fresh_tab_submits_no_quantization_nobody_chose(self, tab, fmt):
+        select(tab.format_combo, fmt)
+        assert tab.quant_combo.currentText() == "" and not tab._quant_user_set
+        assert tab.quant_combo.lineEdit().placeholderText(), "the empty field is explained"
+        assert submit(tab).quantization_options == []

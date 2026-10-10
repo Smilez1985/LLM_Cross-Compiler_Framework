@@ -52,7 +52,8 @@ def _primary_name(info: Dict[str, Any]) -> Optional[str]:
 
 def list_builds(output_dir: Path) -> List[Dict[str, Any]]:
     """Finished builds below output_dir, found through their build manifest (newest first).
-    Symlinked subfolders are followed (output trees moved to another disk), loops are skipped."""
+    Symlinked subfolders are followed (output trees moved to another disk), loops are skipped.
+    Hidden folders are skipped: the build engine stages a build there until it has completed."""
     builds, seen = [], set()
     for root, dirs, files in os.walk(output_dir, followlinks=True):
         real = os.path.realpath(root)
@@ -60,6 +61,7 @@ def list_builds(output_dir: Path) -> List[Dict[str, Any]]:
             dirs[:] = []
             continue
         seen.add(real)
+        dirs[:] = [d for d in dirs if not d.startswith(".")]
         if BUILD_MANIFEST not in files:
             continue
         try:
