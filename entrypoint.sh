@@ -128,6 +128,9 @@ initialize_container() {
         
         # Neustart des Skripts als llmbuilder User
         # Priorität: su-exec (leichtgewichtiger) -> gosu -> su
+        # With PUID=0 llmbuilder is mapped to uid 0, so the restarted script is root again;
+        # the marker stops it from initializing (and re-executing) forever.
+        export LLM_ENTRYPOINT_INITIALIZED=1
         if command -v su-exec >/dev/null; then
             exec su-exec llmbuilder "$0" "$@"
         elif command -v gosu >/dev/null; then
@@ -250,6 +253,13 @@ run_system_tests() {
         "$RKNN_PYTHON" -c "from rknn.api import RKNN" && echo "✅ RKNN toolkit" || { log_error "RKNN toolkit broken"; exit 1; }
     fi
 
+    # Each toolchain venv must be internally consistent (the SDKs pin conflicting torch versions).
+    local py
+    for py in python3 ${RKLLM_PYTHON:-} ${RKNN_PYTHON:-}; do
+        "$py" -m pip check >/dev/null || { log_error "Broken requirements in $("$py" -c 'import sys; print(sys.prefix)')"; "$py" -m pip check; exit 1; }
+    done
+    echo "✅ Python environments consistent (pip check)"
+
     if command -v aarch64-linux-gnu-gcc >/dev/null; then
         echo "✅ Cross-Compiler (GCC aarch64) detected"
     else
@@ -265,7 +275,7 @@ run_system_tests() {
 
 main() {
     # Check for root -> Initialize & Switch User
-    if [ "$(id -u)" = "0" ]; then
+    if [ "$(id -u)" = "0" ] && [ -z "${LLM_ENTRYPOINT_INITIALIZED:-}" ]; then
         initialize_container "$@"
         # initialize_container uses exec, so this code is unreachable
     fi
