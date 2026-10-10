@@ -86,6 +86,11 @@ class BuildRequest:
     # NEW v2.4.0: Smart Calibration Flags
     use_imatrix: bool = False
     dataset_path: Optional[str] = None
+
+    # Board within the target family (e.g. rk3588 vs rk3566) and model kind
+    target_board: Optional[str] = None
+    model_task: str = "LLM"
+    max_context_length: Optional[int] = None
     
     def __post_init__(self):
         if not self.request_id:
@@ -257,6 +262,9 @@ class LLMOrchestrator:
             use_gpu=req.use_gpu,
             base_image=base_img,
             source_format=ModelFormat.HUGGINGFACE,
+            target_board=req.target_board,
+            model_task=req.model_task,
+            max_context_length=req.max_context_length,
             # Pass IMatrix Config
             use_imatrix=req.use_imatrix,
             dataset_path=req.dataset_path
@@ -272,8 +280,10 @@ class LLMOrchestrator:
         
         # 0. Smart Calibration / IMatrix Preparation (NEW v2.4.0)
         # ------------------------------------------------------------------
-        # Falls IMatrix gewünscht ist, müssen wir Ditto bitten, ein Dataset zu liefern.
-        if req.use_imatrix:
+        # Falls IMatrix gewünscht ist und der Nutzer keinen Datensatz mitgibt, liefert Ditto einen.
+        if req.use_imatrix and req.dataset_path:
+            self.logger.info(f"IMatrix enabled with user dataset {req.dataset_path}")
+        elif req.use_imatrix:
             state.current_stage = "Preparing Calibration Data"
             if not self.ditto:
                 self.logger.warning("IMatrix requested but Ditto Manager not available. Skipping Smart Calibration.")
@@ -333,7 +343,7 @@ class LLMOrchestrator:
                             optimization=req.optimization_level,
                             quantization=q,
                             output_path=str(out_dir),
-                            status=BuildStatus.PENDING
+                            status=BuildStatus.QUEUED
                         )
                         build_jobs.append(job)
 

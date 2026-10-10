@@ -23,6 +23,7 @@ import time
 import shutil
 import tempfile
 import hashlib
+import re
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Callable, Tuple
 from dataclasses import dataclass, field, asdict
@@ -67,6 +68,7 @@ class BuildStatus(Enum):
 class ModelFormat(Enum):
     HUGGINGFACE = "hf"
     GGUF = "gguf"
+    RKLLM = "rkllm"          # Rockchip NPU LLM (RK3588/RK3576)
     ONNX = "onnx"
     TENSORFLOW_LITE = "tflite"
     PYTORCH_MOBILE = "pytorch_mobile"
@@ -84,6 +86,10 @@ class OptimizationLevel(Enum):
     SIZE = "size"
     SPEED = "speed"
     AGGRESSIVE = "aggressive"
+
+TERMINAL_STATES = ("completed", "failed", "cancelled")
+# owner/name as used on huggingface.co; no path traversal
+HF_REPO_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 
 # ============================================================================
 # DATA MODELS
@@ -306,6 +312,7 @@ class BuildEngine:
         progress = self._builds.get(build_id)
         if not progress: return False
         
+        previous = progress.status
         try:
             progress.status = BuildStatus.CLEANING
             
@@ -325,6 +332,10 @@ class BuildEngine:
                 
             return True
         except Exception: return False
+        finally:
+            # Pollers wait for a terminal state; cleanup after a failure must not hide it.
+            if previous.value in TERMINAL_STATES:
+                progress.status = previous
     
     def _execute_build(self, config: BuildConfiguration):
         """Main execution flow running in worker thread."""
@@ -355,6 +366,9 @@ class BuildEngine:
             
             # 4. Build Docker Image
             image = self._build_docker_image(config, prog, df_path)
+
+            # 4a. Make the model available inside the containers
+            staged = self._stage_model(config, prog)
             
             # 5. Security Scan
             self._scan_image_security(image.tags[0], prog)
@@ -363,12 +377,12 @@ class BuildEngine:
             # Only if use_imatrix is True AND a dataset is provided
             if config.use_imatrix:
                 if config.dataset_path and os.path.exists(config.dataset_path):
-                    self._generate_imatrix(config, prog, image, target_path)
+                    self._generate_imatrix(config, prog, image, target_path, staged)
                 else:
                     prog.add_warning("IMatrix requested but no dataset found. Skipping IMatrix generation.")
             
             # 6. Run Build Modules (Main Conversion/Quantization)
-            self._execute_build_modules(config, prog, image, target_path)
+            self._execute_build_modules(config, prog, image, target_path, staged)
             
             # 7. Extract Artifacts
             self._extract_artifacts(config, prog)
@@ -443,8 +457,10 @@ class BuildEngine:
         progress.add_log(f"Building Docker Image: {tag}")
         
         try:
-            buildargs = config.build_args.copy()
-            if sys.platform != "win32":
+            buildargs = {"LLAMA_CPP_TAG": str(self._get_conf("llama_cpp_version", "v0.6.0"))}
+            buildargs.update(config.build_args)
+            # uid/gid 0 already exist in the image (root); the entrypoint maps the user at runtime anyway.
+            if sys.platform != "win32" and os.getuid() != 0:
                 buildargs["USER_ID"] = str(os.getuid())
                 buildargs["GROUP_ID"] = str(os.getgid())
 
@@ -469,10 +485,13 @@ class BuildEngine:
             raise RuntimeError(f"Image build failed: {e}")
 
     def _scan_image_security(self, image_tag: str, progress: BuildProgress):
+        if not self._get_conf("enable_security_scan", True):
+            progress.add_log("Security scan disabled (enable_security_scan=false).")
+            return
         progress.add_log(f"Scanning image {image_tag} for vulnerabilities...")
         try:
             scan_cmd = ["image", "--exit-code", "1", "--severity", "HIGH,CRITICAL", image_tag]
-            trivy_image = self._get_conf('image_trivy', "aquasec/trivy:latest")
+            trivy_image = self._get_conf('image_trivy', "aquasec/trivy:0.75.0")
             
             log_stream = self.docker_client.containers.run(
                 trivy_image, 
@@ -491,7 +510,67 @@ class BuildEngine:
         except Exception as e:
             progress.add_warning(f"Security scan failed to run: {e}")
 
-    def _generate_imatrix(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path):
+    def _hf_token(self) -> Optional[str]:
+        sm = getattr(self.framework, "secrets_manager", None) if self.framework else None
+        try:
+            return sm.get_secret("hf_token") if sm else None
+        except Exception:
+            return None
+
+    def _stage_model(self, config: BuildConfiguration, progress: BuildProgress) -> Tuple[str, Dict[str, Dict[str, str]]]:
+        """Returns the model path inside the container and the extra volumes needed to reach it.
+        Local paths are mounted read-only; HuggingFace repo ids are downloaded into cache/models/hf."""
+        progress.current_stage = "Fetching model"
+        source = (config.model_source or "").strip()
+        if not source:
+            # Path("") is the current directory, which must never be mounted as "the model".
+            raise ValueError("No model source given.")
+        local = Path(source).expanduser()
+        if local.exists():
+            local = local.resolve()
+            mount = local if local.is_dir() else local.parent
+            inner = "/build-cache/input-model" + ("" if local.is_dir() else f"/{local.name}")
+            progress.add_log(f"Using local model {local}")
+            return inner, {str(mount): {"bind": "/build-cache/input-model", "mode": "ro"}}
+
+        if not HF_REPO_ID.match(source) or ".." in source:
+            raise ValueError(f"Model '{source}' is neither an existing local path nor a HuggingFace repo id (owner/name).")
+
+        from huggingface_hub import HfApi, snapshot_download
+        token = self._hf_token()
+        revision = config.model_branch or None
+        files = HfApi(token=token).list_repo_files(source, revision=revision)
+        ignore = ["*.gguf", "*.onnx", "*.onnx_data", "*.h5", "*.msgpack", "*.ot", "*.tflite", "original/*", "onnx/*"]
+        if any(f.endswith(".safetensors") for f in files):
+            ignore += ["*.bin", "*.pt", "*.pth"]  # same weights twice otherwise
+
+        dest = self.cache_dir / "models" / "hf" / source.replace("/", "__")
+        progress.add_log(f"Downloading {source} from Hugging Face to {dest} ...")
+        snapshot_download(repo_id=source, revision=revision, local_dir=str(dest), token=token, ignore_patterns=ignore)
+        return f"/build-cache/models/hf/{dest.name}", {}
+
+    def _container_env(self, config: BuildConfiguration, model_path: str) -> Dict[str, str]:
+        name = config.output_name or re.sub(r"[^\w.-]", "_", Path(config.model_source.rstrip("/")).name) or "model"
+        env = {
+            "BUILD_ID": config.build_id,
+            "MODEL_SOURCE": model_path,
+            "MODEL_NAME": name,
+            "MODEL_TASK": config.model_task,
+            "TARGET_ARCH": config.target_arch,
+            "TARGET_BOARD": config.target_board or "",
+            "TARGET_FORMAT": config.target_format.value,
+            "OPTIMIZATION_LEVEL": config.optimization_level.value,
+            "QUANTIZATION": config.quantization or "",
+        }
+        if config.max_context_length:
+            env["MAX_CONTEXT_LENGTH"] = str(config.max_context_length)
+        if sys.platform != "win32":
+            # Files written to the mounted output/cache dirs then belong to the host user.
+            env["PUID"], env["PGID"] = str(os.getuid()), str(os.getgid())
+        return env
+
+    def _generate_imatrix(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
+                          staged: Tuple[str, Dict[str, Dict[str, str]]]):
         """
         NEW in v2.4.0: Runs a pre-build container to generate the importance matrix.
         """
@@ -510,13 +589,13 @@ class BuildEngine:
             # IMPORTANT: Mount dataset
             str(config.dataset_path): {"bind": "/build-cache/dataset.txt", "mode": "ro"}
         }
+        vols.update(staged[1])
         
-        env = {
+        env = self._container_env(config, staged[0])
+        env.update({
             "JOB_TYPE": "imatrix", # Signal to build.sh to run --imatrix mode
-            "BUILD_ID": config.build_id,
-            "MODEL_SOURCE": config.model_source,
             "DATASET_PATH": "/build-cache/dataset.txt"
-        }
+        })
         
         # SSOT Repo Injection
         source_repos = self._get_conf("source_repositories", {})
@@ -563,7 +642,8 @@ class BuildEngine:
             try: container.remove(force=True)
             except: pass
 
-    def _execute_build_modules(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path):
+    def _execute_build_modules(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
+                               staged: Tuple[str, Dict[str, Dict[str, str]]]):
         progress.current_stage = "Running modules"
         progress.status = BuildStatus.BUILDING
         progress.progress_percent = 60
@@ -578,19 +658,11 @@ class BuildEngine:
             # modules/ are not mounted: the image was built from this target's staged context and
             # already contains them executable; a host mount would hide that copy (mode 644 on Linux).
         }
+        vols.update(staged[1])
         
         # 2. Environment Setup
-        env = {
-            "JOB_TYPE": "build", # Default mode
-            "BUILD_ID": config.build_id,
-            "MODEL_SOURCE": config.model_source,
-            "MODEL_TASK": config.model_task, 
-            "TARGET_ARCH": config.target_arch,
-            "OPTIMIZATION_LEVEL": config.optimization_level.value,
-            "QUANTIZATION": config.quantization or "",
-            "LLAMA_CPP_COMMIT": config.build_args.get("LLAMA_CPP_COMMIT", "b3626"),
-            "TARGET_FORMAT": config.target_format.value
-        }
+        env = self._container_env(config, staged[0])
+        env["JOB_TYPE"] = "build"
         
         # Check for IMatrix from previous step
         imatrix_file = build_temp / "imatrix" / "imatrix.dat"

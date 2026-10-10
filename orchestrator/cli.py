@@ -490,8 +490,10 @@ def build():
 @build.command('start')
 @click.option('--model', '-m', required=True, help='Model name (HuggingFace) or local path')
 @click.option('--target', '-t', required=True, help='Target hardware architecture (folder name in targets/)')
-@click.option('--format', '-f', default='gguf', help='Target format (gguf, onnx, tflite)')
-@click.option('--quantization', '-q', help='Quantization method (q4_0, q8_0, etc.)')
+@click.option('--format', '-f', default='gguf', type=click.Choice([f.value for f in ModelFormat if f is not ModelFormat.HUGGINGFACE]),
+              help='Target format (gguf: llama.cpp/CPU, rkllm: Rockchip NPU LLM, rknn: Rockchip NPU ONNX)')
+@click.option('--board', '-b', help='Board within the target family, e.g. rk3588, rk3576, rk3566')
+@click.option('--quantization', '-q', help='Quantization, e.g. Q4_K_M, IQ4_XS, F16 (gguf) or w4a16, w8a8 (rkllm)')
 @click.option('--output-dir', '-o', help='Custom output directory')
 @click.option('--optimization', default='balanced', 
               type=click.Choice(['fast', 'balanced', 'size', 'speed', 'aggressive']),
@@ -506,7 +508,7 @@ def build():
 @click.option('--imatrix/--no-imatrix', default=False, help='Enable Smart Calibration (IMatrix) for quantization')
 @click.option('--dataset', type=click.Path(exists=True), help='Custom calibration dataset path (txt)')
 @pass_context
-def start_build(ctx: FrameworkContext, model: str, target: str, format: str, 
+def start_build(ctx: FrameworkContext, model: str, target: str, format: str, board: Optional[str],
                 quantization: Optional[str], output_dir: Optional[str], 
                 optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: bool, dataset: Optional[str]):
@@ -554,7 +556,8 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str,
             use_gpu=gpu,
             # Pass IMatrix Flags to Orchestrator
             use_imatrix=imatrix,
-            dataset_path=dataset
+            dataset_path=str(Path(dataset).resolve()) if dataset else None,
+            target_board=board
         )
         
         loop = asyncio.new_event_loop()
@@ -575,37 +578,40 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str,
                     title=f"🚀 Starting Build: {request_id}"
                 ))
             
+            # The orchestrator's worker runs on this loop, so the CLI keeps it running until the build ends.
             if follow:
-                console.print("[blue]Following build progress (Ctrl+C to stop following)...[/blue]")
-                try:
-                    while True:
-                        workflow_status = loop.run_until_complete(ctx.orchestrator.get_workflow_status(request_id))
-                        if workflow_status:
-                            # v2.0: Enhanced Status Reporting
-                            status_color = "yellow"
-                            if workflow_status.status == OrchestrationStatus.COMPLETED: status_color = "green"
-                            if workflow_status.status == OrchestrationStatus.ERROR: status_color = "red"
-                            if workflow_status.status == OrchestrationStatus.HEALING: status_color = "magenta"
-                            
-                            console.print(f"[{status_color}]Status: {workflow_status.status.value} - {workflow_status.current_stage}[/{status_color}]")
-                            console.print(f"[cyan]Progress: {workflow_status.progress_percent}% ({workflow_status.completed_builds}/{workflow_status.total_builds} builds)[/cyan]")
-                            
-                            # Show Healing Info
+                console.print("[blue]Following build progress (Ctrl+C to stop)...[/blue]")
+            last = None
+            workflow_status = None
+            try:
+                while True:
+                    workflow_status = loop.run_until_complete(ctx.orchestrator.get_workflow_status(request_id))
+                    if workflow_status:
+                        line = (workflow_status.status, workflow_status.current_stage, workflow_status.completed_builds)
+                        if follow and line != last:
+                            status_color = {OrchestrationStatus.COMPLETED: "green", OrchestrationStatus.ERROR: "red",
+                                            OrchestrationStatus.HEALING: "magenta"}.get(workflow_status.status, "yellow")
+                            console.print(f"[{status_color}]Status: {workflow_status.status.value} - {workflow_status.current_stage} "
+                                          f"({workflow_status.completed_builds}/{workflow_status.total_builds} builds)[/{status_color}]")
                             if workflow_status.healing_proposal:
                                 hp = workflow_status.healing_proposal
-                                console.print(f"[bold magenta]🚑 Self-Healing Active: {hp.summary}[/bold magenta]")
+                                console.print(f"[bold magenta]Self-Healing: {hp.summary}[/bold magenta]")
                                 console.print(f"Proposed Fix: [italic]{hp.fix_command}[/italic]")
-                            
-                            if workflow_status.status in [OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR, OrchestrationStatus.CANCELLED]:
-                                break
-                        
-                        import time
-                        time.sleep(5)
-                except KeyboardInterrupt:
-                    console.print("\n[yellow]Stopped following build (build continues in background)[/yellow]")
-            else:
-                console.print(f"[green]Build started with ID: {request_id}[/green]")
-                console.print(f"Use 'llm-cli build status {request_id}' to check progress")
+                        last = line
+                        if workflow_status.status in [OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR, OrchestrationStatus.CANCELLED]:
+                            break
+                    loop.run_until_complete(asyncio.sleep(2))
+            except KeyboardInterrupt:
+                console.print("\n[yellow]Interrupted; the build is cancelled when the CLI exits.[/yellow]")
+                sys.exit(130)
+
+            if workflow_status:
+                for artifact in workflow_status.artifacts:
+                    console.print(f"[green]Artifacts: {artifact}[/green]")
+                for error in workflow_status.errors:
+                    console.print(f"[red]{error}[/red]")
+                if workflow_status.status != OrchestrationStatus.COMPLETED or workflow_status.failed_builds:
+                    sys.exit(1)
                 
         finally:
             loop.close()

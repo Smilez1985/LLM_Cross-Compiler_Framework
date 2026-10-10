@@ -66,11 +66,11 @@ build_tools:
 # Framework supports multiple backends per target
 inference_backends:
   llama_cpp:
-    repo_url: "https://github.com/ggerganov/llama.cpp"
+    repo_url: "https://github.com/ggml-org/llama.cpp"
     commit: "b4009"
-    docs_workflow: "https://github.com/ggerganov/llama.cpp/blob/master/docs/build.md"
-    docs_quantization: "https://github.com/ggerganov/llama.cpp/blob/master/examples/quantize/README.md"
-    docs_backends: "https://github.com/ggerganov/llama.cpp/blob/master/docs/backend.md"
+    docs_workflow: "https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md"
+    docs_quantization: "https://github.com/ggml-org/llama.cpp/blob/master/examples/quantize/README.md"
+    docs_backends: "https://github.com/ggml-org/llama.cpp/blob/master/docs/backend.md"
     docs_gguf_spec: "https://github.com/ggerganov/ggml/blob/master/docs/gguf.md"
     priority: "CRITICAL"
     integration_status: "ACTIVE"

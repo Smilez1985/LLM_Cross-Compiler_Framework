@@ -263,7 +263,9 @@ class ConfigManager:
             ConfigSchema("docker_namespace", str, False, "llm-framework", "Docker namespace"),
             
             # --- SSOT: Centralized Image Definitions (v2.3) ---
-            ConfigSchema("image_trivy", str, False, "aquasec/trivy:latest", "Security Scanner Image"),
+            ConfigSchema("image_trivy", str, False, "aquasec/trivy:0.75.0", "Security Scanner Image (pinned: 'latest' was compromised in 2026-03)"),
+            ConfigSchema("enable_security_scan", bool, False, True, "Scan built images with Trivy"),
+            ConfigSchema("llama_cpp_version", str, False, "v0.6.0", "llama.cpp release tag built into target images"),
             ConfigSchema("image_qdrant", str, False, "qdrant/qdrant:v1.16.0", "Vector DB Image"),
             ConfigSchema("image_base_debian", str, False, "debian:bookworm-slim", "Base Build Image"),
             ConfigSchema("image_inference_runtime", str, False, "ghcr.io/smilez1985/llm-runtime:latest", "Inference Image"),
@@ -500,6 +502,7 @@ class ConfigManager:
                 "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",
                 # v2.3
                 "image_trivy", "image_qdrant", "image_base_debian", "image_inference_runtime",
+                "enable_security_scan", "llama_cpp_version",
                 # v2.4 (SSOT & IMatrix)
                 "source_repositories", "default_enable_imatrix", "default_calibration_dataset"
             ]

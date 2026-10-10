@@ -11,9 +11,11 @@ Updates v2.4.0:
 - Version Bump auf v2.4.0 (Smart Calibration Update).
 """
 
+import asyncio
 import os
 import sys
 import logging
+import threading
 from pathlib import Path
 from dataclasses import dataclass
 from typing import Optional, Dict, Any
@@ -76,6 +78,7 @@ class FrameworkManager:
         self.updater: Optional[UpdateManager] = None
 
         self._initialized = False
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def initialize(self) -> bool:
         """Führt die Boot-Sequenz durch."""
@@ -152,6 +155,14 @@ class FrameworkManager:
         except Exception as e:
             self.logger.critical(f"Fatal Error during framework initialization: {e}", exc_info=True)
             return False
+
+    def run_coroutine(self, coro, timeout: Optional[float] = None):
+        """Runs a coroutine on a long-lived background event loop and waits for its result.
+        The orchestrator keeps build tasks on its loop, so that loop must outlive the caller (e.g. a GUI slot)."""
+        if self._loop is None:
+            self._loop = asyncio.new_event_loop()
+            threading.Thread(target=self._loop.run_forever, name="framework-asyncio", daemon=True).start()
+        return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout)
 
     def ensure_rag_manager(self) -> Optional[RAGManager]:
         """Creates the RAG manager on demand once RAG is enabled (also at runtime via GUI)."""
