@@ -25,12 +25,12 @@ import shlex
 import subprocess
 import sys
 import tempfile
-import unicodedata
 from pathlib import Path
 from typing import Annotated, Any, Dict, Optional
 
 from pydantic import BaseModel, Field
 
+from orchestrator.tools.confirmation import CallTooLong, describe_call
 from orchestrator.tools.policy import Decision
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
 from orchestrator.utils.logging import get_logger
@@ -57,42 +57,6 @@ class NotAsked(Confirmation):
     """Resolver outcome when nobody was asked: the policy decided, or the client cannot ask.
     The registry then decides on its own and records the call as not confirmed by a person."""
     can_ask: bool = True
-
-
-# Shown first in a confirmation, because they decide what a call touches.
-PRIORITY_FIELDS = ("model", "dataset_path", "use_gpu", "target", "format", "board", "quantization",
-                   "request_id", "approve")
-MAX_DESCRIPTION = 4000
-
-
-class CallTooLong(ValueError):
-    """The arguments cannot be shown completely, so they cannot be confirmed."""
-
-
-def _visible(value: Any) -> str:
-    """A value as the user sees it: control, format and bidi characters escaped, nothing cut off."""
-    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
-    out = []
-    for ch in text:
-        if unicodedata.category(ch) in ("Cc", "Cf", "Co", "Cs", "Cn", "Zl", "Zp"):
-            out.append(f"\\u{ord(ch):04x}")
-        else:
-            out.append(ch)
-    return "".join(out)
-
-
-def _describe_call(spec: ToolSpec, arguments: Dict[str, Any]) -> str:
-    """Every argument the tool will run with, complete. The question text is part of the elicitation's
-    identity, so an answer can only ever confirm exactly these values."""
-    shown = {k: v for k, v in arguments.items() if v is not None}
-    order = [k for k in PRIORITY_FIELDS if k in shown] + [k for k in shown if k not in PRIORITY_FIELDS]
-    lines = [f"  {_visible(k)}: {_visible(shown[k])}" for k in order]
-    text = (f"The AI client wants to run '{spec.title}' in the LLM Cross-Compiler Framework with:\n"
-            + ("\n".join(lines) if lines else "  (no arguments)"))
-    if len(text) > MAX_DESCRIPTION:
-        raise CallTooLong(f"The arguments for '{spec.title}' are too long to show for a confirmation "
-                          f"({len(text)} characters); the call was not run.")
-    return text
 
 
 def _model_parameters(model: type) -> list:
@@ -126,7 +90,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
                                    and getattr(elicitation, "url", None) is not None):
             return NotAsked(approve=False, can_ask=False)
         try:
-            return Elicit(_describe_call(spec, arguments), Confirmation)
+            return Elicit(describe_call(spec, arguments), Confirmation)
         except CallTooLong as e:
             raise MCPToolError(str(e)) from None
 
