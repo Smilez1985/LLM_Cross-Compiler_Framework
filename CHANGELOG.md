@@ -1,9 +1,105 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to this project are documented in this file.
+German version: [CHANGELOG_DE.md](CHANGELOG_DE.md).
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html).
+Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
+
+## [Unreleased]
+
+## [3.0.0] - 2026-10-10
+**Repair, security and MCP release.** The build pipeline works end to end again (verified with real
+conversions), every known dependency vulnerability is gone, AI clients can drive the framework over the
+Model Context Protocol, and conversion containers run in a sandbox.
+
+### Added
+- **MCP server** (`llm-cli mcp serve`, official SDK `mcp` 2.3.0, spec 2026-07-28): Claude Code, Claude
+  Desktop or VS Code can list targets, check capabilities, start/cancel builds, read logs and artifacts,
+  search the knowledge base, run the doctor and decide on self-healing proposals. stdio by default;
+  optional Streamable HTTP on loopback with a per-user bearer token. `llm-cli mcp config` prints the client
+  setup, `--write claude-desktop` adds it to Claude Desktop.
+- **Tool registry with permissions and audit log** shared by Ditto and the MCP server: typed tools with risk
+  tiers (read, local write, external, forbidden), permissions asked once at Ditto's first setup (GUI dialog,
+  `llm-cli ditto setup`, `llm-cli tools permissions`), confirmations via MCP elicitation, and an HMAC-chained
+  audit log (`llm-cli tools audit --verify`).
+- **Target capabilities** (`capabilities:` block in `target.yml`, pydantic schema): boards, formats,
+  quantizations per board, defaults and calibration needs. GUI, CLI, build service and MCP tools offer and
+  validate exactly what a target declares.
+- **Build service**: one typed entry point for builds (validate, start, status, cancel, logs, artifacts).
+- **`llm-cli doctor`**: deterministic health checks (Docker, disk, targets, security, tool permissions,
+  calibration data) with fix hints, tiered automatic fixes and JSON output (inspired by "Mojo" in rag4ll).
+- **Curated calibration text** (`data/calibration`, MIT, checksummed German/English/tool-use sets) for
+  importance matrices.
+- **Build manifests**: every build completes `build_info.json` with its model files and SHA256 hashes; the
+  deployment window lists builds from these manifests.
+- **Real build cancellation and per-stage timeouts**.
+- **SSH trust on first use**: host key fingerprints are confirmed by the user and stored in the framework's
+  own `known_hosts`; a framework Ed25519 key is installed on the device once ("pairing").
+- **Real CI workflows** (lint, tests on Ubuntu 3.11-3.14 and Windows, bandit, pip-audit, Docker build and
+  smoke tests including the sandbox) and Dependabot.
+- Python 3.14 support; per-user state directory `~/.llm-framework` (`LLM_FRAMEWORK_HOME`).
+
+### Changed
+- **Rockchip pipeline rebuilt** and verified end to end: llama.cpp v0.6.0 (GGUF incl. IQ types and
+  importance matrix), RKLLM-Toolkit 1.3.1 and RKNN-Toolkit2 2.3.2, each in its own venv; models are staged on
+  the host (Hugging Face repo or local path), format dispatch `gguf`/`rkllm`/`rknn`, board-aware defaults.
+- Image builds use BuildKit when available and report the real cause of failures; per-build images are
+  removed after the build.
+- The calibration dataset is separate from the importance matrix (imatrix for GGUF only, dataset passed to
+  RKLLM/RKNN directly).
+- The stored Hugging Face token reaches builds (one shared build engine).
+- Relative data paths resolve against the installation directory, not the working directory.
+- Self-healing: proposals wait for an explicit decision (GUI dialog, CLI prompt or MCP tool); only fixed,
+  framework-defined fixes are applied (fewer compile jobs after an out-of-memory image build, cleanup of
+  framework images); AI suggestions are advice only.
+- Ditto: errors and refusals raise instead of being shown as answers; API keys are passed per call;
+  knowledge-base text, logs and probe files go into the user turn as sanitized untrusted blocks.
+- Dependencies updated with hashed pins (Poetry 2 lock, `requirements*.txt`); `pyside6-essentials` instead
+  of the full PySide6; `pydantic` and `mcp` added.
+- Installers and the smoke test require Python 3.11-3.14.
+- Single version source (`orchestrator.__version__`).
+
+### Removed
+- LangChain, python-dotenv, pywin32 and winshell dependencies.
+- The stored SSH password (`target_password`) and its menu item: devices use the framework key.
+- Ditto's generated calibration filler (it downloaded a URL that returns 404 and fell back to repeated
+  sentences).
+
+### Fixed
+- Many crashes and dead paths: build status enum, GUI builds stopping when a slot returned, healing dialog,
+  chat window (sent each question twice, crashed on every message with PySide6 6.12), module wizard import,
+  CLI hard exits and log levels, deployment of folders and archives.
+- RKNN: dataset mounts no longer replace the model mount; JSON datasets keep their suffix; stale artifacts of
+  other boards are never deployed.
+- Entrypoint restart loop when the host user is root; checksums with Windows line endings.
+
+### Security
+- **Sandboxed conversion containers**: host user instead of root, no network, no capabilities,
+  no-new-privileges, read-only image filesystem, process/memory limits.
+- Crawler: SSRF protection with DNS-rebinding-safe connection pinning, robots.txt per RFC 9309, redirect and
+  request limits.
+- Module generation: strict validation of names, images, packages, flags and shell code (deny-list,
+  `bash -n`), confinement to `targets/`, no overwriting of existing targets.
+- Chat output is escaped; links open only after confirmation.
+- Archive extraction blocks path traversal, links and devices; secrets are redacted in logs.
+- pip-audit reports no known vulnerabilities (279 before); GitHub Actions pinned by commit SHA.
+
+## [2.4.0] - 2026-01-14
+**Reconstructed entry.** Versions 2.0 to 2.4 were developed without changelog entries; this summary is
+taken from source headers and the git history (2025-12-13 to 2026-01-14).
+
+### Added
+- Self-healing manager (regex heuristics plus AI analysis of build logs).
+- Offline mode for Ditto with small local models, telemetry (opt-in), updater, community hub.
+- IMatrix "Smart Calibration" for GGUF quantization.
+- Single source of truth for project sources (`configs/project_sources.yml`, `SSOT_ARCHITECTURE.md`,
+  `validate_ssot.py`, `sync_ssot.py`).
+- German voice models (GLaDOS, Thorsten) in the source catalog; transparency manager (experimental).
+
+### Changed
+- Container images configurable centrally; security hardening of the GUI windows.
 
 ## [1.7.0] - 2025-12-10
 **Hardware & Deployment Update.** Bridges the gap between build and run by introducing a zero-dependency deployment manager and full Intel hardware support.

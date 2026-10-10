@@ -73,7 +73,7 @@ class TargetConfig:
 # ============================================================================
 
 console = Console()
-__version__ = "2.4.0"
+from orchestrator import __version__  # noqa: E402
 
 DEFAULT_CONFIG = {
     "targets_dir": "targets",

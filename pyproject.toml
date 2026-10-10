@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "llm-conversion-framework"
-version = "2.3.0"
-description = "Orchestrator GUI und CLI für LLM Cross-Compilierung"
+version = "3.0.0"
+description = "Convert and quantize language models for edge hardware (GUI, CLI and MCP server)"
 authors = ["Smilez1985"]
 readme = "README.md"
 packages = [{include = "orchestrator"}]
