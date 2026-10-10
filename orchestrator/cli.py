@@ -830,14 +830,29 @@ def tools_permissions(ctx: FrameworkContext, reset: bool):
 @click.option('--limit', default=30, show_default=True, help='Number of entries')
 @click.option('--verify', is_flag=True,
               help='Check the chain: changed or removed entries, and removal of the newest entries (anchor)')
+@click.option('--archive', is_flag=True,
+              help='Move the log and its anchor aside (kept with a timestamp) and start a new log')
 @pass_context
-def tools_audit(ctx: FrameworkContext, limit: int, verify: bool):
+def tools_audit(ctx: FrameworkContext, limit: int, verify: bool, archive: bool):
     """Show the audit log of tool calls"""
     import sqlite3
     registry = _tool_registry(ctx)
     if registry.audit is None:
         console.print("[red]No audit log.[/red]")
         sys.exit(1)
+    if archive:
+        try:
+            target = registry.audit.archive()
+        except OSError as e:
+            console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be moved: "
+                          f"{escape(str(e))}[/red] Close the GUI and AI clients using the framework and try again.")
+            sys.exit(1)
+        if target is None:
+            console.print("No audit log to archive.")
+        else:
+            console.print(f"[green]Audit log moved to {escape(str(target))}; the next tool call starts a new "
+                          "log.[/green]")
+        return
     try:
         if verify:
             result = registry.audit.check()

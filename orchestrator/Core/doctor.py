@@ -209,20 +209,25 @@ def check_tool_policy(framework) -> List[Finding]:
     else:
         findings.append(_ok("ai", "tools.permissions", "Tool permissions set up"))
     if registry.audit is not None:
+        archive = ("'llm-cli tools audit --archive' moves it and its anchor aside (kept with a timestamp) and "
+                   "starts a new log.")
         try:
             result = registry.audit.check()
         except Exception as e:
             return findings + [Finding("ai", "tools.audit", Severity.ERROR,
                                        f"The tool audit log {registry.audit.path} cannot be opened: {e}",
-                                       "Move the damaged file aside (keep it for inspection); a new log is started.")]
-        if result.problem in ("modified", "removed"):
+                                       f"Keep the damaged file for inspection: {archive}")]
+        # A log this key cannot verify may just as well have been rewritten, so it is no lesser finding.
+        if result.problem in ("modified", "removed", "key_mismatch"):
             findings.append(Finding("ai", "tools.audit", Severity.ERROR, result.message,
-                                    f"Inspect {registry.audit.path}; keep a copy before starting a new log."))
+                                    f"Inspect {registry.audit.path}; {archive}"))
         elif result.problem:
             findings.append(Finding("ai", "tools.audit", Severity.WARN, result.message,
-                                    f"Inspect {registry.audit.path}."))
+                                    f"Inspect {registry.audit.path}; {archive}"))
         elif not result.keyed:
             findings.append(Finding("ai", "tools.audit", Severity.WARN, result.message,
+                                    "The next tool call adds a keyed entry, which protects the whole chain."
+                                    if result.key_available else
                                     "Install a system keyring (e.g. gnome-keyring or KWallet), so the audit chain "
                                     "is protected by a key."))
         else:

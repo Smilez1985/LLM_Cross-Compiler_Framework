@@ -547,9 +547,6 @@ class TestAuditKey:
         monkeypatch.setattr(memory_keyring, "get_password", broken)
         assert framework_tools._audit_key(SimpleNamespace(secrets_manager=None)) is None
 
-    @pytest.mark.xfail(strict=True, reason="BUG: _audit_key's get/set/re-read is not serialized between "
-                                           "processes; two first starts can each keep their own key (the later "
-                                           "set_password overwrites the earlier one after it was re-read)")
     def test_two_first_starts_end_up_with_the_same_key(self, memory_keyring, monkeypatch):
         """Two processes start for the first time together (e.g. the GUI and an MCP server). The scripted
         keyring lets both read 'no key yet'; the second store lands after the first process re-read its key.
@@ -750,9 +747,6 @@ class TestAuditLog:
         assert "different key" in other.message
 
     @pytest.mark.parametrize("anchor_too", [False, True], ids=["newest-row", "newest-row-and-anchor"])
-    @pytest.mark.xfail(strict=True, reason="BUG: record() moves the anchor to the new head without checking the "
-                                           "old anchor, so the next ordinary tool call erases the evidence of "
-                                           "removed newest entries (or of a removed anchor)")
     def test_removed_entries_stay_detectable_after_the_next_call(self, tmp_path, anchor_too):
         log = filled_log(tmp_path / "a.db")
         run_sql(log.path, "DELETE FROM events WHERE id = 3")  # hide the last start_build
@@ -765,9 +759,6 @@ class TestAuditLog:
         assert not log.check().intact
 
     @pytest.mark.parametrize("writer_key", [None, b"another-key"], ids=["no-key", "other-key"])
-    @pytest.mark.xfail(strict=True, reason="BUG: record() appends with whatever key it has although meta.key_id "
-                                           "names another key; the owner's check() then reports 'modified' (a "
-                                           "tamper alarm, doctor ERROR) for an untouched log")
     def test_a_writer_with_another_key_does_not_cause_a_tamper_alarm(self, tmp_path, writer_key):
         log = filled_log(tmp_path / "a.db", key=b"key-of-this-user")
         # e.g. a process whose keyring lookup failed transiently (_audit_key returned None); refusing is fine
@@ -878,12 +869,13 @@ class TestDoctorAuditFindings:
         finding = self.audit_finding(registry)
         assert finding.severity == severity and words in finding.message
 
-    def test_missing_anchor_and_other_key_are_warnings(self, registry, tmp_path):
+    def test_missing_anchor_is_a_warning_and_other_key_an_error(self, registry, tmp_path):
         registry.audit.anchor_path.unlink()
         assert self.audit_finding(registry).severity == Severity.WARN
+        # A log this key cannot verify may also have been rewritten with a key of the attacker's choice.
         other = ToolRegistry(PolicyStore(tmp_path), AuditLog(tmp_path / "audit.db", key=b"other"))
         finding = self.audit_finding(other)
-        assert finding.severity == Severity.WARN and "different key" in finding.message
+        assert finding.severity == Severity.ERROR and "different key" in finding.message
 
     def test_unkeyed_log_is_a_warning(self, tmp_path):
         registry = ToolRegistry(PolicyStore(tmp_path), filled_log(tmp_path / "plain.db", key=None))
@@ -1334,10 +1326,6 @@ class TestAdversarialAuditLog:
         ("DELETE FROM events WHERE id = 3", "removed"),
         ("UPDATE events SET tool = 'list_targets', approved = 1 WHERE id = 2", "modified"),
     ], ids=["newest-row-deleted", "middle-row-changed"])
-    @pytest.mark.xfail(strict=True, reason="BUG: meta.key_id is not authenticated and check() stops at a key_id "
-                                           "mismatch, so whoever edits audit.db can hide any deletion or change "
-                                           "by also changing key_id: doctor then shows a WARN 'different key "
-                                           "(keyring reset)' instead of the tamper ERROR")
     def test_changing_the_key_id_does_not_hide_tampering(self, tmp_path, damage, expected):
         registry = ToolRegistry(PolicyStore(tmp_path), filled_log(tmp_path / "audit.db", key=b"key"))
         run_sql(registry.audit.path, damage)
@@ -1354,10 +1342,6 @@ class TestAdversarialAuditLog:
         result = AuditLog(tmp_path / "a.db", key=b"new-key").check()
         assert result.problem == "key_mismatch"
 
-    @pytest.mark.xfail(strict=True, reason="BUG: check() reads the rows and then the anchor without blocking "
-                                           "writers; an append by another process in between (MCP session busy "
-                                           "while 'doctor' or 'tools audit --verify' runs) is reported as removed "
-                                           "entries")
     def test_an_append_during_check_is_not_reported_as_removed(self, tmp_path, monkeypatch):
         log = filled_log(tmp_path / "a.db")
         other_process = AuditLog(log.path, key=b"audit-key")
@@ -1377,9 +1361,6 @@ class TestAdversarialAuditLog:
         assert result.intact, result.message
         assert log.check().intact and log.check().entries == 4
 
-    @pytest.mark.xfail(strict=True, reason="BUG: record() writes the anchor before COMMIT and does not restore it "
-                                           "when COMMIT fails (disk full, I/O error); the anchor then names an entry "
-                                           "that was rolled back and check() raises a false 'removed' alarm")
     def test_a_failed_commit_does_not_cause_a_tamper_alarm(self, tmp_path, monkeypatch):
         log = filled_log(tmp_path / "a.db", n=2)
         real_connect = sqlite3.connect
@@ -1404,9 +1385,6 @@ class TestAdversarialAuditLog:
         result = log.check()
         assert result.intact and result.entries == 2, result.message
 
-    @pytest.mark.xfail(strict=True, reason="BUG: a failure to replace the anchor file (on Windows: another process "
-                                           "has audit.db.anchor open, e.g. a concurrent check()) rolls back the "
-                                           "audit entry itself, so the tool call is not audited at all")
     def test_an_anchor_that_cannot_be_replaced_does_not_drop_the_entry(self, tmp_path, monkeypatch):
         log = filled_log(tmp_path / "a.db", n=1)
         real_replace = os.replace
@@ -1425,10 +1403,6 @@ class TestAdversarialAuditLog:
         assert [e["tool"] for e in log.entries()] == ["start_build", "start_build"]
         assert log.check().problem not in ("modified", "removed")
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the schema is created only on an instance's first connect; after "
-                                           "audit.db is moved aside while the GUI or an MCP server runs (doctor: "
-                                           "'keep a copy before starting a new log'), every record() fails with "
-                                           "'no such table' and no tool call is audited until a restart")
     def test_a_running_process_keeps_auditing_after_the_log_was_moved_aside(self, tmp_path):
         log = filled_log(tmp_path / "a.db", n=2)  # a long-running process that has written before
         for suffix in ("", "-wal", "-shm"):
@@ -1442,11 +1416,6 @@ class TestAdversarialAuditLog:
         assert [e["tool"] for e in fresh.entries()] == ["start_build"]
         assert fresh.check().intact
 
-    @pytest.mark.xfail(strict=True, reason="BUG: after installing a keyring (doctor's advice for an unkeyed log) "
-                                           "the keyed process appends HMAC rows to the unkeyed chain; the log is "
-                                           "then 'key_mismatch' for good and the new keyed entries can never be "
-                                           "verified (refusing to write, as suggested for the other-key bug, would "
-                                           "stop auditing instead)")
     def test_installing_a_keyring_leads_to_a_verifiable_keyed_log(self, tmp_path):
         unkeyed = filled_log(tmp_path / "a.db", n=2, key=None)  # no keyring yet: doctor warns 'unkeyed'
         assert unkeyed.check().intact
@@ -1508,10 +1477,6 @@ class TestAdversarialRegistry:
         (framework_tools.TargetIn, "invalid_input"),  # like every real tool: pydantic rejects the surrogate
         (In, "ok"),                                   # an unconstrained str field accepts it and the tool runs
     ], ids=["rejected-like-real-tools", "accepted-plain-str"])
-    @pytest.mark.xfail(strict=True, reason="BUG: AuditLog.record() encodes arguments as strict UTF-8; a lone "
-                                           "surrogate (valid JSON for Python's json, e.g. in Ditto's model output) "
-                                           "raises UnicodeEncodeError, so the attempt (or, for a plain str field, "
-                                           "the executed call) is never audited")
     def test_arguments_with_a_lone_surrogate_are_still_audited(self, tmp_path, input_model, outcome):
         registry = ToolRegistry(PolicyStore(tmp_path), AuditLog(tmp_path / "audit.db", key=b"k"))
         registry.logger = RecordingLogger()
