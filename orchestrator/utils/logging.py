@@ -788,11 +788,15 @@ def setup_logging(config_file: Optional[Path] = None,
     if isinstance(level, str):
         level = LogLevel[level.upper()]
     
-    _logging_manager.initialize(
-        config_file=config_file,
-        default_level=level,
-        enable_memory_handler=enable_memory_handler
-    )
+    if _logging_manager._initialized:
+        # get_logger() auto-initializes with INFO, so later calls must still apply their level.
+        _logging_manager.set_global_level(level)
+    else:
+        _logging_manager.initialize(
+            config_file=config_file,
+            default_level=level,
+            enable_memory_handler=enable_memory_handler
+        )
     
     return _logging_manager
 

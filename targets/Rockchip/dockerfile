@@ -21,7 +21,7 @@ ENV BUILD_CACHE_DIR=/build-cache
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake git git-lfs python3-pip \
         python3-dev python3-venv pkg-config libffi-dev \
-        ca-certificates curl wget \
+        ca-certificates curl wget gosu \
         gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
     && rm -rf /var/lib/apt/lists/*
 

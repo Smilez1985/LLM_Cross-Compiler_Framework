@@ -95,7 +95,10 @@ def safe_extract_archive(archive_path: Path, dest_dir: Path):
             if hasattr(tarfile, "data_filter"):
                 tf.extractall(dest_dir, members=members, filter="data")
             else:
-                # Python < 3.10.12 / 3.11.4 has no extraction filters; members were validated above.
+                # Without extraction filters, chained links could still escape; only plain files and dirs are allowed.
+                links = [m.name for m in members if m.issym() or m.islnk()]
+                if links:
+                    raise Exception(f"Security: links in archive need Python >= 3.10.12 / 3.11.4: {links[:3]}")
                 tf.extractall(dest_dir, members=members)  # nosec B202
 
 def calculate_file_checksum(path: Path, algorithm="sha256") -> str:

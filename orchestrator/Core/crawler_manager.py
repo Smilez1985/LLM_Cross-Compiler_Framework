@@ -35,7 +35,50 @@ except ImportError:
 from orchestrator.utils.logging import get_logger
 # NEU: Import der zentralen Validierungslogik
 # Bitte Pfad anpassen, falls validation.py woanders liegt (z.B. orchestrator.Core.validation)
-from orchestrator.utils.validation import validate_public_url
+from requests.adapters import HTTPAdapter
+from requests.utils import requote_uri
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+
+from orchestrator.utils.validation import validate_public_url, resolve_public_addresses
+
+
+class _PinnedConnectionMixin:
+    """Re-checks the address at connect time and connects to exactly that IP (defeats DNS rebinding).
+    TLS still verifies against the original host name, which urllib3 reads after _new_conn()."""
+
+    def _new_conn(self):
+        vetted = resolve_public_addresses(self._dns_host, self.port)[0]
+        original, self._dns_host = self._dns_host, vetted
+        try:
+            return super()._new_conn()
+        finally:
+            self._dns_host = original
+
+
+class _PinnedHTTPConnection(_PinnedConnectionMixin, HTTPConnection):
+    pass
+
+
+class _PinnedHTTPSConnection(_PinnedConnectionMixin, HTTPSConnection):
+    pass
+
+
+class _PinnedHTTPConnectionPool(HTTPConnectionPool):
+    ConnectionCls = _PinnedHTTPConnection
+
+
+class _PinnedHTTPSConnectionPool(HTTPSConnectionPool):
+    ConnectionCls = _PinnedHTTPSConnection
+
+
+class PublicOnlyAdapter(HTTPAdapter):
+    """Direct connections only reach public addresses. Requests through a configured proxy are
+    resolved by the proxy and therefore only covered by the URL check."""
+
+    def init_poolmanager(self, *args, **kwargs):
+        super().init_poolmanager(*args, **kwargs)
+        self.poolmanager.pool_classes_by_scheme = {"http": _PinnedHTTPConnectionPool, "https": _PinnedHTTPSConnectionPool}
 
 class CrawlerManager:
     """
@@ -69,6 +112,9 @@ class CrawlerManager:
         self.visited: Set[str] = set()
         self.robot_parsers: Dict[str, RobotFileParser] = {}
         self.session = requests.Session()
+        adapter = PublicOnlyAdapter()
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
         self.session.headers.update({
             "User-Agent": "LLM-Conversion-Framework-Bot/1.6.0 (Open Source; +https://github.com/Smilez1985/llm_conversion_framework)"
         })
@@ -79,7 +125,9 @@ class CrawlerManager:
         check = validate_public_url(prepared.url)
         if not check:
             raise PermissionError(check.message)
-        return self.session.send(prepared, timeout=timeout, allow_redirects=False)
+        # send() alone skips what get() does: env proxies and REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE.
+        settings = self.session.merge_environment_settings(prepared.url, {}, None, None, None)
+        return self.session.send(prepared, timeout=timeout, allow_redirects=False, **settings)
 
     def crawl(self, root_url: str) -> List[Document]:
         """
@@ -103,6 +151,8 @@ class CrawlerManager:
                 break
 
             url, depth, hops = queue.pop(0)
+            # Percent-encode what links may contain raw (e.g. spaces in "User Guide.pdf").
+            url = requote_uri(url)
             
             if url in self.visited:
                 continue
@@ -201,11 +251,16 @@ class CrawlerManager:
 
             if response.status_code == 200:
                 rp.parse(response.text.splitlines())
-            elif response.status_code in (401, 403):
+            elif response.status_code in (401, 403) or response.status_code >= 500:
+                # RFC 9309 2.3.1.4: an unreachable robots.txt (server error) means complete disallow.
                 rp.disallow_all = True
             else:
                 rp.allow_all = True
+        except requests.RequestException as e:
+            self.logger.warning(f"Could not reach {robots_url} ({e}). Treating the site as disallowed.")
+            rp.disallow_all = True
         except Exception as e:
+            # Blocked by the SSRF guard or too many redirects: RFC 9309 treats robots.txt as unavailable.
             self.logger.warning(f"Could not read {robots_url} ({e}). Assuming allowed.")
             rp.allow_all = True
         return rp

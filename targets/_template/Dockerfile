@@ -35,6 +35,10 @@ RUN apt-get update && \
     && apt-get clean
 
 # Python Environment Setup
+# Debian Bookworm / Ubuntu 24.04 refuse pip installs into the system Python (PEP 668), so a venv is used.
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv "$VIRTUAL_ENV"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Install CPU-only PyTorch to save space (approx. 2GB saved vs CUDA version)
@@ -55,29 +59,34 @@ FROM debian:bookworm-slim AS runtime
 LABEL stage="runtime"
 
 ENV DEBIAN_FRONTEND=noninteractive
+# Build args are scoped to a stage, so the user mapping args are declared again here.
+ARG USER_ID=1000
+ARG GROUP_ID=1000
+
 ENV BUILD_CACHE_DIR=/build-cache
 ENV PATH="/app/modules:/app/scripts:${PATH}"
 
 # Runtime Dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3 python3-pip cmake make git bc jq file curl \
+        python3 cmake make git bc jq file curl gosu \
     && rm -rf /var/lib/apt/lists/* && apt-get clean
 
 # Copy Python Environment from Builder
-COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+COPY --from=builder /opt/venv /opt/venv
+ENV VIRTUAL_ENV=/opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Setup Directories & User with correct UID/GID
 RUN groupadd -g ${GROUP_ID} llmbuilder && \
     useradd -u ${USER_ID} -g llmbuilder -d /app -s /bin/bash llmbuilder && \
-    mkdir -p ${BUILD_CACHE_DIR}/{models,temp,output,logs,toolchains} && \
+    mkdir -p /app ${BUILD_CACHE_DIR}/models ${BUILD_CACHE_DIR}/temp ${BUILD_CACHE_DIR}/output ${BUILD_CACHE_DIR}/logs ${BUILD_CACHE_DIR}/toolchains && \
     chown -R llmbuilder:llmbuilder /app ${BUILD_CACHE_DIR}
 
 WORKDIR /app
 COPY modules/ ./modules/
 COPY scripts/ ./scripts/
-RUN chmod +x modules/*.sh scripts/*.sh
+RUN find modules scripts -type f \( -name '*.sh' -o -name '*.py' \) -exec chmod +x {} +
 
 # Setup Entrypoint
 COPY --chown=llmbuilder:llmbuilder docker/entrypoint.sh /entrypoint.sh

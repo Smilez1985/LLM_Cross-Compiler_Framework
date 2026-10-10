@@ -1,6 +1,9 @@
 """DeploymentManager tests: package contents, Slim-RAG, Air-Gap images, deploy script, SSH safety."""
 
+import glob
 import hashlib
+import json
+import re
 import shlex
 import shutil
 import subprocess
@@ -85,17 +88,22 @@ class TestPackageCreation:
         assert "docker" not in script
 
     def test_checksums_cover_every_file(self, tmp_path, config, artifact):
-        pkg = build_package(tmp_path, config, artifact, use_docker=False)
+        config.set("enable_rag_knowledge", True)
+        pkg = build_package(tmp_path, config, artifact, use_docker=True, docker_client=FakeDockerClient())
 
-        entries = dict(reversed(line.split("  ", 1)) for line in (pkg / "checksums.sha256").read_text().splitlines())
-        files = {str(p.relative_to(pkg)) for p in pkg.rglob("*") if p.is_file() and p.name != "checksums.sha256"}
+        raw = (pkg / "checksums.sha256").read_bytes()
+        assert b"\r" not in raw and b"\\" not in raw
+        entries = dict(reversed(line.split("  ", 1)) for line in raw.decode().splitlines())
+        files = {p.relative_to(pkg).as_posix() for p in pkg.rglob("*") if p.is_file() and p.name != "checksums.sha256"}
         assert set(entries) == files
+        assert "data/qdrant/.keep" in entries
         for name, digest in entries.items():
             assert hashlib.sha256((pkg / name).read_bytes()).hexdigest() == digest
 
     @pytest.mark.skipif(not shutil.which("sha256sum"), reason="sha256sum not available")
     def test_checksums_verify_with_sha256sum(self, tmp_path, config, artifact):
-        pkg = build_package(tmp_path, config, artifact, use_docker=False)
+        config.set("enable_rag_knowledge", True)
+        pkg = build_package(tmp_path, config, artifact, use_docker=True, docker_client=FakeDockerClient())
         subprocess.run(["sha256sum", "-c", "--quiet", "checksums.sha256"], cwd=pkg, check=True)
 
 
@@ -197,13 +205,22 @@ class TestBuildContext:
         source = REPO_ROOT / dockerfile
         staged = stage_build_context(source.parent, REPO_ROOT, tmp_path / "ctx", source.name)
 
-        for line in staged.read_text().splitlines():
-            parts = line.split()
-            if not parts or parts[0].upper() not in ("COPY", "ADD") or any(p.startswith("--from") for p in parts):
+        instructions = re.sub(r"\\\n", " ", staged.read_text()).splitlines()
+        checked = 0
+        for line in instructions:
+            parts = line.split(None, 1)
+            if len(parts) < 2 or parts[0].upper() not in ("COPY", "ADD"):
                 continue
-            sources = [p for p in parts[1:-1] if not p.startswith("--")]
-            for src in sources:
-                assert (staged.parent / src).exists(), f"{dockerfile}: '{line.strip()}' has no '{src}' in the build context"
+            args = parts[1].strip()
+            flags = re.findall(r"--\S+", args)
+            if any(f.startswith("--from") for f in flags):
+                continue
+            args = re.sub(r"--\S+\s*", "", args).strip()
+            paths = json.loads(args) if args.startswith("[") else args.split()
+            for src in paths[:-1]:
+                assert glob.glob(str(staged.parent / src)), f"{dockerfile}: '{line.strip()}' has no '{src}' in the build context"
+                checked += 1
+        assert checked > 0
 
     def test_context_layout(self, tmp_path):
         from orchestrator.utils.build_context import stage_build_context

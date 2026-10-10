@@ -18,6 +18,14 @@ export LLAMA_CPP_PATH="${LLAMA_CPP_PATH:-/usr/src/llama.cpp}"
 export LOG_LEVEL="${LOG_LEVEL:-INFO}"
 export DEBUG="${DEBUG:-0}"
 
+# The su fallback below resets PATH; keep the image's Python venv first so python3/pip resolve to it.
+if [ -n "${VIRTUAL_ENV:-}" ] && [ -d "$VIRTUAL_ENV/bin" ]; then
+    case ":$PATH:" in
+        *":$VIRTUAL_ENV/bin:"*) ;;
+        *) export PATH="$VIRTUAL_ENV/bin:$PATH" ;;
+    esac
+fi
+
 # User ID Mapping Defaults (werden von docker run -e PUID=... überschrieben)
 PUID=${PUID:-1000}
 PGID=${PGID:-1000}
@@ -82,11 +90,14 @@ fix_permissions() {
     # Recursive chown auf /app kann langsam sein, daher Vorsicht.
     log_info "Applying permissions to storage locations..."
     
-    chown -R llmbuilder:llmbuilder "$BUILD_CACHE_DIR"
+    # Read-only bind mounts (dataset, imatrix) cannot be chowned; that must not abort the container.
+    chown -R llmbuilder:llmbuilder "$BUILD_CACHE_DIR" 2>/dev/null \
+        || log_warn "Some files in $BUILD_CACHE_DIR were not chowned (read-only mounts are expected)."
     
     # Optional: /app ownership fixen, falls Code gemountet wird (Dev Mode)
     if [ -w "/app" ] || [ "$DEBUG" = "1" ]; then
-         chown -R llmbuilder:llmbuilder /app
+         chown -R llmbuilder:llmbuilder /app 2>/dev/null \
+             || log_warn "Some files in /app were not chowned (read-only mounts are expected)."
     fi
     
     log_success "Permission fix completed."
@@ -124,7 +135,7 @@ initialize_container() {
         else
             log_warn "Neither su-exec nor gosu found. Falling back to standard su."
             # Arguments are passed separately; interpolating them into the -c string would split and execute them.
-            exec su llmbuilder -s /bin/bash -c 'exec "$0" "$@"' "$0" "$@"
+            exec su llmbuilder -s /bin/bash -c 'exec "$0" "$@"' -- "$0" "$@"
         fi
     fi
 

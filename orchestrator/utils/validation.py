@@ -1409,6 +1409,47 @@ def validate_url(url: str) -> ValidationResult:
         )
 
 
+_NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+
+
+def is_public_ip(addr: Union[str, ipaddress.IPv4Address, ipaddress.IPv6Address]) -> bool:
+    """True only for globally routable unicast addresses, including IPv4 wrapped in IPv6."""
+    if isinstance(addr, str):
+        addr = ipaddress.ip_address(addr.split("%")[0])
+    if addr.version == 6:
+        if addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        elif addr in _NAT64_PREFIX:
+            addr = ipaddress.IPv4Address(int(addr) & 0xFFFFFFFF)
+        elif addr.sixtofour:
+            addr = addr.sixtofour
+        elif addr.teredo:
+            return False
+    # is_global excludes private, loopback, link-local, CGNAT (100.64/10) and unspecified ranges.
+    return addr.is_global and not addr.is_multicast and not addr.is_reserved
+
+
+def resolve_public_addresses(host: str, port: int) -> List[str]:
+    """Resolves host and returns its addresses; raises PermissionError if any of them is not public."""
+    infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    addresses = [info[4][0] for info in infos]
+    for address in addresses:
+        if not is_public_ip(address):
+            raise PermissionError(f"{host} resolves to non-public address {address}")
+    return addresses
+
+
+def _idna_host(host: str) -> str:
+    try:
+        import idna
+        return idna.encode(host, uts46=True).decode("ascii").lower()
+    except Exception:
+        try:
+            return host.encode("idna").decode("ascii").lower()
+        except Exception:
+            return host.lower()
+
+
 def validate_public_url(url: str) -> ValidationResult:
     """Validate that a URL is http(s) and only resolves to public addresses (SSRF guard)."""
     def _fail(message: str) -> ValidationResult:
@@ -1421,7 +1462,7 @@ def validate_public_url(url: str) -> ValidationResult:
         )
 
     # urllib and urllib3/requests split authorities differently on these characters
-    # (e.g. "http://127.0.0.1\@example.com/"), so such URLs are rejected outright.
+    # (e.g. "http://127.0.0.1\\@example.com/"), so such URLs are rejected outright.
     if not isinstance(url, str) or "\\" in url or any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7f for ch in url):
         return _fail(f"URL contains backslashes, whitespace or control characters: {url!r}")
 
@@ -1439,22 +1480,17 @@ def validate_public_url(url: str) -> ValidationResult:
         fetch_host = (parse_url(url).host or "").strip("[]").lower()
     except Exception as e:
         return _fail(f"URL validation error: {e}")
-    if fetch_host != parsed.hostname.lower():
+    host = parsed.hostname.lower()
+    if fetch_host != host and fetch_host != _idna_host(host):
         return _fail(f"Ambiguous URL host ({parsed.hostname!r} vs {fetch_host!r}): {url}")
 
     try:
-        port = port or (443 if parsed.scheme == "https" else 80)
-        infos = socket.getaddrinfo(parsed.hostname, port, proto=socket.IPPROTO_TCP)
+        # Resolve the IDNA host that urllib3 will actually connect to.
+        resolve_public_addresses(fetch_host, port or (443 if parsed.scheme == "https" else 80))
+    except PermissionError as e:
+        return _fail(f"{e}: {url}")
     except (socket.gaierror, ValueError, UnicodeError) as e:
         return _fail(f"Host could not be resolved: {parsed.hostname} ({e})")
-
-    for info in infos:
-        addr = ipaddress.ip_address(info[4][0].split("%")[0])
-        if addr.version == 6 and addr.ipv4_mapped:
-            addr = addr.ipv4_mapped
-        # is_global excludes private, loopback, link-local, CGNAT (100.64/10), reserved and unspecified ranges.
-        if not addr.is_global or addr.is_multicast:
-            return _fail(f"URL resolves to non-public address {addr}: {url}")
 
     return ValidationResult(
         valid=True,

@@ -507,7 +507,6 @@ class BuildEngine:
         vols = {
             str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
             str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "rw"},
-            str(target_path / "modules"): {"bind": "/app/modules", "mode": "ro"},
             # IMPORTANT: Mount dataset
             str(config.dataset_path): {"bind": "/build-cache/dataset.txt", "mode": "ro"}
         }
@@ -576,7 +575,8 @@ class BuildEngine:
         vols = {
             str(build_temp / "output"): {"bind": "/build-cache/output", "mode": "rw"},
             str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "rw"},
-            str(target_path / "modules"): {"bind": "/app/modules", "mode": "ro"}
+            # modules/ are not mounted: the image was built from this target's staged context and
+            # already contains them executable; a host mount would hide that copy (mode 644 on Linux).
         }
         
         # 2. Environment Setup

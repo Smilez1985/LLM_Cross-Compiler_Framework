@@ -154,9 +154,13 @@ class DittoCoder:
         if not self.offline_mode:
             self._setup_cloud_provider(provider, model, api_key, base_url)
 
-    @staticmethod
-    def _provider_id(provider: Optional[str]) -> str:
-        return provider.split()[0] if provider else ""
+    # Older CLI/config strings for OpenAI-compatible servers.
+    _LEGACY_PROVIDER_IDS = {"LocalAI": "Custom", "Compatible": "Custom"}
+
+    @classmethod
+    def _provider_id(cls, provider: Optional[str]) -> str:
+        first = provider.split()[0] if provider else ""
+        return cls._LEGACY_PROVIDER_IDS.get(first, first)
 
     @classmethod
     def _endpoint_for(cls, provider: Optional[str], base_url: Optional[str]) -> Optional[str]:
