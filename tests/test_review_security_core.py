@@ -27,6 +27,7 @@ from orchestrator.Core import secrets_manager as secrets_module
 from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.Core.doctor import Doctor, Severity, check_secrets, check_tool_policy
 from orchestrator.Core.secrets_manager import SecretsManager
+from orchestrator.tools import audit as audit_module
 from orchestrator.tools import framework_tools
 from orchestrator.tools.audit import GENESIS, AuditLog
 from orchestrator.tools.framework_tools import AUDIT_KEY_ID
@@ -1198,3 +1199,337 @@ class TestApprovalAuditing:
         entry = last_entry(registry)
         assert (entry["decision"], entry["outcome"]) == ("deny", "denied")
         assert self.approved_column(registry) == (None, 1)
+
+
+# ======================================================================================================
+# Adversarial review of the fixes: edge cases, races and other callers
+# ======================================================================================================
+
+class TestAdversarialConfigAndLaunch:
+
+    def test_empty_config_dir_variable_falls_back_to_the_installation_not_the_cwd(self, project, install_configs,
+                                                                                   monkeypatch):
+        monkeypatch.setenv("LLM_FRAMEWORK_CONFIG_DIR", "")
+        before = snapshot(project)
+        cfg = ConfigManager()
+        assert cfg.config_dir == install_configs
+        assert cfg.get("source_repositories") == {}
+        assert snapshot(project) == before
+
+    def test_unicode_config_dir_works(self, project, install_configs, tmp_path, monkeypatch):
+        override = tmp_path / "Konfigüration 設定 ✓"
+        override.mkdir()
+        (override / "framework.yml").write_text("docker_registry: unicode.example\n", encoding="utf-8")
+        monkeypatch.setenv("LLM_FRAMEWORK_CONFIG_DIR", str(override))
+        cfg = ConfigManager()
+        assert cfg.config_dir == override and cfg.get("docker_registry") == "unicode.example"
+
+    def test_path_variables_never_become_config_values(self, project, install_configs, tmp_path, monkeypatch):
+        monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+        cfg = ConfigManager()
+        assert "config_dir" not in cfg.config_values and "home" not in cfg.config_values
+
+    @pytest.mark.xfail(strict=True, reason="BUG: the MCP launch command is 'python -m orchestrator.cli', which puts "
+                                           "the working directory first on sys.path; Claude Code starts the server "
+                                           "inside the project, so a project's orchestrator/ (or secrets.py, mcp.py, "
+                                           "yaml.py ...) is imported and runs inside the MCP server")
+    def test_mcp_launch_command_does_not_import_code_from_the_working_directory(self, tmp_path):
+        from orchestrator import mcp_server
+        project = tmp_path / "cloned-repo"
+        planted = project / "orchestrator"
+        planted.mkdir(parents=True)
+        marker = project / "PLANTED_CODE_RAN"
+        (planted / "__init__.py").write_text(
+            "import pathlib, sys\n"
+            f"pathlib.Path({str(marker)!r}).write_text('imported from the working directory')\n"
+            "sys.exit(0)\n")
+        launch = mcp_server.launch_command(REPO_ROOT)
+        args = list(launch["args"])
+        if args[-2:] == ["mcp", "serve"]:
+            args = args[:-2]  # same interpreter flags and module, but only print the version
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_", "FRAMEWORK_", "PYTHONSAFEPATH"))}
+        env.update(launch.get("env") or {})
+        env.update(PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
+                   LLM_FRAMEWORK_HOME=str(tmp_path / "state"), LLM_FRAMEWORK_CONFIG_DIR=str(tmp_path / "cfg"))
+
+        # Claude Code cannot set a working directory: the server starts in the project (client_snippets).
+        result = subprocess.run([launch["command"], *args, "--version"], cwd=project, env=env,
+                                capture_output=True, text=True, timeout=180, check=False)
+
+        assert not marker.exists(), "code from the project folder ran inside the MCP server"
+        assert result.returncode == 0 and "version" in result.stdout, result.stderr
+
+
+class TestAdversarialSecrets:
+
+    @pytest.mark.parametrize("change", ["set", "deleted"])
+    @pytest.mark.xfail(strict=True, reason="BUG: get_secret() reads a per-process cache that is only refreshed "
+                                           "before writes; a long-running MCP server (or the GUI) never sees a "
+                                           "secret set later by another process and keeps using a deleted one")
+    def test_a_long_running_process_sees_secret_changes_of_other_processes(self, memory_keyring, tmp_path,
+                                                                           change):
+        cli = secrets_for(tmp_path)
+        if change == "deleted":
+            assert cli.set_secret("hf_token", HF)
+        mcp = secrets_for(tmp_path)  # e.g. the MCP server Claude Desktop keeps running for days
+
+        if change == "set":
+            assert cli.set_secret("hf_token", HF)  # llm-cli secrets set hf_token
+            assert mcp.get_secret("hf_token") == HF  # the next gated build started over MCP
+        else:
+            assert cli.delete_secret("hf_token")  # the token leaked and was revoked
+            assert mcp.get_secret("hf_token") is None
+
+    @pytest.mark.xfail(strict=True, reason="BUG: _load_store() keeps the old in-memory cache when the store file "
+                                           "is gone, so after the store is moved aside (doctor's advice) or "
+                                           "deleted, the next set_secret writes every old secret back")
+    def test_removing_the_store_file_does_not_bring_its_secrets_back(self, memory_keyring, tmp_path):
+        gui = secrets_for(tmp_path)
+        assert gui.set_secret("hf_token", HF)
+        gui.secrets_file.rename(gui.secrets_file.with_name("secrets.store.moved-aside"))
+
+        assert gui.set_secret("openai_api_key", SK)  # "set the secrets again"
+
+        fresh = secrets_for(tmp_path)
+        assert fresh.get_secret("openai_api_key") == SK
+        assert fresh.get_secret("hf_token") is None, "a secret from the removed store came back"
+
+    @pytest.mark.xfail(strict=True, reason="BUG: the legacy store is migrated only when no per-user store exists; "
+                                           "pre-3.0 users who also ran llm-cli from their home folder already have "
+                                           "~/.llm-framework/secrets.store, so the GUI's secrets in configs/ are "
+                                           "silently never taken over (doctor: 'Secrets store ready')")
+    def test_legacy_store_is_taken_over_even_if_a_per_user_store_exists(self, memory_keyring, tmp_path):
+        gui_store = SecretsManager(tmp_path / "configs")  # pre-3.0 GUI, started from the installation
+        assert gui_store.initialize() and gui_store.set_secret("hf_token", HF)
+        cli_store = SecretsManager(tmp_path / "state")  # pre-3.0 llm-cli from $HOME: config dir ~/.llm-framework
+        assert cli_store.initialize() and cli_store.set_secret("openai_api_key", SK)
+
+        sm = secrets_for(tmp_path)
+
+        assert sm.get_secret("openai_api_key") == SK
+        assert sm.get_secret("hf_token") == HF
+
+    @pytest.mark.parametrize("value", ["pässwörd-✓-設定-‮evil", "x" * 1_000_000], ids=["unicode", "1MB"])
+    def test_unusual_values_round_trip_and_keep_the_store_valid(self, memory_keyring, tmp_path, value):
+        sm = secrets_for(tmp_path)
+        assert sm.set_secret("hf_token", HF) and sm.set_secret("odd", value)
+        fresh = secrets_for(tmp_path)
+        assert fresh.get_secret("odd") == value and fresh.get_secret("hf_token") == HF
+        assert isinstance(json.loads(sm.secrets_file.read_text()), dict)
+        assert leftovers(sm.secrets_file.parent) == []
+
+    @pytest.mark.parametrize("value", [None, 12345, b"bytes", "lone \ud800 surrogate"])
+    def test_unstorable_values_are_refused_without_touching_the_store(self, memory_keyring, tmp_path, value):
+        sm = secrets_for(tmp_path)
+        assert sm.set_secret("hf_token", HF)
+        before = sm.secrets_file.read_bytes()
+        assert sm.set_secret("odd", value) is False
+        assert sm.secrets_file.read_bytes() == before
+        assert "odd" not in secrets_for(tmp_path).list_secrets()
+
+
+class TestAdversarialAuditLog:
+
+    @pytest.mark.parametrize("damage, expected", [
+        ("DELETE FROM events WHERE id = 3", "removed"),
+        ("UPDATE events SET tool = 'list_targets', approved = 1 WHERE id = 2", "modified"),
+    ], ids=["newest-row-deleted", "middle-row-changed"])
+    @pytest.mark.xfail(strict=True, reason="BUG: meta.key_id is not authenticated and check() stops at a key_id "
+                                           "mismatch, so whoever edits audit.db can hide any deletion or change "
+                                           "by also changing key_id: doctor then shows a WARN 'different key "
+                                           "(keyring reset)' instead of the tamper ERROR")
+    def test_changing_the_key_id_does_not_hide_tampering(self, tmp_path, damage, expected):
+        registry = ToolRegistry(PolicyStore(tmp_path), filled_log(tmp_path / "audit.db", key=b"key"))
+        run_sql(registry.audit.path, damage)
+        run_sql(registry.audit.path, "UPDATE meta SET v = 'deadbeefdeadbeef' WHERE k = 'key_id'")
+
+        result = registry.audit.check()
+
+        assert result.problem in ("modified", "removed"), result.message
+        assert TestDoctorAuditFindings.audit_finding(registry).severity == Severity.ERROR
+
+    def test_a_real_key_change_is_still_a_key_mismatch(self, tmp_path):
+        """Counterpart of the test above: a genuinely different key (nothing verifies) stays key_mismatch."""
+        filled_log(tmp_path / "a.db", key=b"old-key")
+        result = AuditLog(tmp_path / "a.db", key=b"new-key").check()
+        assert result.problem == "key_mismatch"
+
+    @pytest.mark.xfail(strict=True, reason="BUG: check() reads the rows and then the anchor without blocking "
+                                           "writers; an append by another process in between (MCP session busy "
+                                           "while 'doctor' or 'tools audit --verify' runs) is reported as removed "
+                                           "entries")
+    def test_an_append_during_check_is_not_reported_as_removed(self, tmp_path, monkeypatch):
+        log = filled_log(tmp_path / "a.db")
+        other_process = AuditLog(log.path, key=b"audit-key")
+        real_read_anchor = log._read_anchor
+        writer = threading.Thread(target=other_process.record, args=("mcp", "list_targets", "read", "allow", "ok"))
+
+        def append_then_read():
+            if writer.ident is None:  # only during the first check()
+                writer.start()
+                writer.join(1.5)  # finishes at once unless check() keeps writers out while it reads
+            return real_read_anchor()
+
+        monkeypatch.setattr(log, "_read_anchor", append_then_read)
+        result = log.check()
+        writer.join(20)
+
+        assert result.intact, result.message
+        assert log.check().intact and log.check().entries == 4
+
+    @pytest.mark.xfail(strict=True, reason="BUG: record() writes the anchor before COMMIT and does not restore it "
+                                           "when COMMIT fails (disk full, I/O error); the anchor then names an entry "
+                                           "that was rolled back and check() raises a false 'removed' alarm")
+    def test_a_failed_commit_does_not_cause_a_tamper_alarm(self, tmp_path, monkeypatch):
+        log = filled_log(tmp_path / "a.db", n=2)
+        real_connect = sqlite3.connect
+
+        class CommitFails:
+            def __init__(self, con):
+                self._con = con
+
+            def execute(self, sql, *args):
+                if sql == "COMMIT":
+                    raise sqlite3.OperationalError("disk I/O error")
+                return self._con.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._con, name)
+
+        with monkeypatch.context() as m:
+            m.setattr(sqlite3, "connect", lambda *a, **kw: CommitFails(real_connect(*a, **kw)))
+            with pytest.raises(sqlite3.OperationalError):
+                log.record("mcp", "start_build", "local_write", "ask", "ok", approved=True)
+
+        result = log.check()
+        assert result.intact and result.entries == 2, result.message
+
+    @pytest.mark.xfail(strict=True, reason="BUG: a failure to replace the anchor file (on Windows: another process "
+                                           "has audit.db.anchor open, e.g. a concurrent check()) rolls back the "
+                                           "audit entry itself, so the tool call is not audited at all")
+    def test_an_anchor_that_cannot_be_replaced_does_not_drop_the_entry(self, tmp_path, monkeypatch):
+        log = filled_log(tmp_path / "a.db", n=1)
+        real_replace = os.replace
+
+        def sharing_violation(src, dst):
+            if str(dst).endswith(".anchor"):
+                raise PermissionError(13, "The process cannot access the file because it is being used by "
+                                          "another process")
+            return real_replace(src, dst)
+
+        with monkeypatch.context() as m:
+            m.setattr(audit_module.os, "replace", sharing_violation)
+            with contextlib.suppress(Exception):
+                log.record("mcp", "start_build", "local_write", "ask", "ok", approved=True)
+
+        assert [e["tool"] for e in log.entries()] == ["start_build", "start_build"]
+        assert log.check().problem not in ("modified", "removed")
+
+    @pytest.mark.xfail(strict=True, reason="BUG: the schema is created only on an instance's first connect; after "
+                                           "audit.db is moved aside while the GUI or an MCP server runs (doctor: "
+                                           "'keep a copy before starting a new log'), every record() fails with "
+                                           "'no such table' and no tool call is audited until a restart")
+    def test_a_running_process_keeps_auditing_after_the_log_was_moved_aside(self, tmp_path):
+        log = filled_log(tmp_path / "a.db", n=2)  # a long-running process that has written before
+        for suffix in ("", "-wal", "-shm"):
+            path = Path(str(log.path) + suffix)
+            if path.exists():
+                path.rename(path.with_name(path.name + ".inspect"))
+
+        log.record("mcp", "start_build", "local_write", "ask", "ok", approved=True)
+
+        fresh = AuditLog(log.path, key=b"audit-key")
+        assert [e["tool"] for e in fresh.entries()] == ["start_build"]
+        assert fresh.check().intact
+
+    @pytest.mark.xfail(strict=True, reason="BUG: after installing a keyring (doctor's advice for an unkeyed log) "
+                                           "the keyed process appends HMAC rows to the unkeyed chain; the log is "
+                                           "then 'key_mismatch' for good and the new keyed entries can never be "
+                                           "verified (refusing to write, as suggested for the other-key bug, would "
+                                           "stop auditing instead)")
+    def test_installing_a_keyring_leads_to_a_verifiable_keyed_log(self, tmp_path):
+        unkeyed = filled_log(tmp_path / "a.db", n=2, key=None)  # no keyring yet: doctor warns 'unkeyed'
+        assert unkeyed.check().intact
+
+        keyed = AuditLog(unkeyed.path, key=b"key-from-the-new-keyring")
+        keyed.record("gui", "start_build", "local_write", "ask", "ok", approved=True)
+
+        assert any(e["tool"] == "start_build" and e["actor"] == "gui" for e in keyed.entries())
+        result = keyed.check()
+        assert result.problem != "key_mismatch", result.message
+        assert result.problem != "modified", result.message
+
+    @pytest.mark.parametrize("arguments", [
+        {"model": "Ünïcödé/模型-‮evil", "note": "emoji 🦙"},
+        {"model": "x" * 300_000, "token": HF},
+    ], ids=["unicode-bidi", "huge-with-secret"])
+    def test_unusual_arguments_keep_the_chain_intact(self, tmp_path, arguments):
+        log = AuditLog(tmp_path / "a.db", key=b"k")
+        log.record("mcp", "start_build", "local_write", "ask", "ok", arguments=arguments, approved=True)
+        log.record("mcp", "list_targets", "read", "allow", "ok")
+        entry = log.entries(2)[1]
+        full = json.dumps(arguments, ensure_ascii=False, sort_keys=True)
+        assert entry["args_sha256"] == hashlib.sha256(full.encode("utf-8")).hexdigest()
+        assert len(entry["args_preview"]) <= 500 and HF not in entry["args_preview"]
+        assert log.check().intact
+
+
+class TestAdversarialPolicy:
+
+    @pytest.mark.xfail(strict=True, reason="BUG: deeply nested JSON makes json.loads raise RecursionError, which "
+                                           "PolicyStore.load() does not catch: tools list, mcp serve and every "
+                                           "tool call crash instead of denying with a problem text")
+    def test_deeply_nested_file_denies_instead_of_crashing(self, tmp_path):
+        store = PolicyStore(tmp_path)
+        store.path.write_text("[" * 100_000 + "]" * 100_000)
+        assert_denies_everything(store.load())
+        assert store.damaged
+
+    @pytest.mark.skipif(os.name != "posix", reason="symlinks need privileges on Windows")
+    @pytest.mark.xfail(strict=True, reason="BUG: a dangling tool_policy.json symlink (dotfile manager, unmounted "
+                                           "drive) raises FileNotFoundError and silently gives the looser "
+                                           "recommended defaults instead of denying")
+    def test_dangling_symlink_is_not_treated_as_a_missing_file(self, tmp_path):
+        store = PolicyStore(tmp_path)
+        os.symlink(tmp_path / "unmounted-drive" / "tool_policy.json", store.path)
+        assert_denies_everything(store.load())
+        assert store.damaged
+
+    def test_file_with_a_byte_order_mark_fails_closed(self, tmp_path):
+        store = PolicyStore(tmp_path)
+        store.path.write_bytes(b"\xef\xbb\xbf" + json.dumps(STRICT).encode())  # e.g. saved by an old Notepad
+        assert_denies_everything(store.load())
+        assert store.damaged and (tmp_path / "tool_policy.json.bad").exists()
+
+
+class TestAdversarialRegistry:
+
+    @pytest.mark.parametrize("input_model, outcome", [
+        (framework_tools.TargetIn, "invalid_input"),  # like every real tool: pydantic rejects the surrogate
+        (In, "ok"),                                   # an unconstrained str field accepts it and the tool runs
+    ], ids=["rejected-like-real-tools", "accepted-plain-str"])
+    @pytest.mark.xfail(strict=True, reason="BUG: AuditLog.record() encodes arguments as strict UTF-8; a lone "
+                                           "surrogate (valid JSON for Python's json, e.g. in Ditto's model output) "
+                                           "raises UnicodeEncodeError, so the attempt (or, for a plain str field, "
+                                           "the executed call) is never audited")
+    def test_arguments_with_a_lone_surrogate_are_still_audited(self, tmp_path, input_model, outcome):
+        registry = ToolRegistry(PolicyStore(tmp_path), AuditLog(tmp_path / "audit.db", key=b"k"))
+        registry.logger = RecordingLogger()
+        field = next(iter(input_model.model_fields))
+        registry.register(ToolSpec("probe", "Probe", "", ToolTier.READ, input_model, Out,
+                                   lambda i: Out(text="done")))
+
+        with contextlib.suppress(ToolError):
+            registry.call("probe", {field: "Rock\ud800chip"}, ToolContext("ditto"))
+
+        assert not any("Audit write failed" in r[1] for r in registry.logger.records)
+        assert last_entry(registry)["outcome"] == outcome
+
+    def test_input_errors_do_not_echo_argument_values(self, tmp_path):
+        registry = make_registry(tmp_path, lambda i: Out(text=i.text))
+        with pytest.raises(ToolError) as exc:
+            registry.call("probe", {"text": {"token": HF}, "extra": SK}, ToolContext("mcp"))
+        assert HF not in str(exc.value) and SK not in str(exc.value)
+        entry = last_entry(registry)
+        assert entry["outcome"] == "invalid_input" and HF not in entry["args_preview"]
+        assert SK not in entry["args_preview"]
