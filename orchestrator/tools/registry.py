@@ -30,6 +30,14 @@ class ToolInputError(ToolError):
     """The arguments do not match the tool's input schema."""
 
 
+def _with_message(error: ToolError, message: str) -> ToolError:
+    """The same kind of error (denied, invalid input, ...) with another message."""
+    try:
+        return type(error)(message)
+    except Exception:  # a subclass with its own constructor
+        return ToolError(message)
+
+
 @dataclass(frozen=True)
 class ToolSpec:
     name: str
@@ -140,8 +148,11 @@ class ToolRegistry:
             if not isinstance(result, spec.output_model):
                 raise TypeError(f"handler returned {type(result).__name__}, expected {spec.output_model.__name__}")
         except ToolError as e:
-            self._audit(ctx, spec, decision, "error", arguments, approved=approved, detail=str(e))
-            raise
+            message = redact_secrets(str(e))
+            self._audit(ctx, spec, decision, "error", arguments, approved=approved, detail=message)
+            if message == str(e):
+                raise
+            raise _with_message(e, message) from None  # the original still holds the secret
         except ValidationError as e:  # a schema or handler bug (output check, models built inside the handler)
             self.logger.error(f"Tool {spec.name} produced invalid data: {e}", exc_info=True)
             self._audit(ctx, spec, decision, "error", arguments, approved=approved, detail=repr(e))
