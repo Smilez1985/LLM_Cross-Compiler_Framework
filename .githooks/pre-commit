@@ -1,0 +1,4 @@
+#!/bin/sh
+# Refuses commits that contain credentials. Enable with: git config core.hooksPath .githooks
+PY=$(command -v python3 || command -v python) || { echo "secret-scan: python not found, commit refused" >&2; exit 1; }
+exec "$PY" "$(git rev-parse --show-toplevel)/scripts/secret_scan.py" --staged

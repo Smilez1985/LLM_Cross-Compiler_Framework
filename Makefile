@@ -12,7 +12,7 @@ COMPOSE_FILE := "Docker Setup/docker-compose.yml"
 UID := $(shell id -u)
 GID := $(shell id -g)
 
-.PHONY: help build up down clean test test-container audit setup
+.PHONY: help build up down clean test test-container audit setup hooks secret-scan
 
 help:
 	@echo "LLM Framework - Build System"
@@ -26,6 +26,8 @@ help:
 	@echo "make test           - Run unit tests (Host execution)"
 	@echo "make test-container - Run unit tests (Docker execution - Recommended)"
 	@echo "make audit          - Run security audit (Trivy)"
+	@echo "make hooks          - Enable the git hooks that refuse commits/pushes with credentials"
+	@echo "make secret-scan    - Scan the whole git history for credentials"
 
 setup:
 	@echo "Running System Setup & Dependency Check..."
@@ -66,3 +68,10 @@ test-container:
 audit:
 	@echo "Running Security Audit..."
 	docker-compose -f $(COMPOSE_FILE) run --rm trivy-infra-scanner
+
+hooks:
+	git config core.hooksPath .githooks
+	@echo "Secret scan hooks enabled (pre-commit, pre-push)."
+
+secret-scan:
+	python3 scripts/secret_scan.py --history

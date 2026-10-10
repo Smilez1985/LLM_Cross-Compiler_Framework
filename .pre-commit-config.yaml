@@ -1,0 +1,19 @@
+# Optional, for users of the pre-commit tool (https://pre-commit.com): `pre-commit install -t pre-commit -t pre-push`.
+# Without it, `git config core.hooksPath .githooks` enables the same checks.
+repos:
+  - repo: local
+    hooks:
+      - id: secret-scan
+        name: secret scan (API keys, tokens, private keys, local patterns)
+        entry: python scripts/secret_scan.py --staged
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+      - id: secret-scan-push
+        name: secret scan of the commits being pushed
+        entry: python scripts/secret_scan.py --history
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]

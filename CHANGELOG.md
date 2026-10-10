@@ -16,6 +16,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   argument (a dialog in the GUI, a prompt in the CLI; denied without a terminal).
 - **AI settings**: providers from `configs/llm_providers.yml`, a model list loaded live from the provider
   (free text still works), effort, privacy level for cloud providers, offline mode and a fallback chain.
+- **Provider layer for AI** (`orchestrator/llm`): one client for every provider, built on the official
+  `anthropic` and `openai` SDKs (OpenAI-compatible servers through `openai`). Providers are data
+  (`configs/llm_providers.yml`): model and effort per task, retries, a fallback chain, structured answers
+  validated against schemas, and a privacy filter for cloud providers (setting `ai_security_level`): secrets
+  are always redacted; addresses, e-mail addresses, logins, user names, host names and serial numbers are
+  replaced by stable placeholders that are mapped back locally in the answer.
+- **Local knowledge base** on local embeddings (FastEmbed, ONNX on the CPU) and an embedded Qdrant store: no
+  vector-database server and no cloud embeddings needed.
+- **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
+  pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, ROCm, Metal or
+  CPU; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
+  at pinned revisions, checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
+  (3 GB RAM). The "local" provider follows the running server without configuration.
+- **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
+  proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
+  model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -26,13 +42,26 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Histories of earlier versions are migrated.
 - Provider errors are explained, e.g. that an Anthropic API key must belong to a workspace in the Claude
   Console.
-
+- Ditto's prompts: build failures are attributed to the build machine or the device correctly, build
+  recommendations know which inputs each format accepts (an ONNX model is not sent to GGUF), questions about
+  targets and builds are answered from the tools, and module proposals use compiler flags rather than the
+  CPU feature list.
+- Local model: effort "low" turns thinking off (Qwen3.5 on llama-server otherwise thinks at full length, which
+  takes minutes on a CPU); "medium" and up keep it.
 - Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0) and `fastembed` 0.8.1 (local embeddings,
   ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
+
+### Security
+- Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
+  into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
+  build log or a model name told the model.
+- Requests to local model servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment.
+- Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
+  the same way and installed atomically.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
@@ -85,6 +114,15 @@ Model Context Protocol, and conversion containers run in a sandbox.
   of the full PySide6; `pydantic` and `mcp` added.
 - Installers and the smoke test require Python 3.11-3.14.
 - Single version source (`orchestrator.__version__`).
+- **Configuration is never read from the working directory** any more: `LLM_FRAMEWORK_CONFIG_DIR`, then the
+  installation's `configs/`, then `~/.llm-framework` (`framework.yml` in the current directory is ignored).
+- The secrets store lives in the per-user folder (`~/.llm-framework/secrets.store`, copied over once from the
+  old location); the audit log key has its own keyring entry.
+- Capabilities: `default_board` (the board the build scripts use when none is given), per-format quantization
+  aliases (e.g. `INT8` -> `Q8_0`), case-insensitive board names; CLI, build service and GUI submit exactly the
+  values they validated. IMatrix without an own dataset is valid again (shipped calibration text).
+- `build start -o` resolves against the working directory, the configured default against the installation;
+  `deploy list-artifacts` and `deploy package` read the build manifests in the configured output folder.
 
 ### Removed
 - LangChain, python-dotenv, pywin32 and winshell dependencies.
@@ -99,6 +137,9 @@ Model Context Protocol, and conversion containers run in a sandbox.
 - RKNN: dataset mounts no longer replace the model mount; JSON datasets keep their suffix; stale artifacts of
   other boards are never deployed.
 - Entrypoint restart loop when the host user is root; checksums with Windows line endings.
+- Cancelling a build can no longer be undone by a later stage (security scan, image build and stage
+  containers are stopped); only real read timeouts count as timeouts; a retry after a healing fix keeps its own
+  build id and log; a damaged audit database or per-user folder no longer stops the framework from starting.
 
 ### Security
 - **Sandboxed conversion containers**: host user instead of root, no network, no capabilities,
@@ -110,6 +151,19 @@ Model Context Protocol, and conversion containers run in a sandbox.
 - Chat output is escaped; links open only after confirmation.
 - Archive extraction blocks path traversal, links and devices; secrets are redacted in logs.
 - pip-audit reports no known vulnerabilities (279 before); GitHub Actions pinned by commit SHA.
+- A project folder can no longer change the settings of an MCP server started inside it (e.g. source
+  repositories of the build toolchain).
+- A damaged secrets store is never overwritten; secrets are written atomically with mode 0600.
+- Audit log: one write transaction per entry (no forked chains with several processes), key id per log,
+  an anchor file that reveals removed newest entries.
+- A damaged tool permission file denies every tool instead of falling back to looser defaults.
+- MCP: confirmations show every argument in full (too long: refused), only a real answer of the user counts as
+  approval, declined and cancelled calls are audited, client snippets are quoted, and the Claude Desktop config
+  backup is private.
+- **Secret scan** (`scripts/secret_scan.py`, standard library only): provider API keys, tokens, private keys,
+  certificates and credential files are refused by a pre-commit and a pre-push hook (`make hooks`) and by a CI
+  job over the whole history. Personal strings (e-mail address, user name) go into the never-committed
+  `.git/info/secret-patterns`; findings are printed redacted.
 
 ## [2.4.0] - 2026-01-14
 **Reconstructed entry.** Versions 2.0 to 2.4 were developed without changelog entries; this summary is
