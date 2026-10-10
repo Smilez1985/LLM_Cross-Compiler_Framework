@@ -8,7 +8,7 @@ Ditto and the MCP server derive their choices and their request validation from 
 """
 
 from enum import Enum
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -47,6 +47,8 @@ class FormatCapability(BaseModel):
     dataset: Literal["none", "optional", "required"] = "none"
     dataset_kind: Literal["text", "sample_list"] = "text"
     dataset_required_for: List[str] = Field(default_factory=list)
+    # Other spellings the module scripts accept, e.g. {INT8: Q8_0}; matched case-insensitively.
+    aliases: Dict[str, str] = Field(default_factory=dict)
     notes: Optional[str] = None
 
     @model_validator(mode="after")
@@ -68,16 +70,22 @@ class FormatCapability(BaseModel):
                 problems.append(f"{name} lists unknown types {sorted(extra)}")
         if self.needs_imatrix and not self.imatrix:
             problems.append("needs_imatrix is set but imatrix is false")
+        bad_aliases = {a: q for a, q in self.aliases.items() if q not in known}
+        if bad_aliases:
+            problems.append(f"aliases point to unknown types {bad_aliases}")
         if problems:
             raise ValueError("; ".join(problems))
         return self
 
     def canonical(self, quantization: Optional[str]) -> Optional[str]:
-        """The listed spelling of a quantization type (matching is case-insensitive), or None."""
+        """The listed spelling of a quantization type or of one of its aliases (case-insensitive), or None."""
         if not quantization:
             return None
         wanted = quantization.strip().casefold()
-        return next((q for q in self.quantizations if q.casefold() == wanted), None)
+        found = next((q for q in self.quantizations if q.casefold() == wanted), None)
+        if found is None:
+            found = next((q for a, q in self.aliases.items() if a.casefold() == wanted), None)
+        return found
 
     def quantizations_for(self, board: Optional[str]) -> List[str]:
         if board and board in self.board_quantizations:
@@ -98,10 +106,14 @@ class TargetCapabilities(BaseModel):
     support_level: SupportLevel = SupportLevel.OFFICIAL
     boards: Dict[str, BoardInfo] = Field(min_length=1)
     formats: Dict[str, FormatCapability] = Field(min_length=1)
+    # The board the build scripts use when a request names none (must match build.sh).
+    default_board: Optional[str] = None
 
     @model_validator(mode="after")
     def _boards_exist(self):
         problems = []
+        if self.default_board is not None and self.default_board not in self.boards:
+            problems.append(f"default_board {self.default_board!r} is not one of the boards")
         for fmt, cap in self.formats.items():
             referenced = set(cap.boards or []) | set(cap.board_quantizations) | set(cap.board_default_quantization)
             unknown = referenced - set(self.boards)
@@ -117,13 +129,49 @@ class TargetCapabilities(BaseModel):
             return []
         return list(cap.boards) if cap.boards is not None else list(self.boards)
 
+    def canonical_format(self, fmt: Optional[str]) -> Optional[str]:
+        if not fmt:
+            return None
+        wanted = fmt.strip().casefold()
+        return next((f for f in self.formats if f.casefold() == wanted), None)
+
+    def canonical_board(self, board: Optional[str]) -> Optional[str]:
+        """The declared spelling of a board id (case-insensitive), or None if unknown."""
+        if not board:
+            return None
+        wanted = board.strip().casefold()
+        return next((b for b in self.boards if b.casefold() == wanted), None)
+
+    def normalize(self, fmt: str, board: Optional[str], quantization: Optional[str]
+                  ) -> Tuple[str, Optional[str], Optional[str]]:
+        """The values a build really runs with: canonical spellings, the board the scripts fall back to when
+        none is given, and the board's default quantization. Unknown values are passed through unchanged
+        (check_request reports them)."""
+        fmt = self.canonical_format(fmt) or fmt
+        cap = self.formats.get(fmt)
+        if board:
+            board = self.canonical_board(board) or board
+        elif cap is not None:
+            boards = self.boards_for(fmt)
+            if len(boards) == 1:
+                board = boards[0]
+            elif self.default_board in boards:
+                board = self.default_board
+        if cap is not None:
+            quantization = cap.canonical(quantization) or quantization or cap.default_for(board)
+        return fmt, board, quantization
+
     def check_request(self, fmt: str, board: Optional[str], quantization: Optional[str],
                       dataset: bool = False, imatrix: bool = False) -> List[str]:
-        """Problems with a build request, as user-facing sentences (empty list: the request is valid)."""
+        """Problems with a build request, as user-facing sentences (empty list: the request is valid).
+        The values are normalized first (see normalize()); validate what will actually be built."""
+        fmt, board, quantization = self.normalize(fmt, board, quantization)
         cap = self.formats.get(fmt)
         if cap is None:
             return [f"Format '{fmt}' is not available for this target (available: {', '.join(self.formats)})."]
         problems = []
+        if board is None and cap.board_quantizations and len(self.boards_for(fmt)) > 1:
+            return [f"Choose a board for {fmt} ({', '.join(self.boards_for(fmt))}): the supported quantizations differ."]
         if board is not None and board not in self.boards:
             problems.append(f"Unknown board '{board}' (known: {', '.join(self.boards)}).")
         elif board is not None and board not in self.boards_for(fmt):
@@ -136,9 +184,8 @@ class TargetCapabilities(BaseModel):
         if imatrix and not cap.imatrix:
             problems.append(f"An importance matrix (IMatrix) is not used by the {fmt} format.")
         if quant in cap.needs_imatrix and not imatrix:
-            problems.append(f"{quant} needs an importance matrix: enable IMatrix and provide a calibration dataset.")
-        if imatrix and not dataset:
-            problems.append("IMatrix needs a calibration dataset.")
+            # Without a dataset of its own, the framework uses its shipped calibration text.
+            problems.append(f"{quant} needs an importance matrix: enable IMatrix.")
         if (cap.dataset == "required" or quant in cap.dataset_required_for) and not dataset:
             problems.append(f"{fmt} {quant} needs a calibration dataset ({cap.dataset_kind.replace('_', ' ')}).")
         if dataset and cap.dataset == "none" and not cap.imatrix:

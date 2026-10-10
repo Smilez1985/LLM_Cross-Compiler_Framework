@@ -366,6 +366,10 @@ class BuilderTab(QWidget):
             self.format_combo.addItem(label, value)
         self.quant_combo = QComboBox()
         self.quant_combo.setEditable(True)
+        # Only a type the user picked or typed survives a board/format change; defaults never count as a choice.
+        self._quant_user_set = False
+        self.quant_combo.activated.connect(self._mark_quant_user_set)
+        self.quant_combo.lineEdit().textEdited.connect(self._mark_quant_user_set)
         self.board_combo = QComboBox()
         self.board_combo.addItems(["rk3588", "rk3576", "rk3566"])
         self.format_combo.currentIndexChanged.connect(self._update_boards)
@@ -574,26 +578,43 @@ class BuilderTab(QWidget):
 
     def _update_boards(self):
         caps = self._capabilities()
-        boards = caps.boards_for(self.format_combo.currentData()) if caps else ["rk3588", "rk3576", "rk3566"]
-        current = self.board_combo.currentData() or self.board_combo.currentText()
+        current = self.board_combo.currentData() or self.board_combo.currentText().strip()
         self.board_combo.blockSignals(True)
         self.board_combo.clear()
-        for board in boards:
-            label = caps.boards[board].label if caps else board
-            self.board_combo.addItem(label, board)
-        idx = self.board_combo.findData(current)
-        self.board_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        if caps:
+            self.board_combo.setEditable(False)
+            for board in caps.boards_for(self.format_combo.currentData()):
+                self.board_combo.addItem(caps.boards[board].label, board)
+            idx = self.board_combo.findData(current)
+            self.board_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        else:
+            # A target without capabilities (e.g. from the module wizard): no board, or one the user types.
+            self.board_combo.setEditable(True)
+            self.board_combo.addItem("(none)", None)
+            idx = self.board_combo.findText(current) if current else -1
+            if idx < 0 and current and current != "(none)":
+                self.board_combo.setEditText(current)
+            else:
+                self.board_combo.setCurrentIndex(max(idx, 0))
         self.board_combo.blockSignals(False)
         self._update_quant_options()
 
     def _selected_board(self):
-        return self.board_combo.currentData() or self.board_combo.currentText().strip() or None
+        data = self.board_combo.currentData()
+        if data:
+            return data
+        text = self.board_combo.currentText().strip() if self.board_combo.isEditable() else ""
+        return text if text and text != "(none)" else None
+
+    def _mark_quant_user_set(self, *_):
+        self._quant_user_set = True
 
     def _update_quant_options(self):
-        current = self.quant_combo.currentText()
+        current = self.quant_combo.currentText().strip()
         caps = self._capabilities()
         cap = caps.formats.get(self.format_combo.currentData()) if caps else None
         board = self._selected_board()
+        self.quant_combo.blockSignals(True)
         self.quant_combo.clear()
         if cap:
             self.quant_combo.addItems(cap.quantizations_for(board))
@@ -602,11 +623,14 @@ class BuilderTab(QWidget):
             self.quant_combo.addItems(QUANT_SUGGESTIONS.get(self.format_combo.currentData(), []))
             default = None
         # Keep a type the user picked if the new board/format allows it; otherwise use the new default.
-        user_choice = current and current != getattr(self, "_last_default_quant", None)
-        if user_choice and self.quant_combo.findText(current) >= 0:
+        if self._quant_user_set and current and self.quant_combo.findText(current) >= 0:
             self.quant_combo.setCurrentText(current)
         elif default:
             self.quant_combo.setCurrentText(default)
+            self._quant_user_set = False
+        elif current and not cap:
+            self.quant_combo.setCurrentText(current)
+        self.quant_combo.blockSignals(False)
         self._last_default_quant = default
 
     DATASET_HINTS = {
@@ -629,13 +653,25 @@ class BuilderTab(QWidget):
         self.btn_dataset.setToolTip(self.DATASET_HINTS.get(fmt, cap.notes if cap and cap.notes else ""))
 
     def _refresh_targets(self):
-        self.target_combo.clear()
-        if not self.framework or not hasattr(self.framework, 'get_component'): return
-        tm = self.framework.get_component("target_manager")
-        if tm:
-            for t in tm.list_targets():
-                arch = t.get('architecture') or t.get('architecture_family') or "?"
-                self.target_combo.addItem(f"{t.get('name')} ({arch})", t.get('id'))
+        previous = self.target_combo.currentData()
+        # Repopulate silently and apply the capabilities once: the intermediate empty list would
+        # otherwise run the no-capabilities fallback and leave its values behind.
+        self.target_combo.blockSignals(True)
+        try:
+            self.target_combo.clear()
+            tm = self.framework.get_component("target_manager") \
+                if self.framework and hasattr(self.framework, 'get_component') else None
+            if tm:
+                for t in tm.list_targets():
+                    arch = t.get('architecture') or t.get('architecture_family') or "?"
+                    self.target_combo.addItem(f"{t.get('name')} ({arch})", t.get('id'))
+            idx = self.target_combo.findData(previous)
+            if idx >= 0:
+                self.target_combo.setCurrentIndex(idx)
+        finally:
+            self.target_combo.blockSignals(False)
+        if hasattr(self, "format_combo"):
+            self._apply_target_capabilities()
 
     def _browse_model(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Model", "", "Models (*.bin *.gguf *.safetensors);;All Files (*)")
@@ -690,12 +726,17 @@ class BuilderTab(QWidget):
     def _submit_build(self):
         get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
         output_dir = get_cfg("output_dir", "output")
+        if hasattr(self.framework, "resolve_path"):
+            output_dir = str(self.framework.resolve_path(output_dir))  # same folder the deployment window lists
 
-        # Check the request against the target's capabilities before starting a long build.
+        # Check the request against the target's capabilities before starting a long build, and submit
+        # exactly the values that were checked (an empty field means the board's default type).
+        board = self._selected_board()
+        quant = self.quant_combo.currentText().strip() or None
         caps = self._capabilities()
         if caps:
-            problems = caps.check_request(self.format_combo.currentData(), self._selected_board(),
-                                          self.quant_combo.currentText().strip() or None,
+            _, board, quant = caps.normalize(self.format_combo.currentData(), board, quant)
+            problems = caps.check_request(self.format_combo.currentData(), board, quant,
                                           dataset=bool(self.dataset_path), imatrix=self.chk_imatrix.isChecked())
             if problems:
                 QMessageBox.warning(self, "Build settings", "\n".join(problems))
@@ -716,7 +757,7 @@ class BuilderTab(QWidget):
             targets=[self.target_combo.currentData()],
             target_formats=[target_fmt],
             optimization_level=opt_lvl,
-            quantization_options=[self.quant_combo.currentText().strip()] if self.quant_combo.currentText().strip() else [],
+            quantization_options=[quant] if quant else [],
             parallel_builds=True,
             output_base_dir=output_dir,
             description="Builder Tab Job",
@@ -724,7 +765,7 @@ class BuilderTab(QWidget):
             # NEW v2.4.0: Pass IMatrix config
             use_imatrix=self.chk_imatrix.isChecked(),
             dataset_path=self.dataset_path,
-            target_board=self._selected_board()
+            target_board=board
         )
         
         try:

@@ -128,17 +128,29 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     return registry
 
 
+AUDIT_KEY_ID = "audit-hmac-key"
+
+
 def _audit_key(framework) -> Optional[bytes]:
-    sm = getattr(framework, "secrets_manager", None)
-    if sm is None:
-        return None
+    """The audit HMAC key: its own entry in the OS keyring, per user like the audit database itself, and
+    never in a file an editor of the database could also read. None (an unkeyed chain, reported by
+    `llm-cli doctor`) when no keyring is available."""
     try:
-        key = sm.get_secret("audit_hmac_key")
+        import keyring
+        from orchestrator.Core.secrets_manager import SecretsManager
+        service = SecretsManager.SERVICE_ID
+        key = keyring.get_password(service, AUDIT_KEY_ID)
         if not key:
-            key = secrets.token_hex(32)
-            if not sm.set_secret("audit_hmac_key", key):
-                return None
-        return key.encode("utf-8")
+            legacy = None
+            sm = getattr(framework, "secrets_manager", None)
+            if sm is not None:  # 3.0.0 development builds kept the key in the secrets store
+                try:
+                    legacy = sm.get_secret("audit_hmac_key")
+                except Exception:
+                    legacy = None
+            keyring.set_password(service, AUDIT_KEY_ID, legacy or secrets.token_hex(32))
+            key = keyring.get_password(service, AUDIT_KEY_ID)  # re-read: another process may have been first
+        return key.encode("utf-8") if key else None
     except Exception:
         return None
 

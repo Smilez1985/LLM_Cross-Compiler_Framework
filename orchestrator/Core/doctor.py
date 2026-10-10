@@ -173,6 +173,10 @@ def check_secrets(framework) -> List[Finding]:
     sm = getattr(framework, "secrets_manager", None)
     if sm is None:
         return [Finding("security", "secrets.store", Severity.ERROR, "The secrets store is not available.")]
+    if getattr(sm, "_load_failed", False):
+        return [Finding("security", "secrets.store", Severity.ERROR,
+                        f"The secrets store {sm.secrets_file} cannot be read; secrets cannot be changed.",
+                        "Repair the file or move it aside and set the secrets again (llm-cli secrets set).")]
     findings = [_ok("security", "secrets.store", "Secrets store ready")]
     try:
         import keyring
@@ -192,20 +196,37 @@ def check_tool_policy(framework) -> List[Finding]:
     if registry is None:
         return [Finding("ai", "tools.registry", Severity.WARN, "Tool registry not loaded.")]
     findings = []
-    if not registry.policy().configured:
+    policy = registry.policy()
+    problem = getattr(registry.policy_store, "problem", None)
+    if problem:
+        findings.append(Finding("ai", "tools.permissions", Severity.ERROR, problem,
+                                "Run 'llm-cli tools permissions' (or Tools > Tool Permissions in the GUI) to set "
+                                "them up again."))
+    elif not policy.configured:
         findings.append(Finding("ai", "tools.permissions", Severity.INFO,
                                 "Tool permissions are not set up yet (safe defaults apply: read allowed, everything "
                                 "else asks).", "Run 'llm-cli ditto setup' or use Tools > Tool Permissions in the GUI."))
     else:
         findings.append(_ok("ai", "tools.permissions", "Tool permissions set up"))
     if registry.audit is not None:
-        broken = registry.audit.verify()
-        if broken is not None:
-            findings.append(Finding("ai", "tools.audit", Severity.ERROR,
-                                    f"The tool audit log was modified (first broken entry: {broken}).",
-                                    "Inspect ~/.llm-framework/audit.db; keep a copy before starting a new log."))
+        try:
+            result = registry.audit.check()
+        except Exception as e:
+            return findings + [Finding("ai", "tools.audit", Severity.ERROR,
+                                       f"The tool audit log {registry.audit.path} cannot be opened: {e}",
+                                       "Move the damaged file aside (keep it for inspection); a new log is started.")]
+        if result.problem in ("modified", "removed"):
+            findings.append(Finding("ai", "tools.audit", Severity.ERROR, result.message,
+                                    f"Inspect {registry.audit.path}; keep a copy before starting a new log."))
+        elif result.problem:
+            findings.append(Finding("ai", "tools.audit", Severity.WARN, result.message,
+                                    f"Inspect {registry.audit.path}."))
+        elif not result.keyed:
+            findings.append(Finding("ai", "tools.audit", Severity.WARN, result.message,
+                                    "Install a system keyring (e.g. gnome-keyring or KWallet), so the audit chain "
+                                    "is protected by a key."))
         else:
-            findings.append(_ok("ai", "tools.audit", "Audit log intact"))
+            findings.append(_ok("ai", "tools.audit", result.message))
     return findings
 
 

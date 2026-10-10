@@ -21,6 +21,8 @@ def isolated_environment(tmp_path, monkeypatch):
     for var in list(os.environ):
         if var.startswith(("LLM_", "FRAMEWORK_")):
             monkeypatch.delenv(var)
+    # Without it the installation's configs/ folder (the repository) would be used and written to.
+    monkeypatch.setenv("LLM_FRAMEWORK_CONFIG_DIR", str(tmp_path / "configs"))
     # Real provider keys from the developer's shell must not reach the tests.
     for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.delenv(var, raising=False)
