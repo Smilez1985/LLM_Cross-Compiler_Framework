@@ -1,0 +1,137 @@
+# LLM providers for Ditto (read by orchestrator/llm/catalog.py).
+#
+# Presets are data: a new model or an OpenAI-compatible server needs no code change. Every model field also
+# accepts free text, and providers with live_models: true list what the account can use (GET /models).
+# A file with the same name in the user's config directory adds or overrides presets by id.
+#
+# adapter     anthropic | openai_responses | openai_compat | claude_code
+# location    cloud (privacy filter applies) | local (never filtered) | auto (decided from the base_url host)
+# auth        accepted methods, preferred first: api_key | oauth | none
+#             anthropic + oauth: an `ant auth login` profile, read and refreshed by the anthropic SDK
+#             claude_code + oauth: the user's own `claude auth login` session inside Claude Code
+# secret      name of the API key in the encrypted secrets store
+# models      default model per task profile (chat, tools, json, healing); "default" for the rest
+# efforts     default effort per task when the request does not set one
+# effort_map  our level -> the value this provider understands (missing = sent unchanged)
+# reasoning   how effort is sent: none | reasoning_effort (top level) | reasoning_object ({"reasoning": {...}})
+
+version: 1
+
+providers:
+  anthropic:
+    label: "Anthropic Claude (API)"
+    adapter: anthropic
+    base_url: https://api.anthropic.com
+    location: cloud
+    auth: [oauth, api_key]
+    secret: anthropic_api_key
+    models:
+      default: claude-opus-5-5
+      json: claude-sonnet-5-5
+      healing: claude-opus-5-5
+    suggested_models: [claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5, claude-fable-5-1]
+    efforts: {chat: medium, tools: medium, json: low, healing: high}
+    # Server-side refusal fallback (fallbacks: "default", beta server-side-fallback-2026-07-01), Claude API only.
+    # Claude Haiku 5.5 has no server-side fallback and must not get the parameter.
+    server_fallback_models: [claude-opus-5-5, claude-sonnet-5-5, claude-fable-5-1]
+    # Models that reject output_config.effort (prefix match).
+    no_effort_models: [claude-haiku-4-5, claude-3-, claude-opus-4-0, claude-opus-4-1, claude-sonnet-4-0]
+    docs_url: https://platform.claude.com/docs
+
+  claude_code:
+    label: "Claude subscription (Pro/Max) via Claude Code"
+    adapter: claude_code
+    location: cloud
+    auth: [oauth]
+    models:
+      default: claude-opus-5-5
+      json: claude-sonnet-5-5
+    suggested_models: [claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5, claude-fable-5-1, opus, sonnet, haiku]
+    efforts: {chat: medium, tools: medium, json: low, healing: high}
+    live_models: false
+    docs_url: https://code.claude.com/docs/en/headless
+
+  openai:
+    label: "OpenAI (Responses API)"
+    adapter: openai_responses
+    base_url: https://api.openai.com/v1
+    location: cloud
+    auth: [api_key]
+    secret: openai_api_key
+    models:
+      default: gpt-6.1-sol
+      json: gpt-6-luna
+    suggested_models: [gpt-6.1-sol, gpt-6-luna, gpt-6-astra]
+    efforts: {chat: medium, tools: medium, json: low, healing: high}
+    docs_url: https://developers.openai.com/api/docs/models
+
+  google:
+    label: "Google Gemini (OpenAI-compatible endpoint)"
+    adapter: openai_compat
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai/
+    location: cloud
+    auth: [api_key]
+    secret: gemini_api_key
+    models:
+      default: gemini-3.8-flash
+    suggested_models: [gemini-3.8-flash]
+    reasoning: reasoning_effort
+    effort_map: {xhigh: high, max: high}
+    docs_url: https://ai.google.dev/gemini-api/docs/openai
+
+  openrouter:
+    label: "OpenRouter"
+    adapter: openai_compat
+    base_url: https://openrouter.ai/api/v1
+    location: cloud
+    auth: [api_key]
+    secret: openrouter_api_key
+    models: {}          # any model: pick one from the live list
+    reasoning: reasoning_object
+    headers:
+      X-OpenRouter-Title: "LLM Cross-Compiler Framework"
+    docs_url: https://openrouter.ai/docs
+
+  ollama:
+    label: "Ollama (local)"
+    adapter: openai_compat
+    base_url: http://localhost:11434/v1
+    base_url_configurable: true
+    location: local
+    auth: [none]
+    models:
+      default: "qwen3.5:4b"
+    suggested_models: ["qwen3.5:4b"]
+    reasoning: reasoning_effort
+    docs_url: https://docs.ollama.com/api/openai-compatibility
+
+  local:
+    label: "Local model (managed llama-server)"
+    adapter: openai_compat
+    location: local
+    auth: [none]
+    runtime_endpoint: true   # base_url and api key come from the running server, not from the settings
+    reasoning: reasoning_effort
+    effort_map: {xhigh: high, max: high}
+    no_tools_with_response_format: true   # llama-server ignores tools when a JSON schema is set
+
+  custom:
+    label: "Custom OpenAI-compatible server (vLLM, LM Studio, ...)"
+    adapter: openai_compat
+    base_url_configurable: true
+    location: auto
+    auth: [api_key, none]
+    secret: custom_api_key
+
+aliases:   # earlier ai_provider values
+  OpenAI: openai
+  Anthropic: anthropic
+  Claude: anthropic
+  Google: google
+  Gemini: google
+  Ollama: ollama
+  Custom: custom
+  LocalAI: custom
+  Compatible: custom
+  OpenRouter: openrouter
+  ClaudeCode: claude_code
