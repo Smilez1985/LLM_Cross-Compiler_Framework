@@ -742,6 +742,64 @@ class BuildEngine:
         inner = f"/build-cache/dataset{suffix}"
         return {str(path): {"bind": inner, "mode": "ro"}}, inner
 
+    SANDBOX_FALLBACK_USER = (1000, 1000)  # the image's build user, used when the host user is root or on Windows
+
+    def _sandbox(self, config: BuildConfiguration, build_temp: Path) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Dict[str, str]]]:
+        """Container options for the conversion stages (imatrix, build). They run model tooling and the
+        target's build code - possibly AI-generated - so: no network (the model was staged on the host),
+        no capabilities, no privilege escalation, a read-only root filesystem, the host user instead of
+        root, and a writable work folder for intermediates. Returns (create kwargs, env, extra volumes)."""
+        work = build_temp / "work"
+        for sub in ("tmp", "home", "cache"):
+            ensure_directory(work / sub)
+        volumes = {str(work): {"bind": "/build-cache/work", "mode": "rw"}}
+        env = {"BUILD_SCRATCH_DIR": "/build-cache/work", "TMPDIR": "/build-cache/work/tmp"}
+        if not self._get_conf("build_sandbox", True):
+            return {"user": "0:0"}, env, volumes  # legacy mode: the entrypoint maps PUID/PGID and drops root
+
+        if sys.platform != "win32" and os.getuid() != 0:
+            uid, gid = os.getuid(), os.getgid()
+        else:
+            uid, gid = self.SANDBOX_FALLBACK_USER
+            if sys.platform != "win32":
+                # A root host owns the per-build folders; hand them to the container user.
+                for path in [build_temp, *build_temp.rglob("*")]:
+                    try:
+                        os.chown(path, uid, gid)
+                    except OSError:
+                        pass
+        kwargs: Dict[str, Any] = {
+            "user": f"{uid}:{gid}",
+            "network_mode": "none",
+            "cap_drop": ["ALL"],
+            "security_opt": ["no-new-privileges:true"],
+            "read_only": True,
+            "tmpfs": {"/tmp": "rw,nosuid,nodev,size=1g"},
+            "pids_limit": int(self._get_conf("build_pids_limit", 4096) or 4096),
+            "working_dir": "/build-cache/work",
+        }
+        memory = str(self._get_conf("build_memory_limit", "") or "").strip()
+        if memory:
+            kwargs["mem_limit"] = memory
+        env.update({
+            "HOME": "/build-cache/work/home",
+            "XDG_CACHE_HOME": "/build-cache/work/cache",
+            # Everything the tools need is local; never let a library try the network.
+            "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1", "HF_DATASETS_OFFLINE": "1",
+        })
+        return kwargs, env, volumes
+
+    @staticmethod
+    def _render_group_ids() -> List[int]:
+        """Groups owning /dev/dri render nodes: a non-root container user needs them for GPU access."""
+        gids = set()
+        for node in Path("/dev/dri").glob("renderD*") if Path("/dev/dri").exists() else []:
+            try:
+                gids.add(node.stat().st_gid)
+            except OSError:
+                pass
+        return sorted(gids)
+
     def _generate_imatrix(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
                           staged: Tuple[str, Dict[str, Dict[str, str]]]):
         """
@@ -756,15 +814,18 @@ class BuildEngine:
         imatrix_dir = build_temp / "imatrix"
         
         # Volumes for IMatrix run
+        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp)
         vols = {
             str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
-            str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "rw"},
+            str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "ro" if sandbox.get("read_only") else "rw"},
         }
         dataset_vols, dataset_inner = self._dataset_mount(config, staged[1])
         vols.update(dataset_vols)
         vols.update(staged[1])
+        vols.update(sandbox_vols)
         
         env = self._container_env(config, staged[0])
+        env.update(sandbox_env)
         env.update({
             "JOB_TYPE": "imatrix", # Signal to build.sh to run --imatrix mode
             "DATASET_PATH": dataset_inner,
@@ -788,8 +849,8 @@ class BuildEngine:
             volumes=vols,
             environment=env,
             name=f"llm-imatrix-{config.build_id}",
-            user="0:0",
-            device_requests=device_requests
+            device_requests=device_requests,
+            **sandbox,
         )
         # A requested importance matrix that fails stops the build (low-bit types would be unusable).
         exit_code = self._run_container(config, progress, container, "IMATRIX: ")
@@ -808,18 +869,21 @@ class BuildEngine:
         progress.add_log("Starting Main Build Container...")
         
         build_temp = self.cache_dir / "builds" / config.build_id
+        sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp)
         
         # 1. Volume Setup
         vols = {
             str(build_temp / "output"): {"bind": "/build-cache/output", "mode": "rw"},
-            str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "rw"},
+            str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "ro" if sandbox.get("read_only") else "rw"},
             # modules/ are not mounted: the image was built from this target's staged context and
             # already contains them executable; a host mount would hide that copy (mode 644 on Linux).
         }
         vols.update(staged[1])
+        vols.update(sandbox_vols)
         
         # 2. Environment Setup
         env = self._container_env(config, staged[0])
+        env.update(sandbox_env)
         env["JOB_TYPE"] = "build"
         
         # Check for IMatrix from previous step
@@ -851,6 +915,8 @@ class BuildEngine:
                 device_requests = [DeviceRequest(count=-1, capabilities=[['gpu']])]
             elif os.path.exists("/dev/dri"):
                 devices = ["/dev/dri:/dev/dri"]
+                if sandbox.get("read_only") and self._render_group_ids():
+                    sandbox["group_add"] = [str(gid) for gid in self._render_group_ids()]
 
         # 5. Run Container
         container = self.docker_client.containers.create(
@@ -859,9 +925,9 @@ class BuildEngine:
             volumes=vols, 
             environment=env, 
             name=f"llm-build-{config.build_id}", 
-            user="0:0",
             device_requests=device_requests,
-            devices=devices
+            devices=devices,
+            **sandbox,
         )
         
         exit_code = self._run_container(config, progress, container, "CONT: ")

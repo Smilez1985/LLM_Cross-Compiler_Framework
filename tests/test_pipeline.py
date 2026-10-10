@@ -1,6 +1,7 @@
 """Host side of the build pipeline: model staging, container environment, orchestration (no Docker needed)."""
 
 import asyncio
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -410,3 +411,37 @@ class TestCalibrationData:
         config = orch.build_engine.configs[0]
         assert config.use_imatrix and Path(config.dataset_path).name == "calibration_mixed.txt"
         assert Path(config.dataset_path).stat().st_size > 1_000_000
+
+
+class TestBuildSandbox:
+
+    def test_conversion_containers_are_locked_down(self, engine, tmp_path, monkeypatch):
+        monkeypatch.setattr("orchestrator.Core.builder.os.getuid", lambda: 1234)
+        monkeypatch.setattr("orchestrator.Core.builder.os.getgid", lambda: 1234)
+        build_temp = tmp_path / "builds" / "b1"
+        kwargs, env, vols = engine._sandbox(make_config(), build_temp)
+        assert kwargs["user"] == "1234:1234"
+        assert kwargs["network_mode"] == "none" and kwargs["cap_drop"] == ["ALL"]
+        assert kwargs["read_only"] is True and "no-new-privileges:true" in kwargs["security_opt"]
+        assert env["HF_HUB_OFFLINE"] == "1" and env["BUILD_SCRATCH_DIR"] == "/build-cache/work"
+        assert vols == {str(build_temp / "work"): {"bind": "/build-cache/work", "mode": "rw"}}
+        assert (build_temp / "work" / "tmp").is_dir()
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="POSIX ownership")
+    def test_root_host_hands_build_folders_to_the_container_user(self, engine, tmp_path, monkeypatch):
+        owned = []
+        monkeypatch.setattr("orchestrator.Core.builder.os.getuid", lambda: 0)
+        monkeypatch.setattr("orchestrator.Core.builder.os.chown", lambda path, uid, gid: owned.append((Path(path), uid)))
+        kwargs, _, _ = engine._sandbox(make_config(), tmp_path / "builds" / "b1")
+        assert kwargs["user"] == "1000:1000"
+        assert (tmp_path / "builds" / "b1" / "work", 1000) in owned
+
+    def test_sandbox_can_be_disabled(self, engine, tmp_path):
+        engine.config.set("build_sandbox", False)
+        kwargs, env, _ = engine._sandbox(make_config(), tmp_path / "builds" / "b1")
+        assert kwargs == {"user": "0:0"} and "HF_HUB_OFFLINE" not in env
+
+    def test_memory_limit_is_optional(self, engine, tmp_path):
+        assert "mem_limit" not in engine._sandbox(make_config(), tmp_path / "a")[0]
+        engine.config.set("build_memory_limit", "24g")
+        assert engine._sandbox(make_config(), tmp_path / "b")[0]["mem_limit"] == "24g"
