@@ -817,9 +817,10 @@ class LocalLLMRuntime:
 
     def start(self, tier: Optional[str] = None, ctx: Optional[int] = None,
               sleep_idle_seconds: Optional[int] = None, timeout: Optional[float] = None,
-              tie_to_process: bool = False) -> LocalEndpoint:
+              tie_to_process: bool = False, remember: bool = True) -> LocalEndpoint:
         """Starts llama-server (or returns the running one if it already serves this model and context).
-        tier "auto" forgets a tier chosen earlier; tie_to_process ends the server together with this process."""
+        tier "auto" forgets a tier chosen earlier; tie_to_process ends the server together with this process;
+        remember=False keeps the tier chosen earlier (e.g. for an evaluation run)."""
         installed = self.installed()
         if installed is None:
             raise LocalRuntimeError("The local runtime is not installed. Run: llm-cli ditto runtime install")
@@ -836,7 +837,7 @@ class LocalLLMRuntime:
             self._cleanup_stale_locked()
             model_path = self._ensure_model_verified(model)
             endpoint = self._launch(installed, model, model_path, ctx, sleep_idle_seconds, timeout, tie_to_process)
-        if tier:
+        if tier and remember:
             self._update_active(tier=None if tier == "auto" else model.tier)
         return endpoint
 

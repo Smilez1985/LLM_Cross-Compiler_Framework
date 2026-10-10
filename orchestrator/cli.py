@@ -20,7 +20,7 @@ import asyncio
 import os
 import platform
 from pathlib import Path
-from typing import Optional, Dict, List, Any
+from typing import Optional, Dict, List, Any, Tuple
 from datetime import datetime
 from dataclasses import dataclass, asdict
 
@@ -1085,6 +1085,113 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
         err.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     click.echo(reply.text)
+
+
+@ditto.command('eval')
+@click.option('--cases', 'cases_file', type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
+              help='Cases file (default: evals/ditto/cases.yml of the installation)')
+@click.option('--provider', help='AI provider for the run; default: AI settings')
+@click.option('--model', help='Model for the run; default: AI settings')
+@click.option('--tier', 'tiers', multiple=True,
+              help='Run against the managed local model of this tier (repeatable, e.g. --tier small --tier small-q2)')
+@click.option('--kind', 'kinds', multiple=True, type=click.Choice(["healing", "optimizer", "module", "chat"]),
+              help='Only cases of this kind (repeatable)')
+@click.option('--case', 'case_ids', multiple=True, help='Only this case id (repeatable)')
+@click.option('--repeat', type=click.IntRange(1, 20), default=1, show_default=True, help='Runs per case')
+@click.option('--json', 'json_out', type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help='Write the full report as JSON to this file')
+@click.option('--min-pass', type=click.FloatRange(0, 1), default=None,
+              help='Exit code 1 if a run passes fewer cases than this share (e.g. 0.8)')
+@click.option('--effort', type=click.Choice(["low", "medium", "high"]), default=None,
+              help='Reasoning effort for the run (local models: low = no thinking); default: AI settings')
+@pass_context
+def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Optional[str], model: Optional[str],
+               tiers: Tuple[str, ...], kinds: Tuple[str, ...], case_ids: Tuple[str, ...], repeat: int,
+               json_out: Optional[Path], min_pass: Optional[float], effort: Optional[str]):
+    """Grade Ditto on fixed cases with the chosen provider/model, e.g. to check whether a 2-bit local model is
+    good enough. Nothing is built or changed. Cloud providers bill every request (about 20 per run and repeat)."""
+    from orchestrator import __version__
+    from orchestrator.evals.ditto_eval import DittoEval, cases_digest, load_cases
+    ctx.require_framework()
+    if tiers and (provider or model):
+        console.print("[red]--tier runs the managed local model; it cannot be combined with --provider/--model.[/red]")
+        sys.exit(2)
+    try:
+        cases = load_cases(cases_file)
+    except (OSError, ValueError) as e:
+        console.print(f"[red]Cannot read the cases: {escape(str(e))}[/red]")
+        sys.exit(2)
+    cases = [c for c in cases if (not kinds or c.kind in kinds) and (not case_ids or c.id in case_ids)]
+    if not cases:
+        console.print("[red]No case matches the filters.[/red]")
+        sys.exit(2)
+    fm = ctx.framework_manager
+    ditto = _ai_override(ctx, "local" if tiers else provider, model)
+    if effort:
+        for key in ("ai_effort", "ai_effort_chat", "ai_effort_tools", "ai_effort_json", "ai_effort_healing"):
+            fm.config.set(key, effort)  # this run only; the saved settings stay unchanged
+    targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
+    runs = []
+
+    def run_once(label: str):
+        from orchestrator.Core.ditto_manager import DittoError
+        ditto.reload()
+        try:
+            setup = ditto.describe("chat")
+        except DittoError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+        console.print(f"[bold]{escape(label)}[/bold]: {escape(setup['label'])} / {escape(setup['model'])}, "
+                      f"{len(cases)} cases x {repeat}")
+
+        def progress(result):
+            mark = "[green]pass[/green]" if result.pass_rate == 1 else (
+                "[red]fail[/red]" if result.pass_rate == 0 else f"[yellow]{result.pass_rate:.0%}[/yellow]")
+            note = f"  [dim]{escape(result.first_problem()[:160])}[/dim]" if result.pass_rate < 1 else ""
+            console.print(f"  {mark} {escape(result.case.id)} ({result.seconds:.1f}s){note}")
+
+        report = DittoEval(ditto, targets_dir).run(cases, repeat=repeat, on_result=progress)
+        models = {}
+        for task in ("chat", "json", "healing"):  # each task may use its own model
+            try:
+                models[task] = ditto.describe(task).get("model", "")
+            except DittoError:
+                models[task] = ""
+        report.setup = {"label": label, "provider": setup.get("provider", ""), "model": setup.get("model", ""),
+                        "task_models": models, "effort": effort or "settings", "framework": __version__,
+                        "cases_sha256": cases_digest(cases_file), "repeat": repeat, "cases": [c.id for c in cases]}
+        runs.append(report)
+
+    if tiers:
+        from orchestrator.runtime.llama_server import LocalRuntimeError
+        rt = _local_runtime(ctx)
+        for tier in tiers:
+            try:
+                with console.status(f"Starting llama-server with {tier} ..."):
+                    rt.start(tier=tier, remember=False)
+                run_once(f"tier {tier}")
+            except LocalRuntimeError as e:
+                _runtime_failure(e)
+            finally:
+                rt.stop()
+    else:
+        run_once("configured model" if not (provider or model) else f"{provider or ''} {model or ''}".strip())
+
+    table = Table(title="Ditto evaluation")
+    for column in ("Run", "Model", "Passed", *sorted({c.kind for c in cases}), "Avg s/case"):
+        table.add_column(column)
+    for report in runs:
+        kinds_rate = report.by_kind()
+        avg = sum(r.seconds for r in report.results) / len(report.results)
+        table.add_row(escape(report.setup["label"]), escape(report.setup["model"]), f"{report.pass_rate:.0%}",
+                      *[f"{kinds_rate[k]:.0%}" for k in sorted(kinds_rate)], f"{avg:.1f}")
+    console.print(table)
+    if json_out:
+        json_out.write_text(json.dumps({"runs": [r.to_dict() for r in runs]}, indent=2, ensure_ascii=False),
+                            encoding="utf-8")
+        console.print(f"Report written to {escape(str(json_out))}")
+    if min_pass is not None and any(r.pass_rate < min_pass for r in runs):
+        sys.exit(1)
 
 
 # ============================================================================

@@ -481,6 +481,15 @@ class TestOpenAICompat:
         assert http.last.headers["authorization"] == "Bearer runtime-key"
         assert result.parsed.status == "ok"
 
+    @pytest.mark.parametrize("effort,sent", [("low", "none"), ("medium", "medium"), ("high", "high")])
+    def test_llama_server_low_effort_turns_thinking_off(self, make_client, effort, sent):
+        # Qwen3.5's template ignores "low" and thinks at full length; "none" is what turns thinking off.
+        http = FakeHTTP().add(completion("ok"))
+        client = make_client(http, ai_provider="local", ai_effort=effort)
+        client.set_runtime_endpoint("local", "http://127.0.0.1:8099/v1", "runtime-key", "qwen3.5-2b-q2")
+        client.chat(ask())
+        assert http.last.json["reasoning_effort"] == sent
+
     def test_llama_server_json_alone_uses_response_format(self, make_client):
         http = FakeHTTP().add(completion('{"status": "ok", "score": 1}'))
         client = make_client(http, ai_provider="local")

@@ -112,7 +112,9 @@ providers:
     auth: [none]
     runtime_endpoint: true   # base_url and api key come from the running server, not from the settings
     reasoning: reasoning_effort
-    effort_map: {xhigh: high, max: high}
+    # llama-server: "none" turns thinking off; Qwen3.5's template ignores "low" and thinks at full length,
+    # which takes minutes on a CPU. So low = no thinking, medium and up = thinking.
+    effort_map: {low: none, xhigh: high, max: high}
     no_tools_with_response_format: true   # llama-server ignores tools when a JSON schema is set
 
   custom:
