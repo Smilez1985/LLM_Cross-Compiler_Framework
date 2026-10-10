@@ -247,10 +247,10 @@ run_system_tests() {
 
     # Optional SDK venvs (only targets that ship them)
     if [ -n "${RKLLM_PYTHON:-}" ]; then
-        "$RKLLM_PYTHON" -c "from rkllm.api import RKLLM" && echo "✅ RKLLM toolkit" || { log_error "RKLLM toolkit broken"; exit 1; }
+        "$RKLLM_PYTHON" -c "from rkllm.api import RKLLM; RKLLM()" >/dev/null && echo "✅ RKLLM toolkit" || { log_error "RKLLM toolkit broken"; exit 1; }
     fi
     if [ -n "${RKNN_PYTHON:-}" ]; then
-        "$RKNN_PYTHON" -c "from rknn.api import RKNN" && echo "✅ RKNN toolkit" || { log_error "RKNN toolkit broken"; exit 1; }
+        "$RKNN_PYTHON" -c "from rknn.api import RKNN; RKNN(verbose=False)" >/dev/null && echo "✅ RKNN toolkit" || { log_error "RKNN toolkit broken"; exit 1; }
     fi
 
     # Each toolchain venv must be internally consistent (the SDKs pin conflicting torch versions).

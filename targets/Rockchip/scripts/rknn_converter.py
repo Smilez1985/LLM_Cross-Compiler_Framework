@@ -23,8 +23,11 @@ def convert_to_rknn(onnx_path, output_path, target_platform, dtype='i8', dataset
     rknn = RKNN(verbose=False)
 
     logger.info(f"Configuring for {target_platform.upper()}...")
-    q_dtype = 'asymmetric_quantized-8' if dtype == 'i8' else 'fp16'
-    rknn.config(target_platform=target_platform, optimization_level=3, quantized_dtype=q_dtype)
+    # rknn-toolkit2 >= 2.x names quantization schemes w8a8/w8a16/...; FP16 simply means no quantization.
+    config_kwargs = {"target_platform": target_platform, "optimization_level": 3}
+    if dtype == 'i8':
+        config_kwargs["quantized_dtype"] = "w8a8"
+    rknn.config(**config_kwargs)
 
     logger.info(f"Loading model: {os.path.basename(onnx_path)}")
     if rknn.load_onnx(model=onnx_path) != 0:
