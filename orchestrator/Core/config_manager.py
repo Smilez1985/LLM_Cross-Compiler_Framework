@@ -191,7 +191,7 @@ class ConfigManager:
         config_file: Optional[Path] = None
         if config_dir is not None:
             config_dir = Path(config_dir)
-            if config_dir.suffix.lower() in ('.yml', '.yaml', '.json'):
+            if config_dir.is_file() or config_dir.suffix.lower() in ('.yml', '.yaml', '.json'):
                 config_file = config_dir
                 config_dir = config_dir.parent
         self.config_dir = config_dir or self._detect_config_directory()
@@ -318,10 +318,11 @@ class ConfigManager:
     def load_configuration(self, config_file: Optional[Path] = None) -> bool:
         try:
             self._load_default_configuration()
+            # The user config (written by save_user_config) is always read; an explicitly
+            # passed file is layered on top so its values win.
+            self._load_config_files_auto()
             if config_file:
                 self._load_config_file(config_file)
-            else:
-                self._load_config_files_auto()
             self._load_environment_variables()
             self._validate_configuration()
             return True
@@ -377,7 +378,10 @@ class ConfigManager:
             schema = self.config_schemas.get(key)
             if schema and schema.enterprise_only and not self.advanced_mode.enabled:
                 continue
-            
+            if schema and not schema.validate_value(value)[0]:
+                self.logger.warning(f"Ignoring invalid value for '{key}' from {source.source_path}: {value!r}")
+                continue
+
             with self._lock:
                 existing = self.config_values.get(key)
                 if not existing or source.priority >= existing.source.priority:
@@ -398,11 +402,17 @@ class ConfigManager:
             
             if config_key:
                 schema = self.config_schemas.get(config_key)
-                if schema and schema.enterprise_only and not self.advanced_mode.enabled:
+                # Unrelated variables (e.g. LLM_CONFIG) must not turn into config attributes.
+                if schema is None:
                     continue
-                
+                if schema.enterprise_only and not self.advanced_mode.enabled:
+                    continue
+
                 try:
                     val = self._convert_env_value(env_value, schema)
+                    if not schema.validate_value(val)[0]:
+                        self.logger.warning(f"Ignoring invalid value for '{config_key}' from {env_name}")
+                        continue
                     with self._lock:
                         self.config_values[config_key] = ConfigValue(
                             key=config_key, value=val, source=env_source, schema=schema, last_modified=datetime.now()
@@ -494,9 +504,11 @@ class ConfigManager:
                 "source_repositories", "default_enable_imatrix", "default_calibration_dataset"
             ]
             
+            # Only values changed at runtime via set(); defaults and env overrides must not
+            # become permanent, and values already in config.yml are kept from `data` above.
             for key, val in self.config_values.items():
-                if key in persist_keys:
-                      data[key] = val.value
+                if key in persist_keys and val.source.source_type == "override":
+                    data[key] = val.value
         
         try:
             with open(config_file, 'w') as f:

@@ -26,6 +26,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Python Environment Setup
+# Debian Bookworm refuses pip installs into the system Python (PEP 668), so everything goes into a venv.
+ENV VIRTUAL_ENV=/opt/venv
+RUN python3 -m venv "$VIRTUAL_ENV"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
 
 # Install CPU-only PyTorch to save space (Builder runs on Host CPU)
@@ -46,15 +50,14 @@ WORKDIR /tmp
 
 # 1. RKLLM-Toolkit (for LLM on RK3588)
 # Using tag 'release-v1.2.1b1' as stable fallback source
-RUN git clone -b release-v1.2.1b1 https://github.com/airockchip/rknn-llm.git && \
-    # Find and install the python 3.11 wheel (Debian Bookworm uses py3.11)
-    # Pattern: rkllm_toolkit-*-cp311-cp311-linux_x86_64.whl
-    pip install --no-cache-dir rknn-llm/rkllm-toolkit/packages/rkllm_toolkit-*-cp311-cp311-linux_x86_64.whl && \
+# Debian Bookworm uses Python 3.11; at this tag the wheels sit directly in rkllm-toolkit/.
+RUN git clone --depth 1 -b release-v1.2.1b1 https://github.com/airockchip/rknn-llm.git && \
+    pip install --no-cache-dir rknn-llm/rkllm-toolkit/rkllm_toolkit-*-cp311-cp311-linux_x86_64.whl && \
     rm -rf rknn-llm
 
 # 2. RKNN-Toolkit2 (for Vision/Voice on RK3566/RK3588)
 # Using tag 'v2.0.0-beta0'
-RUN git clone -b v2.0.0-beta0 https://github.com/airockchip/rknn-toolkit2.git && \
+RUN git clone --depth 1 -b v2.0.0-beta0 https://github.com/airockchip/rknn-toolkit2.git && \
     pip install --no-cache-dir rknn-toolkit2/rknn-toolkit2/packages/rknn_toolkit2-*-cp311-cp311-linux_x86_64.whl && \
     rm -rf rknn-toolkit2
 

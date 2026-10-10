@@ -116,20 +116,12 @@ class CrawlWorker(QThread):
         try:
             total_docs = 0
 
-            # CrawlerManager reads these keys from the config when it is created.
-            cfg = getattr(self.rag_manager.framework, 'config', None)
-            if cfg is not None and hasattr(cfg, 'set'):
-                cfg.set("crawler_max_depth", int(self.options.get("max_depth", 2)))
-                cfg.set("crawler_respect_robots", bool(self.options.get("respect_robots", True)))
-                cfg.set("crawler_download_pdfs", bool(self.options.get("download_pdfs", True)))
-                cfg.set("crawler_rate_limit", float(self.options.get("request_delay", 1)))
-
             for url in self.urls:
                 if not self._is_running: break
 
                 self.progress.emit(f"Crawling root: {url}...")
 
-                result = self.rag_manager.ingest_url(url)
+                result = self.rag_manager.ingest_url(url, self.options)
                 
                 if result.get("success"):
                     count = result.get("count", 0)

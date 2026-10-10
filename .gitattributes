@@ -1,0 +1,10 @@
+# Scripts and Dockerfiles run inside Linux containers; CRLF from a Windows checkout breaks them.
+*.sh          text eol=lf
+Dockerfile*   text eol=lf
+dockerfile    text eol=lf
+*.yml         text eol=lf
+*.yaml        text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat         text eol=crlf
+*.ps1         text eol=crlf

@@ -1,0 +1,7 @@
+# Test and lint tools for local runs and CI (runtime dependencies are in requirements.txt).
+pytest==9.1.1
+ruff==0.17.0
+bandit==1.9.4
+pip-audit==2.10.1
+shellcheck-py==0.11.0.1
+actionlint-py==1.7.12.25

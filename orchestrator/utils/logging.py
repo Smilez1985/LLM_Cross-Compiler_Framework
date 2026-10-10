@@ -599,7 +599,8 @@ class LoggingManager:
         """Create appropriate handler for destination"""
         
         if destination == LogDestination.CONSOLE:
-            return logging.StreamHandler(sys.stdout)
+            # stdout is reserved for command output (e.g. `cli ... -f json`).
+            return logging.StreamHandler(sys.stderr)
         
         elif destination == LogDestination.FILE:
             if config.file_path:

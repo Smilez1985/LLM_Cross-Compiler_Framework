@@ -10,11 +10,18 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 
 @pytest.fixture(autouse=True)
-def clean_framework_env(monkeypatch):
-    """ConfigManager reads LLM_*/FRAMEWORK_* env vars; keep tests independent of the host shell."""
+def isolated_environment(tmp_path, monkeypatch):
+    """Keeps tests away from the developer's real ~/.llm-framework, API keys and LLM_* settings."""
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
     for var in list(os.environ):
         if var.startswith(("LLM_", "FRAMEWORK_")):
             monkeypatch.delenv(var)
+    # DittoCoder exports keys into os.environ; registering them here makes monkeypatch remove them afterwards.
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(var, raising=False)
 
 
 @pytest.fixture
@@ -46,16 +53,31 @@ def memory_keyring():
 
 
 @pytest.fixture
-def booted_framework(tmp_path, monkeypatch, memory_keyring):
-    """A fully initialized FrameworkManager whose relative paths live in tmp_path."""
+def make_framework(tmp_path, monkeypatch, memory_keyring):
+    """Builds FrameworkManagers whose config, data and install paths all live in tmp_path."""
     monkeypatch.chdir(tmp_path)
+    config_dir = tmp_path / "configs"
+    config_dir.mkdir(exist_ok=True)
     from orchestrator.Core.framework import FrameworkManager
 
-    fm = FrameworkManager()
-    fm.info.installation_path = tmp_path
-    assert fm.initialize(), "FrameworkManager.initialize() failed"
-    yield fm
-    fm.shutdown()
+    created = []
+
+    def factory(config_file=None, initialize=True):
+        fm = FrameworkManager(str(config_file or config_dir))
+        fm.info.installation_path = tmp_path
+        if initialize:
+            assert fm.initialize(), "FrameworkManager.initialize() failed"
+        created.append(fm)
+        return fm
+
+    yield factory
+    for fm in created:
+        fm.shutdown()
+
+
+@pytest.fixture
+def booted_framework(make_framework):
+    return make_framework()
 
 
 @pytest.fixture

@@ -1,16 +1,15 @@
-#!/usr/bin/env python3
 """DeploymentManager tests: package contents, Slim-RAG, Air-Gap images, deploy script, SSH safety."""
 
 import hashlib
 import shlex
 import shutil
 import subprocess
-import sys
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from conftest import REPO_ROOT
 from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.Core.deployment_manager import DeploymentManager
 
@@ -186,5 +185,47 @@ class TestSSHDeployment:
         assert calls[1][2] == "radxa@192.168.1.50:/tmp/llm_deploy/"
 
 
-if __name__ == "__main__":
-    sys.exit(pytest.main(["-v", __file__]))
+
+class TestBuildContext:
+    """Target Dockerfiles COPY paths relative to the staged context; every source must exist there."""
+
+    @pytest.mark.parametrize("dockerfile", sorted(
+        str(p.relative_to(REPO_ROOT)) for p in (REPO_ROOT / "targets").glob("*/*") if p.name.lower().startswith("dockerfile")))
+    def test_every_copy_source_exists_in_staged_context(self, tmp_path, dockerfile):
+        from orchestrator.utils.build_context import stage_build_context
+
+        source = REPO_ROOT / dockerfile
+        staged = stage_build_context(source.parent, REPO_ROOT, tmp_path / "ctx", source.name)
+
+        for line in staged.read_text().splitlines():
+            parts = line.split()
+            if not parts or parts[0].upper() not in ("COPY", "ADD") or any(p.startswith("--from") for p in parts):
+                continue
+            sources = [p for p in parts[1:-1] if not p.startswith("--")]
+            for src in sources:
+                assert (staged.parent / src).exists(), f"{dockerfile}: '{line.strip()}' has no '{src}' in the build context"
+
+    def test_context_layout(self, tmp_path):
+        from orchestrator.utils.build_context import stage_build_context
+
+        staged = stage_build_context(REPO_ROOT / "targets" / "Rockchip", REPO_ROOT, tmp_path / "ctx")
+
+        assert staged == tmp_path / "ctx" / "Dockerfile"
+        assert (tmp_path / "ctx" / "docker" / "entrypoint.sh").read_bytes() == (REPO_ROOT / "entrypoint.sh").read_bytes()
+        assert (tmp_path / "ctx" / "modules" / "build.sh").exists()
+        assert (tmp_path / "ctx" / "scripts" / "rknn_converter.py").exists()
+
+    def test_refuses_to_overwrite_a_non_empty_directory(self, tmp_path):
+        from orchestrator.utils.build_context import stage_build_context
+
+        (tmp_path / "ctx").mkdir()
+        (tmp_path / "ctx" / "keep.txt").write_text("user data")
+        with pytest.raises(FileExistsError):
+            stage_build_context(REPO_ROOT / "targets" / "Rockchip", REPO_ROOT, tmp_path / "ctx")
+        assert (tmp_path / "ctx" / "keep.txt").read_text() == "user data"
+
+    def test_gpu_dockerfile_is_preferred_when_present(self, tmp_path):
+        from orchestrator.utils.build_context import stage_build_context
+
+        staged = stage_build_context(REPO_ROOT / "targets" / "_template", REPO_ROOT, tmp_path / "ctx", "Dockerfile.gpu")
+        assert staged.read_bytes() == (REPO_ROOT / "targets" / "_template" / "Dockerfile.gpu").read_bytes()

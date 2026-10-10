@@ -149,6 +149,8 @@ class RAGManager:
         """Generiert Embeddings mittels litellm."""
         if not litellm:
             raise ImportError("litellm not installed")
+        if self.config is not None and hasattr(self.config, 'get') and self.config.get("offline_mode", False):
+            raise RuntimeError("Offline mode: external embedding API disabled")
 
         # Config safe access
         model = DEFAULT_EMBEDDING_MODEL
@@ -226,10 +228,11 @@ class RAGManager:
         return False
 
     # --- DEEP INGEST (WEB/PDF) ---
-    def ingest_url(self, url: str) -> Dict[str, Any]:
+    def ingest_url(self, url: str, crawler_options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Startet den Crawler für eine URL.
         Erstellt automatisch einen Sicherheits-Snapshot davor.
+        crawler_options gelten nur für diesen Crawl (siehe CrawlerManager).
         """
         if not CrawlerManager:
             return {"success": False, "message": "Crawler module missing"}
@@ -241,7 +244,7 @@ class RAGManager:
             return {"success": False, "message": "Qdrant not connected"}
 
         try:
-            crawler = CrawlerManager(self.framework)
+            crawler = CrawlerManager(self.framework, crawler_options)
             self.logger.info(f"Invoking Crawler for {url}...")
             documents = crawler.crawl(url)
             

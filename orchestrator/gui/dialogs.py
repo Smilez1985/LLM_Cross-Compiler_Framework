@@ -155,14 +155,16 @@ class HealingConfirmDialog(QDialog):
         """Returns the (potentially edited) command."""
         return self.txt_command.toPlainText().strip()
 
-# (display name, provider id understood by DittoCoder, keyring secret, suggested models)
+# (display name, provider id understood by DittoCoder, keyring secret, key required, suggested models)
 AI_PROVIDERS = [
-    ("OpenAI", "OpenAI", "openai_api_key", ["gpt-4o", "gpt-4o-mini", "gpt-4.1"]),
-    ("Anthropic (Claude)", "Anthropic", "anthropic_api_key", ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]),
-    ("Google (Gemini)", "Google", "gemini_api_key", ["gemini-2.0-flash", "gemini-1.5-pro"]),
-    ("Ollama (Local)", "Ollama", None, ["llama3.2", "qwen2.5", "mistral"]),
-    ("Custom Endpoint", "Custom", None, []),
+    ("OpenAI", "OpenAI", "openai_api_key", True, ["gpt-4o", "gpt-4o-mini", "gpt-4.1"]),
+    ("Anthropic (Claude)", "Anthropic", "anthropic_api_key", True, ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]),
+    ("Google (Gemini)", "Google", "gemini_api_key", True, ["gemini-2.0-flash", "gemini-1.5-pro"]),
+    ("Ollama (Local)", "Ollama", None, False, ["llama3.2", "qwen2.5", "mistral"]),
+    ("Custom Endpoint (OpenAI-compatible)", "Custom", "custom_api_key", False, []),
 ]
+# Only these providers talk to a user-supplied URL; cloud providers keep their fixed endpoints.
+ENDPOINT_PROVIDERS = ("Ollama", "Custom")
 
 class AIConfigurationDialog(QDialog):
     """
@@ -190,7 +192,7 @@ class AIConfigurationDialog(QDialog):
         form = QFormLayout()
 
         self.cb_provider = QComboBox()
-        for display, provider_id, _, _ in AI_PROVIDERS:
+        for display, provider_id, _, _, _ in AI_PROVIDERS:
             self.cb_provider.addItem(display, provider_id)
         self.cb_provider.currentIndexChanged.connect(self._on_provider_changed)
         form.addRow("AI Provider:", self.cb_provider)
@@ -206,7 +208,7 @@ class AIConfigurationDialog(QDialog):
         self.txt_base_url = QLineEdit()
         form.addRow("Base URL:", self.txt_base_url)
 
-        self.chk_enable_rag = QCheckBox("Enable Local Knowledge Base (RAG)")
+        self.chk_enable_rag = QCheckBox("Enable Local Knowledge Base (RAG, uses an online embedding API)")
         form.addRow("", self.chk_enable_rag)
 
         self.chk_offline = QCheckBox("Offline Mode (built-in local model, no external APIs)")
@@ -229,38 +231,44 @@ class AIConfigurationDialog(QDialog):
             return cfg.get(key, default)
         return default
 
-    def _provider_meta(self) -> Tuple[Optional[str], List[str]]:
+    def _provider_meta(self) -> Tuple[Optional[str], bool, List[str]]:
         provider = self.cb_provider.currentData()
-        for _, provider_id, secret_key, models in AI_PROVIDERS:
+        for _, provider_id, secret_key, key_required, models in AI_PROVIDERS:
             if provider_id == provider:
-                return secret_key, models
-        return None, []
+                return secret_key, key_required, models
+        return None, False, []
 
     def _stored_key(self) -> Optional[str]:
-        secret_key, _ = self._provider_meta()
+        secret_key, _, _ = self._provider_meta()
         sm = getattr(self.framework, 'secrets_manager', None)
         if secret_key and sm:
             return sm.get_secret(secret_key)
         return None
 
+    def _apply_enabled_state(self):
+        secret_key, key_required, _ = self._provider_meta()
+        offline = self.chk_offline.isChecked()
+        provider = self.cb_provider.currentData()
+
+        self.cb_provider.setEnabled(not offline)
+        self.cb_model.setEnabled(not offline)
+        self.txt_api_key.setEnabled(secret_key is not None and not offline)
+        self.txt_base_url.setEnabled(provider in ENDPOINT_PROVIDERS and not offline)
+        self.txt_base_url.setPlaceholderText("http://localhost:11434" if provider == "Ollama" else "https://.../v1")
+        if self._stored_key():
+            self.txt_api_key.setPlaceholderText("******** (Stored in Keyring)")
+        else:
+            self.txt_api_key.setPlaceholderText("Paste API key" if key_required else "Optional API key")
+
     # --- slots ---
     def _on_provider_changed(self):
-        secret_key, models = self._provider_meta()
+        _, _, models = self._provider_meta()
         self.cb_model.clear()
         self.cb_model.addItems(models)
-
-        offline = self.chk_offline.isChecked()
-        self.txt_api_key.setEnabled(secret_key is not None and not offline)
-        self.txt_base_url.setEnabled(secret_key is None and not offline)
-        self.txt_base_url.setPlaceholderText(
-            "http://localhost:11434" if self.cb_provider.currentData() == "Ollama" else "https://...")
-        self.txt_api_key.setPlaceholderText(
-            "******** (Stored in Keyring)" if self._stored_key() else "Paste API key")
+        self._apply_enabled_state()
 
     def _on_offline_toggled(self, checked: bool):
-        for widget in (self.cb_provider, self.cb_model):
-            widget.setEnabled(not checked)
-        self._on_provider_changed()
+        self._apply_enabled_state()
 
     def _load_current_config(self):
         idx = self.cb_provider.findData(self._config_get("ai_provider", "OpenAI"))
@@ -273,23 +281,28 @@ class AIConfigurationDialog(QDialog):
         self.txt_base_url.setText(self._config_get("ai_base_url", "") or "")
         self.chk_enable_rag.setChecked(bool(self._config_get("enable_rag_knowledge", False)))
         self.chk_offline.setChecked(bool(self._config_get("offline_mode", False)))
+        self._apply_enabled_state()
 
     def _save_config(self):
         provider = self.cb_provider.currentData()
         model = self.cb_model.currentText().strip()
         api_key = self.txt_api_key.text().strip()
-        base_url = self.txt_base_url.text().strip()
         offline = self.chk_offline.isChecked()
         enable_rag = self.chk_enable_rag.isChecked()
-        secret_key, _ = self._provider_meta()
+        secret_key, key_required, _ = self._provider_meta()
+        # A leftover Ollama/Custom URL must never reach a cloud provider (it would receive that provider's key).
+        base_url = self.txt_base_url.text().strip() if provider in ENDPOINT_PROVIDERS else ""
 
         if not offline:
-            if secret_key and not api_key and not self._stored_key():
+            if key_required and not api_key and not self._stored_key():
                 QMessageBox.warning(self, "Missing API Key",
                     "Please provide an API key for this provider, or enable Offline Mode.")
                 return
             if provider == "Custom" and not base_url:
                 QMessageBox.warning(self, "Missing Base URL", "A custom endpoint requires a Base URL.")
+                return
+            if base_url and (urlparse(base_url).scheme not in ("http", "https") or not urlparse(base_url).netloc):
+                QMessageBox.warning(self, "Invalid Base URL", "The Base URL must start with http:// or https://.")
                 return
             if not model:
                 QMessageBox.warning(self, "Missing Model", "Please select or enter a model.")
@@ -316,6 +329,7 @@ class AIConfigurationDialog(QDialog):
 
         ditto = getattr(self.framework, 'ditto_manager', None)
         if ditto and hasattr(ditto, 'reinitialize'):
+            # "" (not None) so that a previously set URL is cleared.
             ditto.reinitialize(provider=provider, model=model, api_key=api_key or None,
                                base_url=base_url, offline_mode=offline)
 

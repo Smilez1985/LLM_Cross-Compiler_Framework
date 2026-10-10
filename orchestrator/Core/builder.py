@@ -38,6 +38,7 @@ from docker.models.images import Image
 from docker.types import DeviceRequest
 
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.build_context import stage_build_context
 
 # Fallback Helper if utils module not fully ready during bootstrap
 def ensure_directory(path: Path):
@@ -414,22 +415,11 @@ class BuildEngine:
         progress.progress_percent = 20
         
         build_temp = self.cache_dir / "builds" / config.build_id
-        df_path = build_temp / "Dockerfile"
-        
         src_df_name = "Dockerfile.gpu" if config.use_gpu else "Dockerfile"
-        src_df = target_path / src_df_name
-        
-        if not src_df.exists():
-            src_df = target_path / "Dockerfile"
-            
-        if not src_df.exists():
-            src_df = target_path / "dockerfile"
-            
-        if not src_df.exists(): 
-            raise FileNotFoundError(f"Dockerfile missing in target {target_path}")
-        
-        progress.add_log(f"Using Dockerfile template: {src_df.name}")
-        shutil.copy2(src_df, df_path)
+
+        # The Dockerfile COPYs modules/, scripts/ and docker/entrypoint.sh relative to its context.
+        df_path = stage_build_context(target_path, self.base_dir, build_temp / "context", src_df_name)
+        progress.add_log(f"Using Dockerfile from {target_path.name}, build context: {df_path.parent}")
         
         if config.enable_hadolint: 
             self._validate_dockerfile_hadolint(df_path, progress)
@@ -447,13 +437,9 @@ class BuildEngine:
         progress.progress_percent = 40
         
         tag = f"llm-framework/{config.target_arch.lower()}:{config.build_id.lower()}"
-        context = self.base_dir
-        
-        try:
-            rel_df = path.relative_to(context)
-        except ValueError:
-            rel_df = path.absolute()
-        
+        context = path.parent
+        rel_df = path.name
+
         progress.add_log(f"Building Docker Image: {tag}")
         
         try:

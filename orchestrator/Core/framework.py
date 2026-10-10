@@ -48,14 +48,15 @@ class FrameworkManager:
     Zentrale Instanz, die den Lebenszyklus aller Sub-Systeme steuert.
     """
     
-    def __init__(self, config_file: Optional[str] = None):
+    def __init__(self, config_file: Optional[str] = None, log_level: Optional[str] = None):
         # 0. Basic Setup (Pfade)
         self.app_root = Path(__file__).resolve().parents[2] # Root dir calculation
         self.info = FrameworkInfo(installation_path=self.app_root)
-        
+
         # Init Config & Logger first
         self.config = ConfigManager(config_file)
-        setup_logging(level=self.config.log_level)
+        level = (log_level or self.config.get("log_level", "INFO") or "INFO").upper()
+        setup_logging(level=level if level in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL") else "INFO")
         self.logger = get_logger("FrameworkKernel")
         
         self.logger.info(f"Booting {self.info.name} v{self.info.version} ({self.info.edition})...")

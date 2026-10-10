@@ -181,7 +181,8 @@ class DeploymentManager:
                     sha = hashlib.sha256()
                     with open(p, "rb") as f_in:
                         for chunk in iter(lambda: f_in.read(4096), b""): sha.update(chunk)
-                    f.write(f"{sha.hexdigest()}  {p.relative_to(directory)}\n")
+                    # POSIX separators: the file is verified with sha256sum on the Linux target, also when built on Windows.
+                    f.write(f"{sha.hexdigest()}  {p.relative_to(directory).as_posix()}\n")
 
     def _generate_deploy_script(self, artifact, flags, use_docker,
                                 inference_image: str = DEFAULT_INFERENCE_IMAGE,

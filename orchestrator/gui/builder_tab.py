@@ -513,7 +513,8 @@ class BuilderTab(QWidget):
         tm = self.framework.get_component("target_manager")
         if tm:
             for t in tm.list_targets():
-                self.target_combo.addItem(f"{t.get('name')} ({t.get('architecture')})", t.get('id'))
+                arch = t.get('architecture') or t.get('architecture_family') or "?"
+                self.target_combo.addItem(f"{t.get('name')} ({arch})", t.get('id'))
 
     def _browse_model(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Model", "", "Models (*.bin *.gguf *.safetensors);;All Files (*)")
