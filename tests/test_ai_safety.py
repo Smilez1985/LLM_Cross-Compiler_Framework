@@ -219,7 +219,7 @@ class TestHealingApproval:
         orch._workflows["r1"] = state
         job = SimpleNamespace(job_id="j1", target_architecture="Rockchip", source_model="m", error_log="No space left")
 
-        async def fake_run_job(job, req):
+        async def fake_run_job(job, req, attempt=1):
             attempts.append(job.job_id)
             return True
 

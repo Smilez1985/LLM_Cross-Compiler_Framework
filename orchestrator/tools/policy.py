@@ -71,6 +71,11 @@ class ToolPolicy(BaseModel):
         return self.tiers.get(tier, Decision.ASK)
 
 
+def restrictive_policy() -> ToolPolicy:
+    """Used when a stored policy exists but cannot be read: it must never be looser than what the user chose."""
+    return ToolPolicy(configured=False, tiers={tier: Decision.DENY for tier in RECOMMENDED_TIERS})
+
+
 class PolicyStore:
     """Loads and saves the policy as JSON (mode 0600) in the per-user state directory."""
 
@@ -78,16 +83,43 @@ class PolicyStore:
 
     def __init__(self, state_dir: Path):
         self.path = Path(state_dir) / self.FILE_NAME
+        self.problem: Optional[str] = None  # set when the stored file exists but could not be used
 
     def load(self) -> ToolPolicy:
         try:
-            return ToolPolicy.model_validate(json.loads(self.path.read_text(encoding="utf-8")))
+            policy = ToolPolicy.model_validate(json.loads(self.path.read_text(encoding="utf-8")))
+            self.problem = None
+            return policy
         except FileNotFoundError:
+            self.problem = None
             return ToolPolicy()
-        except (OSError, ValueError, ValidationError):
-            # A damaged or hand-edited file must not grant anything: fall back to the safe default
-            # and ask for the setup again.
-            return ToolPolicy()
+        except OSError as e:
+            # Unreadable right now (permissions, too many open files): deny everything for this call.
+            self.problem = f"{self.path} cannot be read ({e}); all tools are denied until it can."
+            return restrictive_policy()
+        except (ValueError, ValidationError) as e:
+            # Damaged or edited by hand: deny everything (the recommended defaults could be looser than the
+            # stored choice) and keep a copy, so saving the setup again does not silently lose it.
+            self.problem = (f"{self.path} is damaged ({str(e).splitlines()[0][:200]}); all tools are denied. "
+                            f"A copy was kept as {self.path.name}.bad; set the permissions up again.")
+            self._keep_copy()
+            return restrictive_policy()
+
+    @property
+    def damaged(self) -> bool:
+        return self.problem is not None
+
+    def _keep_copy(self) -> None:
+        bad = self.path.with_name(self.path.name + ".bad")
+        try:
+            data = self.path.read_bytes()
+            if not bad.exists() or bad.read_bytes() != data:
+                fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".tool_policy.bad.")
+                with os.fdopen(fd, "wb") as f:
+                    f.write(data)
+                os.replace(tmp, bad)
+        except OSError:
+            pass
 
     def save(self, policy: ToolPolicy) -> ToolPolicy:
         policy = policy.model_copy(update={"updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds")})

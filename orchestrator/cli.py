@@ -170,7 +170,8 @@ def load_config_file(config_path: Optional[str] = None) -> Dict[str, Any]:
             if file_config:
                 config.update(file_config)
         except Exception as e:
-            console.print(f"[yellow]Warning: Failed to load config file: {e}[/yellow]")
+            # stderr: stdout may carry a protocol (llm-cli mcp serve)
+            Console(stderr=True).print(f"[yellow]Warning: Failed to load config file: {escape(str(e))}[/yellow]")
     return config
 
 
@@ -543,18 +544,22 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         tm = getattr(ctx.framework_manager, "target_manager", None)
         caps = tm.get_capabilities(target) if tm else None
         if caps:
-            cap = caps.formats.get(format)
-            if cap and not board and len(caps.boards_for(format)) == 1:
-                board = caps.boards_for(format)[0]
+            # The values the build really runs with (canonical spellings, the scripts' default board).
+            _, board, quantization = caps.normalize(format, board, quantization)
             problems = caps.check_request(format, board, quantization, dataset=bool(dataset), imatrix=imatrix)
             if problems:
                 for problem in problems:
-                    console.print(f"[red]{problem}[/red]")
+                    console.print(f"[red]{escape(problem)}[/red]")
                 sys.exit(2)
-            quantization = cap.canonical(quantization) or quantization or cap.default_for(board)
+        elif board:
+            board = board.strip().lower()  # the module scripts lower-case it as well
 
-        if not output_dir:
-            output_dir = str(Path(ctx.config["output_dir"]) / f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+        # A path given here means the current directory; the configured default the installation's.
+        if output_dir:
+            output_dir = str(Path(output_dir).expanduser().resolve())
+        else:
+            base = ctx.framework_manager.resolve_path(ctx.framework_manager.config.get("output_dir", "output"))
+            output_dir = str(base / f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
         
         build_request = BuildRequest(
             request_id="",
@@ -779,6 +784,8 @@ def tools_list(ctx: FrameworkContext):
     """List the tools and what your permissions allow"""
     registry = _tool_registry(ctx)
     policy = registry.policy()
+    if registry.policy_store.problem:
+        Console(stderr=True).print(f"[red]{escape(registry.policy_store.problem)}[/red]")
     table = Table(title="Framework tools" + ("" if policy.configured else " (permissions not set up yet)"))
     table.add_column("Tool", style="cyan")
     table.add_column("Tier")
@@ -821,27 +828,33 @@ def tools_permissions(ctx: FrameworkContext, reset: bool):
 
 @tools.command('audit')
 @click.option('--limit', default=30, show_default=True, help='Number of entries')
-@click.option('--verify', is_flag=True, help='Check that no entry was changed or removed')
+@click.option('--verify', is_flag=True,
+              help='Check the chain: changed or removed entries, and removal of the newest entries (anchor)')
 @pass_context
 def tools_audit(ctx: FrameworkContext, limit: int, verify: bool):
     """Show the audit log of tool calls"""
+    import sqlite3
     registry = _tool_registry(ctx)
     if registry.audit is None:
         console.print("[red]No audit log.[/red]")
         sys.exit(1)
-    if verify:
-        broken = registry.audit.verify()
-        if broken is None:
-            console.print("[green]Audit log intact.[/green]")
-        else:
-            console.print(f"[red]Audit log was modified at entry {broken}.[/red]")
-            sys.exit(1)
-        return
+    try:
+        if verify:
+            result = registry.audit.check()
+            color = "green" if result.intact else "yellow" if result.problem == "anchor_missing" else "red"
+            console.print(f"[{color}]{escape(result.message)}[/{color}]")
+            sys.exit(0 if result.intact else 1)
+        entries = registry.audit.entries(limit)
+    except (sqlite3.Error, OSError) as e:
+        console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be read: {escape(str(e))}[/red]")
+        sys.exit(1)
     table = Table(title="Tool calls")
-    for column in ("Time", "Actor", "Tool", "Decision", "Outcome"):
+    for column in ("Time", "Actor", "Tool", "Decision", "Confirmed", "Outcome"):
         table.add_column(column)
-    for entry in registry.audit.entries(limit):
-        table.add_row(entry["ts"], entry["actor"], entry["tool"], entry["decision"], entry["outcome"])
+    confirmed = {None: "-", 0: "no", 1: "yes"}
+    for entry in entries:
+        table.add_row(escape(entry["ts"]), escape(entry["actor"]), escape(entry["tool"]), escape(entry["decision"]),
+                      confirmed.get(entry["approved"], "?"), escape(entry["outcome"]))
     console.print(table)
 
 
@@ -924,7 +937,13 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
     with contextlib.redirect_stdout(sys.stderr):
         ctx.require_framework()
         registry = getattr(ctx.framework_manager, "tool_registry", None)
-        if registry is not None and not registry.policy().configured:
+        if registry is None:
+            Console(stderr=True).print("[red]The tool registry is not available (see the log above).[/red]")
+            sys.exit(1)
+        policy = registry.policy()
+        if registry.policy_store.problem:
+            Console(stderr=True).print(f"[red]{escape(registry.policy_store.problem)}[/red]")
+        elif not policy.configured:
             Console(stderr=True).print("[yellow]Tool permissions are not set up yet: read-only tools work, "
                                        "everything else asks (or is denied without elicitation). "
                                        "Run 'llm-cli ditto setup'.[/yellow]")
@@ -952,11 +971,16 @@ def mcp_config(ctx: FrameworkContext, write_client: Optional[str]):
         console.print(f"[green]Added to {path}. Restart Claude Desktop.[/green]")
         return
     snippets = mcp_server.client_snippets(app_root)
-    console.print(Panel(escape(snippets["claude-code"]), title="Claude Code (run once)"))
-    console.print(Panel(escape(snippets["claude-desktop"]),
-                        title=f"Claude Desktop ({escape(str(mcp_server.claude_desktop_config_path()))})"))
-    console.print(Panel(escape(snippets["vscode"]), title="VS Code (.vscode/mcp.json)"))
-    console.print("Sign in to these clients with your own Claude account or key; the framework never sees it.")
+    # Plain text without panels or wrapping, so the snippets can be copied exactly.
+    sections = [("Claude Code (run once in a terminal)", snippets["claude-code"]),
+                (f"Claude Desktop ({mcp_server.claude_desktop_config_path()}), "
+                 "or: llm-cli mcp config --write claude-desktop", snippets["claude-desktop"]),
+                ("VS Code (.vscode/mcp.json)", snippets["vscode"])]
+    for title, text in sections:
+        click.echo(f"# {title}")
+        click.echo(text)
+        click.echo("")
+    click.echo("Sign in to these clients with your own Claude account or key; the framework never sees it.")
 
 
 @cli.group()
@@ -964,32 +988,41 @@ def deploy():
     """Manage deployments and artifacts"""
     pass
 
+def _output_dir(ctx: FrameworkContext) -> Path:
+    """The configured output folder (relative paths: the installation), as builds and the GUI use it."""
+    ctx.require_framework()
+    fm = ctx.framework_manager
+    return fm.resolve_path(fm.config.get("output_dir", "output"))
+
+
 @deploy.command('list-artifacts')
 @pass_context
 def list_artifacts(ctx: FrameworkContext):
-    """List available golden artifacts in output directory."""
-    output_dir = Path(ctx.config["output_dir"])
-    if not output_dir.exists():
-        console.print("[yellow]No artifacts found (output dir missing).[/yellow]")
+    """List finished builds (from their manifests) in the output directory."""
+    from orchestrator.Core.deployment_manager import list_builds
+    output_dir = _output_dir(ctx)
+    builds = list_builds(output_dir) if output_dir.exists() else []
+    if not builds:
+        console.print(f"[yellow]No finished builds in {escape(str(output_dir))}.[/yellow]")
         return
 
-    table = Table(title="Golden Artifacts")
-    table.add_column("Artifact Name", style="bold yellow")
-    table.add_column("Type", style="cyan")
+    table = Table(title=f"Builds in {escape(str(output_dir))}")
+    table.add_column("Folder", style="bold yellow")
+    table.add_column("Model")
+    table.add_column("Format", style="cyan")
+    table.add_column("Quantization")
+    table.add_column("Board")
     table.add_column("Size (MB)", justify="right")
-
-    for item in output_dir.glob("*"):
-        if item.name.startswith("deploy_"): continue # Skip packages
-        
-        type_str = "Folder" if item.is_dir() else item.suffix
-        size_mb = 0
-        if item.is_file():
-            size_mb = item.stat().st_size / (1024 * 1024)
-        elif item.is_dir():
-            size_mb = sum(f.stat().st_size for f in item.glob('**/*') if f.is_file()) / (1024 * 1024)
-            
-        table.add_row(item.name, type_str, f"{size_mb:.2f}")
-    
+    for info in builds:
+        folder = Path(info["path"])
+        try:
+            shown = str(folder.relative_to(output_dir))
+        except ValueError:
+            shown = str(folder)
+        size_mb = sum(f.stat().st_size for f in folder.glob('**/*') if f.is_file()) / (1024 * 1024)
+        table.add_row(escape(shown), escape(str(info.get("model") or info.get("model_source") or "?")),
+                      escape(str(info.get("format") or "?")), escape(str(info.get("quantization") or "-")),
+                      escape(str(info.get("board") or "-")), f"{size_mb:.2f}")
     console.print(table)
 
 @deploy.command('package')
@@ -1008,8 +1041,10 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
         console.print("[red]Deployment Manager not loaded.[/red]")
         sys.exit(1)
         
-    artifact_path = Path(ctx.config["output_dir"]) / artifact_name
-    output_dir = Path(ctx.config["output_dir"])
+    output_dir = _output_dir(ctx)
+    # A folder from 'deploy list-artifacts' (relative to the output directory) or any existing path.
+    given = Path(artifact_name).expanduser()
+    artifact_path = given.resolve() if given.is_absolute() or given.exists() else output_dir / artifact_name
     
     docker_config = {"use_docker": docker}
     if docker:

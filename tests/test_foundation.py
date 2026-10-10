@@ -50,7 +50,7 @@ class TestCapabilities:
         ("rkllm", "rk3566", None, {}, "does not run on rk3566"),
         ("rkllm", "rk3588", "w4a16", {}, "not supported for rkllm on rk3588"),
         ("gguf", "rk3566", "IQ2_XS", {}, "needs an importance matrix"),
-        ("gguf", "rk3566", "Q4_K_M", {"imatrix": True}, "needs a calibration dataset"),
+        ("rkllm", "rk3588", "w4a16", {}, "not supported for rkllm on rk3588"),
         ("rknn", "rk3588", "i8", {}, "needs a calibration dataset"),
         ("tflite", None, None, {}, "not available"),
         ("rkllm", "rk3576", "w4a16", {"imatrix": True, "dataset": True}, "not used by the rkllm"),
@@ -197,12 +197,20 @@ class TestPolicy:
         if hasattr(store.path, "stat") and __import__("os").name == "posix":
             assert store.path.stat().st_mode & 0o077 == 0
 
-    def test_tampered_file_falls_back_to_safe_defaults(self, tmp_path):
+    def test_tampered_file_denies_everything_and_is_kept(self, tmp_path):
         store = PolicyStore(tmp_path)
         store.path.write_text(json.dumps({"version": 1, "configured": True,
                                           "tiers": {"external": "allow", "local_write": "allow"}}))
         policy = store.load()
-        assert policy.configured is False and policy.decide("x", ToolTier.LOCAL_WRITE) == Decision.ASK
+        assert policy.configured is False and store.damaged
+        assert all(policy.decide("x", tier) == Decision.DENY for tier in ToolTier)
+        assert (tmp_path / "tool_policy.json.bad").exists(), "the damaged file is kept for the user"
+
+    def test_imatrix_without_own_dataset_is_valid_and_rkllm_without_board_uses_rk3588(self, rockchip):
+        caps = rockchip
+        assert caps.check_request("gguf", "rk3566", "IQ2_XS", imatrix=True) == []
+        assert caps.normalize("RKLLM", None, None) == ("rkllm", "rk3588", "w8a8")
+        assert caps.check_request("gguf", "RK3588", "int8") == []
 
 
 class Echo(SimpleNamespace):

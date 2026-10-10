@@ -181,6 +181,7 @@ requirements:
 capabilities:
   schema_version: 1
   support_level: official
+  default_board: rk3588   # what build.sh uses when no board is given (TARGET_BOARD empty)
   boards:
     rk3566:
       label: "RK3566 (4x Cortex-A55)"
@@ -225,6 +226,7 @@ capabilities:
       needs_imatrix: [IQ1_S, IQ1_M, IQ2_XXS, IQ2_XS, IQ2_S]
       dataset: optional
       dataset_kind: text
+      aliases: {FP16: F16, FP32: F32, INT8: Q8_0, Q8: Q8_0, INT4: Q4_K_M, Q4: Q4_K_M, Q5: Q5_K_M}   # build.sh normalize_gguf_type
       notes: "Runs on the CPU of every board. Q4_0 and IQ4_NL are repacked for fast ARM kernels."
     rkllm:
       label: "RKLLM (Rockchip NPU, LLMs)"
@@ -240,6 +242,7 @@ capabilities:
         rk3576: w4a16
       dataset: optional
       dataset_kind: text
+      aliases: {int8: w8a8, q8: w8a8, q8_0: w8a8, int4: w4a16, q4: w4a16, q4_0: w4a16, q4_k_m: w4a16}   # rkllm_module.sh
       notes: "RKLLM-Toolkit 1.3.1. RK3566/RK3568 are not supported by RKLLM; use GGUF there."
     rknn:
       label: "RKNN (Rockchip NPU, ONNX vision/audio models)"
@@ -250,6 +253,7 @@ capabilities:
       dataset: optional
       dataset_kind: sample_list
       dataset_required_for: [i8]
+      aliases: {int8: i8, q8: i8, q8_0: i8, f16: fp16}   # rknn_module.sh
       notes: "RKNN-Toolkit2 2.3.2. i8 needs a list of sample inputs (paths relative to the list file)."
 
 # Supported model formats

@@ -217,17 +217,21 @@ class ConfigManager:
 
         self.logger.info(f"Configuration Manager initialized (advanced_mode: {advanced_mode})")
     
+    @staticmethod
+    def installation_config_dir() -> Path:
+        return Path(__file__).resolve().parents[2] / "configs"
+
     def _detect_config_directory(self) -> Path:
-        candidates = [
-            Path.cwd() / "configs",
-            Path.cwd() / "config", 
-            Path.home() / ".llm-framework",
-            Path.cwd()
-        ]
-        for candidate in candidates:
-            if candidate.exists() and candidate.is_dir():
-                return candidate
-        return Path.cwd() / "configs"
+        """LLM_FRAMEWORK_CONFIG_DIR, else the installation's configs/ folder, else the per-user folder.
+        Never the working directory: AI clients start the MCP server inside arbitrary projects, and a
+        project folder must not be able to change settings such as source repositories or images."""
+        override = os.environ.get("LLM_FRAMEWORK_CONFIG_DIR")
+        if override:
+            return Path(override).expanduser()
+        install = self.installation_config_dir()
+        if install.is_dir() and os.access(install, os.W_OK):
+            return install
+        return self.user_state_dir
     
     @property
     def user_state_dir(self) -> Path:
@@ -370,7 +374,6 @@ class ConfigManager:
         config_candidates = [
             self.config_dir / "framework.yml",
             self.config_dir / "config.yml",
-            Path.cwd() / "framework.yml"
         ]
         for config_file in config_candidates:
             if config_file.exists():

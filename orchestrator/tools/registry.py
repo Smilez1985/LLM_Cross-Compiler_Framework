@@ -14,6 +14,7 @@ from pydantic import BaseModel, ValidationError
 
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier
+from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
 
@@ -128,7 +129,8 @@ class ToolRegistry:
             if approved is None and ctx.confirm is not None:
                 approved = bool(ctx.confirm(spec, inp))
             if not approved:
-                self._audit(ctx, spec, decision, "not_confirmed", arguments, approved=False)
+                # approved stays None when nobody could be asked; False is a person's "no"
+                self._audit(ctx, spec, decision, "not_confirmed", arguments, approved=approved)
                 raise ToolDenied(f"'{spec.title}' needs your confirmation, which was not given.")
 
         try:
@@ -140,12 +142,16 @@ class ToolRegistry:
         except ToolError as e:
             self._audit(ctx, spec, decision, "error", arguments, approved=approved, detail=str(e))
             raise
+        except ValidationError as e:  # a schema or handler bug (output check, models built inside the handler)
+            self.logger.error(f"Tool {spec.name} produced invalid data: {e}", exc_info=True)
+            self._audit(ctx, spec, decision, "error", arguments, approved=approved, detail=repr(e))
+            raise ToolError(f"{spec.title} failed (internal error; details are in the framework log).") from e
         except ValueError as e:  # user-facing validation problems (e.g. BuildServiceError)
             self._audit(ctx, spec, decision, "error", arguments, approved=approved, detail=str(e))
-            raise ToolError(str(e)) from e
+            raise ToolError(redact_secrets(str(e))) from e
         except Exception as e:
             self.logger.error(f"Tool {spec.name} failed: {e}", exc_info=True)
             self._audit(ctx, spec, decision, "error", arguments, approved=approved, detail=repr(e))
-            raise ToolError(f"{spec.title} failed: {e}") from e
+            raise ToolError(f"{spec.title} failed: {redact_secrets(str(e))}") from e
         self._audit(ctx, spec, decision, "ok", arguments, approved=approved)
         return result

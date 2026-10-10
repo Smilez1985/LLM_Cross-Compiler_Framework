@@ -56,6 +56,22 @@ class ValidationError(Exception): pass
 class BuildCancelled(Exception):
     """The user cancelled the build; not a failure."""
 
+
+def _is_read_timeout(exc: Optional[BaseException]) -> bool:
+    """True when docker-py reports an expired wait(timeout=...): a requests ReadTimeout, or a
+    ConnectionError wrapping urllib3's ReadTimeoutError (unix socket transport)."""
+    import requests
+    from urllib3.exceptions import ReadTimeoutError
+    seen = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, (requests.exceptions.ReadTimeout, ReadTimeoutError, TimeoutError)):
+            return True
+        if any(isinstance(arg, ReadTimeoutError) for arg in getattr(exc, "args", ())):
+            return True
+        exc = exc.__cause__ or exc.__context__
+    return False
+
 # ============================================================================
 # ENUMS AND CONSTANTS
 # ============================================================================
@@ -216,14 +232,17 @@ class BuildEngine:
         self._lock = threading.Lock()
         self._builds: Dict[str, BuildProgress] = {}
         self._active_containers: Dict[str, Container] = {}
+        self._active_processes: Dict[str, subprocess.Popen] = {}
+        self._running: set = set()  # builds whose worker thread has not returned yet
         self._build_images: Dict[str, str] = {}
         self._executor = ThreadPoolExecutor(max_workers=max_concurrent_builds)
         
         # Paths initialization using centralized config getter
-        self.targets_dir = self.base_dir / self._get_conf("targets_dir", "targets")
-        self.models_dir = self.base_dir / self._get_conf("models_dir", "models")
-        self.output_dir = self.base_dir / self._get_conf("output_dir", "output")
-        self.cache_dir = self.base_dir / self._get_conf("cache_dir", "cache")
+        # Relative to the installation; "~" means the user's home (same rule as FrameworkManager.resolve_path).
+        self.targets_dir = self.base_dir / Path(str(self._get_conf("targets_dir", "targets"))).expanduser()
+        self.models_dir = self.base_dir / Path(str(self._get_conf("models_dir", "models"))).expanduser()
+        self.output_dir = self.base_dir / Path(str(self._get_conf("output_dir", "output"))).expanduser()
+        self.cache_dir = self.base_dir / Path(str(self._get_conf("cache_dir", "cache"))).expanduser()
         
         self._ensure_directories()
         if self.docker_client:
@@ -281,18 +300,23 @@ class BuildEngine:
         """Submits a new build job."""
         self._validate_build_config(config)
         
-        # Check concurrency
-        active = len([b for b in self._builds.values() if b.status not in 
-                      [BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED]])
-        if active >= self.max_concurrent_builds:
-            raise RuntimeError("Max concurrent builds reached")
-            
         progress = BuildProgress(config.build_id, BuildStatus.QUEUED, "Initializing", start_time=datetime.now())
-        
-        with self._lock: 
+
+        with self._lock:
+            # A cancelled build still counts until its worker has really stopped.
+            if len(self._running) >= self.max_concurrent_builds:
+                raise RuntimeError("Max concurrent builds reached")
+            if config.build_id in self._running:
+                raise RuntimeError(f"Build {config.build_id} is still running")
             self._builds[config.build_id] = progress
-            
-        self._executor.submit(self._execute_build, config)
+            self._running.add(config.build_id)
+
+        try:
+            self._executor.submit(self._execute_build, config)
+        except BaseException:
+            with self._lock:
+                self._running.discard(config.build_id)
+            raise
         self.logger.info(f"Build started: {config.build_id}")
         return config.build_id
 
@@ -303,16 +327,22 @@ class BuildEngine:
         with self._lock: return list(self._builds.values())
     
     def cancel_build(self, build_id: str) -> bool:
-        progress = self._builds.get(build_id)
-        if not progress or progress.status in [BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED]:
-            return False
-            
-        progress.status = BuildStatus.CANCELLED
-        progress.add_log("Build cancelled by user.")
-        
-        # Stop the running stage container (imatrix or build); _run_container then ends the build.
         with self._lock:
+            progress = self._builds.get(build_id)
+            if not progress or progress.status in [BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED]:
+                return False
+            progress.status = BuildStatus.CANCELLED
             container = self._active_containers.get(build_id)
+            process = self._active_processes.get(build_id)
+        progress.add_log("Build cancelled by user.")
+
+        # Stop whatever runs right now (image build, security scan, imatrix or conversion container);
+        # every stage checks the status afterwards and ends the build.
+        if process is not None and process.poll() is None:
+            try:
+                process.terminate()
+            except Exception as e:
+                self.logger.warning(f"Failed to stop the image build for {build_id}: {e}")
         if container:
             try: 
                 container.stop(timeout=10)
@@ -326,6 +356,13 @@ class BuildEngine:
         if progress.status == BuildStatus.CANCELLED:
             raise BuildCancelled("Build cancelled by user.")
 
+    def _enter_stage(self, progress: "BuildProgress", status: "BuildStatus"):
+        """Moves a build to its next stage - unless it was cancelled meanwhile: a cancel is never undone."""
+        with self._lock:
+            if progress.status == BuildStatus.CANCELLED:
+                raise BuildCancelled("Build cancelled by user.")
+            progress.status = status
+
     def _run_container(self, config: "BuildConfiguration", progress: "BuildProgress", container: Container,
                        prefix: str) -> int:
         """Runs a stage container: streams its log into the progress, enforces the build timeout,
@@ -335,6 +372,13 @@ class BuildEngine:
         try:
             self._check_cancelled(progress)
             container.start()
+            if progress.status == BuildStatus.CANCELLED:
+                # cancel_build may have tried to stop the container before it was running
+                try:
+                    container.kill()
+                except Exception:
+                    pass
+                raise BuildCancelled("Build cancelled by user.")
 
             def pump():
                 try:
@@ -346,16 +390,22 @@ class BuildEngine:
             reader = threading.Thread(target=pump, name=f"logs-{config.build_id}", daemon=True)
             reader.start()
             timeout = config.build_timeout or self.default_timeout
+            started = time.monotonic()
             try:
                 result = container.wait(timeout=timeout)
-            except Exception as e:  # docker-py raises a requests timeout/connection error when it expires
+            except Exception as e:
                 self._check_cancelled(progress)
                 try:
                     container.kill()
                 except Exception:
                     pass
-                raise TimeoutError(f"The {prefix.strip(': ').lower() or 'build'} stage ran longer than "
-                                   f"{timeout} s and was stopped (setting build_timeout).") from e
+                stage = prefix.strip(': ').lower() or 'build'
+                if _is_read_timeout(e) or time.monotonic() - started >= timeout:
+                    raise TimeoutError(f"The {stage} stage ran longer than {timeout} s and was stopped "
+                                       f"(setting build_timeout).") from e
+                # Anything else (container removed, daemon restarted, API error) keeps its own message.
+                raise RuntimeError(f"The {stage} stage failed while waiting for its container: {e}\n"
+                                   f"{self._log_tail(progress, prefix)}") from e
             reader.join(timeout=10)
             self._check_cancelled(progress)
             return int(result.get("StatusCode", 1))
@@ -371,9 +421,11 @@ class BuildEngine:
         progress = self._builds.get(build_id)
         if not progress: return False
         
-        previous = progress.status
+        with self._lock:
+            previous = progress.status
+            if previous != BuildStatus.CANCELLED:  # a cancelled build stays cancelled while it is cleaned up
+                progress.status = BuildStatus.CLEANING
         try:
-            progress.status = BuildStatus.CLEANING
             
             # Remove container
             container = self._active_containers.get(build_id)
@@ -410,9 +462,16 @@ class BuildEngine:
         """Main execution flow running in worker thread."""
         bid = config.build_id
         prog = self._builds[bid]
-        
         try:
-            prog.status = BuildStatus.PREPARING
+            self._execute_build_stages(config, prog)
+        finally:
+            with self._lock:
+                self._running.discard(bid)
+
+    def _execute_build_stages(self, config: BuildConfiguration, prog: "BuildProgress"):
+        bid = config.build_id
+        try:
+            self._enter_stage(prog, BuildStatus.PREPARING)
             self._resolve_dataset(config, prog)
             
             # 1. Resolve Target Path
@@ -443,7 +502,8 @@ class BuildEngine:
             self._check_cancelled(prog)
             
             # 5. Security Scan
-            self._scan_image_security(image.tags[0], prog)
+            self._scan_image_security(image.tags[0], prog, build_id=bid)
+            self._check_cancelled(prog)
             
             # 5a. Importance matrix: a llama.cpp (GGUF) concept. Other formats use the dataset directly.
             if config.use_imatrix and config.target_format != ModelFormat.GGUF:
@@ -467,8 +527,7 @@ class BuildEngine:
             if config.cleanup_after_build: 
                 self.cleanup_build(bid)
                 
-            self._check_cancelled(prog)
-            prog.status = BuildStatus.COMPLETED
+            self._enter_stage(prog, BuildStatus.COMPLETED)
             prog.end_time = datetime.now()
             prog.progress_percent = 100
             
@@ -597,12 +656,22 @@ class BuildEngine:
             cmd += ["--label", f"{key}={value}"]
         cmd.append(str(dockerfile.parent))
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
-        for line in proc.stdout:
-            line = line.rstrip()
-            if line:
-                progress.add_log(f"BUILD: {line}")
-        if proc.wait() != 0:
-            raise RuntimeError(f"docker buildx build exited with code {proc.returncode}")
+        with self._lock:
+            self._active_processes[progress.build_id] = proc  # cancel_build terminates it
+        try:
+            self._check_cancelled(progress)
+            for line in proc.stdout:
+                line = line.rstrip()
+                if line:
+                    progress.add_log(f"BUILD: {line}")
+            if proc.wait() != 0:
+                self._check_cancelled(progress)
+                raise RuntimeError(f"docker buildx build exited with code {proc.returncode}")
+        finally:
+            with self._lock:
+                self._active_processes.pop(progress.build_id, None)
+            if proc.poll() is None:
+                proc.kill()
 
     @staticmethod
     def _log_tail(progress: BuildProgress, prefix: str, lines: int = 25) -> str:
@@ -610,31 +679,54 @@ class BuildEngine:
         tail = [l for l in progress.logs if prefix in l][-lines:]
         return "\n".join(tail)
 
-    def _scan_image_security(self, image_tag: str, progress: BuildProgress):
+    def _scan_image_security(self, image_tag: str, progress: BuildProgress, build_id: Optional[str] = None):
         if not self._get_conf("enable_security_scan", True):
             progress.add_log("Security scan disabled (enable_security_scan=false).")
             return
         progress.add_log(f"Scanning image {image_tag} for vulnerabilities...")
+        build_id = build_id or progress.build_id
+        container = None
         try:
             scan_cmd = ["image", "--exit-code", "1", "--severity", "HIGH,CRITICAL", image_tag]
             trivy_image = self._get_conf('image_trivy', "aquasec/trivy:0.75.0")
-            
-            log_stream = self.docker_client.containers.run(
+
+            # Detached and registered like the stage containers, so cancel_build can stop it.
+            container = self.docker_client.containers.run(
                 trivy_image, 
                 command=scan_cmd,
                 volumes={
                     '/var/run/docker.sock': {'bind': '/var/run/docker.sock', 'mode': 'ro'}, 
                     'trivy_cache': {'bind': '/root/.cache/', 'mode': 'rw'}
                 },
-                remove=True, 
-                stream=True
+                detach=True,
             )
-            for line in log_stream: progress.add_log(f"TRIVY: {line.decode().strip()}")
-            progress.add_log("Security scan passed.")
-        except docker.errors.ContainerError:
-            progress.add_warning(f"Security vulnerabilities found! Review logs above.")
+            with self._lock:
+                self._active_containers[build_id] = container
+            self._check_cancelled(progress)
+            for line in container.logs(stream=True, follow=True):
+                progress.add_log(f"TRIVY: {line.decode(errors='replace').strip()}")
+            code = int(container.wait().get("StatusCode", 1))
+            self._check_cancelled(progress)
+            if code == 0:
+                progress.add_log("Security scan passed.")
+            elif code == 1:
+                progress.add_warning("Security vulnerabilities found! Review logs above.")
+            else:
+                progress.add_warning(f"Security scan failed to run (exit code {code}).")
+        except BuildCancelled:
+            raise
         except Exception as e:
+            self._check_cancelled(progress)
             progress.add_warning(f"Security scan failed to run: {e}")
+        finally:
+            if container is not None:
+                with self._lock:
+                    if self._active_containers.get(build_id) is container:
+                        self._active_containers.pop(build_id, None)
+                try:
+                    container.remove(force=True)
+                except Exception:
+                    pass
 
     def _hf_token(self) -> Optional[str]:
         sm = self.secrets_manager or (getattr(self.framework, "secrets_manager", None) if self.framework else None)
@@ -806,7 +898,7 @@ class BuildEngine:
         NEW in v2.4.0: Runs a pre-build container to generate the importance matrix.
         """
         progress.current_stage = "Calculating IMatrix"
-        progress.status = BuildStatus.CALIBRATING
+        self._enter_stage(progress, BuildStatus.CALIBRATING)
         progress.progress_percent = 50
         progress.add_log("Starting IMatrix Generation (Smart Calibration)...")
         
@@ -864,7 +956,7 @@ class BuildEngine:
     def _execute_build_modules(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
                                staged: Tuple[str, Dict[str, Dict[str, str]]]):
         progress.current_stage = "Running modules"
-        progress.status = BuildStatus.BUILDING
+        self._enter_stage(progress, BuildStatus.BUILDING)
         progress.progress_percent = 60
         progress.add_log("Starting Main Build Container...")
         

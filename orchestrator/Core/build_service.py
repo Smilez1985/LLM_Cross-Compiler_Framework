@@ -126,23 +126,33 @@ class BuildService:
         return BuildList(builds=[self._status_of(s) for s in list(self._orchestrator._workflows.values())])
 
     def list_artifacts(self) -> ArtifactList:
+        def text(value):
+            return None if value is None else str(value)
+
         items = []
         for info in list_builds(self._output_dir()):
             primary = info.get("primary")
-            digest = next((a.get("sha256") for a in info.get("artifacts", []) if a.get("file") == primary), None)
-            items.append(ArtifactOut(path=info["path"], model=info.get("model") or info.get("model_source"),
-                                     format=info.get("format"), quantization=info.get("quantization"),
-                                     board=info.get("board"), target=info.get("target"),
-                                     created=info.get("created"), primary=primary, sha256=digest))
+            artifacts = info.get("artifacts") if isinstance(info.get("artifacts"), list) else []
+            digest = next((a.get("sha256") for a in artifacts if isinstance(a, dict) and a.get("file") == primary), None)
+            try:
+                items.append(ArtifactOut(path=info["path"], model=text(info.get("model") or info.get("model_source")),
+                                         format=text(info.get("format")), quantization=text(info.get("quantization")),
+                                         board=text(info.get("board")), target=text(info.get("target")),
+                                         created=text(info.get("created")), primary=text(primary), sha256=text(digest)))
+            except ValueError as e:  # one odd manifest must not hide every other build
+                self.logger.warning(f"Skipping the build manifest in {info.get('path')}: {e}")
         return ArtifactList(artifacts=items)
 
     def log_tail(self, request_id: str, lines: int = 200) -> LogTail:
         state = self._state(request_id)
         engine = self._orchestrator.build_engine
         collected: List[str] = []
-        for build_id in state.build_ids:
+        build_ids = list(dict.fromkeys(state.build_ids))  # each attempt once, in order
+        for build_id in build_ids:
             progress = engine.get_build_status(build_id) if hasattr(engine, "get_build_status") else None
             if progress is not None:
+                if len(build_ids) > 1:
+                    collected.append(f"===== {build_id} =====")
                 collected.extend(progress.logs)
         lines = max(1, min(int(lines), 2000))
         return LogTail(request_id=request_id, lines=[redact_secrets(line) for line in collected[-lines:]])
@@ -152,14 +162,8 @@ class BuildService:
     def validate(self, request: BuildRequestIn) -> BuildRequestIn:
         """Checks a request against the target's capabilities and fills the default quantization."""
         caps = self.capabilities(request.target)
-        fmt = request.format.lower()
-        cap = caps.formats.get(fmt)
-        board = request.board.lower() if request.board else None
-        if board is None and cap is not None and len(caps.boards_for(fmt)) == 1:
-            board = caps.boards_for(fmt)[0]
-        quant = (cap.canonical(request.quantization) if cap else None) or request.quantization
-        if cap is not None and not quant:
-            quant = cap.default_for(board)
+        # Canonical spellings, the board the scripts use when none is given, the board's default type.
+        fmt, board, quant = caps.normalize(request.format, request.board, request.quantization)
         dataset = None
         if request.dataset_path:
             path = Path(request.dataset_path).expanduser()

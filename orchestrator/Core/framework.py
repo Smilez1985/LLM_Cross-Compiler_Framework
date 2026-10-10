@@ -151,8 +151,13 @@ class FrameworkManager:
             self.orchestrator = LLMOrchestrator(self.config, build_engine=build_engine)
             # Typed entry point for tools (MCP server, Ditto) on top of the orchestrator
             self.build_service = BuildService(self)
-            # One tool registry with the user's permissions and the audit log, for Ditto and MCP
-            self.tool_registry = build_tool_registry(self)
+            # One tool registry with the user's permissions and the audit log, for Ditto and MCP.
+            # Without it (e.g. an unusable per-user folder) only the AI tools are unavailable.
+            try:
+                self.tool_registry = build_tool_registry(self)
+            except Exception as e:
+                self.tool_registry = None
+                self.logger.error(f"AI tools unavailable (tool permissions/audit log in the per-user folder): {e}")
             
             # === DEPENDENCY INJECTION ===
             # Connect the Brain (Ditto) and the Guardian (Self-Healing) to the Orchestrator

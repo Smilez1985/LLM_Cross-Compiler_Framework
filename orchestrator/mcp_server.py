@@ -21,8 +21,11 @@ import inspect
 import json
 import os
 import secrets
+import shlex
+import subprocess
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 from typing import Annotated, Any, Dict, Optional
 
@@ -50,12 +53,46 @@ class Confirmation(BaseModel):
     approve: bool = Field(description="Allow this action?")
 
 
+class NotAsked(Confirmation):
+    """Resolver outcome when nobody was asked: the policy decided, or the client cannot ask.
+    The registry then decides on its own and records the call as not confirmed by a person."""
+    can_ask: bool = True
+
+
+# Shown first in a confirmation, because they decide what a call touches.
+PRIORITY_FIELDS = ("model", "dataset_path", "use_gpu", "target", "format", "board", "quantization",
+                   "request_id", "approve")
+MAX_DESCRIPTION = 4000
+
+
+class CallTooLong(ValueError):
+    """The arguments cannot be shown completely, so they cannot be confirmed."""
+
+
+def _visible(value: Any) -> str:
+    """A value as the user sees it: control, format and bidi characters escaped, nothing cut off."""
+    text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+    out = []
+    for ch in text:
+        if unicodedata.category(ch) in ("Cc", "Cf", "Co", "Cs", "Cn", "Zl", "Zp"):
+            out.append(f"\\u{ord(ch):04x}")
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _describe_call(spec: ToolSpec, arguments: Dict[str, Any]) -> str:
+    """Every argument the tool will run with, complete. The question text is part of the elicitation's
+    identity, so an answer can only ever confirm exactly these values."""
     shown = {k: v for k, v in arguments.items() if v is not None}
-    details = json.dumps(shown, ensure_ascii=False, default=str)
-    if len(details) > 600:
-        details = details[:600] + "..."
-    return f"The AI client wants to run '{spec.title}' in the LLM Cross-Compiler Framework.\n{details}"
+    order = [k for k in PRIORITY_FIELDS if k in shown] + [k for k in shown if k not in PRIORITY_FIELDS]
+    lines = [f"  {_visible(k)}: {_visible(shown[k])}" for k in order]
+    text = (f"The AI client wants to run '{spec.title}' in the LLM Cross-Compiler Framework with:\n"
+            + ("\n".join(lines) if lines else "  (no arguments)"))
+    if len(text) > MAX_DESCRIPTION:
+        raise CallTooLong(f"The arguments for '{spec.title}' are too long to show for a confirmation "
+                          f"({len(text)} characters); the call was not run.")
+    return text
 
 
 def _model_parameters(model: type) -> list:
@@ -71,6 +108,7 @@ def _model_parameters(model: type) -> list:
 def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
     """An MCPServer tool function for a registry tool: same input schema, typed structured output,
     confirmation through elicitation when the user's policy says "ask"."""
+    from mcp.server.elicitation import AcceptedElicitation, ElicitationResult
     from mcp.server.mcpserver import Context
     from mcp.server.mcpserver.exceptions import ToolError as MCPToolError
     from mcp.server.mcpserver.resolve import Elicit, Resolve
@@ -80,11 +118,17 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
     def confirm(ctx: Context, **arguments):
         decision = registry.decide(spec)
         if decision != Decision.ASK:
-            return Confirmation(approve=decision == Decision.ALLOW)
+            return NotAsked(approve=False)  # the registry applies allow/deny itself
         capabilities = ctx.client_capabilities
-        if capabilities is None or getattr(capabilities, "elicitation", None) is None:
-            return Confirmation(approve=False)  # cannot ask: the registry denies with a clear message
-        return Elicit(_describe_call(spec, arguments), Confirmation)
+        elicitation = getattr(capabilities, "elicitation", None) if capabilities is not None else None
+        # Same rule as the SDK: a bare `elicitation: {}` means form support, url-only does not.
+        if elicitation is None or (getattr(elicitation, "form", None) is None
+                                   and getattr(elicitation, "url", None) is not None):
+            return NotAsked(approve=False, can_ask=False)
+        try:
+            return Elicit(_describe_call(spec, arguments), Confirmation)
+        except CallTooLong as e:
+            raise MCPToolError(str(e)) from None
 
     confirm.__signature__ = inspect.Signature(
         [inspect.Parameter("ctx", inspect.Parameter.POSITIONAL_OR_KEYWORD, annotation=Context)] + field_params)
@@ -92,19 +136,28 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
 
     async def tool(**kwargs):
         import anyio.to_thread
-        approval: Confirmation = kwargs.pop("approval")
+        outcome = kwargs.pop("approval")
+        # Only a real answer from the user counts as a confirmation; declined and cancelled
+        # elicitations still go through the registry, so they are audited like every other call.
+        data = outcome.data if isinstance(outcome, AcceptedElicitation) else None
+        if isinstance(data, NotAsked):
+            approved, asked, can_ask = None, False, data.can_ask
+        else:
+            approved, asked, can_ask = bool(data is not None and data.approve), True, True
         try:
             return await anyio.to_thread.run_sync(
-                lambda: registry.call(spec.name, kwargs, ToolContext("mcp"), approved=approval.approve))
+                lambda: registry.call(spec.name, kwargs, ToolContext("mcp"), approved=approved))
         except ToolError as e:
             message = str(e)
-            if "needs your confirmation" in message:
+            if asked and not approved:
+                message = f"The user declined '{spec.title}'. Do not retry it unless they ask for it."
+            elif "needs your confirmation" in message and not can_ask:
                 message += (" This client cannot ask you; allow the tool with "
                             "'llm-cli tools permissions' or in the GUI (Tools > Tool Permissions).")
             raise MCPToolError(message) from None
 
     approval_param = inspect.Parameter("approval", inspect.Parameter.KEYWORD_ONLY,
-                                       annotation=Annotated[Confirmation, Resolve(confirm)])
+                                       annotation=Annotated[ElicitationResult[Confirmation], Resolve(confirm)])
     tool.__signature__ = inspect.Signature(field_params + [approval_param], return_annotation=spec.output_model)
     tool.__annotations__ = {**{p.name: p.annotation for p in field_params},
                             "approval": approval_param.annotation, "return": spec.output_model}
@@ -207,13 +260,22 @@ def claude_desktop_config_path() -> Path:
     return Path.home() / ".config" / "Claude" / "claude_desktop_config.json"
 
 
-def client_snippets(app_root: Path) -> Dict[str, str]:
+def shell_command(argv, windows: Optional[bool] = None) -> str:
+    """A command line that survives copy and paste: POSIX shell quoting, or cmd/PowerShell-style double
+    quotes on Windows."""
+    windows = (sys.platform == "win32") if windows is None else windows
+    return subprocess.list2cmdline(list(argv)) if windows else shlex.join(argv)
+
+
+def client_snippets(app_root: Path, windows: Optional[bool] = None) -> Dict[str, str]:
     launch = launch_command(app_root)
     desktop = {"mcpServers": {SERVER_NAME: launch}}
     vscode = {"servers": {SERVER_NAME: {"type": "stdio", **launch}}}
-    args = " ".join(launch["args"])
-    claude_code = (f"claude mcp add {SERVER_NAME} --env PYTHONPATH={launch['env']['PYTHONPATH']} "
-                   f"-- {launch['command']} {args}")
+    # Claude Code cannot set a working directory; the server does not need one (it uses the installation's
+    # configs/ folder and the per-user folder, never the directory it is started in).
+    claude_code = shell_command(["claude", "mcp", "add", SERVER_NAME, "--env",
+                                 f"PYTHONPATH={launch['env']['PYTHONPATH']}", "--", launch["command"],
+                                 *launch["args"]], windows)
     return {
         "claude-desktop": json.dumps(desktop, indent=2),
         "vscode": json.dumps(vscode, indent=2),
@@ -221,26 +283,42 @@ def client_snippets(app_root: Path) -> Dict[str, str]:
     }
 
 
-def write_claude_desktop_config(app_root: Path, path: Optional[Path] = None) -> Path:
-    """Adds this server to Claude Desktop's config, keeping every other entry; the old file is backed up."""
-    path = path or claude_desktop_config_path()
-    data: Dict[str, Any] = {}
-    if path.exists():
+def _write_private(path: Path, data: bytes) -> None:
+    """Atomic write with mode 0600 (the file may hold other servers' tokens); replaces a symlink at `path`
+    instead of writing through it."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
         try:
-            data = json.loads(path.read_text(encoding="utf-8") or "{}")
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def write_claude_desktop_config(app_root: Path, path: Optional[Path] = None) -> Path:
+    """Adds this server to Claude Desktop's config, keeping every other entry; the old file is backed up.
+    A symlinked config (dotfile managers) is updated at its target, so the link stays."""
+    path = Path(path or claude_desktop_config_path())
+    target = Path(os.path.realpath(path)) if path.is_symlink() else path
+    data: Dict[str, Any] = {}
+    if target.exists():
+        original = target.read_bytes()
+        try:
+            data = json.loads(original.decode("utf-8") or "{}")
         except ValueError as e:
             raise ValueError(f"{path} is not valid JSON; fix or remove it first ({e}).") from None
         if not isinstance(data, dict):
             raise ValueError(f"{path} does not contain a JSON object.")
-        backup = path.with_name(path.name + ".bak")
-        backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+        _write_private(target.with_name(target.name + ".bak"), original)
     servers = data.setdefault("mcpServers", {})
     if not isinstance(servers, dict):
         raise ValueError(f"'mcpServers' in {path} is not an object.")
     servers[SERVER_NAME] = launch_command(app_root)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".claude_desktop_config.")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-    os.replace(tmp, path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _write_private(target, json.dumps(data, indent=2).encode("utf-8"))
     return path

@@ -59,6 +59,10 @@ class PriorityLevel(Enum):
     URGENT = 3
     CRITICAL = 4
 
+# llama.cpp quantization types that cannot be produced without an importance matrix
+LLAMA_CPP_NEEDS_IMATRIX = frozenset({"IQ1_S", "IQ1_M", "IQ2_XXS", "IQ2_XS", "IQ2_S"})
+
+
 class OrchestrationStatus(Enum):
     QUEUED = "queued"
     PREPARING = "preparing"
@@ -274,14 +278,15 @@ class LLMOrchestrator:
             self._queue.task_done()
             self._ensure_worker_running()
 
-    def _map_job_to_config(self, job: BuildJob, req: BuildRequest) -> BuildConfiguration:
+    def _map_job_to_config(self, job: BuildJob, req: BuildRequest, attempt: int = 1) -> BuildConfiguration:
         """Konvertiert internen Job zu Builder Config"""
         base_img = "debian:bookworm-slim"
         if hasattr(self.config, 'image_base_debian'):
             base_img = self.config.image_base_debian
 
         return BuildConfiguration(
-            build_id=job.job_id,
+            # every attempt keeps its own progress and log (a retry after a fix must not hide the failure)
+            build_id=job.job_id if attempt <= 1 else f"{job.job_id}_r{attempt - 1}",
             timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
             model_source=job.source_model,
             target_arch=job.target_architecture,
@@ -302,15 +307,27 @@ class LLMOrchestrator:
             build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
         )
 
-    async def _run_job(self, job: "BuildJob", req: BuildRequest) -> bool:
+    async def _run_job(self, job: "BuildJob", req: BuildRequest, attempt: int = 1) -> bool:
         """Runs one build job on the BuildEngine and waits for its terminal state."""
         loop = asyncio.get_running_loop()
         try:
-            build_config = self._map_job_to_config(job, req)
-            returned_id = await loop.run_in_executor(None, self.build_engine.build_model, build_config)
+            build_config = self._map_job_to_config(job, req, attempt)
             state = self._workflows.get(req.request_id)
-            if state is not None:
-                state.build_ids.append(returned_id)
+            # Known before it is submitted, so a cancel arriving meanwhile reaches it.
+            if state is not None and build_config.build_id not in state.build_ids:
+                state.build_ids.append(build_config.build_id)
+            submit = loop.run_in_executor(None, self.build_engine.build_model, build_config)
+            try:
+                returned_id = await asyncio.shield(submit)
+            except asyncio.CancelledError:
+                # The executor thread may still submit the build: cancel it as soon as it exists.
+                def cancel_submitted(fut):
+                    if not fut.cancelled() and fut.exception() is None:
+                        loop.run_in_executor(None, self.build_engine.cancel_build, fut.result())
+                submit.add_done_callback(cancel_submitted)
+                raise
+            if state is not None and state.status == OrchestrationStatus.CANCELLED:
+                await loop.run_in_executor(None, self.build_engine.cancel_build, returned_id)
             while True:
                 status = self.build_engine.get_build_status(returned_id)
                 if not status:
@@ -384,7 +401,7 @@ class LLMOrchestrator:
             return False
         state.current_stage = f"Retrying {job.job_id} after the fix"
         self.logger.info(f"Fix applied; retrying {job.job_id}.")
-        return await self._run_job(job, req)
+        return await self._run_job(job, req, attempt=2)
 
     def resolve_healing(self, request_id: str, approved: bool) -> bool:
         """Records the user's decision on a pending healing proposal. Safe to call from any thread."""
@@ -429,6 +446,14 @@ class LLMOrchestrator:
                 req.dataset_generated = True
                 self.logger.info(f"Calibration dataset ready: {ds_path}")
             except (CalibrationDataError, OSError) as e:
+                needs = [q for q in req.quantization_options if str(q).upper() in LLAMA_CPP_NEEDS_IMATRIX]
+                if needs:
+                    # Without the matrix llama.cpp refuses these types; fail now, not after the image build.
+                    state.status = OrchestrationStatus.ERROR
+                    state.errors.append(f"{', '.join(needs)} needs an importance matrix, but the calibration "
+                                        f"data could not be prepared: {e}")
+                    state.end_time = datetime.now()
+                    return
                 req.use_imatrix = False
                 state.warnings.append(f"IMatrix disabled: {e}")
 
@@ -451,7 +476,7 @@ class LLMOrchestrator:
                     for q in quants:
                         job_id = f"{req.request_id}_{len(build_jobs)+1:03d}"
                         
-                        base = Path(req.output_base_dir)
+                        base = Path(req.output_base_dir).expanduser()
                         if not base.is_absolute() and getattr(self.build_engine, "base_dir", None):
                             base = Path(self.build_engine.base_dir) / base
                         out_dir = base / target / model.split("/")[-1]

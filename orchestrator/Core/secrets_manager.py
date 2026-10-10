@@ -16,6 +16,7 @@ import base64
 import logging
 import platform
 import getpass
+import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Any
 from datetime import datetime
@@ -46,16 +47,30 @@ class SecretsManager:
         
         # Integration: Pfade aus Config holen
         # Fallback für Standalone-Test: Wenn framework_manager ein Path ist (altes Verhalten)
+        state_dir = None
         if isinstance(framework_manager, Path):
             self.config_dir = framework_manager
             self.audit_log_file = self.config_dir / "audit.log"
         else:
             self.config_dir = Path(getattr(framework_manager.config, 'config_dir', None) or "config")
             self.audit_log_file = (Path(framework_manager.config.logs_dir) if hasattr(framework_manager.config, 'logs_dir') else Path("logs")) / "audit.log"
-            
-        self.secrets_file = self.config_dir / "secrets.store"
+            try:
+                state_dir = getattr(framework_manager.config, "user_state_dir", None)
+            except OSError:
+                state_dir = None
+
+        # Secrets are personal: one store per user (next to the tool permissions and the audit log), the
+        # same for the GUI, the CLI and the MCP server wherever they are started. Older versions kept it in
+        # the config folder; it is copied over once.
+        if isinstance(state_dir, (str, Path)):
+            self.secrets_file = Path(state_dir) / "secrets.store"
+            self._legacy_file: Optional[Path] = self.config_dir / "secrets.store"
+        else:
+            self.secrets_file = self.config_dir / "secrets.store"
+            self._legacy_file = None
         self._cipher = None
         self._cache = {}
+        self._load_failed = False  # a damaged store is never overwritten
         self._initialized = False 
 
         if not SECURITY_AVAILABLE:
@@ -130,17 +145,28 @@ class SecretsManager:
         except Exception:
             pass 
 
+    def _reload_for_write(self) -> bool:
+        """Re-reads the store before a change (another process may have written it since) and refuses to
+        write when it cannot be read: saving the in-memory copy would erase every other secret."""
+        self._load_store()
+        if self._load_failed:
+            self.logger.error(f"The secrets store {self.secrets_file} cannot be read; not changing it. "
+                              "Repair or remove the file, then try again.")
+            return False
+        return True
+
     def set_secret(self, key: str, value: str) -> bool:
         """Verschlüsselt und speichert ein Secret."""
         if not self._initialized: self.initialize() 
         
-        if not self._cipher:
+        if not self._cipher or not self._reload_for_write():
             return False
         
         try:
             encrypted_val = self._cipher.encrypt(value.encode()).decode()
             self._cache[key] = encrypted_val
-            self._save_store()
+            if not self._save_store():
+                return False
             self._audit_log("WRITE", key, "SUCCESS")
             return True
         except Exception as e:
@@ -172,39 +198,66 @@ class SecretsManager:
     def delete_secret(self, key: str) -> bool:
         """Löscht ein Secret."""
         if not self._initialized: self.initialize()
+        if not self._reload_for_write():
+            return False
         if key in self._cache:
             del self._cache[key]
-            self._save_store()
+            if not self._save_store():
+                return False
             self._audit_log("DELETE", key, "SUCCESS")
             return True
         return False
 
-    def _save_store(self):
-        """Persistiert den verschlüsselten Store (JSON Blob)."""
+    def _save_store(self) -> bool:
+        """Writes the encrypted store atomically (temp file, mode 0600, then rename), so a reader never
+        sees a half-written file."""
+        tmp = None
         try:
-            # Sicherstellen, dass Config-Dir existiert
             self.secrets_file.parent.mkdir(parents=True, exist_ok=True)
-            
-            with open(self.secrets_file, "w") as f:
+            fd, tmp = tempfile.mkstemp(dir=self.secrets_file.parent, prefix=".secrets.", suffix=".tmp")
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self._cache, f, indent=2)
-            
-            # Setze File Permissions (nur für den User lesbar)
+                f.flush()
+                os.fsync(f.fileno())
             if platform.system() != "Windows":
-                os.chmod(self.secrets_file, 0o600)
-            
+                os.chmod(tmp, 0o600)
+            os.replace(tmp, self.secrets_file)
+            return True
         except Exception as e:
             self.logger.error(f"Failed to save secrets store: {e}")
+            if tmp:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
+            return False
 
     def _load_store(self):
-        """Lädt den Store."""
+        """Loads the store (copying a store from the old location once)."""
+        if not self.secrets_file.exists() and self._legacy_file is not None and self._legacy_file.is_file():
+            try:
+                self.secrets_file.parent.mkdir(parents=True, exist_ok=True)
+                data = json.loads(self._legacy_file.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    self._cache = data
+                    if self._save_store():
+                        self.logger.info(f"Secrets moved to {self.secrets_file} (old copy left in {self._legacy_file}).")
+            except Exception as e:
+                self.logger.warning(f"Could not take over the old secrets store {self._legacy_file}: {e}")
         if not self.secrets_file.exists():
+            self._load_failed = False
             return
         
         try:
-            with open(self.secrets_file, "r") as f:
-                self._cache = json.load(f)
+            with open(self.secrets_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("not a JSON object")
+            self._cache = data
+            self._load_failed = False
         except Exception as e:
-            self.logger.error(f"Failed to load secrets store: {e}")
+            self._load_failed = True
+            self.logger.error(f"Failed to load secrets store {self.secrets_file}: {e}")
 
 if __name__ == "__main__":
     # Smoke Test
