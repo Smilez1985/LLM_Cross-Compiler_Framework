@@ -60,6 +60,15 @@ Model Context Protocol, and conversion containers run in a sandbox.
   of the full PySide6; `pydantic` and `mcp` added.
 - Installers and the smoke test require Python 3.11-3.14.
 - Single version source (`orchestrator.__version__`).
+- **Configuration is never read from the working directory** any more: `LLM_FRAMEWORK_CONFIG_DIR`, then the
+  installation's `configs/`, then `~/.llm-framework` (`framework.yml` in the current directory is ignored).
+- The secrets store lives in the per-user folder (`~/.llm-framework/secrets.store`, copied over once from the
+  old location); the audit log key has its own keyring entry.
+- Capabilities: `default_board` (the board the build scripts use when none is given), per-format quantization
+  aliases (e.g. `INT8` -> `Q8_0`), case-insensitive board names; CLI, build service and GUI submit exactly the
+  values they validated. IMatrix without an own dataset is valid again (shipped calibration text).
+- `build start -o` resolves against the working directory, the configured default against the installation;
+  `deploy list-artifacts` and `deploy package` read the build manifests in the configured output folder.
 
 ### Removed
 - LangChain, python-dotenv, pywin32 and winshell dependencies.
@@ -74,6 +83,9 @@ Model Context Protocol, and conversion containers run in a sandbox.
 - RKNN: dataset mounts no longer replace the model mount; JSON datasets keep their suffix; stale artifacts of
   other boards are never deployed.
 - Entrypoint restart loop when the host user is root; checksums with Windows line endings.
+- Cancelling a build can no longer be undone by a later stage (security scan, image build and stage
+  containers are stopped); only real read timeouts count as timeouts; a retry after a healing fix keeps its own
+  build id and log; a damaged audit database or per-user folder no longer stops the framework from starting.
 
 ### Security
 - **Sandboxed conversion containers**: host user instead of root, no network, no capabilities,
@@ -85,6 +97,15 @@ Model Context Protocol, and conversion containers run in a sandbox.
 - Chat output is escaped; links open only after confirmation.
 - Archive extraction blocks path traversal, links and devices; secrets are redacted in logs.
 - pip-audit reports no known vulnerabilities (279 before); GitHub Actions pinned by commit SHA.
+- A project folder can no longer change the settings of an MCP server started inside it (e.g. source
+  repositories of the build toolchain).
+- A damaged secrets store is never overwritten; secrets are written atomically with mode 0600.
+- Audit log: one write transaction per entry (no forked chains with several processes), key id per log,
+  an anchor file that reveals removed newest entries.
+- A damaged tool permission file denies every tool instead of falling back to looser defaults.
+- MCP: confirmations show every argument in full (too long: refused), only a real answer of the user counts as
+  approval, declined and cancelled calls are audited, client snippets are quoted, and the Claude Desktop config
+  backup is private.
 
 ## [2.4.0] - 2026-01-14
 **Reconstructed entry.** Versions 2.0 to 2.4 were developed without changelog entries; this summary is
