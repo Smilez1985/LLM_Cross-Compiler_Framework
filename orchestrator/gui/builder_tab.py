@@ -283,7 +283,9 @@ class BuilderTab(QWidget):
         self.model_input = QComboBox()
         self.model_input.setEditable(True)
         self.model_input.setPlaceholderText("HuggingFace ID or Path")
-        self.model_input.addItems(["meta-llama/Llama-3.2-3B-Instruct", "mistralai/Mistral-7B-v0.3"])
+        # Ungated models that build without a Hugging Face token
+        self.model_input.addItems(["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3.5-2B", "Qwen/Qwen3.5-4B",
+                                   "HuggingFaceTB/SmolLM2-135M-Instruct"])
         
         browse_btn = QPushButton("📂")
         browse_btn.setFixedWidth(40)
@@ -362,9 +364,9 @@ class BuilderTab(QWidget):
         self.quant_combo = QComboBox()
         self.quant_combo.setEditable(True)
         self.board_combo = QComboBox()
-        self.board_combo.setEditable(True)
         self.board_combo.addItems(["rk3588", "rk3576", "rk3566"])
-        self.format_combo.currentIndexChanged.connect(self._update_quant_options)
+        self.format_combo.currentIndexChanged.connect(self._update_boards)
+        self.board_combo.currentIndexChanged.connect(self._update_quant_options)
         self._update_quant_options()
         self.format_combo.currentIndexChanged.connect(self._update_calibration_options)
         self.opt_combo = QComboBox()
@@ -391,6 +393,9 @@ class BuilderTab(QWidget):
         build_layout.addRow("Optimization:", self.opt_combo)
         build_layout.addRow("Calibration:", row_dataset)
         self._update_calibration_options()
+        # Formats, boards and quantizations follow the selected target's declared capabilities.
+        self.target_combo.currentIndexChanged.connect(self._apply_target_capabilities)
+        self._apply_target_capabilities()
         build_layout.addRow("", self.chk_gpu)
         
         build_group.setLayout(build_layout)
@@ -535,12 +540,65 @@ class BuilderTab(QWidget):
 
     # --- STANDARD LOGIC ---
 
+    def _capabilities(self):
+        tm = self.framework.get_component("target_manager") if self.framework and hasattr(self.framework, "get_component") else None
+        target = self.target_combo.currentData() if hasattr(self, "target_combo") else None
+        return tm.get_capabilities(target) if tm and target and hasattr(tm, "get_capabilities") else None
+
+    def _apply_target_capabilities(self):
+        """Offers exactly the formats the selected target declares (static defaults if it declares none)."""
+        caps = self._capabilities()
+        current = self.format_combo.currentData()
+        self.format_combo.blockSignals(True)
+        self.format_combo.clear()
+        if caps:
+            for fid, cap in caps.formats.items():
+                self.format_combo.addItem(cap.label, fid)
+        else:
+            for label, value in BUILD_FORMATS:
+                self.format_combo.addItem(label, value)
+        idx = self.format_combo.findData(current)
+        self.format_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.format_combo.blockSignals(False)
+        self._update_boards()
+        self._update_calibration_options()
+
+    def _update_boards(self):
+        caps = self._capabilities()
+        boards = caps.boards_for(self.format_combo.currentData()) if caps else ["rk3588", "rk3576", "rk3566"]
+        current = self.board_combo.currentData() or self.board_combo.currentText()
+        self.board_combo.blockSignals(True)
+        self.board_combo.clear()
+        for board in boards:
+            label = caps.boards[board].label if caps else board
+            self.board_combo.addItem(label, board)
+        idx = self.board_combo.findData(current)
+        self.board_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.board_combo.blockSignals(False)
+        self._update_quant_options()
+
+    def _selected_board(self):
+        return self.board_combo.currentData() or self.board_combo.currentText().strip() or None
+
     def _update_quant_options(self):
         current = self.quant_combo.currentText()
+        caps = self._capabilities()
+        cap = caps.formats.get(self.format_combo.currentData()) if caps else None
+        board = self._selected_board()
         self.quant_combo.clear()
-        self.quant_combo.addItems(QUANT_SUGGESTIONS.get(self.format_combo.currentData(), []))
-        if current and self.quant_combo.findText(current) >= 0:
+        if cap:
+            self.quant_combo.addItems(cap.quantizations_for(board))
+            default = cap.default_for(board)
+        else:
+            self.quant_combo.addItems(QUANT_SUGGESTIONS.get(self.format_combo.currentData(), []))
+            default = None
+        # Keep a type the user picked if the new board/format allows it; otherwise use the new default.
+        user_choice = current and current != getattr(self, "_last_default_quant", None)
+        if user_choice and self.quant_combo.findText(current) >= 0:
             self.quant_combo.setCurrentText(current)
+        elif default:
+            self.quant_combo.setCurrentText(default)
+        self._last_default_quant = default
 
     DATASET_HINTS = {
         "gguf": "Plain text; used to compute the importance matrix.",
@@ -549,12 +607,17 @@ class BuilderTab(QWidget):
     }
 
     def _update_calibration_options(self):
+        if not hasattr(self, "chk_imatrix"):
+            return
         fmt = self.format_combo.currentData()
-        is_gguf = fmt == "gguf"
-        self.chk_imatrix.setEnabled(is_gguf)
-        if not is_gguf:
+        caps = self._capabilities()
+        cap = caps.formats.get(fmt) if caps else None
+        uses_imatrix = cap.imatrix if cap else fmt == "gguf"
+        self.chk_imatrix.setEnabled(uses_imatrix)
+        if not uses_imatrix:
             self.chk_imatrix.setChecked(False)
-        self.btn_dataset.setToolTip(self.DATASET_HINTS.get(fmt, ""))
+        self.btn_dataset.setEnabled(cap is None or cap.dataset != "none" or cap.imatrix)
+        self.btn_dataset.setToolTip(self.DATASET_HINTS.get(fmt, cap.notes if cap and cap.notes else ""))
 
     def _refresh_targets(self):
         self.target_combo.clear()
@@ -618,6 +681,16 @@ class BuilderTab(QWidget):
     def _submit_build(self):
         get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
         output_dir = get_cfg("output_dir", "output")
+
+        # Check the request against the target's capabilities before starting a long build.
+        caps = self._capabilities()
+        if caps:
+            problems = caps.check_request(self.format_combo.currentData(), self._selected_board(),
+                                          self.quant_combo.currentText().strip() or None,
+                                          dataset=bool(self.dataset_path), imatrix=self.chk_imatrix.isChecked())
+            if problems:
+                QMessageBox.warning(self, "Build settings", "\n".join(problems))
+                return
         
         try:
              target_fmt = ModelFormat(self.format_combo.currentData())
@@ -642,7 +715,7 @@ class BuilderTab(QWidget):
             # NEW v2.4.0: Pass IMatrix config
             use_imatrix=self.chk_imatrix.isChecked(),
             dataset_path=self.dataset_path,
-            target_board=self.board_combo.currentText().strip() or None
+            target_board=self._selected_board()
         )
         
         try:

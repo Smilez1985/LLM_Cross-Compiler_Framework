@@ -33,7 +33,7 @@ from orchestrator.Core.orchestrator import OrchestrationStatus
 from orchestrator.utils.localization import get_instance as get_i18n
 
 # GUI Components
-from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog, AIConfigurationDialog
+from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog, AIConfigurationDialog, ToolPermissionsDialog
 from orchestrator.gui.wizards import ModuleCreationWizard
 from orchestrator.gui.builder_tab import BuilderTab
 from orchestrator.gui.chat_window import ChatWindow
@@ -100,6 +100,11 @@ class MainOrchestrator(QMainWindow):
         self.update_timer.timeout.connect(self._update_system_state)
         self.update_timer.start(1000) # Every second
 
+        # Ditto's first setup: ask for the tool permissions once, right after the window is shown.
+        registry = getattr(self.framework, "tool_registry", None)
+        if registry is not None and not registry.policy().configured:
+            QTimer.singleShot(0, lambda: self._open_tool_permissions(first_run=True))
+
     def _setup_menu(self):
         menubar = self.menuBar()
         
@@ -125,6 +130,10 @@ class MainOrchestrator(QMainWindow):
         act_wizard = QAction("Create Hardware Module...", self)
         act_wizard.triggered.connect(self._open_module_wizard)
         tools_menu.addAction(act_wizard)
+
+        act_perms = QAction("Tool Permissions (Ditto / MCP)...", self)
+        act_perms.triggered.connect(self._open_tool_permissions)
+        tools_menu.addAction(act_perms)
 
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About", self)
@@ -265,6 +274,14 @@ class MainOrchestrator(QMainWindow):
             cfg = dlg.get_config()
             mode = "Offline" if cfg.get("offline_mode") else f"{cfg.get('provider')} / {cfg.get('model')}"
             self.status.showMessage(f"AI Agent configured: {mode}", 5000)
+
+    def _open_tool_permissions(self, first_run: bool = False):
+        registry = getattr(self.framework, "tool_registry", None)
+        if registry is None:
+            QMessageBox.critical(self, "Error", "Tool registry not available.")
+            return
+        if ToolPermissionsDialog(registry, self, first_run=first_run).exec():
+            self.status.showMessage("Tool permissions saved.", 5000)
 
     def _open_module_wizard(self):
         targets_dir = self.app_root / self.framework.config.get("targets_dir", "targets")

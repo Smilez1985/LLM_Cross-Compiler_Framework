@@ -52,6 +52,10 @@ def ensure_directory(path: Path):
 
 class ValidationError(Exception): pass
 
+
+class BuildCancelled(Exception):
+    """The user cancelled the build; not a failure."""
+
 # ============================================================================
 # ENUMS AND CONSTANTS
 # ============================================================================
@@ -306,8 +310,9 @@ class BuildEngine:
         progress.status = BuildStatus.CANCELLED
         progress.add_log("Build cancelled by user.")
         
-        # Stop container if running
-        container = self._active_containers.get(build_id)
+        # Stop the running stage container (imatrix or build); _run_container then ends the build.
+        with self._lock:
+            container = self._active_containers.get(build_id)
         if container:
             try: 
                 container.stop(timeout=10)
@@ -315,6 +320,52 @@ class BuildEngine:
                 self.logger.warning(f"Failed to stop container for {build_id}: {e}")
                 
         return True
+
+    @staticmethod
+    def _check_cancelled(progress: "BuildProgress"):
+        if progress.status == BuildStatus.CANCELLED:
+            raise BuildCancelled("Build cancelled by user.")
+
+    def _run_container(self, config: "BuildConfiguration", progress: "BuildProgress", container: Container,
+                       prefix: str) -> int:
+        """Runs a stage container: streams its log into the progress, enforces the build timeout,
+        honours cancellation and always removes the container. Returns the exit code."""
+        with self._lock:
+            self._active_containers[config.build_id] = container
+        try:
+            self._check_cancelled(progress)
+            container.start()
+
+            def pump():
+                try:
+                    for line in container.logs(stream=True, follow=True):
+                        progress.add_log(f"{prefix}{line.decode(errors='replace').rstrip()}")
+                except Exception as e:  # the container may be removed while streaming
+                    self.logger.debug(f"Log stream of {config.build_id} ended: {e}")
+
+            reader = threading.Thread(target=pump, name=f"logs-{config.build_id}", daemon=True)
+            reader.start()
+            timeout = config.build_timeout or self.default_timeout
+            try:
+                result = container.wait(timeout=timeout)
+            except Exception as e:  # docker-py raises a requests timeout/connection error when it expires
+                self._check_cancelled(progress)
+                try:
+                    container.kill()
+                except Exception:
+                    pass
+                raise TimeoutError(f"The {prefix.strip(': ').lower() or 'build'} stage ran longer than "
+                                   f"{timeout} s and was stopped (setting build_timeout).") from e
+            reader.join(timeout=10)
+            self._check_cancelled(progress)
+            return int(result.get("StatusCode", 1))
+        finally:
+            with self._lock:
+                self._active_containers.pop(config.build_id, None)
+            try:
+                container.remove(force=True)
+            except Exception:
+                pass
 
     def cleanup_build(self, build_id: str) -> bool:
         progress = self._builds.get(build_id)
@@ -384,9 +435,11 @@ class BuildEngine:
             
             # 4. Build Docker Image
             image = self._build_docker_image(config, prog, df_path)
+            self._check_cancelled(prog)
 
             # 4a. Make the model available inside the containers
             staged = self._stage_model(config, prog)
+            self._check_cancelled(prog)
             
             # 5. Security Scan
             self._scan_image_security(image.tags[0], prog)
@@ -413,11 +466,23 @@ class BuildEngine:
             if config.cleanup_after_build: 
                 self.cleanup_build(bid)
                 
+            self._check_cancelled(prog)
             prog.status = BuildStatus.COMPLETED
             prog.end_time = datetime.now()
             prog.progress_percent = 100
             
+        except BuildCancelled:
+            prog.status = BuildStatus.CANCELLED
+            prog.end_time = datetime.now()
+            try: self.cleanup_build(bid)
+            except Exception: pass
         except Exception as e:
+            if prog.status == BuildStatus.CANCELLED:
+                # Stopping the container makes the stage fail; that is the cancellation, not an error.
+                prog.end_time = datetime.now()
+                try: self.cleanup_build(bid)
+                except Exception: pass
+                return
             prog.status = BuildStatus.FAILED
             prog.end_time = datetime.now()
             prog.add_error(str(e))
@@ -682,38 +747,23 @@ class BuildEngine:
         if config.use_gpu and shutil.which("nvidia-smi"):
              device_requests = [DeviceRequest(count=-1, capabilities=[['gpu']])]
              
-        try:
-            container = self.docker_client.containers.create(
-                image=image.id,
-                command=["/app/modules/build.sh"],
-                volumes=vols,
-                environment=env,
-                name=f"llm-imatrix-{config.build_id}",
-                user="0:0",
-                device_requests=device_requests
-            )
-            
-            container.start()
-            for line in container.logs(stream=True, follow=True):
-                progress.add_log(f"IMATRIX: {line.decode().strip()}")
-                
-            res = container.wait(timeout=config.build_timeout)
-            if res.get('StatusCode', 1) != 0:
-                raise RuntimeError("IMatrix calculation failed.")
-                
-            # Verify Output
-            if (imatrix_dir / "imatrix.dat").exists():
-                progress.add_log("✅ IMatrix successfully generated.")
-            else:
-                progress.add_warning("IMatrix generation finished but 'imatrix.dat' not found.")
-                
-        except Exception as e:
-            progress.add_error(f"IMatrix generation error: {e}")
-            raise # Re-raise to stop build or handle via policy? 
-                  # For now we fail hard if requested IMatrix fails.
-        finally:
-            try: container.remove(force=True)
-            except: pass
+        container = self.docker_client.containers.create(
+            image=image.id,
+            command=["/app/modules/build.sh"],
+            volumes=vols,
+            environment=env,
+            name=f"llm-imatrix-{config.build_id}",
+            user="0:0",
+            device_requests=device_requests
+        )
+        # A requested importance matrix that fails stops the build (low-bit types would be unusable).
+        exit_code = self._run_container(config, progress, container, "IMATRIX: ")
+        if exit_code != 0:
+            raise RuntimeError(f"IMatrix calculation failed (exit code {exit_code})\n{self._log_tail(progress, 'IMATRIX: ')}")
+        if (imatrix_dir / "imatrix.dat").exists():
+            progress.add_log("✅ IMatrix successfully generated.")
+        else:
+            progress.add_warning("IMatrix generation finished but 'imatrix.dat' not found.")
 
     def _execute_build_modules(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
                                staged: Tuple[str, Dict[str, Dict[str, str]]]):
@@ -779,17 +829,7 @@ class BuildEngine:
             devices=devices
         )
         
-        with self._lock: 
-            self._active_containers[config.build_id] = container
-            
-        container.start()
-        
-        for line in container.logs(stream=True, follow=True):
-            progress.add_log(f"CONT: {line.decode().strip()}")
-            
-        res = container.wait(timeout=config.build_timeout)
-        exit_code = res.get('StatusCode', 1)
-        
+        exit_code = self._run_container(config, progress, container, "CONT: ")
         if exit_code != 0:
             raise RuntimeError(f"Build script failed with exit code {exit_code}\n{self._log_tail(progress, 'CONT: ')}")
 

@@ -339,7 +339,8 @@ class TestMainWindowWiring:
         win = main_window.MainOrchestrator(REPO_ROOT)
         try:
             menus = {m.title(): [a.text() for a in m.actions()] for m in win.findChildren(QMenu) if m.title()}
-            assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module..."]
+            assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module...",
+                                      "Tool Permissions (Ditto / MCP)..."]
 
             wizard = ModuleCreationWizard(tmp_path / "targets", win)
             assert wizard.framework_manager is win.framework

@@ -276,7 +276,9 @@ class TestTargets:
 class TestCLI:
 
     def run_cli(self, tmp_path, *args, keyring_backend="keyring.backends.null.Keyring"):
-        env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND=keyring_backend)
+        env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND=keyring_backend,
+                   LLM_FRAMEWORK_HOME=str(tmp_path / "state"), LLM_FRAMEWORK_OUTPUT_DIR=str(tmp_path / "output"),
+                   LLM_FRAMEWORK_CACHE_DIR=str(tmp_path / "cache"), LLM_FRAMEWORK_MODELS_DIR=str(tmp_path / "models"))
         return subprocess.run([sys.executable, "-m", "orchestrator.cli", *args],
                               cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120)
 
