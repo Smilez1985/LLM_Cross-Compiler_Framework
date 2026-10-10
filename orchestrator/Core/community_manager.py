@@ -229,23 +229,22 @@ class CommunityManager:
             return None
             
         rag_manager = self.framework.get_component("rag_manager")
-        if not rag_manager or not rag_manager._connect(): return None
-        
-        all_points = []
-        next_offset = None
+        if not rag_manager: return None
+
         try:
-            while True:
-                rec, next_offset = rag_manager.client.scroll("framework_knowledge", limit=100, offset=next_offset, with_payload=True, with_vectors=False)
-                all_points.extend(rec)
-                if next_offset is None: break
-        except: return None
+            records = list(rag_manager.export_records())
+        except Exception as e:
+            self.logger.error(f"Knowledge export failed: {e}")
+            return None
 
         export_data = []
-        for point in all_points:
-            p = point.payload or {}
-            c = self._sanitize_content(p.get("content", ""))
-            s = self._sanitize_content(p.get("source", ""))
-            if c: export_data.append({"source": s, "content": c, "metadata": {k:v for k,v in p.items() if k not in ["content", "source"]}})
+        for record in records:
+            c = self._sanitize_content(record.get("content", ""))
+            s = self._sanitize_content(record.get("source", ""))
+            meta = {k: self._sanitize_content(v) if isinstance(v, str) else v
+                    for k, v in (record.get("metadata") or {}).items()}  # e.g. URLs with tokens in the query
+            if c: export_data.append({"source": s, "content": c, "metadata": meta})
+        if not export_data: return None
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
         export_path = ensure_directory(self.knowledge_dir) / f"{output_name_prefix}_{ts}.json"

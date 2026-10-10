@@ -214,13 +214,8 @@ class DittoCoder:
         # Robust config check
         get_fn = getattr(self.config, 'get', lambda k, d=None: getattr(self.config, k, d))
         if not get_fn("enable_rag_knowledge", False): return None
-        # RAG embeddings use an online API, which offline mode rules out.
-        if self.offline_mode: return None
-        
-        rag = self.framework.get_component("rag_manager")
-        if rag is not None and self.api_key and self._provider_id(self.provider) == "OpenAI":
-            rag.api_key = self.api_key  # a key typed at a prompt is not in the keyring
-        return rag
+        # Embeddings are computed locally; in offline mode the RAG manager only uses cached models.
+        return self.framework.get_component("rag_manager")
 
     def reinitialize(self, provider: Optional[str] = None, model: Optional[str] = None,
                      api_key: Optional[str] = None, base_url: Optional[str] = None,
@@ -252,7 +247,7 @@ class DittoCoder:
         if rag:
             self.logger.info(f"Querying Knowledge Base for '{sdk_name}'...")
             query = f"{sdk_name} SDK compilation flags build configuration optimization parameters"
-            results = rag.search(query, limit=5, score_threshold=0.65)
+            results = rag.search(query, limit=5)
             
             if results:
                 context_text += "--- EXPERT KNOWLEDGE (Local RAG) ---\n"

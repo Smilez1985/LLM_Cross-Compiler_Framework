@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from orchestrator.schemas.build import (ArtifactList, BuildHandle, BuildList, BuildRequestIn, BuildStatusOut,
                                         LogTail, TargetList)
+from orchestrator.rag.errors import KnowledgeBaseError
 from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.policy import PolicyStore, ToolTier
@@ -74,7 +75,10 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         rag = framework.ensure_rag_manager() if hasattr(framework, "ensure_rag_manager") else None
         if rag is None:
             raise ToolError("The knowledge base is disabled (setting enable_rag_knowledge).")
-        hits = rag.search(inp.query, limit=inp.limit)
+        try:
+            hits = rag.search(inp.query, limit=inp.limit, strict=True)
+        except KnowledgeBaseError as e:
+            raise ToolError(f"The knowledge base is unavailable: {e}") from e
         return SearchOut(results=[KnowledgeHit(source=str(h.source), score=float(getattr(h, "score", 0.0)),
                                                content=str(h.content)[:4000]) for h in hits])
 
