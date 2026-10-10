@@ -47,8 +47,9 @@ GGUF_CONVERT_TYPES=" f32 f16 bf16 q8_0 auto "
 # Types accepted by llama-quantize (llama.cpp v0.6.0).
 GGUF_QUANT_TYPES=" Q4_0 Q4_1 Q5_0 Q5_1 Q8_0 Q2_K Q2_K_S Q3_K_S Q3_K_M Q3_K_L Q4_K_S Q4_K_M Q5_K_S Q5_K_M Q6_K \
 IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS TQ1_0 TQ2_0 MXFP4_MOE "
-# Very low-bit i-quants are unusable without an importance matrix.
+# Very low-bit i-quants are unusable without an importance matrix; other i-quants lose quality without one.
 GGUF_NEEDS_IMATRIX=" IQ1_S IQ1_M IQ2_XXS IQ2_XS IQ2_S "
+GGUF_WANTS_IMATRIX=" IQ2_M IQ3_XXS IQ3_XS IQ3_S IQ3_M IQ4_NL IQ4_XS "
 
 normalize_gguf_type() {
     local q
@@ -90,6 +91,8 @@ build_gguf() {
         imatrix_args=(--imatrix "$IMATRIX_PATH")
     elif [[ "$GGUF_NEEDS_IMATRIX" == *" $q "* ]]; then
         die "$q needs an importance matrix; enable IMatrix calibration for this build."
+    elif [[ "$GGUF_WANTS_IMATRIX" == *" $q "* ]]; then
+        echo "WARNING: $q without an importance matrix loses quality; enable IMatrix calibration for better results." >&2
     fi
 
     f16_file="$WORK_DIR/tmp-${MODEL_NAME}-F16.gguf"

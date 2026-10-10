@@ -8,3 +8,6 @@ dockerfile    text eol=lf
 # Windows-only scripts keep CRLF.
 *.bat         text eol=crlf
 *.ps1         text eol=crlf
+
+# Shipped data files
+*.gz          binary
