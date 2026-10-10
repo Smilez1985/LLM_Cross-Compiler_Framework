@@ -225,3 +225,19 @@ configs/known_hosts
 /models/embeddings/
 # Ditto's local GGUF models (llm-cli ditto models download; up to several GB each)
 /models/ditto/
+
+# Credentials and keys (never commit; scripts/secret_scan.py refuses them as well)
+.env.*
+!.env.example
+*.pem
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.ppk
+.netrc
+credentials.json
+ca-bundle.crt
+secrets.store
+audit.db
+audit.db.anchor

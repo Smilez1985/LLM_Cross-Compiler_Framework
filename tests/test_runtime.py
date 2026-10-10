@@ -789,7 +789,9 @@ class TestModels:
         path.write_bytes(data)
         assert rt.model_state(model) == "unverified"
         assert rt._ensure_model_verified(model) == path and rt.model_ready(model)
-        path.write_bytes(data[:-1] + b"!")  # same size, different content, new mtime
+        before = path.stat().st_mtime_ns
+        path.write_bytes(data[:-1] + b"!")  # same size, different content
+        os.utime(path, ns=(before + 1_000_000_000, before + 1_000_000_000))  # a new mtime even on coarse clocks
         assert not rt.model_ready(model)
         with pytest.raises(IntegrityError):
             rt._ensure_model_verified(model)
