@@ -481,7 +481,7 @@ class LoggingManager:
                 
         except Exception as e:
             # Fallback to default configuration
-            print(f"Failed to load logging config: {e}")
+            print(f"Failed to load logging config: {e}", file=sys.stderr)
             self._setup_default_configuration(LogLevel.INFO)
     
     def _setup_default_configuration(self, default_level: LogLevel):
@@ -739,7 +739,7 @@ class LoggingManager:
             return True
             
         except Exception as e:
-            print(f"Failed to export logs: {e}")
+            print(f"Failed to export logs: {e}", file=sys.stderr)
             return False
     
     def cleanup(self):

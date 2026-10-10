@@ -91,6 +91,25 @@ make test-container     # Run isolated tests
 
 ---
 
+### 4. AI Clients via MCP (Claude Code, Claude Desktop, VS Code)
+
+The framework runs as a [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI client you
+already use can drive it: list targets, check what a board supports, start and watch builds, read logs and
+decide on self-healing proposals. You sign in to the client with your own Claude account or API key; the
+framework never sees those credentials.
+
+```bash
+llm-cli ditto setup        # once: what AI clients may do on their own, what needs your confirmation
+llm-cli mcp config         # shows the commands/snippets for Claude Code, Claude Desktop and VS Code
+llm-cli mcp config --write claude-desktop   # or add it to Claude Desktop directly (backup is kept)
+```
+
+- **Permissions:** read-only tools are allowed by default; starting or cancelling builds asks for your
+  confirmation (the client shows the question), unless you allowed it. Tools that reach other devices can
+  only be allowed one by one. Every call is written to a tamper-evident audit log (`llm-cli tools audit`).
+- **Transports:** stdio (default, started by the client) or local Streamable HTTP
+  (`llm-cli mcp serve --transport http`, loopback only, bearer token in `~/.llm-framework/mcp_http_token`).
+
 ## 🤝 Community & Collaboration
 
 We believe in the power of open collaboration.

@@ -867,6 +867,65 @@ def ditto_setup(ctx: FrameworkContext):
     return policy
 
 
+# ============================================================================
+# MCP SERVER (AI clients such as Claude Code / Claude Desktop / VS Code)
+# ============================================================================
+
+@cli.group()
+def mcp():
+    """Model Context Protocol server for AI clients"""
+    pass
+
+
+@mcp.command('serve')
+@click.option('--transport', type=click.Choice(['stdio', 'http']), default='stdio', show_default=True,
+              help='stdio: started by the client (default). http: local Streamable HTTP with a bearer token.')
+@click.option('--host', default='127.0.0.1', show_default=True, help='HTTP only; loopback addresses only')
+@click.option('--port', default=8765, show_default=True, type=int, help='HTTP only')
+@pass_context
+def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
+    """Run the MCP server (stdout carries the protocol; logs go to stderr)"""
+    import contextlib
+    from orchestrator import mcp_server
+    # Nothing may reach stdout before the transport owns it.
+    with contextlib.redirect_stdout(sys.stderr):
+        ctx.require_framework()
+        registry = getattr(ctx.framework_manager, "tool_registry", None)
+        if registry is not None and not registry.policy().configured:
+            Console(stderr=True).print("[yellow]Tool permissions are not set up yet: read-only tools work, "
+                                       "everything else asks (or is denied without elicitation). "
+                                       "Run 'llm-cli ditto setup'.[/yellow]")
+    try:
+        mcp_server.serve(ctx.framework_manager, transport=transport, host=host, port=port)
+    except ValueError as e:
+        Console(stderr=True).print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(2)
+
+
+@mcp.command('config')
+@click.option('--write', 'write_client', type=click.Choice(['claude-desktop']),
+              help='Add the server to this client\'s configuration (other entries are kept, a backup is written)')
+@pass_context
+def mcp_config(ctx: FrameworkContext, write_client: Optional[str]):
+    """Show how to connect Claude Code, Claude Desktop or VS Code to this framework"""
+    from orchestrator import mcp_server
+    app_root = Path(__file__).resolve().parents[1]
+    if write_client == 'claude-desktop':
+        try:
+            path = mcp_server.write_claude_desktop_config(app_root)
+        except ValueError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+        console.print(f"[green]Added to {path}. Restart Claude Desktop.[/green]")
+        return
+    snippets = mcp_server.client_snippets(app_root)
+    console.print(Panel(escape(snippets["claude-code"]), title="Claude Code (run once)"))
+    console.print(Panel(escape(snippets["claude-desktop"]),
+                        title=f"Claude Desktop ({escape(str(mcp_server.claude_desktop_config_path()))})"))
+    console.print(Panel(escape(snippets["vscode"]), title="VS Code (.vscode/mcp.json)"))
+    console.print("Sign in to these clients with your own Claude account or key; the framework never sees it.")
+
+
 @cli.group()
 def deploy():
     """Manage deployments and artifacts"""
