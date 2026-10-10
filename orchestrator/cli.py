@@ -15,7 +15,6 @@ Updates v2.4.0:
 
 import sys
 import json
-import logging
 import subprocess
 import asyncio
 import os
@@ -38,7 +37,7 @@ from orchestrator.Core.orchestrator import LLMOrchestrator, BuildRequest, Workfl
 from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel
 from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.Core.deployment_manager import DeploymentManager
-from orchestrator.utils.logging import get_logger
+from orchestrator.utils.logging import get_logger, setup_logging
 from orchestrator.utils.validation import ValidationError
 
 # Import DittoCoder optionally
@@ -142,6 +141,13 @@ class FrameworkContext:
             self.init_error = e
             Console(stderr=True).print(f"[red]Failed to initialize framework: {e}[/red]")
 
+    def require_framework(self) -> "FrameworkContext":
+        """Boots the framework on first use; commands that do not need it work without a keyring or Docker."""
+        self.initialize()
+        if self.init_error or not self.framework_manager:
+            sys.exit(1)
+        return self
+
 
 pass_context = click.make_pass_decorator(FrameworkContext, ensure=True)
 
@@ -149,15 +155,6 @@ pass_context = click.make_pass_decorator(FrameworkContext, ensure=True)
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
-
-def setup_cli_logging(level: str = "INFO"):
-    """Setup logging for CLI operations"""
-    logging.basicConfig(
-        level=getattr(logging, level.upper()),
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[logging.StreamHandler(sys.stderr)]
-    )
-
 
 def load_config_file(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load configuration from file"""
@@ -225,8 +222,6 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     for edge hardware. Supports automation, CI/CD integration, Deployment, 
     Self-Healing and Smart Calibration (IMatrix).
     """
-    # Setup logging
-    setup_cli_logging("DEBUG" if verbose else log_level)
     
     # Load configuration
     ctx.config.update(load_config_file(config))
@@ -235,11 +230,8 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     ctx.verbose = verbose
     ctx.quiet = quiet
 
-    # Initialisiere Framework und Orchestrator
-    ctx.initialize()
-    # Subcommand help must still work without a bootable framework.
-    if ctx.init_error and not any(arg in ("--help", "-h") for arg in sys.argv[1:]):
-        sys.exit(1)
+    # Applies to framework loggers too; they are created before FrameworkManager configures logging.
+    setup_logging(level=ctx.log_level)
     
     if not quiet:
         Console(stderr=True).print(Panel(
@@ -264,6 +256,7 @@ def targets():
 @pass_context
 def list_targets(ctx: FrameworkContext, format: str):
     """List available hardware targets"""
+    ctx.require_framework()
     
     try:
         if not ctx.build_engine:
@@ -307,6 +300,7 @@ def list_targets(ctx: FrameworkContext, format: str):
 @pass_context
 def validate_target(ctx: FrameworkContext, target_name: str):
     """Validate a target configuration"""
+    ctx.require_framework()
     try:
         # Assuming validate_target exists on framework manager or target manager
         tm = ctx.framework_manager.get_component("target_manager")
@@ -392,6 +386,7 @@ def generate_ai(ctx: FrameworkContext, probe_file):
     """
     🤖 AI-Powered: Generate module from hardware probe (target_hardware_config.txt).
     """
+    ctx.require_framework()
     if not DittoCoder:
         console.print("[red]Ditto Manager not available. Install litellm via 'pip install litellm'[/red]")
         sys.exit(1)
@@ -418,7 +413,7 @@ def generate_ai(ctx: FrameworkContext, probe_file):
         1: ("Anthropic", "claude-3-opus-20240229"),
         2: ("Google VertexAI", "gemini-1.5-pro"),
         3: ("Ollama (Local)", "llama3"),
-        4: ("LocalAI / OpenAI Compatible", "local-model")
+        4: ("Custom", "local-model")  # LocalAI / any OpenAI-compatible server
     }
     
     provider, default_model = provider_map[choice_idx]
@@ -430,22 +425,26 @@ def generate_ai(ctx: FrameworkContext, probe_file):
     api_key = None
     base_url = None
     
+    provider_id = provider.split()[0]
+
     # Try fetching from SecretsManager first
     if ctx.framework_manager.secrets_manager:
         key_map = {
             "OpenAI": "openai_api_key",
             "Anthropic": "anthropic_api_key",
-            "Google": "gemini_api_key"
+            "Google": "gemini_api_key",
+            "Custom": "custom_api_key"
         }
-        if provider.split()[0] in key_map:
-            api_key = ctx.framework_manager.secrets_manager.get_secret(key_map[provider.split()[0]])
+        if provider_id in key_map:
+            api_key = ctx.framework_manager.secrets_manager.get_secret(key_map[provider_id])
     
-    if "Local" in provider or "Compatible" in provider:
-        base_url = Prompt.ask("Base URL", default="http://localhost:11434")
-        api_key = "sk-dummy"
-    
-    if not api_key:
-        api_key = Prompt.ask(f"Enter API Key", password=True)
+    if provider_id in ("Ollama", "Custom"):
+        default_url = "http://localhost:11434" if provider_id == "Ollama" else "http://localhost:8080/v1"
+        base_url = Prompt.ask("Base URL", default=default_url)
+        if provider_id == "Custom" and not api_key:
+            api_key = Prompt.ask("API Key (optional, Enter to skip)", password=True, default="") or None
+    elif not api_key:
+        api_key = Prompt.ask("Enter API Key", password=True)
 
     try:
         # 4. Execution
@@ -512,6 +511,7 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str,
                 optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: bool, dataset: Optional[str]):
     """Start a new build job"""
+    ctx.require_framework()
     
     try:
         # Target is passed as string (folder name)
@@ -621,6 +621,7 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str,
 @pass_context
 def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
     """Check build status"""
+    ctx.require_framework()
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -674,6 +675,7 @@ def secrets():
 @pass_context
 def set_secret(ctx: FrameworkContext, key, password):
     """Set a secret in the secure store."""
+    ctx.require_framework()
     if not ctx.framework_manager.secrets_manager:
         console.print("[red]SecretsManager not available![/red]")
         sys.exit(1)
@@ -687,6 +689,7 @@ def set_secret(ctx: FrameworkContext, key, password):
 @pass_context
 def list_secrets(ctx: FrameworkContext):
     """List available secret keys (names only)."""
+    ctx.require_framework()
     if not ctx.framework_manager.secrets_manager:
         console.print("[red]SecretsManager not available![/red]")
         sys.exit(1)
@@ -750,6 +753,7 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
     Create a deployment ZIP package.
     Includes artifact, generated deploy.sh, checksums, and optional Docker images.
     """
+    ctx.require_framework()
     dep_mgr = ctx.deployment_manager
     if not dep_mgr:
         console.print("[red]Deployment Manager not loaded.[/red]")
@@ -787,6 +791,7 @@ def run_deploy(ctx: FrameworkContext, package_path, ip, user, password):
     """
     Upload and execute a deployment package on the target.
     """
+    ctx.require_framework()
     dep_mgr = ctx.deployment_manager
     if not dep_mgr:
         console.print("[red]Deployment Manager not loaded.[/red]")
@@ -824,6 +829,7 @@ def swarm_upload(ctx: FrameworkContext, file_path, user):
     Encrypt and upload a Knowledge Base export to the Swarm.
     Uses 'Fake-Encryption' (XOR+Wingdings) for obfuscation.
     """
+    ctx.require_framework()
     cm = ctx.framework_manager.community_manager
     if not cm:
         console.print("[red]Community Manager not loaded.[/red]")
@@ -856,7 +862,7 @@ def swarm_upload(ctx: FrameworkContext, file_path, user):
 @pass_context
 def run_scan(ctx: FrameworkContext, output):
     """Run hardware probe script."""
-    script_dir = Path(ctx.framework_manager.info.installation_path) / "scripts"
+    script_dir = Path(__file__).resolve().parents[1] / "scripts"
     output_file = Path(output).resolve()
     
     is_windows = platform.system() == "Windows"
@@ -908,6 +914,7 @@ def show_config(ctx: FrameworkContext):
 @pass_context
 def config_repos(ctx: FrameworkContext, add, remove):
     """Manage SSOT Source Repositories"""
+    ctx.require_framework()
     cm = ctx.framework_manager.config
     current_repos = getattr(cm, 'source_repositories', {}) or {}
     

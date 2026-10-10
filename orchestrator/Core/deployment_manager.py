@@ -173,7 +173,8 @@ class DeploymentManager:
                 self.logger.error(f"Export failed for {img_name}: {e}")
 
     def _generate_checksums(self, directory: Path, output_file: Path):
-        with open(output_file, "w") as f:
+        # LF line endings: sha256sum < coreutils 9.0 (Debian 11, Ubuntu 22.04, Git for Windows) treats CR as part of the name.
+        with open(output_file, "w", newline="\n", encoding="utf-8") as f:
             for root, _, files in os.walk(directory):
                 for file in files:
                     p = Path(root) / file

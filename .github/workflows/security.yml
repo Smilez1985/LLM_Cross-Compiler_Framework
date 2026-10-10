@@ -60,8 +60,11 @@ jobs:
         run: python -m pip install -r requirements-dev.txt
 
       - name: Audit pinned runtime dependencies
-        # requirements.txt is a fully pinned export, so the pins are audited as they are.
-        run: pip-audit --requirement requirements.txt --no-deps --disable-pip --desc on
+        # requirements.txt is a fully pinned export. Markers are stripped so Windows-only and
+        # version-specific pins are audited too, not only those matching this Linux runner.
+        run: |
+          sed -E 's/[[:space:]]*;.*$//' requirements.txt > "$RUNNER_TEMP/requirements-all.txt"
+          pip-audit --requirement "$RUNNER_TEMP/requirements-all.txt" --no-deps --disable-pip --desc on
 
       - name: Audit dev tools
         run: pip-audit --requirement requirements-dev.txt --desc on

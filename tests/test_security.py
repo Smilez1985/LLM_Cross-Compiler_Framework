@@ -203,12 +203,14 @@ class TestCrawlerSecurity:
         assert web.urls == ["http://93.184.215.14/docs"]
         assert web.requests[0][1]["allow_redirects"] is False
 
-    def test_backslash_redirect_is_not_followed(self, make_crawler):
+    def test_backslash_redirect_never_reaches_internal_host(self, make_crawler):
+        from urllib3.util import parse_url
+
         crawler, web = make_crawler({
             "http://93.184.215.14/docs": response(302, location="http://127.0.0.1:8080\\@example.com/secret"),
         })
         crawler.crawl("http://93.184.215.14/docs")
-        assert web.urls == ["http://93.184.215.14/docs"]
+        assert all(parse_url(u).host not in ("127.0.0.1", "localhost") for u in web.urls), web.urls
 
     def test_redirect_to_other_public_host_is_crawled_with_its_links(self, make_crawler):
         crawler, web = make_crawler({
@@ -310,3 +312,155 @@ class TestSecretRedaction:
 
         assert "sk-REDACTED" in CommunityManager._sanitize_content(None, "token sk-ant-api03-AbCdEf0123456789abcdefghij")
 
+
+
+class TestConnectionPinning:
+    """The address is checked again when the socket is opened (DNS rebinding)."""
+
+    @staticmethod
+    def fake_dns(monkeypatch, answers):
+        import socket as socket_module
+        real = socket_module.getaddrinfo
+        calls = []
+
+        def getaddrinfo(host, port, *args, **kwargs):
+            if host in answers:
+                calls.append(host)
+                ips = answers[host]
+                ip = ips[min(len(calls), len(ips)) - 1]
+                family = socket_module.AF_INET6 if ":" in ip else socket_module.AF_INET
+                return [(family, socket_module.SOCK_STREAM, 6, "", (ip, port))]
+            return real(host, port, *args, **kwargs)
+
+        monkeypatch.setattr(socket_module, "getaddrinfo", getaddrinfo)
+        return calls
+
+    def test_crawler_session_uses_pinned_pools(self, tmp_path):
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.crawler_manager import CrawlerManager, PublicOnlyAdapter, _PinnedHTTPSConnectionPool
+
+        crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)))
+        adapter = crawler.session.get_adapter("https://example.com/")
+        assert isinstance(adapter, PublicOnlyAdapter)
+        assert adapter.poolmanager.pool_classes_by_scheme["https"] is _PinnedHTTPSConnectionPool
+
+    def test_connect_goes_to_the_vetted_ip_and_keeps_the_host_name(self, monkeypatch):
+        import urllib3.util.connection
+        from orchestrator.Core.crawler_manager import _PinnedHTTPSConnection
+
+        self.fake_dns(monkeypatch, {"docs.example": ["93.184.215.14"]})
+        seen = []
+        monkeypatch.setattr(urllib3.util.connection, "create_connection", lambda address, *a, **k: seen.append(address) or object())
+
+        conn = _PinnedHTTPSConnection("docs.example", 443)
+        conn._new_conn()
+
+        assert seen == [("93.184.215.14", 443)]
+        assert conn.host == "docs.example"
+
+    def test_dns_rebinding_never_reaches_the_internal_server(self, tmp_path, monkeypatch):
+        import http.server
+        import threading
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.crawler_manager import CrawlerManager
+
+        hits = []
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                hits.append(self.path)
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                self.end_headers()
+                self.wfile.write(b"internal secret")
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            port = server.server_address[1]
+            # Public for the URL checks, loopback when the socket is opened.
+            self.fake_dns(monkeypatch, {"rebind.test": ["93.184.215.14", "93.184.215.14", "127.0.0.1"]})
+            monkeypatch.delenv("HTTP_PROXY", raising=False)
+            monkeypatch.delenv("http_proxy", raising=False)
+            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)),
+                                     {"respect_robots": False, "request_delay": 0})
+
+            assert crawler.crawl(f"http://rebind.test:{port}/admin") == []
+            assert hits == []
+        finally:
+            server.shutdown()
+
+    def test_idn_hosts_are_accepted(self, monkeypatch):
+        self.fake_dns(monkeypatch, {"xn--bcher-kva.example": ["93.184.215.14"]})
+        assert validate_public_url("https://bücher.example/docs")
+
+    @pytest.mark.parametrize("url", [
+        "http://[64:ff9b::7f00:1]/",   # NAT64 of 127.0.0.1
+        "http://[::127.0.0.1]/",       # IPv4-compatible
+        "http://[2002:7f00:1::]/",     # 6to4 of 127.0.0.1
+        "http://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/",  # Teredo
+    ])
+    def test_ipv4_wrapped_in_ipv6_is_blocked(self, url):
+        assert not validate_public_url(url)
+
+
+class TestCrawlerPoliteness:
+
+    @pytest.fixture
+    def make_crawler(self, tmp_path, monkeypatch):
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.crawler_manager import CrawlerManager
+
+        def factory(pages, **options):
+            options.setdefault("request_delay", 0)
+            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)), options)
+            web = FakeWeb(pages)
+            monkeypatch.setattr(crawler.session, "send", web)
+            return crawler, web
+
+        return factory
+
+    @pytest.mark.parametrize("status", [500, 503])
+    def test_robots_server_error_means_disallow(self, make_crawler, status):
+        crawler, web = make_crawler({
+            "http://93.184.215.14/robots.txt": response(status),
+            "http://93.184.215.14/docs": response(html="Docs." + EN),
+        }, respect_robots=True)
+
+        crawler.crawl("http://93.184.215.14/docs")
+
+        assert web.urls == ["http://93.184.215.14/robots.txt"]
+
+    def test_robots_network_error_means_disallow(self, make_crawler):
+        import requests
+
+        def unreachable(url):
+            raise requests.ConnectionError("connection reset")
+
+        crawler, web = make_crawler({"http://93.184.215.14/robots.txt": unreachable}, respect_robots=True)
+        crawler.crawl("http://93.184.215.14/docs")
+        assert web.urls == ["http://93.184.215.14/robots.txt"]
+
+    def test_ca_bundle_from_environment_is_used(self, make_crawler, monkeypatch, tmp_path):
+        bundle = tmp_path / "corporate-ca.pem"
+        bundle.write_text("dummy")
+        monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(bundle))
+        crawler, web = make_crawler({"https://93.184.215.14/": response(html="Home." + EN)}, respect_robots=False)
+
+        crawler.crawl("https://93.184.215.14/")
+
+        assert web.requests[0][1]["verify"] == str(bundle)
+
+    def test_links_with_spaces_are_fetched_encoded(self, make_crawler):
+        crawler, web = make_crawler({
+            "http://93.184.215.14/": response(html='<a href="/files/User Guide.html">guide</a>' + EN),
+            "http://93.184.215.14/files/User%20Guide.html": response(html="Guide." + EN),
+        }, respect_robots=False)
+
+        docs = crawler.crawl("http://93.184.215.14/")
+
+        assert "http://93.184.215.14/files/User%20Guide.html" in web.urls
+        assert len(docs) == 2

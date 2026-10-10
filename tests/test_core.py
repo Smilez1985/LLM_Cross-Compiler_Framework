@@ -228,6 +228,24 @@ class TestDittoProviders:
         assert calls[1]["api_base"] is None
         assert calls[1]["api_key"] == "sk-ant-key-1234567890abcdef"
 
+    def test_legacy_cli_provider_string_keeps_local_endpoint(self, monkeypatch):
+        calls = []
+
+        def fake_completion(**kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))])
+
+        monkeypatch.setattr("orchestrator.Core.ditto_manager.completion", fake_completion)
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-leak-1234567890")
+
+        ditto = DittoCoder(provider="LocalAI / OpenAI Compatible", model="local-model",
+                           api_key="sk-dummy", base_url="http://localhost:8080/v1")
+        ditto._query_llm([{"role": "user", "content": "hi"}])
+
+        assert calls[0]["api_base"] == "http://localhost:8080/v1"
+        assert calls[0]["api_key"] == "EMPTY"
+        assert calls[0]["model"] == "openai/local-model"
+
     def test_offline_mode_disables_rag(self, booted_framework):
         fm = booted_framework
         fm.config.set("enable_rag_knowledge", True)
@@ -257,10 +275,26 @@ class TestTargets:
 
 class TestCLI:
 
-    def run_cli(self, tmp_path, *args):
-        env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring")
+    def run_cli(self, tmp_path, *args, keyring_backend="keyring.backends.null.Keyring"):
+        env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND=keyring_backend)
         return subprocess.run([sys.executable, "-m", "orchestrator.cli", *args],
                               cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120)
+
+    def test_commands_without_framework_work_without_a_keyring(self, tmp_path):
+        result = self.run_cli(tmp_path, "-q", "config", "show", keyring_backend="keyring.backends.fail.Keyring")
+        assert result.returncode == 0, result.stderr
+        assert "targets_dir" in result.stdout
+
+    def test_framework_commands_fail_cleanly_without_a_keyring(self, tmp_path):
+        result = self.run_cli(tmp_path, "-q", "secrets", "list", keyring_backend="keyring.backends.fail.Keyring")
+        assert result.returncode == 1
+        assert "Traceback" not in result.stderr
+        assert "Failed to initialize framework" in result.stderr
+
+    def test_quiet_suppresses_info_logs(self, tmp_path):
+        result = self.run_cli(tmp_path, "-q", "targets", "list", "-f", "json")
+        assert result.returncode == 0, result.stderr
+        assert "[INFO]" not in result.stderr
 
     def test_help_works(self, tmp_path):
         result = self.run_cli(tmp_path, "--help")

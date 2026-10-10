@@ -79,3 +79,13 @@ jobs:
           docker run --rm llm-framework/rockchip:ci status
           docker run --rm --entrypoint python3 llm-framework/rockchip:ci \
             -c "import torch, transformers; from rkllm.api import RKLLM; from rknn.api import RKNN; print('imports ok')"
+
+      - name: Smoke test (container setup as used by BuildEngine)
+        # BuildEngine starts containers as root with read-only files under /build-cache; the
+        # entrypoint must fix permissions, drop to llmbuilder and keep the venv on PATH.
+        run: |
+          echo "calibration text" > "$RUNNER_TEMP/dataset.txt"
+          docker run --rm --user 0:0 -v "$RUNNER_TEMP/dataset.txt:/build-cache/dataset.txt:ro" \
+            llm-framework/rockchip:ci python3 -c \
+            "import getpass, sys; assert getpass.getuser() == 'llmbuilder', getpass.getuser(); assert sys.prefix == '/opt/venv', sys.prefix; print('entrypoint ok')"
+          docker run --rm --entrypoint test llm-framework/rockchip:ci -x /app/modules/build.sh
