@@ -116,7 +116,7 @@ class FrameworkManager:
             self.target_manager = TargetManager(self)
             self.target_manager.initialize() # Lädt Profile & Targets
             
-            self.model_manager = ModelManager(self.config)
+            self.model_manager = ModelManager(self)  # models_dir resolves against the installation
             
             self.community_manager = CommunityManager(self) # Swarm Logic
             
