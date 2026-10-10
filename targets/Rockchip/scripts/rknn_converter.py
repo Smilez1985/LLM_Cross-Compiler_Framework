@@ -20,6 +20,7 @@ def convert_to_rknn(onnx_path, output_path, target_platform, dtype='i8', dataset
         logger.error("CRITICAL: 'rknn' module not found.")
         sys.exit(1)
 
+    output_path = os.path.abspath(output_path)  # the build may change the working directory
     rknn = RKNN(verbose=False)
 
     logger.info(f"Configuring for {target_platform.upper()}...")
@@ -37,9 +38,10 @@ def convert_to_rknn(onnx_path, output_path, target_platform, dtype='i8', dataset
     logger.info(f"Building (Quant: {dtype}, Dataset: {dataset_path or 'None'})...")
     do_quant = (dtype == 'i8')
     
-    # DATASET LOGIC
-    # If do_quant is True but no dataset, RKNN might fail or do hybrid.
-    # We pass the path if provided.
+    # The dataset lists sample inputs; relative entries are relative to the list file, so build from there.
+    if dataset_path:
+        dataset_path = os.path.abspath(dataset_path)
+        os.chdir(os.path.dirname(dataset_path))
     if rknn.build(do_quantization=do_quant, dataset=dataset_path) != 0:
         logger.error("Build failed!")
         sys.exit(1)

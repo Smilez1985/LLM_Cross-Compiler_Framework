@@ -419,10 +419,17 @@ class ModuleCreationWizard(QWizard):
         self.cmake_flags.setPlaceholderText("-DGGML_CUDA=ON")
         layout.addRow(tr("wiz.lbl.cmake_flags"), self.cmake_flags)
         
-        # Hidden field for AI logic
+        # Shell code that ends up in the generated build scripts: always visible and editable for review.
+        mono = "font-family: Consolas, Monospace;"
         self.quant_logic = QTextEdit()
-        self.quant_logic.setVisible(False) 
-        layout.addRow(self.quant_logic)
+        self.quant_logic.setStyleSheet(mono)
+        self.quant_logic.setPlaceholderText("Optional: bash 'case' branches for build.sh (review AI output carefully)")
+        layout.addRow("Quantization logic (build.sh):", self.quant_logic)
+
+        self.setup_commands = QTextEdit()
+        self.setup_commands.setStyleSheet(mono)
+        self.setup_commands.setPlaceholderText("Optional: extra setup commands for the image")
+        layout.addRow("Setup commands:", self.setup_commands)
         
         page.setLayout(layout)
         return page
@@ -466,8 +473,12 @@ Packages:     {self.packages_edit.text()}
 CPU Flags:    {self.cpu_flags.text()}
 CMake Flags:  {self.cmake_flags.text()}
 
-[LOGIC]
-Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No (Default)'}
+[LOGIC] (becomes part of the generated scripts - review it)
+Quantization logic:
+{self.quant_logic.toPlainText() or '(default)'}
+
+Setup commands:
+{self.setup_commands.toPlainText() or '(none)'}
 """
         self.summary_text.setText(summary)
 
@@ -696,21 +707,43 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
         self.ai_progress.setVisible(False)
         self.status_label.setText(tr("msg.ai_complete"))
         
-        if "module_name" in config: self.name_edit.setText(config["module_name"])
-        if "architecture" in config: self.arch_combo.setCurrentText(config["architecture"])
-        if "sdk" in config: self.sdk_edit.setText(config["sdk"])
+        if not isinstance(config, dict):
+            self.on_ai_error("The AI answer is not a JSON object.")
+            return
+
+        def text(key):
+            value = config.get(key, "")
+            if isinstance(value, (list, tuple)):
+                return " ".join(str(v) for v in value)
+            return "" if value is None else str(value)
+
+        warnings = []
+        if "module_name" in config: self.name_edit.setText(text("module_name"))
+        if "architecture" in config:
+            arch = text("architecture")
+            if self.arch_combo.findText(arch) >= 0:
+                self.arch_combo.setCurrentText(arch)
+            else:
+                warnings.append(f"Unknown architecture '{arch}' - please choose one.")
+        if "sdk" in config: self.sdk_edit.setText(text("sdk"))
         if "base_os" in config:
-            if "debian" in config["base_os"]: self.rad_debian.setChecked(True)
-            elif "ubuntu" in config["base_os"]: self.rad_ubuntu.setChecked(True)
+            base_os = text("base_os")
+            if "debian" in base_os: self.rad_debian.setChecked(True)
+            elif "ubuntu" in base_os: self.rad_ubuntu.setChecked(True)
             else:
                 self.rad_custom.setChecked(True)
-                self.custom_os_edit.setText(config["base_os"])
-        if "packages" in config: self.packages_edit.setText(config["packages"])
-        if "cpu_flags" in config: self.cpu_flags.setText(config["cpu_flags"])
-        if "cmake_flags" in config: self.cmake_flags.setText(config["cmake_flags"])
-        if "quantization_logic" in config: self.quant_logic.setText(config["quantization_logic"])
+                self.custom_os_edit.setText(base_os)
+        if "packages" in config: self.packages_edit.setText(text("packages"))
+        if "cpu_flags" in config: self.cpu_flags.setText(text("cpu_flags"))
+        if "cmake_flags" in config: self.cmake_flags.setText(text("cmake_flags"))
+        # setPlainText: AI output is code, not rich text.
+        if "quantization_logic" in config: self.quant_logic.setPlainText(text("quantization_logic"))
+        if "setup_commands" in config: self.setup_commands.setPlainText(text("setup_commands"))
         
-        QMessageBox.information(self, "Ditto", "Values filled from AI analysis.\nPlease review on next pages.")
+        message = "Values filled from AI analysis.\nReview them on the next pages, especially the shell code."
+        if warnings:
+            message += "\n\n" + "\n".join(warnings)
+        QMessageBox.information(self, "Ditto", message)
         self.next()
 
     def accept(self):
@@ -745,7 +778,7 @@ Quantization Script provided: {'Yes' if self.quant_logic.toPlainText() else 'No 
             "packages": packages_list,
             "cpu_flags": self.cpu_flags.text(),
             "supported_boards": [],
-            "setup_commands": "",
+            "setup_commands": self.setup_commands.toPlainText(),
             "cmake_flags": self.cmake_flags.text(),
             "quantization_logic": self.quant_logic.toPlainText(),
             "detection_commands": "lscpu"

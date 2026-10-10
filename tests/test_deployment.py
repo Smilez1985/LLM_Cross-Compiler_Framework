@@ -109,6 +109,56 @@ class TestPackageCreation:
         subprocess.run(["sha256sum", "-c", "--quiet", "checksums.sha256"], cwd=pkg, check=True)
 
 
+class TestBuildHandoff:
+    """Build output -> deployment: builds are found through their manifest, only model files are installed."""
+
+    @pytest.fixture
+    def build_dir(self, tmp_path):
+        d = tmp_path / "output" / "Rockchip" / "SmolLM2" / "Q4_K_M"
+        d.mkdir(parents=True)
+        (d / "SmolLM2-Q4_K_M.gguf").write_bytes(b"GGUF weights")
+        (d / "Model_Card.md").write_text("card")
+        (d / "build_info.json").write_text(json.dumps({
+            "model": "SmolLM2", "format": "gguf", "quantization": "Q4_K_M", "board": "rk3566",
+            "created": "2026-10-10T12:00:00", "primary": "SmolLM2-Q4_K_M.gguf"}))
+        shutil.make_archive(str(d.parent / "Q4_K_M"), "zip", d.parent, d.name)  # the golden ZIP next to it
+        return d
+
+    def test_builds_are_listed_from_manifests(self, tmp_path, build_dir):
+        from orchestrator.Core.deployment_manager import list_builds
+        builds = list_builds(tmp_path / "output")
+        assert [b["path"] for b in builds] == [str(build_dir)]
+        assert builds[0]["primary"] == "SmolLM2-Q4_K_M.gguf"
+
+    def test_build_directory_deploys_its_primary_model(self, tmp_path, config, build_dir):
+        pkg = build_package(tmp_path, config, build_dir, use_docker=False)
+        assert (pkg / "SmolLM2-Q4_K_M.gguf").read_bytes() == b"GGUF weights"
+        assert (pkg / "build_info.json").is_file() and (pkg / "Model_Card.md").is_file()
+        script = (pkg / "deploy.sh").read_text()
+        assert 'cp SmolLM2-Q4_K_M.gguf "$MODEL_DIR/"' in script
+        assert "chmod +x" not in script
+
+    def test_archive_is_never_executed(self, tmp_path, config, build_dir):
+        dm = DeploymentManager(FakeFramework(config))
+        assert dm.create_deployment_package(build_dir.parent / "Q4_K_M.zip", "", {}, tmp_path / "out") is None
+        with pytest.raises(ValueError):
+            dm._generate_deploy_script("tool.sh", "", use_docker=False)
+
+    def test_manifest_cannot_point_outside_the_build(self, tmp_path, build_dir):
+        from orchestrator.Core.deployment_manager import resolve_model_artifact
+        secret = tmp_path / "output" / "secret.gguf"
+        secret.write_bytes(b"x" * 100)
+        info = json.loads((build_dir / "build_info.json").read_text())
+        info["primary"] = "../../../secret.gguf"
+        (build_dir / "build_info.json").write_text(json.dumps(info))
+        assert resolve_model_artifact(build_dir) == build_dir / "SmolLM2-Q4_K_M.gguf"
+
+    def test_llama_server_hint_stays_on_loopback(self, tmp_path, config, artifact):
+        script = (build_package(tmp_path, config, artifact, use_docker=False) / "deploy.sh").read_text()
+        assert "--host 127.0.0.1" in script
+        assert "--api-key-file" in script
+
+
 class TestDockerPackages:
 
     def test_rag_enabled_bundles_qdrant_with_empty_storage(self, tmp_path, config, artifact):

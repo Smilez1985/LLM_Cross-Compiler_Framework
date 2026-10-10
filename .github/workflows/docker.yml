@@ -6,6 +6,7 @@ on:
       - "targets/**"
       - "entrypoint.sh"
       - "orchestrator/utils/build_context.py"
+      - "orchestrator/Core/builder.py"
       - ".github/workflows/docker.yml"
   push:
     branches: [main]
@@ -13,6 +14,7 @@ on:
       - "targets/**"
       - "entrypoint.sh"
       - "orchestrator/utils/build_context.py"
+      - "orchestrator/Core/builder.py"
       - ".github/workflows/docker.yml"
   schedule:
     - cron: "41 3 * * 0"
@@ -77,8 +79,13 @@ jobs:
         run: |
           docker run --rm llm-framework/rockchip:ci test
           docker run --rm llm-framework/rockchip:ci status
+          # Each SDK lives in its own venv (their torch pins conflict); import it with that interpreter.
           docker run --rm --entrypoint python3 llm-framework/rockchip:ci \
-            -c "import torch, transformers; from rkllm.api import RKLLM; from rknn.api import RKNN; print('imports ok')"
+            -c "import torch, transformers, gguf; print('gguf venv ok')"
+          docker run --rm --entrypoint /opt/venv-rkllm/bin/python llm-framework/rockchip:ci \
+            -c "from rkllm.api import RKLLM; print('rkllm venv ok')"
+          docker run --rm --entrypoint /opt/venv-rknn/bin/python llm-framework/rockchip:ci \
+            -c "from rknn.api import RKNN; print('rknn venv ok')"
 
       - name: Smoke test (container setup as used by BuildEngine)
         # BuildEngine starts containers as root with read-only files under /build-cache; the

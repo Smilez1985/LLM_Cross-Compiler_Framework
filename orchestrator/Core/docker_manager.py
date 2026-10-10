@@ -56,14 +56,16 @@ class DockerManager(QObject):
     # Signal when AI finds a fix for an error
     healing_requested = Signal(object) # Payload: HealingProposal
     
-    def __init__(self, config_manager=None): 
+    def __init__(self, config_manager=None, base_dir=None, secrets_manager=None):
         super().__init__()
         self.logger = logging.getLogger("DockerManager")
         self.framework = None
         self.builder = None
         self.healing_manager = None
         self._monitor_active = False
-        self.config_manager = config_manager 
+        self.config_manager = config_manager
+        self._base_dir = base_dir
+        self._secrets_manager = secrets_manager
 
     def initialize(self, framework_manager=None) -> bool:
         """
@@ -77,7 +79,12 @@ class DockerManager(QObject):
         try:
             # Lazy import to avoid circular dependency
             from orchestrator.Core.builder import BuildEngine
-            self.builder = BuildEngine(framework_manager if framework_manager else self.config_manager)
+            if framework_manager:
+                self.builder = BuildEngine(framework_manager)
+            else:
+                # One engine for the whole app: the framework hands it to the orchestrator as well.
+                self.builder = BuildEngine(self.config_manager, base_dir=self._base_dir,
+                                           secrets_manager=self._secrets_manager)
         except Exception as e:
             self.logger.error(f"Failed to initialize BuildEngine: {e}")
             return False
@@ -273,7 +280,7 @@ class DockerManager(QObject):
                     )
                     
                     if proposal:
-                        self.logger.info(f"Healing Proposal found: {proposal.error_summary}")
+                        self.logger.info(f"Healing Proposal found: {proposal.summary}")
                         self.healing_requested.emit(proposal)
                     else:
                         self.logger.warning("Self-Healing: No fix found.")

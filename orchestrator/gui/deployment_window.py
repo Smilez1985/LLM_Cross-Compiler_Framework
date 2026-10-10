@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QIcon
 from orchestrator.utils.localization import get_instance as get_i18n
+from orchestrator.Core.deployment_manager import list_builds
 
 class DeploymentWorker(QThread):
     """
@@ -188,17 +189,20 @@ class DeploymentWindow(QWidget):
         output_dir = Path(get_cfg("output_dir", "output"))
         
         if output_dir.exists():
-            for item in output_dir.glob("*"):
-                # Zeige nur relevante Dateien (z.B. ZIPs oder Ordner, aber keine Logs)
-                if item.name.startswith("deploy_"): continue # Verstecke bereits erstellte Pakete
-                if item.is_dir() or item.suffix in ['.zip', '.tar.gz', '.bin']:
-                    list_item = QListWidgetItem(item.name)
-                    # Add simple visual distinction
-                    if item.is_dir():
-                        list_item.setText(f"📁 {item.name}")
-                    else:
-                        list_item.setText(f"📦 {item.name}")
-                    self.list_artifacts.addItem(list_item)
+            # Every finished build writes build_info.json; list builds, not raw folders or archives.
+            for build in list_builds(output_dir):
+                if not build.get("primary"):
+                    continue
+                label = " · ".join(str(x) for x in (
+                    build.get("model") or Path(str(build.get("model_source", "?"))).name,
+                    str(build.get("format", "?")).upper(),
+                    build.get("quantization") or "default",
+                    build.get("board") or build.get("target") or "?",
+                ))
+                list_item = QListWidgetItem(f"📦 {label}")
+                list_item.setData(Qt.UserRole, build["path"])
+                list_item.setToolTip(f"{build['path']}\n{build.get('primary')}\n{build.get('created', '')}")
+                self.list_artifacts.addItem(list_item)
         
         # Profiles
         self.cb_profiles.clear()
@@ -223,11 +227,7 @@ class DeploymentWindow(QWidget):
             QMessageBox.warning(self, "Warning", "Please select a Hardware Profile.")
             return
 
-        # Strip icon prefix if present
-        raw_name = artifact_item.text().replace("📁 ", "").replace("📦 ", "")
-        
-        get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
-        artifact_path = Path(get_cfg("output_dir", "output")) / raw_name
+        artifact_path = Path(artifact_item.data(Qt.UserRole))
         
         target_ip = self.txt_ip.text().strip()
         user = self.txt_user.text().strip()

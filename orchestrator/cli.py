@@ -598,6 +598,9 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                                 console.print(f"[bold magenta]Self-Healing: {hp.summary}[/bold magenta]")
                                 console.print(f"Proposed Fix: [italic]{hp.fix_command}[/italic]")
                         last = line
+                        if (workflow_status.status == OrchestrationStatus.AWAITING_APPROVAL
+                                and workflow_status.healing_proposal is not None):
+                            _resolve_healing_interactively(ctx.orchestrator, request_id, workflow_status.healing_proposal)
                         if workflow_status.status in [OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR, OrchestrationStatus.CANCELLED]:
                             break
                     loop.run_until_complete(asyncio.sleep(2))
@@ -619,6 +622,18 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
     except Exception as e:
         console.print(f"[red]Build failed: {e}[/red]")
         sys.exit(1)
+
+
+def _resolve_healing_interactively(orchestrator, request_id, proposal):
+    """Asks on the terminal whether an automatic fix may be applied (manual steps are only shown)."""
+    automatic = (not getattr(proposal, "is_ai_generated", False)
+                 and getattr(getattr(proposal, "strategy", None), "value", "") in ("config_adjustment", "docker_prune", "retry_build"))
+    approved = False
+    if automatic and sys.stdin.isatty():
+        approved = click.confirm("Apply this fix and retry the build?", default=False)
+    elif not automatic:
+        console.print("[yellow]This is a manual step; the framework does not run it.[/yellow]")
+    orchestrator.resolve_healing(request_id, approved)
 
 
 @build.command('status')

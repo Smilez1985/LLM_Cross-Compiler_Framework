@@ -116,44 +116,56 @@ class SecretInputDialog(QDialog):
 
 class HealingConfirmDialog(QDialog):
     """
-    Dialog to review and EDIT an AI healing proposal.
+    Shows a self-healing proposal and asks for the user's decision.
+    Only fixed, framework-defined actions are applied; command text (from heuristics or AI) is advice
+    for the user and is never executed by the framework, so it is shown read-only.
     """
+    AUTOMATIC = {"config_adjustment", "docker_prune", "retry_build"}
+
     def __init__(self, proposal, parent=None):
         super().__init__(parent)
         self.proposal = proposal
         self.setWindowTitle("Self-Healing Proposal")
-        self.resize(500, 400)
+        self.resize(520, 400)
+        strategy = getattr(getattr(proposal, "strategy", None), "value", "")
+        self.automatic = strategy in self.AUTOMATIC and not getattr(proposal, "is_ai_generated", False)
         
         layout = QVBoxLayout(self)
         
-        # Summary
-        lbl_sum = QLabel(f"<b>Issue:</b> {proposal.error_summary}")
+        # Plain text only: summaries and commands may come from an LLM or a build log.
+        lbl_sum = QLabel(f"Issue: {proposal.summary}")
+        lbl_sum.setTextFormat(Qt.PlainText)
+        lbl_sum.setWordWrap(True)
         layout.addWidget(lbl_sum)
         
-        lbl_root = QLabel(f"<b>Root Cause:</b> {proposal.root_cause}")
+        lbl_root = QLabel(f"Root cause: {proposal.root_cause}")
+        lbl_root.setTextFormat(Qt.PlainText)
         lbl_root.setWordWrap(True)
         layout.addWidget(lbl_root)
         
-        # Command (Editable!)
-        layout.addWidget(QLabel("<b>Proposed Fix (You can edit this):</b>"))
+        origin = "AI suggestion" if getattr(proposal, "is_ai_generated", False) else "Known issue"
+        heading = ("What the framework will do before retrying the build:" if self.automatic
+                   else "Suggested manual step (the framework does not run it):")
+        layout.addWidget(QLabel(f"{origin}. {heading}"))
         self.txt_command = QTextEdit()
         self.txt_command.setPlainText(proposal.fix_command)
-        self.txt_command.setReadOnly(False) 
+        self.txt_command.setReadOnly(True)
         self.txt_command.setStyleSheet("background-color: #222; color: #0f0; font-family: Consolas;")
         layout.addWidget(self.txt_command)
         
-        # Confidence
-        conf_color = "green" if proposal.confidence_score > 0.8 else "orange"
-        layout.addWidget(QLabel(f"Confidence: <span style='color:{conf_color}'>{proposal.confidence_score*100:.1f}%</span>"))
+        confidence = float(getattr(proposal, "confidence", 0.0) or 0.0)
+        conf_color = "green" if confidence > 0.8 else "orange"
+        layout.addWidget(QLabel(f"Confidence: <span style='color:{conf_color}'>{confidence * 100:.0f}%</span>"))
         
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons = QDialogButtonBox()
+        if self.automatic:
+            buttons.addButton("Apply and retry", QDialogButtonBox.AcceptRole)
+            buttons.addButton("Dismiss", QDialogButtonBox.RejectRole)
+        else:
+            buttons.addButton("Close", QDialogButtonBox.RejectRole)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
-
-    def get_final_command(self):
-        """Returns the (potentially edited) command."""
-        return self.txt_command.toPlainText().strip()
 
 # (display name, provider id understood by DittoCoder, keyring secret, key required, suggested models)
 AI_PROVIDERS = [

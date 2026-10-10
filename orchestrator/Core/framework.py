@@ -29,6 +29,7 @@ from orchestrator.utils.updater import UpdateManager
 from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.Core.secrets_manager import SecretsManager
 from orchestrator.Core.docker_manager import DockerManager
+from orchestrator.Core.builder import BuildEngine
 from orchestrator.Core.target_manager import TargetManager
 from orchestrator.Core.model_manager import ModelManager
 from orchestrator.Core.rag_manager import RAGManager
@@ -98,7 +99,7 @@ class FrameworkManager:
             self.telemetry = TelemetryManager(self)
             
             # 3. Docker Connectivity
-            self.docker_manager = DockerManager(self.config)
+            self.docker_manager = DockerManager(self.config, base_dir=self.app_root, secrets_manager=self.secrets_manager)
             if not self.docker_manager.initialize():
                 self.logger.warning("Docker Engine not reachable. Build capabilities will be disabled.")
             
@@ -137,7 +138,9 @@ class FrameworkManager:
             self.deployment_manager = DeploymentManager(self)
             
             # Orchestrator - needs everything
-            self.orchestrator = LLMOrchestrator(self.config)
+            build_engine = self.docker_manager.builder or BuildEngine(
+                self.config, base_dir=self.app_root, secrets_manager=self.secrets_manager)
+            self.orchestrator = LLMOrchestrator(self.config, build_engine=build_engine)
             
             # === DEPENDENCY INJECTION ===
             # Connect the Brain (Ditto) and the Guardian (Self-Healing) to the Orchestrator

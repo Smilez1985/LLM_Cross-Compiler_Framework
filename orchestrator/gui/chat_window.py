@@ -13,14 +13,15 @@ Updates v2.3.0:
 - Improved Dark Mode styling.
 """
 
+import html
 import json
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTextBrowser, QLineEdit, 
     QPushButton, QHBoxLayout, QLabel, QProgressBar, QMessageBox
 )
-from PySide6.QtCore import Qt, QTimer, Signal, QThread
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtCore import Qt, QTimer, Signal, QThread, QUrl
+from PySide6.QtGui import QIcon, QAction, QDesktopServices, QTextCursor
 
 from orchestrator.utils.localization import get_instance as get_i18n
 
@@ -60,15 +61,12 @@ class ChatWindow(QWidget):
         self.i18n = get_i18n()
         self.worker = None
         
-        # Pfad für Chat-History sicher ermitteln
+        # The history is personal data: keep it in the user's config directory, not a CWD-relative cache.
         config = framework_manager.config
-        get_cfg = getattr(config, 'get', lambda k, d=None: getattr(config, k, d))
-        cache_dir = Path(get_cfg("cache_dir", "cache"))
-        
-        if not cache_dir.exists():
-            cache_dir.mkdir(parents=True, exist_ok=True)
-            
-        self.history_file = cache_dir / "chat_history.json"
+        history_dir = getattr(config, "user_state_dir", None) or Path.home() / ".llm-framework"
+        Path(history_dir).mkdir(parents=True, exist_ok=True)
+        self.history_file = Path(history_dir) / "chat_history.json"
+        self._pending_question = None
         
         self._init_ui()
         self._load_history()
@@ -91,7 +89,10 @@ class ChatWindow(QWidget):
         
         # Chat Display
         self.txt_display = QTextBrowser()
-        self.txt_display.setOpenExternalLinks(True)
+        # Links are never opened directly: the user sees the full URL and confirms first.
+        self.txt_display.setOpenExternalLinks(False)
+        self.txt_display.setOpenLinks(False)
+        self.txt_display.anchorClicked.connect(self._confirm_open_link)
         # Base styling for the document
         self.txt_display.setStyleSheet("background-color: #1e1e1e; border: 1px solid #333;")
         layout.addWidget(self.txt_display)
@@ -128,10 +129,10 @@ class ChatWindow(QWidget):
         align = "right" if is_user else "left"
         bg_color = "#2d2d2d" if is_user else "#252526"
         
-        # Formatting text (replace newlines for HTML)
-        formatted_text = text.replace("\n", "<br>")
+        # Model output, knowledge-base text and user input are plain text: escape before rendering as rich text.
+        formatted_text = html.escape(str(text)).replace("\n", "<br>")
         
-        html = f"""
+        block = f"""
         <div style='text-align: {align}; margin: 10px;'>
             <span style='font-weight: bold; color: {color}; font-size: 12px;'>{sender}:</span><br>
             <div style='background-color: {bg_color}; padding: 8px; border-radius: 8px; display: inline-block; text-align: left;'>
@@ -141,9 +142,9 @@ class ChatWindow(QWidget):
         """
         # Append HTML intelligently
         cursor = self.txt_display.textCursor()
-        cursor.movePosition(cursor.End)
+        cursor.movePosition(QTextCursor.MoveOperation.End)
         self.txt_display.setTextCursor(cursor)
-        self.txt_display.insertHtml(html)
+        self.txt_display.insertHtml(block)
         self.txt_display.ensureCursorVisible()
         
         # Update internal history logic
@@ -159,15 +160,14 @@ class ChatWindow(QWidget):
         # Add to UI
         self._add_message(text, True)
         
-        # Update history state
-        self.history.append({"role": "user", "content": text})
-        self._save_history()
+        # Ditto adds the question itself; the worker gets a snapshot of the earlier turns only.
+        self._pending_question = text
         
         # UI Sperren und Ladebalken zeigen
         self._set_thinking(True)
         
         # Worker starten (Echter Thread!)
-        self.worker = ChatWorker(self.ditto, text, self.history)
+        self.worker = ChatWorker(self.ditto, text, list(self.history))
         self.worker.finished.connect(self._on_ai_response)
         self.worker.error.connect(self._on_ai_error)
         self.worker.start()
@@ -176,13 +176,26 @@ class ChatWindow(QWidget):
         self._set_thinking(False)
         self._add_message(answer, False)
         
-        # Update history
+        # Only complete exchanges are kept, so the history always alternates user/assistant.
+        self.history.append({"role": "user", "content": self._pending_question or ""})
         self.history.append({"role": "assistant", "content": answer})
+        self._pending_question = None
         self._save_history()
 
     def _on_ai_error(self, error_msg):
         self._set_thinking(False)
+        # Shown, but not stored: an error is not an answer and must not reach the next prompt.
+        self._pending_question = None
         self._add_message(f"⚠️ Error: {error_msg}", False)
+
+    def _confirm_open_link(self, url: QUrl):
+        if url.scheme() not in ("http", "https"):
+            return
+        reply = QMessageBox.question(self, "Open link",
+                                     f"Open this address in your browser?\n\n{url.toString()}",
+                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if reply == QMessageBox.Yes:
+            QDesktopServices.openUrl(url)
 
     def _set_thinking(self, active: bool):
         self.txt_input.setEnabled(not active)
@@ -205,8 +218,10 @@ class ChatWindow(QWidget):
                         self.history = [] # Reset RAM history first
                         self.txt_display.clear()
                         for msg in data:
-                            content = msg.get("content", "")
-                            role = msg.get("role", "user")
+                            if not isinstance(msg, dict) or msg.get("role") not in ("user", "assistant"):
+                                continue
+                            content = str(msg.get("content", ""))
+                            role = msg["role"]
                             is_user = (role == "user")
                             
                             self._add_message(content, is_user)
@@ -224,4 +239,4 @@ class ChatWindow(QWidget):
             self.history = []
             self.txt_display.clear()
             self._save_history() # Leere Datei schreiben
-            self._add_message("History cleared.", False)
+            self.txt_display.append("History cleared.")

@@ -229,6 +229,19 @@ class ConfigManager:
                 return candidate
         return Path.cwd() / "configs"
     
+    @property
+    def user_state_dir(self) -> Path:
+        """Per-user directory for personal state (chat history, later consent and known hosts), outside the repo.
+        LLM_FRAMEWORK_HOME overrides the default ~/.llm-framework."""
+        state = Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
+        state.mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            try:
+                state.chmod(0o700)
+            except OSError:
+                pass
+        return state
+
     def _ensure_directories(self):
         directories = [
             self.config_dir,
@@ -266,6 +279,8 @@ class ConfigManager:
             ConfigSchema("image_trivy", str, False, "aquasec/trivy:0.75.0", "Security Scanner Image (pinned: 'latest' was compromised in 2026-03)"),
             ConfigSchema("enable_security_scan", bool, False, True, "Scan built images with Trivy"),
             ConfigSchema("llama_cpp_version", str, False, "v0.6.0", "llama.cpp release tag built into target images"),
+            ConfigSchema("build_jobs", int, False, 0, "Parallel compile jobs in image builds (0 = all cores)", ["min:0", "max:256"]),
+            ConfigSchema("healing_approval_timeout", int, False, 900, "Seconds to wait for a decision on a healing proposal", ["min:10", "max:86400"]),
             ConfigSchema("image_qdrant", str, False, "qdrant/qdrant:v1.16.0", "Vector DB Image"),
             ConfigSchema("image_base_debian", str, False, "debian:bookworm-slim", "Base Build Image"),
             ConfigSchema("image_inference_runtime", str, False, "ghcr.io/smilez1985/llm-runtime:latest", "Inference Image"),
@@ -502,7 +517,7 @@ class ConfigManager:
                 "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",
                 # v2.3
                 "image_trivy", "image_qdrant", "image_base_debian", "image_inference_runtime",
-                "enable_security_scan", "llama_cpp_version",
+                "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",
                 # v2.4 (SSOT & IMatrix)
                 "source_repositories", "default_enable_imatrix", "default_calibration_dataset"
             ]
