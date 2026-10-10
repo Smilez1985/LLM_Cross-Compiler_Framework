@@ -279,6 +279,8 @@ class ConfigManager:
             ConfigSchema("image_trivy", str, False, "aquasec/trivy:0.75.0", "Security Scanner Image (pinned: 'latest' was compromised in 2026-03)"),
             ConfigSchema("enable_security_scan", bool, False, True, "Scan built images with Trivy"),
             ConfigSchema("llama_cpp_version", str, False, "v0.6.0", "llama.cpp release tag built into target images"),
+            ConfigSchema("calibration_language", str, False, "mixed", "Shipped calibration text for importance matrices",
+                         ["regex:^(mixed|de|en)$"]),
             ConfigSchema("build_jobs", int, False, 0, "Parallel compile jobs in image builds (0 = all cores)", ["min:0", "max:256"]),
             ConfigSchema("healing_approval_timeout", int, False, 900, "Seconds to wait for a decision on a healing proposal", ["min:10", "max:86400"]),
             ConfigSchema("image_qdrant", str, False, "qdrant/qdrant:v1.16.0", "Vector DB Image"),
@@ -302,7 +304,8 @@ class ConfigManager:
             
             # I18N & Security
             ConfigSchema("language", str, False, "en", "Interface Language (en/de)"),
-            ConfigSchema("ai_security_level", str, False, "STRICT", "AI Data Leakage Protection Level"),
+            ConfigSchema("ai_security_level", str, False, "STRICT", "AI Data Leakage Protection Level",
+                         ["regex:^(STRICT|BALANCED|OFF)$"]),
             
             # Local RAG / Vector Database (v1.5.0)
             ConfigSchema("enable_rag_knowledge", bool, False, False, "Enable local Qdrant Vector DB for AI"),
@@ -518,6 +521,7 @@ class ConfigManager:
                 # v2.3
                 "image_trivy", "image_qdrant", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",
+                "calibration_language",
                 # v2.4 (SSOT & IMatrix)
                 "source_repositories", "default_enable_imatrix", "default_calibration_dataset"
             ]

@@ -299,13 +299,7 @@ class TestOrchestration:
         assert orchestrator.build_engine.configs[0].use_imatrix is False
         assert any("GGUF only" in w for w in state.warnings)
 
-    def test_ditto_filler_reaches_only_gguf_jobs(self, orchestrator, tmp_path):
-        class Ditto:
-            def prepare_calibration_dataset(self, path):
-                path.write_text("filler")
-                return True
-
-        orchestrator.ditto = Ditto()
+    def test_shipped_calibration_text_reaches_only_gguf_jobs(self, orchestrator, tmp_path):
         orchestrator.config.set("cache_dir", str(tmp_path / "cache"))
         self.run(orchestrator, self.make_request(tmp_path, use_imatrix=True, quantization_options=[],
                                                  target_formats=[ModelFormat.GGUF, ModelFormat.RKLLM]))
@@ -372,3 +366,47 @@ class TestImageBuild:
         assert "LLAMA_CPP_TAG=v0.6.0" in cmd and "EXTRA=1" in cmd
         assert cmd[-1] == str(dockerfile.parent)
         assert "No space left on device" in str(excinfo.value)
+
+
+class TestCalibrationData:
+
+    def test_shipped_sets_match_their_checksums(self):
+        from orchestrator.utils.calibration import CALIBRATION_SETS, load_set
+        for name in CALIBRATION_SETS:
+            assert len(load_set(name)) > 100_000
+
+    def test_mixed_text_covers_every_language_from_the_start(self):
+        from orchestrator.utils.calibration import build_calibration_text, load_set
+        text = build_calibration_text("mixed")
+        head = text[:20_000]
+        for name in ("de", "en", "tools"):
+            first_block = load_set(name)[:200]
+            assert first_block in head, name
+
+    def test_modified_data_is_refused(self, tmp_path, monkeypatch):
+        import gzip
+        from orchestrator.utils import calibration
+        (tmp_path / "calibration_de.txt.gz").write_bytes(gzip.compress(b"tampered"))
+        monkeypatch.setattr(calibration, "DATA_DIR", tmp_path)
+        with pytest.raises(calibration.CalibrationDataError, match="checksum"):
+            calibration.load_set("de")
+
+    def test_imatrix_without_dataset_uses_the_shipped_text(self, tmp_path):
+        from orchestrator.Core.orchestrator import (BuildRequest, LLMOrchestrator, OrchestrationStatus,
+                                                    PriorityLevel, WorkflowState, WorkflowType)
+        from datetime import datetime
+        cfg = ConfigManager(tmp_path / "configs")
+        (tmp_path / "targets" / "Rockchip").mkdir(parents=True)
+        cfg.set("targets_dir", str(tmp_path / "targets"))
+        cfg.set("cache_dir", str(tmp_path / "cache"))
+        orch = LLMOrchestrator(cfg)
+        orch.build_engine = FakeBuildEngine()
+        req = BuildRequest(request_id="r1", workflow_type=WorkflowType.SIMPLE_CONVERSION, priority=PriorityLevel.NORMAL,
+                           models=["a/b"], targets=["Rockchip"], target_formats=[ModelFormat.GGUF],
+                           optimization_level=OptimizationLevel.BALANCED, quantization_options=["IQ2_XS"],
+                           parallel_builds=False, output_base_dir=str(tmp_path / "out"), use_imatrix=True)
+        orch._workflows["r1"] = WorkflowState("r1", OrchestrationStatus.PREPARING, datetime.now())
+        asyncio.run(orch._run_build_pipeline(req))
+        config = orch.build_engine.configs[0]
+        assert config.use_imatrix and Path(config.dataset_path).name == "calibration_mixed.txt"
+        assert Path(config.dataset_path).stat().st_size > 1_000_000

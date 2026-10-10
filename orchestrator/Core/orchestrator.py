@@ -27,6 +27,7 @@ from enum import Enum
 
 from orchestrator.utils.logging import get_logger
 from orchestrator.Core.builder import BuildEngine, BuildStatus, OptimizationLevel, ModelFormat, BuildConfiguration
+from orchestrator.utils.calibration import CalibrationDataError, write_calibration_dataset
 from orchestrator.Core.module_generator import ModuleGenerator
 
 # Optional Imports for Dependency Injection
@@ -92,7 +93,7 @@ class BuildRequest:
     target_board: Optional[str] = None
     model_task: str = "LLM"
     max_context_length: Optional[int] = None
-    # True when the dataset is Ditto's generic filler (only useful for GGUF importance matrices)
+    # True when the dataset is the framework's shipped calibration text (used for GGUF importance matrices only)
     dataset_generated: bool = False
     
     def __post_init__(self):
@@ -408,9 +409,8 @@ class LLMOrchestrator:
         
         self.logger.info(f"Starting pipeline for {req.request_id}")
         
-        # 0. Smart Calibration / IMatrix Preparation (NEW v2.4.0)
-        # ------------------------------------------------------------------
-        # Falls IMatrix gewünscht ist und der Nutzer keinen Datensatz mitgibt, liefert Ditto einen.
+        # 0. Importance matrix: without a dataset of its own, a GGUF build uses the shipped, checksummed
+        #    calibration text (German/English/tool use, see data/calibration). No generated filler.
         wants_gguf = not req.target_formats or ModelFormat.GGUF in req.target_formats
         if req.use_imatrix and not wants_gguf:
             # The importance matrix is a GGUF concept; RKLLM/RKNN use the user's dataset (if any) directly.
@@ -419,36 +419,18 @@ class LLMOrchestrator:
         elif req.use_imatrix and req.dataset_path:
             self.logger.info(f"IMatrix enabled with user dataset {req.dataset_path}")
         elif req.use_imatrix:
-            state.current_stage = "Preparing Calibration Data"
-            if not self.ditto:
-                self.logger.warning("IMatrix requested but Ditto Manager not available. Skipping Smart Calibration.")
+            state.current_stage = "Preparing calibration data"
+            language = self.config.get("calibration_language", "mixed") if hasattr(self.config, "get") else "mixed"
+            cache_dir = Path(getattr(self.build_engine, "cache_dir", None) or self.config.cache_dir)
+            ds_path = cache_dir / "calibration" / f"calibration_{language}.txt"
+            try:
+                await asyncio.get_running_loop().run_in_executor(None, write_calibration_dataset, ds_path, language)
+                req.dataset_path = str(ds_path)
+                req.dataset_generated = True
+                self.logger.info(f"Calibration dataset ready: {ds_path}")
+            except (CalibrationDataError, OSError) as e:
                 req.use_imatrix = False
-                state.warnings.append("IMatrix disabled (Ditto offline).")
-            else:
-                self.logger.info("IMatrix enabled. Requesting dataset from Ditto...")
-                # Pfad definieren
-                calib_dir = Path(self.config.cache_dir) / "calibration"
-                if not calib_dir.exists(): calib_dir.mkdir(parents=True, exist_ok=True)
-                
-                # Default Dataset Name aus Config
-                ds_name = getattr(self.config, 'default_calibration_dataset', 'wiki.train.raw')
-                ds_path = calib_dir / ds_name
-                
-                # Ditto call (Synchroner Call, da Request-basiert, evtl. in Executor auslagern)
-                # Wir machen es hier direkt, da requests schnell sein sollten oder offline generiert.
-                try:
-                    success = self.ditto.prepare_calibration_dataset(ds_path)
-                    if success:
-                        req.dataset_path = str(ds_path)
-                        req.dataset_generated = True
-                        self.logger.info(f"Calibration dataset ready: {ds_path}")
-                    else:
-                        req.use_imatrix = False
-                        state.warnings.append("Failed to prepare dataset. IMatrix disabled.")
-                except Exception as e:
-                    self.logger.error(f"Error during dataset preparation: {e}")
-                    req.use_imatrix = False
-        # ------------------------------------------------------------------
+                state.warnings.append(f"IMatrix disabled: {e}")
 
         # 1. Expand Build Matrix
         build_jobs: List[BuildJob] = []
