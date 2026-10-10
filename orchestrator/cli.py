@@ -97,6 +97,8 @@ class FrameworkContext:
     def __init__(self):
         self.config: Dict[str, Any] = DEFAULT_CONFIG.copy()
         self.config_path: Optional[str] = None
+        self.log_level: Optional[str] = None
+        self.init_error: Optional[Exception] = None
         self.framework_manager: Optional[FrameworkManager] = None
         self.orchestrator: Optional[LLMOrchestrator] = None
         self.build_engine: Optional[BuildEngine] = None
@@ -112,7 +114,7 @@ class FrameworkContext:
             
         try:
             # Framework Manager initialisieren
-            self.framework_manager = FrameworkManager(self.config_path)
+            self.framework_manager = FrameworkManager(self.config_path, log_level=self.log_level)
             
             if not self.framework_manager.initialize():
                 raise RuntimeError("Framework Manager initialization failed")
@@ -137,9 +139,8 @@ class FrameworkContext:
             self._initialized = True
             
         except Exception as e:
-            console.print(f"[red]Failed to initialize framework: {e}[/red]")
-            # Don't exit here to allow help command to run, but mark as failed
-            # sys.exit(1)
+            self.init_error = e
+            Console(stderr=True).print(f"[red]Failed to initialize framework: {e}[/red]")
 
 
 pass_context = click.make_pass_decorator(FrameworkContext, ensure=True)
@@ -230,14 +231,18 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     # Load configuration
     ctx.config.update(load_config_file(config))
     ctx.config_path = config
+    ctx.log_level = "DEBUG" if verbose else ("ERROR" if quiet else log_level)
     ctx.verbose = verbose
     ctx.quiet = quiet
-    
+
     # Initialisiere Framework und Orchestrator
     ctx.initialize()
+    # Subcommand help must still work without a bootable framework.
+    if ctx.init_error and not any(arg in ("--help", "-h") for arg in sys.argv[1:]):
+        sys.exit(1)
     
     if not quiet:
-        console.print(Panel(
+        Console(stderr=True).print(Panel(
             f"[bold cyan]LLM Cross-Compiler Framework CLI v{__version__}[/bold cyan]\n"
             f"Professional cross-compilation for edge AI",
             title="🚀 Framework CLI"

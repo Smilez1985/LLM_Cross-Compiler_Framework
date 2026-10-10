@@ -133,7 +133,8 @@ class DittoCoder:
         # Configuration
         self.provider = provider
         self.model_name = model
-        self.base_url = base_url
+        self.base_url = self._endpoint_for(provider, base_url)
+        self.api_key: Optional[str] = None
         self.litellm_model = self._format_model_name(provider, model)
         self.offline_mode = False
         
@@ -153,44 +154,63 @@ class DittoCoder:
         if not self.offline_mode:
             self._setup_cloud_provider(provider, model, api_key, base_url)
 
+    @staticmethod
+    def _provider_id(provider: Optional[str]) -> str:
+        return provider.split()[0] if provider else ""
+
+    @classmethod
+    def _endpoint_for(cls, provider: Optional[str], base_url: Optional[str]) -> Optional[str]:
+        # Cloud providers have fixed endpoints; a leftover Ollama/Custom URL would receive their API key.
+        return (base_url or None) if cls._provider_id(provider) in ("Ollama", "Custom") else None
+
     def _setup_cloud_provider(self, provider, model, api_key, base_url):
         self.litellm_model = self._format_model_name(provider, model)
-        self.base_url = base_url
-        
+        self.base_url = self._endpoint_for(provider, base_url)
+
         # SecretsManager Integration
         final_key = api_key
-        if self.framework and hasattr(self.framework, 'secrets_manager') and self.framework.secrets_manager:
-            # Mapping Provider -> Key Name
+        provider_key = self._provider_id(provider)
+        if not final_key and self.framework and getattr(self.framework, 'secrets_manager', None):
             key_map = {
                 "OpenAI": "openai_api_key",
                 "Anthropic": "anthropic_api_key",
                 "Google": "gemini_api_key",
+                "Custom": "custom_api_key",
                 "HuggingFace": "hf_token"
             }
-            # Simple heuristic: first word of provider usually matches key
-            provider_key = provider.split()[0]
             if provider_key in key_map:
                 stored_key = self.framework.secrets_manager.get_secret(key_map[provider_key])
                 if stored_key:
                     final_key = stored_key
                     self.logger.info(f"Loaded API Key for {provider} from secure Keyring.")
 
-        if final_key and final_key != "sk-dummy":
-            # LiteLLM usually expects specific Env Vars
-            if "OpenAI" in provider: os.environ["OPENAI_API_KEY"] = final_key
-            elif "Anthropic" in provider: os.environ["ANTHROPIC_API_KEY"] = final_key
-            elif "Google" in provider: os.environ["GEMINI_API_KEY"] = final_key
+        self.api_key = final_key if final_key and final_key != "sk-dummy" else None
+        if self.api_key:
+            # Other components (e.g. RAG embeddings) read these env vars.
+            env_var = {"OpenAI": "OPENAI_API_KEY", "Anthropic": "ANTHROPIC_API_KEY", "Google": "GEMINI_API_KEY"}.get(provider_key)
+            if env_var:
+                os.environ[env_var] = self.api_key
 
     def _format_model_name(self, provider: str, model: str) -> str:
-        if "Ollama" in provider: return f"ollama/{model}"
-        if "Google" in provider: return f"gemini/{model}"
-        return model
+        prefix = {"Ollama": "ollama", "Google": "gemini", "Anthropic": "anthropic", "Custom": "openai"}.get(
+            self._provider_id(provider))
+        if not prefix or not model or model.startswith(f"{prefix}/"):
+            return model
+        return f"{prefix}/{model}"
+
+    def _completion_api_key(self) -> Optional[str]:
+        if self.api_key:
+            return self.api_key
+        # Without an explicit key litellm would fall back to OPENAI_API_KEY and send it to the custom endpoint.
+        return "EMPTY" if self._provider_id(self.provider) == "Custom" else None
 
     def _get_rag_manager(self) -> Optional[RAGManager]:
         if not self.framework: return None
         # Robust config check
         get_fn = getattr(self.config, 'get', lambda k, d=None: getattr(self.config, k, d))
         if not get_fn("enable_rag_knowledge", False): return None
+        # RAG embeddings use an online API, which offline mode rules out.
+        if self.offline_mode: return None
         
         return self.framework.get_component("rag_manager")
 
@@ -204,6 +224,7 @@ class DittoCoder:
             self.model_name = model
         if base_url is not None:
             self.base_url = base_url or None
+        self.base_url = self._endpoint_for(self.provider, self.base_url)
         if offline_mode is not None:
             self.offline_mode = offline_mode
 
@@ -318,7 +339,8 @@ class DittoCoder:
                 model=self.litellm_model,
                 messages=messages,
                 temperature=0.2, # Low temp for code
-                api_base=self.base_url
+                api_base=self.base_url,
+                api_key=self._completion_api_key()
             )
             return response.choices[0].message.content
         except Exception as e:

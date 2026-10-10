@@ -64,42 +64,39 @@ def safe_extract_archive(archive_path: Path, dest_dir: Path):
     """
     Secure extraction preventing Zip Slip/Tar Slip vulnerabilities.
     """
-    dest_dir = dest_dir.resolve()
-    
+    dest_dir = Path(dest_dir).resolve()
+
+    def inside(path: Path) -> bool:
+        # Path containment, not string prefixes ("/x/out2" starts with "/x/out").
+        return path.resolve().is_relative_to(dest_dir)
+
     if str(archive_path).endswith('.zip'):
         with zipfile.ZipFile(archive_path, 'r') as zf:
             for member in zf.infolist():
-                # Resolve the target path
-                member_path = (dest_dir / member.filename).resolve()
-                # Security Check: Must actully be inside dest_dir
-                if not str(member_path).startswith(str(dest_dir)):
+                if not inside(dest_dir / member.filename):
                     raise Exception(f"Security: Zip Slip attempt detected: {member.filename}")
-            
-            # Bandit: Paths validated above
-            zf.extractall(dest_dir) # nosec
-                
+            # Every member path was checked above.
+            zf.extractall(dest_dir)  # nosec B202
+
     elif str(archive_path).endswith(('.tar.gz', '.tgz', '.tar')):
         with tarfile.open(archive_path, 'r:*') as tf:
-            for member in tf.getmembers():
-                member_path = (dest_dir / member.name).resolve()
-                if not str(member_path).startswith(str(dest_dir)):
-                     raise Exception(f"Security: Tar Slip attempt detected: {member.name}")
-            
-            # Bandit: Paths validated above
-            def is_within_directory(directory, target):
-                abs_directory = os.path.abspath(directory)
-                abs_target = os.path.abspath(target)
-                prefix = os.path.commonprefix([abs_directory, abs_target])
-                return prefix == abs_directory
+            members = tf.getmembers()
+            for member in members:
+                target = dest_dir / member.name
+                if not inside(target):
+                    raise Exception(f"Security: Tar Slip attempt detected: {member.name}")
+                if member.issym() and not inside(target.parent / member.linkname):
+                    raise Exception(f"Security: Tar Slip via symlink detected: {member.name} -> {member.linkname}")
+                if member.islnk() and not inside(dest_dir / member.linkname):
+                    raise Exception(f"Security: Tar Slip via hardlink detected: {member.name} -> {member.linkname}")
+                if member.isdev():
+                    raise Exception(f"Security: Device file in archive: {member.name}")
 
-            def safe_extract(tar, path=".", members=None, *, numeric_owner=False):
-                for member in tar.getmembers():
-                    member_path = os.path.join(path, member.name)
-                    if not is_within_directory(path, member_path):
-                        raise Exception("Attempted Path Traversal in Tar File")
-                tar.extractall(path, members, numeric_owner=numeric_owner) 
-                
-            safe_extract(tf, dest_dir)
+            if hasattr(tarfile, "data_filter"):
+                tf.extractall(dest_dir, members=members, filter="data")
+            else:
+                # Python < 3.10.12 / 3.11.4 has no extraction filters; members were validated above.
+                tf.extractall(dest_dir, members=members)  # nosec B202
 
 def calculate_file_checksum(path: Path, algorithm="sha256") -> str:
     """Calculates hash of a file."""
@@ -120,8 +117,10 @@ def is_admin() -> bool:
         return False
 
 _SECRET_PATTERNS = [
-    (re.compile(r'(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{20,}'), 'sk-REDACTED'),   # OpenAI (incl. sk-proj-), Anthropic (sk-ant-)
-    (re.compile(r'(?<![A-Za-z0-9])hf_[A-Za-z0-9]{20,}'), 'hf_REDACTED'),     # HuggingFace
+    # The digit lookahead keeps words like "disk-usage-monitoring-service" from matching,
+    # without a lookbehind that would miss keys after escapes such as "\nsk-...".
+    (re.compile(r'sk-(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}'), 'sk-REDACTED'),   # OpenAI (incl. sk-proj-), Anthropic (sk-ant-)
+    (re.compile(r'hf_[A-Za-z0-9]{20,}'), 'hf_REDACTED'),                         # HuggingFace
     (re.compile(r'AIza[0-9A-Za-z_-]{35}'), 'AIza-REDACTED'),        # Google / Gemini
     (re.compile(r'(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{36,}'), 'gh-REDACTED'),
     (re.compile(r'github_pat_[A-Za-z0-9_]{22,}'), 'gh-REDACTED'),

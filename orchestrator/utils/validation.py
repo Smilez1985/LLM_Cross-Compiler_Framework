@@ -1420,8 +1420,14 @@ def validate_public_url(url: str) -> ValidationResult:
             details={"url": url}
         )
 
+    # urllib and urllib3/requests split authorities differently on these characters
+    # (e.g. "http://127.0.0.1\@example.com/"), so such URLs are rejected outright.
+    if not isinstance(url, str) or "\\" in url or any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7f for ch in url):
+        return _fail(f"URL contains backslashes, whitespace or control characters: {url!r}")
+
     try:
         parsed = urllib.parse.urlparse(url)
+        port = parsed.port
     except Exception as e:
         return _fail(f"URL validation error: {e}")
 
@@ -1429,15 +1435,25 @@ def validate_public_url(url: str) -> ValidationResult:
         return _fail(f"Only http(s) URLs with a host are allowed: {url}")
 
     try:
-        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        from urllib3.util import parse_url
+        fetch_host = (parse_url(url).host or "").strip("[]").lower()
+    except Exception as e:
+        return _fail(f"URL validation error: {e}")
+    if fetch_host != parsed.hostname.lower():
+        return _fail(f"Ambiguous URL host ({parsed.hostname!r} vs {fetch_host!r}): {url}")
+
+    try:
+        port = port or (443 if parsed.scheme == "https" else 80)
         infos = socket.getaddrinfo(parsed.hostname, port, proto=socket.IPPROTO_TCP)
-    except (socket.gaierror, ValueError) as e:
+    except (socket.gaierror, ValueError, UnicodeError) as e:
         return _fail(f"Host could not be resolved: {parsed.hostname} ({e})")
 
     for info in infos:
         addr = ipaddress.ip_address(info[4][0].split("%")[0])
-        if (addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_multicast
-                or addr.is_reserved or addr.is_unspecified):
+        if addr.version == 6 and addr.ipv4_mapped:
+            addr = addr.ipv4_mapped
+        # is_global excludes private, loopback, link-local, CGNAT (100.64/10), reserved and unspecified ranges.
+        if not addr.is_global or addr.is_multicast:
             return _fail(f"URL resolves to non-public address {addr}: {url}")
 
     return ValidationResult(

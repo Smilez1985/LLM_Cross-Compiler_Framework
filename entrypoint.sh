@@ -123,7 +123,8 @@ initialize_container() {
             exec gosu llmbuilder "$0" "$@"
         else
             log_warn "Neither su-exec nor gosu found. Falling back to standard su."
-            exec su llmbuilder -c "$0 $@"
+            # Arguments are passed separately; interpolating them into the -c string would split and execute them.
+            exec su llmbuilder -s /bin/bash -c 'exec "$0" "$@"' "$0" "$@"
         fi
     fi
 

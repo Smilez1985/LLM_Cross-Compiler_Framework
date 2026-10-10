@@ -265,6 +265,8 @@ class MainOrchestrator(QMainWindow):
         wizard.exec()
         if self.framework.target_manager:
             self.framework.target_manager.initialize()
+            self.builder_tab._refresh_targets()
+            self.deployment_window.refresh_data()
 
     def trigger_healing_dialog(self, proposal):
         """Shows the Self-Healing Proposal Dialog."""

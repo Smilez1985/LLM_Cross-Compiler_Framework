@@ -88,7 +88,8 @@ class SecretsManager:
 
             if stored_key:
                 self.logger.info("Master Key loaded from OS Keyring (Secure).")
-                key_bytes = base64.urlsafe_b64decode(stored_key.encode())
+                # Stored as the base64 Fernet key itself (see below), which is what Fernet() expects.
+                key_bytes = stored_key.encode()
             else:
                 self.logger.warning("No Master Key found in Keyring. Generating new one...")
                 # 2. Generiere neuen Key (Fernet kompatibel)

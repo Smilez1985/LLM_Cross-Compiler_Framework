@@ -31,9 +31,10 @@ from orchestrator.utils.logging import get_logger
 from orchestrator.utils.helpers import redact_secrets
 
 # Fallback Helper
-def ensure_directory(path: Path):
+def ensure_directory(path: Path) -> Path:
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
+    return path
 
 # --- SWARM CIPHER (The "Bluff" Security v2) ---
 class SwarmCipher:
@@ -141,10 +142,7 @@ class CommunityManager:
         self.knowledge_dir = self.community_dir / "knowledge"
         self.targets_dir = self.app_root / "targets"
         self.contribution_dir = self.app_root / "contributions"
-        
-        ensure_directory(self.community_dir)
-        ensure_directory(self.knowledge_dir)
-        ensure_directory(self.contribution_dir)
+        # Directories are created when something is written, not at every CLI/GUI start.
 
     # --- MODULE MANAGEMENT ---
     def scan_modules(self) -> List[CommunityModule]:
@@ -250,7 +248,7 @@ class CommunityManager:
             if c: export_data.append({"source": s, "content": c, "metadata": {k:v for k,v in p.items() if k not in ["content", "source"]}})
 
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        export_path = self.knowledge_dir / f"{output_name_prefix}_{ts}.json"
+        export_path = ensure_directory(self.knowledge_dir) / f"{output_name_prefix}_{ts}.json"
         with open(export_path, 'w', encoding='utf-8') as f: json.dump(export_data, f, indent=2)
         return str(export_path)
 

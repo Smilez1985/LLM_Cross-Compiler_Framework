@@ -49,16 +49,21 @@ class CrawlerManager:
     - Centralized Security Validation (SSRF Protection)
     """
 
-    def __init__(self, framework_manager):
+    MAX_REDIRECTS = 5
+
+    def __init__(self, framework_manager, options: Optional[Dict[str, Any]] = None):
         self.logger = get_logger(__name__)
         self.config = framework_manager.config
+        opts = options or {}
         
-        # Configuration Settings
-        self.respect_robots = self.config.get("crawler_respect_robots", True)
-        self.max_depth = int(self.config.get("crawler_max_depth", 2))
-        self.max_pages = int(self.config.get("crawler_max_pages", 50))
-        self.rate_limit = float(self.config.get("crawler_rate_limit", 1.0))
-        self.download_pdfs = self.config.get("crawler_download_pdfs", True)
+        # Per-crawl options (e.g. from the Deep Ingest dialog) override the stored defaults.
+        self.respect_robots = bool(opts.get("respect_robots", self.config.get("crawler_respect_robots", True)))
+        self.max_depth = int(opts.get("max_depth", self.config.get("crawler_max_depth", 2)))
+        self.max_pages = int(opts.get("max_pages", self.config.get("crawler_max_pages", 50)))
+        self.rate_limit = float(opts.get("request_delay", self.config.get("crawler_rate_limit", 1.0)))
+        self.download_pdfs = bool(opts.get("download_pdfs", self.config.get("crawler_download_pdfs", True)))
+        # Redirects and failed fetches also cost requests; this bounds the total work per crawl.
+        self.max_requests = self.max_pages * 5
         
         # State
         self.visited: Set[str] = set()
@@ -67,6 +72,14 @@ class CrawlerManager:
         self.session.headers.update({
             "User-Agent": "LLM-Conversion-Framework-Bot/1.6.0 (Open Source; +https://github.com/Smilez1985/llm_conversion_framework)"
         })
+
+    def _guarded_get(self, url: str, timeout: int = 10) -> requests.Response:
+        """Fetches exactly the URL that passed the SSRF check, without following redirects."""
+        prepared = self.session.prepare_request(requests.Request("GET", url))
+        check = validate_public_url(prepared.url)
+        if not check:
+            raise PermissionError(check.message)
+        return self.session.send(prepared, timeout=timeout, allow_redirects=False)
 
     def crawl(self, root_url: str) -> List[Document]:
         """
@@ -77,21 +90,24 @@ class CrawlerManager:
         self.visited.clear()
         documents: List[Document] = []
         
-        # Queue für BFS: (url, current_depth)
-        queue = [(root_url, 0)]
-        base_domain = urlparse(root_url).netloc
+        # Queue für BFS: (url, current_depth, redirect_hops)
+        queue = [(root_url, 0, 0)]
+        allowed_hosts = {urlparse(root_url).netloc}
         
         pages_crawled = 0
+        requests_made = 0
         
         while queue and pages_crawled < self.max_pages:
-            url, depth = queue.pop(0)
+            if requests_made >= self.max_requests:
+                self.logger.warning(f"Request budget of {self.max_requests} exhausted, stopping crawl.")
+                break
+
+            url, depth, hops = queue.pop(0)
             
             if url in self.visited:
                 continue
             
-            # ---------------------------------------------------------
-            # NEU: 1. Strenge Sicherheitsvalidierung (SSRF / Format)
-            # ---------------------------------------------------------
+            # 1. Strenge Sicherheitsvalidierung (SSRF / Format)
             if not validate_public_url(url):
                 self.logger.warning(f"Security Alert: Skipping unsafe or invalid URL: {url}")
                 self.visited.add(url)
@@ -109,25 +125,28 @@ class CrawlerManager:
                 
             # 3. Fetch Content
             self.logger.info(f"Crawling ({pages_crawled}/{self.max_pages}): {url}")
+            self.visited.add(url)
+            requests_made += 1
             try:
                 time.sleep(self.rate_limit) # Politeness delay
-                # Redirects are re-queued so their targets pass the SSRF check too.
-                response = self.session.get(url, timeout=10, allow_redirects=False)
+                response = self._guarded_get(url)
 
+                # Redirect targets are queued instead of followed, so they pass the SSRF check too.
                 if response.is_redirect:
-                    self.visited.add(url)
                     location = urljoin(url, response.headers.get('Location', ''))
-                    if location and location not in self.visited:
-                        queue.insert(0, (location, depth))
+                    if hops >= self.MAX_REDIRECTS:
+                        self.logger.warning(f"Too many redirects starting from {url}, giving up.")
+                    elif location and location not in self.visited:
+                        if depth == 0:
+                            allowed_hosts.add(urlparse(location).netloc)  # e.g. example.com -> www.example.com
+                        queue.insert(0, (location, depth, hops + 1))
                     continue
 
                 if response.status_code != 200:
                     self.logger.warning(f"Failed to fetch {url}: Status {response.status_code}")
-                    self.visited.add(url)
                     continue
                     
                 content_type = response.headers.get('Content-Type', '').lower()
-                self.visited.add(url)
                 pages_crawled += 1
                 
                 # 4. Process Content
@@ -138,7 +157,7 @@ class CrawlerManager:
                     if self.download_pdfs:
                         doc = self._process_pdf(response.content, url)
                 elif 'text/html' in content_type:
-                    doc, new_links = self._process_html(response.text, url, base_domain)
+                    doc, new_links = self._process_html(response.text, url, allowed_hosts)
                 
                 if doc:
                     documents.append(doc)
@@ -147,7 +166,7 @@ class CrawlerManager:
                 if depth < self.max_depth:
                     for link in new_links:
                         if link not in self.visited:
-                            queue.append((link, depth + 1))
+                            queue.append((link, depth + 1, 0))
                             
             except Exception as e:
                 self.logger.error(f"Error crawling {url}: {e}")
@@ -162,22 +181,36 @@ class CrawlerManager:
             
         parsed = urlparse(url)
         domain = parsed.netloc
-        robots_url = f"{parsed.scheme}://{domain}/robots.txt"
-        
         if domain not in self.robot_parsers:
-            rp = RobotFileParser()
-            try:
-                rp.set_url(robots_url)
-                rp.read()
-                self.robot_parsers[domain] = rp
-            except Exception:
-                # Bei Fehler (z.B. Timeout) nehmen wir an, es ist erlaubt, aber loggen es
-                self.logger.warning(f"Could not read robots.txt for {domain}. Assuming allowed.")
-                return True
+            self.robot_parsers[domain] = self._load_robots(f"{parsed.scheme}://{domain}/robots.txt")
         
         return self.robot_parsers[domain].can_fetch(self.session.headers["User-Agent"], url)
 
-    def _process_html(self, html_content: str, url: str, base_domain: str) -> tuple[Optional[Document], List[str]]:
+    def _load_robots(self, robots_url: str) -> RobotFileParser:
+        """Loads robots.txt through the SSRF guard (RobotFileParser.read() would follow redirects unchecked)."""
+        rp = RobotFileParser(robots_url)
+        url = robots_url
+        try:
+            for _ in range(self.MAX_REDIRECTS + 1):
+                response = self._guarded_get(url)
+                if not response.is_redirect:
+                    break
+                url = urljoin(url, response.headers.get('Location', ''))
+            else:
+                raise RuntimeError("too many redirects")
+
+            if response.status_code == 200:
+                rp.parse(response.text.splitlines())
+            elif response.status_code in (401, 403):
+                rp.disallow_all = True
+            else:
+                rp.allow_all = True
+        except Exception as e:
+            self.logger.warning(f"Could not read {robots_url} ({e}). Assuming allowed.")
+            rp.allow_all = True
+        return rp
+
+    def _process_html(self, html_content: str, url: str, allowed_hosts: Set[str]) -> tuple[Optional[Document], List[str]]:
         """Extrahiert Text und Links aus HTML."""
         soup = BeautifulSoup(html_content, 'html.parser')
         
@@ -206,7 +239,7 @@ class CrawlerManager:
             full_url = urljoin(url, href)
             # Filter: Only internal links, no fragments
             parsed = urlparse(full_url)
-            if parsed.netloc == base_domain and '#' not in href:
+            if parsed.netloc in allowed_hosts and '#' not in href:
                 links.append(full_url)
         
         # Create Document

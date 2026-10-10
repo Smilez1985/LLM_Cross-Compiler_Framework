@@ -57,9 +57,12 @@ def main():
     cfg_mgr = ConfigManager(str(config_file) if config_file.exists() else None)
     
     language = cfg_mgr.get("language")
-    
+    # The schema default 'en' is always loaded, so a first run is detected by where the value came from.
+    language_value = cfg_mgr.config_values.get("language")
+    first_run = language_value is None or language_value.source.source_type == "default"
+
     # 2. First Run / Language Selection
-    if not language:
+    if first_run:
         # Initialize I18n with default English for the dialog
         get_i18n("en")
         
