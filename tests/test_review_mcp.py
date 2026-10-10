@@ -192,7 +192,6 @@ class TestTooLong:
         assert result.is_error and "too long" in text_of(result)
         assert asked == [] and registry.builds == []
 
-    @pytest.mark.xfail(strict=True, reason="BUG: a call refused as too long to confirm leaves no audit entry")
     def test_refusal_is_audited(self, server, registry):
         result = call(server, "write", {"text": "x" * 5000}, answering("accept"))
         assert result.is_error and registry.writes == []
@@ -369,8 +368,6 @@ class TestPolicyChanges:
         [(tool, decision, _, outcome)] = rows(registry)
         assert (tool, decision, outcome) == ("write", "deny", "denied")
 
-    @pytest.mark.xfail(strict=True, reason="BUG: an explicit 'no' in the dialog is overridden when the policy "
-                                           "is loosened to allow while the dialog is open")
     @pytest.mark.parametrize("mode", MODES)
     def test_no_in_the_dialog_is_not_overridden_by_a_looser_policy(self, server, registry, mode):
         async def callback(ctx, params):
@@ -384,8 +381,6 @@ class TestPolicyChanges:
 
 class TestEarlyExitsAudit:
 
-    @pytest.mark.xfail(strict=True, reason="BUG: calls the SDK rejects before the registry (invalid arguments, "
-                                           "an answer that does not match the form) leave no audit entry")
     @pytest.mark.parametrize("case", ["invalid_arguments", "malformed_answer"])
     def test_sdk_rejections_are_audited(self, server, registry, case):
         async def callback(ctx, params):
@@ -435,7 +430,7 @@ def windows_argv(cmdline):
 
 def expected_argv(app_root, python):
     return ["claude", "mcp", "add", mcp_server.SERVER_NAME, "--env", f"PYTHONPATH={app_root}", "--", python,
-            "-m", "orchestrator.cli", "-q", "mcp", "serve"]
+            "-P", "-m", "orchestrator.cli", "-q", "mcp", "serve"]
 
 
 POSIX_ROOTS = ["/opt/LLM Framework", "/home/John Doe/llm_conversion_framework",
@@ -828,14 +823,11 @@ def longest_mark_run(text):
 class TestFaithfulRendering:
     """The user must be able to read back exactly the values that run, and nothing may draw over them."""
 
-    @pytest.mark.xfail(strict=True, reason="BUG: default-ignorable characters outside Cc/Cf (variation selectors, "
-                                           "CGJ, Hangul fillers, Mongolian/Khmer marks) reach the dialog raw")
     @pytest.mark.parametrize("char", INVISIBLE, ids=lambda c: f"U+{ord(c):04X}")
     def test_invisible_characters_are_escaped(self, char):
         message = mcp_server._describe_call(spec_named(), {"model": f"SmolLM2{char}", "use_gpu": True})
         assert char not in message, "the dialog reads 'SmolLM2' for a different value"
 
-    @pytest.mark.xfail(strict=True, reason="BUG: an unbounded stack of combining marks reaches the dialog raw")
     def test_combining_mark_stacks_are_bounded(self):
         # 400 marks below one letter draw a column over the lines that follow it: dataset_path and use_gpu.
         message = mcp_server._describe_call(spec_named(), {"model": "x" + "\u0333" * 400,
@@ -847,7 +839,6 @@ class TestFaithfulRendering:
         text = "Vie\u0323\u0302t cafe\u0301 \u0915\u093f"  # Vietnamese, decomposed e-acute, Devanagari
         assert f"  model: {text}" in mcp_server._describe_call(spec_named(), {"model": text}).splitlines()
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the escape notation is ambiguous: different values read the same")
     @pytest.mark.parametrize("first, second", [("a\\u000ab", "a\nb"), ("\U000e0041", "\ue004" + "1")],
                              ids=["literal-backslash-u", "astral-vs-bmp-plus-digit"])
     def test_different_values_read_differently(self, first, second):
@@ -928,8 +919,6 @@ class TestAnswersAreBoundToTheCall:
         assert "declined" not in text_of(result), "nobody was asked"
         assert rows(registry) == [("write", "ask", None, "not_confirmed")]
 
-    @pytest.mark.xfail(strict=True, reason="BUG: a failed elicitation request (legacy mode) becomes a JSON-RPC "
-                                           "error for tools/call and leaves no audit entry")
     def test_failed_confirmation_request_is_an_audited_refusal(self, server, registry):
         """The client answers elicitation/create with an error (dialog closed, client timeout, broken UI)."""
         async def callback(ctx, params):
@@ -957,8 +946,6 @@ def outside_double_quotes(command):
 
 class TestSnippetEdges:
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the Windows variant leaves cmd/PowerShell metacharacters unquoted "
-                                           "(list2cmdline only quotes whitespace)")
     @pytest.mark.parametrize("app_root, python", [
         # cmd.exe: '&' ends the command, the rest runs as a second command
         (r"C:\R&D\llm-framework", r"C:\R&D\llm-framework\.venv\Scripts\python.exe"),
@@ -988,8 +975,6 @@ class TestSnippetEdges:
         assert set(blocks) == set(SECTIONS)
         assert json.loads(blocks["Claude Desktop"])["mcpServers"][mcp_server.SERVER_NAME]["command"] == sys.executable
 
-    @pytest.mark.xfail(strict=True, reason="BUG: claude_desktop_config_path ignores XDG_CONFIG_HOME on Linux "
-                                           "(Electron's appData, which Claude Desktop uses, follows it)")
     def test_linux_location_follows_xdg_config_home(self, tmp_path, monkeypatch):
         monkeypatch.setattr(sys, "platform", "linux")
         monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
@@ -998,8 +983,6 @@ class TestSnippetEdges:
 
 class TestDesktopConfigEdges:
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the backup is written before 'mcpServers' is checked, so a refused "
-                                           "config still replaces (or creates) the .bak")
     @pytest.mark.parametrize("previous", [b"the backup of the last good version", None], ids=["backup", "none"])
     @pytest.mark.parametrize("content", ['{"mcpServers": null}', '{"mcpServers": []}'], ids=["null", "list"])
     def test_refused_config_leaves_the_backup_alone(self, tmp_path, content, previous):
@@ -1031,8 +1014,6 @@ class TestDesktopConfigEdges:
                                                                mcp_server.launch_command(REPO_ROOT)}}
         assert path.with_name(path.name + ".bak").read_bytes() == b""
 
-    @pytest.mark.xfail(strict=True, reason="BUG: 'mcp config --write' only catches ValueError; an unwritable config "
-                                           "folder or read-only dotfile target ends in a traceback")
     def test_unwritable_config_folder_is_reported_cleanly(self, tmp_path, monkeypatch):
         """E.g. ~/.config/Claude owned by root after a sudo install, or a home-manager link into /nix/store."""
         from click.testing import CliRunner
@@ -1054,8 +1035,6 @@ class TestDesktopConfigEdges:
         assert "Permission denied" in result.output
 
 
-@pytest.mark.xfail(strict=True, reason="BUG: with -v / --log-level DEBUG a LiteLLM debug line reaches stdout after "
-                                       "the stdio transport has handed fd 1 back (atexit)")
 def test_verbose_serve_keeps_stdout_for_the_protocol(tmp_path):
     """`printf '' | llm-cli -v mcp serve 2>/dev/null` must print nothing: a client reading stdout to EOF
     would get a line that is not JSON-RPC."""
@@ -1063,3 +1042,250 @@ def test_verbose_serve_keeps_stdout_for_the_protocol(tmp_path):
     result = subprocess.run([sys.executable, "-m", "orchestrator.cli", "-v", "mcp", "serve"], cwd=tmp_path,
                             env=cli_env(tmp_path), input="", capture_output=True, text=True, timeout=120)
     assert result.stdout == "", f"stdout belongs to the MCP protocol: {result.stdout!r}"
+
+
+# --- Fix pass: cases around the fixes above ---------------------------------------------------------
+
+def read_back(shown):
+    """Reads the confirmation notation: '\\u' plus all hex digits after it is one code point, the rest is literal."""
+    return re.sub(r"\\u([0-9a-fA-F]+)", lambda m: chr(int(m.group(1), 16)), shown)
+
+
+TRICKY_VALUES = ["a\\u000ab", "a\nb", "\U000e0041", "\ue004" + "1", "\\U000e0041", "\\U0001f600", "c:\\users\\me",
+                 "\\\\server\\share\\", "x\\", "\\\\u", "\\u005c", "\u200b2024", "\u200bCAFE", "\u0301abc",
+                 "e" + "\u0301" * 10, "\u200b\u0301", "\\" + "\u200b", "a\u00a0b", "a\u3000b", "\u2800",
+                 "SmolLM2\ufe0f", "x" + "\u0333" * 40, "Vie\u0323\u0302t"]
+
+
+class TestUnambiguousRendering:
+
+    @pytest.mark.parametrize("value", TRICKY_VALUES, ids=lambda v: v.encode("unicode_escape").decode())
+    def test_every_rendering_reads_back_as_exactly_its_value(self, value):
+        assert read_back(mcp_server._visible(value)) == value
+
+    def test_no_two_values_read_the_same(self):
+        shown = [mcp_server._visible(v) for v in TRICKY_VALUES]
+        assert len(set(shown)) == len(TRICKY_VALUES)
+
+    @pytest.mark.parametrize("path", [r"C:\Users\O'Brien\models\SmolLM2.gguf", r"\\nas\models\x", "/srv/a\\b"])
+    def test_ordinary_backslash_paths_stay_readable(self, path):
+        assert mcp_server._visible(path) == path
+
+    @pytest.mark.parametrize("value, shown", [
+        ("\u0301xyz", "\\u0301xyz"),             # would sit on the label's separator
+        ("\u200b\u0301", "\\u200b\\u0301"),      # would sit on the escape's last hex digit
+        ("\u200b2024", "\\u200b\\u0032\\u0030\\u0032\\u0034"),
+        ("a\u00a0z", "a\\u00a0z"), ("a\u3000z", "a\\u3000z"), ("\u2800", "\\u2800"),
+        ("\u200bab", "\\u200b\\u0061\\u0062"),  # a, b and so on are hex digits
+        ("\\u2028", "\\u005cu2028"), ("\\U0001f600", "\\u005cU0001f600"), ("\\Users", "\\Users"),
+    ])
+    def test_notation(self, value, shown):
+        assert mcp_server._visible(value) == shown
+
+
+class TestWindowsCommandLine:
+
+    @pytest.mark.parametrize("char", list("&|<>^();,@{}#'") + ["\u2019", "\u00a0", "\u2003"],
+                             ids=lambda c: f"U+{ord(c):04X}")
+    def test_metacharacters_are_quoted_for_cmd_and_powershell(self, char):
+        arg = f"C:\\Py{char}thon\\python.exe"
+        command = mcp_server.shell_command(["claude", "mcp", "add", "x", "--", arg, "-P"], windows=True)
+        assert windows_argv(command) == ["claude", "mcp", "add", "x", "--", arg, "-P"]
+        assert char not in outside_double_quotes(command), command
+
+    @pytest.mark.parametrize("char", list('%!$`"') + ["\u201c", "\n"], ids=lambda c: f"U+{ord(c):04X}")
+    def test_command_is_withheld_when_no_quoting_protects_it(self, monkeypatch, char):
+        python = f"C:\\Py{char}thon\\python.exe"
+        monkeypatch.setattr(sys, "executable", python)
+        with pytest.raises(ValueError, match="cmd.exe or PowerShell"):
+            mcp_server.shell_command(["claude", python], windows=True)
+        snippets = mcp_server.client_snippets(Path(r"C:\llm"), windows=True)
+        note = snippets["claude-code"]
+        assert note.startswith("# ") and "\n" not in note
+        assert not set(note) & set("&|<>^%!$`\"'();"), "pasting the note must be harmless in every shell"
+        assert json.loads(snippets["claude-desktop"])["mcpServers"][mcp_server.SERVER_NAME]["command"] == python
+
+    def test_posix_variant_is_unaffected(self, monkeypatch):
+        python = "/opt/100%/$HOME/`x`/python3"
+        monkeypatch.setattr(sys, "executable", python)
+        command = mcp_server.client_snippets(Path("/srv/llm"), windows=False)["claude-code"]
+        assert shlex.split(command) == expected_argv("/srv/llm", python)
+
+
+class TestLaunchCommand:
+
+    @pytest.mark.parametrize("root, windows", [("/opt/llm:framework", False), (r"C:\llm;framework", True),
+                                               ("llm-framework", False), (r"llm\framework", True)])
+    def test_root_that_pythonpath_would_split_or_resolve_in_the_cwd_is_refused(self, root, windows):
+        """A relative PYTHONPATH entry (also one produced by the separator) is looked up in the working directory."""
+        with pytest.raises(ValueError, match="PYTHONPATH"):
+            mcp_server.launch_command(Path(root), windows=windows)
+        with pytest.raises(ValueError, match="PYTHONPATH"):
+            mcp_server.client_snippets(Path(root), windows=windows)
+
+    def test_refused_root_writes_no_backup(self, tmp_path):
+        path = tmp_path / "Claude" / "claude_desktop_config.json"
+        raw = write_original(path)
+        with pytest.raises(ValueError, match="PYTHONPATH"):
+            mcp_server.write_claude_desktop_config(Path("relative-root"), path)
+        assert path.read_bytes() == raw and sorted(p.name for p in path.parent.iterdir()) == [path.name]
+
+    def test_mcp_config_reports_a_refused_root_cleanly(self, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
+
+        def refuse(app_root, windows=None):
+            raise ValueError("The installation path 'x' cannot be put on PYTHONPATH safely")
+        monkeypatch.setattr(mcp_server, "client_snippets", refuse)
+        result = CliRunner().invoke(cli_module.cli, ["-q", "mcp", "config"], obj=cli_module.FrameworkContext())
+        assert isinstance(result.exception, SystemExit) and result.exit_code == 1, repr(result.exception)
+        assert "cannot be put on PYTHONPATH" in result.output
+
+    def test_shadowing_modules_in_the_working_directory_are_not_imported(self, tmp_path):
+        """Not only orchestrator/: a project's yaml.py or click.py would run inside the server as well."""
+        project = tmp_path / "project"
+        project.mkdir()
+        for name in ("yaml", "click"):
+            marker = project / f"{name}-RAN"
+            (project / f"{name}.py").write_text(f"import pathlib\npathlib.Path({str(marker)!r}).write_text('x')\n")
+        launch = mcp_server.launch_command(REPO_ROOT)
+        assert launch["args"][:2] == ["-P", "-m"] and launch["env"] == {"PYTHONPATH": str(REPO_ROOT)}
+        env = {k: v for k, v in cli_env(tmp_path).items() if k != "PYTHONSAFEPATH"}
+        env.update(launch["env"])
+        result = subprocess.run([launch["command"], *launch["args"][:-2], "--version"], cwd=project, env=env,
+                                capture_output=True, text=True, timeout=180)
+        assert result.returncode == 0 and "version" in result.stdout, result.stderr
+        assert not list(project.glob("*-RAN")), "code from the project folder ran"
+
+    def test_real_session_with_the_generated_command_from_a_hostile_project(self, tmp_path):
+        """The exact command a client gets, started inside a project that plants orchestrator/ and yaml.py."""
+        from mcp import StdioServerParameters
+        project = tmp_path / "project"
+        (project / "orchestrator").mkdir(parents=True)
+        marker = project / "PLANTED-RAN"
+        planted = f"import pathlib\npathlib.Path({str(marker)!r}).write_text('x')\n"
+        (project / "orchestrator" / "__init__.py").write_text(planted)
+        (project / "yaml.py").write_text(planted)
+        launch = mcp_server.launch_command(REPO_ROOT)
+        env = {**{k: v for k, v in cli_env(tmp_path).items() if k not in ("PYTHONPATH", "PYTHONSAFEPATH")},
+               **launch["env"]}
+        params = StdioServerParameters(command=launch["command"], args=launch["args"], env=env, cwd=str(project))
+        problems = []
+
+        async def handler(message):
+            if isinstance(message, Exception):
+                problems.append(message)
+
+        async def go():
+            async with Client(params, read_timeout_seconds=90, message_handler=handler) as client:
+                return {t.name for t in (await client.list_tools()).tools}
+
+        names = asyncio.run(go())
+        assert problems == [] and {"list_targets", "start_build"} <= names
+        assert not marker.exists(), "code from the project folder ran inside the MCP server"
+
+
+class TestRefusalsAreFinalAndAudited:
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_yes_under_a_loosened_policy_runs_as_confirmed(self, server, registry, mode):
+        async def callback(ctx, params):
+            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+            return ElicitResult(action="accept", content={"approve": True})
+        assert not call(server, "write", {"text": "x"}, callback, mode).is_error
+        assert registry.writes == ["x"] and rows(registry) == [("write", "allow", 1, "ok")]
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_no_under_a_loosened_policy_is_audited_as_a_persons_no(self, server, registry, mode):
+        async def callback(ctx, params):
+            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+            return ElicitResult(action="decline")
+        result = call(server, "write", {"text": "x"}, callback, mode)
+        assert result.is_error and "The user declined 'Write'" in text_of(result)
+        assert rows(registry) == [("write", "allow", 0, "not_confirmed")]
+
+    @pytest.mark.parametrize("content", [{}, {"approve": None}, {"approve": "maybe"}])
+    def test_malformed_answer_in_legacy_mode_is_an_audited_refusal(self, server, registry, content):
+        async def callback(ctx, params):
+            return ElicitResult(action="accept", content=content)
+        result = call(server, "write", {"text": "x"}, callback, "legacy")
+        assert result.is_error and "not run" in text_of(result) and registry.writes == []
+        assert rows(registry) == [("write", "ask", None, "not_confirmed")]
+
+    def test_invalid_arguments_are_audited_as_invalid_input(self, server, registry):
+        result = call(server, "echo", {"txt": "x"})
+        assert result.is_error
+        [entry] = registry.audit.entries(5)
+        assert (entry["tool"], entry["decision"], entry["approved"], entry["outcome"]) == (
+            "echo", "allow", None, "invalid_input")
+        assert "text" in entry["detail"]
+
+    def test_unknown_tools_and_registry_errors_are_audited_once(self, server, registry):
+        assert call(server, "no_such_tool", {}).is_error and rows(registry) == []
+        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
+        assert call(server, "write", {"text": "x"}).is_error
+        assert rows(registry) == [("write", "deny", None, "denied")], "no second row from the SDK layer"
+
+    def test_registry_treats_a_persons_no_as_final(self, registry):
+        from orchestrator.tools.registry import ToolContext, ToolDenied
+        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        with pytest.raises(ToolDenied):
+            registry.call("write", {"text": "x"}, ToolContext("mcp"), approved=False)
+        assert registry.writes == [] and rows(registry) == [("write", "allow", 0, "not_confirmed")]
+
+    def test_refuse_records_without_running(self, registry):
+        from orchestrator.tools.registry import ToolContext
+        registry.refuse("write", {"text": "x"}, ToolContext("mcp"), detail="too long to show")
+        [entry] = registry.audit.entries(5)
+        assert (entry["tool"], entry["decision"], entry["approved"], entry["outcome"]) == (
+            "write", "ask", None, "not_confirmed")
+        assert entry["detail"] == "too long to show" and registry.writes == []
+
+
+class TestDesktopConfigLocation:
+
+    def test_relative_xdg_config_home_is_ignored(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setenv("XDG_CONFIG_HOME", "relative/config")
+        assert mcp_server.claude_desktop_config_path() == (tmp_path / "home" / ".config" / "Claude"
+                                                           / "claude_desktop_config.json")
+
+    def test_config_path_that_is_a_folder_is_reported_cleanly(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
+        monkeypatch.setenv("APPDATA", str(tmp_path / "home" / "AppData" / "Roaming"))
+        path = mcp_server.claude_desktop_config_path()
+        path.mkdir(parents=True)
+        result = CliRunner().invoke(cli_module.cli, ["-q", "mcp", "config", "--write", "claude-desktop"],
+                                    obj=cli_module.FrameworkContext())
+        assert isinstance(result.exception, SystemExit) and result.exit_code == 1, repr(result.exception)
+        assert path.is_dir() and list(path.parent.iterdir()) == [path]
+
+
+LIBRARY_OUTPUT = """
+import atexit, logging, os, sys
+from orchestrator.cli import cli
+
+library = logging.getLogger("some.library")
+library.addHandler(logging.StreamHandler(sys.stdout))
+library.setLevel(logging.INFO)
+library.propagate = False
+
+def at_exit():
+    print("print at exit")
+    library.error("log at exit")  # -q: the framework sets every logger to ERROR
+    os.write(1, b"fd write at exit\\n")
+
+atexit.register(at_exit)
+sys.argv = ["llm-cli", "-q", "mcp", "serve"]
+cli()
+"""
+
+
+def test_serve_keeps_any_library_output_off_stdout(tmp_path):
+    """Generic, not tied to LiteLLM: a library that logs to a stdout handler, prints or writes to fd 1 at exit."""
+    result = subprocess.run([sys.executable, "-P", "-c", LIBRARY_OUTPUT], cwd=tmp_path, env=cli_env(tmp_path),
+                            input="", capture_output=True, text=True, timeout=120)
+    assert result.stdout == "", f"stdout belongs to the MCP protocol: {result.stdout!r}"
+    for line in ("print at exit", "log at exit", "fd write at exit"):
+        assert line in result.stderr, result.stderr

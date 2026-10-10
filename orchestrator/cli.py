@@ -962,15 +962,17 @@ def mcp_config(ctx: FrameworkContext, write_client: Optional[str]):
     """Show how to connect Claude Code, Claude Desktop or VS Code to this framework"""
     from orchestrator import mcp_server
     app_root = Path(__file__).resolve().parents[1]
-    if write_client == 'claude-desktop':
-        try:
+    try:
+        if write_client == 'claude-desktop':
             path = mcp_server.write_claude_desktop_config(app_root)
-        except ValueError as e:
-            console.print(f"[red]{escape(str(e))}[/red]")
-            sys.exit(1)
-        console.print(f"[green]Added to {path}. Restart Claude Desktop.[/green]")
+        else:
+            snippets = mcp_server.client_snippets(app_root)
+    except (ValueError, OSError) as e:  # OSError: unwritable folder, read-only dotfile target, ...
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if write_client == 'claude-desktop':
+        console.print(f"[green]Added to {escape(str(path))}. Restart Claude Desktop.[/green]")
         return
-    snippets = mcp_server.client_snippets(app_root)
     # Plain text without panels or wrapping, so the snippets can be copied exactly.
     sections = [("Claude Code (run once in a terminal)", snippets["claude-code"]),
                 (f"Claude Desktop ({mcp_server.claude_desktop_config_path()}), "
