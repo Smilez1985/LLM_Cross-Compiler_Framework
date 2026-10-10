@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QLabel, QLineEdit,
     QDialogButtonBox, QMessageBox, QComboBox,
     QWidget, QFormLayout, QTextEdit, QSpinBox,
-    QCheckBox, QGroupBox
+    QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PySide6.QtCore import Qt
 from orchestrator.utils.localization import get_instance as get_i18n
@@ -459,3 +459,81 @@ class URLInputDialog(QDialog):
             "download_pdfs": self.chk_pdfs.isChecked(),
             "request_delay": self.spin_delay.value()
         }
+
+
+class ToolPermissionsDialog(QDialog):
+    """
+    Ditto setup: what Ditto and connected AI clients (MCP) may do on their own.
+    Asked once at the first start (and from the Tools menu); stored per user.
+    """
+    def __init__(self, registry, parent=None, first_run: bool = False):
+        super().__init__(parent)
+        from orchestrator.tools.policy import Decision, TIER_LABELS, ToolTier
+        self._Decision, self._ToolTier = Decision, ToolTier
+        self.registry = registry
+        policy = registry.policy()
+        self.setWindowTitle("Ditto setup - tool permissions" if first_run else "Tool permissions")
+        self.resize(720, 520)
+        layout = QVBoxLayout(self)
+
+        intro = QLabel(
+            "Ditto and AI clients connected over MCP (e.g. Claude Desktop) use the framework through tools.\n"
+            "Decide once what they may do on their own, what needs your confirmation and what is never allowed. "
+            "Tools that reach other devices or delete data always ask unless you allow them one by one.")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+
+        tier_box = QGroupBox("Per category")
+        form = QFormLayout(tier_box)
+        self.tier_combos = {}
+        for tier, label in TIER_LABELS.items():
+            combo = QComboBox()
+            choices = [Decision.ASK, Decision.DENY] if tier == ToolTier.EXTERNAL else [Decision.ALLOW, Decision.ASK, Decision.DENY]
+            for choice in choices:
+                combo.addItem(choice.value.capitalize(), choice.value)
+            idx = combo.findData(policy.tiers.get(tier, Decision.ASK).value)
+            combo.setCurrentIndex(idx if idx >= 0 else combo.findData(Decision.ASK.value))
+            form.addRow(label + ":", combo)
+            self.tier_combos[tier] = combo
+        layout.addWidget(tier_box)
+
+        layout.addWidget(QLabel("Per tool (optional, overrides the category):"))
+        tools = registry.list()
+        self.table = QTableWidget(len(tools), 3)
+        self.table.setHorizontalHeaderLabels(["Tool", "Category", "Permission"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.override_combos = {}
+        for row, spec in enumerate(tools):
+            name_item = QTableWidgetItem(spec.title)
+            name_item.setToolTip(spec.description)
+            self.table.setItem(row, 0, name_item)
+            self.table.setItem(row, 1, QTableWidgetItem(spec.tier.value))
+            combo = QComboBox()
+            combo.addItem("Category default", "")
+            for choice in (Decision.ALLOW, Decision.ASK, Decision.DENY):
+                combo.addItem(choice.value.capitalize(), choice.value)
+            current = policy.overrides.get(spec.name)
+            combo.setCurrentIndex(combo.findData(current.value) if current else 0)
+            self.table.setCellWidget(row, 2, combo)
+            self.override_combos[spec.name] = combo
+        layout.addWidget(self.table)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        buttons.accepted.connect(self.save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def build_policy(self):
+        from orchestrator.tools.policy import ToolPolicy
+        tiers = {tier: self._Decision(combo.currentData()) for tier, combo in self.tier_combos.items()}
+        overrides = {name: self._Decision(combo.currentData())
+                     for name, combo in self.override_combos.items() if combo.currentData()}
+        return ToolPolicy(configured=True, tiers=tiers, overrides=overrides)
+
+    def save(self):
+        try:
+            self.registry.policy_store.save(self.build_policy())
+        except Exception as e:
+            QMessageBox.critical(self, "Tool permissions", f"Could not save the permissions:\n{e}")
+            return
+        self.accept()

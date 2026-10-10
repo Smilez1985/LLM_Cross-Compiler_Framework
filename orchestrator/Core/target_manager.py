@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 
 from orchestrator.utils.logging import get_logger
+from orchestrator.schemas.targets import TargetCapabilities
 
 class TargetManager:
     def __init__(self, framework_manager):
@@ -23,17 +24,21 @@ class TargetManager:
         # Pfade aus Config
         # Fallback für Tests: Wenn framework_manager nur ein Path ist (Legacy)
         if hasattr(framework_manager, 'config'):
-            self.targets_dir = Path(framework_manager.config.targets_dir) if hasattr(framework_manager.config, 'targets_dir') else Path("targets")
+            configured = getattr(framework_manager.config, 'targets_dir', None) or "targets"
+            resolve = getattr(framework_manager, 'resolve_path', None)
+            self.targets_dir = resolve(configured) if callable(resolve) else Path(configured)
         else:
             self.targets_dir = Path("targets") # Default/Fallback
             
         self._targets: Dict[str, Any] = {}
+        self._capabilities: Dict[str, TargetCapabilities] = {}
         self._initialized = False
 
     def initialize(self):
         """Lädt alle verfügbaren Targets aus dem targets/ Verzeichnis."""
         self.logger.info(f"Loading targets from {self.targets_dir}...")
         self._targets = {}
+        self._capabilities = {}
         
         if not self.targets_dir.exists():
             self.logger.warning(f"Targets directory {self.targets_dir} does not exist.")
@@ -56,6 +61,11 @@ class TargetManager:
                                 tid = data['metadata'].get('id') or item.name
                                 data['metadata']['id'] = tid
                                 self._targets[tid] = data
+                                if 'capabilities' in data:
+                                    try:
+                                        self._capabilities[tid] = TargetCapabilities.model_validate(data['capabilities'])
+                                    except Exception as e:  # pydantic.ValidationError, but keep loading other targets
+                                        self.logger.error(f"Invalid capabilities in {config_file}: {e}")
                                 self.logger.debug(f"Loaded target: {tid}")
                             else:
                                 self.logger.warning(f"Invalid target config in {item.name}")
@@ -73,6 +83,11 @@ class TargetManager:
         if not self._initialized: self.initialize()
         # Return list of metadata for UI/CLI
         return [t['metadata'] for t in self._targets.values()]
+
+    def get_capabilities(self, target_id: str) -> Optional[TargetCapabilities]:
+        """Validated capabilities of a target (None if it declares none or they are invalid)."""
+        if not self._initialized: self.initialize()
+        return self._capabilities.get(target_id)
 
     def list_hardware_profiles(self) -> List[str]:
         """Target IDs selectable as deployment profiles (see get_docker_flags_for_profile)."""

@@ -14,6 +14,8 @@ def isolated_environment(tmp_path, monkeypatch):
     """Keeps tests away from the developer's real ~/.llm-framework, API keys and LLM_* settings."""
     home = tmp_path / "home"
     home.mkdir()
+    # Components that fall back to relative paths (output/, cache/, models/) must not write into the repo.
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("USERPROFILE", str(home))
     for var in list(os.environ):
@@ -58,13 +60,16 @@ def make_framework(tmp_path, monkeypatch, memory_keyring):
     monkeypatch.chdir(tmp_path)
     config_dir = tmp_path / "configs"
     config_dir.mkdir(exist_ok=True)
+    # Per-user state (tool policy, audit log, chat history) goes to its own directory, not $HOME.
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
     from orchestrator.Core.framework import FrameworkManager
 
     created = []
 
     def factory(config_file=None, initialize=True):
         fm = FrameworkManager(str(config_file or config_dir))
-        fm.info.installation_path = tmp_path
+        fm.info.installation_path = tmp_path  # output, cache and models go to tmp_path
+        fm.config.set("targets_dir", str(REPO_ROOT / "targets"))  # the real targets, read-only use
         if initialize:
             assert fm.initialize(), "FrameworkManager.initialize() failed"
         created.append(fm)

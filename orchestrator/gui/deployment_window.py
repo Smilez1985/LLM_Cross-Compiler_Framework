@@ -187,6 +187,8 @@ class DeploymentWindow(QWidget):
         # Safe config access
         get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
         output_dir = Path(get_cfg("output_dir", "output"))
+        if hasattr(self.framework, "resolve_path"):
+            output_dir = self.framework.resolve_path(output_dir)
         
         if output_dir.exists():
             # Every finished build writes build_info.json; list builds, not raw folders or archives.

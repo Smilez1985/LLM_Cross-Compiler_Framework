@@ -38,6 +38,8 @@ from orchestrator.Core.self_healing_manager import SelfHealingManager
 from orchestrator.Core.deployment_manager import DeploymentManager
 from orchestrator.Core.community_manager import CommunityManager
 from orchestrator.Core.orchestrator import LLMOrchestrator
+from orchestrator.Core.build_service import BuildService
+from orchestrator.tools.framework_tools import build_tool_registry
 
 @dataclass
 class FrameworkInfo:
@@ -76,6 +78,8 @@ class FrameworkManager:
         self.deployment_manager: Optional[DeploymentManager] = None
         self.community_manager: Optional[CommunityManager] = None
         self.orchestrator: Optional[LLMOrchestrator] = None
+        self.build_service: Optional[BuildService] = None
+        self.tool_registry = None
         self.updater: Optional[UpdateManager] = None
 
         self._initialized = False
@@ -99,7 +103,10 @@ class FrameworkManager:
             self.telemetry = TelemetryManager(self)
             
             # 3. Docker Connectivity
-            self.docker_manager = DockerManager(self.config, base_dir=self.app_root, secrets_manager=self.secrets_manager)
+            # Relative data paths (targets, output, cache, models) resolve against the installation path,
+            # never the working directory (the MCP server, for instance, is started from anywhere).
+            self.docker_manager = DockerManager(self.config, base_dir=self.info.installation_path,
+                                                secrets_manager=self.secrets_manager)
             if not self.docker_manager.initialize():
                 self.logger.warning("Docker Engine not reachable. Build capabilities will be disabled.")
             
@@ -139,8 +146,12 @@ class FrameworkManager:
             
             # Orchestrator - needs everything
             build_engine = self.docker_manager.builder or BuildEngine(
-                self.config, base_dir=self.app_root, secrets_manager=self.secrets_manager)
+                self.config, base_dir=self.info.installation_path, secrets_manager=self.secrets_manager)
             self.orchestrator = LLMOrchestrator(self.config, build_engine=build_engine)
+            # Typed entry point for tools (MCP server, Ditto) on top of the orchestrator
+            self.build_service = BuildService(self)
+            # One tool registry with the user's permissions and the audit log, for Ditto and MCP
+            self.tool_registry = build_tool_registry(self)
             
             # === DEPENDENCY INJECTION ===
             # Connect the Brain (Ditto) and the Guardian (Self-Healing) to the Orchestrator
@@ -173,6 +184,11 @@ class FrameworkManager:
             self.rag_manager = RAGManager(self)
         return self.rag_manager
 
+    def resolve_path(self, value) -> Path:
+        """A configured path; relative ones are relative to the installation path, not the working directory."""
+        path = Path(str(value)).expanduser()
+        return path if path.is_absolute() else Path(self.info.installation_path) / path
+
     def get_component(self, name: str) -> Any:
         """Service Locator für CLI/GUI Zugriff."""
         if not self._initialized:
@@ -189,6 +205,8 @@ class FrameworkManager:
             "deployment_manager": self.deployment_manager,
             "community_manager": self.community_manager,
             "orchestrator": self.orchestrator,
+            "build_service": self.build_service,
+            "tool_registry": self.tool_registry,
             "docker_client": getattr(getattr(self.docker_manager, "builder", None), "docker_client", None)
         }
         return components.get(name)

@@ -538,6 +538,20 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         }
         priority_level = priority_mapping[priority]
         
+        # Validate against the target's declared capabilities and fill its defaults.
+        tm = getattr(ctx.framework_manager, "target_manager", None)
+        caps = tm.get_capabilities(target) if tm else None
+        if caps:
+            cap = caps.formats.get(format)
+            if cap and not board and len(caps.boards_for(format)) == 1:
+                board = caps.boards_for(format)[0]
+            problems = caps.check_request(format, board, quantization, dataset=bool(dataset), imatrix=imatrix)
+            if problems:
+                for problem in problems:
+                    console.print(f"[red]{problem}[/red]")
+                sys.exit(2)
+            quantization = cap.canonical(quantization) or quantization or cap.default_for(board)
+
         if not output_dir:
             output_dir = str(Path(ctx.config["output_dir"]) / f"build_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
         
@@ -730,6 +744,119 @@ def list_secrets(ctx: FrameworkContext):
 # ============================================================================
 # DEPLOYMENT COMMANDS (NEU V2.0)
 # ============================================================================
+
+# ============================================================================
+# TOOLS & PERMISSIONS (shared by Ditto and the MCP server)
+# ============================================================================
+
+@cli.group()
+def tools():
+    """Framework tools, their permissions and the audit log"""
+    pass
+
+
+def _tool_registry(ctx: FrameworkContext):
+    ctx.require_framework()
+    registry = getattr(ctx.framework_manager, "tool_registry", None)
+    if registry is None:
+        console.print("[red]Tool registry not available.[/red]")
+        sys.exit(1)
+    return registry
+
+
+@tools.command('list')
+@pass_context
+def tools_list(ctx: FrameworkContext):
+    """List the tools and what your permissions allow"""
+    registry = _tool_registry(ctx)
+    policy = registry.policy()
+    table = Table(title="Framework tools" + ("" if policy.configured else " (permissions not set up yet)"))
+    table.add_column("Tool", style="cyan")
+    table.add_column("Tier")
+    table.add_column("Permission")
+    table.add_column("Description")
+    for spec in registry.list():
+        table.add_row(spec.name, spec.tier.value, policy.decide(spec.name, spec.tier).value, spec.description)
+    console.print(table)
+
+
+def _ask_tool_policy(registry, current):
+    """Interactive questions for the tool permissions (one per tier)."""
+    from orchestrator.tools.policy import Decision, TIER_LABELS, ToolPolicy, ToolTier
+    tiers = {}
+    for tier, label in TIER_LABELS.items():
+        choices = ["ask", "deny"] if tier == ToolTier.EXTERNAL else ["allow", "ask", "deny"]
+        default = current.tiers.get(tier, Decision.ASK).value
+        default = default if default in choices else "ask"
+        answer = click.prompt(f"{label}", type=click.Choice(choices), default=default)
+        tiers[tier] = Decision(answer)
+    return ToolPolicy(configured=True, tiers=tiers, overrides=dict(current.overrides))
+
+
+@tools.command('permissions')
+@click.option('--reset', is_flag=True, help='Back to the recommended defaults (asks again at the next setup)')
+@pass_context
+def tools_permissions(ctx: FrameworkContext, reset: bool):
+    """Set which tool calls are allowed, need confirmation, or are denied"""
+    from orchestrator.tools.policy import ToolPolicy
+    registry = _tool_registry(ctx)
+    if reset:
+        registry.policy_store.save(ToolPolicy())
+        console.print("[yellow]Tool permissions reset to the recommended defaults.[/yellow]")
+        return
+    policy = registry.policy_store.save(_ask_tool_policy(registry, registry.policy()))
+    console.print(f"[green]Saved to {registry.policy_store.path}[/green]")
+    for tier, decision in policy.tiers.items():
+        console.print(f"  {tier.value}: {decision.value}")
+
+
+@tools.command('audit')
+@click.option('--limit', default=30, show_default=True, help='Number of entries')
+@click.option('--verify', is_flag=True, help='Check that no entry was changed or removed')
+@pass_context
+def tools_audit(ctx: FrameworkContext, limit: int, verify: bool):
+    """Show the audit log of tool calls"""
+    registry = _tool_registry(ctx)
+    if registry.audit is None:
+        console.print("[red]No audit log.[/red]")
+        sys.exit(1)
+    if verify:
+        broken = registry.audit.verify()
+        if broken is None:
+            console.print("[green]Audit log intact.[/green]")
+        else:
+            console.print(f"[red]Audit log was modified at entry {broken}.[/red]")
+            sys.exit(1)
+        return
+    table = Table(title="Tool calls")
+    for column in ("Time", "Actor", "Tool", "Decision", "Outcome"):
+        table.add_column(column)
+    for entry in registry.audit.entries(limit):
+        table.add_row(entry["ts"], entry["actor"], entry["tool"], entry["decision"], entry["outcome"])
+    console.print(table)
+
+
+@cli.group()
+def ditto():
+    """Ditto, the AI assistant"""
+    pass
+
+
+@ditto.command('setup')
+@pass_context
+def ditto_setup(ctx: FrameworkContext):
+    """First-time setup: tool permissions (asked once, used by Ditto and the MCP server)"""
+    registry = _tool_registry(ctx)
+    console.print(Panel(
+        "Ditto and connected AI clients (MCP) use the framework through tools.\n"
+        "Decide once what they may do on their own, what needs your confirmation, and what is never allowed.\n"
+        "Tools that reach other devices or delete data always ask unless you allow them one by one.",
+        title="Ditto setup - tool permissions"))
+    policy = registry.policy_store.save(_ask_tool_policy(registry, registry.policy()))
+    console.print(f"[green]Permissions saved ({registry.policy_store.path}).[/green]")
+    console.print("Change them later with: llm-cli tools permissions")
+    return policy
+
 
 @cli.group()
 def deploy():

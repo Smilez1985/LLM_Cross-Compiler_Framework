@@ -113,6 +113,7 @@ class WorkflowState:
     warnings: List[str] = field(default_factory=list)
     healing_proposal: Optional[Any] = None
     healing_decision: Optional[bool] = None
+    build_ids: List[str] = field(default_factory=list)
 
     @property
     def progress_percent(self) -> int:
@@ -142,7 +143,8 @@ class LLMOrchestrator:
         
         # Sub-Engines (the framework passes its shared engine, which knows the secrets store)
         self.build_engine = build_engine or BuildEngine(config_manager)
-        self.module_generator = ModuleGenerator(Path(config_manager.targets_dir))
+        self.module_generator = ModuleGenerator(Path(getattr(self.build_engine, "targets_dir", None)
+                                                     or config_manager.targets_dir))
         
         # State Management
         self._workflows: Dict[str, WorkflowState] = {}
@@ -157,6 +159,8 @@ class LLMOrchestrator:
         # Pending healing approvals (request_id -> event set by resolve_healing from the GUI/CLI thread)
         self._healing_events: Dict[str, asyncio.Event] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        # Strong references: the event loop keeps only weak references to tasks.
+        self._worker_tasks: set = set()
 
     async def initialize(self) -> bool:
         """Asynchrone Initialisierung"""
@@ -201,13 +205,25 @@ class LLMOrchestrator:
         return list(self._workflows.values())
 
     async def cancel_request(self, request_id: str) -> bool:
-        """Bricht einen laufenden Request ab"""
-        if request_id in self._active_tasks:
-            self._active_tasks[request_id].cancel()
-            if request_id in self._workflows:
-                self._workflows[request_id].status = OrchestrationStatus.CANCELLED
-            return True
-        return False
+        """Cancels a request: stops its running build container and the pipeline task."""
+        state = self._workflows.get(request_id)
+        task = self._active_tasks.get(request_id)
+        if state is None or (task is None and state.status in (OrchestrationStatus.COMPLETED,
+                                                               OrchestrationStatus.ERROR,
+                                                               OrchestrationStatus.CANCELLED)):
+            return False
+        # Mark first, so the pipeline does not treat the stopped build as a failure to heal.
+        state.status = OrchestrationStatus.CANCELLED
+        loop = asyncio.get_running_loop()
+        for build_id in list(state.build_ids):
+            await loop.run_in_executor(None, self.build_engine.cancel_build, build_id)
+        event = self._healing_events.get(request_id)
+        if event is not None:
+            event.set()  # a pending approval counts as dismissed
+        if task is not None:
+            task.cancel()  # a queued request (no task yet) is skipped by the worker
+        state.end_time = state.end_time or datetime.now()
+        return True
 
     # --- DEPENDENCY INJECTION ---
 
@@ -224,13 +240,18 @@ class LLMOrchestrator:
     # --- INTERNAL WORKER ---
 
     def _ensure_worker_running(self):
-        # Einfache Implementierung: Fire & Forget Task pro Request in _process_queue
-        asyncio.create_task(self._process_next_item())
+        task = asyncio.create_task(self._process_next_item())
+        self._worker_tasks.add(task)
+        task.add_done_callback(self._worker_tasks.discard)
 
     async def _process_next_item(self):
         if self._queue.empty(): return
         
         _, _, request = await self._queue.get()
+        state = self._workflows.get(request.request_id)
+        if state is not None and state.status == OrchestrationStatus.CANCELLED:
+            self._ensure_worker_running()  # cancelled while queued: go on with the next request
+            return
         
         # Task erstellen und tracken
         task = asyncio.create_task(self._run_build_pipeline(request))
@@ -273,7 +294,8 @@ class LLMOrchestrator:
             max_context_length=req.max_context_length,
             # Pass IMatrix Config
             use_imatrix=req.use_imatrix,
-            dataset_path=req.dataset_path
+            dataset_path=req.dataset_path,
+            build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
         )
 
     async def _run_job(self, job: "BuildJob", req: BuildRequest) -> bool:
@@ -282,6 +304,9 @@ class LLMOrchestrator:
         try:
             build_config = self._map_job_to_config(job, req)
             returned_id = await loop.run_in_executor(None, self.build_engine.build_model, build_config)
+            state = self._workflows.get(req.request_id)
+            if state is not None:
+                state.build_ids.append(returned_id)
             while True:
                 status = self.build_engine.get_build_status(returned_id)
                 if not status:
@@ -289,7 +314,10 @@ class LLMOrchestrator:
                     return False
                 if status.status == BuildStatus.COMPLETED:
                     return True
-                if status.status in [BuildStatus.FAILED, BuildStatus.CANCELLED]:
+                if status.status == BuildStatus.CANCELLED:
+                    job.error_log = "Cancelled by the user."
+                    return False
+                if status.status == BuildStatus.FAILED:
                     job.error_log = "\n".join(status.errors)
                     return False
                 await asyncio.sleep(1)
@@ -317,6 +345,8 @@ class LLMOrchestrator:
         # The analysis may call an LLM; keep the event loop free meanwhile.
         proposal = await loop.run_in_executor(None, self.self_healing.analyze_error,
                                               job.error_log or "Unknown Error", context)
+        if state.status == OrchestrationStatus.CANCELLED:
+            return False
         if not proposal:
             self.logger.error("Self-Healing found no solution.")
             state.status = OrchestrationStatus.BUILDING
@@ -337,6 +367,8 @@ class LLMOrchestrator:
 
         approved = bool(state.healing_decision)
         state.healing_proposal = None
+        if state.status == OrchestrationStatus.CANCELLED:
+            return False
         state.status = OrchestrationStatus.BUILDING
         if not approved:
             return False
@@ -419,7 +451,8 @@ class LLMOrchestrator:
         for model in req.models:
             for target in req.targets:
                 # Validierung Target
-                if not (Path(self.config.targets_dir) / target).exists():
+                targets_dir = Path(getattr(self.build_engine, "targets_dir", None) or self.config.targets_dir)
+                if not (targets_dir / target).exists():
                     state.warnings.append(f"Target '{target}' not found. Skipping.")
                     continue
                 
@@ -431,7 +464,10 @@ class LLMOrchestrator:
                     for q in quants:
                         job_id = f"{req.request_id}_{len(build_jobs)+1:03d}"
                         
-                        out_dir = Path(req.output_base_dir) / target / model.split("/")[-1]
+                        base = Path(req.output_base_dir)
+                        if not base.is_absolute() and getattr(self.build_engine, "base_dir", None):
+                            base = Path(self.build_engine.base_dir) / base
+                        out_dir = base / target / model.split("/")[-1]
                         if q: out_dir = out_dir / q
                         
                         job = BuildJob(
@@ -455,10 +491,14 @@ class LLMOrchestrator:
         for job in build_jobs:
             state.current_stage = f"Building {job.source_model} for {job.target_architecture}"
             success = await self._run_job(job, req)
+            if state.status == OrchestrationStatus.CANCELLED:
+                return
 
             # --- SELF-HEALING: diagnose, ask the user, apply an approved fix, retry once ---
             if not success and self.self_healing:
                 success = await self._heal_and_retry(state, job, req)
+                if state.status == OrchestrationStatus.CANCELLED:
+                    return
 
             if success:
                 state.completed_builds += 1
