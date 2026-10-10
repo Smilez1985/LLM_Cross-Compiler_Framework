@@ -15,6 +15,7 @@ Updates v2.3.0:
 
 import html
 import json
+import os
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QTextBrowser, QLineEdit, 
@@ -66,6 +67,7 @@ class ChatWindow(QWidget):
         history_dir = getattr(config, "user_state_dir", None) or Path.home() / ".llm-framework"
         Path(history_dir).mkdir(parents=True, exist_ok=True)
         self.history_file = Path(history_dir) / "chat_history.json"
+        self._migrate_legacy_history(config)
         self._pending_question = None
         
         self._init_ui()
@@ -122,6 +124,17 @@ class ChatWindow(QWidget):
         input_layout.addWidget(self.txt_input)
         input_layout.addWidget(self.btn_send)
         layout.addLayout(input_layout)
+
+    def _migrate_legacy_history(self, config):
+        """Moves the history from the old cache/ location (CWD-relative, not git-ignored) once."""
+        get_cfg = getattr(config, 'get', lambda k, d=None: getattr(config, k, d))
+        legacy = Path(str(get_cfg("cache_dir", "cache"))) / "chat_history.json"
+        try:
+            if legacy.is_file() and not self.history_file.exists():
+                legacy.replace(self.history_file)
+                os.chmod(self.history_file, 0o600)
+        except OSError:
+            pass
 
     def _add_message(self, text, is_user=False):
         color = "#aaffaa" if is_user else "#80d4ff"
@@ -218,15 +231,13 @@ class ChatWindow(QWidget):
                         self.history = [] # Reset RAM history first
                         self.txt_display.clear()
                         for msg in data:
-                            if not isinstance(msg, dict) or msg.get("role") not in ("user", "assistant"):
+                            if (not isinstance(msg, dict) or msg.get("role") not in ("user", "assistant")
+                                    or not isinstance(msg.get("content"), str)):
                                 continue
-                            content = str(msg.get("content", ""))
-                            role = msg["role"]
-                            is_user = (role == "user")
-                            
-                            self._add_message(content, is_user)
-                            # Re-populate internal list
-                            self.history.append(msg)
+                            role, content = msg["role"], msg["content"]
+                            self._add_message(content, role == "user")
+                            # Only the two known keys go back to the model.
+                            self.history.append({"role": role, "content": content})
             except Exception as e:
                 print(f"Warning: Corrupt chat history: {e}")
 

@@ -123,6 +123,48 @@ class TestSecretsAndCalibration:
         with pytest.raises(ValueError):
             engine._dataset_mount(make_config(dataset_path=str(tmp_path / "missing.txt")))
 
+    def test_dataset_inside_the_model_folder_reuses_its_mount(self, engine, tmp_path):
+        # Usual RKNN layout: model, sample list and images in one folder. A second bind of the same
+        # host folder would replace the model mount (docker-py keys binds by host path).
+        folder = tmp_path / "yolo"
+        folder.mkdir()
+        (folder / "yolov5s.onnx").write_bytes(b"onnx")
+        (folder / "dataset.txt").write_text("img1.jpg\n")
+        config = make_config(target_format=ModelFormat.RKNN, quantization="i8",
+                             model_source=str(folder / "yolov5s.onnx"), dataset_path=str(folder / "dataset.txt"))
+        _, staged = engine._stage_model(config, BuildProgress("b1", BuildStatus.QUEUED, ""))
+        vols, inner = engine._dataset_mount(config, staged)
+        assert vols == {} and inner == "/build-cache/input-model/dataset.txt"
+
+    def test_json_dataset_keeps_its_suffix(self, engine, tmp_path):
+        ds = tmp_path / "calib.json"
+        ds.write_text("[]")
+        _, inner = engine._dataset_mount(make_config(target_format=ModelFormat.RKLLM, dataset_path=str(ds)))
+        assert inner == "/build-cache/dataset.json"
+
+    @pytest.mark.parametrize("fmt, quant, imatrix, kept", [
+        (ModelFormat.GGUF, "Q4_K_M", False, False),
+        (ModelFormat.GGUF, "IQ2_XS", True, True),
+        (ModelFormat.RKNN, "fp16", False, False),
+        (ModelFormat.RKNN, "i8", False, True),
+        (ModelFormat.RKLLM, "w8a8", False, True),
+    ])
+    def test_dataset_is_kept_only_where_it_is_used(self, engine, tmp_path, fmt, quant, imatrix, kept):
+        ds = tmp_path / "calib.txt"
+        ds.write_text("text")
+        config = make_config(target_format=fmt, quantization=quant, use_imatrix=imatrix, dataset_path=str(ds))
+        engine._resolve_dataset(config, BuildProgress("b1", BuildStatus.QUEUED, ""))
+        assert (config.dataset_path is not None) == kept
+
+    def test_missing_dataset_fails_only_builds_that_need_it(self, engine, tmp_path):
+        progress = BuildProgress("b1", BuildStatus.QUEUED, "")
+        config = make_config(target_format=ModelFormat.RKLLM, dataset_path=str(tmp_path / "gone.txt"))
+        engine._resolve_dataset(config, progress)
+        assert config.dataset_path is None and progress.warnings
+        with pytest.raises(ValueError, match="RKNN"):
+            engine._resolve_dataset(make_config(target_format=ModelFormat.RKNN, quantization="i8",
+                                                dataset_path=str(tmp_path / "gone.txt")), progress)
+
     def test_imatrix_runs_only_for_gguf(self, engine, tmp_path, monkeypatch):
         ds = tmp_path / "calib.txt"
         ds.write_text("text")
@@ -150,9 +192,28 @@ class TestBuildManifest:
         (out / "m-Q4_K_M.gguf").write_bytes(b"weights")
         (out / "build_info.json").write_text('{"model": "m", "llama_cpp": "v0.6.0"}')
         info = engine._write_build_manifest(make_config(), out)
-        assert info["primary"] == "m-Q4_K_M.gguf"
+        assert info["primary"] == "m-Q4_K_M.gguf" and info["multi_file"] is False
         assert info["llama_cpp"] == "v0.6.0", "container fields are kept"
         assert info["artifacts"][0]["sha256"] == __import__("hashlib").sha256(b"weights").hexdigest()
+
+
+    def test_manifest_lists_only_this_builds_files(self, engine, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        old = out / "Qwen-rk3588-w8a8.rkllm"
+        old.write_bytes(b"x" * 100)  # an earlier build for another board, larger
+        new = out / "Qwen-rk3576-w8a8.rkllm"
+        new.write_bytes(b"x" * 10)
+        (out / "Qwen-F16.gguf").write_bytes(b"x" * 1000)
+        info = engine._write_build_manifest(make_config(target_format=ModelFormat.RKLLM), out, [str(new)])
+        assert info["primary"] == new.name and [a["file"] for a in info["artifacts"]] == [new.name]
+
+    def test_target_format_is_preferred_as_primary(self, engine, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "m.rkllm").write_bytes(b"x")
+        (out / "m-F16.gguf").write_bytes(b"x" * 100)
+        assert engine._write_build_manifest(make_config(target_format=ModelFormat.RKLLM), out)["primary"] == "m.rkllm"
 
 
 class TestBuildStatus:
@@ -237,6 +298,20 @@ class TestOrchestration:
         state = self.run(orchestrator, self.make_request(tmp_path, use_imatrix=True))
         assert orchestrator.build_engine.configs[0].use_imatrix is False
         assert any("GGUF only" in w for w in state.warnings)
+
+    def test_ditto_filler_reaches_only_gguf_jobs(self, orchestrator, tmp_path):
+        class Ditto:
+            def prepare_calibration_dataset(self, path):
+                path.write_text("filler")
+                return True
+
+        orchestrator.ditto = Ditto()
+        orchestrator.config.set("cache_dir", str(tmp_path / "cache"))
+        self.run(orchestrator, self.make_request(tmp_path, use_imatrix=True, quantization_options=[],
+                                                 target_formats=[ModelFormat.GGUF, ModelFormat.RKLLM]))
+        gguf, rkllm = orchestrator.build_engine.configs
+        assert gguf.use_imatrix and gguf.dataset_path
+        assert not rkllm.use_imatrix and rkllm.dataset_path is None
 
     def test_user_calibration_dataset_is_not_replaced(self, orchestrator, tmp_path):
         dataset = tmp_path / "calib.txt"

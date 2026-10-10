@@ -299,7 +299,7 @@ class MainOrchestrator(QMainWindow):
         if not self.framework.orchestrator.resolve_healing(request_id, approved):
             self.status.showMessage("The healing proposal is no longer pending.", 5000)
         elif approved:
-            self.status.showMessage("✅ Fix approved; the build is retried.", 5000)
+            self.status.showMessage("✅ Fix approved; applying it.", 5000)
 
     def _show_about(self):
         ver = self.framework.info.version if hasattr(self.framework, 'info') else "Unknown"

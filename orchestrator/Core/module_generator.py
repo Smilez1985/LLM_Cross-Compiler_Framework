@@ -39,13 +39,16 @@ IMAGE_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(?::[\w][\w.-]{0,127})?(?:@sha256:
 TRUSTED_IMAGE_PREFIXES = ("debian:", "ubuntu:", "nvidia/cuda:", "rocm/dev-ubuntu-", "rocm/rocm-terminal:", "python:")
 DETECTION_RE = re.compile(r"^[\w ./=-]{0,200}$")
 SHELL_DENY_PATTERNS = [
-    (re.compile(r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b"), "pipes a download into a shell"),
+    # Generated build code must not fetch anything: downloads belong in a reviewed Dockerfile, and build
+    # containers will run without network. This also covers every download-and-execute variant.
+    (re.compile(r"\b(?:curl|wget|aria2c|fetch)\b"), "downloads at build time"),
     (re.compile(r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(?:--no-preserve-root\s+)?/(?:\s|$|\*)"), "deletes the root filesystem"),
     (re.compile(r"\bchmod\s+(?:-R\s+)?0?777\b"), "makes files world-writable"),
     (re.compile(r"\bsudo\b"), "uses sudo"),
     (re.compile(r"\b(?:mkfs(?:\.\w+)?|dd\s+if=)"), "writes raw devices"),
     (re.compile(r"/var/run/docker\.sock|\bdocker\s+run\b"), "controls the Docker host"),
-    (re.compile(r"(?:^|[;&|]\s*)\s*(?:eval|source)\s+[\"']?\$\("), "evaluates generated code"),
+    (re.compile(r"(?:^|[;&|]\s*)\s*(?:eval|source|\.)\s+[\"']?\$\(", re.MULTILINE), "evaluates generated code"),
+    (re.compile(r"\b(?:ba|z|da)?sh\s+-c\s+[\"']?\$\(|<\(\s*\S"), "runs generated code"),
 ]
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 
@@ -61,7 +64,7 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(data)
 
     name = str(data.get("module_name", "")).strip()
-    if not MODULE_NAME_RE.match(name):
+    if not MODULE_NAME_RE.fullmatch(name):
         problems.append("module_name: letters, digits, space, '_', '.', '-' only (max 64), starting with a letter or digit")
     elif not module_slug(name) or module_slug(name).startswith("_"):
         problems.append("module_name: does not give a usable folder name")
@@ -73,12 +76,12 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
     out["architecture"] = arch
 
     sdk = str(data.get("sdk", "none") or "none").strip()
-    if not SDK_RE.match(sdk):
+    if not SDK_RE.fullmatch(sdk):
         problems.append("sdk: short plain name expected")
     out["sdk"] = sdk
 
     base_os = str(data.get("base_os", "debian:bookworm-slim") or "debian:bookworm-slim").strip()
-    if not IMAGE_RE.match(base_os):
+    if not IMAGE_RE.fullmatch(base_os):
         problems.append("base_os: not a valid image reference")
     elif "@sha256:" not in base_os and not base_os.startswith(TRUSTED_IMAGE_PREFIXES):
         problems.append(f"base_os: '{base_os}' must be pinned by digest (image@sha256:...) unless it is an official base image")
@@ -87,8 +90,8 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
     packages = data.get("packages", [])
     if isinstance(packages, str):
         packages = packages.split()
-    packages = [str(p) for p in packages]
-    bad = [p for p in packages if not DEB_PACKAGE_RE.match(p)]
+    packages = [str(p).strip() for p in packages if str(p).strip()]
+    bad = [p for p in packages if not DEB_PACKAGE_RE.fullmatch(p)]
     if bad:
         problems.append(f"packages: invalid Debian package names: {', '.join(bad[:5])}")
     out["packages"] = packages
@@ -98,13 +101,13 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
         if isinstance(value, (list, tuple)):
             value = " ".join(str(v) for v in value)
         tokens = str(value).split()
-        bad = [t for t in tokens if not FLAG_RE.match(t)]
+        bad = [t for t in tokens if not FLAG_RE.fullmatch(t)]
         if bad:
             problems.append(f"{key}: only plain compiler/CMake options like -mcpu=cortex-a76 or -DGGML_CUDA=ON: {', '.join(bad[:5])}")
         out[key] = " ".join(tokens)
 
     detection = str(data.get("detection_commands", "lscpu") or "lscpu")
-    if not DETECTION_RE.match(detection):
+    if not DETECTION_RE.fullmatch(detection):
         problems.append("detection_commands: a single simple command line expected")
     out["detection_commands"] = detection
 
@@ -231,6 +234,9 @@ class ModuleGenerator:
             
         except Exception as e:
             self.logger.error(f"Failed to generate module: {e}")
+            # The folder did not exist before (checked above): remove the half-written target so it
+            # neither shows up as a buildable target nor blocks a corrected retry.
+            shutil.rmtree(target_dir, ignore_errors=True)
             raise e
 
     def _check_shell_syntax(self, target_dir: Path):

@@ -413,6 +413,7 @@ class BuildEngine:
         
         try:
             prog.status = BuildStatus.PREPARING
+            self._resolve_dataset(config, prog)
             
             # 1. Resolve Target Path
             target_path = self.targets_dir / config.target_arch
@@ -694,18 +695,52 @@ class BuildEngine:
             env["PUID"], env["PGID"] = str(os.getuid()), str(os.getgid())
         return env
 
-    def _dataset_mount(self, config: BuildConfiguration) -> Tuple[Dict[str, Dict[str, str]], Optional[str]]:
+    RKNN_DATASET_QUANTS = ("i8", "int8", "q8", "q8_0")
+
+    def _resolve_dataset(self, config: BuildConfiguration, progress: BuildProgress):
+        """Checks the calibration dataset once. It is kept only where the build uses it (GGUF with an
+        importance matrix, RKLLM, RKNN i8); a missing file fails only builds that need it."""
+        if not config.dataset_path:
+            return
+        fmt = config.target_format
+        quant = (config.quantization or "").lower()
+        used = ((fmt == ModelFormat.GGUF and config.use_imatrix) or fmt == ModelFormat.RKLLM
+                or (fmt == ModelFormat.RKNN and quant in self.RKNN_DATASET_QUANTS))
+        path = Path(config.dataset_path).expanduser()
+        if not used:
+            progress.add_log(f"Calibration dataset not used by {fmt.value} {config.quantization or ''}; ignored.")
+            config.dataset_path = None
+        elif not path.is_file():
+            if fmt == ModelFormat.RKNN:
+                raise ValueError(f"Calibration dataset '{config.dataset_path}' not found (needed for RKNN {quant}).")
+            progress.add_warning(f"Calibration dataset '{config.dataset_path}' not found; continuing without it.")
+            config.dataset_path = None
+        else:
+            config.dataset_path = str(path.resolve())
+
+    def _dataset_mount(self, config: BuildConfiguration,
+                       staged_volumes: Optional[Dict[str, Dict[str, str]]] = None) -> Tuple[Dict[str, Dict[str, str]], Optional[str]]:
         """Volumes and in-container path for the calibration dataset (none if no dataset is set).
-        Text datasets (GGUF imatrix, RKLLM) are mounted as one file. An RKNN dataset lists sample files
-        relative to its own directory, so that directory is mounted read-only."""
+        Text datasets keep their suffix (RKLLM reads .json as a JSON dataset). An RKNN dataset lists sample
+        files relative to its own directory, so that directory is needed. A dataset inside an already
+        mounted folder (often the model folder) is reached through that mount: docker-py keys binds by
+        host path, so a second bind of the same folder would replace the first."""
         if not config.dataset_path:
             return {}, None
         path = Path(config.dataset_path).expanduser().resolve()
         if not path.is_file():
             raise ValueError(f"Calibration dataset '{config.dataset_path}' not found.")
+        for host, bind in (staged_volumes or {}).items():
+            try:
+                rel = path.relative_to(Path(host).resolve())
+            except ValueError:
+                continue
+            return {}, f"{bind['bind'].rstrip('/')}/{rel.as_posix()}"
         if config.target_format == ModelFormat.RKNN:
             return {str(path.parent): {"bind": "/build-cache/dataset", "mode": "ro"}}, f"/build-cache/dataset/{path.name}"
-        return {str(path): {"bind": "/build-cache/dataset.txt", "mode": "ro"}}, "/build-cache/dataset.txt"
+        suffix = path.suffix.lower() if path.suffix.lower() in (".txt", ".json") else ".txt"
+        inner = f"/build-cache/dataset{suffix}"
+        return {str(path): {"bind": inner, "mode": "ro"}}, inner
 
     def _generate_imatrix(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
                           staged: Tuple[str, Dict[str, Dict[str, str]]]):
@@ -725,7 +760,7 @@ class BuildEngine:
             str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
             str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "rw"},
         }
-        dataset_vols, dataset_inner = self._dataset_mount(config)
+        dataset_vols, dataset_inner = self._dataset_mount(config, staged[1])
         vols.update(dataset_vols)
         vols.update(staged[1])
         
@@ -803,7 +838,7 @@ class BuildEngine:
                     env[f"{k.split('.')[-1].upper()}_REPO_OVERRIDE"] = v['url']
 
         # Calibration dataset (RKLLM calibration text, RKNN INT8 sample list; GGUF uses it via the imatrix)
-        dataset_vols, dataset_inner = self._dataset_mount(config)
+        dataset_vols, dataset_inner = self._dataset_mount(config, staged[1])
         if dataset_inner:
             vols.update(dataset_vols)
             env["DATASET_PATH"] = dataset_inner
@@ -863,9 +898,12 @@ class BuildEngine:
                 sha256.update(chunk)
         return sha256.hexdigest()
 
-    def _write_build_manifest(self, config: BuildConfiguration, output_dir: Path) -> Dict[str, Any]:
+    def _write_build_manifest(self, config: BuildConfiguration, output_dir: Path,
+                              produced: Optional[List[str]] = None) -> Dict[str, Any]:
         """Completes build_info.json (written by the container) with the artifact list and hashes.
-        Deployment finds builds through this manifest and installs its primary model file."""
+        Deployment finds builds through this manifest and installs its primary model file.
+        `produced`: the files this build extracted; older files in the same folder (e.g. a build for
+        another board) are not listed."""
         manifest_path = output_dir / BUILD_MANIFEST
         info: Dict[str, Any] = {}
         if manifest_path.is_file():
@@ -874,11 +912,17 @@ class BuildEngine:
                 info = loaded if isinstance(loaded, dict) else {}
             except (OSError, ValueError):
                 info = {}
+        own = {Path(p).resolve() for p in produced} if produced is not None else None
         artifacts = [
             {"file": f.name, "bytes": f.stat().st_size, "sha256": self._sha256_file(f)}
             for f in sorted(output_dir.iterdir())
-            if f.is_file() and f.name.lower().endswith(MODEL_FILE_SUFFIXES)
+            if f.is_file() and f.name.lower().endswith(MODEL_FILE_SUFFIXES) and (own is None or f.resolve() in own)
         ]
+        target_ext = f".{config.target_format.value}"
+        preferred = [a for a in artifacts if a["file"].lower().endswith(target_ext)] or artifacts
+        primary = max(preferred, key=lambda a: a["bytes"])["file"] if preferred else None
+        # Several weight files or bare safetensors/bin weights need their sidecar files (config, tokenizer).
+        multi_file = len(preferred) > 1 or bool(primary and primary.lower().endswith((".safetensors", ".bin")))
         info.update({
             "build_id": config.build_id,
             "model_source": config.model_source,
@@ -889,7 +933,8 @@ class BuildEngine:
             "imatrix": bool(config.use_imatrix and config.target_format == ModelFormat.GGUF),
             "created": datetime.now().isoformat(timespec="seconds"),
             "artifacts": artifacts,
-            "primary": max(artifacts, key=lambda a: a["bytes"])["file"] if artifacts else None,
+            "primary": primary,
+            "multi_file": multi_file,
         })
         manifest_path.write_text(json.dumps(info, indent=2), encoding="utf-8")
         return info
@@ -914,7 +959,7 @@ class BuildEngine:
             f"- **Target Architecture:** {config.target_arch}\n"
             f"- **Target Format:** {config.target_format.value.upper()}\n"
             f"- **Quantization:** {config.quantization or 'FP16'}\n"
-            f"- **IMatrix (Smart Calibration):** {'Enabled' if config.use_imatrix else 'Disabled'}\n\n"
+            f"- **IMatrix (Smart Calibration):** {'Enabled' if manifest.get('imatrix') else 'Disabled'}\n\n"
             f"## 🛡️ Security & Integrity\n"
             f"- **Primary Artifact:** {manifest.get('primary') or 'n/a'}\n"
             f"- **Primary Artifact Hash (SHA256):** `{model_hash}`\n"
@@ -938,7 +983,7 @@ class BuildEngine:
         output_dir = Path(config.output_dir)
         
         progress.add_log("Writing build manifest and Model Card...")
-        manifest = self._write_build_manifest(config, output_dir)
+        manifest = self._write_build_manifest(config, output_dir, progress.artifacts)
         if not manifest.get("primary"):
             progress.add_warning("The build produced no model file.")
         self._generate_model_card(config, output_dir, manifest)

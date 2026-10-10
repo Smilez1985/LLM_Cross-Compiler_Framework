@@ -39,6 +39,13 @@ try:
 except ImportError:
     DittoCoder = None
 
+
+def module_name_hint(raw: str) -> str:
+    """A module name the generator accepts, derived from probe data or AI output (e.g. CPU model strings)."""
+    name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(raw or "").strip())
+    name = re.sub(r"_+", "_", name).strip("_.- ")[:64]
+    return name or "Custom_Target"
+
 class WizardSignals(QObject):
     """Signale für Thread-Kommunikation"""
     analysis_finished = Signal(dict)
@@ -359,7 +366,7 @@ class ModuleCreationWizard(QWizard):
                 
                 # Auto-fill
                 if "CPU_MODEL" in data:
-                    self.name_edit.setText(data["CPU_MODEL"].replace(" ", "_"))
+                    self.name_edit.setText(module_name_hint(data["CPU_MODEL"]))
                 if "ARCH" in data:
                     idx = self.arch_combo.findText(data["ARCH"])
                     if idx >= 0: self.arch_combo.setCurrentIndex(idx)
@@ -428,8 +435,9 @@ class ModuleCreationWizard(QWizard):
 
         self.setup_commands = QTextEdit()
         self.setup_commands.setStyleSheet(mono)
-        self.setup_commands.setPlaceholderText("Optional: extra setup commands for the image")
-        layout.addRow("Setup commands:", self.setup_commands)
+        self.setup_commands.setPlaceholderText("Optional: commands build.sh runs before converting "
+                                               "(as the unprivileged build user, without network), e.g. exporting SDK variables")
+        layout.addRow("Build-time setup:", self.setup_commands)
         
         page.setLayout(layout)
         return page
@@ -594,7 +602,7 @@ Setup commands:
                 name_hint = "Intel_NPU"
 
             self.sdk_edit.setText(sdk)
-            self.name_edit.setText(name_hint)
+            self.name_edit.setText(module_name_hint(name_hint))
             
             # 3. Docker Base Image Logic
             if sdk == "CUDA":
@@ -718,7 +726,7 @@ Setup commands:
             return "" if value is None else str(value)
 
         warnings = []
-        if "module_name" in config: self.name_edit.setText(text("module_name"))
+        if "module_name" in config: self.name_edit.setText(module_name_hint(text("module_name")))
         if "architecture" in config:
             arch = text("architecture")
             if self.arch_combo.findText(arch) >= 0:

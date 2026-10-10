@@ -215,4 +215,5 @@ configs/compliance/
 configs/backups/
 configs/environments/
 configs/chat_history.json
+cache/chat_history.json
 configs/known_hosts

@@ -71,6 +71,7 @@ class RAGManager:
     def __init__(self, framework_manager):
         self.logger = get_logger("RAGManager")
         self.framework = framework_manager
+        self.api_key = None  # an OpenAI key Ditto received for this session (not stored)
         
         # Robust Path & Config
         if hasattr(framework_manager, 'info') and hasattr(framework_manager.info, 'installation_path'):
@@ -158,8 +159,8 @@ class RAGManager:
              model = getattr(self.config, "ai_embedding_model", DEFAULT_EMBEDDING_MODEL) if not hasattr(self.config, 'get') else self.config.get("ai_embedding_model", DEFAULT_EMBEDDING_MODEL)
         
         # API key from the keyring, else the user's own environment; never a placeholder that gets sent anyway.
-        api_key = None
-        if self.framework and hasattr(self.framework, 'secrets_manager') and self.framework.secrets_manager:
+        api_key = self.api_key
+        if not api_key and self.framework and hasattr(self.framework, 'secrets_manager') and self.framework.secrets_manager:
             api_key = self.framework.secrets_manager.get_secret("openai_api_key")
         api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not api_key:

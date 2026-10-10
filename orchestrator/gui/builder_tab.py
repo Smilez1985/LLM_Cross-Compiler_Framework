@@ -635,7 +635,7 @@ class BuilderTab(QWidget):
     def _browse_dataset(self):
         """NEW: Browse for custom calibration dataset"""
         path, _ = QFileDialog.getOpenFileName(self, "Select Calibration Dataset", "",
-                                              "Datasets (*.txt *.json *.jsonl);;All Files (*)")
+                                              "Datasets (*.txt *.json);;All Files (*)")
         if path: 
             self.dataset_path = path
             self._log(f"Selected Dataset: {Path(path).name}")
