@@ -91,6 +91,26 @@ make test-container     # Isolierte Tests ausführen
 
 ---
 
+### 4. KI-Clients über MCP (Claude Code, Claude Desktop, VS Code)
+
+Das Framework läuft als [Model-Context-Protocol](https://modelcontextprotocol.io)-Server. Ein KI-Client, den du
+ohnehin nutzt, kann es damit steuern: Targets auflisten, prüfen, was ein Board kann, Builds starten und
+verfolgen, Logs lesen und über Self-Healing-Vorschläge entscheiden. Im Client meldest du dich mit deinem
+eigenen Claude-Konto oder API-Key an; das Framework sieht diese Zugangsdaten nie.
+
+```bash
+llm-cli ditto setup        # einmalig: was KI-Clients selbst dürfen und was deine Bestätigung braucht
+llm-cli mcp config         # zeigt die Befehle/Snippets für Claude Code, Claude Desktop und VS Code
+llm-cli mcp config --write claude-desktop   # oder direkt in Claude Desktop eintragen (mit Backup)
+```
+
+- **Freigaben:** Lesende Tools sind standardmäßig erlaubt; Builds starten oder abbrechen fragt nach deiner
+  Bestätigung (der Client zeigt die Frage), außer du hast es erlaubt. Tools, die andere Geräte erreichen,
+  lassen sich nur einzeln erlauben. Jeder Aufruf landet in einem manipulationssicheren Audit-Log
+  (`llm-cli tools audit`).
+- **Transporte:** stdio (Standard, vom Client gestartet) oder lokales Streamable HTTP
+  (`llm-cli mcp serve --transport http`, nur Loopback, Bearer-Token in `~/.llm-framework/mcp_http_token`).
+
 ## 🤝 Community & Zusammenarbeit
 
 Wir glauben an die Kraft offener Zusammenarbeit.
