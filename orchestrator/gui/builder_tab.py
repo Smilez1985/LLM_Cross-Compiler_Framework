@@ -12,8 +12,6 @@ Updates v2.4.0:
 """
 
 import os
-import re
-import json
 import platform
 import subprocess
 import asyncio
@@ -181,49 +179,29 @@ class SSHProbeWorker(QThread):
 class AIOptimizerWorker(QThread):
     finished = Signal(bool, dict, str)
     
-    def __init__(self, ditto_manager, model_info, target_info, use_rag):
+    def __init__(self, ditto_manager, model_info, target_info, use_rag, options=None, board=None):
         super().__init__()
         self.ditto = ditto_manager
         self.model = model_info
         self.target = target_info
         self.use_rag = use_rag
+        self.board = board
+        # format -> quantization types the target offers (Ditto may only pick from these)
+        self.options = options or dict(QUANT_SUGGESTIONS)
         
     def run(self):
         if not self.ditto:
             self.finished.emit(False, {}, "Ditto Manager not initialized.")
             return
-
+        from orchestrator.Core.ditto_manager import DittoError
         try:
-            # Offer exactly the formats/quantizations the builder can produce.
-            formats = " | ".join(f'"{value}"' for _, value in BUILD_FORMATS)
-            quants = "; ".join(f"{fmt}: {', '.join(qs)}" for fmt, qs in QUANT_SUGGESTIONS.items())
-            prompt = (
-                f"Act as an Embedded Build Engineer. "
-                f"I need the optimal build configuration for Model: '{self.model}' on Hardware Profile: '{self.target}'.\n"
-                f"Constraints: High Performance, Low Latency.\n"
-                f"Analyze the hardware capabilities (NPU, GPU, RAM) if known.\n"
-                f"Quantizations per format: {quants}.\n\n"
-                f"RETURN ONLY A JSON OBJECT:\n"
-                f"{{\n"
-                f'  "format": {formats},\n'
-                f'  "quantization": one of the quantizations listed for that format,\n'
-                f'  "optimization": "BALANCED" | "SPEED" | "SIZE" | "AGGRESSIVE",\n'
-                f'  "explanation": "Short explanation"\n'
-                f"}}"
-            )
-            response_text = self.ditto.ask_ditto(prompt, [])
-            json_match = re.search(r"\{.*\}", response_text, re.DOTALL)
-            if json_match:
-                clean_json = json_match.group(0)
-                config = json.loads(clean_json)
-                if not isinstance(config, dict):
-                    raise ValueError("AI response is not a JSON object")
-                self.finished.emit(True, config, str(config.get("explanation", "Optimization done.")))
-            else:
-                self.finished.emit(False, {}, f"Invalid AI Response (No JSON found)")
-            
+            recommendation = self.ditto.recommend_build_settings(self.model, self.target, self.options,
+                                                                 board=self.board, use_knowledge=self.use_rag)
+            self.finished.emit(True, recommendation.model_dump(), recommendation.explanation)
+        except DittoError as e:
+            self.finished.emit(False, {}, str(e))
         except Exception as e:
-            self.finished.emit(False, {}, f"AI Error: {str(e)}")
+            self.finished.emit(False, {}, f"AI Error: {e}")
 
 # --- WIDGETS ---
 
@@ -699,10 +677,23 @@ class BuilderTab(QWidget):
             ditto, 
             self.model_input.currentText(),
             self.target_combo.currentText(),
-            self.chk_rag.isChecked()
+            self.chk_rag.isChecked(),
+            options=self._optimizer_options(),
+            board=self._selected_board(),
         )
         self.ai_worker.finished.connect(self._on_ai_finished)
         self.ai_worker.start()
+
+    def _optimizer_options(self):
+        """Format -> quantization types the selected target (and board) can build, as offered in the combos."""
+        caps = self._capabilities()
+        if not caps:
+            return {fmt: list(QUANT_SUGGESTIONS.get(fmt, [])) for _, fmt in BUILD_FORMATS}
+        board = self._selected_board()
+        options = {}
+        for fid, cap in caps.formats.items():
+            options[fid] = cap.quantizations_for(board if board in caps.boards_for(fid) else None)
+        return options
 
     def _on_ai_finished(self, success, config, msg):
         self.btn_optimize.setEnabled(True)

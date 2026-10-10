@@ -32,12 +32,6 @@ class DatasetManager:
         self.framework = framework_manager
         self.config = framework_manager.config
 
-    def _get_ditto(self):
-        """Retrieves Ditto for generation."""
-        if hasattr(self.framework, 'ditto_manager') and self.framework.ditto_manager:
-            return self.framework.ditto_manager
-        return None
-
     def _get_docker(self):
         """Retrieves DockerManager for execution."""
         return self.framework.get_component("docker_manager")
@@ -55,13 +49,9 @@ class DatasetManager:
         return None
 
     def generate_synthetic_dataset(self, domain: str, count: int = 50) -> List[str]:
-        """Delegates to Ditto."""
-        ditto = self._get_ditto()
-        if not ditto: raise RuntimeError("AI Agent not available.")
-        
-        # Ditto logic moved to DittoManager.prepare_calibration_dataset in v2.4.0
-        # This method is kept for backwards compatibility or specialized JSON datasets
-        self.logger.warning("generate_synthetic_dataset is deprecated. Use DittoManager directly.")
+        """Deprecated: builds use the shipped calibration text (data/calibration) or the user's own dataset."""
+        self.logger.warning("generate_synthetic_dataset is deprecated: builds use the shipped calibration text "
+                            "or your own dataset.")
         return []
 
     def measure_perplexity(self, model_path: Path, dataset_path: Path, context_length: int = 512) -> float:

@@ -31,7 +31,7 @@ from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
 from rich.markup import escape
-from rich.prompt import Prompt, Confirm
+from rich.prompt import Confirm
 
 from orchestrator.Core.framework import FrameworkManager
 from orchestrator.Core.orchestrator import LLMOrchestrator, BuildRequest, WorkflowType, PriorityLevel, OrchestrationStatus
@@ -40,12 +40,6 @@ from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.Core.deployment_manager import DeploymentManager
 from orchestrator.utils.logging import get_logger, setup_logging
 from orchestrator.utils.validation import ValidationError
-
-# Import DittoCoder optionally
-try:
-    from orchestrator.Core.ditto_manager import DittoCoder
-except ImportError:
-    DittoCoder = None
 
 # ============================================================================
 # DATENKLASSEN
@@ -381,102 +375,79 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
         sys.exit(1)
 
 
+def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional[str]):
+    """Ditto with provider/model chosen for this command only (the saved AI settings stay unchanged)."""
+    fm = ctx.framework_manager
+    ditto = fm.get_component("ditto_manager")
+    if ditto is None:
+        console.print("[red]The AI assistant (Ditto) is not available.[/red]")
+        sys.exit(1)
+    if provider:
+        if ditto.client.catalog.get(provider) is None:
+            console.print(f"[red]Unknown AI provider '{escape(provider)}'. Choose one of: "
+                          f"{escape(', '.join(ditto.client.catalog.ids()))}.[/red]")
+            sys.exit(2)
+        fm.config.set("ai_provider", provider)
+    if model:
+        fm.config.set("ai_model", model)
+    return ditto
+
+
+def _ditto_confirm(spec, inp) -> bool:
+    """Asks before a tool call that needs confirmation; without a terminal the answer is no."""
+    from orchestrator.tools.confirmation import CallTooLong, describe_call
+    try:
+        text = describe_call(spec, inp.model_dump(mode="json"), actor="Ditto")
+    except CallTooLong as e:
+        click.echo(str(e), err=True)
+        return False
+    click.echo(text, err=True)
+    if not sys.stdin.isatty():
+        click.echo("No terminal to confirm in: denied. Allow the tool with 'llm-cli tools permissions'.", err=True)
+        return False
+    return click.confirm("Allow this?", default=False, err=True)
+
+
 @module.command('generate-ai')
 @click.argument('probe_file', type=click.Path(exists=True))
+@click.option('--provider', help='AI provider for this run (e.g. anthropic, openai, ollama); default: AI settings')
+@click.option('--model', help='Model for this run; default: AI settings')
 @pass_context
-def generate_ai(ctx: FrameworkContext, probe_file):
+def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], model: Optional[str]):
     """
     🤖 AI-Powered: Generate module from hardware probe (target_hardware_config.txt).
     """
+    from orchestrator.Core.ditto_manager import DittoError
     ctx.require_framework()
-    if not DittoCoder:
-        console.print("[red]Ditto Manager not available. Install litellm via 'pip install litellm'[/red]")
-        sys.exit(1)
-
-    console.print(Panel(f"[bold cyan]🤖 Ditto AI Hardware Agent[/bold cyan]\nAnalyzing: {probe_file}", title="AI Setup"))
-
-    # 1. Interactive Provider Selection
-    console.print("\n[bold]Select AI Provider:[/bold]")
-    options = [
-        "OpenAI",
-        "Anthropic (Claude)",
-        "Google (Gemini)",
-        "Ollama (Local)",
-        "LocalAI / OpenAI Compatible"
-    ]
-    for i, opt in enumerate(options, 1):
-        console.print(f"{i}. {opt}")
-    
-    choice = Prompt.ask("Choice", choices=[str(i) for i in range(1, len(options)+1)], default="1")
-    choice_idx = int(choice) - 1
-    
-    provider_map = {
-        0: ("OpenAI", "gpt-6.1-sol"),
-        1: ("Anthropic", "claude-sonnet-5-5"),
-        2: ("Google", "gemini-3.8-flash"),
-        3: ("Ollama (Local)", "qwen3.5:4b"),
-        4: ("Custom", "local-model")  # LocalAI / any OpenAI-compatible server
-    }
-    
-    provider, default_model = provider_map[choice_idx]
-    
-    # 2. Model Override
-    model = Prompt.ask(f"Model Name", default=default_model)
-    
-    # 3. Credentials (via SecretsManager if available)
-    api_key = None
-    base_url = None
-    
-    provider_id = provider.split()[0]
-
-    # Try fetching from SecretsManager first
-    if ctx.framework_manager.secrets_manager:
-        key_map = {
-            "OpenAI": "openai_api_key",
-            "Anthropic": "anthropic_api_key",
-            "Google": "gemini_api_key",
-            "Custom": "custom_api_key"
-        }
-        if provider_id in key_map:
-            api_key = ctx.framework_manager.secrets_manager.get_secret(key_map[provider_id])
-    
-    if provider_id in ("Ollama", "Custom"):
-        default_url = "http://localhost:11434" if provider_id == "Ollama" else "http://localhost:8080/v1"
-        base_url = Prompt.ask("Base URL", default=default_url)
-        if provider_id == "Custom" and not api_key:
-            api_key = Prompt.ask("API Key (optional, Enter to skip)", password=True, default="") or None
-    elif not api_key:
-        api_key = Prompt.ask("Enter API Key", password=True)
-
+    ditto = _ai_override(ctx, provider, model)
     try:
-        # 4. Execution
-        coder = DittoCoder(
-            provider=provider,
-            model=model,
-            api_key=api_key,
-            base_url=base_url,
-            config_manager=ctx.framework_manager.config,
-            framework_manager=ctx.framework_manager
-        )
-        
-        with console.status(f"🤖 Asking {provider} to analyze hardware...", spinner="dots"):
-            config = coder.generate_module_content(Path(probe_file))
-            
-        # 5. Confirmation & Save
-        console.print("\n[bold green]AI Analysis Successful![/bold green]")
-        console.print(json.dumps(config, indent=2))
-        
-        if Confirm.ask("Generate module with these settings?"):
-            targets_dir = Path(ctx.config["targets_dir"])
-            mod_name_raw = config.get("module_name", "Unknown_Target")
-            module_name = mod_name_raw.replace(" ", "_")
-            
-            coder.save_module(module_name, config, targets_dir)
-            console.print(f"[bold green]✅ Module '{module_name}' created in {targets_dir}![/bold green]")
-            
-    except Exception as e:
-        console.print(f"[bold red]AI Generation failed: {e}[/bold red]")
+        info = ditto.describe("json")
+    except DittoError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
+    console.print(Panel(f"[bold cyan]🤖 Ditto AI Hardware Agent[/bold cyan]\nAnalyzing: {escape(str(probe_file))}\n"
+                        f"Provider: {escape(info['label'])} / {escape(info['model'])}", title="AI Setup"))
+    try:
+        with console.status("🤖 Analyzing the hardware probe...", spinner="dots"):
+            definition = ditto.generate_module(Path(probe_file))
+    except DittoError as e:
+        console.print(f"[bold red]AI generation failed:[/bold red] {escape(str(e))}")
+        sys.exit(1)
+
+    # The definition is shown in full before anything is written; the module generator checks it again.
+    console.print("\n[bold green]AI analysis finished. Review the proposal:[/bold green]")
+    click.echo(json.dumps(definition.model_dump(), indent=2, ensure_ascii=False))
+    if not Confirm.ask("Generate module with these settings?"):
+        return
+    fm = ctx.framework_manager
+    targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
+    module_name = definition.module_name.replace(" ", "_")
+    try:
+        path = ditto.save_module(definition, targets_dir, module_name=module_name)
+    except ValueError as e:
+        console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(str(e))}")
+        sys.exit(1)
+    console.print(f"[bold green]✅ Module '{escape(module_name)}' created in {escape(str(path))}[/bold green]")
 
 
 # ============================================================================
@@ -1048,6 +1019,34 @@ def ditto_setup(ctx: FrameworkContext):
     console.print(f"[green]Permissions saved ({registry.policy_store.path}).[/green]")
     console.print("Change them later with: llm-cli tools permissions")
     return policy
+
+
+@ditto.command('ask')
+@click.argument('question')
+@click.option('--no-tools', is_flag=True, help='Answer without using the framework tools')
+@click.option('--provider', help='AI provider for this question (e.g. anthropic, openai, ollama); default: AI settings')
+@click.option('--model', help='Model for this question; default: AI settings')
+@pass_context
+def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Optional[str], model: Optional[str]):
+    """Ask Ditto one question. Tools run within your tool permissions; "ask" ones need your confirmation
+    (denied without a terminal). The answer goes to stdout, everything else to stderr."""
+    from orchestrator.Core.ditto_manager import DittoError
+    ctx.require_framework()
+    ditto = _ai_override(ctx, provider, model)
+    err = Console(stderr=True)
+
+    def tool_used(use):
+        if use.ok:
+            err.print(f"[dim]Used tool: {escape(use.title)}[/dim]")
+        else:
+            err.print(f"[yellow]Tool not run: {escape(use.title)} ({escape(use.detail)})[/yellow]")
+
+    try:
+        reply = ditto.chat(question, confirm=_ditto_confirm, use_tools=not no_tools, on_tool=tool_used)
+    except DittoError as e:
+        err.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    click.echo(reply.text)
 
 
 # ============================================================================

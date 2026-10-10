@@ -703,10 +703,10 @@ class TestOfflineMode:
         fm = booted_framework
         fm.config.set("enable_rag_knowledge", True)
         fm.config.set("offline_mode", True)
-        fm.ditto_manager.reinitialize(offline_mode=True)
         rag = fm.ensure_rag_manager()
 
-        assert fm.ditto_manager._get_rag_manager() is rag
+        assert fm.ditto_manager.offline_mode is True
+        assert fm.ditto_manager._rag_manager() is rag
         assert rag.ingest_document("https://docs.example/npu", DOCS["https://docs.example/npu"])
         assert rag.search("run faster on the neural accelerator")[0].source == "https://docs.example/npu"
         assert seen["offline"] is True

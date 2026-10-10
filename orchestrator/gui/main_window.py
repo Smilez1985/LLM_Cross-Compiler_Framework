@@ -269,7 +269,8 @@ class MainOrchestrator(QMainWindow):
         dlg = AIConfigurationDialog(self.framework, self)
         if dlg.exec():
             cfg = dlg.get_config()
-            mode = "Offline" if cfg.get("offline_mode") else f"{cfg.get('provider')} / {cfg.get('model')}"
+            provider = f"{cfg.get('provider_label') or cfg.get('provider')} / {cfg.get('model')}"
+            mode = f"Offline, {provider}" if cfg.get("offline_mode") else provider
             self.status.showMessage(f"AI Agent configured: {mode}", 5000)
 
     def _open_tool_permissions(self, first_run: bool = False):
@@ -321,6 +322,9 @@ class MainOrchestrator(QMainWindow):
         """)
 
     def closeEvent(self, event):
+        chat = getattr(self, "chat_window", None)
+        if chat is not None:
+            chat.confirmation.close()  # a tool call waiting for a confirmation is answered "no"
         if self.framework:
             self.framework.shutdown()
         event.accept()

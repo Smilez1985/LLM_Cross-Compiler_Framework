@@ -1,4 +1,4 @@
-"""Kernel tests: configuration loading/persistence, framework boot, Ditto provider wiring, CLI."""
+"""Kernel tests: configuration loading/persistence, framework boot, Ditto wiring, CLI."""
 
 import json
 import os
@@ -11,7 +11,6 @@ import yaml
 
 from conftest import REPO_ROOT
 from orchestrator.Core.config_manager import ConfigManager
-from orchestrator.Core.ditto_manager import DittoCoder
 
 
 class TestConfigManager:
@@ -152,13 +151,35 @@ class TestFrameworkBoot:
 
     def test_ditto_uses_configured_provider(self, make_framework, tmp_path):
         config_file = tmp_path / "configs" / "config.yml"
-        config_file.write_text("ai_provider: Ollama\nai_model: qwen2.5\nai_base_url: http://localhost:11434\n")
+        config_file.write_text("ai_provider: Ollama\nai_model: qwen2.5\nai_base_url: http://localhost:11434/v1\n")
 
         fm = make_framework(config_file)
 
-        assert fm.ditto_manager.provider == "Ollama"
-        assert fm.ditto_manager.litellm_model == "ollama/qwen2.5"
-        assert fm.ditto_manager.base_url == "http://localhost:11434"
+        info = fm.ditto_manager.describe()
+        assert (info["provider"], info["model"], info["base_url"], info["local"]) == \
+               ("ollama", "qwen2.5", "http://localhost:11434/v1", True)
+        assert fm.ditto_manager._registry() is fm.tool_registry
+
+    def test_settings_changes_reach_ditto_without_a_restart(self, booted_framework):
+        fm = booted_framework
+        fm.config.set("ai_provider", "anthropic")
+        assert fm.ditto_manager.is_configured() is False  # no key stored yet
+        assert fm.secrets_manager.set_secret("anthropic_api_key", "sk-ant-api03-FAKE0123456789abcdefghij")
+        fm.ditto_manager.reload()
+        assert fm.ditto_manager.describe()["provider"] == "anthropic"
+
+    def test_offline_mode_keeps_the_local_knowledge_base(self, booted_framework):
+        # Embeddings are local now; offline mode only forbids downloads (see tests/test_rag.py).
+        fm = booted_framework
+        fm.config.set("enable_rag_knowledge", True)
+        fm.ensure_rag_manager()
+        assert fm.rag_manager._offline() is False
+
+        fm.config.set("offline_mode", True)
+
+        assert fm.ditto_manager.offline_mode is True
+        assert fm.ditto_manager._rag_manager() is fm.rag_manager
+        assert fm.rag_manager._offline() is True
 
     def test_secrets_roundtrip_through_keyring(self, booted_framework):
         sm = booted_framework.secrets_manager
@@ -168,95 +189,6 @@ class TestFrameworkBoot:
 
     def test_nothing_is_written_to_the_real_home(self, booted_framework, tmp_path):
         assert not (tmp_path / "home" / ".llm-framework").exists()
-
-
-class TestDittoProviders:
-
-    @pytest.fixture
-    def ditto(self):
-        return DittoCoder(provider="OpenAI", model="gpt-4o")
-
-    @pytest.mark.parametrize("provider, model, expected", [
-        ("OpenAI", "gpt-4o", "gpt-4o"),
-        ("Anthropic", "claude-sonnet-5-5", "anthropic/claude-sonnet-5-5"),
-        ("Anthropic", "anthropic/claude-sonnet-5-5", "anthropic/claude-sonnet-5-5"),
-        ("Google", "gemini-2.0-flash", "gemini/gemini-2.0-flash"),
-        ("Ollama", "hf.co/org/model", "ollama/hf.co/org/model"),
-        ("Custom", "my-model", "openai/my-model"),
-    ])
-    def test_litellm_model_names(self, ditto, provider, model, expected):
-        assert ditto._format_model_name(provider, model) == expected
-
-    def test_cloud_providers_never_get_a_custom_base_url(self, ditto):
-        ditto.reinitialize(provider="Custom", model="m", base_url="https://proxy.example.com/v1")
-        assert ditto.base_url == "https://proxy.example.com/v1"
-
-        ditto.reinitialize(provider="OpenAI", model="gpt-4o", api_key="sk-x")
-        assert ditto.base_url is None
-
-        assert DittoCoder(provider="Anthropic", model="x", base_url="http://localhost:11434").base_url is None
-
-    def test_switching_provider_and_offline_mode(self, ditto):
-        ditto.reinitialize(provider="Google", model="gemini-2.0-flash")
-        assert ditto.litellm_model == "gemini/gemini-2.0-flash"
-
-        ditto.reinitialize(offline_mode=True)
-        assert ditto.offline_mode is True
-
-        ditto.reinitialize(provider="Ollama", model="llama3.2", base_url="http://localhost:11434", offline_mode=False)
-        assert ditto.litellm_model == "ollama/llama3.2"
-        assert ditto.base_url == "http://localhost:11434"
-
-    def test_completion_receives_endpoint_and_key(self, ditto, monkeypatch):
-        calls = []
-
-        def fake_completion(**kwargs):
-            calls.append(kwargs)
-            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))])
-
-        monkeypatch.setattr("orchestrator.Core.ditto_manager.completion", fake_completion)
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-leak-1234567890")
-
-        ditto.reinitialize(provider="Custom", model="m", base_url="https://proxy.example.com/v1")
-        assert ditto._query_llm([{"role": "user", "content": "hi"}]) == "ok"
-        ditto.reinitialize(provider="Anthropic", model="claude-haiku-5-5", api_key="sk-ant-key-1234567890abcdef")
-        ditto._query_llm([{"role": "user", "content": "hi"}])
-
-        assert calls[0]["api_base"] == "https://proxy.example.com/v1"
-        assert calls[0]["api_key"] == "EMPTY"
-        assert calls[0]["model"] == "openai/m"
-        assert calls[1]["api_base"] is None
-        assert calls[1]["api_key"] == "sk-ant-key-1234567890abcdef"
-
-    def test_legacy_cli_provider_string_keeps_local_endpoint(self, monkeypatch):
-        calls = []
-
-        def fake_completion(**kwargs):
-            calls.append(kwargs)
-            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))])
-
-        monkeypatch.setattr("orchestrator.Core.ditto_manager.completion", fake_completion)
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-openai-must-not-leak-1234567890")
-
-        ditto = DittoCoder(provider="LocalAI / OpenAI Compatible", model="local-model",
-                           api_key="sk-dummy", base_url="http://localhost:8080/v1")
-        ditto._query_llm([{"role": "user", "content": "hi"}])
-
-        assert calls[0]["api_base"] == "http://localhost:8080/v1"
-        assert calls[0]["api_key"] == "EMPTY"
-        assert calls[0]["model"] == "openai/local-model"
-
-    def test_offline_mode_keeps_the_local_knowledge_base(self, booted_framework):
-        # Embeddings are local now; offline mode only forbids downloads (see tests/test_rag.py).
-        fm = booted_framework
-        fm.config.set("enable_rag_knowledge", True)
-        fm.ensure_rag_manager()
-        assert fm.rag_manager._offline() is False
-
-        fm.ditto_manager.reinitialize(offline_mode=True)
-
-        assert fm.ditto_manager._get_rag_manager() is fm.rag_manager
-        assert fm.rag_manager._offline() is True
 
 
 class TestTargets:
@@ -342,11 +274,3 @@ class TestDependencyApiRegressions:
 
         assert path is not None, "download_tiny_model swallowed an exception"
         assert seen["repo_id"] == "Qwen/Qwen3.5-0.8B"
-
-    def test_completion_sends_no_sampling_parameters(self, monkeypatch):
-        calls = []
-        monkeypatch.setattr("orchestrator.Core.ditto_manager.completion",
-                            lambda **kw: calls.append(kw) or SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]))
-        ditto = DittoCoder(provider="Anthropic", model="claude-sonnet-5-5", api_key="sk-ant-test-1234567890abcdef")
-        ditto._query_llm([{"role": "user", "content": "hi"}])
-        assert not {"temperature", "top_p", "top_k"} & set(calls[0])

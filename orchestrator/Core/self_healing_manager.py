@@ -159,39 +159,34 @@ class SelfHealingManager:
         return None
 
     def _analyze_via_ai(self, ditto, log: str, context: str) -> Optional[HealingProposal]:
-        """Delegates to DittoManager."""
+        """Asks Ditto for a validated analysis. AI proposals are always a manual step for the user."""
+        from orchestrator.Core.ditto_manager import DittoError, HealingAnalysis
         try:
-            result = ditto.analyze_error_log(log, context)
-            
-            if not result or "fix_command" not in result:
-                self.logger.info("AI could not determine a confident fix.")
-                return None
-
-            # AI proposals are advice for the user: the framework never runs their command itself.
-            scope = str(result.get("target", "HOST")).upper()
-            try:
-                confidence = float(result.get("confidence", 0.5))
-            except (TypeError, ValueError):
-                confidence = 0.5
-            if confidence > 1:
-                confidence /= 100.0  # some models answer in percent
-            
-            proposal = HealingProposal(
-                summary=str(result.get("summary", "AI Analysis")),
-                root_cause=str(result.get("root_cause", "Analysis failed")),
-                fix_command=str(result.get("fix_command", "")),
-                confidence=min(max(confidence, 0.0), 1.0),
-                strategy=HealingStrategy.MANUAL_INTERVENTION,
-                target_scope=scope if scope in ("HOST", "DEVICE") else "HOST",
-                is_ai_generated=True
-            )
-            
-            self.logger.info(f"AI Healing Proposal: {proposal.summary} (Conf: {proposal.confidence})")
-            return proposal
-
-        except Exception as e:
+            analysis = ditto.analyze_error_log(log, context)
+            if not isinstance(analysis, HealingAnalysis):
+                analysis = HealingAnalysis.model_validate(analysis)  # e.g. a plain dict from another caller
+        except DittoError as e:
+            self.logger.warning(f"AI analysis unavailable: {e}")
+            return None
+        except Exception as e:  # an invalid answer is never turned into a proposal
             self.logger.error(f"AI analysis failed: {e}")
             return None
+
+        if not analysis.fix_command.strip():
+            self.logger.info("AI could not determine a fix.")
+            return None
+        # AI proposals are advice for the user: the framework never runs their command itself.
+        proposal = HealingProposal(
+            summary=analysis.summary,
+            root_cause=analysis.root_cause or "Unknown",
+            fix_command=analysis.fix_command,
+            confidence=analysis.confidence,
+            strategy=HealingStrategy.MANUAL_INTERVENTION,
+            target_scope=analysis.target,
+            is_ai_generated=True
+        )
+        self.logger.info(f"AI Healing Proposal: {proposal.summary} (Conf: {proposal.confidence})")
+        return proposal
 
     def apply_fix(self, proposal: HealingProposal) -> bool:
         """
