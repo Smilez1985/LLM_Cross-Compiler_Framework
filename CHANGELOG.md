@@ -27,8 +27,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Provider errors are explained, e.g. that an Anthropic API key must belong to a workspace in the Claude
   Console.
 
+- Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0) and `fastembed` 0.8.1 (local embeddings,
+  ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
+
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
+- `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
