@@ -34,6 +34,18 @@ esac
 OUTPUT_FILE="$OUTPUT_DIR/${MODEL_NAME}-${PLATFORM}-${Q}.rkllm"
 log "Converting $MODEL_NAME for $PLATFORM ($Q)..."
 
+# RKLLM-Toolkit writes temporary files into its own package folder. Build containers run with a
+# read-only image filesystem, so load a copy of the package from the writable work folder (25 MB).
+PKG_DIR="$("$RKLLM_PYTHON" -c 'import os, rkllm; print(os.path.dirname(rkllm.__file__))')"
+if [ ! -w "$PKG_DIR/lib" ]; then
+    SHADOW="${BUILD_SCRATCH_DIR:-${TMPDIR:-/tmp}}/rkllm-pkg"
+    rm -rf "$SHADOW"
+    mkdir -p "$SHADOW"
+    cp -r "$PKG_DIR" "$SHADOW/"
+    export PYTHONPATH="$SHADOW${PYTHONPATH:+:$PYTHONPATH}"
+    log "Using a writable copy of RKLLM-Toolkit in $SHADOW"
+fi
+
 args=(--model "$MODEL_SOURCE" --output "$OUTPUT_FILE" --quant "$Q" --target "$PLATFORM")
 if [ -n "${DATASET_PATH:-}" ] && [ -f "${DATASET_PATH}" ]; then
     args+=(--dataset "$DATASET_PATH")

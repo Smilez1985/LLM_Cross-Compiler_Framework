@@ -15,7 +15,9 @@ set -euo pipefail
 WORK_DIR="${BUILD_CACHE_DIR:-/build-cache}"
 OUTPUT_DIR="${WORK_DIR}/output"
 IMATRIX_DIR="${WORK_DIR}/imatrix"
-mkdir -p "$OUTPUT_DIR" "$IMATRIX_DIR"
+# Large intermediates (F16 GGUF) go to the mounted work folder; the image filesystem may be read-only.
+SCRATCH_DIR="${BUILD_SCRATCH_DIR:-$WORK_DIR}"
+mkdir -p "$SCRATCH_DIR"
 
 FORMAT="$(echo "${TARGET_FORMAT:-gguf}" | tr '[:upper:]' '[:lower:]')"
 BOARD="$(echo "${TARGET_BOARD:-rk3588}" | tr '[:upper:]' '[:lower:]')"
@@ -95,7 +97,7 @@ build_gguf() {
         echo "WARNING: $q without an importance matrix loses quality; enable IMatrix calibration for better results." >&2
     fi
 
-    f16_file="$WORK_DIR/tmp-${MODEL_NAME}-F16.gguf"
+    f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
     out_file="$OUTPUT_DIR/${MODEL_NAME}-${q}.gguf"
     convert_to_gguf f16 "$f16_file"
     echo ">> Quantizing -> $q"
@@ -107,7 +109,8 @@ build_imatrix() {
     local dataset="${DATASET_PATH:-}" f16_file
     [ -f "$dataset" ] || die "Calibration dataset not found at '$dataset'."
     [ -x "$IMATRIX_BIN" ] || die "llama-imatrix not found at $IMATRIX_BIN"
-    f16_file="$WORK_DIR/tmp-${MODEL_NAME}-F16.gguf"
+    mkdir -p "$IMATRIX_DIR"
+    f16_file="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
     convert_to_gguf f16 "$f16_file"
     echo ">> Computing importance matrix..."
     # -o *.dat keeps the legacy format, which llama-quantize --imatrix accepts.
@@ -122,6 +125,8 @@ if [[ "$JOB_TYPE" == "imatrix" ]]; then
     echo "Done (imatrix)."
     exit 0
 fi
+
+mkdir -p "$OUTPUT_DIR"
 
 case "$FORMAT" in
     gguf)

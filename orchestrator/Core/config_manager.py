@@ -281,6 +281,9 @@ class ConfigManager:
             ConfigSchema("llama_cpp_version", str, False, "v0.6.0", "llama.cpp release tag built into target images"),
             ConfigSchema("calibration_language", str, False, "mixed", "Shipped calibration text for importance matrices",
                          ["regex:^(mixed|de|en)$"]),
+            ConfigSchema("build_sandbox", bool, False, True, "Run conversion containers without network, capabilities or root"),
+            ConfigSchema("build_memory_limit", str, False, "", "Memory limit for conversion containers, e.g. 24g (empty: none)"),
+            ConfigSchema("build_pids_limit", int, False, 4096, "Process limit for conversion containers", ["min:64"]),
             ConfigSchema("build_jobs", int, False, 0, "Parallel compile jobs in image builds (0 = all cores)", ["min:0", "max:256"]),
             ConfigSchema("healing_approval_timeout", int, False, 900, "Seconds to wait for a decision on a healing proposal", ["min:10", "max:86400"]),
             ConfigSchema("image_qdrant", str, False, "qdrant/qdrant:v1.16.0", "Vector DB Image"),
@@ -521,7 +524,7 @@ class ConfigManager:
                 # v2.3
                 "image_trivy", "image_qdrant", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",
-                "calibration_language",
+                "calibration_language", "build_sandbox", "build_memory_limit", "build_pids_limit",
                 # v2.4 (SSOT & IMatrix)
                 "source_repositories", "default_enable_imatrix", "default_calibration_dataset"
             ]
