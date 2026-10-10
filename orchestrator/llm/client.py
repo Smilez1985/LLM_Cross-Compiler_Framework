@@ -16,9 +16,14 @@ Settings (all optional except ai_provider):
   ai_max_retry_wait      longest Retry-After the client waits for (default 30 s); longer waits are raised
   ai_claude_code_path    path of the `claude` binary (default: from PATH)
   offline_mode           only local providers are used
+
+The "local" provider talks to the managed llama-server (orchestrator.runtime): base_url, the per-start API key
+and the loaded model are read from the running server's state for every call, so a server started or
+restarted by the CLI or the GUI is picked up without configuration. set_runtime_endpoint() overrides that.
 """
 
 import hashlib
+import ipaddress
 import os
 import random
 import secrets
@@ -28,6 +33,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
+from urllib.parse import urlparse
 
 from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
 from orchestrator.llm.errors import (LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused)
@@ -37,6 +43,20 @@ from orchestrator.llm.types import EFFORTS, TASKS, ChatRequest, ChatResult, Mess
 from orchestrator.utils.logging import get_logger
 
 MAX_RETRIES = 2  # the SDKs' own retries are switched off (max_retries=0), so attempts never multiply
+MANAGED_RUNTIME_PROVIDER = "local"  # preset served by the managed llama-server
+
+# (base_url, api_key, model) of a running local server
+RuntimeEndpoint = Tuple[str, Optional[str], Optional[str]]
+
+
+def is_loopback_url(url: Optional[str]) -> bool:
+    host = (urlparse(url or "").hostname or "").lower()
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -56,7 +76,8 @@ class Target:
 class LLMClient:
     def __init__(self, config_manager: Any, secrets_manager: Any = None, *, catalog: Optional[Catalog] = None,
                  state_dir: Optional[Path] = None, http_client: Any = None,
-                 sleep: Callable[[float], None] = time.sleep, adapter_options: Optional[Dict[str, Dict]] = None):
+                 sleep: Callable[[float], None] = time.sleep, adapter_options: Optional[Dict[str, Dict]] = None,
+                 runtime_resolver: Optional[Callable[[str], Optional[RuntimeEndpoint]]] = None):
         self.logger = get_logger("LLMClient")
         self.config = config_manager
         self.secrets = secrets_manager
@@ -65,7 +86,10 @@ class LLMClient:
         self.http_client = http_client          # tests and proxies: an httpx2.Client for both SDKs
         self.sleep = sleep
         self.adapter_options = adapter_options or {}  # extra constructor arguments per adapter family
-        self._runtime: Dict[str, Tuple[str, Optional[str], Optional[str]]] = {}
+        self._runtime: Dict[str, RuntimeEndpoint] = {}
+        # Looks up the endpoint of a running local server per call; default: the managed llama-server.
+        self.runtime_resolver = runtime_resolver or self._managed_runtime_endpoint
+        self._loopback_http = None
         self._adapters: Dict[tuple, Any] = {}
         self._state_cache: Dict[str, str] = {}
         self._lock = threading.Lock()
@@ -116,11 +140,32 @@ class LLMClient:
             else:
                 self._runtime.pop(pid, None)
 
+    def _managed_runtime_endpoint(self, provider: str) -> Optional[RuntimeEndpoint]:
+        """The managed llama-server of this user (started by `llm-cli ditto runtime start` or the GUI)."""
+        if provider != MANAGED_RUNTIME_PROVIDER:
+            return None
+        from orchestrator.runtime.llama_server import read_endpoint, runtime_root
+        endpoint = read_endpoint(runtime_root(self._state_path("")))
+        return (endpoint.base_url, endpoint.api_key, endpoint.model) if endpoint else None
+
+    def _runtime_endpoint(self, preset: ProviderPreset) -> Optional[RuntimeEndpoint]:
+        with self._lock:
+            endpoint = self._runtime.get(preset.id)
+        if endpoint:
+            return endpoint
+        try:
+            return self.runtime_resolver(preset.id)
+        except Exception as e:  # a broken state file must not break the other providers
+            self.logger.warning(f"Could not read the local server state for {preset.id}: {e.__class__.__name__}")
+            return None
+
     def _base_url(self, preset: ProviderPreset, primary: bool) -> Optional[str]:
         if preset.runtime_endpoint:
-            endpoint = self._runtime.get(preset.id)
+            endpoint = self._runtime_endpoint(preset)
             if not endpoint:
-                raise NotConfigured(f"{preset.label}: the local model server is not running.", provider=preset.id)
+                hint = " Start it with: llm-cli ditto runtime start" if preset.id == MANAGED_RUNTIME_PROVIDER else ""
+                raise NotConfigured(f"{preset.label}: the local model server is not running.{hint}",
+                                    provider=preset.id)
             return endpoint[0]
         if preset.base_url_configurable:
             return (self._setting(f"ai_base_url_{preset.id}") or (self._setting("ai_base_url") if primary else None)
@@ -129,7 +174,7 @@ class LLMClient:
 
     def _api_key(self, preset: ProviderPreset) -> Optional[str]:
         if preset.runtime_endpoint:
-            return self._runtime.get(preset.id, (None, None, None))[1]
+            return (self._runtime_endpoint(preset) or (None, None, None))[1]
         if not preset.secret or self.secrets is None:
             return None
         try:
@@ -170,7 +215,7 @@ class LLMClient:
         if explicit:
             return explicit
         if preset.runtime_endpoint:
-            loaded = self._runtime.get(preset.id, (None, None, None))[2]
+            loaded = (self._runtime_endpoint(preset) or (None, None, None))[2]
             if loaded:
                 return loaded  # the model the local server has loaded is the only one it serves
         if primary:
@@ -236,10 +281,22 @@ class LLMClient:
             adapter = self._adapters.get(key)
             if adapter is None:
                 cls = adapter_class(target.preset.adapter)
-                adapter = cls(target.preset, base_url=target.base_url, api_key=api_key, http_client=self.http_client,
+                adapter = cls(target.preset, base_url=target.base_url, api_key=api_key,
+                              http_client=self._http_client_for(target),
                               timeout=float(self._setting("ai_timeout", 600)), **options)
                 self._adapters[key] = adapter
         return adapter
+
+    def _http_client_for(self, target: Target):
+        """Loopback servers are reached directly: an HTTP(S)_PROXY from the environment would otherwise receive
+        the prompts and the local server's key (the SDKs' default clients honour those variables)."""
+        if self.http_client is not None or target.preset.adapter != "openai_compat" \
+                or not is_loopback_url(target.base_url):
+            return self.http_client
+        if self._loopback_http is None:
+            import openai
+            self._loopback_http = openai.DefaultHttpxClient(trust_env=False)
+        return self._loopback_http
 
     def list_models(self, provider: Optional[str] = None) -> List[ModelInfo]:
         """Live model list of a provider (the preset's suggestions where there is no list endpoint)."""
@@ -247,7 +304,9 @@ class LLMClient:
 
     # --- per-install state ------------------------------------------------------------------------------------
     def _state_path(self, name: str) -> Path:
-        base = self._state_dir or Path(getattr(self.config, "user_state_dir", None) or Path.home() / ".llm-framework")
+        base = self._state_dir or getattr(self.config, "user_state_dir", None)
+        if base is None:
+            base = os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework"
         return Path(base) / name
 
     def _state_secret(self, name: str) -> str:

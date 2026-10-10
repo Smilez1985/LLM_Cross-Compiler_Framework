@@ -859,6 +859,14 @@ def _gib(size: Optional[int]) -> str:
     return f"{size / 1024 ** 3:.1f} GiB" if size else "?"
 
 
+def _runtime_failure(error) -> None:
+    """Prints a runtime error (and the server log excerpt, escaped) and exits with 1."""
+    console.print(f"[red]{escape(str(error))}[/red]")
+    if getattr(error, "log_tail", ""):
+        console.print(Panel(escape(error.log_tail), title="llama-server log (last lines)"))
+    sys.exit(1)
+
+
 @ditto.group('runtime')
 def ditto_runtime():
     """Local model server (llama.cpp) for offline use"""
@@ -866,20 +874,35 @@ def ditto_runtime():
 
 
 @ditto_runtime.command('status')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @pass_context
-def runtime_status(ctx: FrameworkContext):
+def runtime_status(ctx: FrameworkContext, as_json: bool):
     """Hardware, recommended build and model, and whether the server is running"""
     rt = _local_runtime(ctx)
-    status = rt.status()
-    choice = rt.select_backend()
-    model, why = rt.choose_tier()
+    with console.status("Checking the hardware ..."):
+        status = rt.status()
+        hardware = rt.hardware()
+        choice = rt.select_backend()
+        model, why = rt.choose_tier()
+    preferred = rt.preferred_tier()
+    if as_json:
+        click.echo(json.dumps({
+            "build": status.build, "hardware": hardware.model_dump(mode="json"),
+            "recommended_build": choice.asset.id if choice.asset else None, "build_reason": choice.reason,
+            "installed": status.installed.asset_id if status.installed else None,
+            "running": status.running, "healthy": status.healthy, "base_url": status.base_url, "pid": status.pid,
+            "model": status.model, "tier": status.tier, "ctx": status.ctx,
+            "recommended_tier": model.tier, "tier_reason": why, "preferred_tier": preferred,
+            "log_file": str(status.log_file)}, indent=2))
+        return
     table = Table(title=f"Local runtime (llama.cpp {escape(status.build)})", show_header=False)
     table.add_column("", style="cyan")
     table.add_column("")
-    table.add_row("Hardware", escape(rt.hardware().summary()))
+    table.add_row("Hardware", escape(hardware.summary()))
     table.add_row("Recommended build", escape(f"{choice.asset.id if choice.asset else '-'}: {choice.reason}"))
     inst = status.installed
-    table.add_row("Installed", escape(f"{inst.asset_id} ({inst.path})") if inst else "[yellow]no[/yellow]")
+    table.add_row("Installed", escape(f"{inst.asset_id} ({inst.path})") if inst else
+                  "[yellow]no[/yellow] (llm-cli ditto runtime install)")
     if status.running:
         health = "[green]ready[/green]" if status.healthy else "[yellow]starting / not answering[/yellow]"
         table.add_row("Server", f"{health} {escape(str(status.base_url))} (pid {status.pid}, "
@@ -887,6 +910,8 @@ def runtime_status(ctx: FrameworkContext):
     else:
         table.add_row("Server", "stopped")
     table.add_row("Recommended model", escape(f"{model.file} - {why}"))
+    if preferred and preferred != model.tier:
+        table.add_row("Chosen model", escape(f"{preferred} (llm-cli ditto runtime start --model auto resets it)"))
     table.add_row("Log", escape(str(status.log_file)))
     console.print(table)
 
@@ -898,7 +923,7 @@ def runtime_status(ctx: FrameworkContext):
 @click.option('--yes', '-y', is_flag=True, help='Do not ask before downloading')
 @pass_context
 def runtime_install(ctx: FrameworkContext, backend: str, force: bool, yes: bool):
-    """Download the pinned llama.cpp build (sha256-verified before unpacking)"""
+    """Download the pinned llama.cpp build (size and sha256 verified before unpacking)"""
     from orchestrator.runtime.llama_server import LocalRuntimeError
     rt = _local_runtime(ctx)
     choice = rt.select_backend(backend)
@@ -906,45 +931,51 @@ def runtime_install(ctx: FrameworkContext, backend: str, force: bool, yes: bool)
         console.print(f"[red]{escape(choice.reason)}[/red]")
         sys.exit(1)
     console.print(f"llama.cpp {escape(rt.build)} - {escape(choice.asset.id)}: {escape(choice.reason)}")
-    if not yes and not click.confirm(f"Download {_gib(choice.asset.download_size)}?", default=True):
+    if not yes and not click.confirm(f"Download {_gib(choice.asset.download_size)} into {rt.root}?", default=True):
         return
     bar, update = _download_progress()
     try:
         with bar:
             inst = rt.install(prefer=backend, force=force, progress=update)
     except LocalRuntimeError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
+        _runtime_failure(e)
     console.print(f"[green]Installed {escape(inst.asset_id)} in {escape(str(inst.path))}[/green]")
 
 
 @ditto_runtime.command('start')
-@click.option('--model', 'tier', default=None, help='Model tier (llm-cli ditto models list); default: chosen for '
-              'this machine')
+@click.option('--model', 'tier', default=None, help="Model tier (llm-cli ditto models list); remembered for later "
+              "starts. 'auto': the recommendation for this machine")
 @click.option('--ctx', 'ctx_len', type=click.IntRange(256, 1048576), default=None,
               help='Context length in tokens (default: from free memory, at most 32768)')
 @click.option('--sleep-idle', type=click.IntRange(0, None), default=None,
               help='Unload the model after this many idle seconds (0 = never)')
 @pass_context
 def runtime_start(ctx: FrameworkContext, tier: Optional[str], ctx_len: Optional[int], sleep_idle: Optional[int]):
-    """Start llama-server on 127.0.0.1 (random port, API key in a private file)"""
+    """Start llama-server on 127.0.0.1 (free port, per-start API key in a private file)"""
     from orchestrator.runtime.llama_server import LocalRuntimeError
     rt = _local_runtime(ctx)
     try:
         with console.status("Starting llama-server ..."):
             ep = rt.start(tier=tier, ctx=ctx_len, sleep_idle_seconds=sleep_idle)
     except LocalRuntimeError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
-    console.print(f"[green]Running:[/green] {escape(ep.base_url)} model {escape(ep.model)} (pid {ep.pid})")
-    console.print(f"API key: {escape(str(rt.key_file))} (readable only by you)")
+        _runtime_failure(e)
+    status = rt.status()
+    console.print(f"[green]Running:[/green] {escape(ep.base_url)} model {escape(ep.model)} (pid {ep.pid}, "
+                  f"ctx {status.ctx})")
+    console.print("Ditto uses it as the 'local' AI provider; the API key changes with every start and is readable "
+                  "only by you.")
 
 
 @ditto_runtime.command('stop')
 @pass_context
 def runtime_stop(ctx: FrameworkContext):
-    """Stop the llama-server started by the framework"""
-    console.print("Stopped." if _local_runtime(ctx).stop() else "Not running.")
+    """Stop the llama-server started by the framework (and leftovers of a crash)"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    try:
+        stopped = _local_runtime(ctx).stop()
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    console.print(f"Stopped ({stopped} process{'es' if stopped > 1 else ''})." if stopped else "Not running.")
 
 
 @ditto.group('models')
@@ -959,13 +990,23 @@ def models_list(ctx: FrameworkContext):
     """Pinned models, their size and whether they are downloaded"""
     rt = _local_runtime(ctx)
     recommended, why = rt.choose_tier()
+    preferred = rt.preferred_tier()
     table = Table(title="Ditto models")
     for column in ("Tier", "File", "Size", "License", "Status", "Note"):
         table.add_column(column)
+    labels = {"ready": "[green]downloaded[/green]", "unverified": "[yellow]not verified yet[/yellow]", "missing": "-"}
     for m in rt.catalog.models:
-        status = "[green]downloaded[/green]" if rt.model_ready(m) else "-"
-        note = "recommended" if m.tier == recommended.tier else ("on request" if m.on_request else "")
-        table.add_row(escape(m.tier), escape(m.file), _gib(m.size), escape(m.license), status, note)
+        notes = []
+        if m.tier == recommended.tier:
+            notes.append("recommended")
+        if m.tier == preferred:
+            notes.append("chosen")
+        if m.on_request and not notes:
+            notes.append("on request")
+        if not m.pinned:
+            notes.append("[red]not pinned[/red]")
+        table.add_row(escape(m.tier), escape(m.file), _gib(m.size), escape(m.license), labels[rt.model_state(m)],
+                      ", ".join(notes))
     console.print(table)
     console.print(f"Recommended for this machine: {escape(why)}")
 
@@ -975,9 +1016,8 @@ def models_list(ctx: FrameworkContext):
 @click.option('--yes', '-y', is_flag=True, help='Do not ask before downloading')
 @pass_context
 def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
-    """Download a model at its pinned revision and check its sha256 (default: the recommended tier)"""
+    """Download a model at its pinned revision and check size and sha256 (default: the recommended tier)"""
     from orchestrator.runtime.llama_server import LocalRuntimeError
-    from orchestrator.utils.helpers import redact_secrets
     rt = _local_runtime(ctx)
     if tier is None:
         model, why = rt.choose_tier()
@@ -992,16 +1032,14 @@ def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
         console.print(f"[green]{escape(model.file)} is already downloaded.[/green]")
         return
     console.print(f"{escape(model.repo)} / {escape(model.file)} ({escape(model.license)})")
-    if not yes and not click.confirm(f"Download {_gib(model.size)}?", default=True):
+    if not yes and not click.confirm(f"Download {_gib(model.size)} into {rt.models_dir}?", default=True):
         return
+    bar, update = _download_progress()
     try:
-        path = rt.download_model(model.tier)
+        with bar:
+            path = rt.download_model(model.tier, progress=update)
     except LocalRuntimeError as e:
-        console.print(f"[red]{escape(str(e))}[/red]")
-        sys.exit(1)
-    except Exception as e:  # network and Hub errors from huggingface_hub
-        console.print(f"[red]Download failed: {escape(redact_secrets(str(e)))}[/red]")
-        sys.exit(1)
+        _runtime_failure(e)
     console.print(f"[green]Verified and saved: {escape(str(path))}[/green]")
 
 

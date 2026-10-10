@@ -1,15 +1,24 @@
 # Managed local LLM runtime for Ditto's offline mode: a pinned llama.cpp build (llama-server) and
 # pinned GGUF models. This file is data: a newer build or another model is added here, not in code.
 #
-# Every download needs a pinned sha256 and is verified before it is unpacked or used; entries without
-# one are refused (fail closed). Models are pinned to a Hugging Face commit, never to a branch.
+# Every download needs a pinned sha256 AND size and is verified before it is unpacked or used; entries
+# without them are refused (fail closed). Models are pinned to a Hugging Face commit, never to a branch.
 #
 # Sources (checked 2026-10-10):
 # - llama.cpp assets: names and sizes from the release download URLs of tag b11429 (the v0.6.0 tag
 #   points at the same commit; binaries are only published under the b-number). The sha256 values were
-#   computed from complete, TLS-verified downloads of each asset because the GitHub API (whose assets
-#   carry a "digest" field) was not reachable from the session that pinned them. To cross-check:
+#   computed from complete, TLS-verified downloads of each asset and checked again by a second, independent
+#   download. To cross-check:
 #   gh api repos/ggml-org/llama.cpp/releases/tags/b11429 --jq '.assets[] | [.name, .digest] | @tsv'
+# - CUDA architectures: ggml/src/ggml-cuda/CMakeLists.txt at the tag (the release workflow sets none, so
+#   the default list applies): PTX only ("-virtual") for 5.0, 6.1, 7.0 (CUDA 12 only), 7.5, 8.0 and 9.0;
+#   native code for 8.6 (also runs on 8.7 and 8.9), 8.9, 12.0 (CUDA >= 12.8) and 12.1 (CUDA >= 12.9).
+# - Driver versions: CUDA Toolkit release notes (tables 2-4) and the CUDA compatibility guide. Minor
+#   version compatibility lets a build run on an older driver of the same major release (13.x: >= 580,
+#   12.x: >= 525), but "applications that compile device code to PTX will not work on older drivers":
+#   a GPU that only gets PTX (e.g. Turing, RTX 2080 Ti, compute 7.5) needs the toolkit's own driver
+#   (CUDA 13.4: branch R615; 12.8 GA: 570.26 Linux; 12.4 GA: 551.61 Windows).
+# - ROCm gpu_targets: GPU_TARGETS of the ubuntu-24-rocm and windows-rocm jobs in the release workflow.
 # - Models: HfApi().model_info(repo, revision, files_metadata=True) -> siblings[].lfs.sha256 and size.
 schema_version: 1
 
@@ -21,8 +30,8 @@ llama_cpp:
   features:
     sleep_idle_seconds: true
     fit: true
-  # CUDA minor-version compatibility (NVIDIA CUDA Toolkit release notes, table 3): 13.x needs driver
-  # >= 580 and dropped GPUs before Turing (compute capability < 7.5); 12.x runs on drivers >= 525.
+  # Driver versions are quoted strings and compared part by part ("570.124" is newer than "570.26").
+  # Files with libs: true (CUDA runtime libraries) are moved next to llama-server after unpacking.
   assets:
     # --- Linux x86_64 ---
     - id: linux-x64-cpu
@@ -42,24 +51,33 @@ llama_cpp:
       arch: x86_64
       backend: cuda
       cuda: "13.4"
-      min_driver: 580
+      min_driver: "580"
+      jit_min_driver: "615"
+      native_compute_caps: [8.6, 8.7, 8.9, 12.0, 12.1]
       min_compute_cap: 7.5
       files:
         - {name: llama-b11429-bin-ubuntu-cuda-13.4-x64.tar.gz, size: 152519318, sha256: 8082b7eaa74a714c9fecca19128f751c8e32da763ee8096b8ad1e824da7621d3}
+        - {name: cudart-llama-b11429-bin-ubuntu-cuda-13.4-x64.tar.gz, size: 440236630, sha256: 93d18648d815b2bd624d83d82f653e1db97afb478f02064305fe3cf570040a6d, libs: true}
     - id: linux-x64-cuda-12.8
       os: linux
       arch: x86_64
       backend: cuda
       cuda: "12.8"
-      min_driver: 525
+      min_driver: "525.60.13"
+      jit_min_driver: "570.26"
+      native_compute_caps: [8.6, 8.7, 8.9, 12.0]
       min_compute_cap: 5.0
       files:
         - {name: llama-b11429-bin-ubuntu-cuda-12.8-x64.tar.gz, size: 171651873, sha256: b13c64b9224d3c89d9993945d70cc21177ad00178c21b8d34237e3bc139834f1}
+        - {name: cudart-llama-b11429-bin-ubuntu-cuda-12.8-x64.tar.gz, size: 594377569, sha256: f4ab593e31507320b121f2cb21791f4c72420a2483d3df8bf2ca1a97d04e6845, libs: true}
     - id: linux-x64-rocm-10.0
       os: linux
       arch: x86_64
       backend: rocm
-      opt_in: true   # only when asked for: needs a matching ROCm installation and a supported GPU
+      opt_in: true   # only when asked for: needs a ROCm installation (HIP runtime) and a supported GPU
+      gpu_targets: [gfx908, gfx90a, gfx942, gfx950, gfx1010, gfx1011, gfx1012, gfx1030, gfx1031, gfx1032, gfx1033,
+                    gfx1034, gfx1035, gfx1036, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152,
+                    gfx1200, gfx1201]
       files:
         - {name: llama-b11429-bin-ubuntu-rocm-10.0-x64.tar.gz, size: 243892368, sha256: bd73e52146551f07a4c539bbe9da42f3b680c44ddc252fce61ab86d567a5932a}
 
@@ -76,8 +94,20 @@ llama_cpp:
       backend: vulkan
       files:
         - {name: llama-b11429-bin-ubuntu-vulkan-arm64.tar.gz, size: 24845090, sha256: 702d99c4219b4314cc6d3b10fb41ae96cbfc68226305c2681269dfb51487af34}
+    - id: linux-arm64-cuda-13.4
+      os: linux
+      arch: arm64
+      backend: cuda
+      cuda: "13.4"
+      min_driver: "580"
+      jit_min_driver: "615"
+      native_compute_caps: [8.6, 8.7, 8.9, 12.0, 12.1]
+      min_compute_cap: 7.5
+      files:
+        - {name: llama-b11429-bin-ubuntu-cuda-13.4-arm64.tar.gz, size: 147639003, sha256: 9c76d072276c0faa7fc1b5cbf715b4186dd2e8d7f16acd20b67daab24c82bd22}
+        - {name: cudart-llama-b11429-bin-ubuntu-cuda-13.4-arm64.tar.gz, size: 552521413, sha256: ad62e46cdc2e8636fa91e883b9e9ad779516f61cc478ece1c90e5dbc905a7d29, libs: true}
 
-    # --- Windows x86_64 ---
+    # --- Windows x86_64 (all files of an asset unpack into one folder) ---
     - id: windows-x64-cpu
       os: windows
       arch: x86_64
@@ -95,26 +125,32 @@ llama_cpp:
       arch: x86_64
       backend: cuda
       cuda: "13.4"
-      min_driver: 580
+      min_driver: "580"
+      jit_min_driver: "615"
+      native_compute_caps: [8.6, 8.7, 8.9, 12.0, 12.1]
       min_compute_cap: 7.5
-      files:   # the CUDA runtime DLLs ship as a separate archive and go into the same folder
+      files:
         - {name: llama-b11429-bin-win-cuda-13.4-x64.zip, size: 153089864, sha256: 76ddc6eff2389570789ed608881efc6977751a722015d8e8c94f302224ff1a3a}
-        - {name: cudart-llama-bin-win-cuda-13.4-x64.zip, size: 423535356, sha256: 738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668}
+        - {name: cudart-llama-bin-win-cuda-13.4-x64.zip, size: 423535356, sha256: 738f8c251ac22b70c3ae6f83a10cf222725df0395246a2cf58f32bdb85fbe668, libs: true}
     - id: windows-x64-cuda-12.4
       os: windows
       arch: x86_64
       backend: cuda
       cuda: "12.4"
-      min_driver: 525
+      min_driver: "527.41"
+      jit_min_driver: "551.61"
+      native_compute_caps: [8.6, 8.7, 8.9]
       min_compute_cap: 5.0
       files:
         - {name: llama-b11429-bin-win-cuda-12.4-x64.zip, size: 264478423, sha256: dd6df685c1024e6aa55ca55ad35038692d5e284d4dc895e7a646c3245d3d14ff}
-        - {name: cudart-llama-bin-win-cuda-12.4-x64.zip, size: 391443627, sha256: 8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6}
+        - {name: cudart-llama-bin-win-cuda-12.4-x64.zip, size: 391443627, sha256: 8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6, libs: true}
     - id: windows-x64-rocm-10.0
       os: windows
       arch: x86_64
       backend: rocm
-      opt_in: true
+      opt_in: true   # bundles the HIP runtime; needs a current AMD driver and a supported GPU
+      gpu_targets: [gfx1010, gfx1011, gfx1012, gfx1030, gfx1031, gfx1032, gfx1033, gfx1034, gfx1035, gfx1036, gfx1100,
+                    gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152, gfx1153, gfx1200, gfx1201]
       files:
         - {name: llama-b11429-bin-win-rocm-10.0-x64.zip, size: 256958369, sha256: 289a8453bb222f0648f91eff3d55133c934119c841eb369b704aafae1d4719d2}
 
@@ -140,6 +176,9 @@ llama_cpp:
       files:
         - {name: llama-b11429-bin-macos-x64.tar.gz, size: 11487431, sha256: 29ac3ea02be6bd143e824973f2cc5fa74bc4094393a9eaab0ff6814f19dd8522}
 
+# Models are downloaded from <model_base_url><repo>/resolve/<revision>/<file> (resumable, verified).
+model_base_url: https://huggingface.co/
+
 # Server defaults. The context is computed from free memory and the model, then capped here;
 # the models' native context (up to 262144 tokens) would not fit on a desktop.
 server:
@@ -147,9 +186,12 @@ server:
   ctx_min: 4096
   sleep_idle_seconds: 600   # unload the model after 10 idle minutes (0 = never); reloads on the next request
   health_timeout_seconds: 300
+  log_max_mib: 5            # llama-server.log is rotated at start when larger; older logs are kept as .1, .2, ...
+  log_backups: 3
 
 # Ditto models. kv_bytes_per_token: f16 KV cache per token, 2 (K,V) * attention layers * KV heads *
 # head dim * 2 bytes, from the base model's config.json (Qwen3.5 has full attention in 1 of 4 layers).
+# A newer model is a new entry here (plus a tier rule if it should be chosen automatically).
 models:
   - tier: small
     repo: unsloth/Qwen3.5-2B-GGUF
@@ -159,8 +201,19 @@ models:
     sha256: aaf42c8b7c3cab2bf3d69c355048d4a0ee9973d48f16c731c0520ee914699223
     license: apache-2.0
     native_context: 262144
-    kv_bytes_per_token: 12288    # 6 full-attention layers * 2 KV heads * 256
+    kv_bytes_per_token: 12288    # 2 * 6 full-attention layers * 2 KV heads * 256 * 2 bytes
     description: Qwen3.5 2B (Q4_K_M) for machines with up to 4 GB RAM
+
+  - tier: small-q2
+    repo: unsloth/Qwen3.5-2B-GGUF
+    revision: f6d5376be1edb4d416d56da11e5397a961aca8ae
+    file: Qwen3.5-2B-UD-Q2_K_XL.gguf
+    size: 966533376
+    sha256: dbcf28421dece9c86884f9da5a2291c8214be7920623f1fcb663ed8f58b38ccb
+    license: apache-2.0
+    native_context: 262144
+    kv_bytes_per_token: 12288
+    description: Qwen3.5 2B at 2-bit (UD-Q2_K_XL) for weak hardware (3 GB RAM or less); less accurate
 
   - tier: default
     repo: unsloth/Qwen3.5-4B-GGUF
@@ -170,8 +223,20 @@ models:
     sha256: 00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4
     license: apache-2.0
     native_context: 262144
-    kv_bytes_per_token: 32768    # 8 full-attention layers * 4 KV heads * 256
+    kv_bytes_per_token: 32768    # 2 * 8 full-attention layers * 4 KV heads * 256 * 2 bytes
     description: Qwen3.5 4B (Q4_K_M), the default
+
+  - tier: default-q2
+    on_request: true
+    repo: unsloth/Qwen3.5-4B-GGUF
+    revision: e87f176479d0855a907a41277aca2f8ee7a09523
+    file: Qwen3.5-4B-UD-Q2_K_XL.gguf
+    size: 1940825248
+    sha256: 79aa0b583c888976013002f66b9f617070d91cf8de6a09dc775983640ac59463
+    license: apache-2.0
+    native_context: 262144
+    kv_bytes_per_token: 32768
+    description: Qwen3.5 4B at 2-bit (UD-Q2_K_XL), only on request; for comparing with the 2B at 4-bit
 
   - tier: large
     repo: unsloth/Qwen3.5-9B-GGUF
@@ -205,12 +270,18 @@ models:
     sha256: e0406663965846ae22a403456eb826ccce5f450840491f71952f18a7cb78e7d5
     license: apache-2.0
     native_context: 131072
-    kv_bytes_per_token: 81920    # 40 layers * 8 KV heads * 64
+    kv_bytes_per_token: 81920    # 2 * 40 layers * 8 KV heads * 64 * 2 bytes
     description: IBM Granite 4.2 3B (Q4_K_M), fallback model family
 
-# Automatic tier choice: the first rule whose conditions all hold wins (GiB; machines sold with 4 GB
-# report about 3.6-3.9 GiB). VRAM counts only when a GPU backend was selected.
+# Automatic tier choice: the first rule whose conditions hold AND whose model fits next to the system
+# (weights + minimum context + 1.5 GiB for the OS and the framework) wins; the last rule needs no
+# conditions and is used even if nothing fits. Sizes in GiB (machines sold with 4 GB report about
+# 3.6-3.9 GiB). VRAM counts only for a dedicated GPU used by the chosen build, and for Apple Silicon
+# (Metal may use about two thirds of the unified memory); integrated AMD/Intel GPUs share the RAM.
 tier_rules:
   - {tier: large, min_vram_gib: 7.5}
+  - {tier: small-q2, max_ram_gib: 3.0}
   - {tier: small, max_ram_gib: 4.5}
   - {tier: default}
+  - {tier: small}      # fallbacks when the model above does not fit
+  - {tier: small-q2}
