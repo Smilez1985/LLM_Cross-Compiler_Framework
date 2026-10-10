@@ -223,3 +223,5 @@ configs/known_hosts
 
 # Embedding models the knowledge base downloads (FastEmbed cache under models_dir; several hundred MB)
 /models/embeddings/
+# Ditto's local GGUF models (llm-cli ditto models download; up to several GB each)
+/models/ditto/
