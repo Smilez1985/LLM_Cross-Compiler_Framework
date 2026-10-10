@@ -191,17 +191,21 @@ class AIOptimizerWorker(QThread):
             return
 
         try:
+            # Offer exactly the formats/quantizations the builder can produce.
+            formats = " | ".join(f'"{value}"' for _, value in BUILD_FORMATS)
+            quants = "; ".join(f"{fmt}: {', '.join(qs)}" for fmt, qs in QUANT_SUGGESTIONS.items())
             prompt = (
                 f"Act as an Embedded Build Engineer. "
                 f"I need the optimal build configuration for Model: '{self.model}' on Hardware Profile: '{self.target}'.\n"
                 f"Constraints: High Performance, Low Latency.\n"
-                f"Analyze the hardware capabilities (NPU, GPU, RAM) if known.\n\n"
+                f"Analyze the hardware capabilities (NPU, GPU, RAM) if known.\n"
+                f"Quantizations per format: {quants}.\n\n"
                 f"RETURN ONLY A JSON OBJECT:\n"
                 f"{{\n"
-                f'  "quantization": "Q4_K_M" | "Q5_K_M" | "Q8_0" | "F16",\n'
-                f'  "format": "GGUF" | "ONNX" | "TFLITE" | "RKNN",\n'
+                f'  "format": {formats},\n'
+                f'  "quantization": one of the quantizations listed for that format,\n'
                 f'  "optimization": "BALANCED" | "SPEED" | "SIZE" | "AGGRESSIVE",\n'
-                f'  "reasoning": "Short explanation"\n'
+                f'  "explanation": "Short explanation"\n'
                 f"}}"
             )
             response_text = self.ditto.ask_ditto(prompt, [])
@@ -209,7 +213,9 @@ class AIOptimizerWorker(QThread):
             if json_match:
                 clean_json = json_match.group(0)
                 config = json.loads(clean_json)
-                self.finished.emit(True, config, config.get("reasoning", "Optimization done."))
+                if not isinstance(config, dict):
+                    raise ValueError("AI response is not a JSON object")
+                self.finished.emit(True, config, str(config.get("explanation", "Optimization done.")))
             else:
                 self.finished.emit(False, {}, f"Invalid AI Response (No JSON found)")
             
@@ -360,19 +366,20 @@ class BuilderTab(QWidget):
         self.board_combo.addItems(["rk3588", "rk3576", "rk3566"])
         self.format_combo.currentIndexChanged.connect(self._update_quant_options)
         self._update_quant_options()
+        self.format_combo.currentIndexChanged.connect(self._update_calibration_options)
         self.opt_combo = QComboBox()
         self.opt_combo.addItems(["BALANCED", "SPEED", "SIZE", "AGGRESSIVE"])
         self.chk_gpu = QCheckBox("Use Host GPU for Build Process")
         if platform.system() == "Linux": self.chk_gpu.setChecked(True)
         
-        # NEW v2.4.0: IMatrix / Smart Calibration
-        self.chk_imatrix = QCheckBox("Enable Smart Calibration (IMatrix)")
-        self.chk_imatrix.setToolTip("Uses AI-generated data to improve quantization quality by analyzing model importance.")
+        # Calibration: the dataset is used by every format (GGUF imatrix, RKLLM calibration, RKNN INT8);
+        # the importance matrix itself exists only for GGUF.
+        self.chk_imatrix = QCheckBox("Importance matrix (IMatrix, GGUF)")
+        self.chk_imatrix.setToolTip("Computes an importance matrix from the calibration dataset to improve "
+                                    "low-bit GGUF quantization (required for IQ1/IQ2 types).")
         self.dataset_path = None
-        self.btn_dataset = QPushButton("Custom Dataset...")
-        self.btn_dataset.setEnabled(False)
+        self.btn_dataset = QPushButton("Calibration dataset...")
         self.btn_dataset.clicked.connect(self._browse_dataset)
-        self.chk_imatrix.toggled.connect(self.btn_dataset.setEnabled)
         
         row_dataset = QHBoxLayout()
         row_dataset.addWidget(self.chk_imatrix)
@@ -383,6 +390,7 @@ class BuilderTab(QWidget):
         build_layout.addRow("Quantization:", self.quant_combo)
         build_layout.addRow("Optimization:", self.opt_combo)
         build_layout.addRow("Calibration:", row_dataset)
+        self._update_calibration_options()
         build_layout.addRow("", self.chk_gpu)
         
         build_group.setLayout(build_layout)
@@ -534,6 +542,20 @@ class BuilderTab(QWidget):
         if current and self.quant_combo.findText(current) >= 0:
             self.quant_combo.setCurrentText(current)
 
+    DATASET_HINTS = {
+        "gguf": "Plain text; used to compute the importance matrix.",
+        "rkllm": "Plain text (one sample per paragraph) or an RKLLM JSON dataset; improves NPU quantization.",
+        "rknn": "Text file listing sample inputs (paths relative to the list file); required for i8.",
+    }
+
+    def _update_calibration_options(self):
+        fmt = self.format_combo.currentData()
+        is_gguf = fmt == "gguf"
+        self.chk_imatrix.setEnabled(is_gguf)
+        if not is_gguf:
+            self.chk_imatrix.setChecked(False)
+        self.btn_dataset.setToolTip(self.DATASET_HINTS.get(fmt, ""))
+
     def _refresh_targets(self):
         self.target_combo.clear()
         if not self.framework or not hasattr(self.framework, 'get_component'): return
@@ -549,7 +571,8 @@ class BuilderTab(QWidget):
 
     def _browse_dataset(self):
         """NEW: Browse for custom calibration dataset"""
-        path, _ = QFileDialog.getOpenFileName(self, "Select Calibration Text", "", "Text Files (*.txt);;All Files (*)")
+        path, _ = QFileDialog.getOpenFileName(self, "Select Calibration Dataset", "",
+                                              "Datasets (*.txt *.json *.jsonl);;All Files (*)")
         if path: 
             self.dataset_path = path
             self._log(f"Selected Dataset: {Path(path).name}")
@@ -578,12 +601,13 @@ class BuilderTab(QWidget):
         if success:
             self._set_state("success")
             self._log(f"Ditto Recommendation:\n{msg}")
-            if "quantization" in config:
-                idx = self.quant_combo.findText(config["quantization"])
-                if idx >= 0: self.quant_combo.setCurrentIndex(idx)
+            # Format first: changing it repopulates the quantization list.
             if "format" in config:
                 idx = self.format_combo.findData(str(config["format"]).lower())
                 if idx >= 0: self.format_combo.setCurrentIndex(idx)
+            if "quantization" in config:
+                idx = self.quant_combo.findText(str(config["quantization"]))
+                if idx >= 0: self.quant_combo.setCurrentIndex(idx)
             if "optimization" in config:
                 idx = self.opt_combo.findText(config["optimization"])
                 if idx >= 0: self.opt_combo.setCurrentIndex(idx)

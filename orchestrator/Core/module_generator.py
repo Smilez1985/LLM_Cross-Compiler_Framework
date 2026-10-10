@@ -13,14 +13,116 @@ Updates v1.6.0:
 """
 
 import os
+import re
 import shutil
 import logging
+import subprocess
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 import yaml
 
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.helpers import ensure_directory
+
+# --- Validation of module data (wizard input, AI output, community input) ---------------------------
+# Every value below ends up in Dockerfiles, YAML or shell scripts, so it is checked before any
+# template is rendered. Shell code fields stay free-form (they are reviewed by the user) but must
+# pass a syntax check and a fixed deny-list that no setting can override.
+
+ARCHITECTURES = ("aarch64", "x86_64", "armv7l", "riscv64")
+MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$")
+SDK_RE = re.compile(r"^[\w .+/-]{0,64}$")
+DEB_PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]+(?::[a-z0-9-]+)?(?:=[A-Za-z0-9.+~:-]+)?$")
+FLAG_RE = re.compile(r"^-[A-Za-z][\w.=+,:/-]*$")
+IMAGE_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(?::[\w][\w.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$")
+# Images that may be used without a digest pin; anything else must be pinned by digest.
+TRUSTED_IMAGE_PREFIXES = ("debian:", "ubuntu:", "nvidia/cuda:", "rocm/dev-ubuntu-", "rocm/rocm-terminal:", "python:")
+DETECTION_RE = re.compile(r"^[\w ./=-]{0,200}$")
+SHELL_DENY_PATTERNS = [
+    (re.compile(r"\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|da)?sh\b"), "pipes a download into a shell"),
+    (re.compile(r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(?:--no-preserve-root\s+)?/(?:\s|$|\*)"), "deletes the root filesystem"),
+    (re.compile(r"\bchmod\s+(?:-R\s+)?0?777\b"), "makes files world-writable"),
+    (re.compile(r"\bsudo\b"), "uses sudo"),
+    (re.compile(r"\b(?:mkfs(?:\.\w+)?|dd\s+if=)"), "writes raw devices"),
+    (re.compile(r"/var/run/docker\.sock|\bdocker\s+run\b"), "controls the Docker host"),
+    (re.compile(r"(?:^|[;&|]\s*)\s*(?:eval|source)\s+[\"']?\$\("), "evaluates generated code"),
+]
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def module_slug(module_name: str) -> str:
+    slug = re.sub(r"[^a-z0-9_-]", "_", module_name.strip().lower().replace(" ", "_")).strip("_-")
+    return slug
+
+
+def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Returns a normalized copy of the module data or raises ValueError listing every problem."""
+    problems: List[str] = []
+    out = dict(data)
+
+    name = str(data.get("module_name", "")).strip()
+    if not MODULE_NAME_RE.match(name):
+        problems.append("module_name: letters, digits, space, '_', '.', '-' only (max 64), starting with a letter or digit")
+    elif not module_slug(name) or module_slug(name).startswith("_"):
+        problems.append("module_name: does not give a usable folder name")
+    out["module_name"] = name
+
+    arch = str(data.get("architecture", "aarch64")).strip()
+    if arch not in ARCHITECTURES:
+        problems.append(f"architecture: one of {', '.join(ARCHITECTURES)}")
+    out["architecture"] = arch
+
+    sdk = str(data.get("sdk", "none") or "none").strip()
+    if not SDK_RE.match(sdk):
+        problems.append("sdk: short plain name expected")
+    out["sdk"] = sdk
+
+    base_os = str(data.get("base_os", "debian:bookworm-slim") or "debian:bookworm-slim").strip()
+    if not IMAGE_RE.match(base_os):
+        problems.append("base_os: not a valid image reference")
+    elif "@sha256:" not in base_os and not base_os.startswith(TRUSTED_IMAGE_PREFIXES):
+        problems.append(f"base_os: '{base_os}' must be pinned by digest (image@sha256:...) unless it is an official base image")
+    out["base_os"] = base_os
+
+    packages = data.get("packages", [])
+    if isinstance(packages, str):
+        packages = packages.split()
+    packages = [str(p) for p in packages]
+    bad = [p for p in packages if not DEB_PACKAGE_RE.match(p)]
+    if bad:
+        problems.append(f"packages: invalid Debian package names: {', '.join(bad[:5])}")
+    out["packages"] = packages
+
+    for key in ("cpu_flags", "cmake_flags"):
+        value = data.get(key, "") or ""
+        if isinstance(value, (list, tuple)):
+            value = " ".join(str(v) for v in value)
+        tokens = str(value).split()
+        bad = [t for t in tokens if not FLAG_RE.match(t)]
+        if bad:
+            problems.append(f"{key}: only plain compiler/CMake options like -mcpu=cortex-a76 or -DGGML_CUDA=ON: {', '.join(bad[:5])}")
+        out[key] = " ".join(tokens)
+
+    detection = str(data.get("detection_commands", "lscpu") or "lscpu")
+    if not DETECTION_RE.match(detection):
+        problems.append("detection_commands: a single simple command line expected")
+    out["detection_commands"] = detection
+
+    for key in ("setup_commands", "quantization_logic", "packaging_commands"):
+        if key not in data or data.get(key) is None:
+            continue
+        code = str(data.get(key))
+        if _CONTROL_CHARS.search(code):
+            problems.append(f"{key}: contains control characters")
+        for pattern, reason in SHELL_DENY_PATTERNS:
+            if pattern.search(code):
+                problems.append(f"{key}: not allowed, {reason}")
+        out[key] = code
+
+    if problems:
+        raise ValueError("Invalid module definition:\n- " + "\n- ".join(problems))
+    return out
+
 
 class ModuleGenerator:
     """
@@ -62,10 +164,17 @@ class ModuleGenerator:
         Returns:
             Path: Path to the created module directory
         """
-        # Slugify name for folder
-        module_name = data.get("module_name", "Unknown")
-        module_slug = module_name.lower().replace(" ", "_")
-        target_dir = self.targets_dir / module_slug
+        data = validate_module_data(data)
+        module_name = data["module_name"]
+        slug = module_slug(module_name)
+        targets_root = Path(self.targets_dir).resolve()
+        target_dir = (targets_root / slug).resolve()
+        if target_dir.parent != targets_root:
+            raise ValueError(f"Module folder '{slug}' would be outside {targets_root}.")
+        # Never overwrite an existing target (case-insensitive: 'rockchip' must not replace 'Rockchip').
+        existing = {p.name.lower() for p in targets_root.iterdir()} if targets_root.exists() else set()
+        if slug.lower() in existing:
+            raise ValueError(f"A target named '{slug}' already exists; choose another module name.")
         
         self.logger.info(f"Generating new target module: '{module_name}' at {target_dir}")
         
@@ -112,7 +221,10 @@ class ModuleGenerator:
             
             # 6. Knowledge Snapshot (NEU v1.6.0)
             if framework_manager:
-                self._create_knowledge_snapshot(target_dir, framework_manager, module_slug)
+                self._create_knowledge_snapshot(target_dir, framework_manager, slug)
+
+            # 7. Generated shell must at least parse.
+            self._check_shell_syntax(target_dir)
             
             self.logger.info(f"Module generation for '{module_name}' completed successfully.")
             return target_dir
@@ -120,6 +232,18 @@ class ModuleGenerator:
         except Exception as e:
             self.logger.error(f"Failed to generate module: {e}")
             raise e
+
+    def _check_shell_syntax(self, target_dir: Path):
+        bash = shutil.which("bash")
+        if not bash:
+            return
+        errors = []
+        for script in sorted(target_dir.rglob("*.sh")):
+            result = subprocess.run([bash, "-n", str(script)], capture_output=True, text=True)
+            if result.returncode != 0:
+                errors.append(f"{script.relative_to(target_dir)}: {result.stderr.strip()}")
+        if errors:
+            raise ValueError("Generated scripts have syntax errors (check the shell code fields):\n" + "\n".join(errors))
 
     def _create_knowledge_snapshot(self, target_dir: Path, framework_manager, module_slug: str):
         """

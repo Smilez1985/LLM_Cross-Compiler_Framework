@@ -20,9 +20,10 @@ import subprocess
 import hashlib
 import shutil
 import tempfile
+import json
 import zipfile
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Any, Optional, List, Dict
 
 try:
     import paramiko
@@ -35,11 +36,52 @@ from orchestrator.utils.logging import get_logger
 
 # NEU: Import der zentralen Validierungslogik
 from orchestrator.utils.validation import validate_ip_address
+from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES
 
 DEFAULT_INFERENCE_IMAGE = "ghcr.io/smilez1985/llm-runtime:latest"
 DEFAULT_QDRANT_IMAGE = "qdrant/qdrant:v1.16.0"
 SSH_USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
-MODEL_SUFFIXES = (".gguf", ".rkllm", ".rknn", ".onnx", ".safetensors", ".bin")
+MODEL_SUFFIXES = MODEL_FILE_SUFFIXES
+
+
+def list_builds(output_dir: Path) -> List[Dict[str, Any]]:
+    """Finished builds below output_dir, found through their build manifest (newest first)."""
+    builds = []
+    for manifest in Path(output_dir).rglob(BUILD_MANIFEST):
+        try:
+            info = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        if isinstance(info, dict):
+            info["path"] = str(manifest.parent)
+            builds.append(info)
+    return sorted(builds, key=lambda b: str(b.get("created", "")), reverse=True)
+
+
+def resolve_model_artifact(artifact_path: Path) -> Path:
+    """The model file to deploy: the file itself, or the primary model of a build directory.
+    Archives are refused; the build directory next to them holds the same files plus the manifest."""
+    path = Path(artifact_path)
+    if path.is_file():
+        if not path.name.lower().endswith(MODEL_SUFFIXES):
+            raise ValueError(f"'{path.name}' is not a model file ({', '.join(MODEL_SUFFIXES)}); select the build instead.")
+        return path
+    if not path.is_dir():
+        raise FileNotFoundError(f"Artifact not found: {path}")
+    manifest = path / BUILD_MANIFEST
+    if manifest.is_file():
+        try:
+            primary = json.loads(manifest.read_text(encoding="utf-8")).get("primary")
+        except (OSError, ValueError, AttributeError):
+            primary = None
+        if primary:
+            candidate = (path / primary).resolve()
+            if candidate.parent == path.resolve() and candidate.is_file():
+                return candidate
+    models = [f for f in path.iterdir() if f.is_file() and f.name.lower().endswith(MODEL_SUFFIXES)]
+    if not models:
+        raise ValueError(f"No model file found in {path}.")
+    return max(models, key=lambda f: f.stat().st_size)
 
 class DeploymentManager:
     def __init__(self, framework_manager=None):
@@ -53,9 +95,11 @@ class DeploymentManager:
         Erstellt ein ZIP-Paket für das Zielsystem.
         Inkludiert Binaries, Configs und Docker-Images (für Air-Gap).
         """
-        artifact_path = Path(artifact_path)
-        if not artifact_path.exists():
-            self.logger.error(f"Artifact not found: {artifact_path}")
+        build_dir = Path(artifact_path) if Path(artifact_path).is_dir() else None
+        try:
+            artifact_path = resolve_model_artifact(Path(artifact_path))
+        except (OSError, ValueError) as e:
+            self.logger.error(str(e))
             return None
 
         # Hardware Flags vom TargetManager holen
@@ -68,8 +112,12 @@ class DeploymentManager:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             
-            # A. Copy Binary / Artifact
+            # A. Model file, plus the build's provenance (manifest, model card) when deploying a build
             shutil.copy2(artifact_path, temp_path / artifact_path.name)
+            if build_dir:
+                for extra in (BUILD_MANIFEST, "Model_Card.md"):
+                    if (build_dir / extra).is_file():
+                        shutil.copy2(build_dir / extra, temp_path / extra)
             
             # B. Configs (User Profiles, Prompts)
             self._bundle_user_configs(temp_path / "data" / "configs")
@@ -91,8 +139,12 @@ class DeploymentManager:
                 self._export_docker_images(images, temp_path / "images")
 
             # D. Script Generation (Deploy + Compose Logic)
-            script_content = self._generate_deploy_script(
-                artifact_path.name, flags_str, use_docker, inference_image, qdrant_image)
+            try:
+                script_content = self._generate_deploy_script(
+                    artifact_path.name, flags_str, use_docker, inference_image, qdrant_image)
+            except ValueError as e:
+                self.logger.error(str(e))
+                return None
             
             deploy_script_path = temp_path / "deploy.sh"
             with open(deploy_script_path, "w", newline='\n') as f:
@@ -245,7 +297,8 @@ class DeploymentManager:
             if str(artifact).lower().endswith(".gguf"):
                 script.extend([
                     "if command -v llama-server >/dev/null 2>&1; then",
-                    f'  echo "Start it with: llama-server -m $MODEL_DIR/"{q}" --host 0.0.0.0 --port 8080"',
+                    f'  echo "Start it with: llama-server -m $MODEL_DIR/"{q}" --host 127.0.0.1 --port 8080"',
+                    "  echo 'For access from the LAN add --host 0.0.0.0 --api-key-file <file with a secret key>; never expose it without a key.'",
                     "else",
                     "  echo 'Install llama.cpp (llama-server) on this board to run the model.'",
                     "fi",
@@ -253,8 +306,8 @@ class DeploymentManager:
             elif str(artifact).lower().endswith(".rkllm"):
                 script.append("echo 'Run it with the RKLLM runtime (librkllmrt, rkllm_server_demo or RKLLama) on the RK3588/RK3576.'")
         else:
-            quoted = shlex.quote(f"./{artifact}")
-            script.append(f"chmod +x {quoted} && {quoted}")
+            # Only model files are deployed without Docker; never make an arbitrary artifact executable.
+            raise ValueError(f"Refusing to deploy '{artifact}': not a model file ({', '.join(MODEL_SUFFIXES)}).")
 
         script.append("echo 'Deployment Complete. System is ready.'")
         return "\n".join(script)

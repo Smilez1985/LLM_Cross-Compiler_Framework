@@ -90,6 +90,71 @@ class TestContainerEnvironment:
         assert env["MODEL_NAME"] == "my_model_rm_-rf"
 
 
+class TestSecretsAndCalibration:
+
+    def test_stored_hf_token_is_used_for_downloads(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr("orchestrator.Core.builder.docker.from_env", lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
+
+        class Secrets:
+            def get_secret(self, key):
+                return "hf_secret" if key == "hf_token" else None
+
+        engine = BuildEngine(ConfigManager(tmp_path / "configs"), secrets_manager=Secrets(), base_dir=tmp_path)
+        assert engine._hf_token() == "hf_secret"
+        assert engine.targets_dir == tmp_path.resolve() / "targets"
+
+    def test_text_dataset_is_mounted_as_one_file(self, engine, tmp_path):
+        ds = tmp_path / "calib.txt"
+        ds.write_text("text")
+        vols, inner = engine._dataset_mount(make_config(dataset_path=str(ds)))
+        assert inner == "/build-cache/dataset.txt"
+        assert vols == {str(ds.resolve()): {"bind": "/build-cache/dataset.txt", "mode": "ro"}}
+
+    def test_rknn_dataset_mounts_its_directory(self, engine, tmp_path):
+        (tmp_path / "samples").mkdir()
+        ds = tmp_path / "samples" / "list.txt"
+        ds.write_text("img1.jpg\n")
+        vols, inner = engine._dataset_mount(make_config(target_format=ModelFormat.RKNN, dataset_path=str(ds)))
+        assert inner == "/build-cache/dataset/list.txt"
+        assert vols == {str(ds.parent.resolve()): {"bind": "/build-cache/dataset", "mode": "ro"}}
+
+    def test_missing_dataset_is_an_error(self, engine, tmp_path):
+        with pytest.raises(ValueError):
+            engine._dataset_mount(make_config(dataset_path=str(tmp_path / "missing.txt")))
+
+    def test_imatrix_runs_only_for_gguf(self, engine, tmp_path, monkeypatch):
+        ds = tmp_path / "calib.txt"
+        ds.write_text("text")
+        calls = []
+        (engine.targets_dir / "Rockchip").mkdir(parents=True)
+        for name in ("_prepare_build_environment", "_generate_dockerfile", "_scan_image_security",
+                     "_execute_build_modules", "_extract_artifacts", "_create_golden_artifact"):
+            monkeypatch.setattr(engine, name, lambda *a, **k: None)
+        monkeypatch.setattr(engine, "_build_docker_image", lambda *a: SimpleNamespace(tags=["img"]))
+        monkeypatch.setattr(engine, "_stage_model", lambda *a: ("/x", {}))
+        monkeypatch.setattr(engine, "_generate_imatrix", lambda *a: calls.append("imatrix"))
+
+        for fmt in (ModelFormat.RKLLM, ModelFormat.GGUF):
+            engine._builds["b1"] = BuildProgress("b1", BuildStatus.QUEUED, "")
+            engine._execute_build(make_config(target_format=fmt, use_imatrix=True, dataset_path=str(ds),
+                                              cleanup_after_build=False))
+        assert calls == ["imatrix"]
+
+
+class TestBuildManifest:
+
+    def test_manifest_lists_model_files_with_hashes(self, engine, tmp_path):
+        out = tmp_path / "out"
+        out.mkdir()
+        (out / "m-Q4_K_M.gguf").write_bytes(b"weights")
+        (out / "build_info.json").write_text('{"model": "m", "llama_cpp": "v0.6.0"}')
+        info = engine._write_build_manifest(make_config(), out)
+        assert info["primary"] == "m-Q4_K_M.gguf"
+        assert info["llama_cpp"] == "v0.6.0", "container fields are kept"
+        assert info["artifacts"][0]["sha256"] == __import__("hashlib").sha256(b"weights").hexdigest()
+
+
 class TestBuildStatus:
 
     def test_cleanup_after_failure_keeps_failed_status(self, engine):
@@ -117,6 +182,15 @@ class FakeBuildEngine:
 
     def get_build_status(self, build_id):
         return SimpleNamespace(status=BuildStatus.COMPLETED, errors=[])
+
+
+class TestFrameworkWiring:
+
+    def test_orchestrator_shares_the_engine_that_knows_the_secrets(self, booted_framework):
+        engine = booted_framework.orchestrator.build_engine
+        assert engine.secrets_manager is booted_framework.secrets_manager
+        if booted_framework.docker_manager.builder is not None:
+            assert engine is booted_framework.docker_manager.builder
 
 
 class TestOrchestration:
@@ -153,6 +227,16 @@ class TestOrchestration:
         config = orchestrator.build_engine.configs[0]
         assert state.status.name == "COMPLETED"
         assert (config.target_board, config.target_format, config.quantization) == ("rk3588", ModelFormat.RKLLM, "w4a16")
+
+    def test_imatrix_is_dropped_for_npu_formats_without_asking_ditto(self, orchestrator, tmp_path):
+        class Ditto:
+            def prepare_calibration_dataset(self, path):
+                raise AssertionError("no GGUF build, no filler dataset")
+
+        orchestrator.ditto = Ditto()
+        state = self.run(orchestrator, self.make_request(tmp_path, use_imatrix=True))
+        assert orchestrator.build_engine.configs[0].use_imatrix is False
+        assert any("GGUF only" in w for w in state.warnings)
 
     def test_user_calibration_dataset_is_not_replaced(self, orchestrator, tmp_path):
         dataset = tmp_path / "calib.txt"

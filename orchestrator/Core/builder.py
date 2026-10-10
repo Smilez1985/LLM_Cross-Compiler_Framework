@@ -41,6 +41,10 @@ from docker.types import DeviceRequest
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
 
+# Files a build may produce that are models (data to install), never programs to execute.
+MODEL_FILE_SUFFIXES = (".gguf", ".rkllm", ".rknn", ".onnx", ".safetensors", ".bin")
+BUILD_MANIFEST = "build_info.json"
+
 # Fallback Helper if utils module not fully ready during bootstrap
 def ensure_directory(path: Path):
     if not path.exists():
@@ -173,7 +177,8 @@ class BuildEngine:
     6. Artifact Extraction
     """
     
-    def __init__(self, config_or_framework, max_concurrent_builds: int = 2, default_timeout: int = 3600):
+    def __init__(self, config_or_framework, max_concurrent_builds: int = 2, default_timeout: int = 3600,
+                 secrets_manager=None, base_dir: Optional[Path] = None):
         self.logger = get_logger("BuildEngine")
         self.max_concurrent_builds = max_concurrent_builds
         self.default_timeout = default_timeout
@@ -181,6 +186,7 @@ class BuildEngine:
         # --- Robust Initialization ---
         self.framework = None
         self.config = None
+        self.secrets_manager = secrets_manager
         
         # Check if we got the full FrameworkManager or just ConfigManager
         if hasattr(config_or_framework, 'info') and hasattr(config_or_framework, 'config'):
@@ -193,7 +199,7 @@ class BuildEngine:
         else:
             # ConfigManager (Standalone)
             self.config = config_or_framework
-            self.base_dir = Path(".").resolve()
+            self.base_dir = Path(base_dir).resolve() if base_dir else Path(".").resolve()
             self.docker_client = None
 
         # Docker Client Fallback
@@ -385,9 +391,10 @@ class BuildEngine:
             # 5. Security Scan
             self._scan_image_security(image.tags[0], prog)
             
-            # 5a. Generate IMatrix (NEW: Smart Calibration)
-            # Only if use_imatrix is True AND a dataset is provided
-            if config.use_imatrix:
+            # 5a. Importance matrix: a llama.cpp (GGUF) concept. Other formats use the dataset directly.
+            if config.use_imatrix and config.target_format != ModelFormat.GGUF:
+                prog.add_warning(f"IMatrix applies to GGUF only; ignored for {config.target_format.value}.")
+            elif config.use_imatrix:
                 if config.dataset_path and os.path.exists(config.dataset_path):
                     self._generate_imatrix(config, prog, image, target_path, staged)
                 else:
@@ -470,6 +477,9 @@ class BuildEngine:
         
         try:
             buildargs = {"LLAMA_CPP_TAG": str(self._get_conf("llama_cpp_version", "v0.6.0"))}
+            build_jobs = int(self._get_conf("build_jobs", 0) or 0)
+            if build_jobs > 0:
+                buildargs["BUILD_JOBS"] = str(build_jobs)  # lowered by self-healing after an OOM
             buildargs.update(config.build_args)
             # uid/gid 0 already exist in the image (root); the entrypoint maps the user at runtime anyway.
             if sys.platform != "win32" and os.getuid() != 0:
@@ -561,7 +571,7 @@ class BuildEngine:
             progress.add_warning(f"Security scan failed to run: {e}")
 
     def _hf_token(self) -> Optional[str]:
-        sm = getattr(self.framework, "secrets_manager", None) if self.framework else None
+        sm = self.secrets_manager or (getattr(self.framework, "secrets_manager", None) if self.framework else None)
         try:
             return sm.get_secret("hf_token") if sm else None
         except Exception:
@@ -619,6 +629,19 @@ class BuildEngine:
             env["PUID"], env["PGID"] = str(os.getuid()), str(os.getgid())
         return env
 
+    def _dataset_mount(self, config: BuildConfiguration) -> Tuple[Dict[str, Dict[str, str]], Optional[str]]:
+        """Volumes and in-container path for the calibration dataset (none if no dataset is set).
+        Text datasets (GGUF imatrix, RKLLM) are mounted as one file. An RKNN dataset lists sample files
+        relative to its own directory, so that directory is mounted read-only."""
+        if not config.dataset_path:
+            return {}, None
+        path = Path(config.dataset_path).expanduser().resolve()
+        if not path.is_file():
+            raise ValueError(f"Calibration dataset '{config.dataset_path}' not found.")
+        if config.target_format == ModelFormat.RKNN:
+            return {str(path.parent): {"bind": "/build-cache/dataset", "mode": "ro"}}, f"/build-cache/dataset/{path.name}"
+        return {str(path): {"bind": "/build-cache/dataset.txt", "mode": "ro"}}, "/build-cache/dataset.txt"
+
     def _generate_imatrix(self, config: BuildConfiguration, progress: BuildProgress, image: Image, target_path: Path,
                           staged: Tuple[str, Dict[str, Dict[str, str]]]):
         """
@@ -636,15 +659,15 @@ class BuildEngine:
         vols = {
             str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
             str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "rw"},
-            # IMPORTANT: Mount dataset
-            str(config.dataset_path): {"bind": "/build-cache/dataset.txt", "mode": "ro"}
         }
+        dataset_vols, dataset_inner = self._dataset_mount(config)
+        vols.update(dataset_vols)
         vols.update(staged[1])
         
         env = self._container_env(config, staged[0])
         env.update({
             "JOB_TYPE": "imatrix", # Signal to build.sh to run --imatrix mode
-            "DATASET_PATH": "/build-cache/dataset.txt"
+            "DATASET_PATH": dataset_inner,
         })
         
         # SSOT Repo Injection
@@ -716,7 +739,7 @@ class BuildEngine:
         
         # Check for IMatrix from previous step
         imatrix_file = build_temp / "imatrix" / "imatrix.dat"
-        if config.use_imatrix and imatrix_file.exists():
+        if config.use_imatrix and config.target_format == ModelFormat.GGUF and imatrix_file.exists():
             vols[str(build_temp / "imatrix")] = {"bind": "/build-cache/imatrix", "mode": "ro"}
             env["USE_IMATRIX"] = "1"
             env["IMATRIX_PATH"] = "/build-cache/imatrix/imatrix.dat"
@@ -729,10 +752,11 @@ class BuildEngine:
                 if isinstance(v, dict) and 'url' in v:
                     env[f"{k.split('.')[-1].upper()}_REPO_OVERRIDE"] = v['url']
 
-        # Dataset Injection (Optional for Build, but good for validation)
-        if config.dataset_path and os.path.exists(config.dataset_path):
-            vols[str(config.dataset_path)] = {"bind": "/build-cache/dataset.txt", "mode": "ro"}
-            env["DATASET_PATH"] = "/build-cache/dataset.txt"
+        # Calibration dataset (RKLLM calibration text, RKNN INT8 sample list; GGUF uses it via the imatrix)
+        dataset_vols, dataset_inner = self._dataset_mount(config)
+        if dataset_inner:
+            vols.update(dataset_vols)
+            env["DATASET_PATH"] = dataset_inner
 
         # 4. GPU Logic
         device_requests = []
@@ -791,27 +815,55 @@ class BuildEngine:
                     count += 1
             progress.add_log(f"Extracted {count} artifacts.")
 
-    def _generate_model_card(self, config: BuildConfiguration, output_dir: Path):
-        readme_path = output_dir / "Model_Card.md"
-        model_hash = "Calculating..."
-        try:
-            target_ext = f".{config.target_format.value}"
-            candidates = list(output_dir.glob(f"*{target_ext}"))
-            if not candidates:
-                files = list(output_dir.glob("*"))
-                if files:
-                    candidates = [max(files, key=lambda p: p.stat().st_size if p.is_file() else 0)]
-            
-            if candidates and candidates[0].is_file():
-                primary_file = candidates[0]
-                sha256 = hashlib.sha256()
-                with open(primary_file, "rb") as f:
-                    for chunk in iter(lambda: f.read(4096), b""): sha256.update(chunk)
-                model_hash = sha256.hexdigest()
-        except Exception as e:
-            model_hash = f"Hash calculation failed: {e}"
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        sha256 = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                sha256.update(chunk)
+        return sha256.hexdigest()
 
-        usage_code = "```bash\n   chmod +x deploy.sh\n   ./deploy.sh\n```"
+    def _write_build_manifest(self, config: BuildConfiguration, output_dir: Path) -> Dict[str, Any]:
+        """Completes build_info.json (written by the container) with the artifact list and hashes.
+        Deployment finds builds through this manifest and installs its primary model file."""
+        manifest_path = output_dir / BUILD_MANIFEST
+        info: Dict[str, Any] = {}
+        if manifest_path.is_file():
+            try:
+                loaded = json.loads(manifest_path.read_text(encoding="utf-8"))
+                info = loaded if isinstance(loaded, dict) else {}
+            except (OSError, ValueError):
+                info = {}
+        artifacts = [
+            {"file": f.name, "bytes": f.stat().st_size, "sha256": self._sha256_file(f)}
+            for f in sorted(output_dir.iterdir())
+            if f.is_file() and f.name.lower().endswith(MODEL_FILE_SUFFIXES)
+        ]
+        info.update({
+            "build_id": config.build_id,
+            "model_source": config.model_source,
+            "target": config.target_arch,
+            "board": config.target_board or info.get("board"),
+            "format": config.target_format.value,
+            "quantization": config.quantization or info.get("quantization"),
+            "imatrix": bool(config.use_imatrix and config.target_format == ModelFormat.GGUF),
+            "created": datetime.now().isoformat(timespec="seconds"),
+            "artifacts": artifacts,
+            "primary": max(artifacts, key=lambda a: a["bytes"])["file"] if artifacts else None,
+        })
+        manifest_path.write_text(json.dumps(info, indent=2), encoding="utf-8")
+        return info
+
+    def _generate_model_card(self, config: BuildConfiguration, output_dir: Path, manifest: Optional[Dict[str, Any]] = None):
+        readme_path = output_dir / "Model_Card.md"
+        manifest = manifest or {}
+        primary = next((a for a in manifest.get("artifacts", []) if a["file"] == manifest.get("primary")), None)
+        model_hash = primary["sha256"] if primary else "n/a (no model file found)"
+
+        usage_code = (
+            "   Open the framework's Deployment window, select this build and deploy it to your device.\n"
+            "   The generated package contains deploy.sh, which verifies the checksums and installs the model."
+        )
         
         content = (
             f"# Model Card: {os.path.basename(config.model_source)}\n\n"
@@ -824,12 +876,11 @@ class BuildEngine:
             f"- **Quantization:** {config.quantization or 'FP16'}\n"
             f"- **IMatrix (Smart Calibration):** {'Enabled' if config.use_imatrix else 'Disabled'}\n\n"
             f"## 🛡️ Security & Integrity\n"
+            f"- **Primary Artifact:** {manifest.get('primary') or 'n/a'}\n"
             f"- **Primary Artifact Hash (SHA256):** `{model_hash}`\n"
             f"- **Base Image:** {config.base_image}\n\n"
             f"## 🚀 Usage\n"
             f"To deploy this model on your edge device:\n\n"
-            f"1. Transfer the archive to the target.\n"
-            f"2. Run the deployment script:\n"
             f"{usage_code}\n\n"
             f"---\n"
             f"Generated automatically by LLM-Builder.\n"
@@ -846,8 +897,11 @@ class BuildEngine:
         
         output_dir = Path(config.output_dir)
         
-        progress.add_log("Generating Model Card...")
-        self._generate_model_card(config, output_dir)
+        progress.add_log("Writing build manifest and Model Card...")
+        manifest = self._write_build_manifest(config, output_dir)
+        if not manifest.get("primary"):
+            progress.add_warning("The build produced no model file.")
+        self._generate_model_card(config, output_dir, manifest)
         
         archive_name = output_dir.name 
         root_dir = output_dir.parent

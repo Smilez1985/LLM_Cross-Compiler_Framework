@@ -77,6 +77,7 @@ class MainOrchestrator(QMainWindow):
         super().__init__()
         self.app_root = app_root
         self.i18n = get_i18n()
+        self._healing_prompted = set()  # (request_id, proposal id) already shown to the user
         
         # Init Framework
         self.framework = FrameworkManager()
@@ -213,6 +214,17 @@ class MainOrchestrator(QMainWindow):
             self.lbl_ditto_status.setText("Idle")
             return
 
+        # A proposal waiting for the user's decision takes precedence over the most recent flow.
+        for flow in active_flows:
+            if flow.status == OrchestrationStatus.AWAITING_APPROVAL and flow.healing_proposal is not None:
+                key = (flow.request_id, id(flow.healing_proposal))
+                if key not in self._healing_prompted:
+                    self._healing_prompted.add(key)
+                    self.ditto_avatar.set_state("think")
+                    self.lbl_ditto_status.setText("Waiting for your decision")
+                    self.trigger_healing_dialog(flow.request_id, flow.healing_proposal)
+                return
+
         # Get most recent flow
         latest = active_flows[-1]
         
@@ -230,11 +242,6 @@ class MainOrchestrator(QMainWindow):
             self.ditto_avatar.set_state("think") # Thinking hard
             self.lbl_ditto_status.setText("Self-Healing Active!")
             self.status.showMessage(f"🚑 Analyzing Error: {latest.current_stage}")
-            
-            # Trigger Dialog if proposal exists and not yet handled
-            if latest.healing_proposal and not getattr(latest, '_gui_dialog_shown', False):
-                latest._gui_dialog_shown = True
-                self.trigger_healing_dialog(latest.healing_proposal)
 
         elif latest.status == OrchestrationStatus.COMPLETED:
             self.ditto_avatar.set_state("success")
@@ -268,19 +275,14 @@ class MainOrchestrator(QMainWindow):
             self.builder_tab._refresh_targets()
             self.deployment_window.refresh_data()
 
-    def trigger_healing_dialog(self, proposal):
-        """Shows the Self-Healing Proposal Dialog."""
+    def trigger_healing_dialog(self, request_id, proposal):
+        """Shows the proposal; the orchestrator applies an approved fix and retries the build."""
         dlg = HealingConfirmDialog(proposal, self)
-        if dlg.exec() == 1: # Accepted
-            final_cmd = dlg.get_final_command() # Assuming dialog has this method
-            proposal.fix_command = final_cmd
-            
-            if self.framework.self_healing_manager:
-                success = self.framework.self_healing_manager.apply_fix(proposal)
-                if success:
-                    self.status.showMessage("✅ Fix applied successfully!", 5000)
-                else:
-                    QMessageBox.critical(self, "Healing Failed", "The fix command failed or requires manual execution.")
+        approved = bool(dlg.exec()) and dlg.automatic
+        if not self.framework.orchestrator.resolve_healing(request_id, approved):
+            self.status.showMessage("The healing proposal is no longer pending.", 5000)
+        elif approved:
+            self.status.showMessage("✅ Fix approved; the build is retried.", 5000)
 
     def _show_about(self):
         ver = self.framework.info.version if hasattr(self.framework, 'info') else "Unknown"

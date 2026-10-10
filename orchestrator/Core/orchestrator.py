@@ -63,6 +63,7 @@ class OrchestrationStatus(Enum):
     PREPARING = "preparing"
     BUILDING = "building"
     HEALING = "healing"
+    AWAITING_APPROVAL = "awaiting_approval"
     COMPLETED = "completed"
     ERROR = "error"
     CANCELLED = "cancelled"
@@ -110,7 +111,8 @@ class WorkflowState:
     artifacts: List[str] = field(default_factory=list)
     errors: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
-    healing_proposal: Optional[Any] = None 
+    healing_proposal: Optional[Any] = None
+    healing_decision: Optional[bool] = None
 
     @property
     def progress_percent(self) -> int:
@@ -134,12 +136,12 @@ class BuildJob:
 # ============================================================================
 
 class LLMOrchestrator:
-    def __init__(self, config_manager):
+    def __init__(self, config_manager, build_engine: Optional[BuildEngine] = None):
         self.logger = get_logger(__name__)
         self.config = config_manager
         
-        # Sub-Engines
-        self.build_engine = BuildEngine(config_manager)
+        # Sub-Engines (the framework passes its shared engine, which knows the secrets store)
+        self.build_engine = build_engine or BuildEngine(config_manager)
         self.module_generator = ModuleGenerator(Path(config_manager.targets_dir))
         
         # State Management
@@ -151,6 +153,10 @@ class LLMOrchestrator:
         # Dependency Injection Containers
         self.self_healing = None 
         self.ditto = None # NEW: For IMatrix Dataset Generation
+
+        # Pending healing approvals (request_id -> event set by resolve_healing from the GUI/CLI thread)
+        self._healing_events: Dict[str, asyncio.Event] = {}
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     async def initialize(self) -> bool:
         """Asynchrone Initialisierung"""
@@ -270,18 +276,111 @@ class LLMOrchestrator:
             dataset_path=req.dataset_path
         )
 
+    async def _run_job(self, job: "BuildJob", req: BuildRequest) -> bool:
+        """Runs one build job on the BuildEngine and waits for its terminal state."""
+        loop = asyncio.get_running_loop()
+        try:
+            build_config = self._map_job_to_config(job, req)
+            returned_id = await loop.run_in_executor(None, self.build_engine.build_model, build_config)
+            while True:
+                status = self.build_engine.get_build_status(returned_id)
+                if not status:
+                    job.error_log = "Build vanished"
+                    return False
+                if status.status == BuildStatus.COMPLETED:
+                    return True
+                if status.status in [BuildStatus.FAILED, BuildStatus.CANCELLED]:
+                    job.error_log = "\n".join(status.errors)
+                    return False
+                await asyncio.sleep(1)
+        except Exception as e:
+            self.logger.error(f"Execution Error: {e}")
+            job.error_log = str(e)
+            return False
+
+    def _approval_timeout(self) -> float:
+        get_fn = getattr(self.config, "get", None)
+        value = get_fn("healing_approval_timeout", 900) if get_fn else 900
+        try:
+            return max(float(value), 1.0)
+        except (TypeError, ValueError):
+            return 900.0
+
+    async def _heal_and_retry(self, state: "WorkflowState", job: "BuildJob", req: BuildRequest) -> bool:
+        """Asks the self-healing manager for a proposal and waits for the user's decision
+        (AWAITING_APPROVAL). An approved fix is applied and the job is retried once."""
+        loop = asyncio.get_running_loop()
+        self.logger.warning(f"Build failed for {job.job_id}. Activating Self-Healing...")
+        state.status = OrchestrationStatus.HEALING
+        state.current_stage = f"Diagnosing {job.job_id}"
+        context = f"Target: {job.target_architecture}, Model: {job.source_model}"
+        # The analysis may call an LLM; keep the event loop free meanwhile.
+        proposal = await loop.run_in_executor(None, self.self_healing.analyze_error,
+                                              job.error_log or "Unknown Error", context)
+        if not proposal:
+            self.logger.error("Self-Healing found no solution.")
+            state.status = OrchestrationStatus.BUILDING
+            return False
+
+        event = asyncio.Event()
+        self._healing_events[state.request_id] = event
+        state.healing_decision = None
+        state.healing_proposal = proposal
+        state.status = OrchestrationStatus.AWAITING_APPROVAL
+        state.current_stage = f"Waiting for approval: {proposal.summary}"
+        try:
+            await asyncio.wait_for(event.wait(), timeout=self._approval_timeout())
+        except asyncio.TimeoutError:
+            state.warnings.append(f"No decision on the healing proposal for {job.job_id}; it was dismissed.")
+        finally:
+            self._healing_events.pop(state.request_id, None)
+
+        approved = bool(state.healing_decision)
+        state.healing_proposal = None
+        state.status = OrchestrationStatus.BUILDING
+        if not approved:
+            return False
+
+        applied = await loop.run_in_executor(None, self.self_healing.apply_fix, proposal)
+        if not applied:
+            state.warnings.append(f"Manual step needed for {job.job_id}: {proposal.fix_command}")
+            return False
+        state.current_stage = f"Retrying {job.job_id} after the fix"
+        self.logger.info(f"Fix applied; retrying {job.job_id}.")
+        return await self._run_job(job, req)
+
+    def resolve_healing(self, request_id: str, approved: bool) -> bool:
+        """Records the user's decision on a pending healing proposal. Safe to call from any thread."""
+        state = self._workflows.get(request_id)
+        event = self._healing_events.get(request_id)
+        if not state or not event or state.status != OrchestrationStatus.AWAITING_APPROVAL:
+            return False
+        state.healing_decision = bool(approved)
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            loop.call_soon_threadsafe(event.set)
+        else:
+            event.set()
+        return True
+
     async def _run_build_pipeline(self, req: BuildRequest):
         """Die eigentliche Pipeline-Logik"""
         state = self._workflows[req.request_id]
         state.status = OrchestrationStatus.PREPARING
         state.current_stage = "Initialization"
+        self._loop = asyncio.get_running_loop()
         
         self.logger.info(f"Starting pipeline for {req.request_id}")
         
         # 0. Smart Calibration / IMatrix Preparation (NEW v2.4.0)
         # ------------------------------------------------------------------
         # Falls IMatrix gewünscht ist und der Nutzer keinen Datensatz mitgibt, liefert Ditto einen.
-        if req.use_imatrix and req.dataset_path:
+        wants_gguf = not req.target_formats or ModelFormat.GGUF in req.target_formats
+        if req.use_imatrix and not wants_gguf:
+            # The importance matrix is a GGUF concept; RKLLM/RKNN use the user's dataset (if any) directly.
+            req.use_imatrix = False
+            state.warnings.append("IMatrix applies to GGUF only; disabled for this request.")
+        elif req.use_imatrix and req.dataset_path:
             self.logger.info(f"IMatrix enabled with user dataset {req.dataset_path}")
         elif req.use_imatrix:
             state.current_stage = "Preparing Calibration Data"
@@ -353,61 +452,13 @@ class LLMOrchestrator:
         self.logger.info(f"Generated {len(build_jobs)} build jobs.")
         
         # 2. Execution Loop
-        loop = asyncio.get_running_loop()
-        
         for job in build_jobs:
             state.current_stage = f"Building {job.source_model} for {job.target_architecture}"
-            
-            try:
-                # 1. Map Job to Config
-                build_config = self._map_job_to_config(job, req)
-                
-                # 2. Execute Async (Non-Blocking) 
-                returned_id = await loop.run_in_executor(
-                    None, 
-                    self.build_engine.build_model, 
-                    build_config
-                )
-                
-                # 3. Poll for Completion
-                success = False
-                while True:
-                    status = self.build_engine.get_build_status(returned_id)
-                    if not status: 
-                        job.error_log = "Build vanished"
-                        break
-                    
-                    if status.status == BuildStatus.COMPLETED:
-                        success = True
-                        break
-                    if status.status in [BuildStatus.FAILED, BuildStatus.CANCELLED]:
-                        job.error_log = "\n".join(status.errors)
-                        break
-                        
-                    await asyncio.sleep(1)
-                    
-            except Exception as e:
-                self.logger.error(f"Execution Error: {e}")
-                job.error_log = str(e)
-                success = False
-            
-            # --- SELF-HEALING LOOP ---
+            success = await self._run_job(job, req)
+
+            # --- SELF-HEALING: diagnose, ask the user, apply an approved fix, retry once ---
             if not success and self.self_healing:
-                self.logger.warning(f"Build failed for {job.job_id}. Activating Self-Healing...")
-                state.status = OrchestrationStatus.HEALING
-                
-                error_log = job.error_log if hasattr(job, 'error_log') else "Unknown Error"
-                context = f"Target: {job.target_architecture}, Model: {job.source_model}"
-                
-                proposal = self.self_healing.analyze_error(error_log, context)
-                
-                if proposal:
-                    state.healing_proposal = proposal 
-                    self.logger.info(f"Healing Proposal: {proposal.fix_command}")
-                else:
-                    self.logger.error("Self-Healing found no solution.")
-                
-                state.status = OrchestrationStatus.BUILDING
+                success = await self._heal_and_retry(state, job, req)
 
             if success:
                 state.completed_builds += 1

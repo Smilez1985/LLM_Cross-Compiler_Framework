@@ -39,12 +39,17 @@ except ImportError:
     TRANSFORMERS_AVAILABLE = False
 
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.untrusted import UNTRUSTED_RULE, wrap_untrusted
 
 # RAG Integration
 try:
     from orchestrator.Core.rag_manager import RAGManager
 except ImportError:
     RAGManager = None
+
+class DittoError(RuntimeError):
+    """The model could not answer (provider error, missing model, ...). Never shown or stored as an answer."""
+
 
 class NativeInferenceEngine:
     """
@@ -188,12 +193,8 @@ class DittoCoder:
                     final_key = stored_key
                     self.logger.info(f"Loaded API Key for {provider} from secure Keyring.")
 
+        # The key is passed per call only; exporting it to os.environ would hand it to every child process.
         self.api_key = final_key if final_key and final_key != "sk-dummy" else None
-        if self.api_key:
-            # Other components (e.g. RAG embeddings) read these env vars.
-            env_var = {"OpenAI": "OPENAI_API_KEY", "Anthropic": "ANTHROPIC_API_KEY", "Google": "GEMINI_API_KEY"}.get(provider_key)
-            if env_var:
-                os.environ[env_var] = self.api_key
 
     def _format_model_name(self, provider: str, model: str) -> str:
         prefix = {"Ollama": "ollama", "Google": "gemini", "Anthropic": "anthropic", "Custom": "openai"}.get(
@@ -329,14 +330,15 @@ class DittoCoder:
                         target = next(x for x in model_base.iterdir() if x.is_dir())
                         self.native_engine = NativeInferenceEngine(str(target))
                     except StopIteration:
-                        return "Error: Offline Mode active but no Tiny Model found (empty dir)."
+                        raise DittoError("Offline mode is active but no local model was found (empty directory).")
                 else:
-                    return "Error: Offline Mode active but no Tiny Model found. Please download one via Wizard."
+                    raise DittoError("Offline mode is active but no local model was found. Download one in the wizard.")
             
             return self.native_engine.generate(messages)
 
         # B. Cloud/Ollama Mode (LiteLLM)
-        if not completion: return "Error: LiteLLM library missing."
+        if not completion:
+            raise DittoError("LiteLLM library missing.")
         
         try:
             response = completion(
@@ -346,9 +348,14 @@ class DittoCoder:
                 api_base=self.base_url,
                 api_key=self._completion_api_key()
             )
-            return response.choices[0].message.content
         except Exception as e:
-            return f"LLM API Error: {str(e)}"
+            raise DittoError(f"LLM API error: {e}") from e
+        choice = response.choices[0]
+        content = choice.message.content
+        if getattr(choice, "finish_reason", None) == "content_filter" or content is None:
+            # Claude 5.x reports a refusal as a normal (HTTP 200) response; LiteLLM maps it to content_filter.
+            raise DittoError(f"The model declined to answer ({self.model_name}).")
+        return content
 
     # --- PUBLIC API ---
 
@@ -362,19 +369,25 @@ class DittoCoder:
         if rag:
             results = rag.search(question)
             if results:
-                rag_context = "\n".join([f"- {r.content}" for r in results])
+                rag_context = "\n".join([f"- [{r.source}] {r.content}" for r in results])
 
-        # 2. Construct/Update History
-        base_system = "You are Ditto, an AI Hardware Expert. Help the user configure their build."
-        if rag_context:
-            base_system += f"\n\nRELEVANT KNOWLEDGE BASE:\n{rag_context}"
+        # 2. Construct/Update History. Retrieved text is data and goes into the user turn, never the system prompt.
+        base_system = (
+            "You are Ditto, the assistant of the LLM Cross-Compiler Framework, which converts and quantizes "
+            "language models for edge hardware (GGUF, RKLLM, RKNN) and deploys them. Help the user configure "
+            "their builds and understand errors. Answer in the language of the user's question. "
+            "Say when you are unsure.\n" + UNTRUSTED_RULE
+        )
         
         messages_for_llm = [{"role": "system", "content": base_system}]
         
         if history:
             messages_for_llm.extend(history)
-            
-        messages_for_llm.append({"role": "user", "content": question})
+
+        user_content = question
+        if rag_context:
+            user_content += "\n\nPossibly relevant knowledge base excerpts:\n" + wrap_untrusted(rag_context, "knowledge base")
+        messages_for_llm.append({"role": "user", "content": user_content})
 
         # 3. Compress if needed
         optimized_messages = self._compress_history(messages_for_llm)
@@ -409,12 +422,11 @@ class DittoCoder:
             "target": "HOST" or "DEVICE"
         }
         NO MARKDOWN. NO EXPLANATIONS.
-        """
-        
-        if rag_context:
-            system_prompt += f"\n\nKNOWN ISSUES:\n{rag_context}"
+        """ + UNTRUSTED_RULE
 
-        user_prompt = f"CONTEXT: {context_info}\n\nLOG:\n{log_content[-3000:]}"
+        user_prompt = f"CONTEXT: {context_info}\n\nLOG:\n" + wrap_untrusted(log_content[-3000:], "build log")
+        if rag_context:
+            user_prompt += "\n\nKNOWN ISSUES (knowledge base):\n" + wrap_untrusted(rag_context, "knowledge base")
 
         messages = [
             {"role": "system", "content": system_prompt},
@@ -422,7 +434,7 @@ class DittoCoder:
         ]
 
         try:
-            response = self._query_llm(messages)
+            response = self._query_llm(messages) or ""
             # Clean JSON
             if "```" in response:
                 import re
@@ -479,20 +491,18 @@ class DittoCoder:
             "setup_commands": "Bash code for Dockerfile setup (optional)",
             "quantization_logic": "Bash CASE block content for build.sh"
         }
-        
-        Documentation Context:
-        {doc_context}
-        """
+        """ + UNTRUSTED_RULE
 
-        user_prompt = f"""
-        --- INPUT: target_hardware_config.txt ---
-        {probe_data[:8000]}
-        
-        Based on this probe, generate the optimal configuration JSON.
-        """
+        user_prompt = (
+            "--- INPUT: target_hardware_config.txt ---\n"
+            + wrap_untrusted(probe_data[:8000], "hardware probe")
+            + "\n\nBased on this probe, generate the optimal configuration JSON."
+        )
+        if doc_context:
+            user_prompt += "\n\nDocumentation context:\n" + wrap_untrusted(doc_context, "knowledge base")
         
         messages = [
-            {"role": "system", "content": system_prompt.replace("{doc_context}", doc_context)},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
 

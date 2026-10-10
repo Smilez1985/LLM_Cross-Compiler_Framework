@@ -157,11 +157,13 @@ class RAGManager:
         if self.config:
              model = getattr(self.config, "ai_embedding_model", DEFAULT_EMBEDDING_MODEL) if not hasattr(self.config, 'get') else self.config.get("ai_embedding_model", DEFAULT_EMBEDDING_MODEL)
         
-        # API Key via SecretsManager if available, else Env
-        api_key = os.environ.get("OPENAI_API_KEY", "sk-dummy")
+        # API key from the keyring, else the user's own environment; never a placeholder that gets sent anyway.
+        api_key = None
         if self.framework and hasattr(self.framework, 'secrets_manager') and self.framework.secrets_manager:
-            s_key = self.framework.secrets_manager.get_secret("openai_api_key")
-            if s_key: api_key = s_key
+            api_key = self.framework.secrets_manager.get_secret("openai_api_key")
+        api_key = api_key or os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("Cloud embeddings need an OpenAI API key (none stored).")
         
         try:
             text = text.replace("\n", " ")
