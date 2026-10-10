@@ -50,10 +50,10 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python: ["3.10", "3.11", "3.12"]
+        python: ["3.11", "3.12", "3.13"]
         include:
           - os: windows-latest
-            python: "3.11"
+            python: "3.12"
     env:
       QT_QPA_PLATFORM: offscreen
       PYTHONUTF8: "1"

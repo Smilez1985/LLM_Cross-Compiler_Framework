@@ -305,3 +305,58 @@ class TestCLI:
         result = self.run_cli(tmp_path, "targets", "list", "-f", "json")
         assert result.returncode == 0, result.stderr
         assert isinstance(json.loads(result.stdout), list)
+
+
+class TestDependencyApiRegressions:
+    """APIs that changed in the dependency upgrade and used to fail silently."""
+
+    def test_rag_search_uses_query_points(self, booted_framework, monkeypatch):
+        fm = booted_framework
+        fm.config.set("enable_rag_knowledge", True)
+        rag = fm.ensure_rag_manager()
+        calls = []
+
+        class FakeClient:
+            def query_points(self, **kwargs):
+                calls.append(kwargs)
+                point = SimpleNamespace(score=0.9, payload={"content": "use -mcpu=cortex-a76", "source": "docs"})
+                return SimpleNamespace(points=[point])
+
+        rag.client, rag._connected = FakeClient(), True
+        monkeypatch.setattr(rag, "_get_embedding", lambda text: [0.1, 0.2])
+
+        results = rag.search("rk3588 flags", limit=2)
+
+        assert [r.content for r in results] == ["use -mcpu=cortex-a76"]
+        assert calls[0]["query"] == [0.1, 0.2] and calls[0]["limit"] == 2
+
+    def test_tiny_model_download_uses_current_hub_api(self, tmp_path, monkeypatch):
+        import inspect
+        import huggingface_hub
+        from orchestrator.Core.model_manager import ModelManager
+
+        seen = {}
+
+        def fake_snapshot_download(**kwargs):
+            inspect.signature(huggingface_hub.snapshot_download).bind(**kwargs)
+            seen.update(kwargs)
+            return kwargs["local_dir"]
+
+        monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot_download)
+        cfg = ConfigManager(tmp_path)
+        cfg.set("source_repositories", {"tiny_models": {"qwen": {"url": "https://huggingface.co/Qwen/Qwen3.5-0.8B"}}})
+        mm = ModelManager(cfg)
+        monkeypatch.setattr(mm, "get_available_tiny_models", lambda: {"qwen": {"url": "https://huggingface.co/Qwen/Qwen3.5-0.8B"}}, raising=False)
+
+        path = mm.download_tiny_model("qwen")
+
+        assert path is not None, "download_tiny_model swallowed an exception"
+        assert seen["repo_id"] == "Qwen/Qwen3.5-0.8B"
+
+    def test_completion_sends_no_sampling_parameters(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr("orchestrator.Core.ditto_manager.completion",
+                            lambda **kw: calls.append(kw) or SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]))
+        ditto = DittoCoder(provider="Anthropic", model="claude-sonnet-5-5", api_key="sk-ant-test-1234567890abcdef")
+        ditto._query_llm([{"role": "user", "content": "hi"}])
+        assert not {"temperature", "top_p", "top_k"} & set(calls[0])

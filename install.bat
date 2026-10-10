@@ -66,6 +66,9 @@ if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
 # Versions-Check
 python --version
 if ($LASTEXITCODE -ne 0) { Write-Error "Python ist nicht korrekt im PATH." }
+# requirements.txt only matches Python >= 3.11; on older versions pip would silently install nothing.
+& python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"
+if ($LASTEXITCODE -ne 0) { Write-Error "Python 3.11 oder neuer wird benoetigt. Bitte z. B. 'winget install Python.Python.3.12' ausfuehren." }
 
 # 3. DATEIEN KOPIEREN
 Write-Host "[2/5] Installiere Dateien (Robocopy)..." -ForegroundColor Yellow

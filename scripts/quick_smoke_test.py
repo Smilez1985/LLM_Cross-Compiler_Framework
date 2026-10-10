@@ -38,7 +38,7 @@ def run_smoke_test():
     
     # Python Version
     py_ver = sys.version_info
-    print_status("Python Version", py_ver >= (3, 10), f"Found {py_ver.major}.{py_ver.minor}.{py_ver.micro}")
+    print_status("Python Version", py_ver >= (3, 11), f"Found {py_ver.major}.{py_ver.minor}.{py_ver.micro}")
     
     # Docker
     try:

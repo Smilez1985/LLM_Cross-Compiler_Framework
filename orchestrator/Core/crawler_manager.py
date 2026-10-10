@@ -11,6 +11,7 @@ Integriert zentrale Sicherheitsvalidierung (SSRF-Schutz).
 """
 
 import time
+from dataclasses import dataclass, field
 import logging
 import requests
 import re
@@ -22,7 +23,6 @@ from io import BytesIO
 
 # Third-party imports
 from bs4 import BeautifulSoup
-from langchain_core.documents import Document
 try:
     from pypdf import PdfReader
 except ImportError:
@@ -41,6 +41,13 @@ from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
 from orchestrator.utils.validation import validate_public_url, resolve_public_addresses
+
+
+@dataclass
+class Document:
+    """A crawled page or PDF (replaces langchain_core's Document; only these two fields are used)."""
+    page_content: str
+    metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class _PinnedConnectionMixin:
@@ -132,7 +139,7 @@ class CrawlerManager:
     def crawl(self, root_url: str) -> List[Document]:
         """
         Startet den Crawl-Vorgang ab der root_url.
-        Gibt eine Liste von LangChain Documents zurück.
+        Gibt eine Liste von Documents zurück.
         """
         self.logger.info(f"Starting Deep Ingest for: {root_url}")
         self.visited.clear()

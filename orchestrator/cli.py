@@ -396,9 +396,9 @@ def generate_ai(ctx: FrameworkContext, probe_file):
     # 1. Interactive Provider Selection
     console.print("\n[bold]Select AI Provider:[/bold]")
     options = [
-        "OpenAI (GPT-4o)",
-        "Anthropic (Claude 3 Opus)",
-        "Google (Gemini Pro)",
+        "OpenAI",
+        "Anthropic (Claude)",
+        "Google (Gemini)",
         "Ollama (Local)",
         "LocalAI / OpenAI Compatible"
     ]
@@ -409,10 +409,10 @@ def generate_ai(ctx: FrameworkContext, probe_file):
     choice_idx = int(choice) - 1
     
     provider_map = {
-        0: ("OpenAI", "gpt-4o"),
-        1: ("Anthropic", "claude-3-opus-20240229"),
-        2: ("Google VertexAI", "gemini-1.5-pro"),
-        3: ("Ollama (Local)", "llama3"),
+        0: ("OpenAI", "gpt-6.1-sol"),
+        1: ("Anthropic", "claude-sonnet-5-5"),
+        2: ("Google", "gemini-3.8-flash"),
+        3: ("Ollama (Local)", "qwen3.5:4b"),
         4: ("Custom", "local-model")  # LocalAI / any OpenAI-compatible server
     }
     

@@ -7,51 +7,49 @@ readme = "README.md"
 packages = [{include = "orchestrator"}]
 
 [tool.poetry.dependencies]
-python = ">=3.10,<3.13"
+# 3.10 is end-of-life (2026-10); lower bounds below exclude all versions with known advisories.
+python = ">=3.11,<3.14"
 
-# --- 1. Core & Installer Dependencies ---
-requests = "^2.31.0"
-psutil = "^5.9.0"
-pyyaml = "^6.0.1"
-packaging = "^23.2"
-python-dotenv = "^1.0.0"  # Hinzugefügt wie besprochen
+# --- 1. Core & Installer ---
+requests = ">=2.34,<3"
+psutil = ">=7.0,<8"
+pyyaml = "^6.0.3"
+packaging = ">=24.2"
 
-# --- 2. Docker Orchestrierung ---
-docker = "^7.0.0"
+# --- 2. Docker Orchestration ---
+docker = "^7.1.0"
 
 # --- 3. GUI & CLI ---
-pyside6 = "^6.6.0"
-click = "^8.1.7"
-rich = "^13.7.0"
+pyside6 = ">=6.10,<6.13"
+click = "^8.3"
+rich = ">=13.9,<16"
 
-# --- 4. Security & Utilities ---
-cryptography = "^41.0.0"
+# --- 4. Security ---
+cryptography = ">=49,<51"
+keyring = ">=25.6"
 
-# --- 5. AI Agent & RAG (Host-Seite) ---
-litellm = "^1.0.0"
-qdrant-client = "^1.7.0"
+# --- 5. AI Agent & RAG (host side) ---
+# Exact pin on purpose: litellm 1.82.7/1.82.8 were a PyPI supply-chain compromise (2026-03).
+litellm = "1.104.2"
+tiktoken = ">=0.8"
+qdrant-client = "^1.19"
+huggingface-hub = ">=1.31,<3"
 
-# --- 6. Crawler & Ingestion (Host-Seite) ---
-beautifulsoup4 = "^4.12.0"
-langchain = "^0.1.0"
-langchain-community = "^0.0.20"
-pypdf = "^4.2.0"
-tiktoken = "^0.7.0"
+# --- 6. Crawler & Ingestion ---
+beautifulsoup4 = "^4.14"
+pypdf = ">=6.19,<7"
 langdetect = "^1.0.9"
 
-# --- 7. Windows Specifics ---
-pywin32 = {version = "^306", markers = "sys_platform == 'win32'"}
-winshell = {version = "^0.6", markers = "sys_platform == 'win32'"}
-
-# --- 8. Optional Deployment (SSH) ---
-paramiko = "^3.4.0"
+# --- 7. Deployment (SSH) ---
+paramiko = ">=3.5.1,<6"
 
 [tool.poetry.group.dev.dependencies]
-pytest = "^8.0.0"
-black = "^24.0.0"
-flake8 = "^7.0.0"
-bandit = "^1.7.0"
-safety = "^3.0.0"
+pytest = ">=9.0.3"
+ruff = ">=0.17"
+bandit = ">=1.9"
+pip-audit = ">=2.10"
+shellcheck-py = ">=0.11"
+actionlint-py = ">=1.7.12"
 
 [build-system]
 requires = ["poetry-core"]

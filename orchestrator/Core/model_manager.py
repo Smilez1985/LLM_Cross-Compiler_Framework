@@ -245,12 +245,8 @@ class ModelManager:
             # Download into a specific subfolder
             local_dir = self.tiny_models_dir / model_key
             
-            path = snapshot_download(
-                repo_id=repo_id,
-                local_dir=str(local_dir),
-                local_dir_use_symlinks=False, # Real files for true offline portability
-                resume_download=True
-            )
+            # With local_dir, huggingface-hub >= 1.0 writes real files and resumes partial downloads by itself.
+            path = snapshot_download(repo_id=repo_id, local_dir=str(local_dir))
             
             self.logger.info(f"Tiny Model installed to: {path}")
             return str(path)

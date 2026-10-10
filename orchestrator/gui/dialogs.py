@@ -157,10 +157,10 @@ class HealingConfirmDialog(QDialog):
 
 # (display name, provider id understood by DittoCoder, keyring secret, key required, suggested models)
 AI_PROVIDERS = [
-    ("OpenAI", "OpenAI", "openai_api_key", True, ["gpt-4o", "gpt-4o-mini", "gpt-4.1"]),
-    ("Anthropic (Claude)", "Anthropic", "anthropic_api_key", True, ["claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]),
-    ("Google (Gemini)", "Google", "gemini_api_key", True, ["gemini-2.0-flash", "gemini-1.5-pro"]),
-    ("Ollama (Local)", "Ollama", None, False, ["llama3.2", "qwen2.5", "mistral"]),
+    ("OpenAI", "OpenAI", "openai_api_key", True, ["gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra"]),
+    ("Anthropic (Claude)", "Anthropic", "anthropic_api_key", True, ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"]),
+    ("Google (Gemini)", "Google", "gemini_api_key", True, ["gemini-3.8-flash", "gemini-3.1-pro-preview"]),
+    ("Ollama (Local)", "Ollama", None, False, ["qwen3.5:4b", "qwen3.5:9b", "gemma4:e4b"]),
     ("Custom Endpoint (OpenAI-compatible)", "Custom", "custom_api_key", False, []),
 ]
 # Only these providers talk to a user-supplied URL; cloud providers keep their fixed endpoints.
