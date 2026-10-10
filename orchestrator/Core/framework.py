@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from typing import Optional, Dict, Any
 
 # Utils
+from orchestrator import __version__
 from orchestrator.utils.logging import setup_logging, get_logger
 from orchestrator.utils.telemetry import TelemetryManager
 from orchestrator.utils.updater import UpdateManager
@@ -44,7 +45,7 @@ from orchestrator.tools.framework_tools import build_tool_registry
 @dataclass
 class FrameworkInfo:
     name: str = "LLM Cross-Compiler Framework"
-    version: str = "2.4.0"
+    version: str = __version__
     edition: str = "Enterprise"
     installation_path: Path = Path(".")
 
