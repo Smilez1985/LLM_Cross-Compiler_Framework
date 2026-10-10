@@ -51,9 +51,9 @@ setup_system() {
         log_warn "Python3 fehlt. Installiere..."
         apt-get update && apt-get install -y python3 python3-venv python3-pip || log_error "Konnte Python nicht installieren."
     fi
-    # requirements.txt only matches Python >= 3.11; on older versions pip would silently install nothing.
-    if ! python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)'; then
-        log_error "Python >= 3.11 wird benötigt, gefunden: $(python3 --version 2>&1). Bitte eine neuere Python-Version installieren (z. B. Debian 12, Ubuntu 24.04 oder 'uv python install 3.12')."
+    # requirements.txt only matches Python 3.11-3.14; outside that range pip would silently install nothing.
+    if ! python3 -c 'import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)'; then
+        log_error "Python 3.11 bis 3.14 wird benötigt, gefunden: $(python3 --version 2>&1). Bitte eine passende Version installieren (z. B. Debian 12, Ubuntu 24.04 oder 'uv python install 3.13')."
     fi
 
     # Docker Check (Übernommen aus setup_linux.sh)

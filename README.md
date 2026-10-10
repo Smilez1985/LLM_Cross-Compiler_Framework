@@ -43,7 +43,7 @@ We have simplified the installation process into single-file installers ("Single
 
 ### Windows
 1. **Run as Admin:** Right-click `install.bat` and select **"Run as Administrator"**.
-2. **Process:** The script will check for Python 3.11 (installing via Winget if missing), create an isolated `.venv`, install all dependencies, and create Desktop shortcuts.
+2. **Process:** The script checks for Python 3.11-3.14 (installing 3.13 via Winget if missing), creates an isolated `.venv`, installs all dependencies, and creates Desktop shortcuts.
 
 ### Linux / macOS
 1. Open your terminal in the repository root.

@@ -55,8 +55,8 @@ Write-Host "[1/5] Pruefe Python Umgebung..." -ForegroundColor Yellow
 if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
     Write-Host "Python nicht gefunden. Versuche Installation via Winget..."
     try {
-        # Python 3.11 festnageln für Stabilität
-        winget install -e --id Python.Python.3.11 --scope machine --accept-source-agreements --accept-package-agreements
+        # Python 3.13: supported by every pinned dependency (3.11 reaches end of life in 2027-10)
+        winget install -e --id Python.Python.3.13 --scope machine --accept-source-agreements --accept-package-agreements
         # Refresh Env Vars
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
     } catch {
@@ -66,9 +66,9 @@ if (-not (Get-Command "python" -ErrorAction SilentlyContinue)) {
 # Versions-Check
 python --version
 if ($LASTEXITCODE -ne 0) { Write-Error "Python ist nicht korrekt im PATH." }
-# requirements.txt only matches Python >= 3.11; on older versions pip would silently install nothing.
-& python -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)"
-if ($LASTEXITCODE -ne 0) { Write-Error "Python 3.11 oder neuer wird benoetigt. Bitte z. B. 'winget install Python.Python.3.12' ausfuehren." }
+# requirements.txt only matches Python 3.11-3.14; outside that range pip would silently install nothing.
+& python -c "import sys; sys.exit(0 if (3, 11) <= sys.version_info[:2] < (3, 15) else 1)"
+if ($LASTEXITCODE -ne 0) { Write-Error "Python 3.11 bis 3.14 wird benoetigt. Bitte z. B. 'winget install Python.Python.3.13' ausfuehren." }
 
 # 3. DATEIEN KOPIEREN
 Write-Host "[2/5] Installiere Dateien (Robocopy)..." -ForegroundColor Yellow

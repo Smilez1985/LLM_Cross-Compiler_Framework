@@ -8,7 +8,7 @@ packages = [{include = "orchestrator"}]
 
 [tool.poetry.dependencies]
 # 3.10 is end-of-life (2026-10); lower bounds below exclude all versions with known advisories.
-python = ">=3.11,<3.14"
+python = ">=3.11,<3.15"
 
 # --- 1. Core & Installer ---
 requests = ">=2.34,<3"
@@ -20,7 +20,8 @@ packaging = ">=24.2"
 docker = "^7.1.0"
 
 # --- 3. GUI & CLI ---
-pyside6 = ">=6.10,<6.13"
+# Only QtCore/QtGui/QtWidgets are used; the essentials wheel skips WebEngine, Pdf and the add-ons.
+pyside6-essentials = ">=6.11,<6.13"
 click = "^8.3"
 rich = ">=13.9,<16"
 
@@ -34,6 +35,11 @@ litellm = "1.104.2"
 tiktoken = ">=0.8"
 qdrant-client = "^1.19"
 huggingface-hub = ">=1.31,<3"
+
+# Schemas for tool inputs/outputs, forced JSON answers and the MCP server.
+pydantic = ">=2.12,<3"
+# Model Context Protocol server (spec 2026-07-28). Exact pin: LLM tooling is a supply-chain target.
+mcp = "2.3.0"
 
 # --- 6. Crawler & Ingestion ---
 beautifulsoup4 = "^4.14"

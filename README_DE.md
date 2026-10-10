@@ -43,7 +43,7 @@ Wir haben den Installationsprozess in zwei "Single Source of Truth" Skripten zus
 
 ### Windows
 1. **Als Admin ausführen:** Rechtsklick auf `install.bat` und "Als Administrator ausführen" wählen.
-2. **Prozess:** Das Skript prüft auf Python 3.11 (installiert via Winget falls fehlend), erstellt ein isoliertes `.venv`, installiert alle Abhängigkeiten und legt Desktop-Verknüpfungen an.
+2. **Prozess:** Das Skript prüft auf Python 3.11 bis 3.14 (installiert 3.13 via Winget falls fehlend), erstellt ein isoliertes `.venv`, installiert alle Abhängigkeiten und legt Desktop-Verknüpfungen an.
 
 ### Linux / macOS
 1. Terminal im Repository-Root öffnen.
