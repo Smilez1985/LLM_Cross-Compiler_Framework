@@ -9,16 +9,18 @@ Updates:
 - LanguageSelectionDialog for first-run setup.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+import threading
+from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QLabel, QLineEdit,
-    QDialogButtonBox, QMessageBox, QComboBox,
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QDialogButtonBox, QMessageBox, QComboBox, QPushButton, QSizePolicy,
     QWidget, QFormLayout, QTextEdit, QSpinBox,
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QObject, Qt, Signal
+from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import get_instance as get_i18n
 
 class LanguageSelectionDialog(QDialog):
@@ -167,34 +169,87 @@ class HealingConfirmDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-# (display name, provider id understood by DittoCoder, keyring secret, key required, suggested models)
-AI_PROVIDERS = [
-    ("OpenAI", "OpenAI", "openai_api_key", True, ["gpt-6.1-sol", "gpt-6-luna", "gpt-6-astra"]),
-    ("Anthropic (Claude)", "Anthropic", "anthropic_api_key", True, ["claude-sonnet-5-5", "claude-haiku-5-5", "claude-opus-5-5"]),
-    ("Google (Gemini)", "Google", "gemini_api_key", True, ["gemini-3.8-flash", "gemini-3.1-pro-preview"]),
-    ("Ollama (Local)", "Ollama", None, False, ["qwen3.5:4b", "qwen3.5:9b", "gemma4:e4b"]),
-    ("Custom Endpoint (OpenAI-compatible)", "Custom", "custom_api_key", False, []),
+class SettingsOverlay:
+    """The saved settings with the dialog's unsaved choices on top, for the live model list.
+    Like LLMClient, it counts only values the user set: schema defaults belong to the default provider."""
+
+    config_values = None  # makes LLMClient read every key through get()
+
+    def __init__(self, base: Any, overrides: Dict[str, Any]):
+        self._base = base
+        self._overrides = overrides
+
+    def get(self, key: str, default: Any = None) -> Any:
+        if key in self._overrides:
+            return self._overrides[key]
+        values = getattr(self._base, "config_values", None)
+        if isinstance(values, dict):
+            entry = values.get(key)
+            if entry is None or getattr(getattr(entry, "source", None), "source_type", "") == "default":
+                return default
+            return entry.value
+        return self._base.get(key, default) if self._base is not None and hasattr(self._base, "get") else default
+
+    def __getattr__(self, name: str) -> Any:
+        if name.startswith("_"):
+            raise AttributeError(name)
+        return getattr(self._base, name)
+
+
+class _SecretsOverlay:
+    """The secrets store, plus a key typed into the dialog but not saved yet."""
+
+    def __init__(self, base: Any, name: Optional[str], value: str):
+        self._base, self._name, self._value = base, name, value
+
+    def get_secret(self, key: str) -> Optional[str]:
+        if self._value and key == self._name:
+            return self._value
+        return self._base.get_secret(key) if self._base is not None else None
+
+
+def list_provider_models(config: Any, secrets: Any, provider: str) -> List[str]:
+    """Model ids from the provider's live list (raises an LLMError with a readable message on failure)."""
+    from orchestrator.llm import LLMClient
+    return [m.id for m in LLMClient(config, secrets).list_models(provider)]
+
+
+class _ModelListSignals(QObject):
+    done = Signal(int, object, str)  # request number, model ids (None on failure), message
+
+
+EFFORT_CHOICES = [("Provider default", ""), ("Low", "low"), ("Medium", "medium"), ("High", "high"),
+                  ("Extra high", "xhigh"), ("Maximum", "max")]
+SECURITY_CHOICES = [
+    ("Strict: also hide host names, serial numbers, UUIDs and directories", "STRICT"),
+    ("Balanced: hide IP/MAC/e-mail addresses, logins and user names", "BALANCED"),
+    ("Off: only API keys and tokens are removed", "OFF"),
 ]
-# Only these providers talk to a user-supplied URL; cloud providers keep their fixed endpoints.
-ENDPOINT_PROVIDERS = ("Ollama", "Custom")
+
 
 class AIConfigurationDialog(QDialog):
     """
-    Configures the AI Agent (Ditto) via dropdowns.
-    API keys go to the OS keyring, selections to the user config.
+    Configures the AI Agent (Ditto): provider (from configs/llm_providers.yml), model, effort, privacy level,
+    offline mode and fallback chain. API keys go to the secrets store, selections to the user config.
     """
+
+    # Returns model ids for (settings, secrets, provider id); replaced in tests.
+    model_lister = staticmethod(list_provider_models)
+
     def __init__(self, framework=None, parent=None):
         super().__init__(parent)
+        from orchestrator.llm import load_catalog
         self.framework = framework
         self.i18n = get_i18n()
         self._result_config: Dict[str, Any] = {}
+        self._model_request = 0
+        self.catalog = load_catalog(user_dir=getattr(self._config(), "config_dir", None))
 
         self.setWindowTitle("Configure AI Agent (Ditto)")
-        self.setMinimumWidth(500)
-
+        self.setMinimumWidth(560)
         layout = QVBoxLayout(self)
 
-        info_text = "Configure the AI Agent for hardware analysis and module generation."
+        info_text = "Configure the AI Agent for chat, hardware analysis, module generation and build advice."
         if self.i18n:
             info_text = self.i18n.t("dlg.ai.info", info_text)
         info_lbl = QLabel(info_text)
@@ -204,26 +259,67 @@ class AIConfigurationDialog(QDialog):
         form = QFormLayout()
 
         self.cb_provider = QComboBox()
-        for display, provider_id, _, _, _ in AI_PROVIDERS:
-            self.cb_provider.addItem(display, provider_id)
+        for preset in self.catalog.providers.values():
+            self.cb_provider.addItem(preset.label, preset.id)
         self.cb_provider.currentIndexChanged.connect(self._on_provider_changed)
         form.addRow("AI Provider:", self.cb_provider)
 
+        model_row = QHBoxLayout()
         self.cb_model = QComboBox()
-        self.cb_model.setEditable(True)
-        form.addRow("Model:", self.cb_model)
+        self.cb_model.setEditable(True)  # any model id works; the live list is only a suggestion
+        self.cb_model.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        model_row.addWidget(self.cb_model)
+        self.btn_refresh_models = QPushButton("Refresh")
+        self.btn_refresh_models.setToolTip("Load the models this provider offers for your account")
+        self.btn_refresh_models.clicked.connect(self._refresh_models)
+        model_row.addWidget(self.btn_refresh_models)
+        form.addRow("Model:", model_row)
+        self.lbl_models = QLabel("")
+        self.lbl_models.setWordWrap(True)
+        self.lbl_models.setTextFormat(Qt.PlainText)  # may contain the provider's error text
+        self.lbl_models.setStyleSheet("color: #888;")
+        form.addRow("", self.lbl_models)
 
+        key_row = QHBoxLayout()
         self.txt_api_key = QLineEdit()
         self.txt_api_key.setEchoMode(QLineEdit.Password)
-        form.addRow("API Key:", self.txt_api_key)
+        key_row.addWidget(self.txt_api_key)
+        # Placeholder for the per-provider sign-in (OAuth, device code, CLI login), built in its own work package.
+        self.btn_sign_in = QPushButton("Sign in...")
+        self.btn_sign_in.setEnabled(False)
+        self.btn_sign_in.setToolTip("Signing in per provider is not available yet; use an API key.")
+        self.btn_sign_in.clicked.connect(self._sign_in)
+        key_row.addWidget(self.btn_sign_in)
+        form.addRow("API Key:", key_row)
 
         self.txt_base_url = QLineEdit()
         form.addRow("Base URL:", self.txt_base_url)
 
+        self.cb_effort = QComboBox()
+        for label, value in EFFORT_CHOICES:
+            self.cb_effort.addItem(label, value)
+        self.cb_effort.setToolTip("How much the model thinks before answering; providers without effort control "
+                                  "ignore it.")
+        form.addRow("Effort:", self.cb_effort)
+
+        self.cb_security = QComboBox()
+        for label, value in SECURITY_CHOICES:
+            self.cb_security.addItem(label, value)
+        self.cb_security.setToolTip("Personal data removed before text goes to a cloud provider (answers are "
+                                    "restored locally). Local providers are never filtered.")
+        form.addRow("Privacy (cloud):", self.cb_security)
+
+        self.txt_fallback = QLineEdit()
+        self.txt_fallback.setPlaceholderText("e.g. local, ollama:qwen3.5:4b")
+        self.txt_fallback.setToolTip("Providers tried in order when the model declines or the provider is "
+                                     "unavailable: provider or provider:model, separated by commas.")
+        form.addRow("Fallback chain:", self.txt_fallback)
+
         self.chk_enable_rag = QCheckBox("Enable Local Knowledge Base (RAG, local embeddings; downloads a ~0.5 GB model once)")
         form.addRow("", self.chk_enable_rag)
 
-        self.chk_offline = QCheckBox("Offline Mode (built-in local model, no external APIs)")
+        self.chk_offline = QCheckBox("Offline Mode (only local providers: Ollama, the managed local model, "
+                                     "a custom server on your network)")
         self.chk_offline.toggled.connect(self._on_offline_toggled)
         form.addRow("", self.chk_offline)
 
@@ -237,100 +333,210 @@ class AIConfigurationDialog(QDialog):
         self._load_current_config()
 
     # --- helpers ---
+    def _config(self):
+        return getattr(self.framework, 'config', None)
+
     def _config_get(self, key: str, default: Any = None) -> Any:
-        cfg = getattr(self.framework, 'config', None)
+        cfg = self._config()
         if cfg is not None and hasattr(cfg, 'get'):
             return cfg.get(key, default)
         return default
 
-    def _provider_meta(self) -> Tuple[Optional[str], bool, List[str]]:
-        provider = self.cb_provider.currentData()
-        for _, provider_id, secret_key, key_required, models in AI_PROVIDERS:
-            if provider_id == provider:
-                return secret_key, key_required, models
-        return None, False, []
+    def _user_value(self, key: str, default: Any = None) -> Any:
+        """A value the user set; schema defaults do not count (the default model belongs to OpenAI)."""
+        return SettingsOverlay(self._config(), {}).get(key, default)
+
+    def _preset(self):
+        return self.catalog.providers.get(self.cb_provider.currentData())
+
+    def _secrets(self):
+        return getattr(self.framework, 'secrets_manager', None)
 
     def _stored_key(self) -> Optional[str]:
-        secret_key, _, _ = self._provider_meta()
-        sm = getattr(self.framework, 'secrets_manager', None)
-        if secret_key and sm:
-            return sm.get_secret(secret_key)
+        preset, sm = self._preset(), self._secrets()
+        if preset is not None and preset.secret and sm:
+            return sm.get_secret(preset.secret)
         return None
 
-    def _apply_enabled_state(self):
-        secret_key, key_required, _ = self._provider_meta()
-        offline = self.chk_offline.isChecked()
-        provider = self.cb_provider.currentData()
+    @staticmethod
+    def _key_required(preset) -> bool:
+        # Presets that also work without a key (local servers) or with another sign-in (OAuth) do not need one.
+        return bool(preset.secret) and preset.auth == ["api_key"]
 
-        self.cb_provider.setEnabled(not offline)
-        self.cb_model.setEnabled(not offline)
-        self.txt_api_key.setEnabled(secret_key is not None and not offline)
-        self.txt_base_url.setEnabled(provider in ENDPOINT_PROVIDERS and not offline)
-        self.txt_base_url.setPlaceholderText("http://localhost:11434" if provider == "Ollama" else "https://.../v1")
-        if self._stored_key():
+    def _base_url(self, preset) -> str:
+        return self.txt_base_url.text().strip() if preset is not None and preset.base_url_configurable else ""
+
+    def _apply_enabled_state(self):
+        preset = self._preset()
+        if preset is None:
+            return
+        self.txt_api_key.setEnabled(bool(preset.secret))
+        self.txt_base_url.setEnabled(preset.base_url_configurable)
+        self.txt_base_url.setPlaceholderText(preset.base_url or "https://.../v1")
+        self.btn_sign_in.setEnabled(self._sign_in_available(preset))
+        self.btn_refresh_models.setEnabled(preset.live_models)
+        if not preset.secret:
+            self.txt_api_key.setPlaceholderText("Not needed for this provider")
+        elif self._stored_key():
             self.txt_api_key.setPlaceholderText("******** (Stored in Keyring)")
         else:
-            self.txt_api_key.setPlaceholderText("Paste API key" if key_required else "Optional API key")
+            self.txt_api_key.setPlaceholderText("Paste API key" if self._key_required(preset) else "Optional API key")
+
+    def _fill_models(self, models: List[str], keep: str = ""):
+        current = keep or self.cb_model.currentText().strip()
+        self.cb_model.blockSignals(True)
+        self.cb_model.clear()
+        for model in models:
+            if model and self.cb_model.findText(model) < 0:
+                self.cb_model.addItem(model)
+        self.cb_model.setCurrentText(current or (models[0] if models else ""))
+        self.cb_model.blockSignals(False)
+
+    @staticmethod
+    def _parse_fallback(text: str) -> List[str]:
+        return [part.strip() for part in text.split(",") if part.strip()]
+
+    # --- sign-in hook ---
+    def _sign_in_available(self, preset) -> bool:
+        """Whether the selected provider offers an interactive sign-in here (none yet)."""
+        return False
+
+    def _sign_in(self):
+        """Hook for the sign-in work package: starts the selected provider's own sign-in flow (OAuth, device
+        code, CLI login) for self.cb_provider.currentData(). Until then keys go into the API Key field."""
+        return None
+
+    # --- live model list ---
+    def _refresh_models(self):
+        """Loads the provider's model list in a worker thread; on failure the free text stays as it is."""
+        preset = self._preset()
+        self._model_request += 1
+        request = self._model_request
+        if preset is None or not preset.live_models:
+            self.lbl_models.setText("")
+            return
+        overrides = {"ai_provider": preset.id, "ai_model": self.cb_model.currentText().strip() or preset.id,
+                     "offline_mode": self.chk_offline.isChecked()}
+        if self._base_url(preset):
+            overrides["ai_base_url"] = self._base_url(preset)
+        config = SettingsOverlay(self._config(), overrides)
+        secrets = _SecretsOverlay(self._secrets(), preset.secret, self.txt_api_key.text().strip())
+        lister = self.model_lister
+        signals = _ModelListSignals(self)
+        signals.done.connect(self._on_models_listed)
+        self.lbl_models.setText("Loading the provider's models...")
+
+        def work():
+            try:
+                ids, message = list(lister(config, secrets, preset.id)), ""
+            except Exception as e:  # LLMError text is already redacted and readable
+                text = redact_secrets(str(e)).strip()
+                ids, message = None, (text.splitlines()[0][:300] if text else type(e).__name__)
+            try:
+                signals.done.emit(request, ids, message)
+            except RuntimeError:
+                pass  # the dialog was closed meanwhile
+
+        threading.Thread(target=work, name="ai-model-list", daemon=True).start()
+
+    def _on_models_listed(self, request: int, ids, message: str):
+        if request != self._model_request:
+            return  # the provider changed meanwhile
+        if ids is None:
+            self.lbl_models.setText(f"Live model list unavailable ({message}). Type the model id.")
+            return
+        if not ids:
+            self.lbl_models.setText("The provider listed no models. Type the model id.")
+            return
+        self._fill_models(ids)
+        self.lbl_models.setText(f"{len(ids)} models available.")
 
     # --- slots ---
     def _on_provider_changed(self):
-        _, _, models = self._provider_meta()
+        preset = self._preset()
+        if preset is None:
+            return
+        saved = self.catalog.resolve_id(self._user_value("ai_provider")) == preset.id
+        suggestions = [m for m in [*preset.models.values(), *preset.suggested_models] if m]
+        keep = (self._user_value("ai_model") if saved else None) or preset.model_for("chat") or ""
         self.cb_model.clear()
-        self.cb_model.addItems(models)
+        self._fill_models(suggestions, keep=keep)
+        self.txt_base_url.setText((self._user_value("ai_base_url") or "") if saved and preset.base_url_configurable
+                                  else "")
+        self.txt_api_key.clear()
+        self.lbl_models.setText("")
         self._apply_enabled_state()
+        self._refresh_models()
 
     def _on_offline_toggled(self, checked: bool):
         self._apply_enabled_state()
 
     def _load_current_config(self):
-        idx = self.cb_provider.findData(self._config_get("ai_provider", "OpenAI"))
-        self.cb_provider.setCurrentIndex(max(idx, 0))
+        pid = self.catalog.resolve_id(self._config_get("ai_provider", "OpenAI")) or "openai"
+        self.chk_offline.setChecked(bool(self._config_get("offline_mode", False)))
+        self.cb_provider.blockSignals(True)
+        self.cb_provider.setCurrentIndex(max(self.cb_provider.findData(pid), 0))
+        self.cb_provider.blockSignals(False)
+        self.chk_enable_rag.setChecked(bool(self._config_get("enable_rag_knowledge", False)))
+        self.cb_effort.setCurrentIndex(max(self.cb_effort.findData(self._user_value("ai_effort") or ""), 0))
+        security = str(self._config_get("ai_security_level", "STRICT") or "STRICT").upper()
+        self.cb_security.setCurrentIndex(max(self.cb_security.findData(security), 0))
+        chain = self._user_value("ai_fallback_chain") or []
+        self.txt_fallback.setText(", ".join(chain) if isinstance(chain, list) else str(chain))
         self._on_provider_changed()
 
-        model = self._config_get("ai_model")
-        if model:
-            self.cb_model.setCurrentText(model)
-        self.txt_base_url.setText(self._config_get("ai_base_url", "") or "")
-        self.chk_enable_rag.setChecked(bool(self._config_get("enable_rag_knowledge", False)))
-        self.chk_offline.setChecked(bool(self._config_get("offline_mode", False)))
-        self._apply_enabled_state()
-
     def _save_config(self):
-        provider = self.cb_provider.currentData()
+        preset = self._preset()
+        if preset is None:
+            return
         model = self.cb_model.currentText().strip()
         api_key = self.txt_api_key.text().strip()
         offline = self.chk_offline.isChecked()
         enable_rag = self.chk_enable_rag.isChecked()
-        secret_key, key_required, _ = self._provider_meta()
-        # A leftover Ollama/Custom URL must never reach a cloud provider (it would receive that provider's key).
-        base_url = self.txt_base_url.text().strip() if provider in ENDPOINT_PROVIDERS else ""
+        # A leftover Ollama/custom URL must never reach a cloud provider (it would receive that provider's key).
+        base_url = self._base_url(preset)
+        fallback = self._parse_fallback(self.txt_fallback.text())
 
-        if not offline:
-            if key_required and not api_key and not self._stored_key():
-                QMessageBox.warning(self, "Missing API Key",
-                    "Please provide an API key for this provider, or enable Offline Mode.")
-                return
-            if provider == "Custom" and not base_url:
-                QMessageBox.warning(self, "Missing Base URL", "A custom endpoint requires a Base URL.")
-                return
-            if base_url and (urlparse(base_url).scheme not in ("http", "https") or not urlparse(base_url).netloc):
-                QMessageBox.warning(self, "Invalid Base URL", "The Base URL must start with http:// or https://.")
-                return
-            if not model:
-                QMessageBox.warning(self, "Missing Model", "Please select or enter a model.")
-                return
+        unknown = [entry for entry in fallback if self.catalog.get(entry.partition(":")[0]) is None]
+        if unknown:
+            QMessageBox.warning(self, "Invalid Fallback Chain",
+                                f"Unknown provider in the fallback chain: {', '.join(unknown)}.\n"
+                                f"Known providers: {', '.join(self.catalog.ids())}.")
+            return
+        if offline and preset.location == "cloud":
+            QMessageBox.warning(self, "Offline Mode",
+                                f"{preset.label} is a cloud provider. In offline mode choose a local provider "
+                                "(Ollama, the managed local model, or a custom server on your network).")
+            return
+        if self._key_required(preset) and not api_key and not self._stored_key():
+            QMessageBox.warning(self, "Missing API Key", "Please provide an API key for this provider.")
+            return
+        if preset.base_url_configurable and not preset.base_url and not base_url:
+            QMessageBox.warning(self, "Missing Base URL", "A custom endpoint requires a Base URL.")
+            return
+        if base_url and (urlparse(base_url).scheme not in ("http", "https") or not urlparse(base_url).netloc):
+            QMessageBox.warning(self, "Invalid Base URL", "The Base URL must start with http:// or https://.")
+            return
+        if not model and not preset.runtime_endpoint:
+            QMessageBox.warning(self, "Missing Model", "Please select or enter a model.")
+            return
 
-        if api_key and secret_key:
-            sm = getattr(self.framework, 'secrets_manager', None)
-            if not sm or not sm.set_secret(secret_key, api_key):
+        if api_key and preset.secret:
+            sm = self._secrets()
+            if not sm or not sm.set_secret(preset.secret, api_key):
                 QMessageBox.critical(self, "Error", "Failed to store API key in the OS keyring.")
                 return
 
-        cfg = getattr(self.framework, 'config', None)
+        effort = self.cb_effort.currentData() or ""
+        security = self.cb_security.currentData() or "STRICT"
+        cfg = self._config()
         if cfg is not None and hasattr(cfg, 'set'):
-            cfg.set("ai_provider", provider)
+            cfg.set("ai_provider", preset.id)
             cfg.set("ai_model", model)
             cfg.set("ai_base_url", base_url)
+            cfg.set("ai_effort", effort)
+            cfg.set("ai_security_level", security)
+            cfg.set("ai_fallback_chain", fallback)
             cfg.set("offline_mode", offline)
             cfg.set("enable_rag_knowledge", enable_rag)
             if hasattr(cfg, 'save_user_config'):
@@ -340,23 +546,24 @@ class AIConfigurationDialog(QDialog):
             self.framework.ensure_rag_manager()
 
         ditto = getattr(self.framework, 'ditto_manager', None)
-        if ditto and hasattr(ditto, 'reinitialize'):
-            # "" (not None) so that a previously set URL is cleared.
-            ditto.reinitialize(provider=provider, model=model, api_key=api_key or None,
-                               base_url=base_url, offline_mode=offline)
+        if ditto is not None and hasattr(ditto, 'reload'):
+            ditto.reload()  # a new key or catalog takes effect on the next question
 
         self._result_config = {
-            "provider": provider,
+            "provider": preset.id,
+            "provider_label": preset.label,
             "model": model,
-            "api_key": api_key or None,
             "base_url": base_url or None,
+            "effort": effort or None,
+            "security_level": security,
+            "fallback_chain": fallback,
             "offline_mode": offline,
             "enable_rag": enable_rag,
         }
         self.accept()
 
     def get_config(self) -> Dict[str, Any]:
-        """Selected settings after the dialog was accepted (empty otherwise)."""
+        """Selected settings after the dialog was accepted (empty otherwise); never contains a key."""
         return dict(self._result_config)
 
 class URLInputDialog(QDialog):

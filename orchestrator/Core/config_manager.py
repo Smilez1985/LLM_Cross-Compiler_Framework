@@ -337,9 +337,16 @@ class ConfigManager:
                          "Languages (ISO 639-1) of the pages the crawler keeps; empty = all languages"),
 
             # AI Agent (Ditto) Selection
-            ConfigSchema("ai_provider", str, False, "OpenAI", "AI provider (OpenAI/Anthropic/Google/Ollama/Custom)"),
+            ConfigSchema("ai_provider", str, False, "OpenAI",
+                         "AI provider id from configs/llm_providers.yml (anthropic, claude_code, openai, google, "
+                         "openrouter, ollama, local, custom); older names such as OpenAI still work"),
             ConfigSchema("ai_model", str, False, "gpt-6.1-sol", "AI model name"),
             ConfigSchema("ai_base_url", str, False, "", "Base URL for Ollama/Custom endpoints"),
+            ConfigSchema("ai_effort", str, False, "", "Reasoning effort: low, medium, high, xhigh, max; "
+                         "empty = the provider's default per task", ["regex:^(low|medium|high|xhigh|max)?$"]),
+            ConfigSchema("ai_fallback_chain", list, False, [],
+                         "Providers tried when the model declines or the provider is unavailable, as provider or "
+                         "provider:model, e.g. local, ollama:qwen3.5:4b"),
 
             # UX History
             ConfigSchema("input_history", list, False, [], "History of user inputs"),
@@ -532,7 +539,7 @@ class ConfigManager:
                 "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
                 "crawler_respect_robots", "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages",
-                "ai_provider", "ai_model", "ai_base_url",
+                "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
                 "input_history",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",
