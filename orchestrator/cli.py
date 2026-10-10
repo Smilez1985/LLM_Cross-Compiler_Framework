@@ -864,6 +864,176 @@ def ditto():
     pass
 
 
+def _local_runtime(ctx: FrameworkContext):
+    """The managed llama-server; needs neither the keyring nor Docker, so the framework is not booted."""
+    from orchestrator.runtime.llama_server import LocalLLMRuntime, framework_models_dir
+    models = framework_models_dir(os.environ.get("LLM_FRAMEWORK_MODELS_DIR") or ctx.config.get("models_dir"))
+    return LocalLLMRuntime(models_dir=models / "ditto")
+
+
+def _download_progress():
+    from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TransferSpeedColumn
+    bar = Progress(TextColumn("{task.description}"), BarColumn(), DownloadColumn(), TransferSpeedColumn(),
+                   console=console, transient=True)
+    tasks = {}
+
+    def update(name: str, done: int, total: Optional[int]):
+        if name not in tasks:
+            tasks[name] = bar.add_task(escape(name), total=total)
+        bar.update(tasks[name], completed=done)
+    return bar, update
+
+
+def _gib(size: Optional[int]) -> str:
+    return f"{size / 1024 ** 3:.1f} GiB" if size else "?"
+
+
+@ditto.group('runtime')
+def ditto_runtime():
+    """Local model server (llama.cpp) for offline use"""
+    pass
+
+
+@ditto_runtime.command('status')
+@pass_context
+def runtime_status(ctx: FrameworkContext):
+    """Hardware, recommended build and model, and whether the server is running"""
+    rt = _local_runtime(ctx)
+    status = rt.status()
+    choice = rt.select_backend()
+    model, why = rt.choose_tier()
+    table = Table(title=f"Local runtime (llama.cpp {escape(status.build)})", show_header=False)
+    table.add_column("", style="cyan")
+    table.add_column("")
+    table.add_row("Hardware", escape(rt.hardware().summary()))
+    table.add_row("Recommended build", escape(f"{choice.asset.id if choice.asset else '-'}: {choice.reason}"))
+    inst = status.installed
+    table.add_row("Installed", escape(f"{inst.asset_id} ({inst.path})") if inst else "[yellow]no[/yellow]")
+    if status.running:
+        health = "[green]ready[/green]" if status.healthy else "[yellow]starting / not answering[/yellow]"
+        table.add_row("Server", f"{health} {escape(str(status.base_url))} (pid {status.pid}, "
+                                f"model {escape(str(status.model))}, ctx {status.ctx})")
+    else:
+        table.add_row("Server", "stopped")
+    table.add_row("Recommended model", escape(f"{model.file} - {why}"))
+    table.add_row("Log", escape(str(status.log_file)))
+    console.print(table)
+
+
+@ditto_runtime.command('install')
+@click.option('--backend', type=click.Choice(['auto', 'cpu', 'vulkan', 'cuda', 'rocm', 'metal']), default='auto',
+              show_default=True, help='Build to install (ROCm only when chosen here)')
+@click.option('--force', is_flag=True, help='Download and unpack again even if it is installed')
+@click.option('--yes', '-y', is_flag=True, help='Do not ask before downloading')
+@pass_context
+def runtime_install(ctx: FrameworkContext, backend: str, force: bool, yes: bool):
+    """Download the pinned llama.cpp build (sha256-verified before unpacking)"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    rt = _local_runtime(ctx)
+    choice = rt.select_backend(backend)
+    if choice.asset is None:
+        console.print(f"[red]{escape(choice.reason)}[/red]")
+        sys.exit(1)
+    console.print(f"llama.cpp {escape(rt.build)} - {escape(choice.asset.id)}: {escape(choice.reason)}")
+    if not yes and not click.confirm(f"Download {_gib(choice.asset.download_size)}?", default=True):
+        return
+    bar, update = _download_progress()
+    try:
+        with bar:
+            inst = rt.install(prefer=backend, force=force, progress=update)
+    except LocalRuntimeError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Installed {escape(inst.asset_id)} in {escape(str(inst.path))}[/green]")
+
+
+@ditto_runtime.command('start')
+@click.option('--model', 'tier', default=None, help='Model tier (llm-cli ditto models list); default: chosen for '
+              'this machine')
+@click.option('--ctx', 'ctx_len', type=click.IntRange(256, 1048576), default=None,
+              help='Context length in tokens (default: from free memory, at most 32768)')
+@click.option('--sleep-idle', type=click.IntRange(0, None), default=None,
+              help='Unload the model after this many idle seconds (0 = never)')
+@pass_context
+def runtime_start(ctx: FrameworkContext, tier: Optional[str], ctx_len: Optional[int], sleep_idle: Optional[int]):
+    """Start llama-server on 127.0.0.1 (random port, API key in a private file)"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    rt = _local_runtime(ctx)
+    try:
+        with console.status("Starting llama-server ..."):
+            ep = rt.start(tier=tier, ctx=ctx_len, sleep_idle_seconds=sleep_idle)
+    except LocalRuntimeError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Running:[/green] {escape(ep.base_url)} model {escape(ep.model)} (pid {ep.pid})")
+    console.print(f"API key: {escape(str(rt.key_file))} (readable only by you)")
+
+
+@ditto_runtime.command('stop')
+@pass_context
+def runtime_stop(ctx: FrameworkContext):
+    """Stop the llama-server started by the framework"""
+    console.print("Stopped." if _local_runtime(ctx).stop() else "Not running.")
+
+
+@ditto.group('models')
+def ditto_models():
+    """Models for Ditto's local mode"""
+    pass
+
+
+@ditto_models.command('list')
+@pass_context
+def models_list(ctx: FrameworkContext):
+    """Pinned models, their size and whether they are downloaded"""
+    rt = _local_runtime(ctx)
+    recommended, why = rt.choose_tier()
+    table = Table(title="Ditto models")
+    for column in ("Tier", "File", "Size", "License", "Status", "Note"):
+        table.add_column(column)
+    for m in rt.catalog.models:
+        status = "[green]downloaded[/green]" if rt.model_ready(m) else "-"
+        note = "recommended" if m.tier == recommended.tier else ("on request" if m.on_request else "")
+        table.add_row(escape(m.tier), escape(m.file), _gib(m.size), escape(m.license), status, note)
+    console.print(table)
+    console.print(f"Recommended for this machine: {escape(why)}")
+
+
+@ditto_models.command('download')
+@click.argument('tier', required=False)
+@click.option('--yes', '-y', is_flag=True, help='Do not ask before downloading')
+@pass_context
+def models_download(ctx: FrameworkContext, tier: Optional[str], yes: bool):
+    """Download a model at its pinned revision and check its sha256 (default: the recommended tier)"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    from orchestrator.utils.helpers import redact_secrets
+    rt = _local_runtime(ctx)
+    if tier is None:
+        model, why = rt.choose_tier()
+        console.print(f"Recommended: {escape(why)}")
+    else:
+        try:
+            model = rt.catalog.model(tier)
+        except KeyError as e:
+            console.print(f"[red]{escape(str(e.args[0]))}[/red]")
+            sys.exit(2)
+    if rt.model_ready(model):
+        console.print(f"[green]{escape(model.file)} is already downloaded.[/green]")
+        return
+    console.print(f"{escape(model.repo)} / {escape(model.file)} ({escape(model.license)})")
+    if not yes and not click.confirm(f"Download {_gib(model.size)}?", default=True):
+        return
+    try:
+        path = rt.download_model(model.tier)
+    except LocalRuntimeError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    except Exception as e:  # network and Hub errors from huggingface_hub
+        console.print(f"[red]Download failed: {escape(redact_secrets(str(e)))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Verified and saved: {escape(str(path))}[/green]")
+
+
 @ditto.command('setup')
 @pass_context
 def ditto_setup(ctx: FrameworkContext):
