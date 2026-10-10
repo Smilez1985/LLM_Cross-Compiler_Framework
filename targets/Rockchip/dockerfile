@@ -55,15 +55,17 @@ RUN python3 -m venv /opt/venv-rkllm \
     && /opt/venv-rkllm/bin/pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu \
     && /opt/venv-rkllm/bin/pip install \
         "rkllm-toolkit @ https://raw.githubusercontent.com/airockchip/rknn-llm/release-v${RKLLM_VERSION}/rkllm-toolkit/packages/rkllm_toolkit-${RKLLM_VERSION}-cp311-cp311-linux_x86_64.whl#sha256=${RKLLM_WHEEL_SHA256}" \
-    && /opt/venv-rkllm/bin/python -c "from rkllm.api import RKLLM; print('RKLLM toolkit ok')"
+    && /opt/venv-rkllm/bin/python -c "from rkllm.api import RKLLM; RKLLM(); print('RKLLM toolkit ok')"
 ENV RKLLM_PYTHON=/opt/venv-rkllm/bin/python
 
 # --- RKNN venv (vision/voice models via ONNX on the NPU) ---
+# rknn-toolkit2 2.3.2 imports pkg_resources (gone in setuptools >= 81) and onnx.mapping (gone after onnx 1.16);
+# its own requirements leave both unbounded.
 RUN python3 -m venv /opt/venv-rknn \
-    && /opt/venv-rknn/bin/pip install --upgrade pip setuptools wheel \
+    && /opt/venv-rknn/bin/pip install --upgrade pip wheel "setuptools<81" \
     && /opt/venv-rknn/bin/pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu \
-    && /opt/venv-rknn/bin/pip install "rknn-toolkit2==${RKNN_TOOLKIT2_VERSION}" \
-    && /opt/venv-rknn/bin/python -c "from rknn.api import RKNN; print('RKNN toolkit ok')"
+    && /opt/venv-rknn/bin/pip install "rknn-toolkit2==${RKNN_TOOLKIT2_VERSION}" "onnx==1.16.2" \
+    && /opt/venv-rknn/bin/python -c "from rknn.api import RKNN; RKNN(verbose=False); print('RKNN toolkit ok')"
 ENV RKNN_PYTHON=/opt/venv-rknn/bin/python
 
 RUN echo "${LLAMA_CPP_TAG}" > "${LLAMA_CPP_PATH}/.llama_cpp_tag"

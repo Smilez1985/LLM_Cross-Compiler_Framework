@@ -88,6 +88,7 @@ class OptimizationLevel(Enum):
     AGGRESSIVE = "aggressive"
 
 TERMINAL_STATES = ("completed", "failed", "cancelled")
+IMAGE_LABEL = "org.llm-framework.target"
 # owner/name as used on huggingface.co; no path traversal
 HF_REPO_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 
@@ -205,6 +206,7 @@ class BuildEngine:
         self._lock = threading.Lock()
         self._builds: Dict[str, BuildProgress] = {}
         self._active_containers: Dict[str, Container] = {}
+        self._build_images: Dict[str, str] = {}
         self._executor = ThreadPoolExecutor(max_workers=max_concurrent_builds)
         
         # Paths initialization using centralized config getter
@@ -324,6 +326,16 @@ class BuildEngine:
                     with self._lock:
                         del self._active_containers[build_id]
                 except Exception: pass
+
+            # Drop the per-build image tag (layers stay in the build cache, so the next build is fast),
+            # then dangling framework images, so repeated builds do not fill the disk.
+            tag = self._build_images.pop(build_id, None)
+            if tag and self.docker_client:
+                try:
+                    self.docker_client.images.remove(tag)
+                    self.docker_client.images.prune(filters={"dangling": True, "label": IMAGE_LABEL})
+                except Exception as e:
+                    self.logger.debug(f"Image cleanup for {build_id} skipped: {e}")
             
             # Remove temp dirs
             build_temp = self.cache_dir / "builds" / build_id
@@ -464,14 +476,17 @@ class BuildEngine:
                 buildargs["USER_ID"] = str(os.getuid())
                 buildargs["GROUP_ID"] = str(os.getgid())
 
+            labels = {IMAGE_LABEL: config.target_arch}
+            self._build_images[config.build_id] = tag
             if self._buildkit_available():
-                self._build_with_buildkit(tag, path, buildargs, progress)
+                self._build_with_buildkit(tag, path, buildargs, progress, labels)
             else:
                 resp = self.docker_client.api.build(
                     path=str(context),
                     dockerfile=str(rel_df),
                     tag=tag,
                     buildargs=buildargs,
+                    labels=labels,
                     decode=True
                 )
                 for chunk in resp:
@@ -497,10 +512,13 @@ class BuildEngine:
         except Exception:
             return False
 
-    def _build_with_buildkit(self, tag: str, dockerfile: Path, buildargs: Dict[str, str], progress: BuildProgress):
+    def _build_with_buildkit(self, tag: str, dockerfile: Path, buildargs: Dict[str, str], progress: BuildProgress,
+                             labels: Optional[Dict[str, str]] = None):
         cmd = ["docker", "buildx", "build", "--load", "--progress=plain", "-t", tag, "-f", str(dockerfile)]
         for key, value in buildargs.items():
             cmd += ["--build-arg", f"{key}={value}"]
+        for key, value in (labels or {}).items():
+            cmd += ["--label", f"{key}={value}"]
         cmd.append(str(dockerfile.parent))
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
         for line in proc.stdout:
