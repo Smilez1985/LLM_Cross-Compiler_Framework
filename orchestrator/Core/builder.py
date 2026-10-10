@@ -464,25 +464,57 @@ class BuildEngine:
                 buildargs["USER_ID"] = str(os.getuid())
                 buildargs["GROUP_ID"] = str(os.getgid())
 
-            resp = self.docker_client.api.build(
-                path=str(context),
-                dockerfile=str(rel_df),
-                tag=tag,
-                buildargs=buildargs,
-                decode=True
-            )
-            
-            for chunk in resp:
-                if 'stream' in chunk:
-                    line = chunk['stream'].strip()
-                    if line: progress.add_log(f"BUILD: {line}")
-                if 'error' in chunk:
-                    raise RuntimeError(chunk['error'])
+            if self._buildkit_available():
+                self._build_with_buildkit(tag, path, buildargs, progress)
+            else:
+                resp = self.docker_client.api.build(
+                    path=str(context),
+                    dockerfile=str(rel_df),
+                    tag=tag,
+                    buildargs=buildargs,
+                    decode=True
+                )
+                for chunk in resp:
+                    if 'stream' in chunk:
+                        line = chunk['stream'].strip()
+                        if line: progress.add_log(f"BUILD: {line}")
+                    if 'error' in chunk:
+                        raise RuntimeError(chunk['error'])
             
             return self.docker_client.images.get(tag)
             
         except Exception as e:
-            raise RuntimeError(f"Image build failed: {e}")
+            raise RuntimeError(f"Image build failed: {e}\n{self._log_tail(progress, 'BUILD: ')}")
+
+    def _buildkit_available(self) -> bool:
+        """BuildKit (docker buildx) caches better than the legacy builder behind docker-py's api.build,
+        which Docker deprecated; it is also what CI uses."""
+        if not shutil.which("docker"):
+            return False
+        try:
+            subprocess.run(["docker", "buildx", "version"], capture_output=True, check=True, timeout=30)
+            return True
+        except Exception:
+            return False
+
+    def _build_with_buildkit(self, tag: str, dockerfile: Path, buildargs: Dict[str, str], progress: BuildProgress):
+        cmd = ["docker", "buildx", "build", "--load", "--progress=plain", "-t", tag, "-f", str(dockerfile)]
+        for key, value in buildargs.items():
+            cmd += ["--build-arg", f"{key}={value}"]
+        cmd.append(str(dockerfile.parent))
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+        for line in proc.stdout:
+            line = line.rstrip()
+            if line:
+                progress.add_log(f"BUILD: {line}")
+        if proc.wait() != 0:
+            raise RuntimeError(f"docker buildx build exited with code {proc.returncode}")
+
+    @staticmethod
+    def _log_tail(progress: BuildProgress, prefix: str, lines: int = 25) -> str:
+        """The last log lines with the actual cause (e.g. 'No space left on device') for the user and self-healing."""
+        tail = [l for l in progress.logs if prefix in l][-lines:]
+        return "\n".join(tail)
 
     def _scan_image_security(self, image_tag: str, progress: BuildProgress):
         if not self._get_conf("enable_security_scan", True):
@@ -717,7 +749,7 @@ class BuildEngine:
         exit_code = res.get('StatusCode', 1)
         
         if exit_code != 0:
-            raise RuntimeError(f"Build script failed with exit code {exit_code}")
+            raise RuntimeError(f"Build script failed with exit code {exit_code}\n{self._log_tail(progress, 'CONT: ')}")
 
     def _extract_artifacts(self, config, progress):
         progress.current_stage = "Extracting"

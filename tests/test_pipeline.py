@@ -178,3 +178,38 @@ class TestBackgroundLoop:
 
         task = booted_framework.run_coroutine(start_task(), timeout=5)
         assert booted_framework.run_coroutine(asyncio.wait_for(asyncio.shield(task), 5), timeout=5) == "done"
+
+
+class TestImageBuild:
+
+    def test_buildkit_command_and_failure_message_with_log_tail(self, engine, monkeypatch, tmp_path):
+        import orchestrator.Core.builder as builder_module
+
+        dockerfile = tmp_path / "ctx" / "Dockerfile"
+        dockerfile.parent.mkdir()
+        dockerfile.write_text("FROM scratch\n")
+        seen = {}
+
+        class FakeProc:
+            stdout = iter(["#8 RUN pip install torch\n", "ERROR: No space left on device\n"])
+            returncode = 1
+
+            def wait(self):
+                return 1
+
+        def fake_popen(cmd, **kwargs):
+            seen["cmd"] = cmd
+            return FakeProc()
+
+        monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
+        monkeypatch.setattr(builder_module.subprocess, "Popen", fake_popen)
+        progress = BuildProgress("b1", BuildStatus.QUEUED, "")
+
+        with pytest.raises(RuntimeError) as excinfo:
+            engine._build_docker_image(make_config(build_args={"EXTRA": "1"}), progress, dockerfile)
+
+        cmd = seen["cmd"]
+        assert cmd[:4] == ["docker", "buildx", "build", "--load"]
+        assert "LLAMA_CPP_TAG=v0.6.0" in cmd and "EXTRA=1" in cmd
+        assert cmd[-1] == str(dockerfile.parent)
+        assert "No space left on device" in str(excinfo.value)
