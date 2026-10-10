@@ -110,6 +110,29 @@ llm-cli mcp config --write claude-desktop   # or add it to Claude Desktop direct
 - **Transports:** stdio (default, started by the client) or local Streamable HTTP
   (`llm-cli mcp serve --transport http`, loopback only, bearer token in `~/.llm-framework/mcp_http_token`).
 
+### 5. Ditto Offline: Local Model Server (llama.cpp)
+
+Ditto can run without any cloud account on a local model served by a managed `llama-server`.
+
+```bash
+llm-cli ditto runtime status       # hardware, recommended llama.cpp build and model, server state
+llm-cli ditto runtime install      # the pinned llama.cpp build for this machine
+llm-cli ditto models download      # the recommended model (or a tier: small-q2, small, default, large, ...)
+llm-cli ditto runtime start        # Ditto then uses it as the "local" AI provider
+llm-cli ditto runtime stop
+```
+
+- **Verified downloads:** every build and model is pinned with size and sha256 in `configs/llama_runtime.yml`
+  (models at a fixed Hugging Face commit) and checked before it is unpacked or loaded; unpinned entries are
+  refused. Downloads resume after an interruption. New models are added in that file, not in code.
+- **Hardware:** NVIDIA GPUs get a CUDA build that matches driver and GPU (an RTX 2080 Ti needs driver 570.26
+  for the CUDA 12.8 build and R615 for CUDA 13.4, otherwise Vulkan is used); AMD Radeon GPUs and APUs such as
+  the Ryzen Z1 Extreme use Vulkan (ROCm only with `--backend rocm`); Apple Silicon uses Metal; everything else
+  the CPU build. The model tier follows RAM and GPU memory; machines with 3 GB RAM or less get a 2-bit model,
+  and `runtime start --model <tier>` picks any tier.
+- **Isolation:** the server listens on 127.0.0.1 only, on a free port, with a new API key per start that is
+  passed in a file only you can read. Its web UI, built-in tools and MCP client stay off.
+
 ## 🤝 Community & Collaboration
 
 We believe in the power of open collaboration.
