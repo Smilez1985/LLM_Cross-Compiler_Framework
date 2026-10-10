@@ -388,12 +388,12 @@ class RAGManager:
         try:
             query_vector = self._get_embedding(query)
             
-            hits = self.client.search(
+            hits = self.client.query_points(
                 collection_name=COLLECTION_NAME,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=limit,
                 score_threshold=score_threshold
-            )
+            ).points
             
             results = []
             for hit in hits:

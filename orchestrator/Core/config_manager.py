@@ -299,7 +299,7 @@ class ConfigManager:
 
             # AI Agent (Ditto) Selection
             ConfigSchema("ai_provider", str, False, "OpenAI", "AI provider (OpenAI/Anthropic/Google/Ollama/Custom)"),
-            ConfigSchema("ai_model", str, False, "gpt-4o", "AI model name"),
+            ConfigSchema("ai_model", str, False, "gpt-6.1-sol", "AI model name"),
             ConfigSchema("ai_base_url", str, False, "", "Base URL for Ollama/Custom endpoints"),
 
             # UX History

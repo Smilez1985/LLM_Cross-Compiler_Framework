@@ -118,7 +118,7 @@ class FrameworkManager:
             # Ditto (The Brain) - needs Secrets!
             self.ditto_manager = DittoCoder(
                 provider=self.config.get("ai_provider", "OpenAI"),
-                model=self.config.get("ai_model", "gpt-4o"),
+                model=self.config.get("ai_model", "gpt-6.1-sol"),
                 base_url=self.config.get("ai_base_url") or None,
                 config_manager=self.config,
                 framework_manager=self # Pass self to access secrets_manager

@@ -62,9 +62,17 @@ jobs:
       - name: Audit pinned runtime dependencies
         # requirements.txt is a fully pinned export. Markers are stripped so Windows-only and
         # version-specific pins are audited too, not only those matching this Linux runner.
+        # A package pinned differently per Python version (e.g. numpy) goes to a second file,
+        # because pip-audit rejects duplicate names in one requirements file.
         run: |
-          sed -E 's/[[:space:]]*;.*$//' requirements.txt > "$RUNNER_TEMP/requirements-all.txt"
-          pip-audit --requirement "$RUNNER_TEMP/requirements-all.txt" --no-deps --disable-pip --desc on
+          grep -E '^[A-Za-z0-9]' requirements.txt \
+            | sed -E 's/[[:space:]]*;.*$//; s/[[:space:]]*\\$//' \
+            | awk -F'==' -v main="$RUNNER_TEMP/req-main.txt" -v dups="$RUNNER_TEMP/req-dups.txt" \
+                '{ if (seen[$1]++) print > dups; else print > main }'
+          pip-audit --requirement "$RUNNER_TEMP/req-main.txt" --no-deps --disable-pip --desc on
+          if [ -s "$RUNNER_TEMP/req-dups.txt" ]; then
+            pip-audit --requirement "$RUNNER_TEMP/req-dups.txt" --no-deps --disable-pip --desc on
+          fi
 
       - name: Audit dev tools
         run: pip-audit --requirement requirements-dev.txt --desc on

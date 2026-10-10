@@ -115,7 +115,7 @@ class DittoCoder:
     AI Agent for Hardware Analysis, Chat, System Diagnosis, and Smart Calibration.
     """
     
-    def __init__(self, provider: str = "OpenAI", model: str = "gpt-4o", 
+    def __init__(self, provider: str = "OpenAI", model: str = "gpt-6.1-sol", 
                  api_key: Optional[str] = None, base_url: Optional[str] = None,
                  config_manager = None, framework_manager = None):
         self.logger = get_logger("DittoManager")
@@ -342,7 +342,7 @@ class DittoCoder:
             response = completion(
                 model=self.litellm_model,
                 messages=messages,
-                temperature=0.2, # Low temp for code
+                # No temperature: current Claude and OpenAI models reject non-default sampling parameters.
                 api_base=self.base_url,
                 api_key=self._completion_api_key()
             )
