@@ -106,6 +106,10 @@ Model Context Protocol, and conversion containers run in a sandbox.
 - MCP: confirmations show every argument in full (too long: refused), only a real answer of the user counts as
   approval, declined and cancelled calls are audited, client snippets are quoted, and the Claude Desktop config
   backup is private.
+- **Secret scan** (`scripts/secret_scan.py`, standard library only): provider API keys, tokens, private keys,
+  certificates and credential files are refused by a pre-commit and a pre-push hook (`make hooks`) and by a CI
+  job over the whole history. Personal strings (e-mail address, user name) go into the never-committed
+  `.git/info/secret-patterns`; findings are printed redacted.
 
 ## [2.4.0] - 2026-01-14
 **Reconstructed entry.** Versions 2.0 to 2.4 were developed without changelog entries; this summary is
