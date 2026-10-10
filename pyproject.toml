@@ -30,9 +30,12 @@ cryptography = ">=49,<51"
 keyring = ">=25.6"
 
 # --- 5. AI Agent & RAG (host side) ---
-# Exact pin on purpose: litellm 1.82.7/1.82.8 were a PyPI supply-chain compromise (2026-03).
-litellm = "1.104.2"
-tiktoken = ">=0.8"
+# Ditto's provider layer uses the official SDKs only (OpenAI-compatible servers go through openai).
+# Exact pins: LLM tooling is a supply-chain target.
+anthropic = "1.13.0"
+openai = "3.28.0"
+# Local embeddings (ONNX on the CPU) and the embedded vector store of the knowledge base.
+fastembed = "0.8.1"
 qdrant-client = "^1.19"
 huggingface-hub = ">=1.31,<3"
 
