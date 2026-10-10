@@ -17,6 +17,7 @@ import json
 import platform
 import subprocess
 import asyncio
+import shlex
 import shutil
 from pathlib import Path
 from PySide6.QtWidgets import (
@@ -28,6 +29,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect
 from PySide6.QtGui import QPixmap, QAction
+
+from orchestrator.gui.dialogs import confirm_host_key
 
 # Optional: Paramiko for SSH
 try:
@@ -78,6 +81,7 @@ class SSHConnectDialog(QDialog):
         
         layout.addRow("Target IP:", self.ip_input)
         layout.addRow("Username:", self.user_input)
+        self.pass_input.setPlaceholderText("first connection only - never stored")
         layout.addRow("Password:", self.pass_input)
         
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -124,56 +128,55 @@ class LocalProbeWorker(QThread):
             self.finished.emit(False, str(e), "")
 
 class SSHProbeWorker(QThread):
-    """Runs probe remotely via SSH and downloads result."""
+    """Runs the hardware probe on a trusted device over SSH and downloads the result."""
     finished = Signal(bool, str, str) # success, message, file_path
 
-    def __init__(self, ip, user, password, local_script_path):
+    def __init__(self, ip, user, password, local_script_path, state_dir, result_dir):
         super().__init__()
         self.ip = ip
         self.user = user
         self.password = password
         self.script_path = Path(local_script_path)
+        self.state_dir = Path(state_dir)
+        self.result_dir = Path(result_dir)
 
     def run(self):
         if not PARAMIKO_AVAILABLE:
             self.finished.emit(False, "Paramiko library missing. Cannot use SSH.", "")
             return
-
+        from orchestrator.utils import ssh_trust
         try:
-            ssh = paramiko.SSHClient()
-            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            ssh.connect(self.ip, username=self.user, password=self.password, timeout=5)
-            
-            sftp = ssh.open_sftp()
-            
-            # 1. Upload Script
-            remote_script = f"/tmp/{self.script_path.name}"
-            remote_output = "/tmp/target_hardware_config.txt"
-            
-            sftp.put(str(self.script_path), remote_script)
-            ssh.exec_command(f"chmod +x {remote_script}")
-            
-            # 2. Run Script
-            # We run it in /tmp so the output lands in /tmp
-            cmd = f"cd /tmp && ./{self.script_path.name}"
-            stdin, stdout, stderr = ssh.exec_command(cmd)
-            exit_status = stdout.channel.recv_exit_status()
-            
-            if exit_status != 0:
-                err = stderr.read().decode()
-                self.finished.emit(False, f"Remote script failed: {err}", "")
-                ssh.close()
+            ssh = ssh_trust.connect(self.ip, self.user, self.state_dir, password=self.password)
+        except Exception as e:
+            self.finished.emit(False, f"SSH login failed: {e}", "")
+            return
+        try:
+            if self.password:
+                ssh_trust.install_public_key(ssh, ssh_trust.client_key(self.state_dir)[1])
+            # A private folder on the device; a fixed /tmp path could be pre-created by another user.
+            _, out, _ = ssh.exec_command("mktemp -d /tmp/llm_probe.XXXXXXXX")
+            remote_dir = out.read().decode().strip()
+            if not remote_dir.startswith("/tmp/llm_probe."):
+                self.finished.emit(False, "Could not create a folder on the device.", "")
                 return
-
-            # 3. Download Result
-            local_output = Path("target_hardware_config.txt").absolute()
-            sftp.get(remote_output, str(local_output))
-            
-            ssh.close()
+            sftp = ssh.open_sftp()
+            remote_script = f"{remote_dir}/{self.script_path.name}"
+            sftp.put(str(self.script_path), remote_script)
+            _, stdout, stderr = ssh.exec_command(
+                f"cd {shlex.quote(remote_dir)} && chmod +x {shlex.quote(self.script_path.name)} && "
+                f"./{shlex.quote(self.script_path.name)}")
+            if stdout.channel.recv_exit_status() != 0:
+                self.finished.emit(False, f"Remote script failed: {stderr.read().decode(errors='replace')}", "")
+                return
+            self.result_dir.mkdir(parents=True, exist_ok=True)
+            local_output = self.result_dir / f"target_hardware_config_{self.ip.replace(':', '_')}.txt"
+            sftp.get(f"{remote_dir}/target_hardware_config.txt", str(local_output))
+            ssh.exec_command(f"rm -rf {shlex.quote(remote_dir)}")
             self.finished.emit(True, f"Remote scan successful from {self.ip}", str(local_output))
-
         except Exception as e:
             self.finished.emit(False, f"SSH Error: {e}", "")
+        finally:
+            ssh.close()
 
 class AIOptimizerWorker(QThread):
     finished = Signal(bool, dict, str)
@@ -478,6 +481,8 @@ class BuilderTab(QWidget):
         if dlg.exec():
             ip, user, password = dlg.get_data()
             if not ip or not user: return
+            if not confirm_host_key(self, self.framework, ip):
+                return
             
             self._set_state("read")
             self._log(f"Connecting to {user}@{ip}...")
@@ -485,7 +490,11 @@ class BuilderTab(QWidget):
             
             script = self.app_root / "scripts" / "hardware_probe.sh"
             
-            self.probe_worker = SSHProbeWorker(ip, user, password, script)
+            config = self.framework.config
+            state_dir = getattr(config, "user_state_dir", Path.home() / ".llm-framework")
+            result_dir = self.framework.resolve_path(config.get("cache_dir", "cache")) / "probes" \
+                if hasattr(self.framework, "resolve_path") else Path("cache") / "probes"
+            self.probe_worker = SSHProbeWorker(ip, user, password or None, script, state_dir, result_dir)
             self.probe_worker.finished.connect(self._on_probe_finished)
             self.probe_worker.start()
 
