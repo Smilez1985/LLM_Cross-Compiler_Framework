@@ -5,10 +5,9 @@ DIREKTIVE: Goldstandard, vollständig, professionell geschrieben.
 
 Zweck:
 Verwaltet den gesamten Build-Lebenszyklus, von der Anfrage bis zum Artefakt.
-Integriert Builder, ModuleGenerator, Self-Healing und Smart Calibration (Ditto).
+Integriert Builder, ModuleGenerator, Self-Healing und Smart Calibration (shipped calibration text).
 
 Updates v2.4.0:
-- Integrated Ditto Manager for IMatrix/Smart Calibration workflow.
 - Updated BuildRequest with IMatrix flags.
 - Pre-Build Dataset preparation phase.
 """
@@ -36,11 +35,6 @@ try:
 except ImportError:
     SelfHealingManager = None
     HealingProposal = None
-
-try:
-    from orchestrator.Core.ditto_manager import DittoCoder
-except ImportError:
-    DittoCoder = None
 
 # ============================================================================
 # DATENKLASSEN & ENUMS
@@ -161,7 +155,6 @@ class LLMOrchestrator:
         
         # Dependency Injection Containers
         self.self_healing = None 
-        self.ditto = None # NEW: For IMatrix Dataset Generation
 
         # Pending healing approvals (request_id -> event set by resolve_healing from the GUI/CLI thread)
         self._healing_events: Dict[str, asyncio.Event] = {}
@@ -239,11 +232,6 @@ class LLMOrchestrator:
         self.self_healing = manager
         self.logger.info("Self-Healing Manager injected into Orchestrator.")
 
-    def inject_ditto(self, manager):
-        """Dependency Injection für DittoManager (IMatrix Support)"""
-        self.ditto = manager
-        self.logger.info("Ditto Manager (AI Agent) injected into Orchestrator.")
-
     # --- INTERNAL WORKER ---
 
     def _ensure_worker_running(self):
@@ -300,7 +288,7 @@ class LLMOrchestrator:
             target_board=req.target_board,
             model_task=req.model_task,
             max_context_length=req.max_context_length,
-            # The importance matrix is GGUF-only; Ditto's generic filler is never an NPU calibration set.
+            # The importance matrix is GGUF-only; the shipped calibration text is never an NPU calibration set.
             use_imatrix=req.use_imatrix and job.target_format == ModelFormat.GGUF,
             dataset_path=(None if req.dataset_generated and job.target_format != ModelFormat.GGUF
                           else req.dataset_path),

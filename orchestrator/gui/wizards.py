@@ -33,12 +33,6 @@ from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog
 from orchestrator.utils.localization import tr
 
-# Optionale Ditto Integration
-try:
-    from orchestrator.Core.ditto_manager import DittoCoder
-except ImportError:
-    DittoCoder = None
-
 
 def module_name_hint(raw: str) -> str:
     """A module name the generator accepts, derived from probe data or AI output (e.g. CPU model strings)."""
@@ -661,14 +655,19 @@ Setup commands:
             self.btn_import_ai.setEnabled(True)
             self.status_label.setText(f"{tr('msg.ai_ready')}: {self.ai_config.get('provider')}")
 
+    def _ditto(self):
+        return getattr(self.framework_manager, "ditto_manager", None) if self.framework_manager else None
+
     def run_ai_analysis(self):
-        if not DittoCoder:
-            QMessageBox.critical(self, tr("status.error"), "Ditto/LiteLLM not installed.\nPlease run: pip install litellm")
+        ditto = self._ditto()
+        if ditto is None:
+            QMessageBox.critical(self, tr("status.error"), "The AI assistant (Ditto) is not available.")
             return
-            
-        if not self.ai_config:
+        if not ditto.is_configured("json"):
+            # Provider, model and key come from the AI settings; ask for them once when they are missing.
             self.configure_ai()
-            if not self.ai_config: return
+            if not ditto.is_configured("json"):
+                return
 
         path, _ = QFileDialog.getOpenFileName(self, tr("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
         if not path: return
@@ -679,26 +678,17 @@ Setup commands:
         self.ai_progress.setVisible(True)
         self.status_label.setText(tr("msg.ai_thinking"))
         
-        threading.Thread(target=self._ai_worker, args=(Path(path),), daemon=True).start()
+        threading.Thread(target=self._ai_worker, args=(ditto, Path(path)), daemon=True).start()
 
-    def _ai_worker(self, path):
+    def _ai_worker(self, ditto, path):
+        from orchestrator.Core.ditto_manager import DittoError
         try:
-            fm_config = None
-            if self.framework_manager:
-                fm_config = self.framework_manager.config
-
-            coder = DittoCoder(
-                provider=self.ai_config.get("provider"),
-                model=self.ai_config.get("model"),
-                api_key=self.ai_config.get("api_key"),
-                base_url=self.ai_config.get("base_url"),
-                config_manager=fm_config,
-                framework_manager=self.framework_manager 
-            )
-            config = coder.generate_module_content(path)
-            self.signals.analysis_finished.emit(config)
-        except Exception as e:
+            definition = ditto.generate_module(path)
+            self.signals.analysis_finished.emit(definition.model_dump())
+        except (DittoError, OSError) as e:
             self.signals.analysis_error.emit(str(e))
+        except Exception as e:
+            self.signals.analysis_error.emit(f"Unexpected error: {e}")
 
     def on_ai_error(self, err):
         self._set_avatar_state("fail")
