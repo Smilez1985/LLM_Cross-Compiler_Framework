@@ -301,6 +301,12 @@ class TestCLI:
         assert result.returncode == 0
         assert "targets" in result.stdout
 
+    def test_build_start_offers_boards_and_real_formats(self, tmp_path):
+        result = self.run_cli(tmp_path, "build", "start", "--help")
+        assert result.returncode == 0, result.stderr
+        assert "--board" in result.stdout
+        assert "rkllm" in result.stdout and "gguf" in result.stdout
+
     def test_json_output_is_not_polluted_by_logs(self, tmp_path):
         result = self.run_cli(tmp_path, "targets", "list", "-f", "json")
         assert result.returncode == 0, result.stderr

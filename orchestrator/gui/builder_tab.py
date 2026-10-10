@@ -48,6 +48,19 @@ except ImportError:
 
 # --- DIALOGS ---
 
+
+# Formats with a working pipeline, and quantization suggestions per format (free text is allowed).
+BUILD_FORMATS = [
+    ("GGUF (llama.cpp, CPU/GPU)", "gguf"),
+    ("RKLLM (Rockchip NPU, LLM)", "rkllm"),
+    ("RKNN (Rockchip NPU, ONNX models)", "rknn"),
+]
+QUANT_SUGGESTIONS = {
+    "gguf": ["Q4_K_M", "Q5_K_M", "Q6_K", "Q8_0", "IQ4_XS", "Q3_K_M", "F16", "BF16"],
+    "rkllm": ["w4a16", "w4a16_g128", "w8a8", "w8a8_g256"],
+    "rknn": ["fp16", "i8"],
+}
+
 class SSHConnectDialog(QDialog):
     """Simple Dialog to get SSH Credentials."""
     def __init__(self, parent=None):
@@ -337,10 +350,16 @@ class BuilderTab(QWidget):
         # 4. BUILD CONFIG
         build_group = QGroupBox("4. Build Configuration")
         build_layout = QFormLayout()
-        self.quant_combo = QComboBox()
-        self.quant_combo.addItems(["Q4_K_M", "Q5_K_M", "Q8_0", "F16"])
         self.format_combo = QComboBox()
-        self.format_combo.addItems(["GGUF", "ONNX", "TFLITE", "RKNN"])
+        for label, value in BUILD_FORMATS:
+            self.format_combo.addItem(label, value)
+        self.quant_combo = QComboBox()
+        self.quant_combo.setEditable(True)
+        self.board_combo = QComboBox()
+        self.board_combo.setEditable(True)
+        self.board_combo.addItems(["rk3588", "rk3576", "rk3566"])
+        self.format_combo.currentIndexChanged.connect(self._update_quant_options)
+        self._update_quant_options()
         self.opt_combo = QComboBox()
         self.opt_combo.addItems(["BALANCED", "SPEED", "SIZE", "AGGRESSIVE"])
         self.chk_gpu = QCheckBox("Use Host GPU for Build Process")
@@ -359,8 +378,9 @@ class BuilderTab(QWidget):
         row_dataset.addWidget(self.chk_imatrix)
         row_dataset.addWidget(self.btn_dataset)
 
-        build_layout.addRow("Quantization:", self.quant_combo)
         build_layout.addRow("Format:", self.format_combo)
+        build_layout.addRow("Board:", self.board_combo)
+        build_layout.addRow("Quantization:", self.quant_combo)
         build_layout.addRow("Optimization:", self.opt_combo)
         build_layout.addRow("Calibration:", row_dataset)
         build_layout.addRow("", self.chk_gpu)
@@ -507,6 +527,13 @@ class BuilderTab(QWidget):
 
     # --- STANDARD LOGIC ---
 
+    def _update_quant_options(self):
+        current = self.quant_combo.currentText()
+        self.quant_combo.clear()
+        self.quant_combo.addItems(QUANT_SUGGESTIONS.get(self.format_combo.currentData(), []))
+        if current and self.quant_combo.findText(current) >= 0:
+            self.quant_combo.setCurrentText(current)
+
     def _refresh_targets(self):
         self.target_combo.clear()
         if not self.framework or not hasattr(self.framework, 'get_component'): return
@@ -555,7 +582,7 @@ class BuilderTab(QWidget):
                 idx = self.quant_combo.findText(config["quantization"])
                 if idx >= 0: self.quant_combo.setCurrentIndex(idx)
             if "format" in config:
-                idx = self.format_combo.findText(config["format"])
+                idx = self.format_combo.findData(str(config["format"]).lower())
                 if idx >= 0: self.format_combo.setCurrentIndex(idx)
             if "optimization" in config:
                 idx = self.opt_combo.findText(config["optimization"])
@@ -569,9 +596,9 @@ class BuilderTab(QWidget):
         output_dir = get_cfg("output_dir", "output")
         
         try:
-             target_fmt = ModelFormat[self.format_combo.currentText()]
+             target_fmt = ModelFormat(self.format_combo.currentData())
              opt_lvl = OptimizationLevel[self.opt_combo.currentText()]
-        except KeyError:
+        except (KeyError, ValueError):
              self._log("Error: Invalid enum selection.")
              return
 
@@ -583,21 +610,20 @@ class BuilderTab(QWidget):
             targets=[self.target_combo.currentData()],
             target_formats=[target_fmt],
             optimization_level=opt_lvl,
-            quantization_options=[self.quant_combo.currentText()],
+            quantization_options=[self.quant_combo.currentText().strip()] if self.quant_combo.currentText().strip() else [],
             parallel_builds=True,
             output_base_dir=output_dir,
             description="Builder Tab Job",
             use_gpu=self.chk_gpu.isChecked(),
             # NEW v2.4.0: Pass IMatrix config
             use_imatrix=self.chk_imatrix.isChecked(),
-            dataset_path=self.dataset_path
+            dataset_path=self.dataset_path,
+            target_board=self.board_combo.currentText().strip() or None
         )
         
         try:
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            rid = loop.run_until_complete(self.framework.orchestrator.submit_build_request(req))
-            loop.close()
+            # The build keeps running on the framework's background loop after this slot returns.
+            rid = self.framework.run_coroutine(self.framework.orchestrator.submit_build_request(req), timeout=30)
             self._set_state("success")
             self._log(f"Job Submitted! ID: {rid}")
             QMessageBox.information(self, "Success", f"Job {rid} started.")

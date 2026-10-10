@@ -84,7 +84,9 @@ class TestPackageCreation:
 
         assert (pkg / "model.gguf").read_bytes() == b"GGUF fake weights"
         script = (pkg / "deploy.sh").read_text()
-        assert "chmod +x ./model.gguf && ./model.gguf" in script
+        assert "./model.gguf" not in script, "a model file must not be executed"
+        assert 'cp model.gguf "$MODEL_DIR/"' in script
+        assert "llama-server -m" in script
         assert "docker" not in script
 
     def test_checksums_cover_every_file(self, tmp_path, config, artifact):

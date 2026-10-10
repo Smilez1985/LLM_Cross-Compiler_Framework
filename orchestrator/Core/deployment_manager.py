@@ -39,6 +39,7 @@ from orchestrator.utils.validation import validate_ip_address
 DEFAULT_INFERENCE_IMAGE = "ghcr.io/smilez1985/llm-runtime:latest"
 DEFAULT_QDRANT_IMAGE = "qdrant/qdrant:v1.16.0"
 SSH_USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
+MODEL_SUFFIXES = (".gguf", ".rkllm", ".rknn", ".onnx", ".safetensors", ".bin")
 
 class DeploymentManager:
     def __init__(self, framework_manager=None):
@@ -231,6 +232,26 @@ class DeploymentManager:
                 ""
             ])
             script.extend(node)
+        elif str(artifact).lower().endswith(MODEL_SUFFIXES):
+            # A model file is data, not a program: install it and say how to run it.
+            q = shlex.quote(str(artifact))
+            script.extend([
+                "echo '[2/3] Installing model...'",
+                'MODEL_DIR="${MODEL_DIR:-$HOME/models}"',
+                'mkdir -p "$MODEL_DIR"',
+                f'cp {q} "$MODEL_DIR/"',
+                f'echo "[3/3] Model installed: $MODEL_DIR/"{q}',
+            ])
+            if str(artifact).lower().endswith(".gguf"):
+                script.extend([
+                    "if command -v llama-server >/dev/null 2>&1; then",
+                    f'  echo "Start it with: llama-server -m $MODEL_DIR/"{q}" --host 0.0.0.0 --port 8080"',
+                    "else",
+                    "  echo 'Install llama.cpp (llama-server) on this board to run the model.'",
+                    "fi",
+                ])
+            elif str(artifact).lower().endswith(".rkllm"):
+                script.append("echo 'Run it with the RKLLM runtime (librkllmrt, rkllm_server_demo or RKLLama) on the RK3588/RK3576.'")
         else:
             quoted = shlex.quote(f"./{artifact}")
             script.append(f"chmod +x {quoted} && {quoted}")

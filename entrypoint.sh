@@ -229,8 +229,27 @@ run_module() {
 
 run_system_tests() {
     log_info "Running system integrity tests..."
-    python3 -c "import torch; print('✅ PyTorch Version: ' + torch.__version__)" || exit 1
-    
+    python3 -c "import torch, gguf; print('✅ GGUF toolchain: torch ' + torch.__version__)" || exit 1
+
+    local llama="${LLAMA_CPP_PATH:-/usr/src/llama.cpp}"
+    for tool in llama-quantize llama-imatrix; do
+        if [ -x "$llama/build/bin/$tool" ]; then
+            echo "✅ $tool present"
+        else
+            log_error "$tool missing in $llama/build/bin"
+            exit 1
+        fi
+    done
+    [ -f "$llama/convert_hf_to_gguf.py" ] || { log_error "convert_hf_to_gguf.py missing"; exit 1; }
+
+    # Optional SDK venvs (only targets that ship them)
+    if [ -n "${RKLLM_PYTHON:-}" ]; then
+        "$RKLLM_PYTHON" -c "from rkllm.api import RKLLM" && echo "✅ RKLLM toolkit" || { log_error "RKLLM toolkit broken"; exit 1; }
+    fi
+    if [ -n "${RKNN_PYTHON:-}" ]; then
+        "$RKNN_PYTHON" -c "from rknn.api import RKNN" && echo "✅ RKNN toolkit" || { log_error "RKNN toolkit broken"; exit 1; }
+    fi
+
     if command -v aarch64-linux-gnu-gcc >/dev/null; then
         echo "✅ Cross-Compiler (GCC aarch64) detected"
     else
