@@ -217,7 +217,10 @@ class DittoCoder:
         # RAG embeddings use an online API, which offline mode rules out.
         if self.offline_mode: return None
         
-        return self.framework.get_component("rag_manager")
+        rag = self.framework.get_component("rag_manager")
+        if rag is not None and self.api_key and self._provider_id(self.provider) == "OpenAI":
+            rag.api_key = self.api_key  # a key typed at a prompt is not in the keyring
+        return rag
 
     def reinitialize(self, provider: Optional[str] = None, model: Optional[str] = None,
                      api_key: Optional[str] = None, base_url: Optional[str] = None,
@@ -290,23 +293,25 @@ class DittoCoder:
         text_blob = "\n".join([f"{m['role']}: {m['content']}" for m in to_summarize])
         summary_prompt = f"Summarize the following technical conversation history in 3 concise sentences, preserving key errors and hardware details:\n{text_blob}"
         
+        def from_user_turn(messages):
+            while messages and messages[0]["role"] != "user":
+                messages = messages[1:]
+            return messages
+
+        head = [system_msg] if system_msg else []  # the system prompt (with its rules) always stays
         try:
-            summary = self._query_llm([{"role": "user", "content": summary_prompt}])
-            
-            new_history = []
-            if system_msg:
-                new_sys_content = f"{system_msg['content']}\n\n[PREVIOUS CONTEXT SUMMARY]: {summary}"
-                new_history.append({"role": "system", "content": new_sys_content})
-            else:
-                new_history.append({"role": "system", "content": f"Previous Context: {summary}"})
-                
-            new_history.extend(recent_msgs)
+            # The conversation may contain untrusted excerpts, so the summarizer gets the same rule.
+            summary = self._query_llm([{"role": "system", "content": UNTRUSTED_RULE},
+                                       {"role": "user", "content": summary_prompt}])
+            # The summary is model output derived from untrusted text: it goes into a user turn, wrapped.
+            summary_turn = {"role": "user", "content": "Summary of the earlier conversation:\n"
+                            + wrap_untrusted(summary, "conversation summary")}
             self.logger.info("History compressed successfully.")
-            return new_history
+            return head + [summary_turn, {"role": "assistant", "content": "Understood."}] + from_user_turn(recent_msgs)
             
         except Exception as e:
             self.logger.error(f"Compression failed: {e}")
-            return history[-(len(history)//2):] 
+            return head + from_user_turn(history[-(len(history)//2):])
 
     def _query_llm(self, messages: List[Dict[str, str]]) -> str:
         """Unified Interface for Cloud/Offline Generation."""
@@ -488,7 +493,7 @@ class DittoCoder:
             "packages": ["list", "of", "packages"],
             "cpu_flags": "GCC Flags",
             "cmake_flags": "CMake Flags",
-            "setup_commands": "Bash code for Dockerfile setup (optional)",
+            "setup_commands": "Bash commands build.sh runs before converting, as the unprivileged build user and without network, e.g. exporting SDK variables (optional)",
             "quantization_logic": "Bash CASE block content for build.sh"
         }
         """ + UNTRUSTED_RULE

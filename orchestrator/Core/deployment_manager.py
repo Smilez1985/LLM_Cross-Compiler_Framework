@@ -44,16 +44,30 @@ SSH_USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
 MODEL_SUFFIXES = MODEL_FILE_SUFFIXES
 
 
+def _primary_name(info: Dict[str, Any]) -> Optional[str]:
+    primary = info.get("primary")
+    return primary if isinstance(primary, str) and primary and primary == Path(primary).name else None
+
+
 def list_builds(output_dir: Path) -> List[Dict[str, Any]]:
-    """Finished builds below output_dir, found through their build manifest (newest first)."""
-    builds = []
-    for manifest in Path(output_dir).rglob(BUILD_MANIFEST):
+    """Finished builds below output_dir, found through their build manifest (newest first).
+    Symlinked subfolders are followed (output trees moved to another disk), loops are skipped."""
+    builds, seen = [], set()
+    for root, dirs, files in os.walk(output_dir, followlinks=True):
+        real = os.path.realpath(root)
+        if real in seen:
+            dirs[:] = []
+            continue
+        seen.add(real)
+        if BUILD_MANIFEST not in files:
+            continue
         try:
-            info = json.loads(manifest.read_text(encoding="utf-8"))
+            info = json.loads((Path(root) / BUILD_MANIFEST).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
         if isinstance(info, dict):
-            info["path"] = str(manifest.parent)
+            info["primary"] = _primary_name(info)
+            info["path"] = str(root)
             builds.append(info)
     return sorted(builds, key=lambda b: str(b.get("created", "")), reverse=True)
 
@@ -71,9 +85,14 @@ def resolve_model_artifact(artifact_path: Path) -> Path:
     manifest = path / BUILD_MANIFEST
     if manifest.is_file():
         try:
-            primary = json.loads(manifest.read_text(encoding="utf-8")).get("primary")
-        except (OSError, ValueError, AttributeError):
-            primary = None
+            info = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            info = {}
+        info = info if isinstance(info, dict) else {}
+        if info.get("multi_file"):
+            raise ValueError("This build produced several weight files (or weights that need their config and "
+                             "tokenizer files); deploying multi-file models is not supported yet.")
+        primary = _primary_name(info)
         if primary:
             candidate = (path / primary).resolve()
             if candidate.parent == path.resolve() and candidate.is_file():

@@ -30,6 +30,7 @@ import requests
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
+from rich.markup import escape
 from rich.prompt import Prompt, Confirm
 
 from orchestrator.Core.framework import FrameworkManager
@@ -605,12 +606,9 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                         if follow and line != last:
                             status_color = {OrchestrationStatus.COMPLETED: "green", OrchestrationStatus.ERROR: "red",
                                             OrchestrationStatus.HEALING: "magenta"}.get(workflow_status.status, "yellow")
-                            console.print(f"[{status_color}]Status: {workflow_status.status.value} - {workflow_status.current_stage} "
+                            # Stages, proposals and errors can contain model or log text: never parse it as markup.
+                            console.print(f"[{status_color}]Status: {workflow_status.status.value} - {escape(workflow_status.current_stage)} "
                                           f"({workflow_status.completed_builds}/{workflow_status.total_builds} builds)[/{status_color}]")
-                            if workflow_status.healing_proposal:
-                                hp = workflow_status.healing_proposal
-                                console.print(f"[bold magenta]Self-Healing: {hp.summary}[/bold magenta]")
-                                console.print(f"Proposed Fix: [italic]{hp.fix_command}[/italic]")
                         last = line
                         if (workflow_status.status == OrchestrationStatus.AWAITING_APPROVAL
                                 and workflow_status.healing_proposal is not None):
@@ -624,9 +622,11 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
 
             if workflow_status:
                 for artifact in workflow_status.artifacts:
-                    console.print(f"[green]Artifacts: {artifact}[/green]")
+                    console.print(f"[green]Artifacts: {escape(str(artifact))}[/green]")
+                for warning in workflow_status.warnings:
+                    console.print(f"[yellow]{escape(str(warning))}[/yellow]")
                 for error in workflow_status.errors:
-                    console.print(f"[red]{error}[/red]")
+                    console.print(f"[red]{escape(str(error))}[/red]")
                 if workflow_status.status != OrchestrationStatus.COMPLETED or workflow_status.failed_builds:
                     sys.exit(1)
                 
@@ -634,7 +634,7 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             loop.close()
             
     except Exception as e:
-        console.print(f"[red]Build failed: {e}[/red]")
+        console.print(f"[red]Build failed: {escape(str(e))}[/red]")
         sys.exit(1)
 
 
@@ -642,11 +642,20 @@ def _resolve_healing_interactively(orchestrator, request_id, proposal):
     """Asks on the terminal whether an automatic fix may be applied (manual steps are only shown)."""
     automatic = (not getattr(proposal, "is_ai_generated", False)
                  and getattr(getattr(proposal, "strategy", None), "value", "") in ("config_adjustment", "docker_prune", "retry_build"))
+    origin = "AI suggestion" if getattr(proposal, "is_ai_generated", False) else "Known issue"
+    console.print(f"[bold magenta]Self-Healing ({origin}): {escape(str(proposal.summary))}[/bold magenta]")
+    console.print(f"Cause: {escape(str(proposal.root_cause))}")
+    label = "The framework will" if automatic else "Manual step (not run by the framework)"
+    console.print(f"{label}: [italic]{escape(str(proposal.fix_command))}[/italic]")
     approved = False
     if automatic and sys.stdin.isatty():
-        approved = click.confirm("Apply this fix and retry the build?", default=False)
-    elif not automatic:
-        console.print("[yellow]This is a manual step; the framework does not run it.[/yellow]")
+        try:
+            approved = click.confirm("Apply this fix and retry the build?", default=False)
+        except click.Abort:
+            orchestrator.resolve_healing(request_id, False)
+            raise KeyboardInterrupt from None
+    elif automatic:
+        console.print("[yellow]No terminal to ask; the proposal is dismissed.[/yellow]")
     orchestrator.resolve_healing(request_id, approved)
 
 

@@ -59,12 +59,21 @@ class SelfHealingManager:
         # the fix text is shown to the user and is never executed as a shell command.
         self.known_issues = [
             (
-                # gcc/clang killed by the kernel OOM killer, or a container that exited with 137 (SIGKILL)
-                r"internal compiler error.*Killed|Killed signal terminated program|"
-                r"(?:cc1plus|cc1|collect2|ld)\b.*\bKilled\b|\b(?:exit(?:ed)? (?:code|status)|code) 137\b",
-                "Out of memory during compilation.",
+                # The compiler was killed while building the image (OOM): fewer parallel jobs help.
+                r"(?:^|\n)Image build failed[\s\S]*(?:internal compiler error.*(?-i:Killed)|Killed signal terminated program|"
+                r"\b(?:cc1plus|cc1|collect2|ld)\b.*(?-i:Killed))",
+                "Out of memory while compiling the build image.",
                 "Lower the parallel compile jobs for image builds to 1 (setting build_jobs) and retry.",
                 HealingStrategy.CONFIG_ADJUSTMENT,
+                "HOST"
+            ),
+            (
+                # The conversion itself was killed (SIGKILL / exit code 137), usually by the OOM killer.
+                r"\b(?:exit(?:ed)? (?:code|status)|code):? 137\b|\bline \d+: +\d+ (?-i:Killed)\b",
+                "The conversion was killed, most likely out of memory.",
+                "Free memory or add swap, close other programs, or choose a smaller model or quantization. "
+                "Large models need roughly their size in RAM during conversion.",
+                HealingStrategy.MANUAL_INTERVENTION,
                 "HOST"
             ),
             (
@@ -133,7 +142,7 @@ class SelfHealingManager:
     def _analyze_heuristics(self, log: str) -> Optional[HealingProposal]:
         """Scans log against regex database."""
         for pattern, cause, fix, strategy, scope in self.known_issues:
-            if re.search(pattern, log, re.IGNORECASE | re.MULTILINE):
+            if re.search(pattern, log, re.IGNORECASE):
                 # Special Case: CMake missing dependencies usually require AI to find the package name
                 if "CMake Error" in log and "Could not find" in log:
                     return None # Let AI handle specific package names
@@ -196,6 +205,9 @@ class SelfHealingManager:
         if proposal.strategy == HealingStrategy.CONFIG_ADJUSTMENT and not proposal.is_ai_generated:
             config = getattr(self.framework, "config", None)
             if config is None or not hasattr(config, "set"):
+                return False
+            if int(config.get("build_jobs", 0) or 0) == 1:
+                self.logger.warning("build_jobs is already 1; lowering it further is not possible.")
                 return False
             config.set("build_jobs", 1)
             self.logger.info("✅ build_jobs set to 1 for the next image build.")

@@ -153,6 +153,36 @@ class TestBuildHandoff:
         (build_dir / "build_info.json").write_text(json.dumps(info))
         assert resolve_model_artifact(build_dir) == build_dir / "SmolLM2-Q4_K_M.gguf"
 
+    def test_non_string_primary_falls_back_to_the_model_file(self, tmp_path, build_dir):
+        from orchestrator.Core.deployment_manager import list_builds, resolve_model_artifact
+        info = json.loads((build_dir / "build_info.json").read_text())
+        info["primary"] = 5
+        (build_dir / "build_info.json").write_text(json.dumps(info))
+        assert resolve_model_artifact(build_dir).name == "SmolLM2-Q4_K_M.gguf"
+        assert list_builds(tmp_path / "output")[0]["primary"] is None
+
+    def test_symlinked_subfolders_are_listed(self, tmp_path, build_dir):
+        import os
+        from orchestrator.Core.deployment_manager import list_builds
+        if not hasattr(os, "symlink"):
+            pytest.skip("no symlinks")
+        out2 = tmp_path / "out2"
+        out2.mkdir()
+        try:
+            (out2 / "Rockchip").symlink_to(tmp_path / "output" / "Rockchip", target_is_directory=True)
+        except OSError:
+            pytest.skip("symlinks not permitted")
+        (out2 / "loop").symlink_to(out2, target_is_directory=True)
+        assert len(list_builds(out2)) == 1
+
+    def test_multi_file_builds_are_refused_honestly(self, tmp_path, config, build_dir):
+        from orchestrator.Core.deployment_manager import resolve_model_artifact
+        info = json.loads((build_dir / "build_info.json").read_text())
+        info["multi_file"] = True
+        (build_dir / "build_info.json").write_text(json.dumps(info))
+        with pytest.raises(ValueError, match="multi-file"):
+            resolve_model_artifact(build_dir)
+
     def test_llama_server_hint_stays_on_loopback(self, tmp_path, config, artifact):
         script = (build_package(tmp_path, config, artifact, use_docker=False) / "deploy.sh").read_text()
         assert "--host 127.0.0.1" in script

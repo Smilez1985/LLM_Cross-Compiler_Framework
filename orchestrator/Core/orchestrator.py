@@ -92,6 +92,8 @@ class BuildRequest:
     target_board: Optional[str] = None
     model_task: str = "LLM"
     max_context_length: Optional[int] = None
+    # True when the dataset is Ditto's generic filler (only useful for GGUF importance matrices)
+    dataset_generated: bool = False
     
     def __post_init__(self):
         if not self.request_id:
@@ -292,9 +294,10 @@ class LLMOrchestrator:
             target_board=req.target_board,
             model_task=req.model_task,
             max_context_length=req.max_context_length,
-            # Pass IMatrix Config
-            use_imatrix=req.use_imatrix,
-            dataset_path=req.dataset_path,
+            # The importance matrix is GGUF-only; Ditto's generic filler is never an NPU calibration set.
+            use_imatrix=req.use_imatrix and job.target_format == ModelFormat.GGUF,
+            dataset_path=(None if req.dataset_generated and job.target_format != ModelFormat.GGUF
+                          else req.dataset_path),
             build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
         )
 
@@ -375,7 +378,8 @@ class LLMOrchestrator:
 
         applied = await loop.run_in_executor(None, self.self_healing.apply_fix, proposal)
         if not applied:
-            state.warnings.append(f"Manual step needed for {job.job_id}: {proposal.fix_command}")
+            # errors are shown by the CLI summary and the GUI; a warning alone would go unnoticed
+            state.errors.append(f"The fix for {job.job_id} could not be applied; manual step: {proposal.fix_command}")
             return False
         state.current_stage = f"Retrying {job.job_id} after the fix"
         self.logger.info(f"Fix applied; retrying {job.job_id}.")
@@ -436,6 +440,7 @@ class LLMOrchestrator:
                     success = self.ditto.prepare_calibration_dataset(ds_path)
                     if success:
                         req.dataset_path = str(ds_path)
+                        req.dataset_generated = True
                         self.logger.info(f"Calibration dataset ready: {ds_path}")
                     else:
                         req.use_imatrix = False
