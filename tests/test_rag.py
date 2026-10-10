@@ -481,7 +481,11 @@ class TestServerMode:
         import qdrant_client
 
         monkeypatch.setattr(qdrant_client, "QdrantClient", lambda *a, **k: pytest.fail("must not connect"))
-        rag = make_rag(qdrant_url="https://admin:s3cret-pass@qdrant.example:6333")
+        url = "https://admin:s3cret-pass@qdrant.example:6333"
+        rag = make_rag()
+        assert rag.config.set("qdrant_url", url) is False  # the schema refuses it
+        assert rag.config.set("qdrant_url", "https://qdrant.example:6333/prefix?x=a@b") is True
+        monkeypatch.setattr(rag, "_server_url", lambda: url)  # e.g. from an old config file
         rag.framework.secrets_manager = SimpleNamespace(get_secret=lambda key: "key-123")
 
         assert rag._connect() is False
