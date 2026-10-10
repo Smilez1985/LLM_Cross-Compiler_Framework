@@ -118,9 +118,6 @@ class MainOrchestrator(QMainWindow):
         act_openai.triggered.connect(lambda: self._open_secret_dialog("openai_api_key", "OpenAI API Key"))
         sec_menu.addAction(act_openai)
         
-        act_ssh = QAction("Set Target SSH Password", self)
-        act_ssh.triggered.connect(lambda: self._open_secret_dialog("target_password", "SSH Password (Root)"))
-        sec_menu.addAction(act_ssh)
 
         tools_menu = menubar.addMenu("Tools")
         act_ai = QAction("Configure AI Agent (Ditto)...", self)

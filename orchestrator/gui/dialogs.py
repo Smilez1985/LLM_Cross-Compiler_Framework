@@ -537,3 +537,31 @@ class ToolPermissionsDialog(QDialog):
             QMessageBox.critical(self, "Tool permissions", f"Could not save the permissions:\n{e}")
             return
         self.accept()
+
+
+def confirm_host_key(parent, framework, host: str, port: int = 22) -> bool:
+    """Trust on first use, never silently: shows an unknown device's host key fingerprint and stores it
+    only if the user confirms; a changed key is refused."""
+    from pathlib import Path
+    from orchestrator.utils import ssh_trust
+    state_dir = Path(getattr(getattr(framework, "config", None), "user_state_dir", None) or Path.home() / ".llm-framework")
+    try:
+        key = ssh_trust.fetch_host_key(host, port)
+        status = ssh_trust.check_host_key(state_dir, host, port, key)
+    except Exception as e:
+        QMessageBox.critical(parent, "SSH", f"Could not reach {host}:{port}: {e}")
+        return False
+    if status == "known":
+        return True
+    if status == "changed":
+        QMessageBox.critical(parent, "SSH host key changed", str(ssh_trust.HostKeyChanged(host, port)))
+        return False
+    answer = QMessageBox.question(
+        parent, "New device",
+        f"First connection to {host}:{port}.\n\nKey type: {key.get_name()}\nFingerprint: {ssh_trust.fingerprint(key)}\n\n"
+        "Compare it with the output of\n  ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub\non the device. Trust this device?",
+        QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+    if answer != QMessageBox.Yes:
+        return False
+    ssh_trust.trust_host_key(state_dir, host, port, key)
+    return True

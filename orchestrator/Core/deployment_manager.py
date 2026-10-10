@@ -37,6 +37,7 @@ from orchestrator.utils.logging import get_logger
 # NEU: Import der zentralen Validierungslogik
 from orchestrator.utils.validation import validate_ip_address
 from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES
+from orchestrator.utils import ssh_trust
 
 DEFAULT_INFERENCE_IMAGE = "ghcr.io/smilez1985/llm-runtime:latest"
 DEFAULT_QDRANT_IMAGE = "qdrant/qdrant:v1.16.0"
@@ -332,14 +333,26 @@ class DeploymentManager:
         return "\n".join(script)
 
     # --- EXECUTION (SSH / SCP) ---
-    def deploy_artifact(self, artifact_path: Path, target_ip: str, user: str, password: Optional[str] = None) -> bool:
+    def _state_dir(self) -> Path:
+        config = getattr(self.framework, "config", None)
+        return Path(getattr(config, "user_state_dir", None) or Path.home() / ".llm-framework")
+
+    def host_key_status(self, target_ip: str, port: int = 22):
+        """('known'|'unknown'|'changed', key) for the device - shown to the user before trusting it."""
+        key = ssh_trust.fetch_host_key(target_ip, port)
+        return ssh_trust.check_host_key(self._state_dir(), target_ip, port, key), key
+
+    def trust_host(self, target_ip: str, key, port: int = 22) -> None:
+        """Stores a host key the user confirmed by comparing its fingerprint."""
+        ssh_trust.trust_host_key(self._state_dir(), target_ip, port, key)
+
+    def deploy_artifact(self, artifact_path: Path, target_ip: str, user: str, password: Optional[str] = None,
+                        port: int = 22, pair: bool = True) -> bool:
         """
-        Deployt das Artefakt auf das Zielsystem.
-        Führt zuerst Sicherheitschecks durch.
+        Uploads the package and runs its deploy.sh on the device. The device's host key must be trusted
+        already (host_key_status/trust_host); a password is used for this connection only and, with
+        pair=True, to install the framework's SSH key so later deployments need none.
         """
-        # ---------------------------------------------------------
-        # NEU: 1. Zentrale Validierung der IP-Adresse
-        # ---------------------------------------------------------
         if not validate_ip_address(target_ip):
             self.logger.error(f"Security/Format Error: Invalid IP address provided: {target_ip}")
             return False
@@ -349,17 +362,14 @@ class DeploymentManager:
             self.logger.error(f"Security/Format Error: Invalid SSH user name: {user!r}")
             return False
 
-        # 2. Verbindungscheck (Port Reachability)
-        if not self._check_conn(target_ip):
-            self.logger.error(f"Target {target_ip} not reachable (Port 22 check failed).")
+        if not self._check_conn(target_ip, port):
+            self.logger.error(f"Target {target_ip} not reachable (port {port}).")
             return False
-        
-        target_dir = "/tmp/llm_deploy"
+
         self.logger.info(f"Deploying to {target_ip}...")
-        
-        if PARAMIKO_AVAILABLE and password:
-            return self._deploy_paramiko(artifact_path, target_ip, user, password, target_dir)
-        return self._deploy_system(artifact_path, target_ip, user, target_dir)
+        if PARAMIKO_AVAILABLE:
+            return self._deploy_paramiko(Path(artifact_path), target_ip, user, password, port, pair)
+        return self._deploy_system(Path(artifact_path), target_ip, user, port)
 
     def _check_conn(self, ip, port=22):
         try:
@@ -373,48 +383,72 @@ class DeploymentManager:
         d, pkg = shlex.quote(target_dir), shlex.quote(package_name)
         return f"cd {d} && unzip -o {pkg} && chmod +x deploy.sh && ./deploy.sh"
 
-    def _deploy_paramiko(self, artifact, ip, user, pw, target_dir):
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    # A private, unpredictable folder on the device (a fixed /tmp path could be pre-created by another user).
+    REMOTE_MKTEMP = "mktemp -d /tmp/llm_deploy.XXXXXXXX"
+
+    def _deploy_paramiko(self, artifact: Path, ip: str, user: str, pw: Optional[str], port: int, pair: bool) -> bool:
+        state_dir = self._state_dir()
         try:
-            ssh.connect(ip, username=user, password=pw)
+            status = ssh_trust.check_host_key(state_dir, ip, port, ssh_trust.fetch_host_key(ip, port))
+        except (OSError, ssh_trust.HostKeyError, Exception) as e:
+            self.logger.error(f"Could not read the host key of {ip}: {e}")
+            return False
+        if status == "unknown":
+            self.logger.error(f"The device {ip} is not trusted yet: confirm its host key fingerprint first.")
+            return False
+        if status == "changed":
+            self.logger.error(str(ssh_trust.HostKeyChanged(ip, port)))
+            return False
+
+        try:
+            ssh = ssh_trust.connect(ip, user, state_dir, port=port, password=pw)
+        except Exception as e:
+            self.logger.error(f"SSH login to {user}@{ip} failed: {e}")
+            return False
+        try:
+            if pw and pair:
+                ssh_trust.install_public_key(ssh, ssh_trust.client_key(state_dir)[1])
+                self.logger.info("Framework SSH key installed; later deployments need no password.")
+            _, out, err = ssh.exec_command(self.REMOTE_MKTEMP)
+            target_dir = out.read().decode().strip()
+            if out.channel.recv_exit_status() != 0 or not target_dir.startswith("/tmp/llm_deploy."):
+                self.logger.error(f"Could not create a folder on the device: {err.read().decode(errors='replace').strip()}")
+                return False
+
             sftp = ssh.open_sftp()
-            try: sftp.mkdir(target_dir)
-            except: pass
-            
-            # Upload
             self.logger.info("Uploading package...")
             sftp.put(str(artifact), f"{target_dir}/{artifact.name}")
             
-            # Execute
             self.logger.info("Installing on target...")
-            cmd = self._remote_install_cmd(target_dir, artifact.name)
-            stdin, stdout, stderr = ssh.exec_command(cmd)
-            
-            # Stream Output
+            stdin, stdout, stderr = ssh.exec_command(self._remote_install_cmd(target_dir, artifact.name))
             for line in stdout: self.logger.info(f"[REMOTE] {line.strip()}")
             
             exit_status = stdout.channel.recv_exit_status()
+            ssh.exec_command(f"rm -rf {shlex.quote(target_dir)}")
             if exit_status == 0:
                 self.logger.info("Remote deployment successful.")
                 return True
-            else:
-                self.logger.error("Remote deployment failed.")
-                return False
+            self.logger.error("Remote deployment failed.")
+            return False
         except Exception as e:
             self.logger.error(f"SSH Deployment Error: {e}")
             return False
         finally:
             ssh.close()
 
-    def _deploy_system(self, artifact, ip, user, target_dir):
-        """Fallback auf System SSH/SCP calls."""
+    def _deploy_system(self, artifact: Path, ip: str, user: str, port: int = 22) -> bool:
+        """Fallback to OpenSSH: framework key and known_hosts only, never prompts, never auto-accepts keys."""
         try:
+            opts = ssh_trust.system_ssh_options(self._state_dir())
             target = f"{user}@{ip}"
-            subprocess.run(["ssh", target, f"mkdir -p {shlex.quote(target_dir)}"], check=True)
-            subprocess.run(["scp", str(artifact), f"{target}:{target_dir}/"], check=True)
-            cmd = self._remote_install_cmd(target_dir, artifact.name)
-            res = subprocess.run(["ssh", target, cmd], capture_output=True, text=True)
+            made = subprocess.run(["ssh", *opts, "-p", str(port), target, self.REMOTE_MKTEMP],
+                                  capture_output=True, text=True, check=True)
+            target_dir = made.stdout.strip()
+            if not target_dir.startswith("/tmp/llm_deploy."):
+                raise RuntimeError("could not create a folder on the device")
+            subprocess.run(["scp", *opts, "-P", str(port), str(artifact), f"{target}:{target_dir}/"], check=True)
+            cmd = self._remote_install_cmd(target_dir, artifact.name) + f"; status=$?; rm -rf {shlex.quote(target_dir)}; exit $status"
+            res = subprocess.run(["ssh", *opts, "-p", str(port), target, cmd], capture_output=True, text=True)
             self.logger.info(res.stdout)
             if res.stderr: self.logger.warning(res.stderr)
             return res.returncode == 0

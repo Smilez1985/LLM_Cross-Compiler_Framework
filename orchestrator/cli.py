@@ -1034,24 +1034,55 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
 @click.argument('package_path', type=click.Path(exists=True))
 @click.option('--ip', required=True, help="Target IP")
 @click.option('--user', required=True, help="Target Username")
-@click.password_option('--password', help="Target Password (RAM only)")
+@click.option('--port', default=22, show_default=True, type=int)
+@click.option('--password', default=None, help="Only for the first connection: used once to install the "
+              "framework's SSH key, never stored (asked interactively when omitted)")
+@click.option('--trust-fingerprint', default=None,
+              help="Trust a new device non-interactively if its host key has this SHA256 fingerprint")
 @pass_context
-def run_deploy(ctx: FrameworkContext, package_path, ip, user, password):
+def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, trust_fingerprint):
     """
     Upload and execute a deployment package on the target.
     """
+    from orchestrator.utils import ssh_trust
     ctx.require_framework()
     dep_mgr = ctx.deployment_manager
     if not dep_mgr:
         console.print("[red]Deployment Manager not loaded.[/red]")
         sys.exit(1)
+
+    # Trust on first use, never silently.
+    try:
+        status, key = dep_mgr.host_key_status(ip, port)
+    except Exception as e:
+        console.print(f"[red]Could not reach {escape(ip)}:{port}: {escape(str(e))}[/red]")
+        sys.exit(1)
+    if status == "changed":
+        console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(ip, port)))}[/bold red]")
+        sys.exit(1)
+    if status == "unknown":
+        fp = ssh_trust.fingerprint(key)
+        console.print(f"New device {escape(ip)}:{port} - {key.get_name()} {fp}")
+        if trust_fingerprint:
+            if trust_fingerprint != fp:
+                console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
+                sys.exit(1)
+        elif not (sys.stdin.isatty() and click.confirm(
+                "Compare with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the device. Trust it?", default=False)):
+            console.print("[red]Device not trusted; nothing was deployed.[/red]")
+            sys.exit(1)
+        dep_mgr.trust_host(ip, key, port)
+    if password is None and sys.stdin.isatty():
+        password = click.prompt("Password (Enter if the framework key is already installed)",
+                                default="", hide_input=True, show_default=False) or None
         
     with console.status(f"Deploying to {user}@{ip}...", spinner="earth"):
         success = dep_mgr.deploy_artifact(
             artifact_path=Path(package_path),
             target_ip=ip,
             user=user,
-            password=password
+            password=password,
+            port=port,
         )
         
     if success:

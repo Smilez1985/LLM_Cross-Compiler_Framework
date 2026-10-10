@@ -256,15 +256,16 @@ class TestSSHDeployment:
         tokens = shlex.split(cmd)
         assert "evil; rm -rf ~.zip" in tokens
 
-    def test_system_ssh_fallback_uses_argument_lists(self, config, tmp_path, monkeypatch):
+    def test_system_ssh_fallback_never_prompts_or_accepts_keys(self, config, tmp_path, monkeypatch):
         dm = DeploymentManager(FakeFramework(config))
         monkeypatch.setattr(dm, "_check_conn", lambda *a, **k: True)
+        monkeypatch.setattr("orchestrator.Core.deployment_manager.PARAMIKO_AVAILABLE", False)
         calls = []
 
         def fake_run(args, **kwargs):
             assert isinstance(args, list) and not kwargs.get("shell")
             calls.append(args)
-            return subprocess.CompletedProcess(args, 0, stdout="ok", stderr="")
+            return subprocess.CompletedProcess(args, 0, stdout="/tmp/llm_deploy.Ab12Cd34\n", stderr="")
 
         monkeypatch.setattr("orchestrator.Core.deployment_manager.subprocess.run", fake_run)
         pkg = tmp_path / "deploy_model_1.zip"
@@ -272,7 +273,22 @@ class TestSSHDeployment:
 
         assert dm.deploy_artifact(pkg, "192.168.1.50", "radxa") is True
         assert [c[0] for c in calls] == ["ssh", "scp", "ssh"]
-        assert calls[1][2] == "radxa@192.168.1.50:/tmp/llm_deploy/"
+        assert calls[1][-1] == "radxa@192.168.1.50:/tmp/llm_deploy.Ab12Cd34/"
+        for call in calls:
+            assert "BatchMode=yes" in call and "StrictHostKeyChecking=yes" in call and "IdentitiesOnly=yes" in call
+
+    def test_untrusted_device_gets_nothing(self, config, tmp_path, monkeypatch):
+        pytest.importorskip("paramiko")
+        import paramiko
+        dm = DeploymentManager(FakeFramework(config))
+        monkeypatch.setattr(dm, "_check_conn", lambda *a, **k: True)
+        monkeypatch.setattr("orchestrator.utils.ssh_trust.fetch_host_key", lambda *a, **k: paramiko.ECDSAKey.generate())
+        connected = []
+        monkeypatch.setattr("orchestrator.utils.ssh_trust.connect", lambda *a, **k: connected.append(a))
+        pkg = tmp_path / "deploy_model_1.zip"
+        pkg.write_bytes(b"zip")
+        assert dm.deploy_artifact(pkg, "192.168.1.50", "radxa", password="secret") is False
+        assert connected == []
 
 
 

@@ -25,6 +25,7 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QIcon
 from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.Core.deployment_manager import list_builds
+from orchestrator.gui.dialogs import confirm_host_key
 
 class DeploymentWorker(QThread):
     """
@@ -234,20 +235,17 @@ class DeploymentWindow(QWidget):
         target_ip = self.txt_ip.text().strip()
         user = self.txt_user.text().strip()
 
-        # 2. Credentials (Secure Access)
-        password = None
-        if self.secrets_manager:
-            password = self.secrets_manager.get_secret("target_password")
-        
-        # Fallback: Wenn kein PW im Keyring, frage User (Session only)
-        if not password:
-            pwd, ok = QInputDialog.getText(self, "SSH Password", 
-                                           f"Enter password for {user}@{target_ip}:", 
-                                           QLineEdit.Password)
-            if ok and pwd:
-                password = pwd
-            else:
-                return # Cancelled
+        # 2. Trust the device (host key fingerprint, first use only) and log in. The password is needed
+        #    only until the framework's SSH key is installed; it is used once and never stored.
+        if not confirm_host_key(self, self.framework, target_ip):
+            return
+        pwd, ok = QInputDialog.getText(
+            self, "SSH login",
+            f"Password for {user}@{target_ip}\n(only the first time: used once to install the framework's SSH key, "
+            "never stored; leave empty if the key is already installed)", QLineEdit.Password)
+        if not ok:
+            return
+        password = pwd or None
 
         # 3. Docker Config gathering
         docker_config = {"use_docker": self.grp_docker.isChecked()}
