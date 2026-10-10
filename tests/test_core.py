@@ -246,18 +246,17 @@ class TestDittoProviders:
         assert calls[0]["api_key"] == "EMPTY"
         assert calls[0]["model"] == "openai/local-model"
 
-    def test_offline_mode_disables_rag(self, booted_framework):
+    def test_offline_mode_keeps_the_local_knowledge_base(self, booted_framework):
+        # Embeddings are local now; offline mode only forbids downloads (see tests/test_rag.py).
         fm = booted_framework
         fm.config.set("enable_rag_knowledge", True)
         fm.ensure_rag_manager()
-        assert fm.ditto_manager._get_rag_manager() is not None
+        assert fm.rag_manager._offline() is False
 
         fm.ditto_manager.reinitialize(offline_mode=True)
-        fm.config.set("offline_mode", True)
 
-        assert fm.ditto_manager._get_rag_manager() is None
-        with pytest.raises(RuntimeError, match="Offline"):
-            fm.rag_manager._get_embedding("question")
+        assert fm.ditto_manager._get_rag_manager() is fm.rag_manager
+        assert fm.rag_manager._offline() is True
 
 
 class TestTargets:
@@ -318,25 +317,8 @@ class TestCLI:
 class TestDependencyApiRegressions:
     """APIs that changed in the dependency upgrade and used to fail silently."""
 
-    def test_rag_search_uses_query_points(self, booted_framework, monkeypatch):
-        fm = booted_framework
-        fm.config.set("enable_rag_knowledge", True)
-        rag = fm.ensure_rag_manager()
-        calls = []
-
-        class FakeClient:
-            def query_points(self, **kwargs):
-                calls.append(kwargs)
-                point = SimpleNamespace(score=0.9, payload={"content": "use -mcpu=cortex-a76", "source": "docs"})
-                return SimpleNamespace(points=[point])
-
-        rag.client, rag._connected = FakeClient(), True
-        monkeypatch.setattr(rag, "_get_embedding", lambda text: [0.1, 0.2])
-
-        results = rag.search("rk3588 flags", limit=2)
-
-        assert [r.content for r in results] == ["use -mcpu=cortex-a76"]
-        assert calls[0]["query"] == [0.1, 0.2] and calls[0]["limit"] == 2
+    # The Qdrant query API (query_points with prefetch + RRF) is exercised against real local Qdrant
+    # in tests/test_rag.py, the FastEmbed API in TestFastEmbedApi there.
 
     def test_tiny_model_download_uses_current_hub_api(self, tmp_path, monkeypatch):
         import inspect

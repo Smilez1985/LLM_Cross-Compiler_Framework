@@ -28,7 +28,8 @@ try:
 except ImportError:
     PdfReader = None
 try:
-    from langdetect import detect
+    from langdetect import DetectorFactory, detect
+    DetectorFactory.seed = 0  # langdetect is randomized; a fixed seed gives the same verdict for the same page
 except ImportError:
     detect = None
 
@@ -40,7 +41,10 @@ from requests.utils import requote_uri
 from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
+from orchestrator.rag.html_text import html_to_markdown
 from orchestrator.utils.validation import validate_public_url, resolve_public_addresses
+
+DEFAULT_LANGUAGES = ("en", "de")
 
 
 @dataclass
@@ -112,6 +116,9 @@ class CrawlerManager:
         self.max_pages = int(opts.get("max_pages", self.config.get("crawler_max_pages", 50)))
         self.rate_limit = float(opts.get("request_delay", self.config.get("crawler_rate_limit", 1.0)))
         self.download_pdfs = bool(opts.get("download_pdfs", self.config.get("crawler_download_pdfs", True)))
+        # Pages in other languages are skipped (with their links); an empty list keeps every language.
+        self.languages = self._language_codes(opts.get("languages", self.config.get("crawler_languages",
+                                                                                    list(DEFAULT_LANGUAGES))))
         # Redirects and failed fetches also cost requests; this bounds the total work per crawl.
         self.max_requests = self.max_pages * 5
         
@@ -272,26 +279,29 @@ class CrawlerManager:
             rp.allow_all = True
         return rp
 
+    @staticmethod
+    def _language_codes(value: Any) -> Set[str]:
+        """ISO 639-1 codes from a list or a comma-separated string (environment variables arrive as strings)."""
+        items = value.split(",") if isinstance(value, str) else (value or [])
+        return {str(item).strip().lower().split("-")[0] for item in items if str(item).strip()}
+
+    def _detect_language(self, text: str) -> Optional[str]:
+        """Language of the prose (code blocks would skew the guess), None if unknown."""
+        if not detect:
+            return None
+        prose = re.sub(r"(?ms)^(`{3,}|~{3,}).*?^\1\s*$", " ", text)
+        try:
+            return detect(prose[:1500]).split("-")[0]
+        except Exception:
+            return None
+
     def _process_html(self, html_content: str, url: str, allowed_hosts: Set[str]) -> tuple[Optional[Document], List[str]]:
-        """Extrahiert Text und Links aus HTML."""
+        """Extracts the page as Markdown (headings, code blocks, tables kept) and its links."""
         soup = BeautifulSoup(html_content, 'html.parser')
         
         # Cleanup (Remove Nav, Footer, Scripts)
-        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside']):
+        for tag in soup(['script', 'style', 'nav', 'footer', 'header', 'aside', 'noscript', 'template', 'svg']):
             tag.decompose()
-            
-        text = soup.get_text(separator="\n", strip=True)
-        
-        # Language Detection Filter
-        if detect:
-            try:
-                # Prüfe die ersten 500 Zeichen
-                lang = detect(text[:500])
-                if lang != 'en': # Wir fokussieren uns auf Englisch (Tech Standard)
-                    self.logger.debug(f"Skipping non-english content ({lang}): {url}")
-                    return None, []
-            except Exception:
-                pass # Fallback: Keep content if detection fails
 
         # Link Extraction
         links = []
@@ -304,8 +314,18 @@ class CrawlerManager:
             if parsed.netloc in allowed_hosts and '#' not in href:
                 links.append(full_url)
         
-        # Create Document
-        metadata = {"source": url, "content_type": "html"}
+        title, text = html_to_markdown(soup)
+
+        # Language filter (configurable, crawler_languages); detection failures keep the page.
+        lang = self._detect_language(text)
+        if lang and self.languages and lang not in self.languages:
+            self.logger.debug(f"Skipping page in language '{lang}' (allowed: {sorted(self.languages)}): {url}")
+            return None, []
+        if not text.strip():
+            return None, links
+        metadata = {"source": url, "content_type": "html", "title": title}
+        if lang:
+            metadata["language"] = lang
         return Document(page_content=text, metadata=metadata), links
 
     def _process_pdf(self, pdf_bytes: bytes, url: str) -> Optional[Document]:
@@ -326,6 +346,9 @@ class CrawlerManager:
                 return None
                 
             metadata = {"source": url, "content_type": "pdf"}
+            info_title = getattr(reader.metadata, "title", None) if reader.metadata else None
+            if isinstance(info_title, str) and info_title.strip():
+                metadata["title"] = info_title.strip()
             return Document(page_content=text, metadata=metadata)
             
         except Exception as e:

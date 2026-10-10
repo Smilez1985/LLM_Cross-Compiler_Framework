@@ -316,6 +316,15 @@ class ConfigManager:
             
             # Local RAG / Vector Database (v1.5.0)
             ConfigSchema("enable_rag_knowledge", bool, False, False, "Enable local Qdrant Vector DB for AI"),
+            ConfigSchema("rag_embedding_model", str, False, "auto",
+                         "Local embedding model of the knowledge base: 'auto' keeps the model the knowledge base "
+                         "was built with, else picks by hardware (intfloat/multilingual-e5-small on CPU, "
+                         "BAAI/bge-m3 with CUDA); or a model id. Each model has its own collection.",
+                         ["non_empty"]),
+            ConfigSchema("qdrant_url", str, False, "",
+                         "Qdrant server for the knowledge base; empty = embedded storage in the user state "
+                         "directory. Remote servers need https and the secret 'qdrant_api_key'.",
+                         ["regex:^(https?://\\S+)?$"]),
             
             # Deep Crawler Settings (v1.6.0)
             ConfigSchema("crawler_respect_robots", bool, False, True, "Respect robots.txt rules"),
@@ -323,6 +332,8 @@ class ConfigManager:
             ConfigSchema("crawler_max_pages", int, False, 50, "Max pages to crawl per session"),
             ConfigSchema("crawler_rate_limit", float, False, 1.0, "Delay between crawler requests (seconds)", ["min:0"]),
             ConfigSchema("crawler_download_pdfs", bool, False, True, "Download and parse PDF files while crawling"),
+            ConfigSchema("crawler_languages", list, False, ["en", "de"],
+                         "Languages (ISO 639-1) of the pages the crawler keeps; empty = all languages"),
 
             # AI Agent (Ditto) Selection
             ConfigSchema("ai_provider", str, False, "OpenAI", "AI provider (OpenAI/Anthropic/Google/Ollama/Custom)"),
@@ -517,9 +528,9 @@ class ConfigManager:
         with self._lock:
             persist_keys = [
                 "language", "ai_security_level", "gui_theme", "docker_registry",
-                "enable_rag_knowledge", 
+                "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
                 "crawler_respect_robots", "crawler_max_depth", "crawler_max_pages",
-                "crawler_rate_limit", "crawler_download_pdfs",
+                "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages",
                 "ai_provider", "ai_model", "ai_base_url",
                 "input_history",
                 # v2.0

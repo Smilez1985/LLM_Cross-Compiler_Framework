@@ -148,7 +148,7 @@ class DockerManager(QObject):
                 client.containers.run(
                     image_tag, 
                     name=container_name, 
-                    ports={'6333/tcp': 6333},
+                    ports={'6333/tcp': ('127.0.0.1', 6333)},  # no API key: never reachable from other hosts
                     volumes={'llm_qdrant_data': {'bind': '/qdrant/storage', 'mode': 'rw'}},
                     network="llm-framework", 
                     detach=True, 

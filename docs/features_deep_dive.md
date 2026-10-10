@@ -31,15 +31,18 @@ Ditto is an automated embedded systems engineer. Instead of you spending hours s
 ### What is it?
 A private, local library of technical manuals. It turns the framework from a "tool" into a "knowledgeable partner".
 
-### ⚙️ How it works (The "Dynamic Sidecar")
-We use a **Dynamic Sidecar Pattern** to keep the framework lightweight:
-1.  **Idle:** By default, no database runs. Zero RAM usage.
-2.  **Activation:** When you check "Enable Local Knowledge Base" in settings, the `DockerManager` pulls the official `qdrant/qdrant` image (~50MB).
-3.  **Runtime:** The container `llm-qdrant` is started on a private Docker network. It is **never exposed** to the public internet.
-4.  **Ingestion:** When you import documents (or sync from Community), text is chunked and converted into vectors (embeddings) locally using `litellm`.
+### ⚙️ How it works
+Everything runs inside the framework process, without Docker and without an open port:
+1.  **Idle:** Nothing is loaded until the knowledge base is first used (RAG is opt-in: "Enable Local Knowledge Base").
+2.  **Storage:** Qdrant runs embedded, with its data in `~/.llm-framework/qdrant` (or `$LLM_FRAMEWORK_HOME/qdrant`). The storage is locked while in use and released after 30 s idle, so the GUI and the MCP server can take turns. For simultaneous use, point `qdrant_url` at a Qdrant server (a remote one needs https and the API key stored as secret `qdrant_api_key`).
+3.  **Embeddings:** Computed locally with FastEmbed (ONNX Runtime). The model is downloaded once into `models/embeddings`; in offline mode nothing is downloaded and a missing model is reported clearly.
+    * `rag_embedding_model: auto` (default) keeps the model the knowledge base was built with; a new knowledge base gets `intfloat/multilingual-e5-small` (384 dims, German/English and ~100 more languages, fast on a CPU) or, with a CUDA-enabled ONNX Runtime, `BAAI/bge-m3` (1024 dims). Every model gets its own collection, so switching models never mixes or loses vectors.
+4.  **Ingestion:** Pages are converted to Markdown and split along their structure (headings, paragraphs; code blocks and tables are never split), sized in model tokens, with a small overlap. Each chunk is embedded with a `Source | Title | Section` line. Re-ingesting a page updates it in place (deterministic ids) and removes chunks the new version no longer has.
+5.  **Search:** Hybrid: dense vectors for meaning plus BM25 for exact terms such as error codes and compiler flags, fused with Reciprocal Rank Fusion. Results are external text; Ditto passes them to the model as untrusted data.
+6.  **Crawler languages:** `crawler_languages` (default `["en", "de"]`) lists the page languages Deep Ingest keeps; an empty list keeps all.
 
 ### 🛡️ Privacy Guarantee
-* **No Cloud Upload:** Your vector data resides in the Docker volume `llm_qdrant_data` on your machine.
+* **No Cloud Upload:** Documents, vectors and queries never leave your machine (unless you configure your own Qdrant server).
 * **No Telemetry:** We do not track what you index.
 
 ---

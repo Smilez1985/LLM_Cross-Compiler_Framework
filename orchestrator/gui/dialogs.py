@@ -220,7 +220,7 @@ class AIConfigurationDialog(QDialog):
         self.txt_base_url = QLineEdit()
         form.addRow("Base URL:", self.txt_base_url)
 
-        self.chk_enable_rag = QCheckBox("Enable Local Knowledge Base (RAG, uses an online embedding API)")
+        self.chk_enable_rag = QCheckBox("Enable Local Knowledge Base (RAG, local embeddings; downloads a ~0.5 GB model once)")
         form.addRow("", self.chk_enable_rag)
 
         self.chk_offline = QCheckBox("Offline Mode (built-in local model, no external APIs)")

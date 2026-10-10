@@ -220,4 +220,6 @@ class FrameworkManager:
     def shutdown(self):
         """Graceful Shutdown."""
         self.logger.info("Shutting down Framework...")
+        if self.rag_manager is not None:
+            self.rag_manager.close()  # releases the lock on the embedded knowledge base storage
         self.logger.info("Shutdown complete.")
