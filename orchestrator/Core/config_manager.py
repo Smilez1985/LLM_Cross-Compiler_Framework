@@ -323,8 +323,9 @@ class ConfigManager:
                          ["non_empty"]),
             ConfigSchema("qdrant_url", str, False, "",
                          "Qdrant server for the knowledge base; empty = embedded storage in the user state "
-                         "directory. Remote servers need https and the secret 'qdrant_api_key'.",
-                         ["regex:^(https?://\\S+)?$"]),
+                         "directory. Remote servers need https and the secret 'qdrant_api_key' (never "
+                         "credentials in the URL).",
+                         ["regex:^(https?://[^\\s/?#@]+([/?#]\\S*)?)?$"]),
             
             # Deep Crawler Settings (v1.6.0)
             ConfigSchema("crawler_respect_robots", bool, False, True, "Respect robots.txt rules"),
