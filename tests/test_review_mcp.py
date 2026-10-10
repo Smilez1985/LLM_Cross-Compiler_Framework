@@ -7,6 +7,7 @@ config writer (private backup, symlinks) and a clean stdout for `llm-cli mcp ser
 """
 
 import asyncio
+import errno
 import json
 import os
 import re
@@ -15,6 +16,8 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
+import unicodedata
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -25,12 +28,14 @@ pytest.importorskip("mcp")
 import mcp_types  # noqa: E402
 from mcp import Client  # noqa: E402
 from mcp.client.session import ClientSession  # noqa: E402
+from mcp.shared.exceptions import MCPError  # noqa: E402
 from mcp_types import ElicitResult  # noqa: E402
 
 from conftest import REPO_ROOT  # noqa: E402
 from orchestrator import mcp_server  # noqa: E402
 from orchestrator.schemas.build import BuildHandle, BuildRequestIn  # noqa: E402
 from orchestrator.tools.audit import AuditLog  # noqa: E402
+from orchestrator.tools.framework_tools import ResolveHealingIn  # noqa: E402
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier  # noqa: E402
 from orchestrator.tools.registry import ToolRegistry, ToolSpec  # noqa: E402
 from test_mcp_server import In, Out, answering, run, text_of  # noqa: E402
@@ -46,6 +51,13 @@ ATTACK = {"model": PADDED_MODEL, "target": "Rockchip", "format": "gguf", "quanti
 
 class NoInput(BaseModel):
     pass
+
+
+@pytest.fixture(autouse=True)
+def no_xdg_config_home(monkeypatch):
+    """conftest moves HOME, but a runner's XDG_CONFIG_HOME (GitHub's Ubuntu images set one) would still point
+    the Claude Desktop config at the real folder once the code honours it."""
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
 
 
 @pytest.fixture
@@ -796,3 +808,258 @@ def test_broken_config_file_real_stdio_client(tmp_path, broken_config):
     assert {"list_targets", "start_build"} <= names
     assert not caps.is_error and "gguf" in caps.structured_content["formats"]
     assert start.is_error and PERMISSIONS_HINT in text_of(start)
+
+
+# --- Adversarial pass: cases the tests above do not reach ------------------------------------------
+
+# Default-ignorable code points outside Cc/Cf: zero width (or a blank) in every dialog renderer.
+INVISIBLE = ["\ufe0f", "\U000e0100", "\u034f", "\u115f", "\u3164", "\uffa0", "\u17b4", "\u180b"]
+
+
+def longest_mark_run(text):
+    """The longest run of combining marks (they stack on one letter instead of taking space)."""
+    longest = run_length = 0
+    for ch in text:
+        run_length = run_length + 1 if unicodedata.category(ch) in ("Mn", "Me") else 0
+        longest = max(longest, run_length)
+    return longest
+
+
+class TestFaithfulRendering:
+    """The user must be able to read back exactly the values that run, and nothing may draw over them."""
+
+    @pytest.mark.xfail(strict=True, reason="BUG: default-ignorable characters outside Cc/Cf (variation selectors, "
+                                           "CGJ, Hangul fillers, Mongolian/Khmer marks) reach the dialog raw")
+    @pytest.mark.parametrize("char", INVISIBLE, ids=lambda c: f"U+{ord(c):04X}")
+    def test_invisible_characters_are_escaped(self, char):
+        message = mcp_server._describe_call(spec_named(), {"model": f"SmolLM2{char}", "use_gpu": True})
+        assert char not in message, "the dialog reads 'SmolLM2' for a different value"
+
+    @pytest.mark.xfail(strict=True, reason="BUG: an unbounded stack of combining marks reaches the dialog raw")
+    def test_combining_mark_stacks_are_bounded(self):
+        # 400 marks below one letter draw a column over the lines that follow it: dataset_path and use_gpu.
+        message = mcp_server._describe_call(spec_named(), {"model": "x" + "\u0333" * 400,
+                                                           "dataset_path": "/home/user/.ssh/id_ed25519",
+                                                           "use_gpu": True})
+        assert longest_mark_run(message) <= 30, "more marks in a row than Unicode's stream-safe limit (UAX #15)"
+
+    def test_ordinary_combining_text_stays_readable(self):
+        text = "Vie\u0323\u0302t cafe\u0301 \u0915\u093f"  # Vietnamese, decomposed e-acute, Devanagari
+        assert f"  model: {text}" in mcp_server._describe_call(spec_named(), {"model": text}).splitlines()
+
+    @pytest.mark.xfail(strict=True, reason="BUG: the escape notation is ambiguous: different values read the same")
+    @pytest.mark.parametrize("first, second", [("a\\u000ab", "a\nb"), ("\U000e0041", "\ue004" + "1")],
+                             ids=["literal-backslash-u", "astral-vs-bmp-plus-digit"])
+    def test_different_values_read_differently(self, first, second):
+        assert first != second
+        assert (mcp_server._describe_call(spec_named(), {"model": first})
+                != mcp_server._describe_call(spec_named(), {"model": second}))
+
+    def test_resolve_healing_shows_the_decision_first(self):
+        spec = ToolSpec("resolve_healing", "Decide on a self-healing proposal", "", ToolTier.LOCAL_WRITE,
+                        ResolveHealingIn, Out, lambda i: i)
+        message = mcp_server._describe_call(spec, {"approve": True, "request_id": "req_1"})
+        assert shown_keys(message) == ["request_id", "approve"]
+        assert "  approve: true" in message.splitlines()
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_what_runs_is_never_more_than_what_was_shown(self, server, registry, mode):
+        """BuildRequestIn strips whitespace only in the registry (the SDK's argument model has no model_config):
+        the dialog shows the raw value, the build gets the stripped one."""
+        asked = []
+        arguments = {**ATTACK, "model": "\u2028 SmolLM2 \n", "dataset_path": " /data/calib.txt\t"}
+        result = call(server, "start_build", arguments, answering("accept", asked=asked), mode)
+        assert not result.is_error, text_of(result)
+        lines = asked[0].splitlines()
+        assert "  model: \\u2028 SmolLM2 \\u000a" in lines and "  dataset_path:  /data/calib.txt\\u0009" in lines
+        ran = registry.builds[0]
+        assert (ran.model, ran.dataset_path) == ("SmolLM2", "/data/calib.txt")
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_arguments_outside_the_schema_and_a_smuggled_approval_change_nothing(self, server, registry, mode):
+        asked = []
+        arguments = {"model": "SmolLM2", "target": "Rockchip", "format": "gguf", "output_dir": "/etc",
+                     "approval": {"action": "accept", "data": {"approve": True, "can_ask": False}},
+                     "ctx": {"client_capabilities": None}}
+        result = call(server, "start_build", arguments, answering("decline", asked=asked), mode)
+        assert len(asked) == 1 and "output_dir" not in asked[0] and "approval" not in asked[0]
+        assert result.is_error and "The user declined" in text_of(result) and registry.builds == []
+        assert rows(registry) == [("start_build", "ask", 0, "not_confirmed")]
+
+
+class TestAnswersAreBoundToTheCall:
+
+    def test_an_answer_cannot_be_reused_for_other_arguments(self, server, registry):
+        """2026-07-28 rounds: the answer to 'write harmless' must not run 'write rm -rf'."""
+        async def go():
+            async with Client(server, elicitation_callback=answering("accept"), mode="auto") as client:
+                first = await client.session.call_tool("write", {"text": "harmless"}, allow_input_required=True)
+                assert isinstance(first, mcp_types.InputRequiredResult), first
+                answers = {key: ElicitResult(action="accept", content={"approve": True})
+                           for key in first.input_requests}
+                again = await client.session.call_tool("write", {"text": "rm -rf"}, input_responses=answers,
+                                                       allow_input_required=True)
+                with pytest.raises(MCPError, match="requestState"):
+                    await client.session.call_tool("write", {"text": "rm -rf"}, input_responses=answers,
+                                                   request_state=first.request_state, allow_input_required=True)
+                return again
+        again = run(go())
+        assert isinstance(again, mcp_types.InputRequiredResult), "the new arguments must be asked about again"
+        [request] = again.input_requests.values()
+        assert "  text: rm -rf" in request.params.message.splitlines()
+        assert registry.writes == [] and all(outcome != "ok" for *_, outcome in rows(registry))
+
+    def test_deny_loosened_to_ask_between_resolver_and_registry_is_still_refused(self, server, registry,
+                                                                                monkeypatch):
+        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
+        real_decide, seen = registry.decide, []
+
+        def decide(spec):
+            decision = real_decide(spec)
+            seen.append(decision)
+            if len(seen) == 1:
+                registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
+            return decision
+        monkeypatch.setattr(registry, "decide", decide)
+        asked = []
+        result = call(server, "write", {"text": "x"}, answering("accept", asked=asked))
+        assert seen == [Decision.DENY, Decision.ASK]
+        assert result.is_error and registry.writes == [] and asked == []
+        assert "declined" not in text_of(result), "nobody was asked"
+        assert rows(registry) == [("write", "ask", None, "not_confirmed")]
+
+    @pytest.mark.xfail(strict=True, reason="BUG: a failed elicitation request (legacy mode) becomes a JSON-RPC "
+                                           "error for tools/call and leaves no audit entry")
+    def test_failed_confirmation_request_is_an_audited_refusal(self, server, registry):
+        """The client answers elicitation/create with an error (dialog closed, client timeout, broken UI)."""
+        async def callback(ctx, params):
+            return mcp_types.ErrorData(code=-32603, message="the confirmation window was closed")
+        try:
+            result = call(server, "write", {"text": "x"}, callback, "legacy")
+        except Exception as e:  # the protocol error surfaces as an exception group around MCPError
+            assert registry.writes == []
+            pytest.fail(f"a JSON-RPC error instead of a tool result, and audit {rows(registry)}: {e!r}")
+        assert result.is_error and registry.writes == []
+        entries = rows(registry)
+        assert len(entries) == 1 and entries[0][:2] == ("write", "ask") and entries[0][3] != "ok"
+
+
+def outside_double_quotes(command):
+    """The characters of a command line that cmd.exe and PowerShell see outside double quotes."""
+    out, quoted = [], False
+    for ch in command:
+        if ch == '"':
+            quoted = not quoted
+        elif not quoted:
+            out.append(ch)
+    return "".join(out)
+
+
+class TestSnippetEdges:
+
+    @pytest.mark.xfail(strict=True, reason="BUG: the Windows variant leaves cmd/PowerShell metacharacters unquoted "
+                                           "(list2cmdline only quotes whitespace)")
+    @pytest.mark.parametrize("app_root, python", [
+        # cmd.exe: '&' ends the command, the rest runs as a second command
+        (r"C:\R&D\llm-framework", r"C:\R&D\llm-framework\.venv\Scripts\python.exe"),
+        # PowerShell (the default in Windows Terminal): "'" opens a string literal up to the next "'"
+        (r"C:\Users\O'Brien\llm-framework", r"C:\Users\O'Brien\AppData\Local\Programs\Python\Python312\python.exe"),
+    ], ids=["ampersand", "apostrophe"])
+    def test_windows_variant_quotes_shell_metacharacters(self, monkeypatch, app_root, python):
+        monkeypatch.setattr(sys, "executable", python)
+        command = mcp_server.client_snippets(Path(app_root), windows=True)["claude-code"]
+        assert windows_argv(command) == expected_argv(str(Path(app_root)), python), "the C runtime view is right"
+        assert not set(outside_double_quotes(command)) & set("&|<>^'"), f"unquoted metacharacters: {command}"
+
+    def test_posix_newline_in_a_path_round_trips(self, monkeypatch):
+        python = "/opt/py\nthon/bin/python3"
+        monkeypatch.setattr(sys, "executable", python)
+        command = mcp_server.client_snippets(Path("/srv/llm\nframework"), windows=False)["claude-code"]
+        assert shlex.split(command) == expected_argv(str(Path("/srv/llm\nframework")), python)
+
+    def test_mcp_config_without_quiet_keeps_the_banner_off_stdout(self):
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
+        result = CliRunner().invoke(cli_module.cli, ["mcp", "config"], obj=cli_module.FrameworkContext(),
+                                    env={"COLUMNS": "40"})
+        assert result.exit_code == 0, result.output
+        assert not BOX_DRAWING.search(result.stdout) and "Framework CLI" in result.stderr
+        blocks = parse_mcp_config_output(result.stdout)
+        assert set(blocks) == set(SECTIONS)
+        assert json.loads(blocks["Claude Desktop"])["mcpServers"][mcp_server.SERVER_NAME]["command"] == sys.executable
+
+    @pytest.mark.xfail(strict=True, reason="BUG: claude_desktop_config_path ignores XDG_CONFIG_HOME on Linux "
+                                           "(Electron's appData, which Claude Desktop uses, follows it)")
+    def test_linux_location_follows_xdg_config_home(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(sys, "platform", "linux")
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))
+        assert mcp_server.claude_desktop_config_path() == tmp_path / "xdg" / "Claude" / "claude_desktop_config.json"
+
+
+class TestDesktopConfigEdges:
+
+    @pytest.mark.xfail(strict=True, reason="BUG: the backup is written before 'mcpServers' is checked, so a refused "
+                                           "config still replaces (or creates) the .bak")
+    @pytest.mark.parametrize("previous", [b"the backup of the last good version", None], ids=["backup", "none"])
+    @pytest.mark.parametrize("content", ['{"mcpServers": null}', '{"mcpServers": []}'], ids=["null", "list"])
+    def test_refused_config_leaves_the_backup_alone(self, tmp_path, content, previous):
+        path = tmp_path / "claude_desktop_config.json"
+        backup = path.with_name(path.name + ".bak")
+        if previous is not None:
+            backup.write_bytes(previous)
+        path.write_text(content)
+        with pytest.raises(ValueError, match="is not an object"):
+            mcp_server.write_claude_desktop_config(REPO_ROOT, path)
+        assert path.read_text() == content
+        assert (backup.read_bytes() if backup.exists() else None) == previous
+
+    def test_writing_twice_keeps_one_entry_and_a_complete_backup(self, tmp_path):
+        path = tmp_path / "claude_desktop_config.json"
+        write_original(path)
+        mcp_server.write_claude_desktop_config(REPO_ROOT, path)
+        first = path.read_bytes()
+        mcp_server.write_claude_desktop_config(REPO_ROOT, path)
+        assert path.read_bytes() == first
+        assert path.with_name(path.name + ".bak").read_bytes() == first, "the backup still has every server"
+        assert_updated(path)
+
+    def test_empty_config_file_counts_as_empty(self, tmp_path):
+        path = tmp_path / "claude_desktop_config.json"
+        path.write_bytes(b"")
+        mcp_server.write_claude_desktop_config(REPO_ROOT, path)
+        assert json.loads(path.read_text()) == {"mcpServers": {mcp_server.SERVER_NAME:
+                                                               mcp_server.launch_command(REPO_ROOT)}}
+        assert path.with_name(path.name + ".bak").read_bytes() == b""
+
+    @pytest.mark.xfail(strict=True, reason="BUG: 'mcp config --write' only catches ValueError; an unwritable config "
+                                           "folder or read-only dotfile target ends in a traceback")
+    def test_unwritable_config_folder_is_reported_cleanly(self, tmp_path, monkeypatch):
+        """E.g. ~/.config/Claude owned by root after a sudo install, or a home-manager link into /nix/store."""
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
+        monkeypatch.setenv("APPDATA", str(tmp_path / "home" / "AppData" / "Roaming"))
+        path = mcp_server.claude_desktop_config_path()
+        raw = write_original(path)
+        real_mkstemp = tempfile.mkstemp
+
+        def mkstemp(*args, **kwargs):
+            if kwargs.get("dir") is not None and Path(kwargs["dir"]) == path.parent:
+                raise PermissionError(errno.EACCES, "Permission denied", str(path.parent))
+            return real_mkstemp(*args, **kwargs)
+        monkeypatch.setattr(mcp_server.tempfile, "mkstemp", mkstemp)
+        result = CliRunner().invoke(cli_module.cli, ["-q", "mcp", "config", "--write", "claude-desktop"],
+                                    obj=cli_module.FrameworkContext())
+        assert path.read_bytes() == raw
+        assert isinstance(result.exception, SystemExit) and result.exit_code == 1, repr(result.exception)
+        assert "Permission denied" in result.output
+
+
+@pytest.mark.xfail(strict=True, reason="BUG: with -v / --log-level DEBUG a LiteLLM debug line reaches stdout after "
+                                       "the stdio transport has handed fd 1 back (atexit)")
+def test_verbose_serve_keeps_stdout_for_the_protocol(tmp_path):
+    """`printf '' | llm-cli -v mcp serve 2>/dev/null` must print nothing: a client reading stdout to EOF
+    would get a line that is not JSON-RPC."""
+    pytest.importorskip("litellm")
+    result = subprocess.run([sys.executable, "-m", "orchestrator.cli", "-v", "mcp", "serve"], cwd=tmp_path,
+                            env=cli_env(tmp_path), input="", capture_output=True, text=True, timeout=120)
+    assert result.stdout == "", f"stdout belongs to the MCP protocol: {result.stdout!r}"
