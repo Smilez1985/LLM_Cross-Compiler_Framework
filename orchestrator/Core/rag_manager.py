@@ -167,6 +167,14 @@ class RAGManager:
         host = (parsed.hostname or "").lower()
         if parsed.scheme not in ("http", "https") or not host:
             raise KnowledgeBaseError("qdrant_url must be an http(s) URL such as https://qdrant.example:6333.")
+        if parsed.username is not None or parsed.password is not None:
+            # The URL is stored in the plain configuration file and appears in connection errors.
+            raise KnowledgeBaseError("qdrant_url must not contain credentials; store the API key as the secret "
+                                     "'qdrant_api_key'.")
+        try:
+            _ = parsed.port  # raises for a non-numeric or out-of-range port
+        except ValueError:
+            raise KnowledgeBaseError("qdrant_url has an invalid port.") from None
         try:
             ip = ipaddress.ip_address(host)
         except ValueError:
@@ -413,7 +421,7 @@ class RAGManager:
             self.logger.info(f"Invoking Crawler for {url}...")
             documents = crawler.crawl(url)
         except Exception as e:
-            self.logger.error(f"Deep Ingest failed: {e}")
+            self.logger.error(f"Deep Ingest failed: {redact_secrets(str(e))}")
             return {"success": False, "message": redact_secrets(str(e))}
         if not documents:
             return {"success": False, "message": "No documents found", "count": 0}
@@ -462,9 +470,10 @@ class RAGManager:
                     content = file_path.read_text(encoding='utf-8', errors='ignore')
                     if not content.strip():
                         continue
-                    rel_path = file_path.relative_to(root)
-                    meta = {"type": "internal_code", "filepath": str(rel_path), "filename": file,
-                            "extension": file_path.suffix, "title": str(rel_path)}
+                    # POSIX form: the source is part of the point id, which must not depend on the OS.
+                    rel_path = file_path.relative_to(root).as_posix()
+                    meta = {"type": "internal_code", "filepath": rel_path, "filename": file,
+                            "extension": file_path.suffix, "title": rel_path}
                     total_files += 1
                     if self._ingest(f"code:{rel_path}", content, meta, replace=True):
                         success_count += 1
@@ -582,13 +591,23 @@ class RAGManager:
         self.logger.info("Knowledge Base cleared.")
         return True
 
-    def get_status(self) -> Dict[str, Any]:
+    def _storage_label(self) -> str:
+        """Where the knowledge base lives, for display: never the userinfo part of a server URL."""
         url = self._server_url()
-        parsed = urlparse(url) if url else None
+        if not url:
+            return str(self.storage_dir)
+        parsed = urlparse(url)
+        host = parsed.hostname or "?"
+        try:
+            port = parsed.port or 6333
+        except ValueError:  # an invalid port is reported by the connection attempt
+            port = "?"
+        return f"{parsed.scheme}://{'[' + host + ']' if ':' in host else host}:{port}"
+
+    def get_status(self) -> Dict[str, Any]:
         status: Dict[str, Any] = {
-            "connected": False, "vector_count": 0, "mode": "server" if url else "embedded",
-            # Never the userinfo part of the URL.
-            "storage": f"{parsed.scheme}://{parsed.hostname}:{parsed.port or 6333}" if parsed else str(self.storage_dir),
+            "connected": False, "vector_count": 0, "mode": "server" if self._server_url() else "embedded",
+            "storage": self._storage_label(),
         }
 
         def info(store: "KnowledgeStore") -> Dict[str, Any]:

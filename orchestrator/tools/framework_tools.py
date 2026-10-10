@@ -14,6 +14,7 @@ from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.policy import PolicyStore, ToolTier
 from orchestrator.tools.registry import ToolError, ToolRegistry, ToolSpec
+from orchestrator.utils.untrusted import sanitize_untrusted
 
 
 class NoInput(BaseModel):
@@ -79,8 +80,11 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
             hits = rag.search(inp.query, limit=inp.limit, strict=True)
         except KnowledgeBaseError as e:
             raise ToolError(f"The knowledge base is unavailable: {e}") from e
-        return SearchOut(results=[KnowledgeHit(source=str(h.source), score=float(getattr(h, "score", 0.0)),
-                                               content=str(h.content)[:4000]) for h in hits])
+        # Crawled pages and community packs can hide instructions in invisible characters; the MCP client's
+        # model reads this output, so it gets the same cleaning as text Ditto passes to its model.
+        return SearchOut(results=[KnowledgeHit(source=sanitize_untrusted(str(h.source), 500),
+                                               score=float(getattr(h, "score", 0.0)),
+                                               content=sanitize_untrusted(str(h.content), 4000)) for h in hits])
 
     def run_doctor(_inp: NoInput) -> DoctorOut:
         from orchestrator.Core.doctor import Doctor

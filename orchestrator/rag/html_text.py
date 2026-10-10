@@ -19,6 +19,9 @@ _BLOCK_TAGS = {"p", "div", "section", "article", "main", "blockquote", "figure",
 _STRUCTURAL = set(_HEADINGS) | _BLOCK_TAGS | {"pre", "table", "ul", "ol", "hr"}
 _SKIP_STRINGS = (Comment, Doctype, Declaration, ProcessingInstruction)
 _LANG_CLASS = re.compile(r"^(?:language|lang|highlight-source|brush:?)-?(\w[\w+#-]*)$")
+_LIST_BREAKERS = ("pre", "table")
+# Rendered blocks that must not get a list marker in front: fences, tables, headings, lists.
+_MARKDOWN_BLOCK_START = re.compile(r"^(?:`{3,}|\||#{1,6} |- |\d+\. )")
 
 
 def html_to_markdown(html: Union[str, BeautifulSoup, Tag]) -> Tuple[str, str]:
@@ -95,18 +98,41 @@ def _table(table: Tag) -> str:
     return "\n".join(lines)
 
 
-def _list(node: Tag, depth: int = 0) -> str:
+def _items(node: Tag) -> List[Tuple[str, Tag]]:
     ordered = node.name == "ol"
-    lines = []
-    for number, li in enumerate(node.find_all("li", recursive=False), start=1):
-        nested = [child for child in li.children if isinstance(child, Tag) and child.name in ("ul", "ol")]
-        own = [child for child in li.children if all(child is not sub for sub in nested)]
-        text = _squash("".join(_inline(child) for child in own)).replace("\n", " ")
-        marker = f"{number}." if ordered else "-"
-        if text:
-            lines.append(f"{'  ' * depth}{marker} {text}")
-        lines.extend(_list(sub, depth + 1) for sub in nested)
-    return "\n".join(line for line in lines if line)
+    return [(f"{number}." if ordered else "-", li)
+            for number, li in enumerate(node.find_all("li", recursive=False), start=1)]
+
+
+def _item_lines(li: Tag, marker: str, depth: int) -> List[str]:
+    nested = [child for child in li.children if isinstance(child, Tag) and child.name in ("ul", "ol")]
+    own = [child for child in li.children if all(child is not sub for sub in nested)]
+    text = _squash("".join(_inline(child) for child in own)).replace("\n", " ")
+    lines = [f"{'  ' * depth}{marker} {text}"] if text else []
+    for sub in nested:
+        for sub_marker, sub_li in _items(sub):
+            lines.extend(_item_lines(sub_li, sub_marker, depth + 1))
+    return lines
+
+
+def _list(node: Tag, blocks: List[str]) -> None:
+    """Appends a list. Items holding code or a table (common in install guides) become separate blocks:
+    inline rendering would squash the code's lines and the table's cells into one line."""
+    lines: List[str] = []
+    for marker, li in _items(node):
+        if not li.find(_LIST_BREAKERS):
+            lines.extend(_item_lines(li, marker, 0))
+            continue
+        if lines:
+            blocks.append("\n".join(lines))
+            lines = []
+        inner: List[str] = []
+        _render(li, inner)
+        if inner and not _MARKDOWN_BLOCK_START.match(inner[0]):
+            inner[0] = f"{marker} {inner[0]}"
+        blocks.extend(inner)
+    if lines:
+        blocks.append("\n".join(lines))
 
 
 def _render(node: Tag, blocks: List[str]) -> None:
@@ -139,7 +165,7 @@ def _render(node: Tag, blocks: List[str]) -> None:
             blocks.append(_table(child))
         elif name in ("ul", "ol"):
             flush()
-            blocks.append(_list(child))
+            _list(child, blocks)
         elif name == "hr":
             flush()
         elif name == "br":

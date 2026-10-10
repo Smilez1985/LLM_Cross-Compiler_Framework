@@ -220,3 +220,6 @@ configs/known_hosts
 
 # Agent worktrees and local tool state
 .claude/worktrees/
+
+# Embedding models the knowledge base downloads (FastEmbed cache under models_dir; several hundred MB)
+/models/embeddings/
