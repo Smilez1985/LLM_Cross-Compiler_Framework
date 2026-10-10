@@ -868,6 +868,39 @@ def ditto_setup(ctx: FrameworkContext):
 
 
 # ============================================================================
+# DOCTOR (deterministic health checks)
+# ============================================================================
+
+@cli.command('doctor')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@click.option('--fix', is_flag=True, help='Apply automatic fixes up to --tier, then check again')
+@click.option('--tier', default=1, show_default=True, type=click.IntRange(1, 2),
+              help='1: harmless fixes (permissions, folders); 2: also removes caches (Docker build cache)')
+@pass_context
+def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
+    """Check the installation and explain how to fix problems (exit code 0 ok, 1 warnings, 2 errors)"""
+    from orchestrator.Core.doctor import Doctor, Severity
+    ctx.require_framework()
+    doc = Doctor(ctx.framework_manager)
+    report = doc.fix(tier) if fix else doc.run()
+    if as_json:
+        click.echo(json.dumps(report.to_dict(), indent=2))
+        sys.exit(report.exit_code)
+    icons = {Severity.OK: "[green]✔[/green]", Severity.INFO: "[blue]ℹ[/blue]",
+             Severity.WARN: "[yellow]![/yellow]", Severity.ERROR: "[red]✘[/red]"}
+    for finding in report.findings:
+        console.print(f"{icons[finding.severity]} {escape(finding.subsystem)}: {escape(finding.message)}")
+        if finding.severity != Severity.OK and finding.fix_hint:
+            tier_note = f" (automatic fix: --fix --tier {finding.fix_tier})" if finding.fix else ""
+            console.print(f"    → {escape(finding.fix_hint)}{tier_note}")
+    for code in report.fixed:
+        console.print(f"[green]Fixed: {escape(code)}[/green]")
+    for code in report.still_present:
+        console.print(f"[yellow]Still present after the fix: {escape(code)}[/yellow]")
+    sys.exit(report.exit_code)
+
+
+# ============================================================================
 # MCP SERVER (AI clients such as Claude Code / Claude Desktop / VS Code)
 # ============================================================================
 
