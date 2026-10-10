@@ -70,13 +70,8 @@ class TransparencyManager:
             model_path = getattr(self.config, 'repe_model_path', None)
             
             if not model_path:
-                # Fallback: Nutze Ditto's Model (falls offline)
-                ditto = self.framework.get_component("ditto_manager")
-                if ditto and ditto.offline_mode and ditto.native_engine:
-                    model_path = ditto.native_engine.model_path
-                else:
-                    self.logger.warning("No RepE model configured. Using HuggingFace default.")
-                    model_path = "meta-llama/Llama-2-7b-hf"  # Kleines Default-Modell
+                self.logger.warning("No RepE model configured (repe_model_path). Using HuggingFace default.")
+                model_path = "meta-llama/Llama-2-7b-hf"  # Kleines Default-Modell
             
             # Load Pipeline
             tokenizer = AutoTokenizer.from_pretrained(model_path)

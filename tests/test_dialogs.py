@@ -25,10 +25,10 @@ class FakeSecrets:
 
 class FakeDitto:
     def __init__(self):
-        self.calls = []
+        self.reloads = 0
 
-    def reinitialize(self, **kwargs):
-        self.calls.append(kwargs)
+    def reload(self):
+        self.reloads += 1
 
 
 class FakeFramework:
@@ -63,6 +63,24 @@ def message_boxes(monkeypatch):
     return shown
 
 
+@pytest.fixture(autouse=True)
+def model_lists(monkeypatch):
+    """No network: the live model list comes from here (default: unavailable)."""
+    calls, answers = [], {}
+
+    def lister(config, secrets, provider):
+        calls.append(SimpleNamespace(provider=provider, model=config.get("ai_model"),
+                                     base_url=config.get("ai_base_url"), offline=config.get("offline_mode"),
+                                     key=secrets.get_secret("anthropic_api_key")))
+        result = answers.get(provider, RuntimeError("no network in tests"))
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(AIConfigurationDialog, "model_lister", staticmethod(lister))
+    return SimpleNamespace(calls=calls, answers=answers)
+
+
 @pytest.fixture
 def framework(tmp_path):
     return FakeFramework(ConfigManager(tmp_path))
@@ -72,40 +90,60 @@ def select_provider(dlg, provider_id):
     dlg.cb_provider.setCurrentIndex(dlg.cb_provider.findData(provider_id))
 
 
+def wait_for(qapp, condition, timeout=5.0):
+    import time
+    deadline = time.monotonic() + timeout
+    while not condition() and time.monotonic() < deadline:
+        qapp.processEvents()
+        time.sleep(0.01)
+    return condition()
+
+
 class TestAIConfigurationDialog:
 
-    def test_loads_saved_selection(self, qapp, framework):
+    def test_providers_come_from_the_catalog(self, qapp, framework):
+        from orchestrator.llm import load_catalog
+        dlg = AIConfigurationDialog(framework)
+        catalog = load_catalog()
+        items = {dlg.cb_provider.itemData(i): dlg.cb_provider.itemText(i) for i in range(dlg.cb_provider.count())}
+        assert items == {pid: preset.label for pid, preset in catalog.providers.items()}
+
+    def test_loads_saved_selection_including_old_provider_names(self, qapp, framework):
         framework.config.set("ai_provider", "Anthropic")
         framework.config.set("ai_model", "claude-sonnet-5-5")
 
         dlg = AIConfigurationDialog(framework)
 
-        assert dlg.cb_provider.currentData() == "Anthropic"
+        assert dlg.cb_provider.currentData() == "anthropic"
         assert dlg.cb_model.currentText() == "claude-sonnet-5-5"
         assert dlg.txt_api_key.isEnabled()
         assert not dlg.txt_base_url.isEnabled()
 
-    def test_provider_ids_match_ditto(self, qapp, framework):
+    def test_default_model_of_another_provider_is_not_shown(self, qapp, framework):
+        framework.config.set("ai_provider", "anthropic")  # ai_model keeps the schema default (an OpenAI model)
         dlg = AIConfigurationDialog(framework)
-        ids = {dlg.cb_provider.itemData(i) for i in range(dlg.cb_provider.count())}
-        assert ids == {"OpenAI", "Anthropic", "Google", "Ollama", "Custom"}
+        assert dlg.cb_model.currentText() == "claude-opus-5-5"
+        assert dlg.cb_model.findText("claude-haiku-5-5") >= 0
 
     def test_cloud_provider_requires_api_key(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
-        select_provider(dlg, "OpenAI")
+        select_provider(dlg, "openai")
 
         dlg._save_config()
 
         assert message_boxes == [("warning", "Missing API Key")]
         assert dlg.result() == 0
         assert dlg.get_config() == {}
-        assert framework.ditto_manager.calls == []
+        assert framework.ditto_manager.reloads == 0
 
-    def test_save_writes_keyring_config_and_ditto(self, qapp, framework, tmp_path, message_boxes):
+    def test_save_writes_keyring_config_and_reloads_ditto(self, qapp, framework, tmp_path, message_boxes):
         dlg = AIConfigurationDialog(framework)
-        select_provider(dlg, "Anthropic")
+        select_provider(dlg, "anthropic")
         dlg.cb_model.setCurrentText("claude-opus-5-5")
         dlg.txt_api_key.setText("sk-ant-test-key-0123456789abcdef")
+        dlg.cb_effort.setCurrentIndex(dlg.cb_effort.findData("high"))
+        dlg.cb_security.setCurrentIndex(dlg.cb_security.findData("BALANCED"))
+        dlg.txt_fallback.setText("ollama:qwen3.5:4b, local")
         dlg.chk_enable_rag.setChecked(True)
 
         dlg._save_config()
@@ -114,21 +152,35 @@ class TestAIConfigurationDialog:
         assert dlg.result() == dialogs.QDialog.Accepted
         assert framework.secrets_manager.store["anthropic_api_key"] == "sk-ant-test-key-0123456789abcdef"
         assert framework.rag_requests == 1
-        assert framework.ditto_manager.calls[-1]["provider"] == "Anthropic"
-        assert framework.ditto_manager.calls[-1]["model"] == "claude-opus-5-5"
+        assert framework.ditto_manager.reloads == 1
 
         reloaded = ConfigManager(tmp_path)
-        assert reloaded.get("ai_provider") == "Anthropic"
+        assert reloaded.get("ai_provider") == "anthropic"
         assert reloaded.get("ai_model") == "claude-opus-5-5"
+        assert reloaded.get("ai_effort") == "high"
+        assert reloaded.get("ai_security_level") == "BALANCED"
+        assert reloaded.get("ai_fallback_chain") == ["ollama:qwen3.5:4b", "local"]
         assert reloaded.get("enable_rag_knowledge") is True
         assert "sk-ant-test-key" not in (tmp_path / "config.yml").read_text()
 
-        assert dlg.get_config()["provider"] == "Anthropic"
+        result = dlg.get_config()
+        assert result["provider"] == "anthropic" and "api_key" not in result
+        assert "sk-ant-test-key" not in repr(result)
+
+    def test_saved_settings_are_shown_again(self, qapp, framework):
+        framework.config.set("ai_provider", "ollama")
+        framework.config.set("ai_effort", "low")
+        framework.config.set("ai_security_level", "OFF")
+        framework.config.set("ai_fallback_chain", ["local"])
+        dlg = AIConfigurationDialog(framework)
+        assert dlg.cb_effort.currentData() == "low"
+        assert dlg.cb_security.currentData() == "OFF"
+        assert dlg.txt_fallback.text() == "local"
 
     def test_stored_key_is_reused(self, qapp, tmp_path, message_boxes):
         fw = FakeFramework(ConfigManager(tmp_path), FakeSecrets({"openai_api_key": "sk-stored-0123456789abcdefghij"}))
         dlg = AIConfigurationDialog(fw)
-        select_provider(dlg, "OpenAI")
+        select_provider(dlg, "openai")
 
         assert "Stored" in dlg.txt_api_key.placeholderText()
         dlg._save_config()
@@ -138,20 +190,20 @@ class TestAIConfigurationDialog:
 
     def test_ollama_needs_no_key(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
-        select_provider(dlg, "Ollama")
+        select_provider(dlg, "ollama")
 
         assert not dlg.txt_api_key.isEnabled()
         assert dlg.txt_base_url.isEnabled()
 
-        dlg.txt_base_url.setText("http://localhost:11434")
+        dlg.txt_base_url.setText("http://192.168.1.20:11434/v1")
         dlg._save_config()
 
         assert dlg.result() == dialogs.QDialog.Accepted
-        assert framework.ditto_manager.calls[-1]["base_url"] == "http://localhost:11434"
+        assert framework.config.get("ai_base_url") == "http://192.168.1.20:11434/v1"
 
     def test_custom_endpoint_requires_base_url(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
-        select_provider(dlg, "Custom")
+        select_provider(dlg, "custom")
         dlg.cb_model.setCurrentText("my-model")
 
         dlg._save_config()
@@ -159,42 +211,42 @@ class TestAIConfigurationDialog:
         assert message_boxes == [("warning", "Missing Base URL")]
         assert dlg.result() == 0
 
-    def test_offline_mode_skips_cloud_requirements(self, qapp, framework, message_boxes):
+    def test_offline_mode_accepts_only_local_providers(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
-        select_provider(dlg, "OpenAI")
+        select_provider(dlg, "openai")
+        dlg.txt_api_key.setText("sk-proj-0123456789abcdefghijkl")
         dlg.chk_offline.setChecked(True)
 
-        assert not dlg.cb_provider.isEnabled()
-        assert not dlg.txt_api_key.isEnabled()
-
         dlg._save_config()
+        assert message_boxes == [("warning", "Offline Mode")] and dlg.result() == 0
 
+        select_provider(dlg, "ollama")
+        dlg._save_config()
         assert dlg.result() == dialogs.QDialog.Accepted
-        assert framework.ditto_manager.calls[-1]["offline_mode"] is True
-        assert framework.config.get("offline_mode") is True
+        assert framework.config.get("offline_mode") is True and framework.config.get("ai_provider") == "ollama"
 
     def test_switching_to_cloud_provider_drops_old_base_url(self, qapp, framework, tmp_path, message_boxes):
         custom = AIConfigurationDialog(framework)
-        select_provider(custom, "Custom")
+        select_provider(custom, "custom")
         custom.cb_model.setCurrentText("my-model")
         custom.txt_base_url.setText("https://third-party-proxy.example.com/v1")
         custom._save_config()
         assert framework.config.get("ai_base_url") == "https://third-party-proxy.example.com/v1"
 
         dlg = AIConfigurationDialog(framework)
-        select_provider(dlg, "OpenAI")
-        dlg.cb_model.setCurrentText("gpt-4o")
+        assert dlg.txt_base_url.text() == "https://third-party-proxy.example.com/v1"
+        select_provider(dlg, "openai")
+        dlg.cb_model.setCurrentText("gpt-6.1-sol")
         dlg.txt_api_key.setText("sk-proj-0123456789abcdefghijkl")
         dlg._save_config()
 
         assert message_boxes == []
-        assert framework.ditto_manager.calls[-1]["base_url"] == ""
         assert dlg.get_config()["base_url"] is None
         assert ConfigManager(tmp_path).get("ai_base_url") == ""
 
     def test_custom_endpoint_key_is_optional_and_stored_separately(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
-        select_provider(dlg, "Custom")
+        select_provider(dlg, "custom")
         dlg.cb_model.setCurrentText("my-model")
         dlg.txt_base_url.setText("http://192.168.1.20:8000/v1")
         assert dlg.txt_api_key.isEnabled()
@@ -204,39 +256,81 @@ class TestAIConfigurationDialog:
         assert framework.secrets_manager.store == {}
 
         dlg2 = AIConfigurationDialog(framework)
+        assert dlg2.cb_provider.currentData() == "custom"
         dlg2.txt_api_key.setText("custom-secret")
         dlg2._save_config()
         assert framework.secrets_manager.store == {"custom_api_key": "custom-secret"}
 
     def test_invalid_base_url_is_rejected(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
-        select_provider(dlg, "Ollama")
+        select_provider(dlg, "ollama")
         dlg.txt_base_url.setText("localhost:11434")
 
         dlg._save_config()
 
         assert message_boxes == [("warning", "Invalid Base URL")]
 
-    def test_saved_offline_mode_keeps_saved_model(self, qapp, framework):
-        framework.config.set("ai_provider", "Anthropic")
-        framework.config.set("ai_model", "claude-sonnet-5-5")
-        framework.config.set("offline_mode", True)
-
+    def test_unknown_fallback_provider_is_rejected(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
-
-        assert dlg.chk_offline.isChecked()
-        assert dlg.cb_model.currentText() == "claude-sonnet-5-5"
-        dlg.chk_offline.setChecked(False)
-        assert dlg.cb_model.currentText() == "claude-sonnet-5-5"
-        assert dlg.cb_provider.isEnabled()
-
-    def test_works_without_framework(self, qapp, message_boxes):
-        dlg = AIConfigurationDialog(None)
-        select_provider(dlg, "Ollama")
+        select_provider(dlg, "ollama")
+        dlg.txt_fallback.setText("local, skynet:model")
 
         dlg._save_config()
 
-        assert dlg.get_config()["provider"] == "Ollama"
+        assert message_boxes == [("warning", "Invalid Fallback Chain")]
+
+    def test_live_model_list_fills_the_combo(self, qapp, framework, model_lists):
+        model_lists.answers["anthropic"] = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-new-model"]
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "anthropic")
+        dlg.txt_api_key.setText("sk-ant-typed-0123456789abcdef")
+        dlg.cb_model.setCurrentText("my-pinned-model")
+        dlg._refresh_models()
+
+        assert wait_for(qapp, lambda: dlg.cb_model.findText("claude-new-model") >= 0)
+        assert dlg.cb_model.currentText() == "my-pinned-model", "a typed model id stays"
+        last = model_lists.calls[-1]
+        assert (last.provider, last.model, last.key) == ("anthropic", "my-pinned-model",
+                                                          "sk-ant-typed-0123456789abcdef")
+        assert "3 models" in dlg.lbl_models.text()
+        assert framework.secrets_manager.store == {}, "listing models stores nothing"
+
+    def test_failed_model_list_keeps_free_text(self, qapp, framework, model_lists):
+        from orchestrator.llm import AuthFailed
+        model_lists.answers["openrouter"] = AuthFailed("OpenRouter rejected the credentials.")
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "openrouter")
+        dlg.cb_model.setCurrentText("vendor/some-model")
+
+        assert wait_for(qapp, lambda: "unavailable" in dlg.lbl_models.text())
+        assert "rejected the credentials" in dlg.lbl_models.text()
+        assert dlg.cb_model.currentText() == "vendor/some-model"
+
+    def test_unsaved_choices_are_used_for_the_model_list(self, qapp, framework, model_lists):
+        model_lists.answers["ollama"] = ["qwen3.5:9b"]
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "ollama")
+        dlg.txt_base_url.setText("http://192.168.1.20:11434/v1")
+        dlg.chk_offline.setChecked(True)
+        dlg._refresh_models()
+        assert wait_for(qapp, lambda: dlg.cb_model.findText("qwen3.5:9b") >= 0)
+        assert (model_lists.calls[-1].base_url, model_lists.calls[-1].offline) == ("http://192.168.1.20:11434/v1",
+                                                                                     True)
+        assert framework.config.get("ai_base_url") == "", "nothing is saved before Save"
+
+    def test_sign_in_placeholder(self, qapp, framework):
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "anthropic")
+        assert dlg.btn_sign_in.text() == "Sign in..." and not dlg.btn_sign_in.isEnabled()
+        assert dlg._sign_in() is None
+
+    def test_works_without_framework(self, qapp, message_boxes):
+        dlg = AIConfigurationDialog(None)
+        select_provider(dlg, "ollama")
+
+        dlg._save_config()
+
+        assert dlg.get_config()["provider"] == "ollama"
 
 
 class TestURLInputDialog:
@@ -335,9 +429,15 @@ class TestMainWindowWiring:
 
         monkeypatch.setattr(main_window, "FrameworkManager", TmpFramework)
         monkeypatch.setattr(main_window.ModuleCreationWizard, "exec", lambda self: 0)
+        # The first-run permissions dialog is modal; a later processEvents() in another test would block on it.
+        opened = []
+        monkeypatch.setattr(main_window.MainOrchestrator, "_open_tool_permissions",
+                            lambda self, first_run=False: opened.append(first_run))
 
         win = main_window.MainOrchestrator(REPO_ROOT)
         try:
+            qapp.processEvents()
+            assert opened == [True], "the permissions are asked once at the first start"
             menus = {m.title(): [a.text() for a in m.actions()] for m in win.findChildren(QMenu) if m.title()}
             assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module...",
                                       "Tool Permissions (Ditto / MCP)..."]

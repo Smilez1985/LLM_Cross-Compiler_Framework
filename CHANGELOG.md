@@ -9,6 +9,27 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 
 ## [Unreleased]
 
+### Added
+- **Ditto uses the framework tools**: in the chat (GUI) and with `llm-cli ditto ask "<question>"`, Ditto can
+  list targets, check capabilities, start and cancel builds, read logs, search the knowledge base and run the
+  doctor, always within your tool permissions. Tools that need a confirmation show their title and every
+  argument (a dialog in the GUI, a prompt in the CLI; denied without a terminal).
+- **AI settings**: providers from `configs/llm_providers.yml`, a model list loaded live from the provider
+  (free text still works), effort, privacy level for cloud providers, offline mode and a fallback chain.
+
+### Changed
+- **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
+  built-in Transformers model for offline mode is gone (offline mode uses local providers: Ollama, the
+  managed llama-server, a server on your network). Healing analyses, module proposals and build
+  recommendations are validated structured answers; an invalid answer is an error and is never applied.
+- **Chat history** is append-only and kept per user; a long conversation is summarized into a new one.
+  Histories of earlier versions are migrated.
+- Provider errors are explained, e.g. that an Anthropic API key must belong to a workspace in the Claude
+  Console.
+
+### Removed
+- Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
+
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
 conversions), every known dependency vulnerability is gone, AI clients can drive the framework over the

@@ -7,7 +7,6 @@ Der Kernel des Systems. Initialisiert alle Manager in strikter,
 sicherheitskritischer Reihenfolge und verknüpft die Komponenten.
 
 Updates v2.4.0:
-- Dependency Injection für DittoManager in Orchestrator (für IMatrix-Flow).
 - Version Bump auf v2.4.0 (Smart Calibration Update).
 """
 
@@ -127,14 +126,8 @@ class FrameworkManager:
             # RAG (Optional)
             self.ensure_rag_manager()
 
-            # Ditto (The Brain) - needs Secrets!
-            self.ditto_manager = DittoCoder(
-                provider=self.config.get("ai_provider", "OpenAI"),
-                model=self.config.get("ai_model", "gpt-6.1-sol"),
-                base_url=self.config.get("ai_base_url") or None,
-                config_manager=self.config,
-                framework_manager=self # Pass self to access secrets_manager
-            )
+            # Ditto (the AI assistant): reads provider, model and keys from the settings on every call.
+            self.ditto_manager = DittoCoder(self)
             
             # === PHASE 4: GUARDIANS & OPS ===
             self.logger.info("[Boot Phase 4] Guardians & Operations")
@@ -160,10 +153,8 @@ class FrameworkManager:
                 self.logger.error(f"AI tools unavailable (tool permissions/audit log in the per-user folder): {e}")
             
             # === DEPENDENCY INJECTION ===
-            # Connect the Brain (Ditto) and the Guardian (Self-Healing) to the Orchestrator
+            # Connect the Guardian (Self-Healing, which asks Ditto) to the Orchestrator
             self.orchestrator.inject_self_healing(self.self_healing_manager)
-            if self.ditto_manager:
-                self.orchestrator.inject_ditto(self.ditto_manager) # NEW: IMatrix Dataset Provider
             
             # Updater
             self.updater = UpdateManager(self.app_root)

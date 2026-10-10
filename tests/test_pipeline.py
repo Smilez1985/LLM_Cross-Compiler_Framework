@@ -290,12 +290,7 @@ class TestOrchestration:
         assert state.status.name == "COMPLETED"
         assert (config.target_board, config.target_format, config.quantization) == ("rk3588", ModelFormat.RKLLM, "w4a16")
 
-    def test_imatrix_is_dropped_for_npu_formats_without_asking_ditto(self, orchestrator, tmp_path):
-        class Ditto:
-            def prepare_calibration_dataset(self, path):
-                raise AssertionError("no GGUF build, no filler dataset")
-
-        orchestrator.ditto = Ditto()
+    def test_imatrix_is_dropped_for_npu_formats(self, orchestrator, tmp_path):
         state = self.run(orchestrator, self.make_request(tmp_path, use_imatrix=True))
         assert orchestrator.build_engine.configs[0].use_imatrix is False
         assert any("GGUF only" in w for w in state.warnings)
@@ -311,12 +306,6 @@ class TestOrchestration:
     def test_user_calibration_dataset_is_not_replaced(self, orchestrator, tmp_path):
         dataset = tmp_path / "calib.txt"
         dataset.write_text("domain text")
-
-        class Ditto:
-            def prepare_calibration_dataset(self, path):
-                raise AssertionError("Ditto must not overwrite a user dataset")
-
-        orchestrator.ditto = Ditto()
         self.run(orchestrator, self.make_request(tmp_path, use_imatrix=True, dataset_path=str(dataset)))
         assert orchestrator.build_engine.configs[0].dataset_path == str(dataset)
 
