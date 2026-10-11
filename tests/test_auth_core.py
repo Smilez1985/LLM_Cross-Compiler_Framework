@@ -394,6 +394,18 @@ class TestResolver:
             self.resolver(store, ai_anthropic_workspace_id="wrkspc_\nX").resolve(anthropic, "api_key")
         assert info.value.code == "anthropic.workspace_invalid"
 
+    def test_a_required_field_must_be_set(self, store):
+        preset = ProviderPreset(id="alibaba", label="Alibaba", adapter="openai_compat",
+                                base_url="https://x.example/v1", auth=[{
+                                    "id": "api_key", "type": "api_key",
+                                    "fields": [{"id": "region", "label": "region", "pattern": "^[a-z0-9-]+$",
+                                                "required": True}]}])
+        store.save_api_key(preset, preset.method("api_key"), LOCAL_KEY)
+        with pytest.raises(NotConfigured, match="region is required"):
+            self.resolver(store).resolve(preset, "api_key")
+        store.update_metadata("alibaba", "api_key", {"region": "eu-1"})
+        assert self.resolver(store).resolve(preset, "api_key").region == "eu-1"
+
     def test_the_resolved_credential_shows_no_value(self, store, catalog):
         anthropic = catalog.get("anthropic")
         store.save_api_key(anthropic, anthropic.method("api_key"), CLAUDE_KEY, fields={"workspace_id": WORKSPACE})
@@ -750,9 +762,8 @@ class TestTokenProvider:
         resolver = CredentialResolver(store)
         resolver.refreshers[("demo", "oauth")] = refresher
         assert not resolver.available(preset, preset.method("oauth"))
-        seed_oauth(store, expires_at=int(time.time()) + 3600)
-        store.update_metadata("demo", "oauth", {"state": None})  # a new sign-in clears the state
-        assert resolver.available(preset, preset.method("oauth"))
+        seed_oauth(store, expires_at=int(time.time()) + 3600)  # a new sign-in ends the signed-out state
+        assert resolver.available(preset, preset.method("oauth")) and not store.is_signed_out("demo", "oauth")
 
     def test_vendor_codes_and_earliest_refresh(self, store):
         now = time.time()
@@ -825,6 +836,17 @@ class TestTokenProvider:
         assert outputs == ["access-2", "access-2"]
         assert counter.read_text(encoding="utf-8").splitlines() == ["refresh-1"]
         assert SecretsManager(state, storage="insecure").get_record("cred/demo/oauth")["refresh_token"] == "refresh-2"
+
+    def test_sign_out_is_local_first_and_honest_about_revocation(self, store, vault):
+        from orchestrator.llm.auth.tokens import sign_out
+        seen = []
+        for revoker, expected in ((None, None), (lambda record: seen.append(record["refresh_token"]) or True, True),
+                                  (lambda record: (_ for _ in ()).throw(OSError("offline")), False)):
+            seed_oauth(store, expires_at=int(time.time()) + 3600)
+            store.update_metadata("demo", "oauth", {"account_label": "me"})
+            assert sign_out(store, "demo", "oauth", revoker=revoker) is expected
+            assert vault.get_record("cred/demo/oauth") is None and store.metadata("demo", "oauth") == {}
+        assert seen == ["refresh-1"]
 
     def test_the_provider_shows_no_token(self, store):
         seed_oauth(store, expires_at=int(time.time()) + 3600)
