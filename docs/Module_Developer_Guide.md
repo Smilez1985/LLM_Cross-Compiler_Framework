@@ -700,8 +700,8 @@ Profiles come from devices or are carried in by hand, so the parser treats them 
 - Free text (`CPU_MODEL`, GPU names, `BOARD_MODEL`) is for display only and never reaches a command line or a file
   name.
 
-**Schema 1** files (the output of `hardware_probe.sh` and `.ps1` before version 3.0.0, without a `PROBE_SCHEMA` line)
-are still read:
+**Schema 1** files (the output of `hardware_probe.sh` 2.4 and `.ps1` 2.5, which the framework shipped up to and
+including release 3.0.0, without a `PROBE_SCHEMA` line) are still read:
 
 - The known keys are converted: `CPU_ARCH_TYPE` to `ARCH`, `TRUE`/`FALSE` to `ON`/`OFF`, `RAM_SWAP_MB` to
   `SWAP_TOTAL_MB`, the first GPU to `GPU0_*`, `DOCKER_VERSION` to `TOOL_DOCKER`. The CPU features of a `.sh` file

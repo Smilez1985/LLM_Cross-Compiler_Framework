@@ -1113,7 +1113,9 @@ keys:
     perf: key
     platforms: [linux, windows]
     sources:
-      linux: "SoC NPU: SOC_MODEL; Hailo: hailortcli fw-control identify when installed; others: left out"
+      linux: >-
+        Rockchip NPU: SOC_MODEL; Intel NPU (intel_vpu driver): intel-npu; others (Hailo, Axelera, MemryX, Coral):
+        left out
       windows: "Intel: intel-npu; others: left out"
     normalise: "lower case identifier (rk3566, rk3588, hailo-8, hailo-8l, intel-npu)"
     consumers: [preflight, bench, gui]
@@ -1129,8 +1131,9 @@ keys:
     platforms: [linux]
     sources:
       linux: >-
-        the node that was found: /dev/rknpu, a DRM node of the rknpu driver (/dev/dri/renderD<N> or
-        /dev/dri/card<N>), /dev/accel/accel<N>, /dev/hailo<N>, /dev/apex_<N>
+        the node that was found: /dev/rknpu, a DRM node of the vendor rknpu driver (/dev/dri/renderD<N> or
+        /dev/dri/card<N> whose device driver is "RKNPU", compared without case), /dev/accel/accel<N> (mainline
+        rocket or intel_vpu driver), /dev/hailo<N>, /dev/apex_<N>
     normalise: "absolute path of one of the accelerator nodes in the pattern"
     consumers: [deploy, preflight]
   RKNPU_DRIVER_VERSION:
@@ -1144,8 +1147,9 @@ keys:
     platforms: [linux]
     sources:
       linux: >-
-        a readable sysfs or debugfs version node of the rknpu driver (unverified; without root often unreadable:
-        needs_root:RKNPU_DRIVER_VERSION)
+        the first readable version node of the vendor rknpu driver: /sys/module/rknpu/version, /proc/rknpu/version
+        (world-readable when the kernel has the driver's procfs option; "RKNPU driver: v0.9.6"),
+        /sys/kernel/debug/rknpu/version (root only); none readable: left out with needs_root:RKNPU_DRIVER_VERSION
     normalise: "digits and dots only; compared and displayed, never placed on a command line"
     consumers: [preflight, deploy]
   RKLLM_RUNTIME_VERSION:

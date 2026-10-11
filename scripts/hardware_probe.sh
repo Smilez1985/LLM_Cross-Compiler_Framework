@@ -397,7 +397,8 @@ OSR=$(f /etc/os-release)
 [ -f "$OSR" ] || OSR=$(f /usr/lib/os-release)
 osr() {
     [ -f "$OSR" ] || return 0
-    v=$(grep -E "^[[:space:]]*$1=" "$OSR" | head -n1 | sed "s/^[[:space:]]*$1=//")
+    # CR of a CRLF file removed, as the Python probe's line split does.
+    v=$(tr -d '\r' < "$OSR" | grep -E "^[[:space:]]*$1=" | head -n1 | sed "s/^[[:space:]]*$1=//")
     v=$(trim "$v")
     case $v in
         \"*\") v=${v#\"}; v=${v%\"}; v=$(printf '%s' "$v" | sed 's/\\\(.\)/\1/g') ;;
@@ -628,6 +629,7 @@ if [ -f "$CPUINFO" ]; then
             [ -n "$last_key" ] && runs="$runs$lo $hi $last_key$NL"
             set +f
             if [ "$ok" = 1 ] && [ -n "$runs" ]; then
+                set -f
                 for run in $(printf '%s' "$runs" | tr ' ' '/'); do
                     lo=${run%%/*}; rest=${run#*/}; hi=${rest%%/*}; key=${rest#*/}
                     impl=${key%%:*}; rest=${key#*:}; part=${rest%%:*}; mhz=${rest#*:}
@@ -638,11 +640,21 @@ if [ -f "$CPUINFO" ]; then
                     if ! name=$(arm_part "$impl:$part"); then name="$impl:$part"; warn unknown_arm_part; fi
                     case "+$NAMES+" in *"+$name+"*) ;; *) NAMES="${NAMES:+$NAMES+}$name" ;; esac
                 done
-                put CPU_CLUSTERS "$CLUSTERS"
+                set +f
+                # As the Python probe's list check: entries of the schema's form, no repeats, at most 64 and 4096
+                # characters (a five-digit CPU number or a 65th cluster is left out, not the whole file spoilt).
+                CLUSTERS=$(printf '%s\n' "$CLUSTERS" | tr ',' '\n' |
+                           grep -E '^[0-9]{1,4}(-[0-9]{1,4})?:0x[0-9a-f]{2}:0x[0-9a-f]{3}(:[0-9]{1,5})?$' | awk '
+                    !seen[$0]++ {
+                        if (n >= 64 || length(out) + (n ? 1 : 0) + length($0) > 4096) exit
+                        out = out (n ? "," : "") $0; n++
+                    }
+                    END { printf "%s", out }')
+                if [ -n "$CLUSTERS" ]; then put CPU_CLUSTERS "$CLUSTERS"; else warn "not_determined:CPU_CLUSTERS"; fi
             fi
         fi
         if [ "$ARCH" = arm64 ]; then
-            if [ -n "$NAMES" ]; then put CPU_MODEL "$NAMES"; else warn "not_determined:CPU_MODEL"; fi
+            if [ -n "$NAMES" ]; then put_text CPU_MODEL "$NAMES"; else warn "not_determined:CPU_MODEL"; fi
         else
             MODEL=$(cpu_field MODEL)
             if [ -n "$MODEL" ]; then put_text CPU_MODEL "$MODEL"; else warn "not_determined:CPU_MODEL"; fi
@@ -738,11 +750,12 @@ NPU_VENDOR="" NPU_MODEL="" NPU_DEVICE=""
 RKNODE=""
 if exists /dev/rknpu; then RKNODE=/dev/rknpu
 else
-    # A DRM node of the vendor rknpu driver or an accel node of the mainline rocket driver (names unverified).
+    # A DRM node of the vendor rknpu driver or an accel node of the mainline rocket driver (unverified on a board).
     set -f
     for pattern in renderD card; do
         for name in $(ls "$(f /sys/class/drm)" 2>/dev/null | grep "^$pattern" | grep -v -- -); do
-            if [ "$(link_name "$(f /sys/class/drm)/$name/device/driver")" = rknpu ]; then
+            # The vendor driver registers as "RKNPU" (upper case): compared without case.
+            if [ "$(lower "$(link_name "$(f /sys/class/drm)/$name/device/driver")")" = rknpu ]; then
                 RKNODE=/dev/dri/$name
                 break 2
             fi
@@ -760,7 +773,8 @@ if [ -n "$RKNODE" ]; then
     NPU_VENDOR=rockchip NPU_DEVICE=$RKNODE
     [ "$(getv SOC_VENDOR)" = rockchip ] && NPU_MODEL=$(getv SOC_MODEL)
     DRV=""
-    for source in /sys/module/rknpu/version /sys/kernel/debug/rknpu/version /proc/debug/rknpu/version; do
+    # Module version, the world-readable procfs node ("RKNPU driver: v0.9.6"), the debugfs node (root only).
+    for source in /sys/module/rknpu/version /proc/rknpu/version /sys/kernel/debug/rknpu/version; do
         DRV=$(first_number "$(rd "$source")")
         if [ -n "$DRV" ] && valid "$P_DOTTED" "$DRV"; then break; fi
         DRV=""
@@ -1156,8 +1170,8 @@ if [ "$TOOLCHAIN" = 1 ]; then
         v=$(tool_all clang --version | sed -n 's/.*clang version \([0-9][0-9.]*\).*/\1/p' | head -n1)
         put TOOL_CLANG "$(first_number "$v")" "$P_VERSION" quiet
     fi
+    have python3 && put TOOL_PYTHON "$(first_number "$(tool_all python3 --version)")" "$P_VERSION" quiet
 fi
-have python3 && put TOOL_PYTHON "$(first_number "$(tool_all python3 --version)")" "$P_VERSION" quiet
 
 # --- the result ------------------------------------------------------------------------------------------------
 

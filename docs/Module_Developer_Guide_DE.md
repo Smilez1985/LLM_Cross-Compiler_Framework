@@ -722,8 +722,8 @@ vertrauenswürdig:
 - Freier Text (`CPU_MODEL`, GPU-Namen, `BOARD_MODEL`) dient nur der Anzeige und erreicht nie eine Befehlszeile oder
   einen Dateinamen.
 
-Dateien in **Schema 1** (die Ausgabe von `hardware_probe.sh` und `.ps1` vor Version 3.0.0, ohne `PROBE_SCHEMA`-Zeile)
-werden weiter gelesen:
+Dateien in **Schema 1** (die Ausgabe von `hardware_probe.sh` 2.4 und `.ps1` 2.5, die das Framework bis einschließlich
+Release 3.0.0 mitbrachte, ohne `PROBE_SCHEMA`-Zeile) werden weiter gelesen:
 
 - Die bekannten Schlüssel werden umgewandelt: `CPU_ARCH_TYPE` zu `ARCH`, `TRUE`/`FALSE` zu `ON`/`OFF`, `RAM_SWAP_MB`
   zu `SWAP_TOTAL_MB`, die erste GPU zu `GPU0_*`, `DOCKER_VERSION` zu `TOOL_DOCKER`. Die CPU-Merkmale einer `.sh`-Datei

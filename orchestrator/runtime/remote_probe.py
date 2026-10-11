@@ -23,11 +23,13 @@ from orchestrator.runtime.profile import HardwareProfile, ProfileError, load_sch
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
 MIN_PYTHON = (3, 8)
-# Asks for python3's version; `sh -c` so the device user's login shell (fish, csh, ...) does not matter.
+# sshd runs every command through the device user's login shell. Each one is a single `sh -c '...'`, so the
+# redirections and && are parsed by sh and a login shell such as csh or fish (where `2>/dev/null` means something
+# else or nothing) does not matter. stdin, which carries the script, passes through to the probe.
 PYTHON_CHECK = "sh -c " + shlex.quote(
     "command -v python3 >/dev/null 2>&1 && python3 -I -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])'")
-PYTHON_COMMAND = "python3 -I - --output - 2>/dev/null"
-SHELL_COMMAND = "sh -s -- --output - 2>/dev/null"
+PYTHON_COMMAND = "sh -c " + shlex.quote("exec python3 -I - --output - 2>/dev/null")
+SHELL_COMMAND = "sh -c " + shlex.quote("exec sh -s -- --output - 2>/dev/null")
 _HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|\[?[0-9A-Fa-f:.]{2,45}\]?)$", re.ASCII)
 
 

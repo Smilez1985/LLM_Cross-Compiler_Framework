@@ -160,9 +160,12 @@ def make_sysroot(base: Path, kind: str) -> Path:
         write(root, "/proc/device-tree/compatible", b"radxa,rock-5b\0rockchip,rk3588\0")
         write(root, "/proc/device-tree/model", b"Radxa ROCK 5B\0")
         write(root, "/proc/device-tree/gpu@fb000000/compatible", b"rockchip,rk3588-mali\0arm,mali-valhall-csf\0")
-        (root / "sys/bus/platform/drivers/rknpu").mkdir(parents=True)
+        # The vendor rknpu driver registers its platform driver as "RKNPU" (upper case; dmesg lines read
+        # "RKNPU fdab0000.npu: ..."), and its procfs node /proc/rknpu/version is world-readable.
+        (root / "sys/bus/platform/drivers/RKNPU").mkdir(parents=True)
         (root / "sys/class/drm/renderD129/device").mkdir(parents=True)
-        os.symlink("../../../../bus/platform/drivers/rknpu", root / "sys/class/drm/renderD129/device/driver")
+        os.symlink("../../../../bus/platform/drivers/RKNPU", root / "sys/class/drm/renderD129/device/driver")
+        write(root, "/proc/rknpu/version", "RKNPU driver: v0.9.6\n")
         pci_device(root, "0000:01:00.0", "0x1e60", "0x2864", "0x120000")  # a Hailo-8 on the M.2 slot
         write(root, "/dev/hailo0", b"")
     else:
@@ -301,8 +304,41 @@ class TestFixtureMachines:
                   "CPU_CLUSTERS": "0-3:0x41:0xd05:1800,4-7:0x41:0xd0b:2400", "SUPPORTS_DOTPROD": "ON",
                   "SUPPORTS_I8MM": "OFF", "SOC_MODEL": "rk3588", "BOARD_MODEL": "Radxa ROCK 5B",
                   "NPU_VENDOR": "rockchip", "NPU_MODEL": "rk3588", "NPU_DEVICE": "/dev/dri/renderD129",
-                  "SUPPORTS_RKNN": "ON", "SUPPORTS_HAILO": "ON", "GPU0_NAME": "Mali (valhall-csf)"}
+                  "RKNPU_DRIVER_VERSION": "0.9.6", "SUPPORTS_RKNN": "ON", "SUPPORTS_HAILO": "ON",
+                  "GPU0_NAME": "Mali (valhall-csf)"}
         assert {k: profile.get(k) for k in expect} == expect
+        assert not profile.warnings
+
+    @pytest.mark.parametrize("driver", ["RKNPU", "rknpu"])
+    def test_rockchip_npu_drm_node_by_driver_name(self, tmp_path, driver):
+        root = make_sysroot(tmp_path, "rk3566")
+        (root / "dev/rknpu").unlink()
+        (root / f"sys/bus/platform/drivers/{driver}").mkdir(parents=True)
+        (root / "sys/class/drm/card1/device").mkdir(parents=True)
+        os.symlink(f"../../../../bus/platform/drivers/{driver}", root / "sys/class/drm/card1/device/driver")
+        values = py_probe(root)
+        assert values["NPU_DEVICE"] == "/dev/dri/card1" and values["SUPPORTS_RKNN"] == "ON"
+
+    def test_rknpu_driver_version_sources(self, tmp_path):
+        root = make_sysroot(tmp_path, "rk3566")
+        write(root, "/sys/kernel/debug/rknpu/version", "RKNPU driver: v0.9.2\n")  # debugfs: readable as root
+        assert py_probe(root)["RKNPU_DRIVER_VERSION"] == "0.9.2"
+        write(root, "/proc/rknpu/version", "RKNPU driver: v0.9.6\n")              # procfs: readable by everyone
+        values = py_probe(root)
+        assert values["RKNPU_DRIVER_VERSION"] == "0.9.6" and "PROBE_WARNINGS" not in values
+        write(root, "/proc/rknpu/version", "RKNPU driver: v0.9.6; reboot\n")      # only the number is taken
+        assert py_probe(root)["RKNPU_DRIVER_VERSION"] == "0.9.6"
+
+    def test_os_version_id_may_hold_an_underscore(self, tmp_path):
+        root = make_sysroot(tmp_path, "amd")
+        write(root, "/etc/os-release", 'ID=alpine\nVERSION_ID=3.21_alpha20241011\nPRETTY_NAME="Alpine Linux edge"\n')
+        values = py_probe(root)
+        assert values["OS_VERSION_ID"] == "3.21_alpha20241011"
+        assert parse_profile(probe.render_text(values)).get("OS_VERSION_ID") == "3.21_alpha20241011"
+
+    def test_python_version_of_a_pre_release(self):
+        assert probe.python_version((3, 14, 0, "candidate", 1)) == "3.14.0"
+        assert probe.check_value(probe.KEYS["TOOL_PYTHON"], probe.python_version()) == probe.python_version()
 
     def test_cluster_entries_split_on_frequency_and_unknown_parts(self, tmp_path):
         root = make_sysroot(tmp_path, "rk3588")
@@ -403,6 +439,8 @@ class TestShellEquivalence:
         write(root, "/etc/os-release", 'ID="x debian"\nVERSION_ID="12$(id)"\nID_LIKE="* ../x"\n'
                                        'PRETTY_NAME="Debian\tGNU/Linux \x1b[31m12\x07"\nVARIANT_ID="a;b"\n')
         write(root, "/proc/device-tree/model", b"Radxa \xc3\x84 ZERO\0")
+        # A line break inside a device-tree string must not hide the SoC entry or smuggle in a key.
+        write(root, "/proc/device-tree/compatible", b"radxa,zero-3w\0rockchip,rk3566\nGPU_COUNT=9\0")
         text = (root / "proc/cpuinfo").read_text().replace("asimddp", "asimddp * ../../etc")
         write(root, "/proc/cpuinfo", text)
         bindir = tool_dir(tmp_path)
@@ -412,6 +450,54 @@ class TestShellEquivalence:
         assert "$(id)" not in sh_text and "x debian" not in sh_text
         assert parse_profile(sh_text).get("OS_FAMILY") == "other"
         assert parse_profile(sh_text).get("BOARD_MODEL") == "Radxa ZERO"
+        assert parse_profile(sh_text).get("GPU_COUNT") == "1" and "SOC_VENDOR" not in parse_profile(sh_text)
+
+    @pytest.mark.parametrize("shell", available_shells())
+    def test_crlf_files_are_read_the_same(self, tmp_path, shell):
+        root = make_sysroot(tmp_path, "rk3566")
+        for rel in ("/etc/os-release", "/proc/cpuinfo"):
+            write(root, rel, (root / rel.lstrip("/")).read_text().replace("\n", "\r\n"))
+        bindir = tool_dir(tmp_path)
+        sh_text = run_emitter(shell.split() + [str(PROBE_SH)], root, bindir, tmp_path)
+        py_text = run_emitter([sys.executable, "-I", str(PROBE_PY)], root, bindir, tmp_path)
+        assert comparable(sh_text) == comparable(py_text)
+        sh = parse_profile(sh_text)
+        assert (sh.get("OS_ID"), sh.get("OS_VERSION_ID"), sh.get("OS_PRETTY_NAME")) == \
+            ("debian", "12", "Debian GNU/Linux 12 (bookworm)")
+
+    @pytest.mark.parametrize("shell", available_shells())
+    def test_values_beyond_the_schema_limits_are_cut_the_same(self, tmp_path, shell):
+        # A hostile or unusual /proc/cpuinfo: 14 core types the tables do not know (a CPU_MODEL over 128 characters),
+        # 70 alternating cores (more than 64 CPU_CLUSTERS entries) and a processor number of five digits. Both probes
+        # must still write a file the parser accepts, with the same values.
+        root = make_sysroot(tmp_path, "rk3566")
+        block = ("processor\t: {n}\nFeatures\t: fp asimd asimddp\nCPU implementer\t: 0x41\nCPU architecture: 8\n"
+                 "CPU part\t: {part}\n\n")
+        parts = [f"0xd{0x90 + i:02x}" for i in range(14)] + ["0xd05", "0xd0b"] * 28
+        text = "".join(block.format(n=n, part=part) for n, part in enumerate(parts))
+        write(root, "/proc/cpuinfo", text + block.format(n=12345, part="0xd05"))
+        bindir = tool_dir(tmp_path)
+        sh_text = run_emitter(shell.split() + [str(PROBE_SH)], root, bindir, tmp_path)
+        py_text = run_emitter([sys.executable, "-I", str(PROBE_PY)], root, bindir, tmp_path)
+        assert comparable(sh_text) == comparable(py_text)
+        sh = parse_profile(sh_text)
+        assert len(sh.get("CPU_MODEL")) <= 128 and len(sh.get("CPU_CLUSTERS").split(",")) == 64
+        assert "12345:" not in sh.get("CPU_CLUSTERS")
+
+    def test_sh_writes_tool_python_only_with_the_toolchain(self, tmp_path):
+        root = make_sysroot(tmp_path, "rk3566")
+        bindir = tool_dir(tmp_path)
+        os.symlink(sys.executable, bindir / "python3")
+        env = {"PATH": str(bindir), "HW_PROBE_SYSROOT": str(root), "HOME": str(tmp_path), "LC_ALL": "C"}
+        texts = {}
+        for flags in ((), ("--no-toolchain",)):
+            result = subprocess.run([available_shells()[0].split()[0], str(PROBE_SH), *flags, "--output", "-"],
+                                    env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=120,
+                                    check=False)
+            assert result.returncode == 0, result.stderr
+            texts[flags] = parse_profile(result.stdout)
+        assert texts[()].get("TOOL_PYTHON") == probe.python_version()
+        assert "TOOL_PYTHON" not in texts[("--no-toolchain",)]
 
     def test_sh_reads_no_stdin_and_installs_nothing_by_default(self, tmp_path):
         root = make_sysroot(tmp_path, "rk3566")
@@ -630,6 +716,12 @@ class TestScripts:
         assert block.index("Start-Process") < block.index("\n}"), "elevation only inside the -Elevate block"
         assert text.count("Start-Process") == 1 and "Set-ExecutionPolicy" not in text
 
+    def test_ps1_writes_tool_python_only_with_the_toolchain(self):
+        # As the .py and the .sh: TOOL_* keys belong to the toolchain section that -NoToolchain skips.
+        text = PROBE_PS1.read_text(encoding="utf-8")
+        block = text.split("if (-not $NoToolchain) {", 1)[1].split("\n}\n", 1)[0]
+        assert "'TOOL_PYTHON'" in block and text.count("'TOOL_PYTHON'") == 1
+
 
 # --- Windows (with a stand-in for the Windows API) -----------------------------------------------------------
 
@@ -787,13 +879,18 @@ class FakeExec:
 
 
 class FakeDevice:
-    """An SSH client stand-in for a device: python3 of a given version (or none) and a fixture sysroot. The script
-    that arrives on stdin is really run (python3 -I - / sh -s) against that sysroot."""
+    """An SSH client stand-in for a device: python3 of a given version (or none) and a fixture sysroot. The probe
+    command is really run the way sshd runs it (the login shell with -c and the exact command string), and the
+    script that arrives on stdin runs (python3 -I - / sh -s) against that sysroot."""
 
     def __init__(self, root, bindir, python="3.11", python_fails=False, override=None):
         self.root, self.bindir, self.python, self.python_fails, self.override = root, bindir, python, python_fails, \
             override
         self.commands, self.sent = [], {}
+        self.login_shell = available_shells()[0].split()[0]
+        for name, target in (("sh", self.login_shell), ("python3", sys.executable)):
+            if not (bindir / name).exists():
+                os.symlink(target, bindir / name)
 
     def exec_command(self, command, timeout=None):
         assert timeout, "every remote command has a time limit"
@@ -812,12 +909,10 @@ class FakeDevice:
         if command == rp.PYTHON_COMMAND:
             if self.python_fails:
                 return 1, b""
-            cmd = [sys.executable, "-I", "-", "--output", "-"]
-        elif command == rp.SHELL_COMMAND:
-            cmd = [available_shells()[0].split()[0], "-s", "--", "--output", "-"]
-        else:
+        elif command != rp.SHELL_COMMAND:
             raise AssertionError(f"unexpected command {command!r}")
-        result = subprocess.run(cmd, input=stdin_data, env=env, capture_output=True, timeout=120, check=False)
+        result = subprocess.run([self.login_shell, "-c", command], input=stdin_data, env=env, capture_output=True,
+                                timeout=120, check=False)
         return result.returncode, result.stdout
 
 
@@ -872,10 +967,17 @@ class TestRemoteProbe:
             rp.probe_over_ssh(Hanging())
 
     def test_commands_are_fixed_strings(self):
+        import shlex
         from orchestrator.runtime import remote_probe as rp
         for command in (rp.PYTHON_CHECK, rp.PYTHON_COMMAND, rp.SHELL_COMMAND):
             assert "{" not in command and "%s" not in command.replace('"%d.%d"', "")
-        assert rp.PYTHON_COMMAND.startswith("python3 -I - ") and rp.SHELL_COMMAND.startswith("sh -s -- ")
+            # sshd hands the command to the user's login shell, which may be csh or fish: each command is one
+            # `sh -c` with a single quoted argument, so redirections and && are parsed by sh, never by that shell.
+            words = shlex.split(command)
+            assert words[:2] == ["sh", "-c"] and len(words) == 3 and command.startswith("sh -c '")
+            assert "!" not in command and "\\" not in command and "$" not in command
+        assert shlex.split(rp.PYTHON_COMMAND)[2].startswith("exec python3 -I - ")
+        assert shlex.split(rp.SHELL_COMMAND)[2].startswith("exec sh -s -- ")
 
     @pytest.mark.parametrize("host, ok", [("192.0.2.10", True), ("board.local", True), ("fe80::1", True),
                                           ("-oProxyCommand=x", False), ("a;b", False), ("", False),
