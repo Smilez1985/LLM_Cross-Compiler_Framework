@@ -134,9 +134,9 @@ def _alternatives(names: Tuple[str, ...]) -> str:
 # (an escaped line break), a closing bracket or an "&".
 _HEADER = re.compile(
     r"(?i)(?<![\w-])(?:" + _alternatives(SENSITIVE_HEADERS) + r")"
-    r"(?:" + _Q + r"?[ \t]*[:=][ \t]*(?:(?-i:b)?(?P<q1>\\?['\"])(?P<v1>.*?)(?P=q1)"
+    r"(?:" + _Q + r"?[ \t]*[:=][ \t]*(?:(?-i:[bfru]{0,2})(?P<q1>\\?['\"])(?P<v1>.*?)(?P=q1)"
     r"|(?P<v2>[^\s'\",)}\]&\\][^\r\n'\",)}\]&\\]*))"
-    r"|" + _Q + r"[ \t]*,[ \t]*(?-i:b)?(?P<q2>\\?['\"])(?P<v3>.*?)(?P=q2))")
+    r"|" + _Q + r"[ \t]*,[ \t]*(?-i:[bfru]{0,2})(?P<q2>\\?['\"])(?P<v3>.*?)(?P=q2))")
 # In a URL, or at the start of a line as in a form-encoded body ("code=...&grant_type=authorization_code").
 _QUERY = re.compile(r"(?im)((?:^|[?&#;])(?:" + _alternatives(SENSITIVE_QUERY_PARAMETERS) + r")=)[^&#\s'\"<>]+")
 # A URL with an id_token_hint (an OpenID reauthorization link) loses its whole query. Found word by word, so
@@ -191,7 +191,7 @@ def _replacer(rule: SecretPattern):
 
 def _header_value(m: "re.Match[str]") -> str:
     for group in ("v1", "v2", "v3"):
-        if m.group(group) is not None:
+        if m.group(group):  # an empty value hides nothing (headers.get("authorization", ""))
             text, offset = m.group(0), m.start()
             return text[:m.start(group) - offset] + "REDACTED" + text[m.end(group) - offset:]
     return m.group(0)
