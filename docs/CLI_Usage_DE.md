@@ -74,7 +74,7 @@ llm-cli [OPTIONEN] BEFEHL [ARGUMENTE]...
 | Option | Bedeutung |
 |---|---|
 | `--version` | Version ausgeben und beenden. |
-| `-c, --config PATH` | Diese Einstellungsdatei verwenden (YAML oder JSON, muss existieren). Ihr Ordner wird für diesen Aufruf zum Einstellungsordner (eine `config.yml` dort wird ebenfalls gelesen), und die Werte der Datei haben Vorrang davor. Der übliche Einstellungsordner wird dann nicht gelesen. |
+| `-c, --config PATH` | Diese Einstellungsdatei verwenden (YAML oder JSON, muss existieren). Ihr Ordner wird für diesen Aufruf zum Einstellungsordner (eine `config.yml` dort wird ebenfalls gelesen), und die Werte der Datei haben Vorrang davor. Der übliche Einstellungsordner wird dann nicht gelesen. Eine Datei, die sich nicht lesen lässt, wird auf stderr genannt und übergangen; die übrigen Einstellungen (jene `config.yml`, `LLM_FRAMEWORK_*`-Variablen, Standardwerte) gelten weiter. |
 | `-v, --verbose` | Log-Level `DEBUG`. |
 | `-q, --quiet` | Log-Level `ERROR` und kein Start-Banner. |
 | `--log-level [DEBUG\|INFO\|WARNING\|ERROR]` | Log-Level (Standard `INFO`). |

@@ -74,7 +74,7 @@ llm-cli [OPTIONS] COMMAND [ARGS]...
 | Option | Meaning |
 |---|---|
 | `--version` | Print the version and exit. |
-| `-c, --config PATH` | Use this settings file (YAML or JSON, must exist). Its folder becomes the settings folder for this run (a `config.yml` there is read as well), and the file's own values win over it. The usual settings folder is not read then. |
+| `-c, --config PATH` | Use this settings file (YAML or JSON, must exist). Its folder becomes the settings folder for this run (a `config.yml` there is read as well), and the file's own values win over it. The usual settings folder is not read then. A file that cannot be read is named on stderr and ignored; the other settings (that `config.yml`, `LLM_FRAMEWORK_*` variables, defaults) still apply. |
 | `-v, --verbose` | Log level `DEBUG`. |
 | `-q, --quiet` | Log level `ERROR` and no start banner. |
 | `--log-level [DEBUG\|INFO\|WARNING\|ERROR]` | Log level (default `INFO`). |

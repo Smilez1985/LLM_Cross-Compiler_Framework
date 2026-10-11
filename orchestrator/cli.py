@@ -45,17 +45,6 @@ from orchestrator.utils.logging import get_logger, setup_logging
 console = Console()
 from orchestrator import __version__  # noqa: E402
 
-DEFAULT_CONFIG = {
-    "targets_dir": "targets",
-    "models_dir": "models", 
-    "output_dir": "output",
-    "configs_dir": "configs",
-    "cache_dir": "cache",
-    "log_level": "INFO",
-    "max_concurrent_builds": 2
-}
-
-
 # ============================================================================
 # CLICK CONTEXT UND MANAGER INITIALISIERUNG
 # ============================================================================
@@ -64,7 +53,7 @@ class FrameworkContext:
     """Shared context for CLI commands, hält Instanzen der Core-Manager"""
     
     def __init__(self):
-        self.config: Dict[str, Any] = DEFAULT_CONFIG.copy()
+        # The settings themselves are read by ConfigManager (see _settings and FrameworkManager), never copied here.
         self.config_path: Optional[str] = None
         self.log_level: Optional[str] = None
         self.init_error: Optional[Exception] = None
@@ -132,24 +121,6 @@ pass_context = click.make_pass_decorator(FrameworkContext, ensure=True)
 # UTILITY FUNCTIONS
 # ============================================================================
 
-def load_config_file(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """Load configuration from file"""
-    config = DEFAULT_CONFIG.copy()
-    if config_path and Path(config_path).exists():
-        try:
-            with open(Path(config_path), 'r') as f:
-                if Path(config_path).suffix in ['.yml', '.yaml']:
-                    file_config = yaml.safe_load(f)
-                else:
-                    file_config = json.load(f)
-            if file_config:
-                config.update(file_config)
-        except Exception as e:
-            # stderr: stdout may carry a protocol (llm-cli mcp serve)
-            Console(stderr=True).print(f"[yellow]Warning: Failed to load config file: {escape(str(e))}[/yellow]")
-    return config
-
-
 def _settings(ctx: "FrameworkContext"):
     """The framework's settings (config.yml, a -c file, LLM_FRAMEWORK_* variables) and its path rule (relative to
     the installation), as Ditto, builds and the GUI use them. A booted framework's own settings when there is
@@ -215,8 +186,7 @@ CLI_HELP = f"""
 def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str,
         debug_http: bool):
     """The help text is CLI_HELP (its version comes from orchestrator.__version__)."""
-    # Load configuration
-    ctx.config.update(load_config_file(config))
+    # ConfigManager reads this file (and reports it on stderr if it cannot be read) wherever settings are needed.
     ctx.config_path = config
     ctx.log_level = "DEBUG" if verbose else ("ERROR" if quiet else log_level)
     ctx.verbose = verbose

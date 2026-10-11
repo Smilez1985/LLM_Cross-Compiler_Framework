@@ -332,6 +332,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   defaults), each with its source and with credentials redacted, instead of the CLI's built-in defaults.
 - `llm-cli config repos --add` stores the `{url: ...}` entry that the build engine passes on as
   `<NAME>_REPO_OVERRIDE`; plain URLs stored by earlier versions are passed on as well.
+- A settings file given with `-c` that cannot be read no longer drops the `LLM_FRAMEWORK_*` variables as well: it
+  is named on stderr and ignored, and the other settings apply.
 - `llm-cli targets list` shows each target's id (the value for `--target`), name, boards and formats from its
   capabilities instead of placeholders; `llm-cli targets validate` checks the capabilities block against the
   schema and prints every error (exit code 1).
