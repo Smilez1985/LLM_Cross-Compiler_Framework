@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import sys
@@ -125,3 +126,27 @@ def qapp():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication([])
+
+
+def pytest_unconfigure(config):
+    """Ends what the tests left running while Python is still fully alive.
+
+    Background event loops of frameworks that were never shut down (CLI tests boot their own) are stopped. The
+    widgets left by GUI tests and the QApplication are deleted here: otherwise PySide deletes them in its exit
+    handler during interpreter finalization, which now and then crashed the process with SIGSEGV
+    (QObject::~QObject called from PySide::destroyQCoreApplication) after every test had passed."""
+    framework = sys.modules.get("orchestrator.Core.framework")
+    if framework is not None:
+        for obj in gc.get_objects():
+            if isinstance(obj, framework.FrameworkManager) and getattr(obj, "_loop", None) is not None:
+                obj._stop_loop(timeout=5)
+    widgets = sys.modules.get("PySide6.QtWidgets")
+    app = widgets.QApplication.instance() if widgets is not None else None
+    if app is None:
+        return
+    from PySide6.QtCore import QCoreApplication, QEvent
+    for widget in app.topLevelWidgets():
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
+    app.shutdown()
