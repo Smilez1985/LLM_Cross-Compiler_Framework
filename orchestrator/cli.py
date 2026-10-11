@@ -112,7 +112,9 @@ class FrameworkContext:
             self.framework_manager = FrameworkManager(self.config_path, log_level=self.log_level)
             
             if not self.framework_manager.initialize():
-                raise RuntimeError("Framework Manager initialization failed")
+                # The cause itself (e.g. the credential storage error with its choices), not just "failed".
+                raise (getattr(self.framework_manager, "init_error", None)
+                       or RuntimeError("Framework Manager initialization failed"))
             
             # Orchestrator initialisieren  
             self.orchestrator = self.framework_manager.orchestrator # Hole vom Kernel
@@ -135,7 +137,7 @@ class FrameworkContext:
             
         except Exception as e:
             self.init_error = e
-            Console(stderr=True).print(f"[red]Failed to initialize framework: {e}[/red]")
+            Console(stderr=True).print(f"[red]Failed to initialize framework: {escape(str(e))}[/red]")
 
     def require_framework(self) -> "FrameworkContext":
         """Boots the framework on first use; commands that do not need it work without a keyring or Docker."""
@@ -732,10 +734,15 @@ def set_secret(ctx: FrameworkContext, key, password):
         console.print("[red]SecretsManager not available![/red]")
         sys.exit(1)
         
-    if ctx.framework_manager.secrets_manager.set_secret(key, password):
-        console.print(f"[green]Secret '{key}' stored successfully in Keyring.[/green]")
+    sm = ctx.framework_manager.secrets_manager
+    if not sm.set_secret(key, password):
+        console.print(f"[red]Failed to store secret '{escape(key)}'.[/red]")
+    elif getattr(sm, "storage_mode", None) == "ephemeral":
+        # Never let a CI user believe it was saved.
+        console.print(f"[yellow]Secret '{escape(key)}' is kept in memory for this run only "
+                      "(secret_storage: ephemeral); nothing was saved.[/yellow]")
     else:
-        console.print(f"[red]Failed to store secret '{key}'.[/red]")
+        console.print(f"[green]Secret '{escape(key)}' stored in the encrypted credential vault.[/green]")
 
 @secrets.command('list')
 @pass_context

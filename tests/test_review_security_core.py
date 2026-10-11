@@ -235,6 +235,7 @@ class TestCliFromForeignProject:
     def run_cli(cwd: Path, tmp_path: Path, *args):
         env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_", "FRAMEWORK_"))}
         env.update(PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
+                   LLM_SECRET_STORAGE="ephemeral",
                    LLM_FRAMEWORK_HOME=str(tmp_path / "state"), LLM_FRAMEWORK_CONFIG_DIR=str(tmp_path / "cfg"))
         return subprocess.run([sys.executable, "-m", "orchestrator.cli", "-q", *args], cwd=cwd, env=env,
                               capture_output=True, text=True, timeout=180, check=False)
@@ -551,7 +552,7 @@ class TestSecretsFollowUp:
 
         assert fresh.get_secret("hf_token") is None, "a secret deleted after the takeover came back"
         assert fresh.set_secret("openai_api_key", SK)
-        assert secrets_for(tmp_path).list_secrets() == ["openai_api_key"]
+        assert secrets_for(tmp_path).list_secrets() == ["cred/openai/api_key"]  # the v2 name of the old key
 
     def test_damaged_legacy_store_is_taken_over_once_repaired(self, memory_keyring, tmp_path):
         legacy = tmp_path / "configs" / "secrets.store"
@@ -1425,7 +1426,7 @@ class TestAdversarialConfigAndLaunch:
             args = args[:-2]  # same interpreter flags and module, but only print the version
         env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_", "FRAMEWORK_", "PYTHONSAFEPATH"))}
         env.update(launch.get("env") or {})
-        env.update(PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
+        env.update(PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring", LLM_SECRET_STORAGE="ephemeral",
                    LLM_FRAMEWORK_HOME=str(tmp_path / "state"), LLM_FRAMEWORK_CONFIG_DIR=str(tmp_path / "cfg"))
 
         # Claude Code cannot set a working directory: the server starts in the project (client_snippets).

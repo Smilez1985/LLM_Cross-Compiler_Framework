@@ -36,7 +36,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   keys that are valid in every workspace of the organization now work. The ID is sent as the
   `anthropic-workspace-id` header on every request made with the API key to the Claude API, the model list
   included. An `ant auth login` profile keeps its own workspace, and other servers never receive the ID.
-
+- **How credentials are protected is your choice** (setting `secret_storage`, or `LLM_SECRET_STORAGE` for
+  one run): the OS keyring (default), a credential helper command (`secret_helper`, e.g.
+  `pass show llmcc/vault-key`, run without a shell), a passphrase asked once per start (scrypt), a key file
+  next to the vault (`insecure`, not encrypted at rest) or memory only (`ephemeral`, for CI). Nothing is
+  picked automatically: without a usable keyring and without a choice, the framework stops and names the
+  options. `llm-cli doctor` warns about the key file and reports memory-only storage.
 - **Documentation in English and German** for every document (README, blueprint with design and roadmap, CLI
   usage, features, contributing, module developer guide, SSOT, changelog), checked by `tests/test_docs.py`:
   every document has its twin, links and anchors resolve, both changelogs list the same versions, and the
@@ -64,6 +69,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   takes minutes on a CPU); "medium" and up keep it.
 - Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0) and `fastembed` 0.8.1 (local embeddings,
   ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
+- **Credential vault format v2**: every entry carries a key id and the vault key can be rotated (every entry
+  is re-encrypted, the old key is removed; an interrupted rotation is completed at the next start). Each
+  vault keeps its key in its own keyring entry, so rotating it or changing its storage never touches another
+  vault (for example of another `LLM_FRAMEWORK_HOME` folder); a store of an earlier version moves to its own
+  entry at its first rotation. Provider keys are stored as credential records under
+  `cred/<provider>/api_key`; stores and key names of earlier versions are read as before and converted on
+  the next change.
+- Reading a secret is written to the secrets audit log once per process and name, not on every access.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
@@ -76,6 +89,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Bedrock, Vertex or Foundry, or using the framework from Claude Code itself (`llm-cli mcp config`). It never
   switches to the Claude API on its own. A `claude_code` preset left in a provider catalog in your config
   directory is skipped with a warning; the other providers keep working.
+
+### Fixed
+- Secrets store: a store of an earlier version that cannot be decrypted is reported by `llm-cli doctor`
+  instead of being merged unreadable into the per-user store.
+- Reading or storing a secret no longer fails in a container whose user has no name (no `USER` variable and
+  no passwd entry).
+- On Windows, saving a secret no longer fails when another process or a virus scanner has the store open for
+  a moment.
+- `llm-cli secrets set` says where the secret went (the encrypted vault, or memory only with `ephemeral`)
+  instead of always "Keyring".
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -93,6 +116,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   debug logs show request details).
 - Claude Admin API keys (`sk-ant-admin01-`) are refused before any request is sent, also when they were stored
   with surrounding spaces.
+- The credential vault is changed under a cross-process lock: the GUI, the CLI and an MCP server writing at
+  the same time no longer lose each other's changes.
+- A keyring that keeps nothing (such as `keyring.backends.null`) or does not answer within 3 seconds is no
+  longer used; before, secrets stored with it were unreadable after the next start. A keyring backend that
+  stores without encryption (`keyrings.alt`) is not used either: that is `secret_storage: insecure`, and
+  only you can choose it.
+- On Windows the vault key stays on the local machine instead of roaming with the user profile.
+- The secrets store refuses a location inside a git work tree (set `LLM_FRAMEWORK_HOME` elsewhere).
+- Secret names with line breaks or control characters are refused, and the secrets audit log escapes them,
+  so a name (or a user name) cannot forge audit entries.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

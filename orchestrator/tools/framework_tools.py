@@ -219,6 +219,9 @@ def _audit_key(framework, state_dir: Optional[Path] = None) -> Optional[bytes]:
     never in a file an editor of the database could also read. None (an unkeyed chain, reported by
     `llm-cli doctor`) when no keyring is available. A key is created under a lock, so two first starts at
     the same time (GUI and MCP server) end up with the same key."""
+    from orchestrator.Core.vault_key import keyring_usable
+    if not keyring_usable():  # probed once per process; a hung keyring must not stop the boot
+        return None
     try:
         import keyring
         from orchestrator.Core.secrets_manager import SecretsManager

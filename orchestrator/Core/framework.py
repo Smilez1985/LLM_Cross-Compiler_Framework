@@ -83,6 +83,7 @@ class FrameworkManager:
         self.updater: Optional[UpdateManager] = None
 
         self._initialized = False
+        self.init_error: Optional[Exception] = None  # why initialize() failed (e.g. a StorageError)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
     def initialize(self) -> bool:
@@ -96,6 +97,7 @@ class FrameworkManager:
             # 1. Secrets (Keyring) - MUSS ZUERST KOMMEN
             self.secrets_manager = SecretsManager(self)
             if not self.secrets_manager.initialize():
+                self.init_error = self.secrets_manager.storage_error
                 self.logger.critical("Failed to initialize SecretsManager. Aborting for security reasons.")
                 return False
 
