@@ -328,6 +328,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 - Der Update-Manager (`orchestrator/utils/updater.py`): Er wurde bei jedem Start angelegt, aber nie aufgerufen, und
   seine Liste der Dateien, die eine neue Einrichtung verlangen, nannte ein Skript, das es nicht gibt.
+- Das Benchmark-Fenster (`orchestrator/gui/benchmark_window.py`): Kein Menü öffnete es, und es konnte nicht
+  funktionieren (es las ein Attribut des Docker-Managers, das es nicht gibt, startete ein Image, das es nicht gibt,
+  und maß einen Platzhalter-Modellpfad).
 
 ### Behoben
 - Secrets-Speicher: Ein Speicher einer früheren Version, der sich nicht entschlüsseln lässt, wird von
@@ -361,6 +364,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ein erneuter Aufruf behält Builds, Cache, Modelle und `configs/config.yml` in `/opt`, statt sie zu löschen.
 - Deployment-Pakete übernehmen Benutzerprofile, Sprachvorlagen und Prompts nur aus dem Einstellungsordner, nie aus
   einem Ordner `config/` im Arbeitsverzeichnis.
+- Der Hugging-Face-Modellbrowser lässt sich wieder öffnen: **Tools > Hugging Face Model Browser...** (kein Menü
+  führte zu ihm).
 
 ### Sicherheit
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen

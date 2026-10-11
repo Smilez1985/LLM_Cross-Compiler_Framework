@@ -286,6 +286,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 - The update manager (`orchestrator/utils/updater.py`): it was created at every start but never called, and its
   list of files that need a new setup named a script that does not exist.
+- The benchmark window (`orchestrator/gui/benchmark_window.py`): no menu opened it, and it could not work (it read
+  a Docker manager attribute that does not exist, started an image that does not exist and benchmarked a
+  placeholder model path).
 
 ### Fixed
 - Secrets store: a store of an earlier version that cannot be decrypted is reported by `llm-cli doctor`
@@ -319,6 +322,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   them.
 - Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
   `config/` folder in the working directory.
+- The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
