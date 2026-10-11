@@ -500,10 +500,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Eine Tabelle der Secret-Formate** (`orchestrator/security/secret_patterns.py`) für den Secret-Scan und die
   Schwärzung zur Laufzeit, die vorher nur fünf Formate kannte. Neu: Schlüssel von Unsloth Studio (`sk-unsloth-`),
   kurzlebige Bedrock-Schlüssel (`bedrock-api-key-`), LocalAI-Schlüssel (`lai-`), geheime age-Schlüssel
-  (`AGE-SECRET-KEY-1...`), Zeilen mit `Authorization: Bearer` und Werte in Anführungszeichen, die `api_key`,
+  (`AGE-SECRET-KEY-1...`), Organisations-Tokens von Hugging Face (`api_org_`), Test-Schlüssel von Stripe
+  (`sk_test_`, `rk_test_`), Zeilen mit `Authorization: Bearer` und Werte in Anführungszeichen, die `api_key`,
   `secret` oder `token` zugewiesen werden (ein Name in Kleinbuchstaben wie `"community_signing_key"` wird nicht
-  gemeldet). Die Schwärzung zur Laufzeit
-  erfasst jetzt auch JWTs, Blöcke privater Schlüssel und Passwörter in URLs.
+  gemeldet). Die Schwärzung zur Laufzeit erfasst jetzt auch JWTs, Blöcke privater Schlüssel, Passwörter in URLs,
+  routingfähige GitLab-Tokens vollständig sowie Tokens von xAI und Replicate, die `_` oder `-` enthalten. Der
+  Secret-Scan meldet einen Wert im exakten Format eines Tokens, das der Push-Schutz von GitHub blockiert (etwa
+  `hf_` gefolgt von 34 Buchstaben oder `ghp_` gefolgt von 36 Buchstaben und Ziffern), auch wenn er wie ein
+  Platzhalter aussieht oder seine Zeile `secret-scan: allow` trägt: GitHub lehnt einen solchen Push ab, so
+  unecht der Wert auch aussieht, und kennt die Markierung nicht. Tests bauen solche Werte zur Laufzeit zusammen.
 - API-Schlüssel, die Dittos Anbieterschicht im Speicher hält, erscheinen in `str()` und `repr()` als
   `<redacted>` und lassen sich nicht mit pickle serialisieren.
 - Ein Schlüssel eines eigenen OpenAI-kompatiblen Servers gehört zu der Adresse, für die er gespeichert wurde

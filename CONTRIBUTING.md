@@ -276,7 +276,26 @@ GitLab, AWS, Google, Groq, xAI and others), JSON web tokens, private keys, certi
 Files are refused by name whatever their content: for example `.env`, `credentials.json`, `secrets.store`,
 `audit.db`, `known_hosts`, `id_ed25519`, `chat_history.json`, `tool_policy.json` and `*.pem`. Obvious placeholders
 (`EXAMPLE`, `REDACTED`, `xxxxxxxx`, `<...>`, example domains) are ignored. A line that contains
-`secret-scan: allow` is skipped; use it only for documented fake values.
+`secret-scan: allow` is skipped; use it only for documented fake values. Neither applies to the exact token
+formats below.
+
+**Fake tokens in tests and documentation:** GitHub's push protection refuses a push that contains a value in a
+provider's exact token format, however fake the value looks: `hf_` followed by 34 letters (the alphabet too),
+`ghp_` followed by 36 letters and digits, a complete `sk-ant-api03-...AA` key, and so on. GitHub does not know the
+marker `secret-scan: allow`. So the scan reports such values even when they look like placeholders, and the marker
+does not silence these findings; the message says that GitHub will block the push. This holds in every mode:
+`--push` and `--history` also report older commits that still contain such a value, because a push of those commits
+would be refused as well. The formats are `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py` (Hugging
+Face, GitHub, AWS, Slack, GitLab, Stripe, PyPI, OpenAI, Anthropic, OpenRouter, Groq, xAI, Perplexity, Replicate).
+Build such a test value at runtime instead, so the file never contains it as one piece:
+
+```python
+TOKEN = "hf_" "abcdefghijklmnopqrstuvwxyzABCDEFGH"  # adjacent string literals: one string at runtime
+TOKEN = "hf_" + "x" * 34                            # or concatenation
+```
+
+Or use a value that does not match the exact format: another length, or a character the format does not allow
+(a digit in a Hugging Face token). In documentation, shorten the value (`hf_...`).
 
 **Personal strings** such as your e-mail address, your user name or host names must not be in the repository
 either, but they cannot be in a public pattern list. Put them into `.git/info/secret-patterns`, which git never
