@@ -744,8 +744,8 @@ These are real limitations of the current state. Most are scheduled in the [road
   and the venvs inside the image have no hashed lock files. Planned for 3.4.0.
 - **Image builds have network access.** This is by design (they download toolchains); only the conversion stages
   are offline.
-- **The project-sources catalogue** (`configs/project_sources.yml`) is not read at runtime, and its sync script
-  has errors; see [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md). Corrections are planned for 3.4.0.
+- **The project-sources catalogue** (`configs/project_sources.yml`) is not read at runtime; it is a reference for
+  developers (see [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md)).
 
 ## Key decisions
 
@@ -904,7 +904,7 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
 | **Signed updates.** | planned |
 | **Clean-up**: removal of the legacy four-module scripts and a target template that matches the current pipeline (capabilities block, GGUF through llama.cpp, intermediates in the work folder). | planned |
-| **SSOT corrections** for the project-sources catalogue and its scripts. | planned |
+| **SSOT corrections** for the project-sources catalogue and its scripts. | done |
 
 ### Later (planned)
 

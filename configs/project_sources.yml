@@ -1,22 +1,27 @@
 # ============================================================================
-# LLM CONVERSION FRAMEWORK - SINGLE SOURCE OF TRUTH (SSOT)
+# LLM CONVERSION FRAMEWORK - CATALOGUE OF UPSTREAM PROJECTS
 # ============================================================================
 # Version: 2.1.0
 # Last Updated: 2025-12-28
-# Purpose: Central registry of all external tools, SDKs, and documentation
+# Purpose: Reference list of the external tools, SDKs and documentation that the framework uses, learns from
+#          or might integrate. Written for people; see configs/SSOT_ARCHITECTURE.md.
 #
-# USAGE:
-# - Orchestrator: Reads this file → ENV variables for Docker containers
-# - Crawler: Follows all docs_* links → Extracts knowledge → Stores in RAG
-# - Ditto (AI): Uses docs_workflow as primary reference + RAG queries
+# WHO READS THIS FILE:
+# - No part of the framework reads it while it runs: it is not turned into environment variables for the build
+#   containers, the crawler does not follow its links, and Ditto does not use docs_workflow.
+# - scripts/validate_ssot.py checks it, and scripts/sync_ssot.py copies its pinned values (commit, version,
+#   pypi_package, docker_tag, metadata) into detailed_project_sources.yml.
+# - Its versions are references, not the versions builds use: builds use what a target's Dockerfile pins and the
+#   setting llama_cpp_version; the local model server uses llama_runtime.yml.
+# - The project's roadmap is in docs/BLUEPRINT.md (section "Roadmap"), not here.
 #
 # STRUCTURE:
-# - Each entry: Links only (no detailed knowledge - that's in RAG!)
-# - repo_url: For git operations
-# - commit: For reproducibility (pinned versions)
-# - docs_workflow: PRIMARY link (Ditto uses this)
-# - docs_*: Additional links (Crawler extracts all)
-# - priority: CRITICAL/HIGH/MEDIUM/LOW (framework decision making)
+# - Each entry: links and short notes
+# - repo_url: the repository
+# - commit: the version this catalogue refers to
+# - docs_workflow: the main documentation link
+# - docs_*: further documentation links
+# - priority: CRITICAL/HIGH/MEDIUM/LOW
 # - integration_status: ACTIVE/PLANNED/LEARN_FROM/REFERENCE
 # - note: Brief context (1-2 sentences max)
 
@@ -29,9 +34,8 @@ metadata:
   maintainer: "LLM Conversion Framework"
   
   purpose: |
-    Central registry of external tools and documentation.
-    Crawler extracts knowledge from linked docs into RAG.
-    Framework uses this for builds, not as knowledge base.
+    Reference catalogue of external tools and documentation links for developers.
+    Not read by the framework at runtime (see the header).
   
   architecture_note: |
     SSOT = Links + Metadata (lightweight)
@@ -652,27 +656,6 @@ quality_tools:
     repo_url: "https://github.com/nightfallai"
     integration_status: "REFERENCE"
     note: "Security scanning. Reference only."
-
-# ============================================================================
-# FRAMEWORK INTEGRATION ROADMAP
-# ============================================================================
-roadmap:
-  v2.2_current:
-    - "llama.cpp backend (ACTIVE)"
-    - "OpenVINO backend (ACTIVE - Intel)"
-    - "TensorRT-LLM (ACTIVE - NVIDIA)"
-    - "RKNN toolkit (ACTIVE - Rockchip)"
-  
-  v2.3_next:
-    - "ncnn backend (mobile)"
-    - "ONNX input format"
-    - "Auto-tuner (TVM-inspired)"
-  
-  v2.4_future:
-    - "Knowledge Snapshot v2.0 schema"
-    - "Multi-backend wizard"
-    - "AMD ROCm support"
-    - "RISC-V experimental"
 
 # ============================================================================
 # FRAMEWORK NOTES
