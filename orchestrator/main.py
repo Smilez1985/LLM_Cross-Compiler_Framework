@@ -12,7 +12,6 @@ Launches the GUI Application.
 
 import sys
 import os
-import yaml
 from pathlib import Path
 from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
@@ -41,6 +40,12 @@ except ImportError as e:
     print("Please ensure 'orchestrator/gui/main_window.py', 'dialogs.py' and 'utils/localization.py' exist.")
     sys.exit(1)
 
+def save_language(cfg_mgr: ConfigManager, language: str) -> bool:
+    """Saves the first-run language choice to config.yml in the effective config folder (other settings there
+    are kept). False if it could not be written."""
+    return bool(cfg_mgr.set("language", language)) and bool(cfg_mgr.save_user_config())
+
+
 def main():
     # High DPI Scaling for modern screens
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
@@ -48,14 +53,10 @@ def main():
     # Determine App Root
     app_root = root_dir
 
-    # 1. Load Config (User Preferences)
-    # We look for config.yml in the 'configs' folder
-    configs_dir = app_root / "configs"
-    config_file = configs_dir / "config.yml"
-
-    # Initialize ConfigManager (v2.3.0 API: takes path string or None)
-    # If file doesn't exist yet, it loads defaults
-    cfg_mgr = ConfigManager(str(config_file) if config_file.exists() else None)
+    # 1. Load Config (User Preferences) from the effective config folder: LLM_FRAMEWORK_CONFIG_DIR, else the
+    # installation's configs/ if this user may write there, else the per-user folder (C:\Program Files is
+    # read-only for standard users). The framework started below uses the same folder.
+    cfg_mgr = ConfigManager()
 
     # Before Qt or the framework start threads: SDK environment guard (orchestrator/llm/sdk_env.py).
     debug_http = "--debug-http" in sys.argv[1:]
@@ -82,26 +83,8 @@ def main():
         dlg = LanguageSelectionDialog()
         if dlg.exec() == QDialog.Accepted:
             language = dlg.selected_lang
-            
-            # Persist Language Selection manually to ensure it's saved immediately
-            try:
-                configs_dir.mkdir(parents=True, exist_ok=True)
-                data = {}
-                
-                if config_file.exists():
-                    with open(config_file, 'r', encoding='utf-8') as f:
-                        data = yaml.safe_load(f) or {}
-                
-                data["language"] = language
-                
-                with open(config_file, 'w', encoding='utf-8') as f:
-                    yaml.dump(data, f)
-                    
-                # Update runtime config manager
-                cfg_mgr.set("language", language)
-                
-            except Exception as e:
-                print(f"Warning: Could not save language preference: {e}")
+            if not save_language(cfg_mgr, language):
+                print(f"Warning: Could not save language preference to {cfg_mgr.config_dir}", file=sys.stderr)
         else:
             # User cancelled setup
             sys.exit(0)

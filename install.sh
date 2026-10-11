@@ -1,15 +1,24 @@
 #!/bin/bash
 # install.sh - LLM Framework Enterprise Installer
 # DIREKTIVE: Goldstandard. Vereint System-Checks, Docker-Setup und App-Deployment.
-# Führt eine saubere Trennung von Code (/opt/llm-framework) und Daten ($HOME/llm-data) durch.
+# Code und Python-Umgebung landen in /opt/llm-conversion-framework (dem aufrufenden Benutzer übergeben). Das
+# Framework legt Builds, Cache und Modelle dort an, wenn sie gebraucht werden (Einstellungen output_dir,
+# cache_dir, models_dir); persönlicher Zustand liegt in ~/.llm-framework des Benutzers.
+
+# Das Skript braucht bash; unter sh (dash) mit einer klaren Meldung abbrechen statt mit "Bad substitution".
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "install.sh braucht bash: sudo ./install.sh (oder sudo bash install.sh)" >&2
+    exit 1
+fi
 
 set -u
 
 # --- KONFIGURATION ---
 APP_NAME="llm-conversion-framework"
 INSTALL_DIR="/opt/$APP_NAME"
-DATA_DIR="$HOME/$APP_NAME-data"
-REPO_ROOT="$(dirname "$(realpath "$0")")"
+REPO_ROOT="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+# Paketindex, den pip erreichen muss (PIP_INDEX_URL, falls ein eigener Spiegel gesetzt ist)
+PACKAGE_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple/}"
 
 # Farben
 RED='\033[0;31m'
@@ -33,11 +42,27 @@ check_root() {
     fi
 }
 
+# Die URL ohne benutzer:passwort@ (PIP_INDEX_URL eines Spiegels kann Zugangsdaten enthalten).
+redact_url() { echo "$1" | sed -E 's#://[^/@]*@#://***@#'; }
+
 wait_for_internet() {
-    log_info "Prüfe Internetverbindung..."
-    if ! ping -c 1 -W 2 8.8.8.8 &> /dev/null; then
-        log_error "Keine Internetverbindung. Abbruch."
+    # HTTPS zum Paketindex statt ping: ICMP ist in vielen Netzen gesperrt, und pip braucht genau diesen Weg.
+    # Geladen wird die kleine Projektseite von pip (<index>/pip/, etwa 100 KB), nicht die Startseite des Index
+    # (bei pypi.org über 40 MB, in 10 s nur mit schneller Leitung). Die URL geht über stdin an curl/wget statt auf
+    # die Kommandozeile, die jeder Benutzer mit ps sieht.
+    local probe shown
+    probe="${PACKAGE_INDEX_URL%/}/pip/"
+    shown="$(redact_url "$PACKAGE_INDEX_URL")"
+    log_info "Prüfe Internetverbindung (HTTPS zu $shown)..."
+    if command -v curl &> /dev/null; then
+        printf 'url = "%s"\n' "$probe" | curl -fsS --max-time 10 -o /dev/null -K - && return 0
+    elif command -v wget &> /dev/null; then
+        printf '%s\n' "$probe" | wget -q --timeout=10 --tries=1 -O /dev/null -i - && return 0
+    else
+        log_warn "Weder curl noch wget gefunden; die Internetprüfung wird übersprungen."
+        return 0
     fi
+    log_error "$shown ist per HTTPS nicht erreichbar. Proxy? Dann mit 'sudo -E ./install.sh' starten, damit https_proxy erhalten bleibt (oder PIP_INDEX_URL auf einen erreichbaren Spiegel setzen)."
 }
 
 # --- SCHRITT 1: PREREQUISITES (Docker & Python) ---
@@ -87,32 +112,19 @@ deploy_files() {
     
     # Wir nutzen rsync für sauberes Kopieren (exklusive Müll)
     if ! command -v rsync &> /dev/null; then apt-get install -y rsync; fi
-    
+
+    # Ausgeschlossene Pfade löscht --delete auch im Ziel nicht: Builds, Cache, Modelle und die Einstellungen des
+    # Benutzers in /opt überstehen eine erneute Installation.
     rsync -av --delete \
         --exclude '.git' --exclude '.venv' --exclude '__pycache__' --exclude 'build' --exclude 'dist' \
+        --exclude '/output' --exclude '/cache' --exclude '/models' --exclude '/logs' \
+        --exclude '/configs/config.yml' \
         ./ "$INSTALL_DIR/" > /dev/null
-    
+
     # Rechte anpassen (Der normale User soll den Code besitzen, um ohne sudo auszuführen)
     REAL_USER="${SUDO_USER:-$USER}"
     REAL_GROUP=$(id -gn "$REAL_USER")
     chown -R "$REAL_USER:$REAL_GROUP" "$INSTALL_DIR"
-
-    # Datenverzeichnis (Templates) kopieren
-    # Wir machen das als der reale User, damit die Permissions im Home stimmen
-    log_info "Ziel Daten: $DATA_DIR"
-    sudo -u "$REAL_USER" mkdir -p "$DATA_DIR"
-    
-    # Templates kopieren (targets, models, configs)
-    for dir in targets models configs; do
-        if [ -d "$REPO_ROOT/$dir" ]; then
-            sudo -u "$REAL_USER" rsync -av "$REPO_ROOT/$dir/" "$DATA_DIR/$dir/" > /dev/null
-        fi
-    done
-    
-    # Output Ordner erstellen
-    for dir in output logs cache; do
-        sudo -u "$REAL_USER" mkdir -p "$DATA_DIR/$dir"
-    done
 }
 
 # --- SCHRITT 3: PYTHON VENV ---
@@ -139,19 +151,9 @@ EOF
 
 # --- SCHRITT 4: KONFIGURATION & LAUNCHER ---
 configure() {
-    log_info "[4/5] Konfiguration & Launcher..."
-    REAL_USER="${SUDO_USER:-$USER}"
+    log_info "[4/5] Launcher..."
 
-    # 1. Config anpassen
-    CONFIG_FILE="$DATA_DIR/configs/user_config.yml"
-    if [ -f "$CONFIG_FILE" ]; then
-        # Einfaches Ersetzen der Pfade via sed
-        sed -i "s|output_dir:.*|output_dir: $DATA_DIR/output|g" "$CONFIG_FILE"
-        sed -i "s|logs_dir:.*|logs_dir: $DATA_DIR/logs|g" "$CONFIG_FILE"
-        sed -i "s|cache_dir:.*|cache_dir: $DATA_DIR/cache|g" "$CONFIG_FILE"
-    fi
-    
-    # 2. Launcher Skript erstellen (Global verfügbar machen)
+    # Launcher Skript erstellen (Global verfügbar machen)
     cat <<EOF > /usr/local/bin/llm-framework
 #!/bin/bash
 cd "$INSTALL_DIR"
@@ -167,7 +169,7 @@ finish() {
     echo ""
     echo "-----------------------------------------------------"
     echo "📂 Code:   $INSTALL_DIR"
-    echo "📂 Daten:  $DATA_DIR"
+    echo "📂 Daten:  $INSTALL_DIR/output, cache, models (beim ersten Gebrauch angelegt)"
     echo "🚀 Start:  Tippe einfach 'llm-framework'"
     echo "-----------------------------------------------------"
     
@@ -180,9 +182,16 @@ finish() {
 }
 
 # --- MAIN ---
-check_root
-setup_system
-deploy_files
-setup_venv
-configure
-finish
+main() {
+    check_root
+    setup_system
+    deploy_files
+    setup_venv
+    configure
+    finish
+}
+
+# Tests laden das Skript mit 'source', um einzelne Funktionen zu prüfen; nur ein direkter Aufruf installiert.
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

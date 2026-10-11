@@ -10,9 +10,11 @@ repos:
         pass_filenames: false
         always_run: true
         stages: [pre-commit]
+      # Same check as .githooks/pre-push. pre-commit passes the pushed commit as PRE_COMMIT_TO_REF (not on stdin),
+      # which --push reads; it hands over only the first branch of a push with several branches.
       - id: secret-scan-push
         name: secret scan of the commits being pushed
-        entry: python scripts/secret_scan.py --history
+        entry: python scripts/secret_scan.py --push
         language: system
         pass_filenames: false
         always_run: true

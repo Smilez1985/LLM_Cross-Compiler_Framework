@@ -181,14 +181,16 @@ The result is a **skeleton**, not a working target yet:
 - **The capabilities block is a starting point.** Add your real boards, other formats, per-board quantizations and
   calibration needs ([section 4](#4-targetyml-and-the-capabilities-block)), and keep the block in sync with
   `build.sh`.
-- **The template `build.sh` does not match the current pipeline.** It looks for `convert-hf-to-gguf.py` and the
-  llama.cpp tools in places where current llama.cpp builds do not put them, writes the F16 intermediate to `/tmp`
-  (a 1 GB tmpfs in the sandbox) and falls back to copying the model unchanged. The template Dockerfile does not build
-  llama.cpp. For GGUF, take `targets/Rockchip/dockerfile` and `targets/Rockchip/modules/build.sh` as the starting
-  point, or the example in [section 6](#6-the-build-script). The generated block declares GGUF all the same, so a
-  build of the unchanged skeleton is accepted and then fails or copies the model.
-
-An updated template is planned for 3.4.0 (see the [roadmap](BLUEPRINT.md#roadmap)).
+- **The template `build.sh` follows the Rockchip dispatcher** (`targets/Rockchip/modules/build.sh`): llama.cpp's
+  `convert_hf_to_gguf.py` and `build/bin/llama-quantize` / `llama-imatrix` below `LLAMA_CPP_PATH`
+  (`/usr/src/llama.cpp`), the F16 intermediate in the work folder (`BUILD_SCRATCH_DIR`, never `/tmp`), the same GGUF
+  type lists and importance-matrix rules, and the `imatrix` job. The branches of your quantization block run first;
+  a branch can call `build_gguf <TYPE>`, and every other type goes through `build_gguf`, which refuses types
+  llama-quantize does not know. Nothing is copied through unchanged, and a build that writes no artifact fails.
+- **The template Dockerfile does not build llama.cpp yet**, so a build of the unchanged skeleton stops with
+  "llama.cpp converter not found" or "llama-quantize not found". Add the llama.cpp build from
+  `targets/Rockchip/dockerfile` (clone the pinned tag to `/usr/src/llama.cpp`, build `llama-quantize` and
+  `llama-imatrix`, install the converter's requirements).
 
 ## 4. target.yml and the capabilities block
 

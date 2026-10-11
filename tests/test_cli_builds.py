@@ -168,9 +168,17 @@ class TestBuildRecords:
 
     def test_records_in_the_installation_stay_out_of_git(self):
         # The default cache_dir is cache/ in the installation, usually a git clone: records hold model names,
-        # local paths and errors and must not show up as files to commit.
+        # local paths and errors and must not show up as files to commit. .gitignore ignores the whole cache/
+        # folder of the installation, which includes the records.
         lines = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
-        assert "/cache/build_records/" in lines
+        assert "/cache/" in lines or "/cache/build_records/" in lines
+        if not (REPO_ROOT / ".git").exists():
+            return
+        record = "cache/build_records/req_0123abcd_001.json"
+        env = {k: v for k, v in os.environ.items() if k not in ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE")}
+        ignored = subprocess.run(["git", "-C", str(REPO_ROOT), "check-ignore", "--no-index", record],
+                                 capture_output=True, text=True, env=env)
+        assert ignored.stdout.split() == [record]
 
 
 class TestCliBuildStatus:

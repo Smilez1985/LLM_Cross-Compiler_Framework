@@ -283,6 +283,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Bedrock, Vertex or Foundry, or using the framework from Claude Code itself (`llm-cli mcp config`). It never
   switches to the Claude API on its own. A `claude_code` preset left in a provider catalog in your config
   directory is skipped with a warning; the other providers keep working.
+- Settings that nothing read: `preferred_tiny_model`, `default_calibration_dataset`, `default_enable_imatrix`,
+  `logs_dir`, `auto_cleanup`, `docker_namespace`, `gui_theme`, `gui_auto_refresh`, `gui_refresh_interval`,
+  `api_enabled`, `api_host` and `api_port`. A `config.yml` that still contains them loads as before; the values are
+  ignored and kept in the file.
+- Leftovers of the removed Transformers offline mode and of the Qdrant container: the tiny-model download of the
+  model manager (it read `source_repositories['tiny_models']`) and `DockerManager.ensure_qdrant_service` (the
+  knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
+- The update manager (`orchestrator/utils/updater.py`): it was created at every start but never called, and its
+  list of files that need a new setup named a script that does not exist.
+- The benchmark window (`orchestrator/gui/benchmark_window.py`): no menu opened it, and it could not work (it read
+  a Docker manager attribute that does not exist, started an image that does not exist and benchmarked a
+  placeholder model path).
 
 ### Fixed
 - Secrets store: a store of an earlier version that cannot be decrypted is reported by `llm-cli doctor`
@@ -292,7 +304,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - On Windows, saving a secret no longer fails when another process or a virus scanner has the store open for
   a moment.
 - `llm-cli secrets set` says where the secret went (the encrypted vault, or memory only with `ephemeral`)
-  instead of always "Keyring".
+  instead of always "Keyring". The GUI names the encrypted credential vault as well (the secret dialog, the API key
+  field and its error message in the AI settings, the token check box of the Hugging Face browser).
 - The CLI and the CLI guides no longer tell you to put the GitHub token on the command line, where the shell
   history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
   hidden prompt.
@@ -325,6 +338,46 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and the build engine resolve targets through one id -> folder map (before, the orchestrator skipped such a target
   with "Nothing to build"), and `-t` takes the id or the folder name.
 - The setting `max_concurrent_builds` sets the number of build slots (it had no effect; the engine always used 2).
+- Audit log: when several processes (GUI, CLI, MCP servers) wrote the first entries of a new log at the same
+  moment, the log could be reported as damaged ("The audit anchor file was missing when entry 2 was written").
+  The anchor of a new log is now written before its first entry becomes visible to other processes.
+- The CLI, the GUI and the MCP server no longer create empty `cache/`, `models/` and `output/` folders in the
+  installation at every start, also when `LLM_FRAMEWORK_CONFIG_DIR` or `LLM_FRAMEWORK_HOME` point elsewhere; a
+  build or a download creates the folders it uses. The repository's `.gitignore` covers `output/`, `cache/`,
+  `models/` and `logs/`, so build results and downloads cannot be committed.
+- The language chosen at the first start of the GUI is saved in the effective config folder
+  (`LLM_FRAMEWORK_CONFIG_DIR`, the installation's `configs/` if writable, otherwise the per-user folder) instead
+  of always in the installation's `configs/`.
+- Saving a setting (for example the first-run language or the AI settings) no longer overwrites a `config.yml`
+  that cannot be read (a YAML error, or no `key: value` settings) with only the changed values; the file stays as
+  it is and the error is logged.
+- Windows: with the framework in `C:\Program Files`, which standard users cannot write to, the settings and the
+  data folders `output/`, `cache/` and `models/` are in the per-user folder (`%USERPROFILE%\.llm-framework`).
+  The writability check no longer trusts `os.access`, which ignores folder permissions on Windows. The installer
+  no longer creates an unused data folder in the public documents folder with a desktop shortcut to it.
+- `install.sh` checks the connection over HTTPS to the package index (`pypi.org` or `PIP_INDEX_URL`) instead of
+  pinging 8.8.8.8, which many networks block. It loads one small project page, not the whole index, does not show
+  credentials contained in `PIP_INDEX_URL`, and stops with a clear message when started with `sh` instead of bash.
+  It no longer creates an unused data folder in root's home folder,
+  and running it again keeps the builds, cache, models and `configs/config.yml` in `/opt` instead of deleting
+  them.
+- Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
+  `config/` folder in the working directory.
+- The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).
+  Its licence check no longer freezes the window, and pressing Enter during a search or double-clicking another
+  model during a download no longer crashes the GUI.
+- `scripts/sync_ssot.py` uses the real file `configs/detailed_project_sources.yml` (it created a copy named
+  `detailed_project.sources.yml` instead) and works from any folder. It lists the differences, and with `--write`
+  it changes only those values; comments and layout stay (it rewrote the whole file with `yaml.dump`).
+- The header of `configs/project_sources.yml` says who reads the file (no part of the framework while it runs; the
+  two SSOT scripts), and its outdated roadmap section (v2.2 to v2.4) is gone.
+- Generated target modules (module wizard, `llm-cli module create`, `llm-cli module generate-ai`): the template
+  `build.sh` follows the Rockchip dispatcher. It uses llama.cpp's `convert_hf_to_gguf.py` and
+  `build/bin/llama-quantize`, writes the F16 intermediate into the work folder instead of `/tmp` (a 1 GB tmpfs in
+  the sandbox), and stops with an error instead of copying the model unchanged. Its packaging step no longer copies
+  a `build/` folder that does not exist, which made every build of a generated module fail at the end.
+- Secret scan with the pre-commit tool: its pre-push stage scans the commits being pushed (`--push`, which now
+  reads the pushed commit from `PRE_COMMIT_TO_REF`) like `.githooks/pre-push`, instead of the whole history.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped

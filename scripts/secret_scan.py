@@ -5,7 +5,8 @@ hold credentials must never be committed.
 
     python scripts/secret_scan.py              # tracked files of the working tree
     python scripts/secret_scan.py --staged     # what the next commit would contain (pre-commit hook)
-    python scripts/secret_scan.py --push       # commits a push would publish (pre-push hook, refs on stdin)
+    python scripts/secret_scan.py --push       # commits a push would publish (pre-push hook, refs on stdin;
+                                               # under the pre-commit tool from PRE_COMMIT_TO_REF)
     python scripts/secret_scan.py --history    # every blob of every commit (CI)
     python scripts/secret_scan.py FILE...      # the given files
 
@@ -221,6 +222,16 @@ def push_revs(lines: Iterable[str]) -> List[str]:
     return revs + ["--not", "--remotes"] if revs else []
 
 
+def pre_commit_push_revs(environ) -> List[str]:
+    """The same for the pre-commit tool's pre-push stage: pre-commit reads git's stdin itself and hands a hook the
+    pushed commit as PRE_COMMIT_TO_REF (only PRE_COMMIT_LOCAL_BRANCH when the push contains a root commit) and an
+    empty stdin. pre-commit passes the first pushed branch with new commits only; the git hook checks all."""
+    ref = environ.get("PRE_COMMIT_TO_REF") or environ.get("PRE_COMMIT_LOCAL_BRANCH")
+    if not ref or ref.startswith("-"):
+        return []
+    return [ref, "--not", "--remotes"]
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description="Scan for committed credentials.")
     mode = ap.add_mutually_exclusive_group()
@@ -247,7 +258,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         elif args.staged:
             findings = scan_staged(repo, local)
         elif args.push:
-            revs = push_revs(sys.stdin)
+            revs = push_revs(sys.stdin) or pre_commit_push_revs(os.environ)
             findings = scan_revs(repo, revs, local) if revs else []
         elif args.history:
             findings = scan_revs(repo, ["--all"], local)

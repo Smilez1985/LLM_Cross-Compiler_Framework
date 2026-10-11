@@ -188,14 +188,17 @@ Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
 - **Der Capabilities-Block ist ein Ausgangspunkt.** Ergänze deine echten Boards, weitere Formate, Quantisierungen je
   Board und den Bedarf an Kalibrierdaten ([Abschnitt 4](#4-targetyml-und-der-capabilities-block)), und halte den
   Block im Einklang mit `build.sh`.
-- **Das Vorlagen-`build.sh` passt nicht zur aktuellen Pipeline.** Es sucht `convert-hf-to-gguf.py` und die
-  llama.cpp-Werkzeuge an Stellen, an denen aktuelle llama.cpp-Builds sie nicht ablegen, schreibt die F16-Zwischendatei
-  nach `/tmp` (in der Sandbox ein 1-GB-tmpfs) und kopiert im Zweifel das Modell unverändert. Das Vorlagen-Dockerfile
-  baut llama.cpp nicht. Für GGUF nimm `targets/Rockchip/dockerfile` und `targets/Rockchip/modules/build.sh` als
-  Ausgangspunkt oder das Beispiel in [Abschnitt 6](#6-das-build-skript). Der erzeugte Block gibt trotzdem GGUF an;
-  ein Build des unveränderten Gerüsts wird also angenommen und scheitert dann oder kopiert das Modell.
-
-Eine überarbeitete Vorlage ist für 3.4.0 geplant (siehe [Roadmap](BLUEPRINT_DE.md#roadmap)).
+- **Das Vorlagen-`build.sh` folgt dem Rockchip-Dispatcher** (`targets/Rockchip/modules/build.sh`):
+  `convert_hf_to_gguf.py` und `build/bin/llama-quantize` / `llama-imatrix` von llama.cpp unter `LLAMA_CPP_PATH`
+  (`/usr/src/llama.cpp`), die F16-Zwischendatei im Arbeitsordner (`BUILD_SCRATCH_DIR`, nie `/tmp`), dieselben
+  GGUF-Typlisten und Regeln für die Importance-Matrix sowie der Auftrag `imatrix`. Die Zweige deines
+  Quantisierungsblocks laufen zuerst; ein Zweig kann `build_gguf <TYP>` aufrufen, und jeder andere Typ läuft über
+  `build_gguf`, das Typen ablehnt, die llama-quantize nicht kennt. Nichts wird unverändert durchkopiert, und ein
+  Build, der kein Artefakt schreibt, scheitert.
+- **Das Vorlagen-Dockerfile baut llama.cpp noch nicht**, ein Build des unveränderten Gerüsts bricht also mit
+  „llama.cpp converter not found“ oder „llama-quantize not found“ ab. Übernimm den llama.cpp-Build aus
+  `targets/Rockchip/dockerfile` (den festgelegten Tag nach `/usr/src/llama.cpp` klonen, `llama-quantize` und
+  `llama-imatrix` bauen, die Abhängigkeiten des Konverters installieren).
 
 ## 4. target.yml und der Capabilities-Block
 

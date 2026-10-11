@@ -194,12 +194,13 @@ class DeploymentManager:
 
     def _bundle_user_configs(self, dest_dir: Path):
         """Kopiert statische Konfigurationen, aber KEINE Datenbanken."""
-        # Wir nehmen an, dass FrameworkConfig.configs_dir auf 'config/' zeigt
-        src_dir = self.framework.config.config_dir if hasattr(self.framework.config, 'config_dir') else Path("config")
-        
-        # Falls configs_dir im config object anders heißt (check config_manager):
-        if not src_dir.exists():
-            src_dir = Path("config") # Fallback relative
+        # The resolved config folder (LLM_FRAMEWORK_CONFIG_DIR, the installation's configs/ or the per-user
+        # folder); never a folder relative to the working directory, which may be any project.
+        src_dir = getattr(getattr(self.framework, "config", None), "config_dir", None)
+        if src_dir is None or not Path(src_dir).is_dir():
+            self.logger.info("No config folder to bundle user profiles, voice templates or prompts from.")
+            return
+        src_dir = Path(src_dir)
 
         # Nur diese Ordner sind für das Target sicher/relevant
         safe_folders = ["user_profiles", "voice_templates", "prompts"]

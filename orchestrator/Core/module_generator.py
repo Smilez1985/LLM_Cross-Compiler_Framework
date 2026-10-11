@@ -426,7 +426,7 @@ class ModuleGenerator:
                 "{packages_str}": packages_str,
                 "# [SDK_SETUP_COMMANDS]": data.get("setup_commands", ""),
                 "[QUANTIZATION_LOGIC]": data.get("quantization_logic", ""),
-                "# [PACKAGING_COMMANDS]": data.get("packaging_commands", "cp -r build/* $OUTPUT_DIR/"),
+                "# [PACKAGING_COMMANDS]": data.get("packaging_commands", ""),  # no build/ folder by default
                 "[CPU_FLAGS]": data.get("cpu_flags", ""),
                 "[CMAKE_FLAGS]": data.get("cmake_flags", "")
             }
