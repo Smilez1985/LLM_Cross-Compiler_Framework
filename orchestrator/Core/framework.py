@@ -36,6 +36,7 @@ from orchestrator.Core.deployment_manager import DeploymentManager
 from orchestrator.Core.community_manager import CommunityManager
 from orchestrator.Core.orchestrator import LLMOrchestrator
 from orchestrator.Core.build_service import BuildService
+from orchestrator.Core.job_service import JobService
 from orchestrator.tools.framework_tools import build_tool_registry
 
 APP_ROOT = Path(__file__).resolve().parents[2]
@@ -86,6 +87,7 @@ class FrameworkManager:
         self.community_manager: Optional[CommunityManager] = None
         self.orchestrator: Optional[LLMOrchestrator] = None
         self.build_service: Optional[BuildService] = None
+        self.job_service: Optional[JobService] = None
         self.tool_registry = None
         self.updater: Optional[UpdateManager] = None
 
@@ -156,6 +158,12 @@ class FrameworkManager:
             self.orchestrator = LLMOrchestrator(self.config, build_engine=build_engine)
             # Typed entry point for tools (MCP server, Ditto) on top of the orchestrator
             self.build_service = BuildService(self)
+            # Long operations other than builds (jobs); their summaries are kept in the per-user folder
+            try:
+                self.job_service = JobService(Path(self.config.user_state_dir) / "jobs")
+            except OSError as e:
+                self.logger.warning(f"Job summaries are not kept (per-user folder: {e}).")
+                self.job_service = JobService()
             # One tool registry with the user's permissions and the audit log, for Ditto and MCP.
             # Without it (e.g. an unusable per-user folder) only the AI tools are unavailable.
             try:
@@ -249,6 +257,7 @@ class FrameworkManager:
             "community_manager": self.community_manager,
             "orchestrator": self.orchestrator,
             "build_service": self.build_service,
+            "job_service": self.job_service,
             "tool_registry": self.tool_registry,
             "docker_client": getattr(getattr(self.docker_manager, "builder", None), "docker_client", None)
         }

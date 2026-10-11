@@ -71,6 +71,7 @@ _CALLER = re.compile(r"^(ditto|mcp|mcp:[a-z0-9][a-z0-9_-]{0,31})$")
 
 _STRICTNESS = {Decision.ALLOW: 0, Decision.ASK: 1, Decision.DENY: 2}
 
+# A Decision, or a function of (input, who) -> Decision or None; see _rule for `who`.
 DecisionRule = Union[Decision, Callable[[Any, str], Optional[Decision]], None]
 
 
@@ -80,9 +81,14 @@ def stricter(*decisions: Optional[Decision]) -> Decision:
     return max(given, key=lambda d: _STRICTNESS[d]) if given else Decision.ASK
 
 
-def _rule(rule: DecisionRule, inp: Any, caller: str) -> Optional[Decision]:
+def _rule(rule: DecisionRule, inp: Any, who: str, failed: Decision) -> Optional[Decision]:
+    """A tool's default or cap for one call. `who` is the caller's owner identity (ToolContext.owner) when there is
+    a call, else the caller's name. A rule that fails gives `failed` (never a looser answer than the rule's)."""
     if callable(rule):
-        return rule(inp, caller)
+        try:
+            return rule(inp, who)
+        except Exception:
+            return failed
     return rule
 
 
@@ -165,16 +171,20 @@ class ToolPolicy(BaseModel):
         reviewed = section[2]
         return name in (TOOLS_OF_3_0_0 if reviewed is None else reviewed)
 
-    def decide_tool(self, spec: Any, inp: Any = None, caller: Optional[str] = None) -> Decision:
-        return self.explain_tool(spec, inp, caller)[0]
+    def decide_tool(self, spec: Any, inp: Any = None, caller: Optional[str] = None,
+                    owner: Optional[str] = None) -> Decision:
+        return self.explain_tool(spec, inp, caller, owner)[0]
 
-    def explain_tool(self, spec: Any, inp: Any = None, caller: Optional[str] = None) -> Tuple[Decision, str]:
+    def explain_tool(self, spec: Any, inp: Any = None, caller: Optional[str] = None,
+                     owner: Optional[str] = None) -> Tuple[Decision, str]:
         """The decision for one call of a tool and why, in this order: the caller's per-tool setting; else the
         tool's own default; else the caller's tier decision (for a tool not reviewed yet never looser than the
         recommended one); then capped by the tool's maximum. A tool's default never opens a tier the person
-        denied."""
+        denied. A callable default or cap gets `owner` (the caller with the connection that owns its builds and
+        jobs, ToolContext.owner) when given, else the caller's name."""
         name, tier = spec.name, spec.tier
         caller = caller or ""
+        who = owner or caller
         if tier == ToolTier.FORBIDDEN:
             return Decision.DENY, "tools in the forbidden tier never run"
         section = self.section(caller)
@@ -184,7 +194,7 @@ class ToolPolicy(BaseModel):
             # Never looser than the shared setting for this tool or the tool's own default (an optional read tool
             # that starts as "deny" stays denied for a token too).
             shared = self.overrides.get(name, self.tiers.get(ToolTier.READ, Decision.ALLOW))
-            default = _rule(getattr(spec, "default_decision", None), inp, caller)
+            default = _rule(getattr(spec, "default_decision", None), inp, who, Decision.ASK)
             decision, why = stricter(shared, default) if default is not None else shared, "a new token may read"
             if decision != shared:
                 why += "; the tool's own default"
@@ -193,7 +203,7 @@ class ToolPolicy(BaseModel):
         else:
             tiers, overrides, _ = section
             tier_decision = tiers.get(tier, Decision.ASK)
-            default = _rule(getattr(spec, "default_decision", None), inp, caller)
+            default = _rule(getattr(spec, "default_decision", None), inp, who, Decision.ASK)
             if name in overrides:
                 decision, why = overrides[name], "your setting for this tool"
             elif default is not None and tier_decision == Decision.DENY:
@@ -207,7 +217,8 @@ class ToolPolicy(BaseModel):
                 decision = stricter(tier_decision, recommended)
                 why = (f"new tool: the recommended setting for {tier.value} until you review it"
                        if decision != tier_decision else f"your setting for the tier {tier.value}")
-        cap = _rule(getattr(spec, "max_decision", None), inp, caller) or TIER_CAPS.get(tier, Decision.ASK)
+        cap = (_rule(getattr(spec, "max_decision", None), inp, who, Decision.DENY)
+               or TIER_CAPS.get(tier, Decision.ASK))
         capped = stricter(decision, cap)
         if capped != decision:
             why += f"; capped at {capped.value} for this tool"

@@ -342,23 +342,35 @@ sequenceDiagram
    dieser Eintrag nicht schreiben lässt. Die Tool-Funktion läuft in einem eigenen Thread; der Abbruch eines Clients
    erreicht sie sofort. Ihr Ergebnis wird gegen das Ausgabemodell geprüft und gefiltert: Secrets in jeder
    Zeichenkette geschwärzt, Felder mit externem Text (Logs, Healing-Vorschläge, Manifeste, Auszüge aus der
-   Wissensbasis) von unsichtbaren Zeichen befreit und gekürzt, ein Ergebnis über 256 KiB abgelehnt. `notes` fügt nur
-   das Framework hinzu. Der Client bekommt das strukturierte Ergebnis und einen Textblock, der mit einem Satz aus
-   Fakten des Frameworks beginnt, gefolgt vom JSON, eingepackt als nicht vertrauenswürdige Daten. Fehler kommen als
-   Tool-Fehler mit einer für Menschen gedachten Meldung zurück, Secrets darin geschwärzt; der Teil eines Fehlers, der
-   externen Text zitiert (eine Serverantwort, eine Log-Zeile, einen Namen aus einem Pack), wird zuerst bereinigt und
-   als nicht vertrauenswürdige Daten eingepackt, die eigenen Worte des Frameworks und der nächste Schritt bleiben
-   unverpackt.
+   Wissensbasis, Fehler von Jobs) von unsichtbaren Zeichen befreit und gekürzt, ein Ergebnis über 256 KiB abgelehnt.
+   `notes` fügt nur das Framework hinzu. Der Client bekommt das strukturierte Ergebnis und einen Textblock, der mit
+   einem Satz aus Fakten des Frameworks beginnt, gefolgt vom JSON, eingepackt als nicht vertrauenswürdige Daten.
+   Fehler kommen als Tool-Fehler mit einer für Menschen gedachten Meldung zurück, Secrets darin geschwärzt; der Teil
+   eines Fehlers, der externen Text zitiert (eine Serverantwort, eine Log-Zeile, einen Namen aus einem Pack), wird
+   zuerst bereinigt und als nicht vertrauenswürdige Daten eingepackt, die eigenen Worte des Frameworks und der
+   nächste Schritt bleiben unverpackt.
 5. **Audit.** Jedes Ergebnis (`ok`, `denied`, `not_confirmed` mit der Antwort, `error`, `invalid_input`,
    `confirmation_timeout`, `cancelled`) wird an `audit.db` angehängt, mit geschwärzten, gekürzten Argumenten und
    einem Hash des vollen Texts, der Dauer, einem Hash des Ergebnisses und einem Verweis auf den Eintrag `started`
    des Aufrufs. `llm-cli tools audit --verify` prüft die Kette und ihren Anker; `llm-cli tools audit --archive` legt
    das Log beiseite und beginnt eine neue Kette.
+6. **Besitzer, Warten und das Ende einer Sitzung.** Die Lifespan des Servers gibt jeder Verbindung eine Sitzung
+   (eine je stdio-Sitzung, eine für den HTTP-Server); der Aufrufer ist der Akteur `mcp` mit dieser Sitzung, und ihm
+   gehören die Builds und Jobs, die er startet. `cancel_build` und `cancel_job` auf eigene Arbeit sind ohne Frage
+   erlaubt (eine Einstellung für das einzelne Tool gilt weiter, eine verweigerte Stufe bleibt verweigert, eine
+   beschädigte Berechtigungsdatei verbietet weiter); auf die Arbeit eines anderen Clients gelten die Berechtigungen
+   des Aufrufers. Ein Aufruf mit `wait_seconds` wartet zuerst in der Ereignisschleife (ohne Thread, höchstens 50 s
+   und 4 Wartevorgänge je Client, Fortschritt alle 5 s, wenn der Client ein Fortschritts-Token mitgegeben hat) und
+   läuft dann einmal durch die Registry; ein abgebrochenes Warten lässt den Build oder Job in Ruhe. Endet die
+   Sitzung, werden ihre unfertigen Builds und Jobs abgebrochen und als `cancelled` („client disconnected“) im
+   Audit-Log festgehalten, der Server wartet bis zu 30 s, bis die Build-Container gestoppt sind, und
+   `llm-cli mcp serve` fährt danach das Framework herunter. Über stdio beendet ein SIGTERM des Clients die Sitzung
+   genauso (es unterbricht den Server wie Strg+C, statt den Prozess sofort zu beenden).
 
-Die zwölf Tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
-`read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `get_status` (Stufe `read`) sowie
-`start_build`, `cancel_build`, `resolve_healing` (Stufe `local_write`). Tools, die deine Berechtigungen verweigern,
-werden dem Client nicht aufgeführt. Kein Tool der Stufe `external` ist registriert; weder
+Die vierzehn Tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
+`read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `get_status`, `get_job_status` (Stufe `read`)
+sowie `start_build`, `cancel_build`, `resolve_healing`, `cancel_job` (Stufe `local_write`). Tools, die deine
+Berechtigungen verweigern, werden dem Client nicht aufgeführt. Kein Tool der Stufe `external` ist registriert; weder
 KI-Clients noch Ditto können also auf Geräte deployen.
 
 ### Eine Frage an Ditto (unveröffentlicht)

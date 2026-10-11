@@ -311,6 +311,8 @@ class ConfigManager:
             # Core Paths & Settings
             ConfigSchema("targets_dir", str, True, "targets", "Directory for target definitions"),
             ConfigSchema("models_dir", str, True, data_dir("models"), "Directory for model storage"),
+            ConfigSchema("datasets_dir", str, False, data_dir("datasets"),
+                         "Directory for calibration datasets (label 'datasets' for AI callers)"),
             ConfigSchema("output_dir", str, True, data_dir("output"), "Directory for build outputs"),
             ConfigSchema("cache_dir", str, True, data_dir("cache"), "Directory for cache files"),
             ConfigSchema("logs_dir", str, True, "logs", "Directory for log files"),

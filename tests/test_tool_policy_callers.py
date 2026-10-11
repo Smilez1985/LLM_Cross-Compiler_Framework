@@ -117,6 +117,23 @@ class TestDefaultsAndCaps:
             registry.call("cancel_job", {"text": "theirs"}, ToolContext("ditto"))
         assert ("mine", "ditto") in seen and ("theirs", "ditto") in seen
 
+    def test_a_callable_default_gets_the_owner_of_the_call(self, registry):
+        seen = []
+        registry.register(spec("cancel_mine", default_decision=lambda inp, who: seen.append(who)))
+        registry.decide(registry.get("cancel_mine"), None, ToolContext("mcp", connection="k1"))
+        registry.decide(registry.get("cancel_mine"), None, "mcp")
+        assert seen == ["mcp#k1", "mcp"]
+
+    def test_a_failing_rule_is_never_looser(self, registry):
+        def broken(inp, who):
+            raise RuntimeError("lookup failed")
+        registry.register(spec("broken_default", default_decision=broken))
+        registry.register(spec("broken_cap", max_decision=broken))
+        save(registry, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW},
+             overrides={"broken_cap": Decision.ALLOW}, reviewed=["broken_default", "broken_cap"])
+        assert decision(registry, "broken_default") == Decision.ASK
+        assert decision(registry, "broken_cap") == Decision.DENY
+
     def test_a_damaged_policy_denies_tools_with_an_allowing_default(self, registry):
         registry.register(spec("cancel_own", default_decision=Decision.ALLOW))
         registry.policy_store.path.write_text("{broken")

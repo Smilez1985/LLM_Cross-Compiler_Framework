@@ -238,8 +238,8 @@ class EvalBuildService(BuildService):
             quantization="Q4_K_M", board="rk3588", target="Rockchip", created="2026-10-01T12:00:00Z",
             primary="model-Q4_K_M.gguf", sha256="0" * 64)])
 
-    def start_build(self, request: BuildRequestIn) -> BuildHandle:
-        req = self.validate(request)
+    def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "") -> BuildHandle:
+        req = self.validate(request, local_paths=local_paths)
         request_id = f"eval-{len(self.started) + 1}"
         self.started.append(req.model_dump())
         self._requests[request_id] = BuildStatusOut(
@@ -342,9 +342,9 @@ class EvalEnvironment:
             self.registry.register(dataclasses.replace(spec, handler=self._recording(spec.name, spec.handler)))
 
     def _recording(self, name: str, handler: Callable):
-        def run(inp: BaseModel):
+        def run(inp: BaseModel, *ctx):  # tools that take the caller's context get it as a second argument
             self.calls.append({"tool": name, "arguments": inp.model_dump(mode="json")})
-            return handler(inp)
+            return handler(inp, *ctx)
         return run
 
     def close(self) -> None:

@@ -18,7 +18,9 @@ class BuildRequestIn(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
     model: str = Field(min_length=1, max_length=512,
-                       description="Hugging Face repo id (owner/name) or a local model path")
+                       description="Hugging Face repo id (owner/name), or a local model as <label>:<relative path> "
+                                   "inside a folder the AI may use (e.g. models:qwen2.5-0.5b-instruct) or its file "
+                                   "id (lf_...); never a path")
     revision: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{40}$",
                                     description="Commit of the Hugging Face model (a recipe's pinned revision); "
                                                 "the default branch when omitted")
@@ -29,7 +31,9 @@ class BuildRequestIn(BaseModel):
     quantization: Optional[str] = Field(default=None, max_length=32,
                                         description="Quantization type; the target's default when omitted")
     use_imatrix: bool = Field(default=False, description="Compute an importance matrix (GGUF only)")
-    dataset_path: Optional[str] = Field(default=None, max_length=1024, description="Calibration dataset file")
+    dataset_path: Optional[str] = Field(default=None, max_length=1024,
+                                        description="Calibration dataset file as <label>:<relative path> (e.g. "
+                                                    "datasets:calib/de.txt) or its file id; never a path")
     use_gpu: bool = False
     max_context_length: Optional[int] = Field(default=None, ge=256, le=1_048_576)
 
@@ -60,6 +64,8 @@ class BuildStatusOut(BaseModel):
     errors: List[UntrustedText] = Field(default_factory=list)
     warnings: List[UntrustedText] = Field(default_factory=list)
     pending_healing: Optional[PendingHealing] = None
+    owner: Optional[str] = Field(default=None, description="Caller class that started it through a tool (mcp, "
+                                                           "ditto); empty for the GUI and the CLI")
 
 
 class BuildList(BaseModel):

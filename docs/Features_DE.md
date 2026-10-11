@@ -97,7 +97,10 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
    einem Fehler wird die echte Ursache gemeldet. Spätere Builds nutzen Dockers Build-Cache.
 4. **Modell auf dem Host bereitstellen:** Ein Hugging-Face-Modell wird auf deinem Rechner heruntergeladen (mit dem
    Token `hf_token` für zugangsbeschränkte Modelle), ein lokaler Ordner bzw. eine Datei wird direkt verwendet. Die
-   Container bekommen es nur lesend.
+   Container bekommen es nur lesend: Eine einzelne Datei wird allein eingebunden, nie der Ordner, in dem sie liegt,
+   und ein Ordner nur er selbst (ein Modell, das Dateien daneben braucht, etwa externe ONNX-Daten, wird als Ordner
+   angegeben). Ein lokales Modell oder ein Datensatz, den Ditto oder ein MCP-Client genannt hat, wird unmittelbar
+   vor jedem Containerstart erneut geprüft ([Lokale Dateien für KI-Clients](#mcp-server)).
 5. **Sicherheits-Scan:** Trivy durchsucht das Image nach Schwachstellen der Stufen HIGH und CRITICAL (Einstellung
    `enable_security_scan`, festgelegtes Image `aquasec/trivy:0.75.0`). Funde erscheinen als Warnung im Log, nicht
    als Fehler. Ein Scan, der nicht innerhalb des Zeitlimits des Builds (`build_timeout`) fertig wird, wird mit
@@ -385,15 +388,17 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `list_targets` | lesen | Targets mit Boards, Formaten und Quantisierungen |
 | `get_target_capabilities` | lesen | Was ein Target bauen kann |
 | `list_build_requests` | lesen | Build-Anfragen dieser Sitzung |
-| `get_build_status` | lesen | Status, Fortschritt, Fehler, ein offener Self-Healing-Vorschlag |
+| `get_build_status` | lesen | Status, Fortschritt, Fehler, ein offener Self-Healing-Vorschlag; mit `wait_seconds` (höchstens 50) wartet es auf eine Änderung |
 | `read_build_log` | lesen | Die letzten Zeilen eines Build-Logs (Geheimnisse geschwärzt) |
 | `list_artifacts` | lesen | Fertige Builds aus ihren Manifesten |
 | `run_doctor` | lesen | Der Gesundheitscheck, ohne Korrekturen |
 | `search_knowledge` | lesen | In der Wissensbasis suchen |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen) |
-| `cancel_build` | lokal schreiben | Einen Build abbrechen |
+| `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
 | `get_status` | lesen | Deine Tool-Berechtigungen für diesen Aufrufer: jedes Tool mit Entscheidung und Grund (auch die ausgeblendeten) und was kein Tool tut, mit dem Ort, wo du es tust |
+| `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
+| `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |
 
 So läuft eine Frage mit Tools ab:
 
@@ -883,6 +888,50 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Teil als nicht vertrauenswürdige Daten eingepackt, während die eigenen Ablehnungen des Frameworks und der nächste
   Schritt unverpackt bleiben (Dittos Modell bekommt solche Fehler ebenfalls in einem Block für nicht
   vertrauenswürdige Daten).
+- **Lokale Dateien für KI-Clients:** MCP-Clients und Ditto nennen nie einen Pfad. Ein lokales Modell oder ein
+  Kalibrierungsdatensatz wird als `<Label>:<relativer Pfad>` in einem Ordner genannt, den die KI nutzen darf, zum
+  Beispiel `models:qwen2.5-0.5b-instruct` oder `datasets:calib/de.txt`, oder über die Datei-ID (`lf_` und 16
+  Hex-Zeichen), die das Framework dafür festgehalten hat. Die Ordner sind der Modellordner (`models`, Einstellung
+  `models_dir`), der Datensatzordner (`datasets`, Einstellung `datasets_dir`, standardmäßig neben dem Modellordner)
+  und die Ordner, die du mit [`llm-cli tools folders add`](CLI_Usage_DE.md#tools-folders) oder in der GUI (Tools >
+  Folders the AI May Use...) hinzufügst. Für den Modell- und den Datensatzordner gelten dieselben Grenzen wie für
+  einen hinzugefügten Ordner: Zeigt eine Einstellung auf `/`, dein Home oder einen Ordner, der den persönlichen
+  Ordner enthält, ist ihr Label nicht nutzbar. Die Datei muss in ihrem Ordner liegen (Links werden verfolgt und
+  geprüft) und außerhalb jedes gesperrten Ordners: des persönlichen Ordners des Frameworks (außer den Datenordnern,
+  die eine schreibgeschützte Installation dort hält), `~/.ssh`, `~/.gnupg` (und `GNUPGHOME`), `~/.config` (und
+  `XDG_CONFIG_HOME`), Schlüsselbunde, `~/.password-store`, `~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.aws`,
+  `~/.kube`, der eigenen Anmeldungen und Einstellungen der KI-Clients (`~/.claude`, `~/.claude.json`, `~/.codex`,
+  `~/.gemini`, `~/.cursor`), des Hugging-Face-Ordners mit seinen Token-Dateien (sein Unterordner `hub` lässt sich
+  als Ordner hinzufügen), Browserprofile, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (außer es ist dein eigenes Home)
+  und der Windows-Ordner für Anmeldedaten. Innen und außen werden über die Identität der Datei entschieden, nicht
+  über Namensvergleiche, deshalb kann ein Dateisystem ohne Unterscheidung von Groß- und Kleinschreibung `~/.SSH`
+  nicht verstecken. Eine Datei mit mehr als einem Hardlink wird abgelehnt. Die Datei wird festgehalten (Identität,
+  Größe, Änderungszeit) und unmittelbar vor jedem Start eines Build-Containers erneut geprüft; eine inzwischen
+  ersetzte Datei stoppt den Build. Ein Ordner (ein Hugging-Face-Modellordner) wird nur genutzt, wenn er echt
+  unterhalb seines Label-Ordners liegt und weder einen gesperrten Ordner noch eine Datei mit Hardlink enthält und
+  nur Dateien, Ordner und Links (keinen Socket, kein Gerät, keine Pipe); ein Snapshot aus dem Hugging-Face-Cache wird
+  Datei für Datei eingebunden. Dasselbe gilt für den Ordner einer RKNN-Beispielliste, deshalb wird eine Liste direkt
+  in einem Label-Ordner abgelehnt. Eine Hugging-Face-Repo-ID von einem KI-Client wird immer heruntergeladen, nie als
+  Ordner auf diesem Rechner nachgeschlagen. Ablehnungen nennen das Label, nie den echten Pfad. GUI- und CLI-Builds,
+  die du selbst startest, nehmen weiterhin jeden Pfad.
+- **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
+  größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
+  endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je
+  Client, und schickt alle 5 Sekunden eine Fortschrittsmeldung, wenn der Client Fortschritt angefordert hat. Ein
+  Client, der ein Warten abbricht, stoppt nur das Warten, nie den Build oder Job. Lange Operationen außer Builds (aus
+  den kommenden Tools für Crawlen, Herunterladen, Deployen und Freigaben) sind Jobs mit einer ID (`job_...`):
+  `get_job_status` zeigt Zustand, Fortschritt und Ergebnis, `cancel_job` stoppt sie. Eine Zusammenfassung jedes Jobs
+  (nie sein Ergebnis) bleibt in `~/.llm-framework/jobs/` für GUI und CLI.
+- **Wem ein Build gehört:** Jede Verbindung (eine stdio-Sitzung; bei HTTP der ganze Server, bis es benannte Tokens
+  gibt) besitzt die Builds und Jobs, die sie startet. Eigene darf sie ohne Frage abbrechen; einen Build oder Job
+  eines anderen Clients abzubrechen folgt deinen Tool-Berechtigungen (standardmäßig fragt es dich).
+  `get_build_status` zeigt die Aufruferklasse, die einen Build gestartet hat (`mcp`, `ditto`).
+- **Wenn ein Client die Verbindung trennt:** Die Builds und Jobs, die seine Sitzung gestartet hat, werden
+  abgebrochen, jeweils mit einem Audit-Eintrag („client disconnected“); der Server wartet bis zu 30 Sekunden, bis
+  ihre Container gestoppt sind, und fährt dann das Framework herunter, damit kein Build ohne Besitzer weiterläuft.
+  Das gilt auch, wenn der Client einen stdio-Server mit SIGTERM beendet (wie Clients es tun, wenn er einige Sekunden
+  nach dem Schließen seiner Eingabe nicht beendet ist). HTTP-Builds gehören dem Server und werden abgebrochen, wenn
+  er endet.
 - **Transporte:** stdio (Standard; der Client startet den Server) oder Streamable HTTP nur auf einer
   Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). HTTP prüft Host und Origin und
   braucht ein Bearer-Token, das pro Benutzer in `~/.llm-framework/mcp_http_token` angelegt wird.

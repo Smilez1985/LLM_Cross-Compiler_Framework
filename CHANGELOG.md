@@ -229,6 +229,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **`llm-cli ditto eval` records every tool call attempt**, not only those that reached a tool: the report's
   `tool_use` block gives tool calls per task, the share of malformed calls and of unknown tool names, repairs and
   repeat refusals.
+- **Folders the AI may use**: Ditto and MCP clients name a local model or calibration dataset as
+  `<label>:<relative path>` (for example `models:qwen2.5-0.5b-instruct`, `datasets:calib/de.txt`) or by its file id
+  inside the models folder, the new datasets folder (setting `datasets_dir`, next to the models folder by default)
+  or a folder you add with `llm-cli tools folders add|list|remove` (terminal required) or in the GUI (Tools >
+  Folders the AI May Use...). Adding one shows what sharing it means and is audited (an addition that cannot be
+  audited, or whose folder changes while you are asked, does not happen); `/`, your home folder, a folder
+  containing the per-user folder or a denied folder cannot be added, and the same limits apply to the models and
+  datasets settings. The Hugging Face cache's `hub` folder may be added; its token files stay denied.
+- **Jobs and waiting for MCP clients and Ditto**: the tools `get_job_status` and `cancel_job` for long operations
+  other than builds (a job id `job_...`, its state, progress, result or error; a summary of each job is kept in
+  `~/.llm-framework/jobs/`), and `wait_seconds` on `get_build_status` and `get_job_status`: the call returns as
+  soon as the build or job changes or ends, at most after 50 seconds (a larger value is reduced with a note), with
+  progress notifications for clients that ask for them. Waiting holds no worker thread, at most 4 waits run per
+  client, and cancelling a wait never touches the build or job.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -304,6 +318,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   follows each tool's own flag instead of its tier (`resolve_healing` is destructive, because one of its fixes
   deletes the Docker build cache), and tools that reach other devices ask the client to show its own prompt on
   every call (`anthropic/requiresUserInteraction`).
+- A local model file is mounted into the build containers alone, no longer together with the folder it lies in
+  (a model that needs files next to it, such as ONNX external data, is given as its folder). An RKNN sample list
+  next to a model file now gets its own folder mount.
+- MCP and Ditto: builds belong to the caller that started them (an MCP connection, Ditto). Cancelling its own build
+  with `cancel_build` no longer asks; cancelling another client's build follows the tool permissions (by default it
+  asks). A per-tool setting still wins, a tier you denied stays denied, and a damaged permission file still denies.
+  `get_build_status` shows the caller class that started a build.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -338,6 +359,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- MCP server: a client that disconnects no longer leaves its builds running with nobody to clean up. The builds
+  and jobs its session started are cancelled, each with an audit entry ("client disconnected"), the server waits
+  up to 30 seconds for their containers to stop, and `llm-cli mcp serve` then shuts the framework down. A SIGTERM
+  from the client (how clients end a stdio server that has not exited after they closed its input) no longer ends
+  the process before this cleanup.
 - Secrets store: a store of an earlier version that cannot be decrypted is reported by `llm-cli doctor`
   instead of being merged unreadable into the per-user store.
 - Reading or storing a secret no longer fails in a container whose user has no name (no `USER` variable and
@@ -581,6 +607,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   tool that reaches other devices or deletes data always asks at most. Before, a per-tool setting could allow such a
   tool without a question. A permission file from 3.0.0 counts its eleven tools as reviewed; 3.0.0 itself reads a
   file saved by this version as damaged and denies every tool.
+- MCP and Ditto: `start_build` no longer accepts a path for `model` or `dataset_path` (an MCP client could mount
+  any readable file, such as `~/.ssh/id_ed25519`, into a build and read it back through the log). Only references
+  inside the folders the AI may use are accepted; the resolved file must lie inside its folder and outside every
+  denied folder (keys, credentials, AI clients' own sign-ins, the Hugging Face token, the framework's per-user
+  folder, system folders), decided by file identity so a case-insensitive file system cannot hide one. Hard-linked
+  files are refused, a folder is used only strictly below its label folder and without a denied folder, a
+  hard-linked file, a socket, a device or a pipe inside, and the file is checked again right before each build
+  container starts. A Hugging Face repo id from an AI caller is no longer looked up as a local path, neither by the
+  build service nor by the build engine (which mounted a folder of that name below its working directory).
+  Refusals name the label, never the real path.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

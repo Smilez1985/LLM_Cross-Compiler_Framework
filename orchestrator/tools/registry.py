@@ -17,7 +17,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Type
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tuple, Type, Union
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -133,9 +133,11 @@ class ToolSpec:
     paging_hint: str = ""  # how to ask for less when a result is too large
     destructive: bool = False  # deletes or overwrites something (destructiveHint), whatever the tier
     # The tool's own default decision, used instead of the caller's tier decision; a Decision or a function of
-    # (input, caller). None: the tier decision. A default never opens a tier the person denied.
+    # (input, who): `who` is the caller's owner identity (ToolContext.owner, e.g. "allow" when the caller cancels
+    # its own build), or the caller's name when there is no call. None: the tier decision. A default never opens a
+    # tier the person denied; a per-tool setting of the person still wins, and a damaged policy still denies.
     default_decision: DecisionRule = None
-    # The highest decision any setting may give this tool; a Decision or a function of (input, caller).
+    # The highest decision any setting may give this tool; a Decision or a function of (input, who).
     # None: the tier's cap (TIER_CAPS: tools that reach other devices or delete data always ask).
     max_decision: DecisionRule = None
     channels: Tuple[str, ...] = CHANNELS  # confirmation channels the tool accepts, strongest first
@@ -144,6 +146,11 @@ class ToolSpec:
     arg_aliases: Mapping[str, str] = field(default_factory=dict)  # declared argument aliases (alias -> field)
     examples: Tuple[Dict[str, Any], ...] = ()                     # valid example calls, shown after input errors
     fields: Mapping[str, FieldMeta] = field(default_factory=dict)  # how the fool-proof layer treats each field
+    # The handler is called as handler(input, ctx) with the caller's ToolContext (owner of builds and jobs).
+    takes_context: bool = False
+    # An async wait the MCP server runs on its event loop before the call, holding no worker thread (long-poll):
+    # long_poll(input, seconds, report_progress). The handler then sees ctx.metadata["waited"].
+    long_poll: Optional[Callable[..., Awaitable[Any]]] = None
 
     def annotations(self) -> Dict[str, Any]:
         """MCP tool annotations (hints for clients; the registry enforces the policy itself)."""
@@ -189,7 +196,7 @@ def current_registry() -> Optional["ToolRegistry"]:
 
 @dataclass
 class ToolContext:
-    actor: str                       # "ditto", "mcp", "cli", "gui"
+    actor: str                       # "ditto", "mcp", "mcp:<token name>", "cli", "gui"
     confirm: Optional[Confirm] = None  # asks the user; None = no way to ask, so "ask" means deny
     metadata: Dict[str, Any] = field(default_factory=dict)
     client: str = ""                 # the client's self-reported name and version: a label, never trusted
@@ -202,6 +209,19 @@ class ToolContext:
     answer: str = ""
     request_id: str = ""             # the JSON-RPC request id (MCP), recorded with the session hash
     repairs: List[Repair] = field(default_factory=list)  # what the fool-proof layer changed before this call
+    # The server connection that owns the builds and jobs this caller starts (MCP: one stdio process, or the whole
+    # HTTP server, so per token); set by the MCP server, never by the client. Ditto has none: its builds stay its
+    # own across questions. `session` above is something else: it groups one client's calls for the repeat guard
+    # and the audit log.
+    connection: str = ""
+    # Notes a handler that takes the context adds for this call's result (framework text only, e.g. "the wait was
+    # shortened"); the registry puts them into the result's `notes` after the repairs. New for every call.
+    notes: List[str] = field(default_factory=list)
+
+    @property
+    def owner(self) -> str:
+        """Who owns the builds and jobs this caller starts: the actor and, for MCP, its connection."""
+        return f"{self.actor}#{self.connection}" if self.connection else self.actor
 
 
 @dataclass
@@ -304,10 +324,13 @@ class ToolRegistry:
     def policy(self) -> ToolPolicy:
         return self.policy_store.load()
 
-    def decide(self, spec: ToolSpec, inp: Any = None, caller: str = "") -> Decision:
-        """The decision for a call of `spec` by `caller` (ditto, mcp, mcp:<token>): the caller's own permissions
-        (or the shared ones), the tool's default for tools the person has not reviewed, and the tool's cap."""
-        return self.policy().decide_tool(spec, inp, caller)
+    def decide(self, spec: ToolSpec, inp: Any = None, caller: Union[str, "ToolContext"] = "") -> Decision:
+        """The decision for a call of `spec` by `caller` (ditto, mcp, mcp:<token>, or the call's ToolContext): the
+        caller's own permissions (or the shared ones), the tool's default for tools the person has not reviewed or
+        for this call (e.g. "allow" when the caller cancels its own build, decided on ToolContext.owner), and the
+        tool's cap."""
+        actor, owner = (caller.actor, caller.owner) if isinstance(caller, ToolContext) else (caller, None)
+        return self.policy().decide_tool(spec, inp, actor, owner=owner)
 
     def visible(self, caller: str) -> List[ToolSpec]:
         """The tools a caller is offered: every tool its permissions do not deny (MCP tools/list, Ditto's tool
@@ -592,7 +615,8 @@ class ToolRegistry:
         began = time.monotonic()
         prepared = self.prepare(name, arguments, ctx)
         spec, inp, arguments = prepared.spec, prepared.input, prepared.arguments
-        ctx = dataclasses.replace(ctx, repairs=prepared.repairs)  # per call: Ditto reuses one context
+        # per call: Ditto reuses one context
+        ctx = dataclasses.replace(ctx, repairs=prepared.repairs, notes=[])
         try:
             result = self._run(spec, inp, arguments, ctx, approved, began)
         except ToolError as e:
@@ -605,7 +629,7 @@ class ToolRegistry:
 
     def _run(self, spec: ToolSpec, inp: BaseModel, arguments: Dict[str, Any], ctx: ToolContext,
              approved: Optional[bool], began: float) -> BaseModel:
-        decision = self.decide(spec, inp, ctx.actor)
+        decision = self.decide(spec, inp, ctx)
         if decision == Decision.DENY:
             self._audit(ctx, spec, decision, "denied", arguments, reason_code="permission_denied")
             raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
@@ -656,7 +680,8 @@ class ToolRegistry:
 
         token = _CALL.set((self, ctx.actor))
         try:
-            result = self._output(spec, spec.handler(inp), [r.note(spec.name) for r in ctx.repairs])
+            raw = spec.handler(inp, ctx) if spec.takes_context else spec.handler(inp)
+            result = self._output(spec, raw, [r.note(spec.name) for r in ctx.repairs] + list(ctx.notes))
         except ResultTooLarge as e:
             end("error", str(e), reason_code="limit_reached")
             raise ToolError(f"{spec.title}: {e}", code="limit_reached") from None
