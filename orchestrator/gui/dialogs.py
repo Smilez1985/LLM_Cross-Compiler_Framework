@@ -1052,7 +1052,7 @@ class AIFoldersDialog(QDialog):
         if answer != QMessageBox.Yes:
             return False
         try:
-            entry = store.add(Path(path), label, kind, self.files.data_folders())
+            entry = store.add(Path(path), label, kind, self.files.data_folders(), expected_real=real)
         except LocalFileError as e:
             QMessageBox.warning(self, "Folders the AI may use", str(e))
             return False

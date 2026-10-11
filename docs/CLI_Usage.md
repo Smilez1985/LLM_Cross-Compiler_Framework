@@ -784,11 +784,15 @@ there; `add` lets them use another folder under a label you choose (lowercase le
 - `add` refuses `/`, your home folder itself, a folder that contains the framework's per-user folder, and a folder
   inside or containing a denied folder (keys, credentials, the Hugging Face token, system folders; the list is in
   [Features](Features.md#mcp-server)). The Hugging Face cache's `hub` subfolder may be added
-  (`~/.cache/huggingface/hub`, where `hf download` stores models); the token files next to it stay denied.
-- The folder's real path is recorded. If it changes later (a link pointing elsewhere), `list` marks it as not
-  usable and AI clients are refused until you run `add` with the same label again.
+  (`~/.cache/huggingface/hub`, where `hf download` stores models); the token files next to it stay denied. The same
+  limits hold for `models_dir` and `datasets_dir`: if either setting points at `/`, your home folder or a folder
+  holding the per-user folder, `list` marks the label as not usable.
+- The folder's real path is recorded, and it is the one `add` showed you: if a link points elsewhere while you are
+  asked, nothing is added. If it changes later, `list` marks it as not usable and AI clients are refused until you
+  run `add` with the same label again.
 - Each change is written to the audit log (actor `cli`; `gui` for the same list in the GUI under Tools > Folders
-  the AI May Use...). The list is stored in `~/.llm-framework/ai_folders.json`, readable only by you.
+  the AI May Use...); an addition that cannot be recorded does not happen. The list is stored in
+  `~/.llm-framework/ai_folders.json`, readable only by you.
 
 ```bash
 llm-cli tools folders add ~/llm-models --label mymodels --kind model

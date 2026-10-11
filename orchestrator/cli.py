@@ -992,7 +992,7 @@ def tools_folders_add(ctx: FrameworkContext, path: str, label: str, kind: str):
         console.print("Nothing changed.")
         sys.exit(1)
     try:
-        entry = files.store.add(Path(path), label, kind, files.data_folders())
+        entry = files.store.add(Path(path), label, kind, files.data_folders(), expected_real=real)
     except LocalFileError as e:
         console.print(f"[red]{escape(str(e))}[/red] The folder was not added.")
         sys.exit(1)

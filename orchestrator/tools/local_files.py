@@ -130,8 +130,17 @@ def denied_folders(state_dir: Optional[Path], data_folders: Sequence[Path] = (),
                          ("Library/Application Support/Firefox", "it holds a browser profile"),
                          ("Library/Application Support/Microsoft Edge", "it holds a browser profile"),
                          ("Library/Application Support/BraveSoftware", "it holds a browser profile"),
-                         ("Library/Safari", "it holds a browser profile"), ("Library/Cookies", "it holds cookies")):
+                         ("Library/Safari", "it holds a browser profile"), ("Library/Cookies", "it holds cookies"),
+                         # AI clients' own sign-ins and settings (the framework never reads them, principle 5)
+                         (".claude", "it holds an AI client's sign-in"), (".claude.json", "it holds an AI client's "
+                                                                                          "settings"),
+                         (".codex", "it holds an AI client's sign-in"), (".gemini", "it holds an AI client's sign-in"),
+                         (".cursor", "it holds an AI client's settings")):
         add(home / name, reason)
+    for var, reason in (("XDG_CONFIG_HOME", "it holds application settings and credentials"),
+                        ("GNUPGHOME", "it holds GPG keys")):
+        if env.get(var):
+            add(Path(os.path.expanduser(env[var])), reason)
     hf_home, hf_token, hf_stored = huggingface_paths(env)
     add(hf_home, "that folder holds your Hugging Face token", [hf_home / "hub"])
     add(hf_token, "it is your Hugging Face token")
@@ -330,12 +339,19 @@ def folder_entries(folder: Path) -> Tuple[List[Path], bool]:
                 raise LocalFileError(f"The folder {folder.name} has more than {MAX_FOLDER_ENTRIES} entries.",
                                      next_step="use a folder that holds only the model or the dataset.")
             st = os.lstat(path)
+            rel = path.relative_to(folder).as_posix()
             if stat.S_ISLNK(st.st_mode):
                 has_links = True
-            elif stat.S_ISREG(st.st_mode) and st.st_nlink > 1:
-                raise LocalFileError(f"The folder {folder.name} contains a file with more than one hard link "
-                                     f"({path.relative_to(folder).as_posix()}), so it could be any other file.",
-                                     next_step="copy that file instead of linking it.")
+            elif stat.S_ISREG(st.st_mode):
+                if st.st_nlink > 1:
+                    raise LocalFileError(f"The folder {folder.name} contains a file with more than one hard link "
+                                         f"({rel}), so it could be any other file.",
+                                         next_step="copy that file instead of linking it.")
+            elif not stat.S_ISDIR(st.st_mode):
+                # A socket (a Docker socket), a device or a pipe would hand the build's code what is behind it.
+                raise LocalFileError(f"The folder {folder.name} contains an entry that is neither a regular file nor "
+                                     f"a folder ({rel}).", next_step="use a folder that holds only the model or the "
+                                                                     "dataset.")
     return entries, has_links
 
 
@@ -408,6 +424,29 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+UNSAFE_ROOTS = {
+    "root": "The root folder cannot be shared with AI clients.",
+    "home": "Your home folder itself cannot be shared with AI clients; add a subfolder.",
+    "state": "This folder contains the framework's own per-user folder; add a subfolder.",
+}
+
+
+def unsafe_root(real: Path, state_dir: Optional[Path]) -> Optional[str]:
+    """Why a folder can never be a label root, as a key of UNSAFE_ROOTS (the root folder, the home folder, a folder
+    holding the per-user folder): it would reach every file the denied list does not name. None when it may be."""
+    real_id = _identity(real)
+    if real_id == _identity(Path(real.anchor or "/")) or real.parent == real:
+        return "root"
+    if real_id == _identity(Path(os.path.expanduser("~"))):
+        return "home"
+    try:
+        if state_dir is not None and Path(state_dir).exists() and real_id in _ancestor_ids(Path(state_dir).resolve()):
+            return "state"
+    except (OSError, RuntimeError):
+        return "state"
+    return None
+
+
 def _write_private_json(path: Path, data) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
@@ -468,14 +507,9 @@ class FolderStore:
             raise LocalFileError(f"{given} does not exist.") from None
         if not real.is_dir():
             raise LocalFileError(f"{given} is not a folder.")
-        real_id = _identity(real)
-        home_id = _identity(Path(os.path.expanduser("~")))
-        if real_id == _identity(Path(real.anchor or "/")) or real.parent == real:
-            raise LocalFileError("The root folder cannot be shared with AI clients.")
-        if real_id == home_id:
-            raise LocalFileError("Your home folder itself cannot be shared with AI clients; add a subfolder.")
-        if self.state_dir.exists() and real_id in _ancestor_ids(self.state_dir.resolve()):
-            raise LocalFileError("This folder contains the framework's own per-user folder; add a subfolder.")
+        problem = unsafe_root(real, self.state_dir)
+        if problem:
+            raise LocalFileError(UNSAFE_ROOTS[problem])
         denied = denied_folders(self.state_dir, data_folders)
         entry = denied_reason(real, denied, real)
         if entry is not None:
@@ -485,7 +519,10 @@ class FolderStore:
             raise LocalFileError(f"{given} contains a folder that is never shared ({inner.path}: {inner.reason}).")
         return real
 
-    def add(self, path: Path, label: str, kind: str = "any", data_folders: Sequence[Path] = ()) -> dict:
+    def add(self, path: Path, label: str, kind: str = "any", data_folders: Sequence[Path] = (),
+            expected_real: Optional[Path] = None) -> dict:
+        """Adds the folder. `expected_real` is the real path the person was shown and agreed to: when the folder
+        resolves elsewhere now (a link changed while they were asked), nothing is added."""
         if not LABEL_RE.fullmatch(label or ""):
             raise LocalFileError(f"'{label}' is not a valid label (lowercase letters, digits, '-' and '_', starting "
                                  "with a letter, at most 32 characters).")
@@ -494,6 +531,9 @@ class FolderStore:
         if kind not in FOLDER_KINDS:
             raise LocalFileError(f"Kind must be one of {', '.join(FOLDER_KINDS)}.")
         real = self.check_new(path, data_folders)
+        if expected_real is not None and (real != Path(expected_real) or _identity(real) != _identity(expected_real)):
+            raise LocalFileError(f"{path} changed while you were asked (it now leads to {real}); nothing was added. "
+                                 "Run the command again.")
         st = _stat(real)
         entry = {"label": label, "path": str(Path(os.path.expanduser(str(path))).absolute()), "real_path": str(real),
                  "dev": st.st_dev, "ino": st.st_ino, "kind": kind, "added": _now()}
@@ -518,9 +558,10 @@ class FolderStore:
 
 
 def record_folder_change(audit, actor: str, action: str, entry: dict) -> None:
-    """Audits a change of the folders the AI may use (actor `cli` or `gui`); raises when it cannot be written."""
+    """Audits a change of the folders the AI may use (actor `cli` or `gui`); raises when it cannot be written, also
+    when there is no audit log at all (what widens an AI's reach is recorded, or it does not happen)."""
     if audit is None:
-        return
+        raise RuntimeError("the audit log is not available")
     audit.record(actor, "ai_folders", "framework", "person", f"folder_{action}",
                  arguments={"label": entry.get("label"), "path": entry.get("real_path") or entry.get("path")},
                  approved=True)
@@ -563,10 +604,18 @@ class LocalFiles:
         return found
 
     def folders(self) -> List[AllowedFolder]:
+        """The labelled folders. A `problem` (a folder that cannot be used now) never names a path: it reaches AI
+        callers in refusals, and the CLI and the GUI show the folder next to it."""
         result = []
+        unsafe_text = {"root": "is the root folder", "home": "is the home folder",
+                       "state": "contains the framework's own per-user folder"}
         for label, path in self.builtin.items():
-            problem = "" if path.is_dir() else f"the {label} folder {path} does not exist yet"
+            problem = "" if path.is_dir() else "the folder does not exist yet"
             real = path.resolve() if not problem else None
+            unsafe = unsafe_root(real, self.state_dir) if real is not None else None
+            if unsafe:  # the setting points at '/', the home folder or around the per-user folder
+                problem = (f"the folder of the setting {label}_dir {unsafe_text[unsafe]} and cannot be shared with "
+                           "AI clients; the user sets it to a subfolder")
             result.append(AllowedFolder(label, path, "model" if label == "models" else "dataset", True, real, problem))
         for entry in (self.store.load() if self.store is not None else []):
             path = Path(str(entry.get("path", "")))
@@ -575,8 +624,11 @@ class LocalFiles:
             try:
                 real = path.resolve(strict=True)
                 if str(real) != str(entry.get("real_path")) or _identity(real) != (entry.get("dev"), entry.get("ino")):
-                    problem = ("it changed since it was added (it now leads to another folder); confirm it again "
-                               f"with 'llm-cli tools folders add {path} --label {entry['label']}'")
+                    problem = ("it changed since it was added (it now leads to another folder); the user confirms "
+                               f"it again with 'llm-cli tools folders add <its folder> --label {entry['label']}'")
+                elif unsafe_root(real, self.state_dir):  # e.g. the per-user folder moved into it since
+                    problem = (f"the folder {unsafe_text[unsafe_root(real, self.state_dir)]} and cannot be shared "
+                               "with AI clients any more")
             except (OSError, RuntimeError):
                 problem = "it does not exist any more"
             result.append(AllowedFolder(str(entry["label"]), path, str(entry.get("kind", "any")), False, real,
@@ -668,6 +720,8 @@ class LocalFiles:
 
 @dataclass(frozen=True)
 class LocalInputs:
-    """The pinned local inputs of one build that an AI caller named (plain data, travels with the request)."""
+    """The pinned local inputs of one build that an AI caller started (plain data, travels with the request). Every
+    AI caller's build carries one, also without pins: the build engine then never looks the model source up on disk
+    (a Hugging Face repo id such as 'Documents/private' is downloaded, never mounted from the working directory)."""
     model: Optional[LocalFilePin] = None
     dataset: Optional[LocalFilePin] = None

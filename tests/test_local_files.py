@@ -117,7 +117,9 @@ class TestDeniedFolders:
         write(state / "tool_policy.json", b"{}")
         files = LocalFiles(state, {"models": models})
         error = refused(files, "models:state/tool_policy.json")
-        assert error.code == "permission_denied" and "framework's own folder" in str(error)
+        # Review: a models folder holding the per-user folder is not usable at all now (like an added one), so the
+        # refusal comes before the denied-folder check (it said "framework's own folder" before).
+        assert error.code == "invalid_value" and "contains the framework's own per-user folder" in str(error)
 
     def test_data_folders_inside_the_per_user_folder_stay_usable(self, tmp_path):
         """A read-only installation keeps models_dir in the per-user folder; only that subfolder is shared."""
@@ -388,7 +390,9 @@ class TestBuildServiceForAICallers:
         monkeypatch.chdir(tmp_path / "cwd")
         framework.build_service.start_build(self.build(model="owner/name"))
         req = framework.orchestrator.submitted[0]
-        assert req.models == ["owner/name"] and req.local_inputs is None
+        # Review: the request carries empty local inputs (it was None), which tells the build engine not to look
+        # the repo id up on disk either (TestReviewS6.test_the_engine_never_looks_up_an_ai_callers_repo_id_on_disk).
+        assert req.models == ["owner/name"] and req.local_inputs == LocalInputs()
 
     def test_a_persons_own_caller_may_still_name_a_path(self, framework, tmp_path):
         model = write(tmp_path / "anywhere" / "model.gguf")
@@ -522,3 +526,144 @@ def test_datasets_folder_setting_defaults_next_to_models(tmp_path):
     cfg = ConfigManager(tmp_path / "configs")
     assert Path(cfg.get("datasets_dir")).name == "datasets"
     assert Path(cfg.get("datasets_dir")).parent == Path(cfg.get("models_dir")).parent
+
+
+# --- adversarial review of S6 ----------------------------------------------------------------------------------
+
+class TestReviewS6:
+    """Findings of the adversarial review: each test fails without its fix."""
+
+    @pytest.fixture
+    def engine(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("orchestrator.Core.builder.docker.from_env",
+                            lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
+        return BuildEngine(ConfigManager(tmp_path / "configs"))
+
+    def test_the_engine_never_looks_up_an_ai_callers_repo_id_on_disk(self, framework, engine, tmp_path,
+                                                                     monkeypatch):
+        """'Documents/private' is a valid repo id. The build service kept it as one, but the build engine mounted
+        the folder of that name below its working directory (an MCP server started in the home folder mounted
+        ~/Documents/private into the build)."""
+        import huggingface_hub
+
+        class ReachedHuggingFace(Exception):
+            pass
+        private = write(tmp_path / "cwd" / "Documents" / "private" / "config.json", b"{}").parent
+        write(private / "tax-return.pdf", b"private")
+        monkeypatch.chdir(tmp_path / "cwd")
+        monkeypatch.setattr(huggingface_hub, "HfApi", lambda **kw: (_ for _ in ()).throw(ReachedHuggingFace()))
+        framework.build_service.start_build(TestBuildServiceForAICallers().build(model="Documents/private"))
+        req = framework.orchestrator.submitted[0]
+        config = TestMounts.config(model_source=req.models[0], local_inputs=req.local_inputs)
+        with pytest.raises(ReachedHuggingFace):  # a repo id, downloaded; never the local folder
+            engine._stage_model(config, BuildProgress("b1", BuildStatus.QUEUED, ""))
+        # A person's own caller (GUI, CLI) still names a local folder by its path.
+        _, volumes = engine._stage_model(TestMounts.config(model_source="Documents/private"),
+                                         BuildProgress("b1", BuildStatus.QUEUED, ""))
+        assert volumes == {str(private.resolve()): {"bind": "/build-cache/input-model", "mode": "ro"}}
+
+    def test_a_builtin_folder_at_root_home_or_around_the_per_user_folder_is_not_usable(self, tmp_path):
+        """The models and datasets settings get the same limits as an added folder: a label for '/', the home
+        folder or a folder holding the per-user folder would reach every file the denied list does not name."""
+        home = isolated_home(tmp_path)
+        write(home / "Documents" / "tax-return.pdf", b"private")
+        state = tmp_path / "outer" / "state"
+        state.mkdir(parents=True)
+        outside = write(tmp_path / "outer" / "m.gguf")
+        for root, reference in ((home, "models:Documents/tax-return.pdf"), (tmp_path / "outer", "models:m.gguf"),
+                                (Path("/"), "models:" + str(outside.resolve()).lstrip("/"))):
+            files = LocalFiles(state, {"models": root})
+            error = refused(files, reference)
+            assert "cannot be used" in str(error), (root, str(error))
+            assert [f.label for f in files.folders() if not f.problem] == []
+
+    def test_a_folder_that_changes_while_the_person_is_asked_is_not_added(self, tmp_path, monkeypatch):
+        """The question shows one folder; what is recorded must be that folder, not where a link points after the
+        answer."""
+        import click
+        fw = cli_framework(tmp_path)
+        shown, swapped = tmp_path / "shown", tmp_path / "swapped"
+        shown.mkdir()
+        swapped.mkdir()
+        link = tmp_path / "link"
+        link.symlink_to(shown, target_is_directory=True)
+
+        def retarget_then_yes(*args, **kwargs):
+            link.unlink()
+            link.symlink_to(swapped, target_is_directory=True)
+            return True
+        monkeypatch.setattr(click, "confirm", retarget_then_yes)
+        result = invoke(fw, "tools", "folders", "add", str(link), "--label", "mine", monkeypatch=monkeypatch,
+                        terminal=True)
+        assert result.exit_code == 1 and "changed while you were asked" in " ".join(result.output.split())
+        assert FolderStore(tmp_path / "state").load() == []
+        with pytest.raises(LocalFileError, match="changed while you were asked"):
+            FolderStore(tmp_path / "state").add(link, "mine", expected_real=shown.resolve())
+
+    def test_the_dialog_adds_no_folder_it_cannot_audit(self, qapp, tmp_path, monkeypatch):
+        """Without a tool registry (an unusable audit log) the GUI added the folder without any record."""
+        from PySide6.QtWidgets import QMessageBox
+        from orchestrator.gui.dialogs import AIFoldersDialog
+        fw = cli_framework(tmp_path)
+        (tmp_path / "mine").mkdir()
+        errors = []
+        monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.Yes)
+        monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: errors.append(a[2]))
+        assert not AIFoldersDialog(fw, None).add_folder(str(tmp_path / "mine"), "mine")
+        assert FolderStore(tmp_path / "state").load() == [] and "not added" in errors[0]
+        with pytest.raises(RuntimeError, match="audit"):
+            local_files.record_folder_change(None, "cli", "added", {"label": "mine"})
+
+    @pytest.mark.skipif(os.name != "posix", reason="FIFOs and Unix sockets")
+    def test_sockets_fifos_and_devices_inside_a_model_folder_are_never_mounted(self, area, engine, monkeypatch):
+        """A mounted folder holding a Unix socket (a Docker socket) would hand the build's community or AI-written
+        code the service behind it."""
+        import socket
+        folder = area.models / "qwen"
+        write(folder / "config.json", b"{}")
+        pin = area.files.resolve("models:qwen")
+        os.mkfifo(folder / "pipe")
+        with pytest.raises(LocalFileError, match="neither a regular file nor a folder"):
+            engine._stage_model(TestMounts.config(model_source=pin.path, local_inputs=LocalInputs(model=pin)),
+                                BuildProgress("b1", BuildStatus.QUEUED, ""))
+        (folder / "pipe").unlink()
+        monkeypatch.chdir(folder)  # a short relative name: Unix socket paths are limited to about 100 bytes
+        server = socket.socket(socket.AF_UNIX)
+        try:
+            server.bind("docker.sock")
+            with pytest.raises(LocalFileError, match="neither a regular file nor a folder"):
+                engine._stage_model(TestMounts.config(model_source=pin.path, local_inputs=LocalInputs(model=pin)),
+                                    BuildProgress("b1", BuildStatus.QUEUED, ""))
+        finally:
+            server.close()
+
+    def test_refusals_for_ai_callers_name_the_label_never_the_real_path(self, area, framework):
+        """Toward the AI: ids and labels, never the person's real paths (DECISIONS round 4 item 1)."""
+        files = LocalFiles(area.state, {"models": area.tmp / "missing-models"})
+        assert str(area.tmp) not in str(refused(files, "models:m.gguf"))
+        first, second = area.tmp / "first", area.tmp / "second"
+        first.mkdir()
+        second.mkdir()
+        link = area.tmp / "current"
+        link.symlink_to(first, target_is_directory=True)
+        FolderStore(area.state).add(link, "mine")
+        link.unlink()
+        link.symlink_to(second, target_is_directory=True)
+        error = str(refused(area.files, "mine:m.gguf"))
+        assert str(area.tmp) not in error and "llm-cli tools folders add" in error
+        folder = write(models_dir(framework) / "notes" / "readme.txt", b"not a model").parent
+        with pytest.raises(ValueError) as info:
+            framework.build_service.start_build(TestBuildServiceForAICallers().build(model="models:notes"))
+        assert "models:notes" in str(info.value) and str(folder.parent) not in str(info.value)
+
+    def test_ai_client_credentials_and_moved_config_folders_are_denied(self, tmp_path, monkeypatch):
+        """The framework never reads an AI client's credentials (principle 5): on Linux Claude Code keeps them in
+        ~/.claude, not in ~/.config; an XDG_CONFIG_HOME or GNUPGHOME elsewhere is denied like ~/.config."""
+        home = isolated_home(tmp_path)
+        monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+        monkeypatch.setenv("GNUPGHOME", str(tmp_path / "gpg"))
+        denied = denied_folders(tmp_path / "state")
+        for secret in (write(home / ".claude" / ".credentials.json", b"{}"), write(home / ".claude.json", b"{}"),
+                       write(home / ".codex" / "auth.json", b"{}"), write(home / ".gemini" / "oauth.json", b"{}"),
+                       write(tmp_path / "cfg" / "gh" / "hosts.yml", b"x"), write(tmp_path / "gpg" / "key", b"x")):
+            assert denied_reason(secret, denied) is not None, secret
