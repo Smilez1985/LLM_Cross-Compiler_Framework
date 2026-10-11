@@ -287,6 +287,20 @@ def test_an_exact_format_is_no_redaction_gap(kind, value):
     assert value not in helpers.redact_secrets(f"request failed: {value}\n")
 
 
+# Letters of other scripts are word characters for Python's \w and \b, but not for GitHub's detector or gitleaks
+# (whose \b is ASCII): a token glued to "é" or to Chinese text is still a token, for the scan and for redaction.
+NON_ASCII_NEIGHBOURS = ["é{}é", "令牌{}无效", "Ä{}ß", " {} "]
+
+
+@pytest.mark.parametrize("kind, value", EXACT_SAMPLES)
+def test_an_exact_format_next_to_letters_of_other_scripts_is_reported_and_redacted(kind, value):
+    for context in NON_ASCII_NEIGHBOURS:
+        text = context.format(value)
+        assert secret_patterns.find_exact_formats(text) == [(kind, value)], context
+        assert [(f.kind, f.exact) for f in secret_scan.scan_text("notes.md", text)] == [(kind, True)], context
+        assert value not in helpers.redact_secrets(f"request failed: {text}\n"), context
+
+
 @pytest.mark.parametrize("kind, value", EXACT_SAMPLES)
 def test_a_value_split_into_literals_is_not_reported(kind, value):
     # How tests write such a value: the same string at runtime, but no exact-format text in the file.
@@ -355,6 +369,61 @@ def test_exact_formats_are_reported_in_staged_tracked_and_push_mode(repo, capsys
     git(repo, "add", "test_fakes.py")
     assert secret_scan.main(["--repo", str(repo), "--staged"]) == 0
     assert secret_scan.main(["--repo", str(repo)]) == 0
+
+
+def stage(repo, path, content, mode="100644"):
+    """Put content into the index under path, without the file system (any name, symlinks on every platform)."""
+    sha = git(repo, "hash-object", "-w", "--stdin", stdin=content).stdout.strip()
+    git(repo, "-c", "core.protectNTFS=false", "update-index", "-z", "--add", "--index-info",
+        stdin=f"{mode} {sha}\t{path}\0")
+
+
+@pytest.mark.parametrize("name", ["line\nbreak.py", "0:stage.py", "2:x.py", "with space.py", "née.py"])
+def test_staged_mode_scans_files_whatever_their_name(repo, name, monkeypatch):
+    # A name is never read as a revision (":0:stage.py" is stage 0 of "stage.py") or split at a line break.
+    if sys.platform == "win32" and any(c in name for c in ":\n"):
+        pytest.skip("git for Windows refuses such a name in the index")
+    kind, value = EXACT_SAMPLES[0]
+    stage(repo, name, f'TOKEN = "{value}"\nKEY = "{SAMPLES["LocalAI key"]}"\n')
+    findings = secret_scan.scan_staged(repo, [])
+    assert [(f.where, f.line, f.kind, f.exact) for f in findings] == [
+        (f"{name} (staged)", 1, kind, True), (f"{name} (staged)", 2, "LocalAI key", False)]
+    git(repo, "commit", "-qm", "odd name", "--no-verify")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"refs/heads/main {head} refs/heads/main {'0' * 40}\n"))
+    assert secret_scan.main(["--repo", str(repo), "--push"]) == 1
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 1
+
+
+def test_staged_mode_scans_a_file_that_replaced_a_symlink(repo):
+    # A type change (symlink -> file) is neither added nor modified for git diff's filter.
+    stage(repo, "link.py", "target.py", mode="120000")
+    git(repo, "commit", "-qm", "link", "--no-verify")
+    assert secret_scan.main(["--repo", str(repo), "--staged"]) == 0
+    stage(repo, "link.py", f'TOKEN = "{EXACT_SAMPLES[2][1]}"\n')
+    assert "T\tlink.py" in git(repo, "diff", "--cached", "--name-status").stdout
+    assert [(f.where, f.kind, f.exact) for f in secret_scan.scan_staged(repo, [])] == [
+        ("link.py (staged)", "GitHub token", True)]
+
+
+def test_two_staged_files_with_the_same_content_are_both_reported(repo):
+    for name in ("a.py", "b.py"):
+        stage(repo, name, f'TOKEN = "{EXACT_SAMPLES[0][1]}"\n')
+    assert [f.where for f in secret_scan.scan_staged(repo, [])] == ["a.py (staged)", "b.py (staged)"]
+
+
+def test_a_text_file_too_big_for_the_full_scan_is_still_checked_for_exact_formats(repo, monkeypatch):
+    # GitHub reads files of any size in a push up to 50 MB; only the cheap exact-format check runs on them.
+    monkeypatch.setattr(secret_scan, "MAX_BYTES", 1000)
+    big = "x = 1\n" * 300 + f'TOKEN = "{EXACT_SAMPLES[0][1]}"  # {secret_scan.ALLOW_PRAGMA}\n'
+    big += f'KEY = "{SAMPLES["LocalAI key"]}"\n'
+    findings = secret_scan.scan_blob("big.py", big.encode(), [])
+    assert [(f.line, f.kind, f.exact) for f in findings] == [(301, EXACT_SAMPLES[0][0], True)]
+    assert secret_scan.scan_blob("big.bin", b"\0" + big.encode(), []) == []  # binary: skipped as before
+    (repo / "big.py").write_text(big)
+    stage(repo, "big.py", big)
+    assert secret_scan.main(["--repo", str(repo), "--staged"]) == 1
+    assert secret_scan.main(["--repo", str(repo)]) == 1
 
 
 def test_mixed_findings_show_both_hints(capsys, tmp_path):

@@ -20,8 +20,9 @@ file named by SECRET_SCAN_PATTERNS_FILE. Findings are printed redacted; local pa
 A line containing "secret-scan: allow" is skipped (use it for documented fake values only), and so are obvious
 placeholders - except values in the exact format of a token that GitHub push protection blocks (hf_ and 34
 letters, ghp_ and 36 characters, ...; EXACT_FORMATS in the table): GitHub refuses the push however fake such a value
-looks and ignores the marker, so the scan reports them in every mode. Build such a test value at runtime
-("hf_" "abc..." or "hf_" + "abc...") or give it a shape the format does not allow.
+looks and ignores the marker, so the scan reports them in every mode, also in text files over MAX_BYTES (which the
+other rules skip). Build such a test value at runtime ("hf_" "abc..." or "hf_" + "abc...") or give it a shape the
+format does not allow.
 Exit code: 0 clean, 1 findings, 2 usage or git error. Standard library only.
 """
 
@@ -34,7 +35,7 @@ import sys
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, List, Optional, Sequence, Tuple
+from typing import Dict, Iterable, Iterator, List, Optional, Sequence, Tuple
 
 MAX_BYTES = 5_000_000
 ALLOW_PRAGMA = "secret-scan: allow"
@@ -125,13 +126,14 @@ def load_local_patterns(repo: Path) -> List["re.Pattern[str]"]:
     return patterns
 
 
-def scan_text(where: str, text: str, local: Sequence["re.Pattern[str]"] = ()) -> List[Finding]:
+def scan_text(where: str, text: str, local: Sequence["re.Pattern[str]"] = (), exact_only: bool = False
+              ) -> List[Finding]:
     findings = []
     for number, line in enumerate(text.splitlines(), 1):
         # Before the marker: GitHub blocks these values whatever the line says.
         exact = find_exact_formats(line)
         findings += [Finding(where, number, kind, redact(match), exact=True) for kind, match in exact]
-        if ALLOW_PRAGMA in line:
+        if exact_only or ALLOW_PRAGMA in line:
             continue
         for kind, match in find_secrets(line):
             if not any(value in match or match in value for _, value in exact):  # each value reported once
@@ -155,9 +157,11 @@ def check_name(path: str) -> Optional[Finding]:
 
 
 def scan_blob(where: str, data: bytes, local: Sequence["re.Pattern[str]"]) -> List[Finding]:
-    if len(data) > MAX_BYTES or b"\0" in data[:8192]:
+    if b"\0" in data[:8192]:
         return []
-    return scan_text(where, data.decode("utf-8", "replace"), local)
+    # A text file too big for every rule still gets the exact formats: GitHub reads files of any size (it skips only
+    # pushes over 50 MB), and one search rules out nearly every line.
+    return scan_text(where, data.decode("utf-8", "replace"), local, exact_only=len(data) > MAX_BYTES)
 
 
 def _git(repo: Path, *args: str, check: bool = True, data: Optional[bytes] = None) -> str:
@@ -217,10 +221,18 @@ def scan_tracked(repo: Path, local) -> List[Finding]:
 
 
 def scan_staged(repo: Path, local) -> List[Finding]:
-    paths = [p for p in _git(repo, "diff", "--cached", "--name-only", "-z", "--diff-filter=ACMR").split("\0") if p]
-    findings = [f for f in map(check_name, paths) if f]
-    for spec, data in _read_blobs(repo, [":" + p for p in paths]):
-        findings += scan_blob(spec[1:] + " (staged)", data, local)
+    # The index's object ids, not ":<path>": a name such as "0:x.py" would read as stage 0 of "x.py", and one with a
+    # line break would split the batch. T: a file that replaced a symlink is a type change, not a modification.
+    fields = _git(repo, "diff", "--cached", "--raw", "-z", "--no-abbrev", "--no-renames",
+                  "--diff-filter=ACMT").split("\0")
+    entries = list(zip(fields[0::2], fields[1::2]))  # (":<old mode> <new mode> <old id> <new id> <status>", path)
+    staged: Dict[str, List[str]] = {}  # object id -> the paths with that content
+    for meta, path in entries:
+        staged.setdefault(meta.split()[3], []).append(path)
+    findings = [f for f in (check_name(path) for _, path in entries) if f]
+    for sha, data in _read_blobs(repo, list(staged)):
+        for path in staged[sha]:
+            findings += scan_blob(path + " (staged)", data, local)
     return findings
 
 

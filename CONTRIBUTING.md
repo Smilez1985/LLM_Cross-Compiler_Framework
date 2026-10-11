@@ -285,7 +285,7 @@ provider's exact token format, however fake the value looks: `hf_` followed by 3
 marker `secret-scan: allow`. So the scan reports such values even when they look like placeholders, and the marker
 does not silence these findings; the message says that GitHub will block the push. This holds in every mode:
 `--push` and `--history` also report older commits that still contain such a value, because a push of those commits
-would be refused as well. The formats are `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py` (Hugging
+would be refused as well. It also holds for text files over 5 MB, which the other rules skip. The formats are `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py` (Hugging
 Face, GitHub, AWS, Slack, GitLab, Stripe, PyPI, OpenAI, Anthropic, OpenRouter, Groq, xAI, Perplexity, Replicate).
 Build such a test value at runtime instead, so the file never contains it as one piece:
 

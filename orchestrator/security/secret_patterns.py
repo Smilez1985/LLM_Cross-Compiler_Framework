@@ -35,9 +35,11 @@ def _rule(name: str, regex: str, replacement: str = "REDACTED", *, scan: bool = 
 def _key(start: str, rest: str) -> str:
     """A key beginning with `start` (a fixed-width regex) at the start of a word, or right after an escape
     ("\\nhf_...", "\\x00hf_...", "\\u00a0hf_...") or a percent-encoded character ("%20sk-..."), where \\b alone
-    would miss it. The literal comes first, so the regex engine can search for it quickly."""
+    would miss it. The literal comes first, so the regex engine can search for it quickly. Word characters are
+    ASCII ones, as for GitHub's detector: a key right after "é" or Chinese text ("令牌hf_...") is still a key."""
     escapes = (r"\\[nrt]", r"\\x[0-9A-Fa-f]{2}", r"\\u[0-9A-Fa-f]{4}", r"%[0-9A-Fa-f]{2}")
-    return start + r"(?:(?<!\w" + start + ")" + "".join("|(?<=" + e + start + ")" for e in escapes) + ")" + rest
+    return (start + r"(?:(?<![A-Za-z0-9_]" + start + ")" + "".join("|(?<=" + e + start + ")" for e in escapes) + ")"
+            + rest)
 
 
 # An optional quote, also escaped as in JSON inside a JSON string ("{\"api_key\": \"...\"}").
@@ -63,7 +65,7 @@ PATTERNS: Tuple[SecretPattern, ...] = (
           "gh-REDACTED"),
     # With the version and checksum after the dot that a routable token carries.
     _rule("GitLab token", _key("glpat-", r"[A-Za-z0-9_\-]{20,}(?:\.[0-9a-z]{9}(?![A-Za-z0-9_\-]))?")),
-    _rule("AWS access key id", _key("A[KS]IA", r"[A-Z0-9]{16}\b")),
+    _rule("AWS access key id", _key("A[KS]IA", r"[A-Z0-9]{16}(?![A-Za-z0-9_])")),
     _rule("AWS secret key",
           r"(?i)aws_secret_access_key" + _Q + r"?\s*[:=]\s*" + _Q + r"?(?P<secret>[A-Za-z0-9/+]{40})\b",
           hints=("aws_secret_access_key",)),
@@ -171,7 +173,7 @@ EXACT_FORMATS: Tuple[ExactFormat, ...] = (
            ("api_org_", r"[A-Za-z]{34}(?![A-Za-z0-9])")),
     _exact("GitHub token", ("gh[pousr]_", r"[A-Za-z0-9]{36}(?![A-Za-z0-9])"),
            ("github_pat_", r"[A-Za-z0-9_]{82}(?![A-Za-z0-9_])")),
-    _exact("AWS access key id", ("A[KS]IA", r"[A-Z0-9]{16}\b")),
+    _exact("AWS access key id", ("A[KS]IA", r"[A-Z0-9]{16}(?![A-Za-z0-9_])")),
     _exact("Slack token", ("xox[abprs]-", r"[0-9]{10,13}-[0-9]{10,13}[A-Za-z0-9\-]*")),
     _exact("GitLab token", ("glpat-", r"[A-Za-z0-9_\-]{20}(?![A-Za-z0-9_\-])"),
            ("glpat-", r"[A-Za-z0-9_\-]{27,300}\.[0-9a-z]{9}(?![A-Za-z0-9_\-])")),
