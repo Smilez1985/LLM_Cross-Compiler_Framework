@@ -1289,3 +1289,24 @@ def test_serve_keeps_any_library_output_off_stdout(tmp_path):
     assert result.stdout == "", f"stdout belongs to the MCP protocol: {result.stdout!r}"
     for line in ("print at exit", "log at exit", "fd write at exit"):
         assert line in result.stderr, result.stderr
+
+
+# --- Adversarial pass ------------------------------------------------------------------------------
+
+def test_serve_on_windows_never_runs_programs_from_the_working_directory(monkeypatch):
+    """The Windows variant of the -P fix: CreateProcess (and shutil.which) look in the working directory before
+    PATH unless NoDefaultCurrentDirectoryInExePath is set. Claude Code starts the server inside the project, and
+    the framework runs 'docker buildx version' while it starts, so a project's docker.exe would run."""
+    from click.testing import CliRunner
+    from orchestrator import cli as cli_module
+    monkeypatch.setenv("NoDefaultCurrentDirectoryInExePath", "")  # so that the test restores the environment
+    monkeypatch.delenv("NoDefaultCurrentDirectoryInExePath")
+    seen = []
+
+    def require_framework(self):
+        seen.append(os.environ.get("NoDefaultCurrentDirectoryInExePath"))
+        sys.exit(1)
+    monkeypatch.setattr(cli_module.FrameworkContext, "require_framework", require_framework)
+    monkeypatch.setattr(sys, "platform", "win32")
+    result = CliRunner().invoke(cli_module.cli, ["-q", "mcp", "serve"], obj=cli_module.FrameworkContext())
+    assert seen == ["1"], f"set before the framework starts: {seen} {result.exception!r}"

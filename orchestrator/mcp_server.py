@@ -366,6 +366,14 @@ def _stdout_fd_to_stderr(stdout) -> None:
         stdout.flush()
 
 
+def no_programs_from_the_working_directory() -> None:
+    """Windows looks for a program such as docker or git in the working directory before PATH (CreateProcess,
+    shutil.which), and clients start the server inside a project. This turns that off for the server and every
+    process it starts, as -P does for imports. Call it before the framework starts (it checks Docker)."""
+    if sys.platform == "win32":
+        os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
+
+
 def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765) -> None:
     if transport == "stdio":
         server = build_mcp_server(framework, lifespan=_stdout_to_stderr)
