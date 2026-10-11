@@ -535,8 +535,12 @@ recommendation.
 - **Isolation:** `llama-server` listens on 127.0.0.1 only, on a free port. A new random API key per start reaches it
   only through a key file readable by you, and the framework checks that the server refuses requests without the
   key. The web UI and the slots endpoint are off, and the server runs with `--offline`. Options that would give the
-  model its own tools, agent mode, MCP servers, remote computing or a key on the command line are refused, and
-  environment variables that could set server options or look like secrets are removed.
+  model its own tools, agent mode, MCP servers, remote computing or a key on the command line are refused. The
+  server starts with a cleared environment: besides your home folder, a fixed `PATH` and the C locale it only gets
+  the variables that choose GPUs or locate GPU drivers (`CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`,
+  `ROCR_VISIBLE_DEVICES`, `GGML_VK_VISIBLE_DEVICES`, `HSA_OVERRIDE_GFX_VERSION`, the Vulkan driver variables,
+  `LD_LIBRARY_PATH` and a few more), so no `LLAMA_*` option, no `GGML_BACKEND_PATH` library, no proxy and no key
+  reaches it.
 - **GPU offload:** with a GPU build, as many layers as fit go to the GPU.
 - **Idle:** the model is unloaded after 600 idle seconds and reloaded on the next request (`--sleep-idle`).
 - **State and log:** `~/.llm-framework/runtime/llama.cpp/` holds the builds and the server state, which is trusted
@@ -581,8 +585,9 @@ download then stays only as an explicit choice, shown as "not self-built".
   everything that changes the binaries, so a stored build is reused and never stamped again. Only a build verified on
   this machine can become the active one; retention keeps the active build, the CPU fallback, the build a running
   server uses and the two newest others. A build made on another of your machines can be imported: every file is
-  checked against its manifest and the commit against the pin, you confirm before any of its programs runs, and then
-  it is verified like a local build.
+  checked against its manifest, the build ID against its plan and the commit against the pin, you confirm before any
+  of its programs runs, and then it is verified like a local build. The version it must report comes from the pin,
+  not from the archive, and every program in it is checked, also one the archive does not list.
 - **Measured** on a 4-core x86-64 virtual machine (GCC 13.3, `-j4`): `llama-server` and `llama-bench` at the pin in
   189 seconds including the checks, 28 MB of binaries.
 

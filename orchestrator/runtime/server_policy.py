@@ -9,15 +9,17 @@ systemd unit and the Docker command) takes the forbidden flags and the environme
   UI, remote compute (RPC), state endpoints or a key on the command line. None of them may reach a command line.
   Self-built servers are also compiled without subprocess support (LLAMA_SUBPROCESS=OFF), so even a forbidden
   --tools would fail; the list is still needed for the in-process file tools and the other options.
-- Environment variables are a second way to set every llama-server option (LLAMA_ARG_*, LLAMA_API_KEY):
-  server_env() drops them and every variable that looks like a secret; cleared_env() starts from nothing.
+- Environment variables are a second way to set every llama-server option (LLAMA_ARG_*, LLAMA_API_KEY), and
+  llama.cpp reads more of them: GGML_BACKEND_PATH loads a library into the server, AIP_MODE/AIP_HTTP_PORT move its
+  port. So every launcher starts from a cleared environment (cleared_env: HOME, a fixed PATH, the C locale);
+  server_env() for Ditto's server adds only the variables of SERVER_ENV_PASS from the caller's environment (which GPUs
+  the server sees and where the GPU drivers are), nothing else: no LLAMA_*, no proxy, no token.
 
 SERVER_TOOLS_CHECK is the one deliberate exception: the build verification starts a freshly built llama-server with
 --tools once, with a model path that does not exist and a cleared environment, and requires it to refuse.
 """
 
 import os
-import re
 from pathlib import Path
 from typing import Dict, List, Mapping, Optional, Sequence
 
@@ -27,7 +29,15 @@ FORBIDDEN_FLAGS = frozenset({
     "--slot-save-path", "--models-dir", "--models-preset", "--path", "-hf", "--hf-repo", "-mu", "--model-url",
     "--rpc", "--slots", "--metrics",
 })
-_SECRET_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH", re.IGNORECASE)
+# What Ditto's server may still take from the caller's environment (decision D22: a cleared environment for every
+# launcher): GPU selection of the CUDA, ROCm and Vulkan backends and where the GPU drivers and the Vulkan loader's
+# driver manifests are. LD_LIBRARY_PATH stays because some systems find the NVIDIA driver library only through it;
+# it already applies to the framework's own process.
+SERVER_ENV_PASS = frozenset({
+    "CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES", "GPU_DEVICE_ORDINAL",
+    "HSA_OVERRIDE_GFX_VERSION", "GGML_VK_VISIBLE_DEVICES", "VK_ICD_FILENAMES", "VK_DRIVER_FILES",
+    "VK_ADD_DRIVER_FILES", "LD_LIBRARY_PATH",
+})
 # The PATH a cleared environment gets: the binaries are always started by their absolute path, so this only serves
 # whatever a C library itself might look up.
 CLEARED_PATH = "/usr/bin:/bin" if os.name != "nt" else ""
@@ -61,9 +71,13 @@ def check_command(cmd: Sequence[str]) -> None:
 
 
 def server_env(base: Optional[Mapping[str, str]] = None) -> Dict[str, str]:
-    """The environment of Ditto's server: the caller's, without LLAMA_* (option twins) and without secrets."""
+    """The environment of Ditto's server: a cleared environment (with the user's home folder) plus the GPU selection
+    and driver variables of SERVER_ENV_PASS from the caller's environment. Nothing else passes."""
     env = dict(os.environ if base is None else base)
-    return {k: v for k, v in env.items() if not k.upper().startswith("LLAMA_") and not _SECRET_ENV.search(k)}
+    home = env.get("HOME") or env.get("USERPROFILE") or str(Path.home())
+    out = cleared_env(Path(home))
+    out.update({k: v for k, v in env.items() if k.upper() in SERVER_ENV_PASS})
+    return out
 
 
 def cleared_env(home: Path, *, path: Optional[str] = None) -> Dict[str, str]:

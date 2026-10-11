@@ -237,6 +237,9 @@ class TestDerivedOptions:
         o = p.options()
         assert o["GGML_CPU_ALL_VARIANTS"] == "ON" and o["CMAKE_INSTALL_RPATH"] == "$ORIGIN;$ORIGIN/../lib"
         assert o["CMAKE_SHARED_LINKER_FLAGS"] == "-static-libstdc++ -static-libgcc"
+        # GGML_BACKEND_DL builds the CPU variants as MODULE libraries (ggml/src/CMakeLists.txt:381-383 at the pin),
+        # which CMake links with CMAKE_MODULE_LINKER_FLAGS: without it they need the base's libstdc++.so.6.
+        assert o["CMAKE_MODULE_LINKER_FLAGS"] == "-static-libstdc++ -static-libgcc"
 
     def test_host_tools_are_cpu_builds_in_the_target_image(self):
         p = plan("host_tools_container")

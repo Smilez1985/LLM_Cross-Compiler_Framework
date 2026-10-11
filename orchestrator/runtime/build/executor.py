@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from orchestrator.runtime.build.recipe import BuildPlan, PlanError, check_download_options
-from orchestrator.runtime.build.toolchain import DetectedToolchain
+from orchestrator.runtime.build.toolchain import DetectedToolchain, host_resources, parallel_jobs
 from orchestrator.utils.sandbox import container_sandbox, hand_over, sandbox_user
 
 BUILDER_DOCKERFILE = Path(__file__).resolve().with_name("builder.Dockerfile")
@@ -206,6 +206,12 @@ class DockerEngine(ContainerEngine):
             _quiet(lambda: container.remove(force=True))
 
 
+def _catalog_per_job_mib(backend: str) -> int:
+    """The estimated peak memory of one compile job of `backend` (configs/llama_runtime.yml, build_jobs)."""
+    from orchestrator.runtime.catalog import load_catalog
+    return load_catalog().build_jobs.per_job_mib(backend)
+
+
 def _quiet(fn: Callable[[], Any]) -> None:
     try:
         fn()
@@ -231,7 +237,9 @@ class BuildExecutor:
     def __init__(self, runner: Optional[ProcessRunner] = None, engine: Optional[ContainerEngine] = None, *,
                  configure_timeout: float = CONFIGURE_TIMEOUT, build_timeout: float = BUILD_TIMEOUT,
                  pids_limit: int = 4096, mem_limit: Optional[str] = None,
-                 log: Optional[Callable[[str], None]] = None, dockerfile: Path = BUILDER_DOCKERFILE):
+                 log: Optional[Callable[[str], None]] = None, dockerfile: Path = BUILDER_DOCKERFILE,
+                 per_job_mib: Optional[Callable[[str], int]] = None):
+        self.per_job_mib = per_job_mib or _catalog_per_job_mib
         self.runner = runner or default_process_runner
         self.engine = engine
         self.configure_timeout = configure_timeout
@@ -283,13 +291,17 @@ class BuildExecutor:
             raise BuildError("configure tried to fetch or download something, which a build must never do: "
                              + " | ".join(fetched[:3]), log)
 
-    def build(self, plan: BuildPlan, *, source: Path, work: Path, jobs: int,
+    def build(self, plan: BuildPlan, *, source: Path, work: Path, jobs: Optional[int] = None,
               toolchain: Optional[DetectedToolchain] = None, ccache_dir: Optional[Path] = None) -> BuildResult:
-        """Builds `plan` from the verified source tree `source` in the new folder `work`."""
+        """Builds `plan` from the verified source tree `source` in the new folder `work`. Without `jobs` (the user's
+        choice), -j follows the memory (design 3.5): min(CPUs, available RAM / the catalog's estimate per job)."""
         self._check_plan(plan)
         source = Path(source).resolve()
         if not (source / "CMakeLists.txt").is_file():
             raise BuildError(f"{source} is not a llama.cpp source tree")
+        if jobs is None:
+            cpus, ram = (toolchain.cpus, toolchain.ram_available_mib) if toolchain is not None else host_resources()
+            jobs = parallel_jobs(cpus, ram, self.per_job_mib(plan.backend))
         jobs = max(1, int(jobs))
         dirs = self._prepare(work)
         started = time.monotonic()

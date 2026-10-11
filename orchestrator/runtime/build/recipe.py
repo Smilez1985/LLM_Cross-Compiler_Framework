@@ -36,7 +36,8 @@ from orchestrator.runtime.catalog import BuildBase, CudaToolkit, RuntimeCatalog,
 from orchestrator.runtime.profile import HardwareProfile
 
 RECIPE_VERSION = 2  # bump when the same inputs give different options: every build ID changes with it
-# 2: Linux Clang builds use OpenMP only with a usable libomp; ARM CPU variants need a compiler that knows +sme
+# 2: Linux Clang builds use OpenMP only with a usable libomp; ARM CPU variants need a compiler that knows +sme;
+#    the CPU variant modules of device builds link the C++ runtime statically too
 
 PURPOSES = ("host-runtime", "host-tools", "device-runtime")
 PLACEMENTS = ("native", "container", "cross", "on-device")
@@ -282,6 +283,62 @@ class BuildPlan:
 
     def to_json(self) -> str:
         return json.dumps(self.as_dict(), indent=2, sort_keys=True) + "\n"
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "BuildPlan":
+        """The plan of as_dict() back, from a file that may come from elsewhere (an imported build.json): every
+        field is type-checked and the options go through the same character check as a computed plan. Raises
+        PlanError. The build ID is taken as written; build_id_of(plan.id_inputs()) tells whether it fits."""
+        def mapping(value: Any, what: str) -> Mapping[str, Any]:
+            if not isinstance(value, Mapping):
+                raise PlanError(f"{what} is not a mapping")
+            return value
+
+        def text(value: Any, what: str) -> str:
+            if not isinstance(value, str):
+                raise PlanError(f"{what} is not text")
+            return value
+
+        if not isinstance(data, Mapping):
+            raise PlanError("the plan is not a mapping")
+        raw_steps = data.get("steps")
+        if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= 4:
+            raise PlanError("the plan has no build steps")
+        steps = []
+        for raw in raw_steps:
+            raw = mapping(raw, "a build step")
+            options = mapping(raw.get("options"), "the options of a build step")
+            pairs = tuple(sorted((text(k, "an option name"), text(v, "an option value")) for k, v in options.items()))
+            for name, value in pairs:
+                if not _RE_OPTION_NAME.fullmatch(name) or not _RE_OPTION_VALUE.fullmatch(value):
+                    raise PlanError(f"option {name[:64]!r} has unexpected characters")
+            targets = raw.get("targets")
+            if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+                raise PlanError("the targets of a build step are not a list of names")
+            toolchain_file = raw.get("toolchain_file")
+            if toolchain_file is not None:
+                text(toolchain_file, "the toolchain file")
+            steps.append(BuildStep(text(raw.get("name"), "a step name"), text(raw.get("compiler"), "a compiler"),
+                                   text(raw.get("generator"), "a generator"), pairs, tuple(targets), toolchain_file))
+        source = mapping(data.get("source"), "source")
+        target = mapping(data.get("target"), "target")
+        for key in ("commit", "tag"):
+            text(source.get(key), f"source.{key}")
+        for key in ("os", "arch"):
+            text(target.get(key), f"target.{key}")
+        recipe_version = data.get("recipe_version")
+        if not isinstance(recipe_version, int) or isinstance(recipe_version, bool):
+            raise PlanError("recipe_version is not a number")
+        notes = data.get("notes") or []
+        if not isinstance(notes, list):
+            raise PlanError("notes is not a list")
+        return cls(recipe_version=recipe_version, purpose=text(data.get("purpose"), "purpose"),
+                   placement=text(data.get("placement"), "placement"), backend=text(data.get("backend"), "backend"),
+                   source=dict(source), target={"libc": None, **target},
+                   builder=dict(mapping(data.get("builder"), "builder")), steps=tuple(steps),
+                   toolchain=dict(mapping(data.get("toolchain"), "toolchain")),
+                   verify=dict(mapping(data.get("verify") or {}, "verify")), notes=tuple(str(n) for n in notes),
+                   build_id=str(data.get("build_id") or ""))
 
 
 def build_id_of(inputs: Mapping[str, Any]) -> str:
@@ -883,6 +940,9 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
         options["CMAKE_EXE_LINKER_FLAGS"] = _STATIC_RUNTIME
         if shared:
             options["CMAKE_SHARED_LINKER_FLAGS"] = _STATIC_RUNTIME
+            # GGML_BACKEND_DL builds the backends (the CPU variants) as MODULE libraries
+            # (ggml/src/CMakeLists.txt:381-383), which CMake links with the module flags, not the shared ones.
+            options["CMAKE_MODULE_LINKER_FLAGS"] = _STATIC_RUNTIME
         if openmp:
             runtime_libs.append("libgomp.so.1")
         options["CMAKE_INSTALL_RPATH"] = _DEVICE_RPATH if openmp else "$ORIGIN"
