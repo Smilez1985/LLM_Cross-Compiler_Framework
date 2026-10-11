@@ -18,6 +18,7 @@ from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.policy import PolicyStore, ToolTier
 from orchestrator.tools.registry import ToolError, ToolRegistry, ToolSpec
+from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.untrusted import sanitize_untrusted
 
 
@@ -144,62 +145,24 @@ AUDIT_KEY_ID = "audit-hmac-key"
 _KEY_THREAD_LOCK = threading.Lock()
 
 
-def _lock_file(fd: int, deadline: float) -> bool:
-    """True once locked, False if the file system cannot lock; TimeoutError when another holder stays."""
-    while True:
-        try:
-            if os.name == "nt":
-                import msvcrt
-                os.lseek(fd, 0, os.SEEK_SET)
-                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
-            else:
-                import fcntl
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            return True
-        except OSError as e:
-            if os.name != "nt" and not isinstance(e, BlockingIOError):
-                return False
-            if time.monotonic() >= deadline:
-                raise TimeoutError("another process holds the audit key lock") from e
-            time.sleep(0.05)
-
-
-def _unlock_file(fd: int) -> None:
-    try:
-        if os.name == "nt":
-            import msvcrt
-            os.lseek(fd, 0, os.SEEK_SET)
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(fd, fcntl.LOCK_UN)
-    except OSError:
-        pass  # closing the file releases it as well
-
-
 @contextlib.contextmanager
 def _key_lock(state_dir: Path, timeout: float = 30.0):
     """Serializes the audit key's get-or-create between threads and processes (GUI, CLI, MCP servers) with a
-    lock file in the per-user folder. Without a usable lock file it goes on unlocked."""
+    lock file in the per-user folder (the shared file_lock helper). Without a usable lock file it goes on
+    unlocked."""
     deadline = time.monotonic() + timeout
     if not _KEY_THREAD_LOCK.acquire(timeout=timeout):
         raise TimeoutError("another thread holds the audit key lock")
     try:
-        try:
-            state_dir.mkdir(parents=True, exist_ok=True)
-            fd = os.open(state_dir / "audit-key.lock", os.O_RDWR | os.O_CREAT, 0o600)
-        except OSError:
-            fd = None
-        try:
-            locked = fd is not None and _lock_file(fd, deadline)
+        with contextlib.ExitStack() as stack:
             try:
-                yield
-            finally:
-                if locked:
-                    _unlock_file(fd)
-        finally:
-            if fd is not None:
-                os.close(fd)
+                remaining = max(0.0, deadline - time.monotonic())
+                stack.enter_context(file_lock(Path(state_dir) / "audit-key.lock", timeout=remaining))
+            except TimeoutError:  # LockTimeout: another process holds it
+                raise
+            except (OSError, NotImplementedError):
+                pass  # no usable lock file (a file in the way, a read-only folder): go on unlocked
+            yield
     finally:
         _KEY_THREAD_LOCK.release()
 
