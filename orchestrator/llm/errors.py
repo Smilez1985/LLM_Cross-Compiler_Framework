@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 Errors of the LLM layer. str(error) is a user-facing message: it never contains an API key, and provider
-text is passed through redact_secrets before it is shown.
+text is passed through redact_secrets before it is shown. Errors with a known cause carry `code` and `actions`
+and are AuthErrors (orchestrator/llm/auth/errors.py), which also recognizes the causes.
 """
 
 import email.utils
-import re
 import time
-from typing import Any, Optional, Tuple
+from typing import Any, Optional, Sequence
 
 from orchestrator.utils.helpers import redact_secrets
 
@@ -16,12 +16,13 @@ class LLMError(Exception):
     retryable = False
 
     def __init__(self, message: str, *, provider: str = "", status: Optional[int] = None,
-                 request_id: Optional[str] = None, code: Optional[str] = None):
+                 request_id: Optional[str] = None, code: Optional[str] = None, actions: Sequence[Any] = ()):
         super().__init__(redact_secrets(message))
         self.provider = provider
         self.status = status
         self.request_id = request_id
         self.code = code  # a known cause, e.g. "anthropic.workspace_required"; None for the generic mapping
+        self.actions = tuple(actions)  # AuthAction: what the user can do next (GUI buttons, CLI "Next:" lines)
 
 
 class NotConfigured(LLMError):
@@ -88,24 +89,25 @@ class InvalidOutput(LLMError):
     """The answer did not match the requested JSON schema, also after one repair attempt."""
 
 
-# Known Claude API causes in plain language.
+# Known Claude API causes in plain language (the texts live in the auth error table).
 ANTHROPIC_WORKSPACE_REQUIRED = (
     "This Claude API key belongs to your account, not to one workspace. Enter the workspace ID (wrkspc_..., "
     "Console > Settings > Workspaces) in the AI settings, or create a key limited to one workspace.")
 ANTHROPIC_WORKSPACE_INVALID = "The workspace ID is not valid. It looks like wrkspc_..."
-ANTHROPIC_WORKSPACE_NOT_FOUND = "This key has no access to workspace {workspace}."
 ANTHROPIC_ADMIN_KEY = "This is an Admin API key. Ditto needs a normal API key (Console > Settings > API keys)."
 ANTHROPIC_AUTH = "Claude rejected the key: it is wrong, was revoked, or has expired."
-ANTHROPIC_PROFILE = "The Anthropic CLI profile{name} cannot be used. Run `ant auth login`."
-_WORKSPACE_NOT_FOUND = re.compile(r"workspace\s+`?([A-Za-z0-9_-]+)`?\s+not found", re.I)
 
 
 def rejected_key_error(preset: Any) -> NotConfigured:
-    """The key in use is of a kind the provider refuses for chat (preset.reject_key_prefixes)."""
+    """The key in use is of a kind the provider refuses for chat (an admin key, the method's reject_prefixes)."""
+    from orchestrator.llm.auth.errors import auth_error
     if preset.adapter == "anthropic":
-        return NotConfigured(ANTHROPIC_ADMIN_KEY, provider=preset.id, code="anthropic.admin_key")
-    return NotConfigured(f"{preset.label}: this is an admin or management key, which cannot be used for chat. "
-                         "Create a normal API key.", provider=preset.id, code=f"{preset.id}.admin_key")
+        return auth_error("anthropic.admin_key", provider=preset.id)
+    if preset.id == "openai":
+        return auth_error("openai.admin_key", provider=preset.id)
+    return auth_error(f"{preset.id}.admin_key", provider=preset.id,
+                      message=f"{preset.label}: this is an admin or management key, which cannot be used for chat. "
+                              "Create a normal API key.")
 
 
 def parse_retry_after(headers: Any) -> Optional[float]:
@@ -166,30 +168,39 @@ def _status_error(status: int, detail: str, label: str, *, retry_after: Optional
     return BadRequest(f"{label} rejected the request ({status}). ({detail})", **kw)
 
 
-def _anthropic_cause(status: int, detail: str) -> Optional[Tuple[str, str]]:
-    """(code, message) for Claude API answers that have a specific fix."""
-    lowered = detail.lower()
-    if status == 400 and "anthropic-workspace-id is required" in lowered:
-        return "anthropic.workspace_required", ANTHROPIC_WORKSPACE_REQUIRED
-    if status == 400 and "anthropic-workspace-id" in lowered and "valid workspace id" in lowered:
-        return "anthropic.workspace_invalid", ANTHROPIC_WORKSPACE_INVALID
-    if status == 404:
-        found = _WORKSPACE_NOT_FOUND.search(detail)
-        if found:
-            return "anthropic.workspace_not_found", ANTHROPIC_WORKSPACE_NOT_FOUND.format(workspace=found.group(1))
-    if status == 401:
-        return "anthropic.auth", ANTHROPIC_AUTH
-    return None
+status_error = _status_error  # the generic class and message for an HTTP status (also used by the credential check)
 
 
-def _profile_message(profile: str) -> str:
-    return ANTHROPIC_PROFILE.format(name=f" '{profile}'" if profile else "")
+def _known_cause(err: Any, detail: str, label: str, kw: dict, generic: LLMError, *, preset: Any, base_url: Any,
+                 profile: Optional[str] = None, error_type: Optional[str] = None, error_code: Optional[str] = None,
+                 retry_after: Optional[float] = None) -> LLMError:
+    """The generic error, or an AuthError with code and actions when the answer has a known cause."""
+    if preset is None:
+        return generic
+    from orchestrator.llm.auth.errors import auth_error, classify, engine_name
+    try:
+        body = err.response.json()  # the whole answer: the SDKs keep only its "error" part as err.body
+    except Exception:
+        body = getattr(err, "body", None)
+    found = classify(preset, err.status_code, detail, body, headers=err.response.headers,
+                     base_url=base_url, profile=profile is not None, error_type=error_type, error_code=error_code)
+    if found is None:
+        return generic
+    code, values = found
+    kind = None  # the table row decides the class: a spend cap is not a rate limit to retry
+    if code == "anthropic.profile":
+        values = {**values, "profile": f" '{profile}'" if profile else ""}
+        kind = "auth_failed"  # the profile's token was rejected (401); a profile that cannot be read is not
+    from orchestrator.llm.auth.store import display_origin
+    return auth_error(code, detail=detail, kind=kind, retry_after=retry_after, provider_label=label,
+                      engine=engine_name(preset), url=display_origin(base_url), **values, **kw)
 
 
 def map_anthropic_error(err: BaseException, label: str = "Claude API", provider: str = "anthropic", *,
-                        profile: Optional[str] = None) -> LLMError:
+                        profile: Optional[str] = None, preset: Any = None, base_url: Optional[str] = None) -> LLMError:
     """Maps anthropic SDK exceptions, most specific class first. `profile` is set (the profile name, or "" when
-    unknown) when the request was signed in with an `ant auth login` profile instead of an API key."""
+    unknown) when the request was signed in with an `ant auth login` profile instead of an API key. With `preset`,
+    answers with a known cause become AuthErrors (code, plain message, actions)."""
     import anthropic
 
     if isinstance(err, LLMError):
@@ -203,25 +214,38 @@ def map_anthropic_error(err: BaseException, label: str = "Claude API", provider:
         kw.update(status=err.status_code, request_id=getattr(err, "request_id", None))
         retry_after = parse_retry_after(err.response.headers)
         detail = _detail(err)
-        cause = _anthropic_cause(err.status_code, detail)
-        if cause is not None and cause[0] == "anthropic.auth" and profile is not None:
-            cause = "anthropic.profile", _profile_message(profile)  # no key involved
-        if cause is not None:
-            code, message = cause
-            cls = AuthFailed if code in ("anthropic.auth", "anthropic.profile") else NotConfigured
-            return cls(f"{message} ({detail})", code=code, **kw)
         error_type = getattr(err, "type", None)
-        code = "insufficient_quota" if error_type == "billing_error" else None
-        return _status_error(err.status_code, detail, label, retry_after=retry_after, code=code, kw=kw)
+        generic = _status_error(err.status_code, detail, label, retry_after=retry_after,
+                                code="insufficient_quota" if error_type == "billing_error" else None, kw=kw)
+        return _known_cause(err, detail, label, kw, generic, preset=preset if preset is not None else _CLAUDE,
+                            base_url=base_url, profile=profile, error_type=error_type, retry_after=retry_after)
     credentials_error = getattr(anthropic, "CredentialsError", None)
     if credentials_error is not None and isinstance(err, credentials_error):
-        return NotConfigured(f"{_profile_message(profile or '')} ({redact_secrets(str(err))[:300]})",
-                             code="anthropic.profile", **kw)
+        from orchestrator.llm.auth.errors import auth_error
+        return auth_error("anthropic.profile", detail=redact_secrets(str(err))[:300],
+                          profile=f" '{profile}'" if profile else "", **kw)
     return LLMError(f"{label} request failed: {redact_secrets(str(err))[:300]}", **kw)
 
 
-def map_openai_error(err: BaseException, label: str = "OpenAI-compatible server", provider: str = "") -> LLMError:
-    """Maps openai SDK exceptions, most specific class first."""
+class _ClaudeAPI:
+    """Stands in for the preset when a caller passes none: the Claude API's own causes still apply."""
+    adapter = "anthropic"
+    id = "anthropic"
+    label = "Claude API"
+    base_url = "https://api.anthropic.com"
+
+    @staticmethod
+    def is_local(url=None) -> bool:
+        return False
+
+
+_CLAUDE = _ClaudeAPI()
+
+
+def map_openai_error(err: BaseException, label: str = "OpenAI-compatible server", provider: str = "", *,
+                     preset: Any = None, base_url: Optional[str] = None) -> LLMError:
+    """Maps openai SDK exceptions, most specific class first. With `preset`, answers with a known cause become
+    AuthErrors (code, plain message, actions), and a local server that is not running says so."""
     import openai
 
     if isinstance(err, LLMError):
@@ -230,10 +254,18 @@ def map_openai_error(err: BaseException, label: str = "OpenAI-compatible server"
     if isinstance(err, openai.APITimeoutError):
         return ProviderTimeout(f"{label} did not answer in time.", **kw)
     if isinstance(err, openai.APIConnectionError):
+        if preset is not None and preset.is_local(base_url):
+            from orchestrator.llm.auth.errors import auth_error, engine_name
+            from orchestrator.llm.auth.store import display_origin
+            return auth_error("local.not_running", engine=engine_name(preset), url=display_origin(base_url),
+                              hint=" or check the address", **kw)
         return ProviderUnavailable(f"Could not connect to {label}. Is the server running and the URL correct?", **kw)
     if isinstance(err, openai.APIStatusError):
         kw.update(status=err.status_code, request_id=getattr(err, "request_id", None))
         retry_after = parse_retry_after(err.response.headers)
         code = getattr(err, "code", None)
-        return _status_error(err.status_code, _detail(err), label, retry_after=retry_after, code=code, kw=kw)
+        detail = _detail(err)
+        generic = _status_error(err.status_code, detail, label, retry_after=retry_after, code=code, kw=kw)
+        return _known_cause(err, detail, label, kw, generic, preset=preset, base_url=base_url, error_code=code,
+                            retry_after=retry_after)
     return LLMError(f"{label} request failed: {redact_secrets(str(err))[:300]}", **kw)

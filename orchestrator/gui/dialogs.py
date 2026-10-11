@@ -20,7 +20,9 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PySide6.QtCore import QObject, Qt, Signal
-from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, rejected_key_error
+from orchestrator.llm.auth.spec import KEY_TYPES
+from orchestrator.llm.auth.store import CredentialStore
+from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, LLMError, rejected_key_error
 from orchestrator.llm.providers.anthropic import WORKSPACE_ID, takes_workspace_id
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import get_instance as get_i18n
@@ -360,11 +362,17 @@ class AIConfigurationDialog(QDialog):
     def _secrets(self):
         return getattr(self.framework, 'secrets_manager', None)
 
+    def _key_method(self, preset):
+        return next((m for m in preset.methods if m.type in KEY_TYPES), None) if preset is not None else None
+
     def _stored_key(self) -> Optional[str]:
+        """Where the provider's key comes from ("vault", "env:<VARIABLE>"), None without one. A key bound to a
+        server address counts only for the address in the dialog."""
         preset, sm = self._preset(), self._secrets()
-        if preset is not None and preset.secret and sm:
-            return sm.get_secret(preset.secret)
-        return None
+        spec = self._key_method(preset)
+        if preset is None or not preset.secret or not sm or spec is None:
+            return None
+        return CredentialStore(sm).key_source(preset, spec, self._base_url(preset) or preset.base_url)
 
     def _key_required(self, preset) -> bool:
         # Presets that also work without a key (local servers) do not need one, nor does a provider whose other
@@ -392,9 +400,12 @@ class AIConfigurationDialog(QDialog):
         self.txt_base_url.setPlaceholderText(preset.base_url or "https://.../v1")
         self.btn_sign_in.setEnabled(self._sign_in_available(preset))
         self.btn_refresh_models.setEnabled(preset.live_models)
+        source = self._stored_key() if preset.secret else None
         if not preset.secret:
             self.txt_api_key.setPlaceholderText("Not needed for this provider")
-        elif self._stored_key():
+        elif source and source.startswith("env:"):
+            self.txt_api_key.setPlaceholderText(f"Using the key from the variable {source[4:]}")
+        elif source:
             self.txt_api_key.setPlaceholderText("******** (Stored in Keyring)")
         else:
             self.txt_api_key.setPlaceholderText("Paste API key" if self._key_required(preset) else "Optional API key")
@@ -565,7 +576,16 @@ class AIConfigurationDialog(QDialog):
             QMessageBox.warning(self, "Missing Model", "Please select or enter a model.")
             return
 
-        if api_key and preset.secret:
+        spec = self._key_method(preset)
+        if api_key and preset.secret and spec is not None:
+            # A key of a server whose address can be changed is stored for that address only.
+            try:
+                CredentialStore(self._secrets()).save_api_key(preset, spec, api_key,
+                                                              base_url=base_url or preset.base_url)
+            except (LLMError, ValueError) as e:
+                QMessageBox.critical(self, "Error", f"Failed to store the API key: {e}")
+                return
+        elif api_key and preset.secret:  # a user preset with a key name but no key method
             sm = self._secrets()
             if not sm or not sm.set_secret(preset.secret, api_key):
                 QMessageBox.critical(self, "Error", "Failed to store API key in the OS keyring.")

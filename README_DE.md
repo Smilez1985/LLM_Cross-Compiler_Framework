@@ -380,7 +380,10 @@ Offline-Modus. Auf einem Rechner ohne Bildschirm speicherst du den Schlüssel mi
 - **Anmeldung pro Anbieter** (die Schaltfläche **Sign in...**) gibt es noch nicht; sie wird gerade gebaut. Bis dahin
   arbeitet Ditto mit API-Schlüsseln. Bei `anthropic` hat der gespeicherte API-Schlüssel immer Vorrang; ein Profil aus
   `ant auth login` wird nur genutzt, wenn du es auswählst (Einstellung `ai_auth_anthropic: ant_profile`).
-  Admin-API-Schlüssel von Claude (`sk-ant-admin01-`) werden abgelehnt.
+  Admin-API-Schlüssel von Claude (`sk-ant-admin01-`) werden abgelehnt. Ohne gespeicherten Schlüssel wird ein
+  Schlüssel aus `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` oder `OPENROUTER_API_KEY` genutzt, und die
+  KI-Einstellungen nennen die Variable. Ein Schlüssel eines `custom`-Servers gehört zu der Adresse, für die er
+  gespeichert wurde, und geht nach einer Änderung der Basis-URL nicht mehr mit.
 - Einen Anbieter für ein Claude-Abo gibt es nicht: Anthropic erlaubt Drittanbieter-Apps nicht, Abo-Limits zu nutzen.
   Ein gespeicherter Anbieter `claude_code` bricht mit einer Meldung ab, die die Alternativen nennt; nutze MCP oder
   einen API-Schlüssel wie [oben](#schnellstart-ki-clients-über-mcp-claude-code-claude-desktop-vs-code) beschrieben.

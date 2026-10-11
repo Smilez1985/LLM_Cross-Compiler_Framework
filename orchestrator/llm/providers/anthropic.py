@@ -24,13 +24,14 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
+from orchestrator.llm.auth.spec import CLAUDE_API_HOST
 from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, NotConfigured, Refused, map_anthropic_error
 from orchestrator.llm.providers.base import DEFAULT_MAX_TOKENS, ProviderAdapter
 from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ModelInfo, NativeMessage, ToolCall,
                                     ToolSpecLLM, Usage)
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"  # pairs with the scalar form fallbacks="default"
-CLAUDE_API_HOSTS = ("api.anthropic.com",)
+CLAUDE_API_HOSTS = (CLAUDE_API_HOST,)
 WORKSPACE_HEADER = "anthropic-workspace-id"
 WORKSPACE_ID = re.compile(r"^wrkspc_[A-Za-z0-9]+\Z")
 
@@ -64,6 +65,7 @@ def claude_schema(schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 class AnthropicAdapter(ProviderAdapter):
     family = "anthropic"
+    credential_kinds = ("api_key", "anthropic_profile")
 
     def __init__(self, preset, *, auth: str = "api_key", oauth_profile: Optional[str] = None,
                  workspace_id: Optional[str] = None, **kw):
@@ -79,7 +81,8 @@ class AnthropicAdapter(ProviderAdapter):
 
     def _map_error(self, err: BaseException):
         profile = (self._profile or "") if self.auth == "ant_profile" else None
-        return map_anthropic_error(err, provider=self.provider, profile=profile)
+        return map_anthropic_error(err, provider=self.provider, profile=profile, preset=self.preset,
+                                   base_url=self.base_url)
 
     # --- client -------------------------------------------------------------------------------------------
     def client(self):
@@ -87,11 +90,17 @@ class AnthropicAdapter(ProviderAdapter):
             if self.workspace_id and not WORKSPACE_ID.match(self.workspace_id):
                 raise NotConfigured(ANTHROPIC_WORKSPACE_INVALID, provider=self.provider,
                                     code="anthropic.workspace_invalid")
+            self.check_credential_kind()
             import anthropic
             common: Dict[str, Any] = dict(base_url=self.base_url, max_retries=0,  # retries: LLMClient
                                           timeout=self.timeout)
+            # The workspace ID follows its own rule above (API key, Claude API only); other catalog fields go with
+            # the API key as declared.
+            headers = self.credential_headers(WORKSPACE_HEADER) if self.auth == "api_key" else {}
             if self.workspace_id:
-                common["default_headers"] = {WORKSPACE_HEADER: self.workspace_id}
+                headers[WORKSPACE_HEADER] = self.workspace_id
+            if headers:
+                common["default_headers"] = headers
             if self.http_client is not None:
                 common["http_client"] = self.http_client
             try:

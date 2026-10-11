@@ -37,14 +37,20 @@ per-user folder (`~/.llm-framework` or `LLM_FRAMEWORK_HOME`). It never uses the 
 The presets of every AI provider Ditto can talk to. A new model or an OpenAI-compatible server is an edit of this
 file, not of the code. The file starts with a comment that explains every field.
 
-Structure:
+Structure (schema 2; files of schema 1, where `auth` lists method names such as `[api_key, none]`, still load):
 
 ```yaml
-version: 1
+version: 2
 providers:
   <id>:
     label: "Shown name"
     adapter: anthropic | openai_responses | openai_compat
+    auth:                       # sign-in methods, preferred first
+      - id: api_key
+        type: api_key
+        key_page: https://...
+        env: [VENDOR_API_KEY]
+        validate: {path: /models}
     ...
 aliases:            # earlier values of the setting ai_provider
   OpenAI: openai
@@ -54,13 +60,13 @@ Fields of a preset:
 
 | Field | Meaning |
 |---|---|
-| `label` | Name shown in the AI settings. |
+| `label`, `group`, `category` | Name shown in the AI settings, the vendor it is grouped under, and its kind (`cloud_api`, `cloud_platform`, `aggregator`, `local_engine`, `mcp_reverse`). |
 | `adapter` | API family: `anthropic` (Anthropic SDK), `openai_responses` (OpenAI Responses API), `openai_compat` (any OpenAI-compatible server through the OpenAI SDK). |
-| `base_url`, `base_url_configurable` | Endpoint. Cloud presets keep their fixed endpoint; only presets with `base_url_configurable: true` (Ollama, custom) accept the setting `ai_base_url`. |
+| `base_url`, `base_url_configurable` | Endpoint. Cloud presets keep their fixed endpoint; only presets with `base_url_configurable: true` (Ollama, custom) accept the setting `ai_base_url`. A key of such a preset belongs to the address it was saved for and is never sent to another one. |
 | `runtime_endpoint` | `true` for the managed local server: address, key and model come from the running server, not from the settings. |
 | `location` | `cloud` (the privacy filter applies), `local` (never filtered) or `auto` (decided from the host of the address: loopback, private networks and `*.local` count as local). |
-| `auth` | Accepted methods, preferred first: `api_key`, `oauth`, `none`. |
-| `secret` | Name of the API key in the encrypted secrets store, for example `openai_api_key`. Set it with `llm-cli secrets set <name>` or in the AI settings. |
+| `auth` | Sign-in methods, preferred first; the first usable one is used unless the setting `ai_auth_<provider>` names one. Fields of a method below. |
+| `secret` | The name earlier versions stored the API key under, for example `openai_api_key`; `llm-cli secrets set <name>` and the AI settings still accept it. The vault keeps the key as `cred/<provider>/<method>`. |
 | `models` | Default model per task (`chat`, `tools`, `json`, `healing`), `default` for the rest. |
 | `suggested_models`, `live_models` | Offered model names; with `live_models: true` (the default) the list is loaded from the provider. |
 | `efforts`, `effort_map`, `reasoning` | Default effort per task, translation of the effort levels for this provider, and how effort is sent (`none`, `reasoning_effort`, `reasoning_object`). |
@@ -68,11 +74,25 @@ Fields of a preset:
 | `no_tools_with_response_format` | `true` if the server ignores tools when a JSON schema is set (llama-server). |
 | `headers`, `docs_url` | Extra request headers and a documentation link. |
 
+Fields of a sign-in method (`auth` entry):
+
+| Field | Meaning |
+|---|---|
+| `id`, `type`, `label` | Id (lower case; the setting `ai_auth_<provider>` names it), type and the name on its card. Types: `none`, `bearer_optional` (a local engine whose key is optional), `api_key`, `cli_session` (an official vendor CLI owns the session, such as `ant auth login`), and `oauth_pkce_loopback`, `oauth_other`, `oauth_device_code`, `cloud_credential_chain`, `short_lived_token`, which are refused until their sign-in flows exist. |
+| `key_page`, `where` | Where the user creates and revokes the key (https), or for a local engine where its settings show it. |
+| `env` | Environment variables used as the key when none is stored. The AI settings name the variable; it is never copied into the vault. |
+| `reject_prefixes` | Key kinds refused before any request, for example `sk-ant-admin01-` (Admin API keys). |
+| `fields` | Values that are not secret: `id`, `label`, `pattern` (must match in full), `header` (sent with the key), `setting` (a setting that holds the value too and wins while it is set) and `invalid_code` (the error for a value that does not match). |
+| `validate` | The free check behind "Check": a GET with `path` (below `base_url`) or `url`, `account_field` or `account_header` (names the account), `models_field` (counted as models), `public: true` for an endpoint that answers without a key. |
+| `opt_in` | Never picked automatically, only when `ai_auth_<provider>` names it. An `ant auth login` profile is always opt-in. |
+| `cli`, `oauth`, `sources` | The vendor CLI's install page and login/logout commands, the endpoints of a later sign-in flow, and the primary sources of the method's facts. |
+
 Presets in the file: `anthropic`, `openai`, `google` (Gemini through its OpenAI-compatible endpoint),
-`openrouter`, `ollama`, `local` (the managed llama-server) and `custom` (any OpenAI-compatible server). The file
-still contains a preset `claude_code` that runs Ditto through a Claude subscription; Anthropic does not allow
-third-party apps to use subscription logins, so it is not a supported feature and is being removed (see the
-[roadmap](../docs/BLUEPRINT.md#roadmap)).
+`openrouter`, `ollama`, `local` (the managed llama-server) and `custom` (any OpenAI-compatible server).
+
+Sign-in details that are not secret (the account or workspace, the last four characters of a key, the fields,
+when it was checked) are kept in `auth.json` next to the credential vault (`~/.llm-framework` or
+`LLM_FRAMEWORK_HOME`), never in this file.
 
 **Your own presets:** a file named `llm_providers.yml` in the config folder adds presets or replaces them by id, and
 adds aliases. This applies only if the config folder is not the installation's `configs/` (otherwise both are the
@@ -86,7 +106,7 @@ python -c "from orchestrator.llm.catalog import load_catalog; print(load_catalog
 ```
 
 Unknown fields or wrong values stop with a validation error. `tests/test_llm.py` covers the loader and the
-override.
+override, `tests/test_auth_core.py` both schema versions and the sign-in methods.
 
 ## llama_runtime.yml
 

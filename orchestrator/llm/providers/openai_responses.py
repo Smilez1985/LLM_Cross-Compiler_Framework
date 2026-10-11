@@ -35,9 +35,11 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         if self._client is None:
             if not self._api_key:
                 raise NotConfigured("No OpenAI API key is stored. Add one in the AI settings.", provider=self.provider)
+            self.check_credential_kind()
             import openai
             kwargs = dict(api_key=self._api_key, base_url=self.base_url, max_retries=0, timeout=self.timeout,
-                          default_headers={**self.preset.headers, "Authorization": f"Bearer {self._api_key}"})
+                          default_headers={**self.preset.headers, **self.credential_headers("Authorization"),
+                                           "Authorization": f"Bearer {self._api_key}"})
             if self.http_client is not None:
                 kwargs["http_client"] = self.http_client
             self._client = openai.OpenAI(**kwargs)
@@ -81,7 +83,8 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         try:
             response = client.responses.create(**params)
         except Exception as e:
-            raise map_openai_error(e, label="OpenAI", provider=self.provider) from None
+            raise map_openai_error(e, label="OpenAI", provider=self.provider, preset=self.preset,
+                                   base_url=self.base_url) from None
         return self.to_result(response, model)
 
     def to_result(self, response: Any, requested_model: str) -> ChatResult:
@@ -132,7 +135,8 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         try:
             return [ModelInfo(id=m.id, display_name=m.id) for m in self.client().models.list()]
         except Exception as e:
-            raise map_openai_error(e, label="OpenAI", provider=self.provider) from None
+            raise map_openai_error(e, label="OpenAI", provider=self.provider, preset=self.preset,
+                                   base_url=self.base_url) from None
 
 
 def _leading_system(messages: List[Message]) -> List[Message]:

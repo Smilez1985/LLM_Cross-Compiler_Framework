@@ -276,6 +276,28 @@ class TestAIConfigurationDialog:
         dlg2._save_config()
         assert framework.secrets_manager.store == {"custom_api_key": "custom-secret"}
 
+    def test_custom_key_belongs_to_the_address_it_was_saved_for(self, qapp, tmp_path, memory_keyring,
+                                                                 message_boxes):
+        from orchestrator.Core.secrets_manager import SecretsManager, credential_name
+        vault = SecretsManager(tmp_path / "state")
+        assert vault.initialize(), vault.storage_error
+        fw = FakeFramework(ConfigManager(tmp_path), vault)
+        key = "custom-" + "secret-0123456789"
+        dlg = AIConfigurationDialog(fw)
+        select_provider(dlg, "custom")
+        dlg.cb_model.setCurrentText("my-model")
+        dlg.txt_base_url.setText("http://192.168.1.20:8000/v1")
+        dlg.txt_api_key.setText(key)
+        dlg._save_config()
+        assert message_boxes == [] and dlg.result() == dialogs.QDialog.Accepted
+        assert vault.list_secrets() == [credential_name("custom", "api_key", "http://192.168.1.20:8000")]
+
+        dlg2 = AIConfigurationDialog(fw)
+        assert "Stored" in dlg2.txt_api_key.placeholderText()
+        dlg2.txt_base_url.setText("http://192.168.1.21:8000/v1")  # another server: its key is not this one
+        dlg2._apply_enabled_state()
+        assert "Stored" not in dlg2.txt_api_key.placeholderText()
+
     def test_invalid_base_url_is_rejected(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "ollama")

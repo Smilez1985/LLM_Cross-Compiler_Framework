@@ -221,30 +221,44 @@ are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what 
 
 | ID | Kind | Where it runs | Sign-in today |
 |---|---|---|---|
-| `anthropic` | Anthropic Claude API | cloud | API key (`anthropic_api_key`) |
-| `openai` | OpenAI Responses API | cloud | API key (`openai_api_key`) |
-| `google` | Gemini, OpenAI-compatible endpoint | cloud | API key (`gemini_api_key`) |
-| `openrouter` | OpenRouter | cloud | API key (`openrouter_api_key`) |
+| `anthropic` | Anthropic Claude API | cloud | API key (`anthropic_api_key`, or `ANTHROPIC_API_KEY`) |
+| `openai` | OpenAI Responses API | cloud | API key (`openai_api_key`, or `OPENAI_API_KEY`) |
+| `google` | Gemini, OpenAI-compatible endpoint | cloud | API key (`gemini_api_key`, or `GEMINI_API_KEY`) |
+| `openrouter` | OpenRouter | cloud | API key (`openrouter_api_key`, or `OPENROUTER_API_KEY`) |
 | `ollama` | Ollama | local (base URL configurable) | none |
 | `local` | managed llama-server | local | per-start key, handled for you |
-| `custom` | any OpenAI-compatible server | decided from the address: loopback, private and link-local addresses and names ending in `.local`, `.lan`, `.localhost` or `.home.arpa` count as local | API key (`custom_api_key`) or none |
+| `custom` | any OpenAI-compatible server | decided from the address: loopback, private and link-local addresses and names ending in `.local`, `.lan`, `.localhost` or `.home.arpa` count as local | API key of the server address (`custom_api_key`) or none |
 
 - Cloud providers have fixed addresses; a base URL left over from Ollama or a custom server never receives their key.
+- A key of a custom server belongs to the address it was saved for (scheme, host and port): after the base URL
+  changes it is no longer sent, and the new server needs its own key.
+- Each provider lists its sign-in methods in `configs/llm_providers.yml` in the order they are preferred; the
+  first usable one is used unless `ai_auth_<provider>` names one. A key in one of the environment variables in
+  the table above is used only when no key is stored, and the AI settings show the variable as its source; it
+  is never copied into the vault.
+- A free check (the provider's model list, OpenRouter's key endpoint) tells whether the stored key works, which
+  workspace or key name it belongs to and how many models it can use. Sign-in details that are not secret
+  (account or workspace, the last four characters of a key, when it was checked) are kept in `auth.json` next to
+  the credential vault.
 - The model list in the settings is loaded live from the provider; any model name can also be typed.
 - A file `llm_providers.yml` in your settings folder adds or replaces providers by ID, so a new
   OpenAI-compatible server needs no code change.
 - **Claude API (`anthropic`):** the stored API key always comes first. An `ant auth login` profile is used only
   when you choose it (`ai_auth_anthropic: ant_profile`; the earlier value `oauth` means the same). A key that is
   valid in every workspace of the organization needs the workspace ID (AI settings field "Workspace ID", setting
-  `ai_anthropic_workspace_id`, `wrkspc_...`); it is sent only with the API key and only to the Claude API. Admin
-  API keys (`sk-ant-admin01-`) are refused before any request.
+  `ai_anthropic_workspace_id`, `wrkspc_...`; while set, it wins over a workspace ID stored with the key); it is
+  sent only with the API key and only to the Claude API. Admin API keys (`sk-ant-admin01-`) are refused before
+  any request.
+- **OpenAI (`openai`):** an organization and a project stored with the key (`org-...`, `proj_...`) go with it as
+  the `OpenAI-Organization` and `OpenAI-Project` headers; a key that works but may not list models is reported as
+  such, and the model ID can be typed.
 - There is no `claude_code` provider (Ditto through a Claude subscription): Anthropic does not allow third-party
   apps to use subscription limits. A saved `claude_code` (also in the fallback chain or `--provider`) stops with a
   message naming the alternatives; such an entry in your own `llm_providers.yml` is skipped with a warning. Claude
   subscribers use the framework from Claude Code or Claude Desktop over [MCP](#mcp-server), or with an API key
   (Max and Team plans include monthly API credits).
-- The SDKs never take a credential, header or address from the environment: every client gets the key and base
-  URL explicitly, and `OPENAI_CUSTOM_HEADERS` / `ANTHROPIC_CUSTOM_HEADERS` are removed at startup with a warning
+- The SDKs never read a credential, header or address from the environment themselves: every client gets the
+  key and base URL explicitly, and `OPENAI_CUSTOM_HEADERS` / `ANTHROPIC_CUSTOM_HEADERS` are removed at startup with a warning
   (setting `ai_allow_sdk_env_headers: true` keeps them).
 
 ### Calls, retries and fallback
