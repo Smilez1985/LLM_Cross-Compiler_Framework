@@ -237,7 +237,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The knowledge snapshot of a new target module is opt-in (a check box on the wizard's last page) and holds only
   the pages crawled for that target in the wizard, all of them: Finish stays disabled while a crawl runs. Before,
   the whole local knowledge base went into every module. A `README.md` next to it says what it holds and that the
-  framework does not import it.
+  framework does not import it; when nothing could be attached, the wizard says so.
 - Target modules created with the wizard, `llm-cli module create` or Ditto get a `capabilities:` block (support
   level community: their boards, and GGUF with the types their build script handles), so the Builder, the CLI
   and AI clients check their build settings. Generation fails if a template placeholder is left anywhere except in
@@ -294,8 +294,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
   hidden prompt.
 - The Deep Ingest dialog opens with the settings `crawler_max_depth`, `crawler_download_pdfs` and
-  `crawler_rate_limit` (delays below a second and depth 0 possible); before, its fixed values (2, PDFs on, 1 s)
-  always overrode them.
+  `crawler_rate_limit` (depth 0 and delays below a second possible, larger values kept); before, its fixed values
+  (2, PDFs on, 1 s) always overrode them.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped

@@ -698,8 +698,9 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   the checked address, so a DNS answer cannot be switched in between.
 - The Deep Ingest dialog sets, for each crawl, the link depth (0 to 5; 0 reads only the entered pages), whether PDFs
   are read and the delay between requests (0 to 10 s, fractions of a second allowed). It opens with the settings
-  `crawler_max_depth` (default 2), `crawler_download_pdfs` (default on) and `crawler_rate_limit` (default 1 s); what
-  you change in the dialog applies to that crawl only.
+  `crawler_max_depth` (default 2), `crawler_download_pdfs` (default on) and `crawler_rate_limit` (default 1 s); a
+  larger configured depth or delay is kept and raises the upper end. What you change in the dialog applies to that
+  crawl only.
 - From the settings: at most `crawler_max_pages` pages per entered URL (default 50), and only pages in the
   languages of `crawler_languages` (default English and German; an empty list keeps all). A crawl also stops after
   five times as many requests as its page limit (redirects and failed fetches count too).
@@ -722,7 +723,7 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   example "disallowed by robots.txt", "X-Robots-Tag: noai", "TDM reservation (...)", "redirect from ... leaves the
   crawled site", "language 'fr' is not one of de, en", "PDF downloads are switched off", "neither HTML nor PDF
   (image/png)", "no text" or "PDF support (pypdf) is not installed", and every page that could not be fetched or read
-  (HTTP status, unreadable PDF, too many redirects). Each fetched page counts toward the page limit, stored or not.
+  (HTTP status, unreadable PDF, too many redirects). Each page that arrives (HTTP 200) counts toward the page limit, stored or not.
   Site reservations and failures make the outcome partial; the other reasons do not.
 
 ### Spoken announcements
@@ -883,7 +884,8 @@ The GUI's input fields offer what you used recently, newest first.
   by default, available after a Deep Ingest in the wizard) writes the pages crawled from the wizard's Deep Ingest
   URLs, privacy-scrubbed, to `knowledge/initial_knowledge.json` in the new target, with a `README.md` that says
   what it holds. While a Deep Ingest is still running, the wizard's **Finish** stays disabled (the page says why),
-  so the snapshot holds every crawled page. The rest of your knowledge base never goes into a module, and
+  so the snapshot holds every crawled page; if no stored page comes from those URLs, the wizard says that no
+  snapshot was attached. The rest of your knowledge base never goes into a module, and
   `llm-cli module create` and `module generate-ai` attach nothing. The framework does not import such a snapshot
   into a knowledge base; to share knowledge, export a knowledge pack.
 - **Export for community:** the wizard's last page also offers **Export for community after creating** (see

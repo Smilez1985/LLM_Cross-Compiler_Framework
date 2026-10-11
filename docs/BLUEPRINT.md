@@ -418,14 +418,15 @@ judge that yourself.
    notice comes back when its text changes, and also when the file is missing or damaged.
 3. **Options and snapshot.** The Deep Ingest dialog takes the start URLs and, for this crawl, the depth (0 to 5),
    PDF downloads and the delay between requests (0 to 10 seconds, fractions allowed). It opens with the settings
-   `crawler_max_depth`, `crawler_download_pdfs` and `crawler_rate_limit`; the values in the dialog decide. The
-   page limit `crawler_max_pages` (default 50) and the languages `crawler_languages` (default `en` and `de`) come
-   from the settings. There is no switch for robots.txt or any other opt-out. Before each start URL the knowledge
-   base saves a snapshot of itself in `knowledge_snapshots/` (the last five are kept; an empty knowledge base gets
+   `crawler_max_depth`, `crawler_download_pdfs` and `crawler_rate_limit` (a larger configured depth or delay raises
+   the upper end, so the dialog never cuts a setting down); the values in the dialog decide. The page limit
+   `crawler_max_pages` (default 50) and the languages `crawler_languages` (default `en` and `de`) come from the
+   settings. There is no switch for robots.txt or any other opt-out. Before each start URL the knowledge base
+   saves a snapshot of itself in `knowledge_snapshots/` (the last five are kept; an empty knowledge base gets
    none). Neither the GUI nor the CLI can restore a snapshot yet.
 4. **Checks before the request.** For each URL, breadth-first, in this order: the SSRF check of the address (see
-   [Security model](#security-model)), then, with PDF downloads off, the skip of a URL ending in `.pdf`, the host's
-   robots.txt and `/.well-known/tdmrep.json` of the origin (scheme, host and port; each fetched once). Both
+   [Security model](#security-model)), then, with PDF downloads off, the skip of a URL ending in `.pdf`, the
+   origin's robots.txt and `/.well-known/tdmrep.json` (origin: scheme, host and port; each file fetched once). Both
    files are fetched through the same SSRF guard as the pages, and every redirect hop on the way is checked again.
 5. **Request.** The wizard shows "Page N of M: <url>", and the crawler waits the delay between requests (a Stop
    cuts it short). The request does not follow redirects: a redirect target is queued and goes through steps 4

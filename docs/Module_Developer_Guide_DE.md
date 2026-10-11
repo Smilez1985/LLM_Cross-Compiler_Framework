@@ -179,7 +179,8 @@ einschalten, wenn in diesem Assistenten Deep Ingest gelaufen ist. Dann exportier
 von den in diesem Assistenten eingegebenen URLs gecrawlt wurden, datenschutzbereinigt (Home-Ordner, Adressen, Host-
 und Benutzernamen, Schlüssel), nach `knowledge/initial_knowledge.json`, mit einer `README.md` daneben, die sagt,
 was die Datei enthält. Solange ein Deep Ingest noch läuft, bleibt Finish gesperrt, damit der Schnappschuss jede
-gecrawlte Seite enthält. Sonst kommt nichts aus deiner Wissensbasis in das Modul, und ohne das Kästchen gibt es
+gecrawlte Seite enthält; stammt keine gespeicherte Seite von diesen URLs, sagt der Assistent, dass kein
+Schnappschuss angehängt wurde. Sonst kommt nichts aus deiner Wissensbasis in das Modul, und ohne das Kästchen gibt es
 keinen Ordner `knowledge/`. `llm-cli module create` und `generate-ai` hängen nie Wissen an. Das Framework nimmt
 diese Datei nicht in eine Wissensbasis auf, und die Platzhalterprüfung des Generators lässt sie aus (gecrawlte
 Seiten können durchaus Text wie `YYYY-MM-DD` enthalten). Die Seiten bleiben unter den Bedingungen ihrer Eigentümer;

@@ -173,7 +173,8 @@ target (Deep Ingest, privacy scrub applied)" is off by default and can only be s
 this wizard. Then the generator exports only the pages crawled from the URLs you entered in this wizard,
 privacy-scrubbed (home folders, addresses, host and user names, keys), to `knowledge/initial_knowledge.json`, with a
 `README.md` next to it that says what the file holds. While a Deep Ingest is still running, Finish stays disabled,
-so the snapshot holds every crawled page. Nothing else from your knowledge base goes into the module, and without
+so the snapshot holds every crawled page; if no stored page comes from those URLs, the wizard says that no snapshot
+was attached. Nothing else from your knowledge base goes into the module, and without
 the check box there is no `knowledge/` folder. `llm-cli module create` and `generate-ai` never attach knowledge.
 The framework does not import that file into a knowledge base, and the generator's placeholder check leaves it out
 (crawled pages may well contain text like `YYYY-MM-DD`). The pages remain under their owners' terms; the licence of
