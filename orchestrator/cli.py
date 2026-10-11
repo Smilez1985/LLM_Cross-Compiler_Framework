@@ -1469,48 +1469,6 @@ def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, tr
         sys.exit(1)
 
 # ============================================================================
-# SWARM COMMAND (NEU V2.0)
-# ============================================================================
-
-@cli.group()
-def swarm():
-    """Interact with Swarm Memory (Knowledge Base)"""
-    pass
-
-@swarm.command('upload')
-@click.argument('file_path', type=click.Path(exists=True))
-@click.option('--user', default="CLI_User", help="Contributor Username")
-@pass_context
-def swarm_upload(ctx: FrameworkContext, file_path, user):
-    """
-    Encrypt and upload a Knowledge Base export to the Swarm.
-    Uses 'Fake-Encryption' (XOR+Wingdings) for obfuscation.
-    """
-    ctx.require_framework()
-    cm = ctx.framework_manager.community_manager
-    if not cm:
-        console.print("[red]Community Manager not loaded.[/red]")
-        sys.exit(1)
-        
-    # Get Token from Secrets
-    sm = ctx.framework_manager.secrets_manager
-    token = sm.get_secret("github_token") if sm else None
-    
-    if not token:
-        console.print("[red]No GitHub Token found in secrets![/red]")
-        console.print("Use 'llm-cli secrets set github_token <TOKEN>' first.")
-        sys.exit(1)
-
-    with console.status(f"Encrypting & Uploading {file_path}...", spinner="dots"):
-        success = cm.upload_knowledge_to_swarm(file_path, token, user)
-        
-    if success:
-        console.print("[bold green]✅ Upload successful! You are now part of the Swarm.[/bold green]")
-    else:
-        console.print("[bold red]❌ Upload failed. Check logs.[/bold red]")
-        sys.exit(1)
-
-# ============================================================================
 # SCAN COMMAND (NEU V2.0)
 # ============================================================================
 
