@@ -539,7 +539,7 @@ build_sandbox: true           # Sandbox für Konvertierungs-Container
 build_memory_limit: ""        # z. B. 24g; leer = kein Limit
 build_pids_limit: 4096        # Prozesslimit im Container
 build_jobs: 0                 # parallele Compile-Jobs beim Image-Build; 0 = alle Kerne
-crawler_max_depth: 2          # gilt nicht im Deep-Ingest-Dialog, der eine eigene Tiefe setzt
+crawler_max_depth: 2          # Linktiefe, mit der sich der Deep-Ingest-Dialog öffnet
 rag_reranker: auto            # auto (nach Hardware gewählt), off oder die ID eines Cross-Encoder-Modells
 rag_rerank_default: false     # true: jede Suche neu bewerten (Standard: nur Build-Empfehlungen)
 rag_rerank_min_score: 0.0     # Relevanzschwelle 0..1; 0 = die kalibrierte Schwelle des Modells (0,2)

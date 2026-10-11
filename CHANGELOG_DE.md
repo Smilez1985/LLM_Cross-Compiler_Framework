@@ -81,8 +81,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `<meta name="robots">` / `<meta name="llm-conversion-framework-bot">` mit `noindex`, `none`, `noai` oder
   `noimageai` markiert sind, folgt den Links von `nofollow`-Seiten nicht und beachtet das W3C TDM Reservation
   Protocol (`/.well-known/tdmrep.json` je Site, Header und Meta-Tag `tdm-reservation`, PDF-Metadaten).
-  Weiterleitungsziele auf anderen Hosts werden genauso geprüft. Jede übersprungene Seite steht mit ihrem Grund im
-  Crawl-Protokoll. Keine dieser Prüfungen lässt sich abschalten.
+  Weiterleitungsziele auf anderen Hosts werden genauso geprüft. Jede Seite, die nicht gespeichert wird, steht mit
+  ihrem Grund im Crawl-Protokoll. Keine dieser Prüfungen lässt sich abschalten.
 - **Hinweis vor dem ersten Deep Ingest** (Englisch und Deutsch): was gelesen wird (nur öffentlich erreichbare
   Seiten), welche Vorbehalte beachtet werden, dass das Wissen auf diesem Computer bleibt und dass beim Weitergeben
   Quelle und Lizenz erhalten bleiben und deine ausdrückliche Freigabe nötig ist. Er ist eine Information, keine
@@ -268,12 +268,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   API-Schlüsseln. Image-Digests (`name@sha256:...`) und die Pfade von Standardkonten wie `/root` oder
   `/home/runner` bleiben, wie sie sind, sodass ein bereinigtes Target weiterhin baut.
 - Der Wissens-Snapshot eines neuen Target-Moduls ist freiwillig (ein Kontrollkästchen auf der letzten Seite des
-  Assistenten) und enthält nur die Seiten, die im Assistenten für dieses Target gecrawlt wurden; vorher ging die
-  ganze lokale Wissensbasis in jedes Modul.
+  Assistenten) und enthält nur die Seiten, die im Assistenten für dieses Target gecrawlt wurden, und zwar alle:
+  Finish bleibt gesperrt, solange ein Crawl läuft. Vorher ging die ganze lokale Wissensbasis in jedes Modul. Eine
+  `README.md` daneben sagt, was er enthält und dass das Framework ihn nicht einliest.
 - Target-Module, die mit dem Assistenten, `llm-cli module create` oder Ditto erstellt werden, bekommen einen Block
   `capabilities:` (Support-Level community: ihre Boards und GGUF mit den Typen, die ihr Build-Skript verarbeitet),
   sodass Builder, CLI und KI-Clients ihre Build-Einstellungen prüfen. Die Erzeugung schlägt fehl, wenn irgendwo ein
-  Platzhalter der Vorlage übrig bleibt.
+  Platzhalter der Vorlage übrig bleibt, außer im Wissens-Snapshot, dessen gecrawlte Seiten Text wie `YYYY-MM-DD`
+  enthalten dürfen.
 - **Tresor für Zugangsdaten im Format v2**: Jeder Eintrag trägt eine Schlüssel-ID, und der Schlüssel des Tresors
   lässt sich wechseln (jeder Eintrag wird neu verschlüsselt, der alte Schlüssel entfernt; ein unterbrochener
   Wechsel wird beim nächsten Start abgeschlossen). Jeder Tresor hält seinen Schlüssel in einem eigenen Eintrag im
@@ -331,6 +333,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Die CLI und die CLI-Anleitungen raten nicht mehr dazu, das GitHub-Token auf der Kommandozeile zu übergeben, wo
   der Shell-Verlauf es behält (diese Form funktionierte auch nicht). `llm-cli secrets set <name>` fragt den Wert
   verdeckt ab.
+- Der Deep-Ingest-Dialog öffnet sich mit den Einstellungen `crawler_max_depth`, `crawler_download_pdfs` und
+  `crawler_rate_limit` (Pausen unter einer Sekunde und Tiefe 0 möglich); vorher setzten sich seine festen Werte
+  (2, PDFs an, 1 s) immer über sie hinweg.
 
 ### Sicherheit
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
@@ -340,10 +345,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Anfragen an lokale Modellserver auf 127.0.0.1 laufen nie über einen HTTP(S)-Proxy aus der Umgebung.
 - Downloads lokaler Modelle werden abgelehnt, wenn Größe und sha256 nicht gepinnt sind; das Archiv mit dem
   Server-Programm wird genauso geprüft und atomar installiert.
-- Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt. Regeln mit `*` oder `$` (etwa
-  `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach der ersten und
-  eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler Seiten abrief, die
-  die Site ausgeschlossen hatte.
+- Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt, mit einer vorsichtigen Abweichung. Regeln mit `*`
+  oder `$` (etwa `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach
+  der ersten und eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler
+  Seiten abrief, die die Site ausgeschlossen hatte. Seine Gruppen werden am genauen Produkt-Token
+  `LLM-Conversion-Framework-Bot` erkannt (gleich in welcher Schreibweise), sodass eine Gruppe für `bot` nicht mehr
+  über `*` siegt, und jedes Schema, jeder Host und jeder Port hat eine eigene robots.txt. Die Abweichung: Eine
+  robots.txt, die mit 401 oder 403 antwortet, heißt „alles verboten“, wo RFC 9309 das Crawlen erlauben würde; ein
+  Vorbehalt, den der Crawler nicht lesen kann, zählt trotzdem.
 - Community-Packs werden nur über einen Quarantäne-Ordner und nach ihren Prüfungen installiert: eine ID ohne
   Pfade, genau die aufgeführten Dateien mit ihren Hashes, keine Links, Sonder- oder Binärdateien, jedes Image, das
   ein Dockerfile bezieht (`FROM`, `COPY --from`, `RUN --mount=...,from=`, auch in einem kleingeschriebenen

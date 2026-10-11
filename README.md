@@ -515,7 +515,7 @@ build_sandbox: true           # sandbox for conversion containers
 build_memory_limit: ""        # e.g. 24g; empty = no limit
 build_pids_limit: 4096        # process limit in the container
 build_jobs: 0                 # parallel compile jobs for image builds; 0 = all cores
-crawler_max_depth: 2          # not used by the Deep Ingest dialog, which sets its own depth
+crawler_max_depth: 2          # link depth the Deep Ingest dialog opens with
 rag_reranker: auto            # auto (chosen by hardware), off, or a cross-encoder model id
 rag_rerank_default: false     # true: rerank every search (default: build recommendations only)
 rag_rerank_min_score: 0.0     # relevance floor 0..1; 0 = the model's calibrated floor (0.2)
