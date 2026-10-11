@@ -796,15 +796,18 @@ saving counts every listed tool as reviewed. The GUI dialog shows the same facts
 ### tools audit
 
 ```
-llm-cli tools audit [--limit N] [--verify] [--archive]
+llm-cli tools audit [--limit N] [--details] [--verify] [--archive]
 ```
 
-Shows the most recent tool calls: time, actor (`ditto`, `mcp`, `mcp:<token name>`, or `cli` for a change to the
-named tokens), tool, decision, whether a person confirmed it, and the outcome.
+Shows the most recent tool calls: time, who called (in words: Ditto, all local stdio clients, the MCP token
+'<name>', or you in the CLI or GUI, with the client's name as it reported itself), the tool by its title (and the
+name the AI wrote when that was a spelling variant), the decision, whether a person confirmed it, the outcome, the
+reason code and how the person was asked with their answer (for example `elicitation: declined`).
 
 | Option | Meaning |
 |---|---|
 | `--limit INTEGER` | Number of entries (default 30). |
+| `--details` | Also show what the fool-proof layer repaired (kind and field), the duration, the SHA-256 and size of the result, links to earlier entries and the session hash. |
 | `--verify` | Check the chain instead: changed or removed entries, and removal of the newest entries (anchor file). Exit code 0 if intact, otherwise 1. |
 | `--archive` | Move the log and its anchor aside (kept as `audit.db.<UTC time>` and `audit.db.<UTC time>.anchor` in the personal folder) and start a new log with the next tool call. Use it when `--verify` or `llm-cli doctor` reports a problem with the log. If the log cannot be moved (for example because it is busy), the command exits with code 1; close the GUI and AI clients and try again. |
 

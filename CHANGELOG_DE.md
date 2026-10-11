@@ -329,6 +329,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Wiederholungssperre lässt einen abgelehnten Aufruf 10 Minuten nach seinem letzten Scheitern wieder laufen (bisher
   war er bis zum Ende des Prozesses gesperrt), und Ditto hört nur nach Fehlern ohne Fortschritt vorzeitig auf, Tools
   aufzurufen, mit bis zu 4 Schritten mehr, solange er einen Eingabefehler behebt.
+- **`llm-cli tools audit` zeigt die neueren Audit-Felder in Worten**: wer aufgerufen hat (Ditto, alle lokalen
+  stdio-Clients, ein benanntes Token, mit dem Namen, den der Client selbst angibt), den Titel des Tools und den Namen,
+  den die KI geschrieben hat, den Grundcode und wie der Mensch gefragt wurde, mit seiner Antwort; `--details` ergänzt
+  Reparaturen, Dauer, Hash des Ergebnisses, Verweise und Sitzung.
 - **`llm-cli ditto eval` hält jeden Versuch eines Tool-Aufrufs fest**, nicht nur die, die ein Tool erreicht haben:
   Der Block `tool_use` des Berichts nennt Tool-Aufrufe pro Aufgabe, den Anteil fehlerhafter Aufrufe und unbekannter
   Tool-Namen, Reparaturen und Ablehnungen wiederholter Aufrufe.
@@ -517,6 +521,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- Rückfragen des 2026-07-28-Protokolls werden je Aufrufer und Sitzung geführt (die Antwort eines Clients schließt die
+  gleiche Rückfrage eines anderen Clients nicht mehr), eine unbeantwortete wird von einem Timer als `unanswered`
+  festgehalten, auch wenn keine weitere Anfrage kommt, und die beim Ende einer Sitzung noch offenen als
+  `client_disconnected`; die Berechtigungsprüfung eines Long-Polls liest die Berechtigungsdatei nicht mehr in der
+  Ereignisschleife des Servers; jede Ablehnung mit dem Grund `failed` nennt jetzt einen nächsten Schritt, und die
+  Eingabe-Ablehnungen des Build-Service tragen ihren eigenen Grundcode.
 - MCP-Server: Ein Client, der die Verbindung trennt, lässt seine Builds nicht mehr ohne jemanden laufen, der
   aufräumt. Die Builds und Jobs, die seine Sitzung gestartet hat, werden abgebrochen, jeweils mit einem Audit-Eintrag
   („client disconnected“), der Server wartet bis zu 30 Sekunden, bis ihre Container gestoppt sind, und

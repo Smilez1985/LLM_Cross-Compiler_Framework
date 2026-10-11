@@ -29,6 +29,8 @@ from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
 AUTOMATIC_STRATEGIES = {"config_adjustment", "docker_prune", "retry_build"}
+MODEL_NEXT = ("Give a Hugging Face repo id (owner/name), or a local model file or a folder with config.json as "
+              "<label>:<relative path>.")
 BUILD_FINISHED = frozenset({"completed", "error", "cancelled"})
 
 
@@ -62,13 +64,13 @@ class BuildService:
     def _orchestrator(self):
         orch = getattr(self.framework, "orchestrator", None)
         if orch is None:
-            raise BuildServiceError("The framework is not initialized (no orchestrator).")
+            raise BuildServiceError("The framework is not initialized (no orchestrator).", next="Tell the person the framework is not ready; 'llm-cli doctor' shows why.")
         return orch
 
     def _targets(self):
         tm = getattr(self.framework, "target_manager", None)
         if tm is None:
-            raise BuildServiceError("The framework is not initialized (no target registry).")
+            raise BuildServiceError("The framework is not initialized (no target registry).", next="Tell the person the framework is not ready; 'llm-cli doctor' shows why.")
         return tm
 
     def _config_get(self, key: str, default=None):
@@ -104,7 +106,8 @@ class BuildService:
         caps = self._targets().get_capabilities(self.resolve_target(target))
         if caps is None:
             known = ", ".join(t.get("id", "?") for t in self._targets().list_targets()) or "none"
-            raise BuildServiceError(f"Target '{target}' is unknown or declares no capabilities (targets: {known}).")
+            raise BuildServiceError(f"Target '{target}' is unknown or declares no capabilities (targets: {known}).",
+                                    code="invalid_value", next="Call list_targets for the targets you can use.")
         return caps
 
     def _confined(self, request: BuildRequestIn) -> Tuple[BuildRequestIn, Optional[LocalInputs]]:
@@ -149,12 +152,14 @@ class BuildService:
                 if not ((local / "config.json").is_file()
                         or any(f.name.lower().endswith(MODEL_FILE_SUFFIXES) for f in local.iterdir() if f.is_file())):
                     raise BuildServiceError(f"'{shown or local}' does not look like a model directory (no config.json "
-                                            "or model file).")
+                                            "or model file).", code="invalid_value", next=MODEL_NEXT)
             elif not local.name.lower().endswith(MODEL_FILE_SUFFIXES):
-                raise BuildServiceError(f"'{shown or local.name}' is not a model file.")
+                raise BuildServiceError(f"'{shown or local.name}' is not a model file.", code="invalid_value",
+                                        next=MODEL_NEXT)
             return str(local)
         if ".." in model or not HF_REPO_ID.match(model):
-            raise BuildServiceError(f"'{model}' is neither an existing local model nor a Hugging Face repo id (owner/name).")
+            raise BuildServiceError(f"'{model}' is neither an existing local model nor a Hugging Face repo id "
+                                    "(owner/name).", code="invalid_value", next=MODEL_NEXT)
         return model
 
     # --- queries ----------------------------------------------------------------------------
@@ -344,7 +349,9 @@ class BuildService:
         if request.dataset_path:
             path = Path(request.dataset_path).expanduser()
             if not path.is_file():
-                raise BuildServiceError(f"Calibration dataset '{request.dataset_path}' not found.")
+                raise BuildServiceError(f"Calibration dataset '{request.dataset_path}' not found.",
+                                        code="invalid_value",
+                                        next="Name an existing dataset file as <label>:<relative path>.")
             dataset = str(path.resolve())
         problems = caps.check_request(fmt, board, quant, dataset=bool(dataset), imatrix=request.use_imatrix)
         if problems:
@@ -356,7 +363,8 @@ class BuildService:
         else:
             model = request.model  # a Hugging Face repo id: never looked up on disk for an AI caller
         if request.revision and Path(model).is_absolute():
-            raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.")
+            raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.",
+                                    code="invalid_value", next="Leave out the revision for a local model.")
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model}), inputs
 
@@ -397,7 +405,8 @@ class BuildService:
     def cancel(self, request_id: str) -> BuildStatusOut:
         self._state(request_id)
         if not self.framework.run_coroutine(self._orchestrator.cancel_request(request_id), timeout=60):
-            raise BuildServiceError(f"Build request '{request_id}' is not running.")
+            raise BuildServiceError(f"Build request '{request_id}' is not running.", code="failed",
+                                    next="It has already ended; get_build_status shows how.")
         return self.get_status(request_id)
 
     # A build id is added to the request just before the engine registers it (build_model runs in a worker thread,

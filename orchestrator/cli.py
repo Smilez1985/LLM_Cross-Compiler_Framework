@@ -931,14 +931,51 @@ def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: 
         console.print(f"  {tier.value}: {decision.value}")
 
 
+def _audit_rows(registry, entries, details: bool = False):
+    """The audit view for people: who (the caller in words, the client as it named itself), the tool by its title
+    (and the name the AI wrote, when that was a spelling variant), how the person was asked and what they answered,
+    the reason code; with `details` also the repairs, duration, result, links and session."""
+    from orchestrator.tools.registry import ToolError, caller_label
+
+    def title(name: str) -> str:
+        try:
+            return registry.get(name).title
+        except ToolError:
+            return name
+
+    for entry in entries:
+        who = caller_label(str(entry.get("actor") or ""))
+        if entry.get("client"):
+            who += f"\n{entry['client']} (self-reported)"
+        tool = str(entry.get("tool") or "")
+        shown = title(tool) + (f" ({tool})" if title(tool) != tool else "")
+        if entry.get("name_requested") and entry["name_requested"] != tool:
+            shown += f"\nthe AI wrote {entry['name_requested']}"
+        asked = entry.get("confirm_channel") or ""
+        if entry.get("answer"):
+            asked = f"{asked}: {entry['answer']}" if asked else str(entry["answer"])
+        row = [str(entry.get("ts", "")), who, shown, str(entry.get("decision", "")),
+               {None: "-", 0: "no", 1: "yes"}.get(entry.get("approved"), "?"), str(entry.get("outcome", "")),
+               str(entry.get("reason_code") or ""), asked or "-"]
+        if details:
+            repairs = entry.get("repairs") if isinstance(entry.get("repairs"), list) else []
+            result = entry.get("result") if isinstance(entry.get("result"), dict) else {}
+            row += [", ".join(f"{r.get('kind')}:{r.get('field') or '-'}" for r in repairs if isinstance(r, dict)),
+                    str(entry.get("duration_ms") or ""),
+                    (f"{str(result.get('sha256', ''))[:12]} {result.get('bytes', '')} B" if result else ""),
+                    ", ".join(str(link) for link in entry.get("links") or []), str(entry.get("session") or "")]
+        yield row
+
+
 @tools.command('audit')
 @click.option('--limit', default=30, show_default=True, help='Number of entries')
+@click.option('--details', is_flag=True, help='Also show repairs, duration, result hash, links and session')
 @click.option('--verify', is_flag=True,
               help='Check the chain: changed or removed entries, and removal of the newest entries (anchor)')
 @click.option('--archive', is_flag=True,
               help='Move the log and its anchor aside (kept with a timestamp) and start a new log')
 @pass_context
-def tools_audit(ctx: FrameworkContext, limit: int, verify: bool, archive: bool):
+def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, archive: bool):
     """Show the audit log of tool calls"""
     import sqlite3
     registry = _tool_registry(ctx)
@@ -969,12 +1006,13 @@ def tools_audit(ctx: FrameworkContext, limit: int, verify: bool, archive: bool):
         console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be read: {escape(str(e))}[/red]")
         sys.exit(1)
     table = Table(title="Tool calls")
-    for column in ("Time", "Actor", "Tool", "Decision", "Confirmed", "Outcome"):
+    columns = ["Time", "Who", "Tool", "Decision", "Confirmed", "Outcome", "Reason", "Asked / answer"]
+    if details:
+        columns += ["Repairs", "ms", "Result", "Links", "Session"]
+    for column in columns:
         table.add_column(column)
-    confirmed = {None: "-", 0: "no", 1: "yes"}
-    for entry in entries:
-        table.add_row(escape(entry["ts"]), escape(entry["actor"]), escape(entry["tool"]), escape(entry["decision"]),
-                      confirmed.get(entry["approved"], "?"), escape(entry["outcome"]))
+    for row in _audit_rows(registry, entries, details):
+        table.add_row(*(escape(cell) for cell in row))
     console.print(table)
 
 

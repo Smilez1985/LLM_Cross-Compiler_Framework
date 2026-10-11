@@ -250,7 +250,8 @@ class EvalBuildService(BuildService):
     def cancel(self, request_id: str) -> BuildStatusOut:
         status = self.get_status(request_id)
         if status.status not in ("QUEUED", "RUNNING"):
-            raise BuildServiceError(f"Build request '{request_id}' is not running.")
+            raise BuildServiceError(f"Build request '{request_id}' is not running.", code="failed",
+                                    next="It has already ended; get_build_status shows how.")
         self._requests[request_id] = status.model_copy(update={"status": "CANCELLED"})
         return self._requests[request_id]
 

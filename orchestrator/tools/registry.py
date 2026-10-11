@@ -965,7 +965,8 @@ class ToolRegistry:
         if ctx.cancel.is_set():  # the caller gave up before the handler started
             self._audit(ctx, spec, decision, "cancelled", arguments, approved=approved, links=links,
                         detail="Cancelled before it started.", reason_code="failed", **confirmation)
-            raise ToolError(f"'{spec.title}' was cancelled before it started.")
+            raise ToolError(f"'{spec.title}' was cancelled before it started.", code="failed",
+                            next="Nothing ran. Call it again only if the person still wants it.")
         if spec.limits.per_day:  # a run counts toward the tool's quota per day once it really starts
             self.limiter.add(("day", ctx.actor, spec.name), DAY)
 
@@ -985,6 +986,8 @@ class ToolRegistry:
             raise ToolError(f"{spec.title}: {e}", code="limit_reached") from None
         except ToolError as e:  # raised by the handler: its message can quote external text
             message, next_step = external_error_text(e.message), redact_secrets(e.next)
+            if not next_step and e.code == "failed":
+                next_step = FAILED_NEXT
             end("error", f"{message} {next_step}".strip(), reason_code=e.code)
             error = e if (message, next_step) == (e.message, e.next) else e.with_text(message, next_step)
             error.quoted = message
@@ -994,18 +997,21 @@ class ToolRegistry:
         except ValidationError as e:  # a schema or handler bug (output check, models built inside the handler)
             self.logger.error(f"Tool {spec.name} produced invalid data: {e}", exc_info=True)
             end("error", repr(e), reason_code="failed")
-            raise ToolError(f"{spec.title} failed (internal error; details are in the framework log).") from e
+            raise ToolError(f"{spec.title} failed (internal error; details are in the framework log).",
+                            next=FAILED_NEXT) from e
         except ValueError as e:  # user-facing validation problems (e.g. BuildServiceError, with its own code)
             code = getattr(e, "code", None) or "failed"
             end("error", str(e), reason_code=code)
             message = external_error_text(str(e))
-            raise ToolError(message, code=code, next=redact_secrets(getattr(e, "next", "") or ""),
-                            quoted=message) from e
+            next_step = redact_secrets(getattr(e, "next", "") or "")
+            if not next_step and code == "failed" and "Next:" not in message:
+                next_step = FAILED_NEXT
+            raise ToolError(message, code=code, next=next_step, quoted=message) from e
         except Exception as e:
             self.logger.error(f"Tool {spec.name} failed: {e}", exc_info=True)
             end("error", repr(e), reason_code="failed")
             message = external_error_text(str(e))
-            raise ToolError(f"{spec.title} failed: {message}", quoted=message) from e
+            raise ToolError(f"{spec.title} failed: {message}", next=FAILED_NEXT, quoted=message) from e
         except BaseException:  # interrupted in the calling thread (KeyboardInterrupt, shutdown): still recorded
             end("cancelled", "Interrupted while it ran.")
             raise
