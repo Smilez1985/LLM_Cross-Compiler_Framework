@@ -36,7 +36,7 @@ from orchestrator.utils.logging import get_logger
 
 # NEU: Import der zentralen Validierungslogik
 from orchestrator.utils.validation import validate_ip_address
-from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES
+from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_staging_folder
 from orchestrator.utils import ssh_trust
 
 DEFAULT_INFERENCE_IMAGE = "ghcr.io/smilez1985/llm-runtime:latest"
@@ -53,7 +53,7 @@ def _primary_name(info: Dict[str, Any]) -> Optional[str]:
 def list_builds(output_dir: Path) -> List[Dict[str, Any]]:
     """Finished builds below output_dir, found through their build manifest (newest first).
     Symlinked subfolders are followed (output trees moved to another disk), loops are skipped.
-    Hidden folders are skipped: the build engine stages a build there until it has completed."""
+    The build engine's staging folders are skipped: a build is staged there until it has completed."""
     builds, seen = [], set()
     for root, dirs, files in os.walk(output_dir, followlinks=True):
         real = os.path.realpath(root)
@@ -61,7 +61,7 @@ def list_builds(output_dir: Path) -> List[Dict[str, Any]]:
             dirs[:] = []
             continue
         seen.add(real)
-        dirs[:] = [d for d in dirs if not d.startswith(".")]
+        dirs[:] = [d for d in dirs if not is_staging_folder(d)]
         if BUILD_MANIFEST not in files:
             continue
         try:

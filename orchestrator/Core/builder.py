@@ -47,6 +47,12 @@ MODEL_FILE_SUFFIXES = (".gguf", ".rkllm", ".rknn", ".onnx", ".safetensors", ".bi
 BUILD_MANIFEST = "build_info.json"
 # Large models are copied, hashed and zipped in chunks; a cancel is noticed between two of them.
 COPY_CHUNK = 8 * 1024 * 1024
+# A build is staged in ".<output folder>.<build id>.partial" next to its output folder until it has completed.
+STAGING_SUFFIX = ".partial"
+
+
+def is_staging_folder(name: str) -> bool:
+    return name.startswith(".") and name.endswith(STAGING_SUFFIX)
 
 # Fallback Helper if utils module not fully ready during bootstrap
 def ensure_directory(path: Path):
@@ -339,7 +345,7 @@ class BuildEngine:
             progress = self._builds.get(build_id)
             if not progress or progress.status in [BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED]:
                 return False
-            if build_id in self._settled:  # failed or publishing its files; the worker only cleans up
+            if build_id in self._settled:  # failed and cleaning up, or publishing its files: too late
                 return False
             progress.status = BuildStatus.CANCELLED
             container = self._active_containers.get(build_id)
@@ -527,7 +533,8 @@ class BuildEngine:
             self._check_cancelled(prog)
             
             # 5. Security Scan
-            self._scan_image_security(image.tags[0], prog, build_id=bid)
+            self._scan_image_security(image.tags[0], prog, build_id=bid,
+                                      timeout=config.build_timeout or self.default_timeout)
             self._check_cancelled(prog)
             
             # 5a. Importance matrix: a llama.cpp (GGUF) concept. Other formats use the dataset directly.
@@ -547,13 +554,13 @@ class BuildEngine:
             self._enter_stage(prog, BuildStatus.PACKAGING)
             self._extract_artifacts(config, prog)
             self._create_golden_artifact(config, prog)
+
+            # 9. Cleanup, before the outcome is settled: a cancel meanwhile still discards the staged files.
+            if config.cleanup_after_build:
+                self.cleanup_build(bid)
+
             self._settle(prog)
             self._publish_artifacts(config, prog)
-            
-            # 9. Cleanup
-            if config.cleanup_after_build: 
-                self.cleanup_build(bid)
-                
             prog.end_time = datetime.now()
             prog.progress_percent = 100
             return BuildStatus.COMPLETED
@@ -712,7 +719,8 @@ class BuildEngine:
         tail = [l for l in progress.logs if prefix in l][-lines:]
         return "\n".join(tail)
 
-    def _scan_image_security(self, image_tag: str, progress: BuildProgress, build_id: Optional[str] = None):
+    def _scan_image_security(self, image_tag: str, progress: BuildProgress, build_id: Optional[str] = None,
+                             timeout: Optional[int] = None):
         if not self._get_conf("enable_security_scan", True):
             progress.add_log("Security scan disabled (enable_security_scan=false).")
             return
@@ -736,9 +744,32 @@ class BuildEngine:
             with self._lock:
                 self._active_containers[build_id] = container
             self._check_cancelled(progress)
-            for line in container.logs(stream=True, follow=True):
-                progress.add_log(f"TRIVY: {line.decode(errors='replace').strip()}")
-            code = int(container.wait().get("StatusCode", 1))
+
+            def pump():
+                try:
+                    for line in container.logs(stream=True, follow=True):
+                        progress.add_log(f"TRIVY: {line.decode(errors='replace').strip()}")
+                except Exception as e:  # the container may be removed while streaming
+                    self.logger.debug(f"Scan log stream of {build_id} ended: {e}")
+
+            reader = threading.Thread(target=pump, name=f"trivy-logs-{build_id}", daemon=True)
+            reader.start()
+            # A scan that hangs (e.g. on its database download) must not hold the build slot forever.
+            timeout = timeout or self.default_timeout
+            try:
+                code = int(container.wait(timeout=timeout).get("StatusCode", 1))
+            except Exception as e:
+                self._check_cancelled(progress)
+                if not _is_read_timeout(e):
+                    raise
+                try:
+                    container.kill()
+                except Exception:
+                    pass
+                progress.add_warning(f"Security scan did not finish within {timeout} s and was stopped "
+                                     f"(setting build_timeout).")
+                return
+            reader.join(timeout=10)
             self._check_cancelled(progress)
             if code == 0:
                 progress.add_log("Security scan passed.")
@@ -1061,10 +1092,10 @@ class BuildEngine:
 
     @staticmethod
     def _staging_root(config: BuildConfiguration) -> Path:
-        """Hidden folder next to the output folder: the same filesystem, so publishing is a rename, and
-        deployment listings skip hidden folders."""
-        out = Path(config.output_dir)
-        return out.parent / f".{out.name}.{config.build_id}.partial"
+        """Hidden folder next to the output folder (next to its target if it is a link): the same filesystem,
+        so publishing is a rename, and deployment listings skip it."""
+        out = Path(os.path.realpath(config.output_dir))
+        return out.parent / f".{out.name}.{config.build_id}{STAGING_SUFFIX}"
 
     def _staged_output(self, config: BuildConfiguration) -> Path:
         return self._staging_root(config) / Path(config.output_dir).name
@@ -1102,9 +1133,10 @@ class BuildEngine:
         shutil.rmtree(root, ignore_errors=True)
 
     def _copy_file(self, src: Path, dst: Path, progress: BuildProgress):
-        """shutil.copy2 that stops after a cancel."""
+        """shutil.copy2 that stops after a cancel and never follows a link."""
         self._check_cancelled(progress)
-        with open(src, "rb") as fin, open(dst, "wb") as fout:
+        fd = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        with open(fd, "rb") as fin, open(dst, "wb") as fout:
             for chunk in iter(lambda: fin.read(COPY_CHUNK), b""):
                 self._check_cancelled(progress)
                 fout.write(chunk)
@@ -1124,7 +1156,16 @@ class BuildEngine:
         
         if src.exists():
             count = 0
+            root = os.path.realpath(src)
             for f in sorted(src.rglob("*")):
+                inside = os.path.realpath(f).startswith(root + os.sep)
+                if f.is_symlink() or not inside:
+                    # Left by the sandboxed conversion: following it would copy a host file it cannot read.
+                    # A link within the output is redundant, its target is copied anyway.
+                    if not inside:
+                        progress.add_warning(f"Not copied: '{f.relative_to(src)}' in the build output links "
+                                             f"outside it.")
+                    continue
                 if f.is_file():
                     rel = f.relative_to(src)
                     target = staged / rel

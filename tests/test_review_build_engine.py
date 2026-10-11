@@ -513,8 +513,6 @@ class TestCancelDuringSecurityScan:
         assert progress.status == BuildStatus.COMPLETED
         assert any("Security scan failed to run" in w for w in progress.warnings)
 
-    @pytest.mark.xfail(strict=True, reason="BUG: a security scan that never ends holds its build slot forever "
-                                           "(no timeout; requests waiting for a slot wait with it)")
     def test_a_hanging_scan_is_stopped_after_the_build_timeout(self, engine, client, tmp_path):
         client.scan_options = dict(auto_exit=False, lines=["Downloading vulnerability DB..."])
         timeouts = []
@@ -822,8 +820,6 @@ class TestCancelIsNeverUndone:
 
 class TestArtifactExtraction:
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the artifact copy follows a link the sandboxed conversion left "
-                                           "in its output folder and publishes a host file")
     def test_a_link_in_the_build_output_never_copies_a_host_file(self, engine, client, tmp_path):
         # The conversion runs target code (possibly generated) without access to the user's files; the host
         # copies its output folder, so a link there must not reach a file outside it.
@@ -855,8 +851,6 @@ class TestArtifactExtraction:
         assert [a["file"] for a in manifest["artifacts"]] == [FakeDockerClient.MODEL_FILE]
         assert any("id_ed25519.gguf" in w for w in progress.warnings), progress.warnings
 
-    @pytest.mark.xfail(strict=True, reason="BUG: list_builds skips every folder whose name starts with a dot, "
-                                           "not only the engine's staging folders")
     def test_a_build_below_a_folder_whose_name_starts_with_a_dot_is_listed(self, engine, client, tmp_path):
         # e.g. a local model folder ".qwen": the orchestrator builds into <out>/<target>/.qwen/<quantization>
         cfg = config_for(tmp_path, output_dir=str(tmp_path / "out" / "Rockchip" / ".qwen" / "Q4_K_M"))
@@ -865,8 +859,6 @@ class TestArtifactExtraction:
         assert [b["build_id"] for b in list_builds(tmp_path / "out")] == ["b1"]
         assert [p.name for p in Path(cfg.output_dir).parent.iterdir()] == ["Q4_K_M", "Q4_K_M.zip"]
 
-    @pytest.mark.xfail(strict=True, reason="BUG: a symlinked output folder is staged next to the link, i.e. on "
-                                           "the link's disk, so the model is copied twice across disks")
     def test_a_symlinked_output_folder_is_staged_on_its_own_disk(self, engine, client, tmp_path):
         disk = tmp_path / "bigdisk" / "Q4_K_M"  # the output folder moved to another disk
         disk.mkdir(parents=True)
@@ -1346,8 +1338,6 @@ class TestOrchestratorCancel:
         assert engine.builds["r1_001_r1"].status == BuildStatus.CANCELLED
         assert engine.builds["r1_001"].status == BuildStatus.FAILED, "the failed attempt keeps its outcome"
 
-    @pytest.mark.xfail(strict=True, reason="BUG: a request cancelled while its build removes its image reports "
-                                           "'cancelled', but the build completes and is listed as deployable")
     def test_a_request_cancelled_during_the_final_cleanup_lists_no_build(self, engine, client, tmp_path,
                                                                          fast_polling):
         orch = LLMOrchestrator(engine.config, build_engine=engine)
@@ -1373,8 +1363,6 @@ class TestOrchestratorCancel:
         assert engine.get_build_status("r1_001").status == BuildStatus.CANCELLED
         assert list_builds(tmp_path / "out") == []
 
-    @pytest.mark.xfail(strict=True, reason="BUG: a cancel that comes too late for a build (its files are being "
-                                           "published) reports the request cancelled without a word about it")
     def test_a_build_too_far_along_to_cancel_is_reported(self, engine, client, tmp_path, fast_polling):
         orch = LLMOrchestrator(engine.config, build_engine=engine)
         publishing, release = threading.Event(), threading.Event()
