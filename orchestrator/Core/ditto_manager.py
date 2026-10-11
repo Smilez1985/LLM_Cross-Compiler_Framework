@@ -88,9 +88,9 @@ class DittoError(RuntimeError):
 
 # --- error messages ---------------------------------------------------------------------------------------------
 
-SETTINGS_HINT = "the AI settings (GUI: Tools > Configure AI Agent; CLI: llm-cli secrets set <key name>)"
-WORKSPACE_SETTING_HINT = ("the AI settings (GUI: Tools > Configure AI Agent > Workspace ID; otherwise the setting "
-                          "ai_anthropic_workspace_id or the variable LLM_FRAMEWORK_AI_ANTHROPIC_WORKSPACE_ID)")
+SETTINGS_HINT = "the AI settings (GUI: Tools > Configure AI Agent; CLI: llm-cli ditto login <provider>)"
+WORKSPACE_SETTING_HINT = ("the AI settings (GUI: Tools > Configure AI Agent > Workspace ID; CLI: llm-cli ditto login "
+                          "anthropic --workspace-id wrkspc_...; otherwise the setting ai_anthropic_workspace_id)")
 CONSOLE_WORKSPACE_HINT = ("Claude needs the workspace ID for this API key (Claude Console > Settings > Workspaces). "
                           f"Enter it in {WORKSPACE_SETTING_HINT}.")
 # Errors with a known cause (LLMError.code): what to change. The plain-language cause follows as the details.
@@ -100,8 +100,8 @@ CODE_HINTS = {
     "anthropic.workspace_not_found": f"Correct the Claude workspace ID in {WORKSPACE_SETTING_HINT}, or use a key "
                                      "of that workspace.",
     "anthropic.admin_key": f"Store a normal Claude API key in {SETTINGS_HINT}.",
-    "anthropic.profile": "Sign in again with `ant auth login`, or remove the setting ai_auth_anthropic to use the "
-                         "stored Claude API key.",
+    "anthropic.profile": "Sign in again with `ant auth login`, or go back to the stored Claude API key: "
+                         "`llm-cli ditto logout anthropic --method ant_profile`.",
     "provider.removed": f"Choose another AI provider in {SETTINGS_HINT}.",
 }
 

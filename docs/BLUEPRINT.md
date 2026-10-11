@@ -151,8 +151,8 @@ flowchart TB
 
 | Component | Where | Role |
 |---|---|---|
-| GUI | `orchestrator/gui/` (start: `llm-gui`) | Main window, build tab, deployment window, Ditto chat, module wizard, Hugging Face browser, dialogs for AI settings, tool permissions, tool confirmations, healing proposals and SSH trust. |
-| CLI | `orchestrator/cli.py` (`llm-cli`) | Top-level commands `build`, `config`, `deploy`, `ditto`, `doctor`, `mcp`, `module`, `scan`, `secrets`, `swarm`, `targets`, `tools` (`doctor` and `scan` are single commands, the others are groups). |
+| GUI | `orchestrator/gui/` (start: `llm-gui`) | Main window, build tab, deployment window, Ditto chat (its header shows the access in use), module wizard, Hugging Face browser, dialogs for AI settings, the sign-in panel (`sign_in.py`: method cards, key form, storage chooser, passphrase dialog; vault and network calls in worker threads), tool permissions, tool confirmations, healing proposals and SSH trust. |
+| CLI | `orchestrator/cli.py` (`llm-cli`) | Top-level commands `build`, `config`, `deploy`, `ditto`, `doctor`, `mcp`, `module`, `scan`, `secrets`, `swarm`, `targets`, `tools` (`doctor` and `scan` are single commands, the others are groups). The sign-in commands `ditto login`, `logout` and `auth` use the same sign-in operations as the GUI (`orchestrator/llm/auth/signin.py`). |
 | FrameworkManager | `orchestrator/Core/framework.py` | Starts all managers in four phases (security and infrastructure, core logic, AI and knowledge, guardians and operations), connects them, keeps one long-lived asyncio loop for builds and resolves relative data paths against the installation folder, not the working directory. |
 | ConfigManager | `orchestrator/Core/config_manager.py` | Settings with a schema (type, default, validation rule). The config folder is `LLM_FRAMEWORK_CONFIG_DIR` if set, otherwise the installation's `configs/` if it is writable, otherwise the per-user folder; never the working directory. User settings are saved to `config.yml` there. Environment variables with the prefix `LLM_FRAMEWORK_`, `FRAMEWORK_` or `LLM_` override known settings. Personal state lives in `~/.llm-framework` (override with `LLM_FRAMEWORK_HOME`), mode 0700 on Linux and macOS. |
 | SecretsManager | `orchestrator/Core/secrets_manager.py`, `orchestrator/Core/vault_key.py`, `orchestrator/utils/file_lock.py` | Encrypted vault (`secrets.store` in the per-user folder, format v2: Fernet entries with key ids, read with MultiFernet, key rotation). Its key comes from the operating system's keyring by default (one entry per vault; a keyring that hangs, keeps nothing or stores in plain text is refused) or from the explicit choice in `secret_storage` (credential helper, passphrase, unencrypted key file, memory only). Every change runs under a cross-process lock; the vault refuses a location inside a git working copy. Holds API keys (as records under `cred/<provider>/api_key`; the old names still work) and the Hugging Face token (`hf_token`). The secrets of a store in the old location (config folder) are taken over once and re-encrypted with the vault key, also into an existing per-user store; secrets already there win, and the old file is left unchanged. A long-running process (GUI, MCP server) re-reads the vault when another process has changed it. |
@@ -411,9 +411,10 @@ These are real limitations of the current state. Most are scheduled in the [road
   `test-container` and `audit` fail; `build`, `up` and `gui` also call the missing `scripts/setup_linux.sh`.
   Install the framework on the host instead. A hardened headless image (CLI and MCP server) is being built for
   3.1.0.
-- **No sign-in per access type yet.** Ditto reads API keys from the secrets store; there is no browser sign-in.
-  For Anthropic it also accepts a profile from `ant auth login`, but only when you choose it
-  (`ai_auth_anthropic: ant_profile`). Sign-in per access type is being built for 3.1.0.
+- **Sign-in covers API keys, local engines and the `ant` profile so far** (the GUI's sign-in panel and
+  `llm-cli ditto login`). There is no browser sign-in and no cloud credential chain yet. For Anthropic an
+  `ant auth login` profile is used only when you choose it. The remaining sign-in methods are being built for
+  3.1.0.
 - **The privacy filter works with patterns.** It recognizes the formats listed above, not every personal detail
   in free text, such as a name in a sentence. Use a local provider for sensitive material.
 - **Generated targets are skeletons.** The module generator writes no `capabilities:` block, and the template
@@ -516,7 +517,9 @@ When a version is released, its done items leave the roadmap and appear in the c
 | **Model zoo from the community**: recipes (model, target, format, quantization, toolchain image and verified hashes) made with the template wizard and contributed by pull request; a signed index, installation with quarantine and trust levels, `llm-cli zoo` and the Community Hub. | in progress |
 
 Sign-in per access type, as designed. Built so far (listed in the changelog): the API key first for Anthropic,
-the credential store's second version and the one pattern table.
+the credential store's second version, the one pattern table, the sign-in core (methods per provider, check,
+errors with a next step) and the sign-in panel in the GUI with the matching CLI commands (`llm-cli ditto login`,
+`logout`, `auth`) for API keys, local engines and the `ant` profile.
 
 - One sign-in panel per access type in the GUI and matching CLI commands.
 - **API keys first.** For Anthropic the API key is used unless you choose an `ant auth login` profile yourself;

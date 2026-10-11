@@ -339,19 +339,20 @@ uses the framework's tools within your tool permissions:
 **Set up Ditto** under **Tools > Configure AI Agent (Ditto)...**: provider, model (the list is loaded live from
 the provider; you can also type a model name), API key, workspace ID (only for Claude API keys that are valid in
 every workspace of the organization), base URL (Ollama and custom servers), effort, privacy level for cloud
-providers, a fallback chain, the knowledge base and offline mode. On a headless machine, store
-the key with `llm-cli secrets set <key name>` and set `ai_provider` in `config.yml` (or the environment variable
-`LLM_FRAMEWORK_AI_PROVIDER`).
+providers, a fallback chain, the knowledge base and offline mode. **Sign in...** next to the key field shows the
+provider's sign-in methods with Check, Save and Sign out. On a headless machine, sign in with
+`llm-cli ditto login <provider>` (the key is asked without echo, or read from stdin with `--with-token`) and set
+`ai_provider` in `config.yml` (or the environment variable `LLM_FRAMEWORK_AI_PROVIDER`).
 
-| Provider (id) | What it is | Sign-in | Key name for `llm-cli secrets set` |
+| Provider (id) | What it is | Sign-in | From the command line |
 |---|---|---|---|
-| `anthropic` | Anthropic Claude API | API key | `anthropic_api_key` |
-| `openai` | OpenAI (Responses API) | API key | `openai_api_key` |
-| `google` | Google Gemini (OpenAI-compatible endpoint) | API key | `gemini_api_key` |
-| `openrouter` | OpenRouter (many models behind one key) | API key | `openrouter_api_key` |
-| `ollama` | Ollama on this computer or your network | none | – |
+| `anthropic` | Anthropic Claude API | API key (an `ant auth login` profile as an advanced option) | `llm-cli ditto login anthropic` |
+| `openai` | OpenAI (Responses API) | API key | `llm-cli ditto login openai` |
+| `google` | Google Gemini (OpenAI-compatible endpoint) | API key | `llm-cli ditto login google` |
+| `openrouter` | OpenRouter (many models behind one key) | API key | `llm-cli ditto login openrouter` |
+| `ollama` | Ollama on this computer or your network | none | `llm-cli ditto login ollama --base-url URL` |
 | `local` | the managed local model server (see [Offline mode](#offline-mode-the-managed-local-model)) | none (a key per start is handled for you) | – |
-| `custom` | any OpenAI-compatible server (vLLM, LM Studio, ...) | API key or none | `custom_api_key` |
+| `custom` | any OpenAI-compatible server (vLLM, LM Studio, ...) | API key or none | `llm-cli ditto login custom --method api_key --base-url URL` |
 
 - The providers are data in [`configs/llm_providers.yml`](configs/llm_providers.yml); a file with the same name
   in your settings folder adds or replaces entries. The default models per task are set there.
@@ -364,8 +365,10 @@ the key with `llm-cli secrets set <key name>` and set `ai_provider` in `config.y
 - Structured answers (healing analysis, module proposal, build recommendation) must match a fixed structure and
   are checked; an invalid answer is an error and is never applied. A proposal that contains a
   dangerous command (for example a download piped into a shell) is discarded.
-- **Sign-in per provider** (the **Sign in...** button) is not available yet; it is being built. Until then
-  Ditto uses API keys. For `anthropic` the stored API key always comes first; an `ant auth login` profile is used
+- **Sign-in per provider:** **Sign in...** in the AI settings and `llm-cli ditto login` take a key from a hidden
+  field, stdin or the provider's environment variable, check it for free before storing it and show it only as
+  its last four characters; `llm-cli ditto auth status` lists the sign-in of every provider. Browser sign-in
+  (OAuth) and cloud platforms come later. For `anthropic` the stored API key always comes first; an `ant auth login` profile is used
   only when you choose it (setting `ai_auth_anthropic: ant_profile`). Claude Admin API keys (`sk-ant-admin01-`)
   are refused. Without a stored key, a key in `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or
   `OPENROUTER_API_KEY` is used, and the AI settings name the variable. A key of a `custom` server belongs to the
@@ -508,7 +511,8 @@ crawler_max_depth: 2
 - **Cancelling a build:** the GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not stop the
   build (the CLI waits until it has ended). A build can be cancelled with the `cancel_build` tool, through Ditto in
   the GUI chat or an MCP client, in the process that started it.
-- **Signing in per provider** is not available yet; Ditto uses API keys.
+- **Browser and cloud sign-in** (OAuth, AWS, Google Cloud, Azure) are not available yet; Ditto signs in with API
+  keys, local engines need none, and an `ant auth login` profile is an advanced option.
 
 ---
 
@@ -516,8 +520,9 @@ crawler_max_depth: 2
 
 The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGELOG.md) at release. In short:
 
-- **In progress:** sign-in per provider and access type (the Claude-subscription provider is already removed;
-  Claude subscribers use MCP or an API key); a hardened headless Docker image for the CLI and the MCP server; a new
+- **In progress:** the remaining sign-in methods per access type, browser sign-in and cloud platforms (API keys,
+  local engines and the `ant` profile work in the GUI and with `llm-cli ditto login`; the Claude-subscription
+  provider is removed, and Claude subscribers use MCP or an API key); a hardened headless Docker image for the CLI and the MCP server; a new
   Ditto evaluation run with the improved prompts.
 - **Planned:** a runtime that the deploy step installs on the board, targets for NVIDIA GPUs and AMD (Ryzen Z1
   Extreme), more formats, LoRA and large models, and supply-chain hardening.

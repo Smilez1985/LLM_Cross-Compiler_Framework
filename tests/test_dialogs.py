@@ -478,11 +478,17 @@ class TestAIConfigurationDialog:
         select_provider(dlg, "anthropic")
         assert dlg.txt_workspace.isEnabled() and dlg.txt_workspace.text() == "wrkspc_" + "01Abc"
 
-    def test_sign_in_placeholder(self, qapp, framework):
+    def test_sign_in_opens_the_panel_of_the_selected_provider(self, qapp, framework):
+        from orchestrator.gui.sign_in import SignInPanel
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "anthropic")
-        assert dlg.btn_sign_in.text() == "Sign in..." and not dlg.btn_sign_in.isEnabled()
-        assert dlg._sign_in() is None
+        assert dlg.btn_sign_in.text() == "Sign in..." and dlg.btn_sign_in.isEnabled()
+        window = dlg._sign_in()
+        assert isinstance(window.panel, SignInPanel) and window.panel.preset.id == "anthropic"
+        assert wait_for(qapp, lambda: not window.panel.busy)
+        window.close()
+        without = AIConfigurationDialog(None)
+        assert not without.btn_sign_in.isEnabled() and without._sign_in() is None
 
     def test_works_without_framework(self, qapp, message_boxes):
         dlg = AIConfigurationDialog(None)

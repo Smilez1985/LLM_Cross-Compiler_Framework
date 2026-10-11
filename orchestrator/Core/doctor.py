@@ -187,14 +187,16 @@ def check_secrets(framework) -> List[Finding]:
                             "Repair the file (its secrets are then taken over) or move it aside.")]
         return [Finding("security", "secrets.store", Severity.ERROR,
                         f"The secrets store {sm.secrets_file} cannot be read; secrets cannot be changed.{reason}",
-                        "Repair the file or move it aside and set the secrets again (llm-cli secrets set).")]
+                        "Repair the file or move it aside and sign in again (llm-cli ditto login <provider>; "
+                        "other tokens: llm-cli secrets set).")]
     findings = [_ok("security", "secrets.store", "Secrets store ready")]
     mode = getattr(sm, "storage_mode", None)
     if mode == "insecure":
         findings.append(Finding("security", "secrets.storage", Severity.WARN,
                                 "The vault key is stored in a file next to the vault (secret_storage: insecure): "
                                 "credentials are not encrypted at rest.",
-                                "Use the OS keyring, a credential helper or a passphrase (setting secret_storage)."))
+                                "Use the OS keyring, a credential helper or a passphrase "
+                                "(llm-cli ditto auth storage --use keyring|helper|passphrase)."))
     elif mode == "ephemeral":
         findings.append(Finding("security", "secrets.storage", Severity.INFO,
                                 "Credentials are kept in memory only (secret_storage: ephemeral); nothing is stored."))
@@ -207,7 +209,7 @@ def check_secrets(framework) -> List[Finding]:
             findings.append(Finding("security", "secrets.keyring", Severity.WARN,
                                     f"The keyring backend ({backend}) does not protect secrets.",
                                     "Install a system keyring (e.g. gnome-keyring or KWallet), or choose a "
-                                    "credential helper or a passphrase (setting secret_storage)."))
+                                    "credential helper or a passphrase (llm-cli ditto auth storage --use ...)."))
     except Exception:
         pass
     return findings
