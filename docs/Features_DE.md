@@ -742,7 +742,8 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 - Der Deep-Ingest-Dialog legt für jeden Crawl die Link-Tiefe (0 bis 5; 0 liest nur die eingegebenen Seiten), das
   Lesen von PDFs und die Pause zwischen Anfragen (0 bis 10 s, auch Bruchteile einer Sekunde) fest. Er öffnet sich
   mit den Einstellungen `crawler_max_depth` (Standard 2), `crawler_download_pdfs` (Standard an) und
-  `crawler_rate_limit` (Standard 1 s); was du im Dialog änderst, gilt nur für diesen Crawl.
+  `crawler_rate_limit` (Standard 1 s); eine größere eingestellte Tiefe oder Pause bleibt und hebt die Obergrenze an.
+  Was du im Dialog änderst, gilt nur für diesen Crawl.
 - Aus den Einstellungen: höchstens `crawler_max_pages` Seiten pro eingegebener URL (Standard 50) und nur Seiten in
   den Sprachen aus `crawler_languages` (Standard Englisch und Deutsch; eine leere Liste behält alle). Ein Crawl hört
   außerdem nach fünfmal so vielen Anfragen auf, wie seine Seitengrenze erlaubt (Weiterleitungen und gescheiterte
@@ -768,8 +769,8 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   ihrem Grund, zum Beispiel „disallowed by robots.txt“, „X-Robots-Tag: noai“, „TDM reservation (...)“, „redirect
   from ... leaves the crawled site“, „language 'fr' is not one of de, en“, „PDF downloads are switched off“,
   „neither HTML nor PDF (image/png)“, „no text“ oder „PDF support (pypdf) is not installed“, und jede Seite, die sich
-  nicht abrufen oder lesen ließ (HTTP-Status, unlesbares PDF, zu viele Weiterleitungen). Jede abgerufene Seite zählt
-  zur Seitengrenze, ob gespeichert oder nicht. Vorbehalte von Sites und Fehler machen das Ergebnis zu „teilweise“,
+  nicht abrufen oder lesen ließ (HTTP-Status, unlesbares PDF, zu viele Weiterleitungen). Jede Seite, die ankommt
+  (HTTP 200), zählt zur Seitengrenze, ob gespeichert oder nicht. Vorbehalte von Sites und Fehler machen das Ergebnis zu „teilweise“,
   die übrigen Gründe nicht.
 
 ### Gesprochene Ansagen
@@ -942,7 +943,8 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
   von den Deep-Ingest-URLs des Assistenten gecrawlt wurden, bereinigt nach `knowledge/initial_knowledge.json` im
   neuen Target, mit einer `README.md`, die sagt, was darin steht. Solange ein Deep Ingest noch läuft, bleibt die
   Schaltfläche *Finish* des Assistenten gesperrt (die Seite sagt, warum), damit der Schnappschuss jede gecrawlte
-  Seite enthält. Der Rest deiner Wissensbasis kommt nie in ein Modul, und `llm-cli module create` und
+  Seite enthält; stammt keine gespeicherte Seite von diesen URLs, sagt der Assistent, dass kein Schnappschuss
+  angehängt wurde. Der Rest deiner Wissensbasis kommt nie in ein Modul, und `llm-cli module create` und
   `module generate-ai` hängen nichts an. Das Framework nimmt einen solchen Schnappschuss nicht in eine Wissensbasis
   auf; zum Teilen von Wissen exportierst du ein Wissens-Pack.
 - **Export für die Community:** Die letzte Seite des Assistenten bietet außerdem **Export for community after

@@ -639,6 +639,16 @@ class TestURLInputDialog:
         dlg.spin_delay.setValue(1.5)
         assert dlg.get_options() == {"max_depth": 4, "download_pdfs": True, "request_delay": 1.5}
 
+    def test_larger_settings_are_not_cut_down(self, qapp, tmp_path):
+        """A configured 30 s delay (a site that asks for it) must not become the dialog's maximum of 10 s."""
+        cfg = ConfigManager(tmp_path)
+        cfg.set("crawler_max_depth", 8)
+        cfg.set("crawler_rate_limit", 30.0)
+        assert URLInputDialog(config=cfg).get_options() == {"max_depth": 8, "download_pdfs": True,
+                                                            "request_delay": 30.0}
+        cfg.set("crawler_max_depth", 2**40)   # beyond what a spin box holds: the dialog still opens
+        assert URLInputDialog(config=cfg).get_options()["max_depth"] == 2**31 - 1
+
     def test_no_switch_to_ignore_robots_txt(self, qapp, tmp_path):
         """robots.txt is a machine-readable opt-out like TDMRep: neither the dialog nor the config turns it off."""
         from PySide6.QtWidgets import QCheckBox
@@ -1065,6 +1075,32 @@ class TestDeepIngestControls:
         release.set()
         assert wait_for(qapp, lambda: finish.isEnabled())
         assert wizard.lbl_crawl_running.isHidden() and wizard_boxes[-1][0] == "information"
+
+    @pytest.mark.parametrize("stored", [False, True])
+    def test_a_requested_snapshot_that_is_missing_is_reported(self, wizard, tmp_path, monkeypatch, wizard_boxes,
+                                                              stored):
+        """The snapshot box was ticked, but no stored page came from the crawled URLs (e.g. the crawl stored
+        nothing): "Module created" alone used to hide that the snapshot is missing."""
+        from orchestrator.gui import wizards
+
+        def generate(data, framework, knowledge_roots=None):
+            target = tmp_path / "targets" / "test_board"
+            (target / "knowledge").mkdir(parents=True)
+            if stored and knowledge_roots:
+                (target / "knowledge" / "initial_knowledge.json").write_text("[]")
+            return target
+
+        monkeypatch.setattr(wizards, "ModuleGenerator", lambda targets: SimpleNamespace(generate_module=generate))
+        wizard.framework_manager = SimpleNamespace(config=ConfigManager(tmp_path / "configs"))
+        wizard.name_edit.setText("Test_Board")
+        wizard.crawled_roots.add("https://docs.example/")
+        wizard.chk_knowledge.setEnabled(True)
+        wizard.chk_knowledge.setChecked(True)
+        wizard.accept()
+
+        kind, _, text = wizard_boxes[-1]
+        assert kind == "information" and str(tmp_path / "targets" / "test_board") in text
+        assert ("knowledge snapshot was not attached" in text) is not stored
 
     def test_crawled_urls_are_remembered_without_secrets(self, wizard, tmp_path, monkeypatch):
         from orchestrator.gui import wizards

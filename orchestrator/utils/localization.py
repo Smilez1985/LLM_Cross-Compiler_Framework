@@ -249,6 +249,8 @@ class LocalizationManager(QObject):
             "crawl.done.failure": "Deep Ingest failed: nothing was stored. See the log.",
             "crawl.finish_waits": "Deep Ingest is still running. The module can be created once it has finished or "
                                   "was stopped, so that a knowledge snapshot holds every page.",
+            "crawl.snapshot_missing": ("The knowledge snapshot was not attached: no stored page comes from the crawled "
+                                       "URLs, or the knowledge base could not be read. See the log."),
 
             # Input history (recent values in the input fields, per user)
             "menu.clear_history": "Clear Input History...",
@@ -484,6 +486,9 @@ class LocalizationManager(QObject):
             "crawl.done.failure": "Deep Ingest fehlgeschlagen: Es wurde nichts gespeichert. Siehe Protokoll.",
             "crawl.finish_waits": "Deep Ingest läuft noch. Das Modul kann erstellt werden, sobald er beendet oder "
                                   "gestoppt ist, damit ein Wissens-Snapshot jede Seite enthält.",
+            "crawl.snapshot_missing": ("Der Wissens-Snapshot wurde nicht angehängt: Keine gespeicherte Seite "
+                                       "stammt von den gecrawlten URLs, oder die Wissensbasis ließ sich nicht "
+                                       "lesen. Siehe Protokoll."),
 
             # Eingabeverlauf (zuletzt verwendete Werte in den Eingabefeldern, je Benutzer)
             "menu.clear_history": "Eingabeverlauf löschen...",

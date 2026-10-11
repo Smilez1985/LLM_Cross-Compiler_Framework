@@ -775,9 +775,13 @@ class URLInputDialog(QDialog):
         grp_options = QGroupBox("Crawl Options")
         opt_layout = QFormLayout()
 
+        # A larger configured value widens the range: the dialog never cuts a setting down (e.g. a longer delay).
+        # A QSpinBox holds a C int; a larger depth would make the dialog fail to open.
+        depth = min(int(setting("crawler_max_depth", 2)), 2**31 - 1)
+        delay = float(setting("crawler_rate_limit", 1.0))
         self.spin_depth = QSpinBox()
-        self.spin_depth.setRange(0, 5)
-        self.spin_depth.setValue(int(setting("crawler_max_depth", 2)))
+        self.spin_depth.setRange(0, max(5, depth))
+        self.spin_depth.setValue(depth)
         self.spin_depth.setToolTip("How many levels deep to follow links (0: only the entered pages)")
         opt_layout.addRow("Max Depth:", self.spin_depth)
 
@@ -786,10 +790,10 @@ class URLInputDialog(QDialog):
         opt_layout.addRow("", self.chk_pdfs)
 
         self.spin_delay = QDoubleSpinBox()
-        self.spin_delay.setRange(0, 10)
+        self.spin_delay.setRange(0, max(10.0, delay))
         self.spin_delay.setDecimals(2)
         self.spin_delay.setSingleStep(0.5)
-        self.spin_delay.setValue(float(setting("crawler_rate_limit", 1.0)))
+        self.spin_delay.setValue(delay)
         self.spin_delay.setSuffix(" s")
         self.spin_delay.setToolTip("Delay between requests (be polite!)")
         opt_layout.addRow("Request Delay:", self.spin_delay)

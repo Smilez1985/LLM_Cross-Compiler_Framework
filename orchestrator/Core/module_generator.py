@@ -71,8 +71,9 @@ records what the target was made from and can be read offline; the pages keep th
 target's licence does not cover them.
 
 The framework does not read this file: nothing imports it into a knowledge base, and there is no command for
-that. To give knowledge to other users, export it as a knowledge pack (`llm-cli zoo export knowledge`); an
-installed knowledge pack is added to the knowledge base.
+that. To share knowledge so that it reaches other users' knowledge bases, export your knowledge base as a
+knowledge pack (`llm-cli zoo export knowledge --author <name>`); an installed knowledge pack is added to the
+knowledge base.
 """
 
 
@@ -401,7 +402,8 @@ class ModuleGenerator:
                 (dst.parent / "README.md").write_text(KNOWLEDGE_README.format(slug=module_slug), encoding="utf-8")
                 self.logger.info(f"Attached the knowledge snapshot: {dst}")
             else:
-                self.logger.warning("No knowledge snapshot created (maybe Qdrant was empty or disabled).")
+                self.logger.warning("No knowledge snapshot attached: no stored page comes from the crawled URLs, "
+                                    "or the knowledge base could not be read.")
                 
         except Exception as e:
             self.logger.warning(f"Failed to create knowledge snapshot: {e}")

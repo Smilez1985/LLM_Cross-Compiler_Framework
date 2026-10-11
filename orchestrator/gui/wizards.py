@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QRect
 from PySide6.QtGui import QPixmap
 
-from orchestrator.Core.module_generator import ModuleGenerator
+from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT, ModuleGenerator
 from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog, show_crawl_notice_once
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils import input_history
@@ -926,8 +926,10 @@ Setup commands:
                 output_path = generator.generate_module(self.module_data, self.framework_manager, knowledge_roots=roots)
             else:
                 output_path = generator.generate_module(self.module_data)
-                
-            QMessageBox.information(self, tr("msg.success"), f"{tr('msg.module_created')}\n{output_path}")
+            message = f"{tr('msg.module_created')}\n{output_path}"
+            if roots and not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
+                message += "\n\n" + ui_text("crawl.snapshot_missing")
+            QMessageBox.information(self, tr("msg.success"), message)
             if self.chk_export.isChecked():
                 from orchestrator.gui.community_hub import CommunityExportDialog
                 CommunityExportDialog(self.framework_manager, "target", output_path.name, self).exec()
