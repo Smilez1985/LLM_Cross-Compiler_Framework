@@ -33,10 +33,11 @@ import secrets
 import shutil
 import subprocess
 import tempfile
+import time
 import webbrowser
 import zipfile
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Sequence, Tuple
@@ -51,6 +52,7 @@ from orchestrator.Core.community_pack import (ENCRYPTED_MAGIC, MAX_PACK_BYTES, P
                                               read_pack, scrub, sign_manifest, tree_sha256, utc_now,
                                               verify_index, verify_manifest, write_pack)
 from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file
+from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
 KINDS = ("target", "recipe", "knowledge")
@@ -58,6 +60,8 @@ _ID = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
 _VERSION = r"^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,32})?$"
 REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
 INDEX_MAX_BYTES = 8 * 1024 * 1024
+# A cached index older than this is fetched again when it is used, so revocations reach every user.
+INDEX_MAX_AGE = 24 * 3600
 KNOWLEDGE_FILE = "knowledge.json"
 RECIPE_FILE = "recipe.yml"
 
@@ -245,7 +249,7 @@ def trust_of_folder(folder: Path, index: Optional[CommunityIndex]) -> Tuple[Opti
 
 def build_trust_check(target_path: Path, cache_dir: Optional[Path]) -> Optional[str]:
     """For the builder: raises PackError for a revoked target; returns a warning for a local one."""
-    index = CommunityManager.read_cached_index(cache_dir) if cache_dir else None
+    index = CommunityManager.read_cached_index(cache_dir, revocations=True) if cache_dir else None
     trust, reason = trust_of_folder(target_path, index)
     if trust == TrustLevel.REVOKED:
         raise PackError(f"Target {target_path.name} was revoked by the community index ({reason}); it is not "
@@ -295,36 +299,45 @@ class CommunityManager:
 
     # --- index ------------------------------------------------------------------------------------------------
     @staticmethod
-    def _verify_index(data: bytes, sig: bytes, keys) -> CommunityIndex:
+    def _verify_index(data: bytes, sig: bytes, keys, now: Optional[datetime] = None) -> CommunityIndex:
         try:
             signature = PackSignature.model_validate_json(sig)
         except ValidationError:
             raise PackError("index.json.sig is not a valid signature file.") from None
-        verify_index(data, signature, keys)  # before anything of the index is parsed
+        verify_index(data, signature, keys, now=now)  # before anything of the index is parsed
         try:
             return CommunityIndex.model_validate_json(data)
         except ValidationError as e:
             raise PackError(f"The community index is invalid: {e}") from None
 
     @classmethod
-    def read_cached_index(cls, cache_dir: Path, keys=None) -> Optional[CommunityIndex]:
-        """The cached index, verified again (an expired or removed key invalidates it); None if absent or bad."""
+    def read_cached_index(cls, cache_dir: Path, keys=None, *, revocations: bool = False) -> Optional[CommunityIndex]:
+        """The cached index, verified again (an expired or removed key invalidates it); None if absent or bad.
+        For revocations only, a key that expired after the index was fetched still counts: a revocation never
+        stops applying because the framework was not updated."""
         try:
-            data = (cache_dir / "index.json").read_bytes()
-            sig = (cache_dir / "index.json.sig").read_bytes()
-            return cls._verify_index(data, sig, load_trusted_keys() if keys is None else keys)
+            path = cache_dir / "index.json"
+            data, sig = path.read_bytes(), (cache_dir / "index.json.sig").read_bytes()
+            fetched = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc) if revocations else None
+            return cls._verify_index(data, sig, load_trusted_keys() if keys is None else keys, now=fetched)
         except (OSError, PackError):
             return None
 
-    def cached_index(self) -> Optional[CommunityIndex]:
-        return self.read_cached_index(self.cache_dir, self._keys)
+    def cached_index(self, *, revocations: bool = False) -> Optional[CommunityIndex]:
+        return self.read_cached_index(self.cache_dir, self._keys, revocations=revocations)
+
+    def _cache_is_fresh(self) -> bool:
+        try:
+            return time.time() - (self.cache_dir / "index.json").stat().st_mtime < INDEX_MAX_AGE
+        except OSError:
+            return False
 
     def load_index(self, refresh: bool = False) -> IndexState:
-        """The verified community index: fetched when refresh is set or nothing is cached, otherwise the cache.
-        Without network the cached index is used. A fetched index that does not verify, or is older than the
-        cached one, raises PackError and changes nothing."""
+        """The verified community index: fetched when refresh is set, nothing is cached or the cache is older than
+        a day, otherwise the cache. Without network the cached index is used. A fetched index that does not
+        verify, or is older than the cached one, raises PackError and changes nothing."""
         cached = self.cached_index()
-        if cached is not None and not refresh:
+        if cached is not None and not refresh and self._cache_is_fresh():
             return IndexState(cached, "cached")
         url = str(self._cfg("community_index_url", "") or "")
         if not url:
@@ -394,11 +407,14 @@ class CommunityManager:
         folder = ensure_directory(self._install_root(kind) / ".quarantine")
         return Path(tempfile.mkdtemp(prefix=f"{pack_id}.", dir=folder))
 
-    def prepare_install(self, kind: str, pack_id: str, refresh: bool = False, progress=None) -> PreparedInstall:
+    def prepare_install(self, kind: str, pack_id: str, progress=None) -> PreparedInstall:
         """Downloads the pack the index pins and checks it in quarantine."""
         if kind not in KINDS or not re.fullmatch(_ID, str(pack_id)):
             raise PackError(f"Invalid {kind} id {pack_id!r}.")
-        state = self.load_index(refresh)
+        # The download needs the network anyway: always the current index, so a revocation is never missed.
+        state = self.load_index(refresh=True)
+        if state.source != "fetched":
+            raise PackError(f"The community index could not be updated ({state.note}); nothing was installed.")
         entry = state.index.latest(kind, pack_id)
         if entry is None:
             raise PackError(f"There is no {kind} '{pack_id}' in the community index.")
@@ -428,7 +444,10 @@ class CommunityManager:
         if data.startswith(ENCRYPTED_MAGIC):
             decrypted = decrypt_pack(data, identity=identity, passphrase=passphrase, trusted_senders=trusted_senders)
             data, sender = decrypted.data, decrypted.sender_id
-        index = self.cached_index()
+        try:
+            index = self.load_index().index  # updated when older than a day, for the latest revocations
+        except PackError:  # offline, no index configured, or a download that does not verify
+            index = self.cached_index()
         entry = index.by_sha256(sha256_bytes(data)) if index else None
         probe = read_pack_manifest(data)
         if kind and probe.kind != kind:
@@ -545,10 +564,12 @@ class CommunityManager:
             return [f"{KNOWLEDGE_FILE}: missing"]
         except (ValueError, UnicodeDecodeError):
             return [f"{KNOWLEDGE_FILE}: not valid JSON"]
+        # Every page keeps where it came from: shared knowledge is never without its source.
         good = isinstance(data, list) and all(
-            isinstance(e, dict) and isinstance(e.get("source", ""), str) and isinstance(e.get("content"), str)
-            and isinstance(e.get("metadata", {}), dict) for e in data)
-        return [] if good else [f"{KNOWLEDGE_FILE}: expected a list of {{source, content, metadata}} entries"]
+            isinstance(e, dict) and isinstance(e.get("source"), str) and e["source"].strip()
+            and isinstance(e.get("content"), str) and isinstance(e.get("metadata", {}), dict) for e in data)
+        return [] if good else [f"{KNOWLEDGE_FILE}: expected a list of {{source, content, metadata}} entries, "
+                                "each with its source"]
 
     def finish_install(self, prepared: PreparedInstall) -> Path:
         """Moves the checked pack into place (atomic rename) with its provenance; the quarantine is removed."""
@@ -566,6 +587,8 @@ class CommunityManager:
             ensure_directory(self.cache_dir)
             (self.cache_dir / "authors.json").write_text(json.dumps(authors, indent=2), encoding="utf-8")
         if prepared.manifest.kind == "knowledge":
+            # The marker of an earlier version (its folder was deleted to remove it) would skip this one.
+            (self.knowledge_dir / f"{dest.name}.imported").unlink(missing_ok=True)
             self.sync_knowledge_base()
         return dest
 
@@ -576,7 +599,7 @@ class CommunityManager:
     # --- verify -----------------------------------------------------------------------------------------------
     def verify_installed(self) -> List[Tuple[Path, Provenance, Optional[TrustLevel], List[str]]]:
         """Each installed pack with its trust and problems: revoked, or changed since it was installed."""
-        index = self.cached_index()
+        index = self.cached_index(revocations=True)
         results = []
         for folder, prov in self.installed():
             trust, reason = trust_of_folder(folder, index)
@@ -614,15 +637,17 @@ class CommunityManager:
             sm = self.framework.get_component("secrets_manager")
         return sm
 
-    def export_pack(self, kind: str, source: Optional[str] = None, *, author: str, license: str = "MIT",
+    def export_pack(self, kind: str, source: Optional[str] = None, *, author: str, license: Optional[str] = None,
                     pack_id: Optional[str] = None, model_license: str = "unknown",
                     root_urls: Optional[Iterable[str]] = None, recipients: Sequence = (),
                     passphrase: Optional[str] = None, out_dir: Optional[Path] = None) -> ExportResult:
         """A scrubbed pack signed with your key: kind target (source: target id), recipe (source: a build's
         build_info.json) or knowledge (optionally only the pages of root_urls). With recipients or a passphrase
-        it is encrypted for private sharing. Nothing is uploaded."""
+        it is encrypted for private sharing. Nothing is uploaded. The licence defaults to MIT for your own work;
+        knowledge holds other people's pages, so it is NOASSERTION there and every page keeps its source."""
         if kind not in KINDS:
             raise PackError(f"Unknown pack kind {kind!r}.")
+        license = license or ("NOASSERTION" if kind == "knowledge" else "MIT")
         out_dir = ensure_directory(Path(out_dir) if out_dir else self.contributions_dir)
         staging = Path(tempfile.mkdtemp(prefix=".export-", dir=out_dir))
         root, notes = staging / "pack", []
@@ -630,7 +655,7 @@ class CommunityManager:
             root.mkdir()
             version = "1.0.0"
             if kind == "target":
-                pack_id, version = self._stage_target(str(source or ""), root)
+                pack_id, version = self._stage_target(str(source or ""), root, notes)
             elif kind == "recipe":
                 pack_id = self._stage_recipe(Path(str(source or "")), root, author, model_license, notes)
             else:
@@ -639,6 +664,7 @@ class CommunityManager:
                 if not exported:
                     raise PackError("The knowledge base has nothing to export.")
                 shutil.move(exported, root / KNOWLEDGE_FILE)
+                notes.append("every page keeps its source address; the pages stay under their owners' terms")
             changes = self._scrub_tree(root)
             manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license=license)
             problems = self._validate(manifest, root, notes)
@@ -659,10 +685,17 @@ class CommunityManager:
         finally:
             shutil.rmtree(staging, ignore_errors=True)
 
-    def _stage_target(self, target_id: str, root: Path) -> Tuple[str, str]:
+    def _stage_target(self, target_id: str, root: Path, notes: List[str]) -> Tuple[str, str]:
         folder = self._target_folder(target_id) if re.fullmatch(_ID, target_id) else None
         if folder is None:
             raise PackError(f"Target '{target_id}' not found in {self.targets_dir}.")
+        prov = read_provenance(folder)
+        if prov is not None:  # re-signing it would replace its author and licence with yours
+            raise PackError(f"Target {folder.name} is {prov.author}'s community pack (from {prov.source}) and is "
+                            "shared already; a target of your own made from it keeps its author and licence.")
+        if (folder / "knowledge").is_dir():
+            notes.append("knowledge/ holds pages from the web: each keeps its source address, and the pack licence "
+                         "does not cover them")
         for rel, path in list_files(folder):  # links and special files are refused
             dest = root.joinpath(*rel.split("/"))
             dest.parent.mkdir(parents=True, exist_ok=True)
@@ -784,7 +817,7 @@ class CommunityManager:
             s = self._sanitize_content(record.get("source", ""))
             meta = {k: self._sanitize_content(v) if isinstance(v, str) else v
                     for k, v in (record.get("metadata") or {}).items()}  # e.g. URLs with tokens in the query
-            if c:
+            if c and s:  # a page without its source is never shared
                 export_data.append({"source": s, "content": c, "metadata": meta})
         if not export_data:
             return None
@@ -838,8 +871,9 @@ def submit_contribution(path: Path, repo: str, kind: str, *, runner: Callable = 
                 return _submit_with_gh(path, repo, kind, gh, git, runner)
             note = "The GitHub CLI is not logged in ('gh auth login'). "
         except (subprocess.SubprocessError, OSError) as e:
-            detail = getattr(e, "stderr", "") or str(e)
-            note = f"The GitHub CLI could not open the pull request ({str(detail).strip()[-300:]}). "
+            # git and gh output can name a remote with credentials in it: never shown
+            detail = redact_secrets(re.sub(r"(\w+://)[^/\s@'\"]+@", r"\1", str(getattr(e, "stderr", "") or e)))
+            note = f"The GitHub CLI could not open the pull request ({detail.strip()[-300:]}). "
     opener(upload)
     return (f"{note}Opened {upload} in your browser: drop {path.name} (in {path.parent}) onto the page and "
             "propose the change; GitHub forks the repository for you.")

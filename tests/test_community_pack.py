@@ -444,6 +444,18 @@ class TestEncryption:
         with pytest.raises(PackError, match="damaged"):
             decrypt_pack(forged, passphrase="correct horse battery")
 
+    def test_only_one_passphrase_stanza_is_read(self, people, monkeypatch):
+        # Anyone can sign a file; 64 passphrase stanzas at the highest work factor would run 64 GiB-sized scrypts.
+        mallory_sign, _ = people["dave"]
+        blob = encrypt_pack(SECRET_TEXT, sender=mallory_sign, passphrase="correct horse battery")
+        header, mac, body, _ = split(blob)
+        header["recipients"] += [dict(header["recipients"][0], log_n=20) for _ in range(3)]
+        forged = rebuild(header, mac, body, b"")
+        forged += mallory_sign.sign(cp._ENCRYPTED_CONTEXT + forged)
+        monkeypatch.setattr(cp, "_scrypt_key", lambda *a: pytest.fail("scrypt ran for a damaged header"))
+        with pytest.raises(PackError, match="damaged"):
+            decrypt_pack(forged, passphrase="correct horse battery")
+
     def test_encrypted_signed_pack_end_to_end(self, people, tmp_path):
         alice_sign, _ = people["alice"]
         _, bob_enc = people["bob"]

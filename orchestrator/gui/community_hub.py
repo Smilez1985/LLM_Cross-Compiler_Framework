@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 import yaml
-from PySide6.QtCore import QThread, QUrl, Signal
+from PySide6.QtCore import Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
@@ -104,6 +104,7 @@ class CommunityHubWindow(QMainWindow):
                                  "QHeaderView::section { background-color: #333; color: white; }")
         layout.addWidget(self.table)
         self.status_label = QLabel(tr("status.ready", "Ready."))
+        self.status_label.setTextFormat(Qt.PlainText)  # errors quote pack contents
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
 
@@ -213,6 +214,8 @@ class CommunityHubWindow(QMainWindow):
         local = prepared.trust == TrustLevel.LOCAL
         box = QMessageBox(QMessageBox.Warning if local else QMessageBox.Question, "Install community pack",
                           prepared.summary(), QMessageBox.Yes | QMessageBox.No, self)
+        # The summary quotes the pack (author, notes): as HTML it could hide the trust level and the warning.
+        box.setTextFormat(Qt.PlainText)
         box.setDefaultButton(QMessageBox.No)  # deny by default
         if box.exec() != QMessageBox.Yes:
             self.comm_manager.discard(prepared)

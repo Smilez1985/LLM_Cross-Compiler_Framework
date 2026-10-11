@@ -1657,11 +1657,10 @@ def zoo_show(ctx: FrameworkContext, pack_id: str, kind: Optional[str]):
 @click.option('--from', 'senders', multiple=True, type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help='Encrypted packs: accept only these senders (public key files, repeatable)')
 @click.option('--passphrase', 'use_passphrase', is_flag=True, help='Encrypted packs: ask for the passphrase')
-@click.option('--refresh', is_flag=True, help='Download the signed index again first')
 @click.option('--yes', is_flag=True, help='Do not ask for a pack from the signed index (a file always asks)')
 @pass_context
 def zoo_install(ctx: FrameworkContext, pack_id: Optional[str], kind: str, file_path: Optional[Path],
-                senders: Tuple[Path, ...], use_passphrase: bool, refresh: bool, yes: bool):
+                senders: Tuple[Path, ...], use_passphrase: bool, yes: bool):
     """Install a community pack: download pinned by the signed index, checks in quarantine, your confirmation"""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     from orchestrator.Core.community_manager import TrustLevel
@@ -1683,7 +1682,7 @@ def zoo_install(ctx: FrameworkContext, pack_id: Optional[str], kind: str, file_p
             prepared = cm.prepare_install_file(file_path, **options)
         else:
             with console.status(f"Downloading and checking {kind} {pack_id}..."):
-                prepared = cm.prepare_install(kind, pack_id, refresh=refresh)
+                prepared = cm.prepare_install(kind, pack_id)
     except (PackError, OSError) as e:
         _zoo_fail(e)
     click.echo(prepared.summary(), err=True)
@@ -1738,7 +1737,8 @@ def zoo_verify(ctx: FrameworkContext, pack_file: Optional[Path]):
 @click.argument('kind', type=click.Choice(ZOO_KINDS))
 @click.argument('source', required=False)
 @click.option('--author', required=True, help='Name shown as the author (a pseudonym is fine)')
-@click.option('--license', 'license_', default='MIT', show_default=True, help='Licence of the pack (SPDX id)')
+@click.option('--license', 'license_', help='Licence of the pack (SPDX id); default MIT, NOASSERTION for '
+              'knowledge (the pages keep their owners\' terms)')
 @click.option('--model-license', default='unknown', show_default=True, help='Recipes: licence id of the model')
 @click.option('--id', 'pack_id', help='Knowledge: id of the pack')
 @click.option('--to', 'recipients', multiple=True, type=click.Path(exists=True, dir_okay=False, path_type=Path),
@@ -1747,10 +1747,11 @@ def zoo_verify(ctx: FrameworkContext, pack_file: Optional[Path]):
 @click.option('--out', type=click.Path(file_okay=False, path_type=Path), help='Folder for the pack')
 @click.option('--pr', 'open_pr', is_flag=True,
               help='Hand the pack to a pull request on the community repository (gh if installed, else the browser)')
+@click.option('--yes', is_flag=True, help='With --pr: submit without asking after the summary')
 @pass_context
-def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: str, license_: str,
+def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: str, license_: Optional[str],
                model_license: str, pack_id: Optional[str], recipients: Tuple[Path, ...], use_passphrase: bool,
-               out: Optional[Path], open_pr: bool):
+               out: Optional[Path], open_pr: bool, yes: bool):
     """Export a target (SOURCE: target id), a recipe (SOURCE: a build folder or its build_info.json) or your
     knowledge base as a scrubbed pack signed with your key. Shows what the privacy scrub changed."""
     from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
@@ -1775,6 +1776,10 @@ def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: 
         return
     if result.encrypted:
         _zoo_fail(ValueError("Encrypted packs are for private sharing; they are not submitted to the community."))
+    # Publishing is a release of its own: only after the summary and the scrub changes were shown.
+    if not yes and not (sys.stdin.isatty() and click.confirm(
+            "Submit this pack to the public community repository?", default=False, err=True)):
+        _zoo_fail(ValueError(f"Not submitted; the pack is ready at {result.path}."))
     try:
         console.print(escape(submit_contribution(result.path, ctx.framework_manager.config.get("community_repo", ""),
                                                  kind)))

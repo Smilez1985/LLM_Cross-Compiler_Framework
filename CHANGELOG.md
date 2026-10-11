@@ -39,8 +39,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Encrypted packs for private sharing** (with your own machines or a team): encrypted to one or more
   recipients' X25519 public keys and/or a passphrase (scrypt), in the style of age (ChaCha20-Poly1305,
   HKDF-SHA256, authenticated header), and signed by the sender, so recipients see who sent it and any change,
-  including an added or removed recipient, is detected. Each user gets an Ed25519/X25519 key pair on first use,
-  kept only in the encrypted secrets store; the public keys can be exported as text.
+  including an added or removed recipient, is detected. As in age, a file holds at most one passphrase entry.
+  Each user gets an Ed25519/X25519 key pair on first use, kept only in the encrypted secrets store; the public
+  keys can be exported as text.
 - **Recipes**, the model zoo's "model templates": the model at a pinned commit, the target with a fingerprint
   of its files, board, format, quantization, options and verified results (artifact hashes, toolchain image,
   device tests). A recipe is generated from a finished build, checked against the target's capabilities and
@@ -50,22 +51,28 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   framework version. Build requests accept a `revision` (commit) for Hugging Face models.
 - **Community zoo** (`llm-cli zoo list|show|install|verify|export|keys`): community targets, recipes and
   knowledge packs listed from a signed community index (setting `community_index_url`: `index.json` plus
-  `index.json.sig`, verified with the keys in `configs/community_keys.yml`, cached per user and never replaced
-  by an older index). Installing downloads the pack pinned by size and sha256, checks it in a quarantine folder
-  (exact file list and hashes, the target validators, the recipe and knowledge schemas), shows a summary with
-  its trust level and installs it only after you confirm, atomically and with a provenance file. Trust levels:
+  `index.json.sig`, verified with the keys in `configs/community_keys.yml`, cached per user, fetched again when
+  the cache is older than a day and never replaced by an older index). Installing always reads the current
+  index first (so a revocation is never missed), downloads the pack pinned by size and sha256, checks it in a
+  quarantine folder (exact file list and hashes, the target validators, the recipe and knowledge schemas), shows
+  a summary with its trust level and installs it only after you confirm, atomically and with a provenance file.
+  Trust levels:
   official, verified, community, local (a file without an index entry: always confirmed, and a warning on
   every build) and revoked (blocked; installed copies are flagged by `llm-cli doctor` and the hub and are not
-  built). `llm-cli zoo verify` finds installed packs that were changed or revoked.
+  built, also after the key that signed the revocation has expired). `llm-cli zoo verify` finds installed packs
+  that were changed or revoked. The install summary is always shown as plain text, so text from a pack cannot
+  hide its trust level.
 - **Community Hub** in the Tools menu: a trust column, filters for kind and trust, import of pack files (also
   packs encrypted to your key), and "Build" on an installed recipe fills in the Builder, including the model's
   pinned commit.
 - **Export for community** on the module wizard's last page, in the Builder log's context menu (a finished
   build becomes a recipe) and with `llm-cli zoo export`: a pack of a target, a recipe or your knowledge base,
   privacy-scrubbed (the changes are shown), validated and signed with your key; with `--to` or `--passphrase`
-  it is encrypted for private sharing instead. "Open pull request" (`--pr`) hands it to the community
-  repository (setting `community_repo`): through the GitHub CLI if it is installed and logged in, otherwise
-  the repository's upload page opens in the browser. The framework never asks for or reads a token.
+  it is encrypted for private sharing instead. Knowledge packs keep the source address of every page and claim
+  no licence for them (`NOASSERTION`); a community pack you installed is not re-signed as your own. "Open pull
+  request" (`--pr`, which asks after the summary unless `--yes` is given) hands it to the community repository
+  (setting `community_repo`): through the GitHub CLI if it is installed and logged in, otherwise the
+  repository's upload page opens in the browser. The framework never asks for, reads or shows a token.
 - Maintainer tools for the community repository: `scripts/zoo_sign_index.py` (signing key in the OS keyring,
   index entries from packs, signature of `index.json`) and the CI workflow template
   `scripts/community_repo/validate-contribution.yml`, which runs `llm-cli zoo verify` on every submitted pack.
