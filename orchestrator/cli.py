@@ -1,16 +1,11 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Command Line Interface (v2.4.0)
-DIREKTIVE: Goldstandard, vollständig, professionell geschrieben.
+LLM Cross-Compiler Framework - Command Line Interface (llm-cli)
 
 Professional CLI for automation, CI/CD integration, and power users.
-Supports all framework operations including Source Management, Module Generation, 
+Supports all framework operations including Source Management, Module Generation,
 AI Assistance, Deployment, Self-Healing, and Smart Calibration (IMatrix).
-
-Updates v2.4.0:
-- Added --imatrix and --dataset flags to build command.
-- Integrated Smart Calibration workflow visualization.
-- Added 'config repos' to manage SSOT source repositories.
+The version shown by --help, --version and the banner is orchestrator.__version__.
 """
 
 import sys
@@ -19,11 +14,12 @@ import subprocess
 import asyncio
 import os
 import platform
+import re
+import time
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, List, Any, Tuple
+from typing import Optional, Dict, Any, Tuple
 from datetime import datetime
-from dataclasses import dataclass, asdict
 
 import click
 import yaml
@@ -39,28 +35,8 @@ from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLeve
 from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.Core.deployment_manager import DeploymentManager
 from orchestrator.llm.sdk_env import guard_sdk_environment
+from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger, setup_logging
-
-# ============================================================================
-# DATENKLASSEN
-# ============================================================================
-
-@dataclass
-class TargetConfig:
-    """Target configuration for CLI display"""
-    name: str
-    architecture: str
-    status: str = "available"
-    version: str = "1.0.0"
-    maintainer: str = "Framework Team"
-    description: str = ""
-    supported_boards: List[str] = None
-    docker_image: str = ""
-    
-    def __post_init__(self):
-        if self.supported_boards is None:
-            self.supported_boards = []
-
 
 # ============================================================================
 # GLOBAL CONFIGURATION
@@ -100,6 +76,7 @@ class FrameworkContext:
         self.verbose: bool = False
         self.quiet: bool = False
         self.http_client: Any = None  # reaches the providers for sign-in checks (tests: a mock transport)
+        self.settings: Any = None  # the settings read without booting the framework (see _settings)
         self._initialized: bool = False
         
     def initialize(self):
@@ -174,6 +151,20 @@ def load_config_file(config_path: Optional[str] = None) -> Dict[str, Any]:
     return config
 
 
+def _settings(ctx: "FrameworkContext"):
+    """The framework's settings (config.yml, a -c file, LLM_FRAMEWORK_* variables) and its path rule (relative to
+    the installation), as Ditto, builds and the GUI use them. A booted framework's own settings when there is
+    one; otherwise they are read without booting it, so the command needs neither a keyring nor Docker."""
+    from orchestrator.Core.framework import resolve_install_path
+    fm = ctx.framework_manager
+    if fm is not None:
+        return fm.config, fm.resolve_path
+    if ctx.settings is None:
+        from orchestrator.Core.config_manager import ConfigManager
+        ctx.settings = ConfigManager(ctx.config_path)
+    return ctx.settings, resolve_install_path
+
+
 def _allow_sdk_env_headers(config_path: Optional[str]) -> Any:
     """The setting ai_allow_sdk_env_headers (read only when OPENAI/ANTHROPIC_CUSTOM_HEADERS is set). Settings that
     cannot be read count as no: the variables are then dropped and the command still runs."""
@@ -183,25 +174,6 @@ def _allow_sdk_env_headers(config_path: Optional[str]) -> Any:
     except Exception as e:
         get_logger(__name__).warning(f"Could not read ai_allow_sdk_env_headers ({e.__class__.__name__}).")
         return False
-
-
-def format_target_table(targets: List[TargetConfig]) -> Table:
-    """Format targets as a Rich table"""
-    table = Table(title="Available Targets")
-    table.add_column("Name", style="cyan", no_wrap=True)
-    table.add_column("Architecture", style="green")
-    table.add_column("Status", style="yellow")
-    table.add_column("Boards", style="magenta")
-    
-    for target in targets:
-        status = "✅ Ready" if target.status == "available" else "❌ Not Ready"
-        boards = ", ".join(target.supported_boards[:2]) if target.supported_boards else "None"
-        if target.supported_boards and len(target.supported_boards) > 2:
-            boards += f" (+{len(target.supported_boards) - 2} more)"
-            
-        table.add_row(target.name, target.architecture, status, boards)
-    
-    return table
 
 
 def model_format_from_string(format_str: str) -> ModelFormat:
@@ -219,7 +191,19 @@ def model_format_from_string(format_str: str) -> ModelFormat:
 # MAIN CLI GROUP
 # ============================================================================
 
-@click.group()
+CLI_HELP = f"""
+    🚀 LLM Cross-Compiler Framework CLI v{__version__}
+
+    Professional command-line interface for cross-compiling Large Language Models
+    for edge hardware. Supports automation, CI/CD integration, Deployment,
+    Self-Healing and Smart Calibration (IMatrix).
+
+    Sign Ditto in to an AI provider with `llm-cli ditto login <provider>`;
+    `llm-cli ditto auth status` shows the sign-in of every provider.
+    """
+
+
+@click.group(help=CLI_HELP)
 @click.version_option(version=__version__)
 @click.option('--config', '-c', type=click.Path(exists=True), help='Configuration file path')
 @click.option('--verbose', '-v', is_flag=True, help='Verbose output')
@@ -231,17 +215,7 @@ def model_format_from_string(format_str: str) -> ModelFormat:
 @pass_context
 def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str,
         debug_http: bool):
-    """
-    🚀 LLM Cross-Compiler Framework CLI v2.4.0
-    
-    Professional command-line interface for cross-compiling Large Language Models
-    for edge hardware. Supports automation, CI/CD integration, Deployment, 
-    Self-Healing and Smart Calibration (IMatrix).
-
-    Sign Ditto in to an AI provider with `llm-cli ditto login <provider>`;
-    `llm-cli ditto auth status` shows the sign-in of every provider.
-    """
-    
+    """The help text is CLI_HELP (its version comes from orchestrator.__version__)."""
     # Load configuration
     ctx.config.update(load_config_file(config))
     ctx.config_path = config
@@ -279,68 +253,68 @@ def targets():
 @click.option('--format', '-f', default='table', type=click.Choice(['table', 'json', 'yaml']))
 @pass_context
 def list_targets(ctx: FrameworkContext, format: str):
-    """List available hardware targets"""
+    """List the hardware targets: id (the value for --target), name, boards and formats from their capabilities"""
+    from orchestrator.Core.build_service import BuildService, BuildServiceError
     ctx.require_framework()
-    
+    fm = ctx.framework_manager
     try:
-        if not ctx.build_engine:
-            console.print("[red]Build engine not available[/red]")
-            sys.exit(1)
-        
-        available_targets = ctx.build_engine.list_available_targets()
-        
-        targets_config_objects = []
-        for target_info in available_targets:
-            target_config = TargetConfig(
-                name=target_info.get("name", "unknown"),
-                architecture=target_info.get("target_arch", "unknown"),
-                status="available" if target_info.get("available", False) else "unavailable",
-                version="1.0.0",
-                maintainer="Framework Team",
-                description=f"Target for {target_info.get('target_arch', 'unknown')} architecture",
-                supported_boards=[str(target_info.get("path", ""))],
-                docker_image="llm-framework/builder"
-            )
-            targets_config_objects.append(target_config)
-        
-        if format == 'table':
-            if targets_config_objects:
-                table = format_target_table(targets_config_objects)
-                console.print(table)
-            else:
-                console.print("[yellow]No targets found matching criteria[/yellow]")
-        elif format == 'json':
-            click.echo(json.dumps([asdict(t) for t in targets_config_objects], indent=2))
-        elif format == 'yaml':
-            click.echo(yaml.dump([asdict(t) for t in targets_config_objects], default_flow_style=False))
-            
-    except Exception as e:
-        console.print(f"[red]Error listing targets: {e}[/red]")
+        targets = (getattr(fm, "build_service", None) or BuildService(fm)).list_targets().targets
+    except BuildServiceError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
+    if format != 'table':
+        data = [t.model_dump(mode="json") for t in targets]
+        click.echo(json.dumps(data, indent=2) if format == 'json' else yaml.safe_dump(data, sort_keys=False))
+        return
+    if not targets:
+        console.print("[yellow]No targets found.[/yellow]")
+        return
+    table = Table(title="Available Targets")
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Name")
+    table.add_column("Architecture", style="green")
+    table.add_column("Boards", style="magenta")
+    table.add_column("Formats", style="yellow")
+    for t in targets:
+        table.add_row(escape(t.id), escape(t.name or ""), escape(t.architecture or "-"),
+                      escape(", ".join(t.boards) or "-"),
+                      escape(", ".join(f.id for f in t.formats) or "- (no capabilities declared)"))
+    console.print(table)
 
 
 @targets.command('validate')
 @click.argument('target_name')
 @pass_context
 def validate_target(ctx: FrameworkContext, target_name: str):
-    """Validate a target configuration"""
+    """Check that a target loads and that its capabilities block passes the schema (exit code 1 if not)"""
+    from pydantic import ValidationError
+    from orchestrator.schemas.targets import TargetCapabilities
     ctx.require_framework()
-    try:
-        # Assuming validate_target exists on framework manager or target manager
-        tm = ctx.framework_manager.get_component("target_manager")
-        if tm:
-             # This is a hypothetical method, adapt if your TM has different API
-             target = tm.get_target(target_name)
-             if target:
-                 console.print(f"[green]✅ Target '{target_name}' is valid[/green]")
-             else:
-                 console.print(f"[red]❌ Target '{target_name}' not found[/red]")
-                 sys.exit(1)
-        else:
-             console.print("[red]Target Manager not available[/red]")
-    except Exception as e:
-        console.print(f"[red]Error validating target: {e}[/red]")
+    tm = ctx.framework_manager.get_component("target_manager")
+    if not tm:
+        console.print("[red]Target Manager not available[/red]")
         sys.exit(1)
+    tid = tm.resolve(target_name)
+    if tid is None:
+        console.print(f"[red]❌ Target '{escape(target_name)}' not found (or its target.yml cannot be read; "
+                      f"see the log).[/red]")
+        sys.exit(1)
+    data = tm.get_target(tid) or {}
+    if "capabilities" not in data:
+        console.print(f"[yellow]Target '{escape(tid)}' loads but declares no capabilities: boards, formats and "
+                      "quantizations are not checked before a build. Add a 'capabilities:' block "
+                      "(see targets/Rockchip/target.yml).[/yellow]")
+        return
+    try:
+        caps = TargetCapabilities.model_validate(data["capabilities"])
+    except ValidationError as e:
+        console.print(f"[red]❌ Target '{escape(tid)}': its capabilities block is invalid:[/red]")
+        for err in e.errors():
+            where = ".".join(str(part) for part in err.get("loc", ())) or "capabilities"
+            console.print(f"[red]  capabilities.{escape(where)}: {escape(str(err.get('msg', '')))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]✅ Target '{escape(tid)}' is valid ({len(caps.boards)} boards, formats: "
+                  f"{escape(', '.join(caps.formats))})[/green]")
 
 
 # ============================================================================
@@ -387,7 +361,9 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
     }
     
     try:
-        targets_dir = Path(ctx.config.get('targets_dir', 'targets'))
+        # The configured targets folder (relative paths: the installation), as builds and the GUI use it.
+        config, resolve = _settings(ctx)
+        targets_dir = resolve(config.get("targets_dir", "targets"))
         generator = ModuleGenerator(targets_dir)
         
         output_path = generator.generate_module(module_data)
@@ -494,19 +470,21 @@ def build():
 
 @build.command('start')
 @click.option('--model', '-m', required=True, help='Model name (HuggingFace) or local path')
-@click.option('--target', '-t', required=True, help='Target hardware architecture (folder name in targets/)')
+@click.option('--target', '-t', required=True, help='Target id or folder name in targets/ (llm-cli targets list)')
 @click.option('--format', '-f', default='gguf', type=click.Choice([f.value for f in ModelFormat if f is not ModelFormat.HUGGINGFACE]),
               help='Target format (gguf: llama.cpp/CPU, rkllm: Rockchip NPU LLM, rknn: Rockchip NPU ONNX)')
 @click.option('--board', '-b', help='Board within the target family, e.g. rk3588, rk3576, rk3566')
 @click.option('--quantization', '-q', help='Quantization, e.g. Q4_K_M, IQ4_XS, F16 (gguf) or w4a16, w8a8 (rkllm)')
 @click.option('--output-dir', '-o', help='Custom output directory')
-@click.option('--optimization', default='balanced', 
+@click.option('--optimization', default='balanced',
               type=click.Choice(['fast', 'balanced', 'size', 'speed', 'aggressive']),
-              help='Optimization level')
+              help='Optimization level, passed to the target\'s build scripts as OPTIMIZATION_LEVEL '
+                   '(the Rockchip target ignores it)')
 @click.option('--priority', default='normal',
               type=click.Choice(['low', 'normal', 'high', 'urgent', 'critical']),
               help='Build priority')
-@click.option('--parallel', is_flag=True, default=True, help='Enable parallel builds')
+@click.option('--parallel', is_flag=True, default=False, hidden=True,
+              help='Deprecated: has no effect (one call runs one build)')
 @click.option('--follow', '-F', is_flag=True, help='Follow build output in real-time')
 @click.option('--gpu/--no-gpu', default=False, help='Enable GPU passthrough')
 # --- NEU v2.4.0: IMatrix Flags ---
@@ -517,11 +495,13 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
                 quantization: Optional[str], output_dir: Optional[str], 
                 optimization: str, priority: str, parallel: bool, follow: bool, gpu: bool,
                 imatrix: bool, dataset: Optional[str]):
-    """Start a new build job"""
+    """Start a new build job. Ctrl+C cancels it (its container is stopped) and exits with code 130."""
     ctx.require_framework()
+    if parallel:
+        Console(stderr=True).print("[yellow]--parallel is deprecated and has no effect.[/yellow]")
     
     try:
-        # Target is passed as string (folder name)
+        # Target id (or folder name), resolved to the registered id below
         target_arch_str = target
         target_format_enum = model_format_from_string(format)
         
@@ -546,12 +526,11 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         # Validate against the target's declared capabilities and fill its defaults.
         tm = getattr(ctx.framework_manager, "target_manager", None)
         if tm:
-            # The registered spelling, so `-t rockchip` is checked like `-t Rockchip`; an unknown target
-            # would otherwise "complete" with nothing built.
-            known = [str(t.get("id")) for t in tm.list_targets() if t.get("id")]
-            match = next((tid for tid in known if tid == target), None) or \
-                next((tid for tid in known if tid.casefold() == target.strip().casefold()), None)
+            # The registered id (also for its folder name or another letter case), so `-t rockchip` is checked
+            # like `-t Rockchip`; an unknown target would otherwise "complete" with nothing built.
+            match = tm.resolve(target)
             if match is None:
+                known = [str(t.get("id")) for t in tm.list_targets() if t.get("id")]
                 console.print(f"[red]Unknown target '{escape(target)}' (targets: {escape(', '.join(known) or 'none')}).[/red]")
                 sys.exit(2)
             target = target_arch_str = match
@@ -583,7 +562,7 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             target_formats=[target_format_enum],
             optimization_level=optimization_level,
             quantization_options=[quantization] if quantization else [],
-            parallel_builds=parallel,
+            parallel_builds=False,
             output_base_dir=output_dir,
             description=f"CLI build: {model} -> {target} ({format})",
             use_gpu=gpu,
@@ -593,67 +572,105 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
             target_board=board
         )
         
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        
-        try:
-            request_id = loop.run_until_complete(ctx.orchestrator.submit_build_request(build_request))
-            
-            if not ctx.quiet:
-                console.print(Panel(
-                    f"[bold]Model:[/bold] {model}\n"
-                    f"[bold]Target:[/bold] {target}\n"
-                    f"[bold]Format:[/bold] {format}\n"
-                    f"[bold]Quantization:[/bold] {quantization or 'None'}\n"
-                    f"[bold]Output:[/bold] {output_dir}\n"
-                    f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"
-                    f"[bold]Smart Calibration (IMatrix):[/bold] {'✅ Enabled' if imatrix else '❌ Disabled'}",
-                    title=f"🚀 Starting Build: {request_id}"
-                ))
-            
-            # The orchestrator's worker runs on this loop, so the CLI keeps it running until the build ends.
-            if follow:
-                console.print("[blue]Following build progress (Ctrl+C to stop)...[/blue]")
-            last = None
-            workflow_status = None
-            try:
-                while True:
-                    workflow_status = loop.run_until_complete(ctx.orchestrator.get_workflow_status(request_id))
-                    if workflow_status:
-                        line = (workflow_status.status, workflow_status.current_stage, workflow_status.completed_builds)
-                        if follow and line != last:
-                            status_color = {OrchestrationStatus.COMPLETED: "green", OrchestrationStatus.ERROR: "red",
-                                            OrchestrationStatus.HEALING: "magenta"}.get(workflow_status.status, "yellow")
-                            # Stages, proposals and errors can contain model or log text: never parse it as markup.
-                            console.print(f"[{status_color}]Status: {workflow_status.status.value} - {escape(workflow_status.current_stage)} "
-                                          f"({workflow_status.completed_builds}/{workflow_status.total_builds} builds)[/{status_color}]")
-                        last = line
-                        if (workflow_status.status == OrchestrationStatus.AWAITING_APPROVAL
-                                and workflow_status.healing_proposal is not None):
-                            _resolve_healing_interactively(ctx.orchestrator, request_id, workflow_status.healing_proposal)
-                        if workflow_status.status in [OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR, OrchestrationStatus.CANCELLED]:
-                            break
-                    loop.run_until_complete(asyncio.sleep(2))
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Interrupted; the build is cancelled when the CLI exits.[/yellow]")
-                sys.exit(130)
+        # The orchestrator runs on the framework's background loop (as for the GUI and the build service), so the
+        # build service can cancel the build from here on Ctrl+C.
+        fm = ctx.framework_manager
+        request_id = fm.run_coroutine(ctx.orchestrator.submit_build_request(build_request), timeout=30)
 
-            if workflow_status:
-                for artifact in workflow_status.artifacts:
-                    console.print(f"[green]Artifacts: {escape(str(artifact))}[/green]")
-                for warning in workflow_status.warnings:
-                    console.print(f"[yellow]{escape(str(warning))}[/yellow]")
-                for error in workflow_status.errors:
-                    console.print(f"[red]{escape(str(error))}[/red]")
-                if workflow_status.status != OrchestrationStatus.COMPLETED or workflow_status.failed_builds:
-                    sys.exit(1)
-                
-        finally:
-            loop.close()
-            
+        if not ctx.quiet:
+            console.print(Panel(
+                f"[bold]Model:[/bold] {escape(model)}\n"
+                f"[bold]Target:[/bold] {escape(target)}\n"
+                f"[bold]Format:[/bold] {format}\n"
+                f"[bold]Quantization:[/bold] {escape(quantization or 'None')}\n"
+                f"[bold]Output:[/bold] {escape(output_dir)}\n"
+                f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"
+                f"[bold]Smart Calibration (IMatrix):[/bold] {'✅ Enabled' if imatrix else '❌ Disabled'}",
+                title=f"🚀 Starting Build: {request_id}"
+            ))
+
+        # The CLI stays until the build has ended; Ctrl+C cancels it.
+        if follow:
+            console.print("[blue]Following build progress (Ctrl+C cancels the build)...[/blue]")
+        last = None
+        workflow_status = None
+        try:
+            while True:
+                workflow_status = fm.run_coroutine(ctx.orchestrator.get_workflow_status(request_id), timeout=30)
+                if workflow_status:
+                    line = (workflow_status.status, workflow_status.current_stage, workflow_status.completed_builds)
+                    if follow and line != last:
+                        status_color = {OrchestrationStatus.COMPLETED: "green", OrchestrationStatus.ERROR: "red",
+                                        OrchestrationStatus.HEALING: "magenta"}.get(workflow_status.status, "yellow")
+                        # Stages, proposals and errors can contain model or log text: never parse it as markup.
+                        console.print(f"[{status_color}]Status: {workflow_status.status.value} - {escape(workflow_status.current_stage)} "
+                                      f"({workflow_status.completed_builds}/{workflow_status.total_builds} builds)[/{status_color}]")
+                    last = line
+                    if (workflow_status.status == OrchestrationStatus.AWAITING_APPROVAL
+                            and workflow_status.healing_proposal is not None):
+                        _resolve_healing_interactively(ctx.orchestrator, request_id, workflow_status.healing_proposal)
+                    if workflow_status.status in [OrchestrationStatus.COMPLETED, OrchestrationStatus.ERROR, OrchestrationStatus.CANCELLED]:
+                        break
+                _pause(BUILD_POLL_SECONDS)
+        except KeyboardInterrupt:
+            _cancel_interrupted_build(ctx, request_id)
+
+        if workflow_status:
+            for artifact in workflow_status.artifacts:
+                console.print(f"[green]Artifacts: {escape(str(artifact))}[/green]")
+            for warning in workflow_status.warnings:
+                console.print(f"[yellow]{escape(str(warning))}[/yellow]")
+            for error in workflow_status.errors:
+                console.print(f"[red]{escape(str(error))}[/red]")
+            if workflow_status.status != OrchestrationStatus.COMPLETED or workflow_status.failed_builds:
+                sys.exit(1)
+
     except Exception as e:
         console.print(f"[red]Build failed: {escape(str(e))}[/red]")
         sys.exit(1)
+
+
+BUILD_POLL_SECONDS = 2
+# How long Ctrl+C waits for a cancelled build to stop (its container stops within about 10 s; a large model file
+# being copied is noticed between two chunks).
+CANCEL_WAIT_SECONDS = 120
+
+
+def _pause(seconds: float) -> None:
+    """The pause between two status polls (tests replace it)."""
+    time.sleep(seconds)
+
+
+def _cancel_interrupted_build(ctx: FrameworkContext, request_id: str) -> None:
+    """Ctrl+C in `build start`: cancels the build through the build service (its container is stopped), waits
+    until the cancel has finished, says so and exits with 130."""
+    from orchestrator.Core.build_service import BuildService, BuildServiceError
+    fm = ctx.framework_manager
+    service = getattr(fm, "build_service", None) or BuildService(fm)
+    console.print(f"\n[yellow]Interrupted: cancelling build {escape(request_id)} and stopping its container "
+                  "...[/yellow]")
+    try:
+        service.cancel(request_id)
+        outcome = service.wait_stopped(request_id, CANCEL_WAIT_SECONDS)
+        status = service.get_status(request_id)
+    except BuildServiceError as e:  # it ended meanwhile
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        sys.exit(130)
+    except KeyboardInterrupt:
+        console.print("[yellow]Not waiting any longer; the build is still being cancelled.[/yellow]")
+        sys.exit(130)
+    for warning in status.warnings:
+        console.print(f"[yellow]{escape(warning)}[/yellow]")
+    if outcome == "cancelled":
+        console.print(f"[yellow]Build {escape(request_id)} cancelled: its container was stopped and nothing was "
+                      "written to the output folder.[/yellow]")
+    elif outcome == "finished":
+        console.print(f"[yellow]Build {escape(request_id)} could no longer be cancelled and has ended on its "
+                      "own.[/yellow]")
+    else:
+        console.print(f"[yellow]Build {escape(request_id)} is cancelled but has not stopped within "
+                      f"{CANCEL_WAIT_SECONDS} s; check it with: llm-cli build status {escape(request_id)}[/yellow]")
+    sys.exit(130)
 
 
 def _resolve_healing_interactively(orchestrator, request_id, proposal):
@@ -677,50 +694,59 @@ def _resolve_healing_interactively(orchestrator, request_id, proposal):
     orchestrator.resolve_healing(request_id, approved)
 
 
+STATUS_ROWS = 20  # builds `build status` lists without --all
+
+
 @build.command('status')
 @click.argument('request_id', required=False)
-@click.option('--all', '-a', is_flag=True, help='Show all builds')
+@click.option('--all', '-a', is_flag=True, help=f'Show every kept build (default: the {STATUS_ROWS} newest)')
 @pass_context
 def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
-    """Check build status"""
-    ctx.require_framework()
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            if all or not request_id:
-                workflows = loop.run_until_complete(ctx.orchestrator.list_workflows())
-                if not workflows:
-                    console.print("[yellow]No builds found[/yellow]")
-                    return
-                
-                table = Table(title="Build Status")
-                table.add_column("Request ID", style="cyan", no_wrap=True)
-                table.add_column("Status", style="yellow")
-                table.add_column("Progress", style="blue")
-                
-                for workflow in workflows:
-                    table.add_row(
-                        workflow.request_id[:12] + "...",
-                        workflow.status.value,
-                        f"{workflow.progress_percent}%"
-                    )
-                console.print(table)
-            else:
-                workflow_status = loop.run_until_complete(ctx.orchestrator.get_workflow_status(request_id))
-                if not workflow_status:
-                    console.print(f"[red]Build '{request_id}' not found[/red]")
-                    sys.exit(1)
-                
-                console.print(f"[bold]ID:[/bold] {workflow_status.request_id}")
-                console.print(f"[bold]Status:[/bold] {workflow_status.status.value}")
-                console.print(f"[bold]Progress:[/bold] {workflow_status.progress_percent}%")
-                
-        finally:
-            loop.close()
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        sys.exit(1)
+    """Status of builds, including those the GUI, the MCP server or another CLI call started (read from the build
+    records in the cache folder). REQUEST_ID: a request id (req_...) or a build id."""
+    from orchestrator.Core.build_records import read_records, records_dir
+    config, resolve = _settings(ctx)
+    folder = records_dir(resolve(config.get("cache_dir", "cache")))
+    records = read_records(folder)
+    if request_id:
+        matches = [r for r in records if request_id in (r.get("request_id"), r.get("build_id"))]
+        if not matches:
+            console.print(f"[red]Build '{escape(request_id)}' not found in {escape(str(folder))}.[/red]")
+            sys.exit(1)
+        for record in reversed(matches):  # attempts in order
+            _print_build_record(record)
+        return
+    if not records:
+        console.print(f"[yellow]No builds found in {escape(str(folder))}.[/yellow]")
+        return
+    shown = records if all else records[:STATUS_ROWS]
+    table = Table(title="Builds")
+    for column in ("Request", "Build", "Status", "Progress", "Target", "Format", "Quantization", "Model",
+                   "Started"):
+        table.add_column(column)
+    for r in shown:
+        table.add_row(escape(str(r.get("request_id") or "-")), escape(str(r.get("build_id"))),
+                      escape(str(r.get("status"))), f"{r.get('progress') or 0}%", escape(str(r.get("target") or "-")),
+                      escape(str(r.get("format") or "-")), escape(str(r.get("quantization") or "-")),
+                      escape(str(r.get("model") or "-")), escape(str(r.get("started") or "-")))
+    console.print(table)
+    if len(records) > len(shown):
+        console.print(f"{len(records) - len(shown)} older builds: llm-cli build status --all")
+
+
+def _print_build_record(r: dict) -> None:
+    rows = [("Build", r.get("build_id")), ("Request", r.get("request_id")), ("Status", r.get("status")),
+            ("Stage", r.get("stage")), ("Progress", f"{r.get('progress') or 0}%"), ("Model", r.get("model")),
+            ("Target", r.get("target")), ("Board", r.get("board")), ("Format", r.get("format")),
+            ("Quantization", r.get("quantization")), ("Output", r.get("output_dir")),
+            ("Started", r.get("started")), ("Ended", r.get("ended")), ("Process", r.get("pid")),
+            ("Error", r.get("error"))]
+    for label, value in rows:
+        if value not in (None, ""):
+            console.print(f"[bold]{label}:[/bold] {escape(str(value))}")
+    if r.get("status") == "interrupted":
+        console.print("[yellow]The process that ran this build has ended before the build finished.[/yellow]")
+    console.print("")
 
 # ============================================================================
 # SECRETS MANAGEMENT COMMANDS (NEU V2.0)
@@ -761,6 +787,7 @@ def set_secret(ctx: FrameworkContext, key, with_token: bool, password: Optional[
     sm = ctx.framework_manager.secrets_manager
     if not sm.set_secret(key, password):
         console.print(f"[red]Failed to store secret '{escape(key)}'.[/red]")
+        sys.exit(1)
     elif getattr(sm, "storage_mode", None) == "ephemeral":
         # Never let a CI user believe it was saved.
         console.print(f"[yellow]Secret '{escape(key)}' is kept in memory for this run only "
@@ -914,10 +941,12 @@ def ditto():
 
 
 def _local_runtime(ctx: FrameworkContext):
-    """The managed llama-server; needs neither the keyring nor Docker, so the framework is not booted."""
-    from orchestrator.runtime.llama_server import LocalLLMRuntime, framework_models_dir
-    models = framework_models_dir(os.environ.get("LLM_FRAMEWORK_MODELS_DIR") or ctx.config.get("models_dir"))
-    return LocalLLMRuntime(models_dir=models / "ditto")
+    """The managed llama-server with the configured models folder (models_dir, as Ditto uses it); needs neither
+    the keyring nor Docker, so the framework is not booted for it."""
+    from orchestrator.runtime.llama_server import LocalLLMRuntime
+    config, resolve = _settings(ctx)
+    return LocalLLMRuntime(data_dir=config.user_state_dir,
+                           models_dir=resolve(config.get("models_dir", "models") or "models") / "ditto")
 
 
 def _download_progress():
@@ -1261,6 +1290,7 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
         if tiers:
             from orchestrator.runtime.llama_server import LocalRuntimeError
             rt = _local_runtime(ctx)
+            before = rt.endpoint()  # a server you started yourself keeps running
             for tier in tiers:
                 try:
                     with console.status(f"Starting llama-server with {tier} ..."):
@@ -1269,7 +1299,12 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
                 except LocalRuntimeError as e:
                     _runtime_failure(e)
                 finally:
-                    rt.stop()
+                    running = rt.endpoint()
+                    if before is None or running is None or running.pid != before.pid:
+                        rt.stop()  # the eval's own server (or what is left of a failed start)
+            if before is not None and getattr(rt.endpoint(), "pid", None) != before.pid:
+                console.print(f"[yellow]Your llama-server ({escape(before.model)}) was replaced for the evaluation; "
+                              "start it again with: llm-cli ditto runtime start[/yellow]")
         else:
             run_once("configured model" if not (provider or model) else f"{provider or ''} {model or ''}".strip())
     elif tiers or provider or model or effort:
@@ -1964,7 +1999,8 @@ def auth_rotate_key(ctx: FrameworkContext):
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @click.option('--fix', is_flag=True, help='Apply automatic fixes up to --tier, then check again')
 @click.option('--tier', default=1, show_default=True, type=click.IntRange(1, 2),
-              help='1: harmless fixes (permissions, folders); 2: also removes caches (Docker build cache)')
+              help='1: harmless fixes (makes your personal folder private); 2: also removes caches (dangling '
+                   'framework images, Docker build cache)')
 @pass_context
 def doctor(ctx: FrameworkContext, as_json: bool, fix: bool, tier: int):
     """Check the installation and explain how to fix problems (exit code 0 ok, 1 warnings, 2 errors)"""
@@ -2143,6 +2179,7 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
         console.print(f"Path: {pkg_path}")
     else:
         console.print("[bold red]Package generation failed. Check logs.[/bold red]")
+        sys.exit(1)
 
 @deploy.command('run')
 @click.argument('package_path', type=click.Path(exists=True))
@@ -2210,39 +2247,37 @@ def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, tr
 # ============================================================================
 
 @cli.command('scan')
-@click.option('--output', default="target_hardware_config.txt", help="Output filename")
+@click.option('--output', default="target_hardware_config.txt", show_default=True,
+              help="File the probe writes (relative to the current folder)")
 @pass_context
 def run_scan(ctx: FrameworkContext, output):
-    """Run hardware probe script."""
+    """Run the hardware probe on this computer (exit code 1 if it fails or writes no file)."""
     script_dir = Path(__file__).resolve().parents[1] / "scripts"
-    output_file = Path(output).resolve()
-    
+    output_file = Path(output).expanduser().resolve()
+
     is_windows = platform.system() == "Windows"
     script = script_dir / ("hardware_probe.ps1" if is_windows else "hardware_probe.sh")
-    
+
     if not script.exists():
-        console.print(f"[red]Probe script not found at {script}[/red]")
+        console.print(f"[red]Probe script not found at {escape(str(script))}[/red]")
         sys.exit(1)
-        
+
+    if is_windows:
+        cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script), "-OutputFile", str(output_file)]
+    else:
+        cmd = ["bash", str(script), "--output", str(output_file)]
     try:
-        cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script)] if is_windows else ["bash", str(script)]
-        
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+        output_file.unlink(missing_ok=True)  # a file of an earlier run must not count as this run's result
         with console.status("Running Hardware Probe...", spinner="dots"):
             subprocess.run(cmd, check=True, cwd=os.getcwd())
-            
-        if output_file.exists():
-            console.print(f"[bold green]✅ Probe successful. Config generated: {output_file}[/bold green]")
-            
-            # Optional: Import into TargetManager
-            # tm = ctx.framework_manager.target_manager
-            # if tm:
-            #     tm.import_hardware_profile(output_file)
-        else:
-            console.print("[red]Probe script ran, but output file was not created.[/red]")
-            
-    except subprocess.CalledProcessError as e:
-        console.print(f"[red]Probe execution failed: {e}[/red]")
+    except (subprocess.CalledProcessError, OSError) as e:
+        console.print(f"[red]Probe execution failed: {escape(str(e))}[/red]")
         sys.exit(1)
+    if not output_file.exists():
+        console.print(f"[red]Probe script ran, but {escape(str(output_file))} was not created.[/red]")
+        sys.exit(1)
+    console.print(f"[bold green]✅ Probe successful. Config generated: {escape(str(output_file))}[/bold green]")
 
 
 # ============================================================================
@@ -2257,8 +2292,43 @@ def config():
 @config.command('show')
 @pass_context
 def show_config(ctx: FrameworkContext):
-    """Show current configuration"""
-    console.print(json.dumps(ctx.config, indent=2, default=str))
+    """Show the effective settings (config.yml, a -c file, LLM_FRAMEWORK_* variables, defaults) as JSON, each with
+    its source; secrets are redacted"""
+    config, _ = _settings(ctx)
+    click.echo(json.dumps(_effective_settings(config), indent=2, default=str, ensure_ascii=False))
+
+
+# Settings that are not part of the schema but look like credentials are never printed.
+SECRET_NAME = re.compile(r"(?i)(^|[_.-])(token|password|passwd|secret|api_?key|access_key|private_key|credentials?)"
+                         r"($|[_.-])")
+
+
+def _redacted(value: Any) -> Any:
+    if isinstance(value, str):
+        return redact_secrets(value)
+    if isinstance(value, dict):
+        return {k: _redacted(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redacted(v) for v in value]
+    return value
+
+
+def _effective_settings(config) -> Dict[str, Any]:
+    """Every setting with its value and source (default, a file, the environment, or changed in this run)."""
+    result = {}
+    values = getattr(config, "config_values", {})
+    for key in sorted(values):
+        entry = values[key]
+        src = entry.source
+        source = f"file {src.source_path}" if src.source_type == "file" and src.source_path else src.source_type
+        unknown = getattr(entry, "schema", None) is None
+        if getattr(entry, "is_secret", False) or (unknown and SECRET_NAME.search(key) and entry.value):
+            value = "REDACTED"
+        else:
+            value = _redacted(entry.value)
+        result[key] = {"value": value, "source": source}
+    return result
+
 
 @config.command('repos')
 @click.option('--add', nargs=2, help="Add repo override: <name> <url>")
@@ -2268,22 +2338,24 @@ def config_repos(ctx: FrameworkContext, add, remove):
     """Manage SSOT Source Repositories"""
     ctx.require_framework()
     cm = ctx.framework_manager.config
-    current_repos = getattr(cm, 'source_repositories', {}) or {}
+    current_repos = dict(cm.get("source_repositories", {}) or {})
     
     if add:
         name, url = add
-        current_repos[name.lower()] = url
+        # The shape the build engine passes on as <NAME>_REPO_OVERRIDE (plain URLs of earlier versions still work).
+        current_repos[name.lower()] = {"url": url}
         cm.set("source_repositories", current_repos)
         cm.save_user_config()
-        console.print(f"[green]Added repo override: {name} -> {url}[/green]")
+        console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(redact_secrets(url))} (passed to "
+                      f"builds as {escape(name.split('.')[-1].upper())}_REPO_OVERRIDE)[/green]")
     elif remove:
         if remove.lower() in current_repos:
             del current_repos[remove.lower()]
             cm.set("source_repositories", current_repos)
             cm.save_user_config()
-            console.print(f"[green]Removed repo override: {remove}[/green]")
+            console.print(f"[green]Removed repo override: {escape(remove)}[/green]")
         else:
-            console.print(f"[yellow]Repo {remove} not found.[/yellow]")
+            console.print(f"[yellow]Repo {escape(remove)} not found.[/yellow]")
     else:
         # List
         if not current_repos:
@@ -2293,8 +2365,8 @@ def config_repos(ctx: FrameworkContext, add, remove):
             table.add_column("Key", style="cyan")
             table.add_column("URL", style="green")
             for k, v in current_repos.items():
-                url = v['url'] if isinstance(v, dict) else v
-                table.add_row(k, url)
+                url = v.get('url') if isinstance(v, dict) else v
+                table.add_row(escape(str(k)), escape(redact_secrets(str(url or "-"))))
             console.print(table)
 
 # ============================================================================

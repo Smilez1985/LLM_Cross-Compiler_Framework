@@ -29,10 +29,10 @@ Hardware (oder ihre technischen Daten).
 
 1. **Laden.** Beim Start liest der `TargetManager` die `target.yml` in jedem Ordner unterhalb von `targets/`.
    Ordner, deren Name mit `_` oder `.` beginnt (etwa `_template`), werden übersprungen, ebenso eine `target.yml`
-   ohne Block `metadata:`. Die Target-ID ist `metadata.id`, wenn gesetzt, sonst der Ordnername. Die Capabilities
-   werden über die ID gesucht, die Build-Engine findet das Target aber über seinen Ordnernamen
-   (`llm-cli build start -t <Ordner>`). Lass `metadata.id` also weg (oder setze es gleich dem Ordnernamen); sonst
-   werden entweder die Capabilities nicht gefunden oder der Build findet den Target-Ordner nicht.
+   ohne Block `metadata:`. Die Target-ID ist `metadata.id`, wenn gesetzt, sonst der Ordnername. CLI,
+   Build-Service, Orchestrator und Build-Engine lösen ein Target über eine einzige Zuordnung von ID zu Ordner auf;
+   `llm-cli build start -t` nimmt daher die ID oder den Ordnernamen (in beliebiger Groß- und Kleinschreibung), und
+   der Build nutzt in beiden Fällen den richtigen Ordner.
 2. **Capabilities.** Der Block `capabilities:` wird gegen das Schema in `orchestrator/schemas/targets.py` geprüft.
    Die GUI bietet genau die dort aufgeführten Formate, Boards und Quantisierungen an, die CLI lehnt alles andere ab,
    und die Tools des MCP-Servers und Dittos starten Builds nur für Targets mit gültigem Block. Ein ungültiger Block
@@ -209,7 +209,7 @@ metadata:
   version: "1.0.0"
   architecture_family: "aarch64"
   vendor: "community"
-  # id: weglassen; die Target-ID muss dem Ordnernamen entsprechen (siehe Abschnitt 1)
+  # id: optional; ohne sie ist der Ordnername die Target-ID (siehe Abschnitt 1)
 ```
 
 ### 4.2 capabilities
@@ -359,7 +359,7 @@ Umgebungsvariablen, die die Engine setzt:
 | `TARGET_BOARD` | Board-ID oder leer (dann dieselbe Vorgabe wie `default_board` nutzen) |
 | `QUANTIZATION` | Quantisierungstyp, bereits vereinheitlicht; leer nur bei Targets ohne Capabilities |
 | `TARGET_ARCH` | die Target-ID |
-| `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | Aufgabe (Vorgabe `LLM`), Optimierungsstufe, Build-ID |
+| `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | Aufgabe (Vorgabe `LLM`), Optimierungsstufe (`fast`, `balanced`, `size`, `speed`, `aggressive`; die Rockchip-Skripte werten sie nicht aus), Build-ID |
 | `MAX_CONTEXT_LENGTH` | nur, wenn für den Build gesetzt |
 | `USE_IMATRIX`, `IMATRIX_PATH` | Build-Stufe: `1` und der Pfad von `imatrix.dat`, wenn eine Importance-Matrix berechnet wurde |
 | `DATASET_PATH` | Kalibrierdatensatz, wenn der Build einen nutzt |
@@ -486,7 +486,8 @@ nur, um herauszufinden, ob ein Fehler an der Sandbox liegt.
    T.model_validate(yaml.safe_load(open('targets/my_board/target.yml', encoding='utf-8'))['capabilities']); print('ok')"
    ```
 
-   `llm-cli targets validate <ID>` bestätigt nur, dass `target.yml` geladen wurde; die Capabilities prüft es nicht.
+   `llm-cli targets validate <ID>` macht dieselbe Prüfung über das Framework und gibt jeden Schemafehler aus
+   (Exit-Code 1, wenn der Block ungültig ist).
 2. **Baut das Image?** Stell den Kontext so zusammen wie die Engine und bau ihn:
 
    ```bash

@@ -209,7 +209,8 @@ Framework nutzt diesen Ordner nicht.
    das Target unterstützt. **Calibration:** Importance Matrix (GGUF) und eine Kalibrierungsdatei. **Use Host GPU
    for Build Process** reicht eine GPU in den Container durch; Rockchip-Konvertierungen brauchen das nicht.
 5. **Start Build Pipeline:** Das Log erscheint rechts. Der erste Build dauert deutlich länger, weil zuerst das
-   Docker-Image mit allen Toolkits gebaut wird; spätere Builds nutzen Dockers Build-Cache.
+   Docker-Image mit allen Toolkits gebaut wird; spätere Builds nutzen Dockers Build-Cache. **Cancel Build** stoppt
+   den laufenden Build nach einer Bestätigung; in den Ausgabeordner wird dann nichts geschrieben.
 
 Scheitert ein Build an einem bekannten Problem, zeigt ein **Self-Healing**-Dialog die Ursache und einen
 Lösungsvorschlag. Nichts ändert sich, bevor du zustimmst. Selbst ausführen kann das Framework nur wenige feste
@@ -263,7 +264,7 @@ Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, steht in der
 llm-cli --version
 llm-cli doctor                 # Gesundheitscheck; Exit-Code 0 = OK, 1 = Warnungen, 2 = Fehler
 llm-cli doctor --fix           # harmlose automatische Korrekturen (macht den persönlichen Ordner privat); --tier 2 leert auch den Docker-Build-Cache
-llm-cli targets list           # verfügbare Targets; der Wert für --target ist der Ordnername in targets/ (Rockchip)
+llm-cli targets list           # verfügbare Targets mit Boards und Formaten; der Wert für --target ist die ID (Rockchip)
 ```
 
 **Ein Modell konvertieren** (`--target Rockchip`; Format, Board und Quantisierung wie in den Tabellen oben):
@@ -289,8 +290,9 @@ llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
 - Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token` (fragt nach dem
   Wert).
 - Der Befehl bleibt im Vordergrund, bis der Build fertig ist; `--follow` zeigt jede Stufe. Wartet der Build auf
-  eine Self-Healing-Entscheidung, fragt die CLI im Terminal. Strg+C bricht den Build in dieser Version nicht ab:
-  Die CLI wartet weiter, bis der Build zu Ende ist (siehe [Bekannte Lücken](#bekannte-lücken)).
+  eine Self-Healing-Entscheidung, fragt die CLI im Terminal. Strg+C bricht den Build ab (sein Container wird
+  gestoppt), wartet, bis er angehalten hat, und endet mit Exit-Code 130. `llm-cli build status` listet auch Builds,
+  die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat.
 
 **Übertragen** (dieselben Schritte wie in der GUI):
 
@@ -564,12 +566,6 @@ Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Feat
   nicht geprüft. Der Installationsordner unter `C:\Program Files` ist für deinen Benutzer meist nicht beschreibbar;
   setze `output_dir`, `cache_dir` und `logs_dir` auf eigene Ordner, wenn Builds ihre Ergebnisse nicht schreiben
   können.
-- **`llm-cli build status`** kennt nur Builds, die im selben Prozess gestartet wurden. Builds aus der GUI, dem
-  MCP-Server oder einem anderen CLI-Aufruf erscheinen nicht; nutze `build start --follow`, das Log in der GUI oder
-  `llm-cli deploy list-artifacts`.
-- **Einen Build abbrechen:** Die GUI hat keine Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start` stoppt
-  den Build nicht (die CLI wartet, bis er zu Ende ist). Abbrechen lässt sich ein Build mit dem Tool `cancel_build`,
-  über Ditto im GUI-Chat oder einen MCP-Client, in dem Prozess, der ihn gestartet hat.
 - **Anmeldung im Browser und bei Cloud-Plattformen** (OAuth, AWS, Google Cloud, Azure) gibt es noch nicht; Ditto
   meldet sich mit API-Schlüsseln an, lokale Engines brauchen keine Anmeldung, und ein Profil aus `ant auth login`
   ist eine erweiterte Möglichkeit.
