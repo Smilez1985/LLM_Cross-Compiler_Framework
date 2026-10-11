@@ -56,8 +56,8 @@ The examples below use `llm-cli`.
 | Variable | Effect |
 |---|---|
 | `LLM_FRAMEWORK_CONFIG_DIR` | Settings folder (`config.yml`). Default: `configs/` in the installation if writable, otherwise `~/.llm-framework`. The working directory is never used. |
-| `LLM_FRAMEWORK_HOME` | Personal state folder. Default: `~/.llm-framework`. |
-| `LLM_FRAMEWORK_MODELS_DIR` | Models folder; Ditto's local models are in its `ditto/` subfolder. Default: `models/` in the installation. |
+| `LLM_FRAMEWORK_HOME` | Personal state folder. Default: `~/.llm-framework`. If you may not write to the installation folder (for example `C:\Program Files`), the data folders `output/`, `cache/` and `models/` are there too. |
+| `LLM_FRAMEWORK_MODELS_DIR` | Models folder; Ditto's local models are in its `ditto/` subfolder. Default: `models/` in the installation if writable, otherwise in the personal folder. |
 | `LLM_FRAMEWORK_<KEY>` | Overrides one setting for this run, e.g. `LLM_FRAMEWORK_AI_PROVIDER=local` or `LLM_FRAMEWORK_BUILD_MEMORY_LIMIT=24g`. Only known setting names count. |
 | `LLM_SECRET_STORAGE` | How the secrets vault is protected for this run, e.g. `ephemeral` in CI (see [secrets](#secrets)). |
 | `OPENAI_CUSTOM_HEADERS`, `ANTHROPIC_CUSTOM_HEADERS` | Removed at startup with a warning, so they cannot replace the stored key; the setting `ai_allow_sdk_env_headers: true` keeps them. |

@@ -23,8 +23,8 @@ project live.
 |---|---|---|---|
 | `llm_providers.yml` | Presets of the AI providers Ditto can use | yes | `orchestrator/llm/catalog.py` |
 | `llama_runtime.yml` | Pinned llama.cpp build, pinned GGUF models, server defaults, rules for the recommended model | yes | `orchestrator/runtime/catalog.py` |
-| `project_sources.yml` | Catalogue of upstream projects: repositories, versions, documentation links, notes | no | people; `scripts/validate_ssot.py` |
-| `detailed_project_sources.yml` | Extended developer reference: guides, decision trees, more vendor sections | no | people |
+| `project_sources.yml` | Catalogue of upstream projects: repositories, versions, documentation links, notes | no | people; `scripts/validate_ssot.py`, `scripts/sync_ssot.py` |
+| `detailed_project_sources.yml` | Extended developer reference: guides, decision trees, more vendor sections | no | people; `scripts/sync_ssot.py` |
 | `config.yml` (not in git) | Your settings | yes | `orchestrator/Core/config_manager.py` |
 | `SSOT_ARCHITECTURE.md`, `SSOT_ARCHITECTURE_DE.md` | This document | no | people |
 
@@ -147,7 +147,7 @@ A catalogue of upstream projects that the framework uses, learns from or might i
 `build_tools`, `inference_backends`, `optimization_frameworks`, `model_formats`, `fine_tuning_tools`, `core`,
 `vector_database`, `knowledge_ingestion`, `hardware_targets`, `mobile_platforms`, `voice_tts` and several voice
 model entries (`glados_tts_*`, `turret_tts_*`, `thorsten_tts_*`), `models`, `tiny_models`, `deployment_tools`,
-`quality_tools`, `roadmap`, `notes`.
+`quality_tools`, `notes`.
 
 A typical entry:
 
@@ -163,14 +163,13 @@ inference_backends:
     note: "Universal CPU/GPU inference. GGUF format standard. Primary fallback backend."
 ```
 
-What the file is **not**, whatever its header comment says:
+What the file is **not** (its header comment says the same):
 
 - No part of the framework reads it while it runs. It is not turned into environment variables for the build
   containers, the crawler does not follow its links, and Ditto does not use `docs_workflow`.
 - Its versions are not the versions builds use. Builds use what the target's Dockerfile pins and the setting
   `llama_cpp_version` (default `v0.6.0`); the local model server uses `llama_runtime.yml`.
-- Its `roadmap` section (v2.2 to v2.4) is outdated. The project's roadmap is in
-  [docs/BLUEPRINT.md](../docs/BLUEPRINT.md#roadmap).
+- It has no roadmap. The project's roadmap is in [docs/BLUEPRINT.md](../docs/BLUEPRINT.md#roadmap).
 
 Use it as a list of links and notes. Keep notes short, use full URLs, and run the validation script after a change.
 
@@ -206,20 +205,21 @@ example below `models` and `tiny_models`), 4 inference backends and 8 hardware t
 
 ### scripts/sync_ssot.py
 
-Meant to copy the values `commit`, `version`, `pypi_package` and `docker_tag` (at every depth) and the metadata
-fields `ssot_version` and `last_updated` (as `last_synced`) from `project_sources.yml` into the detailed file,
-keeping everything else. **Do not use it in its current form:**
+Compares the values `commit`, `version`, `pypi_package` and `docker_tag` (at every depth) and the metadata fields
+`ssot_version` and `last_updated` (as `last_synced`) of `project_sources.yml` with
+`detailed_project_sources.yml`. It finds both files in the repository's `configs/` from any folder (`--configs`
+selects another folder).
 
-1. It looks for `detailed_project.sources.yml` (with a dot), but the file is called `detailed_project_sources.yml`.
-   Run inside `configs/`, it therefore creates a new file `detailed_project.sources.yml` as a plain copy of
-   `project_sources.yml`, and the real detailed file stays unchanged.
-2. Even with the right name it would rewrite the whole file with `yaml.dump`: all comments are lost and the layout
-   changes. It would also add a skeleton (only the copied values) for every section of `project_sources.yml` that
-   the detailed file lacks.
-3. Like the validation script, it works only inside `configs/`.
+```bash
+python scripts/sync_ssot.py            # list the differences; exit code 1 if there are any
+python scripts/sync_ssot.py --write    # copy the values into the detailed file
+```
 
-Until it is fixed (planned for 3.4.0, see the [roadmap](../docs/BLUEPRINT.md#roadmap)), update the detailed file by
-hand.
+With `--write` it changes only the text of the values that differ; comments, order, quoting style and layout stay
+as they are. A value that the detailed file does not have is listed as a note and never added (the detailed file
+is organised differently, so such an entry belongs there only if you add it by hand). A missing file is an error
+(exit code 2); the script never creates one. With the current files the shared values are in sync, and it lists
+eleven entries that only `project_sources.yml` has.
 
 ## Not related: llm-cli config repos
 
@@ -253,4 +253,4 @@ moment.
 | offer a new AI provider or model | `llm_providers.yml` (or your own copy in the config folder) | run the check above and `tests/test_llm.py`; changelog entry |
 | add a local model or a newer llama.cpp build | `llama_runtime.yml`, with size, SHA256 and commit | run the check above and `tests/test_runtime.py`; changelog entry |
 | let a target build a new board, format or type | the target's `target.yml` and `build.sh` | tests; see the [Module Developer Guide](../docs/Module_Developer_Guide.md) |
-| record an upstream project or a documentation link | `project_sources.yml` (and the detailed file by hand, if it has the entry) | `python ../scripts/validate_ssot.py` inside `configs/` |
+| record an upstream project or a documentation link | `project_sources.yml` (new entries in the detailed file by hand) | `python ../scripts/validate_ssot.py` inside `configs/`, then `python ../scripts/sync_ssot.py --write` for changed versions |

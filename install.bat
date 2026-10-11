@@ -40,14 +40,15 @@ $ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AppName = "LLM-Conversion-Framework"
 $ProgramFiles = [Environment]::GetFolderPath("ProgramFiles")
 $InstallDir = Join-Path $ProgramFiles $AppName
-$PublicDocs = [Environment]::GetFolderPath("CommonDocuments")
-$DataDir = Join-Path $PublicDocs $AppName
+# Program Files is read-only for standard users: the framework keeps builds, cache and models in each user's
+# own folder (%USERPROFILE%\.llm-framework, or LLM_FRAMEWORK_HOME) and creates them when they are needed.
+$UserDataHint = "%USERPROFILE%\.llm-framework"
 
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host "      LLM Framework - Enterprise Installer"
 Write-Host "===================================================" -ForegroundColor Cyan
 Write-Host "Code Ziel: $InstallDir"
-Write-Host "Daten Ziel: $DataDir"
+Write-Host "Daten (je Benutzer, beim ersten Gebrauch angelegt): $UserDataHint"
 Write-Host ""
 
 # 2. PYTHON PRÜFUNG & INSTALLATION
@@ -75,7 +76,6 @@ Write-Host "[2/5] Installiere Dateien (Robocopy)..." -ForegroundColor Yellow
 
 # Verzeichnisse erstellen
 New-Item -Path $InstallDir -ItemType Directory -Force | Out-Null
-New-Item -Path $DataDir -ItemType Directory -Force | Out-Null
 
 # Robocopy Wrapper Funktion
 function Copy-Robust ($Src, $Dst, $Exclude) {
@@ -90,17 +90,8 @@ function Copy-Robust ($Src, $Dst, $Exclude) {
     }
 }
 
-# Code kopieren (ohne git, venv, cache)
-Copy-Robust $ScriptPath $InstallDir -Exclude ".git", ".venv", "__pycache__", "build", "dist", ".installer_venv"
-
-# Daten Templates kopieren (targets, models, configs)
-foreach ($folder in @("targets", "models", "configs", "assets")) {
-    Copy-Robust (Join-Path $ScriptPath $folder) (Join-Path $DataDir $folder)
-}
-# Output Ordner anlegen
-foreach ($folder in @("output", "logs", "cache")) {
-    New-Item -Path (Join-Path $DataDir $folder) -ItemType Directory -Force | Out-Null
-}
+# Code kopieren (ohne git, venv, cache und ohne Build-Ergebnisse oder Modelle einer Entwicklungskopie)
+Copy-Robust $ScriptPath $InstallDir -Exclude ".git", ".venv", "__pycache__", "build", "dist", ".installer_venv", "output", "cache", "models", "logs"
 
 # 4. VENV SETUP
 Write-Host "[3/5] Erstelle Python Environment..." -ForegroundColor Yellow
@@ -122,19 +113,8 @@ if (Test-Path "requirements.txt") {
     & $Pip install pyyaml requests psutil pywin32 winshell | Out-Null
 }
 
-# 5. CONFIG UPDATE
-Write-Host "[4/5] Konfiguriere Pfade..." -ForegroundColor Yellow
-$ConfigFile = Join-Path $DataDir "configs\user_config.yml"
-if (Test-Path $ConfigFile) {
-    $YamlContent = Get-Content $ConfigFile -Raw
-    # Simpler String Replace, da wir kein PyYAML im Host-PowerShell haben
-    $YamlContent = $YamlContent -replace "output_dir:.*", "output_dir: $(Join-Path $DataDir 'output')"
-    $YamlContent = $YamlContent -replace "logs_dir:.*", "logs_dir: $(Join-Path $DataDir 'logs')"
-    $YamlContent = $YamlContent -replace "cache_dir:.*", "cache_dir: $(Join-Path $DataDir 'cache')"
-    $YamlContent = $YamlContent -replace "\\", "/"  # YAML mag Forward Slashes lieber
-    Set-Content -Path $ConfigFile -Value $YamlContent
-}
-
+# 5. LAUNCHER
+Write-Host "[4/5] Erstelle Launcher..." -ForegroundColor Yellow
 # Launcher Skript im InstallDir erstellen (damit die Shortcuts funktionieren)
 $LauncherBat = Join-Path $InstallDir "start_framework.bat"
 $BatContent = @"
@@ -146,8 +126,8 @@ pause
 "@
 Set-Content $LauncherBat $BatContent
 
-# 6. SHORTCUTS
-Write-Host "[5/5] Erstelle Desktop Verknuepfungen..." -ForegroundColor Yellow
+# 6. SHORTCUT
+Write-Host "[5/5] Erstelle Desktop Verknuepfung..." -ForegroundColor Yellow
 $WshShell = New-Object -comObject WScript.Shell
 $Desktop = [Environment]::GetFolderPath("Desktop")
 
@@ -160,12 +140,5 @@ $IconPath = Join-Path $InstallDir "assets\LLM-Builder.ico"
 if (Test-Path $IconPath) { $Shortcut.IconLocation = $IconPath }
 $Shortcut.Save()
 
-# Data Shortcut
-$ShortcutData = $WshShell.CreateShortcut((Join-Path $Desktop "$AppName Data.lnk"))
-$ShortcutData.TargetPath = $DataDir
-$ShortcutData.Description = "Hier liegen Modelle und Outputs"
-$IconPathData = Join-Path $InstallDir "assets\setup_LLM-Builder.ico"
-if (Test-Path $IconPathData) { $ShortcutData.IconLocation = $IconPathData }
-$ShortcutData.Save()
-
 Write-Host "Installation Erfolgreich!" -ForegroundColor Green
+Write-Host "Builds, Cache und Modelle: $UserDataHint (je Benutzer)"

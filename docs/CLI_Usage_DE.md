@@ -56,8 +56,8 @@ Die Beispiele unten verwenden `llm-cli`.
 | Variable | Wirkung |
 |---|---|
 | `LLM_FRAMEWORK_CONFIG_DIR` | Einstellungsordner (`config.yml`). Standard: `configs/` in der Installation, wenn beschreibbar, sonst `~/.llm-framework`. Das Arbeitsverzeichnis wird nie verwendet. |
-| `LLM_FRAMEWORK_HOME` | Ordner für den persönlichen Zustand. Standard: `~/.llm-framework`. |
-| `LLM_FRAMEWORK_MODELS_DIR` | Modellordner; Dittos lokale Modelle liegen im Unterordner `ditto/`. Standard: `models/` in der Installation. |
+| `LLM_FRAMEWORK_HOME` | Ordner für den persönlichen Zustand. Standard: `~/.llm-framework`. Darfst du im Installationsordner nicht schreiben (zum Beispiel `C:\Program Files`), liegen auch die Datenordner `output/`, `cache/` und `models/` dort. |
+| `LLM_FRAMEWORK_MODELS_DIR` | Modellordner; Dittos lokale Modelle liegen im Unterordner `ditto/`. Standard: `models/` in der Installation, wenn beschreibbar, sonst im persönlichen Ordner. |
 | `LLM_FRAMEWORK_<SCHLÜSSEL>` | Überschreibt eine Einstellung für diesen Aufruf, z. B. `LLM_FRAMEWORK_AI_PROVIDER=local` oder `LLM_FRAMEWORK_BUILD_MEMORY_LIMIT=24g`. Es zählen nur bekannte Einstellungsnamen. |
 | `LLM_SECRET_STORAGE` | Wie der Secrets-Tresor für diesen Aufruf geschützt wird, z. B. `ephemeral` in der CI (siehe [secrets](#secrets)). |
 | `OPENAI_CUSTOM_HEADERS`, `ANTHROPIC_CUSTOM_HEADERS` | Werden beim Start mit einer Warnung entfernt, damit sie den gespeicherten Schlüssel nicht ersetzen können; die Einstellung `ai_allow_sdk_env_headers: true` behält sie. |

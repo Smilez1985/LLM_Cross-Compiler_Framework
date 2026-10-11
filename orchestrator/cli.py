@@ -51,7 +51,6 @@ DEFAULT_CONFIG = {
     "output_dir": "output",
     "configs_dir": "configs",
     "cache_dir": "cache",
-    "logs_dir": "logs",
     "log_level": "INFO",
     "max_concurrent_builds": 2
 }
@@ -943,6 +942,8 @@ def _local_runtime(ctx: FrameworkContext):
     """The managed llama-server with the configured models folder (models_dir, as Ditto uses it); needs neither
     the keyring nor Docker, so the framework is not booted for it."""
     from orchestrator.runtime.llama_server import LocalLLMRuntime
+    # The effective models_dir (LLM_FRAMEWORK_MODELS_DIR, config.yml, or the per-user folder when the installation
+    # is read-only), the same folder the GUI and the MCP server use.
     config, resolve = _settings(ctx)
     return LocalLLMRuntime(data_dir=config.user_state_dir,
                            models_dir=resolve(config.get("models_dir", "models") or "models") / "ditto")

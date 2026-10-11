@@ -278,8 +278,9 @@ class BuildEngine:
         self.cache_dir = self.base_dir / Path(str(self._get_conf("cache_dir", "cache"))).expanduser()
         # One record per build for `llm-cli build status` in other processes (see build_records).
         self.records_dir = build_records.records_dir(self.cache_dir)
-        
-        self._ensure_directories()
+        # Nothing is created here: the folders are made when a build needs them (a CLI call or an MCP server
+        # start must not leave empty cache/, models/ and output/ folders in the installation; the records
+        # folder is made by the first record written).
         if self.docker_client:
             self._validate_docker_environment()
         
@@ -292,11 +293,6 @@ class BuildEngine:
                 return self.config.get(key, default)
             return getattr(self.config, key, default)
         return default
-    
-    def _ensure_directories(self):
-        dirs = [self.targets_dir, self.models_dir, self.output_dir, self.cache_dir, 
-                self.cache_dir / "docker", self.cache_dir / "models", self.cache_dir / "tools"]
-        for d in dirs: ensure_directory(d)
     
     def _validate_docker_environment(self):
         try:
@@ -677,6 +673,8 @@ class BuildEngine:
         build_temp = self.cache_dir / "builds" / config.build_id
         ensure_directory(build_temp)
         for d in ["output", "logs", "imatrix"]: ensure_directory(build_temp / d)
+        # Mounted into every stage container: it must exist (and belong to the user) before Docker sees it.
+        ensure_directory(self.cache_dir / "models")
         
         # Dump config for debugging
         with open(build_temp / "build_config.json", 'w') as f:

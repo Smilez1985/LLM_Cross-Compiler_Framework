@@ -895,6 +895,9 @@ aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli doctor` e
   für [Community-Packs](#verschlüsselte-packs-zum-privaten-teilen) liegen im verschlüsselten Secrets-Speicher.
 - **Einstellungen** werden nie aus dem Arbeitsverzeichnis gelesen: `LLM_FRAMEWORK_CONFIG_DIR`, dann `configs/` in der
   Installation, wenn du dort schreiben darfst, dann der persönliche Ordner.
+- **Datenordner** (`output/`, `cache/`, `models/`) liegen in der Installation, wenn du dort schreiben darfst, sonst im
+  persönlichen Ordner (unter Windows ist `C:\Program Files` für normale Benutzer schreibgeschützt). Sie entstehen,
+  wenn ein Build oder ein Download sie zum ersten Mal braucht, nicht bei jedem Start.
 
 ---
 

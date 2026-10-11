@@ -141,6 +141,10 @@ class MainOrchestrator(QMainWindow):
         act_wizard.triggered.connect(self._open_module_wizard)
         tools_menu.addAction(act_wizard)
 
+        act_hf = QAction("Hugging Face Model Browser...", self)
+        act_hf.triggered.connect(self._open_hf_browser)
+        tools_menu.addAction(act_hf)
+
         act_hub = QAction(self.i18n.t("menu.open_hub", "Community Hub"), self)
         act_hub.triggered.connect(self._open_community_hub)
         tools_menu.addAction(act_hub)
@@ -340,6 +344,14 @@ class MainOrchestrator(QMainWindow):
             self.framework.target_manager.initialize()
             self.builder_tab._refresh_targets()
             self.deployment_window.refresh_data()
+
+    def _open_hf_browser(self):
+        """Search Hugging Face, check a model's licence and download single files into the models folder."""
+        from orchestrator.gui.huggingface_window import HuggingFaceWindow
+        if getattr(self, "hf_browser", None) is None:
+            self.hf_browser = HuggingFaceWindow(self.framework, self)
+        self.hf_browser.show()
+        self.hf_browser.raise_()
 
     def _open_community_hub(self):
         from orchestrator.gui.community_hub import CommunityHubWindow

@@ -252,6 +252,39 @@ def test_push_mode_scans_only_commits_not_on_a_remote(repo, monkeypatch):
     assert secret_scan.main(["--repo", str(repo), "--push"]) == 0
 
 
+def test_push_mode_under_the_pre_commit_tool_reads_the_pushed_ref(repo, monkeypatch):
+    # pre-commit reads git's stdin itself; a hook gets an empty stdin and the pushed commit in the environment.
+    (repo / "a.py").write_text(f'KEY = "{SAMPLES["Hugging Face token"]}"\n')
+    git(repo, "add", "a.py")
+    git(repo, "commit", "-qm", "leak", "--no-verify")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    branch = git(repo, "symbolic-ref", "HEAD").stdout.strip()
+    for name in ("PRE_COMMIT_TO_REF", "PRE_COMMIT_FROM_REF", "PRE_COMMIT_LOCAL_BRANCH"):
+        monkeypatch.delenv(name, raising=False)
+
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    assert secret_scan.main(["--repo", str(repo), "--push"]) == 0, "nothing named, nothing to scan"
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    monkeypatch.setenv("PRE_COMMIT_FROM_REF", "0" * 40)
+    monkeypatch.setenv("PRE_COMMIT_TO_REF", head)
+    assert secret_scan.main(["--repo", str(repo), "--push"]) == 1
+    monkeypatch.delenv("PRE_COMMIT_TO_REF")
+    monkeypatch.setenv("PRE_COMMIT_LOCAL_BRANCH", branch)  # a push that contains the root commit
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    assert secret_scan.main(["--repo", str(repo), "--push"]) == 1
+    assert secret_scan.pre_commit_push_revs({"PRE_COMMIT_LOCAL_BRANCH": "--all"}) == [], "never an option"
+
+
+def test_the_pre_commit_tool_runs_the_same_push_scan_as_the_git_hook():
+    import yaml
+    config = yaml.safe_load((REPO_ROOT / ".pre-commit-config.yaml").read_text(encoding="utf-8"))
+    hooks = {hook["id"]: hook for repo in config["repos"] for hook in repo["hooks"]}
+    assert hooks["secret-scan-push"]["entry"] == "python scripts/secret_scan.py --push"
+    assert hooks["secret-scan-push"]["stages"] == ["pre-push"]
+    assert hooks["secret-scan"]["entry"] == "python scripts/secret_scan.py --staged"
+    assert "secret_scan.py\" --push" in (REPO_ROOT / ".githooks" / "pre-push").read_text(encoding="utf-8")
+
+
 def test_the_pre_commit_hook_refuses_a_commit_with_a_key(repo):
     (repo / "scripts").mkdir()
     (repo / "orchestrator" / "security").mkdir(parents=True)

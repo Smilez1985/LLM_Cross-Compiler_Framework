@@ -114,10 +114,12 @@ sudo ./install.sh
 
 Der Installer:
 
-1. prüft die Internetverbindung und Python (installiert es mit `apt`, falls es fehlt, und verlangt dann 3.11 bis
-   3.14),
+1. prüft die Internetverbindung (HTTPS zum Paketindex `pypi.org` oder zu `PIP_INDEX_URL`, wenn du einen Spiegel
+   setzt; hinter einem Proxy startest du ihn mit `sudo -E`, damit `https_proxy` erhalten bleibt) und Python
+   (installiert es mit `apt`, falls es fehlt, und verlangt dann 3.11 bis 3.14),
 2. installiert Docker über `get.docker.com`, falls es fehlt, und nimmt deinen Benutzer in die Gruppe `docker` auf,
-3. kopiert das Framework nach `/opt/llm-conversion-framework` (Eigentümer ist dein Benutzer),
+3. kopiert das Framework nach `/opt/llm-conversion-framework` (Eigentümer ist dein Benutzer); ein erneuter Aufruf
+   aktualisiert das Programm und behält deine Builds, den Cache, die Modelle und `configs/config.yml` dort,
 4. legt dort eine virtuelle Umgebung (`.venv`) an und installiert die festgelegten Pakete aus `requirements.txt`,
 5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet.
 
@@ -166,15 +168,13 @@ Befehl `llm-cli`. Die Beispiele in dieser README verwenden `llm-cli`.
 | Was | Wo |
 |---|---|
 | Programm und Python-Umgebung | Linux: `/opt/llm-conversion-framework` · Windows: `C:\Program Files\LLM-Conversion-Framework` |
-| Builds, Logs, Cache | `output/`, `logs/` und `cache/` im Installationsordner (Einstellungen `output_dir`, `logs_dir`, `cache_dir`) |
+| Builds, Cache, heruntergeladene Modelle | `output/`, `cache/` und `models/` im Installationsordner, wenn dein Benutzer dort schreiben darf (Linux), sonst im persönlichen Ordner unten (Windows: `%USERPROFILE%\.llm-framework\output` und so weiter); sie entstehen, wenn sie zum ersten Mal gebraucht werden. Die Einstellungen `output_dir`, `cache_dir` und `models_dir` legen andere Ordner fest |
 | Einstellungen (`config.yml`) | `configs/` im Installationsordner, wenn dein Benutzer dort schreiben darf, sonst der persönliche Ordner unten; `LLM_FRAMEWORK_CONFIG_DIR` legt einen anderen Ordner fest |
 | Persönlicher Zustand: Tool-Berechtigungen, Audit-Log, SSH-Schlüssel und bekannte Geräte, MCP-Token, Chatverlauf, Eingabeverlauf, Wissensbasis, lokaler Modellserver, zwischengespeicherter Community-Index | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` legt einen anderen Ordner fest |
 | API-Schlüssel und Tokens | verschlüsselt in `~/.llm-framework/secrets.store`; der Schlüssel dafür liegt im Schlüsselbund deines Betriebssystems oder dort, wo du es mit der Einstellung `secret_storage` festlegst |
-| Modelle für Dittos Offline-Modus | `models/ditto/` im Installationsordner (`LLM_FRAMEWORK_MODELS_DIR` legt einen anderen Ordner fest) |
+| Modelle für Dittos Offline-Modus | `ditto/` im Modellordner oben (`LLM_FRAMEWORK_MODELS_DIR` legt einen anderen Ordner fest) |
 
-Die Installer kopieren außerdem `targets/`, `models/` und `configs/` in einen eigenen Datenordner (unter Windows
-in den öffentlichen Dokumente-Ordner, mit einer Desktop-Verknüpfung **LLM-Conversion-Framework Data**). Das
-Framework nutzt diesen Ordner nicht.
+Die Installer legen keine eigenen Datenordner an.
 
 ---
 
@@ -223,7 +223,9 @@ Platzhalter.
 
 Menüs: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (Assistent für ein neues Target, mit „Deep Ingest“, um Dokumentation in die Wissensbasis aufzunehmen),
-**Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
+**Tools > Hugging Face Model Browser...** (Modelle suchen, sehen, ob sie zugangsbeschränkt sind und welche Lizenz sie
+haben, einzelne Dateien wie ein GGUF in den Modellordner laden; ein zugangsbeschränktes Modell fragt nach deinem
+Hugging-Face-Token), **Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
 MCP)...**, **Tools > Gesprochene Ansagen** (ein oder aus) und **Tools > Eingabeverlauf löschen...** (in der
 englischen Oberfläche *Open Community Hub*, *Spoken Announcements* und *Clear Input History...*)
 
@@ -563,9 +565,7 @@ Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Feat
   CLI und MCP-Server wird gerade gebaut ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)). Die Konvertierungen selbst
   laufen in Docker und sind nicht betroffen.
 - **Windows-Hosts:** Die Testsuite läuft in der CI unter Windows, Konvertierungen auf einem Windows-Host sind aber
-  nicht geprüft. Der Installationsordner unter `C:\Program Files` ist für deinen Benutzer meist nicht beschreibbar;
-  setze `output_dir`, `cache_dir` und `logs_dir` auf eigene Ordner, wenn Builds ihre Ergebnisse nicht schreiben
-  können.
+  nicht geprüft.
 - **Anmeldung im Browser und bei Cloud-Plattformen** (OAuth, AWS, Google Cloud, Azure) gibt es noch nicht; Ditto
   meldet sich mit API-Schlüsseln an, lokale Engines brauchen keine Anmeldung, und ein Profil aus `ant auth login`
   ist eine erweiterte Möglichkeit.
