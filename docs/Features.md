@@ -936,28 +936,31 @@ has no repository to go to.
   `name`. The file ships with each release; a key rotation ships the old and the new key for one release. A damaged
   file is an error, never read as "no keys".
 - **Author signatures** show where a pack comes from; they do not make it trusted. A signature is checked when the
-  pack includes the public key (a broken signature refuses the pack), and the author's key id is pinned at the first
-  installation of a pack by that author. A later pack with the same author name and another key gets a warning in
-  the summary.
+  pack includes the public key (a broken signature refuses the pack), and the author's public key (the whole key,
+  not its short key id) is pinned at the first installation of a pack by that author. A later pack with the same
+  author name and another key gets a warning in the summary.
 
 ### Encrypted packs for private sharing
 
 For your own machines or a team, a pack can be encrypted instead of published (`llm-cli zoo export ... --to <key
 file>` or `--passphrase`):
 
-- It is encrypted to one or more recipients' X25519 public keys and/or a passphrase (at least 12 characters,
-  scrypt), in the style of age: a random file key, wrapped for each recipient, ChaCha20-Poly1305 for the content
-  (HKDF-SHA256), an authenticated header, and the sender's Ed25519 signature over the whole file. Recipients see who
-  sent it, and any change, including an added or removed recipient, is detected. As in age, a file holds at most one
-  passphrase entry; at most 64 recipients.
-- **Your keys:** on first use every user gets an Ed25519 key pair (signs packs) and an X25519 key pair (receives
-  encrypted packs). They are kept only in the encrypted secrets store. `llm-cli zoo keys` prints the public keys as
-  text (an `ed25519:` and an `x25519:` line) to give to others. A stored key that cannot be read is never replaced
-  automatically.
+- It is encrypted in the [age](https://age-encryption.org/v1) format by rage, the Rust implementation of age
+  (through `pyrage`): to one or more recipients' age keys (`age1...`, at most 64) or to one passphrase (at least 12
+  characters, scrypt), never to both, as age requires. The sender signs the encrypted file with Ed25519, so
+  recipients see who sent it, and any change, including an added or removed recipient, is detected.
+- The `.lcfpack` file is a zip with the age file `pack.zip.age` and the sender's signature `pack.zip.age.sig`. The
+  standard `age` and `rage` tools open it too: unzip it, then `age -d -i key.txt -o pack.zip pack.zip.age` (for a
+  passphrase pack without `-i key.txt`). They do not check the sender's signature; the framework does.
+- **Your keys:** on first use every user gets an Ed25519 key (signs packs) and an age identity (receives encrypted
+  packs). They are kept only in the encrypted secrets store. `llm-cli zoo keys` prints the public keys as text (an
+  `age1...` recipient and an `ed25519:` line) to give to others; a recipient made with `age-keygen` or
+  `rage-keygen` works with `--to` as well. A stored key that cannot be read is never replaced automatically.
 - **Receiving:** `llm-cli zoo install --file <pack>.lcfpack` decrypts with your key, or with `--passphrase`.
-  `--from <key file>` (repeatable) accepts only these senders; otherwise the summary names the sender's key id. The
-  hub's **Import file...** opens packs encrypted to your key; a passphrase pack needs the CLI. An encrypted pack is
-  never submitted to the community.
+  `--from <key file>` (repeatable) accepts only these senders; otherwise the summary names the sender's key id. A
+  passphrase pack whose scrypt work factor is above 2^20 (1 GiB of memory) is refused before anything is decrypted.
+  The hub's **Import file...** opens packs encrypted to your key; a passphrase pack needs the CLI. An encrypted pack
+  is never submitted to the community.
 
 ### Recipes
 
@@ -1014,17 +1017,20 @@ rebuilt, never downloaded as a model.
    removed.
 
 Targets go to `targets/`, recipes to `community/recipes/`, knowledge to `community/knowledge/`. A knowledge pack is
-imported into the knowledge base right after its installation, so turn the knowledge base on first.
+imported into the knowledge base right after its installation or, if the knowledge base is off, as soon as it is
+turned on.
 
 ### Trust levels
 
 | Level | Meaning |
 |---|---|
-| `official` | shipped with the framework (the Rockchip target); shipped targets have no provenance file and are not listed as packs |
 | `verified` | in the signed index: reviewed and reproduced independently |
 | `community` | in the signed index: reviewed |
 | `local` | a file without an entry in the signed index: nobody reviewed it. Installing always asks, and every build of such a target shows a warning. |
-| `revoked` | in the revoked list of the signed index: installing is blocked. Installed copies are flagged by `llm-cli doctor` and the hub and are not built, also after the key that signed the revocation has expired. |
+| `revoked` | in the revoked list of the signed index: installing is blocked. Installed copies are flagged by `llm-cli zoo list`, `zoo verify`, `llm-cli doctor` and the hub and are not built, also after the key that signed the revocation has expired. |
+
+Targets that ship with the framework, such as Rockchip, have no provenance file; they are not packs and have no
+trust level.
 
 ### Checking installed packs
 
@@ -1062,8 +1068,8 @@ encrypted to your key), and **Build** on an installed recipe fills in the Builde
   source is never exported.
 - A target you installed from a community pack is not exported as your own: signing it again would replace its
   author and licence. When a recipe's target is your own, a note reminds you to export the target too. A knowledge
-  export takes every page of your knowledge base, also the pages imported from installed knowledge packs; each keeps
-  its source address.
+  export takes the pages of your knowledge base, each with its source address; pages imported from installed
+  community knowledge packs are left out (their authors share them already), and a note says how many.
 - With `--to` or `--passphrase` the pack is [encrypted](#encrypted-packs-for-private-sharing) for private sharing
   instead.
 
@@ -1089,9 +1095,11 @@ For the community repository, not for users:
   the version and sign again.
 - `scripts/community_repo/validate-contribution.yml` is a CI workflow template for the community repository. On
   every pull request under `contributions/` it accepts only `.zip` pack files of at most 5 MB and runs
-  `llm-cli zoo verify` on each and the secret scan over the changed files. A maintainer reviews and merges the pack,
-  adds its entry to `index.json` and signs the index offline; the signing key never reaches CI. The template pins
-  the framework release `v3.1.0`, which is not released yet.
+  `llm-cli zoo verify` on each, whose privacy scrub also rejects a pack with a key in any of its files (the
+  repository's secret scan skips binary files, so it does not run on the zips). A maintainer reviews and merges the
+  pack, adds its entry to `index.json` and signs the index offline; the signing key never reaches CI. The maintainer
+  sets the framework release the packs are checked with (`LCF_REF`); until then the template holds a placeholder,
+  so the job fails.
 
 ### What was removed
 
@@ -1138,8 +1146,7 @@ What does not work yet, so you are not surprised:
   macOS or Linux.
 - **Community zoo:** no community repository, index or maintainer key is published yet (`configs/community_keys.yml`
   is empty, `community_index_url` and `community_repo` are empty), so only pack files can be installed and a pull
-  request has no repository to go to. A knowledge pack installed while the knowledge base is off is not imported
-  later by itself.
+  request has no repository to go to.
 - **Security scan:** the Trivy container gets the Docker socket to read the image; scanning without the socket is
   planned.
 - Smaller CLI gaps are listed in [CLI_Usage.md](CLI_Usage.md#known-limitations).

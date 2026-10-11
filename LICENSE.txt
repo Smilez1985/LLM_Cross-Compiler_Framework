@@ -53,6 +53,8 @@ ADDITIONAL TERMS AND CONDITIONS FOR LLM CROSS-COMPILER FRAMEWORK
    - Rich: MIT License
    - Click: BSD License
    - PyYAML: MIT License
+   - pyrage (age encryption; bundles rage and other Rust crates under MIT,
+     Apache-2.0 and BSD-3-Clause licences): MIT License
 
 5. DOCKER IMAGES AND CONTAINERS
    Docker images built using this framework may include additional software

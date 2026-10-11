@@ -1,17 +1,22 @@
-"""Community packs: manifest, signatures, zip format, encryption for private sharing, user keys, privacy scrub."""
+"""Community packs: manifest, signatures, zip format, age encryption for private sharing, user keys, privacy
+scrub."""
 
 import base64
 import io
 import json
 import os
+import re
+import subprocess
+import sys
+import threading
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
+import pyrage
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
-from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
 
 from orchestrator.Core import community_pack as cp
 from orchestrator.Core.community_pack import (PackError, PackManifest, TrustedKey, build_manifest, decrypt_pack,
@@ -40,7 +45,7 @@ def manifest_of(root: Path, **overrides) -> PackManifest:
 
 
 def trusted(key: Ed25519PrivateKey, valid_until="2099-12-31") -> TrustedKey:
-    raw = cp._raw_public(key.public_key())
+    raw = key.public_key().public_bytes_raw()
     return TrustedKey(key_id=cp.key_id(key.public_key()), pubkey_b64=base64.b64encode(raw).decode(),
                       valid_until=valid_until)
 
@@ -167,7 +172,7 @@ class TestSignatures:
         # A key that claims the right id but is a different key cannot exist in the trust list.
         other = Ed25519PrivateKey.generate()
         with pytest.raises(ValueError, match="does not belong"):
-            TrustedKey(key_id=sig.key_id, pubkey_b64=base64.b64encode(cp._raw_public(other.public_key())).decode(),
+            TrustedKey(key_id=sig.key_id, pubkey_b64=base64.b64encode(other.public_key().public_bytes_raw()).decode(),
                        valid_until="2099-01-01")
 
     def test_expired_key_fails(self, tmp_path):
@@ -297,174 +302,211 @@ class TestPackFile:
 
 @pytest.fixture
 def people():
-    return {name: (Ed25519PrivateKey.generate(), X25519PrivateKey.generate()) for name in ("alice", "bob", "carol",
-                                                                                            "dave")}
+    return {name: (Ed25519PrivateKey.generate(), pyrage.x25519.Identity.generate())
+            for name in ("alice", "bob", "carol", "dave")}
 
 
-def rebuild(head_json: dict, mac: bytes, body: bytes, sig: bytes) -> bytes:
-    head = cp.ENCRYPTED_MAGIC + cp._canonical(head_json) + b"\n"
-    return head + b"mac " + base64.b64encode(mac) + b"\n" + body + sig
+@pytest.fixture(scope="module")
+def passphrase_pack():
+    # scrypt runs about a second at the work factor rage picks for this computer: encrypted once for the module.
+    sender = Ed25519PrivateKey.generate()
+    return sender, encrypt_pack(SECRET_TEXT, sender=sender, passphrase="correct horse battery")
 
 
-def split(blob: bytes):
-    header, _, _, mac, body, sig = cp._parse_encrypted(blob)
-    return header.model_dump(mode="json"), mac, body, sig
+def members(blob: bytes):
+    with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+        return {name: zf.read(name) for name in zf.namelist()}
+
+
+def zip_of(parts: dict) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        for name, content in parts.items():
+            zf.writestr(name, content)
+    return buffer.getvalue()
+
+
+def seal(age: bytes, sender: Ed25519PrivateKey) -> bytes:
+    """An encrypted pack around any age bytes, signed by sender (as an attacker can do with any file)."""
+    return zip_of({cp.AGE_NAME: age,
+                   cp.AGE_SIG_NAME: cp._sign(cp._ENCRYPTED_CONTEXT + age, sender).model_dump_json()})
+
+
+def age_header(*stanzas: str) -> bytes:
+    """The text header of an age file with these stanza lines (body and MAC are not valid)."""
+    body = "".join(f"-> {s}\n{'A' * 43}\n" for s in stanzas)
+    return f"age-encryption.org/v1\n{body}--- {'B' * 43}\n".encode() + b"\x00" * 64
+
+
+@pytest.fixture
+def no_decryption(monkeypatch):
+    monkeypatch.setattr(cp.pyrage, "decrypt", lambda *a: pytest.fail("decrypted before the checks"))
+    monkeypatch.setattr(cp.pyrage.passphrase, "decrypt", lambda *a: pytest.fail("scrypt ran before the checks"))
 
 
 class TestEncryption:
 
     def test_one_recipient_round_trip(self, people):
         alice_sign, _ = people["alice"]
-        _, bob_enc = people["bob"]
-        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob_enc.public_key()])
-        assert SECRET_TEXT not in blob
-        result = decrypt_pack(blob, identity=bob_enc, trusted_senders=[alice_sign.public_key()])
-        assert result.data == SECRET_TEXT
-        assert result.sender_id == cp.key_id(alice_sign.public_key()) and result.sender_trusted
-        assert not decrypt_pack(blob, identity=bob_enc).sender_trusted, "never trusted without a trust list"
+        _, bob = people["bob"]
+        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob.to_public()])
+        assert SECRET_TEXT not in blob and cp.is_encrypted_pack(blob)
+        data, sender = decrypt_pack(blob, identity=bob, trusted_senders=[alice_sign.public_key()])
+        assert data == SECRET_TEXT and sender == cp.key_id(alice_sign.public_key())
+        assert decrypt_pack(blob, identity=bob) == (SECRET_TEXT, sender), "without a trust list the id is shown"
 
     def test_three_recipients_each_can_decrypt(self, people):
         alice_sign, _ = people["alice"]
-        recipients = [people[n][1] for n in ("bob", "carol", "dave")]
-        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[r.public_key() for r in recipients])
-        for identity in recipients:
-            assert decrypt_pack(blob, identity=identity).data == SECRET_TEXT
-        header, *_ = split(blob)
-        assert len(header["recipients"]) == 3
-        assert all(cp._raw_public(r.public_key()).hex() not in blob.hex() for r in recipients), \
-            "stanzas do not name their recipients"
+        identities = [people[n][1] for n in ("bob", "carol", "dave")]
+        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[i.to_public() for i in identities])
+        for identity in identities:
+            assert decrypt_pack(blob, identity=identity)[0] == SECRET_TEXT
 
-    def test_passphrase_round_trip_and_mixed(self, people):
+    def test_the_content_is_a_standard_age_file(self, people):
+        # What the age and rage tools open after unzipping: a plain age file, nothing of ours inside.
         alice_sign, _ = people["alice"]
-        _, bob_enc = people["bob"]
-        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob_enc.public_key()],
-                            passphrase="correct horse battery")
-        assert decrypt_pack(blob, passphrase="correct horse battery").data == SECRET_TEXT
-        assert decrypt_pack(blob, identity=bob_enc).data == SECRET_TEXT
-        header, *_ = split(blob)
-        assert {s["type"] for s in header["recipients"]} == {"x25519", "scrypt"}
-        assert [s["log_n"] for s in header["recipients"] if s["type"] == "scrypt"] == [17]
+        _, bob = people["bob"]
+        parts = members(encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob.to_public()]))
+        assert sorted(parts) == [cp.AGE_NAME, cp.AGE_SIG_NAME]
+        assert parts[cp.AGE_NAME].startswith(b"age-encryption.org/v1\n-> X25519 ")
+        assert pyrage.decrypt(parts[cp.AGE_NAME], [bob]) == SECRET_TEXT
+        signature = cp.PackSignature.model_validate_json(parts[cp.AGE_SIG_NAME])
+        assert signature.embedded_key().public_bytes_raw() == alice_sign.public_key().public_bytes_raw()
 
-    def test_wrong_key_or_passphrase_fails_without_plaintext(self, people):
-        alice_sign, _ = people["alice"]
-        _, bob_enc = people["bob"]
-        _, carol_enc = people["carol"]
-        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob_enc.public_key()],
-                            passphrase="correct horse battery")
-        for kwargs in ({"identity": carol_enc}, {"passphrase": "wrong horse battery"}, {}):
-            with pytest.raises(PackError, match="not encrypted to your key") as info:
-                decrypt_pack(blob, **kwargs)
-            assert SECRET_TEXT.decode() not in str(info.value)
+    def test_passphrase_round_trip(self, passphrase_pack, people):
+        sender, blob = passphrase_pack
+        age = members(blob)[cp.AGE_NAME]
+        assert age.split(b"\n")[1].startswith(b"-> scrypt ") and b"-> X25519" not in age, "the stanza is alone"
+        assert decrypt_pack(blob, passphrase="correct horse battery") == (SECRET_TEXT, cp.key_id(sender.public_key()))
+        with pytest.raises(PackError, match="passphrase is wrong") as info:
+            decrypt_pack(blob, passphrase="wrong horse battery")
+        assert SECRET_TEXT.decode() not in str(info.value)
 
-    def test_tampered_header_payload_or_signature_fails(self, people):
+    def test_a_pack_asks_for_what_it_was_encrypted_to(self, passphrase_pack, people, no_decryption):
+        _, blob = passphrase_pack
+        with pytest.raises(PackError, match="--passphrase"):
+            decrypt_pack(blob, identity=people["bob"][1])
         alice_sign, _ = people["alice"]
-        _, bob_enc = people["bob"]
-        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob_enc.public_key()])
-        header_at = len(cp.ENCRYPTED_MAGIC) + 10
-        for position in (header_at, len(blob) - 100, len(blob) - 1):  # header, body, signature
-            changed = bytearray(blob)
+        to_bob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[people["bob"][1].to_public()])
+        with pytest.raises(PackError, match="encrypted to keys"):
+            decrypt_pack(to_bob, passphrase="correct horse battery")
+
+    def test_wrong_key_fails_without_plaintext(self, people):
+        alice_sign, _ = people["alice"]
+        _, bob = people["bob"]
+        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob.to_public()])
+        with pytest.raises(PackError, match="not encrypted to your key") as info:
+            decrypt_pack(blob, identity=people["carol"][1])
+        assert SECRET_TEXT.decode() not in str(info.value)
+
+    def test_any_change_breaks_the_signature_before_decryption(self, people, no_decryption):
+        alice_sign, _ = people["alice"]
+        _, bob = people["bob"]
+        parts = members(encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob.to_public()]))
+        age = parts[cp.AGE_NAME]
+        header_end = age.index(b"\n--- ")
+        for position in (header_end - 5, header_end + 10, len(age) - 1):  # a stanza, the MAC, the payload
+            changed = bytearray(age)
             changed[position] ^= 0x01
-            with pytest.raises(PackError):
-                decrypt_pack(bytes(changed), identity=bob_enc)
-        with pytest.raises(PackError):
-            decrypt_pack(blob[:-1], identity=bob_enc)
+            with pytest.raises(PackError, match="does not match"):
+                decrypt_pack(zip_of({cp.AGE_NAME: bytes(changed), cp.AGE_SIG_NAME: parts[cp.AGE_SIG_NAME]}),
+                             identity=bob)
 
-    def test_removing_or_adding_a_recipient_is_detected(self, people):
+    def test_a_re_encrypted_pack_cannot_keep_the_senders_signature(self, people):
+        # An insider (bob can decrypt) re-encrypts it to bob and dave: alice's signature no longer fits, and
+        # signing it himself makes him the visible sender.
         alice_sign, _ = people["alice"]
-        bob_sign, bob_enc = people["bob"]
-        _, carol_enc = people["carol"]
-        _, dave_enc = people["dave"]
-        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob_enc.public_key(), carol_enc.public_key()])
-        header, mac, body, sig = split(blob)
-
-        removed = dict(header, recipients=header["recipients"][:1])
-        with pytest.raises(PackError, match="signature"):
-            decrypt_pack(rebuild(removed, mac, body, sig), identity=bob_enc)
-
-        # An insider (bob knows the file key) adds dave, recomputes the MAC and re-encrypts the body:
-        # alice's signature no longer fits, and signing it himself makes him the visible sender.
-        parsed = cp._EncryptedHeader.model_validate(header)
-        file_key = cp._unwrap_file_key(parsed, bob_enc, None)
-        ephemeral = X25519PrivateKey.generate()
-        epk, rpk = cp._raw_public(ephemeral.public_key()), cp._raw_public(dave_enc.public_key())
-        wrap = cp._x25519_wrap_key(ephemeral.exchange(dave_enc.public_key()), epk, rpk)
-        stanza = {"type": "x25519", "epk": cp._b64e(epk),
-                  "body": cp._b64e(ChaCha20Poly1305(wrap).encrypt(bytes(12), file_key, None))}
-        def forge(sender_text):
-            added = dict(header, sender=sender_text, recipients=header["recipients"] + [stanza])
-            signed_header = cp.ENCRYPTED_MAGIC + cp._canonical(added) + b"\n"
-            head = signed_header + b"mac " + base64.b64encode(cp._header_mac(file_key, signed_header)) + b"\n"
-            salt = base64.b64decode(header["payload_salt"])
-            return head + ChaCha20Poly1305(cp._hkdf(file_key, salt, cp._INFO_PAYLOAD)).encrypt(bytes(12), SECRET_TEXT,
-                                                                                               head)
-
-        with pytest.raises(PackError, match="signature"):
-            decrypt_pack(forge(header["sender"]) + sig, identity=dave_enc)
-        unsigned = forge(cp.public_key_text(bob_sign.public_key()))
-        resigned = unsigned + bob_sign.sign(cp._ENCRYPTED_CONTEXT + unsigned)
-        with pytest.raises(PackError, match="sender"):
-            decrypt_pack(resigned, identity=dave_enc, trusted_senders=[alice_sign.public_key()])
-        assert decrypt_pack(resigned, identity=dave_enc).sender_id == cp.key_id(bob_sign.public_key())
-
-    def test_unknown_sender_is_refused_before_decryption(self, people, monkeypatch):
-        mallory_sign, _ = people["dave"]
-        alice_sign, _ = people["alice"]
-        _, bob_enc = people["bob"]
-        blob = encrypt_pack(SECRET_TEXT, sender=mallory_sign, recipients=[bob_enc.public_key()])
-        monkeypatch.setattr(cp, "_unwrap_file_key", lambda *a: pytest.fail("decrypted before the sender check"))
+        bob_sign, bob = people["bob"]
+        _, dave = people["dave"]
+        parts = members(encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob.to_public()]))
+        again = pyrage.encrypt(pyrage.decrypt(parts[cp.AGE_NAME], [bob]), [bob.to_public(), dave.to_public()])
+        with pytest.raises(PackError, match="does not match"):
+            decrypt_pack(zip_of({cp.AGE_NAME: again, cp.AGE_SIG_NAME: parts[cp.AGE_SIG_NAME]}), identity=dave)
+        resigned = seal(again, bob_sign)
         with pytest.raises(PackError, match="not one of the trusted senders"):
-            decrypt_pack(blob, identity=bob_enc, trusted_senders=[alice_sign.public_key()])
+            decrypt_pack(resigned, identity=dave, trusted_senders=[alice_sign.public_key()])
+        assert decrypt_pack(resigned, identity=dave)[1] == cp.key_id(bob_sign.public_key())
 
-    def test_non_canonical_header_is_rejected(self, people):
+    def test_unknown_sender_is_refused_before_decryption(self, people, no_decryption):
         alice_sign, _ = people["alice"]
-        _, bob_enc = people["bob"]
-        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob_enc.public_key()])
-        header, mac, body, sig = split(blob)
-        pretty = cp.ENCRYPTED_MAGIC + json.dumps(header, indent=1).replace("\n", "").encode() + b"\n"
-        tail = blob[blob.index(b"\nmac ") + 1:]
-        with pytest.raises(PackError, match="canonical"):
-            decrypt_pack(pretty + tail, identity=bob_enc)
+        mallory_sign, _ = people["dave"]
+        blob = encrypt_pack(SECRET_TEXT, sender=mallory_sign, recipients=[people["bob"][1].to_public()])
+        with pytest.raises(PackError, match="not one of the trusted senders"):
+            decrypt_pack(blob, identity=people["bob"][1], trusted_senders=[alice_sign.public_key()])
 
     def test_arguments_are_checked(self, people):
         alice_sign, _ = people["alice"]
-        with pytest.raises(ValueError, match="at least one"):
+        bob = people["bob"][1].to_public()
+        with pytest.raises(ValueError, match="one of the two"):
             encrypt_pack(SECRET_TEXT, sender=alice_sign)
+        with pytest.raises(ValueError, match="one of the two"):  # age keeps a passphrase stanza alone
+            encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob], passphrase="correct horse battery")
         with pytest.raises(ValueError, match="12 characters"):
             encrypt_pack(SECRET_TEXT, sender=alice_sign, passphrase="short")
-        with pytest.raises(PackError, match="Not an encrypted pack"):
-            decrypt_pack(b"PK\x03\x04", passphrase="x" * 12)
+        with pytest.raises(ValueError, match="At most 64"):
+            encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob] * 65)
 
-    def test_scrypt_work_factor_is_bounded_on_reading(self, people):
+    @pytest.mark.parametrize("blob", [b"PK\x03\x04", b"not a zip at all", b""])
+    def test_malformed_input_is_refused(self, blob, no_decryption):
+        with pytest.raises(PackError):
+            decrypt_pack(blob, passphrase="x" * 12)
+
+    def test_unexpected_members_and_an_unsigned_file_are_refused(self, people, no_decryption):
         alice_sign, _ = people["alice"]
-        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, passphrase="correct horse battery")
-        header, mac, body, _ = split(blob)
-        header["recipients"][0]["log_n"] = 30  # would need terabytes of memory
-        forged = rebuild(header, mac, body, b"")
-        forged += alice_sign.sign(cp._ENCRYPTED_CONTEXT + forged)
-        with pytest.raises(PackError, match="damaged"):
+        parts = members(encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[people["bob"][1].to_public()]))
+        for changed in ({**parts, "extra.txt": b"x"}, {cp.AGE_NAME: parts[cp.AGE_NAME]}):
+            with pytest.raises(PackError, match="Not an encrypted pack"):
+                decrypt_pack(zip_of(changed), identity=people["bob"][1])
+        sig = json.loads(parts[cp.AGE_SIG_NAME])
+        del sig["pubkey"]
+        with pytest.raises(PackError, match="sender's public key"):
+            decrypt_pack(zip_of({**parts, cp.AGE_SIG_NAME: json.dumps(sig)}), identity=people["bob"][1])
+
+    @pytest.mark.parametrize("log_n", ["21", "30", "63"])
+    def test_scrypt_work_factor_is_bounded_before_scrypt_runs(self, people, no_decryption, log_n):
+        # Anyone can sign a file; pyrage's own limit follows this computer's speed and lets through work factors
+        # that need several GiB of memory, which aborts the process.
+        forged = seal(age_header(f"scrypt {'C' * 22} {log_n}"), people["dave"][0])
+        with pytest.raises(PackError, match=f"2\\^{log_n}"):
             decrypt_pack(forged, passphrase="correct horse battery")
 
-    def test_only_one_passphrase_stanza_is_read(self, people, monkeypatch):
-        # Anyone can sign a file; 64 passphrase stanzas at the highest work factor would run 64 GiB-sized scrypts.
-        mallory_sign, _ = people["dave"]
-        blob = encrypt_pack(SECRET_TEXT, sender=mallory_sign, passphrase="correct horse battery")
-        header, mac, body, _ = split(blob)
-        header["recipients"] += [dict(header["recipients"][0], log_n=20) for _ in range(3)]
-        forged = rebuild(header, mac, body, b"")
-        forged += mallory_sign.sign(cp._ENCRYPTED_CONTEXT + forged)
-        monkeypatch.setattr(cp, "_scrypt_key", lambda *a: pytest.fail("scrypt ran for a damaged header"))
+    @pytest.mark.parametrize("stanzas", [(f"X25519 {'D' * 43}", f"scrypt {'C' * 22} 18"),
+                                         (f"scrypt {'C' * 22} 18", f"scrypt {'E' * 22} 18"),
+                                         (f"scrypt {'C' * 22} 018",), (f"scrypt {'C' * 22}",)])
+    def test_a_passphrase_stanza_must_be_alone_and_well_formed(self, people, no_decryption, stanzas):
+        forged = seal(age_header(*stanzas), people["dave"][0])
         with pytest.raises(PackError, match="damaged"):
-            decrypt_pack(forged, passphrase="correct horse battery")
+            decrypt_pack(forged, passphrase="correct horse battery", identity=people["bob"][1])
+
+    def test_pyrage_refuses_a_mixed_header_too(self, people):
+        # Checked here first; pyrage (age) refuses it as well, without running scrypt.
+        alice_sign, _ = people["alice"]
+        _, bob = people["bob"]
+        age = members(encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[bob.to_public()]))[cp.AGE_NAME]
+        head, rest = age.split(b"\n--- ", 1)
+        mixed = head + f"\n-> scrypt {'C' * 22} 18\n{'A' * 43}".encode() + b"\n--- " + rest
+        for decrypt in (lambda: pyrage.decrypt(mixed, [bob]),
+                        lambda: pyrage.passphrase.decrypt(mixed, "correct horse battery")):
+            with pytest.raises(pyrage.DecryptError, match="Header is invalid"):
+                decrypt()
+
+    def test_the_old_format_is_refused_with_a_clear_message(self, tmp_path):
+        old = b'lcf-encrypted-pack/v1\n{"v":1}\nmac x\n' + b"\x00" * 80
+        (tmp_path / "old.lcfpack").write_bytes(old)
+        assert cp.is_encrypted_pack(tmp_path / "old.lcfpack")
+        with pytest.raises(PackError, match="development version.*export it again"):
+            decrypt_pack(old, identity=pyrage.x25519.Identity.generate())
 
     def test_encrypted_signed_pack_end_to_end(self, people, tmp_path):
         alice_sign, _ = people["alice"]
-        _, bob_enc = people["bob"]
+        _, bob = people["bob"]
         root = make_tree(tmp_path / "t")
         manifest = manifest_of(root, kind="knowledge", id="team-notes")
         pack = write_pack(root, manifest, sign_manifest(manifest, alice_sign))
-        blob = encrypt_pack(pack, sender=alice_sign, recipients=[bob_enc.public_key()])
-        opened = decrypt_pack(blob, identity=bob_enc, trusted_senders=[alice_sign.public_key()])
-        contents = read_pack(opened.data, tmp_path / "out", keys=[alice_sign.public_key()])
+        assert not cp.is_encrypted_pack(pack)
+        blob = encrypt_pack(pack, sender=alice_sign, recipients=[bob.to_public()])
+        data, _ = decrypt_pack(blob, identity=bob, trusted_senders=[alice_sign.public_key()])
+        contents = read_pack(data, tmp_path / "out", keys=[alice_sign.public_key()])
         assert contents.manifest.id == "team-notes"
 
 
@@ -485,40 +527,64 @@ class TestUserKeys:
 
     def test_keys_are_created_once_and_kept(self, secrets_store):
         first = cp.UserKeys(secrets_store())
-        signing, encryption = first.signing_key(), first.encryption_key()
+        signing, identity = first.signing_key(), first.age_identity()
         again = cp.UserKeys(secrets_store())  # a new process
-        assert cp._raw_private(again.signing_key()) == cp._raw_private(signing)
-        assert cp._raw_private(again.encryption_key()) == cp._raw_private(encryption)
+        assert again.signing_key().private_bytes_raw() == signing.private_bytes_raw()
+        assert str(again.age_identity()) == str(identity)
 
     def test_public_keys_export_as_text(self, secrets_store):
         keys = cp.UserKeys(secrets_store())
         text = keys.export_public()
-        parsed = cp.parse_public_keys(text)
-        assert [cp._raw_public(k) for k in parsed] == [cp._raw_public(keys.signing_key().public_key()),
-                                                       cp._raw_public(keys.encryption_key().public_key())]
-        assert cp.key_id(keys.signing_key().public_key()) in text
-        blob = encrypt_pack(SECRET_TEXT, sender=keys.signing_key(), recipients=[parsed[1]])
-        assert decrypt_pack(blob, identity=keys.encryption_key(), trusted_senders=[parsed[0]]).data == SECRET_TEXT
+        recipient, signing = cp.parse_public_keys(text)
+        assert str(recipient) == str(keys.age_identity().to_public()) and str(recipient).startswith("age1")
+        assert signing.public_bytes_raw() == keys.signing_key().public_key().public_bytes_raw()
+        assert cp.key_id(keys.signing_key().public_key()) in text and "AGE-SECRET-KEY" not in text
+        blob = encrypt_pack(SECRET_TEXT, sender=keys.signing_key(), recipients=[recipient])
+        assert decrypt_pack(blob, identity=keys.age_identity(), trusted_senders=[signing])[0] == SECRET_TEXT
+
+    def test_public_keys_from_age_keygen_are_read(self):
+        identity = pyrage.x25519.Identity.generate()
+        keygen_output = f"# created: 2026-10-11T12:00:00Z\n# public key: {identity.to_public()}\n"
+        assert [str(k) for k in cp.parse_public_keys(keygen_output)] == [str(identity.to_public())]
+        with pytest.raises(PackError, match="Not a valid public key"):
+            cp.parse_public_keys("age1" + "q" * 58)  # the checksum does not match
+        assert cp.parse_public_keys("ssh-ed25519 AAAA x25519:nothing") == []
 
     def test_no_private_key_on_disk_in_plaintext(self, secrets_store, tmp_path):
         keys = cp.UserKeys(secrets_store())
-        privates = [cp._raw_private(keys.signing_key()), cp._raw_private(keys.encryption_key())]
-        forms = []
-        for raw in privates:
-            forms += [raw, raw.hex().encode(), base64.b64encode(raw), base64.b64encode(raw).rstrip(b"="),
-                      base64.urlsafe_b64encode(raw).rstrip(b"=")]
+        raw = keys.signing_key().private_bytes_raw()
+        forms = [raw, raw.hex().encode(), base64.b64encode(raw), base64.b64encode(raw).rstrip(b"="),
+                 base64.urlsafe_b64encode(raw).rstrip(b"="), str(keys.age_identity()).encode(),
+                 str(keys.age_identity()).lower().encode()]
         files = [p for p in tmp_path.rglob("*") if p.is_file()]
         assert any(p.name == "secrets.store" for p in files)
         for path in files:
             content = path.read_bytes()
             assert not any(form in content for form in forms), f"private key readable in {path}"
 
-    def test_damaged_stored_key_is_never_replaced(self, secrets_store):
+    @pytest.mark.parametrize("name", [cp.UserKeys.SIGNING_SECRET, cp.UserKeys.AGE_SECRET])
+    def test_a_damaged_key_is_never_replaced_and_the_advice_works(self, secrets_store, name):
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
         sm = secrets_store()
-        sm.set_secret(cp.UserKeys.SIGNING_SECRET, "not a key")
-        with pytest.raises(PackError, match="damaged"):
-            cp.UserKeys(sm).signing_key()
-        assert sm.get_secret(cp.UserKeys.SIGNING_SECRET) == "not a key"
+        sm.set_secret(name, "not a key")
+        load = cp.UserKeys(sm).signing_key if name == cp.UserKeys.SIGNING_SECRET else cp.UserKeys(sm).age_identity
+        with pytest.raises(PackError, match="damaged") as info:
+            load()
+        assert sm.get_secret(name) == "not a key"
+        # The message names a command that exists: print a new key, store it with `llm-cli secrets set`.
+        command = re.search(r'python -c "([^"]+)" \| llm-cli (secrets set \S+ --with-token)', str(info.value))
+        assert command, str(info.value)
+        new_key = subprocess.run([sys.executable, "-c", command.group(1)], capture_output=True, text=True,
+                                 check=True).stdout
+
+        class Ctx(cli_module.FrameworkContext):
+            def require_framework(self):
+                self.framework_manager = SimpleNamespace(secrets_manager=sm)
+                return self
+        result = CliRunner().invoke(cli_module.cli, ["-q", *command.group(2).split()], obj=Ctx(), input=new_key)
+        assert result.exit_code == 0, result.output
+        assert load() is not None
 
     def test_undecryptable_stored_key_is_never_overwritten(self):
         writes = []
@@ -533,11 +599,39 @@ class TestUserKeys:
         with pytest.raises(PackError, match="secrets store"):
             cp.UserKeys(None).signing_key()
 
-    def test_public_key_text_round_trip(self):
-        for key in (Ed25519PrivateKey.generate().public_key(), X25519PrivateKey.generate().public_key()):
-            assert cp._raw_public(cp.load_public_key(cp.public_key_text(key))) == cp._raw_public(key)
-        with pytest.raises(PackError):
-            cp.load_public_key("ssh-ed25519 AAAA")
+    def test_two_processes_creating_keys_at_once_get_the_same_key(self, secrets_store):
+        # Each SecretsManager stands for a process. Without the lock both see no key, both create one, and one
+        # process keeps signing with a key that is no longer stored.
+        stores, writes = [secrets_store(), secrets_store()], []
+        both_inside = threading.Barrier(2)
+        for sm in stores:
+            def slow_set(name, value, _real=sm.set_secret):
+                writes.append(name)
+                try:
+                    both_inside.wait(timeout=1.5)  # waits for the other process, if it can get here at all
+                except threading.BrokenBarrierError:
+                    pass
+                return _real(name, value)
+            sm.set_secret = slow_set
+        keys = [None, None]
+
+        def create(i):
+            keys[i] = cp.UserKeys(stores[i]).signing_key().private_bytes_raw()
+        threads = [threading.Thread(target=create, args=(i,)) for i in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(30)
+        assert writes == [cp.UserKeys.SIGNING_SECRET], "only one process creates the key"
+        assert keys[0] == keys[1] == cp.UserKeys(secrets_store()).signing_key().private_bytes_raw()
+
+    def test_age_secret_keys_are_caught_by_the_scan_and_redaction(self):
+        # A real identity, made at runtime; documentation uses placeholders like AGE-SECRET-KEY-1XXXX...
+        from orchestrator.security import secret_patterns
+        secret = str(pyrage.x25519.Identity.generate())
+        assert [kind for kind, _ in secret_patterns.find_secrets(f'key = "{secret}"')] == ["age secret key"]
+        assert secret not in secret_patterns.redact(f"loaded {secret}") and secret not in scrub(f"key {secret}")
+        assert secret_patterns.find_secrets("AGE-SECRET-KEY-1" + "X" * 58) == [], "placeholders are skipped"
 
 
 # --- Privacy scrub ----------------------------------------------------------------------------------------
