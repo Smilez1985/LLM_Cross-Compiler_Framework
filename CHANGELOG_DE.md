@@ -162,8 +162,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Eine Tabelle der Secret-Formate** (`orchestrator/security/secret_patterns.py`) für den Secret-Scan und die
   Schwärzung zur Laufzeit, die vorher nur fünf Formate kannte. Neu: Schlüssel von Unsloth Studio (`sk-unsloth-`),
   kurzlebige Bedrock-Schlüssel (`bedrock-api-key-`), LocalAI-Schlüssel (`lai-`), Zeilen mit
-  `Authorization: Bearer` und Werte in Anführungszeichen, die `api_key`, `secret` oder `token` zugewiesen werden.
-  Die Schwärzung zur Laufzeit erfasst jetzt auch JWTs, Blöcke privater Schlüssel und Passwörter in URLs.
+  `Authorization: Bearer` und Werte in Anführungszeichen, die `api_key`, `secret` oder `token` zugewiesen werden
+  (ein Name in Kleinbuchstaben wie `"community_encryption_key"` wird nicht gemeldet). Die Schwärzung zur Laufzeit
+  erfasst jetzt auch JWTs, Blöcke privater Schlüssel und Passwörter in URLs.
 - API-Schlüssel, die Dittos Anbieterschicht im Speicher hält, erscheinen in `str()` und `repr()` als
   `<redacted>` und lassen sich nicht mit pickle serialisieren.
 

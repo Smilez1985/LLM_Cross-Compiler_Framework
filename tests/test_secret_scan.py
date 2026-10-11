@@ -182,9 +182,20 @@ def test_keys_after_escapes_are_found(wrapped, kind):
     'api_key = "your-api-key-' + "x" * 20 + '"',
     'api_key="sk-test-' + '1234567890abcdef"',  # the shape of the test fakes already in the history
     'value = "' + REDACT_ONLY_SAMPLES["sk- key"] + '"',  # redacted at runtime, too broad for the scan
+    # The names of secrets, not their values (a community pack branch keeps such constants).
+    '    ENCRYPTION_SECRET = "community_' + 'encryption_key"',
+    "api_key: 'openai-compatible-" + "server-key'",
 ])
 def test_placeholders_and_marked_lines_are_not_reported(line):
     assert secret_scan.scan_text("f.py", line) == []
+
+
+def test_a_lower_case_key_with_digits_is_still_an_assignment():
+    value = body(32, string.ascii_lowercase + string.digits, seed=3)
+    assert any(c.isdigit() for c in value)
+    hits = secret_scan.scan_text("f.py", 'client_secret = "' + value + '"')
+    assert [h.kind for h in hits] == ["secret assignment"]
+    assert value not in helpers.redact_secrets('client_secret = "' + value + '"')
 
 
 @pytest.mark.parametrize("path,hit", [
