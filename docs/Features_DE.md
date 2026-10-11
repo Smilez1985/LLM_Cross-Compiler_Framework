@@ -691,8 +691,8 @@ Beispiel mit einem neuen Deep Ingest derselben URL), damit es wirkt.
 
 Die Embedding-Modelle und der Reranker werden nach `rag_model_idle_minutes` (Standard 10) ohne Nutzung entladen und
 bei der nächsten Suche wieder geladen, was einige Sekunden dauert. Die Zeit zählt ab dem Ende der letzten Suche oder
-Aufnahme, nie währenddessen. `0` hält sie geladen. Der eingebettete Speicher wird davon getrennt nach 30 Sekunden
-ohne Zugriff freigegeben (siehe **Speicher** oben).
+Aufnahme, nie währenddessen. `0` hält sie geladen; eine längere Zeit als 7 Tage (10080 Minuten) gilt als 7 Tage.
+Der eingebettete Speicher wird davon getrennt nach 30 Sekunden ohne Zugriff freigegeben (siehe **Speicher** oben).
 
 ---
 

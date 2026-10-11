@@ -648,8 +648,8 @@ knowledge base keep their old chunks: import them again (for example a new Deep 
 
 The embedding models and the reranker are unloaded after `rag_model_idle_minutes` (default 10) without use and
 loaded again on the next search, which takes a few seconds. The time counts from the end of the last search or
-import, never during one. `0` keeps them loaded. The embedded storage is released separately, after 30 idle
-seconds (see **Storage** above).
+import, never during one. `0` keeps them loaded; a longer time than 7 days (10080 minutes) counts as 7 days. The
+embedded storage is released separately, after 30 idle seconds (see **Storage** above).
 
 ---
 

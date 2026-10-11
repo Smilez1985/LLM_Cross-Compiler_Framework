@@ -390,6 +390,7 @@ class FastEmbedSparseEmbedder(_FastEmbedBase):
 # FastEmbed's BM25 tokenizer keeps \w runs whole: "-DGGML_CUDA=ON" becomes "dggml_cuda", so a search for
 # GGML_CUDA or "ggml cuda" misses it; snake_case and camelCase names stay one token. Their parts are added.
 _WORD = re.compile(r"\w+")
+_WORD_CHAR = re.compile(r"[\w-]")
 _CMAKE_DEFINE = re.compile(r"D_?[A-Z][A-Z0-9]*(?:_|$)")
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z]{2})")  # not plurals such as GPUs
 _VERSION_PART = re.compile(r"\d{1,2}")  # the 64 of x86_64, the 2 and 17 of manylinux_2_17
@@ -402,7 +403,10 @@ def expand_identifiers(text: str) -> str:
     added: Dict[str, None] = {}
     for match in _WORD.finditer(text or ""):
         word, start, end = match.group(), match.start(), match.end()
-        define = _CMAKE_DEFINE.match(word) if start and text[start - 1] == "-" else None
+        # -D only at the start of a token (after a space, a quote, a backtick, ...), not after a hyphen inside a
+        # word: build-DEFAULT_TARGET keeps its D.
+        option = start and text[start - 1] == "-" and (start == 1 or not _WORD_CHAR.match(text[start - 2]))
+        define = _CMAKE_DEFINE.match(word) if option else None
         if define and ("_" in define.group() or text[end:end + 1] == "="):  # -DNAME=VALUE, -DNAME_X, not -DEBUG
             word = word[1:]
             added.setdefault(word, None)

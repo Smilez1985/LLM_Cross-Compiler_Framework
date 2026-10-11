@@ -22,6 +22,7 @@ the Transformers offline mode; a config.yml that still contains it loads as befo
 
 import os
 import json
+import math
 import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable, Set, Tuple
@@ -108,9 +109,11 @@ class ConfigSchema:
                             value = json.loads(value)
                         except:
                             errors.append(f"Invalid dict format for {self.field_name}")
-            except (ValueError, TypeError):
+            except (ValueError, TypeError, OverflowError):  # OverflowError: int(.inf) from a YAML file
                 errors.append(f"Invalid type for {self.field_name}: expected {self.field_type.__name__}")
-        
+        if self.field_type in (int, float) and isinstance(value, float) and not math.isfinite(value):
+            errors.append(f"Invalid value for {self.field_name}: {value} is not a finite number")
+
         for rule in self.validation_rules:
             if not self._apply_validation_rule(value, rule):
                 errors.append(f"Validation rule failed for {self.field_name}: {rule}")
@@ -216,6 +219,7 @@ class ConfigManager:
         self.config_schemas: Dict[str, ConfigSchema] = {}
         self.change_history: List[Dict[str, Any]] = []
         self.change_listeners: List[Callable] = []
+        self._revisions: Dict[str, int] = {}  # per key: how often set() stored it (see revision())
         
         self._initialize_core_schemas()
         self._ensure_directories()
@@ -505,7 +509,11 @@ class ConfigManager:
             schema = self.config_schemas.get(key)
             if schema and schema.enterprise_only and not self.advanced_mode.enabled:
                 continue
-            if schema and not schema.validate_value(value)[0]:
+            try:
+                valid = not schema or schema.validate_value(value)[0]
+            except Exception:  # one bad value must never cost the settings after it in the file
+                valid = False
+            if not valid:
                 self.logger.warning(f"Ignoring invalid value for '{key}' from {source.source_path}: {value!r}")
                 continue
 
@@ -570,6 +578,12 @@ class ConfigManager:
             val = self.config_values.get(key)
             return val.value if val else default
 
+    def revision(self, key: str) -> int:
+        """How often set() stored `key` in this process: a cache can tell that a setting was changed, also when it
+        was changed back to the value it had before."""
+        with self._lock:
+            return self._revisions.get(key, 0)
+
     # PROXY METHOD FOR ATTRIBUTE ACCESS (orchestrator.py expects config.log_level)
     def __getattr__(self, name):
         with self._lock:
@@ -593,6 +607,7 @@ class ConfigManager:
         with self._lock:
             old = self.config_values.get(key)
             self.config_values[key] = val
+            self._revisions[key] = self._revisions.get(key, 0) + 1
             if self.advanced_mode.enabled:
                 self._track_config_change(key, old.value if old else None, value, source_type)
             if self.advanced_mode.is_feature_enabled(AdvancedFeature.DYNAMIC_UPDATES):

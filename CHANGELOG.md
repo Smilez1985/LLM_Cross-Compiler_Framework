@@ -47,8 +47,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   found at all (answers deep inside such blocks: hit@1 50 % to 100 %). Smaller blocks stay whole. Re-import a
   document to apply it.
 - Knowledge-base models are unloaded after 10 minutes without use and loaded again on the next search
-  (setting `rag_model_idle_minutes`, 0 keeps them loaded). The time counts from the end of the last search or
-  import, never during one.
+  (setting `rag_model_idle_minutes`, 0 keeps them loaded, at most 7 days). The time counts from the end of the
+  last search or import, never during one.
 - **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
   pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, Metal or CPU;
   ROCm on request; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
@@ -355,6 +355,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Saving a setting (for example the first-run language or the AI settings) no longer overwrites a `config.yml`
   that cannot be read (a YAML error, or no `key: value` settings) with only the changed values; the file stays as
   it is and the error is logged.
+- A number in `config.yml` that does not fit its setting (`.inf` for a whole number, or `.inf`/`.nan` for a decimal
+  one) is ignored with a warning and the default applies; before, `.inf` for a whole number stopped reading the
+  file, so every setting after it was ignored too.
 - Windows: with the framework in `C:\Program Files`, which standard users cannot write to, the settings and the
   data folders `output/`, `cache/` and `models/` are in the per-user folder (`%USERPROFILE%\.llm-framework`).
   The writability check no longer trusts `os.access`, which ignores folder permissions on Windows. The installer
