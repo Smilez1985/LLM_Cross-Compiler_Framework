@@ -92,7 +92,10 @@ class BuildRequest:
     dataset_generated: bool = False
     # Commit of a Hugging Face model (recipes pin one); None builds the default branch
     model_revision: Optional[str] = None
-    
+    # Local model and dataset an AI caller named (orchestrator.tools.local_files.LocalInputs), checked again by
+    # the build engine right before each container starts
+    local_inputs: Optional[Any] = None
+
     def __post_init__(self):
         if not self.request_id:
             self.request_id = f"req_{uuid.uuid4().hex[:8]}"
@@ -309,6 +312,7 @@ class LLMOrchestrator:
             dataset_path=(None if req.dataset_generated and job.target_format != ModelFormat.GGUF
                           else req.dataset_path),
             build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
+            local_inputs=req.local_inputs,
         )
 
     async def _submit_to_engine(self, build_config: BuildConfiguration, state: Optional[WorkflowState]) -> Optional[str]:

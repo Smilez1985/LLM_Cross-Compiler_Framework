@@ -241,6 +241,10 @@ Verhalten:
   `Model_Card.md`, dazu ein ZIP davon neben diesem Ordner. Sie erscheinen dort erst, wenn der Build abgeschlossen
   ist; ein abgebrochener oder gescheiterter Build hinterlässt dort keine Dateien.
 - Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token`.
+- Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nie der Ordner, in dem sie liegt; ein
+  Modell, das Dateien daneben braucht (zum Beispiel externe ONNX-Daten), wird als Ordner angegeben. Ditto und
+  MCP-Clients können gar keinen Pfad nennen: Sie verwenden `<Label>:<relativer Pfad>` in den
+  [Ordnern, die die KI nutzen darf](#tools-folders).
 - Der erste Build eines Targets baut zuerst sein Docker-Image und dauert deutlich länger.
 
 ```bash
@@ -781,6 +785,40 @@ und das Ergebnis.
 llm-cli tools audit --limit 100
 llm-cli tools audit --verify
 llm-cli tools audit --archive
+```
+
+### tools folders
+
+```
+llm-cli tools folders list
+llm-cli tools folders add PATH --label LABEL [--kind model|dataset|any]
+llm-cli tools folders remove LABEL
+```
+
+Die Ordner, deren Modell- und Datensatzdateien Ditto und MCP-Clients nutzen dürfen. Sie nennen nie einen Pfad,
+sondern eine Datei als `<Label>:<relativer Pfad>`, zum Beispiel `models:qwen2.5-0.5b-instruct` oder
+`mymodels:llama/model.gguf`. Der Modellordner (`models`, Einstellung `models_dir`) und der Datensatzordner
+(`datasets`, Einstellung `datasets_dir`) sind immer da; mit `add` dürfen sie einen weiteren Ordner unter einem Label
+nutzen, das du wählst (Kleinbuchstaben, Ziffern, `-` und `_`).
+
+- `add` und `remove` brauchen ein Terminal (weitergeleitete Antworten werden abgelehnt), und `add` zeigt den Ordner
+  und fragt vorher: Dateien darin können in Builds eingebunden werden, die Community- oder KI-geschriebenen Code
+  ausführen, und können über Build-Logs KI-Clients erreichen.
+- `add` lehnt `/`, dein Home selbst, einen Ordner, der den persönlichen Ordner des Frameworks enthält, und einen
+  Ordner in einem gesperrten Ordner oder mit einem gesperrten Ordner darin ab (Schlüssel, Anmeldedaten, das
+  Hugging-Face-Token, Systemordner; die Liste steht in den [Funktionen](Features_DE.md#mcp-server)). Der Unterordner
+  `hub` des Hugging-Face-Caches lässt sich hinzufügen (`~/.cache/huggingface/hub`, wo `hf download` Modelle
+  ablegt); die Token-Dateien daneben bleiben gesperrt.
+- Der echte Pfad des Ordners wird festgehalten. Ändert er sich später (ein Link zeigt woandershin), markiert `list`
+  ihn als nicht nutzbar, und KI-Clients werden abgewiesen, bis du `add` mit demselben Label erneut ausführst.
+- Jede Änderung landet im Audit-Log (Akteur `cli`; `gui` für dieselbe Liste in der GUI unter Tools > Folders the AI
+  May Use...). Die Liste liegt in `~/.llm-framework/ai_folders.json`, nur für dich lesbar.
+
+```bash
+llm-cli tools folders add ~/llm-models --label mymodels --kind model
+llm-cli tools folders add ~/.cache/huggingface/hub --label hub
+llm-cli tools folders list
+llm-cli tools folders remove mymodels
 ```
 
 ---

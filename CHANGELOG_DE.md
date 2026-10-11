@@ -231,6 +231,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - `llm-cli secrets set --with-token` liest den Wert von stdin.
 - **Cancel Build** im Builder-Tab: bricht den laufenden Build nach einer Bestätigung über den Build-Service ab
   (nur aktiv, solange der Build läuft, den der Tab gestartet hat); das Log meldet, wenn er angehalten hat.
+- **Ordner, die die KI nutzen darf**: Ditto und MCP-Clients nennen ein lokales Modell oder einen
+  Kalibrierungsdatensatz als `<Label>:<relativer Pfad>` (zum Beispiel `models:qwen2.5-0.5b-instruct`,
+  `datasets:calib/de.txt`) oder über seine Datei-ID im Modellordner, im neuen Datensatzordner (Einstellung
+  `datasets_dir`, standardmäßig neben dem Modellordner) oder in einem Ordner, den du mit
+  `llm-cli tools folders add|list|remove` (Terminal nötig) oder in der GUI (Tools > Folders the AI May Use...)
+  hinzufügst. Das Hinzufügen zeigt, was das Teilen bedeutet, und wird im Audit-Log festgehalten; `/`, dein Home,
+  ein Ordner mit dem persönlichen Ordner oder einem gesperrten Ordner darin lassen sich nicht hinzufügen. Der
+  Ordner `hub` des Hugging-Face-Caches lässt sich hinzufügen; seine Token-Dateien bleiben gesperrt.
 
 ### Geändert
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
@@ -305,6 +313,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Fehlermeldungen und Hinweise nennen `llm-cli ditto login <anbieter>` statt
   `llm-cli secrets set <Schlüsselname>`; `llm-cli module generate-ai` nutzt die gespeicherte Anmeldung und fragt
   nie selbst nach einem Schlüssel.
+- Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nicht mehr zusammen mit dem Ordner, in
+  dem sie liegt (ein Modell, das Dateien daneben braucht, etwa externe ONNX-Daten, wird als Ordner angegeben). Eine
+  RKNN-Beispielliste neben einer Modelldatei bekommt jetzt ihre eigene Ordnereinbindung.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -531,6 +542,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   unsichtbaren Zeichen darin wird abgelehnt, bevor etwas gesendet oder gespeichert wird.
 - Das Builder-Log zeigt jede Meldung als reinen Text, sodass Namen aus Community-Rezepten, Dittos Antworten oder
   Build-Ausgaben nicht als HTML erscheinen (Links, Bilder, Formatierung).
+- MCP und Ditto: `start_build` nimmt für `model` und `dataset_path` keinen Pfad mehr an (ein MCP-Client konnte jede
+  lesbare Datei, etwa `~/.ssh/id_ed25519`, in einen Build einbinden und über das Log zurücklesen). Nur Verweise in
+  den Ordnern, die die KI nutzen darf, werden angenommen; die aufgelöste Datei muss in ihrem Ordner und außerhalb
+  jedes gesperrten Ordners liegen (Schlüssel, Anmeldedaten, das Hugging-Face-Token, der persönliche Ordner des
+  Frameworks, Systemordner), entschieden über die Identität der Datei, sodass ein Dateisystem ohne Unterscheidung
+  von Groß- und Kleinschreibung keinen verstecken kann. Dateien mit Hardlinks werden abgelehnt, ein Ordner wird nur
+  echt unterhalb seines Label-Ordners und ohne gesperrten Ordner oder Datei mit Hardlink darin genutzt, und die
+  Datei wird unmittelbar vor jedem Start eines Build-Containers erneut geprüft. Eine Hugging-Face-Repo-ID wird für
+  KI-Aufrufer nicht mehr als lokaler Pfad nachgeschlagen.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

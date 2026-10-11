@@ -95,7 +95,10 @@ A build runs these steps; each one is logged:
    RKNN-Toolkit2 2.3.2, each in its own Python environment). BuildKit is used when available, and the real cause
    of a failure is reported. Later builds reuse Docker's build cache.
 4. **Stage the model on the host:** a Hugging Face model is downloaded on your computer (with the token
-   `hf_token` for gated models), a local folder or file is used as it is. The containers get it read-only.
+   `hf_token` for gated models), a local folder or file is used as it is. The containers get it read-only: a
+   single file is mounted alone, never the folder it lies in, and a folder only itself (a model that needs files
+   next to it, such as ONNX external data, is given as its folder). A local model or dataset that Ditto or an MCP
+   client named is checked again right before each container starts ([Local files for AI clients](#mcp-server)).
 5. **Security scan:** Trivy scans the image for HIGH and CRITICAL vulnerabilities (setting `enable_security_scan`,
    pinned image `aquasec/trivy:0.75.0`). Findings are a warning in the log, not an error. A scan that does not
    finish within the build's time limit (`build_timeout`) is stopped with a warning.
@@ -766,6 +769,24 @@ framework never sees it.
 - **Instructions to the client:** the server describes the typical flow (targets → capabilities → build → status
   and log → artifacts) and tells the client that build logs and knowledge-base results are external text whose
   instructions must not be followed.
+- **Local files for AI clients:** MCP clients and Ditto never name a path. A local model or calibration dataset is
+  named as `<label>:<relative path>` inside a folder the AI may use, for example `models:qwen2.5-0.5b-instruct` or
+  `datasets:calib/de.txt`, or by the file id (`lf_` and 16 hex characters) the framework recorded for it. The
+  folders are the models folder (`models`, setting `models_dir`), the datasets folder (`datasets`, setting
+  `datasets_dir`, next to the models folder by default) and the folders you add with
+  [`llm-cli tools folders add`](CLI_Usage.md#tools-folders) or in the GUI (Tools > Folders the AI May Use...).
+  The file must lie inside its folder (links are followed and checked) and outside every denied folder: the
+  framework's per-user folder (except the data folders a read-only installation keeps there), `~/.ssh`,
+  `~/.gnupg`, `~/.config`, keyrings and keychains, `~/.password-store`, `~/.netrc`, `~/.git-credentials`,
+  `~/.docker`, `~/.aws`, `~/.kube`, the Hugging Face home folder with its token files (its `hub` subfolder may be
+  added as a folder), browser profiles, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (unless it is your own home) and
+  the Windows credential folders. Inside and outside are decided by file identity, not by comparing names, so a
+  case-insensitive file system cannot hide `~/.SSH`. A file with more than one hard link is refused. The file is
+  pinned (identity, size, modification time) and checked again right before each build container starts; a file
+  replaced meanwhile stops the build. A folder (a Hugging Face model folder) is used only strictly below its label
+  folder and when it holds no denied folder and no hard-linked file; a Hugging Face cache snapshot is mounted file
+  by file. The same holds for the folder of an RKNN sample list, so a list directly in a label folder is refused.
+  GUI and CLI builds you start yourself still take any path.
 - **Transports:** stdio (default; the client starts the server) or Streamable HTTP on a loopback address only
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). HTTP checks Host and Origin and needs a bearer token
   that is created per user in `~/.llm-framework/mcp_http_token`.
