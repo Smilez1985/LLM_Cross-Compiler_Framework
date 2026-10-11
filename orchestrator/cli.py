@@ -224,7 +224,8 @@ def model_format_from_string(format_str: str) -> ModelFormat:
 @click.option('--quiet', '-q', is_flag=True, help='Quiet output')
 @click.option('--log-level', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR']))
 @click.option('--debug-http', is_flag=True,
-              help='Keep ANTHROPIC_LOG/OPENAI_LOG=debug (the SDKs then log request details)')
+              help='Log HTTP and provider SDK debug output to stderr and keep ANTHROPIC_LOG/OPENAI_LOG=debug '
+                   '(credentials stay redacted)')
 @pass_context
 def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str,
         debug_http: bool):
@@ -244,7 +245,7 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     ctx.quiet = quiet
 
     # Applies to framework loggers too; they are created before FrameworkManager configures logging.
-    setup_logging(level=ctx.log_level)
+    setup_logging(level=ctx.log_level, debug_http=debug_http)
 
     # Every command, `mcp serve` included, passes here before anything starts a thread.
     for warning in guard_sdk_environment(lambda: _allow_sdk_env_headers(config), debug_http=debug_http):
@@ -1527,7 +1528,7 @@ def swarm_upload(ctx: FrameworkContext, file_path, user):
     
     if not token:
         console.print("[red]No GitHub Token found in secrets![/red]")
-        console.print("Use 'llm-cli secrets set github_token <TOKEN>' first.")
+        console.print("Run 'llm-cli secrets set github_token' first (it asks for the token).")
         sys.exit(1)
 
     with console.status(f"Encrypting & Uploading {file_path}...", spinner="dots"):
