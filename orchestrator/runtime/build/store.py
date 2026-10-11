@@ -48,7 +48,8 @@ from orchestrator.utils.helpers import safe_extract_archive
 
 STORE_FORMAT = 1
 MAX_STAMP_BYTES = 1024 * 1024
-MAX_IMPORT_BYTES = 4 * 1024 ** 3
+MAX_IMPORT_BYTES = 4 * 1024 ** 3   # packed and unpacked
+MAX_IMPORT_MEMBERS = 1024
 DEFAULT_KEEP = 2
 
 _RE_ID = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
@@ -381,6 +382,7 @@ class BuildStore:
             raise StoreError(f"cannot read {archive.name}: {e.strerror or e}") from None
         if size == 0 or size > MAX_IMPORT_BYTES or not archive.name.endswith((".tar.gz", ".tgz")):
             raise StoreError(f"{archive.name} is not a build archive (a .tar.gz of at most 4 GiB)")
+        _check_unpacked_size(archive)
         self.builds_dir.mkdir(parents=True, exist_ok=True)
         with self._lock():
             staging = self.builds_dir / f".staging-import-{secrets.token_hex(4)}"
@@ -482,6 +484,21 @@ class BuildStore:
             if name not in files:
                 raise StoreError(f"the build lacks {name}")
         return build, manifest
+
+
+def _check_unpacked_size(archive: Path) -> None:
+    """A build archive is unsigned data: what it unpacks to is limited before anything is extracted (a small archive
+    of zeros could otherwise fill the disk)."""
+    total = 0
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            for count, member in enumerate(tar, start=1):
+                total += max(0, member.size)
+                if count > MAX_IMPORT_MEMBERS or total > MAX_IMPORT_BYTES:
+                    raise StoreError(f"{archive.name} would unpack to more than a build (at most "
+                                     f"{MAX_IMPORT_MEMBERS} files and {MAX_IMPORT_BYTES // 1024 ** 2} MiB)")
+    except (tarfile.TarError, OSError, EOFError) as e:
+        raise StoreError(f"{archive.name} is unsafe or damaged: {e}") from None
 
 
 def _import_checks(plan: Mapping[str, Any], pin: LlamaCppSource) -> Dict[str, Any]:
