@@ -233,13 +233,19 @@ are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what 
 - The model list in the settings is loaded live from the provider; any model name can also be typed.
 - A file `llm_providers.yml` in your settings folder adds or replaces providers by ID, so a new
   OpenAI-compatible server needs no code change.
-- If an `ant auth login` profile exists on your computer, the `anthropic` provider currently prefers it over a
-  stored API key. This is changed by the sign-in work, which makes the API key the default
-  ([roadmap](BLUEPRINT.md#roadmap)).
-- The catalog on this branch still contains a `claude_code` entry (Ditto through a Claude subscription). It is
-  being removed, because Anthropic does not allow third-party apps to use subscription limits; Claude subscribers
-  use the framework from Claude Code or Claude Desktop over [MCP](#mcp-server), or with an API key (Max and Team
-  plans include monthly API credits).
+- **Claude API (`anthropic`):** the stored API key always comes first. An `ant auth login` profile is used only
+  when you choose it (`ai_auth_anthropic: ant_profile`; the earlier value `oauth` means the same). A key that is
+  valid in every workspace of the organization needs the workspace ID (AI settings field "Workspace ID", setting
+  `ai_anthropic_workspace_id`, `wrkspc_...`); it is sent only with the API key and only to the Claude API. Admin
+  API keys (`sk-ant-admin01-`) are refused before any request.
+- There is no `claude_code` provider (Ditto through a Claude subscription): Anthropic does not allow third-party
+  apps to use subscription limits. A saved `claude_code` (also in the fallback chain or `--provider`) stops with a
+  message naming the alternatives; such an entry in your own `llm_providers.yml` is skipped with a warning. Claude
+  subscribers use the framework from Claude Code or Claude Desktop over [MCP](#mcp-server), or with an API key
+  (Max and Team plans include monthly API credits).
+- The SDKs never take a credential, header or address from the environment: every client gets the key and base
+  URL explicitly, and `OPENAI_CUSTOM_HEADERS` / `ANTHROPIC_CUSTOM_HEADERS` are removed at startup with a warning
+  (setting `ai_allow_sdk_env_headers: true` keeps them).
 
 ### Calls, retries and fallback
 
@@ -252,8 +258,8 @@ are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what 
   message. The knowledge base downloads nothing in offline mode either.
 - Requests to servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment, so the proxy never sees
   prompts or the local server's key.
-- Errors are explained in plain words, for example that an Anthropic API key must belong to a workspace in the
-  Claude Console, that credit is used up, or that the local server is not running.
+- Errors are explained in plain words, for example that a Claude API key needs a workspace ID, that the key was
+  revoked or has expired, that credit is used up, or that the local server is not running.
 
 ### Privacy filter for cloud providers
 
@@ -559,13 +565,22 @@ timestamp) and starts a new chain, for example after `llm-cli doctor` has report
 
 ## Secrets and personal state
 
-- **Secrets** (API keys, tokens): encrypted (Fernet) in `~/.llm-framework/secrets.store`. The encryption key is kept in
-  your operating system's keyring (Windows Credential Manager, macOS Keychain, Secret Service on Linux), never in a
-  file next to the store. The store is written atomically and readable only by you; a damaged store is never
-  overwritten. `llm-cli doctor` warns when the keyring backend does not protect secrets (for example a plain-text
-  backend on a server without a desktop).
-- **Redaction:** secrets are removed from build logs read through the tools, from provider and tool error messages,
-  from the arguments in the audit log and from everything sent to cloud providers.
+- **Secrets** (API keys, tokens): encrypted (Fernet, each entry with a key id) in the vault
+  `~/.llm-framework/secrets.store`. By default its key is kept in your operating system's keyring (Windows
+  Credential Manager on the local machine, macOS Keychain, Secret Service on Linux), one entry per vault, never in a
+  file next to the store. A keyring that does not answer within 3 seconds, keeps nothing or stores in plain text is
+  not used; then the framework stops and names the choices for the setting `secret_storage` (or
+  `LLM_SECRET_STORAGE` for one run): `helper` (the command in `secret_helper`, run without a shell), `passphrase`
+  (asked once per start), `insecure` (a key file next to the vault, not encrypted at rest) or `ephemeral` (memory
+  only). The vault is written atomically under a lock shared by the GUI, the CLI and MCP servers, is readable only
+  by you, never lies inside a git working copy, and a damaged vault is never overwritten. `llm-cli doctor` warns
+  about the key file and about a keyring that does not protect secrets.
+- **Redaction:** one table of secret formats (`orchestrator/security/secret_patterns.py`) is shared by the
+  repository's secret scan and the runtime redaction. Credentials (known key formats, credential headers, tokens
+  in URLs and form bodies, `HF_TOKEN=...` lines) are removed from every log line and traceback (the framework's own
+  and those of the SDKs and HTTP libraries), from build logs read through the tools, from provider and tool error
+  messages, from the arguments in the audit log and from everything sent to cloud providers. The SDKs' debug logs
+  stay off unless you start with `--debug-http`.
 - **Personal folder** `~/.llm-framework` (`LLM_FRAMEWORK_HOME`), private to your user: tool permissions, audit log,
   SSH key and `known_hosts`, MCP token, chat history, secrets, knowledge base and snapshots, local runtime, and two
   random values per installation (one for the privacy placeholders, one as an anonymous cache ID for OpenAI).

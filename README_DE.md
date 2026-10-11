@@ -169,7 +169,7 @@ Befehl `llm-cli`. Die Beispiele in dieser README verwenden `llm-cli`.
 | Builds, Logs, Cache | `output/`, `logs/` und `cache/` im Installationsordner (Einstellungen `output_dir`, `logs_dir`, `cache_dir`) |
 | Einstellungen (`config.yml`) | `configs/` im Installationsordner, wenn dein Benutzer dort schreiben darf, sonst der persönliche Ordner unten; `LLM_FRAMEWORK_CONFIG_DIR` legt einen anderen Ordner fest |
 | Persönlicher Zustand: Tool-Berechtigungen, Audit-Log, SSH-Schlüssel und bekannte Geräte, MCP-Token, Chatverlauf, Wissensbasis, lokaler Modellserver | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` legt einen anderen Ordner fest |
-| API-Schlüssel und Tokens | verschlüsselt in `~/.llm-framework/secrets.store`; der Schlüssel dafür liegt im Schlüsselbund deines Betriebssystems |
+| API-Schlüssel und Tokens | verschlüsselt in `~/.llm-framework/secrets.store`; der Schlüssel dafür liegt im Schlüsselbund deines Betriebssystems oder dort, wo du es mit der Einstellung `secret_storage` festlegst |
 | Modelle für Dittos Offline-Modus | `models/ditto/` im Installationsordner (`LLM_FRAMEWORK_MODELS_DIR` legt einen anderen Ordner fest) |
 
 Die Installer kopieren außerdem `targets/`, `models/` und `configs/` in einen eigenen Datenordner (unter Windows
@@ -349,8 +349,8 @@ Hardware-Module vor. Dabei nutzt es die Tools des Frameworks im Rahmen deiner To
   Create Hardware Module...**. Du siehst den ganzen Vorschlag, bevor etwas geschrieben wird.
 
 **Ditto einrichten** unter **Tools > Configure AI Agent (Ditto)...**: Anbieter, Modell (die Liste wird live beim
-Anbieter abgefragt; du kannst auch einen Modellnamen eintippen), API-Schlüssel, Basis-URL (Ollama und eigene
-Server), Aufwand (Effort), Datenschutzstufe für Cloud-Anbieter, eine Ersatzkette, die Wissensbasis und der
+Anbieter abgefragt; du kannst auch einen Modellnamen eintippen), API-Schlüssel, Workspace-ID (nur für
+Claude-API-Schlüssel, die in jedem Workspace der Organisation gelten), Basis-URL (Ollama und eigene Server), Aufwand (Effort), Datenschutzstufe für Cloud-Anbieter, eine Ersatzkette, die Wissensbasis und der
 Offline-Modus. Auf einem Rechner ohne Bildschirm speicherst du den Schlüssel mit
 `llm-cli secrets set <Schlüsselname>` und setzt `ai_provider` in der `config.yml` (oder die Umgebungsvariable
 `LLM_FRAMEWORK_AI_PROVIDER`).
@@ -378,13 +378,14 @@ Offline-Modus. Auf einem Rechner ohne Bildschirm speicherst du den Schlüssel mi
   entsprechen und werden geprüft; eine ungültige Antwort ist ein Fehler und wird nie angewendet. Ein Vorschlag mit
   einem gefährlichen Befehl (zum Beispiel einem Download, der direkt in eine Shell geleitet wird) wird verworfen.
 - **Anmeldung pro Anbieter** (die Schaltfläche **Sign in...**) gibt es noch nicht; sie wird gerade gebaut. Bis dahin
-  arbeitet Ditto mit API-Schlüsseln. Eine Ausnahme gibt es heute: Liegt auf diesem Rechner ein Profil aus
-  `ant auth login`, nutzt der Anbieter `anthropic` es vor einem gespeicherten API-Schlüssel. Die Arbeit an der
-  Anmeldung ändert das, sodass der API-Schlüssel Vorrang hat.
-- Die Anbieterliste zeigt auf diesem Entwicklungszweig noch einen Eintrag für ein Claude-Abo über Claude Code. Er
-  wird entfernt, weil Anthropic Drittanbieter-Apps nicht erlaubt, Abo-Limits zu nutzen. Verlass dich nicht darauf;
-  nutze MCP oder einen API-Schlüssel wie [oben](#schnellstart-ki-clients-über-mcp-claude-code-claude-desktop-vs-code)
-  beschrieben.
+  arbeitet Ditto mit API-Schlüsseln. Bei `anthropic` hat der gespeicherte API-Schlüssel immer Vorrang; ein Profil aus
+  `ant auth login` wird nur genutzt, wenn du es auswählst (Einstellung `ai_auth_anthropic: ant_profile`).
+  Admin-API-Schlüssel von Claude (`sk-ant-admin01-`) werden abgelehnt.
+- Einen Anbieter für ein Claude-Abo gibt es nicht: Anthropic erlaubt Drittanbieter-Apps nicht, Abo-Limits zu nutzen.
+  Ein gespeicherter Anbieter `claude_code` bricht mit einer Meldung ab, die die Alternativen nennt; nutze MCP oder
+  einen API-Schlüssel wie [oben](#schnellstart-ki-clients-über-mcp-claude-code-claude-desktop-vs-code) beschrieben.
+- `OPENAI_CUSTOM_HEADERS` und `ANTHROPIC_CUSTOM_HEADERS` aus der Umgebung werden (mit einer Warnung) ignoriert, damit
+  sie deinen Schlüssel nicht ersetzen können; die Einstellung `ai_allow_sdk_env_headers: true` behält sie.
 
 `llm-cli ditto eval` bewertet Ditto anhand fester Testfälle, zum Beispiel um zu prüfen, ob ein kleines lokales
 Modell gut genug ist. Einzelheiten und eine erste Messung: [docs/Features_DE.md](docs/Features_DE.md#ditto-evaluation).
@@ -470,8 +471,12 @@ Suchergebnisse gelten als externer Text, nie als Anweisungen. Mehr dazu:
   SHA256-Fingerabdruck angezeigt und erst nach deiner Bestätigung gespeichert. Ein geänderter Schlüssel wird immer
   abgelehnt. Das SSH-Passwort dient einmal dazu, den eigenen Schlüssel des Frameworks zu hinterlegen, und wird nie
   gespeichert.
-- **Geheimnisse:** API-Schlüssel und Tokens werden verschlüsselt gespeichert; der Schlüssel dafür liegt im
-  Schlüsselbund deines Betriebssystems. `llm-cli doctor` warnt, wenn der Schlüsselbund sie nicht schützt.
+- **Geheimnisse:** API-Schlüssel und Tokens werden verschlüsselt in einem Tresor in deinem persönlichen Ordner
+  gespeichert; sein Schlüssel liegt im Schlüsselbund deines Betriebssystems. Ohne nutzbaren Schlüsselbund wird nichts
+  für dich gewählt: Das Framework hält an und nennt die Möglichkeiten (Einstellung `secret_storage`: ein Befehl als
+  Credential-Helper, eine Passphrase, eine unverschlüsselte Schlüsseldatei oder nur der Arbeitsspeicher).
+  Zugangsdaten werden in jedem Log geschwärzt, auch mit `--debug-http`. `llm-cli doctor` warnt, wenn der Schlüssel
+  des Tresors nicht geschützt ist.
 - **Nicht vertrauenswürdiger Text:** Webseiten, Texte aus der Wissensbasis, Build-Logs, Tool-Ergebnisse und
   Probe-Dateien werden von versteckten Zeichen bereinigt und der KI als gekennzeichnete Daten übergeben, nie als
   Anweisungen. Chat-Ausgaben werden maskiert, und Links öffnen sich erst nach deiner Bestätigung.
@@ -496,6 +501,7 @@ language: en                  # en oder de
 ai_provider: OpenAI           # Anbieter-ID aus der Tabelle oben, z. B. local; alte Namen wie OpenAI gehen auch
 ai_security_level: STRICT     # STRICT, BALANCED oder OFF (nur Cloud-Anbieter)
 offline_mode: false           # true: nur lokale Anbieter
+secret_storage: keyring       # keyring, helper, passphrase, insecure oder ephemeral (Schutz des Secrets-Tresors)
 enable_rag_knowledge: false   # die lokale Wissensbasis
 calibration_language: mixed   # mitgelieferter Kalibrierungstext: mixed, de oder en
 build_sandbox: true           # Sandbox für Konvertierungs-Container
@@ -533,9 +539,9 @@ crawler_max_depth: 2
 
 Die Roadmap führt auf, was geplant ist; Erledigtes wandert beim Release in den [CHANGELOG](CHANGELOG_DE.md). Kurz:
 
-- **In Arbeit:** Anmeldung pro Anbieter und Zugangsart; Entfernen des Claude-Abo-Anbieters (Claude-Abonnenten
-  nutzen MCP oder einen API-Schlüssel); ein gehärtetes Docker-Image ohne Oberfläche für CLI und MCP-Server; eine
-  neue Ditto-Evaluation mit den verbesserten Prompts.
+- **In Arbeit:** Anmeldung pro Anbieter und Zugangsart (der Claude-Abo-Anbieter ist bereits entfernt;
+  Claude-Abonnenten nutzen MCP oder einen API-Schlüssel); ein gehärtetes Docker-Image ohne Oberfläche für CLI und
+  MCP-Server; eine neue Ditto-Evaluation mit den verbesserten Prompts.
 - **Geplant:** eine Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, Targets für NVIDIA-GPUs und
   AMD (Ryzen Z1 Extreme), weitere Formate, LoRA und große Modelle sowie eine gehärtete Lieferkette.
 
