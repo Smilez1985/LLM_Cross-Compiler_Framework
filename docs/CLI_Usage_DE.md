@@ -28,6 +28,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [secrets](#secrets): `set`, `list`
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): Hardware-Probe
+- [device](#device): `list`, `settings`, `runtime`
 - [config](#config): `show`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
@@ -130,6 +131,8 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
 | `module create` / `module generate-ai` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei |
 | `scan` | Die Hardware-Probe auf diesem Rechner oder mit `--device` auf einem Board per SSH ausführen und das Profil speichern |
+| `device list` / `device settings` | Die untersuchten Boards / wie die Laufzeit auf einem Board installiert wird (Startskript oder systemd), vor einem Deployment entschieden |
+| `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
@@ -1017,7 +1020,8 @@ den Rechner geplant, auf dem das Modell läuft, deshalb läuft die Probe auf die
   `hardware_probe.sh` an `sh` (jede POSIX-Shell, auch BusyBox). Das Skript kommt über den SSH-Kanal, also wird auf dem
   Board nichts installiert und nichts zurückgelassen. Das Ergebnis wird wie jede Probe-Datei von außen geprüft, nach
   `--output` geschrieben und unter der ID des Boards gespeichert (`~/.llm-framework/hardware/devices/<ID>.txt`; die ID
-  kommt aus dem Hostschlüssel des Boards), mit deiner Bezeichnung und seiner Adresse.
+  kommt aus dem Hostschlüssel des Boards), mit deiner Bezeichnung und seiner Adresse. Der SSH-Benutzer wird zum
+  Deploy-Benutzer des Boards für [`device runtime deploy`](#device), wenn noch keiner gesetzt ist (nie root).
 
 Die Probes fragen nie nach, installieren nichts und verlangen keine Administratorrechte. Exit-Code 1, wenn die Probe
 scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
@@ -1036,11 +1040,129 @@ scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
 
 Ein Rechner ohne Netzzugang führt eine Probe von Hand aus, und du importierst ihre Datei
 ([README](../README_DE.md#die-hardware-des-boards-untersuchen)). In der GUI importiert **Scan / Import...** eine
-Probe-Datei, untersucht ein Board per SSH oder diesen PC.
+Probe-Datei, untersucht ein Board per SSH (mit derselben entfernten Probe, also auch auf Boards, die `/tmp` mit
+`noexec` einhängen) oder diesen PC.
 
 ```bash
 llm-cli scan                                        # dieser Rechner, gespeichert als „local“
 llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W" --output zero3w.txt
+```
+
+---
+
+## device
+
+Die Boards, die du mit `scan --device` untersucht hast, und die selbst gebaute llama.cpp-Laufzeit darauf
+([Funktionen](Features_DE.md#laufzeit-auf-dem-board-selbst-gebautes-llamacpp)). `GERÄT` ist die ID eines Boards
+(oder ihre ersten 4 oder mehr Zeichen), seine Bezeichnung oder seine gespeicherte Adresse, wie `device list` sie
+zeigt. Der Build braucht Docker auf deinem PC; das Board braucht SSH, `tar`, `gzip` und `sha256sum` (BusyBox hat
+sie) und einen unprivilegierten Benutzer.
+
+```
+llm-cli device list [--json]
+llm-cli device settings GERÄT [--install user|systemd] [--user NAME] [--port N] [--model PFAD] [--confirm-sudo]
+llm-cli device runtime plan GERÄT [--json]
+llm-cli device runtime build GERÄT [--jobs N] [--mirror URL] [--yes]
+llm-cli device runtime deploy GERÄT [--user NAME] [--password TEXT] [--bench-model PFAD] [--allow-untrusted-model]
+llm-cli device runtime verify GERÄT [--user NAME] [--bench-model PFAD] [--allow-untrusted-model]
+llm-cli device runtime status GERÄT [--json]
+```
+
+### device list
+
+Die gespeicherten Boards: ID, Bezeichnung, Adresse, System (OS, Version, Architektur, C-Bibliothek mit Version,
+Init-System), Deploy-Einstellungen und die deployte Laufzeit. `--json` für Skripte.
+
+### device settings
+
+Zeigt oder ändert, wie die Laufzeit auf dem Board installiert wird. Das wird hier entschieden, vor einem Deployment;
+ein Deployment fragt nie.
+
+| Option | Bedeutung |
+|---|---|
+| `--install user` | Das Startskript in deinem Home auf dem Board (die Vorgabe). Mit ihm startest du den Server. |
+| `--install systemd` | Zusätzlich eine systemd-Unit, die den Server beim Booten startet. Nur für Boards, deren Probe `INIT_SYSTEM=systemd` meldet; sie braucht `--model` und deine Bestätigung, gleich hier, dass Deployments auf dem Board `sudo -n` ausführen dürfen (am Terminal abgefragt oder `--confirm-sudo`; wird ins Audit-Log geschrieben). Wählst du wieder `user`, verfällt die Bestätigung. |
+| `--user NAME` | Der SSH-Benutzer auf dem Board; der Server und jede Prüfung laufen als dieser Benutzer. root wird abgelehnt. |
+| `--port N` | Der Loopback-Port des Servers der systemd-Unit (1024-65535, Vorgabe 8080). |
+| `--model PFAD` | Die Modelldatei auf dem Board, die die systemd-Unit bereitstellt (relative Pfade liegen im Home des Benutzers). |
+| `--confirm-sudo` | Mit `--install systemd`: ohne Nachfrage bestätigen. |
+
+Exit-Code 1, wenn das Board kein systemd hat oder die Bestätigung fehlt (dann wird nichts geändert), 2 bei einem
+falschen Wert.
+
+### device runtime plan
+
+Zeigt den Cross-Build, der aus dem eigenen Profil des Boards geplant wird: Architektur, C-Bibliothek mit Version,
+die Builder-Basis mit ihrem GCC, `GGML_CPU_ARM_ARCH` oder die x86-Merkmale, OpenMP und `libgomp.so.1`, die
+Programme, die Build-ID und ob er gebaut ist. `--json` gibt den ganzen Bauplan aus. Exit-Code 1, wenn sich kein
+Bauplan machen lässt (zum Beispiel für ein Board, dessen glibc älter ist als jede Builder-Basis, oder ein Profil ohne
+`LIBC_VERSION`: untersuche es erneut).
+
+### device runtime build
+
+Holt den festgelegten llama.cpp-Quelltext, wenn er nicht im Cache liegt (es fragt vorher; `--yes` fragt nicht,
+`--mirror` holt von einem Spiegel, `ditto runtime import-source` bringt ihn auf einen Rechner ohne Internet), baut
+den Bauplan im Builder-Container ohne Netz (`--jobs` setzt die parallelen Jobs; ohne richten sie sich nach dem
+Speicher), prüft das Format der Programme auf deinem PC und packt den Tarball nach
+`~/.llm-framework/runtime/llama.cpp/device/<ID>/llama-runtime-<Arch>-<Build-ID>.tar.gz`. Ein schon abgelegter Build
+wird nur neu gepackt. Exit-Code 1, wenn Docker nicht antwortet, der Build scheitert oder seine Prüfungen scheitern.
+
+### device runtime deploy
+
+Installiert die gebaute Laufzeit auf dem Board, wie die Deploy-Einstellungen es sagen, und prüft sie dort. Das Board
+muss das sein, mit dem das Profil erstellt wurde (derselbe Hostschlüssel; ein neues Board unter der alten Adresse
+wird abgelehnt), und ihm muss schon vertraut werden; `--password` koppelt ein Board, das noch keinen
+Framework-Schlüssel hat (einmal genutzt, nie gespeichert). Der SSH-Benutzer kommt aus den Deploy-Einstellungen oder
+aus `--user`.
+
+1. Das Board wird untersucht: Benutzer-ID (root wird abgelehnt), Home-Ordner, Architektur (sie muss zum Build
+   passen), Init-System und die Werkzeuge, die das Deployment braucht. Mit der systemd-Einstellung muss `sudo -n
+   true` funktionieren; sonst wird nichts geändert.
+2. Der Tarball kommt über den SSH-Kanal in einen privaten Staging-Ordner in
+   `~/.local/share/llm-framework/llama.cpp/`, wird gegen seine sha256 und jede Datei gegen `SHA256SUMS` geprüft, nur
+   für dich lesbar gemacht und wird zu `current`. Der vorige Build bleibt; ältere werden entfernt, außer ein
+   laufendes Programm nutzt sie.
+3. Das Startskript erzeugt den Schlüssel `~/.config/llm-framework/llama-server.key` auf dem Board (umask 077).
+4. Mit der systemd-Einstellung wird die Unit `llm-llama-server.service` mit `sudo -n` geschrieben und aktiviert und
+   gestartet, sobald das Modell da ist.
+5. Die Prüfungen laufen auf dem Board als dein Benutzer: `--version` gegen den Pin, `--list-devices`, und
+   `llama-server` muss `--tools` ablehnen. `--bench-model PFAD` ergänzt einen kurzen `llama-bench`-Lauf mit diesem
+   Modell auf dem Board; ein Modell, das kein Katalogmodell ist, läuft nur, wenn du zustimmst (am Terminal oder
+   `--allow-untrusted-model`), und das wird ins Audit-Log geschrieben.
+
+Das Ergebnis liegt in `device/<ID>/deployed.json`. Exit-Code 1, wenn ein Schritt oder eine Prüfung scheitert.
+
+Auf dem Board startet das Startskript den Server:
+
+```bash
+~/.local/share/llm-framework/llama.cpp/current/llama-server.sh start ~/models/model.gguf -c 4096 -t 4
+~/.local/share/llm-framework/llama.cpp/current/llama-server.sh status
+~/.local/share/llm-framework/llama.cpp/current/llama-server.sh stop
+curl -s http://127.0.0.1:8080/health   # braucht keinen Schlüssel; jede andere Anfrage braucht "Authorization: Bearer <Schlüssel>"
+```
+
+Es lauscht auf 127.0.0.1 (Vorgabe-Port 8080, `--port` ab 1024) mit der Schlüsseldatei und einer geleerten Umgebung.
+Es reicht `-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`, `-fa`, `-cram`, `-lm`, `-a` und
+`--sleep-idle-seconds` mit geprüften Werten weiter und lehnt jede andere Option ab (Exit-Code 2). `serve` läuft im
+Vordergrund, `keygen` erzeugt den Schlüssel, `version` gibt die Version des Servers aus.
+
+### device runtime verify
+
+Führt die Prüfungen aus Schritt 5 erneut für den deployten Build aus (auch mit `--bench-model`) und aktualisiert den
+Eintrag.
+
+### device runtime status
+
+Was deployt ist (Build, Zeit, Startskript oder systemd, Ergebnis der Prüfungen) und ob es noch der Build ist, den
+das Profil des Boards, der Pin und das Rezept verlangen; wenn nicht, erneut bauen und deployen.
+
+```bash
+llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W"
+llm-cli device runtime plan "ZERO 3W"
+llm-cli device runtime build "ZERO 3W" --yes
+llm-cli device runtime deploy "ZERO 3W" --bench-model models/qwen3.5-2b-q4_0.gguf
+# Die systemd-Unit statt des Startskripts, vor dem nächsten Deployment entschieden
+llm-cli device settings "ZERO 3W" --install systemd --model models/qwen3.5-2b-q4_0.gguf
 ```
 
 ---

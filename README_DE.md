@@ -33,7 +33,8 @@ Die Konvertierungswerkzeuge laufen in einem Docker-Container auf deinem PC; Hers
 installieren. Während der Konvertierung hat der Container keinen Netzwerkzugang. Jeder Build schreibt ein Manifest
 (`build_info.json`) mit den Modelldateien und ihren SHA256-Hashes sowie eine `Model_Card.md`.
 
-Software, die das Modell auf dem Board ausführt, installiert das Framework nicht (siehe [Das Board](#das-board)).
+Für GGUF-Modelle kann das Framework llama.cpp auch für das Board bauen und dort installieren; die Laufzeiten für
+RKLLM und RKNN installierst du selbst (siehe [Das Board](#das-board)).
 
 ## Unterstützte Targets und Formate
 
@@ -255,12 +256,43 @@ dieser Modus ist experimentell und in dieser Version nicht geprüft.
 
 ### Das Board
 
-Um das Modell auf dem Board auszuführen, brauchst du dort eine Laufzeitumgebung, die das Framework nicht
-installiert: llama.cpp (`llama-server`) für GGUF, Rockchips RKLLM-Runtime für `.rkllm`-Dateien (RK3588/RK3576)
-und die RKNN-Runtime für `.rknn`-Dateien. Für GGUF gibt `deploy.sh` eine passende `llama-server`-Befehlszeile
-aus, wenn `llama-server` auf dem Board schon installiert ist, sonst einen Hinweis, llama.cpp zu installieren. Eine
-Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, steht in der
-[Roadmap](docs/BLUEPRINT_DE.md#roadmap).
+Um das Modell auf dem Board auszuführen, brauchst du dort eine Laufzeitumgebung: llama.cpp (`llama-server`) für
+GGUF, Rockchips RKLLM-Runtime für `.rkllm`-Dateien (RK3588/RK3576) und die RKNN-Runtime für `.rknn`-Dateien.
+llama.cpp baut und installiert das Framework selbst für das Board (unten); die RKLLM- und RKNN-Runtime installierst
+du selbst. Für GGUF gibt `deploy.sh` aus, wie du das Modell mit dem Startskript des Frameworks startest, wenn die
+Laufzeit installiert ist, sonst, wie du sie deployst.
+
+**Die llama.cpp-Laufzeit auf ein Board bringen** (Kommandozeile; Docker auf deinem PC für den Build):
+
+```bash
+llm-cli scan --device 192.168.1.50 --user dietpi   # das Board untersuchen (einmal, und nach einem OS-Upgrade erneut)
+llm-cli device settings 192.168.1.50                # wie die Laufzeit startet (Vorgabe: das Startskript)
+llm-cli device runtime build 192.168.1.50           # für dieses Board im Builder-Container cross-kompilieren
+llm-cli device runtime deploy 192.168.1.50          # per SSH installieren und auf dem Board prüfen
+```
+
+- **Für das Board gebaut:** Der Bauplan kommt aus der eigenen Probe des Boards: seine Architektur und
+  CPU-Merkmale (beim RK3566 `armv8.2-a+dotprod+fp16`) und seine C-Bibliothek mit Version. Der Builder-Container
+  nimmt eine Basis, deren glibc (oder musl unter Alpine) nicht neuer ist als die des Boards, linkt die C++-Laufzeit
+  statisch und hat beim Bauen kein Netz. `llm-cli device runtime plan` zeigt den Bauplan vorher.
+- **In deinem Home installiert:** unter `~/.local/share/llm-framework/llama.cpp/` auf dem Board, nie als root und
+  nie mit Dateien in `/tmp`. Der vorige Build bleibt neben dem neuen liegen.
+- **Auf Loopback mit Schlüssel gestartet:** `~/.local/share/llm-framework/llama.cpp/current/llama-server.sh start
+  ~/models/model.gguf` startet `llama-server` auf 127.0.0.1:8080 mit dem Schlüssel aus
+  `~/.config/llm-framework/llama-server.key` (auf dem Board erzeugt, nur für dich lesbar) und einer geleerten
+  Umgebung; `stop`, `status` und `serve` (im Vordergrund) funktionieren genauso. Optionen wie `-c 4096` oder `-t 4`
+  werden weitergereicht; Optionen, die dem Modell Werkzeuge geben, die Weboberfläche öffnen oder Loopback verlassen
+  würden, werden abgelehnt.
+- **Startskript oder systemd-Unit, vorher entschieden:** `llm-cli device settings GERÄT --install systemd --model
+  models/model.gguf` wählt eine systemd-Unit, die den Server beim Booten startet. Sie braucht systemd auf dem Board
+  und deine Bestätigung, gleich an dieser Stelle, dass Deployments dort `sudo -n` ausführen dürfen; ein Deployment
+  selbst fragt nie. Boards ohne systemd (OpenRC unter Alpine, SysV-Init) nutzen das Startskript.
+- **Auf dem Board geprüft:** Nach der Installation laufen die Programme als dein Benutzer: Die Version muss die
+  festgelegte sein, die Geräte werden aufgelistet, und der Server muss `--tools` ablehnen. `--bench-model
+  models/model.gguf` ergänzt einen kurzen `llama-bench`-Lauf; ein Modell, das keines der Katalogmodelle des
+  Frameworks ist, läuft nur nach deiner Zustimmung, die ins Audit-Log geschrieben wird.
+
+Noch nicht auf einem echten Board getestet; die GUI und die MCP-Werkzeuge dafür folgen.
 
 ### Die Hardware des Boards untersuchen
 
@@ -618,9 +650,10 @@ Die Roadmap führt auf, was geplant ist; Erledigtes wandert beim Release in den 
 - **In Arbeit:** die übrigen Anmeldeverfahren je Zugangsart, Anmeldung im Browser und Cloud-Plattformen
   (API-Schlüssel, lokale Engines und das `ant`-Profil funktionieren in der GUI und mit `llm-cli ditto login`; der
   Claude-Abo-Anbieter ist entfernt, und Claude-Abonnenten nutzen MCP oder einen API-Schlüssel); ein gehärtetes Docker-Image ohne Oberfläche für CLI und
-  MCP-Server; eine neue Ditto-Evaluation mit den verbesserten Prompts.
-- **Geplant:** eine Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, Targets für NVIDIA-GPUs und
-  AMD (Ryzen Z1 Extreme), weitere Formate, LoRA und große Modelle sowie eine gehärtete Lieferkette.
+  MCP-Server; eine neue Ditto-Evaluation mit den verbesserten Prompts; die selbst gebaute llama.cpp-Laufzeit auf dem
+  Board (die Kommandozeile funktioniert; die GUI, die MCP-Werkzeuge und ein Lauf auf einem echten Board folgen).
+- **Geplant:** Targets für NVIDIA-GPUs und AMD (Ryzen Z1 Extreme), weitere Formate, LoRA und große Modelle sowie
+  eine gehärtete Lieferkette.
 
 Vollständige Liste: [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap).
 

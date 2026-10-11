@@ -198,14 +198,79 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   `.bin`); ein Build mit mehreren Gewichtsdateien wird abgelehnt.
 - **Auf dem Board:** Das Paket kommt in einen privaten temporären Ordner (`mktemp -d`), `deploy.sh` prüft jede
   Prüfsumme mit `sha256sum -c`, kopiert das Modell nach `~/models` (oder `$MODEL_DIR`), und der temporäre Ordner wird
-  gelöscht. Für GGUF gibt es, wenn `llama-server` auf dem Board installiert ist, eine `llama-server`-Befehlszeile aus,
-  die auf 127.0.0.1 lauscht, und warnt davor, den Server je ohne Schlüssel freizugeben; sonst rät es, llama.cpp zu
-  installieren. Für RKLLM nennt es die RKLLM-Runtime.
+  gelöscht. Für GGUF gibt es aus, wie du das Modell mit dem Startskript der
+  [selbst gebauten Laufzeit](#laufzeit-auf-dem-board-selbst-gebautes-llamacpp) startest, wenn sie auf dem Board
+  installiert ist (auf 127.0.0.1 mit dem Schlüssel des Boards), sonst, wie du sie deployst; auf einen
+  `llama-server` aus dem `PATH` des Boards verweist es nie. Für RKLLM nennt es die RKLLM-Runtime.
 - **Docker-Modus** (`--docker`, Option in der GUI): packt zusätzlich Container-Images ein und startet sie auf dem
   Board. Dieser Modus ist experimentell und in dieser Version nicht geprüft.
 
-Eine Laufzeitumgebung auf dem Board installiert das Framework nicht. Sie steht in der
-[Roadmap](BLUEPRINT_DE.md#roadmap).
+### Laufzeit auf dem Board (selbst gebautes llama.cpp)
+
+Für GGUF-Modelle baut das Framework llama.cpp für ein Board und installiert es dort (`llm-cli device ...`,
+[CLI_Usage_DE.md](CLI_Usage_DE.md#device)). Die RKLLM- und RKNN-Runtime sind Herstellerbinärdateien; sie
+installierst du selbst.
+
+- **Bauplan aus der eigenen Probe des Boards** (Entscheidung D14): `llm-cli scan --device` legt das Profil des
+  Boards unter seiner ID ab (aus seinem SSH-Host-Schlüssel). Der Bauplan ist ein Cross-Build für dieses Profil:
+  `GGML_CPU_ARM_ARCH` aus den CPU-Merkmalen des Boards (RK3566: `armv8.2-a+dotprod+fp16`) und eine Builder-Basis,
+  deren C-Bibliothek nicht neuer ist als die des Boards: die neueste Debian- oder Ubuntu-Basis mit einer glibc, die
+  nicht neuer ist als die des Boards (Debian 11 für glibc 2.31 bis Debian 13 für 2.41), oder Alpine für musl-Boards,
+  die mit Clang und dem Sysroot des Boards gebaut werden (ungeprüft). Ein Board, das älter ist als jede Basis, oder
+  ein Profil ohne `LIBC_VERSION` bekommt keinen Bauplan und eine Meldung, warum. Vorerst nur CPU-Builds: Vulkan auf
+  einer Mali-GPU erst, wenn `llama-bench` zeigt, dass es den CPU-Build schlägt (Entscheidung D8). `llm-cli device
+  runtime plan` zeigt den Bauplan.
+- **Build:** im Builder-Container ohne Netz, die C++-Laufzeit statisch gelinkt, der Server ohne
+  Subprozess-Unterstützung. Der Build wird auf deinem PC im Format geprüft (ELF-Architektur, keine neuere
+  glibc-Symbolversion als auf dem Board, keine geteilte C++-Laufzeit) und wie jeder selbst gebaute Build abgelegt. Ein
+  OpenMP-Build bekommt zusätzlich die `libgomp.so.1` des Boards aus der Cross-Toolchain, die ihn gelinkt hat, und sie
+  wird genauso geprüft.
+- **Tarball:** `~/.llm-framework/runtime/llama.cpp/device/<Geräte-ID>/llama-runtime-<Arch>-<Build-ID>.tar.gz` (mit
+  einer `.sha256`): `bin/` mit `llama-server`, `llama-cli`, `llama-bench` und `llama-perplexity`, bei Bedarf
+  `lib/libgomp.so.1` (die Programme finden sie über ihren RUNPATH `$ORIGIN/../lib`), das Startskript
+  `llama-server.sh`, `build.json` und `manifest.json`, die Lizenz von llama.cpp als `LICENSE-llama.cpp` und
+  `SHA256SUMS`. Er ist deterministisch (feste Besitzer, Rechte und Zeiten). Das Framework teilt dieses Rezept, nie den
+  Tarball (Entscheidung D21).
+- **Deployment** (`llm-cli device runtime deploy`): nur auf das Board, mit dessen Host-Schlüssel das Profil erstellt
+  wurde, als SSH-Benutzer der Deploy-Einstellungen; root wird abgelehnt. Werte, die das Board meldet (Home-Ordner,
+  Benutzer-ID, Architektur, fehlende Werkzeuge), werden geprüft, bevor sie verwendet werden. Der Tarball kommt über
+  die Standardeingabe des Befehls in einen privaten Staging-Ordner in `~/.local/share/llm-framework/llama.cpp/` (nie
+  `/tmp`, das `noexec` sein kann), wird gegen seine sha256 und jede Datei gegen `SHA256SUMS` geprüft, nur für den
+  Benutzer lesbar gemacht und wird zu `current`. Der vorige Build bleibt; ältere werden entfernt, außer ein laufendes
+  Programm nutzt sie. Den Schlüssel in `~/.config/llm-framework/llama-server.key` erzeugt das Startskript auf dem
+  Board unter umask 077; er verlässt das Board nie.
+- **Startskript** (`llama-server.sh serve|start|stop|status|keygen|version`): POSIX-sh, getestet mit dash und bash. Es
+  startet `llama-server` aus seinem eigenen Ordner (nie aus `PATH`) mit `env -i` (HOME, ein fester PATH, die
+  C-Locale), `--host 127.0.0.1`, `--api-key-file`, `--no-ui`, `--no-slots`, `--jinja` und `--offline`. Es reicht nur
+  Tuning-Optionen mit geprüften Werten weiter (`-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`,
+  `-fa`, `-cram`, `-lm`, `-a`, `--sleep-idle-seconds` und `--port` ab 1024); eine Option der gemeinsamen Verbotsliste
+  wird mit Namen abgelehnt, auch in der Schreibweise `--a_b`, und jede andere Option ebenso, sodass das Modell nie
+  Werkzeuge bekommt und der Server Loopback nie verlässt.
+- **Deploy-Einstellungen, vor dem Deployment entschieden** (Entscheidung D7, `llm-cli device settings`): das
+  Startskript im Home des Benutzers (die Vorgabe) oder eine systemd-Unit. Die Unit ist nur wählbar, wenn die Probe
+  des Boards `INIT_SYSTEM=systemd` meldet, braucht das Modell, das sie bereitstellt, und deine Bestätigung, gegeben
+  bei der Wahl, dass Deployments auf dem Board `sudo -n` ausführen dürfen; die Bestätigung wird ins Audit-Log
+  geschrieben. Das Deployment schreibt `/etc/systemd/system/llm-llama-server.service` mit `sudo -n` (das scheitert,
+  statt zu fragen), aktiviert die Unit und startet sie, sobald das Modell da ist. Die Unit führt `serve` des
+  Startskripts als der Benutzer aus, ohne `Environment=`, mit `NoNewPrivileges`, schreibgeschütztem System und Home
+  sowie `IPAddressDeny=any` mit `IPAddressAllow=localhost`. Boards mit OpenRC oder SysV-Init nutzen das Startskript.
+  Ein Deployment stellt nie eine Frage.
+- **Prüfungen auf dem Board** (auch `llm-cli device runtime verify`), als unprivilegierter Benutzer und nie mit
+  sudo: `llama-server --version` und `llama-bench --version` müssen den Pin melden, `llama-bench --list-devices`
+  muss die geplanten Geräte zeigen, und `llama-server --tools all` muss abgelehnt werden. Mit `--bench-model` läuft ein
+  kurzes `llama-bench -p 64 -n 16 -r 1` auf einem Modell auf dem Board: ein Katalogmodell (an seiner sha256 erkannt)
+  sofort, jedes andere Modell erst nach deiner Zustimmung, die ins Audit-Log geschrieben wird (Entscheidung D23). Ein
+  `SIGILL` heißt, dass die CPU-Grundstufe des Builds nicht zum Board passt. Das Ergebnis liegt in
+  `device/<Geräte-ID>/deployed.json`; `llm-cli device runtime status` sagt, ob der deployte Build noch der ist, den
+  Profil und Pin verlangen.
+- **Gemessen** mit echten Programmen statt eines Boards: `llama-server` und `llama-bench`, nativ mit den Optionen des
+  Geräte-Bauplans für einen x86-64-Rechner gebaut (GCC 13.3, `-j4`, etwa 8 Minuten auf 4 geteilten Kernen), ergaben
+  30 MB Programme und einen Tarball von 11,6 MB; die Formatprüfung (glibc 2.38 nötig, keine geteilte C++-Laufzeit),
+  das Deployment auf ein lokal nachgebildetes Board und die Prüfungen dort bestanden, und `libgomp.so.1` wurde über
+  den RUNPATH in `lib/` gefunden.
+- **Noch nicht:** ein Lauf auf einem echten Board, ein Cross-Build in dieser Entwicklungsumgebung (kein
+  Docker-Dienst antwortete), das Bauen auf dem Board selbst, wenn keine Basis alt genug ist, die GUI und das
+  MCP-Werkzeug `deploy_runtime` sowie die Laufzeit in Deployment-Paketen.
 
 ---
 
@@ -1008,9 +1073,12 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 - **Wo sie läuft:** auf dem Rechner, für den gebaut wird. `llm-cli scan` untersucht diesen Rechner mit der
   Python-Probe und behält das Profil als `local`; `llm-cli scan --device` führt sie per SSH auf einem Board aus (die
   Python-Probe mit `python3 -I`, wenn das Board Python 3.8 oder neuer hat, sonst die Shell-Probe; auf dem Board wird
-  nichts installiert) und behält das Profil unter der ID des Boards. In der GUI importiert **Scan / Import...** eine
-  Probe-Datei, untersucht ein Board per SSH mit denselben Regeln für das Vertrauen beim ersten Kontakt wie beim
-  Deployment oder untersucht diesen PC; die Scan-Ergebnisse legt sie in `<cache_dir>/probes/` ab. Rechner ohne
+  nichts installiert) und behält das Profil unter der ID des Boards; der SSH-Benutzer wird zum Deploy-Benutzer des
+  Boards (nie root). In der GUI importiert **Scan / Import...** eine Probe-Datei, untersucht ein Board per SSH mit
+  denselben Regeln für das Vertrauen beim ersten Kontakt wie beim Deployment oder untersucht diesen PC; die
+  Scan-Ergebnisse legt sie in `<cache_dir>/probes/` ab. Der SSH-Scan der GUI nutzt dieselbe entfernte Probe wie
+  `llm-cli scan --device`: Das Skript kommt über den SSH-Kanal, also funktioniert er auch auf Boards, die `/tmp` mit
+  `noexec` einhängen, und das Profil wird unter der ID des Boards abgelegt. Rechner ohne
   Netzzugang führen eine Probe von Hand aus ([README](../README_DE.md#die-hardware-des-boards-untersuchen)).
 - **Dittos lokales Modell** nutzt dieselbe Probe: Die Hardware, auf der Build- und Modellwahl beruhen, kommt aus einem
   Probe-Profil, und freier RAM und freier VRAM werden bei jedem Start neu gelesen.
@@ -1304,7 +1372,9 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
 - **Anmeldung im Browser und bei Cloud-Plattformen:** OAuth-Abläufe und die Anmeldeketten von AWS, Google Cloud
   und Azure gibt es noch nicht; Ditto meldet sich mit API-Schlüsseln an, und lokale Engines brauchen keine
   Anmeldung.
-- **Laufzeit auf dem Gerät:** Das Framework installiert keine Laufzeitumgebung auf dem Board.
+- **Laufzeit auf dem Gerät:** Die selbst gebaute llama.cpp-Laufzeit auf einem Board funktioniert über die
+  Kommandozeile und ist mit einem nachgebildeten SSH-Kanal getestet, noch nicht auf einem echten Board; eine GUI oder
+  ein MCP-Werkzeug dafür gibt es noch nicht.
 - **GUI:** Die Reiter Auto-Tuning und Models sind Platzhalter; die lokale Laufzeit wird nur über die CLI gesteuert.
 - **Deep Ingest** läuft nur aus dem Modul-Assistenten in der GUI; einen CLI-Befehl dafür gibt es nicht. Einen
   Schnappschuss der Wissensbasis wiederherstellen kann man über GUI oder CLI nicht.

@@ -121,7 +121,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `--version`, the planned GPU in `llama-bench --list-devices`, and `llama-server` must refuse `--tools`. The smoke
   run and short benchmark on a tiny pinned model are skipped with a note until the catalog pins one; no other model
   is loaded there. Binaries come only from the build's own folder, never from `PATH`, and every program the
-  framework starts takes the same forbidden-option list and a cleared environment without `LLAMA_*` variables.
+  framework starts takes the same forbidden-option list (also in the `--a_b` spelling, which llama.cpp reads as
+  `--a-b`) and a cleared environment without `LLAMA_*` variables.
   Builds are stored under `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` with `build.json` and
   `manifest.json` (sha256 of every file, duration, verification) and reused, never stamped again; only a build
   verified on this machine can become active, and retention never removes the active build, the CPU fallback or the
@@ -145,6 +146,26 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   without internet access. The source is fetched by commit (by its tag only where a server refuses that), must give
   the pinned commit back and is cached read-only in `~/.llm-framework/runtime/llama.cpp/src/`; later runs check that
   nothing in it was changed or added, files git ignores included, and need no network.
+- **Self-built llama.cpp on the board** (`llm-cli device runtime plan|build|deploy|verify|status`, `llm-cli device
+  list|settings`): the board's own probe profile (`llm-cli scan --device`) becomes a cross build in the builder
+  container, without network, on a base whose C library is not newer than the board's (glibc, or musl on Alpine;
+  a board older than every base gets a clear message), with the C++ runtime linked statically and, for OpenMP
+  builds, the board's `libgomp.so.1` taken from the cross toolchain. The result is a tarball
+  (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`, `lib/libgomp.so.1`, a start script, the build's
+  stamps, llama.cpp's MIT licence and `SHA256SUMS`) that the deployment uploads over SSH into
+  `~/.local/share/llm-framework/llama.cpp/` on the board, checks there file by file and switches to with a `current`
+  link; the previous build is kept. The start script runs the server on 127.0.0.1 with a key that is generated on
+  the board under umask 077, a cleared environment and fixed options; it passes on only a few tuning options with
+  checked values (context size, threads, CPU mask, ...). How the runtime starts is chosen beforehand in the deploy
+  settings, never asked during a deployment: the start script in your home (the default), or a systemd unit, which
+  can be chosen only for boards with systemd and after you confirm that deployments may run `sudo -n` there.
+  After the deployment the programs are checked on the board as your unprivileged user: `--version` against the
+  pin, `--list-devices`, the server's refusal of `--tools` and, with `--bench-model`, a short `llama-bench` run
+  (a model that is not a catalog model only after your consent, written to the audit log). Tested with a fake SSH
+  channel and fixture profiles (an RK3566 on DietPi, an Alpine board, a board without systemd), and with real
+  programs: `llama-server` and `llama-bench` built natively with the device plan's options for an x86-64 machine
+  (30 MB, an 11.6 MB tarball) passed the format check, the deployment to a local stand-in board and the checks
+  there. Not yet on a real board, and no cross build ran here (no Docker daemon).
 - **Deep Ingest honours machine-readable opt-outs.** Text and data mining of public pages is allowed unless
   the rightsholder reserved it in machine-readable form (EU DSM Directive Art. 4, German UrhG § 44b), so
   besides robots.txt the crawler skips pages marked `noindex`, `none`, `noai` or `noimageai` in an
@@ -354,6 +375,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `configs/llama_runtime.yml`, now `b11429`, instead of a written `v0.6.0`; both name the same commit, so images build
   the same source. The Rockchip Dockerfile, the `target.yml` build arguments and `configs/project_sources.yml`
   (which still said `b4009`) name the same tag.
+- `deploy.sh` of a GGUF package no longer suggests a `llama-server` found on the board's `PATH`: it names the start
+  script of the self-built device runtime when that is installed, and otherwise how to deploy it
+  (`llm-cli device runtime build` and `deploy`). `llm-cli scan --device` keeps the SSH user as the board's deploy
+  user (never root).
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -431,6 +456,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   is named on stderr and ignored, and the other settings apply.
 - The GUI's hardware scan of this PC (**Scan / Import...**) writes its result into `<cache_dir>/probes/` instead of
   the GUI's working folder, and the module wizard's *Auto-fill from Probe Result* reads it there.
+- The GUI's SSH scan of a board (**Scan / Import...**) failed on boards that mount `/tmp` with `noexec`: it copied
+  `hardware_probe.sh` there and ran it. It now sends the probe over the SSH channel like `llm-cli scan --device`
+  (the Python probe with Python 3.8 or newer, else the shell probe), writes nothing on the board, and keeps the
+  profile under the board's ID.
 - Deployment from the GUI writes the package into the configured output folder (`output_dir`, relative to the
   installation) instead of `output/` in the working folder.
 - The AI settings dialog warns when the settings could not be saved to `config.yml` (they apply until the program
@@ -611,6 +640,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   numbers or the CPU id, the serial line of `/proc/cpuinfo` and the serial attribute of USB devices are never read,
   and free text is reduced to printable ASCII. Values read on a board are validated before they are written, and the
   SSH scan treats the board's answer as untrusted (size limit, strict parser).
+- The llama.cpp server on a board listens on 127.0.0.1 only and needs a key that is generated on the board and
+  never leaves it. A deployment reaches only the board whose host key the profile was made with, runs as an
+  unprivileged user (root is refused), and uses sudo only for a systemd unit you allowed in the deploy settings,
+  never with a password prompt. Every value read from the board (home folder, user ID, architecture) is checked
+  before it reaches a command.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
