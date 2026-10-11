@@ -25,6 +25,7 @@ from orchestrator.runtime.catalog import LlamaCppSource
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 _DOCKER_ARG = re.compile(r"^\s*ARG\s+LLAMA_CPP_TAG=(\S+)\s*$", re.MULTILINE)
+_DOCKER_COMMIT = re.compile(r"^\s*ARG\s+LLAMA_CPP_COMMIT=(\S+)\s*$", re.MULTILINE)
 _LLAMA_REPO = re.compile(r"github\.com/(ggml-org|ggerganov)/llama\.cpp", re.IGNORECASE)
 _LEGACY_DEFAULT =re.compile(r'LLAMA_CPP_COMMIT="\$\{LLAMA_CPP_COMMIT:-([^}"]*)\}"')
 
@@ -71,9 +72,13 @@ def pin_places(source: LlamaCppSource, root: Path = REPO_ROOT) -> List[PinPlace]
         for dockerfile in dockerfiles:
             text = dockerfile.read_text(encoding="utf-8")
             found = _DOCKER_ARG.findall(text)
-            if found or _LLAMA_REPO.search(text):  # the ARG, or a llama.cpp clone without it
+            commit = _DOCKER_COMMIT.findall(text)
+            if found or commit or _LLAMA_REPO.search(text):  # the ARGs, or a llama.cpp clone without them
                 places.append(PinPlace(rel(dockerfile), "ARG LLAMA_CPP_TAG", "derived",
                                        found[0] if found else None, tag))
+                # The image fetches the commit and checks it; a Dockerfile without the ARG builds a moving tag.
+                places.append(PinPlace(rel(dockerfile), "ARG LLAMA_CPP_COMMIT", "derived",
+                                       commit[0] if commit else None, source.commit))
         target_yml = target_dir / "target.yml"
         if target_yml.is_file():
             data = _yaml(target_yml) or {}
@@ -81,6 +86,9 @@ def pin_places(source: LlamaCppSource, root: Path = REPO_ROOT) -> List[PinPlace]
             if "LLAMA_CPP_TAG" in args:
                 places.append(PinPlace(rel(target_yml), "docker.build_args.LLAMA_CPP_TAG", "derived",
                                        str(args["LLAMA_CPP_TAG"]), tag))
+            if "LLAMA_CPP_COMMIT" in args:
+                places.append(PinPlace(rel(target_yml), "docker.build_args.LLAMA_CPP_COMMIT", "derived",
+                                       str(args["LLAMA_CPP_COMMIT"]), source.commit))
         legacy = target_dir / "modules" / "source_module.sh"
         if legacy.is_file():
             found = _LEGACY_DEFAULT.findall(legacy.read_text(encoding="utf-8"))

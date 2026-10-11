@@ -110,8 +110,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Builder, Prüfungen) mit einer Build-ID, die sich mit jeder Option und jeder Werkzeugversion ändert, aber nicht mit
   flüchtigen Werten wie dem freien Speicher. Jeder Plan baut den festgelegten Commit, schaltet jede Option von
   llama.cpp, die etwas herunterladen kann, aus oder lässt sie ungesetzt (`FETCHCONTENT_FULLY_DISCONNECTED=ON`) und
-  baut den Server ohne Unterprozesse. Ein Build auf dem Rechner selbst nutzt `-march=native`; ein Build für einen
-  anderen Rechner nutzt die CPU-Merkmale der Probe (alle 14 x86-Optionen oder `GGML_CPU_ARM_ARCH`, etwa
+  baut den Server ohne Unterprozesse. Ein Build auf dem Rechner selbst nutzt `-march=native`,
+  Konvertierungswerkzeuge, die in einem Target-Image entstehen, bekommen die CPU-Merkmale des Build-Rechners
+  ausgeschrieben, und ein Build für einen anderen Rechner nutzt die CPU-Merkmale der Probe (alle 14 x86-Optionen oder `GGML_CPU_ARM_ARCH`, etwa
   `armv8.2-a+dotprod+fp16` für den RK3566) oder alle CPU-Varianten, wenn die Probe es nicht sagen konnte.
   NVIDIA-GPUs bekommen echten Code für genau ihre Compute Capabilities (jede NVIDIA-GPU muss ihre melden) mit einem
   CUDA-Toolkit, das nicht neuer ist, als der Treiber unterstützt, auf Systemen mit glibc; AMD-GPUs ihr gfx-Target
@@ -156,7 +157,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   selbst gebaute CUDA-Builds (die Redist-Manifeste von NVIDIA per Größe und SHA256 festgelegt, mit den Grenzen für
   Treiber, Compute Capability, Host-Compiler und CMake je Toolkit; die vorgebauten Entwicklungs-Images von NVIDIA nur
   als ausdrücklicher Opt-in-Eintrag) und die Builder-Basen, per Digest festgelegt. Ein Test schlägt fehl, wenn eine
-  andere Stelle, die die llama.cpp-Version nennt, abweicht, und `python scripts/llama_cpp_pin.py check` prüft mit
+  andere Stelle, die die llama.cpp-Version nennt, abweicht, auch das `ARG LLAMA_CPP_COMMIT`, das jedes Target-Dockerfile
+  braucht, das llama.cpp baut, und `python scripts/llama_cpp_pin.py check` prüft mit
   `git ls-remote`, dass der Tag bei Upstream auf den festgelegten Commit zeigt.
 - **Festgelegter llama.cpp-Quelltext für Rechner ohne Netz**: `llm-cli ditto runtime export-source DATEI` schreibt
   den festgelegten Commit als Git-Bundle mit Manifest, und `llm-cli ditto runtime import-source DATEI` installiert ihn
@@ -164,6 +166,27 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ablehnt), muss den festgelegten Commit zurückgeben und liegt schreibgeschützt in
   `~/.llm-framework/runtime/llama.cpp/src/`; spätere Läufe prüfen, dass darin nichts geändert oder hinzugefügt wurde,
   auch keine Dateien, die Git ignoriert, und brauchen kein Netz.
+- **Konvertierungswerkzeuge abgestimmt auf den Build-Rechner**: Target-Images bauen die Konvertierungswerkzeuge von
+  llama.cpp (`llama-quantize`, `llama-imatrix`, `llama-perplexity`, `llama-completion` und jetzt `llama-bench`) nach
+  dem Build-Rezept. Der Image-Build bekommt den Pin (`LLAMA_CPP_TAG`, `LLAMA_CPP_COMMIT`) und den Plan für den Zweck
+  `host-tools` aus einer Probe dieses Rechners unmittelbar davor (`LLAMA_CMAKE_ARGS`: seine CPU-Merkmale
+  ausgeschrieben, oder alle CPU-Varianten, wenn die Probe es nicht sagen konnte). Das Rockchip-Dockerfile und die
+  Vorlage holen den Commit und brechen ab, wenn sie nicht genau diesen bekommen, lehnen Wörter ab, die nicht
+  `-DNAME=WERT` sind, und Optionen, die bei jedem Setzen etwas herunterladen, setzen nach dem Plan die Optionen, die
+  jeder Build hat (Download-Optionen aus, `LLAMA_SUBPROCESS=OFF`, `FETCHCONTENT_FULLY_DISCONNECTED=ON`, Build-Nummer
+  und Commit), brechen bei einem Konfigurationsprotokoll ab, das einen Download meldet, und prüfen
+  `llama-bench --version`. Ohne Probe, oder mit einem Docker-Daemon auf einem anderen Rechner, gilt die Vorgabe des
+  Dockerfiles: die feste x86-64-Basis mit AVX2, die diese Werkzeuge immer hatten, ausgeschrieben und jetzt statisch
+  gelinkt. `build_info.json` hält die Abstimmung fest (`llama_cpp_tools`). Zehn Quantisierungstypen eines Testmodells
+  waren aus der Basis, einem Build mit AVX-512/AMX und einem ohne AVX2 byteweise gleich; der Bau der fünf Werkzeuge
+  dauerte auf einer virtuellen Maschine mit 4 Kernen 3 bis 6 Minuten.
+- **Block `runtime:` in neuen Target-Modulen**: Der Modul-Assistent, `llm-cli module create` (neue Option
+  `--probe DATEI`) und `llm-cli module generate-ai` schreiben den Plan des Build-Rezepts für die llama.cpp-Laufzeit des
+  Boards aus der Probe des Targets in `target.yml`: Architektur, Betriebssystem, die C-Bibliothek, die der Cross-Build
+  nicht überschreiten darf, Builder-Basis, CPU-Optionen (`armv8.2-a+dotprod+fp16` für den RK3566), Backends und
+  Programme, aus dem Quelltext gebaut. Der Block ist eine Aufzeichnung (eine Geräte-Laufzeit wird immer neu aus der
+  Probe des Geräts geplant) und wird in Paketen gegen sein Schema geprüft. CPU- und CMake-Flags aus dem Assistenten
+  oder von Ditto stehen dort als Hinweistext und werden nie angewendet; der Assistent kennzeichnet sie so.
 - **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in
@@ -400,10 +423,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   neu. Die `.sh` läuft in jeder POSIX-Shell (dash, BusyBox ash), und `llm-cli scan --script` und der GUI-Scan dieses
   PCs führen sie mit `sh` aus, also geht es auch ohne bash; sie liest `/proc` und `/sys` direkt statt über `lspci` und
   `lsusb` und schreibt alle GPUs; die `.ps1` liest den nutzbaren Speicher statt der Summe der Speicherplätze.
-- Die Einstellung `llama_cpp_version` (der llama.cpp-Tag, den Target-Images klonen) hat als Vorgabe den Tag des
-  llama.cpp-Pins in `configs/llama_runtime.yml`, jetzt `b11429`, statt eines fest geschriebenen `v0.6.0`; beide nennen
-  denselben Commit, die Images bauen also denselben Quelltext. Das Rockchip-Dockerfile, die Build-Argumente in
-  `target.yml` und `configs/project_sources.yml` (dort stand noch `b4009`) nennen denselben Tag.
+- Target-Images bauen den llama.cpp-Pin aus `configs/llama_runtime.yml` per Commit (`b11429`, `d8123504`): Die
+  Engine übergibt Tag und Commit, und das Image prüft den Commit. Die Einstellung `llama_cpp_version` hat als Vorgabe
+  den Tag des Pins statt eines fest geschriebenen `v0.6.0` und ändert nicht mehr, was gebaut wird (ein anderer Wert
+  ergibt eine Warnung im Build-Log). Die Dockerfiles, die Build-Argumente in `target.yml` und
+  `configs/project_sources.yml` (dort stand noch `b4009`) nennen denselben Tag und Commit.
+- Die Target-Vorlage baut die Konvertierungswerkzeuge von llama.cpp mit denselben Schritten wie das Rockchip-Image,
+  ein erzeugtes Modul bricht also nicht mehr mit „llama.cpp converter not found“ ab. Die GPU-Vorlage nimmt CUDA 12.9.1
+  aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jede Komponente geprüft) auf Ubuntu 22.04, per
+  Digest festgelegt, statt der nicht festgelegten `nvidia/cuda:12.2.2`-Images; das vorgebaute Entwicklungs-Image von
+  NVIDIA ist ein ausdrücklicher Opt-in, per Digest festgelegt (als Basis-Image gewählt) und gekennzeichnet mit
+  `org.llm-framework.cuda-source=prebuilt-image`. Der Assistent trägt für NVIDIA-Hardware kein `nvidia/cuda`-Image
+  mehr ein.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -692,6 +723,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   werden nie gelesen, und freier Text wird auf druckbares ASCII reduziert. Werte, die auf einem Board gelesen werden,
   werden vor dem Schreiben geprüft, und der SSH-Scan behandelt die Antwort des Boards als nicht vertrauenswürdig
   (Größengrenze, strenger Parser).
+- **Kein vorgebautes llama.cpp in Targets**: Erzeugte Module, Community-Exporte und Target-Pakete in Quarantäne
+  werden abgelehnt, wenn ein Dockerfile ein vorgebautes llama.cpp-Image bezieht (nach seinem Namen, auch per Digest
+  festgelegt, oder eines der früheren Laufzeit-Images des Frameworks) oder llama.cpp-Programme aus einem anderen Image
+  kopiert, oder wenn ein Dockerfile, ein Skript oder eine YAML-Datei llama.cpp-Release-Archive oder -Programme
+  herunterlädt, eine Paketquelle mit vorgebauten `llama-cpp-python`-Wheels nutzt oder ein llama.cpp-Paket installiert:
+  Das Framework teilt Rezepte, keine Binärdateien. `nvidia/cuda`-Images gelten nicht mehr als offizielle Basis-Images
+  und brauchen einen Digest, und ein llama.cpp-Image wird als Basis-Image eines Moduls abgelehnt.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

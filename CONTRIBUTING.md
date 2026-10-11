@@ -176,8 +176,10 @@ content; a tag can be moved. A bump goes like this:
 2. In `configs/llama_runtime.yml` change `llama_cpp.source.commit`, `.tag` and `.build_number`, and
    `llama_cpp.build` (the same label). The official prebuilt archives of that release are labelled by `build`: pin
    their names, sizes and SHA256 values again, as the comment at the top of the file describes.
-3. Change the places that cannot read the catalog: the `ARG LLAMA_CPP_TAG` of `targets/Rockchip/dockerfile`,
-   `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml`, and `inference_backends.llama_cpp.commit` in
+3. Change the places that cannot read the catalog: `ARG LLAMA_CPP_TAG` and `ARG LLAMA_CPP_COMMIT` in
+   `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` and `targets/_template/Dockerfile.gpu` (the defaults
+   for image builds outside the framework; the framework passes the pin itself), `docker.build_args.LLAMA_CPP_TAG`
+   and `LLAMA_CPP_COMMIT` in `targets/*/target.yml`, and `inference_backends.llama_cpp.commit` in
    `configs/project_sources.yml` (then `python ../scripts/sync_ssot.py --write` inside `configs/`). The setting
    `llama_cpp_version` follows the catalog by itself.
 4. Check that the commit is upstream's: `python scripts/llama_cpp_pin.py check`. It runs
@@ -188,7 +190,9 @@ content; a tag can be moved. A bump goes like this:
 5. Re-check the download-capable options against the new tree. `DOWNLOAD_OPTIONS_OFF` and `NEVER_SET` in
    `orchestrator/runtime/build/recipe.py` name each option with its file and lines; search the new tree for
    `FetchContent_Declare`, `ExternalProject_Add` and `file(DOWNLOAD` and add any new one. Check the CUDA architecture
-   rules (`ggml/src/ggml-cuda/CMakeLists.txt`) and which targets `tools/CMakeLists.txt` builds as well.
+   rules (`ggml/src/ggml-cuda/CMakeLists.txt`) and which targets `tools/CMakeLists.txt` builds as well. The target
+   Dockerfiles repeat both lists in their llama.cpp build step (the options set last, and the ones they refuse);
+   `tests/test_target_dockerfiles.py` fails until they match the recipe again.
 6. Regenerate the golden plans and review the diff:
    `LLM_FRAMEWORK_UPDATE_GOLDEN=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_build_recipe.py`. Without a
    recipe change only the commit, the build number and the build IDs change.

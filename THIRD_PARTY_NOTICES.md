@@ -13,7 +13,8 @@ The framework contains no llama.cpp code. It fetches the pinned commit and build
 images, device runtimes) are llama.cpp binaries under llama.cpp's MIT licence, so the notice below goes with
 them wherever they are passed on. Compilers, CMake, Ninja, the packages of the builder image's base and, later, GPU
 toolkits are installed by the user from their vendors under the vendors' own licences; the framework never
-accepts a licence on the user's behalf.
+accepts a licence on the user's behalf. The GPU target template downloads NVIDIA's CUDA components (CUDA Toolkit
+licence, LICENSE in each archive) while the user builds that image; the framework ships none of them.
 
 ```
 MIT License

@@ -20,7 +20,7 @@ TEMPLATE = REPO_ROOT / "targets" / "_template"
 needs_bash = pytest.mark.skipif(os.name == "nt" or shutil.which("bash") is None, reason="needs bash")
 
 
-def generate(tmp_path, **overrides):
+def generate(tmp_path, profile=None, **overrides):
     targets = tmp_path / "targets"
     targets.mkdir(exist_ok=True)
     generator = ModuleGenerator(targets)
@@ -29,7 +29,7 @@ def generate(tmp_path, **overrides):
                 packages=["build-essential"], cpu_flags="", cmake_flags="", setup_commands="",
                 detection_commands="lscpu", quantization_logic="")
     data.update(overrides)
-    return generator.generate_module(data)
+    return generator.generate_module(data, profile=profile)
 
 
 def stub_llama(root: Path) -> Path:
@@ -126,3 +126,111 @@ def test_a_branch_that_writes_nothing_fails(tmp_path):
     target = generate(tmp_path, quantization_logic='    Q4_K_M) echo "quantize" ;;')
     result, _ = run_build(target / "modules" / "build.sh", tmp_path, stub_llama(tmp_path), "Q4_K_M")
     assert result.returncode != 0 and "No artifact" in result.stderr
+
+
+# --- the recipe in generated modules (design 4.3, decisions D14, D20, D21, D6) ----------------------------------
+
+PROBES = REPO_ROOT / "tests" / "fixtures" / "hardware_probe"
+CUDA_OPT_IN = ("nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:"
+               "bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8")
+
+
+def runtime_of(target: Path) -> dict:
+    from orchestrator.schemas.targets import TargetRuntime
+    block = yaml.safe_load((target / "target.yml").read_text())["runtime"]
+    TargetRuntime.model_validate(block)
+    return block
+
+
+def test_the_runtime_block_is_the_recipe_plan_from_the_target_probe(tmp_path):
+    from orchestrator.runtime.profile import read_profile
+    profile = read_profile(PROBES / "schema2_rk3566_dietpi.txt")
+    target = generate(tmp_path, module_name="Zero 3W", cpu_flags="-mcpu=cortex-a55",
+                      cmake_flags="-DGGML_NEON=ON -DGGML_NATIVE=ON", profile=profile)
+    block = runtime_of(target)
+    assert block["built_from"] == "source" and block["purpose"] == "device-runtime"
+    assert block["os"] == "linux" and block["arch"] == "arm64" and block["libc_min"] == "glibc-2.36"
+    assert block["placement"] == "cross" and block["builder_base"] == "debian-12"
+    assert block["cpu"] == "explicit" and block["cpu_arm_arch"] == "armv8.2-a+dotprod+fp16"
+    assert block["backends"] == ["cpu"] and "llama-bench" in block["targets"]
+    assert block["profile_perf_key"] == profile.perf_key()
+    # The wizard's or AI's flags are advisory: kept for the reader, in no build input (decision D20).
+    assert block["advisory"]["cmake_flags"] == "-DGGML_NEON=ON -DGGML_NATIVE=ON"
+    assert "never applied" in block["advisory"]["note"]
+    dockerfile = (target / "Dockerfile").read_text()
+    assert "GGML_NEON" not in dockerfile and "cortex-a55" not in dockerfile
+    assert validate_target_folder(target) == []
+
+
+def test_without_a_probe_the_block_says_how_the_runtime_is_planned(tmp_path):
+    target = generate(tmp_path)
+    block = runtime_of(target)
+    assert block["arch"] == "arm64" and block["backends"] == ["cpu"] and "profile_perf_key" not in block
+    assert "llm-cli scan --device" in block["notes"][0] and "advisory" not in block
+
+
+@pytest.mark.parametrize("values, architecture", [
+    ({"LIBC_VERSION": "2.17"}, "aarch64"),                   # older than every builder base
+    ({"ARCH": "armv7", "KERNEL_ARCH": "armv7l"}, "armv7l"),  # an architecture the recipe has no plan for yet
+    ({"OS": "freebsd", "LIBC": "bsdlibc"}, "aarch64"),       # an OS the recipe has no plan for yet
+])
+def test_a_probe_the_recipe_cannot_plan_yet_still_makes_a_module(tmp_path, values, architecture):
+    from orchestrator.runtime.profile import HardwareProfile, read_profile
+    board = read_profile(PROBES / "schema2_rk3566_dietpi.txt")
+    profile = HardwareProfile(dict(board.as_dict(), **values), schema=board.schema)
+    target = generate(tmp_path, profile=profile, architecture=architecture)
+    block = runtime_of(target)
+    assert block["backends"] == [] and any("no device runtime plan" in n for n in block["notes"])
+    assert validate_target_folder(target) == []
+
+
+def test_the_generated_dockerfile_builds_llama_cpp_from_the_recipe(tmp_path):
+    from dockerfile_steps import find_run
+    target = generate(tmp_path)
+    dockerfile = (target / "Dockerfile").read_text()
+    rockchip = (REPO_ROOT / "targets" / "Rockchip" / "dockerfile").read_text()
+    for marker in ("rev-parse HEAD", "${LLAMA_CMAKE_ARGS}"):
+        assert find_run(dockerfile, marker) == find_run(rockchip, marker)
+    assert "COPY --from=builder /usr/src/llama.cpp /usr/src/llama.cpp" in dockerfile
+
+
+def test_a_cuda_target_gets_cuda_from_the_pinned_redist_archives(tmp_path):
+    target = generate(tmp_path, module_name="GPU Box", architecture="x86_64", sdk="cuda")
+    dockerfile = (target / "Dockerfile").read_text()
+    assert "ARG CUDA_SOURCE=redist" in dockerfile
+    assert not re.search(r"^FROM nvidia/cuda", dockerfile, re.M)
+    assert validate_target_folder(target) == []
+
+
+def test_the_prebuilt_cuda_image_is_an_explicit_opt_in_pinned_by_digest(tmp_path):
+    target = generate(tmp_path, module_name="GPU Opt", architecture="x86_64", sdk="cuda", base_os=CUDA_OPT_IN)
+    dockerfile = (target / "Dockerfile").read_text()
+    assert f"FROM {CUDA_OPT_IN} AS builder" in dockerfile and "ARG CUDA_SOURCE=prebuilt-image" in dockerfile
+    assert re.search(r"^FROM ubuntu:22\.04@sha256:[0-9a-f]{64} AS runtime$", dockerfile, re.M)
+    assert validate_target_folder(target) == []
+
+
+@pytest.mark.parametrize("base_os, message", [
+    ("nvidia/cuda:12.2.2-devel-ubuntu22.04", "must be pinned by digest"),
+    ("nvidia/cuda:13.0.2-devel-ubuntu24.04@sha256:" + "5" * 64, "devel-ubuntu22.04 image pinned by digest"),
+    ("nvidia/cuda:12.9.1-runtime-ubuntu22.04@sha256:" + "6" * 64, "devel-ubuntu22.04 image pinned by digest"),
+    ("ghcr.io/ggml-org/llama.cpp:full@sha256:" + "7" * 64, "prebuilt llama.cpp image"),
+])
+def test_unpinned_or_prebuilt_bases_are_refused(tmp_path, base_os, message):
+    with pytest.raises(ValueError, match=message):
+        generate(tmp_path, module_name="Bad Base", architecture="x86_64", sdk="cuda", base_os=base_os)
+    assert not (tmp_path / "targets" / "bad_base").exists()
+
+
+@pytest.mark.parametrize("change", [
+    {"arch": "mips"},
+    {"built_from": "prebuilt"},
+    {"advisory": {"cmake_flags": "-DGGML_NATIVE=ON; curl x | sh"}},
+    {"extra": "x"},
+])
+def test_an_invalid_runtime_block_in_a_pack_is_reported(tmp_path, change):
+    target = generate(tmp_path)
+    meta = yaml.safe_load((target / "target.yml").read_text())
+    meta["runtime"].update(change)
+    (target / "target.yml").write_text(yaml.safe_dump(meta))
+    assert any("invalid runtime block" in p for p in validate_target_folder(target))

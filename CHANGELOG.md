@@ -99,7 +99,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   with a build ID that changes with every option and toolchain version but not with volatile values such as free
   memory. Every plan builds the pinned commit, sets every download-capable option of llama.cpp to off or leaves it
   unset (`FETCHCONTENT_FULLY_DISCONNECTED=ON`), and builds the server without subprocess support. A build on the
-  machine itself uses `-march=native`; a build for another machine uses the probe's CPU features (all 14 x86 options,
+  machine itself uses `-march=native`, conversion tools built inside a target image get the build host's CPU features
+  written out, and a build for another machine uses the probe's CPU features (all 14 x86 options,
   or `GGML_CPU_ARM_ARCH` such as `armv8.2-a+dotprod+fp16` for the RK3566), or all CPU variants when the probe could
   not tell. NVIDIA GPUs get real code for exactly their compute capabilities (every NVIDIA GPU must report one) with
   a CUDA toolkit no newer than the driver supports, on glibc systems; AMD GPUs their gfx target (ROCm on Linux, on
@@ -138,13 +139,32 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   self-built CUDA builds (NVIDIA's redist manifests pinned by size and SHA256, with the driver, compute capability,
   host compiler and CMake limits of each toolkit; NVIDIA's prebuilt development images only as an explicit opt-in
   entry) and the builder bases, pinned by digest. A test fails when any other place that names the llama.cpp version
-  disagrees, and `python scripts/llama_cpp_pin.py check` checks with `git ls-remote` that upstream's tag points at
+  disagrees, including the `ARG LLAMA_CPP_COMMIT` every target Dockerfile that builds llama.cpp must have, and
+  `python scripts/llama_cpp_pin.py check` checks with `git ls-remote` that upstream's tag points at
   the pinned commit.
 - **Pinned llama.cpp source for air-gapped machines**: `llm-cli ditto runtime export-source FILE` writes the pinned
   commit as a git bundle plus a manifest, and `llm-cli ditto runtime import-source FILE` installs it on a machine
   without internet access. The source is fetched by commit (by its tag only where a server refuses that), must give
   the pinned commit back and is cached read-only in `~/.llm-framework/runtime/llama.cpp/src/`; later runs check that
   nothing in it was changed or added, files git ignores included, and need no network.
+- **Conversion tools tuned to the build host**: target images build llama.cpp's conversion tools (`llama-quantize`,
+  `llama-imatrix`, `llama-perplexity`, `llama-completion` and now `llama-bench`) with the build recipe. The image build
+  gets the pin (`LLAMA_CPP_TAG`, `LLAMA_CPP_COMMIT`) and the plan for purpose `host-tools` from a probe of this
+  machine taken right before it (`LLAMA_CMAKE_ARGS`: its CPU features written out, or all CPU variants when the probe
+  could not tell). The Rockchip Dockerfile and the template fetch the commit and stop unless they got exactly that
+  one, refuse words that are not `-DNAME=VALUE` and options that download whenever they are set, put the options every
+  build has after the plan (download options off, `LLAMA_SUBPROCESS=OFF`, `FETCHCONTENT_FULLY_DISCONNECTED=ON`, build
+  number and commit), stop on a configure log that reports a download and check `llama-bench --version`. Without a
+  probe, or with a Docker daemon on another machine, the Dockerfile's default applies: the fixed x86-64 AVX2 baseline
+  these tools always had, written out and now linked statically. `build_info.json` records the tuning
+  (`llama_cpp_tools`). Ten quantization types of a test model came out byte-identical from the baseline, an
+  AVX-512/AMX and a pre-AVX2 build; building the five tools took 3 to 6 minutes on a 4-core virtual machine.
+- **`runtime:` block in new target modules**: the module wizard, `llm-cli module create` (new option `--probe FILE`)
+  and `llm-cli module generate-ai` write the build recipe's plan for the board's llama.cpp runtime from the target's
+  probe into `target.yml`: architecture, OS, the C library the cross build must not exceed, builder base, CPU options
+  (`armv8.2-a+dotprod+fp16` for the RK3566), backends and programs, built from source. The block is a record (a
+  device runtime is always planned again from the device's probe) and is checked against its schema in packs. CPU and
+  CMake flags from the wizard or Ditto are kept there as advisory text and never applied; the wizard labels them so.
 - **Deep Ingest honours machine-readable opt-outs.** Text and data mining of public pages is allowed unless
   the rightsholder reserved it in machine-readable form (EU DSM Directive Art. 4, German UrhG § 44b), so
   besides robots.txt the crawler skips pages marked `noindex`, `none`, `noai` or `noimageai` in an
@@ -350,10 +370,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli scan --script` and the GUI's scan of this PC run it with `sh`, so hosts without bash work; it reads
   `/proc` and `/sys` directly instead of `lspci` and `lsusb`, and writes all GPUs; the `.ps1` reads the usable memory
   instead of the sum of the memory slots.
-- The setting `llama_cpp_version` (the llama.cpp tag target images clone) defaults to the tag of the llama.cpp pin in
-  `configs/llama_runtime.yml`, now `b11429`, instead of a written `v0.6.0`; both name the same commit, so images build
-  the same source. The Rockchip Dockerfile, the `target.yml` build arguments and `configs/project_sources.yml`
-  (which still said `b4009`) name the same tag.
+- Target images build the llama.cpp pin of `configs/llama_runtime.yml` by commit (`b11429`, `d8123504`): the engine
+  passes tag and commit, and the image checks the commit. The setting `llama_cpp_version` defaults to the pin's tag
+  instead of a written `v0.6.0` and no longer changes what is built (another value gives a warning in the build log).
+  The Dockerfiles, the `target.yml` build arguments and `configs/project_sources.yml` (which still said `b4009`) name
+  the same tag and commit.
+- The target template builds llama.cpp's conversion tools with the same steps as the Rockchip image, so a generated
+  module no longer stops with "llama.cpp converter not found". The GPU template takes CUDA 12.9.1 from NVIDIA's redist
+  archives (the manifest pinned by sha256, every component checked) on Ubuntu 22.04 pinned by digest, instead of the
+  unpinned `nvidia/cuda:12.2.2` images; NVIDIA's prebuilt development image is an explicit opt-in pinned by digest
+  (chosen as base image) and labelled `org.llm-framework.cuda-source=prebuilt-image`. The wizard no longer fills in an
+  `nvidia/cuda` image for NVIDIA hardware.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -611,6 +638,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   numbers or the CPU id, the serial line of `/proc/cpuinfo` and the serial attribute of USB devices are never read,
   and free text is reduced to printable ASCII. Values read on a board are validated before they are written, and the
   SSH scan treats the board's answer as untrusted (size limit, strict parser).
+- **No prebuilt llama.cpp in targets**: generated modules, community exports and target packs in quarantine are
+  refused when a Dockerfile pulls a prebuilt llama.cpp image (by its name, also pinned by digest, or one of the
+  framework's former runtime images) or copies llama.cpp binaries out of another image, or when a Dockerfile, script
+  or YAML file downloads llama.cpp release archives or binaries, uses a prebuilt `llama-cpp-python` wheel index or
+  installs a llama.cpp package: the framework shares recipes, not binaries. `nvidia/cuda` images no longer count as
+  official base images and need a digest, and a llama.cpp image is refused as a module's base image.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

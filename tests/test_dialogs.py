@@ -1083,7 +1083,7 @@ class TestDeepIngestControls:
         nothing): "Module created" alone used to hide that the snapshot is missing."""
         from orchestrator.gui import wizards
 
-        def generate(data, framework, knowledge_roots=None):
+        def generate(data, framework, knowledge_roots=None, profile=None):
             target = tmp_path / "targets" / "test_board"
             (target / "knowledge").mkdir(parents=True)
             if stored and knowledge_roots:
