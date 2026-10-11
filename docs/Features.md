@@ -621,14 +621,14 @@ marked `[…]`; a code block that is open at the cut is closed, so the rest of t
 The keyword index (BM25) also knows the parts of identifiers: `-DGGML_CUDA=ON` is found by `GGML_CUDA`, `GGML` or
 `CUDA`, `rknn_toolkit2` by `rknn toolkit2`, and `rknnToolkitLite` by `rknn Toolkit Lite`. A leading `-D` is
 dropped only from definitions such as `-DNAME=VALUE` or `-DNAME_WITH_UNDERSCORE` (`-DEBUG` keeps it), and parts of
-one or two digits are left out (`x86_64` adds `x86`, not `64`). Only the keyword index gets the split forms; the stored text and the vectors stay as they are. Searches of one or two words use the
-keyword index when they contain an identifier (a digit, an underscore, two capital letters in a row, or a dot or
-hyphen inside a word, such as `E2041`, `GGML_CUDA`, `RKNN` or `librkllmrt.so`); other short searches use meaning
-only. In the retrieval evaluation this raised hit@3 of the identifier questions from 83 % to 100 %; the other
-results stayed the same.
+one or two digits are left out (`x86_64` adds `x86`, not `64`). Only the keyword index gets the split forms; the
+stored text and the vectors stay as they are. Searches of one or two words use the keyword index when they contain
+an identifier (a digit, an underscore, two capital letters in a row, or a dot or hyphen inside a word, such as
+`E2041`, `GGML_CUDA`, `RKNN` or `librkllmrt.so`); other short searches use meaning only. In the retrieval
+evaluation this raised hit@3 of the identifier questions from 83 % to 100 %; the other results stayed the same.
 
-Documents imported before this keep their keyword vectors and stay searchable; import them again (for example a new
-Deep Ingest of the same URL) to add the identifier parts.
+A document keeps the keyword vectors it was imported with and stays searchable; importing it again (for example a
+new Deep Ingest of the same URL) applies the current splitting.
 
 ### Large code blocks and tables
 

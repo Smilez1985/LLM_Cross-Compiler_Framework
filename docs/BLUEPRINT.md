@@ -507,12 +507,12 @@ importing a document again adds its parts.
    first 1500 characters; up to 20 candidates, at least 12) and rates it between 0 and 1. Candidates below the
    relevance floor are dropped, so the list may be empty: no excerpt is better than an unrelated one. The floor is
    `rag_rerank_min_score` (0 turns it off) or, when it is not set (the default), the model's own floor, 0.2 for
-   both registered models. The
-   model comes from `rag_reranker`: `auto` takes `onnx-community/bge-reranker-v2-m3-ONNX` with CUDA and at least
-   16 GB RAM, `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (a download of about 0.12 GB) from 6 GB RAM, and none
-   below that; `off` turns reranking off; a model id picks one. The model is downloaded on first use, never in
-   offline mode. Scores are cached by text. A reranker that cannot run is logged once, and searches keep the fused
-   order until the next start or a change of `rag_reranker`.
+   both registered models. The model comes from `rag_reranker`: `auto` takes
+   `onnx-community/bge-reranker-v2-m3-ONNX` with CUDA and at least 16 GB RAM,
+   `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (a download of about 0.12 GB) from 6 GB RAM, and none below that;
+   `off` turns reranking off; a model id picks one. The model is downloaded on first use, never in offline mode.
+   Scores are cached by text. A reranker that cannot run is logged once, and searches keep the fused order until
+   the next start or a change of `rag_reranker`.
 4. **Excerpt budget.** Ditto takes the excerpts, best first, that fit together into a third of
    `chat_context_limit` (default 4096 tokens). One that does not fit is skipped, so a smaller one after it can
    still come along; a first excerpt that alone is too long is cut at a line, an open code block is closed and

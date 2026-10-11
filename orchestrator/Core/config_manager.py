@@ -78,6 +78,8 @@ class ConfigSchema:
     enterprise_only: bool = False
     
     def validate_value(self, value: Any) -> Tuple[bool, List[str]]:
+        if value is None and self.default_value is None and not self.required:
+            return True, []  # unset, as by default
         errors = []
         if value is not None and not isinstance(value, self.field_type):
             try:

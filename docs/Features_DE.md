@@ -668,8 +668,8 @@ Unterstrich, zwei Großbuchstaben hintereinander oder einen Punkt oder Bindestri
 `E2041`, `GGML_CUDA`, `RKNN` oder `librkllmrt.so`); andere kurze Suchen nutzen nur die Bedeutung. In der
 Retrieval-Evaluation hob das hit@3 der Bezeichner-Fragen von 83 % auf 100 %; die übrigen Ergebnisse blieben gleich.
 
-Vorher aufgenommene Dokumente behalten ihre Stichwortvektoren und bleiben auffindbar; nimm sie erneut auf (zum
-Beispiel mit einem neuen Deep Ingest derselben URL), damit sie die Teile der Bezeichner bekommen.
+Ein Dokument behält die Stichwortvektoren, mit denen es aufgenommen wurde, und bleibt auffindbar; nimmst du es
+erneut auf (zum Beispiel mit einem neuen Deep Ingest derselben URL), gilt die aktuelle Zerlegung.
 
 ### Große Codeblöcke und Tabellen
 
