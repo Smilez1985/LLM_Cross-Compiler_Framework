@@ -225,7 +225,7 @@ class TestCLI:
     def test_framework_commands_fail_cleanly_without_a_keyring(self, tmp_path, backend):
         # The null backend keeps nothing: it used to lose every secret silently on the next start.
         result = self.run_cli(tmp_path, "-q", "secrets", "list", keyring_backend=backend, storage=None)
-        assert result.returncode == 1
+        assert result.returncode == 5, "storage unavailable has its own exit code"
         assert "Traceback" not in result.stderr
         assert "Failed to initialize framework" in result.stderr
         assert "secret_storage" in result.stderr and "passphrase" in result.stderr, "the choices are named"

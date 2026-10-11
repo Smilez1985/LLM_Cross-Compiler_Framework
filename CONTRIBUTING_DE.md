@@ -418,8 +418,9 @@ gelangt ist, gilt als offengelegt, auch wenn du ihn eine Minute später entferns
    - Hugging Face: https://huggingface.co/settings/tokens (ein offengelegtes Hugging-Face-Token kann außerdem jeder
      ungültig machen, siehe https://huggingface.co/docs/hub/security-tokens)
    - GitHub-Tokens: https://github.com/settings/tokens
-2. **Lege den neuen Schlüssel nur im Secrets-Speicher ab** (`llm-cli secrets set <Name>` oder die KI-Einstellungen
-   der GUI), nie in einer Datei im Repository.
+2. **Lege den neuen Schlüssel nur im Secrets-Speicher ab** (`llm-cli ditto login <anbieter>` für Schlüssel von
+   KI-Anbietern, `llm-cli secrets set <Name>` für andere Tokens oder die KI-Einstellungen der GUI), nie in einer
+   Datei im Repository.
 3. **Prüfe, wofür der Schlüssel benutzt wurde**, in der Nutzungs- oder Abrechnungsansicht des Anbieters, und melde
    Missbrauch dem Anbieter.
 4. **Entferne den Wert aus dem Repository** mit einem normalen Commit. Die Historie umzuschreiben ist optional und

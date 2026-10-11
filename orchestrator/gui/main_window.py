@@ -37,6 +37,7 @@ from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog, AI
 from orchestrator.gui.wizards import ModuleCreationWizard
 from orchestrator.gui.builder_tab import BuilderTab
 from orchestrator.gui.chat_window import ChatWindow
+from orchestrator.gui.sign_in import STORAGE_CHOICE_CODES, choose_storage_at_start
 from orchestrator.gui.deployment_window import DeploymentWindow
 
 # ============================================================================
@@ -81,9 +82,14 @@ class MainOrchestrator(QMainWindow):
         
         # Init Framework
         self.framework = FrameworkManager()
-        if not self.framework.initialize():
+        while not self.framework.initialize():
             # The cause (e.g. no usable keyring, with the storage choices), not only "failed".
             cause = getattr(self.framework, "init_error", None)
+            config = getattr(self.framework, "config", None)
+            if getattr(cause, "code", None) in STORAGE_CHOICE_CODES and config is not None and \
+                    choose_storage_at_start(self, config, cause):
+                self.framework = FrameworkManager()  # starts again with the protection the user chose
+                continue
             QMessageBox.critical(self, "Fatal Error", f"Framework initialization failed: {cause}" if cause
                                  else "Framework initialization failed. Check logs.")
             sys.exit(1)
@@ -275,6 +281,9 @@ class MainOrchestrator(QMainWindow):
             provider = f"{cfg.get('provider_label') or cfg.get('provider')} / {cfg.get('model')}"
             mode = f"Offline, {provider}" if cfg.get("offline_mode") else provider
             self.status.showMessage(f"AI Agent configured: {mode}", 5000)
+        chat = getattr(self, "chat_window", None)
+        if chat is not None:
+            chat.refresh_access()  # also after a sign-in that was cancelled with the settings
 
     def _open_tool_permissions(self, first_run: bool = False):
         registry = getattr(self.framework, "tool_registry", None)

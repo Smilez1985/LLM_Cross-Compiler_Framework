@@ -88,6 +88,7 @@ Felder eines Anmeldeverfahrens (Eintrag in `auth`):
 | `fields` | Werte, die nicht geheim sind: `id`, `label`, `pattern` (muss vollständig passen), `header` (wird mit dem Schlüssel gesendet; nie ein Header für Zugangsdaten wie `Authorization`, `x-api-key`, `api-key` oder `Cookie`), `setting` (eine Einstellung, die den Wert ebenfalls hält und Vorrang hat, solange sie gesetzt ist) und `invalid_code` (der Fehler für einen unpassenden Wert). |
 | `validate` | Die kostenlose Prüfung hinter „Prüfen“: ein GET mit `path` (unterhalb von `base_url`) oder `url`, `account_field` oder `account_header` (nennt das Konto), `models_field` (als Modelle gezählt), `public: true` für einen Endpunkt, der ohne Schlüssel antwortet. Ein an eine Adresse gebundener Schlüssel wird nur an dieser Adresse geprüft. |
 | `opt_in` | Wird nie automatisch gewählt, nur wenn `ai_auth_<Anbieter>` es nennt. Ein `ant auth login`-Profil ist immer opt-in. |
+| `note` | Ein Hinweis zu Nutzungsbedingungen oder Gebrauch, der mit dem Verfahren gezeigt wird (`llm-cli ditto auth methods`, die Karte im Anmeldebereich). |
 | `cli`, `oauth`, `sources` | Installationsseite und Befehle zum An- und Abmelden der Kommandozeile des Anbieters, die Endpunkte eines späteren Anmeldeablaufs und die Primärquellen zu den Angaben des Verfahrens. |
 
 Vorlagen in der Datei: `anthropic`, `openai`, `google` (Gemini über seinen OpenAI-kompatiblen Endpunkt),

@@ -35,6 +35,10 @@ from orchestrator.utils.logging import get_logger
 from orchestrator.utils.validation import ValidationError, validate_path, validate_config
 from orchestrator.utils.helpers import ensure_directory, safe_json_load
 
+# Settings per provider that the sign-in (llm-cli ditto login, the GUI's sign-in panel) writes to the user config.
+SIGN_IN_SETTING = re.compile(r"^(ai_auth_[a-z0-9][a-z0-9_.-]{0,63}|ai_base_url_[a-z0-9][a-z0-9_.-]{0,63}|"
+                             r"ai_oauth_profile|ai_auth)$")
+
 
 # ============================================================================
 # ENUMS AND CONSTANTS
@@ -572,8 +576,16 @@ class ConfigManager:
             # Only values changed at runtime via set(); defaults and env overrides must not
             # become permanent, and values already in config.yml are kept from `data` above.
             for key, val in self.config_values.items():
-                if key in persist_keys and val.source.source_type == "override":
+                if val.source.source_type != "override":
+                    continue
+                if key in persist_keys:
                     data[key] = val.value
+                elif SIGN_IN_SETTING.match(key):
+                    # Per-provider sign-in choices (llm-cli ditto login, the sign-in panel); "" removes one.
+                    if val.value in (None, ""):
+                        data.pop(key, None)
+                    else:
+                        data[key] = val.value
         
         try:
             with open(config_file, 'w') as f:

@@ -1047,6 +1047,6 @@ class TestReviewFindings:
                    LLM_FRAMEWORK_HOME=str(repo / "state"), LLM_FRAMEWORK_CONFIG_DIR=str(tmp_path / "cfg"))
         result = subprocess.run([sys.executable, "-m", "orchestrator.cli", "-q", "secrets", "list"], cwd=tmp_path,
                                 env=env, capture_output=True, text=True, timeout=120)
-        assert result.returncode == 1 and "Traceback" not in result.stderr
+        assert result.returncode == 5 and "Traceback" not in result.stderr  # storage unavailable
         shown = result.stderr.replace("\n", "").split("Failed to initialize framework:", 1)[1]
         assert "[bold]project" in shown, "rich markup ate part of the path"

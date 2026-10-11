@@ -25,6 +25,7 @@ if str(root_dir) not in sys.path:
 
 # Core Imports
 from orchestrator.Core.config_manager import ConfigManager
+from orchestrator.Core.vault_key import set_passphrase_prompt
 from orchestrator.llm.sdk_env import guard_sdk_environment
 from orchestrator.utils.logging import setup_logging
 
@@ -33,6 +34,7 @@ from orchestrator.utils.logging import setup_logging
 try:
     from orchestrator.gui.main_window import MainOrchestrator
     from orchestrator.gui.dialogs import LanguageSelectionDialog
+    from orchestrator.gui.sign_in import PassphrasePrompt
     from orchestrator.utils.localization import get_instance as get_i18n
 except ImportError as e:
     print(f"CRITICAL ERROR: Missing GUI components.\n{e}")
@@ -64,6 +66,8 @@ def main():
 
     app = QApplication([arg for arg in sys.argv if arg != "--debug-http"])
     app.setApplicationName("LLM Cross-Compiler")
+    # A vault protected by a passphrase asks for it in a dialog (also when it opens in a worker thread).
+    set_passphrase_prompt(PassphrasePrompt(app))
 
     language = cfg_mgr.get("language")
     # The schema default 'en' is always loaded, so a first run is detected by where the value came from.

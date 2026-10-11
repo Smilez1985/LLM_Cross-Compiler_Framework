@@ -21,7 +21,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
-- [ditto](#ditto): `setup`, `ask`, `eval`, `runtime`, `models`
+- [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
 - [mcp](#mcp): `serve`, `config`
 - [secrets](#secrets): `set`, `list`
@@ -86,7 +86,8 @@ Credentials (API keys, tokens, `Authorization`, `x-api-key` and cookie headers, 
 URLs) are redacted in every log line and traceback, also with `--debug-http`.
 
 **Output:** the start banner and log messages go to stderr; results go to stdout, and so do most messages a
-command prints itself, including its error messages. For `llm-cli ditto ask` only the answer goes to stdout, and for
+command prints itself, including its error messages. For `llm-cli ditto ask` only the answer goes to stdout, the
+sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and questions to stderr, and for
 `llm-cli mcp serve` stdout carries the MCP protocol.
 
 **Exit codes:**
@@ -96,6 +97,10 @@ command prints itself, including its error messages. For `llm-cli ditto ask` onl
 | 0 | Success |
 | 1 | The command failed (for example a failed build, a failed deployment, a damaged audit log, an AI error) |
 | 2 | Invalid input: unknown option, an unknown target or an unsupported format/board/quantization combination (`build start`), an unknown provider (`--provider`), an unknown model tier (`ditto models download`) |
+| 3 | Sign-in: the provider rejected the credential (`ditto login`, `ditto auth status --check`) |
+| 4 | Sign-in: the provider or the local server cannot be reached |
+| 5 | The credential vault cannot be used (no usable keyring, no passphrase, a damaged vault); the message names the choices. Every command that needs the vault uses it |
+| 6 | Sign-in: the method is not available in this version, or the provider was removed |
 | 130 | `build start` was interrupted with Ctrl+C (the CLI exits only after the build has ended) |
 
 `llm-cli doctor` uses 0 (OK), 1 (warnings) and 2 (errors); `llm-cli ditto eval --min-pass` returns 1 when a run
@@ -112,6 +117,8 @@ stays below the given share. A few commands report a failure but still exit with
 | `targets list` / `targets validate` | List hardware targets / check that a target can be loaded |
 | `build start` / `build status` | Convert and quantize a model / show the builds of this process |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
+| `ditto login` / `ditto logout` | Sign Ditto in to a provider (the key from a hidden prompt, stdin or an environment variable, checked before it is stored) / sign out |
+| `ditto auth status/methods/storage/rotate-key` | Sign-in state of every provider / the sign-in methods / how the credential vault is protected / a new vault key |
 | `ditto setup` | Set the tool permissions (the same choices as the GUI's first-start dialog) |
 | `ditto ask` | Ask Ditto one question |
 | `ditto eval` | Grade Ditto on fixed test cases |
@@ -119,7 +126,7 @@ stays below the given share. A few commands report a failure but still exit with
 | `ditto models list/download` | The model tiers for offline mode |
 | `tools list` / `tools permissions` / `tools audit` | The framework tools, their permissions and the audit log |
 | `mcp serve` / `mcp config` | Run the MCP server / show how to connect AI clients |
-| `secrets set` / `secrets list` | Store an API key or token / list the stored names |
+| `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
 | `module create` / `module generate-ai` | Create a new hardware target, by questions or from a probe file with Ditto |
 | `scan` | Run the hardware probe on this computer |
 | `config show` / `config repos` | Show the CLI's base settings / manage source repository overrides |
@@ -337,8 +344,136 @@ llm-cli deploy run output/deploy_model_1791801300.zip --ip 192.168.1.50 --user r
 ## ditto
 
 Ditto is the built-in assistant. Most `ditto` commands use the provider and model from the AI settings (GUI:
-**Tools > Configure AI Agent (Ditto)...**, or `ai_provider` and `ai_model` in `config.yml`). API keys are stored
-with [`llm-cli secrets set`](#secrets).
+**Tools > Configure AI Agent (Ditto)...**, or `ai_provider` and `ai_model` in `config.yml`). Sign in with
+[`llm-cli ditto login`](#ditto-login), or with **Sign in...** in the AI settings.
+
+### ditto login
+
+```
+llm-cli ditto login PROVIDER [--method ID] [--with-token] [--from-env] [--base-url URL] [--workspace-id ID]
+                    [--organization ID] [--project ID] [--profile NAME] [--insecure-storage] [--no-check] [--yes]
+```
+
+Signs Ditto in to a provider (`anthropic`, `openai`, `google`, `openrouter`, `ollama`, `custom`;
+[`llm-cli ditto auth methods`](#ditto-auth-methods) lists them with their methods). A key never comes from the
+command line, where the shell history and the process list would keep it: it is asked with a hidden prompt, read
+from stdin (`--with-token`) or copied once from the provider's documented environment variable (`--from-env`).
+Before it is stored in the credential vault, a free request checks it (the model list; OpenRouter's key endpoint),
+and a rejected key is not stored. The method is remembered as `ai_auth_<provider>`. The output shows at most the
+last four characters of a key.
+
+| Method type | What `ditto login` does |
+|---|---|
+| `api_key` (cloud providers, `custom` servers) | Asks for the key, checks it and stores it. The key of a server whose address you set belongs to that address only. Admin keys (`sk-ant-admin01-`) are refused before anything is sent. |
+| `bearer_optional` (local engines whose key is optional) | Asks for a token ("Enter for none"); without one the server is used without a key. |
+| `none` (Ollama, `custom` without a key) | Stores nothing; checks the address and counts the models. |
+| `cli_session` (`--method ant_profile`) | Uses a profile of Anthropic's own `ant` CLI; only the profile name is kept. When the check through the Anthropic SDK fails, it tells you to run `ant auth login`. Advanced: never chosen automatically, and Anthropic has not confirmed that other apps may use these profiles. |
+| OAuth and cloud sign-ins | Not available in this version (exit code 6). |
+
+Without a terminal (scripts, CI) nothing is asked: a provider with more than one method needs `--method` (an
+opt-in method such as `ant_profile` does not count), and the key must come from `--with-token` or `--from-env`.
+
+| Option | Meaning |
+|---|---|
+| `--method ID` | Sign-in method, see `llm-cli ditto auth methods PROVIDER`. |
+| `--with-token` | Read the key from stdin. |
+| `--from-env` | Copy the key from the provider's environment variable (for example `ANTHROPIC_API_KEY`) into the vault; afterwards the variable is no longer needed. |
+| `--base-url URL` | Server address for providers whose address you set (Ollama, `custom`); remembered as `ai_base_url_<provider>`. A key sent over plain `http://` to another computer needs `--yes`, because it travels unencrypted. |
+| `--workspace-id ID` | Claude API: workspace ID (`wrkspc_...`) for keys that are valid in every workspace of the organization; stored with the key. |
+| `--organization ID`, `--project ID` | OpenAI: organization (`org-...`) and project (`proj_...`), sent with the key. |
+| `--profile NAME` | With `--method ant_profile`: the profile (default: the `ant` CLI's active profile). |
+| `--insecure-storage` | Without a usable keyring: keep the vault key in a file next to the vault (**not encrypted at rest**). Ignored when the vault is protected another way that works. |
+| `--no-check` | Store without the check (for example offline). |
+| `-y, --yes` | Do not ask before sending a key over plain `http://` or before `--insecure-storage`. |
+
+Exit codes: 0 signed in; 2 usage (an unknown provider or method, a missing `--method` or key without a terminal);
+3 rejected (a wrong, revoked or admin key, a workspace problem); 4 the provider or the local server cannot be
+reached; 5 the credential vault cannot be used (the message names the choices); 6 the method is not available in
+this version or the provider was removed.
+
+```bash
+llm-cli ditto login anthropic                      # asks for the key without echo
+printf %s "$OPENAI_API_KEY" | llm-cli ditto login openai --with-token --project proj_abc123
+llm-cli ditto login anthropic --from-env --workspace-id wrkspc_01AbCd
+llm-cli ditto login custom --method api_key --base-url http://127.0.0.1:8000/v1
+llm-cli ditto login ollama --base-url http://192.168.1.20:11434/v1
+llm-cli ditto login anthropic --method ant_profile --profile work
+```
+
+`ditto login` signs in; it does not change which provider Ditto uses (`ai_provider`, set in the AI settings).
+
+### ditto logout
+
+```
+llm-cli ditto logout PROVIDER [--method ID] [--base-url URL]
+```
+
+Signs Ditto out: the stored key (for a server whose address you set, the key of that address) is deleted from this
+computer, and the remembered method is forgotten. The key itself keeps working until you revoke it on the
+provider's key page, which the command names. A key in an environment variable stays in use until you unset the
+variable; the command says so. For the `ant` profile only the profile name is forgotten: `ant auth logout` would
+also sign out the other tools that use it, so the command leaves that to you.
+
+| Option | Meaning |
+|---|---|
+| `--method ID` | Method to sign out of (default: the one in use). |
+| `--base-url URL` | Address whose key is deleted (default: the configured one). |
+
+### ditto auth status
+
+```
+llm-cli ditto auth status [--json] [--check]
+```
+
+One line per provider: method, where the credential comes from (`vault`, `env:<VARIABLE>`, `profile:<name>`,
+`runtime`), account or workspace, the last four characters of the key, and the state ("Signed in as ...", "Not
+signed in", "Using key from environment variable X", "Expired: sign in again"). Ditto's provider is marked with `*`.
+A key is never shown.
+
+| Option | Meaning |
+|---|---|
+| `--json` | Machine-readable output, also without any key. |
+| `--check` | Also run the free check for every provider with a credential (and for Ditto's provider). |
+
+Exit code 5 when the credential vault cannot be used; with `--check` the code of the first failed check (3 or 4);
+otherwise 0.
+
+### ditto auth methods
+
+```
+llm-cli ditto auth methods [PROVIDER] [--json]
+```
+
+The sign-in methods of every provider (or of one) in the order they are preferred: the recommended one, opt-in
+methods, methods that come in a later version, the key page, the environment variables, the extra options
+(`--workspace-id`, `--organization`, `--project`) and policy notes. Needs neither the vault nor the network.
+
+### ditto auth storage
+
+```
+llm-cli ditto auth storage [--use keyring|helper|passphrase|insecure] [--helper COMMAND] [--yes]
+```
+
+Without `--use`, it shows how the credential vault is protected (see [secrets](#secrets)) and ends with exit code
+5 when the vault cannot be used. With `--use`, the vault is protected the chosen way from now on: a working vault
+is re-encrypted with a new key, a vault that could not be opened (no keyring) is opened with the new protection,
+and the choice is saved as `secret_storage` (and `secret_helper`). Nothing is chosen for you. `ephemeral` is chosen
+per run with `LLM_SECRET_STORAGE=ephemeral` (exit code 2 here). A new passphrase is asked twice in the terminal;
+without a terminal the command ends with exit code 5 and nothing changes.
+
+```bash
+llm-cli ditto auth storage --use passphrase
+llm-cli ditto auth storage --use helper --helper "pass show llmcc/vault-key"
+```
+
+### ditto auth rotate-key
+
+```
+llm-cli ditto auth rotate-key
+```
+
+Creates a new vault key, re-encrypts every stored credential with it and removes the old key. Exit code 5 when
+the vault cannot be used.
 
 ### ditto setup
 
@@ -627,7 +762,8 @@ You sign in to these clients with your own account or key; the framework never s
 API keys and tokens are stored encrypted in the credential vault `secrets.store` in your personal state folder
 (`~/.llm-framework`, or `LLM_FRAMEWORK_HOME`). The vault is never placed inside a git working copy. Its key is in
 your operating system's keyring by default. Without a usable keyring, commands that need the framework stop with
-exit code 1 and list the choices; choose another protection with the setting `secret_storage` in `config.yml`, or
+exit code 5 and list the choices; choose another protection with
+[`llm-cli ditto auth storage --use`](#ditto-auth-storage), with the setting `secret_storage` in `config.yml`, or
 with the environment variable `LLM_SECRET_STORAGE` for one run:
 
 | `secret_storage` | Where the vault key comes from |
@@ -641,28 +777,30 @@ with the environment variable `LLM_SECRET_STORAGE` for one run:
 ### secrets set
 
 ```
-llm-cli secrets set KEY [--password TEXT]
+llm-cli secrets set KEY [--with-token] [--password TEXT]
 ```
 
-Stores a secret under the name `KEY`. Without `--password` the value is asked twice without echo, which keeps it
-out of your shell history.
+Stores a secret under the name `KEY`. The value is asked twice without echo, or read from stdin with `--with-token`;
+both keep it out of your shell history. Ditto's provider keys are better stored with [`llm-cli ditto login`](#ditto-login),
+which also checks them.
 
 | Option | Meaning |
 |---|---|
-| `--password TEXT` | The value (avoid this: it ends up in your shell history). |
+| `--with-token` | Read the value from stdin, e.g. `printf %s "$HF_TOKEN" \| llm-cli secrets set hf_token --with-token`. |
+| `--password TEXT` | Deprecated: the value ends up in your shell history and the process list. |
 
 Names the framework uses:
 
 | Name | Used for |
 |---|---|
-| `anthropic_api_key`, `openai_api_key`, `gemini_api_key`, `openrouter_api_key`, `custom_api_key` | Ditto's providers |
+| `anthropic_api_key`, `openai_api_key`, `gemini_api_key`, `openrouter_api_key`, `custom_api_key` | Ditto's providers (better: `llm-cli ditto login <provider>`) |
 | `hf_token` | Gated Hugging Face models in builds |
 | `github_token` | `swarm upload` |
 | `qdrant_api_key` | A remote Qdrant server for the knowledge base (setting `qdrant_url`) |
 
 ```bash
-llm-cli secrets set anthropic_api_key
 llm-cli secrets set hf_token
+printf %s "$GITHUB_TOKEN" | llm-cli secrets set github_token --with-token
 ```
 
 ### secrets list
@@ -707,7 +845,8 @@ llm-cli module generate-ai PROBE_FILE [--provider TEXT] [--model TEXT]
 
 Ditto proposes a target module from a hardware probe file (`target_hardware_config.txt`, see [scan](#scan)). The
 whole proposal is printed as JSON; only after you confirm is the module created (checked again by the module
-generator) in the configured targets folder.
+generator) in the configured targets folder. Ditto uses the provider's stored sign-in
+([`llm-cli ditto login`](#ditto-login)); the command never asks for a key itself.
 
 | Option | Meaning |
 |---|---|
@@ -803,4 +942,5 @@ Needs a GitHub token: `llm-cli secrets set github_token` (the value is asked).
 - `config show` shows only the CLI's base settings; `config repos --add` does not reach builds.
 - `deploy package --docker` is experimental.
 - There is no CLI command yet to choose Ditto's provider permanently; use the GUI, `config.yml` or
-  `LLM_FRAMEWORK_AI_PROVIDER`. Signing in per provider is being built ([roadmap](BLUEPRINT.md#roadmap)).
+  `LLM_FRAMEWORK_AI_PROVIDER` (`ditto login` signs in but does not switch the provider). Browser and cloud
+  sign-ins (OAuth, AWS, Google Cloud, Azure) come later ([roadmap](BLUEPRINT.md#roadmap)).

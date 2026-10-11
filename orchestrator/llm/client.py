@@ -141,6 +141,13 @@ class LLMClient:
             raise self._unknown_provider(name)
         return preset
 
+    def is_primary(self, preset: ProviderPreset) -> bool:
+        """Whether `preset` is the provider in ai_provider (False while that setting names no provider)."""
+        try:
+            return self.primary_provider().id == preset.id
+        except LLMError:
+            return False
+
     def _unknown_provider(self, name: Any) -> NotConfigured:
         removed = self.catalog.removed_message(name)
         if removed:
@@ -190,19 +197,33 @@ class LLMClient:
                     or preset.base_url)
         return preset.base_url  # cloud endpoints are fixed: a leftover custom URL must never receive their key
 
+    def endpoint(self, preset: ProviderPreset) -> Optional[str]:
+        """The base URL a call to `preset` uses; raises NotConfigured for a local server that is not running."""
+        return self._base_url(preset, self.is_primary(preset))
+
     def _runtime_key(self, preset: ProviderPreset) -> Optional[str]:
         """The per-start key of the running local server of a runtime_endpoint preset."""
         if not preset.runtime_endpoint:
             return None
         return reveal((self._runtime_endpoint(preset) or (None, None, None))[1])
 
+    def chosen_method(self, preset: ProviderPreset, primary: Optional[bool] = None) -> Tuple[Optional[str], bool]:
+        """The sign-in method the user chose (ai_auth_<provider>, or ai_auth for the primary provider) and whether
+        it names this provider (only then may it be an opt-in method such as an `ant` profile)."""
+        own = self._setting(f"ai_auth_{preset.id}")
+        if own:
+            return str(own).strip(), True
+        if primary is None:
+            primary = self.is_primary(preset)
+        shared = self._setting("ai_auth") if primary else None
+        return (str(shared).strip() if shared else None), False
+
     def _auth(self, preset: ProviderPreset, primary: bool, base_url: Optional[str]) -> str:
         """The sign-in method: the one the user chose, else the first usable one in the catalog's order. Opt-in
         methods (an `ant` profile) are never picked automatically, so a profile on disk cannot switch the billed
         account."""
-        own = self._setting(f"ai_auth_{preset.id}")
-        chosen = own or (self._setting("ai_auth") if primary else None)
-        return self.resolver.select(preset, chosen=chosen, explicit=bool(own), base_url=base_url).id
+        chosen, explicit = self.chosen_method(preset, primary)
+        return self.resolver.select(preset, chosen=chosen, explicit=explicit, base_url=base_url).id
 
     def _model(self, preset: ProviderPreset, task: str, primary: bool, explicit: Optional[str]) -> str:
         if explicit:
@@ -265,20 +286,25 @@ class LLMClient:
 
     def adapter(self, target: Target):
         credential = self.credential(target)  # raises before any request: no key, admin key, bad workspace ID
-        options = dict(self.adapter_options.get(target.preset.adapter, {}))
-        if target.preset.adapter == "anthropic":
+        return self.adapter_for(target.preset, target.base_url, credential)
+
+    def adapter_for(self, preset: ProviderPreset, base_url: Optional[str], credential: ResolvedCredential):
+        """The adapter for an explicit credential (also one that is not stored yet: the sign-in check)."""
+        options = dict(self.adapter_options.get(preset.adapter, {}))
+        if preset.adapter == "anthropic":
             options.update(auth="ant_profile" if credential.kind == "anthropic_profile" else "api_key",
                            oauth_profile=credential.profile, workspace_id=credential.workspace_id)
-        elif target.preset.adapter == "openai_responses":
+        elif preset.adapter == "openai_responses":
             options.update(prompt_cache_key=self.install_id())
-        key = (target.preset.id, target.base_url, target.auth, credential.fingerprint,
-               repr(sorted(options.items(), key=str)))
+        key = (preset.id, base_url, credential.method, credential.fingerprint, repr(sorted(options.items(), key=str)))
+        target = Target(preset=preset, model="", base_url=base_url, auth=credential.method,
+                        local=preset.is_local(base_url))
         with self._lock:
             adapter = self._adapters.get(key)
             if adapter is None:
-                cls = adapter_class(target.preset.adapter)
-                adapter = cls(target.preset, base_url=target.base_url, api_key=credential.api_key,
-                              credential=credential, http_client=self._http_client_for(target),
+                cls = adapter_class(preset.adapter)
+                adapter = cls(preset, base_url=base_url, api_key=credential.api_key, credential=credential,
+                              http_client=self._http_client_for(target),
                               timeout=float(self._setting("ai_timeout", 600)), **options)
                 self._adapters[key] = adapter
         return adapter
@@ -485,10 +511,14 @@ class LLMClient:
         """What a call for `task` would use, for the settings dialog and Ditto's header (no secrets). `source`
         says where the credential comes from: vault, env:<VARIABLE>, runtime, profile:<name> or none."""
         target = self.resolve(task)
+        spec = target.preset.method(target.auth)
         try:
-            source = self.credential(target).source
+            credential = self.credential(target)
         except LLMError:
-            source = "none"
+            credential = None
         return {"provider": target.provider, "label": target.preset.label, "model": target.model,
-                "base_url": target.base_url, "auth": target.auth, "auth_source": source, "local": target.local,
+                "base_url": target.base_url, "auth": target.auth, "auth_label": spec.label if spec else target.auth,
+                "auth_type": spec.type if spec else None, "auth_source": credential.source if credential else "none",
+                "workspace_id": credential.workspace_id if credential else None,
+                "profile": credential.profile if credential else None, "local": target.local,
                 "privacy": "off (local)" if target.local else self.privacy_level()}
