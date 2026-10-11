@@ -26,7 +26,6 @@ from dataclasses import dataclass, asdict
 
 import click
 import yaml
-import requests
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
@@ -38,8 +37,7 @@ from orchestrator.Core.orchestrator import LLMOrchestrator, BuildRequest, Workfl
 from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel
 from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.Core.deployment_manager import DeploymentManager
-from orchestrator.utils.logging import get_logger, setup_logging
-from orchestrator.utils.validation import ValidationError
+from orchestrator.utils.logging import setup_logging
 
 # ============================================================================
 # DATENKLASSEN

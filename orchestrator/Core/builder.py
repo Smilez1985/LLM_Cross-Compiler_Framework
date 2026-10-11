@@ -16,22 +16,19 @@ Updates v2.4.0-IMatrix:
 import os
 import sys
 import json
-import logging
 import subprocess
 import threading
 import time
 import shutil
-import tempfile
 import hashlib
 import re
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union, Callable, Tuple
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor
 from enum import Enum
-import asyncio
 
 import yaml
 import docker
