@@ -235,7 +235,8 @@ are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what 
 - Each provider lists its sign-in methods in `configs/llm_providers.yml` in the order they are preferred; the
   first usable one is used unless `ai_auth_<provider>` names one. A key in one of the environment variables in
   the table above is used only when no key is stored, and the AI settings show the variable as its source; it
-  is never copied into the vault.
+  is never copied into the vault. When the vault cannot be read, the variable is not used and the error names
+  the problem with the vault.
 - A free check (the provider's model list, OpenRouter's key endpoint) tells whether the stored key works, which
   workspace or key name it belongs to and how many models it can use. Sign-in details that are not secret
   (account or workspace, the last four characters of a key, when it was checked) are kept in `auth.json` next to

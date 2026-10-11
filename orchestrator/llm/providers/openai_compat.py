@@ -193,7 +193,7 @@ class OpenAICompatAdapter(ProviderAdapter):
             return models
         except Exception as e:
             raise map_openai_error(e, label=self.label, provider=self.provider, preset=self.preset,
-                                   base_url=self.base_url) from None
+                                   base_url=self.base_url, during="models") from None
 
 
 def _content(content) -> Any:

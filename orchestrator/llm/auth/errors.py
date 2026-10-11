@@ -3,8 +3,8 @@
 Sign-in problems with a known cause: AuthError(code, message, actions).
 
 `message` is plain language, `actions` are the GUI's buttons and the CLI's "Next:" lines, `exit_code` is the CLI's
-exit code (3 authentication, 4 network, 5 storage, 6 method not available). Each error is also an instance of the
-matching LLMError class (NotConfigured, AuthFailed, BillingError, ...), so callers that know only those keep
+exit code (3 authentication, 4 network, 5 storage, 6 not allowed or not available). Each error is also an instance
+of the matching LLMError class (NotConfigured, AuthFailed, BillingError, ...), so callers that know only those keep
 working. Provider text is passed through redact_secrets before it becomes part of a message.
 
 classify() recognizes the causes from an HTTP status, the provider's error text and body; it is shared by the
@@ -178,10 +178,13 @@ ERRORS: Dict[str, ErrorSpec] = {
                               (AuthAction("retry", "Retry"),), "unavailable", EXIT_NETWORK),
     "auth.refresh_busy": ErrorSpec("{provider_label}: another program is renewing this sign-in. Try again.",
                                    (AuthAction("retry", "Retry"),), "unavailable", EXIT_NETWORK),
-    "auth.refresh_failed": ErrorSpec("{provider_label}: the sign-in could not be renewed (the answer had no "
-                                     "token). Try again later or sign in again.",
+    "auth.refresh_failed": ErrorSpec("{provider_label}: the sign-in could not be renewed{reason}. Try again later "
+                                     "or sign in again.",
                                      (AuthAction("retry", "Retry"), AuthAction("sign_in", "Sign in again")),
                                      "unavailable", EXIT_NETWORK),
+    "auth.origin_mismatch": ErrorSpec("{provider_label}: the key belongs to {origin}, so it is not sent to {url}. "
+                                      "Check the address, or save a key for it.",
+                                      (AuthAction("edit_url", "Edit address"),), exit_code=EXIT_POLICY),
     "auth.not_built": ErrorSpec("{provider_label}: the sign-in method '{method}' is not available in this version.",
                                 (AuthAction("switch_method", "Choose another method"),), exit_code=EXIT_POLICY),
 }

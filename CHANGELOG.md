@@ -39,19 +39,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Sign-in methods per provider** (`configs/llm_providers.yml` schema 2, `orchestrator/llm/auth`): each
   provider lists its sign-in methods in the order they are preferred, with the page where the key is created,
   the environment variables it reads, a free check and extra fields such as the Claude workspace ID or the
-  OpenAI organization and project. Catalogs of schema 1 in your config directory still load. Sign-in details
+  OpenAI organization and project. Catalogs of schema 1 in your config directory still load; one of a newer
+  schema is refused with a message instead of being misread. Sign-in details
   that are not secret (account or workspace, the last four characters of a key, extra fields, when it was
   checked) are kept in `auth.json` next to the credential vault. Tokens of the sign-in flows that come later are
   renewed under a lock shared by the GUI, the CLI and the MCP server; the new refresh token is stored before it
   is used, and a refused renewal marks the sign-in as expired.
 - **Credential check** (for the coming "Check" button and `auth status --check`): one free GET request (the
   model list, OpenRouter's key endpoint) says whether the stored key works, which workspace or key name it
-  belongs to and how many models it can use; a key that works but may not list models is reported as such.
-  Redirects are not followed, so the key goes to the provider only.
+  belongs to and how many models it can use; a key that works but may not list models is reported as such, also
+  by the live model list in the AI settings. Redirects are not followed, so the key goes to the provider only.
 - **API keys from environment variables**: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and
   `OPENROUTER_API_KEY` are used when no key is stored for the provider (only the variables the provider catalog
   lists, read by the framework and never by the SDKs). The AI settings name the variable, nothing is copied
-  into the vault, and a stored key always wins.
+  into the vault, and a stored key always wins. When the credential vault cannot be read, no variable stands in
+  for the key that may be stored there: the error says what is wrong with the vault.
 - **How credentials are protected is your choice** (setting `secret_storage`, or `LLM_SECRET_STORAGE` for
   one run): the OS keyring (default), a credential helper command (`secret_helper`, e.g.
   `pass show llmcc/vault-key`, run without a shell), a passphrase asked once per start (scrypt), a key file
@@ -176,6 +178,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   after the base URL changes it is no longer sent. A key saved by an earlier version is bound to the address it
   is next used with. Claude Admin API keys are also refused for a Claude API preset in your own provider
   catalog that does not list them.
+- Sign-in hardening: the key hint in the AI settings never binds a key of an earlier version to an address that
+  is still being typed; signing out also removes such a key; the credential check sends a key bound to one
+  address to that address only; a key variable of a local engine in your own catalog goes only to the address
+  the catalog gives. A non-secret field (workspace ID, project) can no longer be declared with a credential
+  header such as `Authorization` or `x-api-key`, where it would replace the stored key. A failed token renewal
+  names only the kind of failure, and a vendor message that quotes the refresh token is shown without it.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

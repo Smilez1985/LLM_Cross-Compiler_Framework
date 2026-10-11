@@ -244,7 +244,8 @@ Anbieter übersetzt sie in das, was er versteht.
 - Jeder Anbieter nennt seine Anmeldeverfahren in `configs/llm_providers.yml` in der Reihenfolge, in der sie
   bevorzugt werden; das erste nutzbare wird genutzt, außer `ai_auth_<Anbieter>` nennt eines. Ein Schlüssel in einer
   der Umgebungsvariablen aus der Tabelle oben wird nur genutzt, wenn kein Schlüssel gespeichert ist, und die
-  KI-Einstellungen zeigen die Variable als Quelle; er wird nie in den Tresor kopiert.
+  KI-Einstellungen zeigen die Variable als Quelle; er wird nie in den Tresor kopiert. Lässt sich der Tresor nicht
+  lesen, wird die Variable nicht genutzt, und die Fehlermeldung nennt das Problem mit dem Tresor.
 - Eine kostenlose Prüfung (die Modellliste des Anbieters, bei OpenRouter der Schlüssel-Endpunkt) zeigt, ob der
   gespeicherte Schlüssel funktioniert, zu welchem Workspace oder Schlüsselnamen er gehört und wie viele Modelle er
   nutzen kann. Angaben zu einer Anmeldung, die nicht geheim sind (Konto oder Workspace, die letzten vier Zeichen

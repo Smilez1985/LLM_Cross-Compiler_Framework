@@ -144,6 +144,10 @@ class CredentialResolver:
         raise self.not_signed_in(preset)
 
     def not_signed_in(self, preset: Any, spec: Optional[AuthMethodSpec] = None) -> NotConfigured:
+        """No usable credential. When the vault cannot be read, that is the answer (a key may be stored there)."""
+        problem = self.store.storage_problem(preset.id)
+        if problem is not None:
+            return problem
         spec = spec or next((m for m in preset.methods if m.type == "api_key"), None)
         env = f" or set {' or '.join(spec.env)}" if spec is not None and spec.env else ""
         key_page = spec.key_page if spec is not None else None
@@ -182,10 +186,11 @@ class CredentialResolver:
             return handler[0](self, preset, spec, base_url)
         raise auth_error("auth.not_built", provider=preset.id, provider_label=preset.label, method=spec.id)
 
-    def field_values(self, preset: Any, spec: AuthMethodSpec) -> Dict[str, str]:
+    def field_values(self, preset: Any, spec: AuthMethodSpec, origin: Optional[str] = None) -> Dict[str, str]:
         """The fields of `spec`: a setting named by the field wins while it is set (the AI dialog still writes
-        ai_anthropic_workspace_id), else the stored metadata. Malformed values raise before any request."""
-        meta = self.store.metadata(preset.id, spec.id)
+        ai_anthropic_workspace_id), else the metadata stored with the key (for its origin where keys are bound).
+        Malformed values raise before any request."""
+        meta = self.store.metadata(preset.id, spec.id, origin)
         values: Dict[str, str] = {}
         for item in spec.fields:
             raw = self.setting(item.setting) if item.setting else None
@@ -212,7 +217,7 @@ class CredentialResolver:
         key = found.value.get_secret_value().strip()
         if spec.rejected(key):
             raise rejected_key_error(preset)  # before any request
-        values = self.field_values(preset, spec)
+        values = self.field_values(preset, spec, origin)
         headers = {item.header: values[item.id] for item in spec.fields if item.header and item.id in values}
         return ResolvedCredential(kind="api_key", method=spec.id, type=spec.type, source=found.source,
                                   api_key=SecretStr(key), headers=headers, workspace_id=values.get("workspace_id"),
@@ -224,8 +229,8 @@ class CredentialResolver:
             raise auth_error("auth.signed_out", provider=preset.id, provider_label=preset.label)
         record = self.store.get_record(preset.id, spec.id)
         if not record:
-            raise auth_error("auth.not_signed_in", provider=preset.id, provider_label=preset.label,
-                             key_page=spec.key_page)
+            raise self.store.storage_problem(preset.id) or auth_error(
+                "auth.not_signed_in", provider=preset.id, provider_label=preset.label, key_page=spec.key_page)
         if record.get("kind") == "api_key" and isinstance(record.get("secret"), str):
             # A flow whose result is an API key (OpenRouter): used like a stored key, nothing to refresh.
             return ResolvedCredential(kind="api_key", method=spec.id, type=spec.type, source="vault",
