@@ -93,7 +93,9 @@ A build runs these steps; each one is logged:
    RKLLM, RKNN `i8`).
 3. **Build image:** the target's Docker image with all toolkits (llama.cpp v0.6.0, RKLLM-Toolkit 1.3.1,
    RKNN-Toolkit2 2.3.2, each in its own Python environment). BuildKit is used when available, and the real cause
-   of a failure is reported. Later builds reuse Docker's build cache.
+   of a failure is reported. Later builds reuse Docker's build cache. llama.cpp's conversion tools
+   ([below](#conversion-tools-tuned-to-the-build-host)) are built in this step from the pinned commit with the build
+   recipe's options for this machine.
 4. **Stage the model on the host:** a Hugging Face model is downloaded on your computer (with the token
    `hf_token` for gated models), a local folder or file is used as it is. The containers get it read-only.
 5. **Security scan:** Trivy scans the image for HIGH and CRITICAL vulnerabilities (setting `enable_security_scan`,
@@ -129,6 +131,34 @@ Further behaviour:
 - **Output folder:** CLI builds go to `output/build_<date>_<time>/<target>/<model>/<quantization>/` in the
   installation (or the folder given with `-o`), builds started in the GUI, by Ditto or by MCP clients to
   `output/<target>/<model>/<quantization>/`.
+
+### Conversion tools tuned to the build host
+
+The target images build llama.cpp's conversion tools (`llama-quantize`, `llama-imatrix`, `llama-perplexity`,
+`llama-completion`, `llama-bench`) from source with the same recipe as Ditto's server
+([How the runtime is built](#how-the-runtime-is-built-self-built-llamacpp)); the shipped Rockchip target and the
+template for new targets use the same steps.
+
+- **The pin, by commit:** the engine passes `LLAMA_CPP_TAG` and `LLAMA_CPP_COMMIT`; the image fetches the commit and
+  stops unless `git rev-parse HEAD` gives it back, so a moved tag cannot change what is built. The setting
+  `llama_cpp_version` cannot move it either; a different value gives a warning.
+- **Tuned to the machine that runs them:** the image runs on the build host, so `LLAMA_CMAKE_ARGS` is the recipe's
+  plan for purpose `host-tools` from a probe of this machine, taken right before the image build (or this machine's
+  stored profile if the probe fails): its CPU features written out (AVX-512 only where the CPU has it, no AVX2 on a
+  CPU before Haswell, so no illegal instruction), or all CPU variants, the best one chosen at run time, when the
+  probe could not tell every feature. Without a probe, or with a Docker daemon on another machine, the Dockerfile's
+  default applies: the fixed x86-64 baseline these tools always had (AVX2, FMA, F16C, no AVX-512), written out.
+- **Every build:** after these options the image sets what every build has (nothing downloaded at configure time,
+  no subprocess support, the build number and commit); words that are not `-DNAME=VALUE`, options that download
+  whenever they are set and a configure log that reports a download stop the build, and `llama-bench --version`
+  must report the pinned build and commit. Build arguments of a build request cannot replace the three llama.cpp
+  arguments, and CPU or CMake flags from the module wizard or an AI never reach them.
+- **Recorded:** the build log names the tuning, and `build_info.json` keeps it under `llama_cpp_tools` (tag, commit,
+  tuning, plan ID and its words).
+- **Same output:** the GGUF `llama-quantize` writes does not depend on this tuning. Measured at the pin with GCC
+  13.3 on a synthetic 6 MB llama model: Q2_K, Q3_K_M, Q4_0, Q4_K_M, Q5_K_M, Q6_K, Q8_0, IQ4_NL, IQ4_XS and TQ2_0
+  (without an importance matrix) were byte-identical from three builds: the default baseline, AVX-512 with AMX, and
+  AVX without AVX2 or FMA. Building the five tools took 3 to 6 minutes on a 4-core virtual machine (`-j4`).
 
 ---
 
@@ -953,9 +983,22 @@ The GUI's input fields offer what you used recently, newest first.
 - **New target from a probe:** `llm-cli module generate-ai <probe file>` or the wizard's AI analysis. Ditto proposes
   architecture, SDK, base image, packages, CPU and CMake flags, setup commands and the quantization block of
   `build.sh`; you see the whole proposal first.
+- **The device runtime in the module:** every new `target.yml` gets a `runtime:` block, the build recipe's plan for
+  the board's llama.cpp runtime from the target's probe (the wizard's imported probe file, the probe file of
+  `module generate-ai`, or `llm-cli module create --probe <file>`): architecture, OS, the C library the cross build
+  must not exceed, the builder base, the CPU options (for the RK3566 `armv8.2-a+dotprod+fp16`), the backends and the
+  programs. It says that llama.cpp is built from source; it is a record, and the runtime is always planned again from
+  the device's own probe. CPU and CMake flags from the wizard or Ditto are kept there under `advisory` and never
+  applied.
+- **llama.cpp in new targets:** the template Dockerfile builds the conversion tools like the Rockchip image
+  ([Conversion tools tuned to the build host](#conversion-tools-tuned-to-the-build-host)). The GPU template takes
+  CUDA 12.9.1 from NVIDIA's redist archives (manifest pinned by sha256, every archive checked) on Ubuntu 22.04 pinned
+  by digest; NVIDIA's prebuilt development image is only an explicit opt-in, pinned by digest and labelled.
 - **Checks before anything is written:** names, images, packages and flags are validated strictly; shell code is
   checked against a deny-list and with `bash -n`; files are written only inside `targets/`; an existing target is
-  never overwritten. Setup commands run later as an unprivileged user without network.
+  never overwritten. Setup commands run later as an unprivileged user without network. A target that pulls a
+  prebuilt llama.cpp image, copies llama.cpp binaries out of another image, downloads release archives or binaries
+  or installs a llama.cpp package is refused: the framework shares recipes, not binaries.
 - **Knowledge snapshot (opt-in):** on the wizard's last page, **Attach the knowledge crawled for this target** (off
   by default, available after a Deep Ingest in the wizard) writes the pages crawled from the wizard's Deep Ingest
   URLs, privacy-scrubbed, to `knowledge/initial_knowledge.json` in the new target, with a `README.md` that says
@@ -1088,9 +1131,10 @@ rebuilt, never downloaded as a model.
 2. A pack from the index is downloaded pinned by the size and sha256 the index gives.
 3. The pack is extracted into a quarantine folder (`.quarantine/` in the install folder) and checked: exactly the
    listed files with their hashes, no links, special or binary files, and the checks of its kind. Targets: a valid
-   `capabilities` block, every image a Dockerfile pulls (`FROM`, `COPY --from`, `RUN --mount=...,from=`) pinned by
-   digest unless it is an official base image, the shell deny-list on every script line that is not from the
-   shipped template, `bash -n`, no template placeholders. Recipes: the recipe schema and the target's capabilities.
+   `capabilities` block (and `runtime` block, if there is one), every image a Dockerfile pulls (`FROM`,
+   `COPY --from`, `RUN --mount=...,from=`) pinned by digest unless it is an official base image, no prebuilt
+   llama.cpp (images, copied or downloaded binaries, packages), the shell deny-list on every script line that is not
+   from the shipped template, `bash -n`, no template placeholders. Recipes: the recipe schema and the target's capabilities.
    Knowledge: a list of pages, each with its source.
 4. A summary (kind, id, version, author, licence, trust level, source, files, destination and notes such as the
    author signature) is shown as plain text, so text from a pack cannot hide its trust level. Nothing is installed

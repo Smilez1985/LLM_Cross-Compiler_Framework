@@ -328,7 +328,8 @@ class ConfigManager:
             ConfigSchema("image_trivy", str, False, "aquasec/trivy:0.75.0", "Security Scanner Image (pinned: 'latest' was compromised in 2026-03)"),
             ConfigSchema("enable_security_scan", bool, False, True, "Scan built images with Trivy"),
             ConfigSchema("llama_cpp_version", str, False, pinned_tag(),
-                         "llama.cpp tag built into target images (default: the pin in llama_runtime.yml)"),
+                         "llama.cpp tag of the pin in llama_runtime.yml; target images build the pin's commit, and "
+                         "another value only gives a warning"),
             ConfigSchema("calibration_language", str, False, "mixed", "Shipped calibration text for importance matrices",
                          ["regex:^(mixed|de|en)$"]),
             ConfigSchema("build_sandbox", bool, False, True, "Run conversion containers without network, capabilities or root"),

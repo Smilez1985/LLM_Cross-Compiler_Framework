@@ -190,10 +190,13 @@ class ModuleDefinition(BaseModel):
     module_name: str = Field(description="Short target name: letters, digits, space, '_', '.', '-'; at most 64")
     architecture: Literal[ARCHITECTURES]
     sdk: str = Field(description="SDK or vendor stack, e.g. rknn-toolkit2, cuda, none")
-    base_os: str = Field(description="Docker base image, e.g. debian:bookworm-slim or ubuntu:22.04")
+    base_os: str = Field(description="Docker base image, e.g. debian:bookworm-slim or ubuntu:22.04 (CUDA targets get "
+                                     "CUDA from the framework's pinned redist archives; no nvidia/cuda image needed)")
     packages: List[str] = Field(description="Debian/Ubuntu package names for the build image")
-    cpu_flags: str = Field(description="GCC flags for the target CPU, e.g. -mcpu=cortex-a76")
-    cmake_flags: str = Field(description="CMake flags for llama.cpp, e.g. -DGGML_NATIVE=OFF")
+    cpu_flags: str = Field(description="GCC flags for the target CPU, e.g. -mcpu=cortex-a76 (advisory: shown in the "
+                                       "module, never applied)")
+    cmake_flags: str = Field(description="CMake flags for llama.cpp, e.g. -DGGML_NATIVE=OFF (advisory: the framework "
+                                         "builds llama.cpp with its own recipe from the device's probe)")
     setup_commands: str = Field(description="Bash run before converting, as the unprivileged build user and "
                                             "without network (e.g. exporting SDK variables); may be empty")
     quantization_logic: str = Field(description="Body of the bash `case \"$QUANT\" in` block of build.sh")
@@ -438,8 +441,10 @@ HEALING_SYSTEM = (
 MODULE_SYSTEM = (
     f"You are Ditto, an expert embedded systems engineer for the LLM Cross-Compiler Framework. {FRAMEWORK} From a "
     "hardware probe, propose the definition of a new target module: architecture, SDK, a Docker base image "
-    "(debian:* or ubuntu:* unless an image is pinned by digest), Debian package names, CPU and CMake flags for "
-    "llama.cpp, optional setup commands and the quantization case block of build.sh. sdk is the vendor toolkit "
+    "(debian:* or ubuntu:* unless an image is pinned by digest; CUDA comes from the framework's pinned redist "
+    "archives, so no nvidia/cuda image), Debian package names, CPU and CMake flags for llama.cpp (kept as advisory "
+    "notes: the framework builds llama.cpp with its own recipe from the device probe), optional setup commands and "
+    "the quantization case block of build.sh. sdk is the vendor toolkit "
     "the conversion needs (e.g. cuda for NVIDIA GPUs, rknn-toolkit2 for Rockchip NPUs, none for CPU-only "
     "boards), never a container tool. cpu_flags are compiler flags such as -mcpu=cortex-a76 or -march=znver4, "
     "not the feature list of /proc/cpuinfo. cmake_flags are llama.cpp CMake options (e.g. -DGGML_CUDA=ON for "
@@ -680,8 +685,11 @@ class DittoCoder:
                                        optimization=answer.optimization, explanation=answer.explanation)
 
     def save_module(self, definition: Union[ModuleDefinition, Dict[str, Any]], targets_dir: Path,
-                    module_name: Optional[str] = None) -> Path:
-        """Creates the module through the module generator (which validates every value again)."""
+                    module_name: Optional[str] = None, profile=None) -> Path:
+        """Creates the module through the module generator (which validates every value again). `profile` is the
+        parsed hardware probe of the target, when the probe file was one: the runtime: block of the module is the
+        build recipe's plan from it. The proposal's cpu_flags and cmake_flags are kept there as advisory text and
+        never applied (decision D20)."""
         data = definition.model_dump() if isinstance(definition, BaseModel) else dict(definition)
         packages = data.get("packages", [])
         if isinstance(packages, str):
@@ -701,7 +709,7 @@ class DittoCoder:
             "detection_commands": "lscpu",
             "supported_boards": [name],
         }
-        return ModuleGenerator(Path(targets_dir)).generate_module(generator_input, self.framework)
+        return ModuleGenerator(Path(targets_dir)).generate_module(generator_input, self.framework, profile=profile)
 
     # --- chat ---------------------------------------------------------------------------------------------
     def _context_limit(self) -> int:

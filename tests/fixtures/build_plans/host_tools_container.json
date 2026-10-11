@@ -1,6 +1,6 @@
 {
   "backend": "cpu",
-  "build_id": "ff086c69fc8f7aac4a86deccd772b8c0d88f4afd4f92ca1f345e1e5eac078652",
+  "build_id": "2ce2ce2a38f38a8e51afe4a87fd64e741e619eec4ee143a522bd2a121c83ff27",
   "builder": {
     "base": "target-image",
     "image": "debian:bookworm-slim",
@@ -8,12 +8,11 @@
     "libc": "glibc"
   },
   "notes": [
-    "backend cpu: conversion tools are CPU builds",
-    "what -march/-mcpu=native expands to is recorded by the executor"
+    "backend cpu: conversion tools are CPU builds"
   ],
   "placement": "container",
   "purpose": "host-tools",
-  "recipe_version": 2,
+  "recipe_version": 3,
   "source": {
     "build_number": 11429,
     "commit": "d81235049384534c167caea52b85a694f6103d14",
@@ -29,14 +28,28 @@
         "BUILD_SHARED_LIBS": "OFF",
         "CMAKE_BUILD_TYPE": "Release",
         "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "GGML_AMX_BF16": "OFF",
+        "GGML_AMX_INT8": "OFF",
+        "GGML_AMX_TILE": "OFF",
+        "GGML_AVX": "ON",
+        "GGML_AVX2": "ON",
+        "GGML_AVX512": "OFF",
+        "GGML_AVX512_BF16": "OFF",
+        "GGML_AVX512_VBMI": "OFF",
+        "GGML_AVX512_VNNI": "OFF",
+        "GGML_AVX_VNNI": "OFF",
+        "GGML_BMI2": "ON",
         "GGML_CCACHE": "OFF",
         "GGML_CPU_KLEIDIAI": "OFF",
         "GGML_CUDA": "OFF",
+        "GGML_F16C": "ON",
+        "GGML_FMA": "ON",
         "GGML_HIP": "OFF",
         "GGML_METAL": "OFF",
-        "GGML_NATIVE": "ON",
+        "GGML_NATIVE": "OFF",
         "GGML_OPENMP": "ON",
         "GGML_OPENMP_FETCH": "OFF",
+        "GGML_SSE42": "ON",
         "GGML_VULKAN": "OFF",
         "LLAMA_BUILD_APP": "OFF",
         "LLAMA_BUILD_COMMIT": "d8123504",
@@ -70,28 +83,7 @@
     "triple": null
   },
   "toolchain": {
-    "cmake": "3.25.1",
-    "native": {
-      "ARCH": "x86_64",
-      "CPU_MODEL": "AMD Ryzen 9 5900X 12-Core Processor",
-      "CPU_VENDOR": "amd",
-      "features": {
-        "SUPPORTS_AMX_BF16": "OFF",
-        "SUPPORTS_AMX_INT8": "OFF",
-        "SUPPORTS_AMX_TILE": "OFF",
-        "SUPPORTS_AVX": "ON",
-        "SUPPORTS_AVX2": "ON",
-        "SUPPORTS_AVX512": "OFF",
-        "SUPPORTS_AVX512_BF16": "OFF",
-        "SUPPORTS_AVX512_VBMI": "OFF",
-        "SUPPORTS_AVX512_VNNI": "OFF",
-        "SUPPORTS_AVX_VNNI": "OFF",
-        "SUPPORTS_BMI2": "ON",
-        "SUPPORTS_F16C": "ON",
-        "SUPPORTS_FMA": "ON",
-        "SUPPORTS_SSE42": "ON"
-      }
-    }
+    "cmake": "3.25.1"
   },
   "verify": {
     "binaries": [

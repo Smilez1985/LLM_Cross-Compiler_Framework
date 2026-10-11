@@ -1,12 +1,24 @@
-# Dockerfile.gpu - NVIDIA GPU Optimized Template
+# Dockerfile.gpu - NVIDIA GPU template
 # LLM Cross-Compiler Framework
-# DIREKTIVE: Goldstandard, CUDA-Support, Hadolint-konform
+# Multi-stage, hadolint-clean. llama.cpp is built from source with the shared recipe (the same blocks as
+# targets/Rockchip/dockerfile): the framework shares recipes, never prebuilt llama.cpp images or binaries. The
+# llama.cpp conversion tools are CPU builds for now (GPU tools are a later step of the recipe).
+#
+# CUDA comes from NVIDIA's redist archives: the manifest redistrib_<version>.json is pinned by its sha256 (the values
+# of configs/llama_runtime.yml, cuda.toolkits), and every component archive is checked against the sha256 the
+# manifest lists before it is unpacked. The components come under NVIDIA's CUDA Toolkit licence (LICENSE in each
+# archive); building this image downloads them for your own use.
+#
+# Opt-in, not provisioned from the manifest: NVIDIA's prebuilt development image, pinned by digest. To use it,
+# replace the FROM line of the builder stage with
+#   FROM nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8 AS builder
+# and set CUDA_SOURCE=prebuilt-image; the image is then labelled as built with a prebuilt CUDA image. The module
+# generator does this when a digest-pinned nvidia/cuda:*-devel-ubuntu22.04 image is chosen as base image.
 
 # ============================================================================
-# STAGE 1: Build Environment (CUDA)
+# STAGE 1: Build Environment (CUDA toolkit)
 # ============================================================================
-# Wir nutzen das offizielle NVIDIA Devel Image als Basis für Kompilierung
-FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS builder
+FROM ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401 AS builder
 
 LABEL maintainer="Community Contributor"
 LABEL description="[Hardware-Familie] GPU Cross-Compilation Container"
@@ -14,45 +26,168 @@ LABEL target.sdk="CUDA"
 
 ARG USER_ID=1000
 ARG GROUP_ID=1000
-ARG BUILD_JOBS=4
-# Python Version in Ubuntu 22.04 ist 3.10, wir installieren 3.11 via ppa wenn nötig
-# oder nutzen Standard. Hier nutzen wir Standard für Stabilität.
+# Parallel compile jobs; empty = all cores (the framework lowers it after an out-of-memory build).
+ARG BUILD_JOBS=
+# Ubuntu 22.04 ships Python 3.10; the runtime stage uses the same base, so the venv copied over keeps working.
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
 ENV BUILD_CACHE_DIR=/build-cache
 ENV PATH="/root/.local/bin:$PATH"
 ENV CUDA_HOME=/usr/local/cuda
+ENV CUDA_RUNTIME_DIR=/opt/cuda-runtime
 
 # System Dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        build-essential cmake make git curl wget ca-certificates \
+        build-essential cmake make git curl wget ca-certificates xz-utils \
         python3 python3-pip python3-dev python3-venv \
-        pkg-config libffi-dev libssl-dev jq bc file time ccache \
+        pkg-config libffi-dev libssl-dev jq bc file time ccache libgomp1 \
         {packages_str} \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
+
+# CUDA toolkit: redist (default) or prebuilt-image (opt-in, see the top of this file). CUDA_HOME gets the toolkit,
+# CUDA_RUNTIME_DIR the runtime libraries the runtime stage takes over (cudart, cuBLAS).
+ARG CUDA_SOURCE=redist
+ARG CUDA_VERSION=12.9.1
+ARG CUDA_REDIST_BASE_URL=https://developer.download.nvidia.com/compute/cuda/redist/
+ARG CUDA_REDIST_MANIFEST_SHA256=8335301010b0023ee1ff61eb11e2600ca62002d76780de4089011ad77e0c7630
+ARG CUDA_COMPONENTS="cuda_nvcc cuda_cudart cuda_cccl libcublas"
+LABEL org.llm-framework.cuda-source="${CUDA_SOURCE}" org.llm-framework.cuda-version="${CUDA_VERSION}"
+# hadolint ignore=SC2086
+RUN set -euf; \
+    case "${CUDA_SOURCE}" in \
+    redist) \
+        case "$(uname -m)" in \
+            x86_64) platform=linux-x86_64 ;; \
+            aarch64) platform=linux-sbsa ;; \
+            *) echo "NVIDIA has no CUDA redist archives for $(uname -m)" >&2; exit 1 ;; \
+        esac; \
+        work="$(mktemp -d)"; \
+        curl -fsS -o "${work}/redistrib.json" "${CUDA_REDIST_BASE_URL}redistrib_${CUDA_VERSION}.json"; \
+        echo "${CUDA_REDIST_MANIFEST_SHA256}  ${work}/redistrib.json" | sha256sum -c -; \
+        mkdir -p "${CUDA_HOME}"; \
+        for component in ${CUDA_COMPONENTS}; do \
+            path="$(jq -er --arg c "${component}" --arg p "${platform}" '.[$c][$p].relative_path' "${work}/redistrib.json")"; \
+            sum="$(jq -er --arg c "${component}" --arg p "${platform}" '.[$c][$p].sha256' "${work}/redistrib.json")"; \
+            case "${path}" in \
+                *..*|/*) echo "CUDA ${component}: unexpected archive path in the manifest" >&2; exit 1 ;; \
+            esac; \
+            printf '%s\n' "${path}" | grep -Eqx '[A-Za-z0-9_][A-Za-z0-9_./-]*\.tar\.xz' \
+                || { echo "CUDA ${component}: unexpected archive path in the manifest" >&2; exit 1; }; \
+            printf '%s\n' "${sum}" | grep -Eqx '[0-9a-f]{64}' \
+                || { echo "CUDA ${component}: the manifest lists no sha256" >&2; exit 1; }; \
+            curl -fsS -o "${work}/component.tar.xz" "${CUDA_REDIST_BASE_URL}${path}"; \
+            echo "${sum}  ${work}/component.tar.xz" | sha256sum -c -; \
+            tar -xJf "${work}/component.tar.xz" -C "${CUDA_HOME}" --strip-components=1 --no-same-owner; \
+            rm -f "${work}/component.tar.xz"; \
+        done; \
+        rm -rf "${work}"; \
+        [ -e "${CUDA_HOME}/lib64" ] || ln -s lib "${CUDA_HOME}/lib64"; \
+        echo "CUDA ${CUDA_VERSION} from NVIDIA's redist archives, checked against the pinned manifest" ;; \
+    prebuilt-image) \
+        [ -x "${CUDA_HOME}/bin/nvcc" ] \
+            || { echo "CUDA_SOURCE=prebuilt-image needs an NVIDIA development image as base" >&2; exit 1; }; \
+        echo "CUDA from a prebuilt NVIDIA image (opt-in): not provisioned from the pinned manifest" ;; \
+    *) echo "CUDA_SOURCE must be redist or prebuilt-image" >&2; exit 1 ;; \
+    esac; \
+    mkdir -p "${CUDA_RUNTIME_DIR}/lib"; \
+    set +f; \
+    cp -P "${CUDA_HOME}"/lib64/libcudart.so* "${CUDA_HOME}"/lib64/libcublas.so* "${CUDA_HOME}"/lib64/libcublasLt.so* \
+        "${CUDA_RUNTIME_DIR}/lib/"
+ENV PATH="${CUDA_HOME}/bin:${PATH}"
+
+# --- llama.cpp conversion tools (convert, quantize, imatrix; completion, perplexity, bench): the source ---
+# Built from the one llama.cpp pin (configs/llama_runtime.yml, llama_cpp.source) by commit, never by a tag alone: the
+# framework passes LLAMA_CPP_TAG and LLAMA_CPP_COMMIT, and the build stops unless `git rev-parse HEAD` gives back the
+# commit. LLAMA_CMAKE_ARGS comes from the build recipe (orchestrator/runtime/build/recipe.py, purpose host-tools): the
+# CPU features of the build host's hardware probe, because the tools run on the machine that builds this image. The
+# defaults are for builds outside the framework (CI): the pin, and the fixed x86-64 baseline (AVX2, no AVX-512) these
+# tools always had, written out.
+ARG LLAMA_CPP_REPO=https://github.com/ggml-org/llama.cpp.git
+ARG LLAMA_CPP_TAG=b11429
+ARG LLAMA_CPP_COMMIT=d81235049384534c167caea52b85a694f6103d14
+RUN set -eu; \
+    printf '%s\n' "${LLAMA_CPP_COMMIT}" | grep -Eqx '[0-9a-f]{40}' \
+        || { echo "LLAMA_CPP_COMMIT must be a full commit id (40 hex characters)" >&2; exit 1; }; \
+    printf '%s\n' "${LLAMA_CPP_TAG}" | grep -Eqx 'b[0-9]{1,7}' \
+        || { echo "LLAMA_CPP_TAG must be a build tag such as b11429" >&2; exit 1; }; \
+    git init -q "${LLAMA_CPP_PATH}"; \
+    git -C "${LLAMA_CPP_PATH}" remote add origin "${LLAMA_CPP_REPO}"; \
+    if ! git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "${LLAMA_CPP_COMMIT}"; then \
+        echo "fetching the commit failed; fetching tag ${LLAMA_CPP_TAG}, which must be that commit" >&2; \
+        git -C "${LLAMA_CPP_PATH}" fetch -q --depth 1 origin "refs/tags/${LLAMA_CPP_TAG}"; \
+    fi; \
+    git -C "${LLAMA_CPP_PATH}" -c advice.detachedHead=false checkout -q FETCH_HEAD; \
+    head="$(git -C "${LLAMA_CPP_PATH}" rev-parse HEAD)"; \
+    [ "${head}" = "${LLAMA_CPP_COMMIT}" ] \
+        || { echo "llama.cpp: got commit ${head}, the pin is ${LLAMA_CPP_COMMIT}" >&2; exit 1; }; \
+    rm -rf "${LLAMA_CPP_PATH}/.git"; \
+    printf '%s\n' "${LLAMA_CPP_TAG}" > "${LLAMA_CPP_PATH}/.llama_cpp_tag"; \
+    printf '%s\n' "${LLAMA_CPP_COMMIT}" > "${LLAMA_CPP_PATH}/.llama_cpp_commit"
 
 # Python Environment Setup
 # Debian Bookworm / Ubuntu 24.04 refuse pip installs into the system Python (PEP 668), so a venv is used.
 ENV VIRTUAL_ENV=/opt/venv
 RUN python3 -m venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
-# GPU build: full CUDA wheels, not the CPU-only ones
-# Wir installieren hier NICHT die CPU Version, sondern die volle CUDA Version
+# GPU build: full CUDA wheels, not the CPU-only ones; plus the gguf package of llama.cpp's converter
 RUN python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
 RUN python3 -m pip install --no-cache-dir \
         torch torchvision torchaudio \
         transformers tokenizers safetensors sentencepiece protobuf \
         huggingface-hub datasets numpy scipy onnx onnxruntime-gpu \
-        tqdm psutil pyyaml requests
+        tqdm psutil pyyaml requests \
+    && python3 -m pip install --no-cache-dir "${LLAMA_CPP_PATH}/gguf-py"
+
+# --- llama.cpp conversion tools: the build (after the venvs, so a new LLAMA_CMAKE_ARGS rebuilds only this layer) ---
+# Every build: no option that downloads at configure or build time, no subprocess support in llama.cpp, no FetchContent
+# download (FETCHCONTENT_FULLY_DISCONNECTED), the build number and commit for --version. These come after
+# LLAMA_CMAKE_ARGS on the command line, so they always win. Options that download whenever they are set are refused,
+# and so is a configure log that reports a download. llama-bench --version must report the pinned build and commit.
+ARG LLAMA_CMAKE_ARGS="-DBUILD_SHARED_LIBS=OFF -DGGML_CCACHE=OFF -DGGML_OPENMP=ON -DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_AVX2=ON -DGGML_BMI2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_AVX512=OFF -DGGML_AVX512_VBMI=OFF -DGGML_AVX512_VNNI=OFF -DGGML_AVX512_BF16=OFF -DGGML_AVX_VNNI=OFF -DGGML_AMX_TILE=OFF -DGGML_AMX_INT8=OFF -DGGML_AMX_BF16=OFF"
+# hadolint ignore=SC2086
+RUN set -euf; \
+    native=no; \
+    for word in ${LLAMA_CMAKE_ARGS}; do \
+        printf '%s\n' "${word}" | grep -Eqx -- '-D[A-Z][A-Z0-9_]{0,63}=[A-Za-z0-9._:+/$;-]{0,256}' \
+            || { echo "LLAMA_CMAKE_ARGS: refusing '${word}' (only -DNAME=VALUE words)" >&2; exit 1; }; \
+        case "${word}" in \
+            -DLLAMA_BUILD_BORINGSSL=*|-DLLAMA_BUILD_LIBRESSL=*|-DGGML_CUDA_CCCL_VERSION=*|-DGGML_ZENDNN=*|-DGGML_VIRTGPU=*|-DLLAMA_BUILD_WEBUI=*|-DLLAMA_USE_PREBUILT_WEBUI=*) \
+                echo "LLAMA_CMAKE_ARGS: ${word%%=*} downloads at configure time and is never set" >&2; exit 1 ;; \
+            -DGGML_NATIVE=*) native=yes ;; \
+        esac; \
+    done; \
+    [ "${native}" = yes ] || { echo "LLAMA_CMAKE_ARGS must set GGML_NATIVE (always explicit)" >&2; exit 1; }; \
+    build_number="${LLAMA_CPP_TAG#b}"; \
+    short_commit="$(printf '%.8s' "${LLAMA_CPP_COMMIT}")"; \
+    log="${LLAMA_CPP_PATH}/configure.log"; \
+    cmake -S "${LLAMA_CPP_PATH}" -B "${LLAMA_CPP_PATH}/build" ${LLAMA_CMAKE_ARGS} \
+        -DCMAKE_BUILD_TYPE=Release -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF -DLLAMA_BUILD_APP=OFF \
+        -DLLAMA_BUILD_SERVER=OFF -DLLAMA_BUILD_UI=OFF -DLLAMA_USE_PREBUILT_UI=OFF -DLLAMA_LLGUIDANCE=OFF \
+        -DGGML_CPU_KLEIDIAI=OFF -DGGML_OPENMP_FETCH=OFF -DLLAMA_OPENSSL=OFF -DLLAMA_SUBPROCESS=OFF \
+        -DFETCHCONTENT_FULLY_DISCONNECTED=ON \
+        -DLLAMA_BUILD_NUMBER="${build_number}" -DLLAMA_BUILD_COMMIT="${short_commit}" \
+        > "${log}" 2>&1 || { cat "${log}" >&2; exit 1; }; \
+    cat "${log}"; \
+    if grep -Ei '\b(fetching|downloading|downloading from|hf download|hf fetch|running npm|populating|fetchcontent|git clone|cloning into)\b|\bfile\(download' "${log}" >&2; then \
+        echo "llama.cpp configure reported a download (lines above); the build stops" >&2; exit 1; \
+    fi; \
+    rm -f "${log}"; \
+    cmake --build "${LLAMA_CPP_PATH}/build" -j"${BUILD_JOBS:-$(nproc)}" \
+        --target llama-quantize llama-imatrix llama-completion llama-perplexity llama-bench; \
+    version="$("${LLAMA_CPP_PATH}/build/bin/llama-bench" --version 2>&1)"; \
+    case "${version}" in \
+        *"(build ${build_number}, commit ${short_commit})"*) printf '%s\n' "${version}" ;; \
+        *) echo "llama-bench --version: '${version}', expected build ${build_number}, commit ${short_commit}" >&2; exit 1 ;; \
+    esac; \
+    rm -rf "${LLAMA_CPP_PATH}/build/CMakeFiles"
 
 # ============================================================================
-# STAGE 2: Runtime Environment (CUDA Runtime)
+# STAGE 2: Runtime Environment (CUDA runtime libraries from the builder)
 # ============================================================================
-# Kleineres Runtime Image für die Ausführung
-FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04 AS runtime
+FROM ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401 AS runtime
 
 LABEL stage="runtime"
 
@@ -62,18 +197,25 @@ ARG USER_ID=1000
 ARG GROUP_ID=1000
 
 ENV BUILD_CACHE_DIR=/build-cache
+ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
 ENV PATH="/app/modules:/app/scripts:${PATH}"
+# Read by the NVIDIA container toolkit: which GPUs and driver parts the container gets.
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
-# Runtime Dependencies
+# Runtime Dependencies (libgomp1: the OpenMP runtime of the llama.cpp tools)
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        python3 cmake make git bc jq file curl gosu \
+        python3 cmake make git bc jq file curl gosu libgomp1 \
     && rm -rf /var/lib/apt/lists/* && apt-get clean
 
-# Copy Python Env from Builder
+# CUDA runtime libraries (cudart, cuBLAS) of the toolkit in the builder stage
+COPY --from=builder /opt/cuda-runtime/ /opt/cuda-runtime/
+RUN printf '%s\n' /opt/cuda-runtime/lib > /etc/ld.so.conf.d/cuda-runtime.conf && ldconfig
+
+# Copy Python Env and the llama.cpp tools (source tree with build/bin) from Builder
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /usr/src/llama.cpp /usr/src/llama.cpp
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

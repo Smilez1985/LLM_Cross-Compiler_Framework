@@ -88,9 +88,9 @@ class LocalizationManager(QObject):
             "wiz.lbl.packages": "System Packages (space separated):",
             
             "wiz.page.flags": "Compiler Flags",
-            "wiz.page.flags.sub": "Set default optimization flags",
-            "wiz.lbl.cpu_flags": "CPU Flags (GCC):",
-            "wiz.lbl.cmake_flags": "CMake Flags:",
+            "wiz.page.flags.sub": "Advisory: kept in the module, never applied (llama.cpp is built by the recipe)",
+            "wiz.lbl.cpu_flags": "CPU Flags (GCC, advisory):",
+            "wiz.lbl.cmake_flags": "CMake Flags (advisory):",
             
             "wiz.page.summary": "Summary & Generation",
             "wiz.page.summary.sub": "Review settings before generation",
@@ -324,9 +324,9 @@ class LocalizationManager(QObject):
             "wiz.lbl.packages": "System Pakete (leerzeichengetrennt):",
             
             "wiz.page.flags": "Compiler Flags",
-            "wiz.page.flags.sub": "Optimierungs-Flags setzen",
-            "wiz.lbl.cpu_flags": "CPU Flags (GCC):",
-            "wiz.lbl.cmake_flags": "CMake Flags:",
+            "wiz.page.flags.sub": "Nur Hinweis: im Modul vermerkt, nie angewendet (llama.cpp wird nach dem Rezept gebaut)",
+            "wiz.lbl.cpu_flags": "CPU-Flags (GCC, nur Hinweis):",
+            "wiz.lbl.cmake_flags": "CMake-Flags (nur Hinweis):",
             
             "wiz.page.summary": "Zusammenfassung",
             "wiz.page.summary.sub": "Einstellungen vor Generierung prüfen",

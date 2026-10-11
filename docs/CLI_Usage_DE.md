@@ -944,12 +944,12 @@ Neue Hardware-Targets. Die vollständige Anleitung: [Module_Developer_Guide_DE.m
 ### module create
 
 ```
-llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT]
+llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe DATEI]
 ```
 
 Legt ein neues Target per Fragen an: Name, Architektur und SDK (wenn nicht als Option angegeben), dann
 Docker-Basis-Image (Standard `debian:bookworm-slim`), Beschreibung, Systempakete (Standard
-`build-essential, cmake, git`) und Standard-CPU-Flags. Jeder Wert wird geprüft, bevor Dateien geschrieben werden, der
+`build-essential, cmake, git`) und CPU-Flags, die das Modul nur als Hinweis vermerkt und nie anwendet. Jeder Wert wird geprüft, bevor Dateien geschrieben werden, der
 fertige Ordner muss die Target-Prüfungen bestehen
 ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#91-was-die-prüfungen-verlangen)), und ein vorhandenes
 Target wird nie überschrieben.
@@ -959,6 +959,7 @@ Target wird nie überschrieben.
 | `--name TEXT` | Name des neuen Targets. |
 | `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU-Architektur. |
 | `--sdk TEXT` | Besonderes SDK, z. B. `CUDA`, `RKNN` (Standard `None`). |
+| `--probe DATEI` | Hardware-Probe des Targets (das Profil, das [`scan --device`](#scan) schreibt). Der Block `runtime:` der neuen `target.yml` ist dann der Plan des Build-Rezepts für die llama.cpp-Laufzeit des Boards daraus; eine Datei, die kein Probe-Profil ist, wird abgelehnt, bevor etwas geschrieben wird. |
 
 Das Target wird in den eingestellten Targets-Ordner geschrieben (Einstellung `targets_dir`; ein relativer Pfad
 gilt relativ zur Installation, nicht zum aktuellen Ordner). Seine `target.yml` hat einen Block `capabilities:` (Unterstützungsstufe `community`) mit dem Modulnamen als einzigem
@@ -978,7 +979,8 @@ Ditto schlägt ein Target-Modul aus einer Hardware-Probe-Datei vor (`target_hard
 eingestellten Targets-Ordner angelegt (und vom Modulgenerator erneut geprüft). Ditto nutzt die gespeicherte
 Anmeldung des Anbieters ([`llm-cli ditto login`](#ditto-login)); der Befehl fragt selbst nie nach einem Schlüssel.
 Weder `module create` noch `module generate-ai` hängt Seiten aus der Wissensbasis an; das ist eine Option auf der
-letzten Seite des GUI-Assistenten.
+letzten Seite des GUI-Assistenten. Ist die Probe-Datei ein Probe-Profil, wird der Block `runtime:` des Moduls daraus
+geplant; die CPU- und CMake-Flags des Vorschlags stehen dort als Hinweistext und werden nie angewendet.
 
 | Option | Bedeutung |
 |---|---|

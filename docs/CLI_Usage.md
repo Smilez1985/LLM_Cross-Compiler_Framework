@@ -920,12 +920,12 @@ New hardware targets. The full guide: [Module_Developer_Guide.md](Module_Develop
 ### module create
 
 ```
-llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT]
+llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe FILE]
 ```
 
 Creates a new target by asking questions: name, architecture and SDK (if not given as options), then base Docker
 image (default `debian:bookworm-slim`), description, system packages (default `build-essential, cmake, git`) and
-default CPU flags. Every value is checked before files are written, the finished folder must pass the target
+CPU flags, which the module keeps as advisory text and never applies. Every value is checked before files are written, the finished folder must pass the target
 validators ([Module Developer Guide](Module_Developer_Guide.md#91-what-the-validators-check)), and an existing
 target is never overwritten.
 
@@ -934,6 +934,7 @@ target is never overwritten.
 | `--name TEXT` | Name of the new target. |
 | `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU architecture. |
 | `--sdk TEXT` | Special SDK, e.g. `CUDA`, `RKNN` (default `None`). |
+| `--probe FILE` | Hardware probe of the target (the profile [`scan --device`](#scan) writes). The `runtime:` block of the new `target.yml` is then the build recipe's plan for the board's llama.cpp runtime from it; a file that is not a probe profile is refused before anything is written. |
 
 The target is written to the configured targets folder (setting `targets_dir`; a relative path is relative to the
 installation, not the current folder). Its `target.yml` has a `capabilities:` block (support level `community`) with the module name as the only board and
@@ -953,6 +954,8 @@ whole proposal is printed as JSON; only after you confirm is the module created 
 generator) in the configured targets folder. Ditto uses the provider's stored sign-in
 ([`llm-cli ditto login`](#ditto-login)); the command never asks for a key itself. Neither `module create` nor
 `module generate-ai` attaches pages from the knowledge base; that is an option on the last page of the GUI wizard.
+When the probe file is a probe profile, the module's `runtime:` block is planned from it; the proposal's CPU and
+CMake flags are kept there as advisory text and never applied.
 
 | Option | Meaning |
 |---|---|
