@@ -943,7 +943,7 @@ llm-cli config show
 ```
 
 Prints the CLI's base settings as JSON: the folders (`targets_dir`, `models_dir`, `output_dir`, `configs_dir`,
-`cache_dir`, `logs_dir`), `log_level` and `max_concurrent_builds`, merged with a file given with `-c`. It does not
+`cache_dir`), `log_level` and `max_concurrent_builds`, merged with a file given with `-c`. It does not
 show the settings in `config.yml` (AI provider, sandbox, crawler and so on); look at that file directly.
 
 ### config repos

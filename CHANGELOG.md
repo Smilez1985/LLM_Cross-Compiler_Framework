@@ -277,6 +277,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Bedrock, Vertex or Foundry, or using the framework from Claude Code itself (`llm-cli mcp config`). It never
   switches to the Claude API on its own. A `claude_code` preset left in a provider catalog in your config
   directory is skipped with a warning; the other providers keep working.
+- Settings that nothing read: `preferred_tiny_model`, `default_calibration_dataset`, `default_enable_imatrix`,
+  `logs_dir`, `auto_cleanup`, `docker_namespace`, `gui_theme`, `gui_auto_refresh`, `gui_refresh_interval`,
+  `api_enabled`, `api_host` and `api_port`. A `config.yml` that still contains them loads as before; the values are
+  ignored and kept in the file.
+- Leftovers of the removed Transformers offline mode and of the Qdrant container: the tiny-model download of the
+  model manager (it read `source_repositories['tiny_models']`) and `DockerManager.ensure_qdrant_service` (the
+  knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
+- The update manager (`orchestrator/utils/updater.py`): it was created at every start but never called, and its
+  list of files that need a new setup named a script that does not exist.
 
 ### Fixed
 - Secrets store: a store of an earlier version that cannot be decrypted is reported by `llm-cli doctor`
