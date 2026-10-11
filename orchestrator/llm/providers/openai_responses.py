@@ -84,7 +84,7 @@ class OpenAIResponsesAdapter(ProviderAdapter):
             response = client.responses.create(**params)
         except Exception as e:
             raise map_openai_error(e, label="OpenAI", provider=self.provider, preset=self.preset,
-                                   base_url=self.base_url) from None
+                                   base_url=self.base_url, secret=self._api_key) from None
         return self.to_result(response, model)
 
     def to_result(self, response: Any, requested_model: str) -> ChatResult:
@@ -136,7 +136,7 @@ class OpenAIResponsesAdapter(ProviderAdapter):
             return [ModelInfo(id=m.id, display_name=m.id) for m in self.client().models.list()]
         except Exception as e:
             raise map_openai_error(e, label="OpenAI", provider=self.provider, preset=self.preset,
-                                   base_url=self.base_url, during="models") from None
+                                   base_url=self.base_url, during="models", secret=self._api_key) from None
 
 
 def _leading_system(messages: List[Message]) -> List[Message]:

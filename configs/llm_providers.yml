@@ -31,6 +31,7 @@
 #   validate        the zero-cost GET behind "Check": path (below base_url) or url, account_field or
 #                   account_header (names the account), models_field (counted), public (answers without a key)
 #   opt_in          never picked automatically (an `ant auth login` profile always is opt-in)
+#   note            a policy or usage note shown with the method (`llm-cli ditto auth methods`, the GUI card)
 #   cli             install (URL) and login/logout (argv) of the vendor CLI
 #   sources         primary sources of the method's facts
 # Keys of presets whose base URL can be changed (and of bearer_optional methods) are bound to that address:
@@ -69,6 +70,9 @@ providers:
         type: cli_session
         label: "Anthropic CLI profile (advanced)"
         opt_in: true    # never auto-selected: a profile on disk must not switch the billed account
+        note: >-
+          Uses the profile of Anthropic's own `ant` CLI (sign in there with `ant auth login`). Anthropic has not
+          confirmed that other apps may use these profiles; it is never picked automatically.
         cli:
           install: https://platform.claude.com/docs/en/cli-sdks-libraries/cli/quickstart.md
           login: [ant, auth, login]

@@ -14,6 +14,7 @@ name (the v1 form `auth: [api_key, none]`, which expands to the default spec of 
     fields: [...]                  non-secret extra values (workspace ID, organization, ...); see FieldSpec
     validate: {path: /v1/models}   the zero-cost GET that checks the credential; see ValidateSpec
     opt_in: true                   never picked automatically, only when ai_auth_<provider> names it
+    note: "..."                    shown with the method (`llm-cli ditto auth methods`, the GUI card)
 """
 
 import re
@@ -203,6 +204,7 @@ class AuthMethodSpec(BaseModel):
     opt_in: bool = False
     cli: Optional[CliSpec] = None
     oauth: Optional[OAuthSpec] = None
+    note: Optional[str] = None           # a policy or usage note shown with the method
     sources: List[str] = Field(default_factory=list)
 
     @field_validator("label")
@@ -252,6 +254,9 @@ class AuthMethodSpec(BaseModel):
         return next((f for f in self.fields if f.id == field_id), None)
 
 
+ANT_PROFILE_NOTE = ("Uses the profile of Anthropic's own `ant` CLI (sign in there with `ant auth login`). Anthropic "
+                    "has not confirmed that other apps may use these profiles; it is never picked automatically.")
+
 WORKSPACE_FIELD = FieldSpec(id="workspace_id", label="Workspace ID (only for keys valid in all workspaces)",
                             pattern=r"^wrkspc_[A-Za-z0-9]+$", header="anthropic-workspace-id",
                             setting="ai_anthropic_workspace_id", invalid_code="anthropic.workspace_invalid")
@@ -265,7 +270,7 @@ def default_spec(name: str, *, adapter: Optional[str] = None, base_url: Optional
         return AuthMethodSpec(id="none", type="none")
     if name == "ant_profile":
         return AuthMethodSpec(id="ant_profile", type="cli_session", label="Anthropic CLI profile (advanced)",
-                              opt_in=True, cli=CliSpec(login=["ant", "auth", "login"]))
+                              opt_in=True, cli=CliSpec(login=["ant", "auth", "login"]), note=ANT_PROFILE_NOTE)
     if name == "api_key":
         claude_api = adapter == "anthropic" and (urlparse(base_url or "").hostname or "").lower() == CLAUDE_API_HOST
         refused = list(reject_prefixes or ([CLAUDE_ADMIN_PREFIX] if claude_api else []))

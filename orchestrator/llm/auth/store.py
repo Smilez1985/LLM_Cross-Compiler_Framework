@@ -78,6 +78,16 @@ def last4(key: str) -> Optional[str]:
     return key[-4:] if len(key) >= 16 else None
 
 
+def malformed_key(key: str) -> bool:
+    """A key with a space, a line break, a control or a non-ASCII character inside (a second line from stdin, an
+    invisible character from a web page): no vendor key has one, and an HTTP header cannot carry it."""
+    return any(not "!" <= char <= "~" for char in key)
+
+
+def key_malformed_error(preset: Any, key_page: Optional[str] = None) -> AuthError:
+    return auth_error("auth.key_malformed", provider=preset.id, provider_label=preset.label, key_page=key_page)
+
+
 def _clean(value: Any) -> Any:
     """JSON-safe, non-secret metadata values."""
     if value is None or isinstance(value, (bool, int, float)):
@@ -443,6 +453,8 @@ class CredentialStore:
             raise auth_error("auth.not_signed_in", provider=preset.id, message="No key was entered.")
         if spec.rejected(key):
             raise rejected_key_error(preset)
+        if malformed_key(key):
+            raise key_malformed_error(preset, spec.key_page)
         values = self.check_fields(preset, spec, fields or {})
         origin = None
         if spec.binds_origin(preset):

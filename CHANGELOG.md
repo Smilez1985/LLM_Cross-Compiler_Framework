@@ -150,9 +150,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   checked) are kept in `auth.json` next to the credential vault. Tokens of the sign-in flows that come later are
   renewed under a lock shared by the GUI, the CLI and the MCP server; the new refresh token is stored before it
   is used, and a refused renewal marks the sign-in as expired.
-- **Credential check** (for the coming "Check" button and `auth status --check`): one free GET request (the
-  model list, OpenRouter's key endpoint) says whether the stored key works, which workspace or key name it
-  belongs to and how many models it can use; a key that works but may not list models is reported as such, also
+- **Credential check** (the **Check** button in the sign-in panel and `llm-cli ditto auth status --check`): one
+  free GET request (the model list, OpenRouter's key endpoint) says whether the stored key works, which workspace
+  or key name it belongs to and how many models it can use; a key that works but may not list models is reported as such, also
   by the live model list in the AI settings. Redirects are not followed, so the key goes to the provider only.
 - **API keys from environment variables**: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and
   `OPENROUTER_API_KEY` are used when no key is stored for the provider (only the variables the provider catalog
@@ -171,6 +171,27 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   usage, features, contributing, module developer guide, SSOT, changelog), checked by `tests/test_docs.py`:
   every document has its twin, links and anchors resolve, both changelogs list the same versions, and the
   roadmap names only what comes.
+- **Sign-in from the command line**: `llm-cli ditto login <provider>` signs Ditto in with the provider's
+  methods (an API key, a local engine without a key, an `ant auth login` profile with `--method ant_profile`),
+  checks a key for free before it stores it and remembers the method (`ai_auth_<provider>`); `--workspace-id`,
+  `--organization`, `--project` and `--base-url` set what belongs to the key. `llm-cli ditto logout` deletes the
+  local copy and names the key page where the key itself is revoked. `llm-cli ditto auth status [--json]
+  [--check]` shows the sign-in of every provider (method, source, account, the last four characters of a key),
+  `auth methods` the methods with policy notes, `auth storage [--use ...]` how the credential vault is
+  protected (a choice that fails changes nothing, `config.yml` included), and `auth rotate-key` replaces the
+  vault key. After a checked login the status names the account or workspace. Exit codes: 2 usage (also an
+  empty stdin, a missing server address, a malformed option value or a key with a space or line break inside),
+  3 rejected, 4 network, 5 credential storage unavailable, 6 not allowed or not available.
+- **Sign-in panel in the AI settings** (**Sign in...**): the provider's methods as cards in the catalog's order,
+  the first usable one marked "Recommended"; a key form with the key page, the extra fields, **Check**,
+  **Save** and **Sign out**; a status line ("Signed in as ...", "Not signed in", "Using key from environment
+  variable X"); and, without a usable keyring, the storage chooser, which the GUI also shows at startup before
+  it gives up (a choice there that cannot open the existing vault is not kept, so the next start still works). A
+  vault protected by a passphrase asks for it in a dialog. Every vault, keyring and network call
+  runs in a worker thread, and an older read that finishes late never replaces a newer state. Ditto's chat header
+  shows the access in use, for example "Local · Ollama". A key typed in the AI settings' own key field replaces a
+  method a sign-in remembered (such as the `ant` profile), so it is not left unused.
+- `llm-cli secrets set --with-token` reads the value from stdin.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -226,6 +247,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `cred/<provider>/api_key`; stores and key names of earlier versions are read as before and converted on
   the next change.
 - Reading a secret is written to the secrets audit log once per process and name, not on every access.
+- Commands that need the credential vault exit with code 5 when it cannot be used (no usable keyring, no
+  passphrase, a damaged vault) instead of 1, and name the choices, including
+  `llm-cli ditto auth storage --use ...`.
+- Error messages and hints name `llm-cli ditto login <provider>` instead of `llm-cli secrets set <key name>`;
+  `llm-cli module generate-ai` uses the stored sign-in and never asks for a key itself.
+
+### Deprecated
+- `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
+  list. Use the hidden prompt or `--with-token`.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
@@ -328,7 +358,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   address to that address only; a key variable of a local engine in your own catalog goes only to the address
   the catalog gives. A non-secret field (workspace ID, project) can no longer be declared with a credential
   header such as `Authorization` or `x-api-key`, where it would replace the stored key. A failed token renewal
-  names only the kind of failure, and a vendor message that quotes the refresh token is shown without it.
+  names only the kind of failure, and a vendor message that quotes the refresh token is shown without it. A key
+  of an earlier version is bound to the address before a check with typed fields sends it there.
+- Sign-in never takes a secret from the command line (`ditto login` has no option for a key, and an unknown
+  provider name or `--method` value that looks like a key is not echoed), shows a key only as its last four
+  characters (also in `auth status --json`, and as `REDACTED` when a server's error text or account name repeats
+  it, in Ditto's chat errors too), asks before a key goes over plain `http://` to another computer (also in the
+  sign-in panel and the AI settings' key field; `--yes` in scripts) and never chooses how the vault is protected:
+  `--insecure-storage` never replaces a protection that works, nor a credential helper or passphrase you chose. A
+  key with a space, a line break or an invisible character inside is refused before anything is sent or stored.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

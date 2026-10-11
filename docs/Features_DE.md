@@ -272,6 +272,46 @@ Anbieter übersetzt sie in das, was er versteht.
   und Basis-URL ausdrücklich, und `OPENAI_CUSTOM_HEADERS` / `ANTHROPIC_CUSTOM_HEADERS` werden beim Start mit einer
   Warnung entfernt (die Einstellung `ai_allow_sdk_env_headers: true` behält sie).
 
+### Anmeldung
+
+- **Wo:** **Anmelden...** in den KI-Einstellungen (GUI) und `llm-cli ditto login | logout | auth` (siehe die
+  [CLI-Anleitung](CLI_Usage_DE.md#ditto-login)).
+- **Karten für die Verfahren:** Der Bereich zeigt die Anmeldeverfahren des Anbieters in der Reihenfolge des
+  Katalogs. Das erste, mit dem sich diese Version anmelden kann, ist als „Empfohlen“ markiert, Verfahren nur auf
+  Wunsch (das `ant`-Profil) als „Erweitert“, und Verfahren einer späteren Version werden gezeigt, lassen sich aber
+  nicht wählen. Jede Art hat ihr eigenes Formular: ein Schlüsselformular (Schlüsselseite, Passwortfeld, die
+  zusätzlichen Felder aus dem Katalog wie die Claude-Workspace-ID oder Organisation und Projekt bei OpenAI,
+  **Prüfen**, **Speichern**, **Abmelden**), „keine Anmeldung“ mit Prüfen für lokale Engines, das Profil der
+  `ant`-CLI (der offizielle Befehl, der Name des Profils, eine Prüfung über das Anthropic-SDK; das Framework startet
+  die CLI nie und liest ihre Dateien nicht) und der verwaltete lokale Server, dessen Schlüssel automatisch kommt.
+- **Statuszeile:** „Angemeldet als ...“, „Nicht angemeldet“, „Schlüssel aus der Umgebungsvariable X“ oder
+  „Abgelaufen: bitte erneut anmelden“. Ein Schlüssel erscheint nur mit seinen letzten vier Zeichen. Der Kopf von
+  Dittos Chat zeigt den genutzten Zugang, zum Beispiel „Anthropic Claude (API) · API key · wrkspc_...“ oder
+  „Lokal · Ollama“.
+- **Prüfen vor dem Speichern:** Prüfen sendet den eingetippten Schlüssel mit einer kostenlosen Anfrage und speichert
+  nichts; `llm-cli ditto login` prüft einen Schlüssel genauso, bevor es ihn speichert. Speichern merkt sich das
+  Verfahren als `ai_auth_<anbieter>`.
+- **Kein Geheimnis in der Befehlszeile:** Die CLI nimmt einen Schlüssel nur aus einer verdeckten Abfrage, von stdin
+  (`--with-token`) oder aus der dokumentierten Umgebungsvariable des Anbieters (`--from-env`). Ohne Terminal fragt
+  sie nichts, und ein Anbieter mit mehreren Verfahren braucht `--method`. Exit-Codes: 0 angemeldet, 2 Bedienfehler,
+  3 abgelehnt, 4 Netz, 5 Speicher, 6 nicht verfügbar.
+- **Schlüssel bleiben heil und erscheinen nicht in Ausgaben:** Ein Schlüssel mit einem Leerzeichen, einem
+  Zeilenumbruch oder einem unsichtbaren Zeichen darin wird abgelehnt, bevor etwas gesendet oder gespeichert wird; ein
+  Fehlertext des Servers, der den Schlüssel wiederholt, zeigt stattdessen `REDACTED`; und ein eingetippter Schlüssel
+  geht über einfaches `http://` an einen anderen Computer erst, wenn du es bestätigst (CLI: `--yes`). Ein Schlüssel
+  im eigenen Schlüsselfeld der KI-Einstellungen ersetzt ein Verfahren, das sich eine Anmeldung gemerkt hat (zum
+  Beispiel das `ant`-Profil).
+- **Abmelden zuerst lokal:** Der gespeicherte Schlüssel wird gelöscht, und die Schlüsselseite, auf der du den
+  Schlüssel selbst widerrufst, wird genannt; ein Schlüssel in einer Umgebungsvariable bleibt in Gebrauch, bis du sie
+  entfernst.
+- **Kein nutzbarer Schlüsselbund:** Der Bereich zeigt die Auswahl für den Schutz (Passphrase, Credential-Helper
+  oder die unverschlüsselte Schlüsseldatei nach einer Bestätigung), und die GUI zeigt dieselbe Auswahl beim Start,
+  bevor sie aufgibt; eine Passphrase wird in einem Dialog abgefragt. Eine Wahl, die den vorhandenen Tresor nicht
+  öffnen kann (einen, den der gesperrte Schlüsselbund schützt), wird nicht behalten. Die CLI endet mit Exit-Code 5
+  und nennt `llm-cli ditto auth storage --use ...`. Für dich wird nichts gewählt.
+- **Reaktionsschnell:** Jeder Zugriff auf Tresor, Schlüsselbund oder Netz aus dem Anmeldebereich und für den Kopf
+  des Chats läuft in einem Hintergrund-Thread.
+
 ### Aufrufe, Wiederholungen und Ersatzkette
 
 - Die eigenen Wiederholungen der SDKs sind aus; die Anbieterschicht wiederholt Anfragen bei Ratenlimits und
@@ -614,12 +654,15 @@ aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli doctor` e
   (Windows-Anmeldeinformationsverwaltung auf dem lokalen Rechner, macOS-Schlüsselbund, Secret Service unter Linux),
   ein Eintrag je Tresor, nie in einer Datei neben dem Speicher. Ein Schlüsselbund, der nicht innerhalb von 3 Sekunden
   antwortet, nichts behält oder im Klartext speichert, wird nicht verwendet; dann hält das Framework an und nennt die
-  Möglichkeiten für die Einstellung `secret_storage` (oder `LLM_SECRET_STORAGE` für einen einzelnen Lauf): `helper`
+  Möglichkeiten (die GUI zeigt eine Auswahl, die CLI endet mit Exit-Code 5 und nennt
+  `llm-cli ditto auth storage --use ...`) für die Einstellung `secret_storage` (oder `LLM_SECRET_STORAGE` für einen
+  einzelnen Lauf): `helper`
   (der Befehl in `secret_helper`, ohne Shell ausgeführt), `passphrase` (einmal je Start abgefragt), `insecure` (eine
   Schlüsseldatei neben dem Tresor, im Ruhezustand nicht verschlüsselt) oder `ephemeral` (nur im Arbeitsspeicher).
   Der Tresor wird atomar unter einer Sperre geschrieben, die GUI, CLI und MCP-Server teilen, ist nur für dich lesbar,
   liegt nie in einer Git-Arbeitskopie, und ein beschädigter Tresor wird nie überschrieben. `llm-cli doctor` warnt
-  vor der Schlüsseldatei und vor einem Schlüsselbund, der Geheimnisse nicht schützt.
+  vor der Schlüsseldatei und vor einem Schlüsselbund, der Geheimnisse nicht schützt. `llm-cli ditto auth
+  rotate-key` ersetzt den Schlüssel des Tresors und verschlüsselt jeden Eintrag neu.
 - **Schwärzen:** Eine Tabelle der Secret-Formate (`orchestrator/security/secret_patterns.py`) teilen sich der
   Secret-Scan des Repositorys und die Schwärzung zur Laufzeit. Zugangsdaten (bekannte Schlüsselformate, Header mit
   Zugangsdaten, Tokens in URLs und Formulardaten, Zeilen wie `HF_TOKEN=...`) werden aus jeder Logzeile und jedem
@@ -716,7 +759,9 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
   in einem anderen Prozess sieht sie nicht.
 - **Abbrechen:** Die GUI hat keine Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start` stoppt den Build
   nicht (die CLI wartet, bis er zu Ende ist); abbrechen kann nur das Tool `cancel_build`.
-- **Anmeldung pro Anbieter:** noch nicht verfügbar; Ditto arbeitet mit API-Schlüsseln.
+- **Anmeldung im Browser und bei Cloud-Plattformen:** OAuth-Abläufe und die Anmeldeketten von AWS, Google Cloud
+  und Azure gibt es noch nicht; Ditto meldet sich mit API-Schlüsseln an, und lokale Engines brauchen keine
+  Anmeldung.
 - **Laufzeit auf dem Gerät:** Das Framework installiert keine Laufzeitumgebung auf dem Board.
 - **GUI:** Die Reiter Auto-Tuning und Models sind Platzhalter; die lokale Laufzeit wird nur über die CLI gesteuert.
 - **Sicherheits-Scan:** Der Trivy-Container bekommt den Docker-Socket, um das Image zu lesen; ein Scan ohne Socket ist

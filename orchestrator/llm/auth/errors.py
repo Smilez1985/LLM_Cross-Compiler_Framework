@@ -172,6 +172,8 @@ ERRORS: Dict[str, ErrorSpec] = {
                                (OPEN_KEY_PAGE,), "auth_failed"),
     "auth.field_invalid": ErrorSpec("{provider_label}: the {field} is not valid.",
                                     (AuthAction("edit_field", "Edit"),)),
+    "auth.key_malformed": ErrorSpec("{provider_label}: the key contains spaces, line breaks or other characters "
+                                    "that are never part of a key. Paste only the key.", (OPEN_KEY_PAGE,)),
     "auth.unexpected": ErrorSpec("{provider_label} answered the check unexpectedly.", (AuthAction("retry", "Retry"),),
                                  "bad_request"),
     "auth.network": ErrorSpec("Could not reach {provider_label} ({url}). Check the network or proxy.",

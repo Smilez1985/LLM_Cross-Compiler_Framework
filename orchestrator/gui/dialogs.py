@@ -21,8 +21,9 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QWidget
 )
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from orchestrator.llm.auth.signin import plain_http_to_remote
 from orchestrator.llm.auth.spec import KEY_TYPES
-from orchestrator.llm.auth.store import CredentialStore
+from orchestrator.llm.auth.store import CredentialStore, display_origin
 from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, LLMError, rejected_key_error
 from orchestrator.llm.providers.anthropic import WORKSPACE_ID, takes_workspace_id
 from orchestrator.utils.crawl_notice import CrawlNotice, notice_text
@@ -299,11 +300,13 @@ class AIConfigurationDialog(QDialog):
         self.txt_api_key = QLineEdit()
         self.txt_api_key.setEchoMode(QLineEdit.Password)
         key_row.addWidget(self.txt_api_key)
-        # Placeholder for the per-provider sign-in (OAuth, device code, CLI login), built in its own work package.
-        self.btn_sign_in = QPushButton("Sign in...")
+        # The provider's sign-in methods as cards, with Check, Save and Sign out (orchestrator/gui/sign_in.py).
+        self.btn_sign_in = QPushButton(self.i18n.t("dlg.ai.sign_in", "Sign in...") if self.i18n else "Sign in...")
         self.btn_sign_in.setEnabled(False)
-        self.btn_sign_in.setToolTip("Signing in per provider is not available yet; use an API key.")
+        self.btn_sign_in.setToolTip(self.i18n.t("dlg.ai.sign_in_tip", "Sign in, check or sign out for this provider")
+                                    if self.i18n else "Sign in, check or sign out for this provider")
         self.btn_sign_in.clicked.connect(self._sign_in)
+        self._sign_in_dialog = None
         key_row.addWidget(self.btn_sign_in)
         form.addRow("API Key:", key_row)
 
@@ -435,15 +438,36 @@ class AIConfigurationDialog(QDialog):
     def _parse_fallback(text: str) -> List[str]:
         return [part.strip() for part in text.split(",") if part.strip()]
 
-    # --- sign-in hook ---
+    # --- sign-in ---
     def _sign_in_available(self, preset) -> bool:
-        """Whether the selected provider offers an interactive sign-in here (none yet)."""
-        return False
+        """The sign-in panel needs the provider's methods, the settings and the credential vault."""
+        return (preset is not None and bool(preset.methods) and self._config() is not None
+                and self._secrets() is not None)
 
     def _sign_in(self):
-        """Hook for the sign-in work package: starts the selected provider's own sign-in flow (OAuth, device
-        code, CLI login) for self.cb_provider.currentData(). Until then keys go into the API Key field."""
-        return None
+        """Opens the sign-in panel of the selected provider (for the address typed here); returns the window."""
+        from orchestrator.gui.sign_in import SignInDialog
+        preset = self._preset()
+        if not self._sign_in_available(preset):
+            return None
+        if self._sign_in_dialog is not None:
+            self._sign_in_dialog.close()
+        dlg = SignInDialog(self.framework, preset, base_url=self._base_url(preset) or None, parent=self)
+        dlg.panel.changed.connect(self._on_signed_in)
+        self._sign_in_dialog = dlg
+        dlg.open()  # window-modal; the settings stay responsive to its changes
+        return dlg
+
+    def _on_signed_in(self):
+        """A key, method or storage changed in the sign-in panel: show it here and take it into effect."""
+        preset = self._preset()
+        if preset is not None and takes_workspace_id(preset):
+            self.txt_workspace.setText(self._user_value("ai_anthropic_workspace_id") or self.txt_workspace.text())
+        self._apply_enabled_state()
+        self._refresh_models()
+        ditto = getattr(self.framework, 'ditto_manager', None)
+        if ditto is not None and hasattr(ditto, 'reload'):
+            ditto.reload()
 
     # --- live model list ---
     def _refresh_models(self):
@@ -504,8 +528,9 @@ class AIConfigurationDialog(QDialog):
         keep = (self._user_value("ai_model") if saved else None) or preset.model_for("chat") or ""
         self.cb_model.clear()
         self._fill_models(suggestions, keep=keep)
-        self.txt_base_url.setText((self._user_value("ai_base_url") or "") if saved and preset.base_url_configurable
-                                  else "")
+        own_url = self._user_value(f"ai_base_url_{preset.id}") if preset.base_url_configurable else None
+        self.txt_base_url.setText(own_url or ((self._user_value("ai_base_url") or "")
+                                              if saved and preset.base_url_configurable else ""))
         self.txt_workspace.setText((self._user_value("ai_anthropic_workspace_id") or "")
                                    if takes_workspace_id(preset) else "")
         self.txt_api_key.clear()
@@ -588,6 +613,9 @@ class AIConfigurationDialog(QDialog):
             return
 
         spec = self._key_method(preset)
+        key_url = base_url or preset.base_url
+        if api_key and preset.secret and plain_http_to_remote(key_url) and not self._confirm_plain_http(key_url):
+            return
         if api_key and preset.secret and spec is not None:
             # A key of a server whose address can be changed is stored for that address only.
             try:
@@ -609,6 +637,13 @@ class AIConfigurationDialog(QDialog):
             cfg.set("ai_provider", preset.id)
             cfg.set("ai_model", model)
             cfg.set("ai_base_url", base_url)
+            if self._user_value(f"ai_base_url_{preset.id}"):
+                cfg.set(f"ai_base_url_{preset.id}", base_url)  # set by `llm-cli ditto login`; it wins over ai_base_url
+            chosen = self._user_value(f"ai_auth_{preset.id}")
+            if api_key and spec is not None and chosen and getattr(preset.method(chosen), "id", None) != spec.id:
+                # A key typed here is meant to be used: the method remembered by a sign-in (an `ant` profile, no
+                # key) would otherwise keep it unused without a word.
+                cfg.set(f"ai_auth_{preset.id}", spec.id)
             if takes_workspace_id(preset):
                 cfg.set("ai_anthropic_workspace_id", workspace)
             cfg.set("ai_effort", effort)
@@ -638,6 +673,13 @@ class AIConfigurationDialog(QDialog):
             "enable_rag": enable_rag,
         }
         self.accept()
+
+    def _confirm_plain_http(self, url: str) -> bool:
+        """A key for a server reached over plain http:// on another computer travels unencrypted: only on a Yes."""
+        return QMessageBox.question(
+            self, "Unencrypted connection",
+            f"{display_origin(url)} uses plain http://, so the key travels unencrypted to another computer. Save "
+            "it for this address anyway?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
 
     def get_config(self) -> Dict[str, Any]:
         """Selected settings after the dialog was accepted (empty otherwise); never contains a key."""

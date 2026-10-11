@@ -62,6 +62,14 @@ def message_boxes(monkeypatch):
     shown = []
 
     class RecordingMessageBox:
+        Yes, No = dialogs.QMessageBox.Yes, dialogs.QMessageBox.No
+        answer, asked = dialogs.QMessageBox.Yes, []  # questions are answered, not counted as messages
+
+        @classmethod
+        def question(cls, parent, title, text, *args):
+            cls.asked.append(text)
+            return cls.answer
+
         @staticmethod
         def warning(parent, title, text, *args):
             shown.append(("warning", title))
@@ -479,11 +487,60 @@ class TestAIConfigurationDialog:
         select_provider(dlg, "anthropic")
         assert dlg.txt_workspace.isEnabled() and dlg.txt_workspace.text() == "wrkspc_" + "01Abc"
 
-    def test_sign_in_placeholder(self, qapp, framework):
+    def test_sign_in_opens_the_panel_of_the_selected_provider(self, qapp, framework):
+        from orchestrator.gui.sign_in import SignInPanel
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "anthropic")
-        assert dlg.btn_sign_in.text() == "Sign in..." and not dlg.btn_sign_in.isEnabled()
-        assert dlg._sign_in() is None
+        assert dlg.btn_sign_in.text() == "Sign in..." and dlg.btn_sign_in.isEnabled()
+        window = dlg._sign_in()
+        assert isinstance(window.panel, SignInPanel) and window.panel.preset.id == "anthropic"
+        assert wait_for(qapp, lambda: not window.panel.busy)
+        window.close()
+        without = AIConfigurationDialog(None)
+        assert not without.btn_sign_in.isEnabled() and without._sign_in() is None
+
+    def test_a_key_for_plain_http_to_another_computer_needs_a_yes(self, qapp, tmp_path, memory_keyring,
+                                                                  message_boxes):
+        from orchestrator.Core.secrets_manager import SecretsManager
+        vault = SecretsManager(tmp_path / "state")
+        assert vault.initialize(), vault.storage_error
+        fw = FakeFramework(ConfigManager(tmp_path), vault)
+        dialogs.QMessageBox.answer = dialogs.QMessageBox.No
+
+        def save(url):
+            dlg = AIConfigurationDialog(fw)
+            select_provider(dlg, "custom")
+            dlg.cb_model.setCurrentText("my-model")
+            dlg.txt_base_url.setText(url)
+            dlg.txt_api_key.setText("custom-" + "secret-0123456789")
+            dlg._save_config()
+            return dlg
+
+        assert save("http://192.0.2.10:8000/v1").result() != dialogs.QDialog.Accepted
+        assert vault.list_secrets() == [] and "192.0.2.10:8000" in dialogs.QMessageBox.asked[0]
+        dialogs.QMessageBox.answer = dialogs.QMessageBox.Yes
+        assert save("http://192.0.2.10:8000/v1").result() == dialogs.QDialog.Accepted and vault.list_secrets()
+        assert save("http://127.0.0.1:8000/v1").result() == dialogs.QDialog.Accepted
+        assert len(dialogs.QMessageBox.asked) == 2 and message_boxes == [], "this computer: no question"
+
+    def test_a_key_typed_here_replaces_the_method_a_sign_in_remembered(self, qapp, tmp_path, framework,
+                                                                      message_boxes):
+        # `llm-cli ditto login anthropic --method ant_profile` remembered the profile; a key typed and saved here
+        # would otherwise stay unused while the field says it is stored.
+        framework.config.set("ai_auth_anthropic", "ant_profile")
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "anthropic")
+        dlg.cb_model.setCurrentText("some-model")
+        dlg.txt_api_key.setText("sk-ant-" + "api03-" + "K" * 40)
+        dlg._save_config()
+        assert message_boxes == [] and dlg.result() == dialogs.QDialog.Accepted
+        assert ConfigManager(tmp_path).get("ai_auth_anthropic") == "api_key"
+        framework.config.set("ai_auth_anthropic", "ant_profile")
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "anthropic")
+        dlg.cb_model.setCurrentText("some-model")
+        dlg._save_config()  # no key typed: the remembered method stays
+        assert ConfigManager(tmp_path).get("ai_auth_anthropic") == "ant_profile"
 
     def test_works_without_framework(self, qapp, message_boxes):
         dlg = AIConfigurationDialog(None)

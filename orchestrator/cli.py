@@ -19,6 +19,7 @@ import subprocess
 import asyncio
 import os
 import platform
+import shutil
 from pathlib import Path
 from typing import Optional, Dict, List, Any, Tuple
 from datetime import datetime
@@ -98,6 +99,7 @@ class FrameworkContext:
         self.deployment_manager: Optional[DeploymentManager] = None
         self.verbose: bool = False
         self.quiet: bool = False
+        self.http_client: Any = None  # reaches the providers for sign-in checks (tests: a mock transport)
         self._initialized: bool = False
         
     def initialize(self):
@@ -138,10 +140,12 @@ class FrameworkContext:
             Console(stderr=True).print(f"[red]Failed to initialize framework: {escape(str(e))}[/red]")
 
     def require_framework(self) -> "FrameworkContext":
-        """Boots the framework on first use; commands that do not need it work without a keyring or Docker."""
+        """Boots the framework on first use; commands that do not need it work without a keyring or Docker.
+        Exit code 5 when the credential vault cannot be used (the message names the choices), 1 otherwise."""
         self.initialize()
         if self.init_error or not self.framework_manager:
-            sys.exit(1)
+            storage = (getattr(self.init_error, "code", None) or "").startswith("storage.")
+            sys.exit(5 if storage else 1)
         return self
 
 
@@ -233,6 +237,9 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     Professional command-line interface for cross-compiling Large Language Models
     for edge hardware. Supports automation, CI/CD integration, Deployment, 
     Self-Healing and Smart Calibration (IMatrix).
+
+    Sign Ditto in to an AI provider with `llm-cli ditto login <provider>`;
+    `llm-cli ditto auth status` shows the sign-in of every provider.
     """
     
     # Load configuration
@@ -439,6 +446,8 @@ def _ditto_confirm(spec, inp) -> bool:
 def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], model: Optional[str]):
     """
     🤖 AI-Powered: Generate module from hardware probe (target_hardware_config.txt).
+
+    Ditto uses the provider's stored sign-in (llm-cli ditto login <provider>).
     """
     from orchestrator.Core.ditto_manager import DittoError
     ctx.require_framework()
@@ -719,20 +728,36 @@ def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
 
 @cli.group()
 def secrets():
-    """Manage secure credentials (Keyring)"""
+    """Store tokens in the encrypted credential vault (AI provider keys: llm-cli ditto login)"""
     pass
 
 @secrets.command('set')
 @click.argument('key')
-@click.password_option(help="The secret value")
+@click.option('--with-token', is_flag=True,
+              help='Read the value from stdin, e.g. printf %s "$TOKEN" | llm-cli secrets set hf_token --with-token')
+@click.option('--password', default=None,
+              help='Deprecated: a value on the command line ends up in the shell history and the process list; '
+                   'use the prompt or --with-token')
 @pass_context
-def set_secret(ctx: FrameworkContext, key, password):
-    """Set a secret in the secure store."""
+def set_secret(ctx: FrameworkContext, key, with_token: bool, password: Optional[str]):
+    """Set a secret in the secure store. The value is asked twice without echo, or read from stdin (--with-token).
+    AI provider keys: llm-cli ditto login <provider>."""
+    if with_token and password is not None:
+        _usage("Use either --with-token or --password, not both.")
+    if password is not None:
+        _say("--password is deprecated: the value is now in your shell history. Use the prompt or --with-token.",
+             err=True, fg="yellow")
     ctx.require_framework()
     if not ctx.framework_manager.secrets_manager:
         console.print("[red]SecretsManager not available![/red]")
         sys.exit(1)
-        
+    if with_token:
+        password = sys.stdin.read().strip()
+        if not password:
+            _usage("No value on stdin.")
+    elif password is None:
+        password = click.prompt("Value", hide_input=True, confirmation_prompt=True)
+
     sm = ctx.framework_manager.secrets_manager
     if not sm.set_secret(key, password):
         console.print(f"[red]Failed to store secret '{escape(key)}'.[/red]")
@@ -884,7 +909,7 @@ def tools_audit(ctx: FrameworkContext, limit: int, verify: bool, archive: bool):
 
 @cli.group()
 def ditto():
-    """Ditto, the AI assistant"""
+    """Ditto, the AI assistant: sign-in (login, logout, auth), questions, evaluation and the local model"""
     pass
 
 
@@ -1340,6 +1365,595 @@ def _eval_retrieval(fm, cases, source: Path, variants, repeat: int, progress) ->
                             "repeat": repeat, "cases": [c.id for c in cases]}
             reports.append(report)
     return reports
+
+
+# ============================================================================
+# SIGN-IN (ditto login / logout / auth)
+# ============================================================================
+
+EXIT_USAGE, EXIT_CANCELLED = 2, 1
+# Storage problems a different protection solves (a damaged vault or one in a git work tree needs another fix).
+STORAGE_CHOICE_CODES = ("storage.keyring_unavailable", "storage.passphrase_needed", "storage.helper_failed",
+                        "storage.unavailable")
+FIELD_OPTIONS = (("workspace_id", "--workspace-id"), ("organization", "--organization"), ("project", "--project"))
+
+
+def _interactive() -> bool:
+    """A person at a terminal: only then is anything asked."""
+    try:
+        return sys.stdin is not None and sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _say(text: str, *, err: bool = False, fg: Optional[str] = None) -> None:
+    """Plain lines (URLs and commands are never wrapped); colors only on a terminal."""
+    click.secho(text, err=err, fg=fg)
+
+
+def _usage(message: str):
+    _say(message, err=True, fg="red")
+    sys.exit(EXIT_USAGE)
+
+
+def _auth_fail(error: BaseException, code: Optional[int] = None, service=None):
+    """The error, its "Next:" lines, and the exit code of its kind (3 rejected, 4 network, 5 storage, 6 policy)."""
+    from orchestrator.llm.auth.signin import exit_code
+    if (getattr(error, "code", None) or "").startswith("storage."):
+        _storage_fail(error, service=service)
+    _say(str(error), err=True, fg="red")
+    for action in getattr(error, "actions", ()) or ():
+        target = action.command or action.url
+        _say(f"Next: {action.label}" + (f": {target}" if target else ""), err=True)
+    sys.exit(code if code is not None else exit_code(error))
+
+
+def _storage_fail(error: BaseException, provider: Optional[str] = None, service=None):
+    """A vault that cannot be used (exit code 5), with the protections to choose from; nothing is chosen here."""
+    own = service.storage_message() if service is not None else None  # the vault's full text, not a summary
+    _say(own or str(error), err=True, fg="red")
+    if getattr(error, "code", None) in STORAGE_CHOICE_CODES:
+        _say("Choose how to protect your credentials (nothing is chosen for you):", err=True)
+        for line in ("llm-cli ditto auth storage --use passphrase    a passphrase asked once per start",
+                     'llm-cli ditto auth storage --use helper --helper "pass show llmcc/vault-key"',
+                     f"llm-cli ditto login {provider or '<provider>'} --insecure-storage    a key file next to the "
+                     "vault, NOT encrypted at rest",
+                     "LLM_SECRET_STORAGE=ephemeral    memory only, for CI (keys from environment variables)"):
+            _say(f"  {line}", err=True)
+    sys.exit(5)
+
+
+def _auth_service(ctx: FrameworkContext):
+    """Settings, credential vault and provider layer for the sign-in commands. The framework is not booted: a
+    missing keyring is reported with the choices (exit code 5) instead of stopping everything."""
+    from orchestrator.llm.auth.signin import SignIn
+    fm = ctx.framework_manager
+    if fm is not None and getattr(fm, "secrets_manager", None) is not None:
+        config, secrets = fm.config, fm.secrets_manager
+    else:
+        from types import SimpleNamespace
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.secrets_manager import SecretsManager
+        config = ConfigManager(ctx.config_path)
+        secrets = SecretsManager(SimpleNamespace(config=config))
+        secrets.initialize()  # a failure stays in secrets.storage_error and is reported where a secret is needed
+    try:
+        return SignIn(config, secrets, http_client=ctx.http_client)
+    except (ValueError, OSError) as e:  # a provider catalog in the config folder that cannot be read
+        _say(f"The provider catalog cannot be read: {e}", err=True, fg="red")
+        sys.exit(1)
+
+
+def _auth_catalog(ctx: FrameworkContext):
+    """The provider catalog alone (no vault, no keyring)."""
+    from orchestrator.Core.config_manager import ConfigManager
+    from orchestrator.llm import load_catalog
+    try:
+        return load_catalog(user_dir=ConfigManager(ctx.config_path).config_dir)
+    except (ValueError, OSError) as e:
+        _say(f"The provider catalog cannot be read: {e}", err=True, fg="red")
+        sys.exit(1)
+
+
+def _auth_preset(catalog, name: str):
+    from orchestrator.utils.helpers import redact_secrets
+    preset = catalog.get(name)
+    if preset is not None:
+        return preset
+    removed = catalog.removed_message(name)
+    if removed:
+        _say(removed, err=True, fg="red")
+        sys.exit(6)
+    _usage(f"Unknown AI provider '{redact_secrets(str(name))}'. Choose one of: {', '.join(catalog.ids())}.")
+
+
+def _method_tags(info) -> str:
+    tags = []
+    if info.recommended:
+        tags.append("recommended")
+    if info.spec.opt_in:
+        tags.append("advanced, only when chosen")
+    if not info.built:
+        tags.append("not available in this version")
+    return f" ({', '.join(tags)})" if tags else ""
+
+
+def _named_method(service, preset, method_id: str):
+    """--method: a method of the provider, else a usage error (the value redacted like a provider name)."""
+    from orchestrator.utils.helpers import redact_secrets
+    spec = service.method(preset, method_id)
+    if spec is None:
+        _usage(f"{preset.label} has no sign-in method '{redact_secrets(str(method_id))}'. Methods: "
+               f"{', '.join(preset.auth)}.")
+    return spec
+
+
+def _login_method(service, preset, method_id: Optional[str]):
+    """--method, the only method, or (at a terminal) the user's pick. Opt-in methods count only when named."""
+    if method_id:
+        return _named_method(service, preset, method_id)
+    if len(preset.methods) == 1:
+        return preset.methods[0]
+    candidates = [m for m in preset.methods if not m.opt_in]
+    if not _interactive():
+        if len(candidates) == 1:
+            return candidates[0]
+        _usage(f"{preset.label} offers several sign-in methods; choose one with --method: "
+               f"{', '.join(m.id for m in candidates)}.")
+    infos = service.methods(preset)
+    _say(f"Sign-in methods of {preset.label}:", err=True)
+    for number, info in enumerate(infos, 1):
+        _say(f"  {number}) {info.spec.label} [{info.spec.id}]{_method_tags(info)}", err=True)
+    default = next((n for n, info in enumerate(infos, 1) if info.recommended), 1)
+    choice = click.prompt("Method", type=click.IntRange(1, len(infos)), default=default, err=True)
+    return infos[choice - 1].spec
+
+
+def _ensure_storage(service, preset, insecure: bool, yes: bool) -> None:
+    """The vault must be usable before a key is asked for. --insecure-storage is the user's explicit choice of the
+    key file when no keyring works; it never replaces a protection that works."""
+    from orchestrator.Core.vault_key import StorageError
+    problem = service.storage_problem(preset.id)
+    if problem is None:
+        mode = getattr(service.secrets, "storage_mode", None)
+        if insecure and mode != "insecure":
+            _say(f"The credential vault is protected with '{mode}', so --insecure-storage is ignored (to switch: "
+                 "llm-cli ditto auth storage --use insecure).", err=True, fg="yellow")
+        return
+    if not insecure or problem.code not in STORAGE_CHOICE_CODES:
+        _storage_fail(problem, preset.id, service)
+    configured = str(service.config.get("secret_storage", "keyring") or "keyring").strip().lower()
+    if configured != "keyring":
+        # A helper or passphrase the user chose is never downgraded by a flag (a script may always pass it).
+        _say(service.storage_message() or str(problem), err=True, fg="red")
+        _say(f"--insecure-storage only replaces a keyring that cannot be used; the vault is protected with "
+             f"'{configured}' (secret_storage). Fix that, or switch on purpose: llm-cli ditto auth storage --use "
+             "insecure", err=True)
+        sys.exit(5)
+    warning = "The vault key will be kept in a file next to the vault, NOT encrypted at rest."
+    if not yes and _interactive() and not click.confirm(f"{warning} Continue?", default=False, err=True):
+        _say("Cancelled.", err=True)
+        sys.exit(EXIT_CANCELLED)
+    try:
+        service.choose_storage("insecure")
+    except StorageError as e:
+        _storage_fail(e, preset.id)
+    _say(f"{warning} (secret_storage: insecure)", err=True, fg="yellow")
+
+
+def _read_key(spec, preset, *, with_token: bool, from_env: bool) -> Tuple[str, str]:
+    """The key and where it came from: stdin, the provider's environment variable or a hidden prompt. Never argv."""
+    from orchestrator.llm.auth.store import malformed_key
+    optional = spec.type == "bearer_optional"
+    if with_token:
+        key = sys.stdin.read().strip()
+        if not key:  # an unset variable in a script: never taken as "no key", which would delete a stored one
+            _usage("No key on stdin. Example: printf %s \"$KEY\" | llm-cli ditto login "
+                   f"{preset.id} --with-token" + (f". To use it without a key: llm-cli ditto logout {preset.id}"
+                                                  if optional else ""))
+        if malformed_key(key):
+            _usage("The key on stdin has a space, a line break or another character that is never part of a key; "
+                   "pipe only the key.")
+        return key, "stdin"
+    if from_env:
+        if not spec.env:
+            _usage(f"{preset.label} ({spec.label}) reads no environment variable; use --with-token or the prompt.")
+        name = next((v for v in spec.env if (os.environ.get(v) or "").strip()), None)
+        if name is None:
+            _usage(f"{' and '.join(spec.env)} {'is' if len(spec.env) == 1 else 'are'} not set.")
+        if malformed_key(os.environ[name].strip()):
+            _usage(f"{name} has a space, a line break or another character that is never part of a key.")
+        return os.environ[name].strip(), f"env:{name}"
+    if not _interactive():
+        _usage("No terminal to ask for the key: pipe it to --with-token (printf %s \"$KEY\" | llm-cli ditto login "
+               f"{preset.id} --with-token) or use --from-env.")
+    if spec.where:
+        _say(f"Where to find it: {spec.where}", err=True)
+    elif spec.key_page:
+        _say(f"Create a key at {spec.key_page}", err=True)
+    if optional:
+        key = click.prompt("API token (Enter for none)", hide_input=True, default="", show_default=False, err=True)
+    else:
+        key = click.prompt("API key", hide_input=True, err=True)
+    if malformed_key(key.strip()):
+        _usage("The key has a space or another character that is never part of a key; paste only the key.")
+    return key.strip(), "prompt"
+
+
+def _check_or_fail(service, preset, spec, base_url: Optional[str], **typed):
+    """The free check (`base_url`: the address given on the command line, None for the configured one)."""
+    with Console(stderr=True).status(f"Checking with {preset.label} ..."):
+        result = service.check(preset, spec, base_url, **typed)
+    if not result.ok:
+        _auth_fail(result.error or RuntimeError("The credential could not be checked."))
+    return result
+
+
+def _summary(head: str, result, *parts: Optional[str]) -> str:
+    """"<head>: part, account, N models." with what the check found ("(not checked)" without one)."""
+    found = [p for p in parts if p]
+    if result is not None:
+        found += [p for p in (result.account_label, f"{result.models} models" if result.models is not None else None)
+                  if p]
+    return head + (f": {', '.join(found)}" if found else "") + (" (not checked)" if result is None else "") + "."
+
+
+def _primary_hint(service, preset) -> None:
+    if not service.client.is_primary(preset):
+        _say(f"Ditto's provider is still the one in the AI settings; to use {preset.label}, choose it there or set "
+             f"ai_provider: {preset.id}.", err=True)
+
+
+@ditto.command('login')
+@click.argument('provider')
+@click.option('--method', 'method_id', metavar='ID',
+              help='Sign-in method (see llm-cli ditto auth methods PROVIDER); needed without a terminal when the '
+                   'provider offers several')
+@click.option('--with-token', is_flag=True,
+              help='Read the key from stdin, e.g. printf %s "$KEY" | llm-cli ditto login openai --with-token')
+@click.option('--from-env', is_flag=True,
+              help="Copy the key from the provider's environment variable (e.g. ANTHROPIC_API_KEY) into the vault")
+@click.option('--base-url', metavar='URL',
+              help='Server address for providers whose address you set (Ollama, custom); remembered per provider')
+@click.option('--workspace-id', metavar='ID', help='Claude API: workspace ID (wrkspc_...) for keys valid in every '
+                                                   'workspace of the organization')
+@click.option('--organization', metavar='ID', help='OpenAI: organization ID (org-...)')
+@click.option('--project', metavar='ID', help='OpenAI: project ID (proj_...)')
+@click.option('--profile', metavar='NAME', help='--method ant_profile: the `ant auth login` profile (default: the '
+                                                'active one)')
+@click.option('--insecure-storage', is_flag=True,
+              help='Without a usable keyring: keep the vault key in a file next to the vault (NOT encrypted at rest)')
+@click.option('--no-check', is_flag=True, help='Store without the free check (for example offline)')
+@click.option('--yes', '-y', is_flag=True,
+              help='Do not ask before sending a key over plain http:// or using --insecure-storage')
+@pass_context
+def ditto_login(ctx: FrameworkContext, provider: str, method_id: Optional[str], with_token: bool, from_env: bool,
+                base_url: Optional[str], workspace_id: Optional[str], organization: Optional[str],
+                project: Optional[str], profile: Optional[str], insecure_storage: bool, no_check: bool, yes: bool):
+    """Sign Ditto in to PROVIDER (anthropic, openai, google, openrouter, ollama, custom, ...).
+
+    A key is never taken from the command line: it comes from a hidden prompt, from stdin (--with-token) or from
+    the provider's environment variable (--from-env). It is checked for free before it is stored in the
+    encrypted vault, and the method is remembered (ai_auth_<provider>). Exit codes: 0 signed in, 2 usage,
+    3 rejected, 4 network, 5 credential storage unavailable, 6 not allowed or not available."""
+    from orchestrator.llm.auth.errors import auth_error
+    from orchestrator.llm.auth.signin import exit_code, plain_http_to_remote, valid_profile_name
+    from orchestrator.llm.auth.spec import KEY_TYPES
+    from orchestrator.llm.auth.store import display_origin, last4
+    from orchestrator.llm.errors import LLMError, NotConfigured, rejected_key_error
+
+    if with_token and from_env:
+        _usage("Use either --with-token or --from-env, not both.")
+    service = _auth_service(ctx)
+    preset = _auth_preset(service.catalog, provider)
+    spec = _login_method(service, preset, method_id)
+    if not service.built(preset, spec):
+        _auth_fail(auth_error("auth.not_built", provider=preset.id, provider_label=preset.label, method=spec.id))
+    fields = {fid: value for fid, value in (("workspace_id", workspace_id), ("organization", organization),
+                                            ("project", project)) if value is not None}
+    for fid, option in FIELD_OPTIONS:
+        if fid in fields and spec.field(fid) is None:
+            _usage(f"{option} does not apply to {preset.label} ({spec.label}).")
+    try:
+        service.store.check_fields(preset, spec, fields)  # a malformed option value is a usage error
+    except LLMError as e:
+        _usage(str(e))
+    keyed = spec.type in KEY_TYPES and not preset.runtime_endpoint
+    if (with_token or from_env) and not keyed:
+        _usage(f"--with-token and --from-env take a key; {preset.label} ({spec.label}) needs none.")
+    if profile is not None and spec.type != "cli_session":
+        _usage("--profile belongs to --method ant_profile.")
+    try:
+        url = service.endpoint(preset, base_url)
+    except ValueError as e:
+        _usage(str(e))
+    except NotConfigured as e:  # the managed local server is not running
+        _auth_fail(e, 4)
+    if not url and not preset.runtime_endpoint:
+        _usage(f"{preset.label} has no server address yet: add --base-url URL.")
+
+    if preset.runtime_endpoint:
+        _say(f"{preset.label} needs no sign-in: the framework passes the server's per-start key.")
+        if not no_check:
+            result = _check_or_fail(service, preset, spec, base_url)
+            _say(_summary(f"It answers at {display_origin(url)}", result), fg="green")
+        return
+
+    if spec.type == "cli_session":
+        profile = (profile or "").strip() or None
+        if profile is not None and not valid_profile_name(profile):
+            _usage("A profile name has letters, digits, '.', '_' or '-' (at most 64).")
+        if spec.note:
+            _say(spec.note, err=True, fg="yellow")
+        result = None
+        if not no_check:
+            with Console(stderr=True).status("Checking the profile through the Anthropic SDK ..."):
+                result = service.check(preset, spec, profile=profile)
+            if not result.ok:
+                _say(str(result.error), err=True, fg="red")
+                login = " ".join(spec.cli.login) if spec.cli and spec.cli.login else "ant auth login"
+                if spec.cli and spec.cli.install and shutil.which("ant") is None:
+                    _say(f"Next: install the ant CLI: {spec.cli.install}", err=True)
+                _say(f"Next: sign in with the ant CLI: {login}" + (f" --profile {profile}" if profile else ""),
+                     err=True)
+                sys.exit(exit_code(result.error) if result.error else 3)
+        service.use_method(preset, spec, profile=profile)
+        which = f"profile '{profile}'" if profile else "active profile"
+        _say(_summary(f"Ditto uses the ant CLI {which} for {preset.label}", result), fg="green")
+        _say(f"Back to the API key: llm-cli ditto logout {preset.id} --method {spec.id}", err=True)
+        _primary_hint(service, preset)
+        return
+
+    if spec.type == "none":
+        result = None if no_check else _check_or_fail(service, preset, spec, base_url)
+        service.use_method(preset, spec, base_url, remember_url=bool(base_url))
+        _say(_summary(f"{preset.label} at {display_origin(url)}", result, "no sign-in needed"), fg="green")
+        _primary_hint(service, preset)
+        return
+
+    # A key method (api_key, bearer_optional).
+    if spec.type == "api_key":
+        _ensure_storage(service, preset, insecure_storage, yes)
+    key, source = _read_key(spec, preset, with_token=with_token, from_env=from_env)
+    if key and spec.rejected(key):
+        _auth_fail(rejected_key_error(preset))  # before any request
+    if key and spec.type == "bearer_optional":
+        _ensure_storage(service, preset, insecure_storage, yes)
+    if key and plain_http_to_remote(url) and not yes:
+        warning = f"{display_origin(url)} uses plain http://, so the key travels unencrypted to another computer."
+        if not _interactive():
+            _usage(f"{warning} Add --yes to send it anyway.")
+        if not click.confirm(f"{warning} Continue?", default=False, err=True):
+            _say("Cancelled.", err=True)
+            sys.exit(EXIT_CANCELLED)
+    result = None if no_check else _check_or_fail(service, preset, spec, base_url, key=key, fields=fields)
+    try:
+        if key:
+            saved = service.save_key(preset, spec, key, base_url, fields=fields, source=source,
+                                     remember_url=bool(base_url), checked=result)
+            warnings = saved.warnings
+        else:  # an optional key left empty: no key for this address
+            service.sign_out(preset, spec, base_url)
+            service.use_method(preset, spec, base_url, remember_url=bool(base_url))
+            warnings = []
+    except ValueError as e:
+        _usage(str(e))
+    except LLMError as e:
+        _auth_fail(e, service=service)
+    if key:
+        ending = last4(key)
+        _say(_summary(f"Signed in to {preset.label}", result, spec.label + (f" ...{ending}" if ending else "")),
+             fg="green")
+    else:
+        _say(_summary(f"{preset.label} at {display_origin(url)}", result, "used without a key"), fg="green")
+    if result is not None and result.ok and result.error is not None:
+        _say(str(result.error), err=True, fg="yellow")
+    for warning in warnings:
+        _say(warning, err=True, fg="yellow")
+    if key and getattr(service.secrets, "storage_mode", None) == "ephemeral":
+        _say("The key is kept in memory for this run only (secret_storage: ephemeral); nothing was saved.",
+             err=True, fg="yellow")
+    elif source.startswith("env:"):
+        _say(f"The key from {source[4:]} is now stored in the vault; the variable is no longer needed.", err=True)
+    _primary_hint(service, preset)
+
+
+@ditto.command('logout')
+@click.argument('provider')
+@click.option('--method', 'method_id', metavar='ID', help='Sign-in method to sign out of (default: the one in use)')
+@click.option('--base-url', metavar='URL', help='Server address whose key is deleted (providers whose address you '
+                                                'set; default: the configured one)')
+@pass_context
+def ditto_logout(ctx: FrameworkContext, provider: str, method_id: Optional[str], base_url: Optional[str]):
+    """Sign Ditto out of PROVIDER. The local copy is deleted first; the command says what it cannot revoke and
+    where you revoke the key itself."""
+    from orchestrator.llm.auth.store import display_origin
+    from orchestrator.llm.errors import LLMError
+    service = _auth_service(ctx)
+    preset = _auth_preset(service.catalog, provider)
+    try:
+        url = service.endpoint(preset, base_url) if base_url else None
+    except ValueError as e:
+        _usage(str(e))
+    if method_id:
+        spec = _named_method(service, preset, method_id)
+    else:
+        current = service.status(preset, url)
+        spec = service.chosen(preset) or (preset.method(current.method) if current.method else None) \
+            or service.recommended(preset) or preset.methods[0]
+    try:
+        result = service.sign_out(preset, spec, url)
+    except ValueError as e:
+        _usage(str(e))
+    except LLMError as e:
+        _auth_fail(e, service=service)
+    where = f" at {display_origin(url)}" if url else ""
+    if spec.type in ("api_key", "bearer_optional") and result.note is None:
+        _say(f"Signed out of {preset.label}: the stored key{where} was deleted from this computer." if result.deleted
+             else f"No key was stored for {preset.label}{where}; nothing was deleted.",
+             fg="green" if result.deleted else None)
+        if result.revoke_url:
+            _say(f"The key itself keeps working until you revoke it at {result.revoke_url}")
+        if result.env_variable:
+            _say(f"{result.env_variable} is still set, so Ditto keeps using the key from it; unset it to stop.",
+                 err=True, fg="yellow")
+    elif spec.type == "cli_session":
+        _say(f"Ditto no longer uses the ant CLI profile for {preset.label}." if result.deleted
+             else f"Ditto was not using the ant CLI profile for {preset.label}.", fg="green" if result.deleted else None)
+        if result.note:
+            _say(result.note, err=True)
+    elif spec.type == "none":
+        _say(f"{preset.label}: the remembered server address and method were forgotten." if result.deleted
+             else f"{preset.label} needs no sign-in; nothing was stored.")
+    else:
+        _say(result.note or f"Signed out of {preset.label}.")
+        if result.revoke_url:
+            _say(f"Revoke it at {result.revoke_url}")
+
+
+@ditto.group('auth')
+def ditto_auth():
+    """Sign-in state, sign-in methods, credential storage and the vault key"""
+    pass
+
+
+@ditto_auth.command('status')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output (never a key: the last four '
+                                                      'characters at most)')
+@click.option('--check', is_flag=True, help='Also run the free check for every provider with a credential (network)')
+@pass_context
+def auth_status(ctx: FrameworkContext, as_json: bool, check: bool):
+    """Per provider: sign-in method, where the credential comes from, account and the last four characters of the
+    key. Exit code 5 when the credential vault cannot be used; with --check the code of the first failed check."""
+    from orchestrator.llm.auth.signin import STORAGE, exit_code
+    service = _auth_service(ctx)
+    statuses = service.status_all(check=check)
+    storage = service.storage()
+    failed = next((s.check.error for s in sorted(statuses, key=lambda s: not s.primary)
+                   if s.check is not None and not s.check.ok), None)
+    if as_json:
+        click.echo(json.dumps({"storage": storage, "providers": [s.to_dict() for s in statuses]}, indent=2,
+                              ensure_ascii=False))
+    else:
+        table = Table(title="Sign-in")
+        for column in ("Provider", "Method", "Source", "Account / key", "Status"):
+            table.add_column(column)
+        if check:
+            table.add_column("Check")
+        for st in statuses:
+            key = " · ".join(p for p in (st.account, f"...{st.last4}" if st.last4 else None,
+                                         st.fields.get("workspace_id")) if p)
+            state = "credential vault unavailable (see below)" if st.state == STORAGE else st.message
+            row = [escape(("* " if st.primary else "") + st.label), escape(st.method_label or "-"),
+                   escape(st.source or "-"), escape(key or "-"), escape(state)]
+            if check:
+                row.append(escape(st.check.message) if st.check is not None else "-")
+            table.add_row(*row)
+        console.print(table)
+        _say("* Ditto's provider (ai_provider). Sign in: llm-cli ditto login <provider>")
+        if storage["usable"]:
+            _say(f"Credential vault: {storage['mode']}" + (f", {storage['file']}" if storage["file"] and
+                                                            storage["mode"] != "ephemeral" else ""))
+    if not storage["usable"]:
+        if as_json:
+            sys.exit(5)
+        _storage_fail(service.storage_problem(), service=service)
+    if failed is not None:
+        sys.exit(exit_code(failed))
+
+
+@ditto_auth.command('methods')
+@click.argument('provider', required=False)
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def auth_methods(ctx: FrameworkContext, provider: Optional[str], as_json: bool):
+    """Sign-in methods per provider in the order they are preferred, with the key page, environment variables,
+    extra options and policy notes. Needs neither the vault nor the network."""
+    from orchestrator.llm.auth.signin import method_infos
+    from orchestrator.llm.auth.spec import TYPE_LABELS
+    catalog = _auth_catalog(ctx)
+    presets = [_auth_preset(catalog, provider)] if provider else list(catalog.providers.values())
+    options = dict(FIELD_OPTIONS)
+    if as_json:
+        click.echo(json.dumps({"providers": [{
+            "provider": p.id, "label": p.label, "methods": [{
+                "id": i.spec.id, "type": i.spec.type, "label": i.spec.label, "built": i.built,
+                "recommended": i.recommended, "opt_in": i.spec.opt_in, "key_page": i.spec.key_page,
+                "env": list(i.spec.env), "fields": [f.id for f in i.spec.fields], "note": i.spec.note,
+                "where": i.spec.where} for i in method_infos(p)]} for p in presets]}, indent=2, ensure_ascii=False))
+        return
+    for preset in presets:
+        _say(f"{preset.label} [{preset.id}]")
+        for number, info in enumerate(method_infos(preset), 1):
+            spec = info.spec
+            _say(f"  {number}. {spec.label} [{spec.id}] - {TYPE_LABELS.get(spec.type, spec.type)}{_method_tags(info)}")
+            if spec.key_page:
+                _say(f"     key page: {spec.key_page}")
+            if spec.where:
+                _say(f"     where: {spec.where}")
+            if spec.env:
+                _say(f"     environment: {', '.join(spec.env)} (llm-cli ditto login {preset.id} --from-env)")
+            if spec.fields:
+                _say("     options: " + ", ".join(f"{options.get(f.id, f.id)} ({f.label})" for f in spec.fields))
+            if spec.note:
+                _say(f"     note: {spec.note}")
+
+
+@ditto_auth.command('storage')
+@click.option('--use', 'mode', type=click.Choice(['keyring', 'helper', 'passphrase', 'insecure', 'ephemeral']),
+              help='Protect the vault this way from now on (every stored credential is re-encrypted)')
+@click.option('--helper', 'helper', metavar='COMMAND',
+              help='With --use helper: the command that prints the vault key, e.g. "pass show llmcc/vault-key" '
+                   '(run without a shell)')
+@click.option('--yes', '-y', is_flag=True, help='Do not ask before choosing the unencrypted key file')
+@pass_context
+def auth_storage(ctx: FrameworkContext, mode: Optional[str], helper: Optional[str], yes: bool):
+    """Show how the credential vault is protected, or choose another protection with --use. Nothing is chosen
+    automatically; exit code 5 when the vault cannot be used."""
+    from orchestrator.Core.vault_key import StorageError
+    if mode == "ephemeral":
+        _usage("ephemeral protects no vault and is chosen per run: LLM_SECRET_STORAGE=ephemeral llm-cli ...")
+    if helper is not None and mode != "helper":
+        _usage("--helper belongs to --use helper.")
+    service = _auth_service(ctx)
+    if mode is None:
+        info = service.storage()
+        if not info["usable"]:
+            _storage_fail(service.storage_problem(), service=service)
+        _say(f"The credential vault is protected with '{info['mode']}'."
+             + (f" File: {info['file']}" if info["file"] and info["mode"] != "ephemeral" else ""))
+        _say("Other choices: " + "; ".join(f"{name}: {text}" for name, text in info["choices"].items()
+                                           if name != info["mode"]))
+        return
+    if mode == "insecure" and not yes and _interactive() and not click.confirm(
+            "The vault key will be kept in a file next to the vault, NOT encrypted at rest. Continue?",
+            default=False, err=True):
+        _say("Cancelled.", err=True)
+        sys.exit(EXIT_CANCELLED)
+    try:
+        service.choose_storage(mode, helper)
+    except StorageError as e:
+        _storage_fail(e)
+    _say(f"The credential vault is now protected with '{mode}'.", fg="green")
+
+
+@ditto_auth.command('rotate-key')
+@pass_context
+def auth_rotate_key(ctx: FrameworkContext):
+    """Create a new vault key and re-encrypt every stored credential with it; the old key is removed."""
+    from orchestrator.Core.vault_key import StorageError
+    from orchestrator.llm.errors import LLMError
+    service = _auth_service(ctx)
+    try:
+        service.rotate_key()
+    except (LLMError, StorageError) as e:
+        _storage_fail(e, service=service)
+    if getattr(service.secrets, "storage_mode", None) == "ephemeral":
+        _say("The vault is kept in memory for this run only (secret_storage: ephemeral); the new key is not saved.",
+             err=True, fg="yellow")
+        return
+    _say("Vault key rotated: every stored credential is re-encrypted with the new key, and the old key was removed.",
+         fg="green")
 
 
 # ============================================================================
