@@ -722,8 +722,8 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   example "disallowed by robots.txt", "X-Robots-Tag: noai", "TDM reservation (...)", "redirect from ... leaves the
   crawled site", "language 'fr' is not one of de, en", "PDF downloads are switched off", "neither HTML nor PDF
   (image/png)", "no text" or "PDF support (pypdf) is not installed", and every page that could not be fetched or read
-  (HTTP status, unreadable PDF, too many redirects). Each page that arrives (HTTP 200) counts toward the page limit, stored or not.
-  Site reservations and failures make the outcome partial; the other reasons do not.
+  (HTTP status, unreadable PDF, too many redirects). Each page that arrives (HTTP 200) counts toward the page
+  limit, stored or not. Site reservations and failures make the outcome partial; the other reasons do not.
 
 ### Spoken announcements
 

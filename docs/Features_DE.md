@@ -770,8 +770,8 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   from ... leaves the crawled site“, „language 'fr' is not one of de, en“, „PDF downloads are switched off“,
   „neither HTML nor PDF (image/png)“, „no text“ oder „PDF support (pypdf) is not installed“, und jede Seite, die sich
   nicht abrufen oder lesen ließ (HTTP-Status, unlesbares PDF, zu viele Weiterleitungen). Jede Seite, die ankommt
-  (HTTP 200), zählt zur Seitengrenze, ob gespeichert oder nicht. Vorbehalte von Sites und Fehler machen das Ergebnis zu „teilweise“,
-  die übrigen Gründe nicht.
+  (HTTP 200), zählt zur Seitengrenze, ob gespeichert oder nicht. Vorbehalte von Sites und Fehler machen das
+  Ergebnis zu „teilweise“, die übrigen Gründe nicht.
 
 ### Gesprochene Ansagen
 
