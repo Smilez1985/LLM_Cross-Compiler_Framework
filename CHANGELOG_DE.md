@@ -36,6 +36,38 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Ditto-Evaluation** (`llm-cli ditto eval`): feste Fälle (Analyse von Build-Logs, Build-Empfehlungen,
   Modulvorschläge, Chat mit Tools, Prompt-Injection), nach Regeln bewertet, gegen den konfigurierten Anbieter oder
   je lokaler Modellstufe (`--tier small --tier small-q2`). Es wird nichts gebaut; `--json` schreibt den Bericht.
+- **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
+  erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
+  § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in
+  `<meta name="robots">` / `<meta name="llm-conversion-framework-bot">` mit `noindex`, `none`, `noai` oder
+  `noimageai` markiert sind, folgt den Links von `nofollow`-Seiten nicht und beachtet das W3C TDM Reservation
+  Protocol (`/.well-known/tdmrep.json` je Site, Header und Meta-Tag `tdm-reservation`, PDF-Metadaten).
+  Weiterleitungsziele auf anderen Hosts werden genauso geprüft. Jede übersprungene Seite steht mit ihrem Grund im
+  Crawl-Protokoll. Keine dieser Prüfungen lässt sich abschalten.
+- **Hinweis vor dem ersten Deep Ingest** (Englisch und Deutsch): was gelesen wird (nur öffentlich erreichbare
+  Seiten), welche Vorbehalte beachtet werden, dass das Wissen auf diesem Computer bleibt und dass beim Weitergeben
+  Quelle und Lizenz erhalten bleiben und deine ausdrückliche Freigabe nötig ist. Er ist eine Information, keine
+  rechtliche Bestätigung: ein Knopf „Verstanden“. Er erscheint einmal je Benutzer und erneut, wenn sich sein Text
+  ändert.
+- **Gesprochene Ansagen** des Hinweises und des Ergebnisses von Deep Ingest über die Sprachausgabe des
+  Betriebssystems (Windows System.Speech, macOS `say`, Linux `spd-say` oder `espeak-ng`), in der Sprache der
+  Oberfläche. Nach bestem Bemühen und nie im Weg: keine Audiodateien, die Systemlautstärke wird nie verändert, und
+  still in CI, über SSH ohne Bildschirm, auf Systemen ohne Bildschirm, mit `LLM_FRAMEWORK_NO_AUDIO=1` oder wenn
+  *Werkzeuge > Gesprochene Ansagen* (Einstellung `audio_announcements`) aus ist. Jede Ansage wird auch
+  protokolliert.
+- **Fortschritt und Stopp bei Deep Ingest**: Der Assistent zeigt „Seite N von M: <url>“ statt eines endlosen
+  Drehsymbols, und ein Stopp-Knopf beendet den Crawl nach der aktuellen Seite. Das Schließen des Assistenten
+  stoppt einen laufenden Crawl genauso und schließt, sobald die aktuelle Seite gespeichert ist, ohne dass das
+  Fenster einfriert.
+- **Eingabeverlauf**: Die Eingabefelder bieten an, was du zuletzt verwendet hast, das Neueste zuerst. Modell,
+  Kalibrierungsdatensatz, Deep-Ingest-URL und Gerät (Deployment, Hardware-Scan per SSH) sind bearbeitbare Listen;
+  das letzte Modell und das letzte Gerät werden eingetragen, Datensätze und URLs nur angeboten. Targets und Boards
+  kommen aus den Target-Definitionen, deshalb wird das zuletzt gebaute vorausgewählt, sofern es noch angeboten
+  wird (ein Target ohne angegebene Boards bietet die letzten Boards als Vorschläge an). Der Verlauf gilt je
+  Benutzer (`input_history.json` im Zustandsordner des Benutzers), hat höchstens 20 Einträge je Feld und enthält
+  nie Secrets: Werte, die wie ein API-Schlüssel oder Token aussehen, URLs mit Benutzername oder Passwort und URLs
+  mit einem Zugangs- oder Sitzungsparameter (etwa `?token=` oder `;jsessionid=`) werden nicht gemerkt.
+  *Werkzeuge > Eingabeverlauf löschen...* vergisst ihn.
 
 - **Dokumentation auf Englisch und Deutsch** für jedes Dokument (README, Blaupause mit Design und Roadmap,
   CLI-Anleitung, Funktionen, Mitwirken, Leitfaden für Modulentwickler, SSOT, Changelog), geprüft durch
@@ -43,6 +75,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   dieselben Versionen, und die Roadmap nennt nur, was kommt.
 
 ### Geändert
+- **Ergebnis von Deep Ingest**: Es meldete „Deep Ingest complete“, selbst wenn jede URL fehlschlug. Jetzt meldet
+  es Erfolg (alles gespeichert), teilweise (einige Seiten gespeichert; andere schlugen fehl, waren von der Site
+  vorbehalten, oder der Crawl wurde gestoppt) oder Fehlschlag (nichts gespeichert), jeweils mit eigener Meldung und
+  erst, nachdem der letzte Schreibvorgang zurückgekehrt ist. Seiten werden gespeichert, sobald sie gelesen sind;
+  ein gestoppter oder unterbrochener Crawl behält also, was er schon gespeichert hat, und Seiten, die nicht
+  abgerufen werden konnten, stehen im Crawl-Protokoll.
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
   eingebaute Transformers-Modell für den Offline-Modus ist entfernt (der Offline-Modus nutzt lokale Anbieter:
   Ollama, den verwalteten llama-server, einen Server in deinem Netzwerk). Healing-Analysen, Modulvorschläge und
@@ -60,13 +98,24 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   voller Länge, was auf einer CPU Minuten dauert); ab „medium“ bleibt es an.
 - Abhängigkeiten: `anthropic` 1.13.0, `openai` 3.28.0 (vorher 2.54.0) und `fastembed` 0.8.1 (lokale Embeddings,
   ONNX auf der CPU) sind exakt gepinnt; pip-audit meldet keine bekannten Schwachstellen.
+- Der User-Agent des Crawlers nennt die echte Version des Frameworks (er nannte 1.6.0).
+- Deep Ingest: Ein Link, der auf einen anderen Host weiterleitet, wird wie jeder andere externe Link übersprungen;
+  nur eine Weiterleitung der Start-URL kann den Crawl auf einen anderen Host verlegen.
 
 ### Entfernt
 - Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen
   eigenen Datensatz).
+- Die ungenutzte Einstellung `input_history` (der Eingabeverlauf ist persönlich und liegt im Zustandsordner des
+  Benutzers, nicht in der gemeinsamen `configs/config.yml`).
+- Die Option *Respect robots.txt* im Deep-Ingest-Dialog und die Einstellung `crawler_respect_robots`: robots.txt
+  ist ein maschinenlesbarer Vorbehalt wie die anderen und wird deshalb immer beachtet.
 - `litellm` und `tiktoken` und mit ihnen 19 indirekte Pakete (aiohttp, boto3, jinja2 und andere).
 
 ### Sicherheit
+- Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt. Regeln mit `*` oder `$` (etwa
+  `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach der ersten und
+  eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler Seiten abrief, die
+  die Site ausgeschlossen hatte.
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
   Download, der direkt in eine Shell geleitet wird, das Löschen des Wurzel- oder Home-Ordners, Schreibrechte für
   alle, das Überschreiben eines Datenträgers), ganz gleich, welche Anweisungen ein Build-Log oder ein

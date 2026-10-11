@@ -1,5 +1,6 @@
 """GUI dialog tests (offscreen Qt) against a real ConfigManager."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -367,9 +368,39 @@ class TestURLInputDialog:
         assert message_boxes == [("warning", "No URLs")]
 
     def test_default_options(self, qapp):
-        assert URLInputDialog().get_options() == {
-            "max_depth": 2, "respect_robots": True, "download_pdfs": True, "request_delay": 1,
-        }
+        assert URLInputDialog().get_options() == {"max_depth": 2, "download_pdfs": True, "request_delay": 1}
+
+    def test_no_switch_to_ignore_robots_txt(self, qapp, tmp_path):
+        """robots.txt is a machine-readable opt-out like TDMRep: neither the dialog nor the config turns it off."""
+        from PySide6.QtWidgets import QCheckBox
+        from orchestrator.Core.crawler_manager import CrawlerManager
+
+        dlg = URLInputDialog()
+        assert not [box.text() for box in dlg.findChildren(QCheckBox) if "robots" in box.text().lower()]
+        cfg = ConfigManager(tmp_path)
+        cfg.set("crawler_respect_robots", False)
+        assert "crawler_respect_robots" not in cfg.config_schemas
+        assert CrawlerManager(SimpleNamespace(config=cfg), dlg.get_options()).respect_robots is True
+
+    def test_no_recent_list_without_history(self, qapp):
+        dlg = URLInputDialog()
+        assert dlg.recent_row.isHidden() and dlg.cb_recent.count() == 0
+
+    def test_recent_urls_are_offered_and_added_once(self, qapp):
+        dlg = URLInputDialog(recent=["https://docs.radxa.com/", "https://wiki.example.org/"])
+        assert not dlg.recent_row.isHidden() and dlg.cb_recent.isEditable()
+        assert [dlg.cb_recent.itemText(i) for i in range(dlg.cb_recent.count())] == [
+            "https://docs.radxa.com/", "https://wiki.example.org/"]
+        assert dlg.cb_recent.currentText() == "" and dlg.get_urls() == []   # offered, not filled in
+        assert not dlg.btn_add_recent.autoDefault()   # Enter still means OK
+
+        dlg.cb_recent.setCurrentIndex(1)
+        dlg.add_recent_url()
+        dlg.add_recent_url()
+        assert dlg.get_urls() == ["https://wiki.example.org/"]
+        dlg.cb_recent.setEditText(" https://docs.radxa.com/rock5/ ")   # editable: a recent URL can be changed
+        dlg.add_recent_url()
+        assert dlg.get_urls() == ["https://wiki.example.org/", "https://docs.radxa.com/rock5/"]
 
 
 class TestCrawlOptionWiring:
@@ -385,28 +416,483 @@ class TestCrawlOptionWiring:
         class FakeRag:
             framework = SimpleNamespace(config=cfg)
 
-            def ingest_url(self, url, crawler_options=None):
+            def ingest_url(self, url, crawler_options=None, **kwargs):
                 crawler = CrawlerManager(self.framework, crawler_options)
-                seen.append((url, crawler.max_depth, crawler.respect_robots, crawler.download_pdfs, crawler.rate_limit))
-                return {"success": True, "count": 3}
+                seen.append((url, crawler.max_depth, crawler.download_pdfs, crawler.rate_limit))
+                return {"success": True, "outcome": "success", "count": 3, "documents": 1}
 
         dlg = URLInputDialog()
         dlg.txt_urls.setPlainText("https://docs.radxa.com/")
         dlg.spin_depth.setValue(4)
-        dlg.chk_robots.setChecked(False)
         dlg.chk_pdfs.setChecked(False)
         dlg.spin_delay.setValue(3)
 
         finished = []
-        worker = CrawlWorker(FakeRag(), dlg.get_urls(), dlg.get_options())
-        worker.finished.connect(finished.append)
+        worker = CrawlWorker(FakeRag(), dlg.get_urls(), dlg.get_options(), lang="en")
+        worker.done.connect(lambda outcome, message: finished.append((outcome, message)))
         worker.run()
 
-        assert seen == [("https://docs.radxa.com/", 4, False, False, 3.0)]
-        assert finished == ["Deep Ingest complete. Added 3 knowledge chunks."]
-        assert cfg.get("crawler_respect_robots") is True
-        assert cfg.get("crawler_max_depth") == 2
-        assert CrawlerManager(SimpleNamespace(config=cfg)).respect_robots is True
+        assert seen == [("https://docs.radxa.com/", 4, False, 3.0)]
+        assert finished == [("success", "Deep Ingest finished: 1 pages (3 chunks) are now searchable.")]
+        assert cfg.get("crawler_max_depth") == 2 and cfg.get("crawler_download_pdfs") is True
+        assert CrawlerManager(SimpleNamespace(config=cfg)).max_depth == 2
+
+    def test_skipped_and_failed_pages_are_named_in_the_crawl_log(self, qapp):
+        from orchestrator.gui.wizards import CrawlWorker
+
+        class FakeRag:
+            def ingest_url(self, url, crawler_options=None, **kwargs):
+                return {"success": True, "outcome": "partial", "count": 1, "documents": 1, "skipped": [
+                    {"url": "https://docs.example/private", "reason": "X-Robots-Tag: noai", "opt_out": True}],
+                    "failed": [{"url": "https://docs.example/gone", "reason": "HTTP status 404", "opt_out": False}]}
+
+        lines = []
+        worker = CrawlWorker(FakeRag(), ["https://docs.example/"], {})
+        worker.progress.connect(lines.append)
+        worker.run()
+
+        assert "  -> Skipped https://docs.example/private: X-Robots-Tag: noai" in lines
+        assert "  -> Failed https://docs.example/gone: HTTP status 404" in lines
+
+
+class ScriptedRag:
+    """ingest_url answers from a script per URL and records what happened, in order."""
+
+    def __init__(self, results, events=None):
+        self.results = results
+        self.events = [] if events is None else events
+        self.calls = []
+
+    def ingest_url(self, url, crawler_options=None, stop=None, progress=None):
+        self.calls.append(url)
+        result = self.results[url]
+        if callable(result):
+            result = result(stop, progress)
+        if isinstance(result, Exception):
+            raise result
+        self.events.append(("stored", url))
+        return result
+
+
+def page_result(outcome, pages=0, chunks=0, stopped=False):
+    return {"success": outcome != "failure", "outcome": outcome, "documents": pages, "count": chunks,
+            "message": f"{outcome} message", "stopped": stopped}
+
+
+class TestDeepIngestOutcome:
+    """The eject rule: the outcome is reported and spoken once it is true (after the last write), and success,
+    partial and failure are told apart; "complete" is never said when nothing was stored."""
+
+    def run_worker(self, rag, urls, lang="en", stop_after_first=False):
+        from orchestrator.gui.wizards import CrawlWorker
+
+        worker = CrawlWorker(rag, urls, {}, announcer=lambda text: rag.events.append(("spoken", text)), lang=lang)
+        done, pages = [], []
+        worker.done.connect(lambda outcome, message: done.append((outcome, message)))
+        worker.page.connect(lambda n, m, url: pages.append((n, m, url)))
+        worker.run()
+        return worker, done, pages
+
+    def test_success_is_spoken_after_the_writes(self, qapp):
+        rag = ScriptedRag({"https://a.example/": page_result("success", 2, 5),
+                           "https://b.example/": page_result("success", 1, 2)})
+        _, done, _ = self.run_worker(rag, list(rag.results))
+        message = "Deep Ingest finished: 3 pages (7 chunks) are now searchable."
+        assert done == [("success", message)]
+        assert rag.events == [("stored", "https://a.example/"), ("stored", "https://b.example/"), ("spoken", message)]
+
+    def test_one_failed_site_makes_the_crawl_partial(self, qapp):
+        rag = ScriptedRag({"https://a.example/": page_result("success", 2, 5),
+                           "https://b.example/": page_result("failure")})
+        _, done, _ = self.run_worker(rag, list(rag.results))
+        assert done[0][0] == "partial" and "2 pages (5 chunks) are searchable" in done[0][1]
+        assert rag.events[-1] == ("spoken", done[0][1])
+
+    def test_a_partial_site_makes_the_crawl_partial(self, qapp):
+        rag = ScriptedRag({"https://a.example/": page_result("partial", 2, 5)})
+        assert self.run_worker(rag, list(rag.results))[1][0][0] == "partial"
+
+    def test_nothing_stored_is_a_failure_never_complete(self, qapp):
+        rag = ScriptedRag({"https://a.example/": page_result("failure"), "https://b.example/": page_result("failure")})
+        _, done, _ = self.run_worker(rag, list(rag.results))
+        assert done == [("failure", "Deep Ingest failed: nothing was stored. See the log.")]
+        assert all("complete" not in text for kind, text in rag.events if kind == "spoken")
+
+    def test_outcome_in_the_ui_language(self, qapp):
+        rag = ScriptedRag({"https://a.example/": page_result("success", 1, 3)})
+        _, done, _ = self.run_worker(rag, list(rag.results), lang="de")
+        assert done == [("success", "Deep Ingest abgeschlossen: 1 Seiten (3 Abschnitte) sind jetzt durchsuchbar.")]
+
+    def test_stop_keeps_what_was_stored_and_skips_the_remaining_sites(self, qapp):
+        from orchestrator.gui.wizards import CrawlWorker
+
+        holder = {}
+
+        def first(stop, progress):
+            progress(1, 50, "https://a.example/")
+            holder["worker"].stop()           # the user presses Stop during the first site
+            assert stop.is_set()
+            return page_result("partial", 2, 4, stopped=True)
+
+        rag = ScriptedRag({"https://a.example/": first, "https://b.example/": page_result("success", 9, 9)})
+        worker = CrawlWorker(rag, list(rag.results), {}, announcer=lambda t: rag.events.append(("spoken", t)),
+                             lang="en")
+        holder["worker"] = worker
+        done, pages = [], []
+        worker.done.connect(lambda outcome, message: done.append((outcome, message)))
+        worker.page.connect(lambda n, m, url: pages.append((n, m, url)))
+        worker.run()
+
+        assert rag.calls == ["https://a.example/"]
+        assert pages == [(1, 50, "https://a.example/")]
+        assert done == [("partial", "Deep Ingest stopped: 2 pages (4 chunks) are kept and searchable.")]
+
+    def test_stop_before_anything_was_stored(self, qapp):
+        rag = ScriptedRag({"https://a.example/": page_result("failure", stopped=True)})
+        _, done, _ = self.run_worker(rag, list(rag.results))
+        assert done == [("failure", "Deep Ingest stopped: nothing was stored.")]
+
+    def test_an_unexpected_error_is_reported_and_spoken_as_failure(self, qapp):
+        from orchestrator.gui.wizards import CrawlWorker
+
+        rag = ScriptedRag({"https://a.example/": RuntimeError("disk full")})
+        worker = CrawlWorker(rag, list(rag.results), {}, announcer=lambda t: rag.events.append(("spoken", t)),
+                             lang="en")
+        errors, done = [], []
+        worker.error.connect(errors.append)
+        worker.done.connect(lambda *a: done.append(a))
+        worker.run()
+        assert errors == ["disk full"] and done == []
+        assert rag.events == [("spoken", "Deep Ingest failed: nothing was stored. See the log.")]
+
+    def test_an_error_after_stored_sites_does_not_claim_nothing_was_stored(self, qapp):
+        from orchestrator.gui.wizards import CrawlWorker
+
+        rag = ScriptedRag({"https://a.example/": page_result("success", 2, 5),
+                           "https://b.example/": RuntimeError("disk full")})
+        worker = CrawlWorker(rag, list(rag.results), {}, announcer=lambda t: rag.events.append(("spoken", t)),
+                             lang="en")
+        errors = []
+        worker.error.connect(errors.append)
+        worker.run()
+        assert errors == ["disk full"]
+        assert rag.events == [("stored", "https://a.example/"), ("spoken", (
+            "Deep Ingest partly finished: 2 pages (5 chunks) are searchable; other pages were left out or failed. "
+            "See the log."))]
+
+    def test_a_broken_announcer_never_breaks_the_report(self, qapp):
+        from orchestrator.gui.wizards import CrawlWorker
+
+        def broken(text):
+            raise OSError("no audio device")
+
+        worker = CrawlWorker(ScriptedRag({"https://a.example/": page_result("success", 1, 1)}),
+                             ["https://a.example/"], {}, announcer=broken, lang="en")
+        done = []
+        worker.done.connect(lambda outcome, message: done.append(outcome))
+        worker.run()
+        assert done == ["success"]
+
+
+@pytest.fixture
+def wizard_boxes(monkeypatch):
+    from orchestrator.gui import wizards
+
+    shown = []
+
+    class RecordingMessageBox:
+        @staticmethod
+        def information(parent, title, text, *args):
+            shown.append(("information", title, text))
+
+        @staticmethod
+        def warning(parent, title, text, *args):
+            shown.append(("warning", title, text))
+
+        @staticmethod
+        def critical(parent, title, text, *args):
+            shown.append(("critical", title, text))
+
+    monkeypatch.setattr(wizards, "QMessageBox", RecordingMessageBox)
+    return shown
+
+
+class TestDeepIngestControls:
+    """Progress "page N of M: <url>" instead of an endless spinner, a Stop button, the notice before the first
+    crawl."""
+
+    @pytest.fixture
+    def wizard(self, qapp, tmp_path, wizard_boxes):
+        from PySide6.QtCore import QThread
+        from orchestrator.gui.wizards import ModuleCreationWizard
+
+        wiz = ModuleCreationWizard(tmp_path / "targets")
+        yield wiz
+        # A crawl still running after a failed assertion must not open a real (modal) box in a later test.
+        if isinstance(wiz.crawl_worker, QThread):
+            wiz.crawl_worker.stop()
+            wiz.crawl_worker.wait(5000)
+            qapp.processEvents()
+        wiz.close()
+
+    def test_progress_names_page_and_url(self, wizard):
+        wizard.on_crawl_page(3, 50, "https://docs.example/guide")
+        assert wizard.status_label.text() == "Page 3 of 50: https://docs.example/guide"
+        assert (wizard.ai_progress.minimum(), wizard.ai_progress.maximum(), wizard.ai_progress.value()) == (0, 50, 3)
+
+    def test_progress_shows_urls_as_plain_escaped_text(self, wizard):
+        wizard.on_crawl_page(1, 5, "https://docs.example/<b>x</b>‮" + "a" * 300)
+        text = wizard.status_label.text()
+        assert wizard.status_label.textFormat() == dialogs.Qt.PlainText
+        assert "\\u202e" in text and "‮" not in text and text.endswith("...") and len(text) < 160
+
+    def test_outcomes_get_their_own_box_and_reset_the_controls(self, wizard, wizard_boxes):
+        wizard.btn_stop_crawl.setVisible(True)
+        wizard.btn_deep_ingest.setEnabled(False)
+        wizard.on_crawl_done("success", "ok")
+        wizard.on_crawl_done("partial", "some")
+        wizard.on_crawl_done("failure", "none")
+        assert wizard_boxes == [("information", "Deep Ingest Complete", "ok"),
+                                ("warning", "Deep Ingest Partly Complete", "some"),
+                                ("critical", "Deep Ingest Failed", "none")]
+        assert wizard.btn_stop_crawl.isHidden() and wizard.btn_deep_ingest.isEnabled()
+
+    def test_stop_button_stops_the_running_worker(self, wizard):
+        class Worker:
+            stopped = False
+
+            def isRunning(self):
+                return True
+
+            def stop(self):
+                self.stopped = True
+
+        assert wizard.btn_stop_crawl.isHidden()
+        wizard.crawl_worker = Worker()
+        wizard.btn_stop_crawl.setEnabled(True)
+        wizard.stop_deep_ingest()
+        assert wizard.crawl_worker.stopped and not wizard.btn_stop_crawl.isEnabled()
+        assert wizard.status_label.text() == "Stopping after the current page..."
+
+    def test_closing_during_a_crawl_waits_for_the_current_page_without_blocking(self, qapp, wizard):
+        """The wizard used to give up after a fixed wait and close while the page was still being stored;
+        the main window could then shut the knowledge base down in the middle of the write."""
+        import threading
+        import time
+        from orchestrator.gui.wizards import CrawlWorker
+
+        release, started, events = threading.Event(), threading.Event(), []
+
+        class SlowRag:
+            def ingest_url(self, url, crawler_options=None, stop=None, progress=None):
+                started.set()
+                release.wait(10)   # embedding and storing a long page
+                events.append(("stored", stop.is_set()))
+                return page_result("partial", 1, 9, stopped=True)
+
+        wizard.show()
+        wizard.crawl_worker = CrawlWorker(SlowRag(), ["https://docs.example/"], {}, lang="en")
+        wizard.crawl_worker.start()
+        assert started.wait(5)
+
+        begin = time.monotonic()
+        wizard.reject()
+        assert time.monotonic() - begin < 1.0          # the GUI stays responsive
+        assert wizard.isVisible() and wizard.status_label.text() == "Stopping after the current page..."
+        wizard.reject()                                  # a second click changes nothing
+        release.set()
+        assert wait_for(qapp, lambda: not wizard.isVisible())
+        assert events == [("stored", True)] and not wizard.crawl_worker.isRunning()
+        assert wizard.result() == dialogs.QDialog.Rejected
+
+    def test_deep_ingest_shows_the_notice_once_then_crawls_in_the_background(self, qapp, wizard, tmp_path,
+                                                                           monkeypatch, wizard_boxes):
+        from orchestrator.gui import wizards
+
+        cfg = ConfigManager(tmp_path / "configs")
+        rag = ScriptedRag({"https://docs.example/": lambda stop, progress: (
+            progress(1, 50, "https://docs.example/"), page_result("success", 1, 2))[1]})
+        wizard.framework_manager = SimpleNamespace(config=cfg, get_component=lambda name: rag)
+        notices, spoken = [], []
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: notices.append(self.windowTitle()))
+        monkeypatch.setattr(wizards, "announce", lambda text, lang=None, config=None: spoken.append((text, config)))
+
+        offered = []
+
+        class FakeURLDialog:
+            def __init__(self, parent=None, recent=()):
+                offered.append(list(recent))
+
+            def exec(self):
+                return wizards.QDialog.Accepted
+
+            def get_urls(self):
+                return ["https://docs.example/"]
+
+            def get_options(self):
+                return {"max_depth": 1}
+
+        monkeypatch.setattr(wizards, "URLInputDialog", FakeURLDialog)
+
+        for _ in range(2):
+            wizard.run_deep_ingest()
+            assert not wizard.btn_stop_crawl.isHidden() and wizard.ai_progress.maximum() != 0
+            assert wait_for(qapp, lambda: len(wizard_boxes) and not wizard.crawl_worker.isRunning())
+            wizard_boxes.clear()
+
+        assert notices == ["Before your first Deep Ingest"]   # once per user
+        assert (cfg.user_state_dir / "crawl_notice.json").exists()
+        assert spoken == [("Deep Ingest finished: 1 pages (2 chunks) are now searchable.", cfg)] * 2
+        assert wizard.ai_progress.maximum() == 50   # the "page 1 of 50" progress reached the GUI
+        assert wizard.status_label.text() == "Deep Ingest finished: 1 pages (2 chunks) are now searchable."
+        assert offered == [[], ["https://docs.example/"]]   # crawled URLs are offered the next time
+
+    def test_crawled_urls_are_remembered_without_secrets(self, wizard, tmp_path, monkeypatch):
+        from orchestrator.gui import wizards
+        from orchestrator.utils.input_history import InputHistory
+
+        cfg = ConfigManager(tmp_path / "configs")
+        wizard.framework_manager = SimpleNamespace(config=cfg, get_component=lambda name: object())
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
+        urls = ["https://docs.example/a", "https://docs.example/b?access_token=abc", "https://u:pw@docs.example/c"]
+        crawled = []
+
+        class Worker:
+            progress = page = done = error = SimpleNamespace(connect=lambda slot: None)
+
+            def __init__(self, rag, urls, options, **kwargs):
+                crawled.append(urls)
+
+            def start(self):
+                pass
+
+            def isRunning(self):
+                return False
+
+        class URLDialog:
+            def __init__(self, parent=None, recent=()):
+                pass
+
+            def exec(self):
+                return wizards.QDialog.Accepted
+
+            def get_urls(self):
+                return urls
+
+            def get_options(self):
+                return {}
+
+        monkeypatch.setattr(wizards, "CrawlWorker", Worker)
+        monkeypatch.setattr(wizards, "URLInputDialog", URLDialog)
+        wizard.run_deep_ingest()
+        assert crawled == [urls]   # the crawl gets every URL; only the history leaves some out
+        history = InputHistory(cfg.user_state_dir)
+        assert history.get("url") == ["https://docs.example/a"]
+        assert "abc" not in history.path.read_text() and "pw@" not in history.path.read_text()
+
+
+class TestCrawlNotice:
+    """Information before the first crawl, not a legal confirmation: one button, no checkbox, shown again when
+    the text changes, spoken only once it is on screen."""
+
+    def test_one_understood_button_and_no_checkbox(self, qapp):
+        dlg = dialogs.CrawlNoticeDialog(lang="en")
+        assert [b.text() for b in dlg.buttons()] == ["&Understood"]
+        assert dlg.defaultButton() is dlg.understood and dlg.escapeButton() is dlg.understood
+        assert dlg.checkBox() is None and dlg.textFormat() == dialogs.Qt.PlainText
+        text = dlg.text()
+        for needle in ("publicly reachable", "robots.txt", "X-Robots-Tag", "noai", "TDMRep", "stays on this computer",
+                       "licence", "release it explicitly", "not a legal confirmation"):
+            assert needle in text, needle
+        assert dlg.accessibleName() == "Before your first Deep Ingest" and dlg.accessibleDescription() == text
+
+    def test_german_text(self, qapp):
+        dlg = dialogs.CrawlNoticeDialog(lang="de")
+        assert dlg.windowTitle() == "Vor Ihrem ersten Deep Ingest"
+        assert [b.text() for b in dlg.buttons()] == ["&Verstanden"]
+        assert "TDMRep" in dlg.text() and "§ 44b UrhG" in dlg.text()
+
+    def test_escape_counts_as_understood(self, qapp):
+        from PySide6.QtTest import QTest
+
+        dlg = dialogs.CrawlNoticeDialog(lang="en")
+        dlg.show()
+        QTest.keyClick(dlg, dialogs.Qt.Key_Escape)
+        assert dlg.clickedButton() is dlg.understood and not dlg.isVisible()
+
+    def test_spoken_only_once_the_notice_is_visible(self, qapp):
+        spoken = []
+        dlg = dialogs.CrawlNoticeDialog(lang="de", announcer=lambda text: spoken.append((text, dlg.isVisible())))
+        qapp.processEvents()
+        assert spoken == []
+        dlg.show()
+        assert wait_for(qapp, lambda: spoken)
+        dlg.hide()
+        dlg.show()
+        qapp.processEvents()
+        dlg.close()
+        assert spoken == [("Bitte lesen Sie den Hinweis vor Ihrem ersten Deep Ingest.", True)]
+
+    def test_shown_once_and_again_when_the_text_changes(self, qapp, tmp_path, monkeypatch):
+        import os
+        from orchestrator.utils import localization
+        from orchestrator.utils.crawl_notice import CrawlNotice
+
+        cfg = SimpleNamespace(user_state_dir=tmp_path / "state")
+        shown = []
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: shown.append(self.windowTitle()))
+
+        dialogs.show_crawl_notice_once(None, cfg)
+        dialogs.show_crawl_notice_once(None, cfg)
+        assert len(shown) == 1
+        state = cfg.user_state_dir / CrawlNotice.FILE_NAME
+        if os.name == "posix":
+            assert state.stat().st_mode & 0o777 == 0o600
+        stored = json.loads(state.read_text())
+        assert stored["via"] == "gui" and stored["notice_version"] == 1 and len(stored["notice_sha256"]) == 64
+
+        de = dict(localization.LocalizationManager.TRANSLATIONS["de"])
+        de["crawl.notice.text"] += " Neu."
+        monkeypatch.setitem(localization.LocalizationManager.TRANSLATIONS, "de", de)
+        dialogs.show_crawl_notice_once(None, cfg)
+        assert len(shown) == 2   # a changed text in any language is shown again
+
+    @pytest.mark.parametrize("content", ["{broken", '{"version": 1}', '{"version": 1, "notice_version": 1, '
+                                         '"notice_sha256": "x", "acknowledged_at": "", "via": "mcp"}'])
+    def test_a_damaged_state_file_shows_the_notice_again(self, tmp_path, content):
+        from orchestrator.utils.crawl_notice import CrawlNotice
+
+        (tmp_path / CrawlNotice.FILE_NAME).write_text(content)
+        notice = CrawlNotice(tmp_path)
+        assert notice.needed()
+        notice.acknowledge("cli")
+        assert not notice.needed()
+
+    def test_only_the_gui_or_cli_can_acknowledge(self, tmp_path):
+        from orchestrator.utils.crawl_notice import CrawlNotice
+
+        with pytest.raises(ValueError):
+            CrawlNotice(tmp_path).acknowledge("mcp")
+        assert not (tmp_path / CrawlNotice.FILE_NAME).exists()
+
+    def test_a_failed_save_still_lets_the_crawl_start(self, qapp, tmp_path, monkeypatch):
+        from orchestrator.utils.crawl_notice import CrawlNotice
+
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
+        monkeypatch.setattr(CrawlNotice, "acknowledge", lambda self, via: (_ for _ in ()).throw(OSError("read-only")))
+        dialogs.show_crawl_notice_once(None, SimpleNamespace(user_state_dir=tmp_path))   # no exception
+
+    def test_without_a_usable_state_directory_the_notice_is_shown_and_the_crawl_starts(self, qapp, monkeypatch):
+        class Config:
+            @property
+            def user_state_dir(self):   # ConfigManager creates it on access; a read-only home fails here
+                raise PermissionError("read-only home")
+
+        shown = []
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: shown.append(self.windowTitle()))
+        dialogs.show_crawl_notice_once(None, Config())
+        dialogs.show_crawl_notice_once(None, Config())
+        assert shown == ["Before your first Deep Ingest"] * 2   # nothing remembers it: shown every time
 
 
 class TestMainWindowWiring:
@@ -440,7 +926,13 @@ class TestMainWindowWiring:
             assert opened == [True], "the permissions are asked once at the first start"
             menus = {m.title(): [a.text() for a in m.actions()] for m in win.findChildren(QMenu) if m.title()}
             assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module...",
-                                      "Tool Permissions (Ditto / MCP)..."]
+                                      "Tool Permissions (Ditto / MCP)...", "Spoken Announcements",
+                                      "Clear Input History..."]
+            # The audio switch is a persisted setting, on by default.
+            assert win.act_audio.isCheckable() and win.act_audio.isChecked()
+            win.act_audio.setChecked(False)
+            assert win.framework.config.get("audio_announcements") is False
+            assert "audio_announcements: false" in (tmp_path / "configs" / "config.yml").read_text()
 
             wizard = ModuleCreationWizard(tmp_path / "targets", win)
             assert wizard.framework_manager is win.framework
@@ -455,6 +947,28 @@ class TestMainWindowWiring:
             assert win.deployment_window.cb_profiles.itemText(0) == "Rockchip"
 
             win._update_system_state()
+
+            # Clear Input History: asks first, then forgets everything and empties the recent lists.
+            from orchestrator.utils.input_history import InputHistory
+            history = InputHistory(win.framework.config.user_state_dir)
+            history.add("model", "org/recent-model")
+            history.add("device", "10.0.0.7")
+            win.builder_tab.reload_history()
+            win.deployment_window.reload_history()
+            assert win.builder_tab.model_input.itemText(0) == "org/recent-model"
+            questions = []
+            answer = main_window.QMessageBox.No
+            monkeypatch.setattr(main_window.QMessageBox, "question",
+                                lambda *a: questions.append(a[2]) or answer)
+            win.act_clear_history.trigger()
+            assert history.get("model") == ["org/recent-model"], "No keeps the history"
+            answer = main_window.QMessageBox.Yes
+            win.act_clear_history.trigger()
+            assert len(questions) == 2 and "URLs" in questions[0]
+            assert not history.path.exists()
+            models = [win.builder_tab.model_input.itemText(i) for i in range(win.builder_tab.model_input.count())]
+            assert "org/recent-model" not in models and win.deployment_window.cb_device.count() == 0
+            assert win.status.currentMessage() == "Input history cleared."
         finally:
             win.update_timer.stop()
             win.close()

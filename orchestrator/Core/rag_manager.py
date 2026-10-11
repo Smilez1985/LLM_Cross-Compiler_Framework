@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
@@ -405,41 +405,63 @@ class RAGManager:
         return len(ids)
 
     # --- DEEP INGEST (WEB/PDF) ---
-    def ingest_url(self, url: str, crawler_options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def ingest_url(self, url: str, crawler_options: Optional[Dict[str, Any]] = None,
+                   stop: Optional[threading.Event] = None,
+                   progress: Optional[Callable[[int, int, str], None]] = None) -> Dict[str, Any]:
         """
-        Crawls a URL and indexes the pages. A snapshot is taken first, so a bad crawl can be rolled back.
-        crawler_options apply to this crawl only (see CrawlerManager).
+        Crawls a URL and stores each page as soon as it is read. A snapshot is taken first, so a bad crawl can
+        be rolled back. crawler_options apply to this crawl only (see CrawlerManager). Setting stop ends the
+        crawl after the current page and keeps what is stored; progress gets (page, max pages, url).
+
+        "outcome" is "success" (pages stored, nothing failed or reserved), "partial" (pages stored, but others
+        failed, were reserved by the site, or the crawl was stopped) or "failure" (nothing stored). "skipped"
+        and "failed" list pages as {"url", "reason", "opt_out"}.
         """
         if not CrawlerManager:
-            return {"success": False, "message": "Crawler module missing"}
+            return {"success": False, "outcome": "failure", "message": "Crawler module missing"}
         if not self._connect():
-            return {"success": False, "message": f"Knowledge base unavailable: {self.last_error}"}
+            return {"success": False, "outcome": "failure",
+                    "message": f"Knowledge base unavailable: {self.last_error}"}
         self.create_snapshot(f"pre_ingest_{int(time.time())}")
 
+        crawler, pages, chunks, error = None, 0, 0, None
         try:
             crawler = CrawlerManager(self.framework, crawler_options)
             self.logger.info(f"Invoking Crawler for {url}...")
-            documents = crawler.crawl(url)
-        except Exception as e:
-            self.logger.error(f"Deep Ingest failed: {redact_secrets(str(e))}")
-            return {"success": False, "message": redact_secrets(str(e))}
-        if not documents:
-            return {"success": False, "message": "No documents found", "count": 0}
-
-        pages = chunks = 0
-        for doc in documents:
-            meta = dict(doc.metadata or {})
-            meta["root_url"] = url
-            try:
+            for doc in crawler.iter_crawl(url, stop=stop, progress=progress):
+                meta = dict(doc.metadata or {})
+                meta["root_url"] = url
                 added = self._ingest(meta.get("source", url), doc.page_content, meta, replace=True)
-            except KnowledgeBaseError as e:
-                self._fail(e)
-                return {"success": False, "message": str(e), "count": chunks, "documents": pages}
-            if added:
-                pages += 1
-                chunks += added
-        return {"success": True, "message": f"Ingested {pages} pages ({chunks} chunks)", "count": chunks,
-                "documents": pages}
+                if added:
+                    pages += 1
+                    chunks += added
+        except KnowledgeBaseError as e:
+            self._fail(e)
+            error = self.last_error
+        except Exception as e:
+            error = redact_secrets(str(e))
+            self.logger.error(f"Deep Ingest failed: {error}")
+        return self._crawl_result(crawler, pages, chunks, error)
+
+    @staticmethod
+    def _crawl_result(crawler: Any, pages: int, chunks: int, error: Optional[str]) -> Dict[str, Any]:
+        """The outcome of one crawl; it reports only what was really stored (the writes have returned)."""
+        skipped = [asdict(page) for page in getattr(crawler, "skipped", [])]
+        failed = [asdict(page) for page in getattr(crawler, "failed", [])]
+        stopped = bool(getattr(crawler, "stopped", False))
+        notes = [f"{len(skipped)} pages skipped"] if skipped else []
+        notes += [f"{len(failed)} failed"] if failed else []
+        note = f", {', '.join(notes)} (see the log)" if notes else ""
+        note += ", stopped on request" if stopped else ""
+        if not pages:
+            outcome = "failure"
+            message = (error or ("Stopped before a page was stored" if stopped else "No documents found")) + note
+        else:
+            reserved = any(page["opt_out"] for page in skipped)
+            outcome = "partial" if (error or failed or reserved or stopped) else "success"
+            message = f"Ingested {pages} pages ({chunks} chunks){note}" + (f"; then: {error}" if error else "")
+        return {"success": outcome != "failure", "outcome": outcome, "message": message, "count": chunks,
+                "documents": pages, "skipped": skipped, "failed": failed, "stopped": stopped}
 
     # --- CODEBASE INGEST (SELF-AWARENESS) ---
     def ingest_codebase(self, root_path: Union[str, Path, None] = None) -> Dict[str, Any]:

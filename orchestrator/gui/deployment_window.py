@@ -14,18 +14,17 @@ Updates v2.3.0:
 """
 
 from pathlib import Path
-import logging
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QComboBox, QPushButton, QTableWidget, QTableWidgetItem,
-    QCheckBox, QGroupBox, QHeaderView, QMessageBox, QListWidget,
+    QGroupBox, QHeaderView, QMessageBox, QListWidget,
     QProgressBar, QInputDialog, QLineEdit, QListWidgetItem
 )
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QIcon
 from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.Core.deployment_manager import list_builds
-from orchestrator.gui.dialogs import confirm_host_key
+from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
+from orchestrator.utils import input_history
 
 class DeploymentWorker(QThread):
     """
@@ -94,6 +93,7 @@ class DeploymentWindow(QWidget):
         # Access components safely
         self.target_manager = getattr(framework_manager, 'target_manager', None)
         self.secrets_manager = getattr(framework_manager, 'secrets_manager', None)
+        self.history = input_history.for_config(getattr(framework_manager, "config", None))
         
         self.i18n = get_i18n()
         self.worker = None
@@ -119,11 +119,17 @@ class DeploymentWindow(QWidget):
         layout_target.addWidget(QLabel("Profile:"))
         layout_target.addWidget(self.cb_profiles, 1)
         
-        # Target Connection Info (Quick Edit)
-        self.txt_ip = QLineEdit("192.168.1.100")
-        self.txt_ip.setPlaceholderText("Target IP")
+        # Target Connection Info (Quick Edit); devices deployed to before are offered first
+        self.cb_device = QComboBox()
+        self.cb_device.setEditable(True)
+        self.cb_device.setInsertPolicy(QComboBox.NoInsert)
+        self.cb_device.setMinimumWidth(160)
+        self.cb_device.setAccessibleName("Target IP or host name")
+        self.cb_device.lineEdit().setPlaceholderText("Target IP")
+        recent = self._recent("device")
+        fill_recent(self.cb_device, recent, text=None if recent else "192.168.1.100")
         layout_target.addWidget(QLabel("IP:"))
-        layout_target.addWidget(self.txt_ip)
+        layout_target.addWidget(self.cb_device)
         
         self.txt_user = QLineEdit("root")
         self.txt_user.setPlaceholderText("User")
@@ -207,7 +213,8 @@ class DeploymentWindow(QWidget):
                 list_item.setToolTip(f"{build['path']}\n{build.get('primary')}\n{build.get('created', '')}")
                 self.list_artifacts.addItem(list_item)
         
-        # Profiles
+        # Profiles (target ids): keep the selection, else preselect the most recently used target
+        previous = self.cb_profiles.currentText()
         self.cb_profiles.clear()
         if self.target_manager:
             profiles = self.target_manager.list_hardware_profiles()
@@ -217,6 +224,14 @@ class DeploymentWindow(QWidget):
                 self.cb_profiles.addItem("Generic Profile (Default)")
         else:
             self.cb_profiles.addItem("Error: TargetManager not loaded")
+        select_recent(self.cb_profiles, ([previous] if previous else []) + self._recent("target"))
+
+    def _recent(self, field):
+        return self.history.get(field) if self.history else []
+
+    def reload_history(self):
+        """Refills the recent devices (after a deployment or after the history was cleared)."""
+        fill_recent(self.cb_device, self._recent("device"), text=self.cb_device.currentText())
 
     def _on_deploy(self):
         # 1. Validation
@@ -232,13 +247,18 @@ class DeploymentWindow(QWidget):
 
         artifact_path = Path(artifact_item.data(Qt.UserRole))
         
-        target_ip = self.txt_ip.text().strip()
+        target_ip = self.cb_device.currentText().strip()
         user = self.txt_user.text().strip()
 
         # 2. Trust the device (host key fingerprint, first use only) and log in. The password is needed
         #    only until the framework's SSH key is installed; it is used once and never stored.
         if not confirm_host_key(self, self.framework, target_ip):
             return
+        if self.history:
+            self.history.add("device", target_ip)  # a trusted, reachable device
+            if self.target_manager and profile_name in self.target_manager.list_hardware_profiles():
+                self.history.add("target", profile_name)
+            self.reload_history()
         pwd, ok = QInputDialog.getText(
             self, "SSH login",
             f"Password for {user}@{target_ip}\n(only the first time: used once to install the framework's SSH key, "
