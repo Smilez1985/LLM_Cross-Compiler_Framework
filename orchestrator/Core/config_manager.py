@@ -345,9 +345,6 @@ class ConfigManager:
                          "Providers tried when the model declines or the provider is unavailable, as provider or "
                          "provider:model, e.g. local, ollama:qwen3.5:4b"),
 
-            # UX History
-            ConfigSchema("input_history", list, False, [], "History of user inputs"),
-            
             # v2.0.0: Chat & Brain Settings
             ConfigSchema("chat_context_limit", int, False, 4096, "Max tokens for chat context history"),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
@@ -537,7 +534,6 @@ class ConfigManager:
                 "crawler_respect_robots", "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages", "audio_announcements",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
-                "input_history",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",
                 # v2.3

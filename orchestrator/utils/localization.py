@@ -165,7 +165,15 @@ class LocalizationManager(QObject):
             "crawl.done.failure": "Deep Ingest failed: nothing was stored. See the log.",
             "crawl.title.success": "Deep Ingest Complete",
             "crawl.title.partial": "Deep Ingest Partly Complete",
-            "crawl.title.failure": "Deep Ingest Failed"
+            "crawl.title.failure": "Deep Ingest Failed",
+
+            # Input history (recent values in the input fields, per user)
+            "menu.clear_history": "Clear Input History...",
+            "history.clear.title": "Input History",
+            "history.clear.question": ("Forget the recently used models, targets, boards, URLs, devices and "
+                                       "datasets that the input fields offer?"),
+            "history.clear.failed": "The input history could not be cleared. See the log.",
+            "history.cleared": "Input history cleared."
         },
         "de": {
             # General
@@ -309,7 +317,15 @@ class LocalizationManager(QObject):
             "crawl.done.failure": "Deep Ingest fehlgeschlagen: Es wurde nichts gespeichert. Siehe Protokoll.",
             "crawl.title.success": "Deep Ingest abgeschlossen",
             "crawl.title.partial": "Deep Ingest teilweise abgeschlossen",
-            "crawl.title.failure": "Deep Ingest fehlgeschlagen"
+            "crawl.title.failure": "Deep Ingest fehlgeschlagen",
+
+            # Eingabeverlauf (zuletzt verwendete Werte in den Eingabefeldern, je Benutzer)
+            "menu.clear_history": "Eingabeverlauf löschen...",
+            "history.clear.title": "Eingabeverlauf",
+            "history.clear.question": ("Die zuletzt verwendeten Modelle, Targets, Boards, URLs, Geräte und "
+                                       "Datensätze vergessen, die die Eingabefelder anbieten?"),
+            "history.clear.failed": "Der Eingabeverlauf konnte nicht gelöscht werden. Siehe Protokoll.",
+            "history.cleared": "Eingabeverlauf gelöscht."
         }
     }
 

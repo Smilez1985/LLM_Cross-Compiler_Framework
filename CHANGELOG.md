@@ -50,6 +50,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   *Tools > Spoken Announcements* (setting `audio_announcements`) is off. Every announcement is also logged.
 - **Deep Ingest progress and Stop**: the wizard shows "Page N of M: <url>" instead of an endless spinner, and a
   Stop button ends the crawl after the current page. Closing the wizard stops a running crawl the same way.
+- **Input history**: the input fields offer what you used recently, newest first. Model, calibration dataset,
+  Deep Ingest URL and device (Deployment, remote hardware scan) are editable lists; the most recent model and
+  device are filled in, datasets and URLs are only offered. Targets and boards come from the target
+  definitions, so the most recently built one that is still offered is preselected (a target without declared
+  boards offers recent boards as suggestions). The history is per user (`input_history.json` in the per-user
+  state directory), at most 20 entries per field, and never holds secrets: values that look like an API key or
+  token, URLs with a user name or password and URLs with a credential parameter (such as `?token=`) are not
+  remembered. *Tools > Clear Input History...* forgets it.
 
 ### Changed
 - **Deep Ingest outcome**: it said "Deep Ingest complete" even when every URL failed. It now reports success
@@ -79,6 +87,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
+- The unused setting `input_history` (the input history is personal and lives in the per-user state directory,
+  not in the shared `configs/config.yml`).
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
 
 ### Security
