@@ -410,7 +410,9 @@ keys:
     platforms: [linux, windows, macos, freebsd, android]
     sources:
       linux: "PRETTY_NAME= of /etc/os-release"
-      windows: "ProductName of HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+      windows: >-
+        ProductName of HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion, with "Windows 10" changed to "Windows 11"
+        when CurrentBuildNumber is 22000 or higher (Windows 11 still writes "Windows 10" into ProductName)
       macos: "'macOS ' + sw_vers -productVersion"
     normalise: "quotes removed, whitespace trimmed and collapsed"
     consumers: [gui, proposal]
@@ -1102,16 +1104,18 @@ keys:
   NPU_DEVICE:
     group: npu
     type: pattern
-    pattern: '^/dev/[A-Za-z0-9_-]{1,32}(/[A-Za-z0-9_-]{1,32})?$'
+    # Only accelerator nodes: a deploy step may pass this value to `docker run --device`, so an untrusted profile
+    # must never name a disk, memory or other device node. A new kind of NPU node is added here on purpose.
+    pattern: '^/dev/(rknpu|dri/(renderD|card)[0-9]{1,3}|accel/accel[0-9]{1,3}|hailo[0-9]{1,3}|apex_[0-9]{1,3})$'
     required: false
     stability: stable
     perf: none
     platforms: [linux]
     sources:
       linux: >-
-        the node that was found: /dev/rknpu, a DRM render node of the rknpu driver, /dev/accel/accel<N>,
-        /dev/hailo<N>, /dev/apex_<N>
-    normalise: "absolute path below /dev, no dots"
+        the node that was found: /dev/rknpu, a DRM node of the rknpu driver (/dev/dri/renderD<N> or
+        /dev/dri/card<N>), /dev/accel/accel<N>, /dev/hailo<N>, /dev/apex_<N>
+    normalise: "absolute path of one of the accelerator nodes in the pattern"
     consumers: [deploy, preflight]
   RKNPU_DRIVER_VERSION:
     group: npu
@@ -1545,7 +1549,9 @@ gpu_keys:
     perf: none
     platforms: [linux, windows, macos]
     sources:
-      linux: "NVIDIA: ON; AMD: OFF for the APU device ids of hardware.py, else ON; Intel: OFF unless an Arc device id"
+      linux: >-
+        NVIDIA: ON on PCI, OFF for an integrated Tegra GPU without a PCI address (Jetson); AMD: OFF for the APU device
+        ids of hardware.py, else ON; Intel: OFF unless an Arc device id
       windows: "as Linux, from the PnP device id"
       macos: "OFF on Apple Silicon"
     normalise: "ON/OFF/UNKNOWN"
@@ -1557,7 +1563,9 @@ gpu_keys:
     perf: none
     platforms: [linux, windows, macos]
     sources:
-      any: "ON when the GPU shares the system RAM (Apple Silicon, integrated AMD and Intel GPUs, Mali)"
+      any: >-
+        ON when the GPU shares the system RAM (Apple Silicon, integrated AMD and Intel GPUs, Mali, NVIDIA Tegra on
+        Jetson)
     normalise: "ON/OFF/UNKNOWN"
     consumers: [ditto]
   VRAM_MB:
@@ -1639,11 +1647,12 @@ gpu_keys:
 # Schema 1 (today's .sh v2.4 and .ps1 v2.5 output, no PROBE_SCHEMA line) is still read. The parser maps:
 #   PLATFORM -> OS; ARCH / CPU_ARCH_TYPE -> ARCH; OS_VERSION (.ps1) -> OS_VERSION_ID; CPU_VENDOR_ID -> CPU_VENDOR;
 #   CPU_FLAGS_ALL (space separated) -> comma list, and every x86/ARM SUPPORTS_* key derived from it with the cpuinfo
-#   tokens above; without a flag list the written ON/OFF/TRUE/FALSE values; SUPPORTS_FP16 -> SUPPORTS_F16C on x86
-#   (dropped on ARM); RAM_SWAP_MB -> SWAP_TOTAL_MB; GPU_VENDOR / GPU_VENDOR_ID / GPU_DEVICE_ID / GPU_MODEL /
-#   GPU_VRAM_MB / GPU_DRIVER_VERSION -> GPU0_*; NPU_VENDOR / NPU_MODEL -> lower case; NPU_DEVICE_ID SoC_RKxxxx ->
-#   SOC_MODEL; DEVICE_NODE -> NPU_DEVICE; NPU_MODE / USB ids -> USB_ROCKCHIP_*; DOCKER_VERSION -> TOOL_DOCKER;
-#   PYTHON_VERSION -> TOOL_PYTHON.
+#   tokens above (SUPPORTS_F16C from the f16c token). The file's own SUPPORTS_AVX2 / _AVX512 / _FP16 / _NEON lines
+#   are never taken over: without a flag list the CPU features are UNKNOWN (OFF outside their ARCH), because the
+#   .sh then wrote OFF for everything. RAM_SWAP_MB -> SWAP_TOTAL_MB; GPU_VENDOR / GPU_VENDOR_ID / GPU_DEVICE_ID /
+#   GPU_MODEL / GPU_VRAM_MB / GPU_DRIVER_VERSION -> GPU0_*; NPU_VENDOR / NPU_MODEL -> lower case; NPU_DEVICE_ID
+#   SoC_RKxxxx -> SOC_MODEL; DEVICE_NODE -> NPU_DEVICE; NPU_MODE / USB ids -> USB_ROCKCHIP_*; DOCKER_VERSION ->
+#   TOOL_DOCKER; PYTHON_VERSION -> TOOL_PYTHON.
 # Every CPU feature of a .ps1 file becomes UNKNOWN (its IsProcessorFeaturePresent constants are wrong), and its
 # RAM_TOTAL_MB (the sum of the SMBIOS slots) is dropped. HOSTNAME, RAM_SLOT_*, CPU_DEVICE_ID and every other key are
 # dropped without keeping the value. A key written twice with different values is dropped as ambiguous. Values that

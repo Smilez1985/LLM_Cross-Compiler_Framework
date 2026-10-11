@@ -586,6 +586,8 @@ def parse_profile_json(text: Union[str, bytes], *, schema: Optional[ProbeSchema]
 
     try:
         data = json.loads(text, object_pairs_hook=unique)
+    except RecursionError:  # deep nesting far below the size limit; callers expect ProfileError for bad files
+        raise ProfileError("not valid JSON: nested too deeply") from None
     except ValueError as e:
         if isinstance(e, ProfileError):
             raise
@@ -1014,8 +1016,12 @@ class ProfileStore:
     def _write(self, path: Path, profile: HardwareProfile) -> Path:
         if not isinstance(profile, HardwareProfile):
             raise TypeError("expected a HardwareProfile")
-        text = profile.stable().to_text()
-        parse_profile(text, schema=self.schema)  # the store only ever holds files its own parser accepts
+        stable = profile.stable()
+        text = stable.to_text()
+        # The store only ever holds files its own parser accepts, and exactly the profile it was given: a value with
+        # a line break (a HardwareProfile built in code, not parsed) could otherwise add a key of its own.
+        if parse_profile(text, schema=self.schema) != stable:
+            raise ProfileError("the profile does not survive a round trip through the probe file format; not stored")
         self._prepare(path.parent)
         write_private(path, text)
         return path
@@ -1060,7 +1066,7 @@ class ProfileStore:
             with open(path, "rb") as f:
                 raw = f.read(_META_MAX_BYTES + 1)
             data = json.loads(raw) if len(raw) <= _META_MAX_BYTES else None
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             return {}
         if not isinstance(data, dict):
             return {}
