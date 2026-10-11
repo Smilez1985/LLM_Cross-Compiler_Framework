@@ -74,7 +74,7 @@ def outcomes(registry):
 
 
 def allow(registry, *names):
-    registry.policy_store.save(ToolPolicy(configured=True, overrides={n: Decision.ALLOW for n in names}))
+    registry.policy_store.replace(ToolPolicy(configured=True, overrides={n: Decision.ALLOW for n in names}))
 
 
 def break_the_audit_log(tmp_path):

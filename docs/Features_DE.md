@@ -1020,7 +1020,8 @@ Verfügung.
 - **Neue Tools:** Die Berechtigungsdatei hält fest, welche Tools du gesehen hast; das Speichern der Einrichtung,
   `llm-cli tools permissions` oder der GUI-Dialog markiert jedes aufgeführte Tool. Ein später hinzugekommenes Tool
   nutzt seine eigene Vorgabe, nie eine lockerere Einstellung der Stufe, bis du es gesehen hast; `llm-cli tools list`
-  und der GUI-Dialog kennzeichnen es als neu. Eine Berechtigungsdatei aus 3.0.0 zählt ihre elf Tools als gesehen.
+  und der GUI-Dialog kennzeichnen es als neu. Eine gespeicherte Berechtigungsdatei ohne diese Liste zählt die elf
+  Tools von 3.0.0 als gesehen.
 - **Verweigerte Tools werden nicht aufgeführt**, weder MCP-Clients noch Ditto; ein Aufruf eines solchen Tools wird
   trotzdem abgelehnt und festgehalten. `get_status` führt jedes Tool mit Entscheidung und Grund auf, auch die
   ausgeblendeten, und die Handlungen, die kein Tool übernimmt, mit dem Ort, wo du sie erledigst, damit eine KI dir
@@ -1028,6 +1029,19 @@ Verfügung.
 - Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
   lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
   `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
+- **Nur du änderst die Berechtigungen.** `tool_policy.json` und der Token-Speicher `mcp_tokens.json` sind mit einem
+  Schlüssel signiert, der aus dem Audit-Schlüssel in deinem Schlüsselbund abgeleitet ist. Eine von Hand bearbeitete,
+  mit einem anderen Schlüssel signierte oder unsignierte Datei (auch eine von 3.0.0 gespeicherte Berechtigungsdatei)
+  verbietet jedes Tool, und der Token-Speicher nimmt dann kein Token an, bis du die Berechtigungen neu einrichtest
+  (`llm-cli tools permissions` oder der GUI-Dialog, der den Grund zeigt). Geändert werden sie nur in der GUI und mit
+  `llm-cli tools permissions` und `llm-cli ditto setup`, die ein Terminal brauchen (weitergeleitete Antworten werden
+  abgelehnt). Jedes Speichern wird im Audit-Log festgehalten (`policy_changed`, Akteur `cli` oder `gui`), mit den
+  alten und neuen Entscheidungen, bevor es wirkt; lässt sich der Eintrag nicht schreiben, ändert sich nichts. Jedes
+  Speichern erhöht eine Revisionsnummer unter einer Sperre, die GUI, CLI und MCP-Server teilen, und ein Speichern auf
+  Grundlage einer älteren Revision (ein Fenster, das vor einer anderen Änderung geöffnet wurde) wird abgelehnt, damit
+  es nie eine zwischenzeitliche Änderung rückgängig macht. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie
+  die Audit-Kette) und `llm-cli doctor` warnt; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel
+  geführt wird.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
   nicht lesen lässt, darf nicht einmal lesen.

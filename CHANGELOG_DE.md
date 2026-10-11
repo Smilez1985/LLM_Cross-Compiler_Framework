@@ -461,6 +461,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (`~/.llm-framework/mcp_http_token`) wird nicht mehr akzeptiert: Lege mit `llm-cli mcp token add NAME` ein Token je
   Client an, gib es dem Client und lösche die alte Datei. `llm-cli mcp serve --transport http` startet nicht, bevor
   es ein benanntes Token gibt.
+- **Bestätige deine Tool-Berechtigungen nach dem Update einmal.** Die Berechtigungsdatei ist jetzt signiert, und eine
+  von 3.0.0 gespeicherte trägt keine Signatur, daher ist jedes Tool verboten, bis du die Berechtigungen neu einrichtest
+  (die GUI zeigt den Dialog beim ersten Start und nennt den Grund; `llm-cli tools permissions`).
+  `llm-cli tools permissions`, auch mit `--reset`, und `llm-cli ditto setup` brauchen eine Person an einem Terminal:
+  Weitergeleitete Antworten werden abgelehnt.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -817,6 +822,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine Sitzung und eine offene Fragerunde des Protokolls 2026-07-28 antworten nur dem Token, das sie geöffnet hat,
   und kein Token wird angenommen (und der Server startet nicht), solange andere Benutzer die Token-Datei lesen oder
   ändern können oder sie einem anderen Benutzer gehört.
+- **Nur eine Person ändert, was eine KI darf.** Die Tool-Berechtigungen (`tool_policy.json`) und der MCP-Token-Speicher
+  (`mcp_tokens.json`) sind mit einem Schlüssel signiert, der aus dem Audit-Schlüssel im Schlüsselbund des Systems
+  abgeleitet ist. Eine von Hand bearbeitete, beschädigte, mit einem anderen Schlüssel signierte oder unsignierte Datei
+  verbietet jedes Tool, und der Token-Speicher nimmt kein Token an, bis eine Person sie neu einrichtet; `llm-cli doctor`
+  meldet das. Bisher konnte jeder, der in den Benutzerordner schreiben konnte, jedes Tool erlauben oder ein Token
+  hinzufügen, ohne dass es auffiel. Jede Änderung der Berechtigungen wird mit den alten und neuen Entscheidungen
+  (Akteur `cli` oder `gui`) im Audit-Log festgehalten, bevor sie wirkt, und abgelehnt, wenn sich der Eintrag nicht
+  schreiben lässt. Speichern bekommt eine Revisionsnummer unter einer Sperre, die GUI, CLI und MCP-Server teilen; ein
+  Speichern auf Grundlage einer älteren Revision wird abgelehnt, damit ein früher geöffnetes Fenster eine
+  zwischenzeitliche Änderung nicht mehr rückgängig machen kann. Ohne Schlüsselbund hat die Signatur keinen Schlüssel,
+  wie die Audit-Kette; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt wird.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

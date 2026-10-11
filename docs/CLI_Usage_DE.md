@@ -811,6 +811,13 @@ Voreinstellung auf, der höchsten Entscheidung, die eine Einstellung ihm geben k
 letzten Durchgang neu ist und ob eine Bestätigung eine dauerhafte Freigabe anbieten darf; das Speichern zählt jedes
 aufgeführte Tool als gesehen. Der GUI-Dialog zeigt dieselben Angaben.
 
+Es braucht eine Person an einem Terminal, mit und ohne `--reset` (wie `ditto setup`): Weitergeleitete Antworten werden
+mit dem Exit-Code 2 abgelehnt. Jedes Speichern wird mit dem Akteur `cli` und den alten und neuen Entscheidungen
+festgehalten, bevor es wirkt, und abgelehnt (Exit-Code 1, nichts geändert), wenn sich der Audit-Eintrag nicht
+schreiben lässt oder die Berechtigungen anderswo gespeichert wurden (GUI, ein anderes Terminal), während du
+geantwortet hast. Eine Berechtigungsdatei, die beschädigt, von Hand bearbeitet oder nicht signiert ist (auch eine von
+3.0.0 gespeicherte), verbietet jedes Tool, bis du das hier erneut ausführst; die Fragen beginnen dann mit "deny".
+
 | Option | Bedeutung |
 |---|---|
 | `--caller ditto\|mcp` | Die Berechtigungen eines Aufrufers setzen (Ditto oder lokale MCP-Clients über stdio) statt der gemeinsamen. Die ersten Berechtigungen eines Aufrufers beginnen mit den gemeinsamen, samt den Einstellungen für einzelne Tools. |

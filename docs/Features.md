@@ -945,14 +945,25 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   then the cap. A tool's default never opens a tier you denied.
 - **New tools:** the permission file records which tools you have reviewed; saving the setup, `llm-cli tools
   permissions` or the GUI dialog marks every listed tool. A tool added later uses its own default, never a looser
-  tier setting, until you review it; `llm-cli tools list` and the GUI dialog mark it as new. A permission file from
-  3.0.0 counts its eleven tools as reviewed.
+  tier setting, until you review it; `llm-cli tools list` and the GUI dialog mark it as new. A stored permission
+  file without that list counts the eleven tools of 3.0.0 as reviewed.
 - **Denied tools are not listed** to MCP clients and Ditto; a call to one is still refused and audited.
   `get_status` lists every tool with its decision and why, also the hidden ones, and the actions no tool does, with
   where you do them, so an AI can tell you the real reason.
 - A damaged or unreadable permission file, or a link to a missing one, denies every tool instead of falling back to
   looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and
   `llm-cli mcp serve` say so.
+- **Only you change the permissions.** `tool_policy.json` and the token store `mcp_tokens.json` are signed with a key
+  derived from the audit key in your keyring. A file edited by hand, signed with another key or carrying no
+  signature (a permission file saved by 3.0.0, too) denies every tool, and the token store then accepts no token,
+  until you set the permissions up again (`llm-cli tools permissions` or the GUI dialog, which shows why). They are
+  changed only in the GUI and with `llm-cli tools permissions` and `llm-cli ditto setup`, which need a terminal
+  (piped answers are refused). Every save is recorded in the audit log (`policy_changed`, actor `cli` or `gui`) with
+  the old and new decisions before it takes effect; if the entry cannot be written, nothing changes. Each save
+  raises a revision number under a lock shared by the GUI, the CLI and MCP servers, and a save based on an older
+  revision (a window opened before another change) is refused, so it never undoes a change made meanwhile. Without
+  a keyring the signature has no key (as for the audit chain) and `llm-cli doctor` warns; such a file is refused
+  while the audit log is kept with a key.
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
   unknown or revoked token, or a token file that cannot be read, may not even read.
 

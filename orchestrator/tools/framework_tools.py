@@ -520,6 +520,11 @@ def _audit_key(framework, state_dir: Optional[Path] = None) -> Optional[bytes]:
 def build_tool_registry(framework) -> ToolRegistry:
     """The registry with the user's policy, the audit log and all framework tools."""
     state_dir = Path(framework.config.user_state_dir)
-    audit = AuditLog(state_dir / "audit.db", key=_audit_key(framework, state_dir))
-    registry = ToolRegistry(PolicyStore(state_dir), audit, tokens=TokenStore(state_dir))
+    key = _audit_key(framework, state_dir)
+    audit = AuditLog(state_dir / "audit.db", key=key)
+    # The permissions and the tokens are signed with a key derived from the audit key; without a keyring an unkeyed
+    # signature is accepted only while the audit log is not kept with a key either.
+    refuse_unkeyed = None if key else audit.kept_with_key
+    registry = ToolRegistry(PolicyStore(state_dir, key=key, audit=audit, refuse_unkeyed=refuse_unkeyed), audit,
+                            tokens=TokenStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed))
     return register_framework_tools(registry, framework)
