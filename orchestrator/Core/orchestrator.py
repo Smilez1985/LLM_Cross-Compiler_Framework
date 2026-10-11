@@ -224,7 +224,14 @@ class LLMOrchestrator:
         state.status = OrchestrationStatus.CANCELLED
         loop = asyncio.get_running_loop()
         for build_id in list(state.build_ids):
-            await loop.run_in_executor(None, self.build_engine.cancel_build, build_id)
+            if await loop.run_in_executor(None, self.build_engine.cancel_build, build_id):
+                continue
+            # A build that still runs but refuses: its outcome is settled (its files are being published,
+            # or it failed and cleans up). Say so instead of letting "cancelled" stand alone.
+            progress = self.build_engine.get_build_status(build_id)
+            if progress is not None and getattr(progress, "status", None) not in (
+                    BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED):
+                state.warnings.append(f"Build {build_id} could no longer be cancelled; it finishes on its own.")
         event = self._healing_events.get(request_id)
         if event is not None:
             event.set()  # a pending approval counts as dismissed
