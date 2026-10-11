@@ -101,6 +101,32 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einem Board aus und weicht auf `hardware_probe.sh` aus, wenn das Board kein Python 3.8 hat. Das Skript kommt über
   den SSH-Kanal, also bleibt auf dem Board nichts zurück, und das Profil wird unter der ID des Boards gespeichert. Für
   Rechner ohne Netzzugang beschreibt die README die Probe von Hand.
+- **Build-Rezept für selbst gebautes llama.cpp** (`orchestrator/runtime/build/recipe.py`): Aus dem Hardware-Profil
+  des Rechners, der die Programme ausführen wird, wird ein Build-Plan (CMake-Optionen, Ziele, Toolchain-Datei,
+  Builder, Prüfungen) mit einer Build-ID, die sich mit jeder Option und jeder Werkzeugversion ändert, aber nicht mit
+  flüchtigen Werten wie dem freien Speicher. Jeder Plan baut den festgelegten Commit, schaltet jede Option von
+  llama.cpp, die etwas herunterladen kann, aus oder lässt sie ungesetzt (`FETCHCONTENT_FULLY_DISCONNECTED=ON`) und
+  baut den Server ohne Unterprozesse. Ein Build auf dem Rechner selbst nutzt `-march=native`; ein Build für einen
+  anderen Rechner nutzt die CPU-Merkmale der Probe (alle 14 x86-Optionen oder `GGML_CPU_ARM_ARCH`, etwa
+  `armv8.2-a+dotprod+fp16` für den RK3566) oder alle CPU-Varianten, wenn die Probe es nicht sagen konnte.
+  NVIDIA-GPUs bekommen echten Code für genau ihre Compute Capabilities (jede NVIDIA-GPU muss ihre melden) mit einem
+  CUDA-Toolkit, das nicht neuer ist, als der Treiber unterstützt, auf Systemen mit glibc; AMD-GPUs ihr gfx-Target
+  (ROCm unter Linux, auf Wunsch); Vulkan und Metal sind Schalter; Windows-Builds nutzen Clang. Der Plan folgt
+  Betriebssystem und C-Bibliothek des Ziels: eine Builder-Basis, deren glibc nicht neuer ist als die des Geräts,
+  Alpine für musl und eine statisch gelinkte C++-Laufzeit für Geräte-Builds. Ausgeführt werden die Pläne noch nicht.
+- **llama.cpp per Commit festgelegt**: `llama_cpp.source` in `configs/llama_runtime.yml` (Commit
+  `d81235049384534c167caea52b85a694f6103d14`, Tag `b11429`) ist die eine Stelle. Dazu kommen die CUDA-Toolkits für
+  selbst gebaute CUDA-Builds (die Redist-Manifeste von NVIDIA per Größe und SHA256 festgelegt, mit den Grenzen für
+  Treiber, Compute Capability, Host-Compiler und CMake je Toolkit; die vorgebauten Entwicklungs-Images von NVIDIA nur
+  als ausdrücklicher Opt-in-Eintrag) und die Builder-Basen, per Digest festgelegt. Ein Test schlägt fehl, wenn eine
+  andere Stelle, die die llama.cpp-Version nennt, abweicht, und `python scripts/llama_cpp_pin.py check` prüft mit
+  `git ls-remote`, dass der Tag bei Upstream auf den festgelegten Commit zeigt.
+- **Festgelegter llama.cpp-Quelltext für Rechner ohne Netz**: `llm-cli ditto runtime export-source DATEI` schreibt
+  den festgelegten Commit als Git-Bundle mit Manifest, und `llm-cli ditto runtime import-source DATEI` installiert ihn
+  auf einem Rechner ohne Internetzugang. Der Quelltext wird per Commit geholt (über seinen Tag nur, wo ein Server das
+  ablehnt), muss den festgelegten Commit zurückgeben und liegt schreibgeschützt in
+  `~/.llm-framework/runtime/llama.cpp/src/`; spätere Läufe prüfen, dass darin nichts geändert oder hinzugefügt wurde,
+  auch keine Dateien, die Git ignoriert, und brauchen kein Netz.
 - **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in
@@ -335,6 +361,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   das einzige Hilfsprogramm, das die Probe nutzt), und die `.ps1` startet sich nur mit `-Elevate` mit erhöhten Rechten
   neu. Die `.sh` läuft in jeder POSIX-Shell (dash, BusyBox ash), liest `/proc` und `/sys` direkt statt über `lspci`
   und `lsusb` und schreibt alle GPUs; die `.ps1` liest den nutzbaren Speicher statt der Summe der Speicherplätze.
+- Die Einstellung `llama_cpp_version` (der llama.cpp-Tag, den Target-Images klonen) hat als Vorgabe den Tag des
+  llama.cpp-Pins in `configs/llama_runtime.yml`, jetzt `b11429`, statt eines fest geschriebenen `v0.6.0`; beide nennen
+  denselben Commit, die Images bauen also denselben Quelltext. Das Rockchip-Dockerfile, die Build-Argumente in
+  `target.yml` und `configs/project_sources.yml` (dort stand noch `b4009`) nennen denselben Tag.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der

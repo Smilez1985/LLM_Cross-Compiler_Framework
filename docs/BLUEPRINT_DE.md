@@ -247,8 +247,9 @@ Container um, hält Hashes fest und lässt dich das Ergebnis auf deinem Gerät i
 4. **Build-Kontext und Image.** Die Engine kopiert `modules/`, `scripts/` des Targets und das gemeinsame
    `entrypoint.sh` in einen frischen Build-Kontext und baut das Image `llm-framework/<Target>:<Build-ID>` mit
    `docker buildx build` (BuildKit) oder, falls BuildKit fehlt, über die Docker-API. Dieser Schritt braucht Netzwerk:
-   Er lädt llama.cpp (Tag aus `llama_cpp_version`, Vorgabe `v0.6.0`) und die Python-Werkzeugketten. Die Zahl
-   paralleler Compile-Jobs kommt aus `build_jobs` (0 heißt alle Kerne).
+   Er lädt llama.cpp (Tag aus `llama_cpp_version`, Vorgabe `b11429`, der Tag des Commit-Pins in
+   `configs/llama_runtime.yml`) und die Python-Werkzeugketten. Die Zahl paralleler Compile-Jobs kommt aus
+   `build_jobs` (0 heißt alle Kerne).
 5. **Bereitstellung auf dem Host.** Das Modell wird bereitgestellt, bevor irgendein Umwandlungscode läuft: Ein
    lokaler Ordner oder eine Datei wird schreibgeschützt eingebunden; ein Hugging-Face-Repo wird auf dem Host nach
    `cache/models/hf/` geladen, bei Bedarf mit deinem gespeicherten `hf_token`. Das Token gelangt nie in einen
@@ -800,7 +801,8 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
 - **Trivy und der Docker-Socket.** Der Scanner-Container bekommt den Docker-Socket; schreibgeschütztes Einbinden
   begrenzt nicht, was die Docker-API erlaubt. Geplant für 3.4.0: Trivy per Digest festgelegt, ohne Socket.
 - **Festlegungen in den Images.** Basis-Images sind per Tag festgelegt (`debian:bookworm-slim`), llama.cpp per Tag
-  (`v0.6.0`), und die venvs im Image haben keine Lock-Dateien mit Hashes. Geplant für 3.4.0.
+  (`b11429`; den Commit-Pin aus `configs/llama_runtime.yml` prüft das Image noch nicht), und die venvs im Image haben
+  keine Lock-Dateien mit Hashes. Geplant für 3.4.0.
 - **Image-Builds haben Netzwerk.** Das ist Absicht (sie laden Werkzeugketten); nur die Umwandlungsstufen sind
   offline.
 - **Der Katalog der Projektquellen** (`configs/project_sources.yml`) wird zur Laufzeit nicht gelesen; er ist eine

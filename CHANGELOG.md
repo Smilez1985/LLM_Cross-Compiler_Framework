@@ -91,6 +91,30 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `hardware_probe.sh` when the board has no Python 3.8. The script travels over the SSH channel, so nothing is left
   on the board, and the profile is stored under the board's ID. For machines without network access the README
   explains the probe by hand.
+- **Build recipe for self-built llama.cpp** (`orchestrator/runtime/build/recipe.py`): the hardware profile of the
+  machine that will run the binaries becomes a build plan (CMake options, targets, toolchain file, builder, checks)
+  with a build ID that changes with every option and toolchain version but not with volatile values such as free
+  memory. Every plan builds the pinned commit, sets every download-capable option of llama.cpp to off or leaves it
+  unset (`FETCHCONTENT_FULLY_DISCONNECTED=ON`), and builds the server without subprocess support. A build on the
+  machine itself uses `-march=native`; a build for another machine uses the probe's CPU features (all 14 x86 options,
+  or `GGML_CPU_ARM_ARCH` such as `armv8.2-a+dotprod+fp16` for the RK3566), or all CPU variants when the probe could
+  not tell. NVIDIA GPUs get real code for exactly their compute capabilities (every NVIDIA GPU must report one) with
+  a CUDA toolkit no newer than the driver supports, on glibc systems; AMD GPUs their gfx target (ROCm on Linux, on
+  request); Vulkan and Metal are switches; Windows builds use Clang. The plan follows the target's OS and C library:
+  a builder base whose glibc is not newer than the device's, Alpine for musl, and a statically linked C++ runtime
+  for device builds. Plans are not run yet.
+- **llama.cpp pinned by commit**: `llama_cpp.source` in `configs/llama_runtime.yml` (commit
+  `d81235049384534c167caea52b85a694f6103d14`, tag `b11429`) is the one place. With it come the CUDA toolkits for
+  self-built CUDA builds (NVIDIA's redist manifests pinned by size and SHA256, with the driver, compute capability,
+  host compiler and CMake limits of each toolkit; NVIDIA's prebuilt development images only as an explicit opt-in
+  entry) and the builder bases, pinned by digest. A test fails when any other place that names the llama.cpp version
+  disagrees, and `python scripts/llama_cpp_pin.py check` checks with `git ls-remote` that upstream's tag points at
+  the pinned commit.
+- **Pinned llama.cpp source for air-gapped machines**: `llm-cli ditto runtime export-source FILE` writes the pinned
+  commit as a git bundle plus a manifest, and `llm-cli ditto runtime import-source FILE` installs it on a machine
+  without internet access. The source is fetched by commit (by its tag only where a server refuses that), must give
+  the pinned commit back and is cached read-only in `~/.llm-framework/runtime/llama.cpp/src/`; later runs check that
+  nothing in it was changed or added, files git ignores included, and need no network.
 - **Deep Ingest honours machine-readable opt-outs.** Text and data mining of public pages is allowed unless
   the rightsholder reserved it in machine-readable form (EU DSM Directive Art. 4, German UrhG § 44b), so
   besides robots.txt the crawler skips pages marked `noindex`, `none`, `noai` or `noimageai` in an
@@ -293,6 +317,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and the `.ps1` restarts elevated only with `-Elevate`. The `.sh` runs in any POSIX shell (dash, BusyBox ash), reads
   `/proc` and `/sys` directly instead of `lspci` and `lsusb`, and writes all GPUs; the `.ps1` reads the usable memory
   instead of the sum of the memory slots.
+- The setting `llama_cpp_version` (the llama.cpp tag target images clone) defaults to the tag of the llama.cpp pin in
+  `configs/llama_runtime.yml`, now `b11429`, instead of a written `v0.6.0`; both name the same commit, so images build
+  the same source. The Rockchip Dockerfile, the `target.yml` build arguments and `configs/project_sources.yml`
+  (which still said `b4009`) name the same tag.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process

@@ -1,0 +1,110 @@
+{
+  "backend": "cpu",
+  "build_id": "56f460dbb051624f0cffe10999716d84cadd3c2c8287a6b956464df16f4aaa16",
+  "builder": {
+    "base": "target-image",
+    "image": "debian:bookworm-slim",
+    "kind": "container",
+    "libc": "glibc"
+  },
+  "notes": [
+    "backend cpu: conversion tools are CPU builds",
+    "what -march/-mcpu=native expands to is recorded by the executor"
+  ],
+  "placement": "container",
+  "purpose": "host-tools",
+  "recipe_version": 1,
+  "source": {
+    "build_number": 11429,
+    "commit": "d81235049384534c167caea52b85a694f6103d14",
+    "repo": "https://github.com/ggml-org/llama.cpp.git",
+    "tag": "b11429"
+  },
+  "steps": [
+    {
+      "compiler": "cc",
+      "generator": "Ninja",
+      "name": "main",
+      "options": {
+        "BUILD_SHARED_LIBS": "OFF",
+        "CMAKE_BUILD_TYPE": "Release",
+        "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "GGML_CCACHE": "OFF",
+        "GGML_CPU_KLEIDIAI": "OFF",
+        "GGML_CUDA": "OFF",
+        "GGML_HIP": "OFF",
+        "GGML_METAL": "OFF",
+        "GGML_NATIVE": "ON",
+        "GGML_OPENMP": "ON",
+        "GGML_OPENMP_FETCH": "OFF",
+        "GGML_VULKAN": "OFF",
+        "LLAMA_BUILD_APP": "OFF",
+        "LLAMA_BUILD_COMMIT": "d8123504",
+        "LLAMA_BUILD_COMMON": "ON",
+        "LLAMA_BUILD_EXAMPLES": "OFF",
+        "LLAMA_BUILD_NUMBER": "11429",
+        "LLAMA_BUILD_SERVER": "OFF",
+        "LLAMA_BUILD_TESTS": "OFF",
+        "LLAMA_BUILD_TOOLS": "ON",
+        "LLAMA_BUILD_UI": "OFF",
+        "LLAMA_LLGUIDANCE": "OFF",
+        "LLAMA_OPENSSL": "OFF",
+        "LLAMA_SUBPROCESS": "OFF",
+        "LLAMA_USE_PREBUILT_UI": "OFF"
+      },
+      "targets": [
+        "llama-quantize",
+        "llama-imatrix",
+        "llama-perplexity",
+        "llama-completion",
+        "llama-bench"
+      ],
+      "toolchain_file": null
+    }
+  ],
+  "target": {
+    "arch": "x86_64",
+    "libc": "glibc",
+    "libc_version": null,
+    "os": "linux",
+    "triple": null
+  },
+  "toolchain": {
+    "cmake": "3.25.1",
+    "native": {
+      "ARCH": "x86_64",
+      "CPU_MODEL": "AMD Ryzen 9 5900X 12-Core Processor",
+      "CPU_VENDOR": "amd",
+      "features": {
+        "SUPPORTS_AMX_BF16": "OFF",
+        "SUPPORTS_AMX_INT8": "OFF",
+        "SUPPORTS_AMX_TILE": "OFF",
+        "SUPPORTS_AVX": "ON",
+        "SUPPORTS_AVX2": "ON",
+        "SUPPORTS_AVX512": "OFF",
+        "SUPPORTS_AVX512_BF16": "OFF",
+        "SUPPORTS_AVX512_VBMI": "OFF",
+        "SUPPORTS_AVX512_VNNI": "OFF",
+        "SUPPORTS_AVX_VNNI": "OFF",
+        "SUPPORTS_BMI2": "ON",
+        "SUPPORTS_F16C": "ON",
+        "SUPPORTS_FMA": "ON",
+        "SUPPORTS_SSE42": "ON"
+      }
+    }
+  },
+  "verify": {
+    "binaries": [
+      "llama-quantize",
+      "llama-imatrix",
+      "llama-perplexity",
+      "llama-completion",
+      "llama-bench"
+    ],
+    "devices": [],
+    "version": {
+      "build_number": 11429,
+      "commit": "d8123504"
+    }
+  }
+}

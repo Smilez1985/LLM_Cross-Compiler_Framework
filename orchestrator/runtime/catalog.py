@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Pinned llama.cpp build and Ditto models (configs/llama_runtime.yml), validated with pydantic."""
+"""Pinned llama.cpp (source commit and prebuilt archives), CUDA toolkits, builder bases and Ditto models
+(configs/llama_runtime.yml), validated with pydantic."""
 
 import re
 from pathlib import Path
@@ -95,9 +96,38 @@ class RuntimeAsset(_Strict):
         return compute_cap is not None and any(abs(c - compute_cap) < 0.01 for c in self.native_compute_caps)
 
 
+_COMMIT = r"^[0-9a-f]{40}$"
+# An https git URL without credentials, query or fragment.
+_GIT_URL = r"^https://[A-Za-z0-9][A-Za-z0-9.-]*(?::\d{1,5})?(?:/[A-Za-z0-9][A-Za-z0-9._-]*)+$"
+_VERSION = r"^\d{1,5}(?:\.\d{1,6}){0,3}$"
+# image:tag@sha256:<digest>; registry host and path components without credentials.
+_IMAGE_BY_DIGEST = r"^[a-z0-9][a-z0-9._/-]*(?::[A-Za-z0-9._-]{1,128})?@sha256:[0-9a-f]{64}$"
+
+
+class LlamaCppSource(_Strict):
+    """The one llama.cpp pin every self-built llama.cpp comes from: a commit, never a moving tag."""
+    repo: str = Field(pattern=_GIT_URL, max_length=200)
+    commit: str = Field(pattern=_COMMIT)
+    tag: str = Field(pattern=r"^b\d{1,7}$")
+    build_number: int = Field(gt=0)
+
+    @model_validator(mode="after")
+    def _label_matches_number(self) -> "LlamaCppSource":
+        if self.tag != f"b{self.build_number}":
+            raise ValueError(f"source.tag {self.tag} and source.build_number {self.build_number} disagree")
+        return self
+
+    @property
+    def short_commit(self) -> str:
+        """The 8 hex characters llama.cpp's --version prints."""
+        return self.commit[:8]
+
+
 class LlamaCppBuild(_Strict):
     build: str = Field(pattern=r"^b\d+$")
     version: Optional[str] = None
+    # Required for self-built llama.cpp (orchestrator/runtime/build/); the prebuilt download does not need it.
+    source: Optional[LlamaCppSource] = None
     base_url: str
     features: Dict[str, bool] = Field(default_factory=dict)
     assets: List[RuntimeAsset]
@@ -107,8 +137,114 @@ class LlamaCppBuild(_Strict):
     def _https_only(cls, v: str) -> str:
         return _https_dir(v)
 
+    @model_validator(mode="after")
+    def _one_label(self) -> "LlamaCppBuild":
+        if self.source is not None and self.source.tag != self.build:
+            raise ValueError(f"llama_cpp.build ({self.build}) and llama_cpp.source.tag ({self.source.tag}) must be "
+                             "the same label")
+        return self
+
     def supports(self, feature: str) -> bool:
         return bool(self.features.get(feature, False))
+
+
+class PinnedFile(_Strict):
+    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*\.json$", max_length=200)
+    size: int = Field(gt=0)
+    sha256: str = Field(pattern=_SHA256)
+
+
+class VersionRange(_Strict):
+    min: str = Field(pattern=_VERSION)
+    max: str = Field(pattern=_VERSION)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> "VersionRange":
+        if version_tuple(self.min) > version_tuple(self.max):
+            raise ValueError(f"range {self.min}..{self.max} is empty")
+        return self
+
+
+class HostCompilers(_Strict):
+    """Host compiler versions nvcc accepts, inclusive. nvcc checks the major version (Linux) and the MSVC version
+    (Windows), so a range like ["6", "14"] covers GCC 6.1 to 14.x."""
+    gcc: Optional[Tuple[str, str]] = None
+    clang: Optional[Tuple[str, str]] = None
+    msvc: Optional[Tuple[str, str]] = None
+
+    @field_validator("gcc", "clang", "msvc")
+    @classmethod
+    def _versions(cls, v: Optional[Tuple[str, str]]) -> Optional[Tuple[str, str]]:
+        if v is not None:
+            if not all(re.fullmatch(_VERSION, part) for part in v) or version_tuple(v[0]) > version_tuple(v[1]):
+                raise ValueError(f"not a version range: {v!r}")
+        return v
+
+
+class CudaToolkit(_Strict):
+    version: str = Field(pattern=r"^\d{1,2}\.\d{1,2}\.\d{1,3}$")
+    manifest: PinnedFile
+    components: List[str] = Field(min_length=1)
+    platforms: List[Literal["linux-x86_64", "linux-sbsa", "linux-aarch64", "windows-x86_64", "windows-arm64"]]
+    compute_caps: VersionRange
+    host_compilers: HostCompilers
+
+    @field_validator("components")
+    @classmethod
+    def _component_names(cls, v: List[str]) -> List[str]:
+        for name in v:
+            if not re.fullmatch(r"^[a-z][a-z0-9_]{1,40}$", name):
+                raise ValueError(f"not a redist component name: {name!r}")
+        return v
+
+    @model_validator(mode="after")
+    def _manifest_matches(self) -> "CudaToolkit":
+        if self.manifest.name != f"redistrib_{self.version}.json":
+            raise ValueError(f"toolkit {self.version}: manifest must be redistrib_{self.version}.json")
+        return self
+
+    @property
+    def major_minor(self) -> str:
+        return ".".join(self.version.split(".")[:2])
+
+
+class CudaImage(_Strict):
+    """A prebuilt NVIDIA development image: an explicit opt-in only (decision D6), never chosen automatically."""
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    cuda: str = Field(pattern=r"^\d{1,2}\.\d{1,2}\.\d{1,3}$")
+    image: str = Field(pattern=_IMAGE_BY_DIGEST, max_length=300)
+    opt_in: Literal[True]
+
+
+class CudaCatalog(_Strict):
+    redist_base_url: str
+    cmake_min: str = Field(default="3.18", pattern=_VERSION)
+    toolkits: List[CudaToolkit] = Field(default_factory=list)
+    prebuilt_images: List[CudaImage] = Field(default_factory=list)
+
+    @field_validator("redist_base_url")
+    @classmethod
+    def _https_only(cls, v: str) -> str:
+        return _https_dir(v)
+
+    @model_validator(mode="after")
+    def _unique(self) -> "CudaCatalog":
+        versions = [t.version for t in self.toolkits]
+        if len(versions) != len(set(versions)):
+            raise ValueError("CUDA toolkit versions must be unique")
+        ids = [i.id for i in self.prebuilt_images]
+        if len(ids) != len(set(ids)):
+            raise ValueError("prebuilt CUDA image ids must be unique")
+        return self
+
+
+class BuildBase(_Strict):
+    """A builder container base for container and cross builds, chosen by the C library of the target machine."""
+    id: str = Field(pattern=r"^[a-z0-9][a-z0-9._-]*$")
+    libc: Literal["glibc", "musl"]
+    libc_version: str = Field(pattern=r"^\d{1,3}(\.\d{1,5}){1,3}$")
+    gcc: str = Field(pattern=_VERSION)
+    image: str = Field(pattern=_IMAGE_BY_DIGEST, max_length=300)
 
 
 class ServerDefaults(_Strict):
@@ -161,6 +297,8 @@ class TierRule(_Strict):
 class RuntimeCatalog(_Strict):
     schema_version: Literal[1] = 1
     llama_cpp: LlamaCppBuild
+    cuda: Optional[CudaCatalog] = None
+    build_bases: List[BuildBase] = Field(default_factory=list)
     model_base_url: str = "https://huggingface.co/"
     server: ServerDefaults = ServerDefaults()
     models: List[ModelEntry]
@@ -184,6 +322,9 @@ class RuntimeCatalog(_Strict):
                 raise ValueError(f"tier rule refers to unknown tier '{rule.tier}'")
         if not self.tier_rules[-1].unconditional:
             raise ValueError("the last tier rule must have no conditions, so that every machine gets a model")
+        bases = [b.id for b in self.build_bases]
+        if len(bases) != len(set(bases)):
+            raise ValueError("build base ids must be unique")
         return self
 
     def model(self, tier: str) -> ModelEntry:
