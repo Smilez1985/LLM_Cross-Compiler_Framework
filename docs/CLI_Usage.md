@@ -277,7 +277,9 @@ Shows builds from the build records in the cache folder (`<cache_dir>/build_reco
 stage and progress, so builds that another process started are listed too. Without an ID: a table of the 20 newest
 builds; with a request ID (`req_...`) or a build ID: the details of each attempt, including the error of a failed
 build (credentials redacted). A build whose process has ended before the build finished is shown as `interrupted`.
-Exit code 1 if the ID is not found. The command needs neither the credential vault nor Docker.
+Exit code 1 if the ID is not found. The command needs neither the credential vault nor Docker. On Linux and macOS
+the records folder and its records are readable only by the user who built (modes 0700 and 0600), so in a shared
+installation each user sees their own builds.
 
 | Option | Meaning |
 |---|---|

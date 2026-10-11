@@ -281,7 +281,9 @@ Stufe und Fortschritt, deshalb erscheinen auch Builds, die ein anderer Prozess g
 der 20 neuesten Builds; mit einer Request-ID (`req_...`) oder einer Build-ID: die Einzelheiten jedes Versuchs,
 einschließlich des Fehlers eines gescheiterten Builds (Zugangsdaten geschwärzt). Ein Build, dessen Prozess endete,
 bevor der Build fertig war, erscheint als `interrupted`. Exit-Code 1, wenn die ID nicht gefunden wird. Der Befehl
-braucht weder den Tresor für Zugangsdaten noch Docker.
+braucht weder den Tresor für Zugangsdaten noch Docker. Unter Linux und macOS sind der Ordner der Einträge und die
+Einträge nur für den Benutzer lesbar, der gebaut hat (Modi 0700 und 0600), sodass in einer gemeinsamen Installation
+jeder Benutzer seine eigenen Builds sieht.
 
 | Option | Bedeutung |
 |---|---|
