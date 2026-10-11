@@ -20,8 +20,9 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PySide6.QtCore import QObject, Qt, Signal
+from orchestrator.llm.auth.signin import plain_http_to_remote
 from orchestrator.llm.auth.spec import KEY_TYPES
-from orchestrator.llm.auth.store import CredentialStore
+from orchestrator.llm.auth.store import CredentialStore, display_origin
 from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, LLMError, rejected_key_error
 from orchestrator.llm.providers.anthropic import WORKSPACE_ID, takes_workspace_id
 from orchestrator.utils.helpers import redact_secrets
@@ -610,6 +611,9 @@ class AIConfigurationDialog(QDialog):
             return
 
         spec = self._key_method(preset)
+        key_url = base_url or preset.base_url
+        if api_key and preset.secret and plain_http_to_remote(key_url) and not self._confirm_plain_http(key_url):
+            return
         if api_key and preset.secret and spec is not None:
             # A key of a server whose address can be changed is stored for that address only.
             try:
@@ -667,6 +671,13 @@ class AIConfigurationDialog(QDialog):
             "enable_rag": enable_rag,
         }
         self.accept()
+
+    def _confirm_plain_http(self, url: str) -> bool:
+        """A key for a server reached over plain http:// on another computer travels unencrypted: only on a Yes."""
+        return QMessageBox.question(
+            self, "Unencrypted connection",
+            f"{display_origin(url)} uses plain http://, so the key travels unencrypted to another computer. Save "
+            "it for this address anyway?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No) == QMessageBox.Yes
 
     def get_config(self) -> Dict[str, Any]:
         """Selected settings after the dialog was accepted (empty otherwise); never contains a key."""

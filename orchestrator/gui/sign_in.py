@@ -12,6 +12,7 @@ runs in a worker thread (orchestrator/llm/auth/signin.py does the work); the wor
 
 import threading
 from functools import partial
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal
@@ -402,6 +403,28 @@ class StorageChooserDialog(QDialog):
     def _chosen(self, mode: str, helper: str):
         self.mode, self.helper = mode, helper or None
         self.accept()
+
+
+class UserConfigSnapshot:
+    """config.yml before a storage choice at startup. The choice is saved so that the framework can start again
+    with it; when no choice opens the vault (an existing vault protected another way), the file is put back, so a
+    failed choice never keeps the next start from working."""
+
+    def __init__(self, config):
+        folder = getattr(config, "config_dir", None)
+        self.path = Path(folder) / "config.yml" if folder else None
+        self.content = self.path.read_bytes() if self.path is not None and self.path.is_file() else None
+
+    def restore(self) -> None:
+        if self.path is None:
+            return
+        try:
+            if self.content is None:
+                self.path.unlink(missing_ok=True)
+            else:
+                self.path.write_bytes(self.content)
+        except OSError as e:
+            logger.warning(f"The user config {self.path} could not be put back: {type(e).__name__}")
 
 
 def choose_storage_at_start(parent, config, problem: BaseException) -> bool:

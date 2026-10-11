@@ -306,8 +306,9 @@ Anbieter übersetzt sie in das, was er versteht.
   entfernst.
 - **Kein nutzbarer Schlüsselbund:** Der Bereich zeigt die Auswahl für den Schutz (Passphrase, Credential-Helper
   oder die unverschlüsselte Schlüsseldatei nach einer Bestätigung), und die GUI zeigt dieselbe Auswahl beim Start,
-  bevor sie aufgibt; eine Passphrase wird in einem Dialog abgefragt. Die CLI endet mit Exit-Code 5 und nennt
-  `llm-cli ditto auth storage --use ...`. Für dich wird nichts gewählt.
+  bevor sie aufgibt; eine Passphrase wird in einem Dialog abgefragt. Eine Wahl, die den vorhandenen Tresor nicht
+  öffnen kann (einen, den der gesperrte Schlüsselbund schützt), wird nicht behalten. Die CLI endet mit Exit-Code 5
+  und nennt `llm-cli ditto auth storage --use ...`. Für dich wird nichts gewählt.
 - **Reaktionsschnell:** Jeder Zugriff auf Tresor, Schlüsselbund oder Netz aus dem Anmeldebereich und für den Kopf
   des Chats läuft in einem Hintergrund-Thread.
 
