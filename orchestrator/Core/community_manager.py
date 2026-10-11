@@ -52,7 +52,8 @@ from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_P
                                               list_files, load_trusted_keys, read_manifest, read_pack, scrub,
                                               sign_manifest, tree_sha256, utc_now, verify_index, verify_manifest,
                                               write_pack)
-from orchestrator.utils.download import DownloadError, PinnedDownloader
+from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file
+from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.helpers import ensure_directory, redact_secrets
 from orchestrator.utils.logging import get_logger
 
@@ -444,10 +445,14 @@ class CommunityManager:
         data = path.read_bytes()
         sender = None
         if is_encrypted_pack(data):
-            if passphrase is None and identity is None:
-                identity = UserKeys(self._secrets()).age_identity()
+            # Your own age identity is read (and made on first use) only for a pack encrypted to keys, after its
+            # signature was checked: a passphrase pack opened without the passphrase asks for it.
+            own_identity = UserKeys(self._secrets()).age_identity if passphrase is None and identity is None else None
             data, sender = decrypt_pack(data, identity=identity, passphrase=passphrase,
-                                        trusted_senders=trusted_senders)
+                                        trusted_senders=trusted_senders, identity_loader=own_identity)
+        elif trusted_senders is not None:
+            raise PackError("Trusted senders apply only to encrypted packs; this pack is not encrypted (its author "
+                            "signature is shown in the summary).")
         try:
             index = self.load_index().index  # updated when older than a day, for the latest revocations
         except PackError:  # offline, no index configured, or a download that does not verify
@@ -488,7 +493,7 @@ class CommunityManager:
         signature = contents.signature
         checked = signature is not None and signature.pubkey is not None  # verified in _author_note
         prov = Provenance(kind=m.kind, id=m.id, version=m.version, trust=trust.value, source=source[:1000],
-                          pack_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                          pack_sha256=sha256_file(archive),  # in pieces: an archive may have 512 MB
                           content_sha256=m.content_sha256(), index_version=index.version if index else None,
                           author=m.author, signer=signature.key_id if checked else None, sender=sender,
                           installed_at=utc_now())
@@ -587,15 +592,26 @@ class CommunityManager:
             os.rename(pack, dest)  # never merges into an existing folder
         finally:
             shutil.rmtree(prepared.quarantine, ignore_errors=True)
-        if prepared.author_key and prepared.manifest.author not in self._authors():
-            authors = {**self._authors(), prepared.manifest.author: prepared.author_key}
-            ensure_directory(self.cache_dir)
-            (self.cache_dir / "authors.json").write_text(json.dumps(authors, indent=2), encoding="utf-8")
+        if prepared.author_key:
+            self._pin_author(prepared.manifest.author, prepared.author_key)
         if prepared.manifest.kind == "knowledge":
             # The marker of an earlier version (its folder was deleted to remove it) would skip this one.
             (self.knowledge_dir / f"{dest.name}.imported").unlink(missing_ok=True)
             self.sync_knowledge_base()
         return dest
+
+    def _pin_author(self, author: str, pubkey: str) -> None:
+        """Pins an author's public key on first use. The GUI, the CLI and another CLI call may install at the same
+        time: read and write under the shared lock, so no process drops a key another one pinned."""
+        target = self.cache_dir / "authors.json"
+        with file_lock(self.cache_dir / "authors.json.lock"):
+            authors = self._authors()
+            if author in authors:
+                return
+            authors[author] = pubkey
+            tmp = self.cache_dir / f".authors.json.{os.getpid()}.tmp"
+            tmp.write_text(json.dumps(authors, indent=2), encoding="utf-8")
+            os.replace(tmp, target)  # readers without the lock never see half a file
 
     @staticmethod
     def discard(prepared: PreparedInstall) -> None:
@@ -808,7 +824,8 @@ class CommunityManager:
     def _knowledge_pages(self, root_urls: Optional[Iterable[str]] = None) -> Tuple[List[dict], int]:
         """Your pages of the knowledge base, privacy-scrubbed (home folders, addresses, host and user names,
         secrets), with root_urls only those crawled from these URLs; and how many pages imported from installed
-        community knowledge packs were left out (re-sharing them would sign them under your name)."""
+        community knowledge packs were left out (re-sharing them would sign them under your name). The knowledge
+        base keeps a page as several chunks: pages are counted by their source."""
         rag_manager = self.framework.get_component("rag_manager") if hasattr(self.framework, "get_component") \
             else None
         try:
@@ -827,7 +844,8 @@ class CommunityManager:
                     for k, v in (record.get("metadata") or {}).items()}  # e.g. URLs with tokens in the query
             if content and source:  # a page without its source is never shared
                 pages.append({"source": source, "content": content, "metadata": meta})
-        return pages, len(records) - len(own)
+        left_out = {str(r.get("source") or "") for r in records if (r.get("metadata") or {}).get("origin_pack")}
+        return pages, len(left_out)
 
     def export_knowledge_base(self, output_name_prefix: str = "knowledge_export",
                               root_urls: Optional[Iterable[str]] = None) -> Optional[str]:

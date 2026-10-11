@@ -33,7 +33,7 @@ import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Literal, Optional, Sequence, Tuple, Union, get_args
+from typing import Callable, Iterable, List, Literal, Optional, Sequence, Tuple, Union, get_args
 
 import pyrage
 import yaml
@@ -614,9 +614,12 @@ def encrypt_pack(data: bytes, *, sender: Ed25519PrivateKey, recipients: Sequence
 
 def decrypt_pack(blob: bytes, *, identity: Optional["pyrage.x25519.Identity"] = None,
                  passphrase: Optional[str] = None,
-                 trusted_senders: Optional[Iterable[Union[TrustedKey, Ed25519PublicKey]]] = None) -> Tuple[bytes, str]:
+                 trusted_senders: Optional[Iterable[Union[TrustedKey, Ed25519PublicKey]]] = None,
+                 identity_loader: Optional[Callable[[], "pyrage.x25519.Identity"]] = None) -> Tuple[bytes, str]:
     """Checks and decrypts an encrypted pack: (pack bytes, the sender's key id). With trusted_senders, a pack from
-    any other sender is refused; without, the caller must show the sender's key id (never silently trusted)."""
+    any other sender is refused; without, the caller must show the sender's key id (never silently trusted).
+    identity_loader gives the identity when none is passed; it is called only for a pack encrypted to keys whose
+    checks passed."""
     if blob.startswith(_OLD_ENCRYPTED_MAGIC):
         raise PackError("This encrypted pack was made by a development version in a format that is no longer read; "
                         "ask the sender to export it again.")
@@ -641,6 +644,8 @@ def decrypt_pack(blob: bytes, *, identity: Optional["pyrage.x25519.Identity"] = 
         raise PackError(f"The pack was sent by key {signature.key_id}, which is not one of the trusted senders.")
     if scrypt and passphrase is None:
         raise PackError("This pack is protected with a passphrase (llm-cli zoo install --file FILE --passphrase).")
+    if not scrypt and identity is None and identity_loader is not None:
+        identity = identity_loader()
     if not scrypt and identity is None:
         raise PackError("This pack is encrypted to keys, not to a passphrase.")
     try:

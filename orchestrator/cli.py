@@ -2393,7 +2393,13 @@ def _zoo_fail(error: Exception, code: int = 1):
 
 def _public_keys(files, kind):
     from orchestrator.Core.community_pack import parse_public_keys
-    keys = [k for f in files for k in parse_public_keys(Path(f).read_text(encoding="utf-8")) if isinstance(k, kind)]
+    keys = []
+    for f in files:
+        try:
+            text = Path(f).read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            _zoo_fail(click.UsageError(f"{f} is not a text file with public keys (see 'llm-cli zoo keys')."), 2)
+        keys += [k for k in parse_public_keys(text) if isinstance(k, kind)]
     if files and not keys:
         _zoo_fail(ValueError("The key files contain no usable public key (see 'llm-cli zoo keys')."), 2)
     return keys
@@ -2453,7 +2459,8 @@ def zoo_show(ctx: FrameworkContext, pack_id: str, kind: Optional[str]):
 @click.option('--file', 'file_path', type=click.Path(exists=True, dir_okay=False, path_type=Path),
               help='Install a pack file (or an encrypted pack) instead of an index entry')
 @click.option('--from', 'senders', multiple=True, type=click.Path(exists=True, dir_okay=False, path_type=Path),
-              help='Encrypted packs: accept only these senders (public key files, repeatable)')
+              help='Encrypted packs: accept only these senders (public key files, repeatable); refused for a '
+              'plain pack')
 @click.option('--passphrase', 'use_passphrase', is_flag=True, help='Encrypted packs: ask for the passphrase')
 @click.option('--yes', is_flag=True, help="Do not ask for a pack whose trust comes from the signed index, also a "
               "file the index lists (a file without an index entry is 'local' and is always confirmed)")
@@ -2463,9 +2470,12 @@ def zoo_install(ctx: FrameworkContext, pack_id: Optional[str], kind: str, file_p
     """Install a community pack: download pinned by the signed index, checks in quarantine, your confirmation"""
     from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
     from orchestrator.Core.community_manager import TrustLevel
-    from orchestrator.Core.community_pack import PackError
+    from orchestrator.Core.community_pack import PackError, is_encrypted_pack
     if bool(pack_id) == bool(file_path):
         _zoo_fail(click.UsageError("Give either an id from the index or --file."), 2)
+    if senders and not (file_path and is_encrypted_pack(file_path)):
+        _zoo_fail(click.UsageError("--from applies only to encrypted packs (.lcfpack); this pack is not encrypted. "
+                                   "A plain pack shows its author signature in the summary."), 2)
     cm = _zoo(ctx)
     try:
         if file_path:
