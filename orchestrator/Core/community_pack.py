@@ -5,7 +5,9 @@ Community packs: manifest, Ed25519 signatures, privacy scrub, and encryption for
 A pack is a zip file:
   pack.json   manifest: schema_version, kind, id, version, author, license, lcf_min_version, created (UTC)
               and files [{path, sha256, size, mode}]
-  pack.sig    optional author signature: {"v": 1, "alg": "Ed25519", "key_id": "...", "sig": "<base64url>"}
+  pack.sig    optional author signature: {"v": 1, "alg": "Ed25519", "key_id": "...", "sig": "<base64url>",
+              "pubkey": "<base64>"} (the public key is optional; it lets anyone check the signature, and the
+              author's key id is pinned on first use when the pack is installed)
   <files>     exactly the files the manifest lists, nothing else
 
 Public packs are signed, not encrypted: for public data, authenticity and integrity are what matter. A pack
@@ -49,7 +51,9 @@ from orchestrator.utils.helpers import calculate_file_checksum
 
 MANIFEST_NAME = "pack.json"
 SIGNATURE_NAME = "pack.sig"
-RESERVED_NAMES = frozenset({MANIFEST_NAME, SIGNATURE_NAME})
+# Written next to an installed pack (source, trust level, digests); never part of a pack or its fingerprint.
+PROVENANCE_NAME = ".lcf-provenance.json"
+RESERVED_NAMES = frozenset({MANIFEST_NAME, SIGNATURE_NAME, PROVENANCE_NAME})
 PACK_KINDS = ("target", "recipe", "knowledge")
 # Packs carry scripts, recipes and text, never model weights.
 MAX_PACK_BYTES = 512 * 1024 * 1024
@@ -68,6 +72,7 @@ _BAD_PATH_CHARS = re.compile(r'[\x00-\x1f\x7f\\:*?"<>|]')
 # Domain separation: a signature made for one purpose never verifies for another.
 _MANIFEST_CONTEXT = b"lcf-pack-manifest/v1\n"
 _ENCRYPTED_CONTEXT = b"lcf-encrypted-pack/v1 signature\n"
+_INDEX_CONTEXT = b"lcf-community-index/v1\n"
 
 
 class PackError(Exception):
@@ -206,6 +211,11 @@ def _scan(root: Path) -> List[Tuple[str, Path, os.stat_result]]:
     return found
 
 
+def list_files(root: Path) -> List[Tuple[str, Path]]:
+    """(relative path, path) of every file below root; links and special files raise PackError (see _scan)."""
+    return [(rel, path) for rel, path, _ in _scan(root)]
+
+
 def _pack_files(root: Path) -> List[PackFile]:
     return [PackFile(path=rel, sha256=calculate_file_checksum(path), size=st.st_size,
                      mode=0o755 if st.st_mode & 0o111 else 0o644)
@@ -305,6 +315,16 @@ class PackSignature(_Strict):
     alg: Literal["Ed25519"] = "Ed25519"
     key_id: str = Field(pattern=_KEY_ID)
     sig: str = Field(pattern=r"^[A-Za-z0-9_-]{86}$")  # 64 bytes, base64url without padding
+    pubkey: Optional[str] = Field(default=None, pattern=r"^[A-Za-z0-9+/]{43}=$")
+
+    def embedded_key(self) -> Optional[Ed25519PublicKey]:
+        """The signer's public key carried in the signature, checked against key_id (None if absent)."""
+        if self.pubkey is None:
+            return None
+        key = Ed25519PublicKey.from_public_bytes(_b64d(self.pubkey, 32))
+        if key_id(key) != self.key_id:
+            raise PackError(f"pack.sig names key {self.key_id} but carries another public key.")
+        return key
 
 
 class TrustedKey(_Strict):
@@ -347,30 +367,49 @@ def load_trusted_keys(path: Optional[Path] = None) -> List[TrustedKey]:
         raise PackError(f"The trusted keys in {path} are invalid: {e}") from None
 
 
-def sign_manifest(manifest: PackManifest, private_key: Ed25519PrivateKey) -> PackSignature:
-    sig = private_key.sign(_MANIFEST_CONTEXT + manifest.canonical_bytes())
-    return PackSignature(key_id=key_id(private_key.public_key()),
+def _sign(payload: bytes, private_key: Ed25519PrivateKey) -> PackSignature:
+    sig = private_key.sign(payload)
+    return PackSignature(key_id=key_id(private_key.public_key()), pubkey=_b64e(_raw_public(private_key.public_key())),
                          sig=base64.urlsafe_b64encode(sig).decode("ascii").rstrip("="))
 
 
-def verify_manifest(manifest: PackManifest, signature: PackSignature,
-                    keys: Iterable[Union[TrustedKey, Ed25519PublicKey]], *, now: Optional[datetime] = None) -> str:
-    """Returns the key id of the valid signature; raises PackError for an unknown or expired key or a signature
-    that does not match (a changed manifest, a wrong key)."""
+def _verify(payload: bytes, signature: PackSignature, keys: Iterable[Union[TrustedKey, Ed25519PublicKey]],
+            now: Optional[datetime], what: str) -> str:
     now = now or datetime.now(timezone.utc)
     for candidate in keys:
         public = candidate.public_key() if isinstance(candidate, TrustedKey) else candidate
         if key_id(public) != signature.key_id:
             continue
         if isinstance(candidate, TrustedKey) and not candidate.valid_on(now):
-            raise PackError(f"The pack is signed with key {signature.key_id}, which expired on "
+            raise PackError(f"The {what} is signed with key {signature.key_id}, which expired on "
                             f"{candidate.valid_until}.")
         try:
-            public.verify(base64.urlsafe_b64decode(signature.sig + "=="), _MANIFEST_CONTEXT + manifest.canonical_bytes())
+            public.verify(base64.urlsafe_b64decode(signature.sig + "=="), payload)
         except (InvalidSignature, ValueError, binascii.Error):
-            raise PackError(f"The signature of key {signature.key_id} does not match: the pack was changed.") from None
+            raise PackError(f"The signature of key {signature.key_id} does not match: the {what} was changed.") from None
         return signature.key_id
-    raise PackError(f"The pack is signed with key {signature.key_id}, which is not one of the trusted keys.")
+    raise PackError(f"The {what} is signed with key {signature.key_id}, which is not one of the trusted keys.")
+
+
+def sign_manifest(manifest: PackManifest, private_key: Ed25519PrivateKey) -> PackSignature:
+    return _sign(_MANIFEST_CONTEXT + manifest.canonical_bytes(), private_key)
+
+
+def verify_manifest(manifest: PackManifest, signature: PackSignature,
+                    keys: Iterable[Union[TrustedKey, Ed25519PublicKey]], *, now: Optional[datetime] = None) -> str:
+    """Returns the key id of the valid signature; raises PackError for an unknown or expired key or a signature
+    that does not match (a changed manifest, a wrong key)."""
+    return _verify(_MANIFEST_CONTEXT + manifest.canonical_bytes(), signature, keys, now, "pack")
+
+
+def sign_index(index_bytes: bytes, private_key: Ed25519PrivateKey) -> PackSignature:
+    """Signature of the community index file (index.json.sig), over its exact bytes."""
+    return _sign(_INDEX_CONTEXT + index_bytes, private_key)
+
+
+def verify_index(index_bytes: bytes, signature: PackSignature,
+                 keys: Iterable[Union[TrustedKey, Ed25519PublicKey]], *, now: Optional[datetime] = None) -> str:
+    return _verify(_INDEX_CONTEXT + index_bytes, signature, keys, now, "community index")
 
 
 # --- Zip files -------------------------------------------------------------------------------------------

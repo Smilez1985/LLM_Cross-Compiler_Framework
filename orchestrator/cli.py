@@ -1560,5 +1560,239 @@ def config_repos(ctx: FrameworkContext, add, remove):
                 table.add_row(k, url)
             console.print(table)
 
+# ============================================================================
+# COMMUNITY ZOO (signed community packs: targets, recipes, knowledge)
+# ============================================================================
+
+ZOO_KINDS = ("target", "recipe", "knowledge")
+
+
+@cli.group()
+def zoo():
+    """Community zoo: signed targets, recipes and knowledge packs (nothing is ever uploaded by the framework)"""
+    pass
+
+
+def _zoo(ctx: FrameworkContext):
+    ctx.require_framework()
+    cm = ctx.framework_manager.get_component("community_manager")
+    if cm is None:
+        console.print("[red]The community manager is not available.[/red]")
+        sys.exit(1)
+    return cm
+
+
+def _zoo_fail(error: Exception, code: int = 1):
+    console.print(f"[red]{escape(str(error))}[/red]")
+    sys.exit(code)
+
+
+def _public_keys(files, kind):
+    from orchestrator.Core.community_pack import parse_public_keys
+    keys = [k for f in files for k in parse_public_keys(Path(f).read_text(encoding="utf-8")) if isinstance(k, kind)]
+    if files and not keys:
+        _zoo_fail(ValueError("The key files contain no usable public key (see 'llm-cli zoo keys')."), 2)
+    return keys
+
+
+@zoo.command('list')
+@click.option('--kind', type=click.Choice(ZOO_KINDS), help='Only this kind')
+@click.option('--refresh', is_flag=True, help='Download the signed index again')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def zoo_list(ctx: FrameworkContext, kind: Optional[str], refresh: bool, as_json: bool):
+    """List the community index and installed packs with their trust level"""
+    from orchestrator.Core.community_pack import PackError
+    cm = _zoo(ctx)
+    try:
+        state = cm.load_index(refresh)
+        index, note = state.index, state.note or f"Index version {state.index.version} ({state.source})"
+    except PackError as e:
+        index, note = None, f"No community index: {e}"
+    items = [i for i in cm.list_items(index) if not kind or i.kind == kind]
+    if as_json:
+        click.echo(json.dumps([{"kind": i.kind, "id": i.id, "version": i.version, "trust": i.trust.value,
+                                "installed_version": i.installed_version, "revoked": i.revoked,
+                                "author": i.author, "title": i.title} for i in items], indent=2))
+        return
+    table = Table(title="Community zoo")
+    for column in ("Kind", "ID", "Version", "Trust", "Installed", "Author", "Title"):
+        table.add_column(column)
+    for i in items:
+        table.add_row(i.kind, escape(i.id), i.version, i.trust.value, i.installed_version or "-",
+                      escape(i.author), escape(i.title))
+    console.print(table)
+    console.print(f"[dim]{escape(note)}[/dim]")
+
+
+@zoo.command('show')
+@click.argument('pack_id')
+@click.option('--kind', type=click.Choice(ZOO_KINDS), help='Kind, if the id exists for several')
+@pass_context
+def zoo_show(ctx: FrameworkContext, pack_id: str, kind: Optional[str]):
+    """Show one entry of the zoo (and an installed recipe)"""
+    cm = _zoo(ctx)
+    items = [i for i in cm.list_items(cm.cached_index())
+             if i.id.casefold() == pack_id.casefold() and (not kind or i.kind == kind)]
+    if not items:
+        _zoo_fail(ValueError(f"'{pack_id}' is neither in the cached index nor installed (llm-cli zoo list --refresh)."))
+    for i in items:
+        lines = [f"{i.kind} {i.id} {i.version} by {i.author} ({i.license or 'licence unknown'})",
+                 f"Trust: {i.trust.value}" + (f" - revoked: {i.revoked}" if i.revoked else ""),
+                 f"Installed: {i.installed_version or 'no'}" + (f" in {i.path}" if i.path else "")]
+        if i.entry:
+            lines += [f"Download: {i.entry.url} ({i.entry.size} bytes, sha256 {i.entry.sha256})"]
+        if i.description:
+            lines.append(i.description)
+        if i.kind == "recipe" and i.path and (i.path / "recipe.yml").is_file():
+            lines += ["", (i.path / "recipe.yml").read_text(encoding="utf-8")]
+        console.print(Panel(escape("\n".join(lines)), title=escape(i.title)))
+
+
+@zoo.command('install')
+@click.argument('pack_id', required=False)
+@click.option('--kind', type=click.Choice(ZOO_KINDS), default='target', show_default=True)
+@click.option('--file', 'file_path', type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help='Install a pack file (or an encrypted pack) instead of an index entry')
+@click.option('--from', 'senders', multiple=True, type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help='Encrypted packs: accept only these senders (public key files, repeatable)')
+@click.option('--passphrase', 'use_passphrase', is_flag=True, help='Encrypted packs: ask for the passphrase')
+@click.option('--refresh', is_flag=True, help='Download the signed index again first')
+@click.option('--yes', is_flag=True, help='Do not ask for a pack from the signed index (a file always asks)')
+@pass_context
+def zoo_install(ctx: FrameworkContext, pack_id: Optional[str], kind: str, file_path: Optional[Path],
+                senders: Tuple[Path, ...], use_passphrase: bool, refresh: bool, yes: bool):
+    """Install a community pack: download pinned by the signed index, checks in quarantine, your confirmation"""
+    from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+    from orchestrator.Core.community_manager import TrustLevel
+    from orchestrator.Core.community_pack import ENCRYPTED_MAGIC, PackError, UserKeys
+    if bool(pack_id) == bool(file_path):
+        _zoo_fail(click.UsageError("Give either an id from the index or --file."), 2)
+    cm = _zoo(ctx)
+    try:
+        if file_path:
+            options = {}
+            with open(file_path, "rb") as f:
+                encrypted = f.read(len(ENCRYPTED_MAGIC)) == ENCRYPTED_MAGIC
+            if encrypted:
+                if use_passphrase:
+                    options["passphrase"] = click.prompt("Passphrase", hide_input=True, err=True)
+                else:
+                    options["identity"] = UserKeys(ctx.framework_manager.secrets_manager).encryption_key()
+                options["trusted_senders"] = _public_keys(senders, Ed25519PublicKey) or None
+            prepared = cm.prepare_install_file(file_path, **options)
+        else:
+            with console.status(f"Downloading and checking {kind} {pack_id}..."):
+                prepared = cm.prepare_install(kind, pack_id, refresh=refresh)
+    except (PackError, OSError) as e:
+        _zoo_fail(e)
+    click.echo(prepared.summary(), err=True)
+    asked = not (yes and prepared.trust != TrustLevel.LOCAL)
+    if asked and not sys.stdin.isatty():
+        cm.discard(prepared)
+        _zoo_fail(ValueError("No terminal to confirm in: not installed (--yes applies only to packs from the "
+                             "signed index)."))
+    if asked and not click.confirm("Install this pack?", default=False, err=True):
+        cm.discard(prepared)
+        sys.exit(1)
+    try:
+        dest = cm.finish_install(prepared)
+    except (PackError, OSError) as e:
+        _zoo_fail(e)
+    if prepared.manifest.kind == "target" and ctx.framework_manager.target_manager:
+        ctx.framework_manager.target_manager.initialize()
+    console.print(f"[green]Installed {prepared.manifest.kind} {escape(prepared.manifest.id)} in "
+                  f"{escape(str(dest))}[/green]")
+
+
+@zoo.command('verify')
+@click.argument('pack_file', required=False, type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@pass_context
+def zoo_verify(ctx: FrameworkContext, pack_file: Optional[Path]):
+    """Check installed packs (revoked, changed), or a pack file: format, hashes, validators and privacy scrub
+    (used by the community repository's CI; works without a keyring)"""
+    from orchestrator.Core.community_manager import CommunityManager
+    from orchestrator.Core.community_pack import PackError
+    if pack_file:
+        try:
+            manifest, problems = CommunityManager(None).verify_file(pack_file)
+        except (PackError, OSError) as e:
+            _zoo_fail(e)
+        for problem in problems:
+            console.print(f"[red]✘ {escape(problem)}[/red]")
+        if problems:
+            sys.exit(1)
+        console.print(f"[green]✔ {manifest.kind} {escape(manifest.id)} {manifest.version}: acceptable[/green]")
+        return
+    results = _zoo(ctx).verify_installed()
+    for folder, prov, trust, problems in results:
+        mark = "[red]✘[/red]" if problems else "[green]✔[/green]"
+        detail = "; ".join(problems) or (trust.value if trust else "")
+        console.print(f"{mark} {prov.kind} {escape(prov.id)} {prov.version}: {escape(detail)}")
+    if not results:
+        console.print("No community packs installed.")
+    sys.exit(1 if any(problems for *_, problems in results) else 0)
+
+
+@zoo.command('export')
+@click.argument('kind', type=click.Choice(ZOO_KINDS))
+@click.argument('source', required=False)
+@click.option('--author', required=True, help='Name shown as the author (a pseudonym is fine)')
+@click.option('--license', 'license_', default='MIT', show_default=True, help='Licence of the pack (SPDX id)')
+@click.option('--model-license', default='unknown', show_default=True, help='Recipes: licence id of the model')
+@click.option('--id', 'pack_id', help='Knowledge: id of the pack')
+@click.option('--to', 'recipients', multiple=True, type=click.Path(exists=True, dir_okay=False, path_type=Path),
+              help='Encrypt for private sharing to the public keys in this file (repeatable)')
+@click.option('--passphrase', 'use_passphrase', is_flag=True, help='Encrypt for private sharing with a passphrase')
+@click.option('--out', type=click.Path(file_okay=False, path_type=Path), help='Folder for the pack')
+@click.option('--pr', 'open_pr', is_flag=True,
+              help='Hand the pack to a pull request on the community repository (gh if installed, else the browser)')
+@pass_context
+def zoo_export(ctx: FrameworkContext, kind: str, source: Optional[str], author: str, license_: str,
+               model_license: str, pack_id: Optional[str], recipients: Tuple[Path, ...], use_passphrase: bool,
+               out: Optional[Path], open_pr: bool):
+    """Export a target (SOURCE: target id), a recipe (SOURCE: a build folder or its build_info.json) or your
+    knowledge base as a scrubbed pack signed with your key. Shows what the privacy scrub changed."""
+    from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+    from orchestrator.Core.community_manager import submit_contribution
+    from orchestrator.Core.community_pack import PackError
+    if kind in ("target", "recipe") and not source:
+        _zoo_fail(click.UsageError(f"Name the {'target id' if kind == 'target' else 'build folder'} to export."), 2)
+    if kind == "recipe" and Path(source).is_dir():
+        source = str(Path(source) / "build_info.json")
+    cm = _zoo(ctx)
+    passphrase = click.prompt("Passphrase", hide_input=True, confirmation_prompt=True, err=True) \
+        if use_passphrase else None
+    try:
+        result = cm.export_pack(kind, source, author=author, license=license_, pack_id=pack_id,
+                                model_license=model_license, recipients=_public_keys(recipients, X25519PublicKey),
+                                passphrase=passphrase, out_dir=out)
+    except (PackError, OSError, ValueError) as e:
+        _zoo_fail(e)
+    click.echo(result.summary())
+    if not open_pr:
+        console.print("[dim]Review the pack, then share the file or submit it with --pr.[/dim]")
+        return
+    if result.encrypted:
+        _zoo_fail(ValueError("Encrypted packs are for private sharing; they are not submitted to the community."))
+    try:
+        console.print(escape(submit_contribution(result.path, ctx.framework_manager.config.get("community_repo", ""),
+                                                 kind)))
+    except PackError as e:
+        _zoo_fail(e)
+
+
+@zoo.command('keys')
+@pass_context
+def zoo_keys(ctx: FrameworkContext):
+    """Show your public keys: give them to people who send you encrypted packs or check your signed packs"""
+    from orchestrator.Core.community_pack import PackError, UserKeys
+    ctx.require_framework()
+    try:
+        click.echo(UserKeys(ctx.framework_manager.secrets_manager).export_public(), nl=False)
+    except PackError as e:
+        _zoo_fail(e)
+
+
 if __name__ == "__main__":
     cli()
