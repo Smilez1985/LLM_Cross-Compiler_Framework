@@ -128,7 +128,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `mcp serve` / `mcp config` | Den MCP-Server betreiben / zeigen, wie man KI-Clients verbindet |
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
 | `module create` / `module generate-ai` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei |
-| `scan` | Die Hardware-Probe auf diesem Rechner ausführen |
+| `scan` | Die Hardware-Probe auf diesem Rechner oder mit `--device` auf einem Board per SSH ausführen und das Profil speichern |
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
@@ -951,22 +951,52 @@ llm-cli module generate-ai target_hardware_config.txt --provider local
 ## scan
 
 ```
-llm-cli scan [--output TEXT]
+llm-cli scan [--output TEXT] [--json] [--script]
+llm-cli scan --device HOST --user TEXT [--port N] [--password TEXT] [--trust-fingerprint TEXT] [--label TEXT]
+             [--output TEXT] [--json]
 ```
 
-Führt die Hardware-Probe auf diesem Rechner aus (`scripts/hardware_probe.sh` unter Linux,
-`scripts/hardware_probe.ps1` unter Windows). Die Probe schreibt die mit `--output` angegebene Datei (ihr Ordner
-wird angelegt). Sie fragt eventuell, ob fehlende Hilfsprogramme (`pciutils`, `usbutils`, `dmidecode`) mit deinem
-Paketmanager installiert werden sollen; mit `n` überspringst du das. Unter Windows ohne Administratorrechte startet
-sich die Probe mit erhöhten Rechten neu (Windows fragt nach der Erlaubnis), und die CLI wartet auf sie. Exit-Code 1,
-wenn die Probe scheitert oder keine Datei schreibt.
+Führt die Hardware-Probe aus und behält ihr Ergebnis, das Hardware-Profil (Schema 2, beschrieben im
+[Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#11-die-datei-der-hardware-probe)). Ein Build wird für
+den Rechner geplant, auf dem das Modell läuft, deshalb läuft die Probe auf diesem Rechner.
+
+- **Dieser Rechner** (Standard): Die Python-Probe `scripts/hardware_probe.py` läuft in der CLI. Das Profil wird in die
+  mit `--output` angegebene Datei geschrieben und als Profil dieses Rechners gespeichert
+  (`~/.llm-framework/hardware/local.txt`, ohne flüchtige Werte wie den freien RAM). Kann die Python-Probe nicht
+  laufen, sagt die CLI, warum, und führt stattdessen das Ersatzskript aus; `--script` nimmt das Skript direkt
+  (`scripts/hardware_probe.sh` unter Linux, `scripts/hardware_probe.ps1` unter Windows).
+- **Ein Board per SSH** (`--device`): Beim ersten Kontakt zeigt die CLI den Fingerabdruck des SSH-Hostschlüssels und
+  bittet dich, ihn zu bestätigen, wie bei `deploy run` (`--trust-fingerprint` bestätigt ihn ohne Nachfrage); ein
+  Passwort wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu installieren, und nicht gespeichert. Dann
+  schickt die CLI `hardware_probe.py` an `python3 -I`, wenn das Board Python 3.8 oder neuer hat, sonst
+  `hardware_probe.sh` an `sh` (jede POSIX-Shell, auch BusyBox). Das Skript kommt über den SSH-Kanal, also wird auf dem
+  Board nichts installiert und nichts zurückgelassen. Das Ergebnis wird wie jede Probe-Datei von außen geprüft, nach
+  `--output` geschrieben und unter der ID des Boards gespeichert (`~/.llm-framework/hardware/devices/<ID>.txt`; die ID
+  kommt aus dem Hostschlüssel des Boards), mit deiner Bezeichnung und seiner Adresse.
+
+Die Probes fragen nie nach, installieren nichts und verlangen keine Administratorrechte. Exit-Code 1, wenn die Probe
+scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
 
 | Option | Bedeutung |
 |---|---|
-| `--output TEXT` | Datei, die die Probe schreibt, relativ zum aktuellen Ordner (Standard `target_hardware_config.txt`). Die CLI gibt sie an die Probe weiter (`hardware_probe.sh --output DATEI`, `hardware_probe.ps1 -OutputFile DATEI`). |
+| `--output TEXT` | Datei, in die das Profil geschrieben wird, relativ zum aktuellen Ordner (Standard `target_hardware_config.txt`); ihr Ordner wird angelegt. Mit `--script` gibt die CLI sie an das Skript weiter (`hardware_probe.sh --output DATEI`, `hardware_probe.ps1 -OutputFile DATEI`). |
+| `--json` | Die JSON-Ansicht schreiben (dieselben Schlüssel und Werte als ein Objekt) statt `KEY=VALUE`-Zeilen. |
+| `--script` | Das Ersatzskript statt der Python-Probe nehmen (nur für diesen Rechner). |
+| `--device HOST` | Dieses Board per SSH untersuchen (Hostname oder IP-Adresse) statt dieses Rechners. |
+| `--user TEXT` | SSH-Benutzer auf dem Board (nötig mit `--device`). |
+| `--port N` | SSH-Port des Boards (Standard 22). |
+| `--password TEXT` | Nur für die erste Verbindung: wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu installieren, und nie gespeichert (wird abgefragt, wenn es fehlt). |
+| `--trust-fingerprint TEXT` | Einem neuen Board ohne Nachfrage vertrauen, wenn sein Hostschlüssel diesen SHA256-Fingerabdruck hat. |
+| `--label TEXT` | Deine Bezeichnung für das Board im Profilspeicher. |
 
-Um ein Board statt dieses Rechners zu untersuchen, führst du `scripts/hardware_probe.sh` auf dem Board aus oder
-nutzt in der GUI **Scan / Import... > Remote Scan via SSH**.
+Ein Rechner ohne Netzzugang führt eine Probe von Hand aus, und du importierst ihre Datei
+([README](../README_DE.md#die-hardware-des-boards-untersuchen)). In der GUI importiert **Scan / Import...** eine
+Probe-Datei, untersucht ein Board per SSH oder diesen PC.
+
+```bash
+llm-cli scan                                        # dieser Rechner, gespeichert als „local“
+llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W" --output zero3w.txt
+```
 
 ---
 

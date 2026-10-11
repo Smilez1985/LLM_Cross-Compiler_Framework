@@ -3,45 +3,46 @@
 Hardware detection for the local runtime: which llama.cpp build fits this machine, which Ditto model
 tier, and how much context fits next to the model. Every decision carries a human-readable reason.
 
-Probes (each optional; a missing tool contributes nothing): nvidia-smi for NVIDIA GPUs (driver, compute
-capability, VRAM), vulkaninfo for any Vulkan device, amdgpu's sysfs and the KFD topology on Linux (VRAM,
-gfx target), WMI and the display-class registry on Windows (adapter names, dedicated VRAM).
+detect_hardware() runs the hardware probe (scripts/hardware_probe.py, the same file that probes boards) in-process
+for its memory and GPU parts, checks the result with the probe file parser (orchestrator/runtime/profile.py) and
+builds HardwareInfo from that profile. Free RAM and free GPU memory are volatile: they are read again at every call
+and never taken from a stored profile. hardware_from_profile() builds HardwareInfo from any profile, for example a
+stored one or a device's.
+
+The probe's GPU sources (each optional; a missing tool contributes nothing): nvidia-smi for NVIDIA GPUs (driver,
+compute capability, VRAM), vulkaninfo for any Vulkan device, amdgpu's sysfs and the KFD topology on Linux (VRAM, gfx
+target), WMI and the display-class registry on Windows (adapter names, dedicated VRAM). Its parsers are wrapped below
+into GpuInfo for existing callers.
 """
 
-import ctypes.util
-import glob
-import json
+import importlib.util
+import logging
 import os
 import platform
-import re
 import subprocess
+import threading
 from pathlib import Path
 from typing import Callable, Dict, List, Literal, Optional, Sequence, Tuple
 
-import psutil
 from pydantic import BaseModel
 
 from orchestrator.runtime.catalog import (GPU_BACKENDS, ModelEntry, RuntimeAsset, RuntimeCatalog, ServerDefaults,
                                           version_tuple)
+from orchestrator.runtime.profile import HardwareProfile, ProfileError, load_schema, parse_profile
 
 GIB = 1024 ** 3
 MIB = 1024 ** 2
 SYSTEM_RESERVE = int(1.5 * GIB)  # RAM left to the OS, the GUI and the knowledge base when a model is chosen
+PROBE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "hardware_probe.py"
 
 # (command, timeout) -> (returncode, stdout, stderr); returncode -1 means "not found / not runnable".
 Runner = Callable[[Sequence[str], float], Tuple[int, str, str]]
 LibraryFinder = Callable[[str], Optional[str]]
 
-# PCI device ids of AMD APU graphics (amdgpu_drv.c): their "VRAM" is a carve-out of the system RAM.
-_AMD_APU_DEVICE_IDS = frozenset({
-    "0x15dd", "0x15d8",                      # Raven, Picasso
-    "0x1636", "0x1638", "0x164c", "0x15e7",  # Renoir, Cezanne, Lucienne, Barcelo
-    "0x163f", "0x1435",                      # Van Gogh (Steam Deck)
-    "0x1681", "0x1506", "0x164e", "0x13c0",  # Rembrandt, Mendocino, Raphael, Granite Ridge
-    "0x15bf", "0x15c8",                      # Phoenix / Hawk Point (Radeon 780M, Ryzen Z1 Extreme), Phoenix2 (Z1)
-    "0x150e", "0x1114", "0x1586",            # Strix Point, Krackan Point, Strix Halo
-})
-_VENDORS = {"0x10de": "nvidia", "0x1002": "amd", "0x1022": "amd", "0x8086": "intel", "0x106b": "apple"}
+_GPU_VENDORS = ("nvidia", "amd", "intel", "apple")
+logger = logging.getLogger(__name__)
+_probe_module = None
+_probe_lock = threading.Lock()
 
 
 class GpuInfo(BaseModel):
@@ -89,7 +90,7 @@ def _default_runner(cmd: Sequence[str], timeout: float) -> Tuple[int, str, str]:
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
     try:
         res = subprocess.run(list(cmd), capture_output=True, text=True, timeout=timeout, check=False,
-                             stdin=subprocess.DEVNULL, creationflags=flags)
+                             stdin=subprocess.DEVNULL, creationflags=flags, errors="replace")
         return res.returncode, res.stdout or "", res.stderr or ""
     except (OSError, subprocess.SubprocessError) as e:
         return -1, "", str(e)
@@ -103,261 +104,131 @@ def normalize_platform(system: Optional[str] = None, machine: Optional[str] = No
     return os_name, arch
 
 
-# --- probes ------------------------------------------------------------------------------------------------
+# --- the probe ---------------------------------------------------------------------------------------------
 
-def _float(text: str) -> Optional[float]:
-    try:
-        return float(text.strip())
-    except (TypeError, ValueError):
-        return None
+def load_probe():
+    """scripts/hardware_probe.py as a module (loaded once). It is a standalone file, not part of the package,
+    because the same file is copied to devices; RuntimeError when it is missing from this installation."""
+    global _probe_module
+    with _probe_lock:
+        if _probe_module is None:
+            spec = importlib.util.spec_from_file_location("llm_framework_hardware_probe", PROBE_PATH)
+            if spec is None or spec.loader is None or not PROBE_PATH.is_file():
+                raise RuntimeError(f"The hardware probe {PROBE_PATH} is missing from this installation.")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            _probe_module = module
+        return _probe_module
+
+
+def _gpu_info(gpu: Dict[str, str]) -> GpuInfo:
+    """A probe or profile GPU (GPU<n>_ suffixes -> string values) as GpuInfo."""
+    def number(key: str) -> Optional[int]:
+        value = gpu.get(key)
+        return int(value) if value is not None and value.isdigit() else None
+
+    vendor = gpu.get("VENDOR", "other")
+    vram = number("VRAM_MB")
+    cap = gpu.get("COMPUTE_CAP")
+    return GpuInfo(vendor=vendor if vendor in _GPU_VENDORS else "other",
+                   name=gpu.get("NAME") or gpu.get("PCI_ID") or f"{vendor} GPU",
+                   discrete={"ON": True, "OFF": False}.get(gpu.get("DISCRETE", "UNKNOWN")),
+                   unified=gpu.get("UNIFIED") == "ON", vram_mib=vram or None, vram_free_mib=number("VRAM_FREE_MB"),
+                   driver_version=gpu.get("DRIVER_VERSION"), compute_cap=float(cap) if cap else None,
+                   gfx_target=gpu.get("GFX_TARGET"), source=gpu.get("SOURCE", ""))
 
 
 def parse_nvidia_smi(output: str) -> List[GpuInfo]:
-    """Lines of `--query-gpu=driver_version,compute_cap,memory.total,memory.free,name --format=csv,noheader,nounits`."""
-    gpus = []
-    for line in output.splitlines():
-        parts = [p.strip() for p in line.split(",", 4)]
-        if len(parts) != 5 or not parts[0] or parts[0].startswith("["):
-            continue
-        driver, cap, total, free, name = parts
-        total_f, free_f = _float(total), _float(free)
-        gpus.append(GpuInfo(vendor="nvidia", name=name, discrete=True, driver_version=driver,
-                            compute_cap=_float(cap), vram_mib=int(total_f) if total_f else None,
-                            vram_free_mib=int(free_f) if free_f is not None else None, source="nvidia-smi"))
-    return gpus
-
-
-def _nvidia_smi_paths(os_name: str) -> List[str]:
-    paths = ["nvidia-smi"]
-    if os_name == "windows":
-        # Older drivers install it here without adding it to PATH (current ones put it into System32).
-        for base in (os.environ.get("ProgramW6432"), os.environ.get("ProgramFiles")):
-            if base:
-                paths.append(str(Path(base) / "NVIDIA Corporation" / "NVSMI" / "nvidia-smi.exe"))
-    return paths
+    """Lines of `--query-gpu=driver_version,compute_cap,memory.total,memory.free,name --format=csv,noheader,nounits`
+    (the probe's longer query with the PCI fields is read as well)."""
+    return [_gpu_info(g) for g in load_probe().parse_nvidia_csv(output)]
 
 
 def probe_nvidia(run: Runner, os_name: str = "linux") -> List[GpuInfo]:
-    fields = "driver_version,compute_cap,memory.total,memory.free,name"
-    for exe in _nvidia_smi_paths(os_name):
-        rc, out, err = run([exe, f"--query-gpu={fields}", "--format=csv,noheader,nounits"], 15)
-        if rc == -1:
-            continue  # not installed here
-        if rc != 0 and "compute_cap" in (out + err):
-            # Drivers before R510 do not know compute_cap; ask without it and leave the column empty.
-            rc, out, _ = run([exe, "--query-gpu=driver_version,memory.total,memory.free,name",
-                              "--format=csv,noheader,nounits"], 15)
-            out = "\n".join(line.replace(",", ",,", 1) for line in out.splitlines())
-        return parse_nvidia_smi(out) if rc == 0 else []
-    return []
+    gpus, _exe = load_probe().probe_nvidia(run, os_name)
+    return [_gpu_info(g) for g in gpus]
 
 
 def parse_vulkaninfo_summary(output: str) -> List[GpuInfo]:
     """The "Devices:" section of `vulkaninfo --summary` (GPU0: ... key = value lines)."""
-    gpus, current = [], None
-    for raw in output.splitlines():
-        line = raw.strip()
-        if re.fullmatch(r"GPU\d+:", line):
-            current = {}
-            gpus.append(current)
-        elif current is not None and " = " in line:
-            key, _, value = line.partition(" = ")
-            current[key.strip()] = value.strip()
-    result = []
-    for dev in gpus:
-        dtype = dev.get("deviceType", "")
-        if dtype.endswith(("_CPU", "_OTHER")) or not dev.get("deviceName"):
-            continue  # llvmpipe/lavapipe and other software renderers
-        integrated = dtype.endswith("INTEGRATED_GPU")
-        result.append(GpuInfo(vendor=_VENDORS.get(dev.get("vendorID", "").lower(), "other"), name=dev["deviceName"],
-                              discrete=dtype.endswith("DISCRETE_GPU"), unified=integrated,
-                              driver_version=dev.get("driverInfo") or None, source="vulkaninfo"))
-    return result
+    return [_gpu_info(g) for g in load_probe().parse_vulkaninfo_summary(output)]
 
 
 def probe_vulkaninfo(run: Runner) -> Tuple[bool, List[GpuInfo]]:
-    rc, out, _ = run(["vulkaninfo", "--summary"], 20)
-    if rc != 0 or "Devices" not in out:
-        return False, []
-    return True, parse_vulkaninfo_summary(out)
+    ran, gpus = load_probe().probe_vulkaninfo(run)
+    return ran, [_gpu_info(g) for g in gpus]
 
 
 def guess_discrete(vendor: str, name: str) -> Optional[bool]:
     """From a Windows adapter name: dedicated Radeon RX/PRO and Arc A/B cards; APU graphics are integrated."""
-    if vendor == "amd":
-        # APUs: "Radeon(TM) Graphics", "Radeon 780M Graphics", "Radeon RX Vega 11 Graphics", "Radeon 8060S".
-        if re.search(r"Radeon(\s*\(TM\))?\s+Graphics|\b\d{3}M\b|\bVega\s+(3|6|7|8|9|10|11)\b|\b80[456]0S\b", name,
-                     re.I):
-            return False
-        if re.search(r"\b(RX|PRO|Instinct|FirePro|R9|R7)\b", name, re.I):
-            return True
-        return None
-    if vendor == "intel":
-        return bool(re.search(r"\bArc\b.*\b[AB]\d{3}", name, re.I))
-    return None
-
-
-# One PowerShell call: adapter names from WMI, and the exact dedicated memory from the display-class registry
-# (WMI's AdapterRAM is a 32-bit value and stops at 4 GiB).
-_WINDOWS_ADAPTERS = r"""
-$mem = @{}
-$display = 'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0*'
-Get-ItemProperty $display -ErrorAction SilentlyContinue | ForEach-Object {
-  $v = $_.'HardwareInformation.qwMemorySize'
-  if ($_.DriverDesc -and ($v -is [long] -or $v -is [int])) { $mem[$_.DriverDesc] = [int64]$v }
-}
-Get-CimInstance Win32_VideoController | ForEach-Object {
-  [pscustomobject]@{Name=$_.Name; AdapterCompatibility=$_.AdapterCompatibility;
-                    DriverVersion=$_.DriverVersion; Memory=$mem[$_.Name]}
-} | ConvertTo-Json -Compress
-"""
+    return load_probe().guess_discrete(vendor, name)
 
 
 def probe_windows_adapters(run: Runner) -> List[GpuInfo]:
     """Display adapters. Every current AMD/Intel/NVIDIA driver on Windows ships the Vulkan runtime."""
-    rc, out, _ = run(["powershell", "-NoProfile", "-NonInteractive", "-Command", _WINDOWS_ADAPTERS], 20)
-    if rc != 0 or not out.strip():
-        return []
-    try:
-        data = json.loads(out)
-    except ValueError:
-        return []
-    gpus = []
-    for item in data if isinstance(data, list) else [data]:
-        if not isinstance(item, dict):
-            continue
-        name = str(item.get("Name") or "")
-        maker = f"{item.get('AdapterCompatibility') or ''} {name}".lower()
-        vendor = ("nvidia" if "nvidia" in maker else "amd" if ("advanced micro" in maker or "amd" in maker)
-                  else "intel" if "intel" in maker else "other")
-        if vendor == "other" or not name:
-            continue  # Microsoft Basic Display Adapter, remote display drivers
-        discrete = guess_discrete(vendor, name)
-        memory = item.get("Memory")
-        vram = int(memory) // MIB if isinstance(memory, (int, float)) and memory > 0 and discrete else None
-        gpus.append(GpuInfo(vendor=vendor, name=name, discrete=discrete, unified=discrete is False, vram_mib=vram,
-                            driver_version=item.get("DriverVersion"), source="windows"))
-    return gpus
-
-
-def _gfx_name(version: int) -> str:
-    """KFD gfx_target_version (major*10000 + minor*100 + stepping) -> LLVM target name: 110003 -> gfx1103."""
-    return f"gfx{version // 10000}{(version // 100) % 100:x}{version % 100:x}"
-
-
-def _kfd_gfx_targets(root: Path) -> Dict[int, str]:
-    """DRM render minor -> gfx target, from the KFD topology of amdgpu compute nodes."""
-    targets = {}
-    for props in (root / "class" / "kfd" / "kfd" / "topology" / "nodes").glob("*/properties"):
-        try:
-            values = dict(line.split(None, 1) for line in props.read_text().splitlines() if " " in line.strip())
-            version, minor = int(values.get("gfx_target_version", "0")), int(values.get("drm_render_minor", "-1"))
-        except (OSError, ValueError):
-            continue
-        if version > 0 and minor >= 0:
-            targets[minor] = _gfx_name(version)
-    return targets
+    return [_gpu_info(g) for g in load_probe().probe_windows_adapters(run)]
 
 
 def probe_linux_sysfs(root: Path) -> List[GpuInfo]:
     """AMD GPUs from /sys/class/drm: dedicated VRAM, APU detection and the gfx target."""
-    targets = _kfd_gfx_targets(root)
+    return [_gpu_info(g) for g in load_probe().probe_linux_sysfs(str(root)) if g["VENDOR"] == "amd"]
+
+
+def hardware_from_profile(profile: HardwareProfile, memory: Optional[Tuple[int, int]] = None) -> HardwareInfo:
+    """HardwareInfo from a hardware profile. `memory` (total, available bytes) overrides the profile's RAM; a profile
+    without RAM_AVAILABLE_MB (a stored one, a device's) counts all of its RAM as available."""
+    if memory is not None:
+        ram_total, ram_available = memory
+    else:
+        ram_total = (profile.int_value("RAM_TOTAL_MB") or 0) * MIB
+        free = profile.int_value("RAM_AVAILABLE_MB")
+        ram_available = free * MIB if free is not None else ram_total
     gpus = []
-    for card in sorted((root / "class" / "drm").glob("card[0-9]*")):
-        if "-" in card.name:
-            continue  # connectors such as card0-DP-1
-        dev = card / "device"
-        try:
-            vendor = (dev / "vendor").read_text().strip().lower()
-        except OSError:
-            continue
-        if _VENDORS.get(vendor) != "amd":
-            continue
-        try:
-            device_id = (dev / "device").read_text().strip().lower()
-        except OSError:
-            device_id = ""
-        try:
-            vram = int((dev / "mem_info_vram_total").read_text().strip())
-        except (OSError, ValueError):
-            vram = 0
-        # An APU reports only its carve-out as VRAM (512 MiB to a few GiB, set in the firmware).
-        apu = device_id in _AMD_APU_DEVICE_IDS or vram < 2 * GIB
-        gfx = None
-        for render in (dev / "drm").glob("renderD*"):
-            try:
-                gfx = targets.get(int(render.name[len("renderD"):]), gfx)
-            except ValueError:
-                pass
-        kind = "integrated" if apu else "dedicated"
-        gpus.append(GpuInfo(vendor="amd", name=f"AMD Radeon {gfx or device_id or card.name} ({kind})",
-                            discrete=not apu, unified=apu, vram_mib=vram // MIB or None, gfx_target=gfx,
-                            source="sysfs"))
-    return gpus
-
-
-def _norm_name(name: str) -> str:
-    return re.sub(r"\s+", " ", re.sub(r"\((TM|R)\)|[™®]", "", name, flags=re.I)).strip().lower()
-
-
-def _hip_runtime(find_library: LibraryFinder, rocm_globs: Sequence[str]) -> bool:
-    if find_library("amdhip64"):
-        return True
-    return any(glob.glob(pattern) for pattern in rocm_globs)
+    for gpu in profile.gpus():
+        if gpu.get("VENDOR") == "nvidia" and gpu.get("SOURCE") == "sysfs":
+            continue  # seen only on the PCI bus: without a working NVIDIA driver no GPU build runs on it
+        info = _gpu_info(gpu)
+        if info.vendor == "apple" and info.unified and info.vram_mib is None:
+            # Unified memory: Metal may use roughly two thirds of the RAM for buffers.
+            info.vram_mib = int(ram_total * 2 / 3) // MIB
+        gpus.append(info)
+    os_name = profile.os or "unknown"
+    return HardwareInfo(os=os_name, arch=profile.arch or "other", ram_total=ram_total, ram_available=ram_available,
+                        gpus=gpus, vulkan=profile.is_on("VULKAN"),
+                        hip_runtime=profile.is_on("HIP_RUNTIME") if os_name == "linux" else None)
 
 
 def detect_hardware(run: Optional[Runner] = None, system: Optional[str] = None, machine: Optional[str] = None,
                     memory: Optional[Tuple[int, int]] = None, sysfs_root: Path = Path("/sys"),
                     find_library: Optional[LibraryFinder] = None,
                     rocm_globs: Sequence[str] = ("/opt/rocm*/lib*/libamdhip64.so*",)) -> HardwareInfo:
-    """Probes RAM and GPUs. Probe tools that are missing or fail simply contribute nothing."""
-    run = run or _default_runner
-    find_library = find_library or ctypes.util.find_library
-    os_name, arch = normalize_platform(system, machine)
-    if memory is None:
-        vm = psutil.virtual_memory()
-        memory = (vm.total, vm.available)
-    ram_total, ram_available = memory
+    """Probes RAM and GPUs now (free RAM and VRAM are always current). Probe tools that are missing or fail simply
+    contribute nothing."""
+    probe = load_probe()
+    given_sys = Path(sysfs_root) != Path("/sys")
+    values = probe.collect(root=os.sep, sys_dir=str(sysfs_root) if given_sys else None, run=run or _default_runner,
+                           find_library=find_library, system=system, machine=machine, memory=memory,
+                           rocm_globs=tuple(rocm_globs), sections=("memory", "gpu"))
+    try:
+        profile = parse_profile(probe.render_text(values))
+    except ProfileError as e:
+        # A required key the probe could not read on this system (an unusual kernel string, no memory size): every
+        # value it did write passed the same validation, so the runtime still decides on them.
+        logger.warning(f"Hardware probe result incomplete ({e}); deciding on the values it found")
+        profile = HardwareProfile(values, schema=load_schema())
+    return hardware_from_profile(profile, memory=memory)
 
-    if os_name == "macos":
-        gpus = []
-        if arch == "arm64":
-            # Unified memory: Metal may use roughly two thirds of the RAM for buffers.
-            gpus.append(GpuInfo(vendor="apple", name="Apple Silicon GPU", discrete=False, unified=True,
-                                vram_mib=int(ram_total * 2 / 3) // MIB, source="macos"))
-        return HardwareInfo(os=os_name, arch=arch, ram_total=ram_total, ram_available=ram_available, gpus=gpus)
 
-    nvidia = probe_nvidia(run, os_name)
-    vulkan, vk_gpus = probe_vulkaninfo(run)
-    others = [g for g in vk_gpus if g.vendor != "nvidia" or not nvidia]
-    hip = None
-    if os_name == "windows":
-        adapters = [g for g in probe_windows_adapters(run) if g.vendor != "nvidia" or not nvidia]
-        if not vk_gpus:
-            others = adapters
-            vulkan = bool(adapters)
-        else:
-            # vulkaninfo knows the device type, the registry the memory size.
-            by_name = {_norm_name(a.name): a for a in adapters}
-            for g in others:
-                match = by_name.get(_norm_name(g.name))
-                if match and match.vram_mib and not g.unified:
-                    g.vram_mib = match.vram_mib
-    elif os_name == "linux":
-        sysfs = probe_linux_sysfs(sysfs_root)
-        if not vk_gpus:
-            others = sysfs
-            # Without vulkaninfo: a Vulkan loader plus a GPU whose driver ships a Vulkan ICD (Mesa, NVIDIA).
-            vulkan = bool((others or nvidia) and find_library("vulkan"))
-        else:
-            # vulkaninfo has no memory sizes; amdgpu's sysfs does. Matched only when the count agrees.
-            amd_vk = [g for g in others if g.vendor == "amd"]
-            if amd_vk and len(amd_vk) == len(sysfs):
-                for g, fs in zip(amd_vk, sysfs):
-                    g.vram_mib, g.gfx_target = fs.vram_mib, fs.gfx_target
-        hip = _hip_runtime(find_library, rocm_globs)
-    return HardwareInfo(os=os_name, arch=arch, ram_total=ram_total, ram_available=ram_available,
-                        gpus=nvidia + others, vulkan=vulkan or bool(vk_gpus), hip_runtime=hip)
+def local_probe_values(**options) -> Dict[str, str]:
+    """A full probe of this machine (every section); the options are those of hardware_probe.collect()."""
+    options.setdefault("root", os.sep)
+    return load_probe().collect(**options)
+
+
+def local_profile(**options) -> HardwareProfile:
+    """A full probe of this machine as a validated HardwareProfile."""
+    return parse_profile(load_probe().render_text(local_probe_values(**options)))
+
 
 
 # --- decisions ---------------------------------------------------------------------------------------------
