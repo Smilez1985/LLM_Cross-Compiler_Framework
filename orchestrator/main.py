@@ -26,6 +26,7 @@ if str(root_dir) not in sys.path:
 # Core Imports
 from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.llm.sdk_env import guard_sdk_environment
+from orchestrator.utils.logging import setup_logging
 
 # GUI Imports
 # Note: These will fail if files are missing. We wrap them for better error messages.
@@ -58,6 +59,8 @@ def main():
     debug_http = "--debug-http" in sys.argv[1:]
     for warning in guard_sdk_environment(cfg_mgr.get("ai_allow_sdk_env_headers", False), debug_http):
         print(f"Warning: {warning}", file=sys.stderr)
+    # The SDK logger levels follow the flag too; the framework's later setup_logging() keeps the choice.
+    setup_logging(debug_http=debug_http)
 
     app = QApplication([arg for arg in sys.argv if arg != "--debug-http"])
     app.setApplicationName("LLM Cross-Compiler")
