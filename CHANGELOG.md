@@ -361,7 +361,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   runtime redaction, which knew only five formats before. New: Unsloth Studio keys (`sk-unsloth-`), Bedrock
   short-term keys (`bedrock-api-key-`), LocalAI keys (`lai-`), age secret keys (`AGE-SECRET-KEY-1...`),
   `Authorization: Bearer` lines and quoted values assigned to `api_key`, `secret` or `token` (a lower-case name
-  such as `"community_signing_key"` is not reported). Runtime redaction now also covers JWTs, private key blocks and passwords in URLs.
+  such as `"community_signing_key"` is not reported). Runtime redaction now also covers JWTs, private key blocks
+  and passwords in URLs.
 - API keys held in memory by Ditto's provider layer show as `<redacted>` in `str()` and `repr()` and cannot be
   pickled.
 - A key of a custom OpenAI-compatible server belongs to the address it was saved for (scheme, host and port):
