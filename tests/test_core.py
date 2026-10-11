@@ -117,17 +117,13 @@ class TestConfigManager:
 
 
 class TestRemovedSettingsAndCode:
-    """Settings and code nothing used any more; old config files that still name them keep loading."""
+    """Leftovers of the removed Transformers offline mode and of the Qdrant container; old config files keep loading."""
 
-    REMOVED = {"preferred_tiny_model": "tinyllama_1b", "default_calibration_dataset": "wiki.train.raw",
-               "default_enable_imatrix": True, "gui_theme": "dark", "gui_auto_refresh": True,
-               "gui_refresh_interval": 30, "api_enabled": False, "api_port": 8000, "api_host": "127.0.0.1",
-               "auto_cleanup": True, "docker_namespace": "llm-framework", "logs_dir": "logs"}
-
-    def test_removed_settings_have_no_schema_and_old_files_still_load(self, tmp_path):
-        (tmp_path / "config.yml").write_text(yaml.safe_dump({**self.REMOVED, "log_level": "DEBUG"}))
+    def test_removed_setting_has_no_schema_and_old_files_still_load(self, tmp_path):
+        (tmp_path / "config.yml").write_text(yaml.safe_dump({"preferred_tiny_model": "tinyllama_1b",
+                                                             "log_level": "DEBUG"}))
         cfg = ConfigManager(tmp_path)
-        assert not set(self.REMOVED) & set(cfg.config_schemas)
+        assert "preferred_tiny_model" not in cfg.config_schemas
         assert cfg.log_level == "DEBUG", "the rest of the file still applies"
         cfg.set("language", "de")
         assert cfg.save_user_config()
@@ -136,15 +132,28 @@ class TestRemovedSettingsAndCode:
 
     def test_removed_code_is_gone(self):
         from orchestrator.Core.docker_manager import DockerManager
-        from orchestrator.Core.framework import FrameworkManager
         from orchestrator.Core.model_manager import ModelManager
-        assert not (REPO_ROOT / "orchestrator" / "utils" / "updater.py").exists()
         assert not hasattr(DockerManager, "ensure_qdrant_service")
-        assert not hasattr(FrameworkManager(None), "updater")
         for name in ("get_available_tiny_models", "is_tiny_model_installed", "download_tiny_model"):
             assert not hasattr(ModelManager, name), name
         # image_qdrant stays: deployment packages ship Qdrant to the device (deployment_manager).
         assert "image_qdrant" in ConfigManager().config_schemas
+
+
+class TestFeaturesInDevelopment:
+    """Settings and modules of features that are still being built (see the roadmap) stay in the code base."""
+
+    SETTINGS = {"logs_dir", "auto_cleanup", "docker_namespace", "default_enable_imatrix",
+                "default_calibration_dataset", "gui_theme", "gui_auto_refresh", "gui_refresh_interval",
+                "api_enabled", "api_port", "api_host"}
+
+    def test_their_settings_keep_their_schema(self):
+        assert self.SETTINGS <= set(ConfigManager().config_schemas)
+
+    def test_their_modules_stay(self):
+        for rel in ("orchestrator/utils/updater.py", "orchestrator/gui/benchmark_window.py",
+                    "orchestrator/Core/consistency_manager.py"):
+            assert (REPO_ROOT / rel).exists(), rel
 
 
 class TestFrameworkBoot:

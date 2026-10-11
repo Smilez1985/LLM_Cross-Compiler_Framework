@@ -211,10 +211,3 @@ class TestVaultWording:
                     continue
                 assert not ("eyring" in stripped and any(w in stripped.lower() for w in ("stored", "store ", "save"))), \
                     f"{path.name}: {stripped}"
-
-
-def test_the_benchmark_window_is_gone():
-    assert not (REPO_ROOT / "orchestrator" / "gui" / "benchmark_window.py").exists()
-    from orchestrator.Core.docker_manager import DockerManager
-    # What it relied on never existed: the window read docker_manager.client.
-    assert not hasattr(DockerManager(), "client")

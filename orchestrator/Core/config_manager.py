@@ -11,10 +11,13 @@ Updates v2.0.0:
 Updates v2.3.0:
 - Added Centralized Docker Image Definitions.
 Updates v2.4.0:
+- Added defaults for IMatrix/Smart Calibration.
 - Added SSOT for Source Repositories.
 
-Settings that are no longer used were removed from the schema; a config.yml that still contains one loads as
-before (keys without a schema are kept and ignored).
+Some settings belong to features that are still being built and no code reads them yet (see the roadmap):
+logs_dir, auto_cleanup, docker_namespace, default_enable_imatrix, default_calibration_dataset, gui_theme,
+gui_auto_refresh, gui_refresh_interval, api_enabled, api_port and api_host. preferred_tiny_model was removed with
+the Transformers offline mode; a config.yml that still contains it loads as before (the key is kept and ignored).
 """
 
 import os
@@ -306,12 +309,15 @@ class ConfigManager:
             ConfigSchema("models_dir", str, True, data_dir("models"), "Directory for model storage"),
             ConfigSchema("output_dir", str, True, data_dir("output"), "Directory for build outputs"),
             ConfigSchema("cache_dir", str, True, data_dir("cache"), "Directory for cache files"),
+            ConfigSchema("logs_dir", str, True, "logs", "Directory for log files"),
             ConfigSchema("log_level", str, False, "INFO", "Logging level", ["regex:^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"]),
             
             # Build Settings
             ConfigSchema("max_concurrent_builds", int, False, 2, "Maximum concurrent builds", ["min:1", "max:10"]),
             ConfigSchema("build_timeout", int, False, 3600, "Build timeout in seconds", ["min:60"]),
+            ConfigSchema("auto_cleanup", bool, False, True, "Enable automatic cleanup"),
             ConfigSchema("docker_registry", str, False, "ghcr.io", "Docker registry URL"),
+            ConfigSchema("docker_namespace", str, False, "llm-framework", "Docker namespace"),
             
             # --- SSOT: Centralized Image Definitions (v2.3) ---
             ConfigSchema("image_trivy", str, False, "aquasec/trivy:0.75.0", "Security Scanner Image (pinned: 'latest' was compromised in 2026-03)"),
@@ -332,6 +338,18 @@ class ConfigManager:
             
             # --- SSOT: Repositories (v2.3) ---
             ConfigSchema("source_repositories", dict, False, {}, "Map of Git Repositories (llama.cpp, etc.)"),
+
+            # --- IMatrix & Smart Calibration Defaults (v2.4) ---
+            ConfigSchema("default_enable_imatrix", bool, False, False, "Enable IMatrix generation by default"),
+            ConfigSchema("default_calibration_dataset", str, False, "wiki.train.raw", "Default dataset filename"),
+
+            # GUI & API
+            ConfigSchema("gui_theme", str, False, "dark", "GUI theme"),
+            ConfigSchema("gui_auto_refresh", bool, False, True, "GUI auto-refresh"),
+            ConfigSchema("gui_refresh_interval", int, False, 30, "GUI refresh interval"),
+            ConfigSchema("api_enabled", bool, False, False, "Enable API server"),
+            ConfigSchema("api_port", int, False, 8000, "API server port"),
+            ConfigSchema("api_host", str, False, "127.0.0.1", "API server host"),
 
             # I18N & Security
             ConfigSchema("language", str, False, "en", "Interface Language (en/de)"),
@@ -606,7 +624,7 @@ class ConfigManager:
 
         with self._lock:
             persist_keys = [
-                "language", "ai_security_level", "secret_storage", "secret_helper", "docker_registry",
+                "language", "ai_security_level", "secret_storage", "secret_helper", "gui_theme", "docker_registry",
                 "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
                 "rag_reranker", "rag_rerank_default", "rag_rerank_min_score", "rag_model_idle_minutes",
                 "crawler_max_depth", "crawler_max_pages",
@@ -619,8 +637,8 @@ class ConfigManager:
                 "image_trivy", "image_qdrant", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",
                 "calibration_language", "build_sandbox", "build_memory_limit", "build_pids_limit",
-                # v2.4 (SSOT)
-                "source_repositories",
+                # v2.4 (SSOT & IMatrix)
+                "source_repositories", "default_enable_imatrix", "default_calibration_dataset",
             ]
             
             # Only values changed at runtime via set(); defaults and env overrides must not
