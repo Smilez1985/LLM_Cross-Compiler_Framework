@@ -13,6 +13,7 @@ FEATURES:
 import os
 import json
 import base64
+import hashlib
 import logging
 import platform
 import getpass
@@ -180,7 +181,9 @@ class SecretsManager:
         try:
             # Stelle sicher, dass das Verzeichnis existiert
             self.audit_log_file.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(self.audit_log_file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            # O_BINARY: on Windows a descriptor is text mode otherwise, and lines would end in \r\r\n
+            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
+            fd = os.open(self.audit_log_file, flags, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 if platform.system() != "Windows":
                     os.fchmod(f.fileno(), 0o600)
@@ -314,12 +317,15 @@ class SecretsManager:
             raise
 
     @staticmethod
-    def _read_store(path: Path) -> Dict[str, Any]:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    def _parse_store(raw: bytes) -> Dict[str, Any]:
+        data = json.loads(raw.decode("utf-8"))
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
         return data
+
+    @classmethod
+    def _read_store(cls, path: Path) -> Dict[str, Any]:
+        return cls._parse_store(Path(path).read_bytes())
 
     def _fail(self, path: Path, error: Exception) -> None:
         self._load_failed = True
@@ -347,15 +353,26 @@ class SecretsManager:
         self._failed_file = None
         self._take_over_legacy()
 
-    def _migrated_stores(self) -> list:
+    def _migrated_stores(self) -> Optional[Dict[str, list]]:
+        """The old stores already taken over, by path and by content. None when the record cannot be read:
+        a takeover already ran, and running it again could bring back secrets deleted since."""
+        path = self._migrated_file
+        if not os.path.lexists(path):
+            return {"stores": [], "sha256": []}
         try:
-            data = json.loads(self._migrated_file.read_text(encoding="utf-8"))
-            return [str(p) for p in data.get("stores", [])]
-        except FileNotFoundError:
-            return []
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("not a JSON object")
+            record = {}
+            for name in ("stores", "sha256"):
+                value = data.get(name, [])
+                if not isinstance(value, list):
+                    raise ValueError(f"'{name}' is not a list")
+                record[name] = [str(v) for v in value]
+            return record
         except Exception as e:
-            self.logger.warning(f"Cannot read {self._migrated_file}: {e}")
-            return []
+            self.logger.warning(f"Cannot read {path} ({e}); old secrets stores are not taken over.")
+            return None
 
     def _take_over_legacy(self) -> None:
         """Merges the store of the old location into the per-user store, exactly once. Secrets that are
@@ -363,25 +380,32 @@ class SecretsManager:
         legacy = self._legacy_file
         if legacy is None:
             return
-        legacy_id = os.path.realpath(legacy)
         done = self._migrated_stores()
-        if legacy_id in done:
+        if done is None:
+            return
+        legacy_id = os.path.realpath(legacy)
+        if legacy_id in done["stores"]:
             return
         try:
-            data = self._read_store(legacy)
+            raw = legacy.read_bytes()
+            data = self._parse_store(raw)
         except FileNotFoundError:
             return
         except Exception as e:
             # Its secrets would be lost silently: refuse changes until it is repaired or moved aside.
             self._fail(legacy, e)
             return
-        added = {k: v for k, v in data.items() if k not in self._cache}
+        digest = hashlib.sha256(raw).hexdigest()
+        # The same file under another path (installation folder moved, other mount point) was taken over already.
+        seen = digest in done["sha256"]
+        added = {} if seen else {k: v for k, v in data.items() if k not in self._cache}
         if added:
             self._cache.update(added)
             if not self._save_store():
                 return  # tried again on the next load
+        record = {"stores": done["stores"] + [legacy_id], "sha256": done["sha256"] + ([] if seen else [digest])}
         try:
-            self._write_atomic(self._migrated_file, {"stores": done + [legacy_id]})
+            self._write_atomic(self._migrated_file, record)
         except Exception as e:
             self.logger.warning(f"Could not record the takeover of {legacy} in {self._migrated_file}: {e}")
         self.logger.info(f"Secrets of the old store {legacy} taken over into {self.secrets_file} "
