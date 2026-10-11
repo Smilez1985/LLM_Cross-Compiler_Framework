@@ -920,7 +920,8 @@ class ToolPermissionsDialog(QDialog):
         intro = QLabel(
             "Ditto and AI clients connected over MCP (e.g. Claude Desktop) use the framework through tools.\n"
             "Decide once what they may do on their own, what needs your confirmation and what is never allowed. "
-            "Tools that reach other devices or delete data always ask unless you allow them one by one.")
+            "Tools that reach other devices or delete data always ask; you can deny them, never allow them unasked. "
+            "Tools marked new use their own default until you save here.")
         intro.setWordWrap(True)
         layout.addWidget(intro)
 
@@ -940,8 +941,10 @@ class ToolPermissionsDialog(QDialog):
 
         layout.addWidget(QLabel("Per tool (optional, overrides the category):"))
         tools = registry.list()
-        self.table = QTableWidget(len(tools), 3)
-        self.table.setHorizontalHeaderLabels(["Tool", "Category", "Permission"])
+        facts = {row["tool"]: row for row in registry.permissions("")}
+        self.table = QTableWidget(len(tools), 5)
+        self.table.setHorizontalHeaderLabels(["Tool", "Category", "Default / max / standing approval", "New",
+                                              "Permission"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.override_combos = {}
         for row, spec in enumerate(tools):
@@ -949,13 +952,17 @@ class ToolPermissionsDialog(QDialog):
             name_item.setToolTip(spec.description)
             self.table.setItem(row, 0, name_item)
             self.table.setItem(row, 1, QTableWidgetItem(spec.tier.value))
+            fact = facts.get(spec.name, {})
+            grant = "standing approval possible" if fact.get("standing_approval") else "no standing approval"
+            self.table.setItem(row, 2, QTableWidgetItem(f"{fact.get('default', '')} / {fact.get('max', '')} / {grant}"))
+            self.table.setItem(row, 3, QTableWidgetItem("new" if fact.get("new") else ""))
             combo = QComboBox()
             combo.addItem("Category default", "")
             for choice in (Decision.ALLOW, Decision.ASK, Decision.DENY):
                 combo.addItem(choice.value.capitalize(), choice.value)
             current = policy.overrides.get(spec.name)
             combo.setCurrentIndex(combo.findData(current.value) if current else 0)
-            self.table.setCellWidget(row, 2, combo)
+            self.table.setCellWidget(row, 4, combo)
             self.override_combos[spec.name] = combo
         layout.addWidget(self.table)
 
@@ -965,11 +972,14 @@ class ToolPermissionsDialog(QDialog):
         layout.addWidget(buttons)
 
     def build_policy(self):
-        from orchestrator.tools.policy import ToolPolicy
+        """The shared permissions as set here; every listed tool counts as reviewed, and callers with permissions
+        of their own (llm-cli tools permissions --caller) keep them."""
         tiers = {tier: self._Decision(combo.currentData()) for tier, combo in self.tier_combos.items()}
         overrides = {name: self._Decision(combo.currentData())
                      for name, combo in self.override_combos.items() if combo.currentData()}
-        return ToolPolicy(configured=True, tiers=tiers, overrides=overrides)
+        return self.registry.policy().model_copy(update={
+            "configured": True, "tiers": tiers, "overrides": overrides,
+            "reviewed": sorted(self.override_combos)})
 
     def save(self):
         try:

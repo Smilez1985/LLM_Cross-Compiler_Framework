@@ -373,8 +373,9 @@ def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional
 def _ditto_confirm(spec, inp) -> bool:
     """Asks before a tool call that needs confirmation; without a terminal the answer is no."""
     from orchestrator.tools.confirmation import CallTooLong, describe_call
+    from orchestrator.tools.registry import current_question
     try:
-        text = describe_call(spec, inp.model_dump(mode="json"), actor="Ditto")
+        text = current_question() or describe_call(spec, inp.model_dump(mode="json"), actor="Ditto")
     except CallTooLong as e:
         click.echo(str(e), err=True)
         return False
@@ -383,6 +384,9 @@ def _ditto_confirm(spec, inp) -> bool:
         click.echo("No terminal to confirm in: denied. Allow the tool with 'llm-cli tools permissions'.", err=True)
         return False
     return click.confirm("Allow this?", default=False, err=True)
+
+
+_ditto_confirm.confirm_channel = "framework-cli"  # recorded in the audit log
 
 
 @module.command('generate-ai')
@@ -809,51 +813,103 @@ def _tool_registry(ctx: FrameworkContext):
     return registry
 
 
+CALLER_CHOICE = click.Choice(["ditto", "mcp"])
+CALLER_LABELS = {None: "every AI caller without permissions of its own", "ditto": "Ditto",
+                 "mcp": "local MCP clients (stdio)"}
+
+
 @tools.command('list')
+@click.option('--caller', type=CALLER_CHOICE, default=None,
+              help="Whose permissions: ditto or mcp (default: the shared ones)")
 @pass_context
-def tools_list(ctx: FrameworkContext):
+def tools_list(ctx: FrameworkContext, caller: Optional[str]):
     """List the tools and what your permissions allow"""
     registry = _tool_registry(ctx)
+    rows = registry.permissions(caller or "")
     policy = registry.policy()
     if registry.policy_store.problem:
         Console(stderr=True).print(f"[red]{escape(registry.policy_store.problem)}[/red]")
-    table = Table(title="Framework tools" + ("" if policy.configured else " (permissions not set up yet)"))
-    table.add_column("Tool", style="cyan")
+    table = Table(title=f"Framework tools for {CALLER_LABELS[caller]}"
+                  + ("" if policy.configured else " (permissions not set up yet)"))
+    table.add_column("Tool", style="cyan", no_wrap=True)
     table.add_column("Tier")
     table.add_column("Permission")
     table.add_column("Description")
-    for spec in registry.list():
-        table.add_row(spec.name, spec.tier.value, policy.decide(spec.name, spec.tier).value, spec.description)
+    descriptions = {spec.name: spec.description for spec in registry.list()}
+    for row in rows:
+        facts = [f"default: {row['default']}", f"at most: {row['max']}"]
+        if row["new"]:
+            facts.append("new")
+        facts.append("standing approval possible" if row["standing_approval"] else "no standing approval")
+        table.add_row(row["tool"], row["tier"], row["decision"],
+                      f"{descriptions[row['tool']]}\n({'; '.join(facts)})")
     console.print(table)
+    if any(row["new"] for row in rows):
+        console.print("New tools use their own default, never a looser tier setting, until you review them with "
+                      "'llm-cli tools permissions'.")
+    own = sorted(policy.callers)
+    if own and caller is None:
+        console.print(f"Callers with their own permissions: {', '.join(own)} (see --caller).")
 
 
-def _ask_tool_policy(registry, current):
-    """Interactive questions for the tool permissions (one per tier)."""
-    from orchestrator.tools.policy import Decision, TIER_LABELS, ToolPolicy, ToolTier
+def _ask_tool_policy(registry, current, caller: Optional[str] = None):
+    """Interactive questions for the tool permissions (one per tier), for one caller or the shared ones. Every
+    registered tool counts as reviewed afterwards: the questions apply to the tools listed above them."""
+    from orchestrator.tools.policy import TIER_LABELS, CallerPolicy, Decision, ToolTier
+    section = current.callers.get(caller) if caller else None
+    base_tiers = section.tiers if section is not None else current.tiers
+    # A caller's new section starts from the shared settings, so creating it never loosens a per-tool setting.
+    overrides = dict((section if section is not None else current).overrides)
+    rows = registry.permissions(caller or "")
+    for row in rows:  # what each tool brings, shown before the person decides
+        facts = [f"default {row['default']}", f"at most {row['max']}"] + (["new"] if row["new"] else []) + [
+            "standing approval possible" if row["standing_approval"] else "no standing approval"]
+        console.print(escape(f"  {row['tool']} ({row['tier']}): {', '.join(facts)}"))
+    new = [row["tool"] for row in rows if row["new"]]
+    if new:
+        console.print(f"New tools since the last review (they use their own default until you save): "
+                      f"{escape(', '.join(new))}")
     tiers = {}
     for tier, label in TIER_LABELS.items():
         choices = ["ask", "deny"] if tier == ToolTier.EXTERNAL else ["allow", "ask", "deny"]
-        default = current.tiers.get(tier, Decision.ASK).value
+        default = base_tiers.get(tier, Decision.ASK).value
         default = default if default in choices else "ask"
         answer = click.prompt(f"{label}", type=click.Choice(choices), default=default)
         tiers[tier] = Decision(answer)
-    return ToolPolicy(configured=True, tiers=tiers, overrides=dict(current.overrides))
+    reviewed = sorted(spec.name for spec in registry.list())
+    if caller:
+        callers = dict(current.callers)
+        callers[caller] = CallerPolicy(tiers=tiers, overrides=overrides, reviewed=reviewed)
+        return current.model_copy(update={"configured": True, "callers": callers})
+    return current.model_copy(update={"configured": True, "tiers": tiers, "overrides": overrides,
+                                      "reviewed": reviewed})
 
 
 @tools.command('permissions')
-@click.option('--reset', is_flag=True, help='Back to the recommended defaults (asks again at the next setup)')
+@click.option('--caller', type=CALLER_CHOICE, default=None,
+              help="Set the permissions of one caller (ditto or mcp) instead of the shared ones")
+@click.option('--reset', is_flag=True, help='Back to the recommended defaults (asks again at the next setup); '
+                                            'with --caller: that caller uses the shared permissions again')
 @pass_context
-def tools_permissions(ctx: FrameworkContext, reset: bool):
+def tools_permissions(ctx: FrameworkContext, caller: Optional[str], reset: bool):
     """Set which tool calls are allowed, need confirmation, or are denied"""
     from orchestrator.tools.policy import ToolPolicy
     registry = _tool_registry(ctx)
     if reset:
+        if caller:
+            current = registry.policy()
+            callers = {name: section for name, section in current.callers.items() if name != caller}
+            registry.policy_store.save(current.model_copy(update={"callers": callers}))
+            console.print(f"[yellow]{CALLER_LABELS[caller]} use the shared tool permissions again.[/yellow]")
+            return
         registry.policy_store.save(ToolPolicy())
         console.print("[yellow]Tool permissions reset to the recommended defaults.[/yellow]")
         return
-    policy = registry.policy_store.save(_ask_tool_policy(registry, registry.policy()))
+    console.print(f"Tool permissions for {CALLER_LABELS[caller]}.")
+    policy = registry.policy_store.save(_ask_tool_policy(registry, registry.policy(), caller))
     console.print(f"[green]Saved to {registry.policy_store.path}[/green]")
-    for tier, decision in policy.tiers.items():
+    tiers = policy.callers[caller].tiers if caller else policy.tiers
+    for tier, decision in tiers.items():
         console.print(f"  {tier.value}: {decision.value}")
 
 
@@ -1130,7 +1186,7 @@ def ditto_setup(ctx: FrameworkContext):
     console.print(Panel(
         "Ditto and connected AI clients (MCP) use the framework through tools.\n"
         "Decide once what they may do on their own, what needs your confirmation, and what is never allowed.\n"
-        "Tools that reach other devices or delete data always ask unless you allow them one by one.",
+        "Tools that reach other devices or delete data always ask (you can deny them, never allow them unasked).",
         title="Ditto setup - tool permissions"))
     policy = registry.policy_store.save(_ask_tool_policy(registry, registry.policy()))
     console.print(f"[green]Permissions saved ({registry.policy_store.path}).[/green]")

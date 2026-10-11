@@ -202,6 +202,33 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Cancel Build** in the Builder tab: cancels the running build through the build service after a confirmation
   (enabled only while the build the tab started runs); the log says when it has stopped, also after a cancel
   while the build was still being handed to the build engine.
+- **More context in audit entries**: the confirmation channel (`elicitation`, `framework-gui`, `framework-cli`),
+  the SHA-256 of the question text, the person's answer (accepted, declined, cancelled, unavailable, unanswered,
+  timeout), the client's self-reported name and version (a label only), a hash of the connection, the duration, the
+  SHA-256 and size of the result (never the result itself) and a link from the end entry to the call's write-ahead
+  entry. The fields are bound to the hash chain without changing how 3.0.0 hashes an entry: logs written before them
+  stay verifiable, and a 3.0.0 process that is still running (an MCP server an AI client started before the update)
+  keeps verifying and appending to the same log instead of reporting the new entries as modified.
+- **Tool permissions per caller**: Ditto and local MCP clients over stdio can have permissions of their own
+  (`llm-cli tools permissions --caller ditto|mcp`, `--reset --caller` returns to the shared ones); a caller's first
+  permissions start from the shared ones, including settings for single tools. `llm-cli tools list --caller`, the
+  CLI setup and the GUI dialog show each tool's own default, the highest decision any setting can give it, whether
+  it is new (not reviewed yet) and whether a standing approval may be offered.
+- **`get_status` tool** (Ditto and MCP clients): the caller's tool permissions, with every tool's decision and why,
+  also the tools that are not listed because they are denied, and the actions no tool does with where the person
+  does them, so an AI can name the real reason when it cannot do something.
+- **Fool-proof tool calls** (Ditto and MCP clients, every model size): spelling variants of tool names
+  (`StartBuild` runs `start_build`) and declared argument aliases (`quant` for `quantization`) run with a note,
+  while any other unknown argument name, also one in other letter case, is refused with a suggestion;
+  values are coerced the same way on both paths and matched against the target's formats, boards and quantization
+  types exactly, by canonical form if unique or by the target's aliases, never by guessing a near miss; every
+  refusal carries a reason code and the next step; the same failing call is flagged the second time and refused
+  without running the third time; after three input errors an error shows a valid example call. What was repaired
+  is marked in the question, listed in the result's `notes` and recorded in the audit log. Tool arguments a local
+  model sends with a code fence or in Python notation are read once more.
+- **`llm-cli ditto eval` records every tool call attempt**, not only those that reached a tool: the report's
+  `tool_use` block gives tool calls per task, the share of malformed calls and of unknown tool names, repairs and
+  repeat refusals.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -266,6 +293,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli ditto auth storage --use ...`.
 - Error messages and hints name `llm-cli ditto login <provider>` instead of `llm-cli secrets set <key name>`;
   `llm-cli module generate-ai` uses the stored sign-in and never asks for a key itself.
+- **MCP results**: the text block of a tool result starts with one sentence built only from framework facts (ids,
+  states, counts), followed by the JSON wrapped as untrusted data; output schemas mark every field with external
+  text (`"untrusted": true`); results carry `notes` written by the framework (for example "the knowledge base is
+  reachable; no excerpt matched" or that only the builds of this process are listed); a pending self-healing
+  proposal's `suggested_step` is now `manual_step_text`, text for the person to read. The server instructions say
+  how to treat marked fields and that a task the client cannot do is reported with its specific reason.
+- **MCP clients see only the tools they may use**: tools your permissions deny are left out of the tool list (the
+  same tools Ditto gets for the same permissions); a call to one is still refused and audited. `destructiveHint`
+  follows each tool's own flag instead of its tier (`resolve_healing` is destructive, because one of its fixes
+  deletes the Docker build cache), and tools that reach other devices ask the client to show its own prompt on
+  every call (`anthropic/requiresUserInteraction`).
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -412,6 +450,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   reads the pushed commit from `PRE_COMMIT_TO_REF`) like `.githooks/pre-push`, instead of the whole history. The
   pre-commit check (`--staged`) also scans a file that replaced a symlink and files whose names contain a line
   break or start like `0:`, which it skipped before.
+- **Unanswered, timed-out and cancelled confirmations are audited** (MCP server): a question asked during the call
+  (classic protocol) waits at most 5 minutes and is then recorded as `confirmation_timeout`, a question of the
+  2026-07-28 protocol that is never answered is recorded as `unanswered` after 15 minutes, and a call the client
+  cancels, also while its question is open, is recorded as `cancelled`. Before, these ended without an audit entry,
+  and a question could stay open without limit.
+- **A client's cancel reaches a running call at once** (MCP server): the call is recorded as cancelled and the
+  running handler is told immediately; what already runs finishes and its end entry follows. Before, the
+  cancellation arrived only after the handler had finished, and nothing was recorded.
+- **Unknown arguments are no longer dropped over MCP**: `quant` instead of `quantization` built the target's
+  default quantization and reported success, while Ditto's path refused the same call. Both paths now run the same
+  normalizer on the raw arguments, MCP clients get the tools' closed input schemas (`additionalProperties: false`)
+  instead of open ones, JSON text in a list field is accepted on both paths, and unknown tool names are audited
+  (before: on neither path).
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -511,6 +562,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   key with a space, a line break or an invisible character inside is refused before anything is sent or stored.
 - The Builder log shows every message as plain text, so names from community recipes, Ditto's answers or build
   output cannot render as HTML (links, images, formatting).
+- **Calls that change something run only when they are recorded** (Ditto and MCP clients): before such a call
+  runs, a `started` entry is written to the audit log; if it cannot be written, the call is refused, and a question
+  about it is not asked. Read-only calls stay available. Before, a failed audit write was only logged and the call
+  ran anyway, and the only entry was written after the handler, so a crash in the middle of a change left no trace.
+- **Every tool result is filtered centrally** (Ditto and MCP clients): secrets are redacted in every string of a
+  result, external text (build logs and stage names, healing proposals, build manifests, knowledge excerpts, doctor
+  messages, target labels and notes from `target.yml`) is cleaned of invisible and bidirectional control characters
+  and capped, other strings are capped at 16 KiB, and a result over 256 KiB is refused with a hint how to ask for
+  less. The error of a failed call is cleaned the same way before secrets are redacted, and an MCP client gets the
+  part that quotes external text wrapped as untrusted data, as Ditto's model does. Before, only errors, warnings
+  and log lines were redacted, only knowledge excerpts were cleaned, log lines and results had no size limit, and
+  an MCP client got error text from a tool unmarked.
+- **New tools never inherit a loosened tier setting, and a tool's cap holds**: the permission file records the
+  tools you have reviewed, and a tool added later uses its own default (or the recommended tier setting) until you
+  review it, so allowing a tier once no longer allows every tool added to it later. A tool's own default (for
+  example `deny` for an optional tool) holds even when its tier is allowed, but never opens a tier you denied, and a
+  tool that reaches other devices or deletes data always asks at most. Before, a per-tool setting could allow such a
+  tool without a question. A permission file from 3.0.0 counts its eleven tools as reviewed; 3.0.0 itself reads a
+  file saved by this version as damaged and denies every tool.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
