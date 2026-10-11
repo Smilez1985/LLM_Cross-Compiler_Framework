@@ -1,0 +1,476 @@
+Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-11
+
+[English](Module_Developer_Guide.md) · **Deutsch**
+
+# Leitfaden für Modulentwickler
+
+Dieser Leitfaden erklärt, wie Sie dem LLM Cross-Compiler Framework Unterstützung für neue Hardware hinzufügen. Ein
+**Target** ist eine Hardware-Familie mit eigenem Werkzeug-Image (etwa Rockchip); ein **Board** ist ein Chip oder
+Gerät darin (etwa RK3566). Jedes Target ist ein Ordner unterhalb von `targets/`. Das Rockchip-Target ist das
+Vorbild: Wenn dieser Leitfaden „siehe Rockchip“ sagt, schauen Sie in `targets/Rockchip/`.
+
+Sie brauchen die [Entwicklungsumgebung](../CONTRIBUTING_DE.md#1-entwicklungsumgebung), Docker und ein Gerät der
+neuen Hardware (oder ihre technischen Daten).
+
+## Inhalt
+
+1. [Wie das Framework ein Target nutzt](#1-wie-das-framework-ein-target-nutzt)
+2. [Ordneraufbau](#2-ordneraufbau)
+3. [Ein Target anlegen](#3-ein-target-anlegen)
+4. [target.yml und der Capabilities-Block](#4-targetyml-und-der-capabilities-block)
+5. [Das Dockerfile](#5-das-dockerfile)
+6. [Das Build-Skript](#6-das-build-skript)
+7. [Regeln der Sandbox](#7-regeln-der-sandbox)
+8. [Ein Target testen](#8-ein-target-testen)
+9. [Ein Target teilen](#9-ein-target-teilen)
+10. [Altlasten](#10-altlasten)
+
+## 1. Wie das Framework ein Target nutzt
+
+1. **Laden.** Beim Start liest der `TargetManager` die `target.yml` in jedem Ordner unterhalb von `targets/`.
+   Ordner, deren Name mit `_` oder `.` beginnt (etwa `_template`), werden übersprungen, ebenso eine `target.yml`
+   ohne Block `metadata:`. Die Target-ID ist `metadata.id`, wenn gesetzt, sonst der Ordnername; sie geben Sie bei
+   `llm-cli build start -t <ID>` an.
+2. **Capabilities.** Der Block `capabilities:` wird gegen das Schema in `orchestrator/schemas/targets.py` geprüft.
+   Die GUI bietet genau die dort aufgeführten Formate, Boards und Quantisierungen an, die CLI lehnt alles andere ab,
+   und die Werkzeuge des MCP-Servers und Dittos starten Builds nur für Targets mit gültigem Block. Ein ungültiger
+   Block wird als Fehler protokolliert, und das Target wird dann behandelt, als hätte es keinen.
+3. **Image-Build.** Für jeden Build stellt die `BuildEngine` einen Build-Kontext zusammen (`modules/` und
+   `scripts/` des Targets, das gemeinsame `entrypoint.sh` als `docker/entrypoint.sh` und das Dockerfile) und baut
+   das Image `llm-framework/<Target>:<Build-ID>`. Dieser Schritt hat Netzwerk.
+4. **Stufen.** Zuerst wird das Modell auf dem Host bereitgestellt. Dann läuft `modules/build.sh` in abgeschotteten
+   Containern ohne Netzwerk: einmal mit `JOB_TYPE=imatrix`, wenn für GGUF eine Importance-Matrix gewünscht ist,
+   dann mit `JOB_TYPE=build`.
+5. **Ergebnisse.** Dateien, die `build.sh` in den Ausgabeordner schreibt, werden nach `output/` kopiert. Die Engine
+   ergänzt `build_info.json` um Größe und SHA256-Hash jeder Modelldatei und schreibt `Model_Card.md` und ein ZIP.
+   Das Deployment findet Builds über dieses Manifest.
+
+## 2. Ordneraufbau
+
+```text
+targets/Rockchip/
+├── target.yml           Metadaten und Capabilities
+├── dockerfile           Build-Umgebung („Dockerfile“ geht ebenso)
+├── modules/
+│   ├── build.sh         Verteiler: der einzige Einstieg jeder Stufe
+│   ├── rkllm_module.sh  RKLLM-Export (RK3588, RK3576)
+│   ├── rknn_module.sh   RKNN-Umwandlung
+│   └── source_module.sh, config_module.sh, convert_module.sh, target_module.sh   (Altlasten, nicht aufgerufen)
+└── scripts/
+    ├── export_rkllm.py
+    └── rknn_converter.py
+```
+
+| Datei | Nötig | Wofür |
+|---|---|---|
+| `target.yml` mit Block `metadata:` | ja | Ohne ihn ist der Ordner kein Target. |
+| Block `capabilities:` in `target.yml` | dringend empfohlen | Ohne ihn können GUI und CLI keine Einstellungen prüfen, die MCP-Werkzeuge und Ditto keine Builds für das Target starten, und `llm-cli doctor` warnt. |
+| `Dockerfile` oder `dockerfile` | ja | Das Image, in dem alle Stufen laufen. |
+| `Dockerfile.gpu` | optional | Für Builds mit durchgereichter GPU (`llm-cli build start --gpu` oder „Use Host GPU for Build Process“ in der GUI, unter Linux standardmäßig angehakt); ohne diese Datei wird das normale Dockerfile genutzt. |
+| `modules/build.sh` | ja | Läuft in jeder Stufe als `/app/modules/build.sh`. |
+| `scripts/` | optional | Hilfsskripte; werden neben `modules/` ins Image kopiert. |
+
+## 3. Ein Target anlegen
+
+### 3.1 Das Board untersuchen
+
+Kopieren Sie `scripts/hardware_probe.sh` auf das Gerät und führen Sie es dort aus (auf Windows-Geräten:
+`scripts/hardware_probe.ps1`):
+
+```bash
+bash hardware_probe.sh
+```
+
+Es schreibt `target_hardware_config.txt` in den aktuellen Ordner: CPU-Modell, Kerne und Flags, Speicher, Hersteller-
+IDs von GPU und NPU und mehr. Die Datei enthält auch den Hostnamen des Geräts; entfernen Sie ihn, bevor Sie die Datei
+teilen. Fehlt ein Hilfswerkzeug, bietet das Skript an, es zu installieren; mit `NON_INTERACTIVE=true` wird das
+übersprungen.
+
+Im Build-Reiter der GUI führt **Scan / Import... > Remote Scan via SSH...** die Probe per SSH auf einem Gerät aus (mit
+derselben Prüfung beim ersten Kontakt wie das Deployment) und holt das Ergebnis ab. `llm-cli scan` führt die Probe auf
+dem Rechner aus, an dem Sie arbeiten; das hilft nur, wenn dieser Rechner die Ziel-Hardware ist.
+
+### 3.2 Das Gerüst erzeugen
+
+Es gibt drei Wege; alle enden im selben Modulgenerator (`orchestrator/Core/module_generator.py`).
+
+- **GUI-Assistent:** **Tools > Create Hardware Module...** Lesen Sie die Probe-Datei mit dem Standard-Import (feste
+  Auswertung) ein oder lassen Sie Ditto sie analysieren, fügen Sie auf Wunsch mit „Deep Ingest“
+  Dokumentationsseiten zur Wissensdatenbank hinzu, prüfen Sie dann die Seiten für Hardware, Docker und Flags und
+  bestätigen Sie die Zusammenfassung. Für `aarch64`, `armv7l` und `riscv64` ergänzt der Assistent die passenden
+  Cross-Compiler-Pakete.
+- **CLI, interaktiv:** `llm-cli module create` fragt nach Name, Architektur (`aarch64`, `x86_64`, `armv7l`,
+  `riscv64`), SDK, Basis-Image, Beschreibung, Paketen und CPU-Flags. Führen Sie den Befehl im Installationsordner
+  aus: Anders als die übrigen Befehle löst er ein relatives `targets_dir` gegen den aktuellen Ordner auf.
+- **CLI mit Ditto:** `llm-cli module generate-ai target_hardware_config.txt` (auf Wunsch mit `--provider` und
+  `--model` für diesen Lauf). Ditto liefert einen strukturierten Vorschlag (Architektur, SDK, Basis-Image, Pakete,
+  CPU- und CMake-Flags, Einrichtungsbefehle, Quantisierungsblock). Ist die Wissensdatenbank eingeschaltet, zieht es
+  vorher passende Dokumentationsauszüge hinzu. Der Vorschlag wird vollständig angezeigt; geschrieben wird erst nach
+  Ihrer Bestätigung. Leerzeichen im Modulnamen werden zu Unterstrichen.
+
+### 3.3 Was der Generator prüft
+
+Jeder Wert landet in einem Dockerfile, in YAML oder in einem Shell-Skript; deshalb wird er geprüft, bevor eine
+Vorlage ausgefüllt wird:
+
+- **Name:** 1 bis 64 Buchstaben, Ziffern, Leerzeichen, `_`, `.` oder `-`, beginnend mit Buchstabe oder Ziffer. Der
+  Ordnername ist der kleingeschriebene Name mit Unterstrichen (aus `My Board` wird `targets/my_board/`).
+- **Architektur:** eine von `aarch64`, `x86_64`, `armv7l`, `riscv64`.
+- **Basis-Image:** muss per Digest festgelegt sein (`image@sha256:...`), außer es beginnt mit `debian:`, `ubuntu:`,
+  `nvidia/cuda:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` oder `python:`.
+- **Pakete:** gültige Debian-Paketnamen. **Flags:** einfache Compiler- oder CMake-Optionen wie `-mcpu=cortex-a76`
+  oder `-DGGML_CUDA=ON`.
+- **Shell-Code** (Einrichtungsbefehle, Quantisierungsblock): keine Downloads (`curl`, `wget`, ...), kein `sudo`,
+  kein Löschen von `/`, kein `chmod 777`, kein Schreiben auf Rohgeräte, kein Docker-Socket und kein `docker run`,
+  kein Ausführen erzeugten Codes; keine Steuerzeichen. Jedes erzeugte Skript muss `bash -n` bestehen.
+- **Ort:** Das Target entsteht nur direkt unterhalb von `targets/`, nie über einem bestehenden Target (auch nicht
+  bei anderer Groß- und Kleinschreibung), und es wird wieder entfernt, wenn die Erzeugung scheitert.
+
+### 3.4 Was der Generator schreibt und was Sie ergänzen
+
+Der Generator schreibt `target.yml` (Metadaten, `supported_boards`, `docker`, `modules`, `optimization_profiles`,
+`requirements`), ein `Dockerfile` (aus dem `Dockerfile.gpu` der Vorlage, wenn das SDK „cuda“ oder das Basis-Image
+„nvidia“ enthält), `modules/build.sh`, `modules/config_module.sh`, `modules/source_module.sh`,
+`modules/rkllm_module.sh`, `modules/rknn_module.sh`, `modules/benchmark_module.sh`, Platzhalter für
+`convert_module.sh` und `target_module.sh`, `generate_profile.sh`, die `scripts/` der Vorlage und einen leeren
+Ordner `knowledge/`. Ist die Wissensdatenbank eingeschaltet, exportiert er sie außerdem nach
+`knowledge/initial_knowledge.json`; das Framework liest diese Datei nicht von selbst wieder ein, prüfen Sie sie also
+auf private Daten, bevor Sie sie teilen.
+
+Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
+
+- **Kein Block `capabilities:`.** Ergänzen Sie ihn selbst ([Abschnitt 4](#4-targetyml-und-der-capabilities-block)).
+- **Das Vorlagen-`build.sh` passt nicht zur aktuellen Pipeline.** Es sucht `convert-hf-to-gguf.py` und die
+  llama.cpp-Werkzeuge an Stellen, an denen aktuelle llama.cpp-Builds sie nicht ablegen, schreibt die F16-Zwischendatei
+  nach `/tmp` (in der Sandbox ein 1-GB-tmpfs) und kopiert im Zweifel das Modell unverändert. Das Vorlagen-Dockerfile
+  baut llama.cpp nicht. Für GGUF nehmen Sie `targets/Rockchip/dockerfile` und `targets/Rockchip/modules/build.sh`
+  als Ausgangspunkt oder das Beispiel in [Abschnitt 6](#6-das-build-skript).
+
+Eine überarbeitete Vorlage ist für 3.4.0 geplant (siehe [Roadmap](BLUEPRINT_DE.md#roadmap)).
+
+## 4. target.yml und der Capabilities-Block
+
+### 4.1 metadata
+
+```yaml
+metadata:
+  name: "My Board"
+  description: "CPU-only GGUF builds for My Board"
+  maintainer: "Ihr Name"
+  version: "1.0.0"
+  architecture_family: "aarch64"
+  vendor: "community"
+  # id: "my_board"   optional; Vorgabe: der Ordnername
+```
+
+### 4.2 capabilities
+
+Der Block ist die einzige Quelle dafür, was das Target bauen kann. GUI, CLI, Build-Service, Ditto und der
+MCP-Server leiten ihre Auswahl und ihre Prüfungen daraus ab.
+
+```yaml
+capabilities:
+  schema_version: 1
+  support_level: community
+  default_board: my_board        # das Board, das build.sh ohne Angabe nutzt
+  boards:
+    my_board:
+      label: "My Board (4x Cortex-A76)"
+      cpu: "4x Cortex-A76"
+      ram_max_gb: 8
+      examples: ["My Board 8 GB"]
+  formats:
+    gguf:
+      label: "GGUF (llama.cpp, CPU)"
+      input: [hf]
+      quantizations: [Q4_K_M, Q4_0, Q5_K_M, Q8_0, IQ2_XS]
+      default_quantization: Q4_K_M
+      imatrix: true
+      needs_imatrix: [IQ2_XS]
+      dataset: optional
+      dataset_kind: text
+      aliases: {INT8: Q8_0, Q4: Q4_K_M}
+      notes: "Runs on the CPU."
+```
+
+Oberste Ebene:
+
+| Feld | Bedeutung |
+|---|---|
+| `schema_version` | Immer `1`. |
+| `support_level` | `official` (vom Projekt gepflegt und getestet), `community` (beigesteuert; funktioniert bei seinen Pflegern) oder `experimental` (unvollständig oder ungeprüft). Vorgabe: `official`. |
+| `default_board` | Das Board, das `build.sh` nutzt, wenn ein Auftrag keins nennt. Muss in `boards` stehen und zur Vorgabe in Ihrem `build.sh` passen. |
+| `boards` | Mindestens ein Board: ID → `label` (Pflicht), `cpu`, `ram_max_gb` (größer als 0), `npu`, `gpu`, `examples`. |
+| `formats` | Mindestens ein Ausgabeformat: ID → die Felder unten. |
+
+Je Format:
+
+| Feld | Bedeutung |
+|---|---|
+| `label` | Für Benutzer angezeigter Name (Pflicht). |
+| `input` | Angenommene Modelleingaben: beliebige aus `hf` (Hugging-Face-Modell), `onnx`, `gguf`. Vorgabe: `[hf]`. Dittos Build-Empfehlungen nutzen das. |
+| `quantizations` | Alle Typen, die dieses Format annimmt (mindestens einer). |
+| `default_quantization` | Gilt, wenn ein Auftrag keinen nennt; muss in `quantizations` stehen. |
+| `boards` | Boards, auf denen dieses Format läuft; fehlt das Feld, gelten alle Boards des Targets. |
+| `board_quantizations` | Teilmengen von `quantizations` je Board, wo ein Chip weniger Typen kann. |
+| `board_default_quantization` | Vorgabe je Board; muss auf diesem Board erlaubt sein. |
+| `imatrix` | `true`, wenn das Format eine Importance-Matrix nutzen kann (GGUF). |
+| `needs_imatrix` | Typen, die ohne Importance-Matrix abgelehnt werden. Verlangt `imatrix: true`. |
+| `dataset` | Kalibrierdaten: `none`, `optional` oder `required`. |
+| `dataset_kind` | `text` (eine Textdatei) oder `sample_list` (eine Liste von Beispieleingaben, wie RKNN sie nutzt). |
+| `dataset_required_for` | Typen, die einen Datensatz brauchen, auch wenn `dataset` auf `optional` steht. |
+| `aliases` | Andere Schreibweisen, die Ihre Skripte annehmen, etwa `{INT8: Q8_0}`; ohne Beachtung der Groß- und Kleinschreibung verglichen. Jeder Alias muss auf einen aufgeführten Typ zeigen. |
+| `notes` | Kurzer Hinweis für Benutzer und für Ditto. |
+
+Das Schema lehnt widersprüchliche Blöcke mit einer Meldung ab, etwa eine Vorgabe, die nicht in der Liste steht, eine
+Board-Vorgabe, die auf diesem Board nicht erlaubt ist, unbekannte Boards in `boards`, `board_quantizations` oder
+`board_default_quantization`, `needs_imatrix` ohne `imatrix: true` oder einen Alias, der auf einen unbekannten Typ
+zeigt. Der Rockchip-Block zeigt jedes Feld im Einsatz, auch `board_quantizations` für RKLLM und `sample_list` für
+RKNN.
+
+### 4.3 Wie ein Auftrag vereinheitlicht und geprüft wird
+
+Bevor ein Build startet, werden die Werte vereinheitlicht und dann geprüft; der Build läuft genau mit den
+vereinheitlichten Werten:
+
+1. Format, Board und Quantisierung werden ohne Beachtung der Groß- und Kleinschreibung verglichen; eine
+   Quantisierung darf auch einer der Aliasse sein.
+2. Ein fehlendes Board wird zum einzigen Board des Formats, sonst zu `default_board`.
+3. Eine fehlende Quantisierung wird zur Vorgabe des Boards, dann zur Vorgabe des Formats (oder zum ersten auf dem
+   Board erlaubten Typ).
+4. Probleme kommen als Sätze zurück, die die erlaubten Werte nennen.
+
+Mit dem Rockchip-Block:
+
+| Auftrag | Ergebnis |
+|---|---|
+| `-f gguf -b RK3566` | Board `rk3566`, Quantisierung `Q4_0` (Vorgabe des Boards) |
+| `-f rkllm -q int4` | Board `rk3588` (Standard-Board), Quantisierung `w4a16` (Alias), dann abgelehnt: „Quantization 'w4a16' is not supported for rkllm on rk3588 (allowed: w8a8, w8a8_g128, w8a8_g256, w8a8_g512).“ |
+| `-f gguf -b rk3566 -q IQ2_XS` ohne IMatrix | abgelehnt: „IQ2_XS needs an importance matrix: enable IMatrix.“ |
+
+### 4.4 Weitere Blöcke
+
+Die Build-Pipeline liest nur `metadata` und `capabilities`. Ein optionaler Block `hardware:` (`cpu.architecture`,
+`gpu.vendor`, `gpu.vendor_id`, `npu.vendor`, `npu.vendor_id`) wird an zwei Stellen genutzt: um beim Einlesen einer
+Probe-Datei im Build-Reiter ein passendes Target vorzuschlagen, und für Geräteoptionen in den Startbefehlen eines
+Deployment-Pakets mit Docker-Images. Die übrigen Blöcke in der Rockchip-`target.yml` (`supported_boards`, `docker`,
+`modules`, `optimization_profiles`, `requirements` usw.) sind beschreibend.
+
+## 5. Das Dockerfile
+
+Der Build-Kontext, den die Engine zusammenstellt, sieht so aus; das Dockerfile kopiert also von diesen Pfaden:
+
+```text
+<Kontext>/
+├── Dockerfile           Ihr Dockerfile (oder Dockerfile.gpu)
+├── modules/             Ihre modules/
+├── scripts/             Ihre scripts/ (leer, wenn Sie keine haben)
+└── docker/entrypoint.sh das gemeinsame entrypoint.sh
+```
+
+Build-Argumente, die die Engine übergibt:
+
+| Argument | Wert |
+|---|---|
+| `LLAMA_CPP_TAG` | die Einstellung `llama_cpp_version` (Vorgabe `v0.6.0`) |
+| `BUILD_JOBS` | die Einstellung `build_jobs`, nur wenn sie größer als 0 ist; die Selbstheilung senkt sie auf 1, wenn einem Compiler der Speicher ausging |
+| `USER_ID`, `GROUP_ID` | die IDs des Host-Benutzers (Linux und macOS, wenn der Host-Benutzer nicht root ist) |
+
+Was das Image bieten muss (siehe `targets/Rockchip/dockerfile`):
+
+- `/app/modules/build.sh`, ausführbar (`COPY modules/ ./modules/` und `chmod +x`).
+- Den gemeinsamen Entrypoint als `ENTRYPOINT ["/entrypoint.sh"]` und einen Benutzer `llmbuilder`; startet ein
+  Container als root (alter Modus ohne Sandbox), bildet der Entrypoint ihn auf den Host-Benutzer ab und wechselt zu
+  `llmbuilder`.
+- `ENV BUILD_CACHE_DIR=/build-cache` und jedes Werkzeug, das die Umwandlung braucht. Alles muss beim Bau des Images
+  installiert werden, denn die Stufen haben kein Netzwerk.
+- **Festgelegte Versionen:** ein Tag oder Digest für das Basis-Image, Git-Tags oder Commits, exakte pip-Versionen und
+  SHA256-Prüfungen für heruntergeladene Dateien (wie `RKLLM_WHEEL_SHA256` für das RKLLM-Wheel).
+- **Ein venv je Werkzeugkette**, wenn sich ihre Abhängigkeiten widersprechen (Rockchip: `/opt/venv`,
+  `/opt/venv-rkllm`, `/opt/venv-rknn`).
+- Keine Binärdateien im Repository: Wheels und Bibliotheken im Dockerfile herunterladen und ihre Hashes prüfen.
+
+## 6. Das Build-Skript
+
+`modules/build.sh` ist der einzige Einstieg. Es läuft einmal je Stufe, als `/app/modules/build.sh`, in der Sandbox
+aus [Abschnitt 7](#7-regeln-der-sandbox).
+
+### 6.1 Eingaben
+
+Umgebungsvariablen, die die Engine setzt:
+
+| Variable | Bedeutung |
+|---|---|
+| `JOB_TYPE` | `imatrix` (Importance-Matrix-Stufe) oder `build` |
+| `MODEL_SOURCE` | Pfad des Modells im Container (Ordner oder Datei) |
+| `MODEL_NAME` | für Dateinamen taugliche Modellbezeichnung, für die Namen der Ausgabedateien |
+| `TARGET_FORMAT` | Format-ID aus den Capabilities, etwa `gguf` |
+| `TARGET_BOARD` | Board-ID oder leer (dann dieselbe Vorgabe wie `default_board` nutzen) |
+| `QUANTIZATION` | Quantisierungstyp, bereits vereinheitlicht; leer nur bei Targets ohne Capabilities |
+| `TARGET_ARCH` | die Target-ID |
+| `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | Aufgabe (Vorgabe `LLM`), Optimierungsstufe, Build-ID |
+| `MAX_CONTEXT_LENGTH` | nur, wenn für den Build gesetzt |
+| `USE_IMATRIX`, `IMATRIX_PATH` | Build-Stufe: `1` und der Pfad von `imatrix.dat`, wenn eine Importance-Matrix berechnet wurde |
+| `DATASET_PATH` | Kalibrierdatensatz, wenn der Build einen nutzt |
+| `BUILD_SCRATCH_DIR`, `TMPDIR`, `HOME`, `XDG_CACHE_HOME` | beschreibbarer Arbeitsordner `/build-cache/work` und seine Unterordner |
+| `HF_HUB_OFFLINE`, `TRANSFORMERS_OFFLINE`, `HF_DATASETS_OFFLINE` | `1` in der Sandbox: Bibliotheken versuchen nie das Netzwerk |
+| `PUID`, `PGID` | die IDs des Host-Benutzers (nicht unter Windows) |
+
+Einbindungen:
+
+| Pfad im Container | Modus | Inhalt |
+|---|---|---|
+| `/build-cache/output` | lesen und schreiben (Build-Stufe) | wohin `build.sh` seine Ergebnisse schreibt |
+| `/build-cache/imatrix` | lesen und schreiben in der Imatrix-Stufe, nur lesen in der Build-Stufe | `imatrix.dat` |
+| `/build-cache/work` | lesen und schreiben | Zwischenablage für große Zwischendateien |
+| `/build-cache/input-model` | nur lesen | ein lokaler Modellordner oder der Ordner einer lokalen Modelldatei |
+| `/build-cache/models` | nur lesen in der Sandbox | Hugging-Face-Downloads unter `hf/<Besitzer>__<Name>` |
+| `/build-cache/dataset.txt`, `/build-cache/dataset.json` oder `/build-cache/dataset/` | nur lesen | Kalibrierdatensatz (eine RKNN-Beispielliste bekommt ihren Ordner); ein Datensatz im Modellordner wird über die Modell-Einbindung erreicht |
+
+### 6.2 Ausgaben und Exit-Code
+
+- Schreiben Sie Modelldateien nach `$BUILD_CACHE_DIR/output` (`/build-cache/output`). Dateien mit der Endung
+  `.gguf`, `.rkllm`, `.rknn`, `.onnx`, `.safetensors` oder `.bin` zählen als Modelldateien; die größte Datei mit der
+  Endung des Formats wird zur Hauptdatei, die das Deployment installiert.
+- Sie dürfen dort eine `build_info.json` mit eigenen Feldern schreiben (Rockchip schreibt Modell, Format, Board,
+  Quantisierung und den llama.cpp-Tag); die Engine ergänzt Dateiliste, Hashes und Build-Daten.
+- In der Imatrix-Stufe schreiben Sie `$BUILD_CACHE_DIR/imatrix/imatrix.dat`.
+- Beenden Sie das Skript bei jedem Fehler mit einem Exit-Code ungleich 0 und schreiben Sie den Grund nach stderr. Die
+  letzten Log-Zeilen gehen an den Benutzer und an die Selbstheilung; formulieren Sie sie also klar
+  (`die "RKLLM needs an RK3588 or RK3576 NPU; ..."`).
+
+### 6.3 Regeln
+
+- Beginnen Sie mit `set -euo pipefail`.
+- Schreiben Sie Format und Board klein, vereinheitlichen Sie die Quantisierung und nehmen Sie genau die Aliasse an,
+  die Sie in den Capabilities angegeben haben. Lehnen Sie nicht unterstützte Werte mit einer Meldung ab, die das
+  Unterstützte nennt.
+- Nutzen Sie dasselbe Standard-Board wie `default_board`.
+- Schreiben Sie große Zwischendateien nach `$BUILD_SCRATCH_DIR`, nie ins Image oder an einen festen Pfad unter
+  `/tmp`.
+- Laden Sie nie etwas herunter; die Stufe hat kein Netzwerk.
+- Halten Sie Capabilities und Skript mit Tests im Einklang, so wie `tests/test_foundation.py` und
+  `tests/test_review_capabilities_paths.py` es für Rockchip tun.
+
+### 6.4 Beispiel
+
+Ein minimaler GGUF-Verteiler für die Capabilities aus [Abschnitt 4.2](#42-capabilities). Er setzt voraus, dass das
+Image llama.cpp in `/usr/src/llama.cpp` mit den Werkzeugen in `build/bin` enthält, wie das Rockchip-Image. Er besteht
+`bash -n` und ShellCheck; für F16/BF16-Ausgabe, Aliasse und weitere Prüfungen siehe
+`targets/Rockchip/modules/build.sh`.
+
+```bash
+#!/bin/bash
+# build.sh - dispatcher of the target "my_board" (run by the BuildEngine inside the target image)
+set -euo pipefail
+
+WORK_DIR="${BUILD_CACHE_DIR:-/build-cache}"
+OUTPUT_DIR="$WORK_DIR/output"
+IMATRIX_DIR="$WORK_DIR/imatrix"
+SCRATCH_DIR="${BUILD_SCRATCH_DIR:-$WORK_DIR}"   # large intermediates; the image filesystem is read-only
+FORMAT="$(echo "${TARGET_FORMAT:-gguf}" | tr '[:upper:]' '[:lower:]')"
+BOARD="$(echo "${TARGET_BOARD:-my_board}" | tr '[:upper:]' '[:lower:]')"   # same as default_board
+QUANT="$(echo "${QUANTIZATION:-Q4_K_M}" | tr '[:lower:]' '[:upper:]')"
+MODEL_NAME="${MODEL_NAME:-model}"
+LLAMA_BASE="${LLAMA_CPP_PATH:-/usr/src/llama.cpp}"
+
+die() { echo "ERROR: $*" >&2; exit 1; }
+
+[ -e "${MODEL_SOURCE:-}" ] || die "MODEL_SOURCE '${MODEL_SOURCE:-}' does not exist in the container."
+case "$FORMAT" in
+    gguf) ;;
+    *) die "Format '$FORMAT' is not supported by this target (gguf)." ;;
+esac
+echo "Board: $BOARD, format: $FORMAT, quantization: $QUANT, job: ${JOB_TYPE:-build}"
+
+f16="$SCRATCH_DIR/tmp-${MODEL_NAME}-F16.gguf"
+python3 "$LLAMA_BASE/convert_hf_to_gguf.py" "$MODEL_SOURCE" --outfile "$f16" --outtype f16
+
+if [ "${JOB_TYPE:-build}" = "imatrix" ]; then
+    [ -f "${DATASET_PATH:-}" ] || die "Calibration dataset not found at '${DATASET_PATH:-}'."
+    mkdir -p "$IMATRIX_DIR"
+    "$LLAMA_BASE/build/bin/llama-imatrix" -m "$f16" -f "$DATASET_PATH" -o "$IMATRIX_DIR/imatrix.dat" --chunks 100
+    rm -f "$f16"
+    exit 0
+fi
+
+imatrix_args=()
+if [ "${USE_IMATRIX:-0}" = "1" ]; then
+    [ -f "${IMATRIX_PATH:-}" ] || die "USE_IMATRIX=1 but '${IMATRIX_PATH:-}' is missing."
+    imatrix_args=(--imatrix "$IMATRIX_PATH")
+fi
+mkdir -p "$OUTPUT_DIR"
+"$LLAMA_BASE/build/bin/llama-quantize" "${imatrix_args[@]}" "$f16" "$OUTPUT_DIR/${MODEL_NAME}-${QUANT}.gguf" "$QUANT"
+rm -f "$f16"
+```
+
+## 7. Regeln der Sandbox
+
+Umwandlungsstufen führen Modellwerkzeuge und den Build-Code des Targets aus, der von einer KI erzeugt sein kann. Mit
+der Vorgabe `build_sandbox: true` läuft jeder Stufen-Container:
+
+- als Host-Benutzer, nicht als root (1000:1000, wenn der Host-Benutzer root ist oder unter Windows);
+- **ohne Netzwerk** (`network_mode: none`); Modell und Datensatz wurden auf dem Host bereitgestellt;
+- ohne Linux-Capabilities und mit `no-new-privileges`;
+- mit **schreibgeschütztem Image-Dateisystem**; `/tmp` ist ein 1-GB-tmpfs;
+- mit einem Prozesslimit (`build_pids_limit`, Vorgabe 4096) und, falls gesetzt, einem Speicherlimit
+  (`build_memory_limit`, etwa `24g`);
+- mit nur den eigenen Ordnern des Builds beschreibbar (Arbeitsordner, Ausgabe und in ihrer Stufe die
+  Importance-Matrix); Modell-, Cache- und Datensatz-Einbindungen sind schreibgeschützt.
+
+Mit `--gpu` werden NVIDIA-GPUs durchgereicht, wenn auf dem Host `nvidia-smi` vorhanden ist; sonst wird `/dev/dri`
+durchgereicht, und der Container-Benutzer tritt den Gruppen bei, denen die Render-Geräte gehören.
+
+Was das für Ihr Target heißt: Installieren Sie alles im Dockerfile; schreiben Sie nicht ins Image; verlassen Sie sich
+nicht auf root, `sudo` oder eine feste Benutzer-ID; legen Sie große Dateien in `$BUILD_SCRATCH_DIR` ab; lesen Sie
+Modell und Datensatz nur über die übergebenen Pfade. `build_sandbox: false` schaltet auf den alten Modus (root plus
+Entrypoint) zurück; nutzen Sie das nur, um herauszufinden, ob ein Fehler an der Sandbox liegt.
+
+## 8. Ein Target testen
+
+1. **Ist das Target geladen und sind seine Capabilities gültig?** `llm-cli doctor` meldet den Code
+   `targets.<ID>.capabilities`, wenn der Block fehlt oder ungültig ist; der Fehler selbst steht im Log. So sehen Sie
+   den Schemafehler direkt:
+
+   ```bash
+   python -c "import yaml; from orchestrator.schemas.targets import TargetCapabilities as T; \
+   T.model_validate(yaml.safe_load(open('targets/my_board/target.yml', encoding='utf-8'))['capabilities']); print('ok')"
+   ```
+
+   `llm-cli targets validate <ID>` bestätigt nur, dass `target.yml` geladen wurde; die Capabilities prüft es nicht.
+2. **Baut das Image?** Stellen Sie den Kontext so zusammen wie die Engine und bauen Sie ihn:
+
+   ```bash
+   python3 -m orchestrator.utils.build_context targets/my_board /tmp/my_board-context
+   docker build -t llm-framework/my_board:dev /tmp/my_board-context
+   ```
+
+3. **Ein echter Build mit einem kleinen Modell:**
+
+   ```bash
+   llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t my_board -f gguf -b my_board -F
+   ```
+
+   Prüfen Sie den neuen Ordner in `output/`: die Modelldatei und `build_info.json` mit `artifacts` und `primary`.
+4. **Lint:** ShellCheck läuft über jede versionierte `.sh`-Datei außerhalb von `targets/_template`
+   ([CONTRIBUTING, Abschnitt 5](../CONTRIBUTING_DE.md#5-lint--und-sicherheitsprüfungen)). Nehmen Sie Ihr Dockerfile in
+   die hadolint-Matrix in `.github/workflows/docker.yml` und in `.github/dependabot.yml` auf.
+5. **Tests:** Ergänzen Sie Tests, die Ihre Capabilities und Ihre Skripte im Einklang halten (siehe die in
+   [Abschnitt 6.3](#63-regeln) genannten Rockchip-Tests).
+6. **Auf dem Gerät:** Deployen Sie den Build (Deployment-Fenster oder `llm-cli deploy package` und
+   `llm-cli deploy run`) und starten Sie das Modell dort.
+
+## 9. Ein Target teilen
+
+Öffnen Sie einen Pull-Request mit dem Target-Ordner. Setzen Sie `support_level: community`, solange die Maintainer
+das Target nicht übernehmen. Beschreiben Sie im Pull-Request, welche Boards und Modelle Sie getestet haben. Folgen
+Sie den [Regeln für die Mitarbeit](../CONTRIBUTING_DE.md): keine Binärdateien, keine Geheimnisse, festgelegte
+Versionen und Dokumentation auf Englisch und Deutsch. Wissenspakete sind noch nicht signiert; bitte öffnen Sie ein
+Issue, bevor Sie eines beisteuern.
+
+## 10. Altlasten
+
+Version 1.x nutzte je Target eine Kette aus vier Skripten (`source_module.sh`, `config_module.sh`,
+`convert_module.sh`, `target_module.sh`), gesteuert von der Hardware-Probe. Die aktuelle Pipeline ruft nur `build.sh`
+auf; das Rockchip-`build.sh` nutzt diese Skripte nicht, und der Modulgenerator schreibt sie noch. Ihre Entfernung und
+eine überarbeitete Vorlage sind für 3.4.0 geplant.
