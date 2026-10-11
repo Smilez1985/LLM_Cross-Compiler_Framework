@@ -256,7 +256,8 @@ make hooks          # same as: git config core.hooksPath .githooks
 - The **pre-push** hook scans the commits a push would publish (`--push`), so it also catches commits made with
   `git commit --no-verify`.
 - If you use the pre-commit tool (https://pre-commit.com) instead: `pre-commit install -t pre-commit -t pre-push`
-  (`.pre-commit-config.yaml`; its pre-push stage scans the whole history).
+  (`.pre-commit-config.yaml`). Its pre-push stage runs the same `--push` scan; pre-commit hands over only the first
+  branch of a push with several branches, so push them one at a time or use the git hooks above.
 - The CI job `secret-scan` in `security.yml` scans every commit of the whole history.
 
 **Run it by hand:**
