@@ -173,7 +173,16 @@ def check_secrets(framework) -> List[Finding]:
     sm = getattr(framework, "secrets_manager", None)
     if sm is None:
         return [Finding("security", "secrets.store", Severity.ERROR, "The secrets store is not available.")]
+    refresh = getattr(sm, "refresh", None)
+    if callable(refresh):
+        refresh()  # a long-running GUI or MCP server: another process may have changed the store
     if getattr(sm, "_load_failed", False):
+        failed = getattr(sm, "failed_file", None) or sm.secrets_file
+        if failed != sm.secrets_file:
+            return [Finding("security", "secrets.store", Severity.ERROR,
+                            f"The old secrets store {failed} cannot be read, so its secrets were not taken over "
+                            f"into {sm.secrets_file}; secrets cannot be changed.",
+                            "Repair the file (its secrets are then taken over) or move it aside.")]
         return [Finding("security", "secrets.store", Severity.ERROR,
                         f"The secrets store {sm.secrets_file} cannot be read; secrets cannot be changed.",
                         "Repair the file or move it aside and set the secrets again (llm-cli secrets set).")]
