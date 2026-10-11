@@ -110,14 +110,16 @@ class CredentialResolver:
         self.handlers: Dict[str, TypeHandler] = dict(TYPE_HANDLERS)
 
     # --- selection ------------------------------------------------------------------------------------------
-    def available(self, preset: Any, spec: AuthMethodSpec, base_url: Optional[str] = None) -> bool:
-        """Whether `spec` can be used now without the user choosing it (opt-in aside)."""
+    def available(self, preset: Any, spec: AuthMethodSpec, base_url: Optional[str] = None, *,
+                  adopt: bool = True) -> bool:
+        """Whether `spec` can be used now without the user choosing it (opt-in aside). `adopt=False` only looks
+        (`auth status`): a key stored without an origin is not bound to `base_url`."""
         if spec.type in ("none", "bearer_optional"):
             return True
         if spec.type == "api_key":
             if preset.runtime_endpoint:
                 return bool(reveal(self.runtime_key(preset)))
-            return self.store.find_secret(preset, spec, base_url) is not None
+            return self.store.find_secret(preset, spec, base_url, adopt=adopt) is not None
         if spec.type in OAUTH_TYPES:
             if self.store.is_signed_out(preset.id, spec.id):
                 return False
@@ -127,7 +129,7 @@ class CredentialResolver:
         return bool(handler and handler[1](self, preset, spec, base_url))
 
     def select(self, preset: Any, *, chosen: Optional[str] = None, explicit: bool = False,
-               base_url: Optional[str] = None) -> AuthMethodSpec:
+               base_url: Optional[str] = None, adopt: bool = True) -> AuthMethodSpec:
         """The method to use. `chosen` comes from ai_auth_<provider> (`explicit`) or ai_auth (primary only)."""
         if chosen:
             chosen = str(chosen).strip()
@@ -139,7 +141,7 @@ class CredentialResolver:
                                     f"ai_auth_{preset.id} is set to it.", provider=preset.id)
             return spec
         for spec in preset.methods:
-            if not spec.opt_in and self.available(preset, spec, base_url):
+            if not spec.opt_in and self.available(preset, spec, base_url, adopt=adopt):
                 return spec
         raise self.not_signed_in(preset)
 
@@ -151,12 +153,13 @@ class CredentialResolver:
         spec = spec or next((m for m in preset.methods if m.type == "api_key"), None)
         env = f" or set {' or '.join(spec.env)}" if spec is not None and spec.env else ""
         key_page = spec.key_page if spec is not None else None
+        login = f"llm-cli ditto login {preset.id}"
         if preset.adapter == "anthropic":
-            message = (f"Claude API: no API key stored. Add one in the AI settings{env} (Max and Team plans include "
-                       "monthly API credits for a linked Console organization). To use an `ant auth login` profile "
-                       "instead, set ai_auth_anthropic to ant_profile.")
+            message = (f"Claude API: no API key stored. Add one in the AI settings or with `{login}`{env} (Max and "
+                       "Team plans include monthly API credits for a linked Console organization). To use an `ant "
+                       f"auth login` profile instead: `{login} --method ant_profile` (sets ai_auth_anthropic).")
         else:
-            message = f"{preset.label}: no API key stored. Add one in the AI settings{env}."
+            message = f"{preset.label}: no API key stored. Add one in the AI settings or with `{login}`{env}."
         return auth_error("auth.not_signed_in", message=message, provider=preset.id, key_page=key_page)
 
     # --- credentials ----------------------------------------------------------------------------------------

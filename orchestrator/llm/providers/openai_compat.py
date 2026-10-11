@@ -130,7 +130,7 @@ class OpenAICompatAdapter(ProviderAdapter):
             response = client.chat.completions.create(**params)
         except Exception as e:
             raise map_openai_error(e, label=self.label, provider=self.provider, preset=self.preset,
-                                   base_url=self.base_url) from None
+                                   base_url=self.base_url, secret=self._api_key) from None
         return self.to_result(response, model)
 
     def to_result(self, response: Any, requested_model: str) -> ChatResult:
@@ -193,7 +193,7 @@ class OpenAICompatAdapter(ProviderAdapter):
             return models
         except Exception as e:
             raise map_openai_error(e, label=self.label, provider=self.provider, preset=self.preset,
-                                   base_url=self.base_url, during="models") from None
+                                   base_url=self.base_url, during="models", secret=self._api_key) from None
 
 
 def _content(content) -> Any:

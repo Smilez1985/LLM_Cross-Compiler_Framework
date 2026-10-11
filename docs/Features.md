@@ -262,6 +262,37 @@ are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what 
   key and base URL explicitly, and `OPENAI_CUSTOM_HEADERS` / `ANTHROPIC_CUSTOM_HEADERS` are removed at startup with a warning
   (setting `ai_allow_sdk_env_headers: true` keeps them).
 
+### Sign-in
+
+- **Where:** **Sign in...** in the AI settings (GUI) and `llm-cli ditto login | logout | auth` (see the
+  [CLI guide](CLI_Usage.md#ditto-login)).
+- **Method cards:** the panel shows the provider's sign-in methods in the catalog's order. The first one this
+  version can sign in with is marked "Recommended", opt-in methods (the `ant` profile) "Advanced", and methods of a
+  later version are shown but cannot be chosen. Each type has its own form: a key form (key page, password field,
+  the catalog's extra fields such as the Claude workspace ID or the OpenAI organization and project, **Check**,
+  **Save**, **Sign out**), "no sign-in" with Check for local engines, the `ant` CLI profile (the official command to
+  run, the profile name, a check through the Anthropic SDK; the framework never starts the CLI or reads its files),
+  and the managed local server, whose key is automatic.
+- **Status line:** "Signed in as ...", "Not signed in", "Using key from environment variable X" or "Expired: sign in
+  again". A key is shown only as its last four characters. Ditto's chat header shows the access in use, for example
+  "Anthropic Claude (API) · API key · wrkspc_..." or "Local · Ollama".
+- **Check before storing:** Check sends the typed key with one free request and stores nothing; `llm-cli ditto
+  login` checks a key the same way before it stores it. Saving remembers the method as `ai_auth_<provider>`.
+- **No secret in argv:** the CLI takes a key only from a hidden prompt, stdin (`--with-token`) or the provider's
+  documented environment variable (`--from-env`). Without a terminal it asks nothing, and a provider with several
+  methods needs `--method`. Exit codes: 0 signed in, 2 usage, 3 rejected, 4 network, 5 storage, 6 not available.
+- **Keys stay intact and out of the output:** a key with a space, a line break or an invisible character inside is
+  refused before anything is sent or stored, a server's error text that repeats the key shows `REDACTED` instead,
+  and a typed key goes over plain `http://` to another computer only after you confirm it (CLI: `--yes`). A key typed
+  in the AI settings' own key field replaces a method a sign-in remembered (for example the `ant` profile).
+- **Sign-out is local first:** the stored key is deleted, and the key page where you revoke the key itself is named;
+  a key in an environment variable stays in use until you unset it.
+- **No usable keyring:** the panel shows the storage chooser (passphrase, credential helper, or the unencrypted key
+  file after a confirmation), and the GUI shows the same chooser at startup before it gives up; a passphrase is asked
+  in a dialog. A choice that cannot open the existing vault (one protected by the locked keyring) is not kept. The
+  CLI exits with code 5 and names `llm-cli ditto auth storage --use ...`. Nothing is picked for you.
+- **Responsive:** every vault, keyring or network call of the panel and of the chat header runs in a worker thread.
+
 ### Calls, retries and fallback
 
 - The SDKs' own retries are off; the provider layer retries rate limits and outages up to twice and waits for a
@@ -584,12 +615,14 @@ timestamp) and starts a new chain, for example after `llm-cli doctor` has report
   `~/.llm-framework/secrets.store`. By default its key is kept in your operating system's keyring (Windows
   Credential Manager on the local machine, macOS Keychain, Secret Service on Linux), one entry per vault, never in a
   file next to the store. A keyring that does not answer within 3 seconds, keeps nothing or stores in plain text is
-  not used; then the framework stops and names the choices for the setting `secret_storage` (or
+  not used; then the framework stops and names the choices (the GUI shows a chooser, the CLI exits with code 5
+  and names `llm-cli ditto auth storage --use ...`) for the setting `secret_storage` (or
   `LLM_SECRET_STORAGE` for one run): `helper` (the command in `secret_helper`, run without a shell), `passphrase`
   (asked once per start), `insecure` (a key file next to the vault, not encrypted at rest) or `ephemeral` (memory
   only). The vault is written atomically under a lock shared by the GUI, the CLI and MCP servers, is readable only
   by you, never lies inside a git working copy, and a damaged vault is never overwritten. `llm-cli doctor` warns
-  about the key file and about a keyring that does not protect secrets.
+  about the key file and about a keyring that does not protect secrets. `llm-cli ditto auth rotate-key` replaces
+  the vault key and re-encrypts every entry.
 - **Redaction:** one table of secret formats (`orchestrator/security/secret_patterns.py`) is shared by the
   repository's secret scan and the runtime redaction. Credentials (known key formats, credential headers, tokens
   in URLs and form bodies, `HF_TOKEN=...` lines) are removed from every log line and traceback (the framework's own
@@ -681,7 +714,8 @@ What does not work yet, so you are not surprised:
   another process does not see them.
 - **Cancelling:** the GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not stop the build (the
   CLI waits until it has ended); only the `cancel_build` tool cancels.
-- **Sign-in per provider:** not available yet; Ditto uses API keys.
+- **Browser and cloud sign-in:** OAuth flows and the credential chains of AWS, Google Cloud and Azure are not
+  available yet; Ditto signs in with API keys, and local engines need none.
 - **Device runtime:** the framework does not install a runtime on the board.
 - **GUI:** the Auto-Tuning and Models tabs are placeholders; the local runtime is controlled from the CLI only.
 - **Security scan:** the Trivy container gets the Docker socket to read the image; scanning without the socket is

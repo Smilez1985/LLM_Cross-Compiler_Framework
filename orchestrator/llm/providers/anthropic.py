@@ -82,7 +82,7 @@ class AnthropicAdapter(ProviderAdapter):
     def _map_error(self, err: BaseException):
         profile = (self._profile or "") if self.auth == "ant_profile" else None
         return map_anthropic_error(err, provider=self.provider, profile=profile, preset=self.preset,
-                                   base_url=self.base_url)
+                                   base_url=self.base_url, secret=self._api_key)
 
     # --- client -------------------------------------------------------------------------------------------
     def client(self):

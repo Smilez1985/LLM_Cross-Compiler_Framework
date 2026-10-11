@@ -351,19 +351,20 @@ Hardware-Module vor. Dabei nutzt es die Tools des Frameworks im Rahmen deiner To
 **Ditto einrichten** unter **Tools > Configure AI Agent (Ditto)...**: Anbieter, Modell (die Liste wird live beim
 Anbieter abgefragt; du kannst auch einen Modellnamen eintippen), API-Schlüssel, Workspace-ID (nur für
 Claude-API-Schlüssel, die in jedem Workspace der Organisation gelten), Basis-URL (Ollama und eigene Server), Aufwand (Effort), Datenschutzstufe für Cloud-Anbieter, eine Ersatzkette, die Wissensbasis und der
-Offline-Modus. Auf einem Rechner ohne Bildschirm speicherst du den Schlüssel mit
-`llm-cli secrets set <Schlüsselname>` und setzt `ai_provider` in der `config.yml` (oder die Umgebungsvariable
-`LLM_FRAMEWORK_AI_PROVIDER`).
+Offline-Modus. **Anmelden...** neben dem Schlüsselfeld zeigt die Anmeldeverfahren des Anbieters mit Prüfen,
+Speichern und Abmelden. Auf einem Rechner ohne Bildschirm meldest du dich mit `llm-cli ditto login <anbieter>` an
+(der Schlüssel wird ohne Anzeige abgefragt oder mit `--with-token` von stdin gelesen) und setzt `ai_provider` in
+der `config.yml` (oder die Umgebungsvariable `LLM_FRAMEWORK_AI_PROVIDER`).
 
-| Anbieter (ID) | Was es ist | Anmeldung | Schlüsselname für `llm-cli secrets set` |
+| Anbieter (ID) | Was es ist | Anmeldung | Auf der Kommandozeile |
 |---|---|---|---|
-| `anthropic` | Anthropic-Claude-API | API-Schlüssel | `anthropic_api_key` |
-| `openai` | OpenAI (Responses API) | API-Schlüssel | `openai_api_key` |
-| `google` | Google Gemini (OpenAI-kompatibler Endpunkt) | API-Schlüssel | `gemini_api_key` |
-| `openrouter` | OpenRouter (viele Modelle hinter einem Schlüssel) | API-Schlüssel | `openrouter_api_key` |
-| `ollama` | Ollama auf diesem Rechner oder in deinem Netz | keine | – |
+| `anthropic` | Anthropic-Claude-API | API-Schlüssel (ein Profil aus `ant auth login` als erweiterte Möglichkeit) | `llm-cli ditto login anthropic` |
+| `openai` | OpenAI (Responses API) | API-Schlüssel | `llm-cli ditto login openai` |
+| `google` | Google Gemini (OpenAI-kompatibler Endpunkt) | API-Schlüssel | `llm-cli ditto login google` |
+| `openrouter` | OpenRouter (viele Modelle hinter einem Schlüssel) | API-Schlüssel | `llm-cli ditto login openrouter` |
+| `ollama` | Ollama auf diesem Rechner oder in deinem Netz | keine | `llm-cli ditto login ollama --base-url URL` |
 | `local` | der verwaltete lokale Modellserver (siehe [Offline-Modus](#offline-modus-das-verwaltete-lokale-modell)) | keine (ein Schlüssel pro Start wird automatisch verwaltet) | – |
-| `custom` | jeder OpenAI-kompatible Server (vLLM, LM Studio, ...) | API-Schlüssel oder keine | `custom_api_key` |
+| `custom` | jeder OpenAI-kompatible Server (vLLM, LM Studio, ...) | API-Schlüssel oder keine | `llm-cli ditto login custom --method api_key --base-url URL` |
 
 - Die Anbieter sind Daten in [`configs/llm_providers.yml`](configs/llm_providers.yml); eine Datei mit demselben
   Namen in deinem Einstellungsordner ergänzt oder ersetzt Einträge. Dort stehen auch die Standardmodelle pro
@@ -377,8 +378,10 @@ Offline-Modus. Auf einem Rechner ohne Bildschirm speicherst du den Schlüssel mi
 - Strukturierte Antworten (Healing-Analyse, Modulvorschlag, Build-Empfehlung) müssen einer festen Struktur
   entsprechen und werden geprüft; eine ungültige Antwort ist ein Fehler und wird nie angewendet. Ein Vorschlag mit
   einem gefährlichen Befehl (zum Beispiel einem Download, der direkt in eine Shell geleitet wird) wird verworfen.
-- **Anmeldung pro Anbieter** (die Schaltfläche **Sign in...**) gibt es noch nicht; sie wird gerade gebaut. Bis dahin
-  arbeitet Ditto mit API-Schlüsseln. Bei `anthropic` hat der gespeicherte API-Schlüssel immer Vorrang; ein Profil aus
+- **Anmeldung pro Anbieter:** **Anmelden...** in den KI-Einstellungen und `llm-cli ditto login` nehmen einen
+  Schlüssel aus einem verdeckten Feld, von stdin oder aus der Umgebungsvariable des Anbieters, prüfen ihn kostenlos,
+  bevor sie ihn speichern, und zeigen nur seine letzten vier Zeichen; `llm-cli ditto auth status` listet die
+  Anmeldung jedes Anbieters. Anmeldung im Browser (OAuth) und Cloud-Plattformen kommen später. Bei `anthropic` hat der gespeicherte API-Schlüssel immer Vorrang; ein Profil aus
   `ant auth login` wird nur genutzt, wenn du es auswählst (Einstellung `ai_auth_anthropic: ant_profile`).
   Admin-API-Schlüssel von Claude (`sk-ant-admin01-`) werden abgelehnt. Ohne gespeicherten Schlüssel wird ein
   Schlüssel aus `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` oder `OPENROUTER_API_KEY` genutzt, und die
@@ -534,7 +537,9 @@ crawler_max_depth: 2
 - **Einen Build abbrechen:** Die GUI hat keine Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start` stoppt
   den Build nicht (die CLI wartet, bis er zu Ende ist). Abbrechen lässt sich ein Build mit dem Tool `cancel_build`,
   über Ditto im GUI-Chat oder einen MCP-Client, in dem Prozess, der ihn gestartet hat.
-- **Anmeldung pro Anbieter** gibt es noch nicht; Ditto arbeitet mit API-Schlüsseln.
+- **Anmeldung im Browser und bei Cloud-Plattformen** (OAuth, AWS, Google Cloud, Azure) gibt es noch nicht; Ditto
+  meldet sich mit API-Schlüsseln an, lokale Engines brauchen keine Anmeldung, und ein Profil aus `ant auth login`
+  ist eine erweiterte Möglichkeit.
 
 ---
 
@@ -542,8 +547,9 @@ crawler_max_depth: 2
 
 Die Roadmap führt auf, was geplant ist; Erledigtes wandert beim Release in den [CHANGELOG](CHANGELOG_DE.md). Kurz:
 
-- **In Arbeit:** Anmeldung pro Anbieter und Zugangsart (der Claude-Abo-Anbieter ist bereits entfernt;
-  Claude-Abonnenten nutzen MCP oder einen API-Schlüssel); ein gehärtetes Docker-Image ohne Oberfläche für CLI und
+- **In Arbeit:** die übrigen Anmeldeverfahren je Zugangsart, Anmeldung im Browser und Cloud-Plattformen
+  (API-Schlüssel, lokale Engines und das `ant`-Profil funktionieren in der GUI und mit `llm-cli ditto login`; der
+  Claude-Abo-Anbieter ist entfernt, und Claude-Abonnenten nutzen MCP oder einen API-Schlüssel); ein gehärtetes Docker-Image ohne Oberfläche für CLI und
   MCP-Server; eine neue Ditto-Evaluation mit den verbesserten Prompts.
 - **Geplant:** eine Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, Targets für NVIDIA-GPUs und
   AMD (Ryzen Z1 Extreme), weitere Formate, LoRA und große Modelle sowie eine gehärtete Lieferkette.

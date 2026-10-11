@@ -403,8 +403,9 @@ remove it a minute later. Act in this order:
    - Hugging Face: https://huggingface.co/settings/tokens (anyone can also invalidate a leaked Hugging Face token,
      see https://huggingface.co/docs/hub/security-tokens)
    - GitHub tokens: https://github.com/settings/tokens
-2. **Store the new key only in the secrets store** (`llm-cli secrets set <name>` or the AI settings in the GUI),
-   never in a file inside the repository.
+2. **Store the new key only in the secrets store** (`llm-cli ditto login <provider>` for AI provider keys,
+   `llm-cli secrets set <name>` for other tokens, or the AI settings in the GUI), never in a file inside the
+   repository.
 3. **Check what the key was used for** in the provider's usage or billing view, and report misuse to the provider.
 4. **Remove the value from the repository** with a normal commit. Rewriting the history is optional and comes
    second: a pushed secret stays in clones, forks and caches, so a rewrite never makes a key safe again.

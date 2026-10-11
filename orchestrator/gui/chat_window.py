@@ -8,19 +8,23 @@ Features:
   permissions; tools that need a confirmation ask in a modal dialog showing every argument.
 - Persistent, append-only chat history in the per-user state directory (Core.ditto_manager.ChatHistory).
 - Manual clearing of the history.
+- The header shows the access Ditto uses ("Anthropic Claude (API) · API key · wrkspc_...", "Local · Ollama",
+  "key from OPENAI_API_KEY"), read in a worker thread (it opens the credential vault).
 """
 
 import html
 import os
+import threading
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QThread, QUrl, Signal
+from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QDesktopServices, QTextCursor
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QLineEdit, QMessageBox, QProgressBar, QPushButton,
                                QTextBrowser, QVBoxLayout, QWidget)
 
 from orchestrator.Core.ditto_manager import ChatHistory, DittoError
 from orchestrator.gui.tool_confirmation import ToolConfirmation
+from orchestrator.llm.auth.signin import access_text
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.utils.logging import get_logger
@@ -54,6 +58,20 @@ class ChatWorker(QThread):
             self.failed.emit(f"Unexpected error: {redact_secrets(str(e))}")
 
 
+class _AccessSignals(QObject):
+    done = Signal(int, str)  # request number, header text
+
+
+def describe_access(ditto, translate=None) -> str:
+    """The header text for Ditto's current provider and sign-in (no secrets)."""
+    if ditto is None:
+        return ""
+    try:
+        return access_text(ditto.describe("chat"), translate)
+    except Exception:  # not set up (DittoError) or a broken setting: the chat itself explains it
+        return translate("chat.access.not_set_up", "AI not set up") if translate else "AI not set up"
+
+
 class ChatWindow(QWidget):
     def __init__(self, framework_manager, parent=None):
         super().__init__(parent)
@@ -72,8 +90,10 @@ class ChatWindow(QWidget):
         self._migrate_legacy_history(config)
         self.history = ChatHistory.load(self.history_file)
 
+        self._access_request = 0
         self._init_ui()
         self._show_transcript()
+        self.refresh_access()
 
     def _init_ui(self):
         layout = QVBoxLayout(self)
@@ -82,6 +102,11 @@ class ChatWindow(QWidget):
         title = QLabel("Ditto AI Assistant")
         title.setStyleSheet("font-weight: bold; font-size: 14px;")
         header_layout.addWidget(title)
+        self.lbl_access = QLabel("")
+        self.lbl_access.setTextFormat(Qt.PlainText)
+        self.lbl_access.setStyleSheet("color: #8a8a8a; font-size: 11px;")
+        self.lbl_access.setToolTip("The provider and sign-in Ditto uses (Tools > Configure AI Agent)")
+        header_layout.addWidget(self.lbl_access, stretch=1)
 
         self.btn_clear = QPushButton("🗑️ Clear History")
         self.btn_clear.clicked.connect(self._confirm_clear_history)
@@ -121,6 +146,28 @@ class ChatWindow(QWidget):
         input_layout.addWidget(self.txt_input)
         input_layout.addWidget(self.btn_send)
         layout.addLayout(input_layout)
+
+    def refresh_access(self):
+        """Reads the provider and sign-in Ditto uses in a worker thread and shows them in the header."""
+        self._access_request += 1
+        request, ditto = self._access_request, self.ditto
+        i18n = self.i18n  # the worker holds no widget
+        translate = (lambda key, default: i18n.t(key, default)) if i18n else None
+        signals = _AccessSignals()  # no parent: the worker may still emit after the window is gone
+        signals.done.connect(self._on_access)
+
+        def work():
+            text = describe_access(ditto, translate)
+            try:
+                signals.done.emit(request, text)
+            except RuntimeError:
+                pass
+
+        threading.Thread(target=work, name="chat-access", daemon=True).start()
+
+    def _on_access(self, request: int, text: str):
+        if request == self._access_request:
+            self.lbl_access.setText(text)
 
     def _migrate_legacy_history(self, config):
         """Moves the history from the old cache/ location (CWD-relative, not git-ignored) once."""

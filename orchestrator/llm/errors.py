@@ -133,7 +133,15 @@ def parse_retry_after(headers: Any) -> Optional[float]:
     return max(0.0, float(email.utils.mktime_tz(parsed) - time.time()))
 
 
-def _detail(err: Any) -> str:
+def without_secret(text: str, secret: Optional[str]) -> str:
+    """`text` without the credential itself: a server may repeat a key in its error text whose format no pattern
+    knows (a custom server's "invalid key <key>")."""
+    if text and secret and len(secret) >= 8:
+        return text.replace(secret, "REDACTED")
+    return text
+
+
+def _detail(err: Any, secret: Optional[str] = None) -> str:
     """The provider's own error message (redacted, shortened)."""
     body = getattr(err, "body", None)
     message = None
@@ -142,7 +150,7 @@ def _detail(err: Any) -> str:
         if isinstance(inner, dict):
             message = inner.get("message")
     message = message or getattr(err, "message", None) or str(err)
-    message = redact_secrets(str(message)).strip()
+    message = redact_secrets(without_secret(str(message), secret)).strip()
     return message[:500]
 
 
@@ -198,10 +206,12 @@ def _known_cause(err: Any, detail: str, label: str, kw: dict, generic: LLMError,
 
 
 def map_anthropic_error(err: BaseException, label: str = "Claude API", provider: str = "anthropic", *,
-                        profile: Optional[str] = None, preset: Any = None, base_url: Optional[str] = None) -> LLMError:
+                        profile: Optional[str] = None, preset: Any = None, base_url: Optional[str] = None,
+                        secret: Optional[str] = None) -> LLMError:
     """Maps anthropic SDK exceptions, most specific class first. `profile` is set (the profile name, or "" when
     unknown) when the request was signed in with an `ant auth login` profile instead of an API key. With `preset`,
-    answers with a known cause become AuthErrors (code, plain message, actions)."""
+    answers with a known cause become AuthErrors (code, plain message, actions). `secret` (the key the request
+    was sent with) never appears in the message."""
     import anthropic
 
     if isinstance(err, LLMError):
@@ -214,7 +224,7 @@ def map_anthropic_error(err: BaseException, label: str = "Claude API", provider:
     if isinstance(err, anthropic.APIStatusError):
         kw.update(status=err.status_code, request_id=getattr(err, "request_id", None))
         retry_after = parse_retry_after(err.response.headers)
-        detail = _detail(err)
+        detail = _detail(err, secret)
         error_type = getattr(err, "type", None)
         generic = _status_error(err.status_code, detail, label, retry_after=retry_after,
                                 code="insufficient_quota" if error_type == "billing_error" else None, kw=kw)
@@ -225,7 +235,7 @@ def map_anthropic_error(err: BaseException, label: str = "Claude API", provider:
         from orchestrator.llm.auth.errors import auth_error
         return auth_error("anthropic.profile", detail=redact_secrets(str(err))[:300],
                           profile=f" '{profile}'" if profile else "", **kw)
-    return LLMError(f"{label} request failed: {redact_secrets(str(err))[:300]}", **kw)
+    return LLMError(f"{label} request failed: {redact_secrets(without_secret(str(err), secret))[:300]}", **kw)
 
 
 class _ClaudeAPI:
@@ -244,10 +254,11 @@ _CLAUDE = _ClaudeAPI()
 
 
 def map_openai_error(err: BaseException, label: str = "OpenAI-compatible server", provider: str = "", *,
-                     preset: Any = None, base_url: Optional[str] = None, during: str = "request") -> LLMError:
+                     preset: Any = None, base_url: Optional[str] = None, during: str = "request",
+                     secret: Optional[str] = None) -> LLMError:
     """Maps openai SDK exceptions, most specific class first. With `preset`, answers with a known cause become
     AuthErrors (code, plain message, actions), and a local server that is not running says so. `during` is
-    "models" for the model list."""
+    "models" for the model list. `secret` (the key the request was sent with) never appears in the message."""
     import openai
 
     if isinstance(err, LLMError):
@@ -266,8 +277,8 @@ def map_openai_error(err: BaseException, label: str = "OpenAI-compatible server"
         kw.update(status=err.status_code, request_id=getattr(err, "request_id", None))
         retry_after = parse_retry_after(err.response.headers)
         code = getattr(err, "code", None)
-        detail = _detail(err)
+        detail = _detail(err, secret)
         generic = _status_error(err.status_code, detail, label, retry_after=retry_after, code=code, kw=kw)
         return _known_cause(err, detail, label, kw, generic, preset=preset, base_url=base_url, error_code=code,
                             retry_after=retry_after, during=during)
-    return LLMError(f"{label} request failed: {redact_secrets(str(err))[:300]}", **kw)
+    return LLMError(f"{label} request failed: {redact_secrets(without_secret(str(err), secret))[:300]}", **kw)

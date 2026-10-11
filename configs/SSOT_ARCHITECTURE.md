@@ -85,6 +85,7 @@ Fields of a sign-in method (`auth` entry):
 | `fields` | Values that are not secret: `id`, `label`, `pattern` (must match in full), `header` (sent with the key; never a credential header such as `Authorization`, `x-api-key`, `api-key` or `Cookie`), `setting` (a setting that holds the value too and wins while it is set) and `invalid_code` (the error for a value that does not match). |
 | `validate` | The free check behind "Check": a GET with `path` (below `base_url`) or `url`, `account_field` or `account_header` (names the account), `models_field` (counted as models), `public: true` for an endpoint that answers without a key. A key bound to an address is checked at that address only. |
 | `opt_in` | Never picked automatically, only when `ai_auth_<provider>` names it. An `ant auth login` profile is always opt-in. |
+| `note` | A policy or usage note shown with the method (`llm-cli ditto auth methods`, the card in the sign-in panel). |
 | `cli`, `oauth`, `sources` | The vendor CLI's install page and login/logout commands, the endpoints of a later sign-in flow, and the primary sources of the method's facts. |
 
 Presets in the file: `anthropic`, `openai`, `google` (Gemini through its OpenAI-compatible endpoint),
