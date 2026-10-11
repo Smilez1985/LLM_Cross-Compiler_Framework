@@ -790,7 +790,7 @@ class TestModels:
         assert rt.model_state(model) == "unverified"
         assert rt._ensure_model_verified(model) == path and rt.model_ready(model)
         before = path.stat().st_mtime_ns
-        path.write_bytes(data[:-1] + b"!")  # same size, different content
+        path.write_bytes(data[:-1] + bytes([data[-1] ^ 1]))  # same size, different content (always)
         os.utime(path, ns=(before + 1_000_000_000, before + 1_000_000_000))  # a new mtime even on coarse clocks
         assert not rt.model_ready(model)
         with pytest.raises(IntegrityError):
@@ -832,10 +832,14 @@ class TestServerCommand:
             build_server_command(Path("s"), Path("m"), 1, Path("k"), 4096, alias, gpu=False, cache_ram_mib=256)
 
     def test_environment_has_no_secrets_and_no_llama_options(self):
-        env = server_env({"PATH": "/usr/bin", "CUDA_VISIBLE_DEVICES": "0", "LLAMA_ARG_TOOLS": "all",
-                          "LLAMA_API_KEY": "x", "OPENAI_API_KEY": "sk-fake", "HF_TOKEN": "hf_fake",
-                          "AWS_SECRET_ACCESS_KEY": "x", "GGML_VK_VISIBLE_DEVICES": "0"})
-        assert env == {"PATH": "/usr/bin", "CUDA_VISIBLE_DEVICES": "0", "GGML_VK_VISIBLE_DEVICES": "0"}
+        env = server_env({"PATH": "/usr/bin", "HOME": "/home/u", "CUDA_VISIBLE_DEVICES": "0",
+                          "LLAMA_ARG_TOOLS": "all", "LLAMA_API_KEY": "x", "OPENAI_API_KEY": "sk-fake",
+                          "HF_TOKEN": "hf_fake", "AWS_SECRET_ACCESS_KEY": "x", "GGML_VK_VISIBLE_DEVICES": "0",
+                          "GGML_BACKEND_PATH": "/tmp/extra-backend.so"})
+        assert {k: v for k, v in env.items() if k not in ("SYSTEMROOT", "SystemRoot", "WINDIR", "TEMP", "TMP")} == {
+            "PATH": "/usr/bin:/bin" if os.name != "nt" else "", "HOME": "/home/u", "LANG": "C", "LC_ALL": "C",
+            "CUDA_VISIBLE_DEVICES": "0", "GGML_VK_VISIBLE_DEVICES": "0",
+            **({"USERPROFILE": str(Path("/home/u"))} if os.name == "nt" else {})}
 
     def test_process_group_options(self):
         assert popen_options("posix") == {"start_new_session": True}
@@ -960,6 +964,8 @@ class TestServerProcess:
     def test_start_serve_and_stop(self, fake_runtime, monkeypatch):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-fake0123456789abcdefghijk")
         monkeypatch.setenv("LLAMA_ARG_TOOLS", "all")
+        monkeypatch.setenv("GGML_BACKEND_PATH", "/nonexistent/extra-backend.so")
+        monkeypatch.setenv("AIP_MODE", "PREDICTION")
         rt = fake_runtime()
         ep = rt.start()
         folder = rt.root / "b1-cpu"
@@ -972,6 +978,7 @@ class TestServerProcess:
         assert ep.api_key not in repr(ep)
         env = json.loads((folder / "env-1.json").read_text())
         assert "OPENAI_API_KEY" not in env and "LLAMA_ARG_TOOLS" not in env and "PATH" in env
+        assert "GGML_BACKEND_PATH" not in env and "AIP_MODE" not in env, "a cleared environment (decision D22)"
         assert os.getpgid(ep.pid) == ep.pid  # its own process group
         status = rt.status()
         assert status.running and status.healthy and status.tier == "tiny" and status.ctx >= 4096

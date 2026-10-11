@@ -52,10 +52,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
   pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware the hardware probe finds, with free
   RAM and VRAM read again at every start: CUDA, Vulkan, Metal or CPU; ROCm on request; per-start API key in a
-  private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models at pinned revisions into the
-  `ditto/` folder of the configured models folder (`models_dir`, the one Ditto uses; the runtime also takes it
-  when it is given no folder), checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
-  (3 GB RAM). The "local" provider follows the running server without configuration.
+  private file; a cleared environment that keeps only the variables choosing GPUs or locating their drivers, so no
+  `LLAMA_*` option or `GGML_BACKEND_PATH` library reaches the server), and `llm-cli ditto models list|download`
+  fetches Qwen3.5 models at pinned revisions into the `ditto/` folder of the configured models folder (`models_dir`,
+  the one Ditto uses; the runtime also takes it when it is given no folder), checked by size and sha256. Model
+  tiers go down to 2-bit models for weak hardware (3 GB RAM). The "local" provider follows the running server
+  without configuration.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`; the servers the run starts are stopped afterwards, one you started
@@ -117,14 +119,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the pinned build and commit in `--version`, the planned GPU in `llama-bench --list-devices`, and `llama-server`
   must refuse `--tools`. The smoke run and short benchmark on a tiny pinned model are skipped with a note until the
   catalog pins one. Binaries come only from the build's own folder, never from `PATH`, and every program the
-  framework starts takes the same forbidden-option list and an environment without `LLAMA_*` variables. Builds are
-  stored under `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` with `build.json` and `manifest.json` (sha256
-  of every file, duration, verification) and reused, never stamped again; only a build verified on this machine can
-  become active, and retention never removes the active build, the CPU fallback or the build a running server uses.
-  A build from another of your machines can be imported: its files are checked against the manifest and its commit
-  against the pin, and you confirm before any of its programs runs. Ditto's `runtime install` still downloads the
-  prebuilt archive until it moves to this build. A CPU build of `llama-server` and `llama-bench` at the pin took 189 s
-  on a 4-core virtual machine and gave 28 MB of binaries.
+  framework starts takes the same forbidden-option list and a cleared environment without `LLAMA_*` variables.
+  Builds are stored under `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` with `build.json` and
+  `manifest.json` (sha256 of every file, duration, verification) and reused, never stamped again; only a build
+  verified on this machine can become active, and retention never removes the active build, the CPU fallback or the
+  build a running server uses. A build from another of your machines can be imported: its files are checked against
+  the manifest, its build ID against its plan and its commit against the pin, and you confirm before any of its
+  programs runs; then every program in it must report the pin's version, not the one the archive expects. Ditto's
+  `runtime install` still downloads the prebuilt archive until it moves to this build. A CPU build of
+  `llama-server` and `llama-bench` at the pin took 189 s on a 4-core virtual machine and gave 28 MB of binaries.
 - `llm-cli doctor` checks the local llama.cpp runtime: a self-built build in use that was changed (error) or is older
   than the pin (warning), the prebuilt archive in use (information: not self-built), and whether this machine has the
   compiler, CMake and Ninja for a native build (information, with the builder container as the alternative).

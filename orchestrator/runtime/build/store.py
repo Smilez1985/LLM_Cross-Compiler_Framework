@@ -19,8 +19,10 @@ machine can be activated, and retention never deletes the active build, the CPU 
 references, or the build a running server was started from.
 
 Imported builds (built on another machine of the user) come as a tar.gz of build.json, manifest.json and bin/. They
-carry no signature, so the import extracts them safely, checks every file against the manifest and the commit against
-the pin, asks the user to confirm before any of their programs runs, and then verifies them like a local build.
+carry no signature, so the import extracts them safely, checks every file against the manifest, the build ID against
+the hash of the plan, the plan against the download and subprocess rules and the commit against the pin, asks the
+user to confirm before any of their programs runs, and then verifies them like a local build, with the version
+expected from this framework's pin (not from the archive) and every program in bin/ checked.
 """
 
 import json
@@ -36,7 +38,7 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Set, 
 
 from orchestrator import __version__
 from orchestrator.runtime.build.executor import BuildError, BuildExecutor, BuildResult
-from orchestrator.runtime.build.recipe import BuildPlan
+from orchestrator.runtime.build.recipe import BuildPlan, PlanError, build_id_of, check_download_options
 from orchestrator.runtime.build.source import remove_tree
 from orchestrator.runtime.build.toolchain import DetectedToolchain
 from orchestrator.runtime.build.verify import SmokeModelFile, Verifier, VerifyReport, binary_path, sha256_file
@@ -222,7 +224,8 @@ class BuildStore:
             return None
         return dest
 
-    def build(self, plan: BuildPlan, *, source: Path, executor: BuildExecutor, verifier: Verifier, jobs: int,
+    def build(self, plan: BuildPlan, *, source: Path, executor: BuildExecutor, verifier: Verifier,
+              jobs: Optional[int] = None,
               toolchain: Optional[DetectedToolchain] = None, smoke_model: Optional[SmokeModelFile] = None,
               perf_key: Optional[str] = None, host: Optional[Tuple[str, str]] = None) -> StoredBuild:
         """Builds the plan (or returns the stored build of the same ID), verifies it and stores it. A build that fails
@@ -397,8 +400,8 @@ class BuildStore:
                         "built_by_origin": manifest.get("origin"), "files": sorted(manifest["files"])}
                 if not confirm(info):
                     raise StoreError("the import was not confirmed; nothing was run or stored")
-                report = verifier.verify(build["plan"], staging / "bin", run_binaries=True, smoke_model=smoke_model,
-                                         host_arch=host[1])
+                report = verifier.verify(_import_checks(build["plan"], pin), staging / "bin", run_binaries=True,
+                                         smoke_model=smoke_model, host_arch=host[1])
                 if not report.ok:
                     raise StoreError(f"the imported build failed its verification: {report.summary()}")
                 manifest = dict(manifest)
@@ -431,6 +434,10 @@ class BuildStore:
         plan = build.get("plan")
         if not isinstance(plan, dict):
             raise StoreError("build.json has no plan")
+        try:
+            parsed = BuildPlan.from_dict(plan)
+        except PlanError as e:
+            raise StoreError(f"build.json has no valid plan: {e}") from None
         source = plan.get("source") or {}
         if source.get("commit") != pin.commit:
             raise StoreError(f"the build is of commit {str(source.get('commit'))[:12]}, but this framework is pinned "
@@ -439,6 +446,16 @@ class BuildStore:
         if (target.get("os"), target.get("arch")) != tuple(host):
             raise StoreError(f"the build is for {target.get('os')}/{target.get('arch')}, this machine is "
                              f"{host[0]}/{host[1]}")
+        # The archive is unsigned, so what it says about itself is checked, not believed: the build ID must be the
+        # hash of its plan (find() hands a stored build out by that ID), and the plan must be one this framework
+        # makes (no download option, no subprocess support).
+        if build_id_of(parsed.id_inputs()) != bid:
+            raise StoreError("the build ID of the archive is not the hash of its plan; the archive was changed")
+        try:
+            for index in range(len(parsed.steps)):
+                check_download_options(parsed.options(index))
+        except PlanError as e:
+            raise StoreError(f"the plan of the build is not one this framework makes: {e}") from None
         files = manifest.get("files")
         links = manifest.get("links") or {}
         if not isinstance(files, dict) or not files or not isinstance(links, dict):
@@ -466,6 +483,15 @@ class BuildStore:
             if name not in files:
                 raise StoreError(f"the build lacks {name}")
         return build, manifest
+
+
+def _import_checks(plan: Mapping[str, Any], pin: LlamaCppSource) -> Dict[str, Any]:
+    """The plan an imported build is verified with: the version it must report comes from this framework's pin, not
+    from the archive (the verifier also checks every program the folder holds, not only the ones the archive lists)."""
+    checked = dict(plan)
+    checked["verify"] = {**(plan.get("verify") or {}),
+                         "version": {"build_number": pin.build_number, "commit": pin.short_commit}}
+    return checked
 
 
 def smoke_model_file(catalog_model: Any, models_dir: Path) -> Optional[SmokeModelFile]:

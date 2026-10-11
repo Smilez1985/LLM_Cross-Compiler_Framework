@@ -57,6 +57,8 @@ _SYSTEM_LIBS = re.compile(r"^(libc\.so\.6|libm\.so\.6|libpthread\.so\.0|libdl\.s
                           r"libstdc\+\+\.so\.6|libgomp\.so\.1|libatomic\.so\.1|ld-linux-x86-64\.so\.2|"
                           r"ld-linux-aarch64\.so\.1|libc\.musl-[a-z0-9_]+\.so\.1|ld-musl-[a-z0-9_]+\.so\.1)$", re.ASCII)
 _STATIC_RUNTIME_LIBS = ("libstdc++.so.6", "libgcc_s.so.1")
+# The first device of each GPU backend in --list-devices (the recipe plans these names).
+_BACKEND_DEVICE = {"cuda": "CUDA0", "vulkan": "Vulkan0", "rocm": "ROCm0", "metal": "MTL0"}
 _BACKEND_LIBS = {
     "cuda": re.compile(r"^(libcuda\.so\.1|libcudart\.so\.\d+|libcublas\.so\.\d+|libcublasLt\.so\.\d+)$", re.ASCII),
     "vulkan": re.compile(r"^libvulkan\.so\.1$", re.ASCII),
@@ -338,12 +340,31 @@ class SmokeModelFile:
     sha256: str
 
 
-class Verifier:
-    """Runs the checks of design 3.8 on a build folder. `runner` starts a program (replaceable in tests)."""
+_FROM_CATALOG: Any = object()
 
-    def __init__(self, runner: Optional[BinaryRunner] = None, *, threads: Optional[int] = None):
+
+class Verifier:
+    """Runs the checks of design 3.8 on a build folder. `runner` starts a program (replaceable in tests).
+
+    smoke_sha256 is the sha256 of the catalog's smoke-test model (decision D17); by default it is read from the
+    catalog. A model with another sha256 is never loaded: an untrusted model does not run natively here (decision
+    D23), whatever a caller passes as smoke_model."""
+
+    def __init__(self, runner: Optional[BinaryRunner] = None, *, threads: Optional[int] = None,
+                 smoke_sha256: Optional[str] = _FROM_CATALOG):
         self.runner = runner or default_binary_runner
         self.threads = threads
+        self.smoke_sha256 = smoke_sha256
+
+    def _pinned_smoke_sha256(self) -> Optional[str]:
+        if self.smoke_sha256 is not _FROM_CATALOG:
+            return self.smoke_sha256
+        try:
+            from orchestrator.runtime.catalog import load_catalog
+            model = load_catalog().smoke_model
+        except Exception:
+            return None
+        return model.sha256 if model is not None else None
 
     def verify(self, plan: Any, bin_dir: Path, *, run_binaries: Optional[bool] = None,
                smoke_model: Optional[SmokeModelFile] = None, host_arch: Optional[str] = None) -> VerifyReport:
@@ -354,6 +375,11 @@ class Verifier:
         expected = data.get("verify") or {}
         target = data.get("target") or {}
         binaries = list(expected.get("binaries") or [])
+        # Every llama.cpp program the folder holds is checked, not only the listed ones: a llama-server that an
+        # (imported) plan leaves out of its list still has to report the pin and refuse --tools.
+        present = sorted(p.name for p in Path(bin_dir).iterdir() if _RE_BINARY.fullmatch(p.name)) \
+            if Path(bin_dir).is_dir() else []
+        binaries += [name for name in present if name not in binaries]
         if run_binaries is None:
             run_binaries = data.get("placement") != "cross" and (host_arch is None or host_arch == target.get("arch"))
         paths: Dict[str, Path] = {}
@@ -378,7 +404,7 @@ class Verifier:
             home.mkdir()
             env = cleared_env(home)
             report.checks.append(self._version(expected, paths, tmp, env))
-            report.checks.append(self._devices(expected, paths, tmp, env))
+            report.checks.append(self._devices(expected, paths, tmp, env, str(data.get("backend") or "cpu")))
             report.checks.append(self._server_tools(paths, tmp, env))
             report.checks.append(self._smoke(paths, smoke_model, tmp, env))
         return report
@@ -456,7 +482,7 @@ class Verifier:
 
     # --- 3. devices ---
     def _devices(self, expected: Mapping[str, Any], paths: Mapping[str, Path], cwd: str,
-                 env: Mapping[str, str]) -> Check:
+                 env: Mapping[str, str], backend: str = "cpu") -> Check:
         if "llama-bench" not in paths:
             return Check("devices", None, "no llama-bench in this build")
         rc, out, err = self._run([str(paths["llama-bench"]), "--list-devices"], DEVICES_TIMEOUT, cwd, env)
@@ -465,6 +491,8 @@ class Verifier:
             return Check("devices", False, f"llama-bench --list-devices failed (exit {rc}): {_tail(err or out)}")
         names = [d.name for d in devices]
         want = list(expected.get("devices") or [])
+        if not want and backend in _BACKEND_DEVICE:
+            want = [_BACKEND_DEVICE[backend]]  # a GPU plan without a device list still needs its first device
         lost = [d for d in want if d not in names]
         data = {"devices": [{"name": d.name, "description": d.description[:80], "total_mib": d.total_mib}
                             for d in devices]}
@@ -497,6 +525,10 @@ class Verifier:
                          "benchmark skipped")
         if "llama-bench" not in paths:
             return Check("smoke", None, "no llama-bench in this build")
+        pinned = self._pinned_smoke_sha256()
+        if pinned is None or smoke.sha256 != pinned:
+            return Check("smoke", False, "the model given for the smoke run is not the catalog's smoke-test model; "
+                         "an untrusted model never runs natively here (decision D23); not loaded")
         try:
             if sha256_file(smoke.path) != smoke.sha256:
                 return Check("smoke", False, "the smoke-test model does not match its pinned sha256; not loaded")

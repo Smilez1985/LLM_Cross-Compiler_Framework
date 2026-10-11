@@ -58,7 +58,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install|start|stop|status`
   betreibt einen gepinnten llama.cpp-`llama-server` auf 127.0.0.1 (Build passend zur Hardware, die die
   Hardware-Probe findet, wobei freier RAM und VRAM bei jedem Start neu gelesen werden: CUDA, Vulkan, Metal oder CPU,
-  ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei), und `llm-cli ditto models list|download`
+  ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei; eine geleerte Umgebung, die nur die Variablen
+  behält, die GPUs auswählen oder ihre Treiber finden, sodass keine `LLAMA_*`-Option und keine
+  `GGML_BACKEND_PATH`-Bibliothek den Server erreicht), und `llm-cli ditto models list|download`
   lädt Qwen3.5-Modelle in gepinnten Revisionen in den Ordner `ditto/` des eingestellten Modellordners
   (`models_dir`, den Ditto nutzt; die Laufzeit nimmt ihn auch, wenn sie keinen Ordner bekommt) und prüft sie
   anhand von Größe und sha256. Die Modellstufen reichen bis zu 2-Bit-Modellen für schwache Hardware (3 GB RAM).
@@ -132,15 +134,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   und `llama-server` muss `--tools` ablehnen. Rauchtest und kurzer Benchmark auf einem winzigen festgelegten Modell
   werden mit einem Hinweis übersprungen, bis der Katalog eines festlegt. Programme kommen nur aus dem eigenen Ordner
   des Builds, nie aus `PATH`, und jedes Programm, das das Framework startet, bekommt dieselbe Liste verbotener
-  Optionen und eine Umgebung ohne `LLAMA_*`-Variablen. Builds liegen unter
+  Optionen und eine geleerte Umgebung ohne `LLAMA_*`-Variablen. Builds liegen unter
   `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` mit `build.json` und `manifest.json` (sha256 jeder Datei,
   Dauer, Prüfung) und werden wiederverwendet, nie neu gestempelt; nur ein auf diesem Rechner geprüfter Build kann
   aktiv werden, und die Aufbewahrung entfernt nie den aktiven Build, den CPU-Ersatz oder den Build, aus dem ein
   laufender Server gestartet wurde. Ein Build von einem deiner anderen Rechner kann importiert werden: Seine Dateien
-  werden gegen das Manifest geprüft und sein Commit gegen den Pin, und du bestätigst, bevor eines seiner Programme
-  läuft. `runtime install` von Ditto lädt weiterhin das vorgefertigte Archiv, bis Ditto auf diesen Build wechselt. Ein
-  CPU-Build von `llama-server` und `llama-bench` am Pin dauerte auf einer virtuellen Maschine mit 4 Kernen 189 s und
-  ergab 28 MB Programme.
+  werden gegen das Manifest geprüft, seine Build-ID gegen seinen Bauplan und sein Commit gegen den Pin, und du
+  bestätigst, bevor eines seiner Programme läuft; danach muss jedes seiner Programme die Version des Pins melden,
+  nicht die, die das Archiv erwartet. `runtime install` von Ditto lädt weiterhin das vorgefertigte Archiv, bis Ditto
+  auf diesen Build wechselt. Ein CPU-Build von `llama-server` und `llama-bench` am Pin dauerte auf einer virtuellen
+  Maschine mit 4 Kernen 189 s und ergab 28 MB Programme.
 - `llm-cli doctor` prüft die lokale llama.cpp-Laufzeit: einen genutzten selbst gebauten Build, der verändert wurde
   (Fehler) oder älter als der Pin ist (Warnung), das genutzte vorgefertigte Archiv (Information: nicht selbst gebaut)
   und ob dieser Rechner Compiler, CMake und Ninja für einen nativen Build hat (Information, mit dem Builder-Container

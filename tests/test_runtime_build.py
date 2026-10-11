@@ -672,16 +672,35 @@ class TestVerifier:
         answers[("llama-bench", "-m")] = (0, BENCH_JSON, "")
         plan = with_targets(native_plan(), ["llama-server", "llama-bench"])
         runner = FakeRunner(answers)
-        bad = Verifier(runner).verify(plan, make_bin(tmp_path / "a"), smoke_model=SmokeModelFile(model, "0" * 64))
+        bad = Verifier(runner, smoke_sha256="0" * 64).verify(plan, make_bin(tmp_path / "a"),
+                                                             smoke_model=SmokeModelFile(model, "0" * 64))
         assert "not loaded" in bad.check("smoke").detail
         assert not any(str(model) in c["argv"] for c in runner.calls)
-        good = Verifier(FakeRunner(answers)).verify(plan, make_bin(tmp_path / "b"),
-                                                    smoke_model=SmokeModelFile(model, digest))
+        good = Verifier(FakeRunner(answers), smoke_sha256=digest).verify(plan, make_bin(tmp_path / "b"),
+                                                                         smoke_model=SmokeModelFile(model, digest))
         assert good.check("smoke").ok and "tg 31.4 t/s" in good.check("smoke").detail
         answers[("llama-bench", "-m")] = (-4, "", "Illegal instruction")
-        sigill = Verifier(FakeRunner(answers)).verify(plan, make_bin(tmp_path / "c"),
-                                                      smoke_model=SmokeModelFile(model, digest))
+        sigill = Verifier(FakeRunner(answers), smoke_sha256=digest).verify(plan, make_bin(tmp_path / "c"),
+                                                                           smoke_model=SmokeModelFile(model, digest))
         assert "SIGILL" in sigill.check("smoke").detail
+
+    def test_only_the_catalog_smoke_model_ever_runs(self, tmp_path):
+        """Decision D23: a model that is not the catalog's smoke-test model never runs natively here, even when its
+        file matches the sha256 the caller passes along with it."""
+        model = tmp_path / "someones-conversion.gguf"
+        model.write_bytes(b"GGUF not from the catalog")
+        digest = hashlib.sha256(model.read_bytes()).hexdigest()
+        plan = with_targets(native_plan(), ["llama-server", "llama-bench"])
+        for verifier_sha in (None, "f" * 64):  # no smoke model pinned / another one pinned
+            runner = FakeRunner({**GOOD, ("llama-bench", "-m"): (0, BENCH_JSON, "")})
+            report = Verifier(runner, smoke_sha256=verifier_sha).verify(
+                plan, make_bin(tmp_path / str(verifier_sha)[:4]), smoke_model=SmokeModelFile(model, digest))
+            assert report.check("smoke").ok is False and "D23" in report.check("smoke").detail
+            assert not any(str(model) in c["argv"] for c in runner.calls)
+        assert CATALOG.smoke_model is None or CATALOG.smoke_model.sha256 != digest
+        runner = FakeRunner({**GOOD, ("llama-bench", "-m"): (0, BENCH_JSON, "")})
+        report = Verifier(runner).verify(plan, make_bin(tmp_path / "cat"), smoke_model=SmokeModelFile(model, digest))
+        assert report.check("smoke").ok is False, "the default reads the catalog's pin"
 
     def test_smoke_model_file_needs_a_pinned_downloaded_model(self, tmp_path):
         assert smoke_model_file(None, tmp_path) is None
@@ -988,3 +1007,136 @@ def test_probe_profile_reaches_toolchain_info():
     profile = parse_profile((PROBES / "schema2_pc_two_nvidia.txt").read_text())
     info = ToolchainInfo.from_profile(profile)
     assert info.compiler == "gcc-13.3.0" and info.openmp is None
+
+
+# --- review findings (regressions) -----------------------------------------------------------------------------------
+
+class ElfExecutor(FakeExecutor):
+    """Like FakeExecutor, but every program is a real ELF program of this machine, so the format check can pass."""
+
+    def __init__(self, elf):
+        super().__init__()
+        self.elf = elf
+
+    def build(self, plan, **kw):
+        result = super().build(plan, **kw)
+        for name in plan.targets:
+            shutil.copy2(self.elf, result.bin_dir / name)
+            result.files[name] = hashlib.sha256((result.bin_dir / name).read_bytes()).hexdigest()
+        return result
+
+
+def _edit_stamp(work, change, name="build.json"):
+    data = json.loads((work / name).read_text())
+    change(data)
+    (work / name).write_text(json.dumps(data))
+
+
+class TestImportIsVerifiedAgainstThePin:
+    """An imported archive is unsigned: what it says about itself (its expected version, its list of programs, its
+    build ID) must not decide how it is checked."""
+
+    def archive(self, tmp_path):
+        elf = system_elf("libc.so.6")
+        if elf is None or read_elf(elf).machine != "x86_64":
+            pytest.skip("needs an x86_64 system ELF program (the fixture plan is for x86_64)")
+        store = BuildStore(tmp_path / "pc")
+        build = store_build(store, tmp_path, executor=ElfExecutor(elf))
+        return store.export_build(build.build_id, tmp_path / "b.tar.gz")
+
+    def do_import(self, tmp_path, archive, answers):
+        return BuildStore(tmp_path / "laptop").import_build(archive, pin=PIN, verifier=Verifier(FakeRunner(answers)),
+                                                            confirm=lambda info: True, host=("linux", "x86_64"))
+
+    def test_the_untouched_archive_passes_the_real_verifier(self, tmp_path):
+        imported = self.do_import(tmp_path, self.archive(tmp_path), GOOD)
+        assert imported.verified and imported.origin == "imported"
+
+    def test_a_forged_version_expectation_does_not_let_another_commit_in(self, tmp_path):
+        archive = self.archive(tmp_path)
+        forged = TestStore()._repack(tmp_path, archive, lambda w: _edit_stamp(
+            w, lambda d: d["plan"]["verify"].update(version={"build_number": 99, "commit": "0badc0de"})))
+        other = "version: 0.0.1 (build 99, commit 0badc0de)\n"
+        answers = {**GOOD, ("llama-bench", "--version"): (0, "", other), ("llama-server", "--version"): (0, "", other)}
+        with pytest.raises(StoreError, match="verification") as e:
+            self.do_import(tmp_path, forged, answers)
+        assert "11429" in str(e.value) and PIN.short_commit in str(e.value)
+
+    def test_a_server_left_out_of_the_program_list_is_still_checked(self, tmp_path):
+        archive = self.archive(tmp_path)
+        forged = TestStore()._repack(tmp_path, archive, lambda w: _edit_stamp(
+            w, lambda d: d["plan"]["verify"].update(binaries=["llama-bench"])))
+        answers = {**GOOD, ("llama-server", "--tools"): (1, "", "error: failed to open model file")}
+        with pytest.raises(StoreError, match="--tools"):
+            self.do_import(tmp_path, forged, answers)
+
+    def test_the_build_id_must_be_the_hash_of_the_plan(self, tmp_path):
+        archive = self.archive(tmp_path)
+        forged = TestStore()._repack(tmp_path, archive, lambda w: _edit_stamp(
+            w, lambda d: d["plan"]["steps"][0]["options"].update(GGML_NATIVE="OFF")))
+        verifier = FakeVerifier()
+        with pytest.raises(StoreError, match="build ID"):
+            BuildStore(tmp_path / "laptop").import_build(forged, pin=PIN, verifier=verifier, confirm=lambda i: True,
+                                                         host=("linux", "x86_64"))
+        assert verifier.calls == []
+
+    def test_a_plan_with_subprocess_support_is_refused_even_with_a_matching_id(self, tmp_path):
+        archive = self.archive(tmp_path)
+        plan = native_plan()
+        step = plan.steps[0]
+        options = dict(step.options, LLAMA_SUBPROCESS="ON")
+        bad = replace(plan, steps=(replace(step, options=tuple(sorted(options.items()))),))
+        bad = replace(bad, build_id=build_id_of(bad.id_inputs()))
+
+        def forge(work):
+            _edit_stamp(work, lambda d: d.update(build_id=bad.build_id, plan=bad.as_dict()))
+            _edit_stamp(work, lambda d: d.update(build_id=bad.build_id), "manifest.json")
+
+        forged = TestStore()._repack(tmp_path, archive, forge)
+        verifier = FakeVerifier()
+        with pytest.raises(StoreError, match="LLAMA_SUBPROCESS"):
+            BuildStore(tmp_path / "laptop").import_build(forged, pin=PIN, verifier=verifier, confirm=lambda i: True,
+                                                         host=("linux", "x86_64"))
+        assert verifier.calls == []
+
+
+class TestVerifierChecksWhatIsThere:
+
+    def test_every_program_in_the_folder_is_checked_not_only_the_listed_ones(self, tmp_path):
+        plan = with_targets(native_plan(), ["llama-bench"])
+        answers = {**GOOD, ("llama-server", "--tools"): (1, "", "error: failed to open model file")}
+        report = Verifier(FakeRunner(answers)).verify(plan, make_bin(tmp_path), run_binaries=True)
+        assert report.check("server-tools").ok is False and not report.ok
+
+    def test_a_gpu_plan_without_a_device_list_still_needs_its_device(self, tmp_path):
+        plan = with_targets(native_plan(), ["llama-server", "llama-bench"])
+        plan = replace(plan, backend="vulkan", verify={**plan.verify, "devices": []})
+        report = Verifier(FakeRunner(GOOD)).verify(plan, make_bin(tmp_path), run_binaries=True)
+        assert report.check("devices").ok is False and "Vulkan0" in report.check("devices").detail
+
+
+class TestLauncherEnvironment:
+    """Decision D22: every launcher starts llama-server with a cleared environment, Ditto's too."""
+
+    def test_ditto_server_environment_is_built_from_nothing(self):
+        caller = {"PATH": "/opt/other/bin:/usr/bin", "HOME": "/home/u", "CUDA_VISIBLE_DEVICES": "1",
+                  "GGML_VK_VISIBLE_DEVICES": "0", "LLAMA_ARG_TOOLS": "all",
+                  "GGML_BACKEND_PATH": "/tmp/backend.so",          # loads a library into the server
+                  "AIP_MODE": "PREDICTION", "AIP_HTTP_PORT": "80",  # moves the server's port
+                  "HTTPS_PROXY": "http://proxy.invalid", "LD_PRELOAD": "/tmp/x.so", "OPENAI_API_KEY": "sk-x"}
+        env = server_policy.server_env(caller)
+        assert env["CUDA_VISIBLE_DEVICES"] == "1" and env["GGML_VK_VISIBLE_DEVICES"] == "0"
+        for name in ("LLAMA_ARG_TOOLS", "GGML_BACKEND_PATH", "AIP_MODE", "AIP_HTTP_PORT", "HTTPS_PROXY",
+                     "LD_PRELOAD", "OPENAI_API_KEY"):
+            assert name not in env, name
+        assert env["PATH"] == server_policy.CLEARED_PATH and env["HOME"] == "/home/u"
+        assert set(env) <= set(server_policy.cleared_env(Path("/home/u"))) | server_policy.SERVER_ENV_PASS
+
+
+@POSIX
+def test_parallel_jobs_follow_the_memory_when_the_caller_names_none(tmp_path, fake_tools, source):
+    tools, detected = fake_tools
+    small = replace(detected, cpus=8, ram_available_mib=2 * CATALOG.build_jobs.per_job_mib("cpu") + 100)
+    result = BuildExecutor().build(native_plan(), source=source, work=tmp_path / "w", jobs=None, toolchain=small)
+    build = calls(tools)[-1]["argv"]
+    assert build[build.index("--parallel") + 1] == "2" and result.jobs == 2

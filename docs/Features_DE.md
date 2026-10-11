@@ -569,8 +569,12 @@ deshalb zählt bei ihnen nur der RAM. `runtime start --model <Stufe>` überstimm
   API-Schlüssel pro Start erreicht ihn nur über eine Schlüsseldatei, die nur du lesen kannst, und das Framework
   prüft, dass der Server Anfragen ohne Schlüssel ablehnt. Weboberfläche und Slots-Endpunkt sind aus, und der Server
   läuft mit `--offline`. Optionen, die dem Modell eigene Tools, einen Agentenmodus, MCP-Server, entferntes Rechnen
-  oder einen Schlüssel auf der Befehlszeile geben würden, werden abgelehnt, und Umgebungsvariablen, die
-  Serveroptionen setzen könnten oder nach Geheimnissen aussehen, werden entfernt.
+  oder einen Schlüssel auf der Befehlszeile geben würden, werden abgelehnt. Der Server startet mit geleerter
+  Umgebung: Außer deinem Benutzerordner, einem festen `PATH` und der C-Locale bekommt er nur die Variablen, die GPUs
+  auswählen oder GPU-Treiber finden (`CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`,
+  `GGML_VK_VISIBLE_DEVICES`, `HSA_OVERRIDE_GFX_VERSION`, die Vulkan-Treibervariablen, `LD_LIBRARY_PATH` und wenige
+  mehr), also erreicht ihn keine `LLAMA_*`-Option, keine `GGML_BACKEND_PATH`-Bibliothek, kein Proxy und kein
+  Schlüssel.
 - **GPU-Auslagerung:** Mit einem GPU-Build kommen so viele Schichten auf die GPU, wie hineinpassen.
 - **Leerlauf:** Das Modell wird nach 600 Sekunden ohne Anfrage entladen und bei der nächsten Anfrage wieder geladen
   (`--sleep-idle`).
@@ -618,8 +622,10 @@ Build, und der vorgefertigte Download bleibt dann nur als ausdrückliche Wahl, a
   von allem, was die Programme verändert, also wird ein abgelegter Build wiederverwendet und nie neu gestempelt. Nur
   ein auf diesem Rechner geprüfter Build kann der aktive werden; die Aufbewahrung behält den aktiven Build, den
   CPU-Ersatz, den Build, aus dem ein laufender Server gestartet wurde, und die zwei neuesten anderen. Ein Build von
-  einem deiner anderen Rechner kann importiert werden: Jede Datei wird gegen sein Manifest geprüft und der Commit
-  gegen den Pin, du bestätigst, bevor eines seiner Programme läuft, und danach wird er wie ein lokaler Build geprüft.
+  einem deiner anderen Rechner kann importiert werden: Jede Datei wird gegen sein Manifest geprüft, die Build-ID
+  gegen seinen Bauplan und der Commit gegen den Pin, du bestätigst, bevor eines seiner Programme läuft, und danach
+  wird er wie ein lokaler Build geprüft. Die Version, die er melden muss, kommt aus dem Pin, nicht aus dem Archiv,
+  und jedes Programm darin wird geprüft, auch eines, das das Archiv nicht aufführt.
 - **Gemessen** auf einer virtuellen x86-64-Maschine mit 4 Kernen (GCC 13.3, `-j4`): `llama-server` und `llama-bench`
   am Pin in 189 Sekunden samt Prüfungen, 28 MB Programme.
 
