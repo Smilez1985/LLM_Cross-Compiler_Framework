@@ -333,7 +333,9 @@ class SecretsManager:
         entry = f"[{timestamp}] USER={user} ACTION={action} KEY={key_name} STATUS={status}\n"
         try:
             self.audit_log_file.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(self.audit_log_file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            # O_BINARY: on Windows a descriptor is text mode otherwise, and lines would end in \r\r\n
+            flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
+            fd = os.open(self.audit_log_file, flags, 0o600)
             with os.fdopen(fd, "a", encoding="utf-8") as f:
                 if platform.system() != "Windows":
                     os.fchmod(f.fileno(), 0o600)
@@ -751,17 +753,23 @@ class SecretsManager:
             raise
 
     @staticmethod
-    def _read_store(path: Path) -> Dict[str, Any]:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
+    def _parse_store(raw: bytes) -> Dict[str, Any]:
+        data = json.loads(raw.decode("utf-8"))
         if not isinstance(data, dict):
             raise ValueError("not a JSON object")
         return data
 
     @classmethod
+    def _read_store(cls, path: Path) -> Dict[str, Any]:
+        return cls._parse_store(Path(path).read_bytes())
+
+    @classmethod
     def _read_vault(cls, path: Path) -> Tuple[int, Dict[str, Any], Dict[str, Dict[str, str]]]:
         """(version, header, entries) of a store file of version 1 or 2."""
-        data = cls._read_store(path)
+        return cls._vault_data(cls._read_store(path))
+
+    @staticmethod
+    def _vault_data(data: Dict[str, Any]) -> Tuple[int, Dict[str, Any], Dict[str, Dict[str, str]]]:
         version = data.get("version")
         if isinstance(version, int) and not isinstance(version, bool):
             if version != 2:
@@ -877,15 +885,26 @@ class SecretsManager:
                 continue
         return False
 
-    def _migrated_stores(self) -> list:
+    def _migrated_stores(self) -> Optional[Dict[str, list]]:
+        """The old stores already taken over, by path and by content. None when the record cannot be read:
+        a takeover already ran, and running it again could bring back secrets deleted since."""
+        path = self._migrated_file
+        if not os.path.lexists(path):
+            return {"stores": [], "sha256": []}
         try:
-            data = json.loads(self._migrated_file.read_text(encoding="utf-8"))
-            return [str(p) for p in data.get("stores", [])]
-        except FileNotFoundError:
-            return []
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(data, dict):
+                raise ValueError("not a JSON object")
+            record = {}
+            for name in ("stores", "sha256"):
+                value = data.get(name, [])
+                if not isinstance(value, list):
+                    raise ValueError(f"'{name}' is not a list")
+                record[name] = [str(v) for v in value]
+            return record
         except Exception as e:
-            self.logger.warning(f"Cannot read {self._migrated_file}: {e}")
-            return []
+            self.logger.warning(f"Cannot read {path} ({e}); old secrets stores are not taken over.")
+            return None
 
     def _take_over_legacy(self) -> None:
         """Merges the store of the old location into the per-user store, exactly once. Secrets that are
@@ -894,9 +913,11 @@ class SecretsManager:
         legacy = self._legacy_file
         if legacy is None or self._mode != "keyring":
             return
-        legacy_id = os.path.realpath(legacy)
         done = self._migrated_stores()
-        if legacy_id in done or not os.path.lexists(legacy):
+        if done is None:
+            return
+        legacy_id = os.path.realpath(legacy)
+        if legacy_id in done["stores"] or not os.path.lexists(legacy):
             return
         if not self._lock_depth:
             try:
@@ -906,23 +927,28 @@ class SecretsManager:
                 self.logger.warning(f"Old store {legacy} not taken over yet: {e}")
             return
         try:
-            _, _, data = self._read_vault(legacy)
+            raw = legacy.read_bytes()
+            _, _, data = self._vault_data(self._parse_store(raw))
         except FileNotFoundError:
             return
         except Exception as e:
             # Its secrets would be lost silently: refuse changes until it is repaired or moved aside.
             self._fail(legacy, e)
             return
+        digest = hashlib.sha256(raw).hexdigest()
+        # The same file under another path (installation folder moved, other mount point) was taken over already.
+        seen = digest in done["sha256"]
         present = {canonical_name(name) for name in self._entries}
-        added = {k: v for k, v in data.items() if canonical_name(k) not in present}
+        added = {} if seen else {k: v for k, v in data.items() if canonical_name(k) not in present}
         if added:
             self._entries.update(added)
             self._move_legacy_names()
             if not self._save_store():
                 self._signature = None
                 return  # tried again on the next load
+        record = {"stores": done["stores"] + [legacy_id], "sha256": done["sha256"] + ([] if seen else [digest])}
         try:
-            self._write_atomic(self._migrated_file, {"stores": done + [legacy_id]})
+            self._write_atomic(self._migrated_file, record)
         except Exception as e:
             self.logger.warning(f"Could not record the takeover of {legacy} in {self._migrated_file}: {e}")
         self.logger.info(f"Secrets of the old store {legacy} taken over into {self.secrets_file} "

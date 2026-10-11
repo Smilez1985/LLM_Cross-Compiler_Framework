@@ -489,6 +489,16 @@ class TestSecretsFollowUp:
             assert log.stat().st_mode & 0o777 == 0o600
         assert not (tmp_path / "logs").exists() and list(project.iterdir()) == []
 
+    def test_secrets_audit_log_lines_end_with_one_line_break(self, memory_keyring, tmp_path):
+        """os.open() gives a text-mode descriptor on Windows unless O_BINARY is set; with the text layer on
+        top, every entry would end in \\r\\r\\n."""
+        sm = secrets_for(tmp_path)
+        assert sm.set_secret("hf_token", HF) and sm.get_secret("hf_token") == HF
+
+        raw = sm.audit_log_file.read_bytes()
+        assert b"\r\r" not in raw
+        assert raw.count(os.linesep.encode()) == 2 and raw.endswith(os.linesep.encode())
+
     def test_legacy_merge_keeps_per_user_values_and_runs_once(self, memory_keyring, tmp_path):
         gui_store = SecretsManager(tmp_path / "configs")
         assert gui_store.initialize()
@@ -503,6 +513,46 @@ class TestSecretsFollowUp:
         assert sm.get_secret("gemini_api_key") == "AIzaSyA1234567890abcdefghijklmnopqrstuv"
         assert sm.delete_secret("gemini_api_key")
         assert secrets_for(tmp_path).get_secret("gemini_api_key") is None, "the takeover ran a second time"
+
+    def test_moved_installation_does_not_bring_deleted_secrets_back(self, memory_keyring, tmp_path):
+        """The old store is recognised by its content too: after the installation folder is moved (or seen
+        under another mount point), its configs/secrets.store is not taken over a second time."""
+        old_configs = tmp_path / "install-a" / "configs"
+        old = SecretsManager(old_configs)
+        assert old.initialize() and old.set_secret("hf_token", HF) and old.set_secret("openai_api_key", SK)
+        sm = secrets_for(tmp_path, old_configs)
+        assert sm.get_secret("hf_token") == HF
+        assert sm.delete_secret("hf_token")  # leaked and revoked
+
+        (tmp_path / "install-a").rename(tmp_path / "install-b")
+        moved = secrets_for(tmp_path, tmp_path / "install-b" / "configs")
+
+        assert moved.get_secret("hf_token") is None, "a secret deleted after the takeover came back"
+        assert moved.get_secret("openai_api_key") == SK
+
+        # Another old store with other content is still taken over once.
+        gemini = "AIzaSyA1234567890abcdefghijklmnopqrstuv"
+        other = SecretsManager(tmp_path / "other" / "configs")
+        assert other.initialize() and other.set_secret("gemini_api_key", gemini)
+        assert secrets_for(tmp_path, tmp_path / "other" / "configs").get_secret("gemini_api_key") == gemini
+
+    @pytest.mark.parametrize("record", [b"garbage", b"[]", b'{"stores": "/opt/llm/configs/secrets.store"}'])
+    def test_unreadable_takeover_record_never_takes_the_old_store_over_again(self, memory_keyring, tmp_path,
+                                                                            record):
+        old = SecretsManager(tmp_path / "configs")
+        assert old.initialize() and old.set_secret("hf_token", HF)
+        sm = secrets_for(tmp_path)
+        assert sm.get_secret("hf_token") == HF
+        assert sm.delete_secret("hf_token")
+        marker = tmp_path / "state" / "secrets.store.migrated"
+        assert marker.is_file()
+        marker.write_bytes(record)  # damaged or edited by hand
+
+        fresh = secrets_for(tmp_path)
+
+        assert fresh.get_secret("hf_token") is None, "a secret deleted after the takeover came back"
+        assert fresh.set_secret("openai_api_key", SK)
+        assert secrets_for(tmp_path).list_secrets() == ["cred/openai/api_key"]  # the v2 name of the old key
 
     def test_damaged_legacy_store_is_taken_over_once_repaired(self, memory_keyring, tmp_path):
         legacy = tmp_path / "configs" / "secrets.store"
