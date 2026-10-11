@@ -88,7 +88,7 @@ command prints itself, including its error messages. For `llm-cli ditto ask` onl
 |---|---|
 | 0 | Success |
 | 1 | The command failed (for example a failed build, a failed deployment, a damaged audit log, an AI error) |
-| 2 | Invalid input: unknown option, an unsupported format/board/quantization combination, an unknown provider (`--provider`), an unknown model tier (`ditto models download`) |
+| 2 | Invalid input: unknown option, an unknown target or an unsupported format/board/quantization combination (`build start`), an unknown provider (`--provider`), an unknown model tier (`ditto models download`) |
 | 130 | `build start` was interrupted with Ctrl+C (the CLI exits only after the build has ended) |
 
 `llm-cli doctor` uses 0 (OK), 1 (warnings) and 2 (errors); `llm-cli ditto eval --min-pass` returns 1 when a run
@@ -191,7 +191,7 @@ quantization are filled with the target's defaults.
 | Option | Meaning |
 |---|---|
 | `-m, --model TEXT` | **Required.** Hugging Face ID (e.g. `HuggingFaceTB/SmolLM2-135M-Instruct`) or a local folder or file. |
-| `-t, --target TEXT` | **Required.** Target folder name in `targets/`, e.g. `Rockchip` (case-sensitive; check it with `targets validate`). |
+| `-t, --target TEXT` | **Required.** Target folder name in `targets/`, e.g. `Rockchip`. Not case-sensitive. An unknown target stops with exit code 2 and the list of known targets. |
 | `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Output format (default `gguf`). The list is longer than what any target supports; Rockchip accepts `gguf`, `rkllm` and `rknn`. |
 | `-b, --board TEXT` | Board of the target family, e.g. `rk3588`, `rk3576`, `rk3566`. Default: the target's default board (Rockchip: `rk3588`). Not case-sensitive. |
 | `-q, --quantization TEXT` | Quantization, e.g. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Default: the format's default for the board. Common spellings such as `INT8` are translated. |
@@ -212,7 +212,8 @@ Behaviour:
   asks "Apply this fix and retry the build?". Without a terminal the proposal is dismissed. Manual steps are only
   shown.
 - Results: `<output folder>/<target>/<model>/<quantization>/` with the model file, `build_info.json` and
-  `Model_Card.md`.
+  `Model_Card.md`, and a ZIP of them next to that folder. They appear there only when the build has completed; a
+  cancelled or failed build leaves no files there.
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token`.
 - The first build of a target builds its Docker image first and takes much longer.
 
@@ -544,7 +545,7 @@ set in the GUI are kept.
 ### tools audit
 
 ```
-llm-cli tools audit [--limit N] [--verify]
+llm-cli tools audit [--limit N] [--verify] [--archive]
 ```
 
 Shows the most recent tool calls: time, actor (`ditto` or `mcp`), tool, decision, whether a person confirmed it,
@@ -554,10 +555,12 @@ and the outcome.
 |---|---|
 | `--limit INTEGER` | Number of entries (default 30). |
 | `--verify` | Check the chain instead: changed or removed entries, and removal of the newest entries (anchor file). Exit code 0 if intact, otherwise 1. |
+| `--archive` | Move the log and its anchor aside (kept as `audit.db.<UTC time>` and `audit.db.<UTC time>.anchor` in the personal folder) and start a new log with the next tool call. Use it when `--verify` or `llm-cli doctor` reports a problem with the log. If the log cannot be moved (for example because it is busy), the command exits with code 1; close the GUI and AI clients and try again. |
 
 ```bash
 llm-cli tools audit --limit 100
 llm-cli tools audit --verify
+llm-cli tools audit --archive
 ```
 
 ---
@@ -595,11 +598,13 @@ llm-cli mcp config [--write claude-desktop]
 
 Prints how to connect Claude Code (a `claude mcp add ...` command), Claude Desktop (JSON for its configuration
 file) and VS Code (JSON for `.vscode/mcp.json`), with the Python and folder of this installation. Run it with the
-framework's own Python so the printed command uses it.
+framework's own Python so the printed command uses it. The command starts Python with `-P`, so nothing is imported
+from the folder the client starts the server in. On Windows the command line is quoted so that cmd and PowerShell
+both keep it as it is; if a path contains `%`, `!`, `$`, a backtick or a double quote, only the JSON is shown.
 
 | Option | Meaning |
 |---|---|
-| `--write [claude-desktop]` | Add the server to Claude Desktop's configuration. Other entries are kept and a backup (`.bak`) is written. Restart Claude Desktop afterwards. |
+| `--write [claude-desktop]` | Add the server to Claude Desktop's configuration (the path is shown in the output; on Linux `XDG_CONFIG_HOME` is honoured). Other entries are kept and a backup (`.bak`) is written. If the file cannot be written, the command prints the reason and exits with code 1. Restart Claude Desktop afterwards. |
 
 ```bash
 llm-cli mcp config
@@ -771,8 +776,6 @@ Needs a GitHub token: `llm-cli secrets set github_token` (the value is asked).
 
 - `build status` only sees builds of its own process (see [build status](#build-status)).
 - Ctrl+C in `build start` does not cancel the build; the CLI waits until it has ended.
-- `build start` with an unknown target name (or the wrong case, such as `rockchip`) is not rejected: it prints
-  "Target '...' not found. Skipping.", builds nothing and exits with code 0.
 - `build start --parallel` and `--optimization` have no effect on Rockchip builds.
 - `deploy package`, `secrets set` and `scan` print a failure ("Package generation failed", "Failed to store
   secret", "output file was not created") but exit with code 0; check the output in scripts.

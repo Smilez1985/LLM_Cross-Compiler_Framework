@@ -89,7 +89,7 @@ nach stdout, und bei `llm-cli mcp serve` trägt stdout das MCP-Protokoll.
 |---|---|
 | 0 | Erfolg |
 | 1 | Der Befehl ist gescheitert (zum Beispiel ein gescheiterter Build, eine gescheiterte Übertragung, ein beschädigtes Audit-Log, ein KI-Fehler) |
-| 2 | Ungültige Eingabe: unbekannte Option, eine nicht unterstützte Kombination aus Format, Board und Quantisierung, ein unbekannter Anbieter (`--provider`), eine unbekannte Modellstufe (`ditto models download`) |
+| 2 | Ungültige Eingabe: unbekannte Option, ein unbekanntes Target oder eine nicht unterstützte Kombination aus Format, Board und Quantisierung (`build start`), ein unbekannter Anbieter (`--provider`), eine unbekannte Modellstufe (`ditto models download`) |
 | 130 | `build start` wurde mit Strg+C unterbrochen (die CLI endet erst, wenn der Build zu Ende ist) |
 
 `llm-cli doctor` verwendet 0 (OK), 1 (Warnungen) und 2 (Fehler); `llm-cli ditto eval --min-pass` liefert 1, wenn
@@ -193,7 +193,7 @@ Fehlendes Board und fehlende Quantisierung werden mit den Standardwerten des Tar
 | Option | Bedeutung |
 |---|---|
 | `-m, --model TEXT` | **Pflicht.** Hugging-Face-ID (z. B. `HuggingFaceTB/SmolLM2-135M-Instruct`) oder ein lokaler Ordner bzw. eine Datei. |
-| `-t, --target TEXT` | **Pflicht.** Ordnername des Targets in `targets/`, z. B. `Rockchip` (Groß- und Kleinschreibung zählt; prüfe ihn mit `targets validate`). |
+| `-t, --target TEXT` | **Pflicht.** Ordnername des Targets in `targets/`, z. B. `Rockchip`. Groß- und Kleinschreibung spielt keine Rolle. Ein unbekanntes Target stoppt mit Exit-Code 2 und der Liste der bekannten Targets. |
 | `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Ausgabeformat (Standard `gguf`). Die Liste ist länger als das, was ein Target unterstützt; Rockchip nimmt `gguf`, `rkllm` und `rknn`. |
 | `-b, --board TEXT` | Board der Target-Familie, z. B. `rk3588`, `rk3576`, `rk3566`. Standard: das Standard-Board des Targets (Rockchip: `rk3588`). Groß- und Kleinschreibung spielt keine Rolle. |
 | `-q, --quantization TEXT` | Quantisierung, z. B. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Standard: der Standard des Formats für das Board. Gängige Schreibweisen wie `INT8` werden übersetzt. |
@@ -214,7 +214,8 @@ Verhalten:
   die CLI die Ursache und fragt „Apply this fix and retry the build?“. Ohne Terminal wird der Vorschlag verworfen.
   Manuelle Schritte werden nur angezeigt.
 - Ergebnisse: `<Ausgabeordner>/<Target>/<Modell>/<Quantisierung>/` mit der Modelldatei, `build_info.json` und
-  `Model_Card.md`.
+  `Model_Card.md`, dazu ein ZIP davon neben diesem Ordner. Sie erscheinen dort erst, wenn der Build abgeschlossen
+  ist; ein abgebrochener oder gescheiterter Build hinterlässt dort keine Dateien.
 - Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token`.
 - Der erste Build eines Targets baut zuerst sein Docker-Image und dauert deutlich länger.
 
@@ -551,7 +552,7 @@ einzelne Tools, die in der GUI gesetzt wurden, bleiben erhalten.
 ### tools audit
 
 ```
-llm-cli tools audit [--limit N] [--verify]
+llm-cli tools audit [--limit N] [--verify] [--archive]
 ```
 
 Zeigt die letzten Tool-Aufrufe: Zeit, Akteur (`ditto` oder `mcp`), Tool, Entscheidung, ob ein Mensch bestätigt hat,
@@ -561,10 +562,12 @@ und das Ergebnis.
 |---|---|
 | `--limit INTEGER` | Anzahl der Einträge (Standard 30). |
 | `--verify` | Stattdessen die Kette prüfen: geänderte oder entfernte Einträge und das Entfernen der neuesten Einträge (Anker-Datei). Exit-Code 0, wenn intakt, sonst 1. |
+| `--archive` | Das Log und seinen Anker beiseitelegen (aufbewahrt als `audit.db.<UTC-Zeit>` und `audit.db.<UTC-Zeit>.anchor` im persönlichen Ordner) und mit dem nächsten Tool-Aufruf ein neues Log beginnen. Nutze es, wenn `--verify` oder `llm-cli doctor` ein Problem mit dem Log meldet. Lässt sich das Log nicht beiseitelegen (zum Beispiel, weil es gerade benutzt wird), endet der Befehl mit Exit-Code 1; schließe die GUI und die KI-Clients und versuche es erneut. |
 
 ```bash
 llm-cli tools audit --limit 100
 llm-cli tools audit --verify
+llm-cli tools audit --archive
 ```
 
 ---
@@ -603,11 +606,14 @@ llm-cli mcp config [--write claude-desktop]
 
 Zeigt, wie du Claude Code (ein Befehl `claude mcp add ...`), Claude Desktop (JSON für dessen Konfigurationsdatei) und
 VS Code (JSON für `.vscode/mcp.json`) verbindest, jeweils mit dem Python und dem Ordner dieser Installation. Ruf es
-mit dem Python des Frameworks auf, damit der ausgegebene Befehl dieses verwendet.
+mit dem Python des Frameworks auf, damit der ausgegebene Befehl dieses verwendet. Der Befehl startet Python mit `-P`,
+sodass nichts aus dem Ordner importiert wird, in dem der Client den Server startet. Unter Windows ist die
+Befehlszeile so gequotet, dass cmd und PowerShell sie unverändert lassen; enthält ein Pfad `%`, `!`, `$`, einen
+Backtick oder ein doppeltes Anführungszeichen, wird nur das JSON gezeigt.
 
 | Option | Bedeutung |
 |---|---|
-| `--write [claude-desktop]` | Den Server in die Konfiguration von Claude Desktop eintragen. Andere Einträge bleiben erhalten, und eine Sicherung (`.bak`) wird geschrieben. Danach Claude Desktop neu starten. |
+| `--write [claude-desktop]` | Den Server in die Konfiguration von Claude Desktop eintragen (der Pfad steht in der Ausgabe; unter Linux wird `XDG_CONFIG_HOME` beachtet). Andere Einträge bleiben erhalten, und eine Sicherung (`.bak`) wird geschrieben. Lässt sich die Datei nicht schreiben, nennt der Befehl den Grund und endet mit Exit-Code 1. Danach Claude Desktop neu starten. |
 
 ```bash
 llm-cli mcp config
@@ -781,8 +787,6 @@ Braucht ein GitHub-Token: `llm-cli secrets set github_token` (der Wert wird abge
 
 - `build status` sieht nur Builds des eigenen Prozesses (siehe [build status](#build-status)).
 - Strg+C in `build start` bricht den Build nicht ab; die CLI wartet, bis er zu Ende ist.
-- `build start` mit einem unbekannten Target-Namen (oder falscher Schreibweise wie `rockchip`) wird nicht
-  abgelehnt: Es meldet „Target '...' not found. Skipping.“, baut nichts und endet mit Exit-Code 0.
 - `build start --parallel` und `--optimization` wirken sich auf Rockchip-Builds nicht aus.
 - `deploy package`, `secrets set` und `scan` melden einen Fehler („Package generation failed“, „Failed to store
   secret“, „output file was not created“), enden aber mit Exit-Code 0; prüfe in Skripten die Ausgabe.
