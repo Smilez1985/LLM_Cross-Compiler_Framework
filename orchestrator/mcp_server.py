@@ -15,22 +15,22 @@ Security model
 - "Ask" permissions become an MCP elicitation (the client shows the question to the user). A client
   without elicitation support cannot confirm, so such calls are denied with a hint on how to allow them.
   A person's "no" is final for that call, even if the policy is loosened while the dialog is open.
-- stdio is the default transport. Streamable HTTP binds to loopback only, checks Host/Origin
-  (SDK transport security) and requires a bearer token generated per user.
+- stdio is the default transport. Streamable HTTP binds to loopback only, refuses requests from web
+  pages (any Origin header) and Host names other than loopback with its port, and requires a named
+  token per client (`llm-cli mcp token`). The token's name is the caller (`mcp:<name>`) for the
+  policy and the audit; over stdio LCF_MCP_TOKEN does the same, otherwise the caller is `mcp`.
 - What a client says about itself (clientInfo, protocol version, capabilities) is written to stderr once
   per client (ClientTracker). It is a label for people, never a reason to allow anything.
 """
 
 import contextlib
 import contextvars
-import hmac
 import inspect
 import json
 import logging
 import ntpath
 import os
 import posixpath
-import secrets
 import shlex
 import sys
 import tempfile
@@ -38,13 +38,14 @@ import threading
 import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Dict, Optional, Tuple
+from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError
 
 from orchestrator.tools.confirmation import CallTooLong, describe_call
+from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, ENV_VAR, TokenStore, TokenStoreError, token_digest
 from orchestrator.tools.policy import Decision
-from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
+from orchestrator.tools.registry import ToolContext, ToolDenied, ToolError, ToolRegistry, ToolSpec
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
@@ -125,6 +126,23 @@ def current_client() -> Optional[ClientLabel]:
     return _CLIENT.get()
 
 
+# Who calls, for the policy and the audit: "mcp" (the local stdio clients, which share one policy) or
+# "mcp:<token name>" for a named token, checked by the framework (HTTP bearer header, LCF_MCP_TOKEN over stdio).
+# Never taken from what the client says about itself.
+CALLER_SCOPE_KEY = "lcf.mcp_caller"  # set by TokenAuth on each HTTP request whose token it checked
+_CALLER: "contextvars.ContextVar[str]" = contextvars.ContextVar("lcf_mcp_caller", default="mcp")
+
+
+def current_caller() -> str:
+    return _CALLER.get()
+
+
+def _refusal(message: str) -> Exception:
+    from mcp.shared.exceptions import MCPError
+    from mcp_types import INVALID_REQUEST
+    return MCPError(INVALID_REQUEST, message)
+
+
 def _client_text(value: Any, limit: int = 64) -> str:
     """A client-supplied value as one short line: cut, control and non-ASCII characters escaped, secrets redacted."""
     return redact_secrets(json.dumps(str(value)[:limit], ensure_ascii=True)[1:-1])
@@ -151,17 +169,37 @@ def _capability_names(capabilities: Any) -> Tuple[str, ...]:
 
 
 class ClientTracker:
-    """Server middleware: notes the client of every request for the tool functions (`current_client`) and writes
-    one line to stderr for each new client, never to the client: name and version as it reports them, protocol
-    version, transport and declared capabilities, so you can see which client can ask you (elicitation)."""
+    """Server middleware: notes the caller and the client of every request for the tool functions
+    (`current_caller`, `current_client`) and writes one line to stderr for each new client, never to the client:
+    name and version as it reports them, protocol version, transport, caller and declared capabilities, so you
+    can see which client can ask you (elicitation).
+
+    The caller of an HTTP request is the named token TokenAuth checked for that request; over stdio it is
+    `caller` ("mcp", or "mcp:<name>" from LCF_MCP_TOKEN), and `still_valid` refuses every request once that
+    token was revoked or rotated."""
 
     MAX_REMEMBERED = 256
 
-    def __init__(self, transport: str = "stdio", stream=None):
+    def __init__(self, transport: str = "stdio", stream=None, caller: str = "mcp",
+                 still_valid: Optional[Callable[[], bool]] = None):
         self.transport = transport
         self._stream = stream  # None: sys.stderr at the time of writing (stdio moves stdout there)
+        self.default_caller = caller
+        self.still_valid = still_valid
         self._seen: set = set()
         self._lock = threading.Lock()
+
+    def caller(self, ctx) -> str:
+        if ctx.request is not None:
+            caller = (getattr(ctx.request, "scope", None) or {}).get(CALLER_SCOPE_KEY)
+            if not caller:  # served without TokenAuth in front: nobody checked a token
+                raise _refusal("This HTTP request carries no checked MCP token; it is refused.")
+            return caller
+        if self.still_valid is not None and ctx.request_id is not None and not self.still_valid():
+            raise _refusal(f"The MCP token this server was started with ({ENV_VAR}) was revoked or rotated, so it "
+                           "accepts no more requests. Put the current token into the client's server entry and "
+                           "restart the client.")
+        return self.default_caller
 
     def label(self, ctx) -> Optional[ClientLabel]:
         session = ctx.session
@@ -176,28 +214,30 @@ class ClientTracker:
                            elicitation=elicitation_modes(capabilities),
                            capabilities=_capability_names(capabilities))
 
-    def _note(self, label: ClientLabel) -> None:
+    def _note(self, label: ClientLabel, caller: str) -> None:
         with self._lock:
-            if label in self._seen:
+            if (label, caller) in self._seen:
                 return
             if len(self._seen) >= self.MAX_REMEMBERED:
                 self._seen.clear()
-            self._seen.add(label)
+            self._seen.add((label, caller))
         line = (f'MCP client: "{label.name}" {label.version or "-"} (self-reported), protocol {label.protocol}, '
-                f"{label.transport}, elicitation {label.elicitation}, capabilities: "
+                f"{label.transport}, caller {caller}, elicitation {label.elicitation}, capabilities: "
                 f"{', '.join(label.capabilities) or 'none'}")
         with contextlib.suppress(AttributeError, OSError, ValueError):
             print(line, file=self._stream or sys.stderr, flush=True)
 
     async def __call__(self, ctx, call_next):
+        caller = self.caller(ctx)
         label = self.label(ctx)
         if label is not None:
-            self._note(label)
-        token = _CLIENT.set(label)
+            self._note(label, caller)
+        tokens = (_CALLER.set(caller), _CLIENT.set(label))
         try:
             return await call_next(ctx)
         finally:
-            _CLIENT.reset(token)
+            _CLIENT.reset(tokens[1])
+            _CALLER.reset(tokens[0])
 
 
 def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
@@ -214,7 +254,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
     outcomes = (AcceptedElicitation, DeclinedElicitation, CancelledElicitation)
 
     async def confirm(ctx: Context, **arguments):
-        decision = await anyio.to_thread.run_sync(registry.decide, spec)
+        decision = await anyio.to_thread.run_sync(registry.decide, spec, current_caller())
         rounds = _uses_input_required(ctx)
         # The person already answered in an earlier round: their answer decides, even if the policy was
         # loosened to "allow" meanwhile (the SDK checks that it answers exactly this question).
@@ -252,7 +292,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
         # Only a real answer from the user counts as a confirmation; declined and cancelled
         # elicitations still go through the registry, so they are audited like every other call.
         data = outcome.data if isinstance(outcome, AcceptedElicitation) else None
-        ctx = ToolContext("mcp", metadata={"client": current_client()})
+        ctx = ToolContext(current_caller(), metadata={"client": current_client()})
         if isinstance(data, NotAsked) and data.refused:
             await anyio.to_thread.run_sync(lambda: registry.refuse(spec.name, kwargs, ctx, detail=data.refused))
             raise _audited(MCPToolError(data.refused))
@@ -268,7 +308,10 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
                 message = f"The user declined '{spec.title}'. Do not retry it unless they ask for it."
             elif "needs your confirmation" in message and not can_ask:
                 message += (" This client cannot ask you; allow the tool with "
-                            "'llm-cli tools permissions' or in the GUI (Tools > Tool Permissions).")
+                            f"'{_permissions_command(ctx.actor)}' or in the GUI (Tools > Tool Permissions).")
+            elif isinstance(e, ToolDenied) and ctx.actor.startswith(ACTOR_PREFIX):
+                message += (f" This client uses the MCP token '{ctx.actor[len(ACTOR_PREFIX):]}'; its permissions "
+                            f"are set with '{_permissions_command(ctx.actor)}'.")
             raise _audited(MCPToolError(message)) from None
 
     approval_param = inspect.Parameter("approval", inspect.Parameter.KEYWORD_ONLY,
@@ -297,10 +340,18 @@ def _audit_rejection(registry: ToolRegistry, name: str, arguments: Any, error: E
         outcome, detail = "invalid_input", f"Invalid arguments for {name}: {problems}"
     else:
         outcome, detail = "not_confirmed", str(error)
-    registry.refuse(name, arguments, ToolContext("mcp"), outcome=outcome, detail=detail)
+    registry.refuse(name, arguments, ToolContext(current_caller()), outcome=outcome, detail=detail)
 
 
-def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None, transport: str = "stdio"):
+def _permissions_command(actor: str) -> str:
+    if actor.startswith(ACTOR_PREFIX):
+        return f"llm-cli tools permissions --token {actor[len(ACTOR_PREFIX):]}"
+    return "llm-cli tools permissions"
+
+
+def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None, transport: str = "stdio",
+                     caller: str = "mcp", still_valid: Optional[Callable[[], bool]] = None):
+    """The MCP server for the registry. `caller` and `still_valid`: the stdio caller (see ClientTracker)."""
     import anyio.to_thread
     from mcp.server.mcpserver import MCPServer
     from mcp_types import ToolAnnotations
@@ -322,7 +373,8 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
 
     server = AuditedServer(SERVER_NAME, title="LLM Cross-Compiler Framework", instructions=INSTRUCTIONS,
                            version=getattr(getattr(framework, "info", None), "version", "") or "",
-                           lifespan=lifespan, middleware=[ClientTracker(transport)])
+                           lifespan=lifespan,
+                           middleware=[ClientTracker(transport, caller=caller, still_valid=still_valid)])
     for spec in registry.list():
         server.add_tool(make_tool_function(spec, registry), name=spec.name, title=spec.title,
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
@@ -330,47 +382,132 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
     return server
 
 
-# --- Streamable HTTP: loopback + bearer token ---------------------------------------------------
+# --- Streamable HTTP: loopback, a named token per client, no web pages ------------------------------
 
-def http_token(state_dir: Path) -> str:
-    """The per-user bearer token for the HTTP transport (created on first use, mode 0600)."""
-    path = Path(state_dir) / "mcp_http_token"
-    try:
-        token = path.read_text(encoding="utf-8").strip()
-        if len(token) >= 32:
-            return token
-    except FileNotFoundError:
-        pass
-    token = secrets.token_urlsafe(32)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".mcp_http_token.")
-    with os.fdopen(fd, "w", encoding="utf-8") as f:
-        f.write(token)
-    os.replace(tmp, path)
-    return token
+MAX_HTTP_SESSIONS = 8           # concurrent sessions (the SDK allows 10,000)
+MAX_HTTP_BODY = 1024 * 1024     # bytes per request body (the SDK allows 4 MiB)
 
 
-class BearerTokenMiddleware:
-    """ASGI middleware: every HTTP request needs `Authorization: Bearer <token>` (constant-time check)."""
+def allowed_hosts(port: int) -> List[str]:
+    """The Host header values a request may carry: the loopback names with exactly this port (DNS rebinding)."""
+    return [f"127.0.0.1:{port}", f"localhost:{port}", f"[::1]:{port}"]
 
-    def __init__(self, app, token: str):
+
+class TokenAuth:
+    """ASGI middleware in front of the MCP endpoint, checked before anything else on every request:
+    - an `Origin` header means a web page sent the request (CSRF, DNS rebinding, pages on other localhost ports);
+      it is refused (403), and so is a CORS preflight;
+    - the `Host` header must name a loopback address with this server's port (421);
+    - `Authorization: Bearer <token>` must be a named token from the token store (401 otherwise; a revoked or
+      rotated token stops working at once). The token's name becomes the caller (`mcp:<name>`) of this request,
+      and the SDK binds each session to it, so one token cannot use another token's session."""
+
+    def __init__(self, app, tokens: TokenStore, hosts: List[str]):
         self.app = app
-        self._expected = f"Bearer {token}".encode("utf-8")
+        self.tokens = tokens
+        self.hosts = frozenset(hosts)
+
+    @staticmethod
+    async def _reject(send, status: int, message: str, extra=()) -> None:
+        body = json.dumps({"error": message}).encode("utf-8")
+        await send({"type": "http.response.start", "status": status,
+                    "headers": [(b"content-type", b"application/json"),
+                                (b"content-length", str(len(body)).encode("ascii")), *extra]})
+        await send({"type": "http.response.body", "body": body})
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] == "http":
-            headers = dict(scope.get("headers") or [])
-            given = headers.get(b"authorization", b"")
-            if not hmac.compare_digest(given, self._expected):
-                await send({"type": "http.response.start", "status": 401,
-                            "headers": [(b"content-type", b"application/json"), (b"www-authenticate", b"Bearer")]})
-                await send({"type": "http.response.body", "body": b'{"error": "unauthorized"}'})
-                return
-        await self.app(scope, receive, send)
+        if scope["type"] == "lifespan":
+            await self.app(scope, receive, send)
+            return
+        if scope["type"] != "http":  # no websockets
+            await send({"type": "websocket.close", "code": 1008})
+            return
+        headers = [(name.lower(), value) for name, value in scope.get("headers") or []]
+        if any(name == b"origin" for name, _ in headers):
+            await self._reject(send, 403, "requests from web pages are not accepted")
+            return
+        hosts = [value.decode("latin-1") for name, value in headers if name == b"host"]
+        if len(hosts) != 1 or hosts[0] not in self.hosts:
+            await self._reject(send, 421, "this server answers only on its loopback address")
+            return
+        auth = [value for name, value in headers if name == b"authorization"]
+        record = None
+        if len(auth) == 1 and auth[0][:7].lower() == b"bearer ":
+            record = self.tokens.find(auth[0][7:].strip().decode("latin-1"))
+        if record is None:
+            await self._reject(send, 401, "unauthorized", [(b"www-authenticate", b"Bearer")])
+            return
+        from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+        from mcp.server.auth.provider import AccessToken
+        caller = ACTOR_PREFIX + record.name
+        # The SDK binds a session to the principal that opened it ("user"); never the token itself.
+        user = AuthenticatedUser(AccessToken(token=caller, client_id=caller, scopes=[]))
+        await self.app({**scope, CALLER_SCOPE_KEY: caller, "user": user}, receive, send)
 
 
-def http_app(server, token: str, host: str = "127.0.0.1"):
-    return BearerTokenMiddleware(server.streamable_http_app(host=host), token)
+def http_app(server, tokens: TokenStore, host: str = "127.0.0.1", port: int = 8765):
+    """The ASGI app for `server` over HTTP: TokenAuth in front, and the SDK's own checks with an explicit
+    Host allowlist (numeric port), no allowed Origin, at most 8 sessions and 1 MiB per request body."""
+    from mcp.server.transport_security import TransportSecuritySettings
+    hosts = allowed_hosts(port)
+    security = TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts,
+                                         allowed_origins=[])
+    app = server.streamable_http_app(host=host, transport_security=security, max_sessions=MAX_HTTP_SESSIONS,
+                                     max_request_body_size=MAX_HTTP_BODY)
+    return TokenAuth(app, tokens, hosts)
+
+
+def _token_store(framework) -> TokenStore:
+    """The registry's token store (one cache for the server and the policy), else the one in the per-user folder."""
+    tokens = getattr(getattr(framework, "tool_registry", None), "tokens", None)
+    return tokens if tokens is not None else TokenStore(Path(framework.config.user_state_dir))
+
+
+def _legacy_token_note(state_dir: Path) -> str:
+    legacy = Path(state_dir) / "mcp_http_token"
+    if legacy.exists():
+        return (f" The old shared token in {legacy} is no longer accepted; delete that file and give each client "
+                "its own named token.")
+    return ""
+
+
+def http_problem(tokens: TokenStore, state_dir: Path) -> Optional[str]:
+    """Why the HTTP transport must not start, or None."""
+    problem = tokens.private_problem()
+    if problem:
+        return problem
+    try:
+        named = tokens.list()
+    except TokenStoreError as e:
+        return str(e)
+    if not named:
+        return ("The HTTP transport needs a named token per client. Create one with 'llm-cli mcp token add NAME' "
+                "(it is shown once) and give it to the client as 'Authorization: Bearer <token>'."
+                + _legacy_token_note(state_dir))
+    return None
+
+
+def stdio_caller(tokens: TokenStore, token: Optional[str]) -> Tuple[str, Optional[Callable[[], bool]]]:
+    """The caller of a stdio server: the shared "mcp" without a token, or "mcp:<name>" for the named token in
+    LCF_MCP_TOKEN, with a check that it is still valid. ValueError (the server must not start) for a value that
+    is not a valid token; the message never contains the value."""
+    if token is None:
+        return "mcp", None
+    problem = tokens.private_problem()
+    if problem:
+        raise ValueError(problem)
+    try:
+        tokens.list()
+    except TokenStoreError as e:
+        raise ValueError(str(e)) from None
+    token = token.strip()
+    record = tokens.find(token)
+    if record is None:
+        raise ValueError(f"{ENV_VAR} is set but does not hold a valid MCP token (empty, unknown, revoked or "
+                         "rotated), so the server does not start. 'llm-cli mcp token list' shows the tokens; "
+                         "remove the variable to run as the shared local caller.")
+    name, digest = record.name, token_digest(token)
+    return ACTOR_PREFIX + name, lambda: tokens.holds(name, digest)
 
 
 # --- stdio: stdout belongs to the protocol -----------------------------------------------------------
@@ -415,9 +552,14 @@ def no_programs_from_the_working_directory() -> None:
         os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
 
 
-def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765) -> None:
+def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765,
+          stdio_token: Optional[str] = None) -> None:
+    """Runs the server. `stdio_token`: the value of LCF_MCP_TOKEN (read and removed from the environment by the
+    CLI before the framework starts). ValueError when the server must not start."""
     if transport == "stdio":
-        server = build_mcp_server(framework, lifespan=_stdout_to_stderr)
+        caller, still_valid = stdio_caller(_token_store(framework), stdio_token) if stdio_token is not None \
+            else ("mcp", None)
+        server = build_mcp_server(framework, lifespan=_stdout_to_stderr, caller=caller, still_valid=still_valid)
         _logging_to_stderr()
         stdout = sys.stdout
         try:
@@ -425,18 +567,22 @@ def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: in
         finally:
             _stdout_fd_to_stderr(stdout)
         return
-    server = build_mcp_server(framework, transport="http")
     if transport != "http":
         raise ValueError(f"Unknown transport '{transport}' (stdio, http)")
     if host not in LOOPBACK_HOSTS:
         raise ValueError("The HTTP transport only binds to loopback (127.0.0.1, ::1, localhost).")
+    tokens = _token_store(framework)
+    state_dir = tokens.path.parent
+    problem = http_problem(tokens, state_dir)
+    if problem:
+        raise ValueError(problem)
+    server = build_mcp_server(framework, transport="http")
     import anyio
     import uvicorn
 
-    token = http_token(framework.config.user_state_dir)
-    print(f"MCP server on http://{host}:{port}/mcp - bearer token in "
-          f"{Path(framework.config.user_state_dir) / 'mcp_http_token'}", file=sys.stderr)
-    config = uvicorn.Config(http_app(server, token, host), host=host, port=port, log_level="warning")
+    print(f"MCP server on http://{host}:{port}/mcp - each client sends its own named token "
+          f"('llm-cli mcp token list').{_legacy_token_note(state_dir)}", file=sys.stderr)
+    config = uvicorn.Config(http_app(server, tokens, host, port), host=host, port=port, log_level="warning")
     anyio.run(uvicorn.Server(config).serve)
 
 

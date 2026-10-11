@@ -16,6 +16,7 @@ from orchestrator.schemas.build import (ArtifactList, BuildHandle, BuildList, Bu
 from orchestrator.rag.errors import KnowledgeBaseError
 from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.audit import AuditLog
+from orchestrator.tools.mcp_tokens import TokenStore
 from orchestrator.tools.policy import PolicyStore, ToolTier
 from orchestrator.tools.registry import ToolError, ToolRegistry, ToolSpec
 from orchestrator.utils.file_lock import file_lock
@@ -212,5 +213,5 @@ def build_tool_registry(framework) -> ToolRegistry:
     """The registry with the user's policy, the audit log and all framework tools."""
     state_dir = Path(framework.config.user_state_dir)
     audit = AuditLog(state_dir / "audit.db", key=_audit_key(framework, state_dir))
-    registry = ToolRegistry(PolicyStore(state_dir), audit)
+    registry = ToolRegistry(PolicyStore(state_dir), audit, tokens=TokenStore(state_dir))
     return register_framework_tools(registry, framework)

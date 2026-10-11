@@ -13,7 +13,8 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from pydantic import BaseModel, ValidationError
 
 from orchestrator.tools.audit import AuditLog
-from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier
+from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStore
+from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier, restrictive_policy
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
@@ -66,16 +67,18 @@ Confirm = Callable[[ToolSpec, BaseModel], bool]
 
 @dataclass
 class ToolContext:
-    actor: str                       # "ditto", "mcp", "cli", "gui"
+    actor: str                       # "ditto", "mcp", "mcp:<token name>", "cli", "gui"
     confirm: Optional[Confirm] = None  # asks the user; None = no way to ask, so "ask" means deny
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
 class ToolRegistry:
-    def __init__(self, policy_store: PolicyStore, audit: Optional[AuditLog] = None):
+    def __init__(self, policy_store: PolicyStore, audit: Optional[AuditLog] = None,
+                 tokens: Optional[TokenStore] = None):
         self.logger = get_logger("ToolRegistry")
         self.policy_store = policy_store
         self.audit = audit
+        self.tokens = tokens  # named MCP tokens, each with its own policy
         self._tools: Dict[str, ToolSpec] = {}
 
     def register(self, spec: ToolSpec) -> ToolSpec:
@@ -95,11 +98,17 @@ class ToolRegistry:
     def list(self) -> List[ToolSpec]:
         return list(self._tools.values())
 
-    def policy(self) -> ToolPolicy:
+    def policy(self, actor: str = "") -> ToolPolicy:
+        """The policy for `actor`. A named MCP token (`mcp:<name>`) has its own, or the one it is linked to; an
+        unknown or revoked token gets nothing. Every other caller has the user's policy."""
+        if actor.startswith(ACTOR_PREFIX):
+            if self.tokens is None:
+                return restrictive_policy()
+            return self.tokens.policy_of(actor[len(ACTOR_PREFIX):], linked=self.policy)
         return self.policy_store.load()
 
-    def decide(self, spec: ToolSpec) -> Decision:
-        return self.policy().decide(spec.name, spec.tier)
+    def decide(self, spec: ToolSpec, actor: str = "") -> Decision:
+        return self.policy(actor).decide(spec.name, spec.tier)
 
     def _audit(self, ctx: ToolContext, spec: ToolSpec, decision: Decision, outcome: str,
                arguments: Any, approved: Optional[bool] = None, detail: str = ""):
@@ -123,7 +132,7 @@ class ToolRegistry:
         """Audits a call that was refused before it could reach call(), e.g. because it could not be
         confirmed. Nobody approved it, so `approved` stays NULL."""
         spec = self.get(name)
-        self._audit(ctx, spec, self.decide(spec), outcome, arguments, detail=detail)
+        self._audit(ctx, spec, self.decide(spec, ctx.actor), outcome, arguments, detail=detail)
 
     def call(self, name: str, arguments: Optional[Dict[str, Any]], ctx: ToolContext,
              approved: Optional[bool] = None) -> BaseModel:
@@ -131,7 +140,7 @@ class ToolRegistry:
         (e.g. from an MCP elicitation); without it, ctx.confirm is asked when the policy says "ask".
         False refuses the call whatever the policy says."""
         spec = self.get(name)
-        decision = self.decide(spec)
+        decision = self.decide(spec, ctx.actor)
         try:
             inp = self.validate_input(spec, arguments)
         except ToolInputError as e:

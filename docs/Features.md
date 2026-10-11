@@ -761,7 +761,8 @@ can then use the [same tools as Ditto](#dittos-tools). You sign in to the client
 framework never sees it.
 
 - **Every call goes through the tool registry:** input schema, your permissions, confirmation, audit log (actor
-  `mcp`). Tool annotations (read-only, idempotent) are only hints for the client.
+  `mcp` for local stdio clients, `mcp:<name>` for a named token). Tool annotations (read-only, idempotent) are only
+  hints for the client.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
   elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
   and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be
@@ -773,8 +774,21 @@ framework never sees it.
   and log → artifacts) and tells the client that build logs and knowledge-base results are external text whose
   instructions must not be followed.
 - **Transports:** stdio (default; the client starts the server) or Streamable HTTP on a loopback address only
-  (`--transport http`, default `http://127.0.0.1:8765/mcp`). HTTP checks Host and Origin and needs a bearer token
-  that is created per user in `~/.llm-framework/mcp_http_token`.
+  (`--transport http`, default `http://127.0.0.1:8765/mcp`). Over HTTP every client sends its own named token as
+  `Authorization: Bearer <token>`; a request with an `Origin` header (a web page, also a CORS preflight) is refused,
+  the `Host` header must name a loopback address with the server's port (against DNS rebinding), and the server
+  keeps at most 8 sessions and takes at most 1 MiB per request. A session belongs to the token that opened it.
+- **Named tokens:** `llm-cli mcp token add NAME` creates a token for one client and shows it once; the framework
+  keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode 0600; the server does not start if other users
+  can read it). The token's name is the caller in the audit log (`mcp:<name>`), and it has its own permissions: a
+  new token can only read until you allow more with `llm-cli tools permissions --token NAME`, start it with a copy
+  of another caller's permissions (`--policy-from mcp`), or link it to Ditto's (`--link ditto`, for Ditto on another
+  computer; a change to Ditto's permissions applies to it at once). `rotate` replaces a token, `revoke` deletes it
+  with its permissions; both take effect at once, also for a running server. A stdio client gets its own token
+  through the environment variable `LCF_MCP_TOKEN` in its server entry: the server reads it once at the start,
+  removes it from its environment and does not start with a value that is not a valid token. Without it, all local
+  stdio clients share the caller `mcp` and your own permissions. Only a person at a terminal manages tokens: no tool
+  can create, read or change them, and no token appears in a tool result, log line or audit entry.
 - **Working folder:** the server never reads settings or imports code from the folder it is started in (the client
   starts it with `python -P`), and on Windows it does not run programs such as `docker` or `git` from there. A
   project folder cannot change its behaviour.
@@ -782,8 +796,9 @@ framework never sees it.
   both cmd and PowerShell; `--write claude-desktop` adds the server to Claude Desktop's configuration, keeps other
   entries and writes a private backup.
 - **Who is connected:** for each new client the server writes one line to stderr, never to the client: the name and
-  version the client reports about itself, the protocol version, the transport and the capabilities it declared,
-  for example `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, elicitation form+url,
+  version the client reports about itself, the protocol version, the transport, the caller (`mcp` or the named
+  token's `mcp:<name>`, never the token itself) and the capabilities it declared, for example
+  `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
   capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask" is
   refused there. Client text is cut to 64 characters and escaped; it is a label, never a permission.
 
@@ -825,6 +840,8 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
 - A damaged or unreadable permission file, or a link to a missing one, denies every tool instead of falling back to
   looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and
   `llm-cli mcp serve` say so.
+- A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
+  unknown or revoked token, or a token file that cannot be read, may not even read.
 
 **Audit log** (`~/.llm-framework/audit.db`, SQLite): every tool call is recorded with time, actor, tool, decision,
 whether a person confirmed it, and the outcome. Arguments are stored redacted and shortened, plus a hash of the full

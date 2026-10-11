@@ -70,7 +70,7 @@ class TestClientLine:
         out, err = capsys.readouterr()
         lines = client_lines(err)
         assert lines == [f'MCP client: "Claude Code" 2.1.295 (self-reported), protocol {protocol}, stdio, '
-                         f"elicitation form+url, capabilities: elicitation"], err
+                         f"caller mcp, elicitation form+url, capabilities: elicitation"], err
         assert out == "", "nothing but the protocol may reach stdout"
         assert result.structured_content == {"client": "Claude Code 2.1.295 (self-reported) over stdio",
                                              "elicitation": "form+url"}
@@ -141,4 +141,4 @@ def test_real_stdio_client_line_goes_to_stderr(tmp_path):
     assert "list_targets" in names
     lines = client_lines(errlog.read_text(encoding="utf-8"))
     assert len(lines) == 1 and lines[0].startswith('MCP client: "probe" 9 (self-reported), protocol ')
-    assert ", stdio, elicitation none" in lines[0]
+    assert ", stdio, caller mcp, elicitation none" in lines[0]

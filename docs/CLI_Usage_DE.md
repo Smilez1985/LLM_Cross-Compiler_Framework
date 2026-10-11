@@ -24,7 +24,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
-- [mcp](#mcp): `serve`, `config`
+- [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
 - [secrets](#secrets): `set`, `list`
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): Hardware-Probe
@@ -754,7 +754,7 @@ Beschreibung. Der Titel sagt, wenn die Berechtigungen noch nicht eingerichtet si
 ### tools permissions
 
 ```
-llm-cli tools permissions [--reset]
+llm-cli tools permissions [--reset] [--token NAME]
 ```
 
 Stellt dieselben drei Fragen wie [`ditto setup`](#ditto-setup) und speichert die Antworten. Berechtigungen für
@@ -762,7 +762,8 @@ einzelne Tools, die in der GUI gesetzt wurden, bleiben erhalten.
 
 | Option | Bedeutung |
 |---|---|
-| `--reset` | Zurück zu den empfohlenen Standardwerten (die Einrichtung fragt beim nächsten Mal erneut). |
+| `--reset` | Zurück zu den empfohlenen Standardwerten (die Einrichtung fragt beim nächsten Mal erneut). Mit `--token`: zurück auf nur lesen. |
+| `--token TEXT` | Die Berechtigungen dieses [benannten MCP-Tokens](#mcp-token) setzen statt deiner eigenen (Ditto und lokale stdio-Clients). Braucht ein Terminal; bei einem an Ditto gebundenen Token wird zuerst gefragt, ob es eigene bekommen soll. Protokolliert mit dem Akteur `cli`. |
 
 ### tools audit
 
@@ -770,8 +771,8 @@ einzelne Tools, die in der GUI gesetzt wurden, bleiben erhalten.
 llm-cli tools audit [--limit N] [--verify] [--archive]
 ```
 
-Zeigt die letzten Tool-Aufrufe: Zeit, Akteur (`ditto` oder `mcp`), Tool, Entscheidung, ob ein Mensch bestätigt hat,
-und das Ergebnis.
+Zeigt die letzten Tool-Aufrufe: Zeit, Akteur (`ditto`, `mcp`, `mcp:<Token-Name>` oder `cli` für eine Änderung an
+den benannten Tokens), Tool, Entscheidung, ob ein Mensch bestätigt hat, und das Ergebnis.
 
 | Option | Bedeutung |
 |---|---|
@@ -801,13 +802,22 @@ Tools ohne Nachfrage, alles andere fragt (oder wird abgelehnt, wenn der Client n
 
 | Option | Bedeutung |
 |---|---|
-| `--transport [stdio\|http]` | `stdio` (Standard): vom Client gestartet. `http`: lokales Streamable HTTP mit Bearer-Token. |
+| `--transport [stdio\|http]` | `stdio` (Standard): vom Client gestartet. `http`: lokales Streamable HTTP mit einem benannten Token je Client. |
 | `--host TEXT` | Nur HTTP; nur Loopback-Adressen (Standard `127.0.0.1`; außerdem `::1`, `localhost`). |
 | `--port INTEGER` | Nur HTTP (Standard 8765). |
 
 Mit `--transport http` lauscht der Server auf `http://<Host>:<Port>/mcp`, und jede Anfrage braucht
-`Authorization: Bearer <Token>`; das Token steht in `~/.llm-framework/mcp_http_token` (wird beim ersten Mal
-angelegt).
+`Authorization: Bearer <Token>` mit einem [benannten Token](#mcp-token); der Server startet nicht, bevor es eins gibt,
+oder wenn andere Benutzer die Token-Datei lesen können. Anfragen mit `Origin`-Header (Webseiten, CORS-Preflights)
+werden abgelehnt, der `Host`-Header muss `127.0.0.1`, `localhost` oder `[::1]` mit dem Port des Servers sein, und der
+Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Die alte gemeinsame Token-Datei
+`mcp_http_token` wird nicht mehr akzeptiert.
+
+Über stdio macht die Umgebungsvariable `LCF_MCP_TOKEN` im Server-Eintrag des Clients den Client zum Aufrufer dieses
+benannten Tokens (`mcp:<Name>`, mit den Berechtigungen des Tokens) statt zum gemeinsamen Aufrufer `mcp`. Der Server
+liest sie einmal, entfernt sie aus seiner Umgebung (Kindprozesse erben sie nicht) und endet mit Exit-Code 2, wenn der
+Wert kein gültiges Token ist; ein laufender Server antwortet nicht mehr, sobald sein Token widerrufen oder rotiert
+wird.
 
 ```bash
 llm-cli mcp serve --transport http --port 8765
@@ -836,6 +846,38 @@ llm-cli mcp config --write claude-desktop
 ```
 
 An diesen Clients meldest du dich mit deinem eigenen Konto oder Schlüssel an; das Framework sieht das nie.
+
+### mcp token
+
+```
+llm-cli mcp token add NAME [--policy-from CALLER | --link ditto]
+llm-cli mcp token list
+llm-cli mcp token rotate NAME
+llm-cli mcp token revoke NAME
+```
+
+Benannte Tokens, eins pro Client, der sich über HTTP oder über stdio mit `LCF_MCP_TOKEN` verbindet. Ein Token wird
+einmal gezeigt, wenn es angelegt oder rotiert wird; das Framework behält nur seinen SHA-256 in
+`~/.llm-framework/mcp_tokens.json` (Modus 0600). Sein Name (1-32 Kleinbuchstaben, Ziffern und Bindestriche) ist der
+Aufrufer `mcp:<Name>` im Audit-Log, und es hat eigene Berechtigungen. `add`, `rotate` und `revoke` brauchen einen
+Menschen an einem Terminal (`add` und `rotate` geben außerdem nur auf ein Terminal aus) und werden mit dem Akteur
+`cli` protokolliert, ohne das Token. Kein Tool kann Tokens anlegen, auflisten, ändern oder lesen.
+
+| Befehl / Option | Bedeutung |
+|---|---|
+| `add NAME` | Legt ein Token an, das nur lesen darf, bis du mit `tools permissions --token NAME` mehr erlaubst. |
+| `--policy-from CALLER` | Beginnt mit einer Kopie der Berechtigungen eines anderen Aufrufers: `mcp` (lokale stdio-Clients), `ditto` oder ein Token-Name. Spätere Änderungen der Quelle gelten nicht. |
+| `--link ditto` | Nutzt Dittos Berechtigungen per Verweis, für Ditto auf einem anderen Rechner: Eine Änderung an Dittos Berechtigungen gilt sofort. |
+| `list` | Namen, Audit-Akteure, Berechtigungen, Zeit des Anlegens und Rotierens; nie ein Token oder sein Hash. |
+| `rotate NAME` | Ein neues Token für denselben Namen und dieselben Berechtigungen; das alte funktioniert sofort nicht mehr. |
+| `revoke NAME` | Löscht das Token und seine Berechtigungen nach einer Rückfrage; sein Client verliert sofort den Zugang. |
+
+```bash
+llm-cli mcp token add laptop                          # nur lesen
+llm-cli tools permissions --token laptop              # mehr erlauben
+llm-cli mcp token add ditto-laptop --link ditto       # Ditto auf einem anderen Rechner
+claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
+```
 
 ---
 
