@@ -15,6 +15,8 @@ Möglichkeiten mitzuhelfen:
   `llm-cli doctor --json` und das Build-Log an. Entferne vorher persönliche Daten (Hostnamen, Benutzernamen,
   Schlüssel).
 - **Ein Hardware-Target hinzufügen oder verbessern** (siehe [Abschnitt 7](#7-ein-hardware-target-hinzufügen)).
+- **Ein Target, ein Rezept oder Wissen teilen**, als signiertes Community-Paket (siehe
+  [Beiträge zum Community-Zoo](#beiträge-zum-community-zoo)).
 - **Fehler beheben und Tests schreiben.**
 - **Die Dokumentation verbessern**, auf Englisch und Deutsch.
 
@@ -310,20 +312,98 @@ Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module
    `target_hardware_config.txt`.
 2. **Das Target anlegen:** in der GUI unter **Tools > Create Hardware Module...**, mit `llm-cli module create` oder
    mit Ditto: `llm-cli module generate-ai target_hardware_config.txt`. Der Generator prüft Namen, Images, Pakete,
-   Flags und Shell-Code, schreibt nur unterhalb von `targets/` und überschreibt nie ein bestehendes Target.
-3. **Die Capabilities angeben:** Ergänze einen Block `capabilities:` in `targets/<Name>/target.yml` (Boards,
-   Formate, Quantisierungen je Board, Aliasse, Vorgaben, Bedarf an Kalibrierdaten; Schema in
-   `orchestrator/schemas/targets.py`). Der Generator schreibt ihn noch nicht; nimm den Rockchip-Block als Vorbild.
-   GUI, CLI, Ditto und der MCP-Server bieten genau das an und prüfen genau das, was dort steht.
+   Flags und Shell-Code, schreibt nur unterhalb von `targets/` und überschreibt nie ein bestehendes Target, und der
+   fertige Ordner muss dieselben Prüfungen bestehen wie ein Community-Paket.
+3. **Die Capabilities vervollständigen:** Der Generator schreibt einen Block `capabilities:` mit der
+   Unterstützungsstufe `community`, dem Modulnamen als einzigem Board und GGUF mit den Quantisierungstypen aus den
+   `case`-Zweigen der Quantisierungslogik (ohne solche Zweige sechs gängige GGUF-Typen). Ergänze deine echten Boards,
+   Formate, Quantisierungen je Board, Aliasse, Vorgaben und den Bedarf an Kalibrierdaten in
+   `targets/<Name>/target.yml` (Schema in `orchestrator/schemas/targets.py`; der Rockchip-Block ist das Vorbild). GUI, CLI, Ditto und der MCP-Server bieten genau das an und prüfen genau das, was
+   dort steht.
 4. **Dockerfile und Build-Skript:** Lege jede Version fest (Tags, Commits, Hashes, wie `RKLLM_WHEEL_SHA256` im
    Rockchip-Dockerfile). Die Umwandlung muss in der Sandbox funktionieren: als Benutzer ohne root-Rechte, ohne
    Netzwerk, mit schreibgeschütztem Image-Dateisystem und nur den eigenen Ordnern des Builds beschreibbar.
 5. **Mit einem echten Build testen**, zum Beispiel
    `llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t <Name> -f gguf -b <Board> -F`, und das Dockerfile
    in die hadolint-Matrix in `.github/workflows/docker.yml` und in `.github/dependabot.yml` aufnehmen.
+6. **Teilen**, als Community-Paket (unten) oder, wenn die Maintainer das Target übernehmen, mit einem Pull-Request an
+   dieses Repository ([Abschnitt 9](#9-commits-und-pull-requests)).
 
-**Wissenspakete** (`community/knowledge/`) sind noch nicht signiert (siehe [Roadmap](docs/BLUEPRINT_DE.md#roadmap)).
-Bitte öffne ein Issue, bevor du eines beisteuerst.
+### Beiträge zum Community-Zoo
+
+Targets, die du selbst pflegst, Rezepte (fertige Builds, die andere nachbauen können) und Wissen werden als
+signierte Community-Pakete über das Community-Repository geteilt, nicht als Ordner, die von Hand nach `community/`
+kopiert werden. Befehle und Optionen stehen in der [CLI-Anleitung](docs/CLI_Usage_DE.md#zoo-export); für Targets
+siehe auch den [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.md#9-ein-target-teilen).
+
+1. **Ein Paket exportieren:** `llm-cli zoo export target <ID> --author "<Name>"` für ein Target,
+   `llm-cli zoo export recipe <Build-Ordner> --author "<Name>"` für einen fertigen Build oder
+   `llm-cli zoo export knowledge --author "<Name>"` für deine Wissensbasis. In der GUI: „Export for community after
+   creating“ auf der letzten Seite des Modul-Assistenten oder „Export a finished build for the community...“ im
+   Kontextmenü des Builder-Logs. Das Paket wird datenschutzbereinigt, geprüft, mit deinem Schlüssel signiert und
+   nach `community/contributions/` geschrieben. Gesendet wird noch nichts.
+2. **Prüfen:** Die Zusammenfassung zeigt einen Diff für jede Datei, die die Datenschutz-Bereinigung geändert hat
+   (höchstens 40 Zeilen je Datei). Prüfe das Paket dann so, wie das Community-Repository es prüfen wird:
+   `llm-cli zoo verify community/contributions/<Datei>.zip`.
+3. **Den Pull-Request öffnen:** Ergänze den Export-Befehl um `--pr` (er fragt nach der Zusammenfassung, außer
+   `--yes` ist angegeben) oder klicke im Export-Dialog auf „Open pull request“. Sind die GitHub CLI und git
+   installiert und ist `gh` angemeldet, forkt das Framework das Repository aus der Einstellung `community_repo`,
+   committet das Paket auf einem neuen Branch nach `contributions/<Art>/` und öffnet den Pull-Request. Sonst, oder
+   wenn das scheitert, öffnet sich die Upload-Seite des Repositorys in deinem Browser, und du ziehst die Datei
+   dorthin.
+4. **Die CI-Prüfung:** Bei jedem Pull-Request, der `contributions/` berührt, nimmt der Workflow des
+   Community-Repositorys nur Paketdateien an (`contributions/target/*.zip`, `contributions/recipe/*.zip`,
+   `contributions/knowledge/*.zip`), jeweils höchstens 5 MB, führt für jede `llm-cli zoo verify` aus (Manifest und
+   Prüfsummen, keine Links, zusätzlichen oder binären Dateien, die Target-Prüfungen, die Formate von Rezepten und
+   Wissen, eine enthaltene Autorensignatur, die Datenschutz-Bereinigung) und lässt den Secret-Scan über die
+   geänderten Dateien laufen.
+5. **Durchsicht und Index:** Ein Maintainer sieht das Paket durch, führt es zusammen, trägt es in den signierten
+   Index ein und signiert den Index offline. Danach erscheint es in `llm-cli zoo list` und im Community Hub.
+
+Das Framework fragt nie nach einem Token, liest keines und zeigt keines an: `gh` und `git` nutzen ihre eigene
+gespeicherte Anmeldung, und die Upload-Seite nutzt die GitHub-Sitzung deines Browsers.
+
+**Aktueller Stand:** Das Community-Repository und sein signierter Index sind noch nicht veröffentlicht.
+`community_repo` und `community_index_url` sind leer, und `configs/community_keys.yml` enthält keinen Schlüssel;
+`--pr` bricht deshalb mit „No community repository is configured“ ab und lässt das Paket in
+`community/contributions/`. Bis es das Repository gibt, lässt sich ein Paket als Datei teilen
+(`llm-cli zoo install --file <Paket>` installiert es mit der Vertrauensstufe `local`).
+
+Wissenspakete behalten die Quelladresse jeder Seite und beanspruchen keine Lizenz für die Seiten (`NOASSERTION`);
+die Seiten bleiben unter den Bedingungen ihrer Eigentümer. Ein Target, das mit dem Framework ausgeliefert werden soll
+(Unterstützungsstufe `official`), kommt weiterhin mit einem normalen Pull-Request in dieses Repository.
+
+### Das Community-Repository betreuen
+
+Zwei Dateien in diesem Repository sind Werkzeuge für die Maintainer des Community-Repositorys; das Framework selbst
+nutzt sie nicht.
+
+- `scripts/community_repo/validate-contribution.yml` ist die Vorlage für den CI-Workflow des Community-Repositorys.
+  Kopiere sie dort nach `.github/workflows/` (dieses Repository führt sie nicht aus) und setze `LCF_REF` auf die
+  Framework-Version, mit der die Pakete geprüft werden. Sie führt die Prüfungen aus Schritt 4 oben mit dem Framework
+  in diesem Tag aus. Der Signaturschlüssel erreicht die CI nie.
+- `scripts/zoo_sign_index.py` signiert den Index. Sein Signaturschlüssel liegt nur im Schlüsselbund des
+  Betriebssystems (Dienst `lcf-community-index`):
+
+  ```bash
+  python scripts/zoo_sign_index.py keygen <Schlüsselname>
+  python scripts/zoo_sign_index.py entry <Paket>.zip --url https://<Adresse des Pakets> [--trust community|verified] [--title "<Titel>"]
+  python scripts/zoo_sign_index.py sign index.json --key <Schlüsselname> [--previous <alte index.json>]
+  ```
+
+  `keygen` legt einen Schlüssel an (einen vorhandenen Namen lehnt es ab) und gibt seinen Eintrag für
+  `configs/community_keys.yml` aus, zwei Jahre gültig; liefere diesen Eintrag mit einer Framework-Version aus, bevor
+  der Schlüssel den ersten Index signiert. `entry` prüft ein durchgesehenes Paket wie `llm-cli zoo verify` und gibt
+  seinen Index-Eintrag aus (Art, ID, Version, Titel, Autor, Lizenz, Vertrauensstufe, URL, Größe und sha256; `--trust`
+  ist standardmäßig `community`). `sign` prüft `index.json` gegen das Schema (mit `--previous` muss ihre `version`
+  höher sein) und schreibt `index.json.sig` daneben.
+
+`index.json` enthält `schema_version` (1), `version` (eine Zahl, die mit jedem signierten Index wächst), `generated`
+(UTC-Zeit in der Form `2026-10-11T12:00:00Z`), `entries` (die Ausgabe von `entry`) und `revoked`. Die Signatur deckt
+die genauen Bytes ab; veröffentliche `index.json` also unverändert. Clients lehnen einen Index ab, dessen Version
+niedriger ist als die zwischengespeicherte. Um ein Paket zurückzuziehen, trag einen Eintrag in `revoked` ein, erhöhe
+`version` und signiere erneut. Jeder Eintrag braucht `kind`, `id` und einen `reason`; mit `sha256` zieht er genau
+diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `version`, jede Version dieser ID.
 
 ---
 
@@ -345,6 +425,11 @@ Bitte öffne ein Issue, bevor du eines beisteuerst.
   MCP-Clients oder eine Weboberfläche geben.
 - Neue Aktionen für KI-Clients und Ditto sind Tools in `orchestrator/tools/framework_tools.py` mit der richtigen
   Stufe (`read`, `local_write`, `external`). Umgehe nie die Tool-Registry, die Berechtigungen oder das Audit-Log.
+- Das Framework fragt nie nach einem Repository-Token, liest keines und speichert keines. Übergib Arbeit an GitHub
+  über eine installierte GitHub CLI (sie behält ihre eigene Anmeldung) oder den Browser, so wie
+  `llm-cli zoo export --pr` es tut.
+- Code, der aus einem anderen Projekt übernommen ist, behält einen Kommentar, der seine Quelle nennt („Adapted from
+  ...“), und bekommt einen Eintrag mit der Lizenz dieses Projekts in `THIRD_PARTY_NOTICES.md`.
 - Schwäche nicht die Build-Sandbox, den Datenschutzfilter oder die Regeln für SSH-Vertrauen.
 
 ---
