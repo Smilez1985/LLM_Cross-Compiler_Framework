@@ -274,6 +274,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   without running the third time; after three input errors an error shows a valid example call. What was repaired
   is marked in the question, listed in the result's `notes` and recorded in the audit log. Tool arguments a local
   model sends with a code fence or in Python notation are read once more.
+- **Two-phase confirmation and question text v2** (Ditto and MCP clients): a question starts with the consequence
+  in plain words from facts the framework looked up, then who asks (an MCP client's self-reported name, version and
+  transport, and whose permissions apply), the facts the framework checked (external text labelled "not checked"),
+  and every argument with the speaking name of an id (a build's model and target, a local file's label). A tool can
+  look facts up before the question, and the call is bound to them: `resolve_healing` shows the pending proposal from
+  the framework's own state, refuses a proposal that changed after the question, and always asks before a
+  destructive fix (`docker_prune`), also when it is allowed. Ditto's GUI dialog and CLI prompt show questions up to
+  16,000 characters (a scrollable dialog, the pager); an MCP form stays at 4,000.
 - **`llm-cli ditto eval` records every tool call attempt**, not only those that reached a tool: the report's
   `tool_use` block gives tool calls per task, the share of malformed calls and of unknown tool names, repairs and
   repeat refusals.
@@ -578,6 +586,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (before: on neither path).
 
 ### Security
+- **AI clients never see the host path of a local model they named** (MCP clients and Ditto): the build's stage
+  text, the self-healing context, the build manifest's `model_source` and `list_artifacts` name it by its
+  `<label>:<relative path>` (an older manifest's host path by its label, else by the file name only).
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
   into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
   build log or a model name told the model.

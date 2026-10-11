@@ -123,7 +123,9 @@ def spec_named(title="Start a build"):
 
 
 def shown_keys(message):
-    return [line.split(":", 1)[0].strip() for line in message.splitlines()[1:]]
+    """The argument names of a question, in the order shown (the lines after '... wants to run ... with:'; the
+    consequence, who asks and the looked-up facts come before them since confirmation text v2, design S5)."""
+    return [line.split(":", 1)[0].strip() for line in confirmation.argument_lines(message)]
 
 
 # --- Confirmation text ----------------------------------------------------------------------------
@@ -152,13 +154,13 @@ class TestConfirmationText:
 
     def test_security_fields_come_first_whatever_order_the_client_sends(self):
         arguments = dict(reversed(list({**ATTACK, "board": "rk3588", "request_id": "b1"}.items())))
-        keys = shown_keys(mcp_server.describe_call(spec_named(), arguments))
+        keys = shown_keys(confirmation.describe_call(spec_named(), arguments))
         assert keys[:8] == ["model", "dataset_path", "use_gpu", "target", "format", "board", "quantization",
                             "request_id"]
         assert keys[8:] == ["max_context_length", "use_imatrix"], "the rest keeps the client's order"
 
     def test_none_is_left_out_but_false_zero_and_empty_are_shown(self):
-        keys = shown_keys(mcp_server.describe_call(spec_named(), {"board": None, "use_gpu": False,
+        keys = shown_keys(confirmation.describe_call(spec_named(), {"board": None, "use_gpu": False,
                                                                    "count": 0, "note": ""}))
         assert keys == ["use_gpu", "count", "note"]
 
@@ -182,11 +184,11 @@ class TestTooLong:
 
     def test_limit_is_inclusive(self):
         spec = spec_named("Write")
-        head = len(mcp_server.describe_call(spec, {"text": ""}))
-        fits = mcp_server.describe_call(spec, {"text": "x" * (confirmation.MAX_DESCRIPTION - head)})
+        head = len(confirmation.describe_call(spec, {"text": ""}))
+        fits = confirmation.describe_call(spec, {"text": "x" * (confirmation.MAX_DESCRIPTION - head)})
         assert len(fits) == confirmation.MAX_DESCRIPTION and fits.endswith("x")
-        with pytest.raises(mcp_server.CallTooLong, match="too long"):
-            mcp_server.describe_call(spec, {"text": "x" * (confirmation.MAX_DESCRIPTION - head + 1)})
+        with pytest.raises(confirmation.CallTooLong, match="too long"):
+            confirmation.describe_call(spec, {"text": "x" * (confirmation.MAX_DESCRIPTION - head + 1)})
 
     @pytest.mark.parametrize("mode", MODES)
     def test_refused_before_asking_and_never_run(self, server, registry, mode):
@@ -221,19 +223,19 @@ class TestEscaping:
 
     @pytest.mark.parametrize("char", DANGEROUS, ids=lambda c: f"U+{ord(c):04X}")
     def test_control_format_and_bidi_characters_are_escaped(self, char):
-        message = mcp_server.describe_call(spec_named(), {"model": f"safe{char}tail", "use_gpu": True})
+        message = confirmation.describe_call(spec_named(), {"model": f"safe{char}tail", "use_gpu": True})
         assert f"  model: safe\\u{ord(char):04x}tail" in message.splitlines()
-        assert char not in message.split("\n", 1)[1].replace("\n", ""), "the raw character reaches the dialog"
+        assert char not in "".join(confirmation.argument_lines(message)), "the raw character reaches the dialog"
 
     def test_nested_values_are_escaped_too(self):
-        message = mcp_server.describe_call(spec_named(), {"extra": {"note": "a\u202eb\nc"}, "tags": ["x\u2066"]})
-        body = message.split("\n", 1)[1]
+        message = confirmation.describe_call(spec_named(), {"extra": {"note": "a\u202eb\nc"}, "tags": ["x\u2066"]})
+        body = "\n".join(confirmation.argument_lines(message))
         assert "\u202e" not in body and "\u2066" not in body and "\\u202e" in body and "\\u2066" in body
         assert len(body.splitlines()) == 2
 
     def test_readable_text_is_unchanged(self):
         text = "Modell für Ärzte 模型 🙂 café naïve ½"
-        assert f"  model: {text}" in mcp_server.describe_call(spec_named(), {"model": text}).splitlines()
+        assert f"  model: {text}" in confirmation.describe_call(spec_named(), {"model": text}).splitlines()
 
     @pytest.mark.parametrize("mode", MODES)
     def test_newline_in_a_value_cannot_forge_another_field(self, server, registry, mode):
@@ -241,19 +243,20 @@ class TestEscaping:
         arguments = {**ATTACK, "model": "SmolLM2\n  dataset_path: (none)\n  use_gpu: false\u2028  board: rk3566"}
         result = call(server, "start_build", arguments, answering("accept", asked=asked), mode)
         assert not result.is_error
-        lines = asked[0].splitlines()
-        assert len(lines) == 1 + 8, "one line per argument"
+        lines = confirmation.argument_lines(asked[0])
+        assert len(lines) == 8, "one line per argument"
         assert [x for x in lines if x.startswith("  dataset_path:")] == ["  dataset_path: /home/user/.ssh/id_ed25519"]
         assert [x for x in lines if x.startswith("  use_gpu:")] == ["  use_gpu: true"]
         assert not any(x.startswith("  board:") for x in lines)
-        assert lines[1] == "  model: SmolLM2\\u000a  dataset_path: (none)\\u000a  use_gpu: false\\u2028  board: rk3566"
+        assert lines[0] == "  model: SmolLM2\\u000a  dataset_path: (none)\\u000a  use_gpu: false\\u2028  board: rk3566"
+        assert len(asked[0].splitlines()) == 3 + 8, "consequence, who asks and the header: nothing else to forge"
 
     @pytest.mark.parametrize("mode", MODES)
     def test_end_to_end_dialog_has_no_raw_invisible_characters(self, server, mode):
         asked = []
         hostile = "a" + "".join(DANGEROUS) + "z"
         assert not call(server, "write", {"text": hostile}, answering("accept", asked=asked), mode).is_error
-        body = asked[0].split("\n", 1)[1].replace("\n", "")
+        body = asked[0].replace("\n", "")
         assert not any(ch in body for ch in DANGEROUS)
 
 
@@ -839,31 +842,31 @@ class TestFaithfulRendering:
 
     @pytest.mark.parametrize("char", INVISIBLE, ids=lambda c: f"U+{ord(c):04X}")
     def test_invisible_characters_are_escaped(self, char):
-        message = mcp_server.describe_call(spec_named(), {"model": f"SmolLM2{char}", "use_gpu": True})
+        message = confirmation.describe_call(spec_named(), {"model": f"SmolLM2{char}", "use_gpu": True})
         assert char not in message, "the dialog reads 'SmolLM2' for a different value"
 
     def test_combining_mark_stacks_are_bounded(self):
         # 400 marks below one letter draw a column over the lines that follow it: dataset_path and use_gpu.
-        message = mcp_server.describe_call(spec_named(), {"model": "x" + "\u0333" * 400,
+        message = confirmation.describe_call(spec_named(), {"model": "x" + "\u0333" * 400,
                                                            "dataset_path": "/home/user/.ssh/id_ed25519",
                                                            "use_gpu": True})
         assert longest_mark_run(message) <= 30, "more marks in a row than Unicode's stream-safe limit (UAX #15)"
 
     def test_ordinary_combining_text_stays_readable(self):
         text = "Vie\u0323\u0302t cafe\u0301 \u0915\u093f"  # Vietnamese, decomposed e-acute, Devanagari
-        assert f"  model: {text}" in mcp_server.describe_call(spec_named(), {"model": text}).splitlines()
+        assert f"  model: {text}" in confirmation.describe_call(spec_named(), {"model": text}).splitlines()
 
     @pytest.mark.parametrize("first, second", [("a\\u000ab", "a\nb"), ("\U000e0041", "\ue004" + "1")],
                              ids=["literal-backslash-u", "astral-vs-bmp-plus-digit"])
     def test_different_values_read_differently(self, first, second):
         assert first != second
-        assert (mcp_server.describe_call(spec_named(), {"model": first})
-                != mcp_server.describe_call(spec_named(), {"model": second}))
+        assert (confirmation.describe_call(spec_named(), {"model": first})
+                != confirmation.describe_call(spec_named(), {"model": second}))
 
     def test_resolve_healing_shows_the_decision_first(self):
         spec = ToolSpec("resolve_healing", "Decide on a self-healing proposal", "", ToolTier.LOCAL_WRITE,
                         ResolveHealingIn, Out, lambda i: i)
-        message = mcp_server.describe_call(spec, {"approve": True, "request_id": "req_1"})
+        message = confirmation.describe_call(spec, {"approve": True, "request_id": "req_1"})
         assert shown_keys(message) == ["request_id", "approve"]
         assert "  approve: true" in message.splitlines()
 

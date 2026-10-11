@@ -254,9 +254,16 @@ class EvalBuildService(BuildService):
         self._requests[request_id] = status.model_copy(update={"status": "CANCELLED"})
         return self._requests[request_id]
 
-    def resolve_healing(self, request_id: str, approve: bool) -> BuildStatusOut:
+    def healing_proposal(self, request_id: str, approve: bool):
         self.get_status(request_id)
-        raise BuildServiceError(f"Build request '{request_id}' has no pending healing proposal.")
+        raise BuildServiceError(f"Build request '{request_id}' has no pending healing proposal.", code="failed",
+                                next="Call get_build_status to see the build's state.")
+
+    def request_label(self, request_id: str):
+        return None
+
+    def resolve_healing(self, request_id: str, approve: bool, expect=None) -> BuildStatusOut:
+        return self.healing_proposal(request_id, approve)
 
 
 class _EvalConfig:

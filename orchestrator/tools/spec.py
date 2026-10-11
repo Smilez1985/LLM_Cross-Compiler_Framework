@@ -6,6 +6,8 @@ tool's limits. The registry and the normalizer (orchestrator/tools/normalize.py)
 tool.
 """
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
@@ -43,6 +45,10 @@ class FieldMeta:
     null_means_default: bool = False       # "", "null", "none", "default" mean "not given" (least-impact default)
     split: bool = False                    # "a, b" becomes ["a", "b"] for a list field
     list_tool: str = ""                    # for ids: the tool that lists the valid ones
+    # The speaking name of a value for the person (a build's model and target for its request id, a local file's
+    # <label>:<path> for its file id), shown next to the value in a question; None when there is none. Only people
+    # see it: a model gets the ids and labels it sent.
+    describe: Optional[Callable[[Any], Optional[str]]] = None
 
     def __post_init__(self):
         if self.kind not in FIELD_KINDS:
@@ -59,6 +65,34 @@ class GrantRule:
     scope: Callable[[Any], Optional[str]]
     warning: str
     version: int = 1
+
+
+@dataclass(frozen=True)
+class Fact:
+    """One line of what the framework looked up for a question. `source` marks text from outside the framework (a
+    build log, an AI's proposal, a pack index): it is shown escaped and labelled with where it comes from, never as
+    the framework's own words."""
+    label: str
+    value: str
+    source: str = ""
+
+
+@dataclass(frozen=True)
+class CallFacts:
+    """What a tool's `prepare` looked up before the question (design principle 11): the consequence in plain words
+    (the question's first line), the facts the person is shown, the values the handler must use (`bound`) and a
+    cap the facts call for (the value of a Decision, e.g. "ask" for a destructive healing strategy even when the
+    tool is allowed). The handler gets exactly this object and uses `bound` or refuses."""
+    consequence: str
+    facts: Tuple[Fact, ...] = ()
+    bound: Mapping[str, Any] = field(default_factory=dict)
+    cap: Optional[str] = None
+
+    def fingerprint(self) -> str:
+        """A hash of everything the person was shown and the handler is bound to."""
+        data = [self.consequence, [[f.label, f.value, f.source] for f in self.facts], dict(self.bound), self.cap]
+        text = json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
+        return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 @dataclass(frozen=True)
