@@ -13,9 +13,9 @@ Engines, the first that works:
 * macOS: say, text on stdin, with a voice of the UI language when one is installed.
 * Linux: spd-say (speech-dispatcher), else espeak-ng or espeak (text on stdin).
 
-Silent when LLM_FRAMEWORK_NO_AUDIO is set, under CI, in an SSH session without a display, on Linux without a
-display, under pytest, when the setting audio_announcements is off, or when no engine works. Every announcement
-is logged at INFO as well, so it is never only audible.
+Silent when LLM_FRAMEWORK_NO_AUDIO is set (the test suite sets it), under CI, in an SSH session without a
+display, on Linux without a display, when the setting audio_announcements is off, or when no engine works.
+Every announcement is logged at INFO as well, so it is never only audible.
 """
 
 import logging
@@ -70,8 +70,6 @@ def silent_reason(config: Any = None) -> Optional[str]:
         return "LLM_FRAMEWORK_NO_AUDIO is set"
     if _env_on("CI"):
         return "running under CI"
-    if "PYTEST_CURRENT_TEST" in env:
-        return "running under tests"
     if any(env.get(v) for v in ("SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY")) and not display:
         return "SSH session without a display"
     if _platform().startswith("linux") and not display:

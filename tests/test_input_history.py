@@ -63,10 +63,9 @@ class TestStore:
         assert [p.name for p in history.path.parent.iterdir()] == ["input_history.json"]
         assert json.loads(history.path.read_text()) == {"version": 1, "fields": {"model": ["org/a"]}}
 
-    def test_clear_one_field_or_everything(self, history):
+    def test_clear_forgets_everything(self, history):
         history.add("model", "org/a")
         history.add("url", "https://docs.radxa.com/")
-        assert history.clear("model") and history.get("model") == [] and history.get("url")
         assert history.clear() and not history.path.exists()
         assert history.clear()   # nothing to clear is fine
 

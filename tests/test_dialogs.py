@@ -360,6 +360,43 @@ class TestAIConfigurationDialog:
         assert "3 models" in dlg.lbl_models.text()
         assert framework.secrets_manager.store == {}, "listing models stores nothing"
 
+    def test_model_lists_reach_the_gui_thread_through_the_lasting_relay(self, qapp, framework, model_lists):
+        """The worker used to emit on a QObject of its own and drop it in the worker thread, which aborted the
+        process now and then. It now emits only on the relay that lives as long as the application, queued to
+        the GUI thread, and each dialog takes only its own latest list."""
+        model_lists.answers["ollama"] = ["qwen3.5:9b"]
+        arrived = []
+
+        class Recording(AIConfigurationDialog):
+            def _on_models_listed(self, request, ids, message):
+                arrived.append(threading.current_thread() is threading.main_thread())
+                super()._on_models_listed(request, ids, message)
+
+        relay = dialogs.model_list_relay()
+        assert relay is dialogs.model_list_relay() and relay.parent() is None
+        first, second = Recording(framework), Recording(framework)
+        select_provider(first, "ollama")
+        assert wait_for(qapp, lambda: first.cb_model.findText("qwen3.5:9b") >= 0)
+        assert arrived and all(arrived)
+        assert second.cb_model.findText("qwen3.5:9b") < 0, "another dialog's list does not change this one"
+
+    def test_closing_dialogs_while_their_lists_load_is_safe(self, qapp, framework, model_lists):
+        model_lists.answers["ollama"] = [f"model-{i}" for i in range(20)]
+        for round_ in range(60):
+            dlg = AIConfigurationDialog(framework)
+            select_provider(dlg, "ollama")
+            dlg._refresh_models()
+            qapp.processEvents()
+            dlg.close()
+            dlg.deleteLater()
+            del dlg
+            qapp.processEvents()
+            if round_ % 10 == 0:
+                gc.collect()
+        last = AIConfigurationDialog(framework)
+        select_provider(last, "ollama")
+        assert wait_for(qapp, lambda: last.cb_model.findText("model-19") >= 0)
+
     def test_failed_model_list_keeps_free_text(self, qapp, framework, model_lists):
         from orchestrator.llm import AuthFailed
         model_lists.answers["openrouter"] = AuthFailed("OpenRouter rejected the credentials.")
@@ -586,6 +623,31 @@ class TestURLInputDialog:
 
     def test_default_options(self, qapp):
         assert URLInputDialog().get_options() == {"max_depth": 2, "download_pdfs": True, "request_delay": 1}
+
+    def test_options_start_from_the_settings_and_the_user_values_count(self, qapp, tmp_path):
+        """The dialog is the only way to crawl: it used to open with 2, PDFs on and 1 s (whole seconds) whatever
+        crawler_max_depth, crawler_download_pdfs and crawler_rate_limit said, and always passed those."""
+        cfg = ConfigManager(tmp_path)
+        cfg.set("crawler_max_depth", 0)
+        cfg.set("crawler_download_pdfs", False)
+        cfg.set("crawler_rate_limit", 0.25)
+
+        dlg = URLInputDialog(config=cfg)
+        assert dlg.get_options() == {"max_depth": 0, "download_pdfs": False, "request_delay": 0.25}
+        dlg.spin_depth.setValue(4)
+        dlg.chk_pdfs.setChecked(True)
+        dlg.spin_delay.setValue(1.5)
+        assert dlg.get_options() == {"max_depth": 4, "download_pdfs": True, "request_delay": 1.5}
+
+    def test_larger_settings_are_not_cut_down(self, qapp, tmp_path):
+        """A configured 30 s delay (a site that asks for it) must not become the dialog's maximum of 10 s."""
+        cfg = ConfigManager(tmp_path)
+        cfg.set("crawler_max_depth", 8)
+        cfg.set("crawler_rate_limit", 30.0)
+        assert URLInputDialog(config=cfg).get_options() == {"max_depth": 8, "download_pdfs": True,
+                                                            "request_delay": 30.0}
+        cfg.set("crawler_max_depth", 2**40)   # beyond what a spin box holds: the dialog still opens
+        assert URLInputDialog(config=cfg).get_options()["max_depth"] == 2**31 - 1
 
     def test_no_switch_to_ignore_robots_txt(self, qapp, tmp_path):
         """robots.txt is a machine-readable opt-out like TDMRep: neither the dialog nor the config turns it off."""
@@ -869,9 +931,8 @@ class TestDeepIngestControls:
         wizard.on_crawl_done("success", "ok")
         wizard.on_crawl_done("partial", "some")
         wizard.on_crawl_done("failure", "none")
-        assert wizard_boxes == [("information", "Deep Ingest Complete", "ok"),
-                                ("warning", "Deep Ingest Partly Complete", "some"),
-                                ("critical", "Deep Ingest Failed", "none")]
+        assert wizard_boxes == [("information", "Deep Ingest", "ok"), ("warning", "Deep Ingest", "some"),
+                                ("critical", "Deep Ingest", "none")]
         assert wizard.btn_stop_crawl.isHidden() and wizard.btn_deep_ingest.isEnabled()
 
     def test_stop_button_stops_the_running_worker(self, wizard):
@@ -937,8 +998,9 @@ class TestDeepIngestControls:
         offered = []
 
         class FakeURLDialog:
-            def __init__(self, parent=None, recent=()):
+            def __init__(self, parent=None, recent=(), config=None):
                 offered.append(list(recent))
+                assert config is cfg   # the crawl options start from the user's settings
 
             def exec(self):
                 return wizards.QDialog.Accepted
@@ -964,6 +1026,82 @@ class TestDeepIngestControls:
         assert wizard.status_label.text() == "Deep Ingest finished: 1 pages (2 chunks) are now searchable."
         assert offered == [[], ["https://docs.example/"]]   # crawled URLs are offered the next time
 
+    def test_finish_waits_for_a_running_crawl(self, qapp, wizard, tmp_path, monkeypatch, wizard_boxes):
+        """Finish used to create the module, and its knowledge snapshot of the crawled pages, while Deep Ingest
+        was still storing them."""
+        from orchestrator.gui import wizards
+
+        release, started, generated = threading.Event(), threading.Event(), []
+
+        class SlowRag:
+            def ingest_url(self, url, crawler_options=None, stop=None, progress=None):
+                started.set()
+                release.wait(10)
+                return page_result("success", 1, 1)
+
+        class URLDialog:
+            def __init__(self, parent=None, recent=(), config=None):
+                pass
+
+            def exec(self):
+                return wizards.QDialog.Accepted
+
+            def get_urls(self):
+                return ["https://docs.example/"]
+
+            def get_options(self):
+                return {}
+
+        rag = SlowRag()
+        wizard.framework_manager = SimpleNamespace(config=ConfigManager(tmp_path / "configs"),
+                                                   get_component=lambda name: rag)
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
+        monkeypatch.setattr(wizards, "URLInputDialog", URLDialog)
+        monkeypatch.setattr(wizards, "ModuleGenerator", lambda targets: SimpleNamespace(
+            generate_module=lambda *args, **kwargs: generated.append(args)))
+        wizard.name_edit.setText("Test_Board")
+        wizard.show()
+        while wizard.nextId() != -1:
+            wizard.next()
+        finish = wizard.button(wizards.QWizard.FinishButton)
+        assert finish.isEnabled() and wizard.lbl_crawl_running.isHidden()
+
+        wizard.run_deep_ingest()
+        assert started.wait(5)
+        assert not finish.isEnabled() and not wizard.lbl_crawl_running.isHidden()
+        wizard.accept()
+        assert generated == [] and wizard.isVisible()
+
+        release.set()
+        assert wait_for(qapp, lambda: finish.isEnabled())
+        assert wizard.lbl_crawl_running.isHidden() and wizard_boxes[-1][0] == "information"
+
+    @pytest.mark.parametrize("stored", [False, True])
+    def test_a_requested_snapshot_that_is_missing_is_reported(self, wizard, tmp_path, monkeypatch, wizard_boxes,
+                                                              stored):
+        """The snapshot box was ticked, but no stored page came from the crawled URLs (e.g. the crawl stored
+        nothing): "Module created" alone used to hide that the snapshot is missing."""
+        from orchestrator.gui import wizards
+
+        def generate(data, framework, knowledge_roots=None):
+            target = tmp_path / "targets" / "test_board"
+            (target / "knowledge").mkdir(parents=True)
+            if stored and knowledge_roots:
+                (target / "knowledge" / "initial_knowledge.json").write_text("[]")
+            return target
+
+        monkeypatch.setattr(wizards, "ModuleGenerator", lambda targets: SimpleNamespace(generate_module=generate))
+        wizard.framework_manager = SimpleNamespace(config=ConfigManager(tmp_path / "configs"))
+        wizard.name_edit.setText("Test_Board")
+        wizard.crawled_roots.add("https://docs.example/")
+        wizard.chk_knowledge.setEnabled(True)
+        wizard.chk_knowledge.setChecked(True)
+        wizard.accept()
+
+        kind, _, text = wizard_boxes[-1]
+        assert kind == "information" and str(tmp_path / "targets" / "test_board") in text
+        assert ("knowledge snapshot was not attached" in text) is not stored
+
     def test_crawled_urls_are_remembered_without_secrets(self, wizard, tmp_path, monkeypatch):
         from orchestrator.gui import wizards
         from orchestrator.utils.input_history import InputHistory
@@ -975,7 +1113,7 @@ class TestDeepIngestControls:
         crawled = []
 
         class Worker:
-            progress = page = done = error = SimpleNamespace(connect=lambda slot: None)
+            progress = page = done = error = finished = SimpleNamespace(connect=lambda slot: None)
 
             def __init__(self, rag, urls, options, **kwargs):
                 crawled.append(urls)
@@ -987,7 +1125,7 @@ class TestDeepIngestControls:
                 return False
 
         class URLDialog:
-            def __init__(self, parent=None, recent=()):
+            def __init__(self, parent=None, recent=(), config=None):
                 pass
 
             def exec(self):
@@ -1066,7 +1204,7 @@ class TestCrawlNotice:
         if os.name == "posix":
             assert state.stat().st_mode & 0o777 == 0o600
         stored = json.loads(state.read_text())
-        assert stored["via"] == "gui" and stored["notice_version"] == 1 and len(stored["notice_sha256"]) == 64
+        assert set(stored) == {"notice_sha256", "acknowledged_at"} and len(stored["notice_sha256"]) == 64
 
         de = dict(localization.LocalizationManager.TRANSLATIONS["de"])
         de["crawl.notice.text"] += " Neu."
@@ -1074,29 +1212,21 @@ class TestCrawlNotice:
         dialogs.show_crawl_notice_once(None, cfg)
         assert len(shown) == 2   # a changed text in any language is shown again
 
-    @pytest.mark.parametrize("content", ["{broken", '{"version": 1}', '{"version": 1, "notice_version": 1, '
-                                         '"notice_sha256": "x", "acknowledged_at": "", "via": "mcp"}'])
+    @pytest.mark.parametrize("content", ["{broken", "[]", '"x"', '{"version": 1}', '{"notice_sha256": "x"}'])
     def test_a_damaged_state_file_shows_the_notice_again(self, tmp_path, content):
         from orchestrator.utils.crawl_notice import CrawlNotice
 
         (tmp_path / CrawlNotice.FILE_NAME).write_text(content)
         notice = CrawlNotice(tmp_path)
         assert notice.needed()
-        notice.acknowledge("cli")
+        notice.acknowledge()
         assert not notice.needed()
-
-    def test_only_the_gui_or_cli_can_acknowledge(self, tmp_path):
-        from orchestrator.utils.crawl_notice import CrawlNotice
-
-        with pytest.raises(ValueError):
-            CrawlNotice(tmp_path).acknowledge("mcp")
-        assert not (tmp_path / CrawlNotice.FILE_NAME).exists()
 
     def test_a_failed_save_still_lets_the_crawl_start(self, qapp, tmp_path, monkeypatch):
         from orchestrator.utils.crawl_notice import CrawlNotice
 
         monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
-        monkeypatch.setattr(CrawlNotice, "acknowledge", lambda self, via: (_ for _ in ()).throw(OSError("read-only")))
+        monkeypatch.setattr(CrawlNotice, "acknowledge", lambda self: (_ for _ in ()).throw(OSError("read-only")))
         dialogs.show_crawl_notice_once(None, SimpleNamespace(user_state_dir=tmp_path))   # no exception
 
     def test_without_a_usable_state_directory_the_notice_is_shown_and_the_crawl_starts(self, qapp, monkeypatch):

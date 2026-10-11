@@ -28,7 +28,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QRect
 from PySide6.QtGui import QPixmap
 
-from orchestrator.Core.module_generator import ModuleGenerator
+from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT, ModuleGenerator
 from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog, show_crawl_notice_once
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils import input_history
@@ -46,10 +46,18 @@ class WizardSignals(QObject):
     """Signale für Thread-Kommunikation"""
     analysis_finished = Signal(dict)
     analysis_error = Signal(str)
-    # Crawler Signals
-    crawl_progress = Signal(str)
-    crawl_finished = Signal(str)
-    crawl_error = Signal(str)
+
+
+class SummaryPage(QWizardPage):
+    """The last page. Finish stays disabled while a Deep Ingest runs: the knowledge snapshot would be partial."""
+
+    def __init__(self, crawl_running: Callable[[], bool]):
+        super().__init__()
+        self._crawl_running = crawl_running
+
+    def isComplete(self) -> bool:
+        return super().isComplete() and not self._crawl_running()
+
 
 # --- CUSTOM WIDGET: SPRITE ANIMATOR ---
 class SpriteAnimationWidget(QLabel):
@@ -485,7 +493,7 @@ class ModuleCreationWizard(QWizard):
         return page
 
     def create_summary_page(self):
-        page = QWizardPage()
+        page = self.summary_page = SummaryPage(self._crawl_running)
         page.setTitle(tr("wiz.page.summary"))
         page.setSubTitle(tr("wiz.page.summary.sub"))
         layout = QVBoxLayout()
@@ -501,7 +509,11 @@ class ModuleCreationWizard(QWizard):
         layout.addWidget(self.chk_knowledge)
         self.chk_export = QCheckBox("Export for community after creating (a scrubbed, signed pack for a pull request)")
         layout.addWidget(self.chk_export)
-        
+        self.lbl_crawl_running = QLabel(ui_text("crawl.finish_waits"))
+        self.lbl_crawl_running.setWordWrap(True)
+        self.lbl_crawl_running.setVisible(False)
+        layout.addWidget(self.lbl_crawl_running)
+
         page.setLayout(layout)
         return page
 
@@ -567,7 +579,7 @@ Setup commands:
 
         show_crawl_notice_once(self, cfg, announcer=speak)  # before the first crawl, again when its text changes
         history = input_history.for_config(cfg)
-        dlg = URLInputDialog(self, recent=history.get("url") if history else ())
+        dlg = URLInputDialog(self, recent=history.get("url") if history else (), config=cfg)
         if dlg.exec() == QDialog.Accepted:
             urls = dlg.get_urls()
             options = dlg.get_options()
@@ -596,7 +608,17 @@ Setup commands:
             self.crawl_worker.page.connect(self.on_crawl_page)
             self.crawl_worker.done.connect(self.on_crawl_done)
             self.crawl_worker.error.connect(self.on_crawl_error)
+            self.crawl_worker.finished.connect(self._crawl_state_changed)
             self.crawl_worker.start()
+            self._crawl_state_changed()
+
+    def _crawl_running(self) -> bool:
+        return self.crawl_worker is not None and self.crawl_worker.isRunning()
+
+    def _crawl_state_changed(self):
+        """Finish waits for a running crawl (SummaryPage.isComplete); the summary page says why."""
+        self.lbl_crawl_running.setVisible(self._crawl_running())
+        self.summary_page.completeChanged.emit()
 
     def stop_deep_ingest(self):
         """Stop button: the crawl ends after the current page and keeps what is stored."""
@@ -629,7 +651,7 @@ Setup commands:
         icon = {"success": "✅", "partial": "⚠️"}.get(outcome, "❌")
         self.crawl_log.appendPlainText(f"\n{icon} {msg}")
         show = {"success": QMessageBox.information, "partial": QMessageBox.warning}.get(outcome, QMessageBox.critical)
-        show(self, ui_text(f"crawl.title.{outcome}"), msg)
+        show(self, "Deep Ingest", msg)  # the message and the kind of box tell the outcome
 
     def on_crawl_error(self, err):
         self._set_avatar_state("fail")
@@ -857,6 +879,8 @@ Setup commands:
         self.next()
 
     def accept(self):
+        if self._crawl_running():  # Finish is disabled meanwhile; the snapshot must hold every crawled page
+            return
         # --- CROSS-COMPILER AUTO-INJECTION ---
         packages_list = self.packages_edit.text().split()
         arch = self.arch_combo.currentText()
@@ -902,8 +926,10 @@ Setup commands:
                 output_path = generator.generate_module(self.module_data, self.framework_manager, knowledge_roots=roots)
             else:
                 output_path = generator.generate_module(self.module_data)
-                
-            QMessageBox.information(self, tr("msg.success"), f"{tr('msg.module_created')}\n{output_path}")
+            message = f"{tr('msg.module_created')}\n{output_path}"
+            if roots and not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
+                message += "\n\n" + ui_text("crawl.snapshot_missing")
+            QMessageBox.information(self, tr("msg.success"), message)
             if self.chk_export.isChecked():
                 from orchestrator.gui.community_hub import CommunityExportDialog
                 CommunityExportDialog(self.framework_manager, "target", output_path.name, self).exec()

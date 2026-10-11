@@ -21,12 +21,11 @@ class Config(dict):
 
 @pytest.fixture
 def audible(monkeypatch):
-    """Returns a function that makes announcements audible (a Linux desktop by default). It is called in the
-    test body, because pytest sets PYTEST_CURRENT_TEST again right before the test runs."""
+    """Returns a function that makes announcements audible (a Linux desktop by default), called in the test
+    body."""
 
     def enable(platform="linux", which=None):
-        for var in ("LLM_FRAMEWORK_NO_AUDIO", "CI", "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "WAYLAND_DISPLAY",
-                    "PYTEST_CURRENT_TEST"):
+        for var in ("LLM_FRAMEWORK_NO_AUDIO", "CI", "SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY", "WAYLAND_DISPLAY"):
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("DISPLAY", ":0")
         monkeypatch.setattr(an, "_platform", lambda: platform)
@@ -228,11 +227,10 @@ class TestSilence:
         assert an.announce("Hello", config=Config(config or {})) is None
         assert runs.calls == []
 
-    def test_silent_under_pytest(self, runs, monkeypatch):
-        monkeypatch.delenv("LLM_FRAMEWORK_NO_AUDIO")
+    def test_the_test_suite_is_silent(self, runs, monkeypatch):
         monkeypatch.setenv("DISPLAY", ":0")
-        assert "PYTEST_CURRENT_TEST" in os.environ
-        assert an.silent_reason() == "running under tests" and an.announce("Hello") is None
+        assert os.environ["LLM_FRAMEWORK_NO_AUDIO"] == "1"   # set for every test by conftest.py
+        assert an.silent_reason() == "LLM_FRAMEWORK_NO_AUDIO is set" and an.announce("Hello") is None
 
     def test_no_audio_switch_values(self, monkeypatch):
         monkeypatch.setenv("LLM_FRAMEWORK_NO_AUDIO", "0")

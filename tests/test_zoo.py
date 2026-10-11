@@ -811,6 +811,28 @@ class TestGenerator:
         snapshot = json.loads((scoped / "knowledge" / "initial_knowledge.json").read_text())
         assert [e["content"] for e in snapshot] == ["board doc"]
 
+    def test_a_crawled_page_with_placeholder_text_does_not_break_the_module(self, generator, world):
+        """The snapshot is data, not template output: a page that writes dates as YYYY-MM-DD used to fail the
+        generation and delete the new target (and would fail its export and install)."""
+        from orchestrator.Core.module_generator import validate_target_folder
+        world.rag.records = [{"source": "https://b.invalid/dates", "content": "Dates are YYYY-MM-DD; see [MODULE_NAME].",
+                              "metadata": {"root_url": "https://b.invalid"}}]
+        target = generator.generate_module(self.data(), world.framework, knowledge_roots=["https://b.invalid"])
+        assert "YYYY-MM-DD" in (target / "knowledge" / "initial_knowledge.json").read_text()
+        assert validate_target_folder(target) == []
+        (target / "knowledge" / "README.md").write_text("Created YYYY-MM-DD\n")   # our own files are still checked
+        assert validate_target_folder(target) == ["template placeholder left: knowledge/README.md: YYYY-MM-DD"]
+
+    def test_the_knowledge_readme_says_what_the_snapshot_is(self, generator, world):
+        world.rag.records = [{"source": "a", "content": "board doc", "metadata": {"root_url": "https://b.invalid"}}]
+        target = generator.generate_module(self.data(), world.framework, knowledge_roots=["https://b.invalid"])
+        readme = (target / "knowledge" / "README.md").read_text(encoding="utf-8")
+        for claim in ("vectorized", "Qdrant", "automatically"):   # nothing reads initial_knowledge.json
+            assert claim not in readme
+        for fact in ("initial_knowledge.json", "privacy scrub", "source", "does not read this file",
+                     "llm-cli zoo export knowledge"):
+            assert fact in readme
+
 
 def test_wizard_snapshot_and_export_are_off_by_default(qapp, tmp_path):
     from orchestrator.gui.wizards import ModuleCreationWizard

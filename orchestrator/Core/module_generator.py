@@ -61,6 +61,20 @@ TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_F
     r"(?<![\w$])\[(?:MODULE_NAME|Hardware-Familie|IHRE_ARCHITEKTUR|Hersteller|QUANTIZATION_LOGIC|CPU_FLAGS|CMAKE_FLAGS"
     r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name)\]|\{packages_str\}|YYYY-MM-DD")
 GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
+KNOWLEDGE_SNAPSHOT = "knowledge/initial_knowledge.json"  # crawled pages: data, not template output
+KNOWLEDGE_README = """# Knowledge snapshot of {slug}
+
+`initial_knowledge.json` holds the pages that Deep Ingest crawled for this target in the module wizard, as text
+sections after the privacy scrub (home folders, addresses, host and user names and keys removed). Every section
+keeps its source address (`source`) and its metadata, among them the start URL of its crawl (`root_url`). It
+records what the target was made from and can be read offline; the pages keep their owners' terms, and the
+target's licence does not cover them.
+
+The framework does not read this file: nothing imports it into a knowledge base, and there is no command for
+that. To share knowledge so that it reaches other users' knowledge bases, export your knowledge base as a
+knowledge pack (`llm-cli zoo export knowledge --author <name>`); an installed knowledge pack is added to the
+knowledge base.
+"""
 
 
 def module_slug(module_name: str) -> str:
@@ -187,6 +201,8 @@ def _yaml_strings(value) -> Iterable[str]:
 def _leftover_placeholders(root: Path) -> List[str]:
     found = []
     for path in sorted(p for p in Path(root).rglob("*") if p.is_file() and not p.is_symlink()):
+        if path.relative_to(root).as_posix() == KNOWLEDGE_SNAPSHOT:
+            continue  # a crawled page may well write "YYYY-MM-DD"
         text = path.read_text(encoding="utf-8", errors="replace")
         match = TEMPLATE_PLACEHOLDERS.search(text)
         if match is None and path.name == "target.yml":
@@ -380,17 +396,14 @@ class ModuleGenerator:
 
             if snapshot_path_str and os.path.exists(snapshot_path_str):
                 src = Path(snapshot_path_str)
-                dst = ensure_directory(target_dir / "knowledge") / "initial_knowledge.json"
+                dst = target_dir / KNOWLEDGE_SNAPSHOT
+                ensure_directory(dst.parent)
                 shutil.move(src, dst)
-                self.logger.info(f"✅ Attached Knowledge Snapshot: {dst}")
-                
-                # Create a small Readme for the knowledge
-                with open(target_dir / "knowledge" / "README.md", "w") as f:
-                    f.write(f"# Knowledge Base for {module_slug}\n\n")
-                    f.write("This folder contains vectorized knowledge snapshots (JSON).\n")
-                    f.write("The framework will automatically ingest these into the local Qdrant instance when using this module.\n")
+                (dst.parent / "README.md").write_text(KNOWLEDGE_README.format(slug=module_slug), encoding="utf-8")
+                self.logger.info(f"Attached the knowledge snapshot: {dst}")
             else:
-                self.logger.warning("No knowledge snapshot created (maybe Qdrant was empty or disabled).")
+                self.logger.warning("No knowledge snapshot attached: no stored page comes from the crawled URLs, "
+                                    "or the knowledge base could not be read.")
                 
         except Exception as e:
             self.logger.warning(f"Failed to create knowledge snapshot: {e}")

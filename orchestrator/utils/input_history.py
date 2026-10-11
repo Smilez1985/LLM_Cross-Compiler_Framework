@@ -15,7 +15,6 @@ is kept). Saving errors are logged and never break the GUI.
 import logging
 import os
 import re
-import tempfile
 import unicodedata
 from pathlib import Path
 from typing import Dict, Iterable, List, Literal, Optional, get_args
@@ -23,6 +22,7 @@ from urllib.parse import unquote_plus, urlsplit
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
+from orchestrator.Core.vault_key import write_private
 from orchestrator.utils.helpers import redact_secrets
 
 Field = Literal["model", "target", "board", "url", "device", "dataset"]
@@ -120,19 +120,7 @@ class InputHistory:
 
     def _save(self, data: HistoryFile) -> bool:
         try:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=f".{self.path.name}.")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    f.write(data.model_dump_json(indent=2))
-                os.chmod(tmp, 0o600)
-                os.replace(tmp, self.path)
-            except BaseException:
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
-                raise
+            write_private(self.path, data.model_dump_json(indent=2))
             return True
         except OSError as e:
             logger.warning(f"Could not save the input history: {e}")
@@ -157,21 +145,15 @@ class InputHistory:
         data.fields[field] = _bounded(accepted + data.fields.get(field, []))
         return self._save(data)
 
-    def clear(self, field: Optional[str] = None) -> bool:
-        """Forgets one field, or everything (the file and the copy of a damaged one are removed)."""
-        if field is None:
-            for path in (self.path, self.path.with_name(self.path.name + ".bad")):
-                try:
-                    path.unlink()
-                except FileNotFoundError:
-                    pass
-                except OSError as e:
-                    logger.warning(f"Could not clear the input history: {e}")
-                    return False
-            return True
-        data = self._load()
-        data.fields.pop(self._field(field), None)
-        return self._save(data)
+    def clear(self) -> bool:
+        """Forgets everything: the file and the copy of a damaged one are removed."""
+        for path in (self.path, self.path.with_name(self.path.name + ".bad")):
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning(f"Could not clear the input history: {e}")
+                return False
+        return True
 
 
 def for_config(config) -> Optional[InputHistory]:
