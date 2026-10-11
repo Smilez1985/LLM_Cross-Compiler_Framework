@@ -84,7 +84,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the operating system (Windows System.Speech, macOS `say`, Linux `spd-say` or `espeak-ng`), in the interface
   language. Best effort and never in the way: no audio files, the system volume is never touched, and it is
   silent in CI, over SSH without a display, on headless systems, with `LLM_FRAMEWORK_NO_AUDIO=1` or when
-  *Tools > Spoken Announcements* (setting `audio_announcements`) is off. Every announcement is also logged.
+  *Tools > Spoken Announcements* (setting `audio_announcements`) is off. Every announcement is also logged. The
+  switch warns when it cannot save the setting.
 - **Deep Ingest progress and Stop**: the wizard shows "Page N of M: <url>" instead of an endless spinner, and a
   Stop button ends the crawl after the current page. Closing the wizard stops a running crawl the same way and
   closes once the current page is stored, without freezing the window.
@@ -328,15 +329,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Windows without administrator rights the CLI waits for the probe's elevated restart instead of reporting at once
   that no file was written.
 - `llm-cli module create` writes into the configured targets folder (`targets_dir`, relative to the installation)
-  instead of `targets/` in the current folder.
+  instead of `targets/` in the current folder; its next steps name `modules/build.sh`, the script builds run,
+  instead of the legacy `config_module.sh`.
 - `llm-cli config show` prints the effective settings (`config.yml`, a `-c` file, `LLM_FRAMEWORK_*` variables,
   defaults), each with its source and with credentials redacted, instead of the CLI's built-in defaults.
 - `llm-cli config repos --add` stores the `{url: ...}` entry that the build engine passes on as
-  `<NAME>_REPO_OVERRIDE`; plain URLs stored by earlier versions are passed on as well.
+  `<NAME>_REPO_OVERRIDE`; plain URLs stored by earlier versions are passed on as well. The name comes from the
+  whole entry name (`llama.cpp` and `llama_cpp` both give `LLAMA_CPP_REPO_OVERRIDE`, the name the target scripts
+  read; `llama.cpp` gave `CPP_REPO_OVERRIDE`). `--add` and `--remove` exit with code 1 when `config.yml` cannot
+  be saved, instead of reporting success.
 - A settings file given with `-c` that cannot be read no longer drops the `LLM_FRAMEWORK_*` variables as well: it
   is named on stderr and ignored, and the other settings apply.
 - The GUI's hardware scan of this PC (**Scan / Import...**) writes its result into `<cache_dir>/probes/` instead of
   the GUI's working folder, and the module wizard's *Auto-fill from Probe Result* reads it there.
+- The AI settings dialog warns when the settings could not be saved to `config.yml` (they apply until the program
+  ends); before, only the log said so.
 - `llm-cli targets list` shows each target's id (the value for `--target`), name, boards and formats from its
   capabilities instead of placeholders; `llm-cli targets validate` checks the capabilities block against the
   schema and prints every error (exit code 1).

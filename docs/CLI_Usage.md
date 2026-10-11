@@ -895,8 +895,9 @@ target is never overwritten.
 
 The target is written to the configured targets folder (setting `targets_dir`; a relative path is relative to the
 installation, not the current folder). Its `target.yml` has a `capabilities:` block (support level `community`) with the module name as the only board and
-GGUF as the only format; add your real boards and formats there. The command's hint to customize
-`modules/config_module.sh` refers to a legacy script that the build pipeline does not call
+GGUF as the only format; add your real boards and formats there. The command's next steps name
+`modules/build.sh`, the dispatcher the build engine runs; the generated `config_module.sh` and the other
+`*_module.sh` scripts are legacy files the build pipeline does not call
 ([Module Developer Guide](Module_Developer_Guide.md#10-legacy-files)).
 
 ### module generate-ai
@@ -969,9 +970,12 @@ llm-cli config repos [--add NAME URL] [--remove NAME]
 ```
 
 Without options it lists the source repository overrides (setting `source_repositories`). `--add` and `--remove`
-change them and save `config.yml`. `--add` stores an entry `{url: ...}`; the build engine passes every entry, and
-plain URLs stored by earlier versions, to the stage containers as `<NAME>_REPO_OVERRIDE` (`NAME`: the part after the
-last dot, in upper case, for example `llama_cpp` -> `LLAMA_CPP_REPO_OVERRIDE`).
+change them and save `config.yml`; if it cannot be saved, the command says so and exits with code 1. `--add`
+stores an entry `{url: ...}`; the build engine passes every entry, and plain URLs stored by earlier versions, to
+the stage containers as `<NAME>_REPO_OVERRIDE` (`NAME`: the whole name in upper case, every other character than
+letters and digits as `_`, so `llama.cpp`, `llama_cpp` and `llama-cpp` all give `LLAMA_CPP_REPO_OVERRIDE`). A dotted
+name is passed under the name earlier versions used as well, its part after the last dot (`sources.llama_cpp`
+also gives `LLAMA_CPP_REPO_OVERRIDE`).
 
 | Option | Meaning |
 |---|---|

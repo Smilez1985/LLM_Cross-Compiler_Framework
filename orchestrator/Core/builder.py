@@ -131,6 +131,20 @@ TARGET_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 COMMIT_ID = re.compile(r"^[0-9a-f]{40}$")
 IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 
+
+def repo_override_names(name: str) -> List[str]:
+    """The variables a source_repositories entry reaches the build containers as. First the whole name in upper
+    case, every run of characters other than letters and digits turned into "_": 'llama.cpp', 'llama_cpp' and
+    'llama-cpp' all give LLAMA_CPP_REPO_OVERRIDE, the name targets/*/modules/source_module.sh reads. A dotted name
+    also keeps the name earlier versions derived from its part after the last dot ('repos.llama_cpp' still gives
+    LLAMA_CPP_REPO_OVERRIDE as well)."""
+    names: List[str] = []
+    for part in (str(name), str(name).split(".")[-1]):
+        base = re.sub(r"[^A-Za-z0-9]+", "_", part).strip("_").upper()
+        if base and f"{base}_REPO_OVERRIDE" not in names:
+            names.append(f"{base}_REPO_OVERRIDE")
+    return names
+
 # ============================================================================
 # DATA MODELS
 # ============================================================================
@@ -939,15 +953,18 @@ class BuildEngine:
         return env
 
     def _repo_overrides(self) -> Dict[str, str]:
-        """<NAME>_REPO_OVERRIDE variables from the setting source_repositories: entries {url: ...} as
-        `llm-cli config repos --add` stores them, and plain URLs as earlier versions stored them."""
-        env = {}
+        """<NAME>_REPO_OVERRIDE variables (see repo_override_names) from the setting source_repositories: entries
+        {url: ...} as `llm-cli config repos --add` stores them, and plain URLs as earlier versions stored them. A
+        variable named after a whole entry name wins over the same name derived from another entry's last part."""
+        env, legacy = {}, {}
         repos = self._get_conf("source_repositories", {}) or {}
         for name, entry in (repos.items() if isinstance(repos, dict) else []):
             url = entry.get("url") if isinstance(entry, dict) else entry
-            if isinstance(url, str) and url.strip():
-                env[f"{str(name).split('.')[-1].upper()}_REPO_OVERRIDE"] = url.strip()
-        return env
+            names = repo_override_names(name)
+            if isinstance(url, str) and url.strip() and names:
+                env[names[0]] = url.strip()
+                legacy.update(dict.fromkeys(names[1:], url.strip()))
+        return {**legacy, **env}
 
     RKNN_DATASET_QUANTS = ("i8", "int8", "q8", "q8_0")
 

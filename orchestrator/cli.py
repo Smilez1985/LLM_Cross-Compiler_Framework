@@ -31,7 +31,7 @@ from rich.prompt import Confirm
 
 from orchestrator.Core.framework import FrameworkManager
 from orchestrator.Core.orchestrator import LLMOrchestrator, BuildRequest, WorkflowType, PriorityLevel, OrchestrationStatus
-from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel
+from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel, repo_override_names
 from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.Core.deployment_manager import DeploymentManager
 from orchestrator.llm.sdk_env import guard_sdk_environment
@@ -341,7 +341,9 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
         console.print(f"Location: {output_path}")
         console.print("\nNext steps:")
         console.print(f"1. Edit {output_path}/target.yml to add supported boards")
-        console.print(f"2. Customize {output_path}/modules/config_module.sh")
+        # The build engine runs only this dispatcher (config_module.sh and the other *_module.sh are legacy).
+        console.print(f"2. Customize {output_path}/modules/build.sh (the build steps; the Dockerfile installs "
+                      f"the tools they use)")
         
     except Exception as e:
         console.print(f"[bold red]Error creating module: {e}[/bold red]")
@@ -2305,19 +2307,23 @@ def config_repos(ctx: FrameworkContext, add, remove):
     cm = ctx.framework_manager.config
     current_repos = dict(cm.get("source_repositories", {}) or {})
     
+    def save():
+        if not (cm.set("source_repositories", current_repos) and cm.save_user_config()):
+            console.print(f"[red]Not saved: {escape(str(Path(cm.config_dir) / 'config.yml'))} could not be updated "
+                          f"(see the log); the repository overrides are unchanged.[/red]")
+            sys.exit(1)
+
     if add:
         name, url = add
         # The shape the build engine passes on as <NAME>_REPO_OVERRIDE (plain URLs of earlier versions still work).
         current_repos[name.lower()] = {"url": url}
-        cm.set("source_repositories", current_repos)
-        cm.save_user_config()
+        save()
         console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(redact_secrets(url))} (passed to "
-                      f"builds as {escape(name.split('.')[-1].upper())}_REPO_OVERRIDE)[/green]")
+                      f"builds as {escape(repo_override_names(name)[0])})[/green]")
     elif remove:
         if remove.lower() in current_repos:
             del current_repos[remove.lower()]
-            cm.set("source_repositories", current_repos)
-            cm.save_user_config()
+            save()
             console.print(f"[green]Removed repo override: {escape(remove)}[/green]")
         else:
             console.print(f"[yellow]Repo {escape(remove)} not found.[/yellow]")
