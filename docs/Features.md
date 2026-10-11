@@ -707,13 +707,18 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
 - From the settings: at most `crawler_max_pages` pages per entered URL (default 50), and only pages in the
   languages of `crawler_languages` (default English and German; an empty list keeps all). A crawl also stops after
   five times as many requests as its page limit (redirects and failed fetches count too).
+- Every response is read up to a limit (HTML pages 8 MiB, PDFs 64 MiB, robots.txt 500 KiB, `tdmrep.json` 1 MiB)
+  and must arrive completely within 60 s (PDFs 180 s), so a site cannot fill the memory or hold the crawl with an
+  endless or dripping response. A larger page is skipped, a slower one fails. Of a larger robots.txt the first
+  500 KiB count (RFC 9309 allows that limit); a robots.txt that does not arrive in time means "disallow
+  everything", and a larger `tdmrep.json` is not used.
 
 ### Progress, Stop and the outcome
 
 - The wizard shows "Page N of M: <address>" before each request (M is the page limit) with a progress bar.
 - Pages are stored as soon as they are read. **Stop** ends the crawl after the current page (a waiting delay between
-  requests is cut short); what is stored stays. Closing the wizard during a crawl stops it the same way: the window
-  stays responsive and closes once the current page is stored.
+  requests is cut short, and so is a page that is still arriving); what is stored stays. Closing the wizard during a
+  crawl stops it the same way: the window stays responsive and closes once the current page is stored.
 - The outcome over all entered URLs is reported only after the last write has returned:
 
   | Outcome | When | Message box |
@@ -725,8 +730,9 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
 - The crawl log in the wizard (and the framework's log) names every page that was not stored with its reason, for
   example "disallowed by robots.txt", "X-Robots-Tag: noai", "TDM reservation (...)", "redirect from ... leaves the
   crawled site", "language 'fr' is not one of de, en", "PDF downloads are switched off", "neither HTML nor PDF
-  (image/png)", "no text" or "PDF support (pypdf) is not installed", and every page that could not be fetched or read
-  (HTTP status, unreadable PDF, too many redirects). Each page that arrives (HTTP 200) counts toward the page
+  (image/png)", "no text", "response larger than 8 MiB (the limit for HTML pages)" or "PDF support (pypdf) is not
+  installed", and every page that could not be fetched or read (HTTP status, "no complete response within 60 s",
+  unreadable PDF, too many redirects). Each page that arrives (HTTP 200) counts toward the page
   limit, stored or not. Site reservations and failures make the outcome partial; the other reasons do not.
 
 ### Spoken announcements

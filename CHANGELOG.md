@@ -400,6 +400,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   for `bot` no longer overrides `*`, and each scheme, host and port has its own robots.txt. The deviation: a
   robots.txt that answers 401 or 403 means "disallow everything", where RFC 9309 would allow crawling; a
   reservation the crawler cannot read still counts.
+- Deep Ingest reads every response up to a limit (HTML pages 8 MiB, PDFs 64 MiB, robots.txt 500 KiB,
+  `tdmrep.json` 1 MiB) and within a deadline for the whole request (60 s, PDFs 180 s). Before, a site could send an
+  endless or dripping response that filled the memory or held the crawl, and Stop or closing the wizard, forever:
+  the HTTP timeout only bounds each socket read. A larger page is skipped and a slower one fails, each named in the
+  crawl log; Stop no longer waits for a page that is still arriving.
 - Community packs are installed only through a quarantine folder after their checks: an id without paths, exactly
   the listed files with their hashes, no links, special or binary files, every image a Dockerfile pulls (`FROM`,
   `COPY --from`, `RUN --mount=...,from=`, also in a lowercase `dockerfile`) pinned by digest unless it is an
