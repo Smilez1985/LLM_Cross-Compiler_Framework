@@ -2,6 +2,7 @@
 (orchestrator/security/secret_patterns.py), and its git hooks."""
 
 import ast
+import hashlib
 import importlib.util
 import io
 import json
@@ -432,6 +433,191 @@ def test_mixed_findings_show_both_hints(capsys, tmp_path):
     assert secret_scan.main(["--repo", str(tmp_path), str(leak)]) == 1
     err = " ".join(capsys.readouterr().err.split())
     assert "Documented fake values may carry the marker" in err and "GitHub push protection will block" in err
+
+
+# --- The allowlist of test mocks in old commits (.secret-scan-allow) ---------------------------------------------
+
+# The two test mocks the history holds, built at runtime: the allowlist names them by their digest, and neither it
+# nor this file may hold them as one piece.
+HISTORY_MOCKS = {
+    "GitHub token": "gh" + "p_" + LETTERS + "0123456789",  # old versions of tests/test_security.py
+    "Hugging Face token": "hf" + "_" + LETTERS + LETTERS.upper()[:8],  # old local commits of tests/test_cli_builds.py
+}
+# The same formats, one detail off: each is another value and must still be reported.
+MOCK_VARIANTS = [
+    "gh" + "p_" + LETTERS + "0123456788",
+    "gh" + "o_" + LETTERS + "0123456789",
+    "gh" + "p_" + LETTERS.upper() + "0123456789",
+    "hf" + "_" + LETTERS + LETTERS.upper()[:7] + "I",
+    "hf" + "_" + LETTERS.upper() + LETTERS[:8],
+    "api" + "_org_" + LETTERS + LETTERS.upper()[:8],
+]
+
+
+def hint(value):
+    return f"{value[:4]}...{value[-4:]} ({len(value)} chars)"
+
+
+def allow(repo, *values, extra=""):
+    lines = ["# documented test mocks"] + [f"{secret_scan.digest(v)}  {hint(v)}: a test mock" for v in values]
+    (repo / secret_scan.ALLOWLIST).write_text("\n".join(lines) + "\n" + extra, encoding="utf-8")
+
+
+def commit(repo, name, content):
+    (repo / name).write_text(content, encoding="utf-8")
+    git(repo, "add", name)
+    git(repo, "commit", "-qm", f"add {name}", "--no-verify")
+
+
+def test_the_history_mocks_are_exact_formats_the_samples_cover():
+    for kind, value in HISTORY_MOCKS.items():
+        assert secret_patterns.find_exact_formats(f'"{value}"') == [(kind, value)]
+        assert (kind, value) in EXACT_SAMPLES
+    for value in MOCK_VARIANTS:
+        assert len(secret_patterns.find_exact_formats(value)) == 1 and value not in HISTORY_MOCKS.values()
+
+
+def test_history_skips_a_listed_mock_in_old_commits(repo, capsys):
+    mocks = list(HISTORY_MOCKS.values())
+    commit(repo, "test_old.py", "".join(f'V{i} = "{value}"\n' for i, value in enumerate(mocks)))
+    git(repo, "rm", "-q", "test_old.py")
+    git(repo, "commit", "-qm", "build the mocks at runtime", "--no-verify")
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 1
+    capsys.readouterr()
+    allow(repo, *mocks)
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 0
+    err = capsys.readouterr().err
+    assert "2 exact-format match(es) in old commits skipped" in err and secret_scan.ALLOWLIST in err
+    allow(repo, mocks[0])  # each entry allows its own value only
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 1
+    assert "Hugging Face token in its exact format" in capsys.readouterr().err
+
+
+def test_history_reports_every_other_exact_format_value(repo):
+    allow(repo, *HISTORY_MOCKS.values())
+    others = [value for _, value in EXACT_SAMPLES if value not in HISTORY_MOCKS.values()] + MOCK_VARIANTS
+    assert len(others) == len(EXACT_SAMPLES) - 2 + len(MOCK_VARIANTS)
+    lines = [f'V = "{value}"' for value in list(HISTORY_MOCKS.values()) + others]
+    commit(repo, "test_old.py", "\n".join(lines) + "\n")
+    findings = secret_scan.scan_revs(repo, ["--all"], [], secret_scan.load_allowlist(repo))
+    assert [(f.line, f.exact) for f in findings if f.allowed] == [(1, True), (2, True)]
+    assert [(f.line, f.exact) for f in findings if not f.allowed] == [(n, True) for n in range(3, len(lines) + 1)]
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 1
+    for value in others:  # one other value next to the mocks is enough
+        commit(repo, "test_old.py", f'A = "{HISTORY_MOCKS["GitHub token"]}"\nB = "{value}"\n')
+        findings = secret_scan.scan_revs(repo, ["HEAD^!"], [], secret_scan.load_allowlist(repo))
+        assert [(f.line, f.allowed) for f in findings] == [(1, True), (2, False)], value
+
+
+def test_a_listed_mock_still_fails_in_every_other_mode(repo, capsys, monkeypatch):
+    # GitHub may block a new commit with it, so only --history, which reads the old commits, skips it.
+    allow(repo, *HISTORY_MOCKS.values())
+    (repo / "test_new.py").write_text("".join(f'V{i} = "{value}"\n' for i, value in enumerate(HISTORY_MOCKS.values())))
+    git(repo, "add", "test_new.py")
+    assert secret_scan.main(["--repo", str(repo), "--staged"]) == 1
+    assert secret_scan.main(["--repo", str(repo)]) == 1
+    assert secret_scan.main(["--repo", str(repo), str(repo / "test_new.py")]) == 1
+    err = capsys.readouterr().err
+    assert err.count("GitHub token in its exact format") == err.count("Hugging Face token in its exact format") == 3
+    assert "skipped" not in err
+    git(repo, "commit", "-qm", "mocks", "--no-verify")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"refs/heads/main {head} refs/heads/main {'0' * 40}\n"))
+    assert secret_scan.main(["--repo", str(repo), "--push"]) == 1
+    for name in ("PRE_COMMIT_FROM_REF", "PRE_COMMIT_LOCAL_BRANCH"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("PRE_COMMIT_TO_REF", head)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    assert secret_scan.main(["--repo", str(repo), "--push"]) == 1
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 0
+
+
+def test_the_allowlist_never_silences_the_other_rules(repo):
+    # Listing a digest only drops the exact-format finding in --history: the provider rules still report a
+    # real-looking value, and local patterns and forbidden file names never look at the list.
+    real_looking = "gh" + "p_" + body(36, seed=7)  # an exact format the GitHub rule reports as well
+    personal = "jane-doe-laptop"
+    commit(repo, "settings.py", f'TOKEN = "{real_looking}"\nKEY = "{SAMPLES["Anthropic key"]}"\n')
+    commit(repo, ".env", "DEBUG=1\n")
+    commit(repo, "notes.md", f"built on {personal}\n")
+    (repo / ".git" / "info").mkdir(exist_ok=True)
+    (repo / ".git" / "info" / "secret-patterns").write_text(personal + "\n")
+    allow(repo, *HISTORY_MOCKS.values(), real_looking, SAMPLES["Anthropic key"], ".env", "DEBUG=1", personal)
+    local = secret_scan.load_local_patterns(repo)
+    findings = secret_scan.scan_revs(repo, ["--all"], local, secret_scan.load_allowlist(repo))
+    assert [(f.line, f.kind) for f in findings if f.allowed] == [(1, "GitHub token")]
+    assert sorted((f.where.split(" ")[0], f.line, f.kind, f.exact) for f in findings if not f.allowed) == [
+        (".env", 0, "file that holds credentials or per-user state", False),
+        ("notes.md", 1, "local pattern #1", False),
+        ("settings.py", 1, "GitHub token", False),
+        ("settings.py", 2, "Anthropic key", False),
+    ]
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 1
+
+
+DIGEST = secret_scan.digest("not a token")
+MALFORMED_LINES = [
+    DIGEST.upper() + "  upper-case digits",
+    DIGEST + " one space",
+    DIGEST + "\ta tab",
+    DIGEST + "   three spaces",
+    DIGEST[:-1] + "  63 digits",
+    DIGEST + "0  65 digits",
+    "g" + DIGEST[1:] + "  not hex",
+    DIGEST,
+    DIGEST + "  ",
+    " " + DIGEST + "  indented",
+    "sha256:" + DIGEST + "  with a label",
+    " # an indented comment",
+    HISTORY_MOCKS["GitHub token"] + "  the value instead of its digest",
+    secret_scan.digest(HISTORY_MOCKS["GitHub token"]) + "  " + "x" * 4 + "\n" + "*",  # a valid entry, then junk
+]
+
+
+@pytest.mark.parametrize("line", MALFORMED_LINES)
+def test_a_malformed_allowlist_line_is_a_usage_error_in_every_mode(repo, capsys, line):
+    # A typo must never silently allow more; the pre-commit hook already stops it. The line is never echoed: it may
+    # hold a value pasted by mistake.
+    allow(repo, *HISTORY_MOCKS.values(), extra=line + "\n")
+    number = 4 + line.count("\n")
+    for mode in (["--history"], ["--staged"], [], [str(repo / secret_scan.ALLOWLIST)]):
+        assert secret_scan.main(["--repo", str(repo), *mode]) == 2, mode
+        err = capsys.readouterr().err
+        assert f"{secret_scan.ALLOWLIST}:{number}: malformed line" in err
+        assert line.strip().splitlines()[-1] not in err.replace(str(repo), "")
+        assert HISTORY_MOCKS["GitHub token"] not in err
+
+
+def test_the_allowlist_takes_comments_blank_lines_and_crlf(repo, capsys):
+    assert secret_scan.load_allowlist(repo) == frozenset(), "no file, nothing allowed"
+    first, second = (secret_scan.digest(value) for value in HISTORY_MOCKS.values())
+    text = f"# comment\r\n\r\n   \r\n{first}  note: Prüfung, ünïcode\r\n#{second}  commented out\r\n"
+    (repo / secret_scan.ALLOWLIST).write_bytes(text.encode("utf-8"))
+    assert secret_scan.load_allowlist(repo) == {first}
+    (repo / secret_scan.ALLOWLIST).write_bytes(first.encode() + b"  note \xff\n")  # not UTF-8
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 2
+    assert "cannot read" in capsys.readouterr().err
+
+
+def test_the_repository_allowlist_names_exactly_the_two_history_mocks():
+    text = (REPO_ROOT / secret_scan.ALLOWLIST).read_text(encoding="utf-8")
+    assert secret_scan.load_allowlist(REPO_ROOT) == {hashlib.sha256(value.encode()).hexdigest()
+                                                     for value in HISTORY_MOCKS.values()}
+    entries = [line for line in text.splitlines() if line.strip() and not line.startswith("#")]
+    assert len(entries) == len(HISTORY_MOCKS) == 2
+    for (kind, value), where in zip(HISTORY_MOCKS.items(), ["tests/test_security.py", "tests/test_cli_builds.py"]):
+        entry = next(e for e in entries if e.startswith(secret_scan.digest(value) + "  "))
+        note = entry.split("  ", 1)[1]
+        assert note.startswith(f"{hint(value)}: {kind} format; test mock ") and where in note
+
+
+def test_the_repository_allowlist_holds_no_value():
+    # Neither an exact-format literal (GitHub would block the file) nor any other plaintext piece of the mocks.
+    text = (REPO_ROOT / secret_scan.ALLOWLIST).read_text(encoding="utf-8")
+    assert secret_patterns.find_exact_formats(text) == []
+    assert secret_scan.scan_text(secret_scan.ALLOWLIST, text) == []
+    for value in HISTORY_MOCKS.values():
+        assert not [value[i:i + 8] for i in range(len(value) - 7) if value[i:i + 8] in text]
 
 
 @pytest.mark.parametrize("path,hit", [

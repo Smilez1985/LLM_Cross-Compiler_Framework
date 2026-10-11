@@ -451,7 +451,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   format of a token that GitHub push protection blocks (for example `hf_` followed by 34 letters, `ghp_` followed
   by 36 letters and digits) even when it looks like a placeholder or its line carries `secret-scan: allow`, and
   also in text files over 5 MB, which the other rules skip: GitHub refuses such a push however fake the value is
-  and ignores the marker. Tests build such values at runtime.
+  and ignores the marker. Tests build such values at runtime. Only `--history` skips the two documented test
+  mocks that old commits still contain, listed in `.secret-scan-allow` by the sha256 of the exact value, never
+  the value itself; every other mode still reports them, and the other rules never look at the list.
 - API keys held in memory by Ditto's provider layer show as `<redacted>` in `str()` and `repr()` and cannot be
   pickled.
 - A key of a custom OpenAI-compatible server belongs to the address it was saved for (scheme, host and port):

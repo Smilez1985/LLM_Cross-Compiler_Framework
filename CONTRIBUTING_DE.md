@@ -291,12 +291,12 @@ exakten Token-Format eines Anbieters enthält, so unecht der Wert auch aussieht:
 (auch das Alphabet), `ghp_` gefolgt von 36 Buchstaben und Ziffern, ein vollständiger Schlüssel
 `sk-ant-api03-...AA` und so weiter. Die Markierung `secret-scan: allow` kennt GitHub nicht. Deshalb meldet der Scan
 solche Werte auch dann, wenn sie wie Platzhalter aussehen, und die Markierung unterdrückt diese Funde nicht; die
-Meldung sagt, dass GitHub den Push blockieren wird. Das gilt in jedem Modus: Auch `--push` und `--history` melden
-ältere Commits, die einen solchen Wert noch enthalten, denn ein Push dieser Commits würde ebenfalls abgelehnt. Es
-gilt auch für Textdateien über 5 MB, die die übrigen Regeln überspringen. Die
-Formate stehen in `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py` (Hugging Face, GitHub, AWS, Slack,
-GitLab, Stripe, PyPI, OpenAI, Anthropic, OpenRouter, Groq, xAI, Perplexity, Replicate). Baue einen solchen Testwert
-stattdessen zur Laufzeit zusammen, damit die Datei ihn nie am Stück enthält:
+Meldung sagt, dass GitHub den Push blockieren wird. Das gilt in jedem Modus: Auch `--push` meldet ältere Commits,
+die einen solchen Wert noch enthalten, denn ein Push dieser Commits würde ebenfalls abgelehnt, und ebenso
+`--history`, ausgenommen die unten gelisteten unechten Testwerte. Es gilt auch für Textdateien über 5 MB, die die
+übrigen Regeln überspringen. Die Formate stehen in `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py`
+(Hugging Face, GitHub, AWS, Slack, GitLab, Stripe, PyPI, OpenAI, Anthropic, OpenRouter, Groq, xAI, Perplexity,
+Replicate). Baue einen solchen Testwert stattdessen zur Laufzeit zusammen, damit die Datei ihn nie am Stück enthält:
 
 ```python
 TOKEN = "hf_" "abcdefghijklmnopqrstuvwxyzABCDEFGH"  # benachbarte String-Literale: zur Laufzeit ein String
@@ -305,6 +305,26 @@ TOKEN = "hf_" + "x" * 34                            # oder Verkettung
 
 Oder nimm einen Wert, der nicht zum exakten Format passt: eine andere Länge oder ein Zeichen, das das Format nicht
 erlaubt (eine Ziffer in einem Hugging-Face-Token). In der Dokumentation kürze den Wert (`hf_...`).
+
+**Unechte Testwerte in alten Commits:** Ein bereits veröffentlichter Commit lässt sich nicht ändern, ohne die
+Historie umzuschreiben. `.secret-scan-allow` im Wurzelverzeichnis des Repositorys listet die dokumentierten unechten
+Testwerte, die alte Commits noch enthalten, damit `--history` (der CI-Job, `make secret-scan`) durchläuft. Derzeit
+sind es zwei, aus alten Fassungen von `tests/test_security.py` und `tests/test_cli_builds.py`. Jede Zeile nennt
+genau einen Wert über den sha256-Hexwert dieses exakten Werts, nie über den Wert selbst (das wäre ein Literal im
+exakten Format, das GitHub blockiert), danach zwei Leerzeichen und eine Notiz: die ersten und letzten 4 Zeichen, die
+Länge, warum es ein unechter Testwert ist und wo er steht. Berechne den Hexwert, ohne den Wert in deiner
+Shell-Historie zu hinterlassen:
+
+```bash
+python3 -c "import getpass, hashlib; print(hashlib.sha256(getpass.getpass('value: ').encode()).hexdigest())"
+```
+
+Die Liste gilt nur für `--history` und nur für Funde im exakten Format: Jeder andere Modus meldet den Wert
+weiterhin, ein neuer Commit damit scheitert also, und die übrigen Regeln (Anbieterschlüssel, lokale Muster,
+Dateinamen) lesen die Liste nie, ein echt aussehender Schlüssel wird also auch dann gemeldet, wenn sein Hexwert
+gelistet ist. Eine fehlerhafte Zeile stoppt den Scan in jedem Modus (Exit-Code 2), damit ein Tippfehler nicht mehr
+erlaubt. Trage nie echte Zugangsdaten ein, so alt sie auch sind: Tausche sie aus und schreibe die Historie um
+([Abschnitt 12](#12-wenn-ein-secret-offengelegt-wurde)).
 
 **Persönliche Zeichenfolgen** wie deine E-Mail-Adresse, dein Benutzername oder Hostnamen gehören ebenfalls nicht ins
 Repository, können aber nicht in einer öffentlichen Musterliste stehen. Trage sie in `.git/info/secret-patterns`
