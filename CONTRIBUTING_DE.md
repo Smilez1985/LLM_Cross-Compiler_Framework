@@ -292,7 +292,8 @@ exakten Token-Format eines Anbieters enthält, so unecht der Wert auch aussieht:
 `sk-ant-api03-...AA` und so weiter. Die Markierung `secret-scan: allow` kennt GitHub nicht. Deshalb meldet der Scan
 solche Werte auch dann, wenn sie wie Platzhalter aussehen, und die Markierung unterdrückt diese Funde nicht; die
 Meldung sagt, dass GitHub den Push blockieren wird. Das gilt in jedem Modus: Auch `--push` und `--history` melden
-ältere Commits, die einen solchen Wert noch enthalten, denn ein Push dieser Commits würde ebenfalls abgelehnt. Die
+ältere Commits, die einen solchen Wert noch enthalten, denn ein Push dieser Commits würde ebenfalls abgelehnt. Es
+gilt auch für Textdateien über 5 MB, die die übrigen Regeln überspringen. Die
 Formate stehen in `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py` (Hugging Face, GitHub, AWS, Slack,
 GitLab, Stripe, PyPI, OpenAI, Anthropic, OpenRouter, Groq, xAI, Perplexity, Replicate). Baue einen solchen Testwert
 stattdessen zur Laufzeit zusammen, damit die Datei ihn nie am Stück enthält:
