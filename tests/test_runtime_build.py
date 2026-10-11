@@ -92,6 +92,8 @@ if "--build" in args:
 print("-- The C compiler identification is GNU 13.3.0")
 for line in control.get("configure_lines", []):
     print(line)
+if "cache" in control:
+    (pathlib.Path(args[args.index("-B") + 1]) / "CMakeCache.txt").write_text(control["cache"])
 sys.exit(control.get("configure_rc", 0))
 '''
 
@@ -1131,6 +1133,22 @@ class TestLauncherEnvironment:
             assert name not in env, name
         assert env["PATH"] == server_policy.CLEARED_PATH and env["HOME"] == "/home/u"
         assert set(env) <= set(server_policy.cleared_env(Path("/home/u"))) | server_policy.SERVER_ENV_PASS
+
+
+@POSIX
+def test_a_plan_with_openmp_fails_when_cmake_finds_none(tmp_path, fake_tools, source):
+    """ggml only warns "OpenMP not found" and builds without it: the binaries would not be the ones the build ID
+    names (GGML_OPENMP=ON), so the build stops after configure."""
+    tools, detected = fake_tools
+    plan = native_plan()
+    assert plan.options()["GGML_OPENMP"] == "ON"
+    control(tools, configure_lines=["CMake Warning at ggml/src/CMakeLists.txt:347 (message):", "  OpenMP not found"],
+            cache="CMAKE_BUILD_TYPE:STRING=Release\nGGML_OPENMP_ENABLED:INTERNAL=OFF\n")
+    with pytest.raises(BuildError, match="OpenMP"):
+        BuildExecutor().build(plan, source=source, work=tmp_path / "w", jobs=1, toolchain=detected)
+    assert [c["argv"][1] for c in calls(tools)] == ["-S"], "the build step never runs"
+    control(tools, cache="GGML_OPENMP_ENABLED:INTERNAL=ON\n")
+    BuildExecutor().build(plan, source=source, work=tmp_path / "w2", jobs=1, toolchain=detected)
 
 
 @POSIX

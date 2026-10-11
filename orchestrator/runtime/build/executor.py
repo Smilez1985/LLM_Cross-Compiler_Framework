@@ -281,7 +281,8 @@ class BuildExecutor:
             raise BuildError(f"{dirs['bin']} is not empty; every build starts in a new folder")
         return dirs
 
-    def _finish_configure(self, log: Path) -> None:
+    def _finish_configure(self, log: Path, plan: Optional[BuildPlan] = None,
+                          build_dir: Optional[Path] = None) -> None:
         try:
             text = log.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -290,6 +291,17 @@ class BuildExecutor:
         if fetched:
             raise BuildError("configure tried to fetch or download something, which a build must never do: "
                              + " | ".join(fetched[:3]), log)
+        if plan is not None and build_dir is not None and plan.steps[0].option("GGML_OPENMP") == "ON":
+            # ggml only warns "OpenMP not found" and builds without it (ggml/src/CMakeLists.txt:339-348): the
+            # binaries would then not be the ones the build ID names.
+            try:
+                cache = (build_dir / "CMakeCache.txt").read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                cache = ""
+            if re.search(r"^GGML_OPENMP_ENABLED:INTERNAL=OFF\s*$", cache, re.M):
+                raise BuildError("the plan builds with OpenMP, but CMake found no OpenMP runtime (Clang needs libomp, "
+                                 "GCC libgomp); install it, or detect the toolchain again so the plan switches "
+                                 "OpenMP off", log)
 
     def build(self, plan: BuildPlan, *, source: Path, work: Path, jobs: Optional[int] = None,
               toolchain: Optional[DetectedToolchain] = None, ccache_dir: Optional[Path] = None) -> BuildResult:
@@ -359,7 +371,7 @@ class BuildExecutor:
         cmake = toolchain.tool("cmake")
         configure = [cmake, "-S", str(source), "-B", str(dirs["build"]), "-G", step.generator, *step.cmake_args()]
         self._step("configure", configure, dirs, env, self.configure_timeout)
-        self._finish_configure(dirs["logs"] / "configure.log")
+        self._finish_configure(dirs["logs"] / "configure.log", plan, dirs["build"])
         build = [cmake, "--build", str(dirs["build"]), "--parallel", str(jobs), "--target", *step.targets]
         self._step("build", build, dirs, env, self.build_timeout)
 
@@ -404,7 +416,7 @@ class BuildExecutor:
             (dirs["build"].parent / "toolchain.cmake").write_text(step.toolchain_file, encoding="utf-8")
             configure.append("-DCMAKE_TOOLCHAIN_FILE=/work/toolchain.cmake")
         self._container_step("configure", engine, tag, configure, mounts, env, options, dirs, self.configure_timeout)
-        self._finish_configure(dirs["logs"] / "configure.log")
+        self._finish_configure(dirs["logs"] / "configure.log", plan, dirs["build"])
         build = ["cmake", "--build", "/work/build", "--parallel", str(jobs), "--target", *step.targets]
         self._container_step("build", engine, tag, build, mounts, env, options, dirs, self.build_timeout)
         return tag

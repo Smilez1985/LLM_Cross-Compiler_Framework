@@ -572,14 +572,15 @@ download then stays only as an explicit choice, shown as "not self-built".
   read-only root file system and your user, as the conversion stages run. The framework shares this recipe, never a
   compiled image.
 - **No downloads:** besides the options, the configure output is checked: a line that says llama.cpp fetched or
-  downloaded anything fails the build.
+  downloaded anything fails the build. So does a configure that found no OpenMP runtime for a build planned with
+  OpenMP (ggml would only warn and build without it, so the build ID would no longer be right).
 - **Checks before use:** every binary must be an ELF file for the planned architecture whose libraries are in the
   build or are system libraries; device builds must not need a newer glibc symbol version than the device has, nor a
   shared C++ runtime. `llama-bench --version` and `llama-server --version` must report the pinned build and commit,
   `llama-bench --list-devices` must show the planned GPU, and `llama-server --tools all` must be refused. A smoke run
   and a short `llama-bench` run on a tiny pinned model follow once the catalog pins one; until then they are skipped
-  with a note. Binaries are only ever taken from the build's own folder, never from `PATH`, and run with a cleared
-  environment.
+  with a note. No other model is ever loaded there. Binaries are only ever taken from the build's own folder, never
+  from `PATH`, and run with a cleared environment.
 - **Store:** `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` holds the binaries with `build.json` (the plan)
   and `manifest.json` (sha256 of every file, duration, build host, verification results). The build ID is the hash of
   everything that changes the binaries, so a stored build is reused and never stamped again. Only a build verified on
