@@ -193,6 +193,9 @@ class CredentialResolver:
                 raw = meta.get(item.id)
             value = str(raw).strip() if raw not in (None, "") else ""
             if not value:
+                if item.required:
+                    raise auth_error("auth.field_invalid", provider=preset.id, provider_label=preset.label,
+                                     message=f"{preset.label}: the {item.label} is required.")
                 continue
             if not item.matches(value):
                 raise self.store.field_error(preset, item)

@@ -261,14 +261,15 @@ class CredentialStore:
 
     def save_record(self, provider: str, method: str, record: Dict[str, Any], *, origin: Optional[str] = None,
                     metadata: Optional[Mapping[str, Any]] = None, replace_metadata: bool = False) -> None:
-        """Stores a record (raises an AuthError when the vault refuses); `metadata` goes to auth.json after."""
+        """Stores a record (raises an AuthError when the vault refuses); `metadata` goes to auth.json after. A
+        stored record ends a signed-out state."""
         if not self.records_supported:
             raise auth_error("storage.write_failed", provider=provider,
                              message="This credential store cannot hold sign-in records.")
         if not self.secrets.set_record(vault_name(provider, method, origin), record):
             raise self._failure(provider)
-        if metadata is not None:
-            self.update_metadata(provider, method, metadata, origin, replace=replace_metadata)
+        cleared = {"state": None, "signed_out_at": None, "signed_out_reason": None}
+        self.update_metadata(provider, method, {**cleared, **(metadata or {})}, origin, replace=replace_metadata)
 
     def mark_signed_out(self, provider: str, method: str, origin: Optional[str] = None,
                         reason: Optional[str] = None) -> None:
