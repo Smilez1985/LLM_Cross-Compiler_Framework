@@ -29,13 +29,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Qdrant-Speicher: kein Vektordatenbank-Server und keine Cloud-Embeddings nötig.
 - **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install|start|stop|status`
   betreibt einen gepinnten llama.cpp-`llama-server` auf 127.0.0.1 (Build passend zur Hardware: CUDA, Vulkan,
-  ROCm, Metal oder CPU; API-Schlüssel je Start in einer privaten Datei), und `llm-cli ditto models list|download`
+  Metal oder CPU, ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei), und `llm-cli ditto models list|download`
   lädt Qwen3.5-Modelle in gepinnten Revisionen und prüft sie anhand von Größe und sha256. Die Modellstufen reichen
   bis zu 2-Bit-Modellen für schwache Hardware (3 GB RAM). Der Anbieter „local“ folgt dem laufenden Server ohne
   Konfiguration.
 - **Ditto-Evaluation** (`llm-cli ditto eval`): feste Fälle (Analyse von Build-Logs, Build-Empfehlungen,
   Modulvorschläge, Chat mit Tools, Prompt-Injection), nach Regeln bewertet, gegen den konfigurierten Anbieter oder
   je lokaler Modellstufe (`--tier small --tier small-q2`). Es wird nichts gebaut; `--json` schreibt den Bericht.
+
+- **Dokumentation auf Englisch und Deutsch** für jedes Dokument (README, Blaupause mit Design und Roadmap,
+  CLI-Anleitung, Funktionen, Mitwirken, Leitfaden für Modulentwickler, SSOT, Changelog), geprüft durch
+  `tests/test_docs.py`: Jedes Dokument hat sein Gegenstück, Links und Anker funktionieren, beide Changelogs nennen
+  dieselben Versionen, und die Roadmap nennt nur, was kommt.
 
 ### Geändert
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das

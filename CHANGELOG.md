@@ -25,13 +25,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Local knowledge base** on local embeddings (FastEmbed, ONNX on the CPU) and an embedded Qdrant store: no
   vector-database server and no cloud embeddings needed.
 - **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
-  pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, ROCm, Metal or
-  CPU; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
+  pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, Metal or CPU;
+  ROCm on request; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
   at pinned revisions, checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
   (3 GB RAM). The "local" provider follows the running server without configuration.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
+
+- **Documentation in English and German** for every document (README, blueprint with design and roadmap, CLI
+  usage, features, contributing, module developer guide, SSOT, changelog), checked by `tests/test_docs.py`:
+  every document has its twin, links and anchors resolve, both changelogs list the same versions, and the
+  roadmap names only what comes.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
