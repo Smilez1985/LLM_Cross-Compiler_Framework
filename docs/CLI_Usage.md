@@ -74,9 +74,13 @@ llm-cli [OPTIONS] COMMAND [ARGS]...
 | `-v, --verbose` | Log level `DEBUG`. |
 | `-q, --quiet` | Log level `ERROR` and no start banner. |
 | `--log-level [DEBUG\|INFO\|WARNING\|ERROR]` | Log level (default `INFO`). |
+| `--debug-http` | Show the debug output of the HTTP libraries and the AI provider SDKs on stderr, and keep `ANTHROPIC_LOG=debug` / `OPENAI_LOG=debug`. Without it these loggers stay at `INFO` even with `--verbose`, and the two variables are lowered to `info`. |
 | `--help` | Help for the CLI, a group or a command, e.g. `llm-cli ditto runtime start --help`. |
 
 Global options go before the command: `llm-cli -q doctor`, not `llm-cli doctor -q`.
+
+Credentials (API keys, tokens, `Authorization`, `x-api-key` and cookie headers, sign-in codes and tokens in
+URLs) are redacted in every log line and traceback, also with `--debug-http`.
 
 **Output:** the start banner and log messages go to stderr; results go to stdout, and so do most messages a
 command prints itself, including its error messages. For `llm-cli ditto ask` only the answer goes to stdout, and for

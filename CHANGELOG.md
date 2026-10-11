@@ -42,6 +42,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   next to the vault (`insecure`, not encrypted at rest) or memory only (`ephemeral`, for CI). Nothing is
   picked automatically: without a usable keyring and without a choice, the framework stops and names the
   options. `llm-cli doctor` warns about the key file and reports memory-only storage.
+- **`llm-cli --debug-http`** shows the debug output of the HTTP libraries and the AI provider SDKs on stderr,
+  with credentials redacted.
 - **Documentation in English and German** for every document (README, blueprint with design and roadmap, CLI
   usage, features, contributing, module developer guide, SSOT, changelog), checked by `tests/test_docs.py`:
   every document has its twin, links and anchors resolve, both changelogs list the same versions, and the
@@ -99,6 +101,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   a moment.
 - `llm-cli secrets set` says where the secret went (the encrypted vault, or memory only with `ephemeral`)
   instead of always "Keyring".
+- The CLI and the CLI guides no longer tell you to put the GitHub token on the command line, where the shell
+  history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
+  hidden prompt.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -112,8 +117,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   false; settings that cannot be read count as false): they could replace the stored API key and reach every
   server, local ones included. The OpenAI and OpenAI-compatible adapters also send the stored key as an
   explicit `Authorization` header.
-- `ANTHROPIC_LOG=debug` and `OPENAI_LOG=debug` are lowered to `info` unless `--debug-http` is given (the SDKs'
-  debug logs show request details).
+- The debug output of the provider SDKs and HTTP libraries (request options, prompts, headers) stays off unless
+  `--debug-http` is given: their loggers never go below INFO, even with `--log-level DEBUG`, and
+  `ANTHROPIC_LOG=debug` / `OPENAI_LOG=debug` are lowered to `info`.
 - Claude Admin API keys (`sk-ant-admin01-`) are refused before any request is sent, also when they were stored
   with surrounding spaces.
 - The credential vault is changed under a cross-process lock: the GUI, the CLI and an MCP server writing at
@@ -126,6 +132,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The secrets store refuses a location inside a git work tree (set `LLM_FRAMEWORK_HOME` elsewhere).
 - Secret names with line breaks or control characters are refused, and the secrets audit log escapes them,
   so a name (or a user name) cannot forge audit entries.
+- **Credentials are redacted in every log**: the framework's own, those of the provider SDKs and HTTP libraries
+  (anthropic, openai, httpx, httpcore, urllib3, botocore, google.auth, azure, msal), tracebacks and the extra
+  fields of the JSON log format. Redacted are the values of credential headers (`Authorization`, `x-api-key`,
+  `api-key`, `x-goog-api-key`, `Cookie`, `Set-Cookie`, also in JSON with escaped quotes), sign-in and key
+  parameters in URLs and form-encoded token requests (`code`, `state`, `key`, `access_token`, `token`, ...)
+  and every known key format.
+- Redaction also finds credentials by their context, whatever their format: a bearer token quoted in a server's
+  error message, token-shaped values of `api_key`, `secret`, `token` or `password` fields, and environment
+  lines such as `HF_TOKEN=...` or `export OPENAI_API_KEY=...`. Tokenizer settings in build logs (for example
+  `"pad_token": "<|...|>"`) stay readable.
+- Redaction can no longer be slowed down by crafted text: an error message or build log with a long run of
+  `sk-` took minutes to redact before.
+- **One table of secret formats** (`orchestrator/security/secret_patterns.py`) for the secret scan and for
+  runtime redaction, which knew only five formats before. New: Unsloth Studio keys (`sk-unsloth-`), Bedrock
+  short-term keys (`bedrock-api-key-`), LocalAI keys (`lai-`), `Authorization: Bearer` lines and quoted values
+  assigned to `api_key`, `secret` or `token`. Runtime redaction now also covers JWTs, private key blocks and
+  passwords in URLs.
+- API keys held in memory by Ditto's provider layer show as `<redacted>` in `str()` and `repr()` and cannot be
+  pickled.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
