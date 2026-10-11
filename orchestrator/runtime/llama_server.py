@@ -20,8 +20,6 @@ Models: <models_dir>/ditto/<file>.gguf plus a .<file>.verified.json marker. Log:
 """
 
 import atexit
-import hashlib
-import hmac
 import json
 import os
 import re
@@ -42,6 +40,8 @@ from pydantic import BaseModel, Field
 from orchestrator.runtime.catalog import GPU_BACKENDS, ModelEntry, RuntimeAsset, RuntimeCatalog, load_catalog
 from orchestrator.runtime.hardware import (BackendChoice, HardwareInfo, Runner, choose_model_tier, compute_context,
                                            detect_hardware, select_backend)
+from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloader
+from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
 from orchestrator.utils.helpers import redact_secrets, safe_extract_archive
 from orchestrator.utils.logging import get_logger
 
@@ -66,7 +66,7 @@ _LOG_HEADER = "=== llama-server start"
 ProgressFn = Callable[[str, int, Optional[int]], None]
 
 
-class LocalRuntimeError(Exception):
+class LocalRuntimeError(DownloadError):
     """User-facing runtime problem (the message is safe to show). log_tail is llama-server output: untrusted
     text that must go through orchestrator.utils.untrusted.wrap_untrusted before it reaches a model."""
 
@@ -75,12 +75,8 @@ class LocalRuntimeError(Exception):
         self.log_tail = log_tail
 
 
-class IntegrityError(LocalRuntimeError):
+class IntegrityError(LocalRuntimeError, DownloadIntegrityError):
     """A download is not pinned or does not match its pin; nothing was installed."""
-
-
-class _Retry(Exception):
-    """A download attempt failed in a way worth retrying (network error, 5xx, 429)."""
 
 
 class InstalledRuntime(BaseModel):
@@ -162,22 +158,10 @@ def _read_json(path: Path) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
-def sha256_file(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        while chunk := f.read(1 << 20):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((LOOPBACK, 0))
         return s.getsockname()[1]
-
-
-def _gib(size: float) -> str:
-    return f"{size / 1024 ** 3:.1f} GiB"
 
 
 def server_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
@@ -265,55 +249,15 @@ def read_endpoint(root: Path) -> Optional[LocalEndpoint]:
         return None
 
 
-class _FileLock:
-    """Cross-process lock: an O_EXCL lock file holding the owner's pid and start time. A lock left behind by a
-    process that no longer exists is taken over."""
+class _FileLock(FileLock):
+    error = LocalRuntimeError
+    busy = "The local runtime is busy (another llm-cli or GUI holds {path}); try again when it has finished."
 
-    def __init__(self, path: Path, timeout: float = 900, sleep: Callable[[float], None] = time.sleep):
-        self.path, self.timeout, self.sleep = Path(path), timeout, sleep
 
-    def _owner_alive(self) -> bool:
-        try:
-            text = self.path.read_text(encoding="utf-8")
-        except OSError:
-            return False  # released in the meantime
-        try:
-            pid, created = text.split()[:2]
-            pid, created = int(pid), float(created)
-        except ValueError:
-            try:  # being written this very moment, or garbage that is old enough to ignore
-                return time.time() - self.path.stat().st_mtime < 10
-            except OSError:
-                return False
-        try:
-            return abs(psutil.Process(pid).create_time() - created) < 0.01
-        except psutil.NoSuchProcess:
-            return False
-        except psutil.Error:
-            return True  # exists but is not inspectable: assume it is the owner
-
-    def __enter__(self) -> "_FileLock":
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        me = f"{os.getpid()} {psutil.Process().create_time()}"
-        deadline = time.monotonic() + self.timeout
-        while True:
-            try:
-                fd = os.open(self.path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-            except FileExistsError:
-                if not self._owner_alive():
-                    self.path.unlink(missing_ok=True)
-                    continue
-                if time.monotonic() > deadline:
-                    raise LocalRuntimeError(f"The local runtime is busy (another llm-cli or GUI holds {self.path}); "
-                                            "try again when it has finished.") from None
-                self.sleep(0.2)
-                continue
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(me)
-            return self
-
-    def __exit__(self, *exc) -> None:
-        self.path.unlink(missing_ok=True)
+class _Downloads(PinnedDownloader):
+    error = LocalRuntimeError
+    integrity_error = IntegrityError
+    lock_class = _FileLock
 
 
 def _job_kill_on_close(pid: int):
@@ -590,106 +534,24 @@ class LocalLLMRuntime:
                 continue
             shutil.rmtree(folder, ignore_errors=True)
 
-    # --- downloads --------------------------------------------------------------------------------------------
-    def _http(self) -> requests.Session:
-        if self._session is None:
-            self._session = requests.Session()
-        return self._session
+    # --- downloads (orchestrator/utils/download.py) ---------------------------------------------------------
+    def _downloads(self) -> _Downloads:
+        return _Downloads(self._session, self._sleep, self.logger)
 
-    @staticmethod
-    def _ensure_space(folder: Path, needed: int, what: str = "the download") -> None:
-        folder.mkdir(parents=True, exist_ok=True)
-        free = shutil.disk_usage(folder).free
-        if free < needed + 256 * MIB:
-            raise LocalRuntimeError(f"Not enough free disk space in {folder} for {what}: {_gib(needed)} needed, "
-                                    f"{_gib(free)} free.")
+    def _ensure_space(self, folder: Path, needed: int, what: str = "the download") -> None:
+        self._downloads().ensure_space(folder, needed, what)
 
     def _fetch(self, url: str, dest: Path, size: Optional[int], sha256: Optional[str],
                progress: Optional[ProgressFn] = None, attempts: int = 5) -> Path:
         """Resumable download into <dest>.part; the file only gets its final name after size and hash matched."""
-        if not (sha256 and size):
-            raise IntegrityError(f"No sha256 and size pinned for {dest.name}; refusing to download it.")
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with _FileLock(dest.with_name(f".{dest.name}.lock"), sleep=self._sleep):
-            if dest.is_file():
-                if dest.stat().st_size == size and hmac.compare_digest(sha256_file(dest), sha256.lower()):
-                    return dest  # complete and verified by an earlier, interrupted run
-                dest.unlink()
-            part = dest.with_name(dest.name + ".part")
-            have = part.stat().st_size if part.exists() else 0
-            self._ensure_space(dest.parent, max(size - have, 0))
-            for attempt in range(1, attempts + 1):
-                have = part.stat().st_size if part.exists() else 0
-                if have > size:
-                    part.unlink()
-                    have = 0
-                if have == size:
-                    break
-                try:
-                    self._download_range(url, part, have, size, dest.name, progress)
-                    if part.stat().st_size >= size:
-                        break
-                except _Retry as e:
-                    self.logger.warning(f"Download of {dest.name} interrupted ({e}), attempt {attempt}/{attempts}")
-                if attempt == attempts:
-                    raise LocalRuntimeError(f"Download of {dest.name} did not complete after {attempts} attempts; "
-                                            "run the command again to resume.")
-                self._sleep(min(2 ** attempt, 15))
-            self._verify(part, size, sha256, dest.name)
-            os.replace(part, dest)
-            return dest
-
-    def _download_range(self, url: str, part: Path, have: int, size: int, name: str,
-                        progress: Optional[ProgressFn]) -> None:
-        # identity: a compressed transfer would make the byte counts meaningless
-        headers = {"Accept-Encoding": "identity", **({"Range": f"bytes={have}-"} if have else {})}
+        downloads = self._downloads()
         try:
-            with self._http().get(url, headers=headers, stream=True, timeout=(15, 60), allow_redirects=True) as r:
-                if not str(r.url).startswith("https://"):
-                    raise LocalRuntimeError(f"Refusing a download that was redirected away from HTTPS: {r.url}")
-                if r.status_code == 416:
-                    part.unlink(missing_ok=True)  # our range does not exist on the server: start over
-                    raise _Retry("HTTP 416")
-                if r.status_code == 429 or r.status_code >= 500:
-                    raise _Retry(f"HTTP {r.status_code}")
-                if r.status_code not in (200, 206):
-                    raise LocalRuntimeError(f"Download of {name} failed: HTTP {r.status_code}")
-                resumed = bool(have) and r.status_code == 206
-                if resumed:
-                    match = re.match(r"bytes (\d+)-\d+/(\d+|\*)", str(r.headers.get("Content-Range", "")))
-                    if not match or int(match.group(1)) != have:
-                        part.unlink(missing_ok=True)  # a range we did not ask for
-                        raise _Retry("unexpected Content-Range")
-                    total = match.group(2)
-                    remote = int(total) if total != "*" else None
-                else:
-                    have = 0
-                    length = r.headers.get("Content-Length")
-                    remote = int(length) if length and length.isdigit() else None
-                if remote is not None and remote != size:
-                    raise IntegrityError(f"{name} has {remote} bytes on the server, but {size} are pinned; "
-                                         "refusing it.")
-                with open(part, "ab" if resumed else "wb") as f:
-                    for chunk in r.iter_content(chunk_size=1 << 20):
-                        if not chunk:
-                            continue
-                        f.write(chunk)
-                        have += len(chunk)
-                        if have > size:
-                            break  # more than pinned: the hash check refuses it
-                        if progress:
-                            progress(name, have, size)
-        except (requests.ConnectionError, requests.Timeout, requests.exceptions.ChunkedEncodingError) as e:
-            raise _Retry(e.__class__.__name__) from e
+            return downloads.fetch(url, dest, size, sha256, progress, attempts)
+        finally:
+            self._session = downloads._session  # keep the connection pool for the next file
 
-    @staticmethod
-    def _verify(path: Path, size: int, sha256: str, name: str) -> None:
-        actual_size = path.stat().st_size
-        digest = sha256_file(path)
-        if actual_size != size or not hmac.compare_digest(digest, sha256.lower()):
-            path.unlink(missing_ok=True)
-            raise IntegrityError(f"{name} does not match its pin (expected {size} bytes, sha256 {sha256}; got "
-                                 f"{actual_size} bytes, {digest}). The file was deleted and will not be used.")
+    def _verify(self, path: Path, size: int, sha256: str, name: str) -> None:
+        self._downloads().verify(path, size, sha256, name)
 
     # --- models -----------------------------------------------------------------------------------------------
     def model_path(self, model: ModelEntry) -> Path:

@@ -1,4 +1,4 @@
-"""Community path: the swarm upload is gone, module install and build-context staging never follow links."""
+"""Community path: the swarm upload is gone and build-context staging never follows links."""
 
 import os
 import re
@@ -69,64 +69,7 @@ class TestSwarmRemoval:
             assert leaked not in exported
 
 
-# --- install_module ---------------------------------------------------------------------------------------
-
-@pytest.fixture
-def manager(tmp_path):
-    cm = CommunityManager(SimpleNamespace(info=SimpleNamespace(installation_path=tmp_path)))
-    module = cm.community_dir / "demo-board"
-    (module / "modules").mkdir(parents=True)
-    (module / "target.yml").write_text("metadata:\n  name: Demo Board\n", encoding="utf-8")
-    (module / "modules" / "build.sh").write_text("echo build\n", encoding="utf-8")
-    cm.targets_dir.mkdir()
-    return cm
-
-
-class TestInstallModule:
-
-    def test_installs_a_plain_module(self, manager):
-        dest = manager.install_module("demo-board")
-        assert dest == manager.targets_dir / "demo-board"
-        assert (dest / "modules" / "build.sh").read_text() == "echo build\n"
-        assert [p.name for p in manager.targets_dir.iterdir()] == ["demo-board"], "no staging folder left"
-        assert [m.id for m in manager.scan_modules() if m.is_installed] == ["demo-board"]
-
-    @pytest.mark.parametrize("module_id", ["../demo-board", "demo-board/../../x", "/etc", "..", ".hidden", "",
-                                           "a\\b", "x" * 65, None])
-    def test_id_traversal_is_rejected(self, manager, module_id):
-        with pytest.raises(ValueError, match="Invalid module id"):
-            manager.install_module(module_id)
-        assert list(manager.targets_dir.iterdir()) == []
-
-    def test_existing_target_is_not_replaced_even_with_other_case(self, manager):
-        (manager.targets_dir / "Demo-Board").mkdir()
-        with pytest.raises(FileExistsError):
-            manager.install_module("demo-board")
-
-    @needs_links
-    def test_symlink_inside_is_never_copied(self, manager, tmp_path):
-        secret = tmp_path / "id_rsa"
-        secret.write_text("PRIVATE KEY")
-        (manager.community_dir / "demo-board" / "modules" / "key").symlink_to(secret)
-        with pytest.raises(ValueError, match="links or special files"):
-            manager.install_module("demo-board")
-        assert list(manager.targets_dir.iterdir()) == []
-
-    @needs_links
-    def test_symlinked_folder_inside_is_never_copied(self, manager, tmp_path):
-        (manager.community_dir / "demo-board" / "ssh").symlink_to(tmp_path, target_is_directory=True)
-        with pytest.raises(ValueError, match="links or special files"):
-            manager.install_module("demo-board")
-
-    @needs_links
-    def test_symlinked_module_is_neither_listed_nor_installed(self, manager, tmp_path):
-        elsewhere = tmp_path / "elsewhere"
-        (elsewhere / "modules").mkdir(parents=True)
-        (elsewhere / "target.yml").write_text("metadata: {name: Elsewhere}\n")
-        (manager.community_dir / "linked").symlink_to(elsewhere, target_is_directory=True)
-        assert [m.id for m in manager.scan_modules()] == ["demo-board"]
-        with pytest.raises(ValueError, match="not found"):
-            manager.install_module("linked")
+# Installing community packs (quarantine, validators, provenance, links, id traversal): tests/test_zoo.py.
 
 
 # --- Build context ----------------------------------------------------------------------------------------

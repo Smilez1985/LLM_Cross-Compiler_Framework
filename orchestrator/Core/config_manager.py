@@ -355,7 +355,16 @@ class ConfigManager:
             ConfigSchema("chat_context_limit", int, False, 4096, "Max tokens for chat context history"),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
             ConfigSchema("offline_mode", bool, False, False, "Force offline mode (no external APIs)"),
-            ConfigSchema("preferred_tiny_model", str, False, "tinyllama_1b", "Preferred local model for offline intelligence")
+            ConfigSchema("preferred_tiny_model", str, False, "tinyllama_1b", "Preferred local model for offline intelligence"),
+
+            # Community zoo (3.1): the signed index (verified with configs/community_keys.yml) and the repository
+            # that receives contributions as pull requests. Empty until the community repository is published.
+            ConfigSchema("community_index_url", str, False, "",
+                         "HTTPS URL of the signed community index (index.json; index.json.sig next to it)",
+                         ["regex:^(https://\\S+)?$"]),
+            ConfigSchema("community_repo", str, False, "",
+                         "GitHub repository (owner/name) that receives community packs as pull requests",
+                         ["regex:^([A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100})?$"]),
         ]
         
         for schema in core_schemas:

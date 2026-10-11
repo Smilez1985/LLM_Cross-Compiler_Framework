@@ -249,6 +249,7 @@ class BuilderTab(QWidget):
              self.app_root = Path(".").resolve()
 
         self.assets_dir = self.app_root / "assets"
+        self._recipe = None  # community recipe the settings were filled from (apply_recipe)
         self._init_ui()
         
     def _init_ui(self):
@@ -412,6 +413,8 @@ class BuilderTab(QWidget):
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
         self.log_area.setStyleSheet("font-family: Consolas; background: #222; color: #0f0;")
+        self.log_area.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.log_area.customContextMenuRequested.connect(self._log_context_menu)
         right_col.addWidget(self.log_area)
         main_layout.addLayout(right_col, 3)
 
@@ -659,6 +662,49 @@ class BuilderTab(QWidget):
         if hasattr(self, "format_combo"):
             self._apply_target_capabilities()
 
+    def _log_context_menu(self, pos):
+        menu = self.log_area.createStandardContextMenu()
+        menu.addSeparator()
+        menu.addAction("Export a finished build for the community...", self._export_build_for_community)
+        menu.exec(self.log_area.mapToGlobal(pos))
+
+    def _export_build_for_community(self):
+        """A finished build becomes a recipe pack (scrubbed, signed) for a pull request."""
+        from orchestrator.gui.community_hub import CommunityExportDialog
+        get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: d)
+        start = get_cfg("output_dir", "output")
+        if hasattr(self.framework, "resolve_path"):
+            start = self.framework.resolve_path(start)
+        path, _ = QFileDialog.getOpenFileName(self, "Choose the build_info.json of a finished build", str(start),
+                                              "Build manifest (build_info.json)")
+        if path:
+            CommunityExportDialog(self.framework, "recipe", path, self).exec()
+
+    def apply_recipe(self, recipe):
+        """Fills the build settings from a community recipe (the model at its pinned commit, target, format,
+        board, quantization, IMatrix); the user reviews them and starts the build."""
+        idx = next((i for i in range(self.target_combo.count())
+                    if str(self.target_combo.itemData(i)).casefold() == recipe.target.id.casefold()), -1)
+        if idx < 0:
+            QMessageBox.warning(self, "Recipe", f"Target {recipe.target.id} is not installed; install it from the "
+                                                "Community Hub first.")
+            return
+        self._recipe = recipe
+        self.model_input.setCurrentText(recipe.model.repo)
+        self.target_combo.setCurrentIndex(idx)
+        for combo, value in ((self.format_combo, recipe.format), (self.board_combo, recipe.board)):
+            found = combo.findData(value) if value else -1
+            if found >= 0:
+                combo.setCurrentIndex(found)
+        if recipe.quantization:
+            self.quant_combo.setCurrentText(recipe.quantization)
+            self._quant_user_set = True
+        self.chk_imatrix.setChecked(recipe.options.use_imatrix)
+        self._log(f"Recipe {recipe.id}: {recipe.model.repo} at commit {recipe.model.revision[:12]}.")
+        if recipe.options.dataset:
+            self._log(f"The recipe was calibrated with {recipe.options.dataset.name} (sha256 "
+                      f"{recipe.options.dataset.sha256[:16]}...); choose that file as calibration dataset.")
+
     def _browse_model(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Model", "", "Models (*.bin *.gguf *.safetensors);;All Files (*)")
         if path: self.model_input.setCurrentText(path)
@@ -741,6 +787,8 @@ class BuilderTab(QWidget):
                 QMessageBox.warning(self, "Build settings", "\n".join(problems))
                 return
         
+        recipe = self._recipe if self._recipe and self.model_input.currentText().strip() == self._recipe.model.repo \
+            else None
         try:
              target_fmt = ModelFormat(self.format_combo.currentData())
              opt_lvl = OptimizationLevel[self.opt_combo.currentText()]
@@ -764,7 +812,10 @@ class BuilderTab(QWidget):
             # NEW v2.4.0: Pass IMatrix config
             use_imatrix=self.chk_imatrix.isChecked(),
             dataset_path=self.dataset_path,
-            target_board=board
+            target_board=board,
+            # A recipe pins the model commit (and context length) while its model is still selected.
+            model_revision=recipe.model.revision if recipe else None,
+            max_context_length=recipe.options.max_context_length if recipe else None,
         )
         
         try:
