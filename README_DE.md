@@ -168,7 +168,7 @@ Befehl `llm-cli`. Die Beispiele in dieser README verwenden `llm-cli`.
 | Programm und Python-Umgebung | Linux: `/opt/llm-conversion-framework` · Windows: `C:\Program Files\LLM-Conversion-Framework` |
 | Builds, Logs, Cache | `output/`, `logs/` und `cache/` im Installationsordner (Einstellungen `output_dir`, `logs_dir`, `cache_dir`) |
 | Einstellungen (`config.yml`) | `configs/` im Installationsordner, wenn dein Benutzer dort schreiben darf, sonst der persönliche Ordner unten; `LLM_FRAMEWORK_CONFIG_DIR` legt einen anderen Ordner fest |
-| Persönlicher Zustand: Tool-Berechtigungen, Audit-Log, SSH-Schlüssel und bekannte Geräte, MCP-Token, Chatverlauf, Wissensbasis, lokaler Modellserver | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` legt einen anderen Ordner fest |
+| Persönlicher Zustand: Tool-Berechtigungen, Audit-Log, SSH-Schlüssel und bekannte Geräte, MCP-Token, Chatverlauf, Eingabeverlauf, Wissensbasis, lokaler Modellserver, zwischengespeicherter Community-Index | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` legt einen anderen Ordner fest |
 | API-Schlüssel und Tokens | verschlüsselt in `~/.llm-framework/secrets.store`; der Schlüssel dafür liegt im Schlüsselbund deines Betriebssystems oder dort, wo du es mit der Einstellung `secret_storage` festlegst |
 | Modelle für Dittos Offline-Modus | `models/ditto/` im Installationsordner (`LLM_FRAMEWORK_MODELS_DIR` legt einen anderen Ordner fest) |
 
@@ -222,7 +222,12 @@ Platzhalter.
 
 Menüs: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (Assistent für ein neues Target, mit „Deep Ingest“, um Dokumentation in die Wissensbasis aufzunehmen),
-**Tools > Tool Permissions (Ditto / MCP)...**
+**Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
+MCP)...**, **Tools > Gesprochene Ansagen** (ein oder aus) und **Tools > Eingabeverlauf löschen...** (in der
+englischen Oberfläche *Open Community Hub*, *Spoken Announcements* und *Clear Input History...*)
+
+Die Eingabefelder bieten an, was du zuletzt verwendet hast (Modelle, Targets, Boards, Datensätze, URLs, Geräte), pro
+Benutzer und nie Geheimnisse: [Einzelheiten](docs/Features_DE.md#eingabeverlauf).
 
 ### Auf das Board übertragen
 
@@ -394,7 +399,8 @@ der `config.yml` (oder die Umgebungsvariable `LLM_FRAMEWORK_AI_PROVIDER`).
   sie deinen Schlüssel nicht ersetzen können; die Einstellung `ai_allow_sdk_env_headers: true` behält sie.
 
 `llm-cli ditto eval` bewertet Ditto anhand fester Testfälle, zum Beispiel um zu prüfen, ob ein kleines lokales
-Modell gut genug ist. Einzelheiten und eine erste Messung: [docs/Features_DE.md](docs/Features_DE.md#ditto-evaluation).
+Modell gut genug ist; `--kind retrieval` bewertet stattdessen die Suche in der Wissensbasis. Einzelheiten und
+Messungen: [docs/Features_DE.md](docs/Features_DE.md#ditto-evaluation).
 
 ---
 
@@ -456,12 +462,31 @@ läuft auf deinem Rechner:
 - die Vektoren liegen in einer eingebetteten Qdrant-Datenbank in `~/.llm-framework/qdrant`, ohne Docker und ohne
   offenen Port,
 - die Suche verbindet Bedeutung (Vektoren) mit exakten Wörtern (BM25), sodass auch Fehlercodes und Compiler-Flags
-  gefunden werden.
+  gefunden werden, auch Teile von Bezeichnern wie `GGML_CUDA` in `-DGGML_CUDA=ON`,
+- ein lokaler Cross-Encoder bewertet die Auszüge für Build-Empfehlungen neu und wirft unpassende weg (Einstellung
+  `rag_reranker`).
 
 Dokumentation nimmst du mit **Deep Ingest (Add Docs)** im Modul-Assistenten auf (**Tools > Create Hardware
-Module...**). Der Crawler beachtet `robots.txt`, sperrt private Netzwerkadressen und begrenzt Seitenzahl und Tiefe.
-Suchergebnisse gelten als externer Text, nie als Anweisungen. Mehr dazu:
-[docs/Features_DE.md](docs/Features_DE.md#wissensbasis-rag).
+Module...**). Vor deinem ersten Crawl sagt ein einmaliger Hinweis, was gelesen und behalten wird; er ist eine
+Information, keine Bestätigung. Der Crawler sperrt private Netzwerkadressen, begrenzt Seitenzahl und Tiefe und
+beachtet diese maschinenlesbaren Opt-outs einer Website: robots.txt, den Header `X-Robots-Tag`, robots-Meta-Tags
+(auch `noai`) und das TDM Reservation Protocol. Keine dieser Prüfungen lässt sich abschalten. Der Assistent zeigt
+„Seite N von M“, **Stoppen** behält, was schon gespeichert ist, und das Ergebnis lautet Erfolg, teilweise oder
+Fehlschlag; das Ergebnis spricht auch die Sprachausgabe des Betriebssystems, wenn es eine gibt, außer du schaltest
+das aus. Suchergebnisse gelten als externer Text, nie als Anweisungen. Mehr dazu:
+[Wissensbasis](docs/Features_DE.md#wissensbasis-rag) und [Deep Ingest](docs/Features_DE.md#deep-ingest).
+
+---
+
+## Community-Zoo
+
+Targets, Rezepte (wie ein Modell für ein Board gebaut wurde) und Wissen lassen sich als signierte Packs teilen:
+`llm-cli zoo list|show|install|verify|export|keys` oder **Tools > Community Hub öffnen**. Ein Pack wird erst nach
+Prüfungen in einem Quarantäne-Ordner und deiner Bestätigung installiert und zeigt eine Vertrauensstufe. Deine eigene
+Arbeit wird datenschutzbereinigt exportiert und mit deinem Schlüssel signiert; ein Pull Request läuft über die
+GitHub CLI oder den Browser, und das Framework fragt nie nach einem Token. Packs lassen sich auch für deine eigenen
+Rechner oder ein Team verschlüsseln. Ein Community-Repository oder ein Index ist noch nicht veröffentlicht; heute
+lassen sich deshalb nur Pack-Dateien installieren. Einzelheiten: [docs/Features_DE.md](docs/Features_DE.md#community-zoo).
 
 ---
 
@@ -514,9 +539,17 @@ build_sandbox: true           # Sandbox für Konvertierungs-Container
 build_memory_limit: ""        # z. B. 24g; leer = kein Limit
 build_pids_limit: 4096        # Prozesslimit im Container
 build_jobs: 0                 # parallele Compile-Jobs beim Image-Build; 0 = alle Kerne
-crawler_respect_robots: true
-crawler_max_depth: 2
+crawler_max_depth: 2          # gilt nicht im Deep-Ingest-Dialog, der eine eigene Tiefe setzt
+rag_reranker: auto            # auto (nach Hardware gewählt), off oder die ID eines Cross-Encoder-Modells
+rag_rerank_default: false     # true: jede Suche neu bewerten (Standard: nur Build-Empfehlungen)
+rag_rerank_min_score: 0.0     # Relevanzschwelle 0..1; 0 = die kalibrierte Schwelle des Modells (0,2)
+rag_model_idle_minutes: 10    # Modelle der Wissensbasis nach dieser Leerlaufzeit entladen; 0 = geladen lassen
+audio_announcements: true     # gesprochener Deep-Ingest-Hinweis und gesprochenes Ergebnis (Tools > Gesprochene Ansagen)
+community_index_url: ""       # https-Adresse des signierten Community-Index; leer, bis einer veröffentlicht ist
+community_repo: ""            # GitHub owner/name, das Community-Packs als Pull Requests bekommt; vorerst leer
 ```
+
+Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Features_DE.md](docs/Features_DE.md).
 
 ---
 
@@ -540,6 +573,10 @@ crawler_max_depth: 2
 - **Anmeldung im Browser und bei Cloud-Plattformen** (OAuth, AWS, Google Cloud, Azure) gibt es noch nicht; Ditto
   meldet sich mit API-Schlüsseln an, lokale Engines brauchen keine Anmeldung, und ein Profil aus `ant auth login`
   ist eine erweiterte Möglichkeit.
+- **Deep Ingest** läuft nur aus dem Modul-Assistenten in der GUI; einen CLI-Befehl dafür gibt es nicht.
+- **Community-Zoo:** Ein Community-Repository, ein Index oder ein Maintainer-Schlüssel ist noch nicht veröffentlicht
+  (`configs/community_keys.yml` ist leer, `community_index_url` und `community_repo` sind leer); installieren lassen
+  sich deshalb nur Pack-Dateien.
 
 ---
 
@@ -563,7 +600,7 @@ Vollständige Liste: [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap).
 | Dokument | Inhalt |
 |---|---|
 | [docs/CLI_Usage_DE.md](docs/CLI_Usage_DE.md) | Alle CLI-Befehle und Optionen mit Beispielen |
-| [docs/Features_DE.md](docs/Features_DE.md) | Funktionen im Detail: Build-Pipeline, Sandbox, Ditto, Evaluation, lokale Laufzeit, Wissensbasis, MCP |
+| [docs/Features_DE.md](docs/Features_DE.md) | Funktionen im Detail: Build-Pipeline, Sandbox, Ditto, Evaluation, lokale Laufzeit, Wissensbasis, Deep Ingest, MCP, Community-Zoo |
 | [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md) | Architektur und Roadmap |
 | [docs/Module_Developer_Guide_DE.md](docs/Module_Developer_Guide_DE.md) | Ein neues Hardware-Target hinzufügen |
 | [CHANGELOG_DE.md](CHANGELOG_DE.md) | Was sich in jeder Version geändert hat |
@@ -594,6 +631,9 @@ ausführst und Änderungen einreichst: [CONTRIBUTING_DE.md](CONTRIBUTING_DE.md).
   mitgelieferten Kalibrierungstexte (MIT)
 - **[Qdrant](https://qdrant.tech/)** und **[FastEmbed](https://github.com/qdrant/fastembed)**: die lokale
   Wissensbasis
+- **[rag4ll](https://github.com/Smilez1985/rag4ll)**: Der Reranker, das Budget für Auszüge, das Manifest der Packs,
+  die Datenschutz-Bereinigung und der Aufbau des Sprachaufrufs sind daraus übernommen (MIT, siehe
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))
 - **[Radxa Community](https://forum.radxa.com/)**: Unterstützung bei der Integration des RK3566
 - **[Docker](https://www.docker.com/)**, **[PySide6](https://doc.qt.io/qtforpython-6/)**,
   **[Poetry](https://python-poetry.org/)**
