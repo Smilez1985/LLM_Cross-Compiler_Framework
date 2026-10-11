@@ -11,6 +11,10 @@ Adapted parts (each marked with an "Adapted from rag4ll" comment in the code):
 
 - `orchestrator/rag/retrieval.py`: the cross-encoder reranker (from `rag4ll/reranking/rerank_fastembed.py`)
   and the excerpt budget packer (from `rag4ll/retrieval/budget.py`).
+- `orchestrator/Core/community_pack.py`: the pack manifest (from `rag4ll/sidecar/manifest.py`) and the
+  privacy scrub (from `rag4ll/mojo/redact.py`).
+- `orchestrator/utils/announce.py`: the best-effort shape of the speech call, which never fails the caller
+  (from `play()` in `scripts/rag-usb-watcher`).
 
 ```
 MIT License

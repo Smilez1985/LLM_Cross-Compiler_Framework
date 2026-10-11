@@ -1,0 +1,17 @@
+# Trusted publisher keys for community packs and the signed community index (Ed25519).
+#
+# Shipped with each release. A key rotation ships the old and the new key for one release.
+#   key_id       first 16 hex characters of sha256(raw 32-byte public key)
+#   pubkey_b64   the raw 32-byte public key, base64
+#   valid_until  last day (UTC) on which signatures by this key are accepted
+#   name         who holds the key (optional)
+#
+# Example entry (not a real key):
+#   - key_id: 0123456789abcdef
+#     pubkey_b64: <44 characters>
+#     valid_until: 2027-12-31
+#     name: LCF maintainers
+#
+# No key is listed yet: until the community index is published, a pack verifies only against keys you pass
+# explicitly.
+keys: []

@@ -318,7 +318,7 @@ class TestSecretRedaction:
         assert "sk-proj-AbCdEf" not in report
         assert str(Path.home()) not in report
 
-    def test_swarm_upload_uses_redaction(self):
+    def test_knowledge_export_uses_redaction(self):
         from orchestrator.Core.community_manager import CommunityManager
 
         assert "sk-REDACTED" in CommunityManager._sanitize_content(None, "token sk-ant-api03-AbCdEf0123456789abcdefghij")

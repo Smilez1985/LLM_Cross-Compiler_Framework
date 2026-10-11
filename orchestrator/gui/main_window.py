@@ -128,6 +128,10 @@ class MainOrchestrator(QMainWindow):
         act_wizard.triggered.connect(self._open_module_wizard)
         tools_menu.addAction(act_wizard)
 
+        act_hub = QAction(self.i18n.t("menu.open_hub", "Community Hub"), self)
+        act_hub.triggered.connect(self._open_community_hub)
+        tools_menu.addAction(act_hub)
+
         act_perms = QAction("Tool Permissions (Ditto / MCP)...", self)
         act_perms.triggered.connect(self._open_tool_permissions)
         tools_menu.addAction(act_perms)
@@ -318,6 +322,25 @@ class MainOrchestrator(QMainWindow):
         wizard.exec()
         if self.framework.target_manager:
             self.framework.target_manager.initialize()
+            self.builder_tab._refresh_targets()
+            self.deployment_window.refresh_data()
+
+    def _open_community_hub(self):
+        from orchestrator.gui.community_hub import CommunityHubWindow
+        if getattr(self, "community_hub", None) is None:
+            self.community_hub = CommunityHubWindow(self.framework, self, on_build_recipe=self._build_recipe)
+            self.community_hub.installed.connect(self._on_community_installed)
+        self.community_hub.show()
+        self.community_hub.raise_()
+
+    def _build_recipe(self, recipe):
+        """'Build' on a recipe in the Community Hub: the Builder is filled in, the user starts the build."""
+        self.tabs.setCurrentWidget(self.builder_tab)
+        self.builder_tab.apply_recipe(recipe)
+        self.raise_()
+
+    def _on_community_installed(self, kind: str):
+        if kind == "target":
             self.builder_tab._refresh_targets()
             self.deployment_window.refresh_data()
 
