@@ -20,6 +20,11 @@ Security model
   A person's "no" is final for that call, even if the policy is loosened while the dialog is open.
 - stdio is the default transport. Streamable HTTP binds to loopback only, checks Host/Origin
   (SDK transport security) and requires a bearer token generated per user.
+- Each connection (one stdio session; the whole HTTP server until named tokens exist) owns the builds and
+  jobs it starts: it may cancel them without a question, another client's need one. When a session ends,
+  its unfinished builds and jobs are cancelled and audited ("client disconnected"); `serve` then shuts the
+  framework down. Long-polls (`wait_seconds`) wait on the event loop, at most 50 s and 4 at a time per
+  client, and a cancelled wait never touches the build or job.
 """
 
 import contextlib
@@ -90,8 +95,11 @@ class NotAsked(Confirmation):
 
 
 INPUT_REQUIRED_VERSION = "2026-07-28"  # elicitation as input_required rounds instead of a request mid-call
-ELICITATION_TIMEOUT = 300.0  # seconds a question asked mid-call (classic transport) may stay open
-QUESTION_EXPIRY = 900.0      # 2026-07-28 rounds: an unanswered question is recorded as unanswered after this
+ELICITATION_TIMEOUT = 300.0        # seconds a question asked mid-call (classic transport) may stay open
+QUESTION_EXPIRY = 900.0            # 2026-07-28 rounds: an unanswered question is recorded as unanswered after this
+SESSION_STATE_KEY = "lcf_session"  # where the server lifespan keeps the connection's McpSession
+MAX_WAITS_PER_CLIENT = 4           # long-polls one client may have running at once
+END_OF_SESSION_WAIT = 30.0         # seconds a disconnected session waits for its build containers to stop
 
 
 @dataclass
@@ -152,7 +160,9 @@ def _tool_context(ctx, caller: str = "mcp", instance: str = "") -> ToolContext:
     request_id = ""
     with contextlib.suppress(Exception):
         request_id = _label(ctx.request_id, 40)
-    return ToolContext(caller, client=client, session=session, request_id=request_id)
+    connection = _session_of(ctx)  # the lifespan's McpSession: owner of the builds and jobs this client starts
+    return ToolContext(caller, client=client, session=session, request_id=request_id,
+                       connection=connection.key if connection is not None else "")
 
 
 class _OpenQuestions:
@@ -184,6 +194,61 @@ class _OpenQuestions:
                 self.registry.refuse(name, arguments, ctx, detail="The question was not answered within 15 minutes.",
                                      confirm_channel="elicitation", question_sha256=digest, answer="unanswered")
         return len(gone)
+
+
+@dataclass
+class McpSession:
+    """One client connection (an stdio session; the whole HTTP server until named tokens exist). It owns the
+    builds and jobs started through it: its key is the `connection` of every ToolContext of its requests."""
+    key: str
+    actor: str = "mcp"
+    waits: int = 0
+
+    @property
+    def owner(self) -> str:
+        return f"{self.actor}#{self.key}"
+
+
+def _session_of(mcp_ctx) -> Optional[McpSession]:
+    try:
+        state = mcp_ctx.request_context.lifespan_context
+    except (AttributeError, ValueError):
+        return None
+    session = state.get(SESSION_STATE_KEY) if isinstance(state, dict) else None
+    return session if isinstance(session, McpSession) else None
+
+
+async def _long_poll(spec: ToolSpec, registry: ToolRegistry, arguments: Dict[str, Any], ctx: ToolContext,
+                     mcp_ctx) -> None:
+    """Runs the tool's wait on the event loop (no worker thread) before the registry call. Only the wait is ever
+    cancelled by the client; the build or job goes on. The handler is told not to wait again."""
+    try:
+        seconds = int(arguments.get("wait_seconds") or 0)
+    except (TypeError, ValueError):
+        return
+    inp = _parsed(spec, arguments)
+    if seconds <= 0 or inp is None:
+        return  # an invalid call: the registry call refuses and audits it
+    if registry.decide(spec, inp, ctx) == Decision.DENY:
+        return
+    from orchestrator.Core.job_service import MAX_WAIT_SECONDS
+    ctx.metadata["waited"] = True
+    session = _session_of(mcp_ctx)
+    if session is not None and session.waits >= MAX_WAITS_PER_CLIENT:
+        ctx.metadata["wait_notes"] = [f"Returned without waiting: this client already has {MAX_WAITS_PER_CLIENT} "
+                                      "waits running. Wait for one of them before starting another."]
+        return
+    report = getattr(mcp_ctx, "report_progress", None)
+    if session is not None:
+        session.waits += 1
+    try:
+        await spec.long_poll(inp, min(seconds, MAX_WAIT_SECONDS), report)
+    except (ToolError, ValueError):
+        pass  # an unknown id: the registry call reports it with the next step
+    finally:
+        if session is not None:
+            session.waits -= 1
+
 
 def _model_parameters(model: type) -> list:
     """Keyword-only parameters mirroring a pydantic model's fields (with their constraints)."""
@@ -246,8 +311,9 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
     questions = questions or _OpenQuestions(registry)
 
     async def confirm(ctx: Context, **arguments):
+        # With the caller's context: cancelling its own build or job needs no question (the tool's default).
         decision = await anyio.to_thread.run_sync(
-            functools.partial(registry.decide, spec, _parsed(spec, arguments), caller))
+            functools.partial(registry.decide, spec, _parsed(spec, arguments), _tool_context(ctx, caller, instance)))
         rounds = _uses_input_required(ctx)
         # The person already answered in an earlier round: their answer decides, even if the policy was
         # loosened to "allow" meanwhile (the SDK checks that it answers exactly this question).
@@ -328,6 +394,8 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             tool_ctx.confirm_channel, tool_ctx.question_sha256 = "elicitation", state.question_sha256
             tool_ctx.answer = ("accepted" if approved else "cancelled" if isinstance(outcome, CancelledElicitation)
                                else "declined")
+        if spec.long_poll is not None and approved is not False and can_ask:  # only a call that will run waits
+            await _long_poll(spec, registry, kwargs, tool_ctx, ctx)
         try:
             # abandon_on_cancel: a client's cancellation reaches this function while the handler still runs, so the
             # call's cancel event is set at once (a handler that checks it stops early); the registry writes the
@@ -358,6 +426,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
 
     approval_param = inspect.Parameter("approval", inspect.Parameter.KEYWORD_ONLY,
                                        annotation=Annotated[ElicitationResult[Confirmation], Resolve(confirm)])
+    # The SDK passes the request context here (never part of the input schema): it names the caller's session.
     ctx_param = inspect.Parameter("ctx", inspect.Parameter.KEYWORD_ONLY, annotation=Context)
     tool.__signature__ = inspect.Signature(field_params + [approval_param, ctx_param],
                                            return_annotation=spec.output_model)
@@ -424,6 +493,71 @@ def _audit_rejection(registry: ToolRegistry, name: str, arguments: Any, error: B
     registry.refuse(name, arguments, ctx, outcome=outcome, detail=detail)
 
 
+def end_session(framework, registry: Optional[ToolRegistry], session: McpSession,
+                wait_seconds: float = END_OF_SESSION_WAIT) -> None:
+    """A client disconnected (or the HTTP server stops): cancel the builds and jobs this session started, audit
+    each as cancelled with "client disconnected", and wait a bounded time for build containers to stop."""
+    audit = getattr(registry, "audit", None)
+
+    def record(tool: str, arguments: Dict[str, Any], detail: str) -> None:
+        if audit is None:
+            return
+        try:
+            audit.record(session.actor, tool, "local_write", "allow", "cancelled", arguments=arguments,
+                         detail=f"client disconnected: {detail}")
+        except Exception as e:
+            logger.warning(f"Could not audit the end of an MCP session: {e}")
+
+    service = getattr(framework, "build_service", None)
+    cancelled = []
+    for rid in (service.active_requests(session.owner) if hasattr(service, "active_requests") else []):
+        try:
+            service.cancel(rid)
+            cancelled.append(rid)
+            record("cancel_build", {"request_id": rid}, "the session's own build was cancelled")
+        except Exception as e:  # it ended meanwhile
+            logger.info(f"Build {rid} of a closed MCP session was not cancelled: {e}")
+    jobs = getattr(framework, "job_service", None)
+    for job in (jobs.cancel_owned(session.owner, "client disconnected") if jobs is not None else []):
+        record("cancel_job", {"job_id": job.job_id}, f"the session's own {job.kind} job was cancelled")
+    deadline = time.monotonic() + wait_seconds
+    for rid in cancelled:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            service.wait_stopped(rid, remaining)
+        except Exception as e:
+            logger.info(f"Could not wait for build {rid} to stop: {e}")
+
+
+def _session_lifespan(framework, registry, inner=None, caller: str = "mcp"):
+    """The server lifespan: one McpSession per connection (per stdio session; once for the HTTP server), composed
+    with `inner` (stdout to stderr for stdio). On exit the session's own builds and jobs are cancelled."""
+    import anyio
+    import anyio.to_thread
+
+    @contextlib.asynccontextmanager
+    async def lifespan(server):
+        session = McpSession(secrets.token_hex(8), actor=caller)
+        async with contextlib.AsyncExitStack() as stack:
+            state: Dict[str, Any] = {}
+            if inner is not None:
+                entered = await stack.enter_async_context(inner(server))
+                if isinstance(entered, dict):
+                    state.update(entered)
+            state[SESSION_STATE_KEY] = session
+            try:
+                yield state
+            finally:
+                with anyio.CancelScope(shield=True):
+                    try:
+                        await anyio.to_thread.run_sync(end_session, framework, registry, session)
+                    except Exception as e:
+                        logger.warning(f"Cleaning up a closed MCP session failed: {e}")
+    return lifespan
+
+
 def closed_schema(model: type) -> Dict[str, Any]:
     """A tool's input schema as clients get it: the input model's own schema, closed to unknown keys."""
     schema = model.model_json_schema()
@@ -487,7 +621,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
 
     server = AuditedServer(SERVER_NAME, title="LLM Cross-Compiler Framework", instructions=INSTRUCTIONS,
                            version=getattr(getattr(framework, "info", None), "version", "") or "",
-                           lifespan=lifespan)
+                           lifespan=_session_lifespan(framework, registry, lifespan, caller))
     server.open_questions = questions
     for spec in registry.list():
         server.add_tool(make_tool_function(spec, registry, questions, caller, instance), name=spec.name,
@@ -582,29 +716,70 @@ def no_programs_from_the_working_directory() -> None:
         os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
 
 
-def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765) -> None:
-    if transport == "stdio":
-        server = build_mcp_server(framework, lifespan=_stdout_to_stderr)
-        _logging_to_stderr()
-        stdout = sys.stdout
-        try:
-            server.run("stdio")
-        finally:
-            _stdout_fd_to_stderr(stdout)
+@contextlib.contextmanager
+def _sigterm_ends_the_session():
+    """Clients stop a stdio server by closing its input and, when it has not ended a few seconds later (some right
+    away), with SIGTERM, then SIGKILL. Python's default for SIGTERM ends the process at once, so the lifespan would
+    never cancel the session's builds and jobs. Here SIGTERM interrupts the server like Ctrl+C: the main task is
+    cancelled and the shielded cleanup runs; a second SIGTERM is ignored while it does (SIGKILL still ends it)."""
+    import signal
+    import threading
+    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "SIGTERM"):
+        yield
         return
-    server = build_mcp_server(framework)
-    if transport != "http":
-        raise ValueError(f"Unknown transport '{transport}' (stdio, http)")
-    if host not in LOOPBACK_HOSTS:
-        raise ValueError("The HTTP transport only binds to loopback (127.0.0.1, ::1, localhost).")
-    import anyio
-    import uvicorn
 
-    token = http_token(framework.config.user_state_dir)
-    print(f"MCP server on http://{host}:{port}/mcp - bearer token in "
-          f"{Path(framework.config.user_state_dir) / 'mcp_http_token'}", file=sys.stderr)
-    config = uvicorn.Config(http_app(server, token, host), host=host, port=port, log_level="warning")
-    anyio.run(uvicorn.Server(config).serve)
+    def interrupt(signum, frame):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        handler = signal.getsignal(signal.SIGINT)
+        if callable(handler) and handler is not interrupt:
+            handler(signal.SIGINT, frame)  # asyncio's runner cancels its main task (default handler: raises)
+        else:
+            raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(TypeError, ValueError):
+            signal.signal(signal.SIGTERM, previous)
+
+
+def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765) -> None:
+    """Runs the server until the client (stdio) or the process (HTTP) ends it. The session's builds and jobs are
+    cancelled by the lifespan; afterwards the framework is shut down, so nothing is left without an owner."""
+    try:
+        if transport == "stdio":
+            server = build_mcp_server(framework, lifespan=_stdout_to_stderr)
+            _logging_to_stderr()
+            stdout = sys.stdout
+            try:
+                with _sigterm_ends_the_session():
+                    server.run("stdio")
+            except KeyboardInterrupt:  # SIGTERM or Ctrl+C: the session's cleanup has run
+                logger.info("MCP server stopped by a signal; the session's builds and jobs were cancelled.")
+            finally:
+                _stdout_fd_to_stderr(stdout)
+            return
+        server = build_mcp_server(framework)
+        if transport != "http":
+            raise ValueError(f"Unknown transport '{transport}' (stdio, http)")
+        if host not in LOOPBACK_HOSTS:
+            raise ValueError("The HTTP transport only binds to loopback (127.0.0.1, ::1, localhost).")
+        import anyio
+        import uvicorn
+
+        token = http_token(framework.config.user_state_dir)
+        print(f"MCP server on http://{host}:{port}/mcp - bearer token in "
+              f"{Path(framework.config.user_state_dir) / 'mcp_http_token'}", file=sys.stderr)
+        config = uvicorn.Config(http_app(server, token, host), host=host, port=port, log_level="warning")
+        anyio.run(uvicorn.Server(config).serve)
+    finally:
+        shutdown = getattr(framework, "shutdown", None)
+        if callable(shutdown):
+            try:
+                shutdown()
+            except Exception as e:
+                logger.warning(f"Framework shutdown after the MCP server failed: {e}")
 
 
 # --- Client configuration -----------------------------------------------------------------------

@@ -332,22 +332,34 @@ sequenceDiagram
 4. **Execution.** A call that changes something is first recorded (`started`) and refused if that entry cannot
    be written. The handler runs in a worker thread; a client's cancel reaches it at once. Its result is checked
    against the output model and filtered: secrets redacted in every string, fields with external text (logs,
-   healing proposals, manifests, knowledge excerpts) cleaned of invisible characters and capped, a result over
-   256 KiB refused. `notes` are added by the framework only. The client gets the structured result and a text
-   block that starts with one sentence of framework facts, followed by the JSON wrapped as untrusted data. Errors
-   come back as tool errors with a message meant for people, with secrets redacted; the part of an error that
-   quotes external text (a server reply, a log line, a name from a pack) is cleaned first and wrapped as untrusted
-   data, the framework's own words and the next step stay plain.
+   healing proposals, manifests, knowledge excerpts, job errors) cleaned of invisible characters and capped, a
+   result over 256 KiB refused. `notes` are added by the framework only. The client gets the structured result and
+   a text block that starts with one sentence of framework facts, followed by the JSON wrapped as untrusted data.
+   Errors come back as tool errors with a message meant for people, with secrets redacted; the part of an error
+   that quotes external text (a server reply, a log line, a name from a pack) is cleaned first and wrapped as
+   untrusted data, the framework's own words and the next step stay plain.
 5. **Audit.** Every outcome (`ok`, `denied`, `not_confirmed` with the answer, `error`, `invalid_input`,
    `confirmation_timeout`, `cancelled`) is appended to `audit.db` with redacted, shortened arguments and a hash of
    the full text, the duration, a hash of the result and a link to the call's `started` entry. `llm-cli tools
    audit --verify` checks the chain and its anchor; `llm-cli tools audit --archive` puts the log aside and starts a
    new chain.
+6. **Owner, waits and the end of a session.** The server lifespan gives each connection a session (one per stdio
+   session, one for the HTTP server); the caller is actor `mcp` with that session, and it owns the builds and jobs
+   it starts. `cancel_build` and `cancel_job` on its own work are allowed without a question (a per-tool setting
+   still wins, a tier you denied stays denied, a damaged permission file still denies); on another client's work
+   the caller's permissions apply. A call with `wait_seconds` first waits on the event loop (no worker thread, at
+   most 50 s and 4 waits per client, progress every 5 s when the client gave a progress token), then runs through
+   the registry once; cancelling the wait leaves the build or job alone. When the session ends, its unfinished
+   builds and jobs are cancelled and audited as `cancelled` ("client disconnected"), the server waits up to 30 s
+   for build containers to stop, and `llm-cli mcp serve` then shuts the framework down. Over stdio a SIGTERM from
+   the client ends the session the same way (it interrupts the server like Ctrl+C instead of ending the process at
+   once).
 
-The twelve tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
-`read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `get_status` (tier `read`) and `start_build`,
-`cancel_build`, `resolve_healing` (tier `local_write`). Tools your permissions deny are not listed to the client. No tool of the `external` tier is registered, so neither
-AI clients nor Ditto can deploy to devices.
+The fourteen tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
+`read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `get_status`, `get_job_status` (tier `read`)
+and `start_build`, `cancel_build`, `resolve_healing`, `cancel_job` (tier `local_write`). Tools your permissions deny
+are not listed to the client. No tool of the `external` tier is registered, so neither AI clients nor Ditto can
+deploy to devices.
 
 ### A question to Ditto (unreleased)
 

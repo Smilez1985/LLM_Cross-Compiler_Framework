@@ -9,9 +9,11 @@ requests are validated once, against the target's declared capabilities, and res
 
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional, Tuple
 
+from orchestrator.Core import job_service
 from orchestrator.Core.builder import HF_REPO_ID, MODEL_FILE_SUFFIXES, ModelFormat, OptimizationLevel
+from orchestrator.Core.job_service import owner_actor
 from orchestrator.Core.deployment_manager import list_builds
 from orchestrator.Core.orchestrator import (BuildRequest, OrchestrationStatus, PriorityLevel, WorkflowState,
                                             WorkflowType)
@@ -19,10 +21,13 @@ from orchestrator.schemas.build import (ArtifactList, ArtifactOut, BuildHandle, 
                                         BuildStatusOut, FormatSummary, LogTail, PendingHealing, TargetList,
                                         TargetOut)
 from orchestrator.schemas.targets import TargetCapabilities
+from orchestrator.tools.local_files import (LocalFileError, LocalFiles, LocalInputs, is_path, labels_hint,
+                                            looks_like_reference, split_reference)
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
 AUTOMATIC_STRATEGIES = {"config_adjustment", "docker_prune", "retry_build"}
+BUILD_FINISHED = frozenset({"completed", "error", "cancelled"})
 
 
 class BuildServiceError(ValueError):
@@ -90,17 +95,51 @@ class BuildService:
             raise BuildServiceError(f"Target '{target}' is unknown or declares no capabilities (targets: {known}).")
         return caps
 
+    def _confined(self, request: BuildRequestIn) -> Tuple[BuildRequestIn, Optional[LocalInputs]]:
+        """AI callers name a local model or dataset only by a local-file reference inside the folders the AI may
+        use (G8); a path is refused, and a Hugging Face repo id is never looked up on disk. Returns the request with
+        the confined real paths and their pins."""
+        model, dataset = request.model, request.dataset_path
+        files = None
+
+        def local() -> LocalFiles:
+            nonlocal files
+            files = files or LocalFiles.for_framework(self.framework)
+            return files
+
+        model_pin = local().resolve(model) if looks_like_reference(model) else None
+        if model_pin is None and (".." in model or not HF_REPO_ID.match(model)):
+            try:
+                labels = [f.label for f in local().folders() if not f.problem]
+            except LocalFileError:
+                labels = []
+            if is_path(model):
+                split_reference(model, labels)  # refused with the reason: AI callers never name a path
+            raise LocalFileError(f"'{model}' is neither a Hugging Face repo id (owner/name) nor a local file "
+                                 "reference.", next_step=labels_hint(labels))
+        dataset_pin = local().resolve(dataset) if dataset else None
+        if dataset_pin is not None and dataset_pin.is_dir:
+            raise LocalFileError(f"{dataset_pin.ref} is a folder; a calibration dataset is a file (for RKNN the "
+                                 "sample list).", next_step="name the dataset file inside its folder.")
+        update = {"model": model_pin.path if model_pin else model,
+                  "dataset_path": dataset_pin.path if dataset_pin else None}
+        # Always present for an AI caller, also without pins: the build engine then never looks the model source up
+        # on disk (a repo id that happens to name a folder below the working directory stays a repo id).
+        return request.model_copy(update=update), LocalInputs(model_pin, dataset_pin)
+
     @staticmethod
-    def _check_model_source(model: str) -> str:
+    def _check_model_source(model: str, shown: Optional[str] = None) -> str:
+        """`shown` names the model in errors instead of its path (an AI caller's `<label>:<relative path>`)."""
         local = Path(model).expanduser()
         if local.exists():
             local = local.resolve()
             if local.is_dir():
                 if not ((local / "config.json").is_file()
                         or any(f.name.lower().endswith(MODEL_FILE_SUFFIXES) for f in local.iterdir() if f.is_file())):
-                    raise BuildServiceError(f"'{local}' does not look like a model directory (no config.json or model file).")
+                    raise BuildServiceError(f"'{shown or local}' does not look like a model directory (no config.json "
+                                            "or model file).")
             elif not local.name.lower().endswith(MODEL_FILE_SUFFIXES):
-                raise BuildServiceError(f"'{local.name}' is not a model file.")
+                raise BuildServiceError(f"'{shown or local.name}' is not a model file.")
             return str(local)
         if ".." in model or not HF_REPO_ID.match(model):
             raise BuildServiceError(f"'{model}' is neither an existing local model nor a Hugging Face repo id (owner/name).")
@@ -139,7 +178,8 @@ class BuildService:
             progress_percent=state.progress_percent, total_builds=state.total_builds,
             completed_builds=state.completed_builds, failed_builds=state.failed_builds,
             artifacts=list(state.artifacts), errors=[redact_secrets(e) for e in state.errors],
-            warnings=[redact_secrets(w) for w in state.warnings], pending_healing=pending)
+            warnings=[redact_secrets(w) for w in state.warnings], pending_healing=pending,
+            owner=owner_actor(getattr(state, "owner", "")) or None)
 
     def _state(self, request_id: str) -> WorkflowState:
         state = self._orchestrator._workflows.get(request_id)
@@ -153,6 +193,67 @@ class BuildService:
 
     def list_requests(self) -> BuildList:
         return BuildList(builds=[self._status_of(s) for s in list(self._orchestrator._workflows.values())])
+
+    # --- ownership and waiting --------------------------------------------------------------------------------
+
+    def owner_of(self, request_id: str) -> Optional[str]:
+        """The caller that started a build through a tool (`mcp#<session>`, `ditto`), or None."""
+        try:
+            state = self._orchestrator._workflows.get(request_id)
+        except BuildServiceError:
+            return None
+        return (getattr(state, "owner", "") or None) if state is not None else None
+
+    def active_requests(self, owner: str) -> List[str]:
+        """The unfinished builds `owner` started (a disconnected MCP session's are cancelled)."""
+        try:
+            items = list(self._orchestrator._workflows.items())
+        except BuildServiceError:
+            return []
+        return [rid for rid, state in items
+                if getattr(state, "owner", "") == owner and state.status.value not in BUILD_FINISHED]
+
+    def _change_key(self, request_id: str):
+        s = self.get_status(request_id)
+        return (s.status, s.stage, s.progress_percent, s.completed_builds, s.failed_builds, len(s.errors),
+                len(s.warnings), s.pending_healing is not None)
+
+    def wait_for_change(self, request_id: str, timeout: float, poll: float = 0.25) -> bool:
+        """Blocks until the build's status, stage, progress or healing proposal changes, or it has ended, at most
+        `timeout` seconds (capped at 50). For a caller in its own thread (Ditto). True when something changed."""
+        start = self._change_key(request_id)
+        if str(start[0]).lower() in BUILD_FINISHED:
+            return False
+        deadline = time.monotonic() + max(0.0, min(float(timeout), job_service.MAX_WAIT_SECONDS))
+        while time.monotonic() < deadline:
+            time.sleep(min(poll, max(0.0, deadline - time.monotonic())))
+            if self._change_key(request_id) != start:
+                return True
+        return False
+
+    async def wait_for_change_async(self, request_id: str, timeout: float, report=None, poll: float = 0.25) -> bool:
+        """wait_for_change() on the event loop, holding no worker thread (MCP long-poll), with a progress
+        notification every few seconds through `report` (sent only when the client gave a progress token).
+        Cancelling the wait never touches the build."""
+        import anyio
+        start = self._change_key(request_id)
+        if str(start[0]).lower() in BUILD_FINISHED:
+            return False
+        now = time.monotonic()
+        deadline = now + max(0.0, min(float(timeout), job_service.MAX_WAIT_SECONDS))
+        next_report = now + job_service.PROGRESS_EVERY
+        while time.monotonic() < deadline:
+            await anyio.sleep(min(poll, max(0.0, deadline - time.monotonic())))
+            key = self._change_key(request_id)
+            if key != start:
+                return True
+            if report is not None and time.monotonic() >= next_report:
+                next_report = time.monotonic() + job_service.PROGRESS_EVERY
+                try:  # framework facts only: status and percent, never stage text (it may quote a proposal)
+                    await report(key[2], 100, f"{key[0]} {key[2]}%")
+                except Exception:
+                    pass
+        return False
 
     def list_artifacts(self) -> ArtifactList:
         def text(value):
@@ -188,12 +289,20 @@ class BuildService:
 
     # --- actions ----------------------------------------------------------------------------
 
-    def validate(self, request: BuildRequestIn) -> BuildRequestIn:
-        """Checks a request against the target's capabilities and fills the default quantization."""
+    def validate(self, request: BuildRequestIn, *, local_paths: bool = False) -> BuildRequestIn:
+        """Checks a request against the target's capabilities and fills the default quantization. A local model
+        or dataset must be a local-file reference inside the folders the AI may use, unless `local_paths` is set
+        for a person's own caller (GUI, CLI, a script), which may name any path."""
+        return self._validated(request, local_paths)[0]
+
+    def _validated(self, request: BuildRequestIn, local_paths: bool) -> Tuple[BuildRequestIn, Optional[LocalInputs]]:
         target = self.resolve_target(request.target)
         caps = self.capabilities(target)
         # Canonical spellings, the board the scripts use when none is given, the board's default type.
         fmt, board, quant = caps.normalize(request.format, request.board, request.quantization)
+        inputs = None
+        if not local_paths:
+            request, inputs = self._confined(request)
         dataset = None
         if request.dataset_path:
             path = Path(request.dataset_path).expanduser()
@@ -205,14 +314,18 @@ class BuildService:
             raise BuildServiceError(" ".join(problems), code="not_supported",
                                     next=f"Call get_target_capabilities for {target}, then choose a supported "
                                          "combination.")
-        model = self._check_model_source(request.model)
+        if local_paths or getattr(inputs, "model", None) is not None:
+            model = self._check_model_source(request.model, None if local_paths else inputs.model.ref)
+        else:
+            model = request.model  # a Hugging Face repo id: never looked up on disk for an AI caller
         if request.revision and Path(model).is_absolute():
             raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.")
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
-                                          "dataset_path": dataset, "model": model})
+                                          "dataset_path": dataset, "model": model}), inputs
 
-    def start_build(self, request: BuildRequestIn) -> BuildHandle:
-        req = self.validate(request)
+    def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "") -> BuildHandle:
+        """Validates and queues a build. `owner` is the tool caller that starts it (ToolContext.owner)."""
+        req, inputs = self._validated(request, local_paths)
         build_request = BuildRequest(
             request_id="",
             workflow_type=WorkflowType.SIMPLE_CONVERSION,
@@ -231,6 +344,8 @@ class BuildService:
             dataset_path=req.dataset_path,
             target_board=req.board,
             max_context_length=req.max_context_length,
+            local_inputs=inputs,
+            owner=owner,
         )
         request_id = self.framework.run_coroutine(self._orchestrator.submit_build_request(build_request), timeout=30)
         self.logger.info(f"Build request {request_id} submitted ({req.model} -> {req.target}/{req.format}/{req.quantization})")

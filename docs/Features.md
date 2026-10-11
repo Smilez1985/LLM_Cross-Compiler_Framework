@@ -95,7 +95,10 @@ A build runs these steps; each one is logged:
    RKNN-Toolkit2 2.3.2, each in its own Python environment). BuildKit is used when available, and the real cause
    of a failure is reported. Later builds reuse Docker's build cache.
 4. **Stage the model on the host:** a Hugging Face model is downloaded on your computer (with the token
-   `hf_token` for gated models), a local folder or file is used as it is. The containers get it read-only.
+   `hf_token` for gated models), a local folder or file is used as it is. The containers get it read-only: a
+   single file is mounted alone, never the folder it lies in, and a folder only itself (a model that needs files
+   next to it, such as ONNX external data, is given as its folder). A local model or dataset that Ditto or an MCP
+   client named is checked again right before each container starts ([Local files for AI clients](#mcp-server)).
 5. **Security scan:** Trivy scans the image for HIGH and CRITICAL vulnerabilities (setting `enable_security_scan`,
    pinned image `aquasec/trivy:0.75.0`). Findings are a warning in the log, not an error. A scan that does not
    finish within the build's time limit (`build_timeout`) is stopped with a warning.
@@ -362,15 +365,17 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `list_targets` | read | Targets with boards, formats and quantizations |
 | `get_target_capabilities` | read | What a target can build |
 | `list_build_requests` | read | Build requests of this session |
-| `get_build_status` | read | Status, progress, errors, a pending self-healing proposal |
+| `get_build_status` | read | Status, progress, errors, a pending self-healing proposal; with `wait_seconds` (at most 50) it waits for a change |
 | `read_build_log` | read | The last lines of a build log (secrets redacted) |
 | `list_artifacts` | read | Finished builds from their manifests |
 | `run_doctor` | read | The health check, without fixes |
 | `search_knowledge` | read | Search the knowledge base |
 | `start_build` | local write | Start a build (must match the target's capabilities) |
-| `cancel_build` | local write | Cancel a build |
+| `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
 | `get_status` | read | Your tool permissions for this caller: every tool with its decision and why (also the hidden ones), and what no tool does, with where you do it |
+| `get_job_status` | read | State, progress and result of a long operation other than a build (a job); waits with `wait_seconds` |
+| `cancel_job` | local write | Stop a job (its own jobs without a question, another caller's only after one) |
 
 How a question with tools runs:
 
@@ -821,6 +826,45 @@ framework never sees it.
   quote a server reply, a log line or a name from a pack: it is cleaned the same way before secrets are redacted,
   and the client gets that part wrapped as untrusted data, while the framework's own refusals and the next step
   stay plain (Ditto's model gets such errors in an untrusted block too).
+- **Local files for AI clients:** MCP clients and Ditto never name a path. A local model or calibration dataset is
+  named as `<label>:<relative path>` inside a folder the AI may use, for example `models:qwen2.5-0.5b-instruct` or
+  `datasets:calib/de.txt`, or by the file id (`lf_` and 16 hex characters) the framework recorded for it. The
+  folders are the models folder (`models`, setting `models_dir`), the datasets folder (`datasets`, setting
+  `datasets_dir`, next to the models folder by default) and the folders you add with
+  [`llm-cli tools folders add`](CLI_Usage.md#tools-folders) or in the GUI (Tools > Folders the AI May Use...).
+  The models and datasets folders follow the same limits as an added folder: when a setting points at `/`, your
+  home folder or a folder that holds the per-user folder, its label cannot be used. The file must lie inside its
+  folder (links are followed and checked) and outside every denied folder: the framework's per-user folder (except
+  the data folders a read-only installation keeps there), `~/.ssh`, `~/.gnupg` (and `GNUPGHOME`), `~/.config` (and
+  `XDG_CONFIG_HOME`), keyrings and keychains, `~/.password-store`, `~/.netrc`, `~/.git-credentials`, `~/.docker`,
+  `~/.aws`, `~/.kube`, the AI clients' own sign-ins and settings (`~/.claude`, `~/.claude.json`, `~/.codex`,
+  `~/.gemini`, `~/.cursor`), the Hugging Face home folder with its token files (its `hub` subfolder may be added
+  as a folder), browser profiles, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (unless it is your own home) and the
+  Windows credential folders. Inside and outside are decided by file identity, not by comparing names, so a
+  case-insensitive file system cannot hide `~/.SSH`. A file with more than one hard link is refused. The file is
+  pinned (identity, size, modification time) and checked again right before each build container starts; a file
+  replaced meanwhile stops the build. A folder (a Hugging Face model folder) is used only strictly below its label
+  folder and when it holds no denied folder, no hard-linked file and nothing but files, folders and links (no
+  socket, device or pipe); a Hugging Face cache snapshot is mounted file by file. The same holds for the folder of
+  an RKNN sample list, so a list directly in a label folder is refused. A Hugging Face repo id from an AI client is
+  always downloaded, never looked up as a folder on this computer. Refusals name the label, never the real path.
+  GUI and CLI builds you start yourself still take any path.
+- **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
+  larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
+  server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification
+  every 5 seconds when the client asked for progress. A client that cancels a wait stops only the wait, never the
+  build or job. Long operations other than builds (from the coming crawl, download, deploy and approval tools) are
+  jobs with an id (`job_...`): `get_job_status` shows their state, progress and result, `cancel_job` stops them.
+  A summary of each job (never its result) is kept in `~/.llm-framework/jobs/` for the GUI and the CLI.
+- **Who owns a build:** each connection (one stdio session; for HTTP the whole server until named tokens exist)
+  owns the builds and jobs it starts. It may cancel its own without a question; cancelling another client's build
+  or job follows your tool permissions (by default it asks you). `get_build_status` shows the caller class that
+  started a build (`mcp`, `ditto`).
+- **When a client disconnects:** the builds and jobs its session started are cancelled, each with an audit entry
+  ("client disconnected"), the server waits up to 30 seconds for their containers to stop and then shuts the
+  framework down, so no build is left running without an owner. This also holds when the client ends a stdio
+  server with SIGTERM (as clients do when it has not exited a few seconds after they closed its input). HTTP builds
+  belong to the server and are cancelled when it stops.
 - **Transports:** stdio (default; the client starts the server) or Streamable HTTP on a loopback address only
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). HTTP checks Host and Origin and needs a bearer token
   that is created per user in `~/.llm-framework/mcp_http_token`.

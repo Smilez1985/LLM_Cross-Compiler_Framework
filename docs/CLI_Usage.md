@@ -238,6 +238,9 @@ Behaviour:
   `Model_Card.md`, and a ZIP of them next to that folder. They appear there only when the build has completed; a
   cancelled or failed build leaves no files there.
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token`.
+- A local model file is mounted into the build containers alone, never the folder it lies in; a model that needs
+  files next to it (for example ONNX external data) is given as its folder. Ditto and MCP clients cannot name a path
+  at all: they use `<label>:<relative path>` inside the [folders the AI may use](#tools-folders).
 - The first build of a target builds its Docker image first and takes much longer.
 
 ```bash
@@ -716,10 +719,10 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-The framework tools are what Ditto and MCP clients use: 9 read-only tools (`list_targets`,
+The framework tools are what Ditto and MCP clients use: 10 read-only tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`, `get_status`) and 3 that change things on this computer (`start_build`,
-`cancel_build`, `resolve_healing`).
+`run_doctor`, `search_knowledge`, `get_status`, `get_job_status`) and 4 that change things on this computer
+(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`).
 
 ### tools list
 
@@ -768,6 +771,42 @@ and the outcome.
 llm-cli tools audit --limit 100
 llm-cli tools audit --verify
 llm-cli tools audit --archive
+```
+
+### tools folders
+
+```
+llm-cli tools folders list
+llm-cli tools folders add PATH --label LABEL [--kind model|dataset|any]
+llm-cli tools folders remove LABEL
+```
+
+The folders whose model and dataset files Ditto and MCP clients may use. They never name a path; they name a file
+as `<label>:<relative path>`, for example `models:qwen2.5-0.5b-instruct` or `mymodels:llama/model.gguf`. The models
+folder (`models`, setting `models_dir`) and the datasets folder (`datasets`, setting `datasets_dir`) are always
+there; `add` lets them use another folder under a label you choose (lowercase letters, digits, `-` and `_`).
+
+- `add` and `remove` need a terminal (piped answers are refused), and `add` shows the folder and asks first:
+  files in it can be mounted into builds that run community or AI-written code, and can reach AI clients through
+  build logs.
+- `add` refuses `/`, your home folder itself, a folder that contains the framework's per-user folder, and a folder
+  inside or containing a denied folder (keys, credentials, the Hugging Face token, system folders; the list is in
+  [Features](Features.md#mcp-server)). The Hugging Face cache's `hub` subfolder may be added
+  (`~/.cache/huggingface/hub`, where `hf download` stores models); the token files next to it stay denied. The same
+  limits hold for `models_dir` and `datasets_dir`: if either setting points at `/`, your home folder or a folder
+  holding the per-user folder, `list` marks the label as not usable.
+- The folder's real path is recorded, and it is the one `add` showed you: if a link points elsewhere while you are
+  asked, nothing is added. If it changes later, `list` marks it as not usable and AI clients are refused until you
+  run `add` with the same label again.
+- Each change is written to the audit log (actor `cli`; `gui` for the same list in the GUI under Tools > Folders
+  the AI May Use...); an addition that cannot be recorded does not happen. The list is stored in
+  `~/.llm-framework/ai_folders.json`, readable only by you.
+
+```bash
+llm-cli tools folders add ~/llm-models --label mymodels --kind model
+llm-cli tools folders add ~/.cache/huggingface/hub --label hub
+llm-cli tools folders list
+llm-cli tools folders remove mymodels
 ```
 
 ---

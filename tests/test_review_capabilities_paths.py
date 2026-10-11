@@ -372,10 +372,17 @@ class TestBuildServiceValidate:
         assert (req.quantization, req.use_imatrix, req.dataset_path) == ("IQ2_XS", True, None)
 
     def test_rknn_alias_with_a_sample_list(self, service, tmp_path):
-        samples = tmp_path / "samples.txt"
+        # The service serves AI callers, which name the dataset inside the datasets folder (it took a path before).
+        (tmp_path / "datasets").mkdir()
+        samples = tmp_path / "datasets" / "samples.txt"
         samples.write_text("img.jpg\n")
-        req = service.validate(build_in(format="rknn", board="RK3576", quantization="INT8", dataset_path=str(samples)))
+        req = service.validate(build_in(format="rknn", board="RK3576", quantization="INT8",
+                                        dataset_path="datasets:samples.txt"))
         assert (req.board, req.quantization, req.dataset_path) == ("rk3576", "i8", str(samples.resolve()))
+        # A person's own caller (GUI, CLI, a script) may still name the file by its path.
+        req = service.validate(build_in(format="rknn", board="RK3576", quantization="INT8",
+                                        dataset_path=str(samples)), local_paths=True)
+        assert req.dataset_path == str(samples.resolve())
 
     @pytest.mark.parametrize("fmt, board, quant, expected", [
         ("gguf", "RK3566", "int8", (ModelFormat.GGUF, "rk3566", ["Q8_0"])),
