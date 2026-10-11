@@ -68,6 +68,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   latency; it works offline once the embedding model is downloaded. A manual and nightly CI workflow runs it with
   cached models. Baseline with the default CPU embedding model on the 34 questions: hit@1 83 %, hit@3 97 %, MRR
   0.91; all 4 unrelated questions still get excerpts.
+- **Hardware profile format, schema 2** (`configs/hardware_probe_schema.yml`, parser
+  `orchestrator/runtime/profile.py`): one list of the keys a hardware probe writes, each with its source and
+  normalisation per operating system and its validation. It covers the operating system (ID, version, family,
+  variant such as DietPi, kernel, init system), the architecture of the userland, the C library and its version
+  (glibc, musl, ...), ARM dot product, FP16 arithmetic and CPU clusters, the 14 x86 features ggml builds for, GPU
+  compute capability and gfx target, Vulkan, Rockchip NPU runtime versions and toolchain versions. The parser rejects
+  a schema 2 file with a duplicate key, an empty value, a value longer than 4096 characters or outside the schema,
+  or values that do not fit together (an x86 feature on ARM, a compute capability on an AMD GPU). Files of today's
+  probe scripts (schema 1, which they still write) are converted: the host name, RAM part numbers and other
+  identifying values are dropped, every CPU feature of a `hardware_probe.ps1` file becomes `UNKNOWN` (that script
+  asks Windows with wrong constants), and the result asks for a new probe before a build. With it come a
+  performance key for benchmark results that ignores volatile and recorded-only values, and a per-user profile store
+  (`~/.llm-framework/hardware/`, private files).
 - **Deep Ingest honours machine-readable opt-outs.** Text and data mining of public pages is allowed unless
   the rightsholder reserved it in machine-readable form (EU DSM Directive Art. 4, German UrhG § 44b), so
   besides robots.txt the crawler skips pages marked `noindex`, `none`, `noai` or `noimageai` in an

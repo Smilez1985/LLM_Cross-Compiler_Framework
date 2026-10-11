@@ -1,0 +1,1651 @@
+# Hardware probe file format, schema 2: the one list of keys every probe writes and the framework reads.
+#
+# The probe runs on the machine that will run the binaries (a PC or a board) and writes target_hardware_config.txt.
+# One parser reads it: orchestrator/runtime/profile.py. The parser loads this file, so the validation below is
+# enforced, not only documented. Every emitter of schema 2 (PROBE_TOOL python, sh or ps1) writes exactly these keys.
+# Today's scripts/hardware_probe.sh and scripts/hardware_probe.ps1 still write schema 1, which the parser converts
+# (see the end of this file).
+#
+# File rules (section "file"):
+#   - UTF-8 (a byte order mark is accepted), LF line ends (CRLF is accepted); lines starting with "#" are comments.
+#   - The first line that is not a comment or blank is PROBE_SCHEMA=2.
+#   - KEY=VALUE, one per line. Keys match key_pattern and appear at most once.
+#   - Values are one line, unquoted, at most max_value_length characters; lists are comma-separated without spaces.
+#   - Every key of type bool is always written: ON, OFF or UNKNOWN. UNKNOWN means "this method cannot tell"; it is
+#     never guessed from a model name.
+#   - Any other fact the probe could not determine is left out (never written empty), and a code goes into
+#     PROBE_WARNINGS (see tables.warning_codes).
+#   - Per-GPU keys are indexed GPU0_*, GPU1_*, ... below GPU_COUNT (section "gpu_keys").
+#   - The JSON view (hardware_probe.py --json, HardwareProfile.to_json()) has the same keys with the same string
+#     values, PROBE_SCHEMA included.
+#   - A key this file does not list is dropped by the parser and named in its notes; the value is never kept.
+#
+# Fields of a key:
+#   group       where the key belongs (meta, system, cpu, x86, arm, memory, soc, npu, gpu, toolchain)
+#   type        bool | enum | int | pattern | version | text | list | timestamp
+#               bool: ON/OFF/UNKNOWN. enum: one of `values`. int: decimal, `min`..`max`. pattern/version: the value
+#               fully matches `pattern` (version keys use patterns.version unless they set their own). text: free
+#               text for display only, whitespace collapsed, no control characters, at most `max_length`
+#               characters; free text never reaches a command line or a file name. list: comma-separated items, each
+#               fully matching `item_pattern` (or one of `item_values`), at most `max_items`. timestamp: UTC ISO 8601
+#               (2026-10-11T08:15:00Z).
+#   required    written by every emitter on every OS (bool keys are always required)
+#   stability   stable: kept in the profile store. volatile: changes from minute to minute; read live at each use and
+#               never stored.
+#   perf        key: enters perf_key (the hash that decides whether benchmark results still apply). recorded: stored
+#               with every benchmark run; a change marks results "stale, re-measure suggested". none: neither.
+#   platforms   where an emitter can determine the value (informational)
+#   only_arch / only_os / only_gpu_vendor
+#               the value only exists there: a bool must not be ON elsewhere, any other key must be absent elsewhere
+#               (enforced)
+#   os_values   enum values that only exist on the listed OS values (enforced)
+#   sources     where each OS reads the value; normalise: how the raw value is turned into the written one
+#   consumers   who reads the key (recipe = llama.cpp build recipe, ditto = Ditto's runtime and model tier,
+#               generator = module generator, proposal = Ditto's module proposal, preflight = pre-flight check,
+#               match = target matching, mcp = MCP tools, gui = display, bench = benchmarks, deploy = device deploy)
+#   writer      framework: only the parser writes it (when it converts a schema 1 file), never an emitter
+
+schema: 2
+
+file:
+  name: target_hardware_config.txt
+  encoding: utf-8
+  max_bytes: 131072
+  max_value_length: 4096
+  key_pattern: '^[A-Z][A-Z0-9_]{0,63}$'
+  boolean_values: ["ON", "OFF", "UNKNOWN"]
+  max_gpus: 16
+
+patterns:
+  version: '^\d{1,5}(\.\d{1,6}){0,3}$'
+  identifier: '^[a-z0-9][a-z0-9._-]{0,31}$'
+
+tables:
+  # uname -m (lower case) -> ARCH. A 32-bit userland on a 64-bit kernel is written as the 32-bit ARCH (see ARCH).
+  arch_aliases:
+    x86_64: x86_64
+    amd64: x86_64
+    x64: x86_64
+    x86-64: x86_64
+    x86: x86
+    i386: x86
+    i486: x86
+    i586: x86
+    i686: x86
+    arm64: arm64
+    aarch64: arm64
+    arm64e: arm64
+    armv8l: armv7
+    armv7: armv7
+    armv7l: armv7
+    armv7hl: armv7
+    armhf: armv7
+    armv6: armv6
+    armv6l: armv6
+    riscv64: riscv64
+    ppc64le: ppc64le
+    s390x: s390x
+    loongarch64: loongarch64
+  # The 32-bit counterpart of a 64-bit ARCH, for a 32-bit userland on a 64-bit kernel.
+  arch_32bit_userland:
+    x86_64: x86
+    arm64: armv7
+  x86_arches: [x86_64, x86]
+  arm_arches: [arm64, armv7, armv6]
+  # OS_FAMILY on Linux: OS_ID, then each OS_ID_LIKE entry in order, is looked up here; the first hit wins, else
+  # "other". Other OS values have a fixed family (os_family_fixed).
+  os_families:
+    debian: [debian, ubuntu, raspbian, linuxmint, pop, elementary, kali, devuan, armbian, dietpi, zorin, neon,
+             pureos, deepin, mx]
+    rhel: [rhel, centos, rocky, almalinux, ol, amzn, scientific, eurolinux, cloudlinux, virtuozzo]
+    fedora: [fedora]
+    suse: [suse, opensuse, opensuse-leap, opensuse-tumbleweed, sles, sled, sle-micro]
+    arch: [arch, archarm, manjaro, manjaro-arm, endeavouros, garuda, artix]
+    alpine: [alpine, postmarketos]
+    gentoo: [gentoo, funtoo]
+    openwrt: [openwrt]
+    void: [void]
+    nixos: [nixos]
+    slackware: [slackware]
+  os_family_fixed:
+    windows: windows
+    macos: macos
+    freebsd: bsd
+    android: android
+  # OS_VARIANT_ID on Linux when /etc/os-release has no VARIANT_ID: the first marker file that exists.
+  os_variant_markers:
+    /boot/dietpi/.version: dietpi
+    /etc/armbian-release: armbian
+  # x86 vendor_id (/proc/cpuinfo), VendorIdentifier (Windows registry), machdep.cpu.vendor (macOS), whitespace
+  # trimmed -> CPU_VENDOR
+  x86_vendors:
+    GenuineIntel: intel
+    AuthenticAMD: amd
+    HygonGenuine: hygon
+    CentaurHauls: centaur
+    Shanghai: zhaoxin
+  # ARM "CPU implementer" (/proc/cpuinfo) -> CPU_VENDOR
+  arm_implementers:
+    "0x41": arm
+    "0x42": broadcom
+    "0x43": cavium
+    "0x46": fujitsu
+    "0x48": hisilicon
+    "0x4e": nvidia
+    "0x50": apm
+    "0x51": qualcomm
+    "0x53": samsung
+    "0x56": marvell
+    "0x61": apple
+    "0x66": faraday
+    "0x69": intel
+    "0x6d": microsoft
+    "0x70": phytium
+    "0xc0": ampere
+  # "<implementer>:<part>" -> core name for CPU_MODEL on ARM Linux (the names lscpu prints). An unknown part is
+  # written as "<implementer>:<part>" itself.
+  arm_parts:
+    "0x41:0xb76": ARM1176
+    "0x41:0xc05": Cortex-A5
+    "0x41:0xc07": Cortex-A7
+    "0x41:0xc08": Cortex-A8
+    "0x41:0xc09": Cortex-A9
+    "0x41:0xc0d": Cortex-A17
+    "0x41:0xc0f": Cortex-A15
+    "0x41:0xd01": Cortex-A32
+    "0x41:0xd02": Cortex-A34
+    "0x41:0xd03": Cortex-A53
+    "0x41:0xd04": Cortex-A35
+    "0x41:0xd05": Cortex-A55
+    "0x41:0xd06": Cortex-A65
+    "0x41:0xd07": Cortex-A57
+    "0x41:0xd08": Cortex-A72
+    "0x41:0xd09": Cortex-A73
+    "0x41:0xd0a": Cortex-A75
+    "0x41:0xd0b": Cortex-A76
+    "0x41:0xd0c": Neoverse-N1
+    "0x41:0xd0d": Cortex-A77
+    "0x41:0xd0e": Cortex-A76AE
+    "0x41:0xd40": Neoverse-V1
+    "0x41:0xd41": Cortex-A78
+    "0x41:0xd42": Cortex-A78AE
+    "0x41:0xd43": Cortex-A65AE
+    "0x41:0xd44": Cortex-X1
+    "0x41:0xd46": Cortex-A510
+    "0x41:0xd47": Cortex-A710
+    "0x41:0xd48": Cortex-X2
+    "0x41:0xd49": Neoverse-N2
+    "0x41:0xd4a": Neoverse-E1
+    "0x41:0xd4b": Cortex-A78C
+    "0x41:0xd4c": Cortex-X1C
+    "0x41:0xd4d": Cortex-A715
+    "0x41:0xd4e": Cortex-X3
+    "0x41:0xd4f": Neoverse-V2
+    "0x41:0xd80": Cortex-A520
+    "0x41:0xd81": Cortex-A720
+    "0x41:0xd82": Cortex-X4
+    "0x41:0xd84": Neoverse-V3
+    "0x41:0xd85": Cortex-X925
+    "0x41:0xd87": Cortex-A725
+    "0x41:0xd8e": Neoverse-N3
+  # PCI vendor id -> GPU<n>_VENDOR (anything else: other)
+  pci_vendors:
+    "0x10de": nvidia
+    "0x1002": amd
+    "0x1022": amd
+    "0x8086": intel
+    "0x106b": apple
+    "0x13b5": arm
+    "0x5143": qualcomm
+    "0x1010": imagination
+    "0x14e4": broadcom
+  # SOC_MODEL values the framework takes decisions on; any other value that matches the pattern is display only.
+  soc_models_known: [rk3399, rk3528, rk3562, rk3566, rk3568, rk3576, rk3588, rk3588s]
+  # SMBIOS memory type (Windows Win32_PhysicalMemory.SMBIOSMemoryType, dmidecode) -> RAM_TYPE
+  smbios_memory_types:
+    24: DDR3
+    26: DDR4
+    29: LPDDR3
+    30: LPDDR4
+    34: DDR5
+    35: LPDDR5
+  # Rockchip USB product id (vendor 0x2207) -> USB_ROCKCHIP_MODE, as today's scripts map it (unverified on a device;
+  # in Rockusb mode the USB descriptor, not the product id, tells maskrom from loader).
+  usb_rockchip_pids:
+    "0x350a": rockusb
+    "0x350b": rockusb
+    "0x0006": adb-mtp
+    "0x0019": adb
+  # Codes in PROBE_WARNINGS: "<code>" or "<code>:<KEY>". Unknown codes are accepted (display only) if they match
+  # the item pattern of PROBE_WARNINGS.
+  warning_codes:
+    not_determined: the key could not be read on this machine and was left out
+    needs_root: the value is readable only with root or administrator rights and was left out
+    unknown_arm_part: an ARM core is not in tables.arm_parts; CPU_MODEL names it by implementer and part
+    emulated: the probe ran under emulation; ARCH is the native architecture
+    converted_from_schema_1: written by the framework from a schema 1 file (today's .sh/.ps1 output)
+    reprobe_before_build: the profile lacks facts a build needs; run the probe again on the machine
+    cpu_features_unknown: the CPU features of the source file are unreliable and were set to UNKNOWN
+  consumers: [recipe, ditto, generator, proposal, preflight, match, mcp, gui, bench, deploy]
+
+keys:
+  # --- meta ---------------------------------------------------------------------------------------------------
+  PROBE_SCHEMA:
+    group: meta
+    type: enum
+    values: ["2"]
+    required: true
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd, android]
+    sources: {any: "constant of the emitter; the first line that is not a comment"}
+    normalise: none
+    consumers: [recipe, ditto, mcp]
+  PROBE_TOOL:
+    group: meta
+    type: enum
+    values: [python, sh, ps1]
+    required: true
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd, android]
+    sources: {any: "constant of the emitter (hardware_probe.py, .sh, .ps1)"}
+    normalise: none
+    consumers: [gui, mcp]
+  PROBE_TOOL_VERSION:
+    group: meta
+    type: version
+    required: true
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd, android]
+    sources: {any: "constant of the emitter"}
+    normalise: none
+    consumers: [gui, mcp]
+  PROBE_CONVERTED_FROM:
+    group: meta
+    type: enum
+    values: ["1"]
+    required: false
+    stability: stable
+    perf: none
+    writer: framework
+    platforms: [linux, windows, macos, freebsd, android]
+    sources: {any: "written by the parser when it converts a schema 1 file; required keys may then be missing"}
+    normalise: none
+    consumers: [recipe, gui, mcp]
+  GENERATED_AT:
+    group: meta
+    type: timestamp
+    required: true
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: "date -u +%Y-%m-%dT%H:%M:%SZ; Python datetime.now(timezone.utc)"
+      windows: "(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ')"
+      macos: "date -u +%Y-%m-%dT%H:%M:%SZ"
+    normalise: "UTC, whole seconds, suffix Z"
+    consumers: [gui, mcp]
+  PROBE_WARNINGS:
+    group: meta
+    type: list
+    item_pattern: '^[a-z][a-z0-9_]{0,47}(:[A-Z][A-Z0-9_]{0,63})?$'
+    max_items: 128
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd, android]
+    sources: {any: "codes of tables.warning_codes collected while probing"}
+    normalise: "in the order they occurred, no duplicates"
+    consumers: [gui, mcp, preflight]
+
+  # --- system -------------------------------------------------------------------------------------------------
+  OS:
+    group: system
+    type: enum
+    values: [linux, windows, macos, freebsd, android]
+    required: true
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: "Python platform.system(); shell uname -s"
+      windows: "constant of the .ps1; Python platform.system()"
+      macos: "Python platform.system() (Darwin)"
+      android: "Python sys.platform == 'android' or getprop present; shell: /system/build.prop exists"
+    normalise: "lower case; Darwin -> macos"
+    consumers: [recipe, ditto, deploy, match]
+  OS_ID:
+    group: system
+    type: pattern
+    pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: "ID= of /etc/os-release (fallback /usr/lib/os-release)"
+      windows: "constant windows"
+      macos: "constant macos"
+      freebsd: "ID= of /etc/os-release"
+      android: "constant android"
+    normalise: "quotes removed, lower case"
+    consumers: [recipe, deploy, gui]
+  OS_ID_LIKE:
+    group: system
+    type: list
+    item_pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+    max_items: 16
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, freebsd]
+    sources:
+      linux: "ID_LIKE= of /etc/os-release"
+    normalise: "quotes removed, lower case, spaces become commas"
+    consumers: [deploy]
+  OS_FAMILY:
+    group: system
+    type: enum
+    values: [debian, rhel, fedora, suse, arch, alpine, gentoo, openwrt, void, nixos, slackware, other, windows,
+             macos, bsd, android]
+    os_values: {windows: [windows], macos: [macos], bsd: [freebsd], android: [android]}
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: "OS_ID, then each OS_ID_LIKE entry, looked up in tables.os_families; first hit wins, else other"
+      windows: "tables.os_family_fixed"
+      macos: "tables.os_family_fixed"
+    normalise: "table lookup"
+    consumers: [recipe, deploy]
+  OS_VARIANT_ID:
+    group: system
+    type: pattern
+    pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources:
+      linux: "VARIANT_ID= of /etc/os-release, else the first file of tables.os_variant_markers that exists"
+    normalise: "quotes removed, lower case"
+    consumers: [deploy, gui]
+  OS_VERSION_ID:
+    group: system
+    type: pattern
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._~-]{0,31}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: "VERSION_ID= of /etc/os-release (left out on rolling releases without it)"
+      windows: "major.minor.build from RtlGetVersion / [Environment]::OSVersion.Version (no revision)"
+      macos: "sw_vers -productVersion; Python platform.mac_ver()[0]"
+      android: "getprop ro.build.version.release"
+    normalise: "quotes removed"
+    consumers: [recipe, deploy, gui]
+  OS_VERSION_CODENAME:
+    group: system
+    type: pattern
+    pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources:
+      linux: "VERSION_CODENAME= of /etc/os-release"
+    normalise: "quotes removed, lower case"
+    consumers: [recipe, deploy]
+  OS_PRETTY_NAME:
+    group: system
+    type: text
+    max_length: 128
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: "PRETTY_NAME= of /etc/os-release"
+      windows: "ProductName of HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion"
+      macos: "'macOS ' + sw_vers -productVersion"
+    normalise: "quotes removed, whitespace trimmed and collapsed"
+    consumers: [gui, proposal]
+  KERNEL:
+    group: system
+    type: pattern
+    pattern: '^[A-Za-z0-9][A-Za-z0-9._+~-]{0,63}$'
+    required: true
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: "uname -r; Python platform.release()"
+      windows: "major.minor.build of the NT kernel (same source as OS_VERSION_ID)"
+      macos: "uname -r (Darwin release)"
+    normalise: none
+    consumers: [gui, preflight]
+  KERNEL_ARCH:
+    group: system
+    type: enum
+    values: [x86_64, x86, arm64, armv7, armv6, riscv64, ppc64le, s390x, loongarch64, other]
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, freebsd, android]
+    sources:
+      linux: "uname -m; Python os.uname().machine"
+    normalise: "lower case, then tables.arch_aliases; not in the table -> other"
+    consumers: [gui, preflight]
+  ARCH:
+    group: system
+    type: enum
+    values: [x86_64, x86, arm64, armv7, armv6, riscv64, ppc64le, s390x, loongarch64, other]
+    required: true
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: >-
+        uname -m through tables.arch_aliases; when the userland is 32-bit (Python struct.calcsize('P') == 4, shell
+        getconf LONG_BIT = 32) on a 64-bit kernel, the 32-bit counterpart of tables.arch_32bit_userland (binaries
+        must match the userland, not the kernel)
+      windows: "native machine of IsWow64Process2 (an emulated x64 process on ARM64 still writes arm64)"
+      macos: "sysctl hw.optional.arm64 = 1 -> arm64 (also under Rosetta), else x86_64"
+    normalise: "lower case, then tables.arch_aliases; not in the table -> other (no build is planned for other)"
+    consumers: [recipe, ditto, generator, match, deploy, mcp]
+  LIBC:
+    group: system
+    type: enum
+    values: [glibc, musl, uclibc, bionic, ucrt, libsystem, bsdlibc]
+    os_values: {glibc: [linux], musl: [linux], uclibc: [linux], bionic: [android, linux], ucrt: [windows],
+                libsystem: [macos], bsdlibc: [freebsd]}
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: >-
+        Python os.confstr('CS_GNU_LIBC_VERSION') or shell getconf GNU_LIBC_VERSION -> glibc; else a musl loader
+        /lib/ld-musl-*.so.1 exists -> musl; else /lib/ld-uClibc.so.* -> uclibc
+      windows: "constant ucrt"
+      macos: "constant libsystem"
+      android: "constant bionic"
+    normalise: "table above; left out with not_determined:LIBC when no rule matches"
+    consumers: [recipe, deploy, preflight]
+  LIBC_VERSION:
+    group: system
+    type: version
+    pattern: '^\d{1,3}(\.\d{1,5}){1,3}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows]
+    sources:
+      linux: >-
+        glibc: the version part of CS_GNU_LIBC_VERSION / getconf GNU_LIBC_VERSION ("glibc 2.36" -> 2.36). musl: the
+        "Version" line the musl loader prints when run without arguments
+      windows: "file version of %SystemRoot%\\System32\\ucrtbase.dll, when readable"
+    normalise: "digits and dots only"
+    consumers: [recipe, deploy, preflight]
+  INIT_SYSTEM:
+    group: system
+    type: enum
+    values: [systemd, openrc, sysvinit, busybox, runit, s6, procd, launchd, scm, bsdinit, other]
+    os_values: {systemd: [linux], openrc: [linux], sysvinit: [linux], busybox: [linux], runit: [linux],
+                s6: [linux], procd: [linux], launchd: [macos], scm: [windows], bsdinit: [freebsd]}
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, freebsd]
+    sources:
+      linux: >-
+        first match: /run/systemd/system is a directory -> systemd; /run/openrc -> openrc; /run/runit or
+        /etc/runit/runsvdir -> runit; /run/s6 or /run/s6-rc -> s6; /sbin/procd -> procd; /proc/1/comm is init and
+        /sbin/init links to busybox -> busybox; /proc/1/comm is init and /etc/inittab exists -> sysvinit; else other
+      windows: "constant scm (service control manager)"
+      macos: "constant launchd"
+      freebsd: "constant bsdinit"
+    normalise: "first matching rule"
+    consumers: [deploy]
+
+  # --- CPU identity -------------------------------------------------------------------------------------------
+  CPU_MODEL:
+    group: cpu
+    type: text
+    max_length: 128
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: >-
+        x86 and 32-bit ARM: "model name" of the first processor in /proc/cpuinfo. arm64: the core names of
+        CPU_CLUSTERS (tables.arm_parts), each name once, in the order of their first CPU, joined with "+"
+        (RK3566: Cortex-A55; RK3588: Cortex-A55+Cortex-A76)
+      windows: >-
+        ProcessorNameString of HKLM\HARDWARE\DESCRIPTION\System\CentralProcessor\0 (not platform.processor(),
+        which gives "Intel64 Family ..." there)
+      macos: "sysctl machdep.cpu.brand_string"
+    normalise: "whitespace trimmed and collapsed to single spaces"
+    consumers: [gui, generator, proposal, bench]
+  CPU_VENDOR:
+    group: cpu
+    type: enum
+    values: [intel, amd, hygon, centaur, zhaoxin, arm, broadcom, cavium, fujitsu, hisilicon, nvidia, apm, qualcomm,
+             samsung, marvell, apple, faraday, microsoft, phytium, ampere, other]
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: >-
+        x86: vendor_id via tables.x86_vendors; ARM: CPU implementer of the first processor via
+        tables.arm_implementers
+      windows: "VendorIdentifier of the CentralProcessor\\0 registry key via tables.x86_vendors; ARM64 PCs: left out"
+      macos: "x86: sysctl machdep.cpu.vendor via tables.x86_vendors; arm64: constant apple"
+    normalise: "table lookup; not in the table -> other"
+    consumers: [recipe, bench, gui]
+  CPU_CORES_LOGICAL:
+    group: cpu
+    type: int
+    min: 1
+    max: 4096
+    required: true
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: "number of processor entries in /proc/cpuinfo; Python os.cpu_count()"
+      windows: "NumberOfLogicalProcessors of Win32_Processor (summed over sockets); Python os.cpu_count()"
+      macos: "sysctl hw.logicalcpu"
+    normalise: "decimal integer"
+    consumers: [recipe, bench, ditto]
+  CPU_CORES_PHYSICAL:
+    group: cpu
+    type: int
+    min: 1
+    max: 4096
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "distinct (physical id, core id) pairs in /proc/cpuinfo; on ARM without them: CPU_CORES_LOGICAL"
+      windows: "NumberOfCores of Win32_Processor (summed over sockets)"
+      macos: "sysctl hw.physicalcpu"
+    normalise: "decimal integer"
+    consumers: [bench, ditto]
+  CPU_CLUSTERS:
+    group: cpu
+    type: list
+    item_pattern: '^\d{1,4}(-\d{1,4})?:0x[0-9a-f]{2}:0x[0-9a-f]{3}(:\d{1,5})?$'
+    max_items: 64
+    only_arch: [arm64, armv7, armv6]
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, android]
+    sources:
+      linux: >-
+        per logical CPU: "CPU implementer" and "CPU part" of /proc/cpuinfo and
+        /sys/devices/system/cpu/cpu<N>/cpufreq/cpuinfo_max_freq (kHz); CPUs with the same implementer, part and
+        maximum frequency form a cluster
+    normalise: >-
+      "<cpus>:<implementer>:<part>:<max MHz>", for example 0-3:0x41:0xd05:1800,4-7:0x41:0xd0b:2400 (RK3588). cpus is
+      one CPU or a contiguous range (a non-contiguous group is written as several entries); implementer 2 and part 3
+      lower-case hex digits; MHz = kHz // 1000, left out (with its colon) when unreadable; entries ordered by their
+      first CPU. x86 has no clusters (hybrid Intel cores are not described)
+    consumers: [bench, recipe]
+  CPU_FLAGS_ALL:
+    group: cpu
+    type: list
+    item_pattern: '^[a-z0-9_.]{1,48}$'
+    max_items: 1024
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, macos, android]
+    sources:
+      linux: "\"flags\" (x86) or \"Features\" (ARM) line of the first processor in /proc/cpuinfo"
+      macos: "sysctl machdep.cpu.features and machdep.cpu.leaf7_features (x86); left out on arm64"
+    normalise: "lower case, split on whitespace, joined with commas in the original order, no duplicates"
+    consumers: [proposal, gui]
+  CPU_FLAGS_SOURCE:
+    group: cpu
+    type: enum
+    values: [proc-cpuinfo, sysctl, windows-api]
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos, android]
+    sources:
+      linux: "constant proc-cpuinfo when /proc/cpuinfo was read"
+      windows: "constant windows-api (IsProcessorFeaturePresent)"
+      macos: "constant sysctl"
+    normalise: "where the SUPPORTS_* CPU features came from"
+    consumers: [recipe, gui]
+
+  # --- x86 CPU features: exactly ggml's x86 options at the pinned llama.cpp commit -----------------------------
+  # Linux: ON if every token of cpuinfo is in CPU_FLAGS_ALL, else OFF; UNKNOWN when /proc/cpuinfo has no flags.
+  # Windows: IsProcessorFeaturePresent(windows_feature) TRUE -> ON; FALSE -> OFF only on Windows builds that know
+  # the constant (older builds return FALSE for constants they do not know: UNKNOWN; build thresholds unverified);
+  # no constant -> UNKNOWN. macOS (x86): the sysctl token in machdep.cpu.features / leaf7_features.
+  # Non-x86 ARCH: OFF.
+  SUPPORTS_SSE42:
+    group: x86
+    type: bool
+    cpuinfo: [sse4_2]
+    windows_feature: 38
+    macos_sysctl: SSE4.2
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources: {linux: "/proc/cpuinfo flags sse4_2", windows: "PF_SSE4_2_INSTRUCTIONS_AVAILABLE (38)", macos: "SSE4.2"}
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_AVX:
+    group: x86
+    type: bool
+    cpuinfo: [avx]
+    windows_feature: 39
+    macos_sysctl: AVX1.0
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources: {linux: "/proc/cpuinfo flags avx", windows: "PF_AVX_INSTRUCTIONS_AVAILABLE (39)", macos: "AVX1.0"}
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_AVX2:
+    group: x86
+    type: bool
+    cpuinfo: [avx2]
+    windows_feature: 40
+    macos_sysctl: AVX2
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources: {linux: "/proc/cpuinfo flags avx2", windows: "PF_AVX2_INSTRUCTIONS_AVAILABLE (40)", macos: "AVX2"}
+    normalise: "see the rule above"
+    consumers: [recipe, generator]
+  SUPPORTS_BMI2:
+    group: x86
+    type: bool
+    cpuinfo: [bmi2]
+    windows_feature: 60
+    macos_sysctl: BMI2
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "/proc/cpuinfo flags bmi2"
+      windows: "PF_BMI2_INSTRUCTIONS_AVAILABLE (60, Windows 11 24H2 and later)"
+      macos: "BMI2"
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_F16C:
+    group: x86
+    type: bool
+    cpuinfo: [f16c]
+    macos_sysctl: F16C
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux, macos]
+    sources: {linux: "/proc/cpuinfo flags f16c", windows: "no constant: UNKNOWN", macos: "F16C"}
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_FMA:
+    group: x86
+    type: bool
+    cpuinfo: [fma]
+    macos_sysctl: FMA
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux, macos]
+    sources: {linux: "/proc/cpuinfo flags fma", windows: "no constant: UNKNOWN", macos: "FMA"}
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_AVX512:
+    group: x86
+    type: bool
+    cpuinfo: [avx512f]
+    windows_feature: 41
+    macos_sysctl: AVX512F
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "/proc/cpuinfo flags avx512f (AVX-512 Foundation; the key name is kept for existing readers)"
+      windows: "PF_AVX512F_INSTRUCTIONS_AVAILABLE (41)"
+      macos: "AVX512F"
+    normalise: "see the rule above"
+    consumers: [recipe, generator]
+  SUPPORTS_AVX512_VBMI:
+    group: x86
+    type: bool
+    cpuinfo: [avx512vbmi]
+    macos_sysctl: AVX512VBMI
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux, macos]
+    sources: {linux: "/proc/cpuinfo flags avx512vbmi", windows: "no constant: UNKNOWN", macos: "AVX512VBMI"}
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_AVX512_VNNI:
+    group: x86
+    type: bool
+    cpuinfo: [avx512_vnni]
+    macos_sysctl: AVX512VNNI
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux, macos]
+    sources: {linux: "/proc/cpuinfo flags avx512_vnni", windows: "no constant: UNKNOWN", macos: "AVX512VNNI"}
+    normalise: "see the rule above"
+    consumers: [recipe, preflight]
+  SUPPORTS_AVX512_BF16:
+    group: x86
+    type: bool
+    cpuinfo: [avx512_bf16]
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo flags avx512_bf16", windows: "no constant: UNKNOWN", macos: "UNKNOWN"}
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_AVX_VNNI:
+    group: x86
+    type: bool
+    cpuinfo: [avx_vnni]
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo flags avx_vnni", windows: "no constant: UNKNOWN", macos: "UNKNOWN"}
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_AMX_TILE:
+    group: x86
+    type: bool
+    cpuinfo: [amx_tile]
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo flags amx_tile", windows: "no constant: UNKNOWN", macos: "OFF (no Mac has AMX)"}
+    normalise: "see the rule above"
+    consumers: [recipe, preflight]
+  SUPPORTS_AMX_INT8:
+    group: x86
+    type: bool
+    cpuinfo: [amx_int8]
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo flags amx_int8", windows: "no constant: UNKNOWN", macos: "OFF (no Mac has AMX)"}
+    normalise: "see the rule above"
+    consumers: [recipe, preflight]
+  SUPPORTS_AMX_BF16:
+    group: x86
+    type: bool
+    cpuinfo: [amx_bf16]
+    only_arch: [x86_64, x86]
+    stability: stable
+    perf: key
+    platforms: [linux]
+    sources: {linux: "/proc/cpuinfo flags amx_bf16", windows: "no constant: UNKNOWN", macos: "OFF (no Mac has AMX)"}
+    normalise: "see the rule above"
+    consumers: [recipe]
+
+  # --- ARM CPU features --------------------------------------------------------------------------------------
+  # Linux: ON if every token of cpuinfo is in the Features line (any one of cpuinfo_any for NEON), else OFF;
+  # UNKNOWN when /proc/cpuinfo has no Features line. Windows on ARM: IsProcessorFeaturePresent(windows_feature) as
+  # for x86; no constant -> UNKNOWN. macOS: sysctl hw.optional.arm.<macos_sysctl> = 1 -> ON. Non-ARM ARCH: OFF.
+  SUPPORTS_NEON:
+    group: arm
+    type: bool
+    cpuinfo_any: [asimd, neon]
+    windows_feature: 29
+    macos_sysctl: hw.optional.neon
+    only_arch: [arm64, armv7, armv6]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "Features asimd (arm64) or neon (32-bit ARM)"
+      windows: "PF_ARM_V8_INSTRUCTIONS_AVAILABLE (29): every ARMv8 core has Advanced SIMD"
+      macos: "hw.optional.neon"
+    normalise: "see the rule above"
+    consumers: [recipe, generator]
+  SUPPORTS_DOTPROD:
+    group: arm
+    type: bool
+    cpuinfo: [asimddp]
+    windows_feature: 43
+    macos_sysctl: FEAT_DotProd
+    only_arch: [arm64, armv7, armv6]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "Features asimddp"
+      windows: "PF_ARM_V82_DP_INSTRUCTIONS_AVAILABLE (43)"
+      macos: "hw.optional.arm.FEAT_DotProd"
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_FP16_ARITH:
+    group: arm
+    type: bool
+    cpuinfo: [fphp, asimdhp]
+    windows_feature: 67
+    macos_sysctl: FEAT_FP16
+    only_arch: [arm64, armv7, armv6]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "Features fphp and asimdhp (both, as ggml checks them)"
+      windows: "PF_ARM_V82_FP16_INSTRUCTIONS_AVAILABLE (67)"
+      macos: "hw.optional.arm.FEAT_FP16"
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_I8MM:
+    group: arm
+    type: bool
+    cpuinfo: [i8mm]
+    windows_feature: 66
+    macos_sysctl: FEAT_I8MM
+    only_arch: [arm64, armv7, armv6]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "Features i8mm"
+      windows: "PF_ARM_V82_I8MM_INSTRUCTIONS_AVAILABLE (66)"
+      macos: "hw.optional.arm.FEAT_I8MM"
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_SVE:
+    group: arm
+    type: bool
+    cpuinfo: [sve]
+    windows_feature: 46
+    macos_sysctl: FEAT_SVE
+    only_arch: [arm64, armv7, armv6]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "Features sve"
+      windows: "PF_ARM_SVE_INSTRUCTIONS_AVAILABLE (46)"
+      macos: "hw.optional.arm.FEAT_SVE"
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_SVE2:
+    group: arm
+    type: bool
+    cpuinfo: [sve2]
+    windows_feature: 47
+    macos_sysctl: FEAT_SVE2
+    only_arch: [arm64, armv7, armv6]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "Features sve2"
+      windows: "PF_ARM_SVE2_INSTRUCTIONS_AVAILABLE (47)"
+      macos: "hw.optional.arm.FEAT_SVE2"
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_SME:
+    group: arm
+    type: bool
+    cpuinfo: [sme]
+    windows_feature: 70
+    macos_sysctl: FEAT_SME
+    only_arch: [arm64, armv7, armv6]
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "Features sme"
+      windows: "PF_ARM_SME_INSTRUCTIONS_AVAILABLE (70)"
+      macos: "hw.optional.arm.FEAT_SME"
+    normalise: "see the rule above"
+    consumers: [recipe]
+  SUPPORTS_BF16_ARM:
+    group: arm
+    type: bool
+    cpuinfo: [bf16]
+    macos_sysctl: FEAT_BF16
+    only_arch: [arm64, armv7, armv6]
+    stability: stable
+    perf: key
+    platforms: [linux, macos]
+    sources:
+      linux: "Features bf16"
+      windows: "no verified constant: UNKNOWN"
+      macos: "hw.optional.arm.FEAT_BF16"
+    normalise: "see the rule above"
+    consumers: [recipe]
+
+  # --- memory and disk ---------------------------------------------------------------------------------------
+  RAM_TOTAL_MB:
+    group: memory
+    type: int
+    min: 16
+    max: 16777216
+    required: true
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows, macos, freebsd, android]
+    sources:
+      linux: "MemTotal of /proc/meminfo (kB)"
+      windows: "ullTotalPhys of GlobalMemoryStatusEx (never the sum of the SMBIOS memory slots)"
+      macos: "sysctl hw.memsize"
+    normalise: "usable memory in MiB, rounded down"
+    consumers: [ditto, recipe, preflight, bench, gui]
+  SWAP_TOTAL_MB:
+    group: memory
+    type: int
+    min: 0
+    max: 16777216
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "SwapTotal of /proc/meminfo (kB)"
+      windows: "ullTotalPageFile - ullTotalPhys of GlobalMemoryStatusEx"
+      macos: "sysctl vm.swapusage total"
+    normalise: "MiB, rounded down"
+    consumers: [recipe, preflight]
+  RAM_AVAILABLE_MB:
+    group: memory
+    type: int
+    min: 0
+    max: 16777216
+    required: false
+    stability: volatile
+    perf: none
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "MemAvailable of /proc/meminfo (kB)"
+      windows: "ullAvailPhys of GlobalMemoryStatusEx"
+      macos: "free + inactive pages of vm_stat times the page size"
+    normalise: "MiB, rounded down"
+    consumers: [ditto, recipe]
+  DISK_FREE_MB:
+    group: memory
+    type: int
+    min: 0
+    max: 2147483647
+    required: false
+    stability: volatile
+    perf: none
+    platforms: [linux, windows, macos]
+    sources:
+      any: >-
+        free space of the file system holding the framework state folder (PCs) or the user's home folder (the
+        install folder on devices); Python shutil.disk_usage, shell df -Pk
+    normalise: "MiB, rounded down"
+    consumers: [recipe, deploy, preflight]
+  RAM_TYPE:
+    group: memory
+    type: enum
+    values: [DDR3, DDR4, DDR5, LPDDR3, LPDDR4, LPDDR4X, LPDDR5, LPDDR5X]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [windows]
+    sources:
+      linux: "only when readable without root (not with dmidecode): left out with needs_root:RAM_TYPE"
+      windows: "SMBIOSMemoryType of the first Win32_PhysicalMemory entry via tables.smbios_memory_types"
+    normalise: "table lookup; not in the table -> left out"
+    consumers: [bench, gui]
+  RAM_SPEED_MTS:
+    group: memory
+    type: int
+    min: 100
+    max: 20000
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [windows]
+    sources:
+      linux: "only when readable without root: left out with needs_root:RAM_SPEED_MTS"
+      windows: "highest ConfiguredClockSpeed (else Speed) of Win32_PhysicalMemory"
+    normalise: "MT/s, decimal integer"
+    consumers: [bench, gui]
+
+  # --- SoC -----------------------------------------------------------------------------------------------------
+  SOC_VENDOR:
+    group: soc
+    type: pattern
+    pattern: '^[a-z0-9][a-z0-9-]{0,31}$'
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, android]
+    sources:
+      linux: "vendor part of the last entry of /proc/device-tree/compatible (rockchip,rk3566 -> rockchip)"
+    normalise: "lower case"
+    consumers: [match, gui]
+  SOC_MODEL:
+    group: soc
+    type: pattern
+    pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+    known: soc_models_known
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, android]
+    sources:
+      linux: "model part of the last entry of /proc/device-tree/compatible (rockchip,rk3566 -> rk3566)"
+    normalise: "lower case; values outside tables.soc_models_known are display only"
+    consumers: [match, recipe, preflight, deploy, gui]
+  BOARD_MODEL:
+    group: soc
+    type: text
+    max_length: 128
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, android]
+    sources:
+      linux: "/proc/device-tree/model (product name of the board; never a serial number)"
+    normalise: "trailing NUL removed, whitespace trimmed and collapsed"
+    consumers: [gui, proposal]
+
+  # --- NPU and USB-attached boards ---------------------------------------------------------------------------
+  NPU_VENDOR:
+    group: npu
+    type: enum
+    values: [rockchip, hailo, axelera, memryx, google, intel, qualcomm, apple, amd, other]
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows]
+    sources:
+      linux: >-
+        the SoC NPU first (device node of NPU_DEVICE), then PCI/USB vendor ids in the order of the SUPPORTS_* NPU
+        keys below
+      windows: "PnP vendor ids in the same order"
+    normalise: "lower case vendor name; one NPU is described (the SUPPORTS_* keys tell about the others)"
+    consumers: [preflight, match, generator, gui]
+  NPU_MODEL:
+    group: npu
+    type: pattern
+    pattern: '^[a-z0-9][a-z0-9._-]{0,31}$'
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources:
+      linux: "SoC NPU: SOC_MODEL; Hailo: hailortcli fw-control identify when installed; others: left out"
+      windows: "Intel: intel-npu; others: left out"
+    normalise: "lower case identifier (rk3566, rk3588, hailo-8, hailo-8l, intel-npu)"
+    consumers: [preflight, bench, gui]
+  NPU_DEVICE:
+    group: npu
+    type: pattern
+    pattern: '^/dev/[A-Za-z0-9_-]{1,32}(/[A-Za-z0-9_-]{1,32})?$'
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources:
+      linux: >-
+        the node that was found: /dev/rknpu, a DRM render node of the rknpu driver, /dev/accel/accel<N>,
+        /dev/hailo<N>, /dev/apex_<N>
+    normalise: "absolute path below /dev, no dots"
+    consumers: [deploy, preflight]
+  RKNPU_DRIVER_VERSION:
+    group: npu
+    type: pattern
+    pattern: '^\d{1,3}(\.\d{1,4}){1,3}$'
+    only_os: [linux, android]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: >-
+        a readable sysfs or debugfs version node of the rknpu driver (unverified; without root often unreadable:
+        needs_root:RKNPU_DRIVER_VERSION)
+    normalise: "digits and dots only; compared and displayed, never placed on a command line"
+    consumers: [preflight, deploy]
+  RKLLM_RUNTIME_VERSION:
+    group: npu
+    type: pattern
+    pattern: '^\d{1,3}(\.\d{1,4}){1,3}$'
+    only_os: [linux, android]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: "version string inside an installed librkllmrt.so (unverified)"
+    normalise: "digits and dots only; compared and displayed, never placed on a command line"
+    consumers: [preflight, deploy]
+  RKNN_RUNTIME_VERSION:
+    group: npu
+    type: pattern
+    pattern: '^\d{1,3}(\.\d{1,4}){1,3}$'
+    only_os: [linux, android]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources:
+      linux: "version string inside an installed librknnrt.so (unverified)"
+    normalise: "digits and dots only; compared and displayed, never placed on a command line"
+    consumers: [preflight, deploy]
+  USB_ROCKCHIP_PID:
+    group: npu
+    type: pattern
+    pattern: '^0x[0-9a-f]{4}$'
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows]
+    sources:
+      linux: "lsusb -d 2207: (first device)"
+      windows: "PID_ part of a PnP device with VID_2207"
+    normalise: "lower-case hex with 0x"
+    consumers: [deploy, gui]
+  USB_ROCKCHIP_MODE:
+    group: npu
+    type: enum
+    values: [rockusb, adb, adb-mtp, other]
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows]
+    sources:
+      any: "USB_ROCKCHIP_PID via tables.usb_rockchip_pids; not in the table -> other"
+    normalise: "table lookup"
+    consumers: [deploy, gui]
+  SUPPORTS_RKNN:
+    group: npu
+    type: bool
+    only_os: [linux, android]
+    stability: stable
+    perf: key
+    platforms: [linux]
+    sources:
+      linux: >-
+        ON when this machine's Rockchip SoC NPU node exists (NPU_DEVICE); a board attached over USB does not
+        count
+      windows: "OFF"
+    normalise: "ON/OFF"
+    consumers: [preflight, generator, match]
+  SUPPORTS_HAILO:
+    group: npu
+    type: bool
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources: {linux: "PCI vendor 0x1e60 (lspci -n, /sys/bus/pci/devices/*/vendor)", windows: "PnP VEN_1E60"}
+    normalise: "ON/OFF"
+    consumers: [preflight, generator]
+  SUPPORTS_METIS:
+    group: npu
+    type: bool
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources: {linux: "PCI vendor 0x1f4b (Axelera)", windows: "PnP VEN_1F4B"}
+    normalise: "ON/OFF"
+    consumers: [preflight, generator]
+  SUPPORTS_MX3:
+    group: npu
+    type: bool
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources:
+      linux: "PCI/USB vendor of the MemryX MX3 (today's scripts use 0x1d6b, a generic id: unverified)"
+      windows: "PnP device as on Linux"
+    normalise: "ON/OFF"
+    consumers: [preflight, generator]
+  SUPPORTS_CORAL:
+    group: npu
+    type: bool
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources:
+      linux: "Google Coral Edge TPU: USB 1a6e:089a or 18d1:9302, PCI 1ac1:089a, or /dev/apex_<N>"
+      windows: "PnP device with the same ids"
+    normalise: "ON/OFF"
+    consumers: [preflight, generator]
+  SUPPORTS_INTEL_NPU:
+    group: npu
+    type: bool
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources:
+      linux: "/dev/accel/accel<N> bound to the intel_vpu driver"
+      windows: "PnP device \"Intel(R) AI Boost\""
+    normalise: "ON/OFF"
+    consumers: [preflight]
+
+  # --- GPU (global keys; per-GPU keys in gpu_keys) -------------------------------------------------------------
+  GPU_COUNT:
+    group: gpu
+    type: int
+    min: 0
+    max: 16
+    required: true
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "nvidia-smi, amdgpu sysfs and KFD topology, /sys/class/drm, device tree (Mali), merged per PCI address"
+      windows: "display adapters of WMI Win32_VideoController and the display-class registry, nvidia-smi"
+      macos: "system_profiler SPDisplaysDataType"
+    normalise: "number of GPU<n> entries; GPUs ordered by PCI address where known, else in the order of the source"
+    consumers: [recipe, ditto, preflight, gui]
+  NVIDIA_DRIVER_CUDA_MAX:
+    group: gpu
+    type: pattern
+    pattern: '^\d{1,2}\.\d{1,3}$'
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows]
+    sources: {any: "\"CUDA Version: X.Y\" in the nvidia-smi header (highest CUDA version the driver supports)"}
+    normalise: "X.Y"
+    consumers: [recipe, preflight]
+  SUPPORTS_CUDA:
+    group: gpu
+    type: bool
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources:
+      linux: >-
+        ON when a GPU<n>_VENDOR is nvidia (PCI vendor 0x10de, display class); not whether a CUDA toolkit is
+        installed
+      windows: "same"
+    normalise: "ON/OFF"
+    consumers: [preflight, generator]
+  SUPPORTS_INTEL_XPU:
+    group: gpu
+    type: bool
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources: {linux: "ON when a GPU<n>_VENDOR is intel", windows: "same"}
+    normalise: "ON/OFF"
+    consumers: [preflight]
+  VULKAN:
+    group: gpu
+    type: bool
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows, macos]
+    sources:
+      any: "ON when a Vulkan loader (libvulkan.so.1, vulkan-1.dll) or a Vulkan device (vulkaninfo --summary) is present"
+    normalise: "ON/OFF"
+    consumers: [recipe, ditto]
+  VULKAN_DEVICES:
+    group: gpu
+    type: int
+    min: 0
+    max: 64
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows, macos]
+    sources: {any: "number of GPU entries in vulkaninfo --summary (CPU implementations such as llvmpipe not counted)"}
+    normalise: "decimal integer"
+    consumers: [recipe, ditto]
+  HIP_RUNTIME:
+    group: gpu
+    type: bool
+    only_os: [linux]
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources: {linux: "libamdhip64 found by the dynamic loader", windows: "OFF (no self-built HIP on Windows)"}
+    normalise: "ON/OFF"
+    consumers: [recipe, ditto]
+  ROCM_VERSION:
+    group: gpu
+    type: version
+    only_os: [linux]
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux]
+    sources: {linux: "/opt/rocm/.info/version, else hipconfig --version"}
+    normalise: "leading dotted number"
+    consumers: [recipe]
+  METAL:
+    group: gpu
+    type: bool
+    only_os: [macos]
+    stability: stable
+    perf: recorded
+    platforms: [macos]
+    sources: {macos: "ON on Apple Silicon and on Intel Macs with a Metal-capable GPU (system_profiler)"}
+    normalise: "ON/OFF"
+    consumers: [recipe, ditto]
+
+  # --- toolchain: versions only, never paths (paths can contain the user name) -----------------------------
+  TOOL_CC:
+    group: toolchain
+    type: pattern
+    pattern: '^(gcc|clang|appleclang|msvc|icx)-\d{1,4}(\.\d{1,6}){0,3}$'
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources:
+      any: "cc --version (Windows: clang-cl --version, else cl without arguments); the compiler id from the banner"
+    normalise: "<id>-<version>: gcc-12.2.0, clang-18.1.3, appleclang-16.0.0, msvc-19.44.35207"
+    consumers: [recipe]
+  TOOL_CXX:
+    group: toolchain
+    type: pattern
+    pattern: '^(gcc|clang|appleclang|msvc|icx)-\d{1,4}(\.\d{1,6}){0,3}$'
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources: {any: "c++ --version, as TOOL_CC"}
+    normalise: "as TOOL_CC"
+    consumers: [recipe]
+  TOOL_CLANG:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources: {any: "clang --version (Windows: clang-cl --version)"}
+    normalise: "first dotted number of the first line"
+    consumers: [recipe]
+  TOOL_MSVC:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [windows]
+    sources: {windows: "cl.exe banner in the environment of vcvarsall.bat (located with vswhere.exe)"}
+    normalise: "first dotted number"
+    consumers: [recipe]
+  TOOL_CMAKE:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources: {any: "cmake --version"}
+    normalise: "first dotted number of the first line"
+    consumers: [recipe]
+  TOOL_NINJA:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources: {any: "ninja --version"}
+    normalise: "first dotted number"
+    consumers: [recipe]
+  TOOL_MAKE:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, macos]
+    sources: {any: "make --version"}
+    normalise: "first dotted number of the first line"
+    consumers: [recipe]
+  TOOL_GIT:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources: {any: "git --version"}
+    normalise: "first dotted number"
+    consumers: [recipe]
+  TOOL_CCACHE:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources: {any: "ccache --version"}
+    normalise: "first dotted number of the first line"
+    consumers: [recipe]
+  TOOL_NVCC:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows]
+    sources: {any: "nvcc --version (\"release X.Y, VX.Y.Z\": the VX.Y.Z part)"}
+    normalise: "dotted number without the V"
+    consumers: [recipe]
+  TOOL_GLSLC:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources: {any: "glslc --version (the shaderc line)"}
+    normalise: "first dotted number"
+    consumers: [recipe]
+  TOOL_HIPCONFIG:
+    group: toolchain
+    type: version
+    only_os: [linux]
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux]
+    sources: {linux: "hipconfig --version"}
+    normalise: "first dotted number"
+    consumers: [recipe]
+  TOOL_DOCKER:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources: {any: "docker --version (replaces DOCKER_VERSION of schema 1)"}
+    normalise: "first dotted number (27.3.1-ce -> 27.3.1)"
+    consumers: [recipe, deploy]
+  TOOL_PYTHON:
+    group: toolchain
+    type: version
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources:
+      any: "python3 --version; the Python probe: platform.python_version() (replaces PYTHON_VERSION of schema 1)"
+    normalise: "first dotted number"
+    consumers: [deploy]
+
+# Per-GPU keys: GPU<n>_<NAME> for n = 0 .. GPU_COUNT-1 (no leading zeros). The bool keys are required for every GPU.
+gpu_keys:
+  VENDOR:
+    group: gpu
+    type: enum
+    values: [nvidia, amd, intel, apple, arm, qualcomm, imagination, broadcom, other]
+    required: true
+    stability: stable
+    perf: key
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "PCI vendor id via tables.pci_vendors; device tree arm,mali-* -> arm (Mali detection unverified)"
+      windows: "VEN_ part of the adapter's PnP id via tables.pci_vendors"
+      macos: "constant apple on Apple Silicon; Intel Macs: the PCI vendor"
+    normalise: "table lookup; not in the table -> other"
+    consumers: [recipe, ditto, preflight, gui]
+  NAME:
+    group: gpu
+    type: text
+    max_length: 128
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "nvidia-smi name, else the Vulkan deviceName, else the PCI id"
+      windows: "Name of Win32_VideoController"
+      macos: "chipset model of system_profiler"
+    normalise: "whitespace trimmed and collapsed"
+    consumers: [gui, proposal]
+  PCI_ID:
+    group: gpu
+    type: pattern
+    pattern: '^0x[0-9a-f]{4}:0x[0-9a-f]{4}$'
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources:
+      linux: "/sys/bus/pci/devices/<address>/vendor and device"
+      windows: "VEN_ and DEV_ parts of the adapter's PnP id"
+    normalise: "<vendor>:<device>, lower-case hex with 0x"
+    consumers: [recipe, ditto, match]
+  DISCRETE:
+    group: gpu
+    type: bool
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources:
+      linux: "NVIDIA: ON; AMD: OFF for the APU device ids of hardware.py, else ON; Intel: OFF unless an Arc device id"
+      windows: "as Linux, from the PnP device id"
+      macos: "OFF on Apple Silicon"
+    normalise: "ON/OFF/UNKNOWN"
+    consumers: [ditto, recipe]
+  UNIFIED:
+    group: gpu
+    type: bool
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources:
+      any: "ON when the GPU shares the system RAM (Apple Silicon, integrated AMD and Intel GPUs, Mali)"
+    normalise: "ON/OFF/UNKNOWN"
+    consumers: [ditto]
+  VRAM_MB:
+    group: gpu
+    type: int
+    min: 0
+    max: 16777216
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows]
+    sources:
+      linux: "nvidia-smi memory.total; amdgpu mem_info_vram_total"
+      windows: "nvidia-smi; HardwareInformation.qwMemorySize of the display-class registry key"
+    normalise: "MiB, rounded down"
+    consumers: [ditto, recipe, preflight]
+  VRAM_FREE_MB:
+    group: gpu
+    type: int
+    min: 0
+    max: 16777216
+    required: false
+    stability: volatile
+    perf: none
+    platforms: [linux, windows]
+    sources:
+      linux: "nvidia-smi memory.free; amdgpu mem_info_vram_total - mem_info_vram_used"
+      windows: "nvidia-smi memory.free"
+    normalise: "MiB, rounded down"
+    consumers: [ditto]
+  DRIVER_VERSION:
+    group: gpu
+    type: version
+    required: false
+    stability: stable
+    perf: recorded
+    platforms: [linux, windows]
+    sources: {linux: "nvidia-smi driver_version", windows: "nvidia-smi; DriverVersion of Win32_VideoController"}
+    normalise: "dotted number"
+    consumers: [recipe, preflight]
+  COMPUTE_CAP:
+    group: gpu
+    type: pattern
+    pattern: '^\d{1,2}\.\d$'
+    only_gpu_vendor: [nvidia]
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources: {any: "nvidia-smi --query-gpu=compute_cap"}
+    normalise: "major.minor (8.6)"
+    consumers: [recipe, preflight]
+  GFX_TARGET:
+    group: gpu
+    type: pattern
+    pattern: '^gfx[0-9a-f]{3,5}$'
+    only_gpu_vendor: [amd]
+    required: false
+    stability: stable
+    perf: key
+    platforms: [linux, windows]
+    sources:
+      linux: "gfx_target_version of the KFD topology node (/sys/class/kfd/kfd/topology/nodes/*/properties)"
+      windows: "WMI (limited; left out when not readable)"
+    normalise: "gfx + hex digits (gfx1103)"
+    consumers: [recipe]
+  SOURCE:
+    group: gpu
+    type: enum
+    values: [nvidia-smi, sysfs, kfd, vulkaninfo, wmi, registry, system-profiler, device-tree]
+    required: false
+    stability: stable
+    perf: none
+    platforms: [linux, windows, macos]
+    sources: {any: "the probe that found the GPU first"}
+    normalise: none
+    consumers: [gui]
+
+# Schema 1 (today's .sh v2.4 and .ps1 v2.5 output, no PROBE_SCHEMA line) is still read. The parser maps:
+#   PLATFORM -> OS; ARCH / CPU_ARCH_TYPE -> ARCH; OS_VERSION (.ps1) -> OS_VERSION_ID; CPU_VENDOR_ID -> CPU_VENDOR;
+#   CPU_FLAGS_ALL (space separated) -> comma list, and every x86/ARM SUPPORTS_* key derived from it with the cpuinfo
+#   tokens above; without a flag list the written ON/OFF/TRUE/FALSE values; SUPPORTS_FP16 -> SUPPORTS_F16C on x86
+#   (dropped on ARM); RAM_SWAP_MB -> SWAP_TOTAL_MB; GPU_VENDOR / GPU_VENDOR_ID / GPU_DEVICE_ID / GPU_MODEL /
+#   GPU_VRAM_MB / GPU_DRIVER_VERSION -> GPU0_*; NPU_VENDOR / NPU_MODEL -> lower case; NPU_DEVICE_ID SoC_RKxxxx ->
+#   SOC_MODEL; DEVICE_NODE -> NPU_DEVICE; NPU_MODE / USB ids -> USB_ROCKCHIP_*; DOCKER_VERSION -> TOOL_DOCKER;
+#   PYTHON_VERSION -> TOOL_PYTHON.
+# Every CPU feature of a .ps1 file becomes UNKNOWN (its IsProcessorFeaturePresent constants are wrong), and its
+# RAM_TOTAL_MB (the sum of the SMBIOS slots) is dropped. HOSTNAME, RAM_SLOT_*, CPU_DEVICE_ID and every other key are
+# dropped without keeping the value. A key written twice with different values is dropped as ambiguous. Values that
+# fail validation are dropped. Booleans the file lacks become UNKNOWN. The result carries PROBE_CONVERTED_FROM=1 and
+# the warnings converted_from_schema_1 and reprobe_before_build: run the probe again before a build.

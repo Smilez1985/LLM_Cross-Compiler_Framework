@@ -77,6 +77,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Embedding-Modell heruntergeladen ist. Ein manueller und nächtlicher CI-Workflow führt ihn mit
   zwischengespeicherten Modellen aus. Ausgangswerte mit dem Standard-Embedding-Modell für die CPU bei den 34
   Fragen: hit@1 83 %, hit@3 97 %, MRR 0,91; alle 4 themenfremden Fragen bekommen noch Auszüge.
+- **Format der Hardware-Profile, Schema 2** (`configs/hardware_probe_schema.yml`, Parser
+  `orchestrator/runtime/profile.py`): eine Liste der Schlüssel, die eine Hardware-Probe schreibt, jeder mit Quelle und
+  Normalisierung je Betriebssystem und seiner Prüfung. Sie umfasst das Betriebssystem (ID, Version, Familie, Variante
+  wie DietPi, Kernel, Init-System), die Architektur des Userlands, die C-Bibliothek und ihre Version (glibc, musl,
+  ...), ARM-Skalarprodukt, FP16-Arithmetik und CPU-Cluster, die 14 x86-Merkmale, für die ggml baut, Compute
+  Capability und gfx-Target der GPU, Vulkan, Versionen der Rockchip-NPU-Laufzeit und Werkzeugversionen. Der Parser
+  lehnt eine Datei in Schema 2 ab, wenn ein Schlüssel doppelt vorkommt, ein Wert leer, länger als 4096 Zeichen oder
+  außerhalb des Schemas ist oder Werte nicht zusammenpassen (ein x86-Merkmal auf ARM, eine Compute Capability bei
+  einer AMD-GPU). Dateien der heutigen Probe-Skripte (Schema 1, das sie noch schreiben) werden umgewandelt: Der
+  Hostname, RAM-Teilenummern und andere identifizierende Werte werden verworfen, jedes CPU-Merkmal einer
+  `hardware_probe.ps1`-Datei wird `UNKNOWN` (dieses Skript fragt Windows mit falschen Konstanten), und das Ergebnis
+  verlangt vor einem Build eine neue Probe. Dazu kommen ein Leistungsschlüssel für Benchmark-Ergebnisse, der flüchtige
+  und nur festgehaltene Werte nicht berücksichtigt, und ein Profilspeicher je Benutzer (`~/.llm-framework/hardware/`,
+  private Dateien).
 - **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in

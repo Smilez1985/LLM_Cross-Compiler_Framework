@@ -13,6 +13,9 @@ des Projekts liegen.
 
 - Zwei Dateien in `configs/` steuern das laufende Framework: **`llm_providers.yml`** (Dittos KI-Anbieter) und
   **`llama_runtime.yml`** (der lokale Modellserver und seine Modelle). Beide sind neu und noch nicht veröffentlicht.
+- **`hardware_probe_schema.yml`** legt die Datei der Hardware-Probe fest (Schema 2): jeden Schlüssel mit Quelle,
+  Normalisierung und Prüfung. Der Profil-Parser lädt sie und setzt sie durch. Sie ist neu und noch nicht
+  veröffentlicht.
 - **`project_sources.yml`** und **`detailed_project_sources.yml`** sind ein Nachschlagekatalog vorgelagerter
   Projekte und Dokumentationslinks für Entwickler. Das Framework liest sie im Betrieb **nicht**.
 - Deine eigenen Einstellungen landen in **`config.yml`** im Einstellungsordner. Die Datei ist persönlich und wird
@@ -24,6 +27,7 @@ des Projekts liegen.
 |---|---|---|---|
 | `llm_providers.yml` | Vorlagen der KI-Anbieter, die Ditto nutzen kann | ja | `orchestrator/llm/catalog.py` |
 | `llama_runtime.yml` | Festgelegter llama.cpp-Build, festgelegte GGUF-Modelle, Servervorgaben, Regeln für das empfohlene Modell | ja | `orchestrator/runtime/catalog.py` |
+| `hardware_probe_schema.yml` | Schlüssel der Datei der Hardware-Probe (Schema 2): Typ, Prüfung, Quelle und Normalisierung je Betriebssystem, ob ein Schlüssel in den Leistungsschlüssel eingeht | ja, wenn ein Hardware-Profil gelesen wird | `orchestrator/runtime/profile.py` |
 | `project_sources.yml` | Katalog vorgelagerter Projekte: Repositorys, Versionen, Dokumentationslinks, Notizen | nein | Menschen; `scripts/validate_ssot.py`, `scripts/sync_ssot.py` |
 | `detailed_project_sources.yml` | Ausführliche Entwicklerreferenz: Anleitungen, Entscheidungsbäume, weitere Herstellerabschnitte | nein | Menschen; `scripts/sync_ssot.py` |
 | `config.yml` (nicht in git) | Deine Einstellungen | ja | `orchestrator/Core/config_manager.py` |
@@ -144,6 +148,38 @@ python -c "from orchestrator.runtime.catalog import load_catalog; c = load_catal
 
 `tests/test_runtime.py` prüft die Datei selbst und den Lader.
 
+## hardware_probe_schema.yml
+
+Das Format von `target_hardware_config.txt`, der Datei, die die Hardware-Probe auf dem Rechner schreibt, der die
+Programme ausführen wird. Die Datei beginnt mit einem Kommentar, der jedes Feld erklärt; der
+[Leitfaden für Modulentwickler](../docs/Module_Developer_Guide_DE.md#11-die-datei-der-hardware-probe) beschreibt das
+Format für alle, die Probe-Dateien schreiben oder lesen.
+
+| Abschnitt | Inhalt |
+|---|---|
+| `schema` | Immer `2`. |
+| `file` | Dateiregeln: Dateiname, die Größengrenze, höchstens 4096 Zeichen je Wert, das Schlüsselmuster, `ON`/`OFF`/`UNKNOWN`, höchstens 16 GPUs. |
+| `patterns` | Benannte Muster, die Schlüssel gemeinsam nutzen (`version`, `identifier`). |
+| `tables` | Normalisierungstabellen: Architekturnamen, Betriebssystem-Familien, CPU-Hersteller, ARM-Kernnamen, PCI-Hersteller, die SoC-Modelle, nach denen das Framework entscheidet, SMBIOS-Speichertypen, Rockchip-USB-Produkt-IDs, Warncodes. |
+| `keys` | Ein Eintrag je Schlüssel: `group`, `type` (`bool`, `enum`, `int`, `pattern`, `version`, `text`, `list`, `timestamp`) mit seiner Prüfung, `required`, `stability` (`stable` oder `volatile`), `perf` (`key`, `recorded` oder `none`), `platforms`, `sources` je Betriebssystem, `normalise`, `consumers` und, wo ein Wert nur auf manchen Architekturen, Betriebssystemen oder bei manchen GPU-Herstellern existiert, `only_arch`, `only_os`, `only_gpu_vendor`, `os_values`. |
+| `gpu_keys` | Dasselbe für die Schlüssel je GPU, `GPU<n>_<NAME>`. |
+
+Der Lader lehnt einen Schlüssel ohne Quellen, Normalisierung oder Prüfung ab, Enum-Werte ohne Anführungszeichen
+(YAML liest `ON` als Wahrheitswert) und flüchtige Schlüssel, die Pflicht sind oder in den Leistungsschlüssel eingehen.
+Eine Überschreibung je Benutzer gibt es nicht: Es gilt immer die Datei der Installation.
+
+**Einen Schlüssel hinzufügen:** Trag den Eintrag mit allen Feldern ein, schreib ihn in den Probes und ergänze einen
+Testwert in den Fixtures unter `tests/fixtures/hardware_probe/`. Ein neuer Eintrag mit `perf: key` ändert jeden
+gespeicherten Leistungsschlüssel; vermerke das im Changelog.
+
+**Prüfen:**
+
+```bash
+python -c "from orchestrator.runtime.profile import load_schema; s = load_schema(); print(len(s.keys), len(s.gpu_keys))"
+```
+
+`tests/test_hardware_profile.py` prüft die Datei selbst, den Parser und den Profilspeicher.
+
 ## project_sources.yml
 
 Ein Katalog vorgelagerter Projekte, die das Framework nutzt, von denen es lernt oder die es vielleicht einbindet.
@@ -258,5 +294,6 @@ derzeit keine Wirkung auf Builds.
 |---|---|---|
 | einen neuen KI-Anbieter oder ein neues Modell anbieten | `llm_providers.yml` (oder deine eigene Kopie im Einstellungsordner) | die Prüfung oben und `tests/test_llm.py` ausführen; Changelog-Eintrag |
 | ein lokales Modell oder einen neueren llama.cpp-Build ergänzen | `llama_runtime.yml`, mit Größe, SHA256 und Commit | die Prüfung oben und `tests/test_runtime.py` ausführen; Changelog-Eintrag |
+| einen Schlüssel der Datei der Hardware-Probe ergänzen oder ändern | `hardware_probe_schema.yml` und die Probes, die ihn schreiben | die Prüfung oben und `tests/test_hardware_profile.py` ausführen; Changelog-Eintrag |
 | ein Target ein neues Board, Format oder einen neuen Typ bauen lassen | `target.yml` und `build.sh` des Targets | Tests; siehe [Leitfaden für Modulentwickler](../docs/Module_Developer_Guide_DE.md) |
 | ein vorgelagertes Projekt oder einen Dokumentationslink festhalten | `project_sources.yml` (neue Einträge in der ausführlichen Datei von Hand) | `python ../scripts/validate_ssot.py` in `configs/`, danach `python ../scripts/sync_ssot.py --write` für geänderte Versionen |
