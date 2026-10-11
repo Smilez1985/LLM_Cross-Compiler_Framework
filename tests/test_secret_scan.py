@@ -56,6 +56,7 @@ SAMPLES = {
     "Slack token": "xo" + "xb-" + body(40),
     "Stripe key": "sk" + "_live_" + body(30),
     "PyPI token": "pypi-" + "AgE" + body(60),
+    "age secret key": "AGE-SECRET-" + "KEY-1" + body(58, "QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L"),
     "JSON web token": "ey" + "J" + body(24) + ".ey" + "J" + body(40) + "." + body(43),
     "private key": "-----BEGIN OPENSSH " + "PRIVATE KEY-----",
     "certificate": "-----BEGIN " + "CERTIFICATE-----",
@@ -176,6 +177,7 @@ def test_keys_after_escapes_are_found(wrapped, kind):
     'key = "' + SAMPLES["OpenAI key"] + '"  # secret-scan: allow',
     'key = "sk-unsloth-' + "EXAMPLE" + body(24) + '"',
     'key = "lai-' + "x" * 30 + '"',
+    'identity = "AGE-SECRET-KEY-1' + "X" * 58 + '"',  # the placeholder the documentation uses
     'token = "bedrock-api-key-' + "EXAMPLE" + body(60) + '"',
     "Authorization: Bearer <paste-your-token-here>",
     'curl -H "Authorization: Bearer ' + "X" * 40 + '"',

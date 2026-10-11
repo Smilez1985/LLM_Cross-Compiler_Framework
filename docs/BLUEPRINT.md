@@ -213,7 +213,7 @@ is for.
 | `models/ditto/` | Ditto's local GGUF models with a `.verified.json` marker each (unreleased). |
 | `models/embeddings/` | Embedding and reranking models of the knowledge base (unreleased). |
 | `community/` | Installed community recipes (`recipes/`) and knowledge packs (`knowledge/`), each with a `.lcf-provenance.json`, and the packs you export (`contributions/`). Community targets are installed into `targets/`. A `.quarantine/` folder inside an install folder holds a pack only while it is checked (unreleased). |
-| `~/.llm-framework/` (or `LLM_FRAMEWORK_HOME`) | `secrets.store` (also your community key pairs), `tool_policy.json`, `audit.db` with `audit.db.anchor`, `known_hosts`, the framework SSH key `id_ed25519_llm_framework` (+ `.pub`), `mcp_http_token`, `chat_history.json`, `llm_privacy_key` and `llm_install_id`; `crawl_notice.json` and `input_history.json` (unreleased); the cached community index `community/index.json` with `index.json.sig` and the author key ids remembered at the first install, `community/authors.json` (unreleased); the embedded knowledge base `qdrant/` and `knowledge_snapshots/`; the local model server under `runtime/llama.cpp/` (builds, `active.json`, `server.json`, the key file while the server runs) and its log in `logs/llama-server.log`. |
+| `~/.llm-framework/` (or `LLM_FRAMEWORK_HOME`) | `secrets.store` (also your community keys), `tool_policy.json`, `audit.db` with `audit.db.anchor`, `known_hosts`, the framework SSH key `id_ed25519_llm_framework` (+ `.pub`), `mcp_http_token`, `chat_history.json`, `llm_privacy_key` and `llm_install_id`; `crawl_notice.json` and `input_history.json` (unreleased); the cached community index `community/index.json` with `index.json.sig` and the authors' public keys remembered at the first install, `community/authors.json` (unreleased); the embedded knowledge base `qdrant/` and `knowledge_snapshots/`; the local model server under `runtime/llama.cpp/` (builds, `active.json`, `server.json`, the key file while the server runs) and its log in `logs/llama-server.log`. |
 | Config folder (usually `configs/`) | `config.yml` (user settings); optionally an own `llm_providers.yml` that adds or replaces provider presets. |
 
 `cache/`, `output/` and `models/` are relative to the installation folder unless the settings `cache_dir`,
@@ -571,31 +571,32 @@ it needs (device tests are not recorded there); only builds of a Hugging Face mo
 recipe is checked against the target's capabilities and becomes a normal build request.
 
 **Signatures.** Ed25519 over a purpose prefix followed by the signed bytes: the canonical JSON of a pack manifest
-(sorted keys, no whitespace, UTF-8), the exact bytes of `index.json`, or everything before the signature of an
-encrypted pack. There is one prefix each for these three, so a signature made for one purpose never verifies for
-another. A key id is the first 16 hex characters of the SHA-256 of the raw public key. An author signature is
-provenance, not trust: it is checked when the pack carries the public key, the author's key id is remembered at the
-first install (`authors.json`), and a different key later is shown as a warning.
+(sorted keys, no whitespace, UTF-8), the exact bytes of `index.json`, or the age file of an encrypted pack. There
+is one prefix each for these three, so a signature made for one purpose never verifies for another. A key id is the
+first 16 hex characters of the SHA-256 of the raw public key. An author signature is provenance, not trust: it is
+checked when the pack carries the public key, the author's whole public key (not the short key id, which a key made
+for the purpose could match) is remembered at the first install (`authors.json`), and a different key later is
+shown as a warning.
 
-**Encryption for private sharing** (format v1, in the style of [age](https://age-encryption.org/v1)), for your
-own machines or a team:
+**Encryption for private sharing** in the [age](https://age-encryption.org/v1) format, for your own machines or a
+team:
 
-- Each pack gets a random 32-byte file key. For each recipient an X25519 stanza holds the file key sealed with
-  ChaCha20-Poly1305 under a wrap key derived with HKDF-SHA256 from an ephemeral key exchange (salt: both public
-  keys). For a passphrase, one scrypt stanza does the same (N = 2^17, r = 8, p = 1; at least 12 characters; as in
-  age, at most one per file). Stanzas do not name their recipient; there are at most 64.
-- The header (canonical JSON with the sender's public key, a payload salt and the stanzas) is protected by an
-  HMAC-SHA256 whose key is derived from the file key. The pack itself is sealed with ChaCha20-Poly1305 under a key
-  derived with HKDF from the file key and the payload salt, with the header as associated data. Every derived key
-  is used once, so the fixed zero nonce is safe.
-- The sender signs the whole file with Ed25519. A reader checks, in this order and before any plaintext is
-  returned: the signature (any change, also an added or removed recipient, breaks it), the sender if trusted
-  senders are given (`--from`), the wrapped file key, the header MAC and the payload tag. Without `--from`, the
-  sender's key id is shown.
-- Each user gets an Ed25519 key pair (signing) and an X25519 key pair (receiving) on first use. They are kept
-  only in the encrypted secrets store and never replaced silently; `llm-cli zoo keys` prints the public keys as
-  text to give to others.
-- Only standard primitives of the `cryptography` package are combined; there is no cipher of our own.
+- The pack is encrypted by rage, the Rust implementation of age, through its Python binding `pyrage` (pinned
+  exactly): to the recipients' X25519 keys (`age1...`, at most 64) or to one passphrase (scrypt, at least 12
+  characters, with the work factor rage picks for the sender's computer), never to both, as age requires. There is
+  no cipher of our own.
+- An encrypted pack (`.lcfpack`) is a zip with two members: `pack.zip.age`, a standard age file that the `age` and
+  `rage` tools open too, and `pack.zip.age.sig`, the sender's Ed25519 signature over it (the `pack.sig` format with
+  the public key). The signature covers the whole age file, so an added or removed recipient, or a recipient who
+  re-encrypts the pack, breaks it.
+- A reader checks, in this order and before anything is decrypted: the zip layout and sizes, the age header (a
+  scrypt stanza must be alone, and its work factor at most 2^20: pyrage's own limit follows the machine's speed and
+  lets through work factors whose memory need aborts the process), the signature, and the sender if trusted
+  senders are given (`--from`). Without `--from`, the sender's key id is shown.
+- Each user gets an Ed25519 key (signing) and an age identity (receiving) on first use. They are kept only in the
+  encrypted secrets store, created under the store's lock for that entry (two processes never create two keys)
+  and never replaced silently; `llm-cli zoo keys` prints the public keys as text to give to others. The shared
+  secret pattern table knows age secret keys, so the secret scan and the runtime redaction catch them.
 
 **The signed index.** `index.json` lists the packs (kind, id, version, author, licence, trust `verified` or
 `community`, HTTPS address, size and sha256) and the revocations (by sha256, or by kind and id, optionally for one
@@ -623,26 +624,28 @@ expired, so a revocation never stops applying because the framework was not upda
    `community`), also for a pack file.
 6. An atomic rename puts the pack in place, never over an existing folder (also when only the case differs),
    together with `.lcf-provenance.json` (trust, source, hashes, signer, sender). A knowledge pack is then imported
-   into the knowledge base. Anything that fails on the way is removed.
+   into the knowledge base, or when the knowledge base starts if it is off. Anything that fails on the way is
+   removed.
 
 A pack file (`llm-cli zoo install --file`, or Import file... in the Community Hub) goes through the same
 quarantine; an encrypted one is decrypted first (`--from`, `--passphrase`). Its trust comes from the index when
 the index lists its sha256; otherwise it is `local`.
 
-**Trust levels.** `official` (shipped with the framework; shipped targets carry no provenance file and are not
-listed in the zoo, so no listing shows this level yet), `verified` (in the signed index: reviewed and
-reproduced independently), `community` (in the signed index: reviewed), `local` (a file without an index entry:
-always confirmed, and every build of it shows a warning) and `revoked` (in the signed revocation list: not
-installed; installed copies are flagged by `llm-cli doctor` and the Community Hub and are not built).
-`llm-cli zoo verify` finds installed packs that were changed or revoked.
+**Trust levels.** `verified` (in the signed index: reviewed and reproduced independently), `community` (in the
+signed index: reviewed), `local` (a file without an index entry: always confirmed, and every build of it shows a
+warning) and `revoked` (in the signed revocation list: not installed; installed copies are flagged by
+`llm-cli zoo list`, `llm-cli doctor` and the Community Hub and are not built). Shipped targets carry no provenance
+file; they are not packs and have no trust level. `llm-cli zoo verify` finds installed packs that were changed or
+revoked.
 
 **Export and hand-over.** `llm-cli zoo export target|recipe|knowledge`, the check box "Export for community" on the
 module wizard's last page and "Export a finished build for the community..." in the Builder log's context menu make
 a pack: its files are privacy-scrubbed (home folders, IP and MAC addresses, e-mail addresses, JWTs, the host and
-user name, keys; the changes are shown), validated and signed with your key. With `--to` (files with public keys) or
-`--passphrase` the signed pack is also encrypted for private sharing; an encrypted pack is never submitted with
-`--pr`. The licence defaults to MIT, for knowledge to `NOASSERTION`, and every page keeps its source address. A
-target you installed from someone else is not re-signed as yours. "Open pull request" (`--pr`) hands the pack to the
+user name, keys; the changes are shown), validated and signed with your key. With `--to` (files with age
+recipients) or `--passphrase` the signed pack is also encrypted for private sharing; an encrypted pack is never
+submitted with `--pr`. The licence defaults to MIT, for knowledge to `NOASSERTION`, and every page keeps its source
+address. A target you installed from someone else is not re-signed as yours, and pages imported from installed
+community knowledge packs are left out of a knowledge export. "Open pull request" (`--pr`) hands the pack to the
 community repository (`community_repo`): through the GitHub CLI when it is installed and logged in, otherwise the
 repository's upload page opens in the browser. Both keep their own credentials; the framework never asks for, reads
 or shows a token.
@@ -651,13 +654,15 @@ or shows a token.
 and prints its index entry (`entry`) and signs `index.json` (`sign`; with `--previous` the version must be higher
 than that of the old index). `scripts/community_repo/validate-contribution.yml` is the workflow template for the
 community repository: it accepts only pack zips of at most 5 MB and runs `llm-cli zoo verify` on each, which also
-rejects packs that still contain keys or personal data. The signing key never reaches CI.
+rejects packs that still contain keys or personal data (the repository's secret scan skips binary files, so it
+does not run on the zips). The signing key never reaches CI.
 
 **State.** The community repository, its index and the maintainer's key are not published yet:
 `configs/community_keys.yml` lists no key, and `community_index_url` and `community_repo` are empty. Listing the
 index and installing by id therefore stop with a message (`llm-cli zoo list` still shows installed packs), and
-`--pr` only says where the pack is. The workflow template checks packs with the framework release `v3.1.0`, which
-does not exist yet. Packs can already be exchanged as files (trust `local`) and encrypted between users.
+`--pr` only says where the pack is. The framework release the workflow template checks packs with (`LCF_REF`) is a
+placeholder that the maintainer sets. Packs can already be exchanged as files (trust `local`) and encrypted between
+users.
 
 ### Recent inputs (unreleased)
 
@@ -703,7 +708,7 @@ threat, the protection and where it is implemented.
 | Someone impersonates your device during deployment | Trust on first use, but never silently: unknown host keys are shown with their SHA256 fingerprint and stored only after confirmation; a changed key or key type always fails. Authentication uses the framework's own Ed25519 key. The OpenSSH fallback runs with `BatchMode=yes` and `StrictHostKeyChecking=yes`. User names and IP addresses are validated; the upload goes into a private temporary folder; `deploy.sh` verifies all checksums. Without Docker only model files are deployed, never arbitrary programs. | `orchestrator/utils/ssh_trust.py`, `orchestrator/Core/deployment_manager.py` |
 | A crafted archive writes outside its folder | Extraction refuses path traversal, links pointing outside and device files, and uses Python's `data` filter for tar files. | `safe_extract_archive` in `orchestrator/utils/helpers.py` |
 | A community pack is changed on the way, replaced by an older index, or revoked after its release | Packs from the index are downloaded pinned by size and sha256 from an index signed with a key that ships with the framework (with an expiry date). An index that does not verify is not used, an older one is refused, installing by id always fetches the current index, and revoked packs are neither installed nor built. Every pack is checked in a quarantine folder (exact file list and hashes, no links or special files, the validators, which refuse binary files in a target) and moved into place atomically only after you confirm a plain-text summary with its trust level, so text from a pack cannot hide it. A file without an index entry is `local` and warns on every build. | `orchestrator/Core/community_manager.py` (with `build_trust_check`, which `orchestrator/Core/builder.py` calls), `orchestrator/Core/community_pack.py` |
-| Someone reads or changes a privately shared pack | Encrypted to X25519 recipients and/or a scrypt passphrase with ChaCha20-Poly1305 and HKDF-SHA256, with a header MAC and the sender's Ed25519 signature. Any change, also to the recipient list, is detected before any plaintext is returned; `--from` accepts only known senders. The private keys live only in the encrypted secrets store. | `encrypt_pack`, `decrypt_pack`, `UserKeys` in `orchestrator/Core/community_pack.py` |
+| Someone reads or changes a privately shared pack | Encrypted in the age format by rage (`pyrage`) to X25519 recipients or one scrypt passphrase, with the sender's Ed25519 signature over the whole age file. Any change, also to the recipient list, is detected before anything is decrypted; a scrypt work factor above 2^20 is refused before scrypt runs; `--from` accepts only known senders. The private keys live only in the encrypted secrets store. | `encrypt_pack`, `decrypt_pack`, `UserKeys` in `orchestrator/Core/community_pack.py` |
 | A shared pack or the input history gives away personal data or a credential | Exports are privacy-scrubbed (home folders, IP and MAC addresses, e-mail addresses, JWTs, host and user name, keys) and the changes are shown; `llm-cli zoo verify`, also in the community repository's CI, rejects a pack that the scrub would still change. The input history refuses values that look like secrets and URLs with credentials. The framework never asks for or stores a repository token: a pull request goes through the GitHub CLI or the browser, which keep their own credentials. | `scrub` in `orchestrator/Core/community_pack.py`, `submit_contribution` in `orchestrator/Core/community_manager.py`, `orchestrator/utils/input_history.py` |
 | A compromised dependency (supply chain) | Host dependencies are pinned with hashes (`requirements*.txt`, Poetry 2 lock); `anthropic` (1.13.0), `openai` (3.28.0), `fastembed` (0.8.1) and `mcp` (2.3.0) are pinned exactly. GitHub Actions are pinned by commit SHA; CI runs pip-audit and bandit; Dependabot checks pip, Actions and Docker weekly. In the Rockchip image the RKLLM wheel is checked by SHA256 and the toolkit, torch and onnx versions are pinned. The calibration text is checked by SHA256. | `pyproject.toml`, `poetry.lock`, `.github/`, `targets/Rockchip/dockerfile`, `orchestrator/utils/calibration.py` |
 
@@ -777,7 +782,7 @@ These are real limitations of the current state. Most are scheduled in the [road
 | **The mMARCO cross-encoder is the default CPU reranker** | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` is multilingual (German and English questions), small (about 0.12 GB) and fast enough on a CPU; its model card names the Apache-2.0 licence. It was trained on mMARCO, a translation of MS MARCO, which has its own terms of use; the maintainer accepted it as the default that `rag_reranker: auto` downloads on first use. `rag_reranker: off` or another model id replaces it. |
 | **The retrieval evaluation is the gate for search defaults** | Retrieval changes can help one kind of question and hurt another. A fixed corpus with fixed cases, graded by rules and without an AI judge, shows that before a change becomes a default. |
 | **Identifiers are split for the keyword index only** | Flags and names such as `-DGGML_CUDA=ON` were one token for BM25 and could not be found by their parts. Adding the parts only to the BM25 input leaves the dense vectors and the stored text unchanged; the stamped encoding rebuilds older keyword indexes once. |
-| **Public packs signed, private packs encrypted, with standard primitives** | For public data, authenticity and integrity matter; for private sharing, confidentiality too. The XOR "SwarmCipher" could be undone by anyone. Ed25519, X25519, HKDF-SHA256, scrypt and ChaCha20-Poly1305 composed in the style of age are well studied; one signing prefix per purpose keeps a signature for one thing from verifying another. |
+| **Public packs signed, private packs encrypted in the age format** | For public data, authenticity and integrity matter; for private sharing, confidentiality too. The XOR "SwarmCipher" could be undone by anyone. age is a published and well-reviewed format and rage a maintained implementation of it, so there is no cipher of our own to review, and recipients can also use the standard age tools. One signing prefix per purpose keeps a signature for one thing from verifying another. |
 | **Installing always reads the current index first** | A revocation only protects users who see it. An install needs the network anyway, so it fetches the index first and installs nothing without it. A cached index serves listing and file installs, and is never replaced by an older one. |
 | **No token in the framework, and no upload of its own** | A repository token in the framework would be a valuable secret in one more place, and an upload button sends data without a review step. The framework prepares a scrubbed, signed pack and shows what the scrub changed; only when you open the pull request do the GitHub CLI or the browser send it, with their own credentials. |
 | **`NOASSERTION` for knowledge packs** | A knowledge pack holds other people's pages. The exporter cannot license them, so the pack claims no licence for them and every page keeps its source address. |
@@ -842,7 +847,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 | **Crawler that checks the site's own signals.** A user cannot know whether a site may be evaluated, so the crawler checks the machine-readable opt-outs itself (robots.txt per RFC 9309, the `X-Robots-Tag` header, robots meta tags including `noai` and its own bot name, the TDM Reservation Protocol) and skips reserved pages, naming them in the log; any reservation wins, and no check can be switched off. Instead of a legal confirmation, a one-time notice (per user, again when its text changes) explains what is read and kept, with a spoken announcement through the operating system's speech engine (the technique of the rag4ll USB watcher); a Stop button keeps what was stored, the progress shows "Page N of M", the result says success, partial or failure honestly, and the crawler reports its real version. Deep Ingest starts only from the GUI. | done |
 | **Input history**: recent models, targets, boards, URLs, devices and datasets offered in the GUI fields, per user, without secrets; Tools > Clear Input History... forgets them. | done |
 | **Better answers from the knowledge base**, taken from rag4ll and kept small: reranking with a cross-encoder on the CPU and a relevance floor that keeps unrelated excerpts out of Ditto's prompt (on for build recommendations; for the chat and MCP searches with `rag_rerank_default`), a size budget for the excerpts, splitting of oversized code and table blocks, keyword search that understands identifiers such as `-DGGML_CUDA=ON`, and unloading of idle models; measured with the retrieval evaluation (`llm-cli ditto eval --kind retrieval`). | done |
-| **Community packs with real cryptography**: packs with a manifest of every file, public packs signed with Ed25519, private packs encrypted to the recipients' keys (X25519 with ChaCha20-Poly1305) or a passphrase (scrypt) and signed by the sender. The XOR "SwarmCipher" upload and its GitHub token prompt are removed; the framework never asks for a token. | done |
+| **Community packs with real cryptography**: packs with a manifest of every file, public packs signed with Ed25519, private packs encrypted in the age format (rage, through `pyrage`) to the recipients' keys or a passphrase, signed by the sender and readable with the standard age tools. The XOR "SwarmCipher" upload and its GitHub token prompt are removed; the framework never asks for a token. | done |
 | **Model zoo from the community**: recipes (model at a pinned commit, target fingerprint, format, quantization, toolchain image and verified hashes) generated from finished builds; a signed index with revocations, installation through a quarantine with trust levels, `llm-cli zoo`, the Community Hub, export for the community with a hand-over to a pull request, and the maintainer tools for the community repository. | done |
 | **Community repository and index published**: the community repository with the contribution workflow, the first signed index, the maintainer's key in `configs/community_keys.yml` and the settings `community_index_url` and `community_repo` filled in, shipped with a release. Until then the zoo works with pack files only. | planned |
 
@@ -961,7 +966,7 @@ What each released version contains is recorded in the [changelog](../CHANGELOG.
 | Community pack | A zip file with a target, a recipe or knowledge, a manifest of its files and usually a signature; private packs are encrypted. |
 | Recipe | How a model was built (model commit, target, format, quantization, options, result hashes), so others can rebuild it; contains no model files. |
 | Community index | The signed list of reviewed community packs, with their download addresses, hashes and revocations. |
-| Trust level | How far a pack was checked: official, verified, community, local or revoked. |
+| Trust level | How far a pack was checked: verified, community, local or revoked. |
 | Quarantine | A folder where a pack is unpacked and checked before it is installed. |
 | Sandbox | A locked-down container with no network and minimal rights. |
 | Trust on first use (TOFU) | The first time you connect to a device you confirm its key; afterwards any change is detected. |

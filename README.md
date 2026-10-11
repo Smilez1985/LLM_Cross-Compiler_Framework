@@ -463,9 +463,9 @@ Targets, recipes (how a model was built for a board) and knowledge can be shared
 `llm-cli zoo list|show|install|verify|export|keys` or **Tools > Open Community Hub**. A pack is installed only after
 checks in a quarantine folder and your confirmation, and it shows a trust level. Your own work is exported
 privacy-scrubbed and signed with your key; a pull request goes through the GitHub CLI or the browser, and the
-framework never asks for a token. Packs can also be encrypted for your own machines or a team. No community
-repository or index is published yet, so today only pack files can be installed. Details:
-[docs/Features.md](docs/Features.md#community-zoo).
+framework never asks for a token. Packs can also be encrypted for your own machines or a team, in the age format,
+so the standard age and rage tools open them too. No community repository or index is published yet, so today only
+pack files can be installed. Details: [docs/Features.md](docs/Features.md#community-zoo).
 
 ---
 

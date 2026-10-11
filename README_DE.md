@@ -485,8 +485,9 @@ Targets, Rezepte (wie ein Modell für ein Board gebaut wurde) und Wissen lassen 
 Prüfungen in einem Quarantäne-Ordner und deiner Bestätigung installiert und zeigt eine Vertrauensstufe. Deine eigene
 Arbeit wird datenschutzbereinigt exportiert und mit deinem Schlüssel signiert; ein Pull Request läuft über die
 GitHub CLI oder den Browser, und das Framework fragt nie nach einem Token. Packs lassen sich auch für deine eigenen
-Rechner oder ein Team verschlüsseln. Ein Community-Repository oder ein Index ist noch nicht veröffentlicht; heute
-lassen sich deshalb nur Pack-Dateien installieren. Einzelheiten: [docs/Features_DE.md](docs/Features_DE.md#community-zoo).
+Rechner oder ein Team verschlüsseln, im Format age, sodass auch die üblichen Werkzeuge age und rage sie öffnen. Ein
+Community-Repository oder ein Index ist noch nicht veröffentlicht; heute lassen sich deshalb nur Pack-Dateien
+installieren. Einzelheiten: [docs/Features_DE.md](docs/Features_DE.md#community-zoo).
 
 ---
 

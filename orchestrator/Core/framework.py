@@ -178,6 +178,8 @@ class FrameworkManager:
         """Creates the RAG manager on demand once RAG is enabled (also at runtime via GUI)."""
         if self.rag_manager is None and self.config.get("enable_rag_knowledge", False):
             self.rag_manager = RAGManager(self)
+            if self.community_manager is not None:  # knowledge packs installed while it was off
+                self.community_manager.sync_knowledge_base(self.rag_manager)
         return self.rag_manager
 
     def resolve_path(self, value) -> Path:

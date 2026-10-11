@@ -355,8 +355,10 @@ siehe auch den [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.m
    Community-Repositorys nur Paketdateien an (`contributions/target/*.zip`, `contributions/recipe/*.zip`,
    `contributions/knowledge/*.zip`), jeweils höchstens 5 MB, führt für jede `llm-cli zoo verify` aus (Manifest und
    Prüfsummen, keine Links, zusätzlichen oder binären Dateien, die Target-Prüfungen, die Formate von Rezepten und
-   Wissen, eine enthaltene Autorensignatur, die Datenschutz-Bereinigung) und lässt den Secret-Scan über die
-   geänderten Dateien laufen.
+   Wissen, eine enthaltene Autorensignatur, die Datenschutz-Bereinigung). Die Datenschutz-Bereinigung umfasst auch
+   die Tabelle der Geheimnis-Formate des Frameworks; ein Paket mit einem Schlüssel in einer seiner Dateien wird also
+   abgelehnt. Der Secret-Scan des Repositorys läuft nicht über die ZIP-Dateien, weil er Binärdateien überspringt und
+   in einem Paket nichts prüfen würde.
 5. **Durchsicht und Index:** Ein Maintainer sieht das Paket durch, führt es zusammen, trägt es in den signierten
    Index ein und signiert den Index offline. Danach erscheint es in `llm-cli zoo list` und im Community Hub.
 
@@ -380,8 +382,9 @@ nutzt sie nicht.
 
 - `scripts/community_repo/validate-contribution.yml` ist die Vorlage für den CI-Workflow des Community-Repositorys.
   Kopiere sie dort nach `.github/workflows/` (dieses Repository führt sie nicht aus) und setze `LCF_REF` auf die
-  Framework-Version, mit der die Pakete geprüft werden. Sie führt die Prüfungen aus Schritt 4 oben mit dem Framework
-  in diesem Tag aus. Der Signaturschlüssel erreicht die CI nie.
+  Framework-Version, mit der die Pakete geprüft werden: In der Vorlage steht ein Platzhalter, der Job schlägt also
+  fehl, bis das Tag eines veröffentlichten Releases eingetragen ist. Sie führt die Prüfungen aus Schritt 4 oben mit
+  dem Framework in diesem Tag aus. Der Signaturschlüssel erreicht die CI nie.
 - `scripts/zoo_sign_index.py` signiert den Index. Sein Signaturschlüssel liegt nur im Schlüsselbund des
   Betriebssystems (Dienst `lcf-community-index`):
 

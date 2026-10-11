@@ -13,10 +13,10 @@ from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
+import pyrage
 import pytest
 from click.testing import CliRunner
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey
 
 from orchestrator.Core import community_manager as zoo_mod
 from orchestrator.Core import community_pack as cp
@@ -83,7 +83,7 @@ class FakeSecrets:
 
 
 def trusted(key, valid_until="2099-12-31"):
-    raw = cp._raw_public(key.public_key())
+    raw = key.public_key().public_bytes_raw()
     return cp.TrustedKey(key_id=cp.key_id(key.public_key()), pubkey_b64=base64.b64encode(raw).decode(),
                          valid_until=valid_until)
 
@@ -356,12 +356,21 @@ class TestInstall:
         notes = world.cm.prepare_install_file(tmp_path / "b.zip").notes
         assert any("WARNING" in n and "before" in n for n in notes), notes
 
+    def test_the_whole_author_key_is_pinned_not_its_short_id(self, world, tmp_path, monkeypatch):
+        # A 64-bit key id can be matched by a key made for the purpose; here every key gets the same id.
+        monkeypatch.setattr(cp, "key_id", lambda key: "0123456789abcdef")
+        (tmp_path / "a.zip").write_bytes(world.target_pack(key=Ed25519PrivateKey.generate()))
+        world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "a.zip"))
+        (tmp_path / "b.zip").write_bytes(world.target_pack(name="second", key=Ed25519PrivateKey.generate()))
+        notes = world.cm.prepare_install_file(tmp_path / "b.zip").notes
+        assert any("WARNING" in n and "another key" in n for n in notes), notes
+
     def test_signature_with_a_foreign_public_key_is_refused(self, world, tmp_path):
         data = world.target_pack(key=Ed25519PrivateKey.generate())
         with zipfile.ZipFile(__import__("io").BytesIO(data)) as zf:
             members = {i.filename: zf.read(i) for i in zf.infolist()}
         sig = json.loads(members["pack.sig"])
-        sig["pubkey"] = base64.b64encode(cp._raw_public(Ed25519PrivateKey.generate().public_key())).decode()
+        sig["pubkey"] = base64.b64encode(Ed25519PrivateKey.generate().public_key().public_bytes_raw()).decode()
         members["pack.sig"] = json.dumps(sig).encode()
         with zipfile.ZipFile(tmp_path / "x.zip", "w") as zf:
             for name, content in members.items():
@@ -370,14 +379,18 @@ class TestInstall:
             world.cm.prepare_install_file(tmp_path / "x.zip")
 
     def test_encrypted_pack_to_my_key(self, world, tmp_path):
-        sender, me = Ed25519PrivateKey.generate(), X25519PrivateKey.generate()
-        blob = cp.encrypt_pack(world.target_pack(), sender=sender, recipients=[me.public_key()])
+        sender = Ed25519PrivateKey.generate()
+        me = cp.UserKeys(world.secrets).age_identity()  # what the CLI and the hub open a pack with
+        blob = cp.encrypt_pack(world.target_pack(), sender=sender, recipients=[me.to_public()])
         (tmp_path / "x.lcfpack").write_bytes(blob)
-        prepared = world.cm.prepare_install_file(tmp_path / "x.lcfpack", identity=me)
+        prepared = world.cm.prepare_install_file(tmp_path / "x.lcfpack")
         assert prepared.trust == TrustLevel.LOCAL and prepared.provenance.sender == cp.key_id(sender.public_key())
+        world.cm.discard(prepared)
         with pytest.raises(PackError, match="not one of the trusted senders"):
-            world.cm.prepare_install_file(tmp_path / "x.lcfpack", identity=me,
+            world.cm.prepare_install_file(tmp_path / "x.lcfpack",
                                           trusted_senders=[Ed25519PrivateKey.generate().public_key()])
+        with pytest.raises(PackError, match="not encrypted to your key"):
+            world.cm.prepare_install_file(tmp_path / "x.lcfpack", identity=pyrage.x25519.Identity.generate())
 
     def test_recipe_is_checked_against_the_installed_target(self, world, tmp_path):
         from test_recipes import recipe_data
@@ -413,6 +426,25 @@ class TestInstall:
         (tmp_path / "bad.zip").write_bytes(pack_bytes(bad, kind="knowledge", pack_id="bad", version="1.0.0"))
         with pytest.raises(PackError, match="expected a list"):
             world.cm.prepare_install_file(tmp_path / "bad.zip")
+
+    def test_a_knowledge_pack_installed_while_the_knowledge_base_is_off_is_imported_when_it_starts(
+            self, world, tmp_path, monkeypatch):
+        from orchestrator.Core import framework as framework_mod
+        world.framework.get_component = lambda name: None  # knowledge base off
+        root = tmp_path / "k"
+        root.mkdir()
+        (root / "knowledge.json").write_text(json.dumps([{"source": "s", "content": "c", "metadata": {}}]))
+        (tmp_path / "k.zip").write_bytes(pack_bytes(root, kind="knowledge", pack_id="notes", version="1.0.0"))
+        world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "k.zip"))
+        assert world.rag.ingested == []
+        monkeypatch.setattr(framework_mod, "RAGManager", lambda fm: world.rag)
+        framework = SimpleNamespace(rag_manager=None, community_manager=world.cm,
+                                    config=SimpleNamespace(get=lambda k, d=None: k == "enable_rag_knowledge" or d))
+        assert framework_mod.FrameworkManager.ensure_rag_manager(framework) is world.rag  # the user turns it on
+        assert world.rag.ingested == [("s", "c")]
+        framework.rag_manager = None
+        framework_mod.FrameworkManager.ensure_rag_manager(framework)  # the next start
+        assert world.rag.ingested == [("s", "c")], "imported once"
 
     def test_a_newer_knowledge_pack_is_ingested_after_the_old_folder_was_deleted(self, world, tmp_path):
         for version, content in (("1.0.0", "old"), ("1.1.0", "new")):
@@ -466,7 +498,7 @@ class TestRevocation:
         with pytest.raises(PackError, match="revoked"):
             build_trust_check(dest, world.cm.cache_dir)
 
-    def test_a_revocation_outlives_the_key_that_signed_it(self, world, monkeypatch):
+    def test_a_revocation_outlives_the_key_that_signed_it(self, world, monkeypatch, qapp):
         from orchestrator.Core.doctor import Severity, check_community
         keys = [trusted(world.maintainer)]
         monkeypatch.setattr(zoo_mod, "load_trusted_keys", lambda: keys)
@@ -485,6 +517,21 @@ class TestRevocation:
         with pytest.raises(PackError, match="revoked"):
             build_trust_check(dest, world.cm.cache_dir)
         assert check_community(SimpleNamespace(community_manager=world.cm))[0].severity == Severity.ERROR
+        listed = json.loads(invoke(world, "list", "--json").stdout)
+        assert [(i["id"], i["trust"], i["revoked"]) for i in listed] == [("demo-board", "revoked", "malware")]
+        assert world.cm.verify_installed()[0][2] == TrustLevel.REVOKED
+        from orchestrator.gui.community_hub import CommunityHubWindow
+        hub = CommunityHubWindow(SimpleNamespace(community_manager=world.cm, secrets_manager=world.secrets))
+        try:
+            wait(hub, qapp)
+            assert [(hub.table.item(r, 3).text(), hub.table.cellWidget(r, 6).text())
+                    for r in range(hub.table.rowCount())] == [("revoked", "Revoked")]
+        finally:
+            hub.close()
+
+    def test_every_trust_level_can_occur_and_has_a_hub_colour(self):
+        from orchestrator.gui.community_hub import TRUST_COLORS
+        assert {t.value for t in TrustLevel} == {"verified", "community", "local", "revoked"} == set(TRUST_COLORS)
 
     def test_local_target_warns_on_every_build(self, world, tmp_path):
         (tmp_path / "p.zip").write_bytes(world.target_pack())
@@ -551,6 +598,19 @@ class TestExport:
         with zipfile.ZipFile(result.path) as zf:
             assert [e["content"] for e in json.loads(zf.read("knowledge.json"))] == ["from docs"]
 
+    def test_pages_from_installed_knowledge_packs_are_not_exported_as_your_own(self, world):
+        world.rag.records = [{"source": "https://docs.invalid/a", "content": "mine", "metadata": {}},
+                             {"source": "https://docs.invalid/b", "content": "alice's",
+                              "metadata": {"origin_pack": "alice-notes"}}]
+        result = world.cm.export_pack("knowledge", author="mallory", pack_id="docs")
+        with zipfile.ZipFile(result.path) as zf:
+            assert [e["content"] for e in json.loads(zf.read("knowledge.json"))] == ["mine"]
+        assert any(n.startswith("1 page(s) imported from installed community knowledge packs were left out")
+                   for n in result.notes), result.notes
+        world.rag.records = world.rag.records[1:]
+        with pytest.raises(PackError, match="nothing to export"):
+            world.cm.export_pack("knowledge", author="mallory", pack_id="docs")
+
     def test_knowledge_keeps_its_sources_and_claims_no_licence(self, world):
         world.rag.records = [{"source": "https://docs.invalid/a", "content": "page", "metadata": {}},
                              {"source": "", "content": "nobody knows where from", "metadata": {}}]
@@ -582,11 +642,11 @@ class TestExport:
 
     def test_encrypted_export_for_private_sharing(self, world):
         make_target(world.root / "targets" / "team-board")
-        friend = X25519PrivateKey.generate()
-        result = world.cm.export_pack("target", "team-board", author="a", recipients=[friend.public_key()])
+        friend = pyrage.x25519.Identity.generate()  # also made with age-keygen or rage-keygen
+        result = world.cm.export_pack("target", "team-board", author="a", recipients=[friend.to_public()])
         assert result.encrypted and result.path.suffix == ".lcfpack"
-        opened = cp.decrypt_pack(result.path.read_bytes(), identity=friend)
-        assert opened.sender_id == result.signer
+        data, sender = cp.decrypt_pack(result.path.read_bytes(), identity=friend)
+        assert sender == result.signer and cp.read_manifest(data).id == "team-board"
 
 
 # --- pull request handoff -------------------------------------------------------------------------------------
@@ -782,11 +842,44 @@ class TestCli:
         assert (world.root / "targets" / "demo-board" / PROVENANCE_NAME).is_file()
         assert invoke(world, "verify").exit_code == 0
 
-    def test_file_import_needs_a_terminal_even_with_yes(self, world, tmp_path):
+    def test_yes_skips_the_question_only_for_packs_the_index_lists(self, world, tmp_path):
+        from orchestrator.cli import cli
+        rule = "a file without an index entry is 'local' and is always confirmed"
+        assert rule in " ".join(cli.commands["zoo"].commands["install"].get_help(
+            __import__("click").Context(cli)).split())
         (tmp_path / "p.zip").write_bytes(world.target_pack())
         result = invoke(world, "install", "--file", str(tmp_path / "p.zip"), "--yes")
-        assert result.exit_code == 1 and "No terminal" in result.output
+        assert result.exit_code == 1 and "No terminal" in result.output and rule in " ".join(result.output.split())
         assert not (world.root / "targets" / "demo-board").exists()
+        world.add((tmp_path / "p.zip").read_bytes())  # now the signed index lists this file
+        world.publish()
+        result = invoke(world, "install", "--file", str(tmp_path / "p.zip"), "--yes")
+        assert result.exit_code == 0, result.output
+        assert json.loads((world.root / "targets" / "demo-board" / PROVENANCE_NAME).read_text())["trust"] == "community"
+
+    def test_an_encrypted_file_opens_with_my_key(self, world, tmp_path):
+        me = cp.UserKeys(world.secrets).age_identity()
+        data = world.target_pack()
+        world.add(data)
+        world.publish()
+        (tmp_path / "p.lcfpack").write_bytes(cp.encrypt_pack(data, sender=Ed25519PrivateKey.generate(),
+                                                             recipients=[me.to_public()]))
+        result = invoke(world, "install", "--file", str(tmp_path / "p.lcfpack"), "--yes")
+        assert result.exit_code == 0, result.output
+        assert "sent by key" in result.output
+
+    def test_verify_rejects_a_pack_with_a_key_and_ci_relies_on_it(self, world, tmp_path):
+        from conftest import REPO_ROOT
+        root = tmp_path / "k"
+        root.mkdir()
+        page = f"restore with {pyrage.x25519.Identity.generate()}"  # a real age secret key, made at runtime
+        (root / "knowledge.json").write_text(json.dumps([{"source": "https://docs.invalid", "content": page}]))
+        (tmp_path / "k.zip").write_bytes(pack_bytes(root, kind="knowledge", pack_id="notes", version="1.0.0"))
+        result = invoke(world, "verify", str(tmp_path / "k.zip"))
+        assert result.exit_code == 1 and "privacy scrub" in result.output
+        # The secret scan skips binary files, so the workflow does not pretend to run it on the zips.
+        workflow = (REPO_ROOT / "scripts" / "community_repo" / "validate-contribution.yml").read_text()
+        assert "llm-cli zoo verify" in workflow and "secret_scan.py" not in workflow
 
     def test_verify_a_pack_file(self, world, tmp_path):
         (tmp_path / "good.zip").write_bytes(world.target_pack())
@@ -801,7 +894,15 @@ class TestCli:
         assert result.exit_code == 0, result.output
         assert "Privacy scrub" in result.output and "signed with key" in result.output
         keys = invoke(world, "keys")
-        assert keys.output.count("ed25519:") == 1 and keys.output.count("x25519:") == 1
+        assert keys.output.count("ed25519:") == 1 and keys.output.count("\nage1") == 1
+        assert [type(k).__name__ for k in cp.parse_public_keys(keys.output)] == ["Recipient", "Ed25519PublicKey"]
+
+    def test_keys_or_a_passphrase_not_both(self, world, tmp_path):
+        make_target(world.root / "targets" / "cli-board")
+        (tmp_path / "friend.keys").write_text(str(pyrage.x25519.Identity.generate().to_public()))
+        result = invoke(world, "export", "target", "cli-board", "--author", "pat", "--to",
+                        str(tmp_path / "friend.keys"), "--passphrase", input="x" * 12 + "\n")
+        assert result.exit_code == 2 and "not both" in result.output and "Passphrase" not in result.output
 
     def test_pr_submits_only_after_the_summary_was_confirmed(self, world, monkeypatch):
         make_target(world.root / "targets" / "pr-board")

@@ -78,6 +78,8 @@ PATTERNS: Tuple[SecretPattern, ...] = (
     _rule("Slack token", _key("xox[abprs]-", r"[A-Za-z0-9\-]{10,}")),
     _rule("Stripe key", _key("[rs]k_live_", r"[A-Za-z0-9]{20,}")),
     _rule("PyPI token", _key("pypi-AgE", r"[A-Za-z0-9_\-]{50,}")),
+    # An age identity (community packs, age-keygen, rage-keygen): bech32 of 32 bytes, upper case.
+    _rule("age secret key", _key("AGE-SECRET-KEY-1", r"[02-9AC-HJ-NP-Z]{58}\b")),
     _rule("JSON web token", _key("eyJ", r"[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
     # The scan reads line by line and reports the header; redaction removes the whole block (or everything
     # after a header without its end).

@@ -97,7 +97,7 @@ stderr aus, und bei `llm-cli mcp serve` trägt stdout das MCP-Protokoll.
 |---|---|
 | 0 | Erfolg |
 | 1 | Der Befehl ist gescheitert (zum Beispiel ein gescheiterter Build, eine gescheiterte Übertragung, ein beschädigtes Audit-Log, ein KI-Fehler) |
-| 2 | Ungültige Eingabe: unbekannte Option, ein unbekanntes Target oder eine nicht unterstützte Kombination aus Format, Board und Quantisierung (`build start`), ein unbekannter Anbieter (`--provider`), eine unbekannte Modellstufe (`ditto models download`), kein passender Evaluationsfall (`ditto eval`), eine fehlende Paket-ID, Datei oder Quelle (`zoo install`, `zoo export`), eine Schlüsseldatei ohne verwendbaren Schlüssel (`--to`, `--from`) |
+| 2 | Ungültige Eingabe: unbekannte Option, ein unbekanntes Target oder eine nicht unterstützte Kombination aus Format, Board und Quantisierung (`build start`), ein unbekannter Anbieter (`--provider`), eine unbekannte Modellstufe (`ditto models download`), kein passender Evaluationsfall (`ditto eval`), eine fehlende Paket-ID, Datei oder Quelle (`zoo install`, `zoo export`), eine Schlüsseldatei ohne verwendbaren Schlüssel (`--to`, `--from`), `--to` zusammen mit `--passphrase` (`zoo export`) |
 | 3 | Anmeldung: Der Anbieter hat die Zugangsdaten abgelehnt (`ditto login`, `ditto auth status --check`) |
 | 4 | Anmeldung: Anbieter oder lokaler Server nicht erreichbar |
 | 5 | Der Tresor für Zugangsdaten lässt sich nicht nutzen (kein nutzbarer Schlüsselbund, keine Passphrase, ein beschädigter Tresor); die Meldung nennt die Möglichkeiten. Jeder Befehl, der den Tresor braucht, verwendet ihn |
@@ -864,7 +864,7 @@ Namen, die das Framework verwendet:
 | `anthropic_api_key`, `openai_api_key`, `gemini_api_key`, `openrouter_api_key`, `custom_api_key` | Dittos Anbieter (besser: `llm-cli ditto login <anbieter>`) |
 | `hf_token` | Zugangsbeschränkte Hugging-Face-Modelle in Builds |
 | `qdrant_api_key` | Ein entfernter Qdrant-Server für die Wissensbasis (Einstellung `qdrant_url`) |
-| `community_signing_key`, `community_encryption_key` | Deine Schlüsselpaare für Community-Pakete, beim ersten Mal von [`llm-cli zoo`](#zoo-keys) oder vom Community-Export und -Import der GUI angelegt; nicht von Hand setzen |
+| `community_signing_key`, `community_age_identity` | Deine Schlüssel für Community-Pakete, beim ersten Mal von [`llm-cli zoo`](#zoo-keys) oder vom Community-Export und -Import der GUI angelegt; nicht von Hand setzen |
 
 ```bash
 llm-cli secrets set hf_token
@@ -1027,14 +1027,14 @@ Vertrauensstufen:
 | `verified` | Im signierten Index: geprüft und unabhängig nachgebaut. |
 | `community` | Im signierten Index: geprüft. |
 | `local` | Eine Datei, die der signierte Index nicht aufführt. Niemand hat sie geprüft: Die Installation fragt immer nach, und jeder Build eines solchen Targets zeigt eine Warnung. |
-| `revoked` | In der Liste zurückgezogener Pakete des Index. Es wird nicht installiert; installierte Kopien werden von `zoo verify`, `llm-cli doctor` und dem Community Hub markiert und nicht gebaut. `zoo verify`, `llm-cli doctor` und Builds wenden den zwischengespeicherten Rückzug weiter an, nachdem der Schlüssel, der ihn signiert hat, abgelaufen ist; `zoo list` und der Community Hub nutzen diesen Index dann nicht mehr. |
+| `revoked` | In der Liste zurückgezogener Pakete des Index. Es wird nicht installiert; installierte Kopien werden von `zoo list`, `zoo verify`, `llm-cli doctor` und dem Community Hub markiert und nicht gebaut, auch nachdem der Schlüssel abgelaufen ist, der den Rückzug signiert hat. |
 
 Targets, die mit dem Framework ausgeliefert werden, etwa Rockchip, haben keine Herkunftsdatei und erscheinen nicht im
 Zoo.
 
 Installierte Targets landen im Targets-Ordner, Rezepte in `community/recipes/<ID>/` und Wissenspakete in
 `community/knowledge/<ID>/` der Installation. Ein Wissenspaket wird direkt nach der Installation in deine
-Wissensbasis importiert; die Wissensbasis muss in diesem Moment eingeschaltet sein.
+Wissensbasis importiert oder, wenn die Wissensbasis ausgeschaltet ist, sobald sie eingeschaltet wird.
 
 In der GUI: **Tools > Community Hub öffnen** (Liste, Filter nach Art und Vertrauensstufe, „Import file...“, „Build“
 bei einem installierten Rezept), die letzte Seite des Modul-Assistenten und das Kontextmenü des Builder-Logs
@@ -1100,14 +1100,16 @@ Note: signed by author key 0123456789abcdef (first pack seen from this author)
 | `--file FILE` | Eine Paketdatei installieren, die dir jemand gegeben hat, oder ein verschlüsseltes Paket (`.lcfpack`). Ihre Vertrauensstufe ist `local`, außer der signierte Index führt ihre sha256 auf. Funktioniert ohne Netzwerk. |
 | `--from FILE` | Verschlüsselte Pakete: nur von diesen Absendern annehmen. Die Datei enthält die öffentlichen Schlüssel der Absender, wie `llm-cli zoo keys` sie ausgibt; wiederholbar. Ohne die Option wird jeder Absender angenommen; die Zusammenfassung nennt immer die Schlüssel-ID des Absenders. |
 | `--passphrase` | Verschlüsselte Pakete: nach der Passphrase fragen, statt das Paket mit deinem eigenen Schlüssel zu öffnen. |
-| `--yes` | Bei einem Paket, dessen Vertrauensstufe aus dem signierten Index kommt, nicht nachfragen. Ein `local`-Paket fragt immer. |
+| `--yes` | Bei einem Paket, dessen Vertrauensstufe aus dem signierten Index kommt, nicht nachfragen, auch bei einer Datei, die der Index führt. Eine Datei ohne Eintrag im Index ist `local` und wird immer bestätigt; ohne Terminal wird sie nicht installiert. |
 
 Verhalten:
 
 - Installieren per ID braucht das Netzwerk: Zuerst wird der Index neu heruntergeladen, und scheitert das, wird nichts
   installiert. Ein zurückgezogenes Paket wird abgelehnt.
-- Ein verschlüsseltes Paket wird vor dem Entschlüsseln gegen die Signatur seines Absenders geprüft. Es öffnet sich
-  mit deinem eigenen Schlüssel (siehe [zoo keys](#zoo-keys)) oder mit `--passphrase` mit der Passphrase. Der
+- Ein verschlüsseltes Paket (eine age-Datei und die Signatur ihres Absenders, siehe
+  [Funktionen](Features_DE.md#verschlüsselte-packs-zum-privaten-teilen)) wird vor dem Entschlüsseln gegen die
+  Signatur geprüft. Es öffnet sich mit deiner eigenen age-Identität (siehe [zoo keys](#zoo-keys)) oder mit
+  `--passphrase` mit der Passphrase; eine Passphrase mit einem scrypt-Arbeitsfaktor über 2^20 wird abgelehnt. Der
   Community Hub öffnet Pakete, die an deinen Schlüssel verschlüsselt sind; Pakete mit Passphrase brauchen diesen
   Befehl.
 - Nichts wird über einen vorhandenen Ordner gleichen Namens installiert, auch wenn sich nur die Groß- und
@@ -1168,8 +1170,8 @@ Datei), und Hinweise.
 | `--license TEXT` | Lizenz des Pakets als SPDX-ID. Standard `MIT`; für Wissen `NOASSERTION`, weil die Seiten unter den Bedingungen ihrer Eigentümer bleiben. |
 | `--model-license TEXT` | Rezepte: Lizenz-ID des Modells (Standard `unknown`). |
 | `--id TEXT` | Wissen: ID des Pakets (Standard `knowledge-` und das heutige Datum, z. B. `knowledge-20261011`). |
-| `--to FILE` | Das Paket zum privaten Teilen an die öffentlichen Schlüssel in dieser Datei verschlüsseln (was `llm-cli zoo keys` auf dem Rechner des Empfängers ausgegeben hat); wiederholbar. |
-| `--passphrase` | Das Paket zum privaten Teilen mit einer Passphrase verschlüsseln (zweimal abgefragt, mindestens 12 Zeichen). Mit `--to` kombinierbar. |
+| `--to FILE` | Das Paket zum privaten Teilen an die age-Empfänger (`age1...`) in dieser Datei verschlüsseln: was `llm-cli zoo keys` auf dem Rechner des Empfängers ausgegeben hat, oder ein öffentlicher Schlüssel aus `age-keygen`/`rage-keygen`; wiederholbar. |
+| `--passphrase` | Das Paket zum privaten Teilen mit einer Passphrase verschlüsseln (zweimal abgefragt, mindestens 12 Zeichen). Nicht zusammen mit `--to` (Exit-Code 2): age verschlüsselt an Schlüssel oder an eine Passphrase. |
 | `--out DIRECTORY` | Ordner für das Paket. Standard: `community/contributions/` in der Installation. |
 | `--pr` | Das Paket an einen Pull-Request im Community-Repository übergeben (siehe unten). |
 | `--yes` | Mit `--pr`: ohne Nachfrage nach der Zusammenfassung einreichen. |
@@ -1183,11 +1185,15 @@ Was in das Paket kommt:
 - **recipe:** nur ein fertiger Build eines Hugging-Face-Modells, dessen `build_info.json` den Commit des Modells und
   den Fingerabdruck des Targets enthält (Builds dieser Version). Ist das Target dein eigenes, erinnert die
   Zusammenfassung daran, es ebenfalls zu exportieren, sonst können andere das Rezept nicht bauen.
-- **knowledge:** die ganze Wissensbasis (sie muss eingeschaltet sein), datenschutzbereinigt. Jede Seite behält ihre
-  Quelladresse; Seiten ohne Quelle bleiben draußen.
+- **knowledge:** deine Seiten der Wissensbasis (sie muss eingeschaltet sein), datenschutzbereinigt. Jede Seite
+  behält ihre Quelladresse; Seiten ohne Quelle bleiben draußen, ebenso Seiten aus installierten
+  Community-Wissenspaketen (ein Hinweis sagt, wie viele).
 
-Die Datei heißt `contribution-<Art>-<ID>-<Version>.zip`, verschlüsselt `<Art>-<ID>-<Version>.lcfpack`. Dein
-Schlüsselpaar wird beim ersten Mal im Secrets-Speicher angelegt (siehe [zoo keys](#zoo-keys)).
+Die Datei heißt `contribution-<Art>-<ID>-<Version>.zip`, verschlüsselt `<Art>-<ID>-<Version>.lcfpack`. Deine
+Schlüssel werden beim ersten Mal im Secrets-Speicher angelegt (siehe [zoo keys](#zoo-keys)). Der Empfänger eines
+verschlüsselten Pakets öffnet es mit `llm-cli zoo install --file` oder ohne das Framework: entpacken, dann
+`age -d -i key.txt -o pack.zip pack.zip.age` (das Werkzeug `age` oder `rage`; die Signatur des Absenders wird dabei
+nicht geprüft).
 
 Die Datenschutz-Bereinigung ersetzt Home-Ordner durch `~` sowie IP- und MAC-Adressen, E-Mail-Adressen, JWTs, den
 Hostnamen dieses Rechners und deinen Benutzernamen durch Platzhalter wie `<ip>` und `<user>`, und sie schwärzt
@@ -1237,12 +1243,13 @@ llm-cli zoo export target my-board --author "<dein Name>" --pr
 llm-cli zoo keys
 ```
 
-Gibt deine öffentlichen Schlüssel aus: eine Zeile `ed25519:`, mit der deine Signaturen geprüft werden (andere nutzen
-sie mit `--from`), und eine Zeile `x25519:`, an die andere Pakete für dich verschlüsseln (`--to`). Sie sind nicht
-geheim; speichere die Ausgabe in einer Datei und gib sie den Leuten, mit denen du Pakete austauschst. Die Schlüssel
-werden beim ersten Mal angelegt und nur im verschlüsselten Secrets-Speicher aufbewahrt (Namen
-`community_signing_key` und `community_encryption_key`). Ein gespeicherter Schlüssel, der sich nicht lesen lässt,
-wird nie automatisch ersetzt.
+Gibt deine öffentlichen Schlüssel aus: einen age-Empfänger (`age1...`), an den andere Pakete für dich verschlüsseln
+(`--to` oder die Option `age -r` der age-Werkzeuge), und eine Zeile `ed25519:`, mit der deine Signaturen geprüft
+werden (andere nutzen sie mit `--from`). Sie sind nicht geheim; speichere die Ausgabe in einer Datei und gib sie den
+Leuten, mit denen du Pakete austauschst. Die Schlüssel werden beim ersten Mal angelegt und nur im verschlüsselten
+Secrets-Speicher aufbewahrt (Namen `community_signing_key` und `community_age_identity`). Ein gespeicherter
+Schlüssel, der sich nicht lesen lässt, wird nie automatisch ersetzt; bei einem beschädigten nennt die Fehlermeldung
+den Befehl, der einen neuen Schlüssel speichert.
 
 ```bash
 llm-cli zoo keys > my.keys
@@ -1250,9 +1257,9 @@ llm-cli zoo keys > my.keys
 
 ```
 # LCF public keys, key id 0123456789abcdef. Not secret: give them to people who send you
-# encrypted packs or verify your signed packs.
+# encrypted packs (the age recipient, also for the age and rage tools) or check your signed packs.
+age1<58 Zeichen>
 ed25519:<base64>
-x25519:<base64>
 ```
 
 ---

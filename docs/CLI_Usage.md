@@ -97,7 +97,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 |---|---|
 | 0 | Success |
 | 1 | The command failed (for example a failed build, a failed deployment, a damaged audit log, an AI error) |
-| 2 | Invalid input: unknown option, an unknown target or an unsupported format/board/quantization combination (`build start`), an unknown provider (`--provider`), an unknown model tier (`ditto models download`), no matching evaluation case (`ditto eval`), a missing pack id, file or source (`zoo install`, `zoo export`), a key file without a usable key (`--to`, `--from`) |
+| 2 | Invalid input: unknown option, an unknown target or an unsupported format/board/quantization combination (`build start`), an unknown provider (`--provider`), an unknown model tier (`ditto models download`), no matching evaluation case (`ditto eval`), a missing pack id, file or source (`zoo install`, `zoo export`), a key file without a usable key (`--to`, `--from`), `--to` together with `--passphrase` (`zoo export`) |
 | 3 | Sign-in: the provider rejected the credential (`ditto login`, `ditto auth status --check`) |
 | 4 | Sign-in: the provider or the local server cannot be reached |
 | 5 | The credential vault cannot be used (no usable keyring, no passphrase, a damaged vault); the message names the choices. Every command that needs the vault uses it |
@@ -845,7 +845,7 @@ Names the framework uses:
 | `anthropic_api_key`, `openai_api_key`, `gemini_api_key`, `openrouter_api_key`, `custom_api_key` | Ditto's providers (better: `llm-cli ditto login <provider>`) |
 | `hf_token` | Gated Hugging Face models in builds |
 | `qdrant_api_key` | A remote Qdrant server for the knowledge base (setting `qdrant_url`) |
-| `community_signing_key`, `community_encryption_key` | Your key pairs for community packs, created on first use by [`llm-cli zoo`](#zoo-keys) or the GUI's community export and import; do not set them by hand |
+| `community_signing_key`, `community_age_identity` | Your keys for community packs, created on first use by [`llm-cli zoo`](#zoo-keys) or the GUI's community export and import; do not set them by hand |
 
 ```bash
 llm-cli secrets set hf_token
@@ -1002,13 +1002,13 @@ Trust levels:
 | `verified` | In the signed index: reviewed and reproduced independently. |
 | `community` | In the signed index: reviewed. |
 | `local` | A file the signed index does not list. Nobody reviewed it: installing it always asks, and every build of such a target shows a warning. |
-| `revoked` | In the index's list of revoked packs. It is not installed; installed copies are flagged by `zoo verify`, `llm-cli doctor` and the Community Hub and are not built. `zoo verify`, `llm-cli doctor` and builds keep applying the cached revocation after the key that signed it has expired; `zoo list` and the Community Hub then no longer use that index. |
+| `revoked` | In the index's list of revoked packs. It is not installed; installed copies are flagged by `zoo list`, `zoo verify`, `llm-cli doctor` and the Community Hub and are not built, also after the key that signed the revocation has expired. |
 
 Targets that ship with the framework, such as Rockchip, have no provenance file and do not appear in the zoo.
 
 Installed targets go into the targets folder, recipes into `community/recipes/<id>/` and knowledge packs into
 `community/knowledge/<id>/` of the installation. A knowledge pack is imported into your knowledge base right after
-it is installed; the knowledge base must be enabled at that moment.
+it is installed or, if the knowledge base is off, as soon as it is turned on.
 
 In the GUI: **Tools > Open Community Hub** (list, filters by kind and trust, "Import file...", "Build" on an
 installed recipe), the module wizard's last page and the Builder log's context menu ("Export a finished build for
@@ -1072,15 +1072,17 @@ Note: signed by author key 0123456789abcdef (first pack seen from this author)
 | `--file FILE` | Install a pack file someone gave you, or an encrypted pack (`.lcfpack`). Its trust is `local` unless the signed index lists its sha256. Works without network. |
 | `--from FILE` | Encrypted packs: accept them only from these senders. The file holds the senders' public keys as `llm-cli zoo keys` prints them; repeatable. Without it, any sender is accepted; the summary always names the sender's key ID. |
 | `--passphrase` | Encrypted packs: ask for the passphrase instead of opening the pack with your own key. |
-| `--yes` | Do not ask for a pack whose trust comes from the signed index. A `local` pack always asks. |
+| `--yes` | Do not ask for a pack whose trust comes from the signed index, also a file the index lists. A file without an index entry is `local` and is always confirmed; without a terminal it is not installed. |
 
 Behaviour:
 
 - Installing by ID needs the network: the index is downloaded again first, and if that fails nothing is installed.
   A revoked pack is refused.
-- An encrypted pack is checked against its sender's signature before it is decrypted. It opens with your own key
-  (see [zoo keys](#zoo-keys)) or, with `--passphrase`, with the passphrase. The Community Hub opens packs encrypted
-  to your key; packs with a passphrase need this command.
+- An encrypted pack (an age file and its sender's signature, see
+  [Features](Features.md#encrypted-packs-for-private-sharing)) is checked against the signature before it is
+  decrypted. It opens with your own age identity (see [zoo keys](#zoo-keys)) or, with `--passphrase`, with the
+  passphrase; a passphrase whose scrypt work factor is above 2^20 is refused. The Community Hub opens packs
+  encrypted to your key; packs with a passphrase need this command.
 - Nothing is installed over an existing folder of the same name, also when only the case differs; remove the old
   folder first.
 - Exit code 1: a check failed (the problems are listed and the quarantine folder is removed), you answered no, or
@@ -1138,8 +1140,8 @@ lines per file) and notes.
 | `--license TEXT` | Licence of the pack as an SPDX ID. Default `MIT`; for knowledge `NOASSERTION`, because the pages keep their owners' terms. |
 | `--model-license TEXT` | Recipes: licence ID of the model (default `unknown`). |
 | `--id TEXT` | Knowledge: ID of the pack (default `knowledge-` and today's date, e.g. `knowledge-20261011`). |
-| `--to FILE` | Encrypt the pack for private sharing to the public keys in this file (what `llm-cli zoo keys` printed on the recipient's computer); repeatable. |
-| `--passphrase` | Encrypt the pack for private sharing with a passphrase (asked twice, at least 12 characters). Can be combined with `--to`. |
+| `--to FILE` | Encrypt the pack for private sharing to the age recipients (`age1...`) in this file: what `llm-cli zoo keys` printed on the recipient's computer, or a public key from `age-keygen`/`rage-keygen`; repeatable. |
+| `--passphrase` | Encrypt the pack for private sharing with a passphrase (asked twice, at least 12 characters). Not together with `--to` (exit code 2): age encrypts to keys or to one passphrase. |
 | `--out DIRECTORY` | Folder for the pack. Default: `community/contributions/` in the installation. |
 | `--pr` | Hand the pack to a pull request on the community repository (see below). |
 | `--yes` | With `--pr`: submit without asking after the summary. |
@@ -1153,11 +1155,15 @@ What goes into the pack:
 - **recipe:** only a finished build of a Hugging Face model whose `build_info.json` records the model's commit and
   the target's fingerprint (builds of this version). If the target is your own, the summary reminds you to export
   it too, or others cannot build the recipe.
-- **knowledge:** the whole knowledge base (it must be enabled), privacy-scrubbed. Every page keeps its source
-  address; pages without one are left out.
+- **knowledge:** your pages of the knowledge base (it must be enabled), privacy-scrubbed. Every page keeps its
+  source address; pages without one are left out, and so are pages imported from installed community knowledge
+  packs (a note says how many).
 
 The file is called `contribution-<kind>-<id>-<version>.zip`, or `<kind>-<id>-<version>.lcfpack` when it is
-encrypted. Your key pair is created in the secrets store on first use (see [zoo keys](#zoo-keys)).
+encrypted. Your keys are created in the secrets store on first use (see [zoo keys](#zoo-keys)). The recipient of
+an encrypted pack opens it with `llm-cli zoo install --file`, or without the framework: unzip it, then
+`age -d -i key.txt -o pack.zip pack.zip.age` (the `age` or `rage` tool; this does not check the sender's
+signature).
 
 The privacy scrub replaces home folders with `~`, and IP and MAC addresses, e-mail addresses, JWTs, this
 computer's host name and your user name with placeholders such as `<ip>` and `<user>`, and it redacts API keys.
@@ -1206,11 +1212,12 @@ llm-cli zoo export target my-board --author "<your name>" --pr
 llm-cli zoo keys
 ```
 
-Prints your public keys: an `ed25519:` line, which checks your signatures (others use it with `--from`), and an
-`x25519:` line, to which others encrypt packs for you (`--to`). They are not secret; save the output to a file and
-give it to the people you exchange packs with. The keys are created on first use and kept only in the encrypted
-secrets store (names `community_signing_key` and `community_encryption_key`). A stored key that cannot be read is
-never replaced automatically.
+Prints your public keys: an age recipient (`age1...`), to which others encrypt packs for you (`--to`, or the
+`age -r` option of the age tools), and an `ed25519:` line, which checks your signatures (others use it with
+`--from`). They are not secret; save the output to a file and give it to the people you exchange packs with. The
+keys are created on first use and kept only in the encrypted secrets store (names `community_signing_key` and
+`community_age_identity`). A stored key that cannot be read is never replaced automatically; for a damaged one the
+error message names the command that stores a new key.
 
 ```bash
 llm-cli zoo keys > my.keys
@@ -1218,9 +1225,9 @@ llm-cli zoo keys > my.keys
 
 ```
 # LCF public keys, key id 0123456789abcdef. Not secret: give them to people who send you
-# encrypted packs or verify your signed packs.
+# encrypted packs (the age recipient, also for the age and rage tools) or check your signed packs.
+age1<58 characters>
 ed25519:<base64>
-x25519:<base64>
 ```
 
 ---

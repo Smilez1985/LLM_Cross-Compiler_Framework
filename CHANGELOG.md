@@ -95,15 +95,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   token, URLs with a user name or password and URLs with a credential or session parameter (such as `?token=`
   or `;jsessionid=`) are not remembered. *Tools > Clear Input History...* forgets it.
 - **Signed community packs**: a pack is a zip with a manifest (sha256, size and mode of every file) and an
-  optional Ed25519 author signature. Reading a pack accepts exactly the listed files, never links or special
-  files, and checks every hash. Trusted publisher keys ship in `configs/community_keys.yml`, each with an
-  expiry date.
-- **Encrypted packs for private sharing** (with your own machines or a team): encrypted to one or more
-  recipients' X25519 public keys and/or a passphrase (scrypt), in the style of age (ChaCha20-Poly1305,
-  HKDF-SHA256, authenticated header), and signed by the sender, so recipients see who sent it and any change,
-  including an added or removed recipient, is detected. As in age, a file holds at most one passphrase entry.
-  Each user gets an Ed25519/X25519 key pair on first use, kept only in the encrypted secrets store; the public
-  keys can be exported as text.
+  optional Ed25519 author signature; the author's public key is pinned at the first install, and another key
+  under the same author name is shown with a warning. Reading a pack accepts exactly the listed files, never links
+  or special files, and checks every hash. Trusted publisher keys ship in `configs/community_keys.yml`, each with
+  an expiry date.
+- **Encrypted packs for private sharing** (with your own machines or a team): encrypted in the age format by rage
+  (through `pyrage`) to one or more recipients' age keys or to one passphrase, and signed by the sender, so
+  recipients see who sent it and any change, including an added or removed recipient, is detected. The standard
+  `age` and `rage` tools open them too. A passphrase pack whose scrypt work factor needs more than 1 GiB of memory
+  is refused before anything is decrypted. Each user gets an Ed25519 key and an age identity on first use, kept
+  only in the encrypted secrets store; the public keys can be exported as text.
 - **Recipes**, the model zoo's "model templates": the model at a pinned commit, the target with a fingerprint
   of its files, board, format, quantization, options and verified results (artifact hashes, toolchain image,
   device tests). A recipe is generated from a finished build, checked against the target's capabilities and
@@ -118,11 +119,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   first (so a revocation is never missed), downloads the pack pinned by size and sha256, checks it in a
   quarantine folder (exact file list and hashes, the target validators, the recipe and knowledge schemas), shows
   a summary with its trust level and installs it only after you confirm, atomically and with a provenance file.
-  Trust levels: official, verified, community, local (a file without an index entry: always confirmed, and a
-  warning on every build) and revoked (blocked; installed copies are flagged by `llm-cli doctor` and the hub and
-  are not built, also after the key that signed the revocation has expired). `llm-cli zoo verify` finds installed
-  packs that were changed or revoked. The install summary is always shown as plain text, so text from a pack
-  cannot hide its trust level.
+  Trust levels: verified, community, local (a file without an index entry: always confirmed, and a warning on
+  every build) and revoked (blocked; installed copies are flagged by `llm-cli zoo list`, `zoo verify`,
+  `llm-cli doctor` and the hub and are not built, also after the key that signed the revocation has expired).
+  `llm-cli zoo verify` finds installed packs that were changed or revoked. The install summary is always shown as
+  plain text, so text from a pack cannot hide its trust level. A knowledge pack is imported into the knowledge
+  base when it is installed, or when the knowledge base is turned on later.
 - **Community Hub** in the Tools menu: a trust column, filters for kind and trust, import of pack files (also
   packs encrypted to your key), and "Build" on an installed recipe fills in the Builder, including the model's
   pinned commit.
@@ -130,7 +132,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   build becomes a recipe) and with `llm-cli zoo export`: a pack of a target, a recipe or your knowledge base,
   privacy-scrubbed (the changes are shown), validated and signed with your key; with `--to` or `--passphrase`
   it is encrypted for private sharing instead. Knowledge packs keep the source address of every page and claim
-  no licence for them (`NOASSERTION`); a community pack you installed is not re-signed as your own. "Open pull
+  no licence for them (`NOASSERTION`); a community pack you installed is not re-signed as your own, and pages
+  imported from installed knowledge packs are left out of a knowledge export. "Open pull
   request" (`--pr`, which asks after the summary unless `--yes` is given) hands it to the community repository
   (setting `community_repo`): through the GitHub CLI if it is installed and logged in, otherwise the
   repository's upload page opens in the browser. The framework never asks for, reads or shows a token.
@@ -218,8 +221,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   CPU feature list.
 - Local model: effort "low" turns thinking off (Qwen3.5 on llama-server otherwise thinks at full length, which
   takes minutes on a CPU); "medium" and up keep it.
-- Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0) and `fastembed` 0.8.1 (local embeddings,
-  ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
+- Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0), `fastembed` 0.8.1 (local embeddings, ONNX on
+  the CPU) and `pyrage` 1.4.0 (age encryption of privately shared community packs) are pinned exactly; pip-audit
+  reports no known vulnerabilities.
 - **Ditto's knowledge excerpts fit the context**: they take at most a third of `chat_context_limit`; an excerpt
   that does not fit is skipped and a too long first one is shortened at a line (an open code block is closed).
 - **Deep Ingest outcome**: it said "Deep Ingest complete" even when every URL failed. It now reports success
@@ -344,9 +348,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `sk-` took minutes to redact before.
 - **One table of secret formats** (`orchestrator/security/secret_patterns.py`) for the secret scan and for
   runtime redaction, which knew only five formats before. New: Unsloth Studio keys (`sk-unsloth-`), Bedrock
-  short-term keys (`bedrock-api-key-`), LocalAI keys (`lai-`), `Authorization: Bearer` lines and quoted values
-  assigned to `api_key`, `secret` or `token` (a lower-case name such as `"community_encryption_key"` is not
-  reported). Runtime redaction now also covers JWTs, private key blocks and passwords in URLs.
+  short-term keys (`bedrock-api-key-`), LocalAI keys (`lai-`), age secret keys (`AGE-SECRET-KEY-1...`),
+  `Authorization: Bearer` lines and quoted values assigned to `api_key`, `secret` or `token` (a lower-case name
+  such as `"community_signing_key"` is not reported). Runtime redaction now also covers JWTs, private key blocks and passwords in URLs.
 - API keys held in memory by Ditto's provider layer show as `<redacted>` in `str()` and `repr()` and cannot be
   pickled.
 - A key of a custom OpenAI-compatible server belongs to the address it was saved for (scheme, host and port):
