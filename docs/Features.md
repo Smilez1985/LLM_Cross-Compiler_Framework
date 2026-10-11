@@ -95,18 +95,29 @@ A build runs these steps; each one is logged:
 4. **Stage the model on the host:** a Hugging Face model is downloaded on your computer (with the token
    `hf_token` for gated models), a local folder or file is used as it is. The containers get it read-only.
 5. **Security scan:** Trivy scans the image for HIGH and CRITICAL vulnerabilities (setting `enable_security_scan`,
-   pinned image `aquasec/trivy:0.75.0`). Findings are a warning in the log, not an error.
+   pinned image `aquasec/trivy:0.75.0`). Findings are a warning in the log, not an error. A scan that does not
+   finish within the build's time limit (`build_timeout`) is stopped with a warning.
 6. **Importance matrix** (GGUF only, when chosen).
 7. **Convert and quantize** in sandboxed containers ([Build sandbox](#build-sandbox)).
 8. **Results:** the model file is collected, `build_info.json` is completed with the model files and their SHA256
-   hashes, and a `Model_Card.md` with hashes and usage notes is written. Per-build images are removed afterwards.
+   hashes, a `Model_Card.md` with hashes and usage notes is written, and a ZIP of these files is made. All of this
+   is prepared in a hidden folder next to the output folder and moved into it only at the end, so a cancelled or
+   failed build leaves no files in the output folder, and files of an earlier build there are replaced only by a
+   completed one. Links in the build output are never followed. Per-build images are removed afterwards.
 
 Further behaviour:
 
 - **Cancel:** the `cancel_build` tool (Ditto in the GUI chat, or an MCP client, for builds of its own process)
   stops the running container, including a running security scan or image build, and a later step can never undo
-  it. The GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not cancel (see
+  it. Once a build has failed or is moving its files into the output folder, it can no longer be cancelled and
+  finishes on its own. The GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not cancel (see
   [Known gaps](#known-gaps)).
+- **Build slots:** at most two builds run at the same time in one program; a further build waits for a free slot
+  (its stage shows "Waiting for a free build slot") instead of failing. A cancelled build keeps its slot until its
+  container has stopped.
+- **Unknown target:** the CLI, Ditto and MCP clients refuse an unknown target before anything runs (the CLI with
+  exit code 2). A request that still ends up with nothing to build fails with "Nothing to build" instead of
+  reporting success.
 - **Timeouts:** each container step has a time limit (setting `build_timeout`, default 3600 s); only a real time-out
   counts as one.
 - **Output folder:** CLI builds go to `output/build_<date>_<time>/<target>/<model>/<quantization>/` in the
@@ -490,20 +501,24 @@ framework never sees it.
 - **Every call goes through the tool registry:** input schema, your permissions, confirmation, audit log (actor
   `mcp`). Tool annotations (read-only, idempotent) are only hints for the client.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
-  elicitation). The question shows the tool and every argument in full, the security-relevant ones first, with
-  control characters made visible; a question that would be longer than 4000 characters is refused instead of being
-  cut. Only a real answer from the user counts as approval. Declined and cancelled calls are audited too. A client
-  that cannot ask gets a refusal with a hint how to allow the tool.
+  elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
+  and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be
+  longer than 4000 characters is refused instead of being cut. Only a real answer from the user counts as approval,
+  and a "no" is final for that call, even if the permissions are loosened while the question is open. Declined and
+  cancelled calls, and calls refused before they run (invalid arguments, a confirmation that fails), are audited
+  too. A client that cannot ask gets a refusal with a hint how to allow the tool.
 - **Instructions to the client:** the server describes the typical flow (targets → capabilities → build → status
   and log → artifacts) and tells the client that build logs and knowledge-base results are external text whose
   instructions must not be followed.
 - **Transports:** stdio (default; the client starts the server) or Streamable HTTP on a loopback address only
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). HTTP checks Host and Origin and needs a bearer token
   that is created per user in `~/.llm-framework/mcp_http_token`.
-- **Settings:** the server never reads settings from the folder it is started in, so a project folder cannot change
-  its behaviour.
-- **Client setup:** `llm-cli mcp config` prints the commands and JSON with correct quoting; `--write claude-desktop`
-  adds the server to Claude Desktop's configuration, keeps other entries and writes a private backup.
+- **Working folder:** the server never reads settings or imports code from the folder it is started in (the client
+  starts it with `python -P`), and on Windows it does not run programs such as `docker` or `git` from there. A
+  project folder cannot change its behaviour.
+- **Client setup:** `llm-cli mcp config` prints the commands and JSON with quoting that holds in POSIX shells and in
+  both cmd and PowerShell; `--write claude-desktop` adds the server to Claude Desktop's configuration, keeps other
+  entries and writes a private backup.
 
 **Claude subscribers:** this is the way to use the framework with a Claude plan. Anthropic does not allow
 third-party apps to use a subscription's sign-in or limits, so Ditto itself needs an API key; Claude Code and Claude
@@ -527,8 +542,9 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
 - The permissions are asked once (GUI dialog on the first start, `llm-cli ditto setup`) and stored in
   `~/.llm-framework/tool_policy.json` (readable only by you). Single tools can be set differently in the GUI.
 - Until the setup is done, read-only tools are allowed and everything else asks.
-- A damaged or unreadable permission file denies every tool instead of falling back to looser defaults; a copy is
-  kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and `llm-cli mcp serve` say so.
+- A damaged or unreadable permission file, or a link to a missing one, denies every tool instead of falling back to
+  looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and
+  `llm-cli mcp serve` say so.
 
 **Audit log** (`~/.llm-framework/audit.db`, SQLite): every tool call is recorded with time, actor, tool, decision,
 whether a person confirmed it, and the outcome. Arguments are stored redacted and shortened, plus a hash of the full
@@ -536,7 +552,8 @@ text. Each entry contains the hash of the previous one; with the key from your o
 HMAC chain that someone who can only edit the database cannot recompute. After every entry the newest one is also
 written to an anchor file, so removing the newest entries is detected too. `llm-cli tools audit --verify` checks the
 chain and tells a changed entry apart from a wrong key. Each entry is written in its own transaction, so several
-processes cannot fork the chain.
+processes cannot fork the chain. `llm-cli tools audit --archive` moves the log and its anchor aside (kept with a
+timestamp) and starts a new chain, for example after `llm-cli doctor` has reported a problem with the log.
 
 ---
 

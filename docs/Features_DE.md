@@ -98,19 +98,31 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
    Container bekommen es nur lesend.
 5. **Sicherheits-Scan:** Trivy durchsucht das Image nach Schwachstellen der Stufen HIGH und CRITICAL (Einstellung
    `enable_security_scan`, festgelegtes Image `aquasec/trivy:0.75.0`). Funde erscheinen als Warnung im Log, nicht
-   als Fehler.
+   als Fehler. Ein Scan, der nicht innerhalb des Zeitlimits des Builds (`build_timeout`) fertig wird, wird mit
+   einer Warnung gestoppt.
 6. **Importance Matrix** (nur GGUF, wenn gewählt).
 7. **Konvertieren und quantisieren** in Containern mit Sandbox ([Build-Sandbox](#build-sandbox)).
 8. **Ergebnisse:** Die Modelldatei wird eingesammelt, `build_info.json` wird um die Modelldateien und ihre
-   SHA256-Hashes ergänzt, und eine `Model_Card.md` mit Hashes und Hinweisen zur Nutzung wird geschrieben.
-   Images pro Build werden danach entfernt.
+   SHA256-Hashes ergänzt, eine `Model_Card.md` mit Hashes und Hinweisen zur Nutzung wird geschrieben, und ein ZIP
+   dieser Dateien wird erstellt. All das wird in einem versteckten Ordner neben dem Ausgabeordner vorbereitet und
+   erst ganz am Ende hineinverschoben. So hinterlässt ein abgebrochener oder gescheiterter Build keine Dateien im
+   Ausgabeordner, und Dateien eines früheren Builds dort ersetzt nur ein abgeschlossener. Links in der Ausgabe des
+   Builds werden nie verfolgt. Images pro Build werden danach entfernt.
 
 Weiteres Verhalten:
 
 - **Abbrechen:** Das Tool `cancel_build` (Ditto im GUI-Chat oder ein MCP-Client, für Builds des eigenen Prozesses)
   stoppt den laufenden Container, auch einen laufenden Sicherheits-Scan oder Image-Build, und kein späterer Schritt
-  kann den Abbruch rückgängig machen. Die GUI hat keine Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start`
-  bricht nicht ab (siehe [Bekannte Lücken](#bekannte-lücken)).
+  kann den Abbruch rückgängig machen. Ist ein Build gescheitert oder verschiebt er gerade seine Dateien in den
+  Ausgabeordner, lässt er sich nicht mehr abbrechen und läuft von selbst zu Ende. Die GUI hat keine
+  Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start` bricht nicht ab (siehe
+  [Bekannte Lücken](#bekannte-lücken)).
+- **Build-Slots:** In einem Programm laufen höchstens zwei Builds gleichzeitig; ein weiterer Build wartet auf einen
+  freien Slot (seine Stufe zeigt „Waiting for a free build slot“), statt zu scheitern. Ein abgebrochener Build
+  behält seinen Slot, bis sein Container gestoppt ist.
+- **Unbekanntes Target:** CLI, Ditto und MCP-Clients lehnen ein unbekanntes Target ab, bevor etwas läuft (die CLI
+  mit Exit-Code 2). Eine Anfrage, bei der trotzdem nichts zu bauen bleibt, scheitert mit „Nothing to build“, statt
+  Erfolg zu melden.
 - **Zeitlimits:** Jeder Container-Schritt hat ein Zeitlimit (Einstellung `build_timeout`, Standard 3600 s); nur
   ein echtes Überschreiten zählt als Zeitüberschreitung.
 - **Ausgabeordner:** CLI-Builds landen in `output/build_<Datum>_<Uhrzeit>/<Target>/<Modell>/<Quantisierung>/` in der
@@ -512,21 +524,25 @@ Konto oder Schlüssel an; das Framework sieht das nie.
 - **Jeder Aufruf läuft durch die Tool-Registry:** Eingabeschema, deine Berechtigungen, Bestätigung, Audit-Log
   (Akteur `mcp`). Tool-Annotationen (nur lesend, idempotent) sind nur Hinweise für den Client.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
-  (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst, mit
-  sichtbar gemachten Steuerzeichen; eine Frage, die länger als 4000 Zeichen würde, wird abgelehnt statt gekürzt.
-  Nur eine echte Antwort des Benutzers zählt als Zustimmung. Abgelehnte und abgebrochene Aufrufe landen ebenfalls im
-  Audit-Log. Ein Client, der nicht fragen kann, bekommt eine Ablehnung mit einem Hinweis, wie du das Tool erlaubst.
+  (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
+  Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine
+  Frage, die länger als 4000 Zeichen würde, wird abgelehnt statt gekürzt. Nur eine echte Antwort des Benutzers zählt
+  als Zustimmung, und ein „Nein“ gilt für diesen Aufruf endgültig, auch wenn die Berechtigungen gelockert werden,
+  während die Frage offen ist. Abgelehnte und abgebrochene Aufrufe sowie Aufrufe, die abgewiesen werden, bevor sie
+  laufen (ungültige Argumente, eine gescheiterte Bestätigung), landen ebenfalls im Audit-Log. Ein Client, der nicht
+  fragen kann, bekommt eine Ablehnung mit einem Hinweis, wie du das Tool erlaubst.
 - **Anweisungen an den Client:** Der Server beschreibt den typischen Ablauf (Targets → Capabilities → Build → Status
   und Log → Artefakte) und sagt dem Client, dass Build-Logs und Ergebnisse aus der Wissensbasis externer Text sind,
   dessen Anweisungen nicht befolgt werden dürfen.
 - **Transporte:** stdio (Standard; der Client startet den Server) oder Streamable HTTP nur auf einer
   Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). HTTP prüft Host und Origin und
   braucht ein Bearer-Token, das pro Benutzer in `~/.llm-framework/mcp_http_token` angelegt wird.
-- **Einstellungen:** Der Server liest nie Einstellungen aus dem Ordner, in dem er gestartet wird; ein Projektordner
-  kann sein Verhalten also nicht ändern.
-- **Client-Einrichtung:** `llm-cli mcp config` gibt die Befehle und das JSON korrekt gequotet aus;
-  `--write claude-desktop` trägt den Server in die Konfiguration von Claude Desktop ein, behält andere Einträge und
-  schreibt eine private Sicherung.
+- **Arbeitsordner:** Der Server liest nie Einstellungen und importiert nie Code aus dem Ordner, in dem er gestartet
+  wird (der Client startet ihn mit `python -P`), und unter Windows startet er von dort keine Programme wie `docker`
+  oder `git`. Ein Projektordner kann sein Verhalten nicht ändern.
+- **Client-Einrichtung:** `llm-cli mcp config` gibt die Befehle und das JSON so gequotet aus, dass sie in
+  POSIX-Shells und in cmd wie PowerShell halten; `--write claude-desktop` trägt den Server in die Konfiguration von
+  Claude Desktop ein, behält andere Einträge und schreibt eine private Sicherung.
 
 **Claude-Abonnenten:** Das ist der Weg, das Framework mit einem Claude-Abo zu nutzen. Anthropic erlaubt
 Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines Abos zu verwenden; Ditto selbst braucht deshalb einen
@@ -552,9 +568,9 @@ Verfügung.
   `~/.llm-framework/tool_policy.json` gespeichert (nur für dich lesbar). Einzelne Tools lassen sich in der GUI
   abweichend einstellen.
 - Bis zur Einrichtung sind nur lesende Tools erlaubt, alles andere fragt.
-- Eine beschädigte oder unlesbare Berechtigungsdatei verbietet jedes Tool, statt auf lockerere Standardwerte
-  zurückzufallen; eine Kopie bleibt als `tool_policy.json.bad`, und `llm-cli doctor`, `llm-cli tools list` und
-  `llm-cli mcp serve` weisen darauf hin.
+- Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
+  lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
+  `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
 
 **Audit-Log** (`~/.llm-framework/audit.db`, SQLite): Jeder Tool-Aufruf wird mit Zeit, Akteur, Tool, Entscheidung, ob
 ein Mensch bestätigt hat, und Ergebnis festgehalten. Argumente werden geschwärzt und gekürzt gespeichert, dazu ein
@@ -563,7 +579,8 @@ deines Betriebssystems ist das eine HMAC-Kette, die jemand, der nur die Datenban
 kann. Nach jedem Eintrag wird der neueste zusätzlich in eine Anker-Datei geschrieben, sodass auch das Entfernen der
 neuesten Einträge auffällt. `llm-cli tools audit --verify` prüft die Kette und unterscheidet einen geänderten Eintrag
 von einem falschen Schlüssel. Jeder Eintrag wird in einer eigenen Transaktion geschrieben, damit mehrere Prozesse die
-Kette nicht aufspalten.
+Kette nicht aufspalten. `llm-cli tools audit --archive` legt das Log und seinen Anker beiseite (mit Zeitstempel
+aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli doctor` ein Problem mit dem Log gemeldet hat.
 
 ---
 

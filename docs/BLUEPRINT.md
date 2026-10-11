@@ -155,16 +155,16 @@ flowchart TB
 | CLI | `orchestrator/cli.py` (`llm-cli`) | Top-level commands `build`, `config`, `deploy`, `ditto`, `doctor`, `mcp`, `module`, `scan`, `secrets`, `swarm`, `targets`, `tools` (`doctor` and `scan` are single commands, the others are groups). |
 | FrameworkManager | `orchestrator/Core/framework.py` | Starts all managers in four phases (security and infrastructure, core logic, AI and knowledge, guardians and operations), connects them, keeps one long-lived asyncio loop for builds and resolves relative data paths against the installation folder, not the working directory. |
 | ConfigManager | `orchestrator/Core/config_manager.py` | Settings with a schema (type, default, validation rule). The config folder is `LLM_FRAMEWORK_CONFIG_DIR` if set, otherwise the installation's `configs/` if it is writable, otherwise the per-user folder; never the working directory. User settings are saved to `config.yml` there. Environment variables with the prefix `LLM_FRAMEWORK_`, `FRAMEWORK_` or `LLM_` override known settings. Personal state lives in `~/.llm-framework` (override with `LLM_FRAMEWORK_HOME`), mode 0700 on Linux and macOS. |
-| SecretsManager | `orchestrator/Core/secrets_manager.py` | Encrypted store (`secrets.store` in the per-user folder, Fernet) whose master key is kept in the operating system's keyring. Holds API keys and the Hugging Face token (`hf_token`). A store in the old location (config folder) is copied over once. |
+| SecretsManager | `orchestrator/Core/secrets_manager.py` | Encrypted store (`secrets.store` in the per-user folder, Fernet) whose master key is kept in the operating system's keyring. Holds API keys and the Hugging Face token (`hf_token`). The secrets of a store in the old location (config folder) are taken over once, also into an existing per-user store; secrets already there win, and the old file is left unchanged. A long-running process (GUI, MCP server) re-reads the store when another process has changed it. |
 | TargetManager and capabilities | `orchestrator/Core/target_manager.py`, `orchestrator/schemas/targets.py` | Loads the `target.yml` of every target folder (folders starting with `_` or `.`, such as `_template`, are skipped) and validates its `capabilities:` block: boards, formats, quantization types (also per board), aliases, board defaults, default board, importance matrix and calibration needs, support level (`official`, `community`, `experimental`). |
 | BuildService | `orchestrator/Core/build_service.py`, `orchestrator/schemas/build.py` | One typed entry point for builds: validate, start, status, cancel, log tail, artifacts, healing decision. The tools (MCP server and Ditto) use it. GUI and CLI check the same capabilities and then submit to the orchestrator directly. |
 | LLMOrchestrator | `orchestrator/Core/orchestrator.py` | Queue and pipeline: prepares calibration text, expands a request into jobs (model x target x format x quantization), runs them on the build engine, handles cancellation and the self-healing approval loop. |
-| BuildEngine | `orchestrator/Core/builder.py`, `orchestrator/utils/build_context.py` | Stages the Docker build context, builds the image (BuildKit when available), downloads or mounts the model, runs the optional Trivy scan, the importance-matrix stage and the build stage in sandboxed containers, writes the manifest, model card and ZIP, and cleans up. |
+| BuildEngine | `orchestrator/Core/builder.py`, `orchestrator/utils/build_context.py` | Stages the Docker build context, builds the image (BuildKit when available), downloads or mounts the model, runs the optional Trivy scan, the importance-matrix stage and the build stage in sandboxed containers, writes the manifest, model card and ZIP into a hidden staging folder, moves them into the output folder once the build can no longer be cancelled, and cleans up. |
 | DockerManager | `orchestrator/Core/docker_manager.py` | Docker connection and live CPU/RAM figures for the GUI. |
 | Rockchip reference target | `targets/Rockchip/` | `dockerfile` (Debian bookworm-slim; llama.cpp v0.6.0 tools; three Python venvs), `modules/build.sh` (dispatcher for `gguf`, `rkllm`, `rknn` and the `imatrix` job), `modules/rkllm_module.sh`, `modules/rknn_module.sh`, `scripts/export_rkllm.py`, `scripts/rknn_converter.py`, `target.yml`. `targets/_template/` is the starting point for new targets ([Module Developer Guide](Module_Developer_Guide.md)). |
 | DeploymentManager and SSH trust | `orchestrator/Core/deployment_manager.py`, `orchestrator/utils/ssh_trust.py` | Builds the deployment package, checks the device's host key, pairs the framework's SSH key, uploads and runs the installer. |
 | Tool registry, permissions, audit | `orchestrator/tools/` (`registry.py`, `policy.py`, `audit.py`, `confirmation.py`, `framework_tools.py`) | Eleven typed tools with risk tiers, the user's stored permissions, the confirmation text (shared by MCP and Ditto) and a hash-chained audit log. |
-| MCP server | `orchestrator/mcp_server.py` | Exposes the tool registry over MCP (official SDK `mcp` 2.3.0) via stdio or local Streamable HTTP. |
+| MCP server | `orchestrator/mcp_server.py` | Exposes the tool registry over MCP (official SDK `mcp` 2.3.0) via stdio or local Streamable HTTP. The launch command it writes for clients uses `python -P`, so nothing is imported from the folder a client starts it in. |
 | Provider layer (unreleased) | `orchestrator/llm/` | One client (`LLMClient`) for every AI provider, built on the official `anthropic` and `openai` SDKs; OpenAI-compatible servers go through `openai`. Picks provider, model and effort per task from the settings and the presets in `configs/llm_providers.yml` (a file of the same name in the config folder adds or replaces presets). Retries (two, the SDKs' own retries are off), a fallback chain for refusals and outages (`ai_fallback_chain`), structured answers validated against schemas with one repair attempt, typed errors, the privacy filter for cloud providers, and a tool loop. |
 | Ditto (rebuilt, unreleased) | `orchestrator/Core/ditto_manager.py` | The assistant: chat with the framework tools (at most 8 model turns per question, tool calls as actor `ditto` through the registry), analysis of failed builds, module proposals from a hardware probe and build recommendations. The last three are validated structured answers; an invalid answer is an error and is never applied. A healing analysis or build recommendation with a dangerous command is discarded; a module proposal is checked again by the module generator. The chat history is append-only (`chat_history.json`); a long conversation is summarized into a new one. |
 | Managed local model (unreleased) | `orchestrator/runtime/`, `configs/llama_runtime.yml` | Downloads a pinned llama.cpp build (b11429, the same commit as v0.6.0) for the hardware (CPU, Vulkan, CUDA, Metal; ROCm only when chosen) and pinned GGUF models in tiers (Qwen3.5 9B, 4B and 2B, 2-bit variants for weak hardware, and an IBM Granite 4.2 3B model on request), each checked by size and SHA256. Runs `llama-server` on 127.0.0.1 with a free port and a per-start API key. The `local` provider finds the running server by itself. |
@@ -209,8 +209,9 @@ prepares everything on your computer, builds a toolbox image, converts the model
 records hashes and lets you install the result on your device.
 
 1. **Request.** The GUI build tab, `llm-cli build start -m <model> -t Rockchip -f gguf -b rk3566`, or the tool
-   `start_build` (MCP client or Ditto) creates a request. It is checked against the target's capabilities:
-   unknown formats, boards or quantization types are refused with a sentence that lists the allowed values;
+   `start_build` (MCP client or Ditto) creates a request. An unknown target is refused with the list of known
+   targets. The request is checked against the target's capabilities: unknown formats, boards or quantization
+   types are refused with a sentence that lists the allowed values;
    spellings are normalized (case, aliases such as `INT8` for `Q8_0`); a missing board becomes the target's
    default board, a missing quantization the board default; low-bit types such as IQ2_XS require an importance
    matrix.
@@ -229,17 +230,19 @@ records hashes and lets you install the result on your device.
    `hf_token` if needed. The token never enters a container.
 6. **Security scan.** If `enable_security_scan` is on (default), Trivy (`image_trivy`, default
    `aquasec/trivy:0.75.0`) scans the image for HIGH and CRITICAL vulnerabilities. Findings produce a warning; the
-   build continues.
+   build continues. A scan that does not finish within `build_timeout` is stopped with a warning.
 7. **Importance-matrix stage** (GGUF with IMatrix only). A sandboxed container runs `modules/build.sh` with
    `JOB_TYPE=imatrix`: it converts the model to F16 GGUF and runs `llama-imatrix` on the first 100 chunks of the
    calibration text. If this stage fails, the build stops.
 8. **Build stage.** A second sandboxed container runs `modules/build.sh` with `JOB_TYPE=build`. The dispatcher
    picks the toolchain: `llama-quantize` for GGUF (with the importance matrix if present), `rkllm_module.sh` for
    RKLLM (RK3588 and RK3576 only), `rknn_module.sh` for RKNN.
-9. **Manifest and golden artifact.** The engine copies the results to `output/`, completes `build_info.json`
-   with every model file's size and SHA256 hash and the primary file, writes `Model_Card.md` and creates a ZIP of
-   the build folder. The per-build image tag and the work folder are removed; image layers stay in the build
-   cache, so the next build is faster.
+9. **Manifest and golden artifact.** The engine copies the results into a hidden staging folder next to the
+   output folder (links in the build output are not followed), completes `build_info.json` with every model
+   file's size and SHA256 hash and the primary file, writes `Model_Card.md` and creates a ZIP of these files. Only
+   when the build can no longer be cancelled are they moved into `output/` and the ZIP next to the build folder; a
+   cancelled or failed build leaves no files there. The per-build image tag and the work folder are removed; image
+   layers stay in the build cache, so the next build is faster.
 10. **Deployment.** In the deployment window (or with `llm-cli deploy package` and `llm-cli deploy run`) you pick
     a build. The framework packs the model file, `build_info.json`, `Model_Card.md`, a generated `deploy.sh` and
     `checksums.sha256` into a ZIP.
@@ -286,20 +289,21 @@ sequenceDiagram
 ```
 
 1. **Schema.** Every tool has a pydantic input and output model. The MCP SDK publishes them as JSON schemas;
-   invalid arguments are refused before anything runs.
+   invalid arguments are refused before anything runs, and the refusal is audited as `invalid_input`.
 2. **Policy.** The registry looks up your stored permission for this tool (per-tool override first, then its
    tier). Defaults: `read` allowed, `local_write` ask, `external` ask. Tools in the `forbidden` tier cannot even
    be registered. If the permission file is damaged, every tool is denied until you set the permissions up
    again.
 3. **Elicitation.** "Ask" becomes an MCP elicitation: the client shows you the tool and every argument in full
-   (arguments too long to show cannot be confirmed). Only a real answer counts as approval. A client without
-   elicitation support cannot confirm, so the call is denied with a hint to allow the tool with
+   (arguments too long to show cannot be confirmed). Only a real answer counts as approval, and a "no" is final
+   for that call, even if the permission is loosened meanwhile. A confirmation that fails is refused and audited.
+   A client without elicitation support cannot confirm, so the call is denied with a hint to allow the tool with
    `llm-cli tools permissions` or in the GUI (Tools > Tool Permissions (Ditto / MCP)...).
 4. **Execution.** The handler runs in a worker thread; its result is checked against the output model. Errors
-   come back as tool errors with a message meant for people.
+   come back as tool errors with a message meant for people, with secrets redacted.
 5. **Audit.** Every outcome (`ok`, `denied`, `not_confirmed`, `error`, `invalid_input`) is appended to `audit.db`
    with redacted, shortened arguments and a hash of the full text. `llm-cli tools audit --verify` checks the chain
-   and its anchor.
+   and its anchor; `llm-cli tools audit --archive` puts the log aside and starts a new chain.
 
 The eleven tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
 `read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge` (tier `read`) and `start_build`,
@@ -503,7 +507,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 |---|---|
 | **Ditto rebuilt on its own provider layer.** Official `anthropic` and `openai` SDKs instead of LiteLLM; providers as data (`configs/llm_providers.yml`) with model and effort per task and a live model list; retries, fallback chain, validated structured answers, prompt caching, privacy filter for cloud providers; Ditto uses the framework tools within your permissions (GUI chat and `llm-cli ditto ask`). | done |
 | **Local knowledge base.** FastEmbed embeddings on the CPU, Qdrant embedded in the process, hybrid search (BM25 plus dense vectors, Reciprocal Rank Fusion); no vector-database server and no cloud embeddings. | done |
-| **Managed local model with tiers down to 2-bit.** Pinned llama.cpp `llama-server` for the hardware (CUDA, Vulkan, ROCm, Metal or CPU) and pinned Qwen3.5 models from 9B down to 2-bit models for weak hardware (3 GB RAM); `llm-cli ditto runtime` and `llm-cli ditto models`. | done |
+| **Managed local model with tiers down to 2-bit.** Pinned llama.cpp `llama-server` for the hardware (CUDA, Vulkan, Metal or CPU; ROCm only when chosen) and pinned Qwen3.5 models from 9B down to 2-bit models for weak hardware (3 GB RAM); `llm-cli ditto runtime` and `llm-cli ditto models`. | done |
 | **Ditto evaluation.** `llm-cli ditto eval` with fixed cases graded by rules, per provider or local model tier. The first measurement found gaps in Ditto's prompts; they are fixed, and a new measurement is running. | done |
 | **Sign-in per access type** for all common cloud and API providers and for local engines (details below). | in progress |
 | **Removal of the `claude_code` provider.** Anthropic does not allow third-party apps to use Claude subscription logins. Claude subscribers use the framework from Claude Code or Claude Desktop through the MCP server (`llm-cli mcp config` prints the setup), or give Ditto an Anthropic API key; Max and Team plans include monthly API credits. | in progress |

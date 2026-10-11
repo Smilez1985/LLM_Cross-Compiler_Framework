@@ -1,4 +1,4 @@
-Version 3.0.0 plus die [unveröffentlichten Änderungen](CHANGELOG_DE.md) · Zuletzt aktualisiert am 2026-10-11
+Version 3.0.0 plus die [unveröffentlichten Änderungen](CHANGELOG_DE.md#unreleased) · Zuletzt aktualisiert am 2026-10-11
 
 [English](README.md) · **Deutsch**
 
