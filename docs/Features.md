@@ -781,6 +781,24 @@ framework never sees it.
 - **Client setup:** `llm-cli mcp config` prints the commands and JSON with quoting that holds in POSIX shells and in
   both cmd and PowerShell; `--write claude-desktop` adds the server to Claude Desktop's configuration, keeps other
   entries and writes a private backup.
+- **Who is connected:** for each new client the server writes one line to stderr, never to the client: the name and
+  version the client reports about itself, the protocol version, the transport and the capabilities it declared,
+  for example `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, elicitation form+url,
+  capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask" is
+  refused there. Client text is cut to 64 characters and escaped; it is a label, never a permission.
+
+What the clients support, from their vendors' documentation (2026-10-11). "Not documented" means the vendor does
+not say; the stderr line above shows what a client really declares.
+
+| Client | Asks you (elicitation) | Progress | Resources | Prompts | Protocol 2026-07-28 |
+|---|---|---|---|---|---|
+| Claude Code (v1 and v2 runtimes) | yes, form and URL | yes | yes | yes | v2 runtime (the default from 2.1.232, or 2.1.274 without feature flags) |
+| Claude Desktop (chat) | not documented | not documented | yes | yes | not documented |
+| Claude Cowork | not documented | not documented | not documented | not documented | not documented |
+| VS Code (GitHub Copilot) | yes, modes not documented | not documented | yes, with templates | yes | not documented |
+
+Claude Desktop chat and Cowork are expected to declare no elicitation (one third-party source says so): there, every
+tool set to "ask" is refused, while allowed tools work.
 
 **Claude subscribers:** this is the way to use the framework with a Claude plan. Anthropic does not allow
 third-party apps to use a subscription's sign-in or limits, so Ditto itself needs an API key; Claude Code and Claude

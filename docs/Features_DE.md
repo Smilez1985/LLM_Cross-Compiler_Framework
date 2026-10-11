@@ -833,6 +833,25 @@ Konto oder Schlüssel an; das Framework sieht das nie.
 - **Client-Einrichtung:** `llm-cli mcp config` gibt die Befehle und das JSON so gequotet aus, dass sie in
   POSIX-Shells und in cmd wie PowerShell halten; `--write claude-desktop` trägt den Server in die Konfiguration von
   Claude Desktop ein, behält andere Einträge und schreibt eine private Sicherung.
+- **Wer verbunden ist:** Für jeden neuen Client schreibt der Server eine Zeile nach stderr, nie an den Client: Name
+  und Version, die der Client über sich selbst angibt, die Protokollversion, den Transport und die Fähigkeiten, die er
+  erklärt hat, zum Beispiel `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio,
+  elicitation form+url, capabilities: elicitation, roots`. `elicitation none` heißt, dass der Client dich nicht fragen
+  kann; ein Tool auf „fragen“ wird dort abgelehnt. Text vom Client wird auf 64 Zeichen gekürzt und escapet; er ist
+  eine Beschriftung, nie eine Berechtigung.
+
+Was die Clients unterstützen, laut der Dokumentation ihrer Hersteller (2026-10-11). „Nicht dokumentiert“ heißt, dass
+der Hersteller nichts dazu sagt; die stderr-Zeile oben zeigt, was ein Client wirklich erklärt.
+
+| Client | Fragt dich (Elicitation) | Fortschritt | Ressourcen | Prompts | Protokoll 2026-07-28 |
+|---|---|---|---|---|---|
+| Claude Code (Laufzeit v1 und v2) | ja, Formular und URL | ja | ja | ja | Laufzeit v2 (Standard ab 2.1.232, ohne Feature-Flags ab 2.1.274) |
+| Claude Desktop (Chat) | nicht dokumentiert | nicht dokumentiert | ja | ja | nicht dokumentiert |
+| Claude Cowork | nicht dokumentiert | nicht dokumentiert | nicht dokumentiert | nicht dokumentiert | nicht dokumentiert |
+| VS Code (GitHub Copilot) | ja, Modi nicht dokumentiert | nicht dokumentiert | ja, mit Vorlagen | ja | nicht dokumentiert |
+
+Von Claude-Desktop-Chat und Cowork wird erwartet, dass sie keine Elicitation erklären (eine Quelle eines Dritten
+sagt das): Dort wird jedes Tool auf „fragen“ abgelehnt, erlaubte Tools funktionieren.
 
 **Claude-Abonnenten:** Das ist der Weg, das Framework mit einem Claude-Abo zu nutzen. Anthropic erlaubt
 Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines Abos zu verwenden; Ditto selbst braucht deshalb einen
