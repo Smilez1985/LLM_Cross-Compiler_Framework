@@ -408,6 +408,21 @@ class TestCrawlOptionWiring:
         assert cfg.get("crawler_max_depth") == 2
         assert CrawlerManager(SimpleNamespace(config=cfg)).respect_robots is True
 
+    def test_skipped_pages_are_named_in_the_crawl_log(self, qapp):
+        from orchestrator.gui.wizards import CrawlWorker
+
+        class FakeRag:
+            def ingest_url(self, url, crawler_options=None):
+                return {"success": True, "count": 1, "skipped": [
+                    {"url": "https://docs.example/private", "reason": "X-Robots-Tag: noai", "opt_out": True}]}
+
+        lines = []
+        worker = CrawlWorker(FakeRag(), ["https://docs.example/"], {})
+        worker.progress.connect(lines.append)
+        worker.run()
+
+        assert "  -> Skipped https://docs.example/private: X-Robots-Tag: noai" in lines
+
 
 class TestMainWindowWiring:
 

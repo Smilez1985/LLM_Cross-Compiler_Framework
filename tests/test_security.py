@@ -1,6 +1,8 @@
 """Security tests: archive extraction, input validation, SSRF guard, secret redaction."""
 
 import io
+import json
+import re
 import tarfile
 import zipfile
 from pathlib import Path
@@ -145,11 +147,14 @@ class TestSSRFGuard:
 EN = " This guide explains how to install the software development kit on your single board computer. "
 
 
-def response(status=200, html="", location=None, content_type="text/html"):
-    headers = {"Content-Type": content_type}
+def response(status=200, html="", location=None, content_type="text/html", headers=None, content=None):
+    from requests.structures import CaseInsensitiveDict
+
+    all_headers = CaseInsensitiveDict({"Content-Type": content_type, **(headers or {})})
     if location:
-        headers["Location"] = location
-    return SimpleNamespace(status_code=status, headers=headers, text=html, content=html.encode(),
+        all_headers["Location"] = location
+    return SimpleNamespace(status_code=status, headers=all_headers, text=html,
+                           content=html.encode() if content is None else content,
                            is_redirect=status in (301, 302, 303, 307, 308) and location is not None)
 
 
@@ -170,6 +175,11 @@ class FakeWeb:
     @property
     def urls(self):
         return [u for u, _ in self.requests]
+
+    @property
+    def page_urls(self):
+        """Requested URLs without the per-origin robots.txt and TDMRep files."""
+        return [u for u in self.urls if not u.endswith(("/robots.txt", "/.well-known/tdmrep.json"))]
 
 
 class TestCrawlerSecurity:
@@ -200,8 +210,8 @@ class TestCrawlerSecurity:
         })
 
         assert crawler.crawl("http://93.184.215.14/docs") == []
-        assert web.urls == ["http://93.184.215.14/docs"]
-        assert web.requests[0][1]["allow_redirects"] is False
+        assert web.urls == ["http://93.184.215.14/.well-known/tdmrep.json", "http://93.184.215.14/docs"]
+        assert all(kwargs["allow_redirects"] is False for _, kwargs in web.requests)
 
     def test_backslash_redirect_never_reaches_internal_host(self, make_crawler):
         from urllib3.util import parse_url
@@ -232,13 +242,13 @@ class TestCrawlerSecurity:
 
         crawler, web = make_crawler({f"http://93.184.215.14/r/{i}": endless for i in range(100)})
         crawler.crawl("http://93.184.215.14/r/0")
-        assert len(web.requests) == CrawlerManager.MAX_REDIRECTS + 1
+        assert len(web.page_urls) == CrawlerManager.MAX_REDIRECTS + 1
 
     def test_total_requests_are_bounded(self, make_crawler):
         links = "".join(f'<a href="/missing/{i}">x</a>' for i in range(50))
         crawler, web = make_crawler({"http://93.184.215.14/": response(html=EN * 6 + links)}, max_pages=2)
         crawler.crawl("http://93.184.215.14/")
-        assert len(web.requests) == crawler.max_requests == 10
+        assert len(web.page_urls) == crawler.max_requests == 10
 
     def test_robots_txt_redirect_to_internal_address_is_not_followed(self, make_crawler):
         crawler, web = make_crawler({
@@ -248,7 +258,8 @@ class TestCrawlerSecurity:
 
         docs = crawler.crawl("http://93.184.215.14/docs")
 
-        assert web.urls == ["http://93.184.215.14/robots.txt", "http://93.184.215.14/docs"]
+        assert web.urls == ["http://93.184.215.14/robots.txt", "http://93.184.215.14/.well-known/tdmrep.json",
+                            "http://93.184.215.14/docs"]
         assert len(docs) == 1
         assert all(kwargs["allow_redirects"] is False for _, kwargs in web.requests)
 
@@ -464,3 +475,347 @@ class TestCrawlerPoliteness:
 
         assert "http://93.184.215.14/files/User%20Guide.html" in web.urls
         assert len(docs) == 2
+
+
+SITE = "http://93.184.215.14"
+OTHER_SITE = "http://93.184.215.15"
+TDM_FILE = "/.well-known/tdmrep.json"
+
+
+def page_with(head="", body='<a href="/guide">Guide</a>', **kwargs):
+    return response(html=f"<html><head>{head}</head><body>{body}{EN}</body></html>", **kwargs)
+
+
+def tdm_file(*rules):
+    return response(html=json.dumps([{"location": loc, "tdm-reservation": flag} for loc, flag in rules]),
+                    content_type="application/json")
+
+
+class TestCrawlerOptOuts:
+    """Machine-readable reservations (robots directives, TDMRep) keep pages out of the knowledge base, and
+    every skipped page is named with its reason (EU DSM Art. 4 / UrhG 44b: mining unless reserved)."""
+
+    @pytest.fixture
+    def make_crawler(self, tmp_path, monkeypatch):
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.crawler_manager import CrawlerManager
+
+        def factory(pages, **options):
+            options.setdefault("respect_robots", False)
+            options.setdefault("request_delay", 0)
+            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)), options)
+            web = FakeWeb(pages)
+            monkeypatch.setattr(crawler.session, "send", web)
+            return crawler, web
+
+        return factory
+
+    @staticmethod
+    def sources(docs):
+        return sorted(d.metadata["source"] for d in docs)
+
+    @staticmethod
+    def reasons(crawler):
+        assert all(page.opt_out for page in crawler.skipped)
+        return {page.url: page.reason for page in crawler.skipped}
+
+    def test_user_agent_reports_the_framework_version(self, make_crawler, monkeypatch):
+        from orchestrator import __version__
+
+        crawler, _ = make_crawler({})
+        sent = []
+        monkeypatch.setattr(crawler.session, "send",
+                            lambda prepared, **kw: sent.append(prepared.headers["User-Agent"]) or response(404))
+        crawler.crawl(f"{SITE}/")
+
+        assert sent and all(ua.startswith(f"LLM-Conversion-Framework-Bot/{__version__} (") for ua in sent)
+
+    @pytest.mark.parametrize("directive", ["noindex", "none", "noai", "noimageai", "NoAI"])
+    def test_x_robots_tag_keeps_the_page_out(self, make_crawler, directive):
+        crawler, web = make_crawler({
+            f"{SITE}/": page_with(headers={"X-Robots-Tag": directive}),
+            f"{SITE}/guide": page_with(body="Guide."),
+        })
+
+        docs = crawler.crawl(f"{SITE}/")
+
+        followed = directive != "none"  # "none" is noindex plus nofollow
+        assert self.sources(docs) == ([f"{SITE}/guide"] if followed else [])
+        assert (f"{SITE}/guide" in web.urls) is followed
+        assert self.reasons(crawler) == {f"{SITE}/": f"X-Robots-Tag: {directive.lower()}"}
+
+    def test_x_robots_tag_nofollow_keeps_the_page_but_not_its_links(self, make_crawler):
+        crawler, web = make_crawler({
+            f"{SITE}/": page_with(headers={"X-Robots-Tag": "nofollow"}),
+            f"{SITE}/guide": page_with(body="Guide."),
+        })
+
+        assert self.sources(crawler.crawl(f"{SITE}/")) == [f"{SITE}/"]
+        assert f"{SITE}/guide" not in web.urls
+        assert crawler.skipped == []
+
+    @pytest.mark.parametrize("header, kept, followed", [
+        ("googlebot: noindex, nofollow", True, True),           # another crawler's rules
+        ("LLM-Conversion-Framework-Bot: noai", False, True),     # ours
+        ("googlebot: noindex, llm-conversion-framework-bot: nofollow", True, False),
+        ("unavailable_after: 25 Jun 2010 15:00:00 PST, noindex", False, True),
+    ])
+    def test_x_robots_tag_scopes(self, make_crawler, header, kept, followed):
+        crawler, web = make_crawler({
+            f"{SITE}/": page_with(headers={"X-Robots-Tag": header}),
+            f"{SITE}/guide": page_with(body="Guide."),
+        })
+
+        sources = self.sources(crawler.crawl(f"{SITE}/"))
+
+        assert (f"{SITE}/" in sources) is kept
+        assert (f"{SITE}/guide" in web.urls) is followed
+
+    def test_repeated_x_robots_tag_headers_keep_their_own_scope(self, make_crawler):
+        from urllib3 import HTTPHeaderDict
+
+        raw = HTTPHeaderDict()
+        raw.add("X-Robots-Tag", "googlebot: noindex")
+        raw.add("X-Robots-Tag", "noai")  # a header of its own: applies to every crawler
+        page = page_with(headers={"X-Robots-Tag": "googlebot: noindex, noai"})  # how requests joins them
+        page.raw = SimpleNamespace(headers=raw)
+        crawler, _ = make_crawler({f"{SITE}/": page})
+
+        assert crawler.crawl(f"{SITE}/") == []
+        assert self.reasons(crawler) == {f"{SITE}/": "X-Robots-Tag: noai"}
+
+    @pytest.mark.parametrize("meta, reason, followed", [
+        ('<meta name="robots" content="noindex">', '<meta name="robots">: noindex', True),
+        ('<meta name="ROBOTS" content="noimageai, noai">', '<meta name="robots">: noai, noimageai', True),
+        ('<meta name="LLM-Conversion-Framework-Bot" content="none">',
+         '<meta name="llm-conversion-framework-bot">: none', False),
+        ('<meta name="tdm-reservation" content="1">', 'TDM reservation (<meta name="tdm-reservation">)', True),
+    ])
+    def test_meta_tags_keep_the_page_out(self, make_crawler, meta, reason, followed):
+        crawler, web = make_crawler({f"{SITE}/": page_with(meta), f"{SITE}/guide": page_with(body="Guide.")})
+
+        docs = crawler.crawl(f"{SITE}/")
+
+        assert f"{SITE}/" not in self.sources(docs)
+        assert (f"{SITE}/guide" in web.urls) is followed
+        assert self.reasons(crawler) == {f"{SITE}/": reason}
+
+    @pytest.mark.parametrize("meta, followed", [
+        ('<meta name="robots" content="nofollow">', False),
+        ('<meta name="googlebot" content="noindex, nofollow">', True),   # another crawler's rules
+        ('<meta name="tdm-reservation" content="0">', True),
+    ])
+    def test_meta_tags_that_keep_the_page(self, make_crawler, meta, followed):
+        crawler, web = make_crawler({f"{SITE}/": page_with(meta), f"{SITE}/guide": page_with(body="Guide.")})
+
+        assert f"{SITE}/" in self.sources(crawler.crawl(f"{SITE}/"))
+        assert (f"{SITE}/guide" in web.urls) is followed
+        assert crawler.skipped == []
+
+    @pytest.mark.parametrize("value, reserved", [("1", True), (" 1 ", True), ("0", False), ("yes", False)])
+    def test_tdm_reservation_header_alone(self, make_crawler, value, reserved):
+        crawler, web = make_crawler({
+            f"{SITE}/": page_with(headers={"tdm-reservation": value, "tdm-policy": f"{SITE}/policy.json"}),
+            f"{SITE}/guide": page_with(body="Guide."),
+        })
+
+        docs = crawler.crawl(f"{SITE}/")
+
+        assert f"{SITE}{TDM_FILE}" in web.urls  # answered 404: the site has no TDMRep file
+        assert (f"{SITE}/" not in self.sources(docs)) is reserved
+        assert f"{SITE}/guide" in self.sources(docs)
+        if reserved:
+            assert self.reasons(crawler) == {
+                f"{SITE}/": f"TDM reservation (tdm-reservation header, policy {SITE}/policy.json)"}
+        else:
+            assert crawler.skipped == []  # "yes" is a protocol error, which TDMRep treats as unset
+
+    def test_tdmrep_file_alone_reserves_paths_before_they_are_fetched(self, make_crawler):
+        crawler, web = make_crawler({
+            f"{SITE}{TDM_FILE}": tdm_file(("/private/*", 1)),
+            f"{SITE}/": page_with(body='<a href="/private/a">a</a><a href="/public">p</a><a href="/private">x</a>'),
+            f"{SITE}/private/a": page_with(body="Private."),
+            f"{SITE}/public": page_with(body="Public."),
+            f"{SITE}/private": page_with(body="Not under /private/."),
+        })
+
+        docs = crawler.crawl(f"{SITE}/")
+
+        assert self.sources(docs) == [f"{SITE}/", f"{SITE}/private", f"{SITE}/public"]
+        assert f"{SITE}/private/a" not in web.urls
+        assert web.urls.count(f"{SITE}{TDM_FILE}") == 1  # cached per origin
+        assert self.reasons(crawler) == {
+            f"{SITE}/private/a": f"TDM reservation ({TDM_FILE} rule '/private/*')"}
+
+    def test_tdmrep_first_matching_rule_decides(self, make_crawler):
+        crawler, web = make_crawler({
+            f"{SITE}{TDM_FILE}": tdm_file(("/docs/open/*", 0), ("/docs/*", 1)),
+            f"{SITE}/": page_with(body='<a href="/docs/open/a">a</a><a href="/docs/b">b</a>'),
+            f"{SITE}/docs/open/a": page_with(body="Open."),
+            f"{SITE}/docs/b": page_with(body="Reserved."),
+        })
+
+        docs = crawler.crawl(f"{SITE}/")
+
+        assert self.sources(docs) == [f"{SITE}/", f"{SITE}/docs/open/a"]
+        assert f"{SITE}/docs/b" not in web.urls
+
+    def test_tdmrep_whole_site_reservation_fetches_no_page(self, make_crawler):
+        crawler, web = make_crawler({f"{SITE}{TDM_FILE}": tdm_file(("/", 1)), f"{SITE}/": page_with()})
+
+        assert crawler.crawl(f"{SITE}/") == []
+        assert web.urls == [f"{SITE}{TDM_FILE}"]
+
+    @pytest.mark.parametrize("answer", [
+        response(404), response(500), response(html="not json"), response(html='{"location": "/"}'),
+        response(html='[{"location": "/", "tdm-reservation": "yes"}]'),   # protocol error: unset
+        response(302, location="http://127.0.0.1:8080/tdmrep.json"),        # SSRF guard: never fetched
+    ])
+    def test_unusable_tdmrep_file_means_no_reservation(self, make_crawler, answer):
+        from urllib3.util import parse_url
+
+        crawler, web = make_crawler({f"{SITE}{TDM_FILE}": answer, f"{SITE}/": page_with(body="Home.")})
+
+        assert self.sources(crawler.crawl(f"{SITE}/")) == [f"{SITE}/"]
+        assert all(parse_url(u).host == "93.184.215.14" for u in web.urls)
+
+    def test_tdmrep_file_is_followed_through_redirects(self, make_crawler):
+        crawler, web = make_crawler({
+            f"{SITE}{TDM_FILE}": response(301, location=f"{OTHER_SITE}/tdm.json"),
+            f"{OTHER_SITE}/tdm.json": tdm_file(("/", 1)),
+            f"{SITE}/": page_with(),
+        })
+
+        assert crawler.crawl(f"{SITE}/") == []
+        assert f"{SITE}/" not in web.urls
+
+    @pytest.mark.parametrize("other_site, reason", [
+        ({f"{OTHER_SITE}{TDM_FILE}": tdm_file(("/", 1))}, f"TDM reservation ({TDM_FILE} rule '/')"),
+        ({f"{OTHER_SITE}/robots.txt": response(html="User-agent: *\nDisallow: /\n", content_type="text/plain")},
+         "disallowed by robots.txt"),
+        ({f"{OTHER_SITE}/": page_with(headers={"X-Robots-Tag": "noai"})}, "X-Robots-Tag: noai"),
+    ])
+    def test_redirect_onto_a_reserved_host(self, make_crawler, other_site, reason):
+        crawler, web = make_crawler({
+            f"{SITE}/": response(301, location=f"{OTHER_SITE}/"),
+            f"{OTHER_SITE}/": page_with(),
+            **other_site,
+        }, respect_robots=True)
+
+        assert crawler.crawl(f"{SITE}/") == []
+        assert self.reasons(crawler) == {f"{OTHER_SITE}/": reason}
+        if "X-Robots-Tag" not in reason:
+            assert f"{OTHER_SITE}/" not in web.urls  # reserved before the request
+
+    def test_redirect_from_a_deeper_page_to_another_host_is_skipped(self, make_crawler):
+        crawler, web = make_crawler({
+            f"{SITE}/": page_with(body='<a href="/download">dl</a>'),
+            f"{SITE}/download": response(302, location=f"{OTHER_SITE}/file"),
+            f"{OTHER_SITE}/file": page_with(body="Elsewhere."),
+        })
+
+        docs = crawler.crawl(f"{SITE}/")
+
+        assert self.sources(docs) == [f"{SITE}/"]
+        assert not [u for u in web.urls if u.startswith(OTHER_SITE)]
+        assert [(p.url, p.opt_out) for p in crawler.skipped] == [(f"{OTHER_SITE}/file", False)]
+        assert "leaves the crawled site" in crawler.skipped[0].reason
+
+    @pytest.mark.parametrize("xmp", [b"<tdm:reservation>1</tdm:reservation>", b'tdm:reservation="1"'])
+    def test_tdm_reservation_in_pdf_metadata(self, make_crawler, xmp):
+        crawler, _ = make_crawler({
+            f"{SITE}/manual.pdf": response(content_type="application/pdf", content=b"%PDF-1.7\n" + xmp + b"\n%%EOF"),
+        })
+
+        assert crawler.crawl(f"{SITE}/manual.pdf") == []
+        assert self.reasons(crawler) == {f"{SITE}/manual.pdf": "TDM reservation (tdm:reservation in the PDF metadata)"}
+
+    def test_each_skip_is_logged_with_its_reason(self, make_crawler, monkeypatch):
+        crawler, _ = make_crawler({f"{SITE}/": page_with(headers={"X-Robots-Tag": "noai"})})
+        logged = []
+        monkeypatch.setattr(crawler.logger, "log", lambda level, msg, *a, **k: logged.append(msg))
+
+        crawler.crawl(f"{SITE}/")
+
+        assert f"Skipped {SITE}/: X-Robots-Tag: noai" in logged
+
+    def test_site_controlled_text_in_reasons_is_escaped(self, make_crawler):
+        crawler, _ = make_crawler({
+            f"{SITE}{TDM_FILE}": tdm_file(("/‮hidden\n*", 1)),
+            f"{SITE}/": page_with(body='<a href="/%E2%80%AEhidden%0Ax">x</a>'),
+        })
+
+        crawler.crawl(f"{SITE}/")
+
+        reason = self.reasons(crawler)[f"{SITE}/%E2%80%AEhidden%0Ax"]
+        assert "\n" not in reason and "‮" not in reason
+
+    @pytest.mark.parametrize("location, path, expected", [
+        ("/", "/anything", True),
+        ("/docs/*", "/docs/a/b", True),
+        ("/docs/*", "/doc", False),
+        ("/docs$", "/docs", True),
+        ("/docs$", "/docs/x", False),
+        ("*.pdf$", "/files/a.pdf", True),
+        ("*.pdf$", "/files/a.pdf.html", False),
+        ("/a*b*c", "/axxbyyc/z", True),
+        ("/a*b*c$", "/axxbyycz", False),
+        ("/Docs", "/docs", False),               # case-sensitive
+        ("/User Guide", "/User%20Guide", True),  # compared percent-encoded
+        ("/*$", "/", True),
+    ])
+    def test_tdm_location_patterns(self, location, path, expected):
+        from orchestrator.Core.crawler_manager import tdm_location_matches
+        assert tdm_location_matches(location, path) is expected
+
+    def test_pathological_tdm_pattern_is_fast(self):
+        import time as time_module
+        from orchestrator.Core.crawler_manager import tdm_location_matches
+
+        start = time_module.monotonic()
+        assert not tdm_location_matches("/" + "*a" * 200 + "b", "/" + "a" * 5000)
+        assert time_module.monotonic() - start < 1.0
+
+
+class TestCrawlsStayWithTheUser:
+    """Crawls start only from the GUI's Deep Ingest: MCP clients and Ditto have no way to start one."""
+
+    AUTOMATION = ["orchestrator/mcp_server.py", "orchestrator/Core/ditto_manager.py", "orchestrator/tools",
+                  "orchestrator/llm"]
+
+    def test_automation_code_never_reaches_the_crawler(self):
+        import ast
+        from conftest import REPO_ROOT
+
+        files = []
+        for entry in self.AUTOMATION:
+            path = REPO_ROOT / entry
+            files += sorted(path.rglob("*.py")) if path.is_dir() else [path]
+        offenders = []
+        for path in files:
+            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+                names = []
+                if isinstance(node, ast.Attribute):
+                    names.append(node.attr)
+                elif isinstance(node, ast.Name):
+                    names.append(node.id)
+                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                    names.append(node.value)   # getattr(rag, "ingest_url")
+                elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                    names += [getattr(node, "module", None) or ""] + [a.name for a in node.names]
+                for name in names:
+                    if name in ("ingest_url", "crawl", "CrawlerManager") or "crawler_manager" in name:
+                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}: {name}")
+        assert len(files) > 5 and offenders == []
+
+    def test_no_tool_crawls_or_takes_a_url(self, tmp_path):
+        from unittest.mock import Mock
+        from orchestrator.tools.framework_tools import register_framework_tools
+        from orchestrator.tools.policy import PolicyStore
+        from orchestrator.tools.registry import ToolRegistry
+
+        registry = register_framework_tools(ToolRegistry(PolicyStore(tmp_path)), SimpleNamespace(build_service=Mock()))
+        assert registry.list()
+        for spec in registry.list():
+            assert not re.search(r"crawl|ingest|url|fetch", spec.name + spec.description, re.I), spec.name
+            assert not [f for f in spec.input_model.model_fields if "url" in f.lower()], spec.name
