@@ -26,10 +26,9 @@ from orchestrator.utils.helpers import redact_secrets
 # Conservative for multilingual subword tokenizers (EN/DE text averages closer to 4 characters per token),
 # so chunks sized with it stay below the model's context.
 CHARS_PER_TOKEN = 3.0
+# FastEmbed's BM25 over the text plus the split forms of its identifiers. The forms only add tokens of the same
+# hashed vocabulary, so chunks imported before the splitting stay valid in the same index.
 SPARSE_MODEL = "Qdrant/bm25"
-# The keyword encoding stored with each collection: FastEmbed's BM25 over the text plus the split forms of its
-# identifiers. A collection of another encoding is re-encoded, never mixed.
-SPARSE_ENCODING = "Qdrant/bm25+ids1"
 # One stemmer for every document keeps query and document tokens consistent; German words are stemmed
 # imperfectly but identically on both sides, and German stop words get a low IDF anyway.
 BM25_LANGUAGE = "english"
@@ -197,21 +196,25 @@ def check_vectors(vectors: Iterable, expected: int, dim: int, model_id: str) -> 
 _REGISTER_LOCK = threading.Lock()
 
 
+def register_model(model_class, model_id: str, **description) -> None:
+    """Registers a model FastEmbed does not ship with its model class (TextEmbedding, TextCrossEncoder); a model
+    registered earlier in this process, or shipped by a newer FastEmbed, is left as it is."""
+    with _REGISTER_LOCK:
+        if not any(m["model"].lower() == model_id.lower() for m in model_class.list_supported_models()):
+            model_class.add_custom_model(model=model_id, **description)
+
+
 def _register_custom(spec: EmbeddingModelSpec) -> None:
     if spec.custom is None:
         return
     from fastembed import TextEmbedding
     from fastembed.common.model_description import ModelSource, PoolingType
 
-    with _REGISTER_LOCK:
-        if any(m["model"].lower() == spec.model_id.lower() for m in TextEmbedding.list_supported_models()):
-            return  # registered earlier in this process, or shipped by a newer FastEmbed
-        TextEmbedding.add_custom_model(
-            model=spec.model_id, pooling=PoolingType(spec.custom.pooling),
-            normalization=spec.custom.normalization, sources=ModelSource(hf=spec.custom.hf_repo),
-            dim=spec.dim, model_file=spec.custom.model_file, additional_files=list(spec.custom.additional_files),
-            license=spec.license, size_in_gb=spec.size_gb,
-            description=f"Registered by the LLM Cross-Compiler Framework ({spec.max_tokens} tokens).")
+    register_model(TextEmbedding, spec.model_id, pooling=PoolingType(spec.custom.pooling),
+                   normalization=spec.custom.normalization, sources=ModelSource(hf=spec.custom.hf_repo),
+                   dim=spec.dim, model_file=spec.custom.model_file, additional_files=list(spec.custom.additional_files),
+                   license=spec.license, size_in_gb=spec.size_gb,
+                   description=f"Registered by the LLM Cross-Compiler Framework ({spec.max_tokens} tokens).")
 
 
 def _quiet_fastembed() -> None:
@@ -255,16 +258,11 @@ class _FastEmbedBase:
             except Exception as e:
                 if offline:
                     raise EmbeddingModelNotCached(
-                        f"The {self.kind} {self.model_name} is not in {self.cache_dir} and offline mode is on. "
+                        f"The {self.kind} {self.model_id} is not in {self.cache_dir} and offline mode is on. "
                         f"Turn offline mode off once to download it (about {self._size_gb:.2f} GB).") from e
-                raise EmbeddingError(f"Could not load the {self.kind} {self.model_name}: "
+                raise EmbeddingError(f"Could not load the {self.kind} {self.model_id}: "
                                      f"{redact_secrets(str(e))}") from e
             return self._model
-
-    @property
-    def model_name(self) -> str:
-        """The model's FastEmbed name."""
-        return self.model_id
 
     def prepare(self) -> None:
         """Downloads (unless offline) and loads the model now instead of on first use."""
@@ -350,14 +348,14 @@ class FastEmbedDenseEmbedder(_FastEmbedBase):
 
 class FastEmbedSparseEmbedder(_FastEmbedBase):
     """BM25 term weights with FastEmbed over the text plus its split identifiers (expand_identifiers); the
-    collection's sparse vector must use Modifier.IDF. model_id names the encoding (SPARSE_ENCODING)."""
+    collection's sparse vector must use Modifier.IDF."""
 
     BATCH_SIZE = 64
 
     def __init__(self, cache_dir: Path, offline: Callable[[], bool] = lambda: False, language: str = BM25_LANGUAGE,
                  model_dir: Optional[Path] = None):
         super().__init__(cache_dir, offline, 0.01)
-        self.model_id = SPARSE_ENCODING
+        self.model_id = SPARSE_MODEL
         self.language = language
         self._model_dir = model_dir  # a local copy of the stop word files, used instead of the cache
 
@@ -378,10 +376,6 @@ class FastEmbedSparseEmbedder(_FastEmbedBase):
         except Exception:
             return None
         return Path(found).parent if isinstance(found, str) else None  # else not downloaded: FastEmbed reports it
-
-    @property
-    def model_name(self) -> str:
-        return SPARSE_MODEL
 
     def embed_passages(self, texts: Sequence[str]) -> List[SparseVec]:
         texts = [expand_identifiers(t) for t in texts]

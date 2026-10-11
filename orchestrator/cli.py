@@ -1196,8 +1196,7 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
     """Grade Ditto on fixed cases with the chosen provider/model, e.g. to check whether a 2-bit local model is
     good enough, or the knowledge-base search (--kind retrieval, works offline once the embedding model is
     downloaded). Nothing is built or changed. Cloud providers bill every request (about 20 per run and repeat)."""
-    from orchestrator import __version__
-    from orchestrator.evals.ditto_eval import DEFAULT_CASES, RETRIEVAL_CASES, DittoEval, cases_digest, load_cases
+    from orchestrator.evals.ditto_eval import DEFAULT_CASES, RETRIEVAL_CASES, DittoEval, load_cases, run_setup
     ctx.require_framework()
     if tiers and (provider or model):
         console.print("[red]--tier runs the managed local model; it cannot be combined with --provider/--model.[/red]")
@@ -1252,10 +1251,8 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
                     models[task] = ditto.describe(task).get("model", "")
                 except DittoError:
                     models[task] = ""
-            report.setup = {"label": label, "provider": setup.get("provider", ""), "model": setup.get("model", ""),
-                            "task_models": models, "effort": effort or "settings", "framework": __version__,
-                            "cases_sha256": cases_digest(cases_file), "repeat": repeat,
-                            "cases": [c.id for c in ai_cases]}
+            report.setup = run_setup(label, setup.get("provider", ""), setup.get("model", ""), cases_file, ai_cases,
+                                     repeat, task_models=models, effort=effort or "settings")
             runs.append(report)
 
         if tiers:
@@ -1312,9 +1309,8 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
 def _eval_retrieval(fm, cases, source: Path, variants, repeat: int, progress) -> list:
     """Retrieval cases: the corpus is indexed once into a temporary knowledge base, one report per variant."""
     import time
-    from orchestrator import __version__
-    from orchestrator.evals.ditto_eval import (RetrievalEval, RetrievalEvalError, cases_digest,
-                                               check_retrieval_cases, corpus_digest, corpus_dir, load_corpus,
+    from orchestrator.evals.ditto_eval import (RetrievalEval, RetrievalEvalError, check_retrieval_cases,
+                                               corpus_digest, corpus_dir, load_corpus, run_setup,
                                                temporary_knowledge_base)
     try:
         folder = corpus_dir(source)
@@ -1336,20 +1332,20 @@ def _eval_retrieval(fm, cases, source: Path, variants, repeat: int, progress) ->
             sys.exit(1)
         index_seconds = round(time.monotonic() - start, 1)
         embedding = str(knowledge.get_status().get("embedding_model", ""))
-        reranker = knowledge.reranker_info()
+        reranker = knowledge.reranker() if "rerank" in variants else None
         if "rerank" in variants:
-            if not reranker["model"]:
-                console.print(f"[red]The rerank variant needs a reranker: {escape(reranker['reason'])}. Set "
+            if reranker is None:
+                console.print(f"[red]The rerank variant needs a reranker: {escape(knowledge.reranker_reason)}. Set "
                               "rag_reranker to a model id to grade one anyway.[/red]")
                 sys.exit(2)
-            with console.status(f"Loading the reranker {reranker['model']} (downloaded on first use) ..."):
+            with console.status(f"Loading the reranker {reranker.model_id} (downloaded on first use) ..."):
                 ready = knowledge.prepare_models()
             if not ready:
                 console.print(f"[red]{escape(knowledge.last_error)}[/red]")
                 sys.exit(1)
         for variant in dict.fromkeys(variants):
-            label = f"retrieval {variant}"
-            model = f"{embedding} + {reranker['model']}" if variant == "rerank" else embedding
+            label, reranked = f"retrieval {variant}", variant == "rerank"
+            model = f"{embedding} + {reranker.model_id}" if reranked else embedding
             console.print(f"[bold]{escape(label)}[/bold]: {escape(model)}, {len(cases)} cases x {repeat}")
             report = ev.run(cases, variant=variant, repeat=repeat, on_result=progress)
             try:
@@ -1357,12 +1353,11 @@ def _eval_retrieval(fm, cases, source: Path, variants, repeat: int, progress) ->
                 rss_mb = round(psutil.Process().memory_info().rss / 2 ** 20)  # models loaded
             except Exception:
                 rss_mb = None
-            report.setup = {"label": label, "provider": "knowledge base", "model": model, "variant": variant,
-                            "model_reason": knowledge.model_reason, "framework": __version__,
-                            "reranker": reranker if variant == "rerank" else None,
-                            "cases_sha256": cases_digest(source), "corpus_sha256": corpus_digest(folder),
-                            "corpus_documents": len(docs), "index_seconds": index_seconds, "rss_mb": rss_mb,
-                            "repeat": repeat, "cases": [c.id for c in cases]}
+            used = {"model": reranker.model_id, "min_score": knowledge.rerank_floor(reranker)} if reranked else None
+            report.setup = run_setup(
+                label, "knowledge base", model, source, cases, repeat, variant=variant, reranker=used,
+                model_reason=knowledge.model_reason, corpus_sha256=corpus_digest(folder), corpus_documents=len(docs),
+                index_seconds=index_seconds, rss_mb=rss_mb)
             reports.append(report)
     return reports
 

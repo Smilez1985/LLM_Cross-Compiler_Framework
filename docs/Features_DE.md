@@ -644,7 +644,8 @@ unpassenden.
 - **Wie eine Suche neu bewertet wird:** bis zu 20 Kandidaten (das Dreifache der gewünschten Anzahl, mindestens 12),
   von jedem Titel, Kapitel und die ersten 1500 Zeichen; die Werte werden nach Text zwischengespeichert. Ein Reranker,
   der nicht laufen kann (im Offline-Modus nicht heruntergeladen, unbekannte Modell-ID, ein Fehler), wird einmal
-  protokolliert, die Suche behält die hybride Reihenfolge, und der Reranker wird nach 5 Minuten erneut versucht.
+  protokolliert, und Suchen behalten die hybride Reihenfolge bis zum nächsten Start oder einer Änderung von
+  `rag_reranker`.
 
 ### Budget für Auszüge
 
@@ -667,11 +668,8 @@ Unterstrich, zwei Großbuchstaben hintereinander oder einen Punkt oder Bindestri
 `E2041`, `GGML_CUDA`, `RKNN` oder `librkllmrt.so`); andere kurze Suchen nutzen nur die Bedeutung. In der
 Retrieval-Evaluation hob das hit@3 der Bezeichner-Fragen von 83 % auf 100 %; die übrigen Ergebnisse blieben gleich.
 
-Bei einer Wissensbasis aus einer früheren Version wird der Stichwortindex einmal, bei der ersten Nutzung, aus dem
-gespeicherten Text neu aufgebaut; Dokumente und Vektoren bleiben erhalten, und das Log nennt die Zahl der neu
-aufgebauten Abschnitte. Schnappschüsse früherer Versionen werden beim Wiederherstellen genauso neu aufgebaut. Ein
-Qdrant-Server älter als 1.16 speichert keine Metadaten zur Sammlung; dort lässt sich der Neuaufbau nicht erkennen,
-nimm die Dokumente dann erneut auf.
+Vorher aufgenommene Dokumente behalten ihre Stichwortvektoren und bleiben auffindbar; nimm sie erneut auf (zum
+Beispiel mit einem neuen Deep Ingest derselben URL), damit sie die Teile der Bezeichner bekommen.
 
 ### Große Codeblöcke und Tabellen
 
