@@ -144,6 +144,26 @@ class TestBuildRecords:
         assert states == {"b_alive": "building", "b_dead": "interrupted", "b_reused_pid": "interrupted",
                           "b_done": "completed"}
 
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX permissions")
+    def test_records_are_readable_only_by_their_owner(self, tmp_path):
+        # A record names the model, the output folder and errors; in a shared installation other users read them.
+        import stat
+        from orchestrator.Core import build_records
+        old_umask = os.umask(0o022)
+        try:
+            folder = tmp_path / "cache" / "build_records"
+            build_records.write_record(folder, record(build_id="b1"))
+            earlier = tmp_path / "earlier" / "build_records"  # a folder an earlier version created world-readable
+            earlier.mkdir(parents=True)
+            earlier.chmod(0o755)
+            build_records.write_record(earlier, record(build_id="b2"))
+        finally:
+            os.umask(old_umask)
+        for path, mode in ((folder, 0o700), (folder / "b1.json", 0o600),
+                           (earlier, 0o700), (earlier / "b2.json", 0o600)):
+            assert stat.S_IMODE(path.stat().st_mode) == mode, path
+        assert [r["build_id"] for r in build_records.read_records(folder)] == ["b1"]
+
     def test_prune_keeps_unfinished_and_the_newest_finished(self, tmp_path):
         from orchestrator.Core import build_records
         folder = tmp_path / "records"

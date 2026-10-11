@@ -97,7 +97,7 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 |---|---|
 | 0 | Success |
 | 1 | The command failed (for example a failed build, a failed deployment, a package that could not be created, a secret that could not be stored, a hardware probe that wrote no file, a damaged audit log, an AI error) |
-| 2 | Invalid input: unknown option, an unknown target or an unsupported format/board/quantization combination (`build start`), an unknown provider (`--provider`), an unknown model tier (`ditto models download`), no matching evaluation case (`ditto eval`), a missing pack id, file or source (`zoo install`, `zoo export`), a key file without a usable key (`--to`, `--from`), `--to` together with `--passphrase` (`zoo export`) |
+| 2 | Invalid input: unknown option, an unknown target or an unsupported format/board/quantization combination (`build start`), an unknown provider (`--provider`), an unknown model tier (`ditto models download`), no matching evaluation case (`ditto eval`), a missing pack id, file or source (`zoo install`, `zoo export`), a key file without a usable key or not a text file (`--to`, `--from`), `--from` for a pack that is not encrypted (`zoo install`), `--to` together with `--passphrase` (`zoo export`) |
 | 3 | Sign-in: the provider rejected the credential (`ditto login`, `ditto auth status --check`) |
 | 4 | Sign-in: the provider or the local server cannot be reached |
 | 5 | The credential vault cannot be used (no usable keyring, no passphrase, a damaged vault); the message names the choices. Every command that needs the vault uses it |
@@ -277,7 +277,9 @@ Shows builds from the build records in the cache folder (`<cache_dir>/build_reco
 stage and progress, so builds that another process started are listed too. Without an ID: a table of the 20 newest
 builds; with a request ID (`req_...`) or a build ID: the details of each attempt, including the error of a failed
 build (credentials redacted). A build whose process has ended before the build finished is shown as `interrupted`.
-Exit code 1 if the ID is not found. The command needs neither the credential vault nor Docker.
+Exit code 1 if the ID is not found. The command needs neither the credential vault nor Docker. On Linux and macOS
+the records folder and its records are readable only by the user who built (modes 0700 and 0600), so in a shared
+installation each user sees their own builds.
 
 | Option | Meaning |
 |---|---|
@@ -1088,7 +1090,7 @@ Note: signed by author key 0123456789abcdef (first pack seen from this author)
 | `PACK_ID` | An ID from the index (`zoo list`). The newest version is installed. |
 | `--kind [target\|recipe\|knowledge]` | Kind of `PACK_ID` (default `target`). A pack file names its own kind. |
 | `--file FILE` | Install a pack file someone gave you, or an encrypted pack (`.lcfpack`). Its trust is `local` unless the signed index lists its sha256. Works without network. |
-| `--from FILE` | Encrypted packs: accept them only from these senders. The file holds the senders' public keys as `llm-cli zoo keys` prints them; repeatable. Without it, any sender is accepted; the summary always names the sender's key ID. |
+| `--from FILE` | Encrypted packs: accept them only from these senders. The file holds the senders' public keys as `llm-cli zoo keys` prints them; repeatable. Without it, any sender is accepted; the summary always names the sender's key ID. For a pack that is not encrypted the command stops with exit code 2 (a plain pack has no sender; its summary shows the author signature). |
 | `--passphrase` | Encrypted packs: ask for the passphrase instead of opening the pack with your own key. |
 | `--yes` | Do not ask for a pack whose trust comes from the signed index, also a file the index lists. A file without an index entry is `local` and is always confirmed; without a terminal it is not installed. |
 
@@ -1099,8 +1101,9 @@ Behaviour:
 - An encrypted pack (an age file and its sender's signature, see
   [Features](Features.md#encrypted-packs-for-private-sharing)) is checked against the signature before it is
   decrypted. It opens with your own age identity (see [zoo keys](#zoo-keys)) or, with `--passphrase`, with the
-  passphrase; a passphrase whose scrypt work factor is above 2^20 is refused. The Community Hub opens packs
-  encrypted to your key; packs with a passphrase need this command.
+  passphrase; a passphrase whose scrypt work factor is above 2^20 is refused. A pack with a passphrase opened
+  without `--passphrase` says so; your own identity is read (and created on first use) only for a pack encrypted
+  to keys. The Community Hub opens packs encrypted to your key; packs with a passphrase need this command.
 - Nothing is installed over an existing folder of the same name, also when only the case differs; remove the old
   folder first.
 - Exit code 1: a check failed (the problems are listed and the quarantine folder is removed), you answered no, or

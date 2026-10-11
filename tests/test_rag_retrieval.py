@@ -358,6 +358,46 @@ def test_a_failing_reranker_keeps_the_fused_order_until_the_setting_changes(know
     assert rag.search("model memory", limit=3, rerank=True)[0].source == "https://docs.example/license"
 
 
+def test_switching_the_reranker_away_and_back_tries_again(knowledge, monkeypatch):
+    import orchestrator.Core.rag_manager as rm
+
+    created = []
+
+    def create(spec, cache_dir, offline):
+        created.append(spec.model_id)
+        if len(created) == 1:
+            return FakeReranker(LICENSE_FIRST, fail=EmbeddingModelNotCached("The reranking model is not in /cache"))
+        return FakeReranker(LICENSE_FIRST)
+
+    monkeypatch.setattr(rm, "create_reranker", create)
+    rag = knowledge(rag_reranker=DEFAULT_CPU_RERANKER)
+    ingest_all(rag)
+    rag.search("model memory", limit=3, rerank=True)
+    assert rag.reranker() is None and created == [DEFAULT_CPU_RERANKER]
+    rag.config.set("rag_reranker", "off")  # away and back, without a search in between
+    rag.config.set("rag_reranker", DEFAULT_CPU_RERANKER)
+    assert rag.search("model memory", limit=3, rerank=True)[0].source == "https://docs.example/license"
+    assert created == [DEFAULT_CPU_RERANKER, DEFAULT_CPU_RERANKER]
+
+
+def test_a_settings_object_without_revisions_retries_after_a_search_saw_the_change(knowledge, monkeypatch):
+    import orchestrator.Core.rag_manager as rm
+
+    failures = iter([EmbeddingModelNotCached("not in /cache"), None])
+    monkeypatch.setattr(rm, "create_reranker",
+                        lambda spec, cache_dir, offline: FakeReranker(LICENSE_FIRST, fail=next(failures)))
+    rag = knowledge()
+    ingest_all(rag)
+    values = {"rag_reranker": DEFAULT_CPU_RERANKER, "rag_model_idle_minutes": 0}
+    rag.config = SimpleNamespace(get=lambda key, default=None: values.get(key, default))
+    rag.search("model memory", limit=3, rerank=True)
+    assert rag.reranker() is None
+    values["rag_reranker"] = "off"
+    rag.search("model memory", limit=3)  # a search that does not rerank still notices the change
+    values["rag_reranker"] = DEFAULT_CPU_RERANKER
+    assert rag.search("model memory", limit=3, rerank=True)[0].source == "https://docs.example/license"
+
+
 def test_an_unknown_reranker_keeps_the_fused_order(knowledge):
     rag = knowledge(rag_reranker="nobody/nothing")
     ingest_all(rag)
@@ -546,6 +586,10 @@ def test_ingest_splits_blocks_beyond_the_model_context(knowledge):
     ("-DNDEBUG=1", "NDEBUG"),
     ("-DBUILD_SHARED_LIBS", "BUILD_SHARED_LIBS BUILD SHARED LIBS"),
     ("-D_FORTIFY_SOURCE=2 -D_GNU_SOURCE", "_FORTIFY_SOURCE FORTIFY SOURCE _GNU_SOURCE GNU"),  # no stray "D"
+    # -D only starts a definition at the start of a token, not after a hyphen inside a word.
+    ("build-DEFAULT_TARGET", "DEFAULT TARGET"),
+    ("`-DGGML_CUDA=ON` and \"-DGGML_VULKAN=1\"", "GGML_CUDA GGML CUDA GGML_VULKAN VULKAN"),
+    ("CMAKE_ARGS=-DGGML_CUDA=on", "CMAKE ARGS GGML_CUDA GGML CUDA"),
     # Version numbers are no search words: no fragments of one or two digits (the identifier itself stays).
     ("x86_64 wheels for manylinux_2_17", "x86 manylinux"),
     ("manylinux2014_x86_64 and gcc_12", "manylinux2014 x86 gcc"),
@@ -655,6 +699,18 @@ def test_idle_models_are_released_after_the_configured_time(knowledge, monkeypat
     latest = rag._model_timer
     rag.close()
     assert rag._model_timer is None and latest.finished.is_set()
+
+
+@pytest.mark.parametrize("minutes", [1e300, 10 ** 400, float("nan")], ids=["1e300", "10**400", "nan"])
+def test_a_huge_idle_time_is_capped_so_the_timer_keeps_running(knowledge, minutes):
+    from orchestrator.Core.rag_manager import MAX_MODEL_IDLE_SECONDS
+
+    rag = knowledge(embedder=Releasable())
+    rag.config = SimpleNamespace(get=lambda key, default=None: minutes if key == "rag_model_idle_minutes" else default)
+    rag.ingest_document("https://docs.example/a", "Model memory note.")
+    timer = rag._model_timer
+    timer.join(0.2)  # threading.Timer failed at once in its thread on an overflowing timeout
+    assert timer.is_alive() and timer.interval == (600 if minutes != minutes else MAX_MODEL_IDLE_SECONDS)
 
 
 def test_models_in_use_are_not_released_and_the_countdown_starts_after_the_last_use(knowledge):

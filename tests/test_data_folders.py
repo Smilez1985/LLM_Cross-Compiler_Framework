@@ -1,9 +1,12 @@
 """Where the framework keeps its settings and data folders, and what the installers do about them:
 no folders at startup, a read-only installation (C:\\Program Files) falls back to the per-user folder, the GUI's
 first-run language goes to the effective config folder, deployment bundles never read the working directory, and
-install.sh / install.bat drop their unused data folder and check the network over HTTPS."""
+install.sh / install.bat drop their unused data folder and check the network over HTTPS; running install.sh again
+keeps what the user and the framework created in the installation."""
 
+import getpass
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -284,11 +287,133 @@ class TestInstallSh:
         assert run.returncode == 1
         assert "bash" in run.stderr and "Bad substitution" not in run.stderr and "parameter not set" not in run.stderr
 
-    def test_no_unused_data_folder_and_user_data_survives_a_reinstall(self):
+    def test_no_unused_data_folder(self):
         text = INSTALL_SH.read_text(encoding="utf-8")
         assert "DATA_DIR" not in text and "user_config.yml" not in text and "8.8.8.8" not in text
-        for path in ("/output", "/cache", "/models", "/logs", "/configs/config.yml"):
-            assert f"--exclude '{path}'" in text, path   # rsync --delete keeps excluded paths in /opt
+
+    @pytest.mark.skipif(not shutil.which("rsync") or not shutil.which("git"), reason="needs rsync and git")
+    def test_a_reinstall_keeps_what_the_user_and_the_framework_created(self, tmp_path):
+        """install.sh used rsync --delete with a few excludes: running it again deleted the targets made with the
+        module wizard or `module create`, community packs installed into targets/ and community/, and anything
+        else in /opt that the repository does not ship. Now only files an earlier install.sh copied are removed."""
+        repo, install, outside = tmp_path / "repo", tmp_path / "opt" / "llm-conversion-framework", tmp_path / "outside"
+        shipped = {"README.md": "v1", "orchestrator/main.py": "v1", "orchestrator/old.py": "old",
+                   "targets/Rockchip/target.yml": "v1", "targets/Rockchip/modules/build.sh": "v1",
+                   "community/knowledge/.gitkeep": "", "configs/llm_providers.yml": "v1"}
+        for rel, text in {**shipped, "scratch.txt": "not tracked", "configs/config.yml": "a developer's"}.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(text)
+        git = ["git", "-C", str(repo), "-c", "safe.directory=*"]
+        subprocess.run(git[:3] + ["init", "-q"], check=True)
+        subprocess.run(git + ["add", *shipped], check=True)
+
+        def deploy():
+            script = ('source "$1"; REPO_ROOT="$2"; INSTALL_DIR="$3"; '
+                      'apt-get() { echo "apt-get must not run" >&2; return 1; }; deploy_files')
+            return subprocess.run(["/bin/bash", "-c", script, "test", str(INSTALL_SH), str(repo), str(install)],
+                                  env={"PATH": os.environ["PATH"], "HOME": str(tmp_path),
+                                       "USER": os.environ.get("USER") or getpass.getuser()},
+                                  capture_output=True, text=True, timeout=120)
+
+        run = deploy()
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert {p.relative_to(install).as_posix() for p in install.rglob("*") if p.is_file()} == \
+            set(shipped) | {".lcf-installed-files"}, "only the files the repository ships"
+
+        created = {"targets/my-board/target.yml": "module wizard", "targets/zoo-board/.lcf-provenance.json": "pack",
+                   "targets/Rockchip/modules/my_step.sh": "added by the user",
+                   "community/recipes/my-recipe/recipe.yml": "pack", "community/knowledge/notes.imported": "marker",
+                   "community/contributions/contribution-target-x-1.0.0.zip": "export",
+                   "configs/config.yml": "settings", "output/build_1/model.gguf": "build", "cache/x": "cache",
+                   "models/m.gguf": "model", ".venv/bin/python": "venv"}
+        for rel, text in created.items():
+            (install / rel).parent.mkdir(parents=True, exist_ok=True)
+            (install / rel).write_text(text)
+        # Entries no install.sh writes must never delete anything outside the installation.
+        outside.mkdir()
+        (outside / "victim.txt").write_text("keep")
+        (install / "linked").symlink_to(outside, target_is_directory=True)
+        with open(install / ".lcf-installed-files", "ab") as manifest:
+            manifest.write(b"../../outside/victim.txt\0" + str(outside / "victim.txt").encode() + b"\0"
+                           b"linked/victim.txt\0")
+
+        (repo / "orchestrator" / "main.py").write_text("v2")
+        later = (install / "orchestrator" / "main.py").stat().st_mtime + 10  # as after a git pull, not the same second
+        os.utime(repo / "orchestrator" / "main.py", (later, later))
+        (repo / "orchestrator" / "new.py").write_text("new")
+        subprocess.run(git + ["rm", "-q", "-f", "orchestrator/old.py"], check=True)  # staged only, never committed
+        subprocess.run(git + ["add", "orchestrator/new.py"], check=True)
+        run = deploy()
+
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert (install / "orchestrator" / "main.py").read_text() == "v2"
+        assert (install / "orchestrator" / "new.py").exists()
+        assert not (install / "orchestrator" / "old.py").exists(), "a file the repository no longer ships is removed"
+        assert {rel: (install / rel).read_text() for rel in created} == created, "everything else stays"
+        assert (outside / "victim.txt").read_text() == "keep"
+        listed = (install / ".lcf-installed-files").read_bytes().split(b"\0")
+        assert b"orchestrator/new.py" in listed and b"orchestrator/old.py" not in listed
+
+    @pytest.mark.skipif(not shutil.which("rsync") or not shutil.which("git"), reason="needs rsync and git")
+    def test_the_installed_copy_a_failed_listing_and_a_stale_link_delete_nothing_else(self, tmp_path):
+        """Three ways the reinstall could still lose files: the copy of install.sh in /opt listed every file there
+        as shipped (own targets and packs included), so the next update from the repository deleted them; a listing
+        that failed or came back empty removed the whole installed program; and a stale entry that is a link
+        deleted the file it points to instead of the link."""
+        repo, install, bin_dir = tmp_path / "repo", tmp_path / "opt" / "llm-conversion-framework", tmp_path / "bin"
+        shipped = {"README.md": "v1", "install.sh": INSTALL_SH.read_text(encoding="utf-8"),
+                   "orchestrator/main.py": "v1", "orchestrator/old.md": "old", "targets/Rockchip/target.yml": "v1"}
+        for rel, text in shipped.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(text)
+        git = ["git", "-C", str(repo), "-c", "safe.directory=*"]
+        subprocess.run(git[:3] + ["init", "-q"], check=True)
+        subprocess.run(git + ["add", *shipped], check=True)
+        # A git whose ls-files fails halfway (a damaged index, no read access) after rev-parse found the work tree.
+        bin_dir.mkdir()
+        (bin_dir / "git").write_text(f'#!/bin/sh\ncase "$*" in *ls-files*) printf "README.md\\0"; exit 128 ;; esac\n'
+                                     f'exec "{shutil.which("git")}" "$@"\n')
+        (bin_dir / "git").chmod(0o755)
+
+        def deploy(script, root, path=os.environ["PATH"]):
+            code = ('source "$1"; REPO_ROOT="$2"; INSTALL_DIR="$3"; '
+                    'apt-get() { echo "apt-get must not run" >&2; return 1; }; deploy_files')
+            return subprocess.run(["/bin/bash", "-c", code, "test", str(script), str(root), str(install)],
+                                  env={"PATH": path, "HOME": str(tmp_path),
+                                       "USER": os.environ.get("USER") or getpass.getuser()},
+                                  capture_output=True, text=True, timeout=120)
+
+        def files():
+            return {p.relative_to(install).as_posix(): p.read_text() for p in install.rglob("*")
+                    if p.is_file() and p.name != ".lcf-installed-files"}
+
+        assert deploy(INSTALL_SH, repo).returncode == 0
+        own = {"targets/my-board/target.yml": "module wizard", "community/recipes/r/recipe.yml": "pack"}
+        for rel, text in own.items():
+            (install / rel).parent.mkdir(parents=True, exist_ok=True)
+            (install / rel).write_text(text)
+        manifest, before = (install / ".lcf-installed-files").read_bytes(), files()
+
+        run = deploy(install / "install.sh", install)  # sudo /opt/llm-conversion-framework/install.sh
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert (install / ".lcf-installed-files").read_bytes() == manifest and files() == before
+
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        for script, root, path in ((INSTALL_SH, empty, os.environ["PATH"]),
+                                   (INSTALL_SH, repo, f"{bin_dir}{os.pathsep}{os.environ['PATH']}")):
+            run = deploy(script, root, path)
+            assert run.returncode != 0 and "nichts kopiert oder entfernt" in run.stdout, run.stdout + run.stderr
+            assert (install / ".lcf-installed-files").read_bytes() == manifest and files() == before
+
+        (install / "orchestrator" / "old.md").unlink()
+        (install / "orchestrator" / "old.md").symlink_to("../README.md")  # e.g. a link the user put there
+        subprocess.run(git + ["rm", "-q", "--cached", "orchestrator/old.md"], check=True)
+        run = deploy(INSTALL_SH, repo)
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert not (install / "orchestrator" / "old.md").is_symlink(), "the stale link itself is removed"
+        assert (install / "README.md").read_text() == "v1", "never the file it points to"
+        assert {rel: (install / rel).read_text() for rel in own} == own
 
 
 class TestInstallBat:

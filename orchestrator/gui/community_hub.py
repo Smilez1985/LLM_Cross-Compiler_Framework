@@ -151,7 +151,8 @@ class CommunityHubWindow(QMainWindow):
             row = self.table.rowCount()
             self.table.insertRow(row)
             name = QTableWidgetItem(item.title)
-            name.setToolTip(item.description or item.id)
+            # The description comes from the index or the pack: plain text, never rendered as HTML.
+            name.setToolTip(QtText.convertFromPlainText(item.description or item.id, Qt.WhiteSpaceNormal))
             trust = QTableWidgetItem(item.trust.value)
             trust.setForeground(QColor(TRUST_COLORS.get(item.trust.value, "#eee")))
             status = (f"revoked: {item.revoked}" if item.revoked else

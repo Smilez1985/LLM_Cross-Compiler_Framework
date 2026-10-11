@@ -392,6 +392,57 @@ class TestInstall:
         with pytest.raises(PackError, match="not encrypted to your key"):
             world.cm.prepare_install_file(tmp_path / "x.lcfpack", identity=pyrage.x25519.Identity.generate())
 
+    def test_a_passphrase_pack_without_the_passphrase_asks_for_it_and_needs_no_key(self, world, tmp_path):
+        blob = cp.encrypt_pack(world.target_pack(), sender=Ed25519PrivateKey.generate(),
+                               passphrase="correct horse battery")
+        (tmp_path / "x.lcfpack").write_bytes(blob)
+        with pytest.raises(PackError, match="protected with a passphrase"):
+            world.cm.prepare_install_file(tmp_path / "x.lcfpack")
+        assert world.secrets.store == {}, "no age identity is created for a passphrase pack"
+        world.framework.secrets_manager = None  # without a secrets store the answer is the same
+        with pytest.raises(PackError, match="protected with a passphrase"):
+            world.cm.prepare_install_file(tmp_path / "x.lcfpack")
+        prepared = world.cm.prepare_install_file(tmp_path / "x.lcfpack", passphrase="correct horse battery")
+        assert prepared.trust == TrustLevel.LOCAL
+
+    def test_trusted_senders_are_refused_for_a_plain_pack(self, world, tmp_path):
+        (tmp_path / "p.zip").write_bytes(world.target_pack())
+        with pytest.raises(PackError, match="only to encrypted packs"):
+            world.cm.prepare_install_file(tmp_path / "p.zip",
+                                          trusted_senders=[Ed25519PrivateKey.generate().public_key()])
+        assert list((world.root / "targets").iterdir()) == []
+
+    def test_the_archive_is_hashed_in_pieces(self, world, monkeypatch):
+        data = world.target_pack()
+        world.add(data)
+        world.publish()
+        real = Path.read_bytes
+
+        def read_bytes(path):
+            assert path.name != "pack.zip", "the archive (up to 512 MB) must not be read into memory at once"
+            return real(path)
+
+        monkeypatch.setattr(Path, "read_bytes", read_bytes)
+        prepared = world.cm.prepare_install("target", "demo-board")
+        assert prepared.provenance.pack_sha256 == cp.hashlib.sha256(data).hexdigest()
+
+    def test_author_keys_are_pinned_under_the_lock_without_losing_another_writer(self, world, tmp_path):
+        import threading
+        from orchestrator.utils.file_lock import file_lock
+
+        alice = Ed25519PrivateKey.generate()
+        (tmp_path / "a.zip").write_bytes(world.target_pack(key=alice))
+        prepared = world.cm.prepare_install_file(tmp_path / "a.zip")
+        authors = world.cm.cache_dir / "authors.json"
+        with file_lock(world.cm.cache_dir / "authors.json.lock"):  # another process pins a key meanwhile
+            worker = threading.Thread(target=world.cm.finish_install, args=(prepared,))
+            worker.start()
+            worker.join(0.5)
+            assert worker.is_alive() and not authors.exists(), "the pin waits for the lock"
+            authors.write_text(json.dumps({"bob": "Ym9i"}), encoding="utf-8")
+        worker.join(30)
+        assert set(json.loads(authors.read_text(encoding="utf-8"))) == {"alice", "bob"}
+
     def test_recipe_is_checked_against_the_installed_target(self, world, tmp_path):
         from test_recipes import recipe_data
         world.add(world.target_pack())
@@ -626,6 +677,14 @@ class TestExport:
         world.rag.records = world.rag.records[1:]
         with pytest.raises(PackError, match="nothing to export"):
             world.cm.export_pack("knowledge", author="mallory", pack_id="docs")
+
+    def test_the_note_counts_left_out_pages_not_their_chunks(self, world):
+        world.rag.records = [{"source": "https://docs.invalid/a", "content": "mine", "metadata": {}}] + [
+            {"source": f"https://docs.invalid/{page}", "content": f"alice's part {i}",
+             "metadata": {"origin_pack": "alice-notes"}} for page in ("b", "c") for i in range(3)]
+        result = world.cm.export_pack("knowledge", author="mallory", pack_id="docs")
+        assert any(n.startswith("2 page(s) imported from installed community knowledge packs were left out")
+                   for n in result.notes), result.notes
 
     def test_knowledge_keeps_its_sources_and_claims_no_licence(self, world):
         world.rag.records = [{"source": "https://docs.invalid/a", "content": "page", "metadata": {}},
@@ -942,6 +1001,28 @@ class TestCli:
                         str(tmp_path / "friend.keys"), "--passphrase", input="x" * 12 + "\n")
         assert result.exit_code == 2 and "not both" in result.output and "Passphrase" not in result.output
 
+    def test_a_binary_key_file_is_a_clear_usage_error(self, world, tmp_path):
+        me = cp.UserKeys(world.secrets).age_identity()
+        (tmp_path / "p.lcfpack").write_bytes(cp.encrypt_pack(world.target_pack(), sender=Ed25519PrivateKey.generate(),
+                                                             recipients=[me.to_public()]))
+        (tmp_path / "key.bin").write_bytes(b"\xff\xfe\x00\x81 not text")
+        result = invoke(world, "install", "--file", str(tmp_path / "p.lcfpack"), "--from", str(tmp_path / "key.bin"))
+        output = " ".join(result.output.split())  # the console wraps long lines
+        assert result.exit_code == 2 and "is not a text file with public keys" in output, output
+        assert not isinstance(result.exception, UnicodeDecodeError)
+        make_target(world.root / "targets" / "cli-board")
+        result = invoke(world, "export", "target", "cli-board", "--author", "pat", "--to", str(tmp_path / "key.bin"))
+        output = " ".join(result.output.split())
+        assert result.exit_code == 2 and "is not a text file with public keys" in output, output
+
+    def test_from_is_refused_for_a_plain_pack(self, world, tmp_path):
+        (tmp_path / "p.zip").write_bytes(world.target_pack())
+        (tmp_path / "alice.keys").write_text(invoke(world, "keys").output, encoding="utf-8")
+        result = invoke(world, "install", "--file", str(tmp_path / "p.zip"), "--from", str(tmp_path / "alice.keys"))
+        output = " ".join(result.output.split())
+        assert result.exit_code == 2 and "--from applies only to encrypted packs" in output, output
+        assert not (world.root / "targets" / "demo-board").exists()
+
     def test_pr_submits_only_after_the_summary_was_confirmed(self, world, monkeypatch):
         make_target(world.root / "targets" / "pr-board")
         submitted = []
@@ -1097,3 +1178,17 @@ def test_maintainer_signing_script(tmp_path, memory_keyring, capsys, world):
     verified = CommunityManager._verify_index(index.read_bytes(), (tmp_path / "index.json.sig").read_bytes(), [key])
     assert verified.entries[0].sha256 == cp.hashlib.sha256((tmp_path / "p.zip").read_bytes()).hexdigest()
     assert tool.main(["sign", str(index), "--key", "maintainers", "--previous", str(index)]) == 1
+
+
+def test_hub_tooltips_show_the_description_as_plain_text(qapp):
+    from orchestrator.gui.community_hub import CommunityHubWindow
+    hub = CommunityHubWindow(SimpleNamespace(community_manager=None))
+    try:
+        description = '<b>Fast</b> <a href="https://evil.invalid">board</a> & <img src="x">'
+        hub.populate_table([SimpleNamespace(title="T", description=description, id="t", kind="target",
+                                            version="1.0.0", trust=TrustLevel.COMMUNITY, author="a", revoked=None,
+                                            installed_version=None, path=None)])
+        tip = hub.table.item(0, 0).toolTip()
+        assert "&lt;b&gt;Fast&lt;/b&gt;" in tip and "<a " not in tip and "<img" not in tip and "&amp;" in tip
+    finally:
+        hub.close()

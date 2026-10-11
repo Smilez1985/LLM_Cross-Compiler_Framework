@@ -985,6 +985,76 @@ class TestGuiHelpers:
         win.refresh_access()
         assert wait_for(qapp, lambda: win.lbl_access.text() == "AI not set up")
 
+    @staticmethod
+    def started_targets(module, monkeypatch):
+        """Records the functions given to threading.Thread in `module` (they still run)."""
+        targets, real = [], threading.Thread
+
+        def thread(*args, target=None, **kwargs):
+            targets.append(target)
+            return real(*args, target=target, **kwargs)
+
+        monkeypatch.setattr(module.threading, "Thread", thread)
+        return targets
+
+    @staticmethod
+    def qt_objects_held(function):
+        """The Qt objects a worker function holds, except the relay that lives as long as the application."""
+        from PySide6.QtCore import QObject
+        from orchestrator.gui.worker_relay import worker_relay
+        cells = [cell.cell_contents for cell in (function.__closure__ or ())]
+        return [value for value in cells if isinstance(value, QObject) and value is not worker_relay()]
+
+    def test_workers_hold_no_qt_object_and_answer_on_the_gui_thread(self, qapp, tmp_path, monkeypatch):
+        """Both workers used to create a signals object without a parent in the GUI thread, emit on it from the
+        worker thread and drop it there, the pattern that made the AI dialog abort now and then. They now emit on
+        the lasting relay, queued to the GUI thread, and each receiver takes only its own results."""
+        from orchestrator.gui import chat_window, sign_in
+
+        targets = self.started_targets(chat_window, monkeypatch)
+        ditto = SimpleNamespace(describe=lambda task="chat": {"label": "Ollama (local)", "local": True,
+                                                              "auth_type": "none", "auth_source": "none"})
+        framework = SimpleNamespace(config=ConfigManager(tmp_path / "cfg"), ditto_manager=ditto)
+        first, second = chat_window.ChatWindow(framework), chat_window.ChatWindow(framework)
+        second.ditto = None
+        second.refresh_access()
+        assert wait_for(qapp, lambda: first.lbl_access.text() == "Local · Ollama")
+        assert wait_for(qapp, lambda: len(targets) == 3) and all(not self.qt_objects_held(t) for t in targets)
+        qapp.processEvents()
+        assert second.lbl_access.text() == "", "another window's answer does not change this one"
+
+        targets = self.started_targets(sign_in, monkeypatch)
+        busy, results = [], []
+        worker = sign_in.Worker(busy.append)
+        worker.run("test", lambda: threading.current_thread() is threading.main_thread(),
+                   lambda result, error: results.append((result, error,
+                                                         threading.current_thread() is threading.main_thread())))
+        assert wait_for(qapp, lambda: results) and results == [(False, None, True)] and busy == [True, False]
+        assert targets and not self.qt_objects_held(targets[0])
+
+    def test_closing_windows_while_their_workers_run_is_safe(self, qapp, tmp_path):
+        from orchestrator.gui import chat_window, sign_in
+
+        def slow(task="chat"):
+            time.sleep(0.01)
+            return {"label": "Ollama (local)", "local": True, "auth_type": "none", "auth_source": "none"}
+
+        framework = SimpleNamespace(config=ConfigManager(tmp_path / "cfg"),
+                                    ditto_manager=SimpleNamespace(describe=slow))
+        for round_ in range(40):
+            win = chat_window.ChatWindow(framework)
+            worker = sign_in.Worker(lambda busy: None, parent=win)
+            worker.run("test", lambda: time.sleep(0.01), lambda result, error: None)
+            qapp.processEvents()
+            win.close()
+            win.deleteLater()
+            del win, worker
+            qapp.processEvents()
+            if round_ % 10 == 0:
+                gc.collect()
+        last = chat_window.ChatWindow(framework)
+        assert wait_for(qapp, lambda: last.lbl_access.text() == "Local · Ollama")
+
     def test_the_passphrase_is_asked_on_the_gui_thread(self, qapp, monkeypatch):
         from orchestrator.gui.sign_in import PassphrasePrompt
         prompt = PassphrasePrompt()
