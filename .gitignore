@@ -229,6 +229,11 @@ configs/known_hosts
 /models/
 /logs/
 
+# Written by install.bat for the Windows uninstaller (the installation folder) and the uninstaller's backups of
+# your data (scripts/Uninstall-LLM-Conversion-Framework.bat)
+/.install_complete
+/recovered_data/
+
 # Credentials and keys (never commit; scripts/secret_scan.py refuses them as well)
 .env.*
 !.env.example

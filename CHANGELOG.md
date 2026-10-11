@@ -52,9 +52,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
   pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, Metal or CPU;
   ROCm on request; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
-  at pinned revisions into the `ditto/` folder of the configured models folder (`models_dir`, the one Ditto uses),
-  checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
-  (3 GB RAM). The "local" provider follows the running server without configuration.
+  at pinned revisions into the `ditto/` folder of the configured models folder (`models_dir`, the one Ditto uses;
+  the runtime also takes it when it is given no folder), checked by size and sha256. Model tiers go down to 2-bit
+  models for weak hardware (3 GB RAM). The "local" provider follows the running server without configuration.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`; the servers the run starts are stopped afterwards, one you started
@@ -342,8 +342,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   is named on stderr and ignored, and the other settings apply.
 - The GUI's hardware scan of this PC (**Scan / Import...**) writes its result into `<cache_dir>/probes/` instead of
   the GUI's working folder, and the module wizard's *Auto-fill from Probe Result* reads it there.
+- Deployment from the GUI writes the package into the configured output folder (`output_dir`, relative to the
+  installation) instead of `output/` in the working folder.
 - The AI settings dialog warns when the settings could not be saved to `config.yml` (they apply until the program
   ends); before, only the log said so.
+- Windows: the uninstaller (`scripts/Uninstall-LLM-Conversion-Framework.bat`) finds the installation. `install.bat`
+  now writes the marker with the installation folder that the uninstaller reads, next to `install.bat`, where the
+  uninstaller looks for it; before, no installer wrote it and the uninstaller always reported that nothing was
+  installed. The start script `scripts/start-llm_convertion_framework.bat` also works from `scripts\` (it looked
+  for `orchestrator\main.py` and `.venv` there).
 - `llm-cli targets list` shows each target's id (the value for `--target`), name, boards and formats from its
   capabilities instead of placeholders; `llm-cli targets validate` checks the capabilities block against the
   schema and prints every error (exit code 1).

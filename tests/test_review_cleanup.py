@@ -5,6 +5,7 @@
 4 wait_stopped after a cancel that came before the engine registered the build
 5 `module create` hint and <NAME>_REPO_OVERRIDE names
 6 failed saves of the settings are reported
+7 configured folders instead of the working directory or the installation, Windows start and uninstall scripts
 8 FrameworkManager.shutdown ends the background event loop
 """
 
@@ -298,6 +299,85 @@ class TestFailedSaves:
             assert shown == []
         else:
             assert len(shown) == 1 and "config.yml" in shown[0][1]
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# 7. Configured folders; Windows start and uninstall scripts
+# ---------------------------------------------------------------------------------------------------------------
+
+def test_the_deployment_package_goes_to_the_configured_output_folder(qapp, tmp_path):
+    from orchestrator.gui.deployment_window import DeploymentWorker
+    install, seen = tmp_path / "install", {}
+
+    class Deployment:
+        def create_deployment_package(self, artifact_path, profile_name, docker_config, output_dir):
+            seen["output_dir"] = output_dir
+            return None  # stops after packaging
+
+    framework = SimpleNamespace(config=SimpleNamespace(get=lambda key, default=None: default),
+                                resolve_path=lambda value: install / value,
+                                get_component=lambda name: Deployment())
+    results = []
+    worker = DeploymentWorker(framework, tmp_path / "model.gguf", "Rockchip", {}, "10.0.0.2", "root", None)
+    worker.finished.connect(lambda ok, message: results.append(ok))
+    worker.run()
+    assert seen["output_dir"] == install / "output" and results == [False]
+
+
+class TestRuntimeDefaultModelsDir:
+
+    def test_without_models_dir_the_configured_folder_is_used(self, tmp_path):
+        from orchestrator.runtime.llama_server import LocalLLMRuntime
+        write_user_config(tmp_path, models_dir=str(tmp_path / "my-models"))
+        runtime = LocalLLMRuntime(data_dir=tmp_path / "state")
+        assert runtime.models_dir == tmp_path / "my-models" / "ditto"
+
+    def test_the_same_folder_as_from_framework(self, tmp_path):
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.framework import resolve_install_path
+        from orchestrator.runtime.llama_server import LocalLLMRuntime
+        write_user_config(tmp_path, models_dir="relative-models")
+        framework = SimpleNamespace(config=ConfigManager(), resolve_path=resolve_install_path)
+        expected = LocalLLMRuntime.from_framework(framework).models_dir
+        assert LocalLLMRuntime(data_dir=tmp_path / "state").models_dir == expected == \
+            REPO_ROOT / "relative-models" / "ditto"
+
+
+SCRIPTS = REPO_ROOT / "scripts"
+
+
+class TestWindowsScripts:
+
+    def test_the_start_script_finds_the_framework_folder(self):
+        text = (SCRIPTS / "start-llm_convertion_framework.bat").read_text(encoding="utf-8")
+        # It lies in scripts\ (the updater, still in development, copies it into the framework folder): both work.
+        assert 'if not exist "orchestrator\\main.py" if exist "..\\orchestrator\\main.py" cd ..' in text
+        assert 'set "PYTHONPATH=%FRAMEWORK_ROOT%"' in text and 'set "PYTHONPATH=%~dp0"' not in text
+        started = re.search(r'"%PYTHON_EXE%" (\S+)', text).group(1)
+        assert (REPO_ROOT / started.replace("\\", "/")).is_file()
+        # Files that are not shipped (planned updater, portable Python) are used only when present.
+        for optional in ("updater.bat", "updater.sh", "python_embed\\python.exe"):
+            assert f'if exist "{optional}"' in text, optional
+
+    def test_the_uninstaller_reads_the_marker_install_bat_writes(self):
+        uninstall = (SCRIPTS / "Uninstall-LLM-Conversion-Framework.bat").read_text(encoding="utf-8")
+        install = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+        marker = re.search(r'SET "MARKER_FILE=([^"]+)"', uninstall).group(1)
+        assert f'Join-Path $ScriptPath "{marker}"' in install and "-Value $InstallDir" in install
+        # The marker lies next to install.bat, one level above the uninstaller in scripts\.
+        assert (SCRIPTS / ".." / "install.bat").is_file()
+        assert 'IF NOT EXIST "install.bat" IF EXIST "..\\install.bat" cd ..' in uninstall
+        assert (uninstall.index('IF EXIST "..\\install.bat" cd ..') < uninstall.index('SET "SOURCE_REPO=%CD%"')
+                < uninstall.index('IF NOT EXIST "%MARKER_FILE%"'))
+        # The shortcut it removes is the one install.bat creates.
+        shortcut = re.search(r'SET "SHORTCUT_NAME=([^"]+)"', uninstall).group(1)
+        app = re.search(r'\$AppName = "([^"]+)"', install).group(1)
+        assert shortcut == f"{app}.lnk" and '"$AppName.lnk"' in install
+
+    def test_the_marker_and_the_backups_stay_out_of_git(self):
+        for path in (".install_complete", "recovered_data/backup/config.yml"):
+            ignored = subprocess.run(["git", "-C", str(REPO_ROOT), "check-ignore", "-q", path])
+            assert ignored.returncode == 0, path
 
 
 # ---------------------------------------------------------------------------------------------------------------

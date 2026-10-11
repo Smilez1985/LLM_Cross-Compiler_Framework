@@ -140,5 +140,12 @@ $IconPath = Join-Path $InstallDir "assets\LLM-Builder.ico"
 if (Test-Path $IconPath) { $Shortcut.IconLocation = $IconPath }
 $Shortcut.Save()
 
+# Marker for scripts\Uninstall-LLM-Conversion-Framework.bat: the installation folder, kept next to this script
+try {
+    Set-Content -Path (Join-Path $ScriptPath ".install_complete") -Value $InstallDir -Encoding ASCII
+} catch {
+    Write-Warning "Marker fuer den Uninstaller nicht geschrieben ($_); er findet die Installation dann nicht."
+}
+
 Write-Host "Installation Erfolgreich!" -ForegroundColor Green
 Write-Host "Builds, Cache und Modelle: $UserDataHint (je Benutzer)"
