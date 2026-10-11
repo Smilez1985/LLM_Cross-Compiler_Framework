@@ -7,14 +7,22 @@ from typing import Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from orchestrator.llm.types import Effort
 
 DEFAULT_CATALOG = Path(__file__).resolve().parents[2] / "configs" / "llm_providers.yml"
 CATALOG_FILENAME = "llm_providers.yml"
 
-AuthMethod = Literal["api_key", "oauth", "none"]
+AuthMethod = Literal["api_key", "ant_profile", "none"]
+
+# Providers that no longer exist. Selecting one, also by an old alias, raises NotConfigured with this text.
+CLAUDE_CODE_REMOVED = (
+    "The Claude Code connection was removed: Anthropic does not allow other apps to use Claude subscription "
+    "limits without approval. Choose one of these instead: (1) a Claude API key (Max and Team plans include "
+    "monthly API credits for a linked Console organization), (2) Claude on Bedrock, Vertex or Foundry, (3) use "
+    "the framework from Claude Code itself: `llm-cli mcp config`.")
+REMOVED_PROVIDERS = {"claude_code": CLAUDE_CODE_REMOVED, "claudecode": CLAUDE_CODE_REMOVED}
 
 
 class ProviderPreset(BaseModel):
@@ -22,12 +30,14 @@ class ProviderPreset(BaseModel):
 
     id: str
     label: str
-    adapter: Literal["anthropic", "openai_responses", "openai_compat", "claude_code"]
+    adapter: Literal["anthropic", "openai_responses", "openai_compat"]
     base_url: Optional[str] = None
     base_url_configurable: bool = False  # ai_base_url applies; cloud presets keep their fixed endpoint
     runtime_endpoint: bool = False       # endpoint is supplied by a running local server
     location: Literal["cloud", "local", "auto"] = "cloud"
     auth: List[AuthMethod] = Field(default_factory=lambda: ["api_key"])
+    opt_in_auth: List[AuthMethod] = Field(default_factory=list)  # used only when ai_auth_<id> names it
+    reject_key_prefixes: List[str] = Field(default_factory=list)  # admin keys, refused before any request
     secret: Optional[str] = None
     models: Dict[str, str] = Field(default_factory=dict)
     suggested_models: List[str] = Field(default_factory=list)
@@ -40,6 +50,17 @@ class ProviderPreset(BaseModel):
     headers: Dict[str, str] = Field(default_factory=dict)
     live_models: bool = True
     docs_url: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _opt_in_methods_are_offered(self):
+        unknown = [m for m in self.opt_in_auth if m not in self.auth]
+        if unknown:
+            raise ValueError(f"opt_in_auth lists methods that are not in auth: {', '.join(unknown)}")
+        return self
+
+    def rejected_key(self, key: Optional[str]) -> bool:
+        """True for a key of a kind this provider refuses for chat (e.g. an Admin API key)."""
+        return bool(key) and any(key.startswith(p) for p in self.reject_key_prefixes if p)
 
     def model_for(self, task: str) -> Optional[str]:
         return self.models.get(task) or self.models.get("default")
@@ -74,6 +95,17 @@ class Catalog(BaseModel):
             for alias, target in self.aliases.items():
                 if alias.lower() == lowered:
                     return target
+        return None
+
+    def removed_message(self, name: Optional[str]) -> Optional[str]:
+        """What to use instead when `name` is a provider that was removed (None otherwise)."""
+        pid = self.resolve_id(name)
+        if not name or pid in self.providers:
+            return None
+        raw = str(name).strip()
+        for cand in (pid, raw, raw.split()[0] if raw.split() else ""):
+            if cand and cand.lower() in REMOVED_PROVIDERS:
+                return REMOVED_PROVIDERS[cand.lower()]
         return None
 
     def get(self, name: Optional[str]) -> Optional[ProviderPreset]:

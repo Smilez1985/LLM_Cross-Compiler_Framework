@@ -38,6 +38,7 @@ from orchestrator.Core.orchestrator import LLMOrchestrator, BuildRequest, Workfl
 from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel
 from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.Core.deployment_manager import DeploymentManager
+from orchestrator.llm.sdk_env import guard_sdk_environment
 from orchestrator.utils.logging import get_logger, setup_logging
 from orchestrator.utils.validation import ValidationError
 
@@ -169,6 +170,12 @@ def load_config_file(config_path: Optional[str] = None) -> Dict[str, Any]:
     return config
 
 
+def _allow_sdk_env_headers(config_path: Optional[str]) -> bool:
+    """The setting ai_allow_sdk_env_headers (read only when OPENAI/ANTHROPIC_CUSTOM_HEADERS is set)."""
+    from orchestrator.Core.config_manager import ConfigManager
+    return bool(ConfigManager(config_path).get("ai_allow_sdk_env_headers", False))
+
+
 def format_target_table(targets: List[TargetConfig]) -> Table:
     """Format targets as a Rich table"""
     table = Table(title="Available Targets")
@@ -209,8 +216,11 @@ def model_format_from_string(format_str: str) -> ModelFormat:
 @click.option('--verbose', '-v', is_flag=True, help='Verbose output')
 @click.option('--quiet', '-q', is_flag=True, help='Quiet output')
 @click.option('--log-level', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR']))
+@click.option('--debug-http', is_flag=True,
+              help='Keep ANTHROPIC_LOG/OPENAI_LOG=debug (the SDKs then log request details)')
 @pass_context
-def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str):
+def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str,
+        debug_http: bool):
     """
     🚀 LLM Cross-Compiler Framework CLI v2.4.0
     
@@ -228,7 +238,11 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
 
     # Applies to framework loggers too; they are created before FrameworkManager configures logging.
     setup_logging(level=ctx.log_level)
-    
+
+    # Every command, `mcp serve` included, passes here before anything starts a thread.
+    for warning in guard_sdk_environment(lambda: _allow_sdk_env_headers(config), debug_http=debug_http):
+        Console(stderr=True).print(f"[yellow]Warning: {escape(warning)}[/yellow]")
+
     if not quiet:
         Console(stderr=True).print(Panel(
             f"[bold cyan]LLM Cross-Compiler Framework CLI v{__version__}[/bold cyan]\n"

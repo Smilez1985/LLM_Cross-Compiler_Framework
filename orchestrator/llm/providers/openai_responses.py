@@ -10,6 +10,8 @@ The current models (gpt-6.1-sol, gpt-6-luna, gpt-6-astra) call tools only there:
 - store=false: nothing is kept on OpenAI's side; the output items (reasoning items carry encrypted_content in
   stateless mode) are replayed unchanged as the next request's input.
 - prompt_cache_key is a random per-install id, never derived from the user's identity.
+- key and base_url are explicit, Authorization is set explicitly (OPENAI_CUSTOM_HEADERS cannot replace it), and
+  organization and project are cleared (no OPENAI_ORG_ID / OPENAI_PROJECT_ID from the environment).
 """
 
 from typing import Any, Dict, List, Optional
@@ -34,11 +36,12 @@ class OpenAIResponsesAdapter(ProviderAdapter):
             if not self._api_key:
                 raise NotConfigured("No OpenAI API key is stored. Add one in the AI settings.", provider=self.provider)
             import openai
-            kwargs = dict(api_key=self._api_key, base_url=self.base_url, max_retries=0, timeout=self.timeout)
+            kwargs = dict(api_key=self._api_key, base_url=self.base_url, max_retries=0, timeout=self.timeout,
+                          default_headers={**self.preset.headers, "Authorization": f"Bearer {self._api_key}"})
             if self.http_client is not None:
                 kwargs["http_client"] = self.http_client
             self._client = openai.OpenAI(**kwargs)
-            self._client.organization = None  # no implicit OPENAI_ORG_ID / OPENAI_PROJECT_ID from the environment
+            self._client.organization = None
             self._client.project = None
         return self._client
 

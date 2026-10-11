@@ -96,7 +96,9 @@ make test-container     # Run isolated tests
 The framework runs as a [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI client you
 already use can drive it: list targets, check what a board supports, start and watch builds, read logs and
 decide on self-healing proposals. You sign in to the client with your own Claude account or API key; the
-framework never sees those credentials.
+framework never sees those credentials. This is the way to use the framework with a Claude Pro or Max plan:
+Ditto itself (inside the framework) needs a Claude API key (Max and Team plans include monthly API credits)
+or another provider, because other apps may not use Claude subscription limits.
 
 ```bash
 llm-cli ditto setup        # once: what AI clients may do on their own, what needs your confirmation

@@ -12,18 +12,26 @@ Request rules for the current models (Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, Fa
 - automatic prompt caching via the top-level cache_control, plus a breakpoint on the static system prompt.
 - server-side refusal fallback (fallbacks: "default") for the models listed in the preset, Claude API only.
 - assistant turns are passed back unchanged (thinking blocks are bound to the conversation prefix).
+
+Credentials: the stored API key, or an `ant auth login` profile only when the user chose that method. The
+client always gets an explicit credential and base_url, so neither ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL nor the
+CLI's active profile can switch the account or the endpoint. A workspace ID (keys valid in every workspace of
+the organization need one) goes out as the anthropic-workspace-id header on every request.
 """
 
+import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
-from orchestrator.llm.errors import NotConfigured, Refused, map_anthropic_error
+from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, NotConfigured, Refused, map_anthropic_error
 from orchestrator.llm.providers.base import DEFAULT_MAX_TOKENS, ProviderAdapter
 from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ModelInfo, NativeMessage, ToolCall,
                                     ToolSpecLLM, Usage)
 
 FALLBACK_BETA = "server-side-fallback-2026-07-01"  # pairs with the scalar form fallbacks="default"
 CLAUDE_API_HOSTS = ("api.anthropic.com",)
+WORKSPACE_HEADER = "anthropic-workspace-id"
+WORKSPACE_ID = re.compile(r"^wrkspc_[A-Za-z0-9]+$")
 
 _STOP = {"end_turn": "end", "stop_sequence": "end", "pause_turn": "end", "tool_use": "tool_use",
          "max_tokens": "max_tokens", "model_context_window_exceeded": "max_tokens", "refusal": "refusal"}
@@ -47,24 +55,33 @@ def claude_schema(schema: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 class AnthropicAdapter(ProviderAdapter):
     family = "anthropic"
 
-    def __init__(self, preset, *, auth: str = "api_key", oauth_profile: Optional[str] = None, **kw):
+    def __init__(self, preset, *, auth: str = "api_key", oauth_profile: Optional[str] = None,
+                 workspace_id: Optional[str] = None, **kw):
         super().__init__(preset, **kw)
         self.base_url = self.base_url or preset.base_url or "https://api.anthropic.com"
         self.auth = auth
         self.oauth_profile = oauth_profile
+        self.workspace_id = str(workspace_id).strip() if workspace_id else None
         self._client = None
 
     # --- client -------------------------------------------------------------------------------------------
     def client(self):
         if self._client is None:
+            if self.workspace_id and not WORKSPACE_ID.match(self.workspace_id):
+                raise NotConfigured(ANTHROPIC_WORKSPACE_INVALID, provider=self.provider,
+                                    code="anthropic.workspace_invalid")
             import anthropic
-            common = dict(base_url=self.base_url, max_retries=0, timeout=self.timeout)  # retries: LLMClient
+            common: Dict[str, Any] = dict(base_url=self.base_url, max_retries=0,  # retries: LLMClient
+                                          timeout=self.timeout)
+            if self.workspace_id:
+                common["default_headers"] = {WORKSPACE_HEADER: self.workspace_id}
             if self.http_client is not None:
                 common["http_client"] = self.http_client
             try:
-                if self.auth == "oauth":
-                    # An `ant auth login` profile (Anthropic's own sign-in); the SDK reads and refreshes the
-                    # token itself, this code never sees it. Without a name, the CLI's active profile is used.
+                if self.auth == "ant_profile":
+                    # An `ant auth login` profile (Anthropic's own sign-in), chosen explicitly by the user; the
+                    # SDK reads and refreshes the token itself, this code never sees it. Without a name, the
+                    # CLI's active profile is used.
                     from anthropic.lib.credentials import CredentialsFile
                     profile = self.oauth_profile or CredentialsFile().profile
                     self._client = anthropic.Anthropic(profile=profile, **common)
@@ -72,8 +89,8 @@ class AnthropicAdapter(ProviderAdapter):
                     # Passing the key explicitly turns off the SDK's environment and profile fallbacks.
                     self._client = anthropic.Anthropic(api_key=self._api_key, **common)
                 else:
-                    raise NotConfigured("No Claude API key is stored. Add one in the AI settings, or sign in with "
-                                        "`ant auth login` and choose OAuth.", provider=self.provider)
+                    raise NotConfigured("No Claude API key is stored. Add one in the AI settings.",
+                                        provider=self.provider)
             except NotConfigured:
                 raise
             except Exception as e:

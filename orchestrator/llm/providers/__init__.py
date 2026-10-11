@@ -14,9 +14,6 @@ def adapter_class(name: str):
     if name == "openai_responses":
         from orchestrator.llm.providers.openai_responses import OpenAIResponsesAdapter
         return OpenAIResponsesAdapter
-    if name == "claude_code":
-        from orchestrator.llm.providers.claude_code import ClaudeCodeAdapter
-        return ClaudeCodeAdapter
     raise ValueError(f"Unknown adapter '{name}'")
 
 
