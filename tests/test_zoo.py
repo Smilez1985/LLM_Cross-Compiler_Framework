@@ -4,7 +4,10 @@ CLI and hub (offline: downloads go to a fake session, keys are made at runtime).
 import base64
 import inspect
 import json
+import os
+import shutil
 import subprocess
+import time
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -204,6 +207,30 @@ class TestIndex:
         state = world.cm.load_index(refresh=True)
         assert state.source == "cached" and "offline" in state.note
 
+    def test_a_cache_older_than_a_day_is_fetched_again(self, world):
+        world.publish()
+        world.cm.load_index(refresh=True)
+        world.publish(version=2)
+        assert world.cm.load_index().index.version == 1, "a fresh cache needs no network"
+        old = time.time() - zoo_mod.INDEX_MAX_AGE - 60
+        os.utime(world.cm.cache_dir / "index.json", (old, old))
+        state = world.cm.load_index()
+        assert (state.source, state.index.version) == ("fetched", 2)
+
+    def test_install_always_sees_the_current_revocations(self, world):
+        world.add(world.target_pack())
+        world.publish()
+        world.cm.load_index(refresh=True)  # cached just now, before the revocation
+        world.revoked.append({"kind": "target", "id": "demo-board", "reason": "malware"})
+        world.publish(version=2)
+        with pytest.raises(PackError, match="revoked: malware"):
+            world.cm.prepare_install("target", "demo-board")
+        del world.session.files[INDEX_URL]  # the index cannot be updated, the pack could be downloaded
+        world.session.calls.clear()
+        with pytest.raises(PackError, match="could not be updated"):
+            world.cm.prepare_install("target", "demo-board")
+        assert world.session.calls == [INDEX_URL], "no pack is downloaded with an outdated index"
+
     def test_no_url_or_no_shipped_keys_never_touches_the_network(self, world):
         world.values["community_index_url"] = ""
         with pytest.raises(PackError, match="community_index_url"):
@@ -306,6 +333,20 @@ class TestInstall:
         world.cm.load_index(refresh=True)
         assert world.cm.prepare_install_file(tmp_path / "pack.zip").trust == TrustLevel.VERIFIED
 
+    def test_file_import_sees_revocations_of_an_index_newer_than_the_cache(self, world, tmp_path):
+        (tmp_path / "pack.zip").write_bytes(world.target_pack())
+        world.publish()
+        world.cm.load_index(refresh=True)
+        world.revoked.append({"kind": "target", "id": "demo-board", "reason": "malware"})
+        world.publish(version=2)
+        old = time.time() - zoo_mod.INDEX_MAX_AGE - 60
+        os.utime(world.cm.cache_dir / "index.json", (old, old))
+        with pytest.raises(PackError, match="revoked: malware"):
+            world.cm.prepare_install_file(tmp_path / "pack.zip")
+        world.session.files.clear()  # offline now: the updated cache keeps the revocation
+        with pytest.raises(PackError, match="revoked: malware"):
+            world.cm.prepare_install_file(tmp_path / "pack.zip")
+
     def test_author_signature_is_checked_and_pinned_per_author(self, world, tmp_path):
         alice = Ed25519PrivateKey.generate()
         (tmp_path / "a.zip").write_bytes(world.target_pack(key=alice))
@@ -373,6 +414,26 @@ class TestInstall:
         with pytest.raises(PackError, match="expected a list"):
             world.cm.prepare_install_file(tmp_path / "bad.zip")
 
+    def test_a_newer_knowledge_pack_is_ingested_after_the_old_folder_was_deleted(self, world, tmp_path):
+        for version, content in (("1.0.0", "old"), ("1.1.0", "new")):
+            root = tmp_path / version
+            root.mkdir()
+            (root / "knowledge.json").write_text(json.dumps([{"source": "s", "content": content, "metadata": {}}]))
+            (tmp_path / f"{version}.zip").write_bytes(pack_bytes(root, kind="knowledge", pack_id="notes",
+                                                                 version=version))
+            dest = world.cm.finish_install(world.cm.prepare_install_file(tmp_path / f"{version}.zip"))
+            if version == "1.0.0":
+                shutil.rmtree(dest)  # how a pack is removed
+        assert world.rag.ingested == [("s", "old"), ("s", "new")]
+
+    def test_knowledge_without_its_source_is_refused(self, world, tmp_path):
+        root = tmp_path / "k"
+        root.mkdir()
+        (root / "knowledge.json").write_text(json.dumps([{"source": " ", "content": "c", "metadata": {}}]))
+        (tmp_path / "k.zip").write_bytes(pack_bytes(root, kind="knowledge", pack_id="anon", version="1.0.0"))
+        with pytest.raises(PackError, match="each with its source"):
+            world.cm.prepare_install_file(tmp_path / "k.zip")
+
 
 # --- revocation and trust -------------------------------------------------------------------------------------
 
@@ -404,6 +465,26 @@ class TestRevocation:
         assert finding.severity == Severity.ERROR and "revoked" in finding.message
         with pytest.raises(PackError, match="revoked"):
             build_trust_check(dest, world.cm.cache_dir)
+
+    def test_a_revocation_outlives_the_key_that_signed_it(self, world, monkeypatch):
+        from orchestrator.Core.doctor import Severity, check_community
+        keys = [trusted(world.maintainer)]
+        monkeypatch.setattr(zoo_mod, "load_trusted_keys", lambda: keys)
+        world.cm._keys = keys
+        world.add(world.target_pack())
+        world.publish()
+        dest = world.install()
+        world.revoked.append({"kind": "target", "id": "demo-board", "reason": "malware"})
+        world.publish(version=2)
+        world.cm.load_index(refresh=True)
+        # Later: the framework was not updated and the key that signed the index has expired since.
+        keys[0] = trusted(world.maintainer, valid_until="2025-01-01")
+        fetched = cp.datetime(2024, 6, 1, tzinfo=cp.timezone.utc).timestamp()
+        os.utime(world.cm.cache_dir / "index.json", (fetched, fetched))
+        assert world.cm.cached_index() is None, "nothing is installed from an index with an expired key"
+        with pytest.raises(PackError, match="revoked"):
+            build_trust_check(dest, world.cm.cache_dir)
+        assert check_community(SimpleNamespace(community_manager=world.cm))[0].severity == Severity.ERROR
 
     def test_local_target_warns_on_every_build(self, world, tmp_path):
         (tmp_path / "p.zip").write_bytes(world.target_pack())
@@ -470,6 +551,25 @@ class TestExport:
         with zipfile.ZipFile(result.path) as zf:
             assert [e["content"] for e in json.loads(zf.read("knowledge.json"))] == ["from docs"]
 
+    def test_knowledge_keeps_its_sources_and_claims_no_licence(self, world):
+        world.rag.records = [{"source": "https://docs.invalid/a", "content": "page", "metadata": {}},
+                             {"source": "", "content": "nobody knows where from", "metadata": {}}]
+        result = world.cm.export_pack("knowledge", author="a", pack_id="docs")
+        assert result.manifest.license == "NOASSERTION", "web pages are not the exporter's to license"
+        with zipfile.ZipFile(result.path) as zf:
+            assert [e["source"] for e in json.loads(zf.read("knowledge.json"))] == ["https://docs.invalid/a"]
+        assert any("keeps its source" in n for n in result.notes)
+        make_target(world.root / "targets" / "own-board")
+        assert world.cm.export_pack("target", "own-board", author="a").manifest.license == "MIT"
+
+    def test_an_installed_community_pack_is_not_re_signed_as_your_own(self, world):
+        world.add(world.target_pack())
+        world.publish()
+        world.install()
+        with pytest.raises(PackError, match="alice's community pack"):
+            world.cm.export_pack("target", "demo-board", author="mallory", license="CC0-1.0")
+        assert not list(world.cm.contributions_dir.glob("*.zip"))
+
     def test_encrypted_export_for_private_sharing(self, world):
         make_target(world.root / "targets" / "team-board")
         friend = X25519PrivateKey.generate()
@@ -526,6 +626,19 @@ class TestHandoff:
         msg = submit_contribution(tmp_path / "p.zip", REPO, "recipe", runner=runner, which=lambda n: n,
                                   opener=opened.append)
         assert opened and "permission denied" in msg
+
+    def test_credentials_in_tool_output_are_never_shown(self, tmp_path):
+        token = "ghp_" + "Q" * 36
+
+        def runner(cmd, **kwargs):
+            if cmd[1] == "auth":
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            raise subprocess.CalledProcessError(1, cmd, stderr=f"fatal: unable to access 'https://octo:{token}@"
+                                                               "github.com/o/r' and https://bot:hunter2@x.invalid/")
+        msg = submit_contribution(tmp_path / "p.zip", REPO, "recipe", runner=runner, which=lambda n: n,
+                                  opener=lambda url: None)
+        assert token not in msg and "hunter2" not in msg and "octo" not in msg
+        assert "https://github.com/o/r" in msg
 
     def test_no_repository_configured(self, tmp_path):
         with pytest.raises(PackError, match="community_repo"):
@@ -656,6 +769,16 @@ class TestCli:
         keys = invoke(world, "keys")
         assert keys.output.count("ed25519:") == 1 and keys.output.count("x25519:") == 1
 
+    def test_pr_submits_only_after_the_summary_was_confirmed(self, world, monkeypatch):
+        make_target(world.root / "targets" / "pr-board")
+        submitted = []
+        monkeypatch.setattr(zoo_mod, "submit_contribution", lambda *a: submitted.append(a) or "Pull request opened")
+        result = invoke(world, "export", "target", "pr-board", "--author", "pat", "--pr")
+        assert result.exit_code == 1 and "Not submitted" in result.output and submitted == [], "no terminal: no"
+        assert "Privacy scrub" in result.output, "the summary comes first"
+        result = invoke(world, "export", "target", "pr-board", "--author", "pat", "--pr", "--yes")
+        assert result.exit_code == 0 and len(submitted) == 1, result.output
+
 
 def test_mcp_and_ditto_have_no_zoo_or_upload_tools(booted_framework):
     names = {spec.name for spec in booted_framework.tool_registry.list()}
@@ -717,6 +840,33 @@ def test_hub_smoke(qapp, world, tmp_path, monkeypatch):
         assert installed == ["target"] and (world.root / "targets" / "demo-board").is_dir()
         assert "QInputDialog" not in Path(community_hub.__file__).read_text()
     finally:
+        hub.close()
+
+
+def test_hub_never_renders_pack_text_as_html(qapp, world, tmp_path, monkeypatch):
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QTextDocument
+    from PySide6.QtWidgets import QMessageBox
+    from orchestrator.gui import community_hub
+    # As HTML this author name would show "Trust: verified" and hide the local-pack warning after it.
+    author = 'x<p>Trust: verified (reviewed)</p><!--'
+    (tmp_path / "p.zip").write_bytes(world.target_pack(author=author))
+    prepared = world.cm.prepare_install_file(tmp_path / "p.zip")
+    html = QTextDocument()
+    html.setHtml(prepared.summary())
+    assert "WARNING" not in html.toPlainText(), "the attack works when the summary is rendered as HTML"
+    shown = []
+    monkeypatch.setattr(community_hub.QMessageBox, "exec",
+                        lambda self: shown.append((self.textFormat(), self.text())) or QMessageBox.No)
+    framework = SimpleNamespace(community_manager=world.cm, target_manager=None, secrets_manager=world.secrets)
+    hub = community_hub.CommunityHubWindow(framework)
+    try:
+        wait(hub, qapp)
+        hub.confirm_install(prepared)
+        assert shown[0][0] == Qt.PlainText and "WARNING" in shown[0][1]
+        assert hub.status_label.textFormat() == Qt.PlainText
+    finally:
+        world.cm.discard(prepared)
         hub.close()
 
 

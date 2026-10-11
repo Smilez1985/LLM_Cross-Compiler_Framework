@@ -586,6 +586,13 @@ class _EncryptedHeader(_Strict):
     payload_salt: str
     recipients: List[Union[_X25519Stanza, _ScryptStanza]] = Field(min_length=1, max_length=MAX_RECIPIENTS)
 
+    @model_validator(mode="after")
+    def _one_passphrase(self):
+        # As in age: at most one passphrase stanza, so a crafted file cannot make the reader run scrypt 64 times.
+        if sum(isinstance(s, _ScryptStanza) for s in self.recipients) > 1:
+            raise ValueError("more than one passphrase stanza")
+        return self
+
 
 @dataclass(frozen=True)
 class DecryptedPack:
