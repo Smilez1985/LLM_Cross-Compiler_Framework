@@ -25,12 +25,14 @@ Back to the [README](../README.md) · All commands: [CLI_Usage.md](CLI_Usage.md)
 - [Ditto evaluation](#ditto-evaluation)
 - [Local runtime and model tiers](#local-runtime-and-model-tiers)
 - [Knowledge base (RAG)](#knowledge-base-rag)
+- [Deep Ingest](#deep-ingest)
 - [MCP server](#mcp-server)
 - [Tool permissions and audit log](#tool-permissions-and-audit-log)
 - [Secrets and personal state](#secrets-and-personal-state)
+- [Input history](#input-history)
 - [Hardware probe and new targets](#hardware-probe-and-new-targets)
 - [Health check (doctor)](#health-check-doctor)
-- [Community knowledge](#community-knowledge)
+- [Community zoo](#community-zoo)
 - [Secret scan for contributors](#secret-scan-for-contributors)
 - [Known gaps](#known-gaps)
 
@@ -353,7 +355,8 @@ questions about targets and builds from the tools rather than from memory, and t
 ## Ditto evaluation
 
 `llm-cli ditto eval` is a tool to measure how well a provider and model work for Ditto, for example whether a
-small 2-bit local model is good enough for weak hardware. Nothing is built or changed.
+small 2-bit local model is good enough for weak hardware. Nothing is built or changed. With `--kind retrieval` it
+measures the knowledge-base search instead ([Retrieval evaluation](#retrieval-evaluation)).
 
 **Cases** ([`evals/ditto/cases.yml`](../evals/ditto/cases.yml), 19 cases; a cases file is data, new cases need no
 code change):
@@ -388,6 +391,43 @@ off) and the prompts of that time, the 2-bit tier `small-q2` passed 42% of the 1
 47%. The evaluation found gaps in Ditto's prompts (attributing failures to host or device, which inputs each format
 accepts, using the tools for questions about targets and builds, compiler flags in module proposals). These gaps are
 fixed now, and a new measurement is running.
+
+### Retrieval evaluation
+
+`llm-cli ditto eval --kind retrieval` grades the [knowledge-base](#knowledge-base-rag) search instead of a model. No
+AI model is involved, and your own knowledge base is not touched.
+
+- **Cases:** [`evals/retrieval/cases.yml`](../evals/retrieval/cases.yml), 42 German and English searches against
+  `evals/retrieval/corpus/`, 30 documentation excerpts of the framework and of SDKs. Each case names the excerpts
+  that count and the rank the first of them must reach, or, for an unrelated question, expects no excerpt at all.
+- **Tags** group the report: `en` and `de` (language of the question), `cross-lingual` (question and excerpt in
+  different languages), `identifier` (for example `GGML_CUDA`), `oversized` (the answer is deep inside a block
+  larger than the embedding model's context), `framework` (this framework's own documentation), `log` (the last
+  three lines of a failed build, as the build-log analysis searches), `callsite` (Ditto's own search strings for
+  module proposals and build recommendations) and `negative` (unrelated questions).
+- **How it runs:** the corpus is indexed into a temporary knowledge base in a temporary folder, deleted afterwards,
+  with the configured local embedding model. The model is downloaded on first use; after that the evaluation works
+  offline. Retrieval cases run only when `--kind retrieval` is given.
+- **Variants** (`--rag-variant`, repeatable, default `fused`): `fused` is the hybrid search; `rerank` adds the
+  cross-encoder of `rag_reranker` and its relevance floor ([Reranking](#reranking)). `rerank` stops with a message
+  when no reranker suits the machine (set `rag_reranker` to a model id to grade one anyway), and a case counts as
+  failed when the reranker did not run.
+- **Report:** per variant hit@1, hit@3, hit@k (within each case's rank), MRR over the first 10 results, the share
+  of unrelated questions that got no excerpt and the median search time. `--json` adds the figures per tag, the
+  relevant questions that got no excerpt at all, the 95th percentile of the search time, the models, the sha256 of
+  the cases and the corpus, and every result.
+- **Measured** with the default CPU embedding model on the 34 cases that are not `log` or `callsite` searches (30
+  with an expected excerpt, 4 unrelated): the hybrid search reaches hit@1 87 % and MRR 0.93, but all 4 unrelated
+  questions still get excerpts, because it has no relevance floor. The figures with reranking are under
+  [Reranking](#reranking).
+- **CI:** the workflow `.github/workflows/retrieval-eval.yml` runs `fused` and `rerank` every night and on demand,
+  with the models cached between runs. It fails when fewer than 70 % of the cases pass (`--min-pass 0.7`), which
+  catches a broken search, not small changes, and it uploads the JSON report.
+
+```bash
+llm-cli ditto eval --kind retrieval                                  # hybrid search
+llm-cli ditto eval --kind retrieval --rag-variant fused --rag-variant rerank --json retrieval.json
+```
 
 ---
 
@@ -487,28 +527,186 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   or `BAAI/bge-m3` (1024 dimensions) when ONNX Runtime has CUDA and the machine has at least 8 GB RAM. Each model
   has its own collection, so switching models never mixes or loses vectors. In offline mode nothing is downloaded,
   and a missing model is reported clearly.
-- **Ingesting:** pages are converted to Markdown and split along their structure (headings, paragraphs, lists;
-  code blocks and tables are never split), sized in the model's tokens. Each chunk is stored with its source, title
-  and section. Re-ingesting a page updates it in place and removes chunks the new version no longer has.
+- **Ingesting:** pages are converted to Markdown and split along their structure (headings, paragraphs, lists, code
+  blocks, tables), sized in the model's tokens. Each chunk is stored with its source, title and section.
+  Re-ingesting a page updates it in place and removes chunks the new version no longer has. Code blocks and tables
+  stay whole unless they are larger than the model's context ([Large code blocks and
+  tables](#large-code-blocks-and-tables)).
 - **Snapshots:** before every crawl the knowledge base is saved as a snapshot in
   `~/.llm-framework/knowledge_snapshots` (the newest 5 are kept). Restoring a snapshot is not available from the GUI
   or the CLI yet.
 - **Search:** hybrid. Dense vectors find meaning, BM25 finds exact terms such as error codes and compiler flags; both
-  rankings are fused with Reciprocal Rank Fusion. The same text from several sources is returned once.
+  rankings are fused with Reciprocal Rank Fusion. The same text from several sources is returned once. A
+  cross-encoder can then rerank the results ([Reranking](#reranking)).
 - **Use:** the `search_knowledge` tool (Ditto, MCP clients); without tools Ditto adds matching excerpts to the
-  question itself. Healing analyses, module proposals and (on request) build recommendations also get excerpts.
-  Results are always treated as untrusted data.
+  question itself. Healing analyses, module proposals and build recommendations (Builder: **Use RAG Knowledge
+  Base**) also get excerpts. Results are always treated as untrusted data.
+- **Adding documentation:** [Deep Ingest](#deep-ingest) in the module wizard, and [knowledge packs](#community-zoo)
+  from the community zoo.
 
-**Adding documentation:** **Deep Ingest (Add Docs)** in the module wizard (**Tools > Create Hardware Module...**)
-crawls the URLs you enter. The crawler:
+### Reranking
 
-- blocks private, loopback and other non-public addresses (SSRF protection) and pins each connection to the checked
-  address, so a DNS answer cannot be switched in between,
-- respects `robots.txt` (setting `crawler_respect_robots`), waits between requests (`crawler_rate_limit`, default
-  1 s), follows at most 5 redirects and stops after a request budget,
-- limits depth and pages (`crawler_max_depth` 2, `crawler_max_pages` 50 by default), reads PDFs
-  (`crawler_download_pdfs`) and keeps only pages in the languages of `crawler_languages` (default English and
-  German; an empty list keeps all).
+The hybrid search ranks by words and meaning. It cannot tell whether an excerpt answers the question, and it always
+returns something. A reranker reads the question together with each candidate and gives it a relevance between 0
+and 1. Candidates below a relevance floor are dropped, so Ditto gets no excerpt rather than an irrelevant one.
+
+- **Model** (setting `rag_reranker`, default `auto`): a local cross-encoder on FastEmbed/ONNX, downloaded into
+  `models/embeddings/` on first use, never in offline mode. With `auto`:
+
+  | Machine | Reranker |
+  |---|---|
+  | ONNX Runtime with CUDA and at least 16 GB RAM | `onnx-community/bge-reranker-v2-m3-ONNX` (multilingual, about 0.6 GB download) |
+  | at least 6 GB RAM | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (multilingual MiniLM, about 120 MB download, about 0.5 GB in memory) |
+  | less than 6 GB RAM | none |
+
+  `off` turns reranking off. A model id chooses another cross-encoder that FastEmbed lists.
+- **Relevance floor** (setting `rag_rerank_min_score`, 0 to 1, default 0): 0 means the floor calibrated for the
+  model, 0.2 for both models above. In the retrieval evaluation, relevant excerpts scored 0.80 or more and
+  unrelated ones 0.009 or less.
+- **Which searches rerank:** by default only build recommendations. The setting `rag_rerank_default: true` reranks
+  every other search too: the chat, the MCP tool `search_knowledge`, healing analyses and module proposals.
+- **Why only build recommendations:** measured with the [retrieval evaluation](#retrieval-evaluation) on a shared
+  4-core CPU. On the 34 cases that are not `log` or `callsite` searches, reranking raised hit@1 from 87 % to 93 %
+  and MRR from 0.93 to 0.97, and all 4 unrelated questions got no excerpt. It costs about 1 s for 12 candidates and
+  2 to 2.6 s for 20, and it gained less than the 0.05 MRR required for chat, so chat stays without it. On the last
+  lines of failed builds it found the relevant excerpt within the first 3 in 2 of 6 cases (hybrid search: 5 of 6)
+  and dropped it below the floor in one; for the search string of module proposals it dropped every excerpt. So
+  build-log analysis and module proposals keep the hybrid order.
+- **How a search is reranked:** up to 20 candidates (three times the requested number, at least 12), of each the
+  title, section and first 1500 characters; scores are cached by text. A reranker that cannot run (not downloaded
+  in offline mode, unknown model id, an error) is logged once, the search keeps the hybrid order, and the reranker
+  is tried again after 5 minutes.
+
+### Excerpt budget
+
+When Ditto adds knowledge-base excerpts to a request itself (chat without tools, healing analyses, module proposals,
+build recommendations), they take at most a third of `chat_context_limit` (default 4096 tokens, so about 1365
+tokens, estimated at three characters per token). The best excerpts come first. One that does not fit is skipped,
+so a smaller later one can still come along. If the first excerpt alone is too long, it is shortened at a line and
+marked `[…]`; a code block that is open at the cut is closed, so the rest of the prompt does not read as code.
+
+### Keyword search for identifiers
+
+The keyword index (BM25) also knows the parts of identifiers: `-DGGML_CUDA=ON` is found by `GGML_CUDA`, `GGML` or
+`CUDA`, `rknn_toolkit2` by `rknn toolkit2`, and `rknnToolkitLite` by `rknn Toolkit Lite`. Only the keyword index
+gets the split forms; the stored text and the vectors stay as they are. Searches of one or two words use the
+keyword index when they contain an identifier (a digit, an underscore, two capital letters in a row, or a dot or
+hyphen inside a word, such as `E2041`, `GGML_CUDA`, `RKNN` or `librkllmrt.so`); other short searches use meaning
+only. In the retrieval evaluation this raised hit@3 of the identifier questions from 83 % to 100 %; the other
+results stayed the same.
+
+A knowledge base built by an earlier version gets its keyword index rebuilt from the stored text once, on first use;
+documents and vectors are kept, and the log names the number of rebuilt chunks. Snapshots of earlier versions are
+rebuilt the same way when they are restored. A Qdrant server older than 1.16 keeps no collection metadata, so there
+the rebuild cannot be detected; re-import the documents.
+
+### Large code blocks and tables
+
+Code blocks and tables stay whole as long as the embedding model sees them whole: up to its context minus 96 tokens
+for the source line (512 tokens for the default model `intfloat/multilingual-e5-small`, so 416 tokens). Larger ones
+are split at line boundaries into pieces of the normal chunk size (384 tokens for the default model). Each piece
+repeats the table header or reopens the code fence, so the later parts of a long table or script can be found at
+all (in the retrieval evaluation, answers deep inside such blocks: hit@1 from 50 % to 100 %). Documents in the
+knowledge base keep their old chunks: import them again (for example a new Deep Ingest of the same URL) to apply it.
+
+### Models in memory
+
+The embedding models and the reranker are unloaded after `rag_model_idle_minutes` (default 10) without use and
+loaded again on the next search, which takes a few seconds. The time counts from the end of the last search or
+import, never during one. `0` keeps them loaded. The embedded storage is released separately, after 30 idle
+seconds (see **Storage** above).
+
+---
+
+## Deep Ingest
+
+Deep Ingest reads documentation pages from the web into the knowledge base. Start it with **Deep Ingest (Add Docs)**
+in the module wizard (**Tools > Create Hardware Module...**); the knowledge base must be on. There is no CLI command
+for it in this version.
+
+Text and data mining of publicly accessible content is permitted unless the rightsholder reserved it in
+machine-readable form (EU Directive 2019/790, Art. 4; German UrhG § 44b). So the crawler checks these signals itself
+instead of asking you to confirm anything, and none of the checks can be switched off. The former *Respect
+robots.txt* option and the setting `crawler_respect_robots` are gone.
+
+### The notice before the first crawl
+
+- Before the first Deep Ingest of each user, a notice in the interface language explains what is read (only
+  publicly reachable pages, no logins, starting from the addresses you enter, within the page and depth limits),
+  which opt-outs are honoured, that the knowledge stays on this computer (when Ditto answers, matching excerpts go to
+  the AI provider you selected; with a local provider nothing leaves the computer), and that sharing it in a target
+  or a community pack keeps the source and licence of every page and needs your explicit release.
+- It is information, not a legal confirmation: one button, **Understood** (also Esc), nothing to tick.
+- It is shown once per user and again when its text changes in any language. The state file `crawl_notice.json` in
+  the per-user folder (`~/.llm-framework`) stores the notice version and a hash of its texts. If that folder cannot
+  be used, the notice is shown every time.
+
+### What the crawler honours
+
+| Signal | Where it is read | Effect |
+|---|---|---|
+| robots.txt (RFC 9309) | `/robots.txt` of each host, once per host | Disallowed paths are not fetched. The groups for `LLM-Conversion-Framework-Bot` apply, otherwise all `*` groups; `*` and `$` patterns work; the longest rule wins, `Allow` wins a tie. A robots.txt that cannot be reached or answers 401, 403 or a server error counts as "disallow everything". |
+| `X-Robots-Tag` header | every response | `noindex`, `none`, `noai` and `noimageai` keep the page out; `nofollow` and `none` stop following its links. Directives for this crawler (`LLM-Conversion-Framework-Bot: noai`) count, those for other crawlers do not. |
+| `<meta name="robots">` and `<meta name="llm-conversion-framework-bot">` | HTML pages | the same directives as the header |
+| TDM Reservation Protocol (W3C TDMRep 1.0) | `/.well-known/tdmrep.json` per site (the first matching rule decides), the `tdm-reservation` header, `<meta name="tdm-reservation">`, `tdm:reservation` in PDF metadata | A reservation keeps the page out; a `tdm-policy` is named in the log. |
+
+- A reservation from any of these sources wins. TDMRep lets a later source lift an earlier reservation; the crawler
+  stays on the cautious side.
+- Redirects are not followed directly. Their targets are queued and checked like any other address: security check,
+  robots.txt and `tdmrep.json` of their own host. A link that redirects to another host is skipped; only a redirect
+  of the start URL (for example `example.com` to `www.example.com`) moves the crawl to that host. At most 5
+  redirects per address.
+- The crawler names itself `LLM-Conversion-Framework-Bot/<version> (Open Source;
+  +https://github.com/Smilez1985/llm_conversion_framework)`, with the real framework version. Site operators can
+  address it in robots.txt and in a meta tag with that name.
+
+### Network safety and limits
+
+- Private, loopback and other non-public addresses are blocked (SSRF protection), and each connection is pinned to
+  the checked address, so a DNS answer cannot be switched in between.
+- The Deep Ingest dialog sets, for each crawl, the link depth (1 to 5, default 2), whether PDFs are read and the
+  delay between requests (0 to 10 s, default 1 s). The settings `crawler_max_depth`, `crawler_rate_limit` and
+  `crawler_download_pdfs` are only the defaults for crawls without these options; the dialog always passes its own
+  values.
+- From the settings: at most `crawler_max_pages` pages (default 50), and only pages in the languages of
+  `crawler_languages` (default English and German; an empty list keeps all). A crawl also stops after five times as
+  many requests as its page limit (redirects and failed fetches count too).
+
+### Progress, Stop and the outcome
+
+- The wizard shows "Page N of M: <address>" before each request (M is the page limit) with a progress bar.
+- Pages are stored as soon as they are read. **Stop** ends the crawl after the current page (a waiting delay between
+  requests is cut short); what is stored stays. Closing the wizard during a crawl stops it the same way: the window
+  stays responsive and closes once the current page is stored.
+- The outcome over all entered URLs is reported only after the last write has returned:
+
+  | Outcome | When | Dialog title |
+  |---|---|---|
+  | success | every entered URL stored pages; nothing failed, nothing was reserved by a site, the crawl was not stopped | Deep Ingest Complete |
+  | partial | pages are stored, but others failed, were reserved by the site, or the crawl was stopped | Deep Ingest Partly Complete |
+  | failure | nothing was stored | Deep Ingest Failed |
+
+- The crawl log in the wizard (and the framework's log) names every skipped page with its reason, for example
+  "disallowed by robots.txt", "X-Robots-Tag: noai", "TDM reservation (...)", "redirect from ... leaves the crawled
+  site" or "language 'fr' is not one of de, en", and every page that could not be fetched or read (HTTP status,
+  unreadable PDF, too many redirects). Pages left out for their language or an off-site redirect do not make the
+  outcome partial; failures and site reservations do.
+
+### Spoken announcements
+
+- The notice ("Please read the notice before your first Deep Ingest.") once it is on screen, and the outcome of a
+  Deep Ingest, are also spoken in the interface language.
+- Engines, the first that works: on Windows, Windows PowerShell 5.1 with System.Speech (started from the system
+  folder; the text travels in an environment variable, never as code); on macOS, `say` (with a voice of the interface
+  language when one is installed); on Linux, `spd-say` (speech-dispatcher), otherwise `espeak-ng` or `espeak`.
+  Nothing is installed for it; without an engine it stays silent.
+- It never gets in the way: a background thread with a 30 s time limit, at most 300 characters, no audio files, the
+  mixer and the system volume are never touched, and a failure never stops anything. Every announcement is also
+  written to the log, so it is never only audible.
+- It stays silent when the setting `audio_announcements` is off (menu **Tools > Spoken Announcements**, a check mark
+  that is saved at once), when `LLM_FRAMEWORK_NO_AUDIO` is set (to anything but empty, `0`, `false`, `no` or
+  `off`), under CI (`CI` set), during tests, in an SSH session without a display, and on Linux without a display
+  (no `DISPLAY` or `WAYLAND_DISPLAY`).
 
 ---
 
@@ -597,10 +795,39 @@ timestamp) and starts a new chain, for example after `llm-cli doctor` has report
   messages, from the arguments in the audit log and from everything sent to cloud providers. The SDKs' debug logs
   stay off unless you start with `--debug-http`.
 - **Personal folder** `~/.llm-framework` (`LLM_FRAMEWORK_HOME`), private to your user: tool permissions, audit log,
-  SSH key and `known_hosts`, MCP token, chat history, secrets, knowledge base and snapshots, local runtime, and two
-  random values per installation (one for the privacy placeholders, one as an anonymous cache ID for OpenAI).
+  SSH key and `known_hosts`, MCP token, chat history, secrets, knowledge base and snapshots, local runtime, the
+  [input history](#input-history), the state of the [Deep Ingest notice](#the-notice-before-the-first-crawl), the
+  cached [community index](#the-signed-index) with the pinned author keys, and two random values per installation
+  (one for the privacy placeholders, one as an anonymous cache ID for OpenAI). Your key pairs for
+  [community packs](#encrypted-packs-for-private-sharing) are kept in the encrypted secrets store.
 - **Settings** are never read from the working directory: `LLM_FRAMEWORK_CONFIG_DIR`, then `configs/` in the
   installation if you may write there, then the personal folder.
+
+---
+
+## Input history
+
+The GUI's input fields offer what you used recently, newest first.
+
+| Field | Where | Filled in | Remembered when |
+|---|---|---|---|
+| Model | Builder, **Source Model** | the most recent one | a build is submitted |
+| Calibration dataset | Builder, **Calibration** | no, only offered | a build with a dataset is submitted |
+| Target and board | Builder | the most recently built target and board that the target definitions still offer; a target without declared boards offers recent boards as suggestions | a build is submitted |
+| Profile | Deployment | the profile chosen before, else the most recent one | a deployment is started |
+| Deep Ingest URL | **Recent** list in the Deep Ingest dialog, added with **Add** | no, only offered | the dialog is confirmed |
+| Device (IP address or host name) | Deployment, remote hardware scan (**Scan / Import...**) | the most recent one | its SSH host key is confirmed |
+
+- The history is per user: `input_history.json` in the per-user folder (`~/.llm-framework`, or
+  `LLM_FRAMEWORK_HOME`), readable only by you, at most 20 entries per field, without duplicates. It is not part of
+  the shared `configs/config.yml`; the former setting `input_history` is gone.
+- It never holds secrets. Not remembered are values that look like an API key or a token, URLs with a user name or
+  password, URLs with a credential or session parameter in the query, the fragment or a path parameter (such as
+  `?token=`, `?api_key=`, `#access_token=`, `;jsessionid=` or `?sid=`), `user:password@host`, text with control
+  characters and values longer than 1000 characters. The same rules apply to a file edited by hand.
+- A damaged file starts an empty history; the old file is kept as `input_history.json.bad`.
+- **Tools > Clear Input History...** asks once, then deletes the file and the `.bad` copy, and the fields are
+  refilled at once.
 
 ---
 
@@ -617,8 +844,13 @@ timestamp) and starts a new chain, for example after `llm-cli doctor` has report
 - **Checks before anything is written:** names, images, packages and flags are validated strictly; shell code is
   checked against a deny-list and with `bash -n`; files are written only inside `targets/`; an existing target is
   never overwritten. Setup commands run later as an unprivileged user without network.
-- When a target is created in the GUI wizard or with `module generate-ai` and the knowledge base is on and holds
-  documents, a sanitized export of it is attached to the new target as `knowledge/initial_knowledge.json`.
+- **Knowledge snapshot (opt-in):** on the wizard's last page, **Attach the knowledge crawled for this target** (off
+  by default, available after a Deep Ingest in the wizard) writes the pages crawled from the wizard's Deep Ingest
+  URLs, privacy-scrubbed, to `knowledge/initial_knowledge.json` in the new target. The rest of your knowledge base
+  never goes into a module, and `llm-cli module create` and `module generate-ai` attach nothing. The framework does
+  not import such a snapshot into a knowledge base by itself.
+- **Export for community:** the wizard's last page also offers **Export for community after creating** (see
+  [Export for community](#export-for-community)).
 
 Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 
@@ -637,6 +869,7 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | Security | personal folder private, secrets store usable, keyring protects secrets |
 | AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key) |
 | Data | shipped calibration data intact (checksums) |
+| Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
 
 `--fix` applies the automatic fixes up to `--tier` (1: makes the personal folder private; 2: also removes dangling
 framework images and the Docker build cache) and checks again. Exit codes: 0 OK, 1 warnings, 2 errors; `--json`
@@ -644,18 +877,192 @@ for scripts.
 
 ---
 
-## Community knowledge
+## Community zoo
 
-The framework has the beginnings of a way to share knowledge-base contents:
+The community zoo shares three kinds of packs: **targets** (hardware modules), **recipes** (how a model was built
+for a target) and **knowledge** (pages for the knowledge base). Packs are listed from a signed community index,
+installed through a quarantine folder and exported from your own work for a pull request. Commands:
+`llm-cli zoo list|show|install|verify|export|keys`; in the GUI the [Community Hub](#community-hub). The framework
+never uploads anything and never asks for, reads or shows a repository token.
 
-- **Export:** the module generator attaches a sanitized export of the knowledge base to a new target (secrets
-  removed from content, sources and metadata; see [Hardware probe and new targets](#hardware-probe-and-new-targets)).
-- **Upload:** `llm-cli swarm upload <file>` pushes an export to the community repository on GitHub with your
-  `github_token`. The file is only obfuscated (XOR), **not encrypted**; treat it as public.
-- **Import:** reading community packs from `community/knowledge/` into the knowledge base exists in the code but is
-  not reachable from the GUI or the CLI in this version.
+**State today:** no community repository, index or maintainer key is published yet. `configs/community_keys.yml`
+lists no key, and the settings `community_index_url` and `community_repo` are empty by default. So `llm-cli zoo
+list` and the hub show only installed packs, only pack files can be installed (trust `local`), and a pull request
+has no repository to go to.
 
-Signed packs instead of XOR obfuscation are on the [roadmap](BLUEPRINT.md#roadmap).
+### Packs
+
+- A pack is a zip file with `pack.json` (the manifest: kind, id, version, author, licence, minimum framework
+  version, creation time, and the sha256, size and mode of every file), an optional `pack.sig` (the author's Ed25519
+  signature over the manifest) and exactly the listed files. Reading a pack accepts nothing else: no links, no
+  special files, no unlisted files, and every hash is checked. Packs carry text only (scripts, recipes, pages),
+  never model weights or binary files; at most 512 MB and 10,000 files.
+- **Trusted keys:** `configs/community_keys.yml` lists the publisher keys that sign the community index, each with
+  `key_id`, `pubkey_b64`, `valid_until` (the last day, in UTC, on which its signatures are accepted) and an optional
+  `name`. The file ships with each release; a key rotation ships the old and the new key for one release. A damaged
+  file is an error, never read as "no keys".
+- **Author signatures** show where a pack comes from; they do not make it trusted. A signature is checked when the
+  pack includes the public key (a broken signature refuses the pack), and the author's key id is pinned at the first
+  installation of a pack by that author. A later pack with the same author name and another key gets a warning in
+  the summary.
+
+### Encrypted packs for private sharing
+
+For your own machines or a team, a pack can be encrypted instead of published (`llm-cli zoo export ... --to <key
+file>` or `--passphrase`):
+
+- It is encrypted to one or more recipients' X25519 public keys and/or a passphrase (at least 12 characters,
+  scrypt), in the style of age: a random file key, wrapped for each recipient, ChaCha20-Poly1305 for the content
+  (HKDF-SHA256), an authenticated header, and the sender's Ed25519 signature over the whole file. Recipients see who
+  sent it, and any change, including an added or removed recipient, is detected. As in age, a file holds at most one
+  passphrase entry; at most 64 recipients.
+- **Your keys:** on first use every user gets an Ed25519 key pair (signs packs) and an X25519 key pair (receives
+  encrypted packs). They are kept only in the encrypted secrets store. `llm-cli zoo keys` prints the public keys as
+  text (an `ed25519:` and an `x25519:` line) to give to others. A stored key that cannot be read is never replaced
+  automatically.
+- **Receiving:** `llm-cli zoo install --file <pack>.lcfpack` decrypts with your key, or with `--passphrase`.
+  `--from <key file>` (repeatable) accepts only these senders; otherwise the summary names the sender's key id. The
+  hub's **Import file...** opens packs encrypted to your key; a passphrase pack needs the CLI. An encrypted pack is
+  never submitted to the community.
+
+### Recipes
+
+A recipe is the zoo's "model template": the Hugging Face model at a pinned commit (never a branch or tag), the target
+with the fingerprint (sha256 over its files) and version of the target folder, board, format, quantization, options
+(importance matrix, context length, name and sha256 of a calibration dataset) and verified results (artifact file,
+size and sha256, framework version, toolchain image, optionally a device test). It carries no weights: a recipe is
+rebuilt, never downloaded as a model.
+
+- A recipe is generated from a finished build's `build_info.json`, never typed by hand. `build_info.json` records
+  what a recipe needs: the model's commit (the download is pinned to it), the target fingerprint and version, the
+  toolchain image, the context length, the calibration dataset's hash and the framework version. A build of a local
+  model, or one without a target fingerprint, cannot become a recipe.
+- At installation a recipe is checked against the capabilities of its target, if that target is installed. A note
+  says when the target is missing or when your copy differs from the one the recipe was built with.
+- **Build** on an installed recipe in the hub fills in the Builder (model at its pinned commit, target, format, board,
+  quantization, importance matrix). You check the settings and start the build; a recipe maps to a normal build
+  request.
+
+### The signed index
+
+- `index.json` and `index.json.sig` next to it, at the https address in the setting `community_index_url`, signed
+  by a key from `configs/community_keys.yml`. An index whose signature does not verify is not used.
+- The last verified index is cached per user in `~/.llm-framework/community/`. It is fetched again when you ask
+  (`llm-cli zoo list --refresh`, **Refresh** in the hub), when nothing is cached, or when the cache is older than a
+  day; without network the cached index is used. A downloaded index with a lower version than the cached one is
+  refused, so an older index never replaces a newer one. The cache is verified again whenever it is used, so a
+  removed or expired key invalidates it.
+- The index also lists revoked packs (by sha256, or by kind, id and optionally version, each with a reason).
+
+### Installing
+
+`llm-cli zoo install <id> [--kind target|recipe|knowledge]`, `llm-cli zoo install --file <pack>`, or **Install** and
+**Import file...** in the hub:
+
+1. An installation from the index always reads the current index first, so a revocation is never missed; if the
+   index cannot be updated, nothing is installed. A pack file is looked up in the index (updated when older than a
+   day; the cached one without network): if the index lists its sha256, it gets that entry's trust level, otherwise
+   `local`.
+2. A pack from the index is downloaded pinned by the size and sha256 the index gives.
+3. The pack is extracted into a quarantine folder (`.quarantine/` in the install folder) and checked: exactly the
+   listed files with their hashes, no links, special or binary files, and the checks of its kind. Targets: a valid
+   `capabilities` block, every image a Dockerfile pulls (`FROM`, `COPY --from`, `RUN --mount=...,from=`) pinned by
+   digest unless it is an official base image, the shell deny-list on every script line that is not from the
+   shipped template, `bash -n`, no template placeholders. Recipes: the recipe schema and the target's capabilities.
+   Knowledge: a list of pages, each with its source.
+4. A summary (kind, id, version, author, licence, trust level, source, files, destination and notes such as the
+   author signature) is shown as plain text, so text from a pack cannot hide its trust level. Nothing is installed
+   until you confirm; the default answer is no. `--yes` skips the question only for packs from the signed index; a
+   file always asks, and without a terminal nothing is installed.
+5. The pack moves into place in one rename, never over an existing folder (also when only the case differs), with
+   a provenance file `.lcf-provenance.json` (source, trust level, hashes, signer, time). Anything that fails is
+   removed.
+
+Targets go to `targets/`, recipes to `community/recipes/`, knowledge to `community/knowledge/`. A knowledge pack is
+imported into the knowledge base right after its installation, so turn the knowledge base on first.
+
+### Trust levels
+
+| Level | Meaning |
+|---|---|
+| `official` | shipped with the framework (the Rockchip target); shipped targets have no provenance file and are not listed as packs |
+| `verified` | in the signed index: reviewed and reproduced independently |
+| `community` | in the signed index: reviewed |
+| `local` | a file without an entry in the signed index: nobody reviewed it. Installing always asks, and every build of such a target shows a warning. |
+| `revoked` | in the revoked list of the signed index: installing is blocked. Installed copies are flagged by `llm-cli doctor` and the hub and are not built, also after the key that signed the revocation has expired. |
+
+### Checking installed packs
+
+- `llm-cli zoo verify` checks every installed pack against the cached index: revoked, or changed since it was
+  installed. The exit code is 1 when it finds a problem.
+- `llm-cli zoo verify <pack file>` checks a file without installing it: format, hashes, the checks of its kind, an
+  included author signature and the privacy scrub (no home folders, addresses, host or user names, keys). It needs
+  no keyring; the community repository's CI uses it.
+- `llm-cli doctor` reports revoked packs as errors, changed packs as warnings and packs with trust `local` as
+  information ([Health check](#health-check-doctor)).
+
+### Community Hub
+
+**Tools > Open Community Hub** lists the index entries and the installed packs with name, kind, version, a coloured
+trust column, author and status, with a search field and filters for kind and trust. **Refresh** fetches the index
+again, **Install** installs an index entry after its summary, **Import file...** installs a pack file (also one
+encrypted to your key), and **Build** on an installed recipe fills in the Builder. A revoked pack shows a disabled
+**Revoked** button.
+
+### Export for community
+
+- **Where:** the module wizard's last page (**Export for community after creating**: the new target), the Builder
+  log's context menu (**Export a finished build for the community...**: a finished build's `build_info.json` becomes
+  a recipe), and `llm-cli zoo export target <id>`, `zoo export recipe <build folder>` or `zoo export knowledge`,
+  each with `--author <name>` (a pseudonym is fine). Knowledge packs are exported with the CLI only.
+- **Privacy scrub:** every file is scrubbed on this computer. Home folders become `~`, IP and MAC addresses `<ip>`
+  and `<mac>`, e-mail addresses `<email>`, JWTs `<jwt>`, the host name `<host>`, the user name `<user>`, and API
+  keys are redacted. Loopback addresses, image digests, `git@` remotes and default accounts such as `root` or
+  `runner` stay, so a scrubbed target still builds. The changes are shown as a diff before you share anything.
+  Binary files are refused.
+- The pack is checked like an installation and signed with your key. It is written to `community/contributions/`
+  (or `--out`).
+- **Licence:** MIT by default for your own target or recipe (`--license`; a list in the GUI). Knowledge packs hold
+  other people's pages: their licence is `NOASSERTION`, every page keeps its source address, and a page without a
+  source is never exported.
+- A community pack you installed is not exported as your own: signing it again would replace its author and
+  licence. When a recipe's target is your own, a note reminds you to export the target too.
+- With `--to` or `--passphrase` the pack is [encrypted](#encrypted-packs-for-private-sharing) for private sharing
+  instead.
+
+### Pull request handoff
+
+- **Open pull request** in the export dialog, or `--pr` with `llm-cli zoo export`, hands the pack to the repository
+  in the setting `community_repo` (`owner/name`). The CLI first shows the summary and asks "Submit this pack to the
+  public community repository?" unless `--yes` is given; without a terminal nothing is submitted.
+- If the GitHub CLI (`gh`) and `git` are installed and `gh` is logged in, the framework forks the repository,
+  commits the pack as `contributions/<kind>/<file>` on a new branch and opens the pull request with `gh pr create`;
+  `gh` and `git` use their own stored credentials. Otherwise, or if that fails, the repository's upload page opens in
+  the browser: drop the file there, and GitHub forks the repository for you.
+- Without `community_repo` (the default today) nothing is handed over; the pack stays ready in its folder.
+
+### Maintainer tools
+
+For the community repository, not for users:
+
+- `scripts/zoo_sign_index.py keygen <name>` creates an Ed25519 signing key in the OS keyring and prints its entry
+  for `configs/community_keys.yml` (valid for two years). `entry <pack.zip> --url <https address>` checks a pack and
+  prints its index entry. `sign index.json --key <name> [--previous <old index.json>]` checks the index (its version
+  must be higher than the previous one) and writes `index.json.sig`. To revoke a pack, add it to `revoked`, raise
+  the version and sign again.
+- `scripts/community_repo/validate-contribution.yml` is a CI workflow template for the community repository. On
+  every pull request under `contributions/` it accepts only `.zip` pack files of at most 5 MB and runs
+  `llm-cli zoo verify` on each and the secret scan over the changed files. A maintainer reviews and merges the pack,
+  adds its entry to `index.json` and signs the index offline; the signing key never reaches CI. The template pins
+  the framework release `v3.1.0`, which is not released yet.
+
+### What was removed
+
+- The "swarm" upload: the XOR "SwarmCipher" (an obfuscation anyone could undo), `llm-cli swarm upload`, the hub's
+  "Contribute to Swarm" button and its GitHub token prompt. Old swarm packets in `community/knowledge/` are skipped
+  with a warning.
+- Installing hand-copied module folders from `community/`. Community packs are installed with `llm-cli zoo install`
+  or the hub.
 
 ---
 
@@ -684,6 +1091,16 @@ What does not work yet, so you are not surprised:
 - **Sign-in per provider:** not available yet; Ditto uses API keys.
 - **Device runtime:** the framework does not install a runtime on the board.
 - **GUI:** the Auto-Tuning and Models tabs are placeholders; the local runtime is controlled from the CLI only.
+- **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it. Its dialog always
+  passes its own depth and request delay, so `crawler_max_depth` and `crawler_rate_limit` do not apply there.
+  Restoring a knowledge-base snapshot is not available from the GUI or the CLI.
+- **Reranking** runs only for build recommendations unless `rag_rerank_default` is turned on.
+- **Spoken announcements** are tested with simulated speech engines only, not with the real voices of Windows,
+  macOS or Linux.
+- **Community zoo:** no community repository, index or maintainer key is published yet (`configs/community_keys.yml`
+  is empty, `community_index_url` and `community_repo` are empty), so only pack files can be installed and a pull
+  request has no repository to go to. A knowledge pack installed while the knowledge base is off is not imported
+  later by itself.
 - **Security scan:** the Trivy container gets the Docker socket to read the image; scanning without the socket is
   planned.
 - Smaller CLI gaps are listed in [CLI_Usage.md](CLI_Usage.md#known-limitations).
