@@ -90,16 +90,22 @@ class PolicyStore:
             policy = ToolPolicy.model_validate(json.loads(self.path.read_text(encoding="utf-8")))
             self.problem = None
             return policy
-        except FileNotFoundError:
+        except FileNotFoundError as e:
+            if os.path.lexists(self.path):
+                # A link whose target is gone (moved folder, unmounted drive): the stored choice is unknown.
+                self.problem = (f"{self.path} is a link to a missing file ({e}); all tools are denied until "
+                                "it is back.")
+                return restrictive_policy()
             self.problem = None
             return ToolPolicy()
         except OSError as e:
             # Unreadable right now (permissions, too many open files): deny everything for this call.
             self.problem = f"{self.path} cannot be read ({e}); all tools are denied until it can."
             return restrictive_policy()
-        except (ValueError, ValidationError) as e:
-            # Damaged or edited by hand: deny everything (the recommended defaults could be looser than the
-            # stored choice) and keep a copy, so saving the setup again does not silently lose it.
+        except (ValueError, ValidationError, RecursionError) as e:
+            # Damaged or edited by hand (RecursionError: deeply nested JSON): deny everything (the recommended
+            # defaults could be looser than the stored choice) and keep a copy, so saving the setup again does
+            # not silently lose it.
             self.problem = (f"{self.path} is damaged ({str(e).splitlines()[0][:200]}); all tools are denied. "
                             f"A copy was kept as {self.path.name}.bad; set the permissions up again.")
             self._keep_copy()

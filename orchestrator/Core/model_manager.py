@@ -46,25 +46,31 @@ class ModelMetadata:
         return self.size_bytes / (1024 ** 3)
 
 class ModelManager:
-    def __init__(self, config_or_framework: Any):
+    def __init__(self, config_or_framework: Any, base_dir: Optional[Path] = None):
         self.logger = get_logger("ModelManager")
         
         # --- Logic for handling Framework vs Config object ---
-        # framework.py passes 'self.config' (ConfigManager), but code might expect FrameworkManager
+        framework = None
         if hasattr(config_or_framework, 'config') and not isinstance(config_or_framework, dict):
-            # It is FrameworkManager
-            self.config = config_or_framework.config
-            self.root_path = getattr(config_or_framework.info, 'installation_path', Path("."))
+            # It is FrameworkManager: relative paths resolve against the installation, never the working
+            # directory (the CLI and the MCP server are started inside arbitrary projects).
+            framework = config_or_framework
+            self.config = framework.config
+            self.root_path = Path(getattr(getattr(framework, 'info', None), 'installation_path', None) or Path("."))
         else:
-            # It is ConfigManager directly
+            # It is ConfigManager directly (standalone use): base_dir, else the working directory
             self.config = config_or_framework
-            self.root_path = getattr(self.config, 'root_path', Path("."))
+            self.root_path = Path(base_dir or getattr(self.config, 'root_path', None) or Path("."))
 
         # Paths
         # Use .get() for safety if config is ConfigManager class
         models_dir_name = self.config.get("models_dir", "models") if hasattr(self.config, "get") else getattr(self.config, "models_dir", "models")
+        models_dir_name = models_dir_name or "models"
         
-        self.models_dir = self.root_path / models_dir_name
+        if framework is not None and callable(getattr(framework, "resolve_path", None)):
+            self.models_dir = framework.resolve_path(models_dir_name)
+        else:
+            self.models_dir = self.root_path / Path(str(models_dir_name)).expanduser()
         self.tiny_models_dir = self.models_dir / "tiny_models"
         
         ensure_directory(self.models_dir)
