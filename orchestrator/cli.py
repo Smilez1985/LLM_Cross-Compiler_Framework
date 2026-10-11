@@ -1085,6 +1085,61 @@ def runtime_stop(ctx: FrameworkContext):
     console.print(f"Stopped ({stopped} process{'es' if stopped > 1 else ''})." if stopped else "Not running.")
 
 
+def _pinned_llama_source():
+    """The llama.cpp pin of configs/llama_runtime.yml (exits with 1 when the catalog has none)."""
+    from orchestrator.runtime.catalog import load_catalog
+    source = load_catalog().llama_cpp.source
+    if source is None:
+        console.print("[red]configs/llama_runtime.yml has no llama_cpp.source (the pinned commit).[/red]")
+        sys.exit(1)
+    return source
+
+
+@ditto_runtime.command('export-source')
+@click.argument('file', type=click.Path(dir_okay=False, path_type=Path))
+@click.option('--mirror', default=None, metavar='URL',
+              help='Fetch from this mirror instead of the pinned repository (the commit is verified the same way)')
+@click.option('--yes', '-y', is_flag=True, help='Fetch without asking when the source is not cached yet')
+@pass_context
+def runtime_export_source(ctx: FrameworkContext, file: Path, mirror: Optional[str], yes: bool):
+    """Write the pinned llama.cpp source as a git bundle (FILE, plus FILE.json) for an air-gapped machine"""
+    from orchestrator.runtime.build.source import SourceError, cached_source, export_source
+    source = _pinned_llama_source()
+    state_dir = _settings(ctx)[0].user_state_dir
+    try:
+        if cached_source(source, state_dir) is None and not yes and not click.confirm(
+                f"The pinned llama.cpp source ({source.tag}, commit {source.commit[:12]}, about 215 MB) is not "
+                "cached yet. Fetch it now?", default=True):
+            return
+        with console.status("Preparing the llama.cpp source ..."):
+            manifest = export_source(source, state_dir, file, url=mirror,
+                                     log=lambda msg: console.print(escape(msg)))
+    except SourceError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Wrote {escape(str(file))}[/green] ({_gib(int(manifest['bundle_size']))}, llama.cpp "
+                  f"{escape(source.tag)}, commit {escape(source.commit[:12])}) and {escape(file.name)}.json.")
+    console.print("On the air-gapped machine: llm-cli ditto runtime import-source " + escape(file.name))
+
+
+@ditto_runtime.command('import-source')
+@click.argument('file', type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@pass_context
+def runtime_import_source(ctx: FrameworkContext, file: Path):
+    """Import the pinned llama.cpp source from a bundle of export-source (checked by its commit)"""
+    from orchestrator.runtime.build.source import SourceError, import_source
+    source = _pinned_llama_source()
+    try:
+        with console.status("Importing and verifying the llama.cpp source ..."):
+            path = import_source(source, _settings(ctx)[0].user_state_dir, file,
+                                 log=lambda msg: console.print(escape(msg)))
+    except SourceError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Verified llama.cpp {escape(source.tag)} (commit {escape(source.commit[:12])})[/green] "
+                  f"in {escape(str(path))}")
+
+
 @ditto.group('models')
 def ditto_models():
     """Models for Ditto's local mode"""

@@ -12,7 +12,8 @@ des Projekts liegen.
 ## Kurz gesagt
 
 - Zwei Dateien in `configs/` steuern das laufende Framework: **`llm_providers.yml`** (Dittos KI-Anbieter) und
-  **`llama_runtime.yml`** (der lokale Modellserver und seine Modelle). Beide sind neu und noch nicht veröffentlicht.
+  **`llama_runtime.yml`** (der lokale Modellserver und seine Modelle sowie der eine llama.cpp-Commit, aus dem jedes
+  selbst gebaute llama.cpp stammt). Beide sind neu und noch nicht veröffentlicht.
 - **`hardware_probe_schema.yml`** legt die Datei der Hardware-Probe fest (Schema 2): jeden Schlüssel mit Quelle,
   Normalisierung und Prüfung. Der Profil-Parser lädt sie und setzt sie durch. Sie ist neu und noch nicht
   veröffentlicht.
@@ -26,7 +27,7 @@ des Projekts liegen.
 | Datei | Enthält | Im Betrieb gelesen? | Gelesen von |
 |---|---|---|---|
 | `llm_providers.yml` | Vorlagen der KI-Anbieter, die Ditto nutzen kann | ja | `orchestrator/llm/catalog.py` |
-| `llama_runtime.yml` | Festgelegter llama.cpp-Build, festgelegte GGUF-Modelle, Servervorgaben, Regeln für das empfohlene Modell | ja | `orchestrator/runtime/catalog.py` |
+| `llama_runtime.yml` | Der llama.cpp-Pin (Commit), die vorgebauten llama.cpp-Archive, CUDA-Toolkits und Builder-Basen für selbst gebautes llama.cpp, festgelegte GGUF-Modelle, Servervorgaben, Regeln für das empfohlene Modell | ja | `orchestrator/runtime/catalog.py`; den Pin auch `orchestrator/utils/llama_pin.py` |
 | `hardware_probe_schema.yml` | Schlüssel der Datei der Hardware-Probe (Schema 2): Typ, Prüfung, Quelle und Normalisierung je Betriebssystem, ob ein Schlüssel in den Leistungsschlüssel eingeht | ja, wenn ein Hardware-Profil gelesen wird | `orchestrator/runtime/profile.py` |
 | `project_sources.yml` | Katalog vorgelagerter Projekte: Repositorys, Versionen, Dokumentationslinks, Notizen | nein | Menschen; `scripts/validate_ssot.py`, `scripts/sync_ssot.py` |
 | `detailed_project_sources.yml` | Ausführliche Entwicklerreferenz: Anleitungen, Entscheidungsbäume, weitere Herstellerabschnitte | nein | Menschen; `scripts/sync_ssot.py` |
@@ -118,15 +119,18 @@ Unbekannte Felder oder falsche Werte brechen mit einem Prüffehler ab. `tests/te
 
 ## llama_runtime.yml
 
-Das verwaltete lokale Modell für Dittos Offline-Modus: welcher llama.cpp-Build für welche Hardware geladen wird,
-welche Modelle es gibt und wie der Server läuft. Jeder Download braucht eine festgelegte Größe **und** einen SHA256
-und wird geprüft, bevor er entpackt oder benutzt wird; Einträge ohne beides werden abgelehnt (im Zweifel
-geschlossen). Der Kommentar oben nennt die Quellen jedes Werts.
+Das verwaltete lokale Modell für Dittos Offline-Modus und selbst gebautes llama.cpp: der eine llama.cpp-Commit, aus
+dem jeder Build stammt, welcher vorgebaute Build für welche Hardware geladen wird, die CUDA-Toolkits und
+Builder-Basen, die das Build-Rezept nutzt, welche Modelle es gibt und wie der Server läuft. Jeder Download braucht
+eine festgelegte Größe **und** einen SHA256 und wird geprüft, bevor er entpackt oder benutzt wird; Einträge ohne
+beides werden abgelehnt (im Zweifel geschlossen). Der Kommentar oben nennt die Quellen jedes Werts.
 
 | Abschnitt | Inhalt |
 |---|---|
 | `schema_version` | Immer `1`. |
-| `llama_cpp` | `build` (b-Nummer, etwa `b11429`), `version`, `base_url` (https), `features` (Serveroptionen dieses Builds) und `assets`: ein Eintrag je Betriebssystem, Architektur und Backend (`cpu`, `vulkan`, `cuda`, `rocm`, `metal`) mit seinen Dateien (`name`, `size`, `sha256`, `libs` für CUDA-Laufzeitbibliotheken) und bei GPU-Builds `cuda`, `min_driver`, `jit_min_driver`, `native_compute_caps`, `min_compute_cap` oder `gpu_targets`. `opt_in: true` kennzeichnet Builds, die nur auf Wunsch installiert werden (ROCm). |
+| `llama_cpp` | `build` (b-Nummer, etwa `b11429`), `version`, `source` (der Pin, siehe unten), `base_url` (https), `features` (Serveroptionen dieses Builds) und `assets`: ein Eintrag je Betriebssystem, Architektur und Backend (`cpu`, `vulkan`, `cuda`, `rocm`, `metal`) mit seinen Dateien (`name`, `size`, `sha256`, `libs` für CUDA-Laufzeitbibliotheken) und bei GPU-Builds `cuda`, `min_driver`, `jit_min_driver`, `native_compute_caps`, `min_compute_cap` oder `gpu_targets`. `opt_in: true` kennzeichnet Builds, die nur auf Wunsch installiert werden (ROCm). |
+| `cuda` | CUDA-Toolkits für selbst gebaute CUDA-Builds (Entscheidung D6): `redist_base_url` (die Redist-Archive von NVIDIA), `cmake_min` und je Toolkit `version`, `manifest` (`redistrib_<version>.json` mit `size` und `sha256`; das Manifest nennt den SHA256 jeder Komponente), `components`, `platforms`, `compute_caps` (`min`, `max`) und `host_compilers` (die Bereiche für `gcc`, `clang` und `msvc`, die nvcc annimmt). `prebuilt_images`: Entwicklungs-Images von NVIDIA, per Digest festgelegt, nur auf ausdrücklichen Wunsch genutzt (`opt_in: true` ist Pflicht). |
+| `build_bases` | Builder-Container-Basen für Container- und Cross-Builds: `id`, `libc` (`glibc` oder `musl`), `libc_version`, `gcc`, `image` (per Digest festgelegt). Ein Build für einen Rechner mit glibc nutzt die neueste Basis, deren glibc nicht neuer ist als die des Rechners, ein Rechner mit musl die Alpine-Basis. |
 | `model_base_url` | Woher Modelle geladen werden (https). |
 | `server` | `ctx_cap` und `ctx_min` (Grenzen der Kontextlänge), `sleep_idle_seconds`, `health_timeout_seconds`, `log_max_mib`, `log_backups`. |
 | `models` | Ein Eintrag je Stufe: `tier`, `repo`, `revision` (ein Commit mit 40 Zeichen, nie ein Branch), `file`, `size`, `sha256`, `license`, `native_context`, `kv_bytes_per_token`, `description`; `on_request: true` kennzeichnet Stufen, die nur über ihren Namen geladen werden sollen (in `llm-cli ditto models list` als „on request“ angezeigt; keine Stufenregel nennt sie). |
@@ -135,6 +139,34 @@ geschlossen). Der Kommentar oben nennt die Quellen jedes Werts.
 Der Lader lehnt außerdem doppelte Stufen oder Asset-IDs ab, Stufenregeln mit unbekannter Stufe und Treiberversionen,
 die als Dezimalzahl ohne Anführungszeichen geschrieben sind (YAML würde `570.60` als `570.6` lesen; schreib
 `"570.60"`). Eine Überschreibung je Benutzer gibt es nicht: Es gilt immer die Datei der Installation.
+
+**Wo der llama.cpp-Pin steht.** `llama_cpp.source` ist die eine Stelle:
+
+```yaml
+llama_cpp:
+  build: b11429
+  source:
+    repo: https://github.com/ggml-org/llama.cpp.git
+    commit: d81235049384534c167caea52b85a694f6103d14   # = refs/tags/b11429
+    tag: b11429                                        # immer dasselbe wie build
+    build_number: 11429
+```
+
+Gebaut wird der Commit: `orchestrator/runtime/build/source.py` holt genau diesen Commit und lehnt jeden anderen ab.
+Der Lader verlangt 40 kleingeschriebene Hex-Zeichen, ein https-Repository ohne Zugangsdaten und einen `tag`, der
+sowohl `b<build_number>` als auch `build` entspricht. Alles andere folgt aus diesem Eintrag:
+
+| Stelle | Wie sie folgt |
+|---|---|
+| Das Build-Rezept (`orchestrator/runtime/build/recipe.py`) | liest ihn: Jeder Plan baut diesen Commit und setzt `LLAMA_BUILD_NUMBER` und `LLAMA_BUILD_COMMIT` daraus |
+| Die Einstellung `llama_cpp_version` (der Tag, den Target-Images klonen) | ihre Vorgabe wird aus `tag` abgeleitet (`orchestrator/utils/llama_pin.py`) |
+| `ARG LLAMA_CPP_TAG` in `targets/Rockchip/dockerfile`, `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml` | Rückfallwerte für Image-Builds außerhalb des Frameworks; müssen `tag` entsprechen |
+| `inference_backends.llama_cpp.commit` in `project_sources.yml` und `detailed_project_sources.yml` | Nachschlagekatalog; muss `tag` entsprechen |
+| Vorgaben für `LLAMA_CPP_COMMIT` in `targets/*/modules/source_module.sh` | alte Vier-Modul-Kette, unverändert gelassen (Entscheidung D20); gemeldet, nicht geprüft |
+
+`tests/test_build_recipe.py` schlägt fehl, wenn eine Stelle abweicht. `python scripts/llama_cpp_pin.py check` gibt
+dieselbe Tabelle aus und prüft mit `git ls-remote`, dass der Tag bei Upstream auf den festgelegten Commit zeigt. Wie
+der Pin angehoben wird: [CONTRIBUTING_DE.md](../CONTRIBUTING_DE.md#den-llamacpp-pin-anheben).
 
 **Ein Modell hinzufügen:** Ermittle Größe und SHA256 der Datei bei einem festen Commit (etwa mit
 `HfApi().model_info(repo, revision, files_metadata=True)` aus `huggingface_hub`), trag den Commit als `revision` ein
@@ -146,7 +178,8 @@ und ergänze eine Stufenregel nur, wenn das Modell automatisch empfohlen werden 
 python -c "from orchestrator.runtime.catalog import load_catalog; c = load_catalog(); print(c.llama_cpp.build, [m.tier for m in c.models])"
 ```
 
-`tests/test_runtime.py` prüft die Datei selbst und den Lader.
+`tests/test_runtime.py` prüft die Datei selbst und den Lader, `tests/test_build_recipe.py` den Pin, die
+CUDA-Toolkits und die Builder-Basen.
 
 ## hardware_probe_schema.yml
 
@@ -194,7 +227,7 @@ Ein typischer Eintrag:
 inference_backends:
   llama_cpp:
     repo_url: "https://github.com/ggml-org/llama.cpp"
-    commit: "b4009"
+    commit: "b11429"
     docs_workflow: "https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md"
     docs_quantization: "..."
     priority: "CRITICAL"
@@ -207,8 +240,9 @@ Was die Datei **nicht** ist (ihr Kopfkommentar sagt dasselbe):
 - Kein Teil des Frameworks liest sie im Betrieb. Sie wird nicht in Umgebungsvariablen für die Build-Container
   übersetzt, der Crawler folgt ihren Links nicht, und Ditto nutzt `docs_workflow` nicht.
 - Ihre Versionen sind nicht die Versionen, mit denen gebaut wird. Builds nutzen, was das Dockerfile des Targets
-  festlegt, und die Einstellung `llama_cpp_version` (Vorgabe `v0.6.0`); der lokale Modellserver nutzt
-  `llama_runtime.yml`.
+  festlegt, und die Einstellung `llama_cpp_version`, deren Vorgabe aus dem llama.cpp-Pin in `llama_runtime.yml`
+  stammt; der lokale Modellserver nutzt `llama_runtime.yml`. Ihr llama.cpp-Eintrag wird trotzdem gegen diesen Pin
+  geprüft.
 - Sie hat keine Roadmap. Die Roadmap des Projekts steht in [docs/BLUEPRINT_DE.md](../docs/BLUEPRINT_DE.md#roadmap).
 
 Nutze sie als Liste von Links und Notizen. Halte Notizen kurz, verwende vollständige URLs und führe nach einer
@@ -284,7 +318,8 @@ derzeit keine Wirkung auf Builds.
 | Tools für KI-Clients und Ditto | `orchestrator/tools/framework_tools.py` | `tests/test_foundation.py`, `tests/test_mcp_server.py` |
 | Dittos Evaluationsfälle | `evals/ditto/cases.yml` | `tests/test_ditto_eval.py` |
 | Kalibriertext für Importance-Matrizen | `data/calibration/`, SHA256-Werte in `orchestrator/utils/calibration.py` | `llm-cli doctor` (Code `data.calibration`) |
-| Versionen in den Target-Images | das Dockerfile des Targets und die Einstellung `llama_cpp_version` | hadolint und der Image-Build in `.github/workflows/docker.yml` |
+| llama.cpp-Version | `llama_cpp.source` in `configs/llama_runtime.yml` (der Commit) | `tests/test_build_recipe.py`, `python scripts/llama_cpp_pin.py check` |
+| Weitere Versionen in den Target-Images | das Dockerfile des Targets | hadolint und der Image-Build in `.github/workflows/docker.yml` |
 | Was war | [CHANGELOG_DE.md](../CHANGELOG_DE.md) | `tests/test_versioning.py` (neueste Version, an `CHANGELOG.md`) |
 | Was kommt | [docs/BLUEPRINT_DE.md#roadmap](../docs/BLUEPRINT_DE.md#roadmap) | Durchsicht |
 
@@ -294,6 +329,7 @@ derzeit keine Wirkung auf Builds.
 |---|---|---|
 | einen neuen KI-Anbieter oder ein neues Modell anbieten | `llm_providers.yml` (oder deine eigene Kopie im Einstellungsordner) | die Prüfung oben und `tests/test_llm.py` ausführen; Changelog-Eintrag |
 | ein lokales Modell oder einen neueren llama.cpp-Build ergänzen | `llama_runtime.yml`, mit Größe, SHA256 und Commit | die Prüfung oben und `tests/test_runtime.py` ausführen; Changelog-Eintrag |
+| auf einen anderen llama.cpp-Commit wechseln | `llama_cpp.source` in `llama_runtime.yml` und die Stellen, die dazu passen müssen | das Vorgehen in [CONTRIBUTING_DE.md](../CONTRIBUTING_DE.md#den-llamacpp-pin-anheben) |
 | einen Schlüssel der Datei der Hardware-Probe ergänzen oder ändern | `hardware_probe_schema.yml` und die Probes, die ihn schreiben | die Prüfung oben und `tests/test_hardware_profile.py` ausführen; Changelog-Eintrag |
 | ein Target ein neues Board, Format oder einen neuen Typ bauen lassen | `target.yml` und `build.sh` des Targets | Tests; siehe [Leitfaden für Modulentwickler](../docs/Module_Developer_Guide_DE.md) |
 | ein vorgelagertes Projekt oder einen Dokumentationslink festhalten | `project_sources.yml` (neue Einträge in der ausführlichen Datei von Hand) | `python ../scripts/validate_ssot.py` in `configs/`, danach `python ../scripts/sync_ssot.py --write` für geänderte Versionen |

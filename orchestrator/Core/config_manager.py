@@ -34,6 +34,7 @@ import yaml
 
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.helpers import ensure_directory
+from orchestrator.utils.llama_pin import pinned_tag
 
 # Settings per provider that the sign-in (llm-cli ditto login, the GUI's sign-in panel) writes to the user config.
 SIGN_IN_SETTING = re.compile(r"^(ai_auth_[a-z0-9][a-z0-9_.-]{0,63}|ai_base_url_[a-z0-9][a-z0-9_.-]{0,63}|"
@@ -322,7 +323,8 @@ class ConfigManager:
             # --- SSOT: Centralized Image Definitions (v2.3) ---
             ConfigSchema("image_trivy", str, False, "aquasec/trivy:0.75.0", "Security Scanner Image (pinned: 'latest' was compromised in 2026-03)"),
             ConfigSchema("enable_security_scan", bool, False, True, "Scan built images with Trivy"),
-            ConfigSchema("llama_cpp_version", str, False, "v0.6.0", "llama.cpp release tag built into target images"),
+            ConfigSchema("llama_cpp_version", str, False, pinned_tag(),
+                         "llama.cpp tag built into target images (default: the pin in llama_runtime.yml)"),
             ConfigSchema("calibration_language", str, False, "mixed", "Shipped calibration text for importance matrices",
                          ["regex:^(mixed|de|en)$"]),
             ConfigSchema("build_sandbox", bool, False, True, "Run conversion containers without network, capabilities or root"),
