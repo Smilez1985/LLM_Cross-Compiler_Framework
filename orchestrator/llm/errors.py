@@ -96,6 +96,7 @@ ANTHROPIC_WORKSPACE_INVALID = "The workspace ID is not valid. It looks like wrks
 ANTHROPIC_WORKSPACE_NOT_FOUND = "This key has no access to workspace {workspace}."
 ANTHROPIC_ADMIN_KEY = "This is an Admin API key. Ditto needs a normal API key (Console > Settings > API keys)."
 ANTHROPIC_AUTH = "Claude rejected the key: it is wrong, was revoked, or has expired."
+ANTHROPIC_PROFILE = "The Anthropic CLI profile{name} cannot be used. Run `ant auth login`."
 _WORKSPACE_NOT_FOUND = re.compile(r"workspace\s+`?([A-Za-z0-9_-]+)`?\s+not found", re.I)
 
 
@@ -181,8 +182,14 @@ def _anthropic_cause(status: int, detail: str) -> Optional[Tuple[str, str]]:
     return None
 
 
-def map_anthropic_error(err: BaseException, label: str = "Claude API", provider: str = "anthropic") -> LLMError:
-    """Maps anthropic SDK exceptions, most specific class first."""
+def _profile_message(profile: str) -> str:
+    return ANTHROPIC_PROFILE.format(name=f" '{profile}'" if profile else "")
+
+
+def map_anthropic_error(err: BaseException, label: str = "Claude API", provider: str = "anthropic", *,
+                        profile: Optional[str] = None) -> LLMError:
+    """Maps anthropic SDK exceptions, most specific class first. `profile` is set (the profile name, or "" when
+    unknown) when the request was signed in with an `ant auth login` profile instead of an API key."""
     import anthropic
 
     if isinstance(err, LLMError):
@@ -197,17 +204,19 @@ def map_anthropic_error(err: BaseException, label: str = "Claude API", provider:
         retry_after = parse_retry_after(err.response.headers)
         detail = _detail(err)
         cause = _anthropic_cause(err.status_code, detail)
+        if cause is not None and cause[0] == "anthropic.auth" and profile is not None:
+            cause = "anthropic.profile", _profile_message(profile)  # no key involved
         if cause is not None:
             code, message = cause
-            cls = AuthFailed if code == "anthropic.auth" else NotConfigured
+            cls = AuthFailed if code in ("anthropic.auth", "anthropic.profile") else NotConfigured
             return cls(f"{message} ({detail})", code=code, **kw)
         error_type = getattr(err, "type", None)
         code = "insufficient_quota" if error_type == "billing_error" else None
         return _status_error(err.status_code, detail, label, retry_after=retry_after, code=code, kw=kw)
     credentials_error = getattr(anthropic, "CredentialsError", None)
     if credentials_error is not None and isinstance(err, credentials_error):
-        return NotConfigured(f"{label}: the sign-in profile could not be read. Run `ant auth login` again. "
-                             f"({redact_secrets(str(err))[:300]})", **kw)
+        return NotConfigured(f"{_profile_message(profile or '')} ({redact_secrets(str(err))[:300]})",
+                             code="anthropic.profile", **kw)
     return LLMError(f"{label} request failed: {redact_secrets(str(err))[:300]}", **kw)
 
 

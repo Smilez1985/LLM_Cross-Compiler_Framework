@@ -100,6 +100,8 @@ CODE_HINTS = {
     "anthropic.workspace_not_found": f"Correct the Claude workspace ID in {WORKSPACE_SETTING_HINT}, or use a key "
                                      "of that workspace.",
     "anthropic.admin_key": f"Store a normal Claude API key in {SETTINGS_HINT}.",
+    "anthropic.profile": "Sign in again with `ant auth login`, or remove the setting ai_auth_anthropic to use the "
+                         "stored Claude API key.",
     "provider.removed": f"Choose another AI provider in {SETTINGS_HINT}.",
 }
 

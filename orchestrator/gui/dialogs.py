@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import QObject, Qt, Signal
 from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, rejected_key_error
-from orchestrator.llm.providers.anthropic import WORKSPACE_ID
+from orchestrator.llm.providers.anthropic import WORKSPACE_ID, takes_workspace_id
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import get_instance as get_i18n
 
@@ -380,14 +380,14 @@ class AIConfigurationDialog(QDialog):
         return self.txt_base_url.text().strip() if preset is not None and preset.base_url_configurable else ""
 
     def _workspace_id(self, preset) -> str:
-        return self.txt_workspace.text().strip() if preset is not None and preset.adapter == "anthropic" else ""
+        return self.txt_workspace.text().strip() if preset is not None and takes_workspace_id(preset) else ""
 
     def _apply_enabled_state(self):
         preset = self._preset()
         if preset is None:
             return
         self.txt_api_key.setEnabled(bool(preset.secret))
-        self.txt_workspace.setEnabled(preset.adapter == "anthropic")
+        self.txt_workspace.setEnabled(takes_workspace_id(preset))
         self.txt_base_url.setEnabled(preset.base_url_configurable)
         self.txt_base_url.setPlaceholderText(preset.base_url or "https://.../v1")
         self.btn_sign_in.setEnabled(self._sign_in_available(preset))
@@ -436,7 +436,7 @@ class AIConfigurationDialog(QDialog):
                      "offline_mode": self.chk_offline.isChecked()}
         if self._base_url(preset):
             overrides["ai_base_url"] = self._base_url(preset)
-        if preset.adapter == "anthropic":
+        if takes_workspace_id(preset):
             overrides["ai_anthropic_workspace_id"] = self._workspace_id(preset)  # also when cleared
         config = SettingsOverlay(self._config(), overrides)
         secrets = _SecretsOverlay(self._secrets(), preset.secret, self.txt_api_key.text().strip())
@@ -485,7 +485,7 @@ class AIConfigurationDialog(QDialog):
         self.txt_base_url.setText((self._user_value("ai_base_url") or "") if saved and preset.base_url_configurable
                                   else "")
         self.txt_workspace.setText((self._user_value("ai_anthropic_workspace_id") or "")
-                                   if preset.adapter == "anthropic" else "")
+                                   if takes_workspace_id(preset) else "")
         self.txt_api_key.clear()
         self.lbl_models.setText("")
         self._apply_enabled_state()
@@ -508,9 +508,17 @@ class AIConfigurationDialog(QDialog):
         chain = self._user_value("ai_fallback_chain") or []
         self.txt_fallback.setText(", ".join(chain) if isinstance(chain, list) else str(chain))
         self._on_provider_changed()
-        removed = self.catalog.removed_message(saved_provider)
-        if removed:  # the saved provider no longer exists: say why and what to use instead, once per load
+        removed = self._removed_message([saved_provider, *self._parse_fallback(self.txt_fallback.text())])
+        if removed:  # a saved provider no longer exists: say why and what to use instead, once per load
             QMessageBox.information(self, "AI Provider Removed", removed)
+
+    def _removed_message(self, entries: List[str]) -> Optional[str]:
+        """The migration text for the first removed provider among `entries` (provider or provider:model)."""
+        for entry in entries:
+            removed = self.catalog.removed_message(str(entry).partition(":")[0])
+            if removed:
+                return removed
+        return None
 
     def _save_config(self):
         preset = self._preset()
@@ -526,9 +534,11 @@ class AIConfigurationDialog(QDialog):
 
         unknown = [entry for entry in fallback if self.catalog.get(entry.partition(":")[0]) is None]
         if unknown:
+            removed = self._removed_message(unknown)
             QMessageBox.warning(self, "Invalid Fallback Chain",
                                 f"Unknown provider in the fallback chain: {', '.join(unknown)}.\n"
-                                f"Known providers: {', '.join(self.catalog.ids())}.")
+                                f"Known providers: {', '.join(self.catalog.ids())}."
+                                + (f"\n\n{removed}" if removed else ""))
             return
         if offline and preset.location == "cloud":
             QMessageBox.warning(self, "Offline Mode",
@@ -568,7 +578,7 @@ class AIConfigurationDialog(QDialog):
             cfg.set("ai_provider", preset.id)
             cfg.set("ai_model", model)
             cfg.set("ai_base_url", base_url)
-            if preset.adapter == "anthropic":
+            if takes_workspace_id(preset):
                 cfg.set("ai_anthropic_workspace_id", workspace)
             cfg.set("ai_effort", effort)
             cfg.set("ai_security_level", security)

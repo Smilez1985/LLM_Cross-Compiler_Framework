@@ -170,10 +170,15 @@ def load_config_file(config_path: Optional[str] = None) -> Dict[str, Any]:
     return config
 
 
-def _allow_sdk_env_headers(config_path: Optional[str]) -> bool:
-    """The setting ai_allow_sdk_env_headers (read only when OPENAI/ANTHROPIC_CUSTOM_HEADERS is set)."""
-    from orchestrator.Core.config_manager import ConfigManager
-    return bool(ConfigManager(config_path).get("ai_allow_sdk_env_headers", False))
+def _allow_sdk_env_headers(config_path: Optional[str]) -> Any:
+    """The setting ai_allow_sdk_env_headers (read only when OPENAI/ANTHROPIC_CUSTOM_HEADERS is set). Settings that
+    cannot be read count as no: the variables are then dropped and the command still runs."""
+    try:
+        from orchestrator.Core.config_manager import ConfigManager
+        return ConfigManager(config_path).get("ai_allow_sdk_env_headers", False)
+    except Exception as e:
+        get_logger(__name__).warning(f"Could not read ai_allow_sdk_env_headers ({e.__class__.__name__}).")
+        return False
 
 
 def format_target_table(targets: List[TargetConfig]) -> Table:
@@ -241,7 +246,8 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
 
     # Every command, `mcp serve` included, passes here before anything starts a thread.
     for warning in guard_sdk_environment(lambda: _allow_sdk_env_headers(config), debug_http=debug_http):
-        Console(stderr=True).print(f"[yellow]Warning: {escape(warning)}[/yellow]")
+        # One line each, whatever the terminal width (MCP clients log stderr line by line).
+        Console(stderr=True, soft_wrap=True).print(f"[yellow]Warning: {escape(warning)}[/yellow]")
 
     if not quiet:
         Console(stderr=True).print(Panel(
@@ -398,7 +404,9 @@ def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional
         sys.exit(1)
     if provider:
         if ditto.client.catalog.get(provider) is None:
-            console.print(f"[red]Unknown AI provider '{escape(provider)}'. Choose one of: "
+            removed = ditto.client.catalog.removed_message(provider)
+            console.print(f"[red]{escape(removed)}[/red]" if removed else
+                          f"[red]Unknown AI provider '{escape(provider)}'. Choose one of: "
                           f"{escape(', '.join(ditto.client.catalog.ids()))}.[/red]")
             sys.exit(2)
         fm.config.set("ai_provider", provider)

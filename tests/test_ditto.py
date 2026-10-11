@@ -519,6 +519,7 @@ class TestErrors:
         ("anthropic.workspace_invalid", "Correct the Claude workspace ID"),
         ("anthropic.workspace_not_found", "Correct the Claude workspace ID"),
         ("anthropic.admin_key", "Store a normal Claude API key"),
+        ("anthropic.profile", "ant auth login"),
         ("provider.removed", "Choose another AI provider"),
     ])
     def test_known_causes_say_what_to_change(self, code, phrase):
@@ -646,6 +647,27 @@ class TestConfirmations:
         assert "Rockchip and more." in result.stdout
         assert calls == [("Which targets?", cli._ditto_confirm, True)]
         assert config.values["ai_provider"] == "ollama"
+
+    def test_removed_provider_on_the_command_line_names_the_alternatives(self, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli
+        from orchestrator.llm import load_catalog
+
+        config = FakeConfig()
+        ditto = SimpleNamespace(client=SimpleNamespace(catalog=load_catalog()))
+        framework = SimpleNamespace(config=config, get_component=lambda name: ditto)
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "--provider", "claude_code", "Hi"])
+        assert result.exit_code == 2
+        text = " ".join(result.stdout.split())  # the console wraps long lines at its width
+        assert "llm-cli mcp config" in text and "Bedrock, Vertex or Foundry" in text
+        assert "Unknown AI provider" not in text
+        assert "ai_provider" not in config.values
 
 
 # --- the chat window ------------------------------------------------------------------------------------------

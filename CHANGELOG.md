@@ -34,7 +34,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
 - **Claude workspace ID** (AI settings field "Workspace ID", setting `ai_anthropic_workspace_id`): Claude API
   keys that are valid in every workspace of the organization now work. The ID is sent as the
-  `anthropic-workspace-id` header on every request, the model list included.
+  `anthropic-workspace-id` header on every request made with the API key to the Claude API, the model list
+  included. An `ant auth login` profile keeps its own workspace, and other servers never receive the ID.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -44,10 +45,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Chat history** is append-only and kept per user; a long conversation is summarized into a new one.
   Histories of earlier versions are migrated.
 - Provider errors are explained in plain language, e.g. a Claude API key that needs a workspace ID, a
-  workspace the key cannot use, or a key that is wrong, revoked or expired.
+  workspace the key cannot use, a key that is wrong, revoked or expired, or an `ant auth login` profile that
+  needs a new sign-in.
 - **Claude API sign-in**: a stored API key is always used first. An `ant auth login` profile is used only when
   you choose it (`ai_auth_anthropic: ant_profile`); before, a profile on disk silently took the place of the
-  stored key, and with it the account that is billed.
+  stored key, and with it the account that is billed. The earlier name `oauth` still means the profile, in the
+  setting and in a provider catalog in your config directory.
 - Ditto's prompts: build failures are attributed to the build machine or the device correctly, build
   recommendations know which inputs each format accepts (an ONNX model is not sent to GGUF), questions about
   targets and builds are answered from the tools, and module proposals use compiler flags rather than the
@@ -62,10 +65,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
 - **The Claude subscription provider `claude_code`** (Ditto through `claude -p` on Claude Pro/Max plan
   limits): Anthropic does not allow other apps to use Claude subscription limits without approval. A saved
-  `ai_provider: claude_code` (or `ClaudeCode`) now stops with a message, shown once in the AI settings, that
-  names the alternatives: a Claude API key (Max and Team plans include monthly API credits for a linked Console
-  organization), Claude on Bedrock, Vertex or Foundry, or using the framework from Claude Code itself
-  (`llm-cli mcp config`).
+  `ai_provider: claude_code` (or `ClaudeCode`, `Claude Code`), the same name in the fallback chain or in
+  `--provider`, now stops with a message, shown once in the AI settings, that names the alternatives: a Claude
+  API key (Max and Team plans include monthly API credits for a linked Console organization), Claude on
+  Bedrock, Vertex or Foundry, or using the framework from Claude Code itself (`llm-cli mcp config`). It never
+  switches to the Claude API on its own. A `claude_code` preset left in a provider catalog in your config
+  directory is skipped with a warning; the other providers keep working.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -75,12 +80,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
   the same way and installed atomically.
 - `OPENAI_CUSTOM_HEADERS` and `ANTHROPIC_CUSTOM_HEADERS` are dropped at startup of the CLI, the GUI and the MCP
-  server, with a warning, unless the setting `ai_allow_sdk_env_headers` is true: they could replace the stored
-  API key and reach every server, local ones included. The OpenAI and OpenAI-compatible adapters also send the
-  stored key as an explicit `Authorization` header.
+  server, with a warning, unless the setting `ai_allow_sdk_env_headers` is true (a quoted `"false"` counts as
+  false; settings that cannot be read count as false): they could replace the stored API key and reach every
+  server, local ones included. The OpenAI and OpenAI-compatible adapters also send the stored key as an
+  explicit `Authorization` header.
 - `ANTHROPIC_LOG=debug` and `OPENAI_LOG=debug` are lowered to `info` unless `--debug-http` is given (the SDKs'
   debug logs show request details).
-- Claude Admin API keys (`sk-ant-admin01-`) are refused before any request is sent.
+- Claude Admin API keys (`sk-ant-admin01-`) are refused before any request is sent, also when they were stored
+  with surrounding spaces.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

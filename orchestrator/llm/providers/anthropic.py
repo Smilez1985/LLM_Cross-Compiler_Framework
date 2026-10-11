@@ -16,7 +16,8 @@ Request rules for the current models (Claude Opus 5.5, Sonnet 5.5, Haiku 5.5, Fa
 Credentials: the stored API key, or an `ant auth login` profile only when the user chose that method. The
 client always gets an explicit credential and base_url, so neither ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL nor the
 CLI's active profile can switch the account or the endpoint. A workspace ID (keys valid in every workspace of
-the organization need one) goes out as the anthropic-workspace-id header on every request.
+the organization need one) goes out as the anthropic-workspace-id header on every request made with the API
+key to the Claude API; an `ant` profile keeps the workspace it was set up with, and other hosts never get it.
 """
 
 import re
@@ -31,10 +32,19 @@ from orchestrator.llm.types import (ChatRequest, ChatResult, Message, ModelInfo,
 FALLBACK_BETA = "server-side-fallback-2026-07-01"  # pairs with the scalar form fallbacks="default"
 CLAUDE_API_HOSTS = ("api.anthropic.com",)
 WORKSPACE_HEADER = "anthropic-workspace-id"
-WORKSPACE_ID = re.compile(r"^wrkspc_[A-Za-z0-9]+$")
+WORKSPACE_ID = re.compile(r"^wrkspc_[A-Za-z0-9]+\Z")
 
 _STOP = {"end_turn": "end", "stop_sequence": "end", "pause_turn": "end", "tool_use": "tool_use",
          "max_tokens": "max_tokens", "model_context_window_exceeded": "max_tokens", "refusal": "refusal"}
+
+
+def is_claude_api(base_url: Optional[str]) -> bool:
+    return (urlparse(base_url or "").hostname or "").lower() in CLAUDE_API_HOSTS
+
+
+def takes_workspace_id(preset) -> bool:
+    """Whether ai_anthropic_workspace_id applies to this preset (Claude API presets only)."""
+    return preset.adapter == "anthropic" and is_claude_api(preset.base_url)
 
 
 def _matches(model: str, prefixes: List[str]) -> bool:
@@ -61,8 +71,15 @@ class AnthropicAdapter(ProviderAdapter):
         self.base_url = self.base_url or preset.base_url or "https://api.anthropic.com"
         self.auth = auth
         self.oauth_profile = oauth_profile
-        self.workspace_id = str(workspace_id).strip() if workspace_id else None
+        # For the API key on the Claude API only: a profile's own workspace must not be replaced silently.
+        use_workspace = workspace_id and auth == "api_key" and is_claude_api(self.base_url)
+        self.workspace_id = (str(workspace_id).strip() or None) if use_workspace else None
+        self._profile: Optional[str] = None  # resolved name of the `ant` profile in use
         self._client = None
+
+    def _map_error(self, err: BaseException):
+        profile = (self._profile or "") if self.auth == "ant_profile" else None
+        return map_anthropic_error(err, provider=self.provider, profile=profile)
 
     # --- client -------------------------------------------------------------------------------------------
     def client(self):
@@ -83,8 +100,8 @@ class AnthropicAdapter(ProviderAdapter):
                     # SDK reads and refreshes the token itself, this code never sees it. Without a name, the
                     # CLI's active profile is used.
                     from anthropic.lib.credentials import CredentialsFile
-                    profile = self.oauth_profile or CredentialsFile().profile
-                    self._client = anthropic.Anthropic(profile=profile, **common)
+                    self._profile = self.oauth_profile or CredentialsFile().profile
+                    self._client = anthropic.Anthropic(profile=self._profile, **common)
                 elif self._api_key:
                     # Passing the key explicitly turns off the SDK's environment and profile fallbacks.
                     self._client = anthropic.Anthropic(api_key=self._api_key, **common)
@@ -94,12 +111,11 @@ class AnthropicAdapter(ProviderAdapter):
             except NotConfigured:
                 raise
             except Exception as e:
-                raise map_anthropic_error(e, provider=self.provider) from None
+                raise self._map_error(e) from None
         return self._client
 
     def server_fallbacks(self, model: str) -> bool:
-        host = (urlparse(self.base_url).hostname or "").lower()
-        return host in CLAUDE_API_HOSTS and _matches(model, self.preset.server_fallback_models)
+        return is_claude_api(self.base_url) and _matches(model, self.preset.server_fallback_models)
 
     def supports_effort(self, model: str) -> bool:
         return not _matches(model, self.preset.no_effort_models)
@@ -152,7 +168,7 @@ class AnthropicAdapter(ProviderAdapter):
             else:
                 response = client.messages.create(**params)
         except Exception as e:
-            raise map_anthropic_error(e, provider=self.provider) from None
+            raise self._map_error(e) from None
         return self.to_result(response, model)
 
     def to_result(self, response: Any, requested_model: str) -> ChatResult:
@@ -190,7 +206,7 @@ class AnthropicAdapter(ProviderAdapter):
                                         max_tokens=getattr(m, "max_tokens", None), capabilities=caps))
             return models
         except Exception as e:
-            raise map_anthropic_error(e, provider=self.provider) from None
+            raise self._map_error(e) from None
 
 
 def render_tool(tool: ToolSpecLLM) -> Dict[str, Any]:

@@ -7,8 +7,8 @@
 # adapter     anthropic | openai_responses | openai_compat
 # location    cloud (privacy filter applies) | local (never filtered) | auto (decided from the base_url host)
 # auth        accepted methods, preferred first: api_key | ant_profile | none
-#             ant_profile: an `ant auth login` profile, read and refreshed by the anthropic SDK
-# opt_in_auth methods never picked automatically: only used when ai_auth_<provider> names them
+#             ant_profile: an `ant auth login` profile, read and refreshed by the anthropic SDK (earlier name: oauth)
+# opt_in_auth methods never picked automatically: only used when ai_auth_<provider> names them (ant_profile always)
 # reject_key_prefixes  key prefixes refused before any request (admin keys cannot be used for chat)
 # secret      name of the API key in the encrypted secrets store
 # models      default model per task profile (chat, tools, json, healing); "default" for the rest

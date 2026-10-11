@@ -56,7 +56,7 @@ def main():
 
     # Before Qt or the framework start threads: SDK environment guard (orchestrator/llm/sdk_env.py).
     debug_http = "--debug-http" in sys.argv[1:]
-    for warning in guard_sdk_environment(bool(cfg_mgr.get("ai_allow_sdk_env_headers", False)), debug_http):
+    for warning in guard_sdk_environment(cfg_mgr.get("ai_allow_sdk_env_headers", False), debug_http):
         print(f"Warning: {warning}", file=sys.stderr)
 
     app = QApplication([arg for arg in sys.argv if arg != "--debug-http"])

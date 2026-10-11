@@ -822,6 +822,29 @@ class TestSignInMethod:
         with pytest.raises(ValueError):
             ProviderPreset(id="x", label="X", adapter="anthropic", auth=["api_key"], opt_in_auth=["ant_profile"])
 
+    def test_ant_profile_is_opt_in_even_when_a_catalog_forgets_to_say_so(self):
+        preset = ProviderPreset(id="x", label="X", adapter="anthropic", auth=["ant_profile", "api_key"])
+        assert preset.opt_in_auth == ["ant_profile"]
+
+    def test_ant_profile_keeps_its_own_workspace(self, make_client, ant_profile):
+        # The setting is for API keys; it must not move the profile's requests into another workspace.
+        profile_workspace = "wrkspc_" + "01FromTheProfile"
+        cfg = Path(os.environ["ANTHROPIC_CONFIG_DIR"]) / "configs" / "default.json"
+        cfg.write_text(json.dumps({"authentication": {"type": "user_oauth"}, "workspace_id": profile_workspace}))
+        http = FakeHTTP().add(claude_message([text_block("ok")]))
+        make_client(http, SECRETS, ai_auth_anthropic="ant_profile", ai_anthropic_workspace_id=WORKSPACE,
+                    **ANTHROPIC).chat(ask())
+        assert http.last.headers["anthropic-workspace-id"] == profile_workspace
+
+    def test_rejected_profile_sign_in_is_not_called_a_key(self, make_client, ant_profile):
+        http = FakeHTTP()
+        http.queue.append(anthropic_error(401, "authentication_error", "invalid bearer token"))
+        with pytest.raises(AuthFailed) as info:
+            make_client(http, SECRETS, ai_auth_anthropic="ant_profile", **ANTHROPIC).chat(ask())
+        text = str(info.value)
+        assert info.value.code == "anthropic.profile" and "'default'" in text and "ant auth login" in text
+        assert "rejected the key" not in text and ant_profile not in text
+
 
 class TestRemovedProviders:
 
@@ -845,6 +868,39 @@ class TestRemovedProviders:
         assert info.value.code == "provider.removed" and http.requests == []
         for alternative in ("Claude API key", "Max and Team", "Bedrock, Vertex or Foundry", "llm-cli mcp config"):
             assert alternative in text
+
+    @pytest.mark.parametrize("value", ["Claude Code", "claude-code", "CLAUDE_CODE", "Claude Code (Pro/Max)",
+                                       "ClaudeCode (subscription)"])
+    def test_other_spellings_never_turn_into_the_claude_api(self, make_client, value):
+        # "Claude Code" must not resolve through its first word ("Claude") to the API key and its billing.
+        cat = load_catalog()
+        assert cat.get(value) is None and cat.removed_message(value) is not None
+        assert cat.resolve_id("Claude") == "anthropic" and cat.resolve_id("Claude API") == "anthropic"
+        http = FakeHTTP()
+        with pytest.raises(NotConfigured) as info:
+            make_client(http, SECRETS, ai_provider=value).chat(ask())
+        assert info.value.code == "provider.removed" and http.requests == []
+
+    def test_user_catalog_of_an_earlier_version_still_loads(self, tmp_path):
+        # A copied catalog with the old method name and the removed preset must not break every provider.
+        (tmp_path / "llm_providers.yml").write_text(
+            "providers:\n"
+            "  anthropic:\n    label: Claude\n    adapter: anthropic\n    base_url: https://api.anthropic.com\n"
+            "    auth: [oauth, api_key]\n    secret: anthropic_api_key\n    models: {default: model-a}\n"
+            "  claude_code:\n    label: Claude subscription\n    adapter: claude_code\n    auth: [oauth]\n"
+            "  my_claude:\n    label: Mine\n    adapter: claude_code\n"
+            "aliases:\n  ClaudeCode: claude_code\n", encoding="utf-8")
+        cat = load_catalog(user_dir=tmp_path)
+        anthropic = cat.get("anthropic")
+        assert anthropic.auth == ["ant_profile", "api_key"] and anthropic.opt_in_auth == ["ant_profile"]
+        assert "claude_code" not in cat.ids() and "my_claude" not in cat.ids() and "openai" in cat.ids()
+        for name in ("claude_code", "ClaudeCode", "my_claude"):
+            assert "llm-cli mcp config" in cat.removed_message(name)
+        client = LLMClient(FakeConfig(**ANTHROPIC), FakeSecrets(SECRETS), catalog=cat, state_dir=tmp_path / "s")
+        assert client.resolve().auth == "api_key"  # the profile listed first is still never picked on its own
+        with pytest.raises(NotConfigured) as info:
+            client.resolve(provider="my_claude")
+        assert info.value.code == "provider.removed"
 
     def test_removed_provider_in_the_fallback_chain_is_skipped(self, make_client):
         http = FakeHTTP().add(claude_message([text_block("")], stop="refusal"))
@@ -895,6 +951,40 @@ class TestClaudeWorkspace:
             make_client(http, SECRETS, ai_anthropic_workspace_id=WORKSPACE, **ANTHROPIC).chat(ask())
         assert info.value.code == code and phrase in str(info.value) and info.value.status == status
         assert len(http.requests) == 1  # not retried
+
+    def test_other_hosts_never_get_the_workspace_id(self, tmp_path):
+        # An Anthropic-protocol gateway or router is not the Claude API: the organization's workspace stays private.
+        (tmp_path / "llm_providers.yml").write_text(
+            "providers:\n  gateway:\n    label: Gateway\n    adapter: anthropic\n"
+            "    base_url: https://gateway.example.com\n    secret: anthropic_api_key\n"
+            "    models: {default: model-a}\n", encoding="utf-8")
+        http = FakeHTTP().add(claude_message([text_block("ok")]))
+        client = LLMClient(FakeConfig(ai_provider="gateway", ai_anthropic_workspace_id=WORKSPACE),
+                           FakeSecrets(SECRETS), catalog=load_catalog(user_dir=tmp_path), state_dir=tmp_path / "s",
+                           http_client=http.client(), sleep=lambda s: None)
+        client.chat(ask())
+        assert http.last.url.startswith("https://gateway.example.com/")
+        assert "anthropic-workspace-id" not in http.last.headers
+
+    @pytest.mark.parametrize("value", [" wrkspc_abc\n", "wrkspc_" + "ab c", "wrkspc_" + "\u00e4bc", "wrkspc_",
+                                       "wrkspc_abc\x00"])
+    def test_odd_workspace_ids(self, make_client, value):
+        http = FakeHTTP().add(claude_message([text_block("ok")]))
+        client = make_client(http, SECRETS, ai_anthropic_workspace_id=value, **ANTHROPIC)
+        if value.strip() == "wrkspc_abc":  # surrounding whitespace is trimmed
+            client.chat(ask())
+            assert http.last.headers["anthropic-workspace-id"] == "wrkspc_abc"
+            return
+        with pytest.raises(NotConfigured) as info:
+            client.chat(ask())
+        assert info.value.code == "anthropic.workspace_invalid" and http.requests == []
+
+    def test_admin_key_with_surrounding_whitespace_is_refused(self, make_client):
+        admin_key = " " + "sk-ant-" + "admin01-" + "Z" * 32 + "\n"  # pasted into `llm-cli secrets set`
+        http = FakeHTTP()
+        with pytest.raises(NotConfigured) as info:
+            make_client(http, {"anthropic_api_key": admin_key}, **ANTHROPIC).chat(ask())
+        assert info.value.code == "anthropic.admin_key" and http.requests == []
 
     def test_admin_key_is_refused_before_any_request(self, make_client):
         admin_key = "sk-ant-" + "admin01-" + "Z" * 32

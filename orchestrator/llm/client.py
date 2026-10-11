@@ -12,6 +12,7 @@ Settings (all optional except ai_provider):
   ai_oauth_profile       `ant auth login` profile for Claude when ai_auth_anthropic is ant_profile (default: the
                          CLI's active profile)
   ai_anthropic_workspace_id   wrkspc_... for Claude API keys that are valid in every workspace of the organization
+                         (sent with the API key to the Claude API only; an `ant` profile keeps its own workspace)
   ai_effort / ai_effort_<task>   low | medium | high | xhigh | max
   ai_fallback_chain      e.g. ["local"] or ["ollama:qwen3.5:4b"]; tried on refusals and outages
   ai_security_level      STRICT | BALANCED | OFF for cloud providers (local ones are never filtered)
@@ -37,7 +38,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
+from orchestrator.llm.catalog import LEGACY_AUTH, Catalog, ProviderPreset, load_catalog
 from orchestrator.llm.errors import (LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused,
                                      rejected_key_error)
 from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj
@@ -47,7 +48,6 @@ from orchestrator.utils.logging import get_logger
 
 MAX_RETRIES = 2  # the SDKs' own retries are switched off (max_retries=0), so attempts never multiply
 MANAGED_RUNTIME_PROVIDER = "local"  # preset served by the managed llama-server
-LEGACY_AUTH = {"oauth": "ant_profile"}  # earlier name of the `ant auth login` method
 
 # (base_url, api_key, model) of a running local server
 RuntimeEndpoint = Tuple[str, Optional[str], Optional[str]]
