@@ -450,7 +450,12 @@ class ConfigManager:
             # passed file is layered on top so its values win.
             self._load_config_files_auto()
             if config_file:
-                self._load_config_file(config_file)
+                try:
+                    self._load_config_file(config_file)
+                except Exception as e:
+                    # A file chosen explicitly (llm-cli -c) that is ignored must show, also with -q (ERROR level);
+                    # the other sources (config.yml, LLM_FRAMEWORK_* variables, defaults) still apply.
+                    self.logger.error(f"Failed to load config file {config_file}: {e}; its settings are not used.")
             self._load_environment_variables()
             self._validate_configuration()
             return True
