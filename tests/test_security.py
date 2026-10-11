@@ -973,7 +973,8 @@ class TestCrawlerOptOuts:
 
 
 class TestCrawlsStayWithTheUser:
-    """Crawls start only from the GUI's Deep Ingest: MCP clients and Ditto have no way to start one."""
+    """Crawls start only from the GUI's Deep Ingest: MCP clients and Ditto have no way to start one, nor to
+    acknowledge the notice before the first crawl in the user's place."""
 
     AUTOMATION = ["orchestrator/mcp_server.py", "orchestrator/Core/ditto_manager.py", "orchestrator/tools",
                   "orchestrator/llm"]
@@ -999,7 +1000,8 @@ class TestCrawlsStayWithTheUser:
                 elif isinstance(node, (ast.Import, ast.ImportFrom)):
                     names += [getattr(node, "module", None) or ""] + [a.name for a in node.names]
                 for name in names:
-                    if name in ("ingest_url", "crawl", "iter_crawl", "CrawlerManager") or "crawler_manager" in name:
+                    if name in ("ingest_url", "crawl", "iter_crawl", "CrawlerManager", "CrawlNotice") or \
+                            "crawler_manager" in name or "crawl_notice" in name:
                         offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}: {name}")
         assert len(files) > 5 and offenders == []
 
