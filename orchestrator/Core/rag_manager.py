@@ -729,11 +729,11 @@ class RAGManager:
             return self._reranker
 
     def _rerank_floor(self, reranker) -> float:
+        """rag_rerank_min_score (0: no floor), or the reranker's calibrated floor when it is not set."""
         try:
-            configured = float(self._cfg("rag_rerank_min_score", 0.0) or 0.0)
+            return float(self._cfg("rag_rerank_min_score"))
         except (TypeError, ValueError):
-            configured = 0.0
-        return configured or float(getattr(getattr(reranker, "spec", None), "min_score", 0.0))
+            return float(getattr(getattr(reranker, "spec", None), "min_score", 0.0))
 
     def _rerank(self, reranker, query: str, results: List[SearchResult]) -> List[SearchResult]:
         def text(result: SearchResult) -> str:

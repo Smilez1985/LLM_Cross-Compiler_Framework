@@ -335,12 +335,14 @@ class ConfigManager:
             ConfigSchema("rag_reranker", str, False, "auto",
                          "Cross-encoder that reranks knowledge-base results and drops irrelevant ones: 'auto' "
                          "(multilingual MiniLM from 6 GB RAM, bge-reranker-v2-m3 with CUDA and 16 GB), 'off', or "
-                         "a model id. Used by build recommendations, and by every search with rag_rerank_default.",
+                         "a model id. Used by build recommendations, and by chat and MCP searches with "
+                         "rag_rerank_default.",
                          ["non_empty"]),
             ConfigSchema("rag_rerank_default", bool, False, False,
-                         "Also rerank the other knowledge-base searches (Ditto chat, MCP search_knowledge)"),
-            ConfigSchema("rag_rerank_min_score", float, False, 0.0,
-                         "Relevance floor (0..1) for reranked results; 0 = the reranker's calibrated floor",
+                         "Also rerank Ditto's chat searches and the MCP tool search_knowledge"),
+            ConfigSchema("rag_rerank_min_score", float, False, None,
+                         "Relevance floor (0..1) for reranked results; unset = the reranker's calibrated floor, "
+                         "0 = no floor",
                          ["min:0", "max:1"]),
             ConfigSchema("rag_model_idle_minutes", int, False, 10,
                          "Minutes after which unused knowledge-base models are unloaded (0 = keep them loaded)",

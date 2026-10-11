@@ -396,25 +396,27 @@ class FastEmbedSparseEmbedder(_FastEmbedBase):
 # FastEmbed's BM25 tokenizer keeps \w runs whole: "-DGGML_CUDA=ON" becomes "dggml_cuda", so a search for
 # GGML_CUDA or "ggml cuda" misses it; snake_case and camelCase names stay one token. Their parts are added.
 _WORD = re.compile(r"\w+")
-_CMAKE_DEFINE = re.compile(r"D(?=[A-Z][A-Z0-9]*(?:_|$))")
+_CMAKE_DEFINE = re.compile(r"D[A-Z][A-Z0-9]*(_|$)")
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z]{2})")  # not plurals such as GPUs
+_VERSION_PART = re.compile(r"\d{1,2}")  # the 64 of x86_64, the 2 and 17 of manylinux_2_17
 
 
 def expand_identifiers(text: str) -> str:
     """The text plus the split forms of its identifiers, for the BM25 input only (the dense input and the
     stored content stay as they are): -DGGML_CUDA=ON adds GGML_CUDA GGML CUDA, rknn_toolkit2 adds rknn toolkit2,
-    rknnToolkitLite adds rknn Toolkit Lite. Each form is added once."""
+    rknnToolkitLite adds rknn Toolkit Lite, x86_64 adds x86. Each form is added once."""
     added: Dict[str, None] = {}
     for match in _WORD.finditer(text or ""):
-        word = match.group()
-        start = match.start()
-        if start and text[start - 1] == "-" and _CMAKE_DEFINE.match(word):
-            word = word[1:]  # a CMake definition: -DNAME=VALUE
+        word, start, end = match.group(), match.start(), match.end()
+        define = _CMAKE_DEFINE.match(word) if start and text[start - 1] == "-" else None
+        if define and (define.group(1) or text[end:end + 1] == "="):  # -DNAME=VALUE or -DNAME_X, not -DEBUG
+            word = word[1:]
             added.setdefault(word, None)
         parts = [p for p in _CAMEL.sub("_", word).split("_") if p]
         if len(parts) > 1:
             for part in parts:
-                added.setdefault(part, None)
+                if not _VERSION_PART.fullmatch(part):
+                    added.setdefault(part, None)
     return f"{text}\n{' '.join(added)}" if added else text
 
 
