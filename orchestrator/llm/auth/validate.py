@@ -16,8 +16,9 @@ from urllib.parse import urlsplit
 
 from orchestrator.llm.auth.errors import AuthError, auth_error, classify, engine_name, vendor_of
 from orchestrator.llm.auth.spec import AuthMethodSpec, ValidateSpec
-from orchestrator.llm.auth.store import display_origin
-from orchestrator.llm.errors import LLMError, NotConfigured, parse_retry_after, rejected_key_error, status_error
+from orchestrator.llm.auth.store import display_origin, key_malformed_error, malformed_key
+from orchestrator.llm.errors import (LLMError, NotConfigured, parse_retry_after, rejected_key_error, status_error,
+                                     without_secret)
 from orchestrator.security.redaction import reveal
 from orchestrator.utils.helpers import redact_secrets
 
@@ -76,7 +77,7 @@ def _dig(data: Any, path: Optional[str]) -> Any:
     return data
 
 
-def _detail(response: Any, body: Any) -> str:
+def _detail(response: Any, body: Any, key: Optional[str] = None) -> str:
     message = None
     if isinstance(body, list) and body and isinstance(body[0], dict):
         body = body[0]
@@ -85,7 +86,7 @@ def _detail(response: Any, body: Any) -> str:
         message = inner.get("message") if isinstance(inner, dict) else inner
     if not isinstance(message, str) or not message:
         message = (response.text or "")[:300]
-    return redact_secrets(message).strip()[:500]
+    return redact_secrets(without_secret(message, key)).strip()[:500]
 
 
 def default_validation(preset: Any) -> ValidateSpec:
@@ -93,14 +94,14 @@ def default_validation(preset: Any) -> ValidateSpec:
     return ValidateSpec(path="/v1/models" if preset.adapter == "anthropic" else "/models")
 
 
-def _label(spec: ValidateSpec, response: Any, body: Any) -> Optional[str]:
+def _label(spec: ValidateSpec, response: Any, body: Any, key: Optional[str] = None) -> Optional[str]:
     value = response.headers.get(spec.account_header) if spec.account_header else None
     if value and spec.account_header.lower().endswith("workspace-id"):
         value = f"workspace {value}"
     if not value:
         found = _dig(body, spec.account_field)
         value = found if isinstance(found, str) else None
-    return (redact_secrets(value).strip()[:120] or None) if value else None
+    return (redact_secrets(without_secret(value, key)).strip()[:120] or None) if value else None
 
 
 def validate_credential(preset: Any, spec: AuthMethodSpec, credential: Any, base_url: Optional[str], *,
@@ -112,6 +113,9 @@ def validate_credential(preset: Any, spec: AuthMethodSpec, credential: Any, base
     key = reveal(credential.api_key)
     if key and spec.rejected(key):
         result.error = rejected_key_error(preset)  # before any request
+        return result
+    if key and malformed_key(key):
+        result.error = key_malformed_error(preset, spec.key_page)  # an HTTP header cannot carry it
         return result
     if credential.kind not in ("none", "api_key"):
         if list_models is None:
@@ -178,7 +182,7 @@ def validate_credential(preset: Any, spec: AuthMethodSpec, credential: Any, base
         body = None
     if 200 <= response.status_code < 300:
         result.ok = True
-        result.account_label = _label(check, response, body)
+        result.account_label = _label(check, response, body, key)
         found = _dig(body, check.models_field)
         result.models = len(found) if isinstance(found, list) else None
         return result
@@ -187,7 +191,7 @@ def validate_credential(preset: Any, spec: AuthMethodSpec, credential: Any, base
                                   message=f"{display_origin(url)} redirected the check to another address; the key "
                                           "was not sent there. Check the address.")
         return result
-    detail = _detail(response, body)
+    detail = _detail(response, body, key)
     error_body = body if isinstance(body, (dict, list)) else None
     inner = error_body.get("error") if isinstance(error_body, dict) else None
     found = classify(preset, response.status_code, detail, error_body, headers=response.headers, base_url=base_url,

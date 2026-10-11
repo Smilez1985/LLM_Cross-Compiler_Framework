@@ -490,6 +490,25 @@ class TestAIConfigurationDialog:
         without = AIConfigurationDialog(None)
         assert not without.btn_sign_in.isEnabled() and without._sign_in() is None
 
+    def test_a_key_typed_here_replaces_the_method_a_sign_in_remembered(self, qapp, tmp_path, framework,
+                                                                      message_boxes):
+        # `llm-cli ditto login anthropic --method ant_profile` remembered the profile; a key typed and saved here
+        # would otherwise stay unused while the field says it is stored.
+        framework.config.set("ai_auth_anthropic", "ant_profile")
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "anthropic")
+        dlg.cb_model.setCurrentText("some-model")
+        dlg.txt_api_key.setText("sk-ant-" + "api03-" + "K" * 40)
+        dlg._save_config()
+        assert message_boxes == [] and dlg.result() == dialogs.QDialog.Accepted
+        assert ConfigManager(tmp_path).get("ai_auth_anthropic") == "api_key"
+        framework.config.set("ai_auth_anthropic", "ant_profile")
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "anthropic")
+        dlg.cb_model.setCurrentText("some-model")
+        dlg._save_config()  # no key typed: the remembered method stays
+        assert ConfigManager(tmp_path).get("ai_auth_anthropic") == "ant_profile"
+
     def test_works_without_framework(self, qapp, message_boxes):
         dlg = AIConfigurationDialog(None)
         select_provider(dlg, "ollama")

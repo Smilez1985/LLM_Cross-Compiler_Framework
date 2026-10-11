@@ -1385,13 +1385,20 @@ def _method_tags(info) -> str:
     return f" ({', '.join(tags)})" if tags else ""
 
 
+def _named_method(service, preset, method_id: str):
+    """--method: a method of the provider, else a usage error (the value redacted like a provider name)."""
+    from orchestrator.utils.helpers import redact_secrets
+    spec = service.method(preset, method_id)
+    if spec is None:
+        _usage(f"{preset.label} has no sign-in method '{redact_secrets(str(method_id))}'. Methods: "
+               f"{', '.join(preset.auth)}.")
+    return spec
+
+
 def _login_method(service, preset, method_id: Optional[str]):
     """--method, the only method, or (at a terminal) the user's pick. Opt-in methods count only when named."""
     if method_id:
-        spec = service.method(preset, method_id)
-        if spec is None:
-            _usage(f"{preset.label} has no sign-in method '{method_id}'. Methods: {', '.join(preset.auth)}.")
-        return spec
+        return _named_method(service, preset, method_id)
     if len(preset.methods) == 1:
         return preset.methods[0]
     candidates = [m for m in preset.methods if not m.opt_in]
@@ -1422,6 +1429,14 @@ def _ensure_storage(service, preset, insecure: bool, yes: bool) -> None:
         return
     if not insecure or problem.code not in STORAGE_CHOICE_CODES:
         _storage_fail(problem, preset.id, service)
+    configured = str(service.config.get("secret_storage", "keyring") or "keyring").strip().lower()
+    if configured != "keyring":
+        # A helper or passphrase the user chose is never downgraded by a flag (a script may always pass it).
+        _say(service.storage_message() or str(problem), err=True, fg="red")
+        _say(f"--insecure-storage only replaces a keyring that cannot be used; the vault is protected with "
+             f"'{configured}' (secret_storage). Fix that, or switch on purpose: llm-cli ditto auth storage --use "
+             "insecure", err=True)
+        sys.exit(5)
     warning = "The vault key will be kept in a file next to the vault, NOT encrypted at rest."
     if not yes and _interactive() and not click.confirm(f"{warning} Continue?", default=False, err=True):
         _say("Cancelled.", err=True)
@@ -1435,12 +1450,17 @@ def _ensure_storage(service, preset, insecure: bool, yes: bool) -> None:
 
 def _read_key(spec, preset, *, with_token: bool, from_env: bool) -> Tuple[str, str]:
     """The key and where it came from: stdin, the provider's environment variable or a hidden prompt. Never argv."""
+    from orchestrator.llm.auth.store import malformed_key
     optional = spec.type == "bearer_optional"
     if with_token:
         key = sys.stdin.read().strip()
-        if not key and not optional:
+        if not key:  # an unset variable in a script: never taken as "no key", which would delete a stored one
             _usage("No key on stdin. Example: printf %s \"$KEY\" | llm-cli ditto login "
-                   f"{preset.id} --with-token")
+                   f"{preset.id} --with-token" + (f". To use it without a key: llm-cli ditto logout {preset.id}"
+                                                  if optional else ""))
+        if malformed_key(key):
+            _usage("The key on stdin has a space, a line break or another character that is never part of a key; "
+                   "pipe only the key.")
         return key, "stdin"
     if from_env:
         if not spec.env:
@@ -1448,6 +1468,8 @@ def _read_key(spec, preset, *, with_token: bool, from_env: bool) -> Tuple[str, s
         name = next((v for v in spec.env if (os.environ.get(v) or "").strip()), None)
         if name is None:
             _usage(f"{' and '.join(spec.env)} {'is' if len(spec.env) == 1 else 'are'} not set.")
+        if malformed_key(os.environ[name].strip()):
+            _usage(f"{name} has a space, a line break or another character that is never part of a key.")
         return os.environ[name].strip(), f"env:{name}"
     if not _interactive():
         _usage("No terminal to ask for the key: pipe it to --with-token (printf %s \"$KEY\" | llm-cli ditto login "
@@ -1460,6 +1482,8 @@ def _read_key(spec, preset, *, with_token: bool, from_env: bool) -> Tuple[str, s
         key = click.prompt("API token (Enter for none)", hide_input=True, default="", show_default=False, err=True)
     else:
         key = click.prompt("API key", hide_input=True, err=True)
+    if malformed_key(key.strip()):
+        _usage("The key has a space or another character that is never part of a key; paste only the key.")
     return key.strip(), "prompt"
 
 
@@ -1537,6 +1561,10 @@ def ditto_login(ctx: FrameworkContext, provider: str, method_id: Optional[str], 
     for fid, option in FIELD_OPTIONS:
         if fid in fields and spec.field(fid) is None:
             _usage(f"{option} does not apply to {preset.label} ({spec.label}).")
+    try:
+        service.store.check_fields(preset, spec, fields)  # a malformed option value is a usage error
+    except LLMError as e:
+        _usage(str(e))
     keyed = spec.type in KEY_TYPES and not preset.runtime_endpoint
     if (with_token or from_env) and not keyed:
         _usage(f"--with-token and --from-env take a key; {preset.label} ({spec.label}) needs none.")
@@ -1548,6 +1576,8 @@ def ditto_login(ctx: FrameworkContext, provider: str, method_id: Optional[str], 
         _usage(str(e))
     except NotConfigured as e:  # the managed local server is not running
         _auth_fail(e, 4)
+    if not url and not preset.runtime_endpoint:
+        _usage(f"{preset.label} has no server address yet: add --base-url URL.")
 
     if preset.runtime_endpoint:
         _say(f"{preset.label} needs no sign-in: the framework passes the server's per-start key.")
@@ -1607,7 +1637,7 @@ def ditto_login(ctx: FrameworkContext, provider: str, method_id: Optional[str], 
     try:
         if key:
             saved = service.save_key(preset, spec, key, base_url, fields=fields, source=source,
-                                     remember_url=bool(base_url))
+                                     remember_url=bool(base_url), checked=result)
             warnings = saved.warnings
         else:  # an optional key left empty: no key for this address
             service.sign_out(preset, spec, base_url)
@@ -1653,9 +1683,7 @@ def ditto_logout(ctx: FrameworkContext, provider: str, method_id: Optional[str],
     except ValueError as e:
         _usage(str(e))
     if method_id:
-        spec = service.method(preset, method_id)
-        if spec is None:
-            _usage(f"{preset.label} has no sign-in method '{method_id}'. Methods: {', '.join(preset.auth)}.")
+        spec = _named_method(service, preset, method_id)
     else:
         current = service.status(preset, url)
         spec = service.chosen(preset) or (preset.method(current.method) if current.method else None) \

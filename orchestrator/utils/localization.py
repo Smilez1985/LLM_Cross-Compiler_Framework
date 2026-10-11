@@ -151,6 +151,10 @@ class LocalizationManager(QObject):
             "signin.key_needed": "Paste the key first.",
             "signin.checking": "Checking...",
             "signin.working": "Working...",
+            "signin.plain_http.title": "Unencrypted connection",
+            "signin.plain_http": "{origin} uses plain http://, so the key travels unencrypted to another computer. "
+                                 "Send it anyway?",
+            "signin.cancelled": "Cancelled: the key was not sent.",
             "signin.saved": "Saved.",
             "signin.signed_out": "Signed out: the stored key was deleted from this computer.",
             "signin.nothing_stored": "Nothing was stored here.",
@@ -337,6 +341,10 @@ class LocalizationManager(QObject):
             "signin.key_needed": "Füge zuerst den Schlüssel ein.",
             "signin.checking": "Wird geprüft...",
             "signin.working": "Wird ausgeführt...",
+            "signin.plain_http.title": "Unverschlüsselte Verbindung",
+            "signin.plain_http": "{origin} nutzt einfaches http://, der Schlüssel geht also unverschlüsselt an einen "
+                                 "anderen Computer. Trotzdem senden?",
+            "signin.cancelled": "Abgebrochen: Der Schlüssel wurde nicht gesendet.",
             "signin.saved": "Gespeichert.",
             "signin.signed_out": "Abgemeldet: Der gespeicherte Schlüssel wurde von diesem Computer gelöscht.",
             "signin.nothing_stored": "Hier war nichts gespeichert.",

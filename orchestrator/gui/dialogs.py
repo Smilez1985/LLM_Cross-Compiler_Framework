@@ -633,6 +633,11 @@ class AIConfigurationDialog(QDialog):
             cfg.set("ai_base_url", base_url)
             if self._user_value(f"ai_base_url_{preset.id}"):
                 cfg.set(f"ai_base_url_{preset.id}", base_url)  # set by `llm-cli ditto login`; it wins over ai_base_url
+            chosen = self._user_value(f"ai_auth_{preset.id}")
+            if api_key and spec is not None and chosen and getattr(preset.method(chosen), "id", None) != spec.id:
+                # A key typed here is meant to be used: the method remembered by a sign-in (an `ant` profile, no
+                # key) would otherwise keep it unused without a word.
+                cfg.set(f"ai_auth_{preset.id}", spec.id)
             if takes_workspace_id(preset):
                 cfg.set("ai_anthropic_workspace_id", workspace)
             cfg.set("ai_effort", effort)

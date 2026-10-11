@@ -83,17 +83,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schlüssel gehört. `llm-cli ditto logout` löscht die lokale Kopie und nennt die Schlüsselseite, auf der der
   Schlüssel selbst widerrufen wird. `llm-cli ditto auth status [--json] [--check]` zeigt die Anmeldung aller
   Anbieter (Verfahren, Quelle, Konto, die letzten vier Zeichen eines Schlüssels), `auth methods` die Verfahren
-  mit Hinweisen zu den Nutzungsbedingungen, `auth storage [--use ...]`, wie der Tresor geschützt ist, und
-  `auth rotate-key` ersetzt den Schlüssel des Tresors. Exit-Codes: 2 Bedienfehler, 3 abgelehnt, 4 Netz,
-  5 Tresor nicht nutzbar, 6 nicht erlaubt oder nicht verfügbar.
+  mit Hinweisen zu den Nutzungsbedingungen, `auth storage [--use ...]`, wie der Tresor geschützt ist (eine Wahl,
+  die scheitert, ändert nichts, auch nicht `config.yml`), und `auth rotate-key` ersetzt den Schlüssel des
+  Tresors. Nach einer geprüften Anmeldung nennt der Status das Konto oder den Workspace. Exit-Codes:
+  2 Bedienfehler (auch ein leeres stdin, eine fehlende Serveradresse, ein fehlerhafter Optionswert oder ein
+  Schlüssel mit Leerzeichen oder Zeilenumbruch darin), 3 abgelehnt, 4 Netz, 5 Tresor nicht nutzbar, 6 nicht
+  erlaubt oder nicht verfügbar.
 - **Anmeldebereich in den KI-Einstellungen** (**Anmelden...**): die Verfahren des Anbieters als Karten in der
   Reihenfolge des Katalogs, das erste nutzbare als „Empfohlen“ markiert; ein Schlüsselformular mit
   Schlüsselseite, den zusätzlichen Feldern, **Prüfen**, **Speichern** und **Abmelden**; eine Statuszeile
   („Angemeldet als ...“, „Nicht angemeldet“, „Schlüssel aus der Umgebungsvariable X“); und ohne nutzbaren
   Schlüsselbund die Auswahl für den Schutz, die die GUI auch beim Start zeigt, bevor sie aufgibt. Ein mit
   Passphrase geschützter Tresor fragt sie in einem Dialog ab. Jeder Zugriff auf Tresor, Schlüsselbund und Netz
-  läuft in einem Hintergrund-Thread. Der Kopf von Dittos Chat zeigt den genutzten Zugang, zum Beispiel
-  „Lokal · Ollama“.
+  läuft in einem Hintergrund-Thread, und ein älteres Lesen, das spät fertig wird, ersetzt nie einen neueren
+  Stand. Der Kopf von Dittos Chat zeigt den genutzten Zugang, zum Beispiel „Lokal · Ollama“. Ein Schlüssel im
+  eigenen Schlüsselfeld der KI-Einstellungen ersetzt ein Verfahren, das sich eine Anmeldung gemerkt hat (etwa
+  das `ant`-Profil), damit er nicht ungenutzt bleibt.
 - `llm-cli secrets set --with-token` liest den Wert von stdin.
 
 ### Geändert
@@ -236,12 +241,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nennt. Ein nicht geheimes Feld (Workspace-ID, Projekt) lässt sich nicht mehr mit einem Header für
   Zugangsdaten wie `Authorization` oder `x-api-key` angeben, wo es den gespeicherten Schlüssel ersetzen würde.
   Eine gescheiterte Token-Erneuerung nennt nur die Art des Fehlers, und eine Meldung des Anbieters, die das
-  Refresh-Token zitiert, wird ohne es angezeigt.
+  Refresh-Token zitiert, wird ohne es angezeigt. Ein Schlüssel einer früheren Version wird an die Adresse
+  gebunden, bevor eine Prüfung mit eingetippten Feldern ihn dorthin schickt.
 - Die Anmeldung nimmt nie ein Geheimnis von der Kommandozeile (`ditto login` hat keine Option für einen
-  Schlüssel, und ein unbekannter Anbietername, der wie ein Schlüssel aussieht, wird nicht ausgegeben), zeigt
-  einen Schlüssel nur mit seinen letzten vier Zeichen (auch in `auth status --json`), fragt nach, bevor ein
-  Schlüssel über reines `http://` an einen anderen Rechner geht (`--yes` in Skripten), und wählt nie selbst,
-  wie der Tresor geschützt wird: `--insecure-storage` ersetzt nie einen Schutz, der funktioniert.
+  Schlüssel, und ein unbekannter Anbietername oder `--method`-Wert, der wie ein Schlüssel aussieht, wird nicht
+  ausgegeben), zeigt einen Schlüssel nur mit seinen letzten vier Zeichen (auch in `auth status --json`, und als
+  `REDACTED`, wenn ein Fehlertext oder Kontoname des Servers ihn wiederholt, auch in Fehlern von Dittos Chat),
+  fragt nach, bevor ein Schlüssel über reines `http://` an einen anderen Rechner geht (auch im Anmeldebereich;
+  `--yes` in Skripten), und wählt nie selbst, wie der Tresor geschützt wird: `--insecure-storage` ersetzt nie
+  einen Schutz, der funktioniert, und auch keinen Credential-Helper und keine Passphrase, die du gewählt hast.
+  Ein Schlüssel mit einem Leerzeichen, einem Zeilenumbruch oder einem unsichtbaren Zeichen darin wird abgelehnt,
+  bevor etwas gesendet oder gespeichert wird.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

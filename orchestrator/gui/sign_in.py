@@ -20,8 +20,9 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QDialogButtonBo
                                QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton,
                                QStackedWidget, QVBoxLayout, QWidget)
 
-from orchestrator.llm.auth.signin import (STORAGE, SignIn, method_infos, status_line)
+from orchestrator.llm.auth.signin import STORAGE, SignIn, method_infos, plain_http_to_remote, status_line
 from orchestrator.llm.auth.spec import KEY_TYPES, TYPE_LABELS
+from orchestrator.llm.auth.store import display_origin
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.utils.logging import get_logger
@@ -429,6 +430,8 @@ class SignInPanel(QWidget):
         self.base_url = base_url or None
         self._service = service
         self.status = None
+        self._status_request = 0
+        self._http_confirmed = set()  # origins the user agreed to send a key to over plain http
         self.worker = Worker(self._set_busy, self)
         self.forms: Dict[str, QWidget] = {}
         self.cards: Dict[str, MethodCard] = {}
@@ -541,10 +544,13 @@ class SignInPanel(QWidget):
     def refresh(self) -> None:
         """Reads the sign-in state (vault and settings) in a worker; the status line follows."""
         service, preset, base_url = self.service(), self.preset, self.base_url
+        self._status_request += 1
         self.worker.run("status", lambda: (service.status(preset, base_url), service.storage_problem(preset.id)),
-                        self._on_status)
+                        partial(self._on_status, self._status_request))
 
-    def _on_status(self, result, error):
+    def _on_status(self, request: int, result, error):
+        if request != self._status_request:
+            return  # an older read that finished late (the vault was slow): the newer one is shown
         if error is not None:
             self.lbl_status.setText(error_text(error))
             return
@@ -569,11 +575,34 @@ class SignInPanel(QWidget):
             self.select_method(status.method)
 
     # --- actions --------------------------------------------------------------------------------------------
+    def _plain_http_confirmed(self) -> bool:
+        """A typed key would travel unencrypted to another computer (http:// to a host that is not this one): only
+        after the user agrees, once per address (the CLI's --yes). Settings only, no vault or network."""
+        try:
+            url = self.service().endpoint(self.preset, self.base_url)
+        except Exception:  # a bad or missing address: the worker reports it
+            return True
+        origin = display_origin(url)
+        if not plain_http_to_remote(url) or origin in self._http_confirmed:
+            return True
+        answer = QMessageBox.question(
+            self, _t("signin.plain_http.title", "Unencrypted connection"),
+            _t("signin.plain_http", "{origin} uses plain http://, so the key travels unencrypted to another "
+                                    "computer. Send it anyway?", origin=origin),
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            self._show(_t("signin.cancelled", "Cancelled: the key was not sent."), False)
+            return False
+        self._http_confirmed.add(origin)
+        return True
+
     def check(self, method_id: str) -> None:
         spec, form = self._spec(method_id), self.forms[method_id]
         service, preset, base_url = self.service(), self.preset, self.base_url
         kwargs: Dict[str, Any] = {}
         if isinstance(form, KeyForm):
+            if form.key() and not self._plain_http_confirmed():
+                return
             kwargs = {"key": form.key() or None, "fields": form.field_values() or None}
         elif isinstance(form, CliSessionForm):
             kwargs = {"profile": form.profile() or ""}
@@ -592,6 +621,8 @@ class SignInPanel(QWidget):
         key, fields = form.key(), form.field_values()
         signed_in = self.status is not None and self.status.method == method_id and self.status.state == "signed_in"
         if key:
+            if not self._plain_http_confirmed():
+                return
             work = partial(service.save_key, preset, spec, key, base_url, fields=fields)
         elif signed_in and fields:
             work = partial(service.save_fields, preset, spec, fields, base_url)

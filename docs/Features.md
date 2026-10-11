@@ -281,6 +281,10 @@ are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what 
 - **No secret in argv:** the CLI takes a key only from a hidden prompt, stdin (`--with-token`) or the provider's
   documented environment variable (`--from-env`). Without a terminal it asks nothing, and a provider with several
   methods needs `--method`. Exit codes: 0 signed in, 2 usage, 3 rejected, 4 network, 5 storage, 6 not available.
+- **Keys stay intact and out of the output:** a key with a space, a line break or an invisible character inside is
+  refused before anything is sent or stored, a server's error text that repeats the key shows `REDACTED` instead,
+  and a typed key goes over plain `http://` to another computer only after you confirm it (CLI: `--yes`). A key typed
+  in the AI settings' own key field replaces a method a sign-in remembered (for example the `ant` profile).
 - **Sign-out is local first:** the stored key is deleted, and the key page where you revoke the key itself is named;
   a key in an environment variable stays in use until you unset it.
 - **No usable keyring:** the panel shows the storage chooser (passphrase, credential helper, or the unencrypted key
