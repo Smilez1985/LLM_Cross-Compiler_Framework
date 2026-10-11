@@ -222,7 +222,9 @@ Platzhalter.
 
 Menüs: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (Assistent für ein neues Target, mit „Deep Ingest“, um Dokumentation in die Wissensbasis aufzunehmen),
-**Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
+**Tools > Hugging Face Model Browser...** (Modelle suchen, sehen, ob sie zugangsbeschränkt sind und welche Lizenz sie
+haben, einzelne Dateien wie ein GGUF in den Modellordner laden; ein zugangsbeschränktes Modell fragt nach deinem
+Hugging-Face-Token), **Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
 MCP)...**, **Tools > Gesprochene Ansagen** (ein oder aus) und **Tools > Eingabeverlauf löschen...** (in der
 englischen Oberfläche *Open Community Hub*, *Spoken Announcements* und *Clear Input History...*)
 
