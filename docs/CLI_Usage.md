@@ -5,8 +5,9 @@ Version 3.0.0 plus the [unreleased changes](../CHANGELOG.md#unreleased) · Last 
 # Command line (`llm-cli`)
 
 The command line can do everything you need on a server without a screen, in scripts and in CI: check the
-installation, convert models, deploy them, set up Ditto and its local model, manage tool permissions and run the
-MCP server. Every command and option below was taken from the real `--help` output of this version.
+installation, convert models, deploy them, set up Ditto and its local model, manage tool permissions, run the
+MCP server and share or install community packs. Every command and option below was taken from the real `--help`
+output of this version.
 
 Back to the [README](../README.md) · Features in detail: [Features.md](Features.md)
 
@@ -28,7 +29,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): hardware probe
 - [config](#config): `show`, `repos`
-- [swarm](#swarm): `upload`
+- [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
 - [Known limitations](#known-limitations)
 
 ---
@@ -95,7 +96,7 @@ command prints itself, including its error messages. For `llm-cli ditto ask` onl
 |---|---|
 | 0 | Success |
 | 1 | The command failed (for example a failed build, a failed deployment, a damaged audit log, an AI error) |
-| 2 | Invalid input: unknown option, an unknown target or an unsupported format/board/quantization combination (`build start`), an unknown provider (`--provider`), an unknown model tier (`ditto models download`) |
+| 2 | Invalid input: unknown option, an unknown target or an unsupported format/board/quantization combination (`build start`), an unknown provider (`--provider`), an unknown model tier (`ditto models download`), no matching evaluation case (`ditto eval`), a missing pack id, file or source (`zoo install`, `zoo export`), a key file without a usable key (`--to`, `--from`) |
 | 130 | `build start` was interrupted with Ctrl+C (the CLI exits only after the build has ended) |
 
 `llm-cli doctor` uses 0 (OK), 1 (warnings) and 2 (errors); `llm-cli ditto eval --min-pass` returns 1 when a run
@@ -114,7 +115,7 @@ stays below the given share. A few commands report a failure but still exit with
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
 | `ditto setup` | Set the tool permissions (the same choices as the GUI's first-start dialog) |
 | `ditto ask` | Ask Ditto one question |
-| `ditto eval` | Grade Ditto on fixed test cases |
+| `ditto eval` | Grade Ditto on fixed test cases, or the knowledge-base search |
 | `ditto runtime install/start/status/stop` | The managed local model server (llama.cpp) for offline mode |
 | `ditto models list/download` | The model tiers for offline mode |
 | `tools list` / `tools permissions` / `tools audit` | The framework tools, their permissions and the audit log |
@@ -123,7 +124,9 @@ stays below the given share. A few commands report a failure but still exit with
 | `module create` / `module generate-ai` | Create a new hardware target, by questions or from a probe file with Ditto |
 | `scan` | Run the hardware probe on this computer |
 | `config show` / `config repos` | Show the CLI's base settings / manage source repository overrides |
-| `swarm upload` | Upload a knowledge-base export to the community repository |
+| `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
+| `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
+| `zoo export` / `zoo keys` | Make a signed pack of your own target, build or knowledge base (and open a pull request) / show your public keys |
 
 ---
 
@@ -135,7 +138,8 @@ llm-cli doctor [--json] [--fix] [--tier 1|2]
 
 Checks Python, the Docker daemon and buildx, free disk space for the cache and output folders, the targets and
 their capabilities, the privacy of the personal folder, the secrets store and the keyring, the tool
-permissions, the audit log and the shipped calibration data. Each finding comes with a hint how to fix it.
+permissions, the audit log, the shipped calibration data and the installed community packs (revoked, changed or
+imported from a file). Each finding comes with a hint how to fix it.
 
 | Option | Meaning |
 |---|---|
@@ -389,17 +393,19 @@ llm-cli ditto eval [options]
 ```
 
 Grades Ditto on fixed test cases (build-log analysis, build recommendations, module proposals, chat with tools,
-prompt injection), for example to check whether a 2-bit local model is good enough. Nothing is built or changed:
-chat cases run against a stand-in build service. Cloud providers bill every request (about 20 per run and repeat).
-How it works: [Features.md](Features.md#ditto-evaluation).
+prompt injection), for example to check whether a 2-bit local model is good enough. With `--kind retrieval` it
+grades the knowledge-base search instead, without any AI model ([below](#retrieval-evaluation)). Nothing is built
+or changed: chat cases run against a stand-in build service. Cloud providers bill every request (about 20 per run
+and repeat). How it works: [Features.md](Features.md#ditto-evaluation).
 
 | Option | Meaning |
 |---|---|
-| `--cases FILE` | Cases file (default: `evals/ditto/cases.yml` of the installation). |
+| `--cases FILE` | Cases file. Default: `evals/ditto/cases.yml` of the installation, and for `--kind retrieval` `evals/retrieval/cases.yml`. |
 | `--provider TEXT` | Provider for the run. Default: AI settings. |
 | `--model TEXT` | Model for the run. Default: AI settings. |
-| `--tier TEXT` | Run against the managed local model of this tier; repeatable (`--tier small --tier small-q2`). Cannot be combined with `--provider`/`--model`. |
-| `--kind [healing\|optimizer\|module\|chat]` | Only cases of this kind; repeatable. |
+| `--tier TEXT` | Run against the managed local model of this tier; repeatable (`--tier small --tier small-q2`). Cannot be combined with `--provider`/`--model` (exit code 2). |
+| `--kind [healing\|optimizer\|module\|chat\|retrieval]` | Only cases of this kind; repeatable. `retrieval` runs only when it is chosen here (or when `--case` is given without `--kind`). |
+| `--rag-variant [fused\|rerank]` | Retrieval only: the search variant to grade; repeatable, one run per variant. `fused` (default): the hybrid search. `rerank`: the hybrid search plus the reranker of `rag_reranker` and its relevance floor. |
 | `--case TEXT` | Only this case ID; repeatable. |
 | `--repeat INTEGER RANGE` | Runs per case, 1 to 20 (default 1). |
 | `--json FILE` | Write the full report (setup, pass rates, every answer) as JSON. |
@@ -421,7 +427,49 @@ llm-cli ditto eval --kind chat --repeat 3
 llm-cli ditto eval --provider anthropic --min-pass 0.8
 ```
 
-The result is a table per run: passed share, share per kind and average seconds per case.
+The result is a table per run: passed share, share per kind and average seconds per case. A cases file that
+cannot be read, or filters that match no case, stop with exit code 2.
+
+#### Retrieval evaluation
+
+`llm-cli ditto eval --kind retrieval` measures how well the knowledge base finds the right excerpt. The shipped
+cases are 42 searches in German and English: questions across the two languages, identifiers such as
+`GGML_CUDA`, answers deep inside a large table or script, the last lines of failed builds, the search strings Ditto
+itself sends, and 4 unrelated questions. They run against a corpus of 30 framework and SDK documentation excerpts
+in `evals/retrieval/corpus/` (a cases file names its corpus folder with `corpus:`, relative to the file).
+
+- The corpus is indexed into a temporary knowledge base with the configured local embedding model
+  (`rag_embedding_model`) and deleted afterwards. Your own knowledge base is not touched, and no AI model and no
+  Qdrant server is used. `--provider`, `--model`, `--tier` and `--effort` have no effect on these cases.
+- The embedding model, and for `rerank` the reranker, is downloaded into the models folder on first use (not in
+  offline mode); after that the evaluation works offline.
+- Each search returns up to 10 excerpts. A case passes when the first relevant excerpt is within its limit (the
+  case's `within`, default 3); an unrelated question passes only when no excerpt comes back.
+- Besides the run table there is a "Retrieval" table per variant: hit@1, hit@3, hit@k (k = each case's limit),
+  MRR over the 10 results, "Unrelated: no excerpt" (the share of unrelated questions that got nothing) and the
+  median search time ("p50 ms"). `--json` adds the retrieved documents and scores of every case, the digests of
+  cases and corpus, the indexing time and the memory in use.
+- `rerank` needs a reranker. With `rag_reranker: off`, or `auto` on a computer with less than 6 GB RAM, there is
+  none, and the command stops with exit code 2 and the reason; set `rag_reranker` to a model id to grade one
+  anyway. A reranker that cannot be loaded stops the run with exit code 1, and a search in which the reranker did
+  not run counts as failed. The floor is `rag_rerank_min_score` (default 0: the reranker's calibrated floor).
+- A corpus that cannot be read, or a case that expects a document the corpus does not have, stops with exit code
+  2. If the corpus cannot be indexed (for example in offline mode before the embedding model was downloaded), the
+  command exits with code 1.
+
+Outside the evaluation, only build recommendations use the reranker. Ditto's chat and the MCP tool
+`search_knowledge` rerank only with `rag_rerank_default: true` (default off).
+
+```bash
+# The hybrid search with the configured embedding model
+llm-cli ditto eval --kind retrieval
+
+# Hybrid search and reranker side by side, report as JSON
+llm-cli ditto eval --kind retrieval --rag-variant fused --rag-variant rerank --json retrieval.json
+
+# Only two cases
+llm-cli ditto eval --kind retrieval --case retr-en-rknn-onnx-convert --case retr-en-cuda-oom
+```
 
 ### ditto runtime
 
@@ -657,8 +705,8 @@ Names the framework uses:
 |---|---|
 | `anthropic_api_key`, `openai_api_key`, `gemini_api_key`, `openrouter_api_key`, `custom_api_key` | Ditto's providers |
 | `hf_token` | Gated Hugging Face models in builds |
-| `github_token` | `swarm upload` |
 | `qdrant_api_key` | A remote Qdrant server for the knowledge base (setting `qdrant_url`) |
+| `community_signing_key`, `community_encryption_key` | Your key pairs for community packs, created by [`llm-cli zoo`](#zoo-keys) on first use; do not set them by hand |
 
 ```bash
 llm-cli secrets set anthropic_api_key
@@ -687,8 +735,10 @@ llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sd
 ```
 
 Creates a new target by asking questions: name, architecture and SDK (if not given as options), then base Docker
-image (default `debian:bookworm-slim`), description, system packages and default CPU flags. Every value is checked
-before files are written; an existing target is never overwritten.
+image (default `debian:bookworm-slim`), description, system packages (default `build-essential, cmake, git`) and
+default CPU flags. Every value is checked before files are written, the finished folder must pass the target
+validators ([Module Developer Guide](Module_Developer_Guide.md#91-what-the-validators-check)), and an existing
+target is never overwritten.
 
 | Option | Meaning |
 |---|---|
@@ -696,8 +746,11 @@ before files are written; an existing target is never overwritten.
 | `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU architecture. |
 | `--sdk TEXT` | Special SDK, e.g. `CUDA`, `RKNN` (default `None`). |
 
-The target is written to `targets/` **of the current folder**; run the command from the installation folder.
-Afterwards add boards to `target.yml` and adjust `modules/config_module.sh`.
+The target is written to `targets/` **of the current folder**; run the command from the installation folder. Its
+`target.yml` has a `capabilities:` block (support level `community`) with the module name as the only board and
+GGUF as the only format; add your real boards and formats there. The command's hint to customize
+`modules/config_module.sh` refers to a legacy script that the build pipeline does not call
+([Module Developer Guide](Module_Developer_Guide.md#10-legacy-files)).
 
 ### module generate-ai
 
@@ -707,7 +760,8 @@ llm-cli module generate-ai PROBE_FILE [--provider TEXT] [--model TEXT]
 
 Ditto proposes a target module from a hardware probe file (`target_hardware_config.txt`, see [scan](#scan)). The
 whole proposal is printed as JSON; only after you confirm is the module created (checked again by the module
-generator) in the configured targets folder.
+generator) in the configured targets folder. Neither `module create` nor `module generate-ai` attaches pages from
+the knowledge base; that is an option on the last page of the GUI wizard.
 
 | Option | Meaning |
 |---|---|
@@ -771,23 +825,260 @@ In this version, overrides added here do not reach builds: the build engine only
 
 ---
 
-## swarm
+## zoo
 
-### swarm upload
+The community zoo: hardware targets, recipes and knowledge packs that other users share. A recipe is a "model
+template": a model at a pinned commit, built for a target, board, format and quantization, with the hashes of what
+came out. The framework never uploads anything by itself; sharing is always a step you start.
+
+**Current state:** the community repository and its signed index are not published yet. The settings
+`community_index_url` and `community_repo` are empty, and `configs/community_keys.yml` lists no publisher key. Until
+then `zoo list` shows only installed packs, installing by ID and `zoo export --pr` stop with a message, and packs
+are shared as files (`zoo install --file`).
+
+How packs are protected:
+
+- A pack is a zip file with a manifest (`pack.json`: sha256, size and mode of every file) and an Ed25519
+  signature of its author (`pack.sig`; packs exported with this framework always have one). It carries scripts,
+  recipes and text, never model weights or other binary files.
+- The list of packs comes from a signed index: `index.json` at `community_index_url` and `index.json.sig` next to
+  it, checked with the keys in `configs/community_keys.yml`, each accepted until its expiry date. An index that does
+  not verify is not used. The last good index is cached in `~/.llm-framework/community/`, fetched again when it is
+  older than a day and never replaced by an older one.
+- Installing by ID reads the current index first, so a revocation is never missed, and downloads the pack pinned
+  by its size and sha256. Every pack is extracted into a quarantine folder and checked there: exactly the listed
+  files with their hashes, no links, the target validators
+  ([Module Developer Guide](Module_Developer_Guide.md#91-what-the-validators-check)), and the recipe and knowledge
+  formats. Only after you confirm the summary is it moved into place, with a provenance file
+  `.lcf-provenance.json`.
+- Author signatures show who made a pack. The first key seen for an author name is remembered; a later pack of
+  that name signed with another key is shown with a warning.
+
+Trust levels:
+
+| Trust | Meaning |
+|---|---|
+| `verified` | In the signed index: reviewed and reproduced independently. |
+| `community` | In the signed index: reviewed. |
+| `local` | A file the signed index does not list. Nobody reviewed it: installing it always asks, and every build of such a target shows a warning. |
+| `revoked` | In the index's list of revoked packs. It is not installed; installed copies are flagged by `zoo verify`, `llm-cli doctor` and the Community Hub and are not built, also after the key that signed the revocation has expired. |
+
+Targets that ship with the framework, such as Rockchip, have no provenance file and do not appear in the zoo.
+
+Installed targets go into the targets folder, recipes into `community/recipes/<id>/` and knowledge packs into
+`community/knowledge/<id>/` of the installation. A knowledge pack is imported into your knowledge base right after
+it is installed; the knowledge base must be enabled at that moment.
+
+In the GUI: **Tools > Open Community Hub** (list, filters by kind and trust, "Import file...", "Build" on an
+installed recipe), the module wizard's last page and the Builder log's context menu ("Export a finished build for
+the community...").
+
+### zoo list
 
 ```
-llm-cli swarm upload FILE_PATH [--user TEXT]
+llm-cli zoo list [--kind target|recipe|knowledge] [--refresh] [--json]
 ```
 
-Uploads a knowledge-base export (a JSON file) to the community repository on GitHub. The file is obfuscated
-(XOR), **not encrypted**: anyone can read it. Upload only what you would publish.
+Lists the entries of the signed index (the newest version of each) and the installed packs: kind, ID, version,
+trust, installed version, author and title. Below the table it says which index was used, or why there is none
+(for example "No community index: No community index is configured (setting community_index_url)."); installed
+packs are listed in either case.
+
+| Option | Meaning |
+|---|---|
+| `--kind [target\|recipe\|knowledge]` | Only this kind. |
+| `--refresh` | Download the signed index again, even if the cached one is less than a day old. Without network the cached index is used. |
+| `--json` | Machine-readable output: a list with `kind`, `id`, `version`, `trust`, `installed_version`, `revoked`, `author` and `title`. |
+
+### zoo show
+
+```
+llm-cli zoo show PACK_ID [--kind target|recipe|knowledge]
+```
+
+Shows one entry: kind, ID, version, author and licence, trust (and why it was revoked), where it is installed, the
+download address with size and sha256, the description, and for an installed recipe its `recipe.yml`. The ID is not
+case-sensitive. The command reads only the cached index and the installed packs; run `zoo list --refresh` first to
+see new entries. An unknown ID exits with code 1.
+
+| Option | Meaning |
+|---|---|
+| `--kind [target\|recipe\|knowledge]` | The kind, if the ID exists for several kinds. |
+
+### zoo install
+
+```
+llm-cli zoo install PACK_ID [--kind target|recipe|knowledge] [--yes]
+llm-cli zoo install --file FILE [--passphrase] [--from KEY_FILE ...] [--yes]
+```
+
+Installs a pack from the signed index (by ID) or from a file. Give exactly one of the two (exit code 2 otherwise).
+The command prints a summary to stderr and asks "Install this pack?" (default no). A summary looks like this:
+
+```
+target my-board 1.0.0 by <author> (licence MIT)
+Trust: community
+Source: https://<address of the pack>
+Files: 14 (48213 bytes)
+Installs to: /opt/llm-conversion-framework/targets/my-board
+Note: signed by author key 0123456789abcdef (first pack seen from this author)
+```
 
 | Argument / option | Meaning |
 |---|---|
-| `FILE_PATH` | The export file (must exist). |
-| `--user TEXT` | Contributor name (default `CLI_User`). |
+| `PACK_ID` | An ID from the index (`zoo list`). The newest version is installed. |
+| `--kind [target\|recipe\|knowledge]` | Kind of `PACK_ID` (default `target`). A pack file names its own kind. |
+| `--file FILE` | Install a pack file someone gave you, or an encrypted pack (`.lcfpack`). Its trust is `local` unless the signed index lists its sha256. Works without network. |
+| `--from FILE` | Encrypted packs: accept them only from these senders. The file holds the senders' public keys as `llm-cli zoo keys` prints them; repeatable. Without it, the summary names the sender's key ID. |
+| `--passphrase` | Encrypted packs: ask for the passphrase instead of opening the pack with your own key. |
+| `--yes` | Do not ask for a pack whose trust comes from the signed index. A `local` pack always asks. |
 
-Needs a GitHub token: `llm-cli secrets set github_token` (the value is asked).
+Behaviour:
+
+- Installing by ID needs the network: the index is downloaded again first, and if that fails nothing is installed.
+  A revoked pack is refused.
+- An encrypted pack is checked against its sender's signature before it is decrypted. It opens with your own key
+  (see [zoo keys](#zoo-keys)) or, with `--passphrase`, with the passphrase. The Community Hub opens packs encrypted
+  to your key; packs with a passphrase need this command.
+- Nothing is installed over an existing folder of the same name, also when only the case differs; remove the old
+  folder first.
+- Exit code 1: a check failed (the problems are listed and the quarantine folder is removed), you answered no, or
+  there is no terminal for a pack that needs the question.
+
+```bash
+llm-cli zoo install my-board
+llm-cli zoo install smollm2-135m-instruct-rk3588-gguf-q4_k_m --kind recipe
+llm-cli zoo install --file contribution-target-my-board-1.0.0.zip
+llm-cli zoo install --file target-my-board-1.0.0.lcfpack --from colleague.keys
+llm-cli zoo install --file target-my-board-1.0.0.lcfpack --passphrase
+```
+
+A recipe needs its target: install the target first. "Build" on an installed recipe in the Community Hub fills in
+the Builder, including the model's pinned commit.
+
+### zoo verify
+
+```
+llm-cli zoo verify [PACK_FILE]
+```
+
+Without an argument it checks every installed community pack against the cached index, without downloading
+anything: revoked, or changed since it was installed. It prints one line per pack (✔, or ✘ with the reason), or
+"No community packs installed.". Exit code 1 if a pack has a problem, otherwise 0.
+
+With `PACK_FILE` it checks a pack file without installing it: format, file list and hashes, the checks of its
+kind, an included author signature, and that the privacy scrub would not change anything in it. It prints
+"acceptable" or every problem (exit code 1). This form works without a keyring; the community repository's CI runs
+it on every submitted pack.
+
+```bash
+llm-cli zoo verify
+llm-cli zoo verify community/contributions/contribution-target-my-board-1.0.0.zip
+```
+
+### zoo export
+
+```
+llm-cli zoo export target|recipe|knowledge [SOURCE] --author NAME [options]
+```
+
+Makes a pack of your own work: a target (`SOURCE`: the target's folder name), a recipe (`SOURCE`: the folder of a
+finished build or its `build_info.json`) or your knowledge base (no `SOURCE`). The pack is privacy-scrubbed, checked
+the way an installation would check it, signed with your key and written to a folder; nothing is sent. The summary
+on stdout shows the file, the key it was signed with, every change of the privacy scrub as a diff, and notes.
+
+| Argument / option | Meaning |
+|---|---|
+| `target\|recipe\|knowledge` | Kind of pack. |
+| `SOURCE` | The target's folder name, or a build folder or its `build_info.json`. Required for `target` and `recipe` (exit code 2 without it). |
+| `--author TEXT` | **Required.** Name shown as the author; a pseudonym is fine. |
+| `--license TEXT` | Licence of the pack as an SPDX ID. Default `MIT`; for knowledge `NOASSERTION`, because the pages keep their owners' terms. |
+| `--model-license TEXT` | Recipes: licence ID of the model (default `unknown`). |
+| `--id TEXT` | Knowledge: ID of the pack (default `knowledge-` and today's date, e.g. `knowledge-20261011`). |
+| `--to FILE` | Encrypt the pack for private sharing to the public keys in this file (what `llm-cli zoo keys` printed on the recipient's computer); repeatable. |
+| `--passphrase` | Encrypt the pack for private sharing with a passphrase (asked twice, at least 12 characters). Can be combined with `--to`. |
+| `--out DIRECTORY` | Folder for the pack. Default: `community/contributions/` in the installation. |
+| `--pr` | Hand the pack to a pull request on the community repository (see below). |
+| `--yes` | With `--pr`: submit without asking after the summary. |
+
+What goes into the pack:
+
+- **target:** every file of the target folder. Links, special files and binary files are refused, and the target
+  validators must pass, which includes a valid `capabilities:` block. The version is `metadata.version` from
+  `target.yml` if it has the form `1.2.3`, otherwise `1.0.0`. A target you installed from the zoo is refused: it
+  remains its author's pack.
+- **recipe:** only a finished build of a Hugging Face model whose `build_info.json` records the model's commit and
+  the target's fingerprint (builds of this version). If the target is your own, the summary reminds you to export
+  it too, or others cannot build the recipe.
+- **knowledge:** the whole knowledge base (it must be enabled), privacy-scrubbed. Every page keeps its source
+  address; pages without one are left out.
+
+The file is called `contribution-<kind>-<id>-<version>.zip`, or `<kind>-<id>-<version>.lcfpack` when it is
+encrypted. Your key pair is created in the secrets store on first use (see [zoo keys](#zoo-keys)).
+
+The privacy scrub replaces home folders with `~`, and IP and MAC addresses, e-mail addresses, JWTs, this
+computer's host name and your user name with placeholders such as `<ip>` and `<user>`, and it redacts API keys.
+Loopback addresses, image digests (`name@sha256:...`) and default accounts such as `/root` stay. Read the diff: a
+script whose address was replaced may no longer work.
+
+**Pull request (`--pr`).** After the summary the command asks "Submit this pack to the public community
+repository?". Without a terminal and without `--yes` nothing is submitted (exit code 1). Then:
+
+- With the GitHub CLI installed and logged in (`gh auth login`), it forks the repository named in the setting
+  `community_repo` (`owner/name`), commits the pack to `contributions/<kind>/` on a new branch of your fork and
+  opens the pull request with `gh pr create`.
+- Otherwise, or if that fails, it opens the repository's upload page
+  (`https://github.com/<owner>/<name>/upload/main/contributions/<kind>`) in your browser. Drop the file there;
+  GitHub creates the fork for you.
+
+The framework never asks for, reads or shows a token: `gh` and `git` use their own stored sign-in. Encrypted packs
+are for private sharing and are never submitted (exit code 1). While `community_repo` is empty, as it is for now,
+the command stops with "No community repository is configured" and exit code 1; the pack stays in its folder. The
+community repository's CI checks every submitted pack with `llm-cli zoo verify`
+([CONTRIBUTING](../CONTRIBUTING.md#contributing-to-the-community-zoo)).
+
+```bash
+# A target, checked the way the community repository's CI will check it
+llm-cli zoo export target my-board --author "<your name>"
+llm-cli zoo verify community/contributions/contribution-target-my-board-1.0.0.zip
+
+# A finished build as a recipe
+llm-cli zoo export recipe output/build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0 \
+  --author "<your name>" --model-license Apache-2.0
+
+# Your knowledge base under an ID of your choice
+llm-cli zoo export knowledge --author "<your name>" --id rk3588-notes
+
+# Encrypted for a colleague, or with a passphrase
+llm-cli zoo export target my-board --author "<your name>" --to colleague.keys
+llm-cli zoo export target my-board --author "<your name>" --passphrase
+
+# Export and open a pull request
+llm-cli zoo export target my-board --author "<your name>" --pr
+```
+
+### zoo keys
+
+```
+llm-cli zoo keys
+```
+
+Prints your public keys: an `ed25519:` line, which checks your signatures (others use it with `--from`), and an
+`x25519:` line, to which others encrypt packs for you (`--to`). They are not secret; save the output to a file and
+give it to the people you exchange packs with. The keys are created on first use and kept only in the encrypted
+secrets store (names `community_signing_key` and `community_encryption_key`). A stored key that cannot be read is
+never replaced automatically.
+
+```bash
+llm-cli zoo keys > my.keys
+```
+
+```
+# LCF public keys, key id 0123456789abcdef. Not secret: give them to people who send you
+# encrypted packs or verify your signed packs.
+ed25519:<base64>
+x25519:<base64>
+```
 
 ---
 
@@ -804,3 +1095,10 @@ Needs a GitHub token: `llm-cli secrets set github_token` (the value is asked).
 - `deploy package --docker` is experimental.
 - There is no CLI command yet to choose Ditto's provider permanently; use the GUI, `config.yml` or
   `LLM_FRAMEWORK_AI_PROVIDER`. Signing in per provider is being built ([roadmap](BLUEPRINT.md#roadmap)).
+- The community repository and its signed index are not published yet (`community_index_url` and
+  `community_repo` are empty, `configs/community_keys.yml` lists no key): `zoo list` shows only installed packs,
+  and `zoo install <id>` and `zoo export --pr` stop with a message. Packs can be shared as files.
+- `build start` has no option for a model commit: the pinned commit of a recipe is used only when the Builder is
+  filled from the Community Hub.
+- There is no CLI command for Deep Ingest (adding documentation pages to the knowledge base); it runs in the GUI's
+  module wizard (**Tools > Create Hardware Module...**).
