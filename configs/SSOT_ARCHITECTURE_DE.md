@@ -161,16 +161,18 @@ Format für alle, die Probe-Dateien schreiben oder lesen.
 | `file` | Dateiregeln: Dateiname, die Größengrenze, höchstens 4096 Zeichen je Wert, das Schlüsselmuster, `ON`/`OFF`/`UNKNOWN`, höchstens 16 GPUs. |
 | `patterns` | Benannte Muster, die Schlüssel gemeinsam nutzen (`version`, `identifier`). |
 | `tables` | Normalisierungstabellen: Architekturnamen, Betriebssystem-Familien, CPU-Hersteller, ARM-Kernnamen, PCI-Hersteller, die SoC-Modelle, nach denen das Framework entscheidet, SMBIOS-Speichertypen, Rockchip-USB-Produkt-IDs, Warncodes. |
-| `keys` | Ein Eintrag je Schlüssel: `group`, `type` (`bool`, `enum`, `int`, `pattern`, `version`, `text`, `list`, `timestamp`) mit seiner Prüfung, `required`, `stability` (`stable` oder `volatile`), `perf` (`key`, `recorded` oder `none`), `platforms`, `sources` je Betriebssystem, `normalise`, `consumers` und, wo ein Wert nur auf manchen Architekturen, Betriebssystemen oder bei manchen GPU-Herstellern existiert, `only_arch`, `only_os`, `only_gpu_vendor`, `os_values`. |
+| `keys` | Ein Eintrag je Schlüssel: `group`, `type` (`bool`, `enum`, `int`, `pattern`, `version`, `text`, `list`, `timestamp`) mit seiner Prüfung, `required`, `stability` (`stable` oder `volatile`), `perf` (`key`, `recorded` oder `none`), `platforms`, `sources` je Betriebssystem, `normalise`, `consumers` und, wo ein Wert nur auf manchen Architekturen, Betriebssystemen oder bei manchen GPU-Herstellern existiert, `only_arch`, `only_os`, `only_gpu_vendor`, `os_values`. CPU-Merkmale nennen außerdem ihre `/proc/cpuinfo`-Tokens, die Windows-Konstante für `IsProcessorFeaturePresent` mit dem niedrigsten Windows-Build, der sie kennt (`windows_feature`, `windows_min_build`), und den macOS-sysctl. |
 | `gpu_keys` | Dasselbe für die Schlüssel je GPU, `GPU<n>_<NAME>`. |
 
 Der Lader lehnt einen Schlüssel ohne Quellen, Normalisierung oder Prüfung ab, Enum-Werte ohne Anführungszeichen
 (YAML liest `ON` als Wahrheitswert) und flüchtige Schlüssel, die Pflicht sind oder in den Leistungsschlüssel eingehen.
 Eine Überschreibung je Benutzer gibt es nicht: Es gilt immer die Datei der Installation.
 
-**Einen Schlüssel hinzufügen:** Trag den Eintrag mit allen Feldern ein, schreib ihn in den Probes und ergänze einen
-Testwert in den Fixtures unter `tests/fixtures/hardware_probe/`. Ein neuer Eintrag mit `perf: key` ändert jeden
-gespeicherten Leistungsschlüssel; vermerke das im Changelog.
+**Einen Schlüssel hinzufügen:** Trag den Eintrag mit allen Feldern ein, schreib ihn in den drei Probes
+(`scripts/hardware_probe.py`, `.sh`, `.ps1`; jede trägt eine Kopie der Prüfungen und Tabellen, die sie nutzt) und
+ergänze einen Testwert in den Fixtures unter `tests/fixtures/hardware_probe/`. `tests/test_hardware_probe.py` schlägt
+fehl, bis die Kopien zum Schema passen. Ein neuer Eintrag mit `perf: key` ändert jeden gespeicherten
+Leistungsschlüssel; vermerke das im Changelog.
 
 **Prüfen:**
 
@@ -294,6 +296,6 @@ derzeit keine Wirkung auf Builds.
 |---|---|---|
 | einen neuen KI-Anbieter oder ein neues Modell anbieten | `llm_providers.yml` (oder deine eigene Kopie im Einstellungsordner) | die Prüfung oben und `tests/test_llm.py` ausführen; Changelog-Eintrag |
 | ein lokales Modell oder einen neueren llama.cpp-Build ergänzen | `llama_runtime.yml`, mit Größe, SHA256 und Commit | die Prüfung oben und `tests/test_runtime.py` ausführen; Changelog-Eintrag |
-| einen Schlüssel der Datei der Hardware-Probe ergänzen oder ändern | `hardware_probe_schema.yml` und die Probes, die ihn schreiben | die Prüfung oben und `tests/test_hardware_profile.py` ausführen; Changelog-Eintrag |
+| einen Schlüssel der Datei der Hardware-Probe ergänzen oder ändern | `hardware_probe_schema.yml` und die Probes, die ihn schreiben | die Prüfung oben, `tests/test_hardware_profile.py` und `tests/test_hardware_probe.py` ausführen; Changelog-Eintrag |
 | ein Target ein neues Board, Format oder einen neuen Typ bauen lassen | `target.yml` und `build.sh` des Targets | Tests; siehe [Leitfaden für Modulentwickler](../docs/Module_Developer_Guide_DE.md) |
 | ein vorgelagertes Projekt oder einen Dokumentationslink festhalten | `project_sources.yml` (neue Einträge in der ausführlichen Datei von Hand) | `python ../scripts/validate_ssot.py` in `configs/`, danach `python ../scripts/sync_ssot.py --write` für geänderte Versionen |

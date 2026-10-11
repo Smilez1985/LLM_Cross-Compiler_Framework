@@ -56,8 +56,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (Einstellung `rag_model_idle_minutes`, 0 hält sie geladen). Die Zeit läuft ab dem Ende der letzten Suche oder
   des letzten Imports, nie währenddessen.
 - **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install|start|stop|status`
-  betreibt einen gepinnten llama.cpp-`llama-server` auf 127.0.0.1 (Build passend zur Hardware: CUDA, Vulkan,
-  Metal oder CPU, ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei), und `llm-cli ditto models list|download`
+  betreibt einen gepinnten llama.cpp-`llama-server` auf 127.0.0.1 (Build passend zur Hardware, die die
+  Hardware-Probe findet, wobei freier RAM und VRAM bei jedem Start neu gelesen werden: CUDA, Vulkan, Metal oder CPU,
+  ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei), und `llm-cli ditto models list|download`
   lädt Qwen3.5-Modelle in gepinnten Revisionen in den Ordner `ditto/` des eingestellten Modellordners
   (`models_dir`, den Ditto nutzt) und prüft sie anhand von Größe und sha256. Die Modellstufen reichen
   bis zu 2-Bit-Modellen für schwache Hardware (3 GB RAM). Der Anbieter „local“ folgt dem laufenden Server ohne
@@ -85,12 +86,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Capability und gfx-Target der GPU, Vulkan, Versionen der Rockchip-NPU-Laufzeit und Werkzeugversionen. Der Parser
   lehnt eine Datei in Schema 2 ab, wenn ein Schlüssel doppelt vorkommt, ein Wert leer, länger als 4096 Zeichen oder
   außerhalb des Schemas ist oder Werte nicht zusammenpassen (ein x86-Merkmal auf ARM, eine Compute Capability bei
-  einer AMD-GPU). Dateien der heutigen Probe-Skripte (Schema 1, das sie noch schreiben) werden umgewandelt: Der
-  Hostname, RAM-Teilenummern und andere identifizierende Werte werden verworfen, jedes CPU-Merkmal einer
-  `hardware_probe.ps1`-Datei wird `UNKNOWN` (dieses Skript fragt Windows mit falschen Konstanten), und das Ergebnis
+  einer AMD-GPU). Dateien der älteren Probe-Skripte (Schema 1) werden umgewandelt: Der Hostname, RAM-Teilenummern
+  und andere identifizierende Werte werden verworfen, jedes CPU-Merkmal einer `hardware_probe.ps1`-Datei wird
+  `UNKNOWN` (dieses Skript fragte Windows mit falschen Konstanten), und das Ergebnis
   verlangt vor einem Build eine neue Probe. Dazu kommen ein Leistungsschlüssel für Benchmark-Ergebnisse, der flüchtige
   und nur festgehaltene Werte nicht berücksichtigt, und ein Profilspeicher je Benutzer (`~/.llm-framework/hardware/`,
   private Dateien).
+- **Hardware-Probe für Boards und PCs** (`scripts/hardware_probe.py`, nur Standardbibliothek, Python 3.8 oder
+  neuer): schreibt das Hardware-Profil in Schema 2 unter Linux, Windows und macOS, mit Betriebssystem, C-Bibliothek
+  und ihrer Version, ARM-Kernclustern, ARM-Skalarprodukt und FP16-Arithmetik, den x86-Merkmalen, für die ggml baut,
+  dem SoC, dem NPU-Gerät und jeder GPU (NVIDIA Compute Capability, AMD gfx-Target, Vulkan). `llm-cli scan` führt sie
+  im Prozess aus und speichert das Ergebnis als Profil dieses Rechners (`--script` behält das Ersatzskript, `--json`
+  schreibt die JSON-Ansicht); `llm-cli scan --device HOST --user BENUTZER` führt sie per SSH mit `python3 -I` auf
+  einem Board aus und weicht auf `hardware_probe.sh` aus, wenn das Board kein Python 3.8 hat. Das Skript kommt über
+  den SSH-Kanal, also bleibt auf dem Board nichts zurück, und das Profil wird unter der ID des Boards gespeichert. Für
+  Rechner ohne Netzzugang beschreibt die README die Probe von Hand.
 - **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in
@@ -319,6 +329,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Fehlermeldungen und Hinweise nennen `llm-cli ditto login <anbieter>` statt
   `llm-cli secrets set <Schlüsselname>`; `llm-cli module generate-ai` nutzt die gespeicherte Anmeldung und fragt
   nie selbst nach einem Schlüssel.
+- `scripts/hardware_probe.sh` und `scripts/hardware_probe.ps1` schreiben Schema 2 mit denselben Schlüsseln wie die
+  Python-Probe (Tests führen die `.sh` und die `.py` auf denselben Testrechnern aus). Beide sind standardmäßig nicht
+  interaktiv: Die Paketinstallations-Abfrage der `.sh` braucht `--install-tools` (sie bietet jetzt `vulkan-tools` an,
+  das einzige Hilfsprogramm, das die Probe nutzt), und die `.ps1` startet sich nur mit `-Elevate` mit erhöhten Rechten
+  neu. Die `.sh` läuft in jeder POSIX-Shell (dash, BusyBox ash), liest `/proc` und `/sys` direkt statt über `lspci`
+  und `lsusb` und schreibt alle GPUs; die `.ps1` liest den nutzbaren Speicher statt der Summe der Speicherplätze.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -449,6 +465,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Secret-Scan mit dem Werkzeug pre-commit: Seine pre-push-Stufe durchsucht die Commits, die gepusht werden
   (`--push`, das den gepushten Commit jetzt aus `PRE_COMMIT_TO_REF` liest), wie `.githooks/pre-push`, statt der
   ganzen Historie.
+- `hardware_probe.ps1` fragte Windows nach den falschen CPU-Merkmalen: Konstante 40 (AVX2) als AVX-512 und 37
+  (SSE4.1) als NEON, sodass fast jeder PC AVX-512 und NEON meldete. Jetzt fragt es die dokumentierten Konstanten (AVX
+  39, AVX2 40, AVX-512 F 41, BMI2 60; auf ARM NEON 29, Skalarprodukt 43, i8mm 66, FP16 67, SVE 46, SME 70) und schreibt
+  `UNKNOWN`, wo Windows es nicht sagen kann. Außerdem weist es der schreibgeschützten Variable `$PID` keinen Wert mehr
+  zu, was die Probe abbrach, sobald ein Rockchip-Board per USB angeschlossen war.
+- `hardware_probe.sh` sah weder das ARM-Skalarprodukt noch die FP16-Arithmetik, schrieb das x86-Flag `f16c` auf ARM
+  als FP16-Unterstützung, erkannte nur RK3588 und RK3566 und behielt nur die erste GPU; jetzt schreibt es die
+  ARM-Merkmale, die Kerncluster, jeden SoC aus dem Device Tree und alle GPUs.
 
 ### Sicherheit
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
@@ -545,6 +569,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   unsichtbaren Zeichen darin wird abgelehnt, bevor etwas gesendet oder gespeichert wird.
 - Das Builder-Log zeigt jede Meldung als reinen Text, sodass Namen aus Community-Rezepten, Dittos Antworten oder
   Build-Ausgaben nicht als HTML erscheinen (Links, Bilder, Formatierung).
+- Hardware-Profile enthalten keine identifizierenden Werte: Die Probe-Skripte schreiben weder den Hostnamen noch die
+  RAM-Teilenummern oder die CPU-ID, die Serial-Zeile von `/proc/cpuinfo` und das Serial-Attribut von USB-Geräten
+  werden nie gelesen, und freier Text wird auf druckbares ASCII reduziert. Werte, die auf einem Board gelesen werden,
+  werden vor dem Schreiben geprüft, und der SSH-Scan behandelt die Antwort des Boards als nicht vertrauenswürdig
+  (Größengrenze, strenger Parser).
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

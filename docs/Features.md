@@ -875,10 +875,24 @@ The GUI's input fields offer what you used recently, newest first.
 
 ## Hardware probe and new targets
 
-- **Probe:** `scripts/hardware_probe.sh` (Linux) and `scripts/hardware_probe.ps1` (Windows) write
-  `target_hardware_config.txt` with CPU, flags, memory, GPU and NPU information. Run them on the board, use
-  `llm-cli scan` on this computer, or **Scan / Import...** in the GUI (file import, remote scan over SSH with the same
-  trust-on-first-use rules as deployment, or this PC).
+- **Probe:** one hardware probe in three implementations writes the same file, `target_hardware_config.txt`
+  (schema 2): `scripts/hardware_probe.py` (the main path: standard library only, Python 3.8 or newer, Linux, Windows
+  and macOS) and the fallbacks `scripts/hardware_probe.sh` (any POSIX shell on Linux, for boards without Python) and
+  `scripts/hardware_probe.ps1` (Windows). It records the operating system (ID, version, family, variant such as
+  DietPi, kernel, init system), the architecture of the userland, the C library and its version (glibc, musl), the
+  CPU (model, cores, ARM core clusters, the x86 and ARM features ggml builds for, such as AVX-512 or the ARM dot
+  product), memory, SoC, NPU and every GPU (NVIDIA compute capability, AMD gfx target, Vulkan); no host name, serial
+  number or MAC address. The probes need no network, never prompt, install or ask for administrator rights, and run
+  external tools with a time limit. Tests run the `.py` and the `.sh` on the same fixture machines and require the
+  same result.
+- **Where it runs:** on the machine the build is for. `llm-cli scan` probes this computer with the Python probe and
+  keeps the profile as `local`; `llm-cli scan --device` runs it on a board over SSH (the Python probe with
+  `python3 -I` if the board has Python 3.8 or newer, else the shell probe; nothing is installed on the board) and
+  keeps the profile under the board's ID. In the GUI, **Scan / Import...** imports a probe file, scans a board over
+  SSH with the same trust-on-first-use rules as deployment, or scans this PC. Machines without network access run a
+  probe by hand ([README](../README.md#probing-the-boards-hardware)).
+- **Ditto's local model** uses the same probe: the hardware its build and model choice are based on comes from a
+  probe profile, and free RAM and free VRAM are read again at every start.
 - **New target by questions:** `llm-cli module create` or the wizard under **Tools > Create Hardware Module...**.
 - **New target from a probe:** `llm-cli module generate-ai <probe file>` or the wizard's AI analysis. Ditto proposes
   architecture, SDK, base image, packages, CPU and CMake flags, setup commands and the quantization block of

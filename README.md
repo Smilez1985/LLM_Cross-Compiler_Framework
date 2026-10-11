@@ -248,6 +248,34 @@ To run the model on the board you need a runtime there, which the framework does
 installed on the board, otherwise a hint to install llama.cpp. A runtime that the deploy step installs on the
 board is on the [roadmap](docs/BLUEPRINT.md#roadmap).
 
+### Probing the board's hardware
+
+A build is planned for the hardware it will run on, so the hardware probe runs on that machine:
+
+```bash
+llm-cli scan --device 192.168.1.50 --user rock   # a board over SSH (Python probe with Python 3.8+, else shell probe)
+llm-cli scan                                      # this computer
+```
+
+Each scan writes `target_hardware_config.txt` and keeps the profile in `~/.llm-framework/hardware/`. The profile
+holds the operating system (ID, version, family such as Debian, variant such as DietPi, kernel, init system), the
+architecture, the C library and its version (glibc or musl), the CPU with its features and core clusters, memory,
+SoC, NPU and GPUs; no host name, serial number or MAC address. Details: [CLI_Usage.md](docs/CLI_Usage.md#scan).
+
+**Machines without network access (air-gapped):** copy one probe from `scripts/` to the machine, for example on a
+USB stick, run it there and carry `target_hardware_config.txt` back:
+
+| On the machine | Command |
+|---|---|
+| Python 3.8 or newer (Linux, Windows, macOS) | `python3 -I hardware_probe.py` |
+| Linux without Python (any POSIX shell, also BusyBox) | `sh hardware_probe.sh` |
+| Windows without Python | `powershell -ExecutionPolicy Bypass -File hardware_probe.ps1` |
+
+The probes need no network, ask nothing and install nothing. The interactive features of the old scripts are kept
+as options: `hardware_probe.sh --install-tools` first offers to install `vulkan-tools` with the package manager, and
+`hardware_probe.ps1 -Elevate` restarts with administrator rights. Bring the file into the framework with **Scan /
+Import... > Import from File (USB/Disk)...** in the GUI, or pass it to `llm-cli module generate-ai`.
+
 ---
 
 ## Quick start: the command line

@@ -418,7 +418,9 @@ class ModuleCreationWizard(QWizard):
                 if "CPU_MODEL" in data:
                     self.name_edit.setText(module_name_hint(data["CPU_MODEL"]))
                 if "ARCH" in data:
-                    idx = self.arch_combo.findText(data["ARCH"])
+                    # Probe files of schema 2 write arm64/armv7 (schema 1 wrote uname -m: aarch64/armv7l).
+                    arch = {"arm64": "aarch64", "armv7": "armv7l"}.get(data["ARCH"], data["ARCH"])
+                    idx = self.arch_combo.findText(arch)
                     if idx >= 0: self.arch_combo.setCurrentIndex(idx)
                     
                 self.status_lbl.setText("✅ Data loaded from probe.")
