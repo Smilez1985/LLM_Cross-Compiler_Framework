@@ -202,6 +202,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Cancel Build** in the Builder tab: cancels the running build through the build service after a confirmation
   (enabled only while the build the tab started runs); the log says when it has stopped, also after a cancel
   while the build was still being handed to the build engine.
+- **MCP server names its clients:** for each new client `llm-cli mcp serve` writes one line to stderr (never to
+  the client) with the name and version the client reports, the protocol version, the transport and the declared
+  capabilities, including whether it can ask you (elicitation). The tools see the same label. Docs: a table of
+  what Claude Code, Claude Desktop, Cowork and VS Code support.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the

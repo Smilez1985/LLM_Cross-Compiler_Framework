@@ -17,9 +17,12 @@ Security model
   A person's "no" is final for that call, even if the policy is loosened while the dialog is open.
 - stdio is the default transport. Streamable HTTP binds to loopback only, checks Host/Origin
   (SDK transport security) and requires a bearer token generated per user.
+- What a client says about itself (clientInfo, protocol version, capabilities) is written to stderr once
+  per client (ClientTracker). It is a label for people, never a reason to allow anything.
 """
 
 import contextlib
+import contextvars
 import hmac
 import inspect
 import json
@@ -31,15 +34,18 @@ import secrets
 import shlex
 import sys
 import tempfile
+import threading
 import unicodedata
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Annotated, Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError
 
 from orchestrator.tools.confirmation import CallTooLong, describe_call
 from orchestrator.tools.policy import Decision
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
+from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
 SERVER_NAME = "llm-cross-compiler"
@@ -90,6 +96,108 @@ def _uses_input_required(ctx) -> bool:
     from mcp_types.version import is_version_at_least
     version = ctx.protocol_version
     return version is not None and is_version_at_least(version, INPUT_REQUIRED_VERSION)
+
+
+# --- Who is connected: what each client says about itself ---------------------------------------
+
+@dataclass(frozen=True)
+class ClientLabel:
+    """What a connected client says about itself (`clientInfo`, protocol version, declared capabilities).
+    Self-reported: a label for the log, questions and the audit, never a reason to allow anything."""
+    name: str
+    version: str
+    protocol: str
+    transport: str                 # "stdio" or "http"
+    elicitation: str               # how it can ask the person: "form", "url", "form+url" or "none"
+    capabilities: Tuple[str, ...]  # the capabilities it declared, for the log
+
+    def describe(self) -> str:
+        """For a person: "Claude Code 2.1.295 (self-reported) over stdio"."""
+        version = f" {self.version}" if self.version else ""
+        return f"{self.name}{version} (self-reported) over {self.transport}"
+
+
+_CLIENT: "contextvars.ContextVar[Optional[ClientLabel]]" = contextvars.ContextVar("lcf_mcp_client", default=None)
+
+
+def current_client() -> Optional[ClientLabel]:
+    """The client of the request being handled (None outside a request or before the handshake)."""
+    return _CLIENT.get()
+
+
+def _client_text(value: Any, limit: int = 64) -> str:
+    """A client-supplied value as one short line: cut, control and non-ASCII characters escaped, secrets redacted."""
+    return redact_secrets(json.dumps(str(value)[:limit], ensure_ascii=True)[1:-1])
+
+
+def elicitation_modes(capabilities: Any) -> str:
+    """How a client can ask the person, from its declared capabilities: "form", "url", "form+url" or "none".
+    Same rule as the SDK: a bare `elicitation: {}` means form support."""
+    elicitation = getattr(capabilities, "elicitation", None) if capabilities is not None else None
+    if elicitation is None:
+        return "none"
+    modes = [mode for mode in ("form", "url") if getattr(elicitation, mode, None) is not None]
+    return "+".join(modes) or "form"
+
+
+def _capability_names(capabilities: Any) -> Tuple[str, ...]:
+    if capabilities is None:
+        return ()
+    names = [name for name in ("elicitation", "sampling", "roots", "experimental", "tasks")
+             if getattr(capabilities, name, None) is not None]
+    extensions = getattr(capabilities, "extensions", None) or {}
+    names += [f"extension {_client_text(key)}" for key in list(extensions)[:8]]
+    return tuple(names)
+
+
+class ClientTracker:
+    """Server middleware: notes the client of every request for the tool functions (`current_client`) and writes
+    one line to stderr for each new client, never to the client: name and version as it reports them, protocol
+    version, transport and declared capabilities, so you can see which client can ask you (elicitation)."""
+
+    MAX_REMEMBERED = 256
+
+    def __init__(self, transport: str = "stdio", stream=None):
+        self.transport = transport
+        self._stream = stream  # None: sys.stderr at the time of writing (stdio moves stdout there)
+        self._seen: set = set()
+        self._lock = threading.Lock()
+
+    def label(self, ctx) -> Optional[ClientLabel]:
+        session = ctx.session
+        capabilities, params = session.client_capabilities, session.client_params
+        if capabilities is None and params is None:
+            return None  # `initialize` itself (the handshake commits after it) or an anonymous request
+        info = getattr(params, "client_info", None)
+        return ClientLabel(name=_client_text(getattr(info, "name", "") or "unnamed client"),
+                           version=_client_text(getattr(info, "version", "") or ""),
+                           protocol=_client_text(session.protocol_version or ctx.protocol_version or "", 32),
+                           transport="http" if ctx.request is not None else self.transport,
+                           elicitation=elicitation_modes(capabilities),
+                           capabilities=_capability_names(capabilities))
+
+    def _note(self, label: ClientLabel) -> None:
+        with self._lock:
+            if label in self._seen:
+                return
+            if len(self._seen) >= self.MAX_REMEMBERED:
+                self._seen.clear()
+            self._seen.add(label)
+        line = (f'MCP client: "{label.name}" {label.version or "-"} (self-reported), protocol {label.protocol}, '
+                f"{label.transport}, elicitation {label.elicitation}, capabilities: "
+                f"{', '.join(label.capabilities) or 'none'}")
+        with contextlib.suppress(AttributeError, OSError, ValueError):
+            print(line, file=self._stream or sys.stderr, flush=True)
+
+    async def __call__(self, ctx, call_next):
+        label = self.label(ctx)
+        if label is not None:
+            self._note(label)
+        token = _CLIENT.set(label)
+        try:
+            return await call_next(ctx)
+        finally:
+            _CLIENT.reset(token)
 
 
 def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
@@ -144,7 +252,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry):
         # Only a real answer from the user counts as a confirmation; declined and cancelled
         # elicitations still go through the registry, so they are audited like every other call.
         data = outcome.data if isinstance(outcome, AcceptedElicitation) else None
-        ctx = ToolContext("mcp")
+        ctx = ToolContext("mcp", metadata={"client": current_client()})
         if isinstance(data, NotAsked) and data.refused:
             await anyio.to_thread.run_sync(lambda: registry.refuse(spec.name, kwargs, ctx, detail=data.refused))
             raise _audited(MCPToolError(data.refused))
@@ -192,7 +300,7 @@ def _audit_rejection(registry: ToolRegistry, name: str, arguments: Any, error: E
     registry.refuse(name, arguments, ToolContext("mcp"), outcome=outcome, detail=detail)
 
 
-def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None):
+def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None, transport: str = "stdio"):
     import anyio.to_thread
     from mcp.server.mcpserver import MCPServer
     from mcp_types import ToolAnnotations
@@ -214,7 +322,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
 
     server = AuditedServer(SERVER_NAME, title="LLM Cross-Compiler Framework", instructions=INSTRUCTIONS,
                            version=getattr(getattr(framework, "info", None), "version", "") or "",
-                           lifespan=lifespan)
+                           lifespan=lifespan, middleware=[ClientTracker(transport)])
     for spec in registry.list():
         server.add_tool(make_tool_function(spec, registry), name=spec.name, title=spec.title,
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
@@ -317,7 +425,7 @@ def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: in
         finally:
             _stdout_fd_to_stderr(stdout)
         return
-    server = build_mcp_server(framework)
+    server = build_mcp_server(framework, transport="http")
     if transport != "http":
         raise ValueError(f"Unknown transport '{transport}' (stdio, http)")
     if host not in LOOPBACK_HOSTS:
