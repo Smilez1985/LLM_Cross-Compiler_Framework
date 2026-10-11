@@ -407,7 +407,7 @@ AI model is involved, and your own knowledge base is not touched.
   module proposals and build recommendations) and `negative` (unrelated questions).
 - **How it runs:** the corpus is indexed into a temporary knowledge base in a temporary folder, deleted afterwards,
   with the configured local embedding model. The model is downloaded on first use; after that the evaluation works
-  offline. Retrieval cases run only when `--kind retrieval` is given.
+  offline. Retrieval cases run only when `--kind retrieval` is given or `--case` names one of them.
 - **Variants** (`--rag-variant`, repeatable, default `fused`): `fused` is the hybrid search; `rerank` adds the
   cross-encoder of `rag_reranker` and its relevance floor ([Reranking](#reranking)). `rerank` stops with a message
   when no reranker suits the machine (set `rag_reranker` to a model id to grade one anyway), and a case counts as
@@ -603,7 +603,8 @@ the rebuild cannot be detected; re-import the documents.
 ### Large code blocks and tables
 
 Code blocks and tables stay whole as long as the embedding model sees them whole: up to its context minus 96 tokens
-for the source line (512 tokens for the default model `intfloat/multilingual-e5-small`, so 416 tokens). Larger ones
+for the line with source, title and section that is embedded with every chunk (512 tokens for the default model
+`intfloat/multilingual-e5-small`, so 416 tokens). Larger ones
 are split at line boundaries into pieces of the normal chunk size (384 tokens for the default model). Each piece
 repeats the table header or reopens the code fence, so the later parts of a long table or script can be found at
 all (in the retrieval evaluation, answers deep inside such blocks: hit@1 from 50 % to 100 %). Documents in the
@@ -665,12 +666,12 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
 - Private, loopback and other non-public addresses are blocked (SSRF protection), and each connection is pinned to
   the checked address, so a DNS answer cannot be switched in between.
 - The Deep Ingest dialog sets, for each crawl, the link depth (1 to 5, default 2), whether PDFs are read and the
-  delay between requests (0 to 10 s, default 1 s). The settings `crawler_max_depth`, `crawler_rate_limit` and
-  `crawler_download_pdfs` are only the defaults for crawls without these options; the dialog always passes its own
-  values.
-- From the settings: at most `crawler_max_pages` pages (default 50), and only pages in the languages of
-  `crawler_languages` (default English and German; an empty list keeps all). A crawl also stops after five times as
-  many requests as its page limit (redirects and failed fetches count too).
+  delay between requests (whole seconds from 0 to 10, default 1 s). The settings `crawler_max_depth`,
+  `crawler_rate_limit` and `crawler_download_pdfs` are only the defaults for crawls without these options; the
+  dialog always passes its own values.
+- From the settings: at most `crawler_max_pages` pages per entered URL (default 50), and only pages in the
+  languages of `crawler_languages` (default English and German; an empty list keeps all). A crawl also stops after
+  five times as many requests as its page limit (redirects and failed fetches count too).
 
 ### Progress, Stop and the outcome
 
@@ -705,8 +706,8 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   written to the log, so it is never only audible.
 - It stays silent when the setting `audio_announcements` is off (menu **Tools > Spoken Announcements**, a check mark
   that is saved at once), when `LLM_FRAMEWORK_NO_AUDIO` is set (to anything but empty, `0`, `false`, `no` or
-  `off`), under CI (`CI` set), during tests, in an SSH session without a display, and on Linux without a display
-  (no `DISPLAY` or `WAYLAND_DISPLAY`).
+  `off`), under CI (`CI` set in the same way), during tests, in an SSH session without a display, and on Linux
+  without a display (no `DISPLAY` or `WAYLAND_DISPLAY`).
 
 ---
 
@@ -972,8 +973,9 @@ rebuilt, never downloaded as a model.
    Knowledge: a list of pages, each with its source.
 4. A summary (kind, id, version, author, licence, trust level, source, files, destination and notes such as the
    author signature) is shown as plain text, so text from a pack cannot hide its trust level. Nothing is installed
-   until you confirm; the default answer is no. `--yes` skips the question only for packs from the signed index; a
-   file always asks, and without a terminal nothing is installed.
+   until you confirm; the default answer is no. `--yes` skips the question only for packs whose trust level comes
+   from the signed index, also a file whose sha256 the index lists; a pack with trust `local` always asks, and
+   without a terminal nothing is installed.
 5. The pack moves into place in one rename, never over an existing folder (also when only the case differs), with
    a provenance file `.lcf-provenance.json` (source, trust level, hashes, signer, time). Anything that fails is
    removed.
@@ -1025,8 +1027,10 @@ encrypted to your key), and **Build** on an installed recipe fills in the Builde
 - **Licence:** MIT by default for your own target or recipe (`--license`; a list in the GUI). Knowledge packs hold
   other people's pages: their licence is `NOASSERTION`, every page keeps its source address, and a page without a
   source is never exported.
-- A community pack you installed is not exported as your own: signing it again would replace its author and
-  licence. When a recipe's target is your own, a note reminds you to export the target too.
+- A target you installed from a community pack is not exported as your own: signing it again would replace its
+  author and licence. When a recipe's target is your own, a note reminds you to export the target too. A knowledge
+  export takes every page of your knowledge base, also the pages imported from installed knowledge packs; each keeps
+  its source address.
 - With `--to` or `--passphrase` the pack is [encrypted](#encrypted-packs-for-private-sharing) for private sharing
   instead.
 
@@ -1092,8 +1096,9 @@ What does not work yet, so you are not surprised:
 - **Device runtime:** the framework does not install a runtime on the board.
 - **GUI:** the Auto-Tuning and Models tabs are placeholders; the local runtime is controlled from the CLI only.
 - **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it. Its dialog always
-  passes its own depth and request delay, so `crawler_max_depth` and `crawler_rate_limit` do not apply there.
-  Restoring a knowledge-base snapshot is not available from the GUI or the CLI.
+  passes its own depth, PDF choice and request delay (whole seconds), so `crawler_max_depth`,
+  `crawler_download_pdfs` and `crawler_rate_limit` do not apply there. Restoring a knowledge-base snapshot is not
+  available from the GUI or the CLI.
 - **Reranking** runs only for build recommendations unless `rag_rerank_default` is turned on.
 - **Spoken announcements** are tested with simulated speech engines only, not with the real voices of Windows,
   macOS or Linux.

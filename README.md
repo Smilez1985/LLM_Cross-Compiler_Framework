@@ -445,12 +445,12 @@ Turn it on in the AI settings (**Enable Local Knowledge Base**). Everything runs
 
 Add documentation with **Deep Ingest (Add Docs)** in the module wizard (**Tools > Create Hardware Module...**).
 Before your first crawl, a one-time notice says what is read and kept; it is information, not a confirmation. The
-crawler blocks private network addresses, limits pages and depth, and honours every machine-readable opt-out of a
+crawler blocks private network addresses, limits pages and depth, and honours these machine-readable opt-outs of a
 site: robots.txt, the `X-Robots-Tag` header, robots meta tags (including `noai`) and the TDM Reservation Protocol.
 None of these checks can be switched off. The wizard shows "Page N of M", **Stop** keeps what is already stored, and
-the result says success, partial or failure; the outcome is also spoken, unless you turn that off. Search results are
-treated as external text, never as instructions. More: [knowledge base](docs/Features.md#knowledge-base-rag) and
-[Deep Ingest](docs/Features.md#deep-ingest).
+the result says success, partial or failure; the outcome is also spoken by the speech engine of the operating system,
+if there is one, unless you turn that off. Search results are treated as external text, never as instructions. More:
+[knowledge base](docs/Features.md#knowledge-base-rag) and [Deep Ingest](docs/Features.md#deep-ingest).
 
 ---
 
@@ -512,7 +512,7 @@ build_sandbox: true           # sandbox for conversion containers
 build_memory_limit: ""        # e.g. 24g; empty = no limit
 build_pids_limit: 4096        # process limit in the container
 build_jobs: 0                 # parallel compile jobs for image builds; 0 = all cores
-crawler_max_depth: 2
+crawler_max_depth: 2          # not used by the Deep Ingest dialog, which sets its own depth
 rag_reranker: auto            # auto (chosen by hardware), off, or a cross-encoder model id
 rag_rerank_default: false     # true: rerank every search (default: build recommendations only)
 rag_rerank_min_score: 0.0     # relevance floor 0..1; 0 = the model's calibrated floor (0.2)

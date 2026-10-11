@@ -466,12 +466,12 @@ läuft auf deinem Rechner:
 Dokumentation nimmst du mit **Deep Ingest (Add Docs)** im Modul-Assistenten auf (**Tools > Create Hardware
 Module...**). Vor deinem ersten Crawl sagt ein einmaliger Hinweis, was gelesen und behalten wird; er ist eine
 Information, keine Bestätigung. Der Crawler sperrt private Netzwerkadressen, begrenzt Seitenzahl und Tiefe und
-beachtet jeden maschinenlesbaren Opt-out einer Website: robots.txt, den Header `X-Robots-Tag`, robots-Meta-Tags
+beachtet diese maschinenlesbaren Opt-outs einer Website: robots.txt, den Header `X-Robots-Tag`, robots-Meta-Tags
 (auch `noai`) und das TDM Reservation Protocol. Keine dieser Prüfungen lässt sich abschalten. Der Assistent zeigt
 „Seite N von M“, **Stoppen** behält, was schon gespeichert ist, und das Ergebnis lautet Erfolg, teilweise oder
-Fehlschlag; das Ergebnis wird auch gesprochen, außer du schaltest das aus. Suchergebnisse gelten als externer Text,
-nie als Anweisungen. Mehr dazu: [Wissensbasis](docs/Features_DE.md#wissensbasis-rag) und
-[Deep Ingest](docs/Features_DE.md#deep-ingest).
+Fehlschlag; das Ergebnis spricht auch die Sprachausgabe des Betriebssystems, wenn es eine gibt, außer du schaltest
+das aus. Suchergebnisse gelten als externer Text, nie als Anweisungen. Mehr dazu:
+[Wissensbasis](docs/Features_DE.md#wissensbasis-rag) und [Deep Ingest](docs/Features_DE.md#deep-ingest).
 
 ---
 
@@ -536,7 +536,7 @@ build_sandbox: true           # Sandbox für Konvertierungs-Container
 build_memory_limit: ""        # z. B. 24g; leer = kein Limit
 build_pids_limit: 4096        # Prozesslimit im Container
 build_jobs: 0                 # parallele Compile-Jobs beim Image-Build; 0 = alle Kerne
-crawler_max_depth: 2
+crawler_max_depth: 2          # gilt nicht im Deep-Ingest-Dialog, der eine eigene Tiefe setzt
 rag_reranker: auto            # auto (nach Hardware gewählt), off oder die ID eines Cross-Encoder-Modells
 rag_rerank_default: false     # true: jede Suche neu bewerten (Standard: nur Build-Empfehlungen)
 rag_rerank_min_score: 0.0     # Relevanzschwelle 0..1; 0 = die kalibrierte Schwelle des Modells (0,2)
