@@ -4,11 +4,12 @@
 # accepts free text, and providers with live_models: true list what the account can use (GET /models).
 # A file with the same name in the user's config directory adds or overrides presets by id.
 #
-# adapter     anthropic | openai_responses | openai_compat | claude_code
+# adapter     anthropic | openai_responses | openai_compat
 # location    cloud (privacy filter applies) | local (never filtered) | auto (decided from the base_url host)
-# auth        accepted methods, preferred first: api_key | oauth | none
-#             anthropic + oauth: an `ant auth login` profile, read and refreshed by the anthropic SDK
-#             claude_code + oauth: the user's own `claude auth login` session inside Claude Code
+# auth        accepted methods, preferred first: api_key | ant_profile | none
+#             ant_profile: an `ant auth login` profile, read and refreshed by the anthropic SDK
+# opt_in_auth methods never picked automatically: only used when ai_auth_<provider> names them
+# reject_key_prefixes  key prefixes refused before any request (admin keys cannot be used for chat)
 # secret      name of the API key in the encrypted secrets store
 # models      default model per task profile (chat, tools, json, healing); "default" for the rest
 # efforts     default effort per task when the request does not set one
@@ -23,7 +24,9 @@ providers:
     adapter: anthropic
     base_url: https://api.anthropic.com
     location: cloud
-    auth: [oauth, api_key]
+    auth: [api_key, ant_profile]
+    opt_in_auth: [ant_profile]
+    reject_key_prefixes: [sk-ant-admin01-]
     secret: anthropic_api_key
     models:
       default: claude-opus-5-5
@@ -37,19 +40,6 @@ providers:
     # Models that reject output_config.effort (prefix match).
     no_effort_models: [claude-haiku-4-5, claude-3-, claude-opus-4-0, claude-opus-4-1, claude-sonnet-4-0]
     docs_url: https://platform.claude.com/docs
-
-  claude_code:
-    label: "Claude subscription (Pro/Max) via Claude Code"
-    adapter: claude_code
-    location: cloud
-    auth: [oauth]
-    models:
-      default: claude-opus-5-5
-      json: claude-sonnet-5-5
-    suggested_models: [claude-opus-5-5, claude-sonnet-5-5, claude-haiku-5-5, claude-fable-5-1, opus, sonnet, haiku]
-    efforts: {chat: medium, tools: medium, json: low, healing: high}
-    live_models: false
-    docs_url: https://code.claude.com/docs/en/headless
 
   openai:
     label: "OpenAI (Responses API)"
@@ -136,4 +126,3 @@ aliases:   # earlier ai_provider values
   LocalAI: custom
   Compatible: custom
   OpenRouter: openrouter
-  ClaudeCode: claude_code

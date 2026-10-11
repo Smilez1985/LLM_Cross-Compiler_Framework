@@ -96,7 +96,10 @@ make test-container     # Isolierte Tests ausführen
 Das Framework läuft als [Model-Context-Protocol](https://modelcontextprotocol.io)-Server. Ein KI-Client, den du
 ohnehin nutzt, kann es damit steuern: Targets auflisten, prüfen, was ein Board kann, Builds starten und
 verfolgen, Logs lesen und über Self-Healing-Vorschläge entscheiden. Im Client meldest du dich mit deinem
-eigenen Claude-Konto oder API-Key an; das Framework sieht diese Zugangsdaten nie.
+eigenen Claude-Konto oder API-Key an; das Framework sieht diese Zugangsdaten nie. So nutzt du das Framework
+mit einem Claude-Pro- oder -Max-Abo: Ditto selbst (im Framework) braucht einen Claude-API-Key (Max- und
+Team-Pläne enthalten monatliches API-Guthaben) oder einen anderen Anbieter, denn andere Apps dürfen die Limits
+eines Claude-Abos nicht nutzen.
 
 ```bash
 llm-cli ditto setup        # einmalig: was KI-Clients selbst dürfen und was deine Bestätigung braucht

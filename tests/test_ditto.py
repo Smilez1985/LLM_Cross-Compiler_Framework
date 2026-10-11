@@ -25,6 +25,7 @@ from orchestrator.Core.ditto_manager import (CONSOLE_WORKSPACE_HINT, ChatHistory
 from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatResult, InvalidOutput, LLMClient,  # noqa: E402
                               Message, NativeMessage, NotConfigured, PermissionDenied, ProviderTimeout,
                               ProviderUnavailable, RateLimited, Refused, ToolCall, Truncated)
+from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_REQUIRED  # noqa: E402
 from orchestrator.llm.providers.base import ProviderAdapter  # noqa: E402
 from orchestrator.tools.audit import AuditLog  # noqa: E402
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier  # noqa: E402
@@ -493,15 +494,36 @@ class TestErrors:
         assert phrase in message and str(error) in message
         assert "workspace" not in message
 
-    @pytest.mark.parametrize("error", [AuthFailed("invalid x-api-key", provider="anthropic", status=401),
-                                       PermissionDenied("forbidden", provider="anthropic", status=403)])
-    def test_anthropic_key_errors_explain_workspaces(self, tmp_path, llm, error):
+    def test_key_without_a_workspace_says_where_to_enter_the_id(self, tmp_path, llm):
+        llm.script.append(NotConfigured(f"{ANTHROPIC_WORKSPACE_REQUIRED} (anthropic-workspace-id is required)",
+                                        provider="anthropic", status=400, code="anthropic.workspace_required"))
+        ditto = make_ditto(tmp_path, ai_provider="anthropic", secrets={"anthropic_api_key": ANTHROPIC_KEY})
+        with pytest.raises(DittoError) as info:
+            ditto.chat("hi")
+        text = str(info.value)
+        assert CONSOLE_WORKSPACE_HINT in text and ANTHROPIC_WORKSPACE_REQUIRED in text
+        assert "ai_anthropic_workspace_id" in text and "not set up" not in text and ANTHROPIC_KEY not in text
+
+    @pytest.mark.parametrize("error", [
+        AuthFailed("Claude rejected the key", provider="anthropic", status=401, code="anthropic.auth"),
+        PermissionDenied("forbidden", provider="anthropic", status=403)])
+    def test_rejected_claude_keys_get_no_workspace_hint(self, tmp_path, llm, error):
+        # A key without a workspace is a 400 with its own message; 401 and 403 have other causes.
         llm.script.append(error)
         ditto = make_ditto(tmp_path, ai_provider="anthropic", secrets={"anthropic_api_key": ANTHROPIC_KEY})
         with pytest.raises(DittoError) as info:
             ditto.chat("hi")
-        assert CONSOLE_WORKSPACE_HINT in str(info.value) and "organization" in str(info.value)
-        assert ANTHROPIC_KEY not in str(info.value)
+        assert "workspace" not in str(info.value).lower() and ANTHROPIC_KEY not in str(info.value)
+
+    @pytest.mark.parametrize("code, phrase", [
+        ("anthropic.workspace_invalid", "Correct the Claude workspace ID"),
+        ("anthropic.workspace_not_found", "Correct the Claude workspace ID"),
+        ("anthropic.admin_key", "Store a normal Claude API key"),
+        ("provider.removed", "Choose another AI provider"),
+    ])
+    def test_known_causes_say_what_to_change(self, code, phrase):
+        message = describe_llm_error(NotConfigured("the plain cause", code=code))
+        assert phrase in message and "the plain cause" in message and "not set up" not in message
 
     def test_other_providers_get_no_workspace_hint(self, tmp_path, llm):
         llm.script.append(AuthFailed("invalid key", provider="openrouter", status=401))

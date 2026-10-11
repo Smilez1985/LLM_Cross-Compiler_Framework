@@ -338,8 +338,17 @@ class ConfigManager:
 
             # AI Agent (Ditto) Selection
             ConfigSchema("ai_provider", str, False, "OpenAI",
-                         "AI provider id from configs/llm_providers.yml (anthropic, claude_code, openai, google, "
-                         "openrouter, ollama, local, custom); older names such as OpenAI still work"),
+                         "AI provider id from configs/llm_providers.yml (anthropic, openai, google, openrouter, "
+                         "ollama, local, custom); older names such as OpenAI still work"),
+            ConfigSchema("ai_auth_anthropic", str, False, None,
+                         "Claude sign-in: empty or api_key = the stored API key; ant_profile = an `ant auth login` "
+                         "profile (never picked automatically)"),
+            ConfigSchema("ai_anthropic_workspace_id", str, False, None,
+                         "Claude workspace ID (wrkspc_...) for API keys that are valid in every workspace of the "
+                         "organization; sent as the anthropic-workspace-id header"),
+            ConfigSchema("ai_allow_sdk_env_headers", bool, False, False,
+                         "Keep OPENAI_CUSTOM_HEADERS / ANTHROPIC_CUSTOM_HEADERS from the environment (dropped at "
+                         "startup by default: they could replace the API key or reach other servers)"),
             ConfigSchema("ai_model", str, False, "gpt-6.1-sol", "AI model name"),
             ConfigSchema("ai_base_url", str, False, "", "Base URL for Ollama/Custom endpoints"),
             ConfigSchema("ai_effort", str, False, "", "Reasoning effort: low, medium, high, xhigh, max; "
@@ -540,7 +549,7 @@ class ConfigManager:
                 "crawler_respect_robots", "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
-                "input_history",
+                "ai_anthropic_workspace_id", "input_history",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",
                 # v2.3

@@ -25,6 +25,7 @@ if str(root_dir) not in sys.path:
 
 # Core Imports
 from orchestrator.Core.config_manager import ConfigManager
+from orchestrator.llm.sdk_env import guard_sdk_environment
 
 # GUI Imports
 # Note: These will fail if files are missing. We wrap them for better error messages.
@@ -40,22 +41,27 @@ except ImportError as e:
 def main():
     # High DPI Scaling for modern screens
     os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
-    
-    app = QApplication(sys.argv)
-    app.setApplicationName("LLM Cross-Compiler")
-    
+
     # Determine App Root
     app_root = root_dir
-    
+
     # 1. Load Config (User Preferences)
     # We look for config.yml in the 'configs' folder
     configs_dir = app_root / "configs"
     config_file = configs_dir / "config.yml"
-    
+
     # Initialize ConfigManager (v2.3.0 API: takes path string or None)
     # If file doesn't exist yet, it loads defaults
     cfg_mgr = ConfigManager(str(config_file) if config_file.exists() else None)
-    
+
+    # Before Qt or the framework start threads: SDK environment guard (orchestrator/llm/sdk_env.py).
+    debug_http = "--debug-http" in sys.argv[1:]
+    for warning in guard_sdk_environment(bool(cfg_mgr.get("ai_allow_sdk_env_headers", False)), debug_http):
+        print(f"Warning: {warning}", file=sys.stderr)
+
+    app = QApplication([arg for arg in sys.argv if arg != "--debug-http"])
+    app.setApplicationName("LLM Cross-Compiler")
+
     language = cfg_mgr.get("language")
     # The schema default 'en' is always loaded, so a first run is detected by where the value came from.
     language_value = cfg_mgr.config_values.get("language")

@@ -7,14 +7,16 @@ Settings (all optional except ai_provider):
   ai_provider            preset id from configs/llm_providers.yml (old values such as "OpenAI" still work)
   ai_model               model for every task; ai_model_<task> (chat, tools, json, healing) wins over it
   ai_base_url            endpoint for presets that allow one (Ollama, custom); ai_base_url_<provider> per provider
-  ai_auth / ai_auth_<provider>   api_key | oauth | none (default: the first usable method of the preset)
-  ai_oauth_profile       `ant auth login` profile for Claude (default: the active profile)
+  ai_auth / ai_auth_<provider>   api_key | ant_profile | none (default: the first usable method of the preset;
+                         methods in the preset's opt_in_auth, such as ant_profile, only through ai_auth_<provider>)
+  ai_oauth_profile       `ant auth login` profile for Claude when ai_auth_anthropic is ant_profile (default: the
+                         CLI's active profile)
+  ai_anthropic_workspace_id   wrkspc_... for Claude API keys that are valid in every workspace of the organization
   ai_effort / ai_effort_<task>   low | medium | high | xhigh | max
   ai_fallback_chain      e.g. ["local"] or ["ollama:qwen3.5:4b"]; tried on refusals and outages
   ai_security_level      STRICT | BALANCED | OFF for cloud providers (local ones are never filtered)
   ai_timeout             seconds per request (default 600)
   ai_max_retry_wait      longest Retry-After the client waits for (default 30 s); longer waits are raised
-  ai_claude_code_path    path of the `claude` binary (default: from PATH)
   offline_mode           only local providers are used
 
 The "local" provider talks to the managed llama-server (orchestrator.runtime): base_url, the per-start API key
@@ -36,7 +38,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
 from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
-from orchestrator.llm.errors import (LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused)
+from orchestrator.llm.errors import (LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused,
+                                     rejected_key_error)
 from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj
 from orchestrator.llm.providers import adapter_class
 from orchestrator.llm.types import EFFORTS, TASKS, ChatRequest, ChatResult, Message, ModelInfo
@@ -44,6 +47,7 @@ from orchestrator.utils.logging import get_logger
 
 MAX_RETRIES = 2  # the SDKs' own retries are switched off (max_retries=0), so attempts never multiply
 MANAGED_RUNTIME_PROVIDER = "local"  # preset served by the managed llama-server
+LEGACY_AUTH = {"oauth": "ant_profile"}  # earlier name of the `ant auth login` method
 
 # (base_url, api_key, model) of a running local server
 RuntimeEndpoint = Tuple[str, Optional[str], Optional[str]]
@@ -126,8 +130,14 @@ class LLMClient:
                 name = None
         preset = self.catalog.get(name)
         if preset is None:
-            raise NotConfigured(f"Unknown AI provider '{name}'. Choose one of: {', '.join(self.catalog.ids())}.")
+            raise self._unknown_provider(name)
         return preset
+
+    def _unknown_provider(self, name: Any) -> NotConfigured:
+        removed = self.catalog.removed_message(name)
+        if removed:
+            return NotConfigured(removed, code="provider.removed")
+        return NotConfigured(f"Unknown AI provider '{name}'. Choose one of: {', '.join(self.catalog.ids())}.")
 
     def set_runtime_endpoint(self, provider: str, base_url: Optional[str], api_key: Optional[str] = None,
                              model: Optional[str] = None) -> None:
@@ -183,32 +193,29 @@ class LLMClient:
             self.logger.warning(f"Could not read the stored key for {preset.id}: {e.__class__.__name__}")
             return None
 
-    def _oauth_available(self, preset: ProviderPreset) -> bool:
-        if preset.adapter == "claude_code":
-            return True  # Claude Code handles its own sign-in; a missing login is reported when it runs
-        if preset.adapter == "anthropic":
-            try:
-                from anthropic.lib.credentials import CredentialsFile
-                return CredentialsFile(self._setting("ai_oauth_profile")).config_path.is_file()
-            except Exception:
-                return False
-        return False
-
     def _auth(self, preset: ProviderPreset, primary: bool) -> str:
-        chosen = self._setting(f"ai_auth_{preset.id}") or (self._setting("ai_auth") if primary else None)
+        """The sign-in method: the one the user chose, else the first usable one. Opt-in methods (an `ant`
+        profile) are never picked automatically, so a profile on disk cannot switch the billed account."""
+        own = self._setting(f"ai_auth_{preset.id}")
+        chosen = own or (self._setting("ai_auth") if primary else None)
         if chosen:
+            if LEGACY_AUTH.get(chosen) in preset.auth:
+                chosen = LEGACY_AUTH[chosen]
             if chosen not in preset.auth:
                 raise NotConfigured(f"{preset.label} does not support sign-in method '{chosen}'.", provider=preset.id)
+            if chosen in preset.opt_in_auth and not own:
+                raise NotConfigured(f"{preset.label}: the sign-in method '{chosen}' is used only when "
+                                    f"ai_auth_{preset.id} is set to it.", provider=preset.id)
             return chosen
         for method in preset.auth:
-            if method == "none" or (method == "oauth" and self._oauth_available(preset)) or \
-                    (method == "api_key" and self._api_key(preset)):
+            if method in preset.opt_in_auth:
+                continue
+            if method == "none" or (method == "api_key" and self._api_key(preset)):
                 return method
         if preset.adapter == "anthropic":
-            raise NotConfigured("Claude API: no API key stored and no `ant auth login` profile found. Add an API key "
-                                "in the AI settings (Max/Team plans include monthly API credits for a linked Console "
-                                "organization), or choose the Claude Code provider to use your subscription.",
-                                provider=preset.id)
+            raise NotConfigured("Claude API: no API key stored. Add one in the AI settings (Max and Team plans include "
+                                "monthly API credits for a linked Console organization). To use an `ant auth login` "
+                                "profile instead, set ai_auth_anthropic to ant_profile.", provider=preset.id)
         raise NotConfigured(f"{preset.label}: no API key stored. Add one in the AI settings.", provider=preset.id)
 
     def _model(self, preset: ProviderPreset, task: str, primary: bool, explicit: Optional[str]) -> str:
@@ -245,7 +252,7 @@ class LLMClient:
         primary_preset = self.primary_provider()
         preset = self.catalog.get(provider) if provider else primary_preset
         if preset is None:
-            raise NotConfigured(f"Unknown AI provider '{provider}'.")
+            raise self._unknown_provider(provider)
         primary = preset.id == primary_preset.id
         base_url = self._base_url(preset, primary)
         local = preset.is_local(base_url)
@@ -268,14 +275,15 @@ class LLMClient:
     # --- adapters ---------------------------------------------------------------------------------------------
     def adapter(self, target: Target):
         api_key = self._api_key(target.preset) if target.auth == "api_key" or target.preset.runtime_endpoint else None
+        if target.preset.rejected_key(api_key):
+            raise rejected_key_error(target.preset)  # before any request
         fingerprint = hashlib.sha256(api_key.encode()).hexdigest()[:16] if api_key else ""
         options = dict(self.adapter_options.get(target.preset.adapter, {}))
         if target.preset.adapter == "anthropic":
-            options.update(auth=target.auth, oauth_profile=self._setting("ai_oauth_profile"))
+            options.update(auth=target.auth, oauth_profile=self._setting("ai_oauth_profile"),
+                           workspace_id=self._setting("ai_anthropic_workspace_id"))
         elif target.preset.adapter == "openai_responses":
             options.update(prompt_cache_key=self.install_id())
-        elif target.preset.adapter == "claude_code":
-            options.setdefault("binary", self._setting("ai_claude_code_path"))
         key = (target.preset.id, target.base_url, target.auth, fingerprint, repr(sorted(options.items(), key=str)))
         with self._lock:
             adapter = self._adapters.get(key)

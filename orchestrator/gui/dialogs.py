@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PySide6.QtCore import QObject, Qt, Signal
+from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, rejected_key_error
+from orchestrator.llm.providers.anthropic import WORKSPACE_ID
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import get_instance as get_i18n
 
@@ -292,6 +294,12 @@ class AIConfigurationDialog(QDialog):
         key_row.addWidget(self.btn_sign_in)
         form.addRow("API Key:", key_row)
 
+        self.txt_workspace = QLineEdit()
+        self.txt_workspace.setPlaceholderText("wrkspc_... (only for keys valid in every workspace)")
+        self.txt_workspace.setToolTip("Claude Console > Settings > Workspaces. Needed when the API key belongs to "
+                                      "the whole organization instead of one workspace.")
+        form.addRow("Workspace ID:", self.txt_workspace)
+
         self.txt_base_url = QLineEdit()
         form.addRow("Base URL:", self.txt_base_url)
 
@@ -358,19 +366,28 @@ class AIConfigurationDialog(QDialog):
             return sm.get_secret(preset.secret)
         return None
 
-    @staticmethod
-    def _key_required(preset) -> bool:
-        # Presets that also work without a key (local servers) or with another sign-in (OAuth) do not need one.
-        return bool(preset.secret) and preset.auth == ["api_key"]
+    def _key_required(self, preset) -> bool:
+        # Presets that also work without a key (local servers) do not need one, nor does a provider whose other
+        # sign-in method the user chose (ai_auth_<provider>); opt-in methods never stand in for the key on their own.
+        if not preset.secret:
+            return False
+        chosen = self._user_value(f"ai_auth_{preset.id}")
+        if chosen and chosen != "api_key":
+            return False
+        return all(method == "api_key" or method in preset.opt_in_auth for method in preset.auth)
 
     def _base_url(self, preset) -> str:
         return self.txt_base_url.text().strip() if preset is not None and preset.base_url_configurable else ""
+
+    def _workspace_id(self, preset) -> str:
+        return self.txt_workspace.text().strip() if preset is not None and preset.adapter == "anthropic" else ""
 
     def _apply_enabled_state(self):
         preset = self._preset()
         if preset is None:
             return
         self.txt_api_key.setEnabled(bool(preset.secret))
+        self.txt_workspace.setEnabled(preset.adapter == "anthropic")
         self.txt_base_url.setEnabled(preset.base_url_configurable)
         self.txt_base_url.setPlaceholderText(preset.base_url or "https://.../v1")
         self.btn_sign_in.setEnabled(self._sign_in_available(preset))
@@ -419,10 +436,14 @@ class AIConfigurationDialog(QDialog):
                      "offline_mode": self.chk_offline.isChecked()}
         if self._base_url(preset):
             overrides["ai_base_url"] = self._base_url(preset)
+        if preset.adapter == "anthropic":
+            overrides["ai_anthropic_workspace_id"] = self._workspace_id(preset)  # also when cleared
         config = SettingsOverlay(self._config(), overrides)
         secrets = _SecretsOverlay(self._secrets(), preset.secret, self.txt_api_key.text().strip())
         lister = self.model_lister
-        signals = _ModelListSignals(self)
+        # No parent: the worker emits on this object, so it must not die with the dialog (closing the dialog while
+        # the list loads would free it under the worker). The connection ends when the dialog is destroyed.
+        signals = _ModelListSignals()
         signals.done.connect(self._on_models_listed)
         self.lbl_models.setText("Loading the provider's models...")
 
@@ -463,6 +484,8 @@ class AIConfigurationDialog(QDialog):
         self._fill_models(suggestions, keep=keep)
         self.txt_base_url.setText((self._user_value("ai_base_url") or "") if saved and preset.base_url_configurable
                                   else "")
+        self.txt_workspace.setText((self._user_value("ai_anthropic_workspace_id") or "")
+                                   if preset.adapter == "anthropic" else "")
         self.txt_api_key.clear()
         self.lbl_models.setText("")
         self._apply_enabled_state()
@@ -472,7 +495,8 @@ class AIConfigurationDialog(QDialog):
         self._apply_enabled_state()
 
     def _load_current_config(self):
-        pid = self.catalog.resolve_id(self._config_get("ai_provider", "OpenAI")) or "openai"
+        saved_provider = self._config_get("ai_provider", "OpenAI")
+        pid = self.catalog.resolve_id(saved_provider) or "openai"
         self.chk_offline.setChecked(bool(self._config_get("offline_mode", False)))
         self.cb_provider.blockSignals(True)
         self.cb_provider.setCurrentIndex(max(self.cb_provider.findData(pid), 0))
@@ -484,6 +508,9 @@ class AIConfigurationDialog(QDialog):
         chain = self._user_value("ai_fallback_chain") or []
         self.txt_fallback.setText(", ".join(chain) if isinstance(chain, list) else str(chain))
         self._on_provider_changed()
+        removed = self.catalog.removed_message(saved_provider)
+        if removed:  # the saved provider no longer exists: say why and what to use instead, once per load
+            QMessageBox.information(self, "AI Provider Removed", removed)
 
     def _save_config(self):
         preset = self._preset()
@@ -511,6 +538,13 @@ class AIConfigurationDialog(QDialog):
         if self._key_required(preset) and not api_key and not self._stored_key():
             QMessageBox.warning(self, "Missing API Key", "Please provide an API key for this provider.")
             return
+        if preset.rejected_key(api_key):
+            QMessageBox.warning(self, "Unsuitable API Key", str(rejected_key_error(preset)))
+            return
+        workspace = self._workspace_id(preset)
+        if workspace and not WORKSPACE_ID.match(workspace):
+            QMessageBox.warning(self, "Invalid Workspace ID", ANTHROPIC_WORKSPACE_INVALID)
+            return
         if preset.base_url_configurable and not preset.base_url and not base_url:
             QMessageBox.warning(self, "Missing Base URL", "A custom endpoint requires a Base URL.")
             return
@@ -534,6 +568,8 @@ class AIConfigurationDialog(QDialog):
             cfg.set("ai_provider", preset.id)
             cfg.set("ai_model", model)
             cfg.set("ai_base_url", base_url)
+            if preset.adapter == "anthropic":
+                cfg.set("ai_anthropic_workspace_id", workspace)
             cfg.set("ai_effort", effort)
             cfg.set("ai_security_level", security)
             cfg.set("ai_fallback_chain", fallback)

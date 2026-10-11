@@ -5,8 +5,9 @@ text is passed through redact_secrets before it is shown.
 """
 
 import email.utils
+import re
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Tuple
 
 from orchestrator.utils.helpers import redact_secrets
 
@@ -15,11 +16,12 @@ class LLMError(Exception):
     retryable = False
 
     def __init__(self, message: str, *, provider: str = "", status: Optional[int] = None,
-                 request_id: Optional[str] = None):
+                 request_id: Optional[str] = None, code: Optional[str] = None):
         super().__init__(redact_secrets(message))
         self.provider = provider
         self.status = status
         self.request_id = request_id
+        self.code = code  # a known cause, e.g. "anthropic.workspace_required"; None for the generic mapping
 
 
 class NotConfigured(LLMError):
@@ -86,6 +88,25 @@ class InvalidOutput(LLMError):
     """The answer did not match the requested JSON schema, also after one repair attempt."""
 
 
+# Known Claude API causes in plain language.
+ANTHROPIC_WORKSPACE_REQUIRED = (
+    "This Claude API key belongs to your account, not to one workspace. Enter the workspace ID (wrkspc_..., "
+    "Console > Settings > Workspaces) in the AI settings, or create a key limited to one workspace.")
+ANTHROPIC_WORKSPACE_INVALID = "The workspace ID is not valid. It looks like wrkspc_..."
+ANTHROPIC_WORKSPACE_NOT_FOUND = "This key has no access to workspace {workspace}."
+ANTHROPIC_ADMIN_KEY = "This is an Admin API key. Ditto needs a normal API key (Console > Settings > API keys)."
+ANTHROPIC_AUTH = "Claude rejected the key: it is wrong, was revoked, or has expired."
+_WORKSPACE_NOT_FOUND = re.compile(r"workspace\s+`?([A-Za-z0-9_-]+)`?\s+not found", re.I)
+
+
+def rejected_key_error(preset: Any) -> NotConfigured:
+    """The key in use is of a kind the provider refuses for chat (preset.reject_key_prefixes)."""
+    if preset.adapter == "anthropic":
+        return NotConfigured(ANTHROPIC_ADMIN_KEY, provider=preset.id, code="anthropic.admin_key")
+    return NotConfigured(f"{preset.label}: this is an admin or management key, which cannot be used for chat. "
+                         "Create a normal API key.", provider=preset.id, code=f"{preset.id}.admin_key")
+
+
 def parse_retry_after(headers: Any) -> Optional[float]:
     """Seconds from retry-after-ms / retry-after (seconds or HTTP date), like the SDKs read them."""
     if headers is None:
@@ -144,6 +165,22 @@ def _status_error(status: int, detail: str, label: str, *, retry_after: Optional
     return BadRequest(f"{label} rejected the request ({status}). ({detail})", **kw)
 
 
+def _anthropic_cause(status: int, detail: str) -> Optional[Tuple[str, str]]:
+    """(code, message) for Claude API answers that have a specific fix."""
+    lowered = detail.lower()
+    if status == 400 and "anthropic-workspace-id is required" in lowered:
+        return "anthropic.workspace_required", ANTHROPIC_WORKSPACE_REQUIRED
+    if status == 400 and "anthropic-workspace-id" in lowered and "valid workspace id" in lowered:
+        return "anthropic.workspace_invalid", ANTHROPIC_WORKSPACE_INVALID
+    if status == 404:
+        found = _WORKSPACE_NOT_FOUND.search(detail)
+        if found:
+            return "anthropic.workspace_not_found", ANTHROPIC_WORKSPACE_NOT_FOUND.format(workspace=found.group(1))
+    if status == 401:
+        return "anthropic.auth", ANTHROPIC_AUTH
+    return None
+
+
 def map_anthropic_error(err: BaseException, label: str = "Claude API", provider: str = "anthropic") -> LLMError:
     """Maps anthropic SDK exceptions, most specific class first."""
     import anthropic
@@ -158,9 +195,15 @@ def map_anthropic_error(err: BaseException, label: str = "Claude API", provider:
     if isinstance(err, anthropic.APIStatusError):
         kw.update(status=err.status_code, request_id=getattr(err, "request_id", None))
         retry_after = parse_retry_after(err.response.headers)
+        detail = _detail(err)
+        cause = _anthropic_cause(err.status_code, detail)
+        if cause is not None:
+            code, message = cause
+            cls = AuthFailed if code == "anthropic.auth" else NotConfigured
+            return cls(f"{message} ({detail})", code=code, **kw)
         error_type = getattr(err, "type", None)
         code = "insufficient_quota" if error_type == "billing_error" else None
-        return _status_error(err.status_code, _detail(err), label, retry_after=retry_after, code=code, kw=kw)
+        return _status_error(err.status_code, detail, label, retry_after=retry_after, code=code, kw=kw)
     credentials_error = getattr(anthropic, "CredentialsError", None)
     if credentials_error is not None and isinstance(err, credentials_error):
         return NotConfigured(f"{label}: the sign-in profile could not be read. Run `ant auth login` again. "
