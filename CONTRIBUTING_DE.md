@@ -315,10 +315,10 @@ Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module
    Flags und Shell-Code, schreibt nur unterhalb von `targets/` und überschreibt nie ein bestehendes Target, und der
    fertige Ordner muss dieselben Prüfungen bestehen wie ein Community-Paket.
 3. **Die Capabilities vervollständigen:** Der Generator schreibt einen Block `capabilities:` mit der
-   Unterstützungsstufe `community`, dem Modulnamen als einzigem Board und GGUF mit den Quantisierungstypen, die das
-   Build-Skript behandelt. Ergänze deine echten Boards, Formate, Quantisierungen je Board, Aliasse, Vorgaben und den
-   Bedarf an Kalibrierdaten in `targets/<Name>/target.yml` (Schema in `orchestrator/schemas/targets.py`; der
-   Rockchip-Block ist das Vorbild). GUI, CLI, Ditto und der MCP-Server bieten genau das an und prüfen genau das, was
+   Unterstützungsstufe `community`, dem Modulnamen als einzigem Board und GGUF mit den Quantisierungstypen aus den
+   `case`-Zweigen der Quantisierungslogik (ohne solche Zweige sechs gängige GGUF-Typen). Ergänze deine echten Boards,
+   Formate, Quantisierungen je Board, Aliasse, Vorgaben und den Bedarf an Kalibrierdaten in
+   `targets/<Name>/target.yml` (Schema in `orchestrator/schemas/targets.py`; der Rockchip-Block ist das Vorbild). GUI, CLI, Ditto und der MCP-Server bieten genau das an und prüfen genau das, was
    dort steht.
 4. **Dockerfile und Build-Skript:** Lege jede Version fest (Tags, Commits, Hashes, wie `RKLLM_WHEEL_SHA256` im
    Rockchip-Dockerfile). Die Umwandlung muss in der Sandbox funktionieren: als Benutzer ohne root-Rechte, ohne
@@ -342,13 +342,15 @@ siehe auch den [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.m
    creating“ auf der letzten Seite des Modul-Assistenten oder „Export a finished build for the community...“ im
    Kontextmenü des Builder-Logs. Das Paket wird datenschutzbereinigt, geprüft, mit deinem Schlüssel signiert und
    nach `community/contributions/` geschrieben. Gesendet wird noch nichts.
-2. **Prüfen:** Die Zusammenfassung zeigt jede Änderung der Datenschutz-Bereinigung als Diff. Prüfe das Paket dann so,
-   wie das Community-Repository es prüfen wird: `llm-cli zoo verify community/contributions/<Datei>.zip`.
+2. **Prüfen:** Die Zusammenfassung zeigt einen Diff für jede Datei, die die Datenschutz-Bereinigung geändert hat
+   (höchstens 40 Zeilen je Datei). Prüfe das Paket dann so, wie das Community-Repository es prüfen wird:
+   `llm-cli zoo verify community/contributions/<Datei>.zip`.
 3. **Den Pull-Request öffnen:** Ergänze den Export-Befehl um `--pr` (er fragt nach der Zusammenfassung, außer
-   `--yes` ist angegeben) oder klicke im Export-Dialog auf „Open pull request“. Ist die GitHub CLI installiert und
-   angemeldet, forkt das Framework das Repository aus der Einstellung `community_repo`, committet das Paket auf einem
-   neuen Branch nach `contributions/<Art>/` und öffnet den Pull-Request. Sonst öffnet sich die Upload-Seite des
-   Repositorys in deinem Browser, und du ziehst die Datei dorthin.
+   `--yes` ist angegeben) oder klicke im Export-Dialog auf „Open pull request“. Sind die GitHub CLI und git
+   installiert und ist `gh` angemeldet, forkt das Framework das Repository aus der Einstellung `community_repo`,
+   committet das Paket auf einem neuen Branch nach `contributions/<Art>/` und öffnet den Pull-Request. Sonst, oder
+   wenn das scheitert, öffnet sich die Upload-Seite des Repositorys in deinem Browser, und du ziehst die Datei
+   dorthin.
 4. **Die CI-Prüfung:** Bei jedem Pull-Request, der `contributions/` berührt, nimmt der Workflow des
    Community-Repositorys nur Paketdateien an (`contributions/target/*.zip`, `contributions/recipe/*.zip`,
    `contributions/knowledge/*.zip`), jeweils höchstens 5 MB, führt für jede `llm-cli zoo verify` aus (Manifest und
@@ -399,8 +401,9 @@ nutzt sie nicht.
 `index.json` enthält `schema_version` (1), `version` (eine Zahl, die mit jedem signierten Index wächst), `generated`
 (UTC-Zeit in der Form `2026-10-11T12:00:00Z`), `entries` (die Ausgabe von `entry`) und `revoked`. Die Signatur deckt
 die genauen Bytes ab; veröffentliche `index.json` also unverändert. Clients lehnen einen Index ab, dessen Version
-niedriger ist als die zwischengespeicherte. Um ein Paket zurückzuziehen, trag es in `revoked` ein (über `sha256` oder
-über `kind` und `id` mit optionaler `version`, immer mit einem `reason`), erhöhe `version` und signiere erneut.
+niedriger ist als die zwischengespeicherte. Um ein Paket zurückzuziehen, trag einen Eintrag in `revoked` ein, erhöhe
+`version` und signiere erneut. Jeder Eintrag braucht `kind`, `id` und einen `reason`; mit `sha256` zieht er genau
+diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `version`, jede Version dieser ID.
 
 ---
 

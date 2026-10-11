@@ -407,7 +407,7 @@ wird gebaut oder geändert: Chat-Fälle laufen gegen einen Ersatz-Build-Dienst. 
 | `--provider TEXT` | Anbieter für den Lauf. Standard: KI-Einstellungen. |
 | `--model TEXT` | Modell für den Lauf. Standard: KI-Einstellungen. |
 | `--tier TEXT` | Gegen das verwaltete lokale Modell dieser Stufe laufen; wiederholbar (`--tier small --tier small-q2`). Nicht mit `--provider`/`--model` kombinierbar (Exit-Code 2). |
-| `--kind [healing\|optimizer\|module\|chat\|retrieval]` | Nur Fälle dieser Art; wiederholbar. `retrieval` läuft nur, wenn es hier gewählt ist (oder wenn `--case` ohne `--kind` angegeben ist). |
+| `--kind [healing\|optimizer\|module\|chat\|retrieval]` | Nur Fälle dieser Art; wiederholbar. `retrieval` läuft nur, wenn es hier gewählt ist, wenn `--case` ohne `--kind` angegeben ist oder wenn die Datei aus `--cases` Retrieval-Fälle enthält. |
 | `--rag-variant [fused\|rerank]` | Nur Retrieval: die zu bewertende Suchvariante; wiederholbar, ein Lauf je Variante. `fused` (Standard): die hybride Suche. `rerank`: die hybride Suche plus der Reranker aus `rag_reranker` mit seiner Relevanzschwelle. |
 | `--case TEXT` | Nur diese Fall-ID; wiederholbar. |
 | `--repeat INTEGER RANGE` | Läufe pro Fall, 1 bis 20 (Standard 1). |
@@ -450,8 +450,8 @@ Framework- und SDK-Dokumentation in `evals/retrieval/corpus/` (eine Datei mit F�
   (nicht im Offline-Modus); danach funktioniert die Evaluation offline.
 - Jede Suche liefert bis zu 10 Auszüge. Ein Fall besteht, wenn der erste passende Auszug innerhalb seiner Grenze
   liegt (`within` des Falls, Standard 3); eine Frage ohne Bezug besteht nur, wenn kein Auszug zurückkommt.
-- Neben der Tabelle der Läufe gibt es je Variante eine Tabelle „Retrieval“: hit@1, hit@3, hit@k (k = die Grenze des
-  jeweiligen Falls), MRR über die 10 Ergebnisse, „Unrelated: no excerpt“ (der Anteil der Fragen ohne Bezug, die
+- Neben der Tabelle der Läufe gibt es eine Tabelle „Retrieval“ mit einer Zeile je Variante: hit@1, hit@3, hit@k
+  (k = die Grenze des jeweiligen Falls), MRR über die 10 Ergebnisse, „Unrelated: no excerpt“ (der Anteil der Fragen ohne Bezug, die
   nichts bekommen haben) und die mittlere Suchzeit („p50 ms“, Median). `--json` ergänzt für jeden Fall die
   gefundenen Dokumente und ihre Werte, die Prüfsummen von Fällen und Korpus, die Dauer der Indizierung und den
   belegten Speicher.
@@ -719,7 +719,7 @@ Namen, die das Framework verwendet:
 | `anthropic_api_key`, `openai_api_key`, `gemini_api_key`, `openrouter_api_key`, `custom_api_key` | Dittos Anbieter |
 | `hf_token` | Zugangsbeschränkte Hugging-Face-Modelle in Builds |
 | `qdrant_api_key` | Ein entfernter Qdrant-Server für die Wissensbasis (Einstellung `qdrant_url`) |
-| `community_signing_key`, `community_encryption_key` | Deine Schlüsselpaare für Community-Pakete, von [`llm-cli zoo`](#zoo-keys) beim ersten Mal angelegt; nicht von Hand setzen |
+| `community_signing_key`, `community_encryption_key` | Deine Schlüsselpaare für Community-Pakete, beim ersten Mal von [`llm-cli zoo`](#zoo-keys) oder vom Community-Export und -Import der GUI angelegt; nicht von Hand setzen |
 
 ```bash
 llm-cli secrets set anthropic_api_key
@@ -856,9 +856,10 @@ Herausgeber-Schlüssel. Bis dahin zeigt `zoo list` nur installierte Pakete, Inst
 
 So sind Pakete geschützt:
 
-- Ein Paket ist eine ZIP-Datei mit einem Manifest (`pack.json`: sha256, Größe und Modus jeder Datei) und einer
-  Ed25519-Signatur seines Autors (`pack.sig`; mit diesem Framework exportierte Pakete haben immer eine). Es enthält
-  Skripte, Rezepte und Text, nie Modellgewichte oder andere Binärdateien.
+- Ein Paket ist eine ZIP-Datei mit einem Manifest (`pack.json`: sha256, Größe und Modus jeder Datei) und meist einer
+  Ed25519-Signatur seines Autors (`pack.sig`). Mit diesem Framework exportierte Pakete haben immer eine; bei einem
+  Paket ohne Signatur sagt die Zusammenfassung „not signed by its author“. Ein Paket enthält Skripte, Rezepte und
+  Text, nie Modellgewichte oder andere Binärdateien.
 - Die Liste der Pakete kommt aus einem signierten Index: `index.json` unter `community_index_url` und
   `index.json.sig` daneben, geprüft mit den Schlüsseln in `configs/community_keys.yml`, die jeweils bis zu ihrem
   Ablaufdatum gelten. Ein Index, der die Prüfung nicht besteht, wird nicht verwendet. Der letzte gültige Index wird
@@ -880,7 +881,7 @@ Vertrauensstufen:
 | `verified` | Im signierten Index: geprüft und unabhängig nachgebaut. |
 | `community` | Im signierten Index: geprüft. |
 | `local` | Eine Datei, die der signierte Index nicht aufführt. Niemand hat sie geprüft: Die Installation fragt immer nach, und jeder Build eines solchen Targets zeigt eine Warnung. |
-| `revoked` | In der Liste zurückgezogener Pakete des Index. Es wird nicht installiert; installierte Kopien werden von `zoo verify`, `llm-cli doctor` und dem Community Hub markiert und nicht gebaut, auch nachdem der Schlüssel, der den Rückzug signiert hat, abgelaufen ist. |
+| `revoked` | In der Liste zurückgezogener Pakete des Index. Es wird nicht installiert; installierte Kopien werden von `zoo verify`, `llm-cli doctor` und dem Community Hub markiert und nicht gebaut. `zoo verify`, `llm-cli doctor` und Builds wenden den zwischengespeicherten Rückzug weiter an, nachdem der Schlüssel, der ihn signiert hat, abgelaufen ist; `zoo list` und der Community Hub nutzen diesen Index dann nicht mehr. |
 
 Targets, die mit dem Framework ausgeliefert werden, etwa Rockchip, haben keine Herkunftsdatei und erscheinen nicht im
 Zoo.
@@ -951,7 +952,7 @@ Note: signed by author key 0123456789abcdef (first pack seen from this author)
 | `PACK_ID` | Eine ID aus dem Index (`zoo list`). Installiert wird die neueste Version. |
 | `--kind [target\|recipe\|knowledge]` | Art von `PACK_ID` (Standard `target`). Eine Paketdatei nennt ihre Art selbst. |
 | `--file FILE` | Eine Paketdatei installieren, die dir jemand gegeben hat, oder ein verschlüsseltes Paket (`.lcfpack`). Ihre Vertrauensstufe ist `local`, außer der signierte Index führt ihre sha256 auf. Funktioniert ohne Netzwerk. |
-| `--from FILE` | Verschlüsselte Pakete: nur von diesen Absendern annehmen. Die Datei enthält die öffentlichen Schlüssel der Absender, wie `llm-cli zoo keys` sie ausgibt; wiederholbar. Ohne die Option nennt die Zusammenfassung die Schlüssel-ID des Absenders. |
+| `--from FILE` | Verschlüsselte Pakete: nur von diesen Absendern annehmen. Die Datei enthält die öffentlichen Schlüssel der Absender, wie `llm-cli zoo keys` sie ausgibt; wiederholbar. Ohne die Option wird jeder Absender angenommen; die Zusammenfassung nennt immer die Schlüssel-ID des Absenders. |
 | `--passphrase` | Verschlüsselte Pakete: nach der Passphrase fragen, statt das Paket mit deinem eigenen Schlüssel zu öffnen. |
 | `--yes` | Bei einem Paket, dessen Vertrauensstufe aus dem signierten Index kommt, nicht nachfragen. Ein `local`-Paket fragt immer. |
 
@@ -976,8 +977,9 @@ llm-cli zoo install --file target-my-board-1.0.0.lcfpack --from kollegin.keys
 llm-cli zoo install --file target-my-board-1.0.0.lcfpack --passphrase
 ```
 
-Ein Rezept braucht sein Target: Installiere zuerst das Target. „Build“ bei einem installierten Rezept im Community Hub
-füllt den Builder aus, einschließlich des festgelegten Commits des Modells.
+Ein Rezept braucht sein Target: Installiere zuerst das Target, damit das Rezept auch gegen die Capabilities des
+Targets geprüft wird (ohne das Target vermerkt die Zusammenfassung nur, dass es fehlt). „Build“ bei einem
+installierten Rezept im Community Hub füllt den Builder aus, einschließlich des festgelegten Commits des Modells.
 
 ### zoo verify
 
@@ -1009,7 +1011,8 @@ Macht ein Paket aus deiner eigenen Arbeit: ein Target (`SOURCE`: der Ordnername 
 der Ordner eines fertigen Builds oder seine `build_info.json`) oder deine Wissensbasis (ohne `SOURCE`). Das Paket
 wird datenschutzbereinigt, so geprüft, wie eine Installation es prüfen würde, mit deinem Schlüssel signiert und in
 einen Ordner geschrieben; nichts wird gesendet. Die Zusammenfassung auf stdout zeigt die Datei, den Schlüssel, mit
-dem signiert wurde, jede Änderung der Datenschutz-Bereinigung als Diff und Hinweise.
+dem signiert wurde, einen Diff für jede Datei, die die Datenschutz-Bereinigung geändert hat (höchstens 40 Zeilen je
+Datei), und Hinweise.
 
 | Argument / Option | Bedeutung |
 |---|---|
@@ -1029,8 +1032,8 @@ Was in das Paket kommt:
 
 - **target:** jede Datei des Target-Ordners. Links, Spezialdateien und Binärdateien werden abgelehnt, und die
   Target-Prüfungen müssen bestehen, wozu ein gültiger Block `capabilities:` gehört. Die Version ist
-  `metadata.version` aus der `target.yml`, wenn sie die Form `1.2.3` hat, sonst `1.0.0`. Ein Target, das du aus dem
-  Zoo installiert hast, wird abgelehnt: Es bleibt das Paket seines Autors.
+  `metadata.version` aus der `target.yml`, wenn sie die Form `1.2.3` hat (ein Zusatz wie `-rc1` ist erlaubt), sonst
+  `1.0.0`. Ein Target, das du aus dem Zoo installiert hast, wird abgelehnt: Es bleibt das Paket seines Autors.
 - **recipe:** nur ein fertiger Build eines Hugging-Face-Modells, dessen `build_info.json` den Commit des Modells und
   den Fingerabdruck des Targets enthält (Builds dieser Version). Ist das Target dein eigenes, erinnert die
   Zusammenfassung daran, es ebenfalls zu exportieren, sonst können andere das Rezept nicht bauen.
@@ -1046,10 +1049,11 @@ API-Schlüssel. Loopback-Adressen, Image-Digests (`name@sha256:...`) und Standar
 Diff: Ein Skript, dessen Adresse ersetzt wurde, funktioniert womöglich nicht mehr.
 
 **Pull-Request (`--pr`).** Nach der Zusammenfassung fragt der Befehl „Submit this pack to the public community
-repository?“. Ohne Terminal und ohne `--yes` wird nichts eingereicht (Exit-Code 1). Danach:
+repository?“. Antwortest du mit Nein oder gibt es kein Terminal und kein `--yes`, wird nichts eingereicht
+(Exit-Code 1). Danach:
 
-- Ist die GitHub CLI installiert und angemeldet (`gh auth login`), forkt der Befehl das Repository aus der
-  Einstellung `community_repo` (`Besitzer/Name`), committet das Paket auf einem neuen Branch deines Forks nach
+- Sind die GitHub CLI und git installiert und ist `gh` angemeldet (`gh auth login`), forkt der Befehl das Repository
+  aus der Einstellung `community_repo` (`Besitzer/Name`), committet das Paket auf einem neuen Branch deines Forks nach
   `contributions/<Art>/` und öffnet den Pull-Request mit `gh pr create`.
 - Sonst, oder wenn das scheitert, öffnet er die Upload-Seite des Repositorys
   (`https://github.com/<Besitzer>/<Name>/upload/main/contributions/<Art>`) in deinem Browser. Zieh die Datei dorthin;
@@ -1124,7 +1128,8 @@ x25519:<base64>
   `community_repo` sind leer, `configs/community_keys.yml` enthält keinen Schlüssel): `zoo list` zeigt nur
   installierte Pakete, und `zoo install <ID>` und `zoo export --pr` brechen mit einer Meldung ab. Pakete lassen sich
   als Dateien teilen.
-- `build start` hat keine Option für einen Modell-Commit: Der festgelegte Commit eines Rezepts wird nur genutzt, wenn
-  der Builder aus dem Community Hub ausgefüllt wird.
+- `build start` hat keine Option für einen Modell-Commit: Der festgelegte Commit eines Rezepts wird genutzt, wenn der
+  Builder aus dem Community Hub ausgefüllt wird oder wenn ein KI-Client dem MCP-Tool `start_build` eine `revision`
+  übergibt.
 - Für Deep Ingest (Dokumentationsseiten zur Wissensbasis hinzufügen) gibt es keinen CLI-Befehl; es läuft im
   Modul-Assistenten der GUI (**Tools > Create Hardware Module...**).

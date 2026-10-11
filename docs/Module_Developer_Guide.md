@@ -165,7 +165,8 @@ capabilities:
 - **Quantizations:** the labels of the `case` branches in the quantization logic of the wizard or of Ditto's
   proposal (for example `Q4_K_M)` or `Q4_K_M|Q5_K_M)`; only names of letters, digits and `_`). Without such
   branches: `Q4_K_M`, `Q4_0`, `Q5_K_M`, `Q6_K`, `Q8_0` and `F16`. The first one is the default. Labels are taken as
-  written, so `Q4_K_M|q4_k_m)` lists both spellings; write one spelling and declare others as `aliases`.
+  written, so `Q4_K_M|q4_k_m)` lists both spellings. Keep one spelling in the block: requests are matched without
+  regard to case, and other names go into `aliases` (for example `INT8: Q8_0`).
 
 **Knowledge snapshot (opt-in).** On the wizard's last page, the check box "Attach the knowledge crawled for this
 target (Deep Ingest, privacy scrub applied)" is off by default and can only be switched on after Deep Ingest ran in
@@ -559,10 +560,10 @@ The shipped Rockchip target passes all of these checks.
 
    The pack is written to `community/contributions/contribution-target-my_board-1.0.0.zip` and signed with your
    key, which is created in the secrets store on first use.
-3. **Read the summary.** It shows every change of the privacy scrub as a diff (home folders, IP and MAC addresses,
-   e-mail addresses, host and user names, keys) and notes, for example that `knowledge/` holds pages from the web
-   whose terms the pack licence does not cover. If a change breaks a script, fix the file in your target and export
-   again.
+3. **Read the summary.** It shows a diff for every file the privacy scrub changed (home folders, IP and MAC
+   addresses, e-mail addresses, host and user names, keys; at most 40 lines per file) and notes, for example that
+   `knowledge/` holds pages from the web whose terms the pack licence does not cover. If a change breaks a script,
+   fix the file in your target and export again.
 4. **Check it the way the community repository will:**
    `llm-cli zoo verify community/contributions/contribution-target-my_board-1.0.0.zip`.
 5. **Submit it:** "Open pull request" in the dialog, or the export command with `--pr` added. What happens then,

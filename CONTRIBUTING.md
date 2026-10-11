@@ -307,9 +307,10 @@ The full guide is the [Module Developer Guide](docs/Module_Developer_Guide.md). 
    packages, flags and shell code, writes only below `targets/` and never overwrites an existing target, and the
    finished folder must pass the same validators as a community pack.
 3. **Complete the capabilities:** the generator writes a `capabilities:` block with support level `community`, the
-   module name as the only board and GGUF with the quantization types the build script handles. Add your real
-   boards, formats, quantizations per board, aliases, defaults and calibration needs to
-   `targets/<name>/target.yml` (schema in `orchestrator/schemas/targets.py`; the Rockchip block is the reference).
+   module name as the only board and GGUF with the quantization types of the `case` branches in the quantization
+   logic (without such branches, six common GGUF types). Add your real boards, formats, quantizations per board,
+   aliases, defaults and calibration needs to `targets/<name>/target.yml` (schema in
+   `orchestrator/schemas/targets.py`; the Rockchip block is the reference).
    GUI, CLI, Ditto and the MCP server offer and validate exactly what is declared there.
 4. **Dockerfile and build script:** pin every version (tags, commits, hashes, like `RKLLM_WHEEL_SHA256` in the
    Rockchip Dockerfile). The conversion has to work in the sandbox: as a non-root user, without network, with a
@@ -333,13 +334,14 @@ and options are in the [CLI guide](docs/CLI_Usage.md#zoo-export); for targets, s
    creating" on the last page of the module wizard, or "Export a finished build for the community..." in the
    Builder log's context menu. The pack is privacy-scrubbed, checked and signed with your key, and written to
    `community/contributions/`. Nothing is sent yet.
-2. **Review it:** the summary shows every change of the privacy scrub as a diff. Then check the pack the way the
-   community repository will: `llm-cli zoo verify community/contributions/<file>.zip`.
+2. **Review it:** the summary shows a diff for every file the privacy scrub changed (at most 40 lines per file).
+   Then check the pack the way the community repository will:
+   `llm-cli zoo verify community/contributions/<file>.zip`.
 3. **Open the pull request:** add `--pr` to the export command (it asks after the summary unless `--yes` is given),
-   or click "Open pull request" in the export dialog. With the GitHub CLI installed and logged in, the framework
-   forks the repository named in the setting `community_repo`, commits the pack to `contributions/<kind>/` on a new
-   branch and opens the pull request. Otherwise the repository's upload page opens in your browser, and you drop
-   the file there.
+   or click "Open pull request" in the export dialog. With the GitHub CLI and git installed and `gh` logged in, the
+   framework forks the repository named in the setting `community_repo`, commits the pack to `contributions/<kind>/`
+   on a new branch and opens the pull request. Otherwise, or if that fails, the repository's upload page opens in
+   your browser, and you drop the file there.
 4. **The CI check:** on every pull request that touches `contributions/`, the community repository's workflow
    accepts only pack files (`contributions/target/*.zip`, `contributions/recipe/*.zip`,
    `contributions/knowledge/*.zip`) of at most 5 MB, runs `llm-cli zoo verify` on each of them (manifest and hashes,
@@ -387,8 +389,9 @@ not use them.
 `index.json` holds `schema_version` (1), `version` (a number that grows with every signed index), `generated` (UTC
 time in the form `2026-10-11T12:00:00Z`), `entries` (the output of `entry`) and `revoked`. The signature covers the
 exact bytes, so publish `index.json` unchanged. Clients refuse an index whose version is lower than the one they
-have cached. To revoke a pack, add it to `revoked` (by `sha256`, or by `kind` and `id` with an optional `version`,
-always with a `reason`), raise `version` and sign again.
+have cached. To revoke a pack, add an entry to `revoked`, raise `version` and sign again. Each entry needs `kind`,
+`id` and a `reason`; with `sha256` it revokes exactly that pack file, without it the `version` given or, without a
+`version`, every version of that ID.
 
 ---
 
