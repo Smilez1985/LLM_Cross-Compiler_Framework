@@ -858,12 +858,14 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   (nie sein Ergebnis) bleibt in `~/.llm-framework/jobs/` für GUI und CLI.
 - **Wem ein Build gehört:** Jede Verbindung (eine stdio-Sitzung; bei HTTP der ganze Server, bis es benannte Tokens
   gibt) besitzt die Builds und Jobs, die sie startet. Eigene darf sie ohne Frage abbrechen; einen Build oder Job
-  eines anderen Clients abzubrechen fragt dich (außer du hast das Tool auf „allow“ gestellt). `get_build_status`
-  zeigt die Aufruferklasse, die einen Build gestartet hat (`mcp`, `ditto`).
+  eines anderen Clients abzubrechen folgt deinen Tool-Berechtigungen (standardmäßig fragt es dich).
+  `get_build_status` zeigt die Aufruferklasse, die einen Build gestartet hat (`mcp`, `ditto`).
 - **Wenn ein Client die Verbindung trennt:** Die Builds und Jobs, die seine Sitzung gestartet hat, werden
   abgebrochen, jeweils mit einem Audit-Eintrag („client disconnected“); der Server wartet bis zu 30 Sekunden, bis
   ihre Container gestoppt sind, und fährt dann das Framework herunter, damit kein Build ohne Besitzer weiterläuft.
-  HTTP-Builds gehören dem Server und werden abgebrochen, wenn er endet.
+  Das gilt auch, wenn der Client einen stdio-Server mit SIGTERM beendet (wie Clients es tun, wenn er einige Sekunden
+  nach dem Schließen seiner Eingabe nicht beendet ist). HTTP-Builds gehören dem Server und werden abgebrochen, wenn
+  er endet.
 - **Transporte:** stdio (Standard; der Client startet den Server) oder Streamable HTTP nur auf einer
   Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). HTTP prüft Host und Origin und
   braucht ein Bearer-Token, das pro Benutzer in `~/.llm-framework/mcp_http_token` angelegt wird.

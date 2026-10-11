@@ -337,7 +337,8 @@ sequenceDiagram
    progress every 5 s when the client gave a progress token), then runs through the registry once; cancelling the
    wait leaves the build or job alone. When the session ends, its unfinished builds and jobs are cancelled and
    audited as `cancelled` ("client disconnected"), the server waits up to 30 s for build containers to stop, and
-   `llm-cli mcp serve` then shuts the framework down.
+   `llm-cli mcp serve` then shuts the framework down. Over stdio a SIGTERM from the client ends the session the
+   same way (it interrupts the server like Ctrl+C instead of ending the process at once).
 
 The thirteen tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
 `read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `get_job_status` (tier `read`) and

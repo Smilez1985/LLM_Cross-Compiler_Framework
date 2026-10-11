@@ -450,6 +450,34 @@ def no_programs_from_the_working_directory() -> None:
         os.environ["NoDefaultCurrentDirectoryInExePath"] = "1"
 
 
+@contextlib.contextmanager
+def _sigterm_ends_the_session():
+    """Clients stop a stdio server by closing its input and, when it has not ended a few seconds later (some right
+    away), with SIGTERM, then SIGKILL. Python's default for SIGTERM ends the process at once, so the lifespan would
+    never cancel the session's builds and jobs. Here SIGTERM interrupts the server like Ctrl+C: the main task is
+    cancelled and the shielded cleanup runs; a second SIGTERM is ignored while it does (SIGKILL still ends it)."""
+    import signal
+    import threading
+    if threading.current_thread() is not threading.main_thread() or not hasattr(signal, "SIGTERM"):
+        yield
+        return
+
+    def interrupt(signum, frame):
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        handler = signal.getsignal(signal.SIGINT)
+        if callable(handler) and handler is not interrupt:
+            handler(signal.SIGINT, frame)  # asyncio's runner cancels its main task (default handler: raises)
+        else:
+            raise KeyboardInterrupt
+
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        yield
+    finally:
+        with contextlib.suppress(TypeError, ValueError):
+            signal.signal(signal.SIGTERM, previous)
+
+
 def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765) -> None:
     """Runs the server until the client (stdio) or the process (HTTP) ends it. The session's builds and jobs are
     cancelled by the lifespan; afterwards the framework is shut down, so nothing is left without an owner."""
@@ -459,7 +487,10 @@ def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: in
             _logging_to_stderr()
             stdout = sys.stdout
             try:
-                server.run("stdio")
+                with _sigterm_ends_the_session():
+                    server.run("stdio")
+            except KeyboardInterrupt:  # SIGTERM or Ctrl+C: the session's cleanup has run
+                logger.info("MCP server stopped by a signal; the session's builds and jobs were cancelled.")
             finally:
                 _stdout_fd_to_stderr(stdout)
             return
