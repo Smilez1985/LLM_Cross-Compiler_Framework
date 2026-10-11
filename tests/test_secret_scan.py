@@ -59,6 +59,7 @@ SAMPLES = {
     "Stripe key": "sk" + "_live_" + body(30),
     "PyPI token": "pypi-" + "AgE" + body(60),
     "age secret key": "AGE-SECRET-" + "KEY-1" + body(58, "QPZRY9X8GF2TVDW0S3JN54KHCE6MUA7L"),
+    "MCP token": "lcf_" + "mcp_" + body(43, ALNUM + "_-"),
     "JSON web token": "ey" + "J" + body(24) + ".ey" + "J" + body(40) + "." + body(43),
     "private key": "-----BEGIN OPENSSH " + "PRIVATE KEY-----",
     "certificate": "-----BEGIN " + "CERTIFICATE-----",

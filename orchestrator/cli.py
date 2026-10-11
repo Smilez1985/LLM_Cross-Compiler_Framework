@@ -2008,7 +2008,7 @@ def mcp():
 
 @mcp.command('serve')
 @click.option('--transport', type=click.Choice(['stdio', 'http']), default='stdio', show_default=True,
-              help='stdio: started by the client (default). http: local Streamable HTTP with a bearer token.')
+              help='stdio: started by the client (default). http: local Streamable HTTP with a named token per client.')
 @click.option('--host', default='127.0.0.1', show_default=True, help='HTTP only; loopback addresses only')
 @click.option('--port', default=8765, show_default=True, type=int, help='HTTP only')
 @pass_context
@@ -2140,7 +2140,7 @@ def mcp_token():
 @click.argument('name')
 @click.option('--policy-from', 'policy_from',
               help="Start with a copy of another caller's permissions: mcp (local stdio clients), ditto, or a "
-                   "token name. Default: read only")
+                   "token name (mcp:NAME is always a token). Default: read only")
 @click.option('--link', type=click.Choice(['ditto']),
               help="Use Ditto's permissions by reference (Ditto on another computer); changes apply at once")
 @pass_context
@@ -2155,8 +2155,10 @@ def mcp_token_add(ctx: FrameworkContext, name: str, policy_from: Optional[str], 
         console.print("[red]Use either --policy-from or --link.[/red]")
         sys.exit(2)
     if policy_from:
-        source = policy_from[len(ACTOR_PREFIX):] if policy_from.startswith(ACTOR_PREFIX) else policy_from
-        if source in ("mcp", "ditto"):
+        # "mcp:<name>" (a token's audit actor) is always a token, also one named like a caller ("mcp", "ditto").
+        named_token = policy_from.startswith(ACTOR_PREFIX)
+        source = policy_from[len(ACTOR_PREFIX):] if named_token else policy_from
+        if not named_token and source in ("mcp", "ditto"):
             if registry.policy_store.problem:
                 console.print(f"[red]{escape(registry.policy_store.problem)}[/red]")
                 sys.exit(1)

@@ -183,31 +183,36 @@ class ClientTracker:
     name and version as it reports them, protocol version, transport, caller and declared capabilities, so you
     can see which client can ask you (elicitation).
 
-    The caller of an HTTP request is the named token TokenAuth checked for that request; over stdio it is
-    `caller` ("mcp", or "mcp:<name>" from LCF_MCP_TOKEN), and `still_valid` refuses every request once that
-    token was revoked or rotated."""
+    The caller of an HTTP request is the named token TokenAuth checked for that request (a server built for HTTP
+    never falls back to the shared caller); over stdio it is `caller` ("mcp", or "mcp:<name>" from LCF_MCP_TOKEN),
+    and `still_valid` refuses every request once that token was revoked or rotated. `refused(caller, params,
+    detail)` records a tool call refused that way in the audit log."""
 
     MAX_REMEMBERED = 256
+    TOKEN_ENDED = (f"The MCP token this server was started with ({ENV_VAR}) was revoked or rotated, so it accepts no "
+                   "more requests. Put the current token into the client's server entry and restart the client.")
 
     def __init__(self, transport: str = "stdio", stream=None, caller: str = "mcp",
-                 still_valid: Optional[Callable[[], bool]] = None):
+                 still_valid: Optional[Callable[[], bool]] = None,
+                 refused: Optional[Callable[[str, Any, str], None]] = None):
         self.transport = transport
         self._stream = stream  # None: sys.stderr at the time of writing (stdio moves stdout there)
         self.default_caller = caller
         self.still_valid = still_valid
+        self.refused = refused
         self._seen: set = set()
         self._lock = threading.Lock()
 
     def caller(self, ctx) -> str:
-        if ctx.request is not None:
+        if ctx.request is not None or self.transport == "http":
             caller = (getattr(ctx.request, "scope", None) or {}).get(CALLER_SCOPE_KEY)
             if not caller:  # served without TokenAuth in front: nobody checked a token
                 raise _refusal("This HTTP request carries no checked MCP token; it is refused.")
             return caller
         if self.still_valid is not None and ctx.request_id is not None and not self.still_valid():
-            raise _refusal(f"The MCP token this server was started with ({ENV_VAR}) was revoked or rotated, so it "
-                           "accepts no more requests. Put the current token into the client's server entry and "
-                           "restart the client.")
+            error = _refusal(self.TOKEN_ENDED)
+            error.token_ended = True
+            raise error
         return self.default_caller
 
     def label(self, ctx) -> Optional[ClientLabel]:
@@ -237,7 +242,16 @@ class ClientTracker:
             print(line, file=self._stream or sys.stderr, flush=True)
 
     async def __call__(self, ctx, call_next):
-        caller = self.caller(ctx)
+        try:
+            caller = self.caller(ctx)
+        except Exception as e:
+            if getattr(e, "token_ended", False) and ctx.method == "tools/call" and self.refused is not None:
+                import anyio.to_thread
+                try:  # every call is audited, also one refused before it reached the registry
+                    await anyio.to_thread.run_sync(self.refused, self.default_caller, ctx.params, self.TOKEN_ENDED)
+                except Exception as audit_error:  # never hide the refusal itself
+                    logger.warning(f"Could not audit a refused call: {audit_error}")
+            raise
         label = self.label(ctx)
         if label is not None:
             self._note(label, caller)
@@ -352,6 +366,20 @@ def _audit_rejection(registry: ToolRegistry, name: str, arguments: Any, error: E
     registry.refuse(name, arguments, ToolContext(current_caller()), outcome=outcome, detail=detail)
 
 
+def _audit_refused_call(registry: ToolRegistry, caller: str, params: Any, detail: str) -> None:
+    """A tools/call that ClientTracker refused before it reached the registry (the stdio token was revoked or
+    rotated): recorded as denied, like every other call."""
+    from collections.abc import Mapping
+    params = params if isinstance(params, Mapping) else {}
+    name = str(params.get("name") or "")
+    try:
+        registry.get(name)
+    except ToolError:
+        return  # not a registry tool, nothing to record
+    registry.refuse(name, params.get("arguments"), ToolContext(caller), outcome="denied", detail=detail,
+                    decision=Decision.DENY)
+
+
 def _permissions_command(actor: str) -> str:
     if actor.startswith(ACTOR_PREFIX):
         return f"llm-cli tools permissions --token {actor[len(ACTOR_PREFIX):]}"
@@ -383,7 +411,8 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
     server = AuditedServer(SERVER_NAME, title="LLM Cross-Compiler Framework", instructions=INSTRUCTIONS,
                            version=getattr(getattr(framework, "info", None), "version", "") or "",
                            lifespan=lifespan,
-                           middleware=[ClientTracker(transport, caller=caller, still_valid=still_valid)])
+                           middleware=[ClientTracker(transport, caller=caller, still_valid=still_valid,
+                                                     refused=lambda *args: _audit_refused_call(registry, *args))])
     for spec in registry.list():
         server.add_tool(make_tool_function(spec, registry), name=spec.name, title=spec.title,
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
@@ -409,7 +438,8 @@ class TokenAuth:
     - the `Host` header must name a loopback address with this server's port (421);
     - `Authorization: Bearer <token>` must be a named token from the token store (401 otherwise; a revoked or
       rotated token stops working at once). The token's name becomes the caller (`mcp:<name>`) of this request,
-      and the SDK binds each session to it, so one token cannot use another token's session."""
+      and the SDK binds each session and each pending question round to it, so one token cannot use another
+      token's session or answer the question another token was asked."""
 
     def __init__(self, app, tokens: TokenStore, hosts: List[str]):
         self.app = app
@@ -446,12 +476,18 @@ class TokenAuth:
         if record is None:
             await self._reject(send, 401, "unauthorized", [(b"www-authenticate", b"Bearer")])
             return
+        from mcp.server.auth.middleware.auth_context import auth_context_var
         from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
         from mcp.server.auth.provider import AccessToken
         caller = ACTOR_PREFIX + record.name
-        # The SDK binds a session to the principal that opened it ("user"); never the token itself.
+        # The SDK binds a session (handshake protocols) to the principal that opened it ("user"), and the sealed
+        # requestState of a 2026-07-28 question round to the principal in its auth context; never the token itself.
         user = AuthenticatedUser(AccessToken(token=caller, client_id=caller, scopes=[]))
-        await self.app({**scope, CALLER_SCOPE_KEY: caller, "user": user}, receive, send)
+        bound = auth_context_var.set(user)
+        try:
+            await self.app({**scope, CALLER_SCOPE_KEY: caller, "user": user}, receive, send)
+        finally:
+            auth_context_var.reset(bound)
 
 
 def http_app(server, tokens: TokenStore, host: str = "127.0.0.1", port: int = 8765):

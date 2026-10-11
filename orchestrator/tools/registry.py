@@ -128,11 +128,12 @@ class ToolRegistry:
             raise ToolInputError(f"Invalid arguments for {spec.name}: {problems}") from None
 
     def refuse(self, name: str, arguments: Optional[Dict[str, Any]], ctx: ToolContext,
-               outcome: str = "not_confirmed", detail: str = "") -> None:
+               outcome: str = "not_confirmed", detail: str = "", decision: Optional[Decision] = None) -> None:
         """Audits a call that was refused before it could reach call(), e.g. because it could not be
-        confirmed. Nobody approved it, so `approved` stays NULL."""
+        confirmed. Nobody approved it, so `approved` stays NULL. `decision`: when the refusal was not the
+        policy's (e.g. the caller's token ended); otherwise the policy decides what is recorded."""
         spec = self.get(name)
-        self._audit(ctx, spec, self.decide(spec, ctx.actor), outcome, arguments, detail=detail)
+        self._audit(ctx, spec, decision or self.decide(spec, ctx.actor), outcome, arguments, detail=detail)
 
     def call(self, name: str, arguments: Optional[Dict[str, Any]], ctx: ToolContext,
              approved: Optional[bool] = None) -> BaseModel:

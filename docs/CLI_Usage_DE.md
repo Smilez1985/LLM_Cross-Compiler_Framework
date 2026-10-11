@@ -808,7 +808,8 @@ Tools ohne Nachfrage, alles andere fragt (oder wird abgelehnt, wenn der Client n
 
 Mit `--transport http` lauscht der Server auf `http://<Host>:<Port>/mcp`, und jede Anfrage braucht
 `Authorization: Bearer <Token>` mit einem [benannten Token](#mcp-token); der Server startet nicht, bevor es eins gibt,
-oder wenn andere Benutzer die Token-Datei lesen können. Anfragen mit `Origin`-Header (Webseiten, CORS-Preflights)
+und kein Token wird angenommen (und der Server startet nicht), solange andere Benutzer die Token-Datei lesen oder
+ändern können oder sie einem anderen Benutzer gehört. Anfragen mit `Origin`-Header (Webseiten, CORS-Preflights)
 werden abgelehnt, der `Host`-Header muss `127.0.0.1`, `localhost` oder `[::1]` mit dem Port des Servers sein, und der
 Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Die alte gemeinsame Token-Datei
 `mcp_http_token` wird nicht mehr akzeptiert.
@@ -866,7 +867,7 @@ Menschen an einem Terminal (`add` und `rotate` geben außerdem nur auf ein Termi
 | Befehl / Option | Bedeutung |
 |---|---|
 | `add NAME` | Legt ein Token an, das nur lesen darf, bis du mit `tools permissions --token NAME` mehr erlaubst. |
-| `--policy-from CALLER` | Beginnt mit einer Kopie der Berechtigungen eines anderen Aufrufers: `mcp` (lokale stdio-Clients), `ditto` oder ein Token-Name. Spätere Änderungen der Quelle gelten nicht. |
+| `--policy-from CALLER` | Beginnt mit einer Kopie der Berechtigungen eines anderen Aufrufers: `mcp` (lokale stdio-Clients), `ditto` oder ein Token-Name; `mcp:NAME` meint immer ein Token, auch eins namens `mcp` oder `ditto`. Spätere Änderungen der Quelle gelten nicht. |
 | `--link ditto` | Nutzt Dittos Berechtigungen per Verweis, für Ditto auf einem anderen Rechner: Eine Änderung an Dittos Berechtigungen gilt sofort. |
 | `list` | Namen, Audit-Akteure, Berechtigungen, Zeit des Anlegens und Rotierens; nie ein Token oder sein Hash. |
 | `rotate NAME` | Ein neues Token für denselben Namen und dieselben Berechtigungen; das alte funktioniert sofort nicht mehr. |
