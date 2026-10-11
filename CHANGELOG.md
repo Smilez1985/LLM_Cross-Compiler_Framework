@@ -334,6 +334,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `<NAME>_REPO_OVERRIDE`; plain URLs stored by earlier versions are passed on as well.
 - A settings file given with `-c` that cannot be read no longer drops the `LLM_FRAMEWORK_*` variables as well: it
   is named on stderr and ignored, and the other settings apply.
+- The GUI's hardware scan of this PC (**Scan / Import...**) writes its result into `<cache_dir>/probes/` instead of
+  the GUI's working folder, and the module wizard's *Auto-fill from Probe Result* reads it there.
 - `llm-cli targets list` shows each target's id (the value for `--target`), name, boards and formats from its
   capabilities instead of placeholders; `llm-cli targets validate` checks the capabilities block against the
   schema and prints every error (exit code 1).
