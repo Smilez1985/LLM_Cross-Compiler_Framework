@@ -199,7 +199,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   method a sign-in remembered (such as the `ant` profile), so it is not left unused.
 - `llm-cli secrets set --with-token` reads the value from stdin.
 - **Cancel Build** in the Builder tab: cancels the running build through the build service after a confirmation
-  (enabled only while the build the tab started runs); the log says when it has stopped.
+  (enabled only while the build the tab started runs); the log says when it has stopped, also after a cancel
+  while the build was still being handed to the build engine.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -320,8 +321,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   a build whose program ended before it finished is shown as interrupted. The command needs neither the credential
   vault nor Docker; `--all` lists every kept build instead of the 20 newest.
 - Ctrl+C in `llm-cli build start` cancels the build through the build service: its container is stopped, the CLI
-  waits until the build has stopped, says so and exits with code 130. Before, the build and its container kept
-  running.
+  waits until the build has stopped (also when it was still being handed to the build engine), says so and exits
+  with code 130. Before, the build and its container kept running.
 - `llm-cli scan --output FILE` reaches the hardware probe (`hardware_probe.sh --output`,
   `hardware_probe.ps1 -OutputFile`), which always wrote `target_hardware_config.txt` into the current folder. On
   Windows without administrator rights the CLI waits for the probe's elevated restart instead of reporting at once
