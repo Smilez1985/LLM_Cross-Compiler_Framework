@@ -323,6 +323,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
   `config/` folder in the working directory.
 - The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).
+- `scripts/sync_ssot.py` uses the real file `configs/detailed_project_sources.yml` (it created a copy named
+  `detailed_project.sources.yml` instead) and works from any folder. It lists the differences, and with `--write`
+  it changes only those values; comments and layout stay (it rewrote the whole file with `yaml.dump`).
+- The header of `configs/project_sources.yml` says who reads the file (no part of the framework while it runs; the
+  two SSOT scripts), and its outdated roadmap section (v2.2 to v2.4) is gone.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped

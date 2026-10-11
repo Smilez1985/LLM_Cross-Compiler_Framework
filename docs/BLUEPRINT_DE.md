@@ -794,9 +794,8 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
   (`v0.6.0`), und die venvs im Image haben keine Lock-Dateien mit Hashes. Geplant für 3.4.0.
 - **Image-Builds haben Netzwerk.** Das ist Absicht (sie laden Werkzeugketten); nur die Umwandlungsstufen sind
   offline.
-- **Der Katalog der Projektquellen** (`configs/project_sources.yml`) wird zur Laufzeit nicht gelesen, und sein
-  Abgleichskript hat Fehler; siehe [SSOT_ARCHITECTURE_DE.md](../configs/SSOT_ARCHITECTURE_DE.md). Korrekturen sind
-  für 3.4.0 geplant.
+- **Der Katalog der Projektquellen** (`configs/project_sources.yml`) wird zur Laufzeit nicht gelesen; er ist eine
+  Referenz für Entwickler (siehe [SSOT_ARCHITECTURE_DE.md](../configs/SSOT_ARCHITECTURE_DE.md)).
 
 ## Wichtige Entscheidungen
 
@@ -960,7 +959,7 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
 | **Signierte Updates.** | geplant |
 | **Aufräumen**: Entfernung der alten Vier-Module-Skripte und eine Target-Vorlage, die zur aktuellen Pipeline passt (Capabilities-Block, GGUF über llama.cpp, Zwischendateien im Arbeitsordner). | geplant |
-| **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | geplant |
+| **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
 
 ### Später (geplant)
 
