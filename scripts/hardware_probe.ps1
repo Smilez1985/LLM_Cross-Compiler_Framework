@@ -597,9 +597,9 @@ if (-not $NoToolchain) {
         Put 'TOOL_CC' $cc '^(gcc|clang|appleclang|msvc|icx)-[0-9]{1,4}(\.[0-9]{1,6}){0,3}$' -Quiet
         Put 'TOOL_CXX' $cc '^(gcc|clang|appleclang|msvc|icx)-[0-9]{1,4}(\.[0-9]{1,6}){0,3}$' -Quiet
     }
+    $text = Tool-Text (Invoke-Tool 'python' @('--version'))
+    if ($text -match '(?m)^Python (\d+(\.\d+){1,3})') { Put 'TOOL_PYTHON' $Matches[1] $P_Version -Quiet }
 }
-$text = Tool-Text (Invoke-Tool 'python' @('--version'))
-if ($text -match '(?m)^Python (\d+(\.\d+){1,3})') { Put 'TOOL_PYTHON' $Matches[1] $P_Version -Quiet }
 
 # --- the result ----------------------------------------------------------------------------------------------------
 if ($script:Warnings.Count -gt 0) { Put 'PROBE_WARNINGS' ($script:Warnings -join ',') }

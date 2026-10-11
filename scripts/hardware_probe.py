@@ -1364,7 +1364,9 @@ class Probe:
     def _soc(self):
         if self.os not in ("linux", "android"):
             return
-        compatible = [c for c in (self._device_tree("compatible") or "").split("\0") if c.strip()]
+        # NUL-separated strings; a line break inside one (never in a real device tree) separates as well, as in the
+        # .sh, so the last entry is the same for both probes.
+        compatible = [c for c in re.split("[\0\n]", self._device_tree("compatible") or "") if c.strip()]
         if compatible:
             vendor, _, model = compatible[-1].strip().lower().partition(",")
             if model:
@@ -1399,15 +1401,15 @@ class Probe:
         return found
 
     def _rknpu_node(self):
-        """The Rockchip NPU node: /dev/rknpu, a DRM node of the vendor rknpu driver, or an accel node of the mainline
-        rocket driver (driver names unverified on a board)."""
+        """The Rockchip NPU node: /dev/rknpu, a DRM node of the vendor rknpu driver (its platform driver is named
+        "RKNPU"; compared without case), or an accel node of the mainline rocket driver (unverified on a board)."""
         if self.exists("/dev/rknpu"):
             return "/dev/rknpu"
         drm = self.path("/sys/class/drm")
         for pattern in ("renderD*", "card*"):
             for node in sorted(glob.glob(os.path.join(glob.escape(drm), pattern))):
                 name = os.path.basename(node)
-                if "-" not in name and _link_name(os.path.join(node, "device", "driver")) == "rknpu":
+                if "-" not in name and (_link_name(os.path.join(node, "device", "driver")) or "").lower() == "rknpu":
                     return "/dev/dri/" + name
         accel = self.path("/sys/class/accel")
         for node in sorted(glob.glob(os.path.join(glob.escape(accel), "accel[0-9]*"))):
@@ -1416,7 +1418,9 @@ class Probe:
         return None
 
     def _rknpu_driver_version(self):
-        for source in ("/sys/module/rknpu/version", "/sys/kernel/debug/rknpu/version", "/proc/debug/rknpu/version"):
+        """The vendor rknpu driver's version: its module version, its world-readable procfs node (/proc/rknpu/version,
+        "RKNPU driver: v0.9.6") or its debugfs node (root only)."""
+        for source in ("/sys/module/rknpu/version", "/proc/rknpu/version", "/sys/kernel/debug/rknpu/version"):
             version = first_number(self.read(source, 4096) or "", 4)
             if version and check_value(KEYS["RKNPU_DRIVER_VERSION"], version):
                 return version
@@ -1655,7 +1659,7 @@ class Probe:
             if clang:
                 match = re.search(r"clang version (\d+(?:\.\d+){0,3})", clang)
                 self.put("TOOL_CLANG", match.group(1) if match else None, warn_invalid=False)
-        self.put("TOOL_PYTHON", platform.python_version())
+        self.put("TOOL_PYTHON", python_version())
 
     # --- the result ---
 
@@ -1750,6 +1754,13 @@ def windows_feature_value(arch, key, constant, min_build, build, ask):
     if answer is False and build and min_build is not None and build >= min_build:
         return "OFF"
     return "UNKNOWN"
+
+
+def python_version(info=None):
+    """major.minor.micro of this Python (a pre-release such as 3.14.0rc1 gives 3.14.0, as `python3 --version` read by
+    the .sh does)."""
+    info = sys.version_info if info is None else info
+    return "{}.{}.{}".format(info[0], info[1], info[2])
 
 
 def compiler_id(banner):
