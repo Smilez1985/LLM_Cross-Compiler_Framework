@@ -65,7 +65,7 @@ leiten jede Designentscheidung.
 
 | Grundsatz | Was das praktisch heißt |
 |---|---|
-| **Lokal zuerst** | Umwandlungen laufen auf deinem Rechner in Docker. Modelle werden auf dem Host heruntergeladen, die Umwandlungs-Container haben kein Netzwerk. Die Wissensbasis berechnet ihre Embeddings und ihr Reranking lokal, und Ditto kann ganz offline mit einem lokalen Modell arbeiten. Außer Downloads verlässt nichts deinen Rechner, es sei denn, du wählst für Ditto einen Cloud-KI-Anbieter (dann greift der Datenschutzfilter, siehe [Sicherheitsmodell](#sicherheitsmodell)), schaltest die anonymen Fehlerberichte ein (`enable_telemetry`, standardmäßig aus) oder gibst selbst ein Community-Paket weiter (das Framework bereitet es nur vor; es lädt nie etwas hoch). |
+| **Lokal zuerst** | Umwandlungen laufen auf deinem Rechner in Docker. Modelle werden auf dem Host heruntergeladen, die Umwandlungs-Container haben kein Netzwerk. Die Wissensbasis berechnet ihre Embeddings und ihr Reranking lokal, und Ditto kann ganz offline mit einem lokalen Modell arbeiten. Außer Downloads verlässt nichts deinen Rechner, es sei denn, du wählst für Ditto einen Cloud-KI-Anbieter (dann greift der Datenschutzfilter, siehe [Sicherheitsmodell](#sicherheitsmodell)), schaltest die anonymen Fehlerberichte ein (`enable_telemetry`, standardmäßig aus) oder öffnest mit einem Community-Paket einen Pull-Request (das Framework bereitet das Paket vor; die GitHub-CLI oder der Browser verschickt es mit ihren eigenen Zugangsdaten). |
 | **Laienfreundlich** | Die GUI bietet nur an, was das gewählte Target kann, die CLI lehnt alles andere ab, und beide setzen sinnvolle Vorgaben je Board (zum Beispiel Q4_0 auf dem RK3566). `llm-cli doctor` erklärt Probleme mit Lösungshinweisen. KI-Fehler werden in klaren Worten erklärt (etwa, dass ein Claude-API-Schlüssel, der in jedem Workspace gilt, die Workspace-ID braucht). Vorschläge des Self-Healing warten auf deine Entscheidung. |
 | **Sicher von Haus aus** | Die Umwandlungs-Sandbox ist eingeschaltet (`build_sandbox: true`). KI-Clients und Ditto dürfen frei lesen, müssen aber fragen, bevor sie etwas ändern. Neuen SSH-Geräten wird erst vertraut, wenn du ihren Fingerabdruck bestätigt hast. Passwörter werden nie gespeichert. Von einer KI vorgeschlagener Text wird nie ausgeführt. Der Crawler beachtet jeden maschinenlesbaren Nutzungsvorbehalt einer Seite, und kein Schalter hebt das auf. Community-Pakete werden erst nach Prüfungen in einem Quarantäneordner und nach deiner Bestätigung installiert. |
 | **Daten statt Code** | Was ein Target bauen kann, steht in seiner `target.yml` (Block `capabilities:`, von einem Schema geprüft). KI-Anbieter sind Vorlagen in `configs/llm_providers.yml`, der lokale Modellserver und seine Modelle sind in `configs/llama_runtime.yml` festgelegt, Dittos Evaluationsfälle stehen in `evals/ditto/cases.yml`, Korpus und Fälle der Abruf-Evaluation in `evals/retrieval/` und die vertrauenswürdigen Community-Schlüssel in `configs/community_keys.yml`. Ein neues Board, ein neues Modell oder ein OpenAI-kompatibler Server ist eine Datenänderung, solange der Code dahinter das unterstützt. |
@@ -78,7 +78,7 @@ der alle anderen Teile startet und miteinander verbindet. Ein Build-Auftrag land
 Docker-Image für das Target baut und die Umwandlung in abgeschotteten Containern ausführt. Das fertige Modell liegt
 danach in `output/`, und der `DeploymentManager` kopiert es auf das Gerät. Ditto spricht mit KI-Anbietern nur über
 die Anbieterschicht und nutzt dieselbe Tool-Registry wie der MCP-Server. Deep Ingest, das nur die GUI starten kann,
-schickt den Crawler für die Wissensbasis auf öffentliche Webseiten; der Community-Zoo installiert signierte Pakete
+schickt den Crawler für die Wissensbasis auf öffentliche Webseiten; der Community-Zoo installiert Community-Pakete
 nach `targets/`, in den Rezeptordner und in die Wissensbasis.
 
 ```mermaid
@@ -193,7 +193,7 @@ flowchart TB
 | Deep-Ingest-Hinweis und Sprachansagen (unveröffentlicht) | `orchestrator/utils/crawl_notice.py`, `orchestrator/utils/announce.py` | Der einmalige Hinweis vor dem ersten Deep Ingest, je Benutzer gemerkt, und kurze Ansagen über die Sprachausgabe des Betriebssystems. |
 | Community-Zoo (unveröffentlicht) | `orchestrator/Core/community_manager.py`, `orchestrator/Core/community_pack.py`, `orchestrator/schemas/recipes.py`, `orchestrator/gui/community_hub.py`, `configs/community_keys.yml` | Signierte und verschlüsselte Community-Pakete (Targets, Rezepte, Wissen), der signierte Community-Index, die Installation über eine Quarantäne mit Vertrauensstufen, der Export mit Datenschutz-Bereinigung und die Übergabe an einen Pull-Request (siehe [Community-Pakete](#community-pakete-format-vertrauen-und-austausch-unveröffentlicht)). |
 | Eingabe-Historie (unveröffentlicht) | `orchestrator/utils/input_history.py` | Zuletzt verwendete Werte der GUI-Eingabefelder, je Benutzer und ohne Geheimnisse (siehe [Zuletzt verwendete Eingaben](#zuletzt-verwendete-eingaben-unveröffentlicht)). |
-| Doctor | `orchestrator/Core/doctor.py` | Deterministische Gesundheitsprüfungen (Python, Docker und BuildKit, Speicherplatz, Targets, Rechte des Zustandsordners, Secrets und Schlüsselbund, Tool-Berechtigungen und Audit-Log, Kalibrierdaten) mit festen Codes, Lösungshinweisen und gestuften automatischen Korrekturen. |
+| Doctor | `orchestrator/Core/doctor.py` | Deterministische Gesundheitsprüfungen (Python, Docker und BuildKit, Speicherplatz, Targets, Rechte des Zustandsordners, Secrets und Schlüsselbund, Tool-Berechtigungen und Audit-Log, Kalibrierdaten, installierte Community-Pakete) mit festen Codes, Lösungshinweisen und gestuften automatischen Korrekturen. |
 | Kalibrierdaten | `data/calibration/`, `orchestrator/utils/calibration.py` | Kuratierter deutscher, englischer und Tool-Nutzungs-Text (MIT-Lizenz) mit SHA256-Prüfung, für Importance-Matrizen. |
 | Umgang mit nicht vertrauenswürdigem Text | `orchestrator/utils/untrusted.py` | Bereinigt und verpackt externen Text, bevor er ein Sprachmodell erreicht. |
 
@@ -217,7 +217,7 @@ ihn zur Laufzeit nicht; wofür jede Datei in `configs/` da ist, steht in
 | `models/ditto/` | Dittos lokale GGUF-Modelle mit je einer Markierung `.verified.json` (unveröffentlicht). |
 | `models/embeddings/` | Embedding- und Reranking-Modelle der Wissensbasis (unveröffentlicht). |
 | `community/` | Installierte Community-Rezepte (`recipes/`) und Wissenspakete (`knowledge/`), jeweils mit einer `.lcf-provenance.json`, und die Pakete, die du exportierst (`contributions/`). Community-Targets werden nach `targets/` installiert. Ein Ordner `.quarantine/` in einem Installationsordner enthält ein Paket nur, solange es geprüft wird (unveröffentlicht). |
-| `~/.llm-framework/` (oder `LLM_FRAMEWORK_HOME`) | `secrets.store` (auch dein Community-Schlüsselpaar), `tool_policy.json`, `audit.db` mit `audit.db.anchor`, `known_hosts`, der SSH-Schlüssel des Frameworks `id_ed25519_llm_framework` (+ `.pub`), `mcp_http_token`, `chat_history.json`, `llm_privacy_key` und `llm_install_id`; `crawl_notice.json` und `input_history.json` (unveröffentlicht); der zwischengespeicherte Community-Index `community/index.json` mit `index.json.sig` und die gemerkten Autorenschlüssel `community/authors.json` (unveröffentlicht); die eingebettete Wissensbasis `qdrant/` und `knowledge_snapshots/`; der lokale Modellserver unter `runtime/llama.cpp/` (Builds, `active.json`, `server.json`, die Schlüsseldatei, solange der Server läuft) und sein Log in `logs/llama-server.log`. |
+| `~/.llm-framework/` (oder `LLM_FRAMEWORK_HOME`) | `secrets.store` (auch deine Community-Schlüsselpaare), `tool_policy.json`, `audit.db` mit `audit.db.anchor`, `known_hosts`, der SSH-Schlüssel des Frameworks `id_ed25519_llm_framework` (+ `.pub`), `mcp_http_token`, `chat_history.json`, `llm_privacy_key` und `llm_install_id`; `crawl_notice.json` und `input_history.json` (unveröffentlicht); der zwischengespeicherte Community-Index `community/index.json` mit `index.json.sig` und die bei der ersten Installation gemerkten Schlüssel-IDs der Autoren, `community/authors.json` (unveröffentlicht); die eingebettete Wissensbasis `qdrant/` und `knowledge_snapshots/`; der lokale Modellserver unter `runtime/llama.cpp/` (Builds, `active.json`, `server.json`, die Schlüsseldatei, solange der Server läuft) und sein Log in `logs/llama-server.log`. |
 | Einstellungsordner (meist `configs/`) | `config.yml` (Benutzereinstellungen); auf Wunsch eine eigene `llm_providers.yml`, die Anbietervorlagen ergänzt oder ersetzt. |
 
 `cache/`, `output/` und `models/` sind relativ zum Installationsordner, sofern die Einstellungen `cache_dir`,
@@ -420,31 +420,38 @@ der Inhaber der Website maschinenlesbar „kein Text- und Data-Mining“ erklär
 Das musst du nicht selbst beurteilen.
 
 1. **Start.** Deep Ingest startet nur aus der GUI: Der Modul-Assistent (Tools > Create Hardware Module...) hat den
-   Knopf „Deep Ingest (Add Docs)“. Die CLI hat keinen Crawl-Befehl, und MCP-Clients und Ditto haben kein Tool,
-   das crawlt oder eine URL annimmt. Der Test `TestCrawlsStayWithTheUser` in `tests/test_security.py` schlägt
-   fehl, wenn Code des MCP-Servers, von Ditto, der Tools oder der Anbieterschicht den Crawler erreicht.
-2. **Hinweis.** Vor dem ersten Crawl sagt ein Hinweis, was gelesen wird (nur öffentlich erreichbare Seiten),
-   welche Nutzungsvorbehalte beachtet werden, dass das Wissen auf diesem Rechner bleibt und dass Teilen deine
-   ausdrückliche Freigabe braucht. Er ist eine Information, keine rechtliche Bestätigung, und hat deshalb einen
-   einzigen Knopf, „Verstanden“. Ein kurzer gesprochener Hinweis beginnt, sobald der Hinweis auf dem Bildschirm
-   ist. Die Datei `crawl_notice.json` im Benutzerordner (Modus 0600, atomar geschrieben) hält die Version des
-   Hinweises und einen SHA-256-Hash seines englischen und deutschen Texts fest: Der Hinweis kommt wieder, wenn
-   sich sein Text ändert, und auch, wenn die Datei fehlt oder beschädigt ist.
-3. **Optionen und Snapshot.** Der Deep-Ingest-Dialog nimmt die Start-URLs, die Tiefe, PDF-Downloads und die Pause
-   zwischen Anfragen; die gespeicherten Vorgaben sind `crawler_max_depth` 2, `crawler_max_pages` 50,
-   `crawler_rate_limit` 1,0 Sekunden, `crawler_download_pdfs` true und `crawler_languages` `en` und `de`. Einen
-   Schalter für robots.txt oder einen anderen Nutzungsvorbehalt gibt es nicht. Die Wissensbasis legt zuerst einen
-   Snapshot an, sodass sich ein misslungener Crawl zurückrollen lässt.
+   Knopf „Deep Ingest (Add Docs)“, der die Wissensbasis braucht (`enable_rag_knowledge`). Die CLI hat keinen
+   Crawl-Befehl, und MCP-Clients und Ditto haben kein Tool, das crawlt oder eine URL annimmt. Der Test
+   `TestCrawlsStayWithTheUser` in `tests/test_security.py` schlägt fehl, wenn Code des MCP-Servers, von Ditto, der
+   Tools oder der Anbieterschicht den Crawler erreicht.
+2. **Hinweis.** Vor dem ersten Crawl sagt ein Hinweis, was gelesen wird (nur öffentlich erreichbare Seiten), welche
+   Nutzungsvorbehalte beachtet werden, dass das Wissen auf diesem Rechner bleibt (nur die Auszüge, die Ditto nutzt,
+   gehen an den gewählten KI-Anbieter) und dass Teilen deine ausdrückliche Freigabe braucht. Er ist eine
+   Information, keine rechtliche Bestätigung, und hat deshalb einen einzigen Knopf, „Verstanden“. Ein kurzer
+   gesprochener Hinweis beginnt, sobald der Hinweis auf dem Bildschirm ist. Die Datei `crawl_notice.json` im
+   Benutzerordner (Modus 0600, atomar geschrieben) hält die Version des Hinweises und einen SHA-256-Hash seines
+   englischen und deutschen Texts fest: Der Hinweis kommt wieder, wenn sich sein Text ändert, und auch, wenn die
+   Datei fehlt oder beschädigt ist.
+3. **Optionen und Snapshot.** Der Deep-Ingest-Dialog nimmt die Start-URLs und für diesen Crawl die Tiefe (1 bis 5),
+   PDF-Downloads und die Pause zwischen Anfragen (0 bis 10 Sekunden). Er öffnet mit 2, eingeschaltet und 1 Sekunde
+   und liest die Einstellungen `crawler_max_depth`, `crawler_download_pdfs` und `crawler_rate_limit` nicht; seine
+   Werte entscheiden. Das Seitenlimit `crawler_max_pages` (Vorgabe 50) und die Sprachen `crawler_languages`
+   (Vorgabe `en` und `de`) kommen aus den Einstellungen. Einen Schalter für robots.txt oder einen anderen
+   Nutzungsvorbehalt gibt es nicht. Vor jeder Start-URL speichert die Wissensbasis einen Snapshot von sich in
+   `knowledge_snapshots/` (die letzten fünf bleiben; eine leere Wissensbasis bekommt keinen). Weder die GUI noch
+   die CLI kann einen Snapshot bisher wiederherstellen.
 4. **Prüfungen vor der Anfrage.** Für jede URL, in der Breite zuerst, in dieser Reihenfolge: die SSRF-Prüfung der
-   Adresse (siehe [Sicherheitsmodell](#sicherheitsmodell)), die robots.txt des Hosts (einmal je Host geladen) und
-   die `/.well-known/tdmrep.json` des Ursprungs (einmal je Ursprung geladen). Beide Dateien werden über denselben
+   Adresse (siehe [Sicherheitsmodell](#sicherheitsmodell)), dann bei ausgeschalteten PDF-Downloads das Überspringen
+   einer URL, die auf `.pdf` endet, die robots.txt des Hosts (einmal je Host geladen) und die
+   `/.well-known/tdmrep.json` des Ursprungs (einmal je Ursprung geladen). Beide Dateien werden über denselben
    SSRF-Schutz geladen wie die Seiten, und jeder Weiterleitungsschritt auf dem Weg wird erneut geprüft.
 5. **Anfrage.** Der Assistent zeigt „Seite N von M: <URL>“, und der Crawler wartet die Pause zwischen Anfragen ab
    (ein Stopp verkürzt sie). Die Anfrage folgt keinen Weiterleitungen: Ein Weiterleitungsziel wird eingereiht und
    durchläuft die Schritte 4 und 5 selbst, wird also gegen robots.txt und `tdmrep.json` seines eigenen Hosts
    geprüft. Ein Link, der auf einen anderen Host weiterleitet, wird wie jeder externe Link übersprungen; nur die
    Start-URL darf den Crawl auf einen anderen Host verlegen (etwa von `example.com` nach `www.example.com`). Mehr
-   als fünf Weiterleitungen zählen als Fehler, und ein Crawl stellt höchstens fünfmal `crawler_max_pages` Anfragen.
+   als fünf Weiterleitungen zählen als Fehler, und ein Crawl stellt höchstens fünfmal `crawler_max_pages`
+   Seitenanfragen (das Laden von robots.txt und `tdmrep.json` zählt nicht mit).
 6. **Prüfungen nach der Antwort.** Zuerst der Header `X-Robots-Tag` und der TDMRep-Header `tdm-reservation`; dann
    bei HTML `<meta name="robots">`, `<meta name="llm-conversion-framework-bot">` und
    `<meta name="tdm-reservation">`, bei einem PDF `tdm:reservation` in seinen Metadaten. `noindex`, `none`,
@@ -454,17 +461,19 @@ Das musst du nicht selbst beurteilen.
    erhalten) und nach Sprache gefiltert (`crawler_languages`), ein PDF wird als Text gelesen; jede Seite wird
    sofort gespeichert und ersetzt ihre frühere Fassung. Ein Stopp oder das Schließen des Assistenten beendet den
    Crawl nach der aktuellen Seite; was gespeichert ist, bleibt.
-8. **Ergebnis.** Erst wenn der letzte Schreibvorgang zurückgekehrt ist, nennt das Ergebnis Erfolg (alles
-   gespeichert), Teilerfolg (einige Seiten gespeichert; andere schlugen fehl, waren von der Website vorbehalten,
-   oder der Crawl wurde gestoppt) oder Fehler (nichts gespeichert). Es wird angezeigt, protokolliert und
-   gesprochen. Seiten, die ein Nutzungsvorbehalt, die Adressprüfung, eine Weiterleitung oder der Sprachfilter
-   ausgelassen hat, stehen mit ihrem Grund im Crawl-Protokoll, ebenso Seiten, die sich nicht laden ließen.
+8. **Ergebnis.** Erst wenn der letzte Schreibvorgang zurückgekehrt ist, nennt das Ergebnis Erfolg (Seiten
+   gespeichert; keine schlug fehl oder war von der Website vorbehalten, und der Crawl wurde nicht gestoppt),
+   Teilerfolg (einige Seiten gespeichert; andere schlugen fehl, waren von der Website vorbehalten, oder der Crawl
+   wurde gestoppt) oder Fehler (nichts gespeichert). Es wird angezeigt, protokolliert und gesprochen. Seiten, die
+   ein Nutzungsvorbehalt, die Adressprüfung, ausgeschaltete PDF-Downloads, eine Weiterleitung oder der
+   Sprachfilter ausgelassen hat, stehen mit ihrem Grund im Crawl-Protokoll, ebenso Seiten, die sich nicht laden
+   ließen.
 
 Welche Signale zählen und wann sie gelesen werden:
 
 | Signal | Wann | Regel |
 |---|---|---|
-| robots.txt ([RFC 9309](https://www.rfc-editor.org/rfc/rfc9309)) | vor der Anfrage, einmal je Host | Es zählen die Gruppen, die diesen Crawler nennen (`LLM-Conversion-Framework-Bot`), sonst alle `*`-Gruppen zusammen; Muster mit `*` und `$` wirken; die längste passende Regel entscheidet, bei Gleichstand gewinnt `Allow`. Ein 401, ein 403, ein Serverfehler oder eine unerreichbare Datei heißen „alles verboten“; eine fehlende Datei (404) heißt, alles ist erlaubt. Eine Datei, die der SSRF-Schutz blockiert oder die hinter mehr als fünf Weiterleitungen liegt, gilt als nicht verfügbar, was RFC 9309 als erlaubt behandelt. |
+| robots.txt ([RFC 9309](https://www.rfc-editor.org/rfc/rfc9309)) | vor der Anfrage, einmal je Host | Es zählen die Gruppen, die diesen Crawler nennen (`LLM-Conversion-Framework-Bot`), sonst alle `*`-Gruppen zusammen; Muster mit `*` und `$` wirken; die längste passende Regel entscheidet, bei Gleichstand gewinnt `Allow`. Ein 401, ein 403, ein Serverfehler oder eine unerreichbare Datei heißen „alles verboten“ (bei 401 und 403 ist das strenger als RFC 9309, das Crawlen erlaubt, wenn die Datei mit einem 4xx-Code nicht verfügbar ist); eine fehlende Datei (404) heißt, alles ist erlaubt. Eine Datei, die der SSRF-Schutz blockiert oder die hinter mehr als fünf Weiterleitungen liegt, gilt als nicht verfügbar, was RFC 9309 als erlaubt behandelt. |
 | TDMRep-Datei `/.well-known/tdmrep.json` | vor der Anfrage, einmal je Ursprung | Die erste Regel, deren Ort zum Pfad passt, entscheidet; `"tdm-reservation": 1` behält die Seite vor. Eine fehlende oder unlesbare Datei heißt, die Website nutzt das Protokoll nicht. |
 | Header `X-Robots-Tag` und `tdm-reservation` | nach der Antwort | `noindex`, `none`, `noai`, `noimageai` oder `tdm-reservation: 1` behalten die Seite vor. Anweisungen für andere Crawler (`otherbot: noindex`) werden übergangen. |
 | Robots-Meta-Tags (`robots` und `llm-conversion-framework-bot`), Meta-Tag `tdm-reservation` | nach der Antwort, HTML | wie bei den Headern |
@@ -475,19 +484,18 @@ früheren aufzuheben; der Crawler weicht davon absichtlich ab und bleibt auf der
 Quelle eine Seite vorbehalten, hebt nichts das wieder auf. Keine dieser Prüfungen lässt sich abschalten; die alte
 Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es nicht mehr.
 
-Hinweis und Ergebnis werden auch **gesprochen**, über die Sprachausgabe des Betriebssystems und in der Sprache der
-Oberfläche: Windows PowerShell 5.1 mit System.Speech (aus dem Systemordner gestartet; der Text reist in
-Umgebungsvariablen und wird so nie zu Code), macOS `say` (mit einer installierten Stimme der Sprache, wenn es eine
-gibt), Linux `spd-say`, sonst `espeak-ng` oder `espeak`. Es gibt keine Audiodateien und keine neue Abhängigkeit,
-und die Systemlautstärke wird nie angefasst. Die Ausgabe läuft in einem Hintergrund-Thread, eine Ansage nach der
-anderen, höchstens 300 Zeichen, mit Zeitlimit; sie blockiert den Aufrufer nie und lässt ihn nie scheitern, und
-jede Ansage steht auch im Log. Sie bleibt stumm, wenn die Einstellung `audio_announcements` (Tools > Gesprochene
-Ansagen, in der englischen Oberfläche Spoken Announcements) aus ist, mit `LLM_FRAMEWORK_NO_AUDIO=1`, in der CI
-oder in Tests, in einer SSH-Sitzung ohne Bildschirm, unter Linux ohne Bildschirm und wenn keine Sprachausgabe
-funktioniert. Die Form des Aufrufs folgt dem
-USB-Watcher von rag4ll (MIT-Lizenz, siehe [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)), ebenso seine Regel,
-einen Zustand erst anzusagen, wenn er stimmt: Das Ergebnis wird gesprochen, nachdem der letzte Schreibvorgang
-zurückgekehrt ist.
+Eine kurze Ansage zum Hinweis und das Ergebnis werden auch **gesprochen**, über die Sprachausgabe des
+Betriebssystems und in der Sprache der Oberfläche: Windows PowerShell 5.1 mit System.Speech (aus dem Systemordner
+gestartet; der Text reist in Umgebungsvariablen und wird so nie zu Code), macOS `say` (mit einer installierten
+Stimme der Sprache, wenn es eine gibt), Linux `spd-say`, sonst `espeak-ng` oder `espeak`. Es gibt keine Audiodateien
+und keine neue Abhängigkeit, und die Systemlautstärke wird nie angefasst. Die Ausgabe läuft in einem
+Hintergrund-Thread, eine Ansage nach der anderen, höchstens 300 Zeichen, mit Zeitlimit; sie blockiert den Aufrufer
+nie und lässt ihn nie scheitern, und jede Ansage steht auch im Log. Sie bleibt stumm, wenn die Einstellung
+`audio_announcements` (Tools > Gesprochene Ansagen, in der englischen Oberfläche Spoken Announcements) aus ist, mit
+`LLM_FRAMEWORK_NO_AUDIO=1`, in der CI oder in Tests, in einer SSH-Sitzung ohne Bildschirm, unter Linux ohne
+Bildschirm und wenn keine Sprachausgabe funktioniert. Die Form des Aufrufs folgt dem USB-Watcher von rag4ll
+(MIT-Lizenz, siehe [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)), ebenso seine Regel, einen Zustand erst
+anzusagen, wenn er stimmt: Das Ergebnis wird gesprochen, nachdem der letzte Schreibvorgang zurückgekehrt ist.
 
 ### Eine Suche in der Wissensbasis (unveröffentlicht)
 
@@ -541,7 +549,7 @@ Wo Reranking genutzt wird:
 
 | Suche | Reranking | Warum |
 |---|---|---|
-| Build-Empfehlung mit Auszügen aus der Wissensbasis | ja, sobald ein Reranker zum Rechner passt | Ihre Anfrage ist Fließtext über Modell, Target und Quantisierung; dort hat der Reranker die Reihenfolge verbessert und seine Schwelle unpassende Auszüge herausgehalten. |
+| Build-Empfehlung mit Auszügen aus der Wissensbasis | ja, außer `rag_reranker` ist `off` oder kein Reranker passt zum Rechner | Ihre Anfrage ist Fließtext über Modell, Target und Quantisierung; dort hat der Reranker die Reihenfolge verbessert und seine Schwelle unpassende Auszüge herausgehalten. |
 | Ditto-Chat, MCP-Tool `search_knowledge` | nur mit `rag_rerank_default` (standardmäßig aus) | In der Abruf-Evaluation war der Gewinn zu klein für etwa 1 bis 2,5 Sekunden je Suche auf einem freien CPU-Kern. |
 | Build-Log-Analyse des Self-Healing | nicht angefordert (folgt `rag_rerank_default`) | Der Cross-Encoder bewertet Logzeilen gegen Fließtext schlecht: Er hat passende Auszüge verloren, die die hybride Suche gefunden hatte. |
 | Modulvorschlag | nicht angefordert (folgt `rag_rerank_default`) | Bei seiner Suchanfrage aus Stichwörtern hat die Schwelle jeden Auszug verworfen, auch die passenden. |
@@ -575,31 +583,33 @@ In einfachen Worten: Du kannst ein Target, ein Rezept (wie ein Modell gebaut wur
 Ein öffentliches Paket ist signiert, sodass andere prüfen können, dass niemand es verändert hat; ein privates Paket
 ist verschlüsselt, sodass nur die Menschen es öffnen können, die du auswählst. Pakete stehen in einem signierten
 Community-Index. Die Installation läuft immer über einen Quarantäneordner, in dem jede Datei geprüft wird, und du
-bestätigst, bevor irgendetwas an seinen Platz kommt. Das Framework lädt nie etwas hoch und fragt nie nach einem
-Token.
+bestätigst, bevor irgendetwas an seinen Platz kommt. Verschickt wird nichts, außer du öffnest einen Pull-Request,
+der über die GitHub-CLI oder den Browser läuft; das Framework fragt nie nach einem Token.
 
 **Das Paket.** Eine ZIP-Datei mit `pack.json`, einer optionalen Autorensignatur `pack.sig` und genau den Dateien,
-die das Manifest aufführt. Das Manifest nennt Schemaversion, Art (`target`, `recipe` oder `knowledge`), ID,
-Version, Autor, Lizenz (eine SPDX-ID), die Mindestversion des Frameworks, die Erstellungszeit in UTC und für jede
-Datei Pfad, sha256, Größe und Modus (0644 oder 0755). Pfade sind schlichte relative Pfade, die jedes
-Betriebssystem speichern kann; Links, Spezialdateien und Binärdateien werden abgelehnt; ein Paket enthält
-höchstens 10.000 Dateien und 512 MB. Derselbe Inhalt ergibt immer dieselben ZIP-Bytes. Beim Lesen werden genau die
-aufgeführten Dateien angenommen und jede Größe und jeder Hash geprüft; bei jedem Problem bleibt nichts davon übrig.
+die das Manifest aufführt. Das Manifest nennt Schemaversion, Art (`target`, `recipe` oder `knowledge`), ID, Version,
+Autor, Lizenz (eine SPDX-ID), die Mindestversion des Frameworks, die Erstellungszeit in UTC und für jede Datei Pfad,
+sha256, Größe und Modus (0644 oder 0755). Pfade sind schlichte relative Pfade, die jedes Betriebssystem speichern
+kann; Links und Spezialdateien werden abgelehnt (Binärdateien lehnen der Export und die Target-Prüfer ab); ein Paket
+enthält höchstens 10.000 Dateien und 512 MB. Die ZIP-Einträge tragen ein festes Datum, sodass dasselbe Manifest mit
+denselben Dateien immer dieselben ZIP-Bytes ergibt. Beim Lesen werden genau die aufgeführten Dateien angenommen und
+jede Größe und jeder Hash geprüft; bei jedem Problem bleibt nichts davon übrig.
 
 **Rezepte**, die Modellvorlagen des Zoos, enthalten keine Gewichte. Ein Rezept nennt ein Hugging-Face-Modell mit
 festgelegtem Commit, das Target mit einem Fingerabdruck seiner Dateien, Board, Format, Quantisierung, Optionen
-(Importance-Matrix, Kontextlänge, Hash des Kalibrierdatensatzes) und geprüfte Ergebnisse (Name, Größe und sha256
-des Artefakts, Framework-Version, per Digest festgelegtes Toolchain-Image, Gerätetests). Es entsteht aus der
-`build_info.json` eines fertigen Builds, die all das festhält; infrage kommen nur Builds eines Hugging-Face-Modells
-mit bekanntem Commit. Ein Rezept wird gegen die Capabilities des Targets geprüft und wird zu einem normalen
-Build-Auftrag.
+(Importance-Matrix, Kontextlänge, Hash des Kalibrierdatensatzes) und geprüfte Ergebnisse (Name, Größe und sha256 des
+Artefakts, Framework-Version, per Digest festgelegtes Toolchain-Image, Gerätetests). Es entsteht aus der
+`build_info.json` eines fertigen Builds, die festhält, was es braucht (Gerätetests stehen dort nicht); infrage
+kommen nur Builds eines Hugging-Face-Modells mit bekanntem Commit. Ein Rezept wird gegen die Capabilities des
+Targets geprüft und wird zu einem normalen Build-Auftrag.
 
-**Signaturen.** Ed25519 über ein Zweck-Präfix, gefolgt von kanonischem JSON (sortierte Schlüssel, keine
-Leerzeichen, UTF-8). Es gibt je ein Präfix für Paket-Manifeste, den Community-Index und verschlüsselte Pakete;
-eine Signatur für einen Zweck lässt sich also nie für einen anderen verwenden. Eine Schlüssel-ID sind die ersten
-16 Hex-Zeichen des SHA-256 des rohen öffentlichen Schlüssels. Eine Autorensignatur ist Herkunftsangabe, kein
-Vertrauen: Sie wird geprüft, wenn das Paket den öffentlichen Schlüssel mitbringt, die Schlüssel-ID des Autors wird
-bei der ersten Installation gemerkt (`authors.json`), und ein anderer Schlüssel später wird als Warnung angezeigt.
+**Signaturen.** Ed25519 über ein Zweck-Präfix, gefolgt von den signierten Bytes: dem kanonischen JSON eines
+Paket-Manifests (sortierte Schlüssel, keine Leerzeichen, UTF-8), den genauen Bytes von `index.json` oder allem vor
+der Signatur eines verschlüsselten Pakets. Es gibt für diese drei je ein Präfix; eine Signatur für einen Zweck lässt
+sich also nie für einen anderen verwenden. Eine Schlüssel-ID sind die ersten 16 Hex-Zeichen des SHA-256 des rohen
+öffentlichen Schlüssels. Eine Autorensignatur ist Herkunftsangabe, kein Vertrauen: Sie wird geprüft, wenn das Paket
+den öffentlichen Schlüssel mitbringt, die Schlüssel-ID des Autors wird bei der ersten Installation gemerkt
+(`authors.json`), und ein anderer Schlüssel später wird als Warnung angezeigt.
 
 **Verschlüsselung zum privaten Teilen** (Format v1, nach dem Vorbild von [age](https://age-encryption.org/v1)),
 für die eigenen Rechner oder ein Team:
@@ -647,9 +657,11 @@ nicht aktualisiert wurde.
    ein Dockerfile bezieht, per Digest festgelegt, außer es ist ein offizielles Basis-Image, die Shell-Sperrliste,
    `bash -n`, keine Vorlagen-Platzhalter, keine Binärdateien); ein Rezept muss zu seinem Schema passen und zu den
    Capabilities seines Targets, wenn dieses installiert ist; Wissen muss eine Liste von Einträgen sein, die jeweils
-   ihre Quelle behalten.
+   ihre Quelle behalten. Ein Rezept- oder Wissenspaket darf nur seine `recipe.yml` oder `knowledge.json` und eine
+   `README.md` enthalten.
 5. Eine Zusammenfassung in reinem Text zeigt Art, ID, Version, Autor, Lizenz, Vertrauensstufe, Quelle, Dateien
-   und Ziel, und du bestätigst. `--yes` überspringt die Frage nur bei einem Paket aus dem signierten Index.
+   und Ziel, und du bestätigst. `--yes` überspringt die Frage nur, wenn der signierte Index das Paket aufführt
+   (Vertrauen `verified` oder `community`), auch bei einer Paketdatei.
 6. Ein atomares Umbenennen bringt das Paket an seinen Platz, nie über einen bestehenden Ordner (auch nicht, wenn
    sich nur die Groß- und Kleinschreibung unterscheidet), zusammen mit `.lcf-provenance.json` (Vertrauen, Quelle,
    Hashes, Signierer, Absender). Ein Wissenspaket wird danach in die Wissensbasis eingelesen. Was unterwegs
@@ -659,7 +671,8 @@ Eine Paketdatei (`llm-cli zoo install --file` oder Import file... im Community-H
 Quarantäne; eine verschlüsselte wird zuerst entschlüsselt (`--from`, `--passphrase`). Ihr Vertrauen kommt aus dem
 Index, wenn der Index ihren sha256 aufführt; sonst ist es `local`.
 
-**Vertrauensstufen.** `official` (mit dem Framework ausgeliefert), `verified` (im signierten Index: geprüft und
+**Vertrauensstufen.** `official` (mit dem Framework ausgeliefert; ausgelieferte Targets haben keine Herkunftsdatei
+und stehen nicht im Zoo, deshalb zeigt bisher keine Liste diese Stufe), `verified` (im signierten Index: geprüft und
 unabhängig nachgebaut), `community` (im signierten Index: geprüft), `local` (eine Datei ohne Indexeintrag: immer
 bestätigt, und jeder Build davon zeigt eine Warnung) und `revoked` (in der signierten Widerrufsliste: nicht
 installiert; installierte Kopien werden von `llm-cli doctor` und dem Community-Hub markiert und nicht gebaut).
@@ -669,26 +682,27 @@ installiert; installierte Kopien werden von `llm-cli doctor` und dem Community-H
 auf der letzten Seite des Modul-Assistenten und „Export a finished build for the community...“ im Kontextmenü des
 Builder-Logs erstellen ein Paket: Seine Dateien werden datenschutzbereinigt (Home-Ordner, IP- und MAC-Adressen,
 E-Mail-Adressen, JWTs, Host- und Benutzername, Schlüssel; die Änderungen werden angezeigt), geprüft und mit deinem
-Schlüssel signiert. Mit `--to` (Dateien mit öffentlichen Schlüsseln) oder `--passphrase` wird das Paket stattdessen
-zum privaten Teilen verschlüsselt. Die Lizenz ist standardmäßig MIT, bei Wissen `NOASSERTION`, und jede Seite
-behält ihre Quelladresse. Ein Target, das du von jemand anderem installiert hast, wird nicht als deines neu
-signiert. „Open pull request“ (`--pr`) übergibt das Paket an das Community-Repository (`community_repo`): über die
-GitHub-CLI, wenn sie installiert und angemeldet ist, sonst öffnet sich die Upload-Seite des Repositorys im Browser.
-Beide behalten ihre eigenen Zugangsdaten; das Framework fragt nie nach einem Token, liest keines und zeigt keines
-an.
+Schlüssel signiert. Mit `--to` (Dateien mit öffentlichen Schlüsseln) oder `--passphrase` wird das signierte Paket
+zusätzlich zum privaten Teilen verschlüsselt; ein verschlüsseltes Paket wird nie mit `--pr` eingereicht. Die Lizenz
+ist standardmäßig MIT, bei Wissen `NOASSERTION`, und jede Seite behält ihre Quelladresse. Ein Target, das du von
+jemand anderem installiert hast, wird nicht als deines neu signiert. „Open pull request“ (`--pr`) übergibt das Paket
+an das Community-Repository (`community_repo`): über die GitHub-CLI, wenn sie installiert und angemeldet ist, sonst
+öffnet sich die Upload-Seite des Repositorys im Browser. Beide behalten ihre eigenen Zugangsdaten; das Framework
+fragt nie nach einem Token, liest keines und zeigt keines an.
 
-**Werkzeuge für den Maintainer.** `scripts/zoo_sign_index.py` legt den Index-Schlüssel im Schlüsselbund des
-Systems an (`keygen`), prüft ein Paket und gibt seinen Indexeintrag aus (`entry`) und signiert `index.json`
-(`sign`; die Version muss wachsen). `scripts/community_repo/validate-contribution.yml` ist die Workflow-Vorlage für
-das Community-Repository: Sie nimmt nur Paket-ZIPs bis 5 MB an und lässt über jedes `llm-cli zoo verify` laufen,
-das auch Pakete ablehnt, die noch Schlüssel oder persönliche Daten enthalten. Der Signierschlüssel erreicht die CI
-nie.
+**Werkzeuge für den Maintainer.** `scripts/zoo_sign_index.py` legt den Index-Schlüssel im Schlüsselbund des Systems
+an (`keygen`), prüft ein Paket und gibt seinen Indexeintrag aus (`entry`) und signiert `index.json` (`sign`; mit
+`--previous` muss die Version höher sein als die des alten Index).
+`scripts/community_repo/validate-contribution.yml` ist die Workflow-Vorlage für das Community-Repository: Sie nimmt
+nur Paket-ZIPs bis 5 MB an und lässt über jedes `llm-cli zoo verify` laufen, das auch Pakete ablehnt, die noch
+Schlüssel oder persönliche Daten enthalten. Der Signierschlüssel erreicht die CI nie.
 
 **Stand.** Das Community-Repository, sein Index und der Schlüssel des Maintainers sind noch nicht veröffentlicht:
-`configs/community_keys.yml` enthält keinen Schlüssel, und `community_index_url` und `community_repo` sind leer.
-Den Index auflisten und per ID installieren endet deshalb mit einer Meldung (`llm-cli zoo list` zeigt installierte
-Pakete trotzdem an), und `--pr` sagt nur, wo das Paket liegt. Pakete lassen sich schon als Dateien austauschen
-(Vertrauen `local`) und zwischen Benutzern verschlüsselt weitergeben.
+`configs/community_keys.yml` enthält keinen Schlüssel, und `community_index_url` und `community_repo` sind leer. Den
+Index auflisten und per ID installieren endet deshalb mit einer Meldung (`llm-cli zoo list` zeigt installierte
+Pakete trotzdem an), und `--pr` sagt nur, wo das Paket liegt. Die Workflow-Vorlage prüft Pakete mit dem
+Framework-Release `v3.1.0`, das es noch nicht gibt. Pakete lassen sich schon als Dateien austauschen (Vertrauen
+`local`) und zwischen Benutzern verschlüsselt weitergeben.
 
 ### Zuletzt verwendete Eingaben (unveröffentlicht)
 
@@ -701,11 +715,12 @@ tippen musst. Nichts Geheimes wird gemerkt.
   Das zuletzt gebaute, das noch angeboten wird, ist vorausgewählt, und ein Target ohne angegebene Boards bietet
   zuletzt verwendete Boards als Vorschläge an.
 - **Wann.** Ein Wert wird gemerkt, sobald er verwendet wurde: ein abgeschickter Build (Modell, Target, Board,
-  Datensatz), die URLs eines Crawls, ein Gerät, dessen Host-Schlüssel bestätigt wurde.
-- **Wo.** `input_history.json` im Benutzerordner (Modus 0600, atomar geschrieben), höchstens 20 Werte je Feld und
-  1000 Zeichen je Wert. Jedes Lesen lädt die Datei, sodass mehrere Fenster gleichauf bleiben. Eine beschädigte
-  Datei beginnt eine neue Historie und bleibt als `input_history.json.bad` erhalten; Fehler werden protokolliert
-  und legen die GUI nie lahm.
+  Datensatz), die URLs eines Crawls, ein Gerät, dessen Host-Schlüssel bestätigt wurde (bei einem Deployment auch
+  sein Hardware-Profil).
+- **Wo.** `input_history.json` im Benutzerordner (Modus 0600, atomar geschrieben), höchstens 20 Werte je Feld; ein
+  Wert mit mehr als 1000 Zeichen wird nicht gemerkt. Jedes Lesen lädt die Datei, sodass mehrere Fenster gleichauf
+  bleiben. Eine beschädigte Datei beginnt eine neue Historie und bleibt als `input_history.json.bad` erhalten;
+  Fehler werden protokolliert und legen die GUI nie lahm.
 - **Nie Geheimnisse.** Ein Wert wird abgelehnt, wenn die Secret-Schwärzung ihn verändern würde (API-Schlüssel,
   Tokens), wenn er eine URL mit Benutzername oder Passwort ist, wenn seine Query, sein Fragment oder seine
   Pfadparameter einen Namen tragen, der nach Zugangsdaten klingt (token, key, secret, password, auth, signature,
@@ -736,7 +751,7 @@ jedes davon erreichen kann. Die Tabelle nennt jede Bedrohung, den Schutz und wo 
 | Secrets gelangen nach außen | Secrets werden verschlüsselt in einem Tresor gespeichert, dessen Schlüssel im Schlüsselbund des Systems liegt oder so geschützt ist, wie du es ausdrücklich wählst (`secret_storage`); nichts weicht stillschweigend aus. Der Tresor wird unter einer Sperre über Prozessgrenzen geändert, liegt nie in einer Git-Arbeitskopie, und sein Schlüssel lässt sich wechseln. API-Schlüssel werden je Aufruf übergeben, nie in die Umgebung von Kindprozessen exportiert; jeder SDK-Client bekommt Schlüssel und Basis-URL ausdrücklich, und `OPENAI_CUSTOM_HEADERS`/`ANTHROPIC_CUSTOM_HEADERS` werden beim Start entfernt. Cloud-Vorlagen haben feste Endpunkte; ein Cloud-Schlüssel erreicht also nie eine übrig gebliebene eigene URL, und der Schlüssel eines eigenen Servers ist an die Adresse gebunden, für die er gespeichert wurde; Admin-API-Schlüssel von Claude werden abgelehnt. Schlüssel aus Umgebungsvariablen werden nur gelesen, wie der Anbieterkatalog sie nennt, und als Quelle des Schlüssels angezeigt. Das Hugging-Face-Token bleibt auf dem Host. Das SSH-Passwort wird einmal benutzt und nie gespeichert. Eine Tabelle der Secret-Formate teilen sich der Secret-Scan des Repositorys und die Schwärzung zur Laufzeit; diese erfasst jeden Logeintrag (auch die der SDKs und HTTP-Bibliotheken, und Tracebacks), Build-Logs und an Tools gegebene Fehler, das Audit-Log, Anfragen an Cloud-KI-Anbieter, Telemetrieberichte und Community-Exporte. Die Debug-Logs der SDKs bleiben aus, außer `--debug-http` ist angegeben. Im Repository lehnt ein Secret-Scan Zugangsdaten in Commits und Pushes ab, und die CI durchsucht die ganze Historie. | `orchestrator/Core/secrets_manager.py`, `orchestrator/Core/vault_key.py`, `orchestrator/security/`, `orchestrator/llm/sdk_env.py`, `orchestrator/llm/client.py`, `orchestrator/llm/auth/`, `scripts/secret_scan.py` |
 | Jemand gibt sich beim Deployment als dein Gerät aus | Vertrauen beim ersten Kontakt, aber nie stillschweigend: Unbekannte Host-Schlüssel werden mit ihrem SHA256-Fingerabdruck angezeigt und erst nach Bestätigung gespeichert; ein geänderter Schlüssel oder Schlüsseltyp scheitert immer. Die Anmeldung nutzt den eigenen Ed25519-Schlüssel des Frameworks. Der OpenSSH-Rückfallweg läuft mit `BatchMode=yes` und `StrictHostKeyChecking=yes`. Benutzernamen und IP-Adressen werden geprüft; das Hochladen geht in einen privaten temporären Ordner; `deploy.sh` prüft alle Prüfsummen. Ohne Docker werden nur Modelldateien deployt, nie beliebige Programme. | `orchestrator/utils/ssh_trust.py`, `orchestrator/Core/deployment_manager.py` |
 | Ein präpariertes Archiv schreibt außerhalb seines Ordners | Das Entpacken lehnt Pfadüberschreitungen, nach außen zeigende Links und Gerätedateien ab und nutzt für tar-Dateien den `data`-Filter von Python. | `safe_extract_archive` in `orchestrator/utils/helpers.py` |
-| Ein Community-Paket wird unterwegs verändert, durch einen älteren Index ersetzt oder nach seiner Veröffentlichung widerrufen | Pakete aus dem Index werden, festgelegt durch Größe und sha256, aus einem Index geladen, der mit einem Schlüssel signiert ist, der mit dem Framework ausgeliefert wird (mit Ablaufdatum). Ein Index, der sich nicht prüfen lässt, wird nicht genutzt, ein älterer wird abgelehnt, eine Installation per ID lädt immer den aktuellen Index, und widerrufene Pakete werden weder installiert noch gebaut. Jedes Paket wird in einem Quarantäneordner geprüft (genaue Dateiliste und Hashes, keine Links, Spezial- oder Binärdateien, die Prüfer) und erst nach deiner Bestätigung einer Zusammenfassung in reinem Text mit seiner Vertrauensstufe atomar an seinen Platz gebracht; Text aus einem Paket kann diese also nicht verdecken. Eine Datei ohne Indexeintrag ist `local` und warnt bei jedem Build. | `orchestrator/Core/community_manager.py` (mit `build_trust_check`, das `orchestrator/Core/builder.py` aufruft), `orchestrator/Core/community_pack.py` |
+| Ein Community-Paket wird unterwegs verändert, durch einen älteren Index ersetzt oder nach seiner Veröffentlichung widerrufen | Pakete aus dem Index werden, festgelegt durch Größe und sha256, aus einem Index geladen, der mit einem Schlüssel signiert ist, der mit dem Framework ausgeliefert wird (mit Ablaufdatum). Ein Index, der sich nicht prüfen lässt, wird nicht genutzt, ein älterer wird abgelehnt, eine Installation per ID lädt immer den aktuellen Index, und widerrufene Pakete werden weder installiert noch gebaut. Jedes Paket wird in einem Quarantäneordner geprüft (genaue Dateiliste und Hashes, keine Links oder Spezialdateien, die Prüfer, die in einem Target Binärdateien ablehnen) und erst nach deiner Bestätigung einer Zusammenfassung in reinem Text mit seiner Vertrauensstufe atomar an seinen Platz gebracht; Text aus einem Paket kann diese also nicht verdecken. Eine Datei ohne Indexeintrag ist `local` und warnt bei jedem Build. | `orchestrator/Core/community_manager.py` (mit `build_trust_check`, das `orchestrator/Core/builder.py` aufruft), `orchestrator/Core/community_pack.py` |
 | Jemand liest oder verändert ein privat geteiltes Paket | Verschlüsselt an X25519-Empfänger und/oder eine scrypt-Passphrase mit ChaCha20-Poly1305 und HKDF-SHA256, mit einem HMAC über den Kopf und der Ed25519-Signatur des Absenders. Jede Änderung, auch an der Empfängerliste, fällt auf, bevor irgendein Klartext herausgegeben wird; `--from` nimmt nur bekannte Absender an. Die privaten Schlüssel liegen nur im verschlüsselten Secrets-Speicher. | `encrypt_pack`, `decrypt_pack`, `UserKeys` in `orchestrator/Core/community_pack.py` |
 | Ein geteiltes Paket oder die Eingabe-Historie verrät persönliche Daten oder Zugangsdaten | Exporte werden datenschutzbereinigt (Home-Ordner, IP- und MAC-Adressen, E-Mail-Adressen, JWTs, Host- und Benutzername, Schlüssel), und die Änderungen werden angezeigt; `llm-cli zoo verify`, auch in der CI des Community-Repositorys, lehnt ein Paket ab, das die Bereinigung noch verändern würde. Die Eingabe-Historie lehnt Werte ab, die nach Secrets aussehen, und URLs mit Zugangsdaten. Das Framework fragt nie nach einem Repository-Token und speichert keines: Ein Pull-Request läuft über die GitHub-CLI oder den Browser, die ihre eigenen Zugangsdaten behalten. | `scrub` in `orchestrator/Core/community_pack.py`, `submit_contribution` in `orchestrator/Core/community_manager.py`, `orchestrator/utils/input_history.py` |
 | Eine kompromittierte Abhängigkeit (Lieferkette) | Host-Abhängigkeiten sind mit Hashes festgelegt (`requirements*.txt`, Poetry-2-Lock); `anthropic` (1.13.0), `openai` (3.28.0), `fastembed` (0.8.1) und `mcp` (2.3.0) sind exakt festgelegt. GitHub Actions sind per Commit-SHA festgelegt; die CI führt pip-audit und bandit aus; Dependabot prüft pip, Actions und Docker wöchentlich. Im Rockchip-Image wird das RKLLM-Wheel per SHA256 geprüft, und die Versionen von Toolkit, torch und onnx sind festgelegt. Der Kalibriertext wird per SHA256 geprüft. | `pyproject.toml`, `poetry.lock`, `.github/`, `targets/Rockchip/dockerfile`, `orchestrator/utils/calibration.py` |
@@ -813,7 +828,7 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
 | **Bezeichner werden nur für den Stichwortindex zerlegt** | Flags und Namen wie `-DGGML_CUDA=ON` waren für BM25 ein einziges Token und über ihre Teile nicht zu finden. Die Teile nur der BM25-Eingabe hinzuzufügen, lässt die dichten Vektoren und den gespeicherten Text unverändert; die festgehaltene Kodierung baut ältere Stichwortindizes einmal neu auf. |
 | **Öffentliche Pakete signiert, private verschlüsselt, mit Standardbausteinen** | Bei öffentlichen Daten zählen Echtheit und Unversehrtheit, beim privaten Teilen auch Vertraulichkeit. Die XOR-„SwarmCipher“ konnte jeder rückgängig machen. Ed25519, X25519, HKDF-SHA256, scrypt und ChaCha20-Poly1305, nach dem Vorbild von age kombiniert, sind gut untersucht; ein Signatur-Präfix je Zweck verhindert, dass eine Signatur für das eine auch für etwas anderes gilt. |
 | **Eine Installation liest immer zuerst den aktuellen Index** | Ein Widerruf schützt nur Benutzer, die ihn sehen. Eine Installation braucht ohnehin das Netz, also lädt sie zuerst den Index und installiert ohne ihn nichts. Ein zwischengespeicherter Index dient dem Auflisten und Installationen aus Dateien und wird nie durch einen älteren ersetzt. |
-| **Kein Token und kein Upload aus dem Framework** | Ein Repository-Token im Framework wäre ein wertvolles Geheimnis an einer Stelle mehr, und ein Upload-Knopf schickt Daten ohne Prüfschritt hinaus. Das Framework bereitet ein bereinigtes, signiertes Paket vor; die GitHub-CLI oder der Browser öffnen mit ihren eigenen Zugangsdaten den Pull-Request. |
+| **Kein Token im Framework und kein eigener Upload** | Ein Repository-Token im Framework wäre ein wertvolles Geheimnis an einer Stelle mehr, und ein Upload-Knopf schickt Daten ohne Prüfschritt hinaus. Das Framework bereitet ein bereinigtes, signiertes Paket vor und zeigt, was die Bereinigung geändert hat; erst wenn du den Pull-Request öffnest, verschicken die GitHub-CLI oder der Browser es mit ihren eigenen Zugangsdaten. |
 | **`NOASSERTION` für Wissenspakete** | Ein Wissenspaket enthält Seiten anderer Leute. Wer es exportiert, kann sie nicht lizenzieren; das Paket beansprucht deshalb keine Lizenz für sie, und jede Seite behält ihre Quelladresse. |
 | **Rezepte statt geteilter Modelldateien** | Modelldateien sind groß und haben eigene Lizenzen. Ein Rezept legt Modell-Commit, Target-Fingerabdruck und Toolchain-Image fest und nennt die Hashes der Artefakte; so kann jeder das Modell nachbauen und vergleichen, und „verified“ heißt unabhängig nachgebaut. |
 | **Eingabe-Historie je Benutzer und ohne Geheimnisse** | Die gemeinsame `config.yml` kann im Installationsordner liegen und geteilt werden. Zuletzt verwendete Eingaben sind persönlich; sie liegen deshalb im Benutzerordner (Modus 0600), und Werte, die nach Zugangsdaten aussehen, werden nie geschrieben. |
@@ -878,7 +893,7 @@ dieser Version.
 | **Gehärtetes Docker-Image ohne Oberfläche** für die CLI und den MCP-Server, mit funktionierender Compose-Datei und Makefile-Zielen; ersetzt das kaputte `Docker Setup/`. | in Arbeit |
 | **Dokumentation auf Englisch und Deutsch** für jedes Dokument. | in Arbeit |
 | **Crawler, der die eigenen Signale der Seite prüft.** Ob eine Seite ausgewertet werden darf, kann ein Nutzer nicht wissen. Deshalb prüft der Crawler die maschinenlesbaren Nutzungsvorbehalte selbst (robots.txt nach RFC 9309, den Header `X-Robots-Tag`, Robots-Meta-Tags einschließlich `noai` und seines eigenen Bot-Namens, das TDM Reservation Protocol) und überspringt vorbehaltene Seiten mit Nennung im Log; jeder Vorbehalt gewinnt, und keine Prüfung lässt sich abschalten. Statt einer rechtlichen Bestätigung erklärt ein einmaliger Hinweis (je Benutzer, erneut, wenn sich sein Text ändert), was gelesen und behalten wird, mit Sprachansage über die Sprachausgabe des Betriebssystems (die Technik des USB-Watchers aus rag4ll); ein Stopp-Knopf behält das Gespeicherte, der Fortschritt zeigt „Seite N von M“, das Ergebnis nennt ehrlich Erfolg, Teilerfolg oder Fehler, und der Crawler meldet seine echte Version. Deep Ingest startet nur aus der GUI. | fertig |
-| **Eingabe-Historie**: zuletzt verwendete Modelle, Targets, Boards, URLs, Geräte und Datensätze als Auswahl in den GUI-Feldern, pro Nutzer, ohne Geheimnisse; Tools > Eingabeverlauf löschen... vergisst sie. | fertig |
+| **Eingabe-Historie**: zuletzt verwendete Modelle, Targets, Boards, URLs, Geräte und Datensätze als Auswahl in den GUI-Feldern, je Benutzer, ohne Geheimnisse; Tools > Eingabeverlauf löschen... vergisst sie. | fertig |
 | **Bessere Antworten aus der Wissensbasis**, aus rag4ll übernommen und klein gehalten: Reranking mit einem Cross-Encoder auf der CPU und eine Relevanzschwelle, die unpassende Auszüge aus Dittos Prompt heraushält (eingeschaltet für Build-Empfehlungen; für Chat und MCP-Suchen mit `rag_rerank_default`), ein Größenbudget für die Auszüge, das Aufteilen übergroßer Code- und Tabellenblöcke, eine Stichwortsuche, die Bezeichner wie `-DGGML_CUDA=ON` versteht, und das Entladen unbenutzter Modelle; gemessen mit der Abruf-Evaluation (`llm-cli ditto eval --kind retrieval`). | fertig |
 | **Community-Pakete mit echter Kryptografie**: Pakete mit einem Manifest jeder Datei, öffentliche Pakete mit Ed25519 signiert, private Pakete an die Schlüssel der Empfänger (X25519 mit ChaCha20-Poly1305) oder mit einer Passphrase (scrypt) verschlüsselt und vom Absender signiert. Der Upload mit der XOR-„SwarmCipher“ und seine Abfrage eines GitHub-Tokens entfallen; das Framework fragt nie nach einem Token. | fertig |
 | **Model-Zoo aus der Community**: Rezepte (Modell mit festgelegtem Commit, Target-Fingerabdruck, Format, Quantisierung, Toolchain-Image und geprüfte Hashes), aus fertigen Builds erzeugt; ein signierter Index mit Widerrufen, Installation über eine Quarantäne mit Vertrauensstufen, `llm-cli zoo`, der Community-Hub, der Export für die Community mit Übergabe an einen Pull-Request und die Werkzeuge des Maintainers für das Community-Repository. | fertig |
