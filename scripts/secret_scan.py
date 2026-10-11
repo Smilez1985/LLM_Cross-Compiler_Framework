@@ -48,11 +48,12 @@ def _load_patterns():
 
 try:
     _patterns = _load_patterns()
-except OSError as e:  # never scan without the table: the commit would pass unchecked
-    print(f"secret-scan: cannot load the pattern table {PATTERN_TABLE}: {e}", file=sys.stderr)
+    PATTERNS = _patterns.PATTERNS        # the same objects runtime redaction uses
+    PLACEHOLDER = _patterns.PLACEHOLDER
+    find_secrets = _patterns.find_secrets
+except Exception as e:  # never scan without the table (missing, mid-merge, broken): the commit would pass unchecked
+    print(f"secret-scan: cannot load the pattern table {PATTERN_TABLE}: {type(e).__name__}: {e}", file=sys.stderr)
     sys.exit(2)
-PATTERNS = _patterns.PATTERNS        # the same objects runtime redaction uses
-PLACEHOLDER = _patterns.PLACEHOLDER
 
 # Files that hold credentials or per-user state, whatever their content.
 FORBIDDEN_NAMES = {
@@ -111,7 +112,7 @@ def scan_text(where: str, text: str, local: Sequence["re.Pattern[str]"] = ()) ->
     for number, line in enumerate(text.splitlines(), 1):
         if ALLOW_PRAGMA in line:
             continue
-        for kind, match in _patterns.find_secrets(line):
+        for kind, match in find_secrets(line):
             findings.append(Finding(where, number, kind, redact(match)))
         for i, rx in enumerate(local, 1):
             if rx.search(line):

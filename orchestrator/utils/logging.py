@@ -162,6 +162,23 @@ class LoggingStats:
 # CUSTOM FORMATTERS
 # ============================================================================
 
+def _redacted_extra(value: Any) -> Any:
+    """An `extra=` field for the JSON log. Extra fields are set after the record is created, so the redaction
+    of the message does not cover them."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return redact(value)
+    try:
+        text = redact(json.dumps(value, default=str))
+    except (TypeError, ValueError):  # e.g. a circular structure
+        return redact(repr(value))
+    try:
+        return json.loads(text)
+    except ValueError:
+        return text
+
+
 class StructuredFormatter(logging.Formatter):
     """Structured formatter for enhanced logging"""
     
@@ -221,7 +238,7 @@ class StructuredFormatter(logging.Formatter):
                            'module', 'lineno', 'funcName', 'created', 'msecs', 'relativeCreated',
                            'thread', 'threadName', 'processName', 'process', 'message', 'exc_info',
                            'exc_text', 'stack_info', 'thread_id']:
-                log_entry.extra_fields[key] = value
+                log_entry.extra_fields[key] = _redacted_extra(value)
         
         return log_entry.to_json()
     

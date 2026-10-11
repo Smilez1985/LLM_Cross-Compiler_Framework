@@ -4,6 +4,7 @@
 import ast
 import importlib.util
 import io
+import json
 import random
 import shutil
 import string
@@ -67,6 +68,9 @@ REDACT_ONLY_SAMPLES = {
     "sk- key": "sk-" + body(32, "0123456789abcdef"),
     "private key block": ("-----BEGIN RSA " + "PRIVATE KEY-----\n" + body(64, ALNUM + "+/") + "\n"
                           + body(64, ALNUM + "+/") + "\n-----END RSA " + "PRIVATE KEY-----"),
+    "Bearer token": "rejected bearer " + body(40, ALNUM + "._-"),
+    "quoted secret": '{"access_' + 'token": "ya29.' + body(60, ALNUM + "._-") + '"}',
+    "environment variable": "export LLAMA_" + "API_KEY=" + body(28, ALNUM + "-_"),
 }
 
 
@@ -130,6 +134,21 @@ def test_the_scan_refuses_to_run_without_the_table(tmp_path):
     assert run.returncode == 2 and "cannot load the pattern table" in run.stderr
 
 
+@pytest.mark.parametrize("broken", ["<<<<<<< HEAD\nPATTERNS = ()\n=======\n", "raise RuntimeError('x')\n",
+                                    "PLACEHOLDER = None\n"])
+def test_the_scan_refuses_to_run_with_a_broken_table(tmp_path, broken):
+    # A table with merge conflict markers, one that fails on import, or one without PATTERNS: a usage error
+    # (exit 2) with a clear message, never a traceback that reads like findings.
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "orchestrator" / "security").mkdir(parents=True)
+    shutil.copy(REPO_ROOT / "scripts" / "secret_scan.py", tmp_path / "scripts" / "secret_scan.py")
+    (tmp_path / "orchestrator" / "security" / "secret_patterns.py").write_text(broken)
+    run = subprocess.run([sys.executable, "-I", "-S", str(tmp_path / "scripts" / "secret_scan.py"),
+                          "--repo", str(tmp_path)], capture_output=True, text=True)
+    assert run.returncode == 2 and "cannot load the pattern table" in run.stderr
+    assert "Traceback" not in run.stderr
+
+
 def test_a_key_is_reported_once_under_its_own_name():
     line = (f'OPENAI_API_KEY = "{SAMPLES["OpenAI key"]}"  # sent as '
             f'Authorization: Bearer {SAMPLES["JSON web token"]}')
@@ -139,9 +158,15 @@ def test_a_key_is_reported_once_under_its_own_name():
 @pytest.mark.parametrize("wrapped, kind", [
     (repr("token:\n" + SAMPLES["Hugging Face token"]), "Hugging Face token"),
     ("https://maps.invalid/api?q=1%20" + SAMPLES["Google API key"], "Google API key"),
+    (repr(b"\x00" + SAMPLES["Hugging Face token"].encode()), "Hugging Face token"),
+    (json.dumps(" " + SAMPLES["GitHub token"]), "GitHub token"),
+    # JSON inside a JSON string: the quotes are escaped
+    (json.dumps(json.dumps({"api_key": body(32)})), "secret assignment"),
+    (json.dumps(json.dumps({"Authorization": "Bearer " + body(40)})), "Authorization header"),
 ])
 def test_keys_after_escapes_are_found(wrapped, kind):
     assert [f.kind for f in secret_scan.scan_text("f.py", wrapped)] == [kind]
+    assert "REDACTED" in helpers.redact_secrets(wrapped)
 
 
 @pytest.mark.parametrize("line", [

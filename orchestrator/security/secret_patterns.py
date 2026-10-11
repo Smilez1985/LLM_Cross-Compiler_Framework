@@ -32,9 +32,14 @@ def _rule(name: str, regex: str, replacement: str = "REDACTED", *, scan: bool = 
 
 def _key(start: str, rest: str) -> str:
     """A key beginning with `start` (a fixed-width regex) at the start of a word, or right after an escape
-    ("\\nhf_...") or a percent-encoded character ("%20sk-..."), where \\b alone would miss it. The literal comes
-    first, so the regex engine can search for it quickly."""
-    return start + r"(?:(?<!\w" + start + r")|(?<=\\[nrt]" + start + r")|(?<=%[0-9A-Fa-f]{2}" + start + r"))" + rest
+    ("\\nhf_...", "\\x00hf_...", "\\u00a0hf_...") or a percent-encoded character ("%20sk-..."), where \\b alone
+    would miss it. The literal comes first, so the regex engine can search for it quickly."""
+    escapes = (r"\\[nrt]", r"\\x[0-9A-Fa-f]{2}", r"\\u[0-9A-Fa-f]{4}", r"%[0-9A-Fa-f]{2}")
+    return start + r"(?:(?<!\w" + start + ")" + "".join("|(?<=" + e + start + ")" for e in escapes) + ")" + rest
+
+
+# An optional quote, also escaped as in JSON inside a JSON string ("{\"api_key\": \"...\"}").
+_Q = r"""(?:\\?['"])"""
 
 
 _PRIVATE_KEY = r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----"
@@ -48,14 +53,15 @@ PATTERNS: Tuple[SecretPattern, ...] = (
     _rule("OpenRouter key", r"sk-or-v1-[a-f0-9]{40,}", "sk-REDACTED"),
     _rule("Unsloth Studio key", _key("sk-unsloth-", r"[A-Za-z0-9]{24,}"), "sk-REDACTED"),
     # Other sk- keys (DeepSeek, Moonshot, ...): too broad for the scan. The digit lookahead spares words such
-    # as "disk-usage-monitoring-service".
-    _rule("sk- key", r"sk-(?=[A-Za-z0-9_\-]*\d)[A-Za-z0-9_\-]{20,}", "sk-REDACTED", scan=False),
+    # as "disk-usage-monitoring-service"; it is bounded, so a long run of "sk-sk-sk-..." stays linear.
+    _rule("sk- key", r"sk-(?=[A-Za-z_\-]{0,64}\d)[A-Za-z0-9_\-]{20,}", "sk-REDACTED", scan=False),
     _rule("Hugging Face token", _key("hf_", r"[A-Za-z0-9]{20,}"), "hf_REDACTED"),
     _rule("GitHub token", _key("gh[pousr]_", r"[A-Za-z0-9]{36,}") + "|" + _key("github_pat_", r"[A-Za-z0-9_]{22,}"),
           "gh-REDACTED"),
     _rule("GitLab token", _key("glpat-", r"[A-Za-z0-9_\-]{20,}")),
     _rule("AWS access key id", _key("A[KS]IA", r"[A-Z0-9]{16}\b")),
-    _rule("AWS secret key", r"(?i)aws_secret_access_key['\"]?\s*[:=]\s*['\"]?(?P<secret>[A-Za-z0-9/+]{40})\b",
+    _rule("AWS secret key",
+          r"(?i)aws_secret_access_key" + _Q + r"?\s*[:=]\s*" + _Q + r"?(?P<secret>[A-Za-z0-9/+]{40})\b",
           hints=("aws_secret_access_key",)),
     _rule("Bedrock API key", _key("ABSK", r"[A-Za-z0-9+/=]{60,}")),
     _rule("Bedrock short-term key", _key("bedrock-api-key-", r"[A-Za-z0-9+/]{40,}={0,2}(?:&Version=\d+)?")),
@@ -82,11 +88,26 @@ PATTERNS: Tuple[SecretPattern, ...] = (
     _rule("URL with password",
           r"://(?<=[A-Za-z0-9+.\-]://)[^\s:/@'\"\\]+:(?P<secret>[^\s/@'\"\\]{6,})@[A-Za-z0-9.\-]+"),
     _rule("Authorization header",
-          r"(?i)authorization['\"]?\s*[:=]\s*['\"]?bearer(?:\s+|%20)(?P<secret>[A-Za-z0-9._~+/\-]{20,}=*)",
+          r"(?i)authorization" + _Q + r"?\s*[:=]\s*" + _Q
+          + r"?bearer(?:\s+|%20)(?P<secret>[A-Za-z0-9._~+/\-]{20,}=*)",
           hints=("authorization",)),
+    # Runtime only: a bearer token without its header name, e.g. quoted in a server's error message.
+    _rule("Bearer token", r"(?i)\bbearer(?:\s+|%20|\+)(?P<secret>[A-Za-z0-9._~+/\-]{20,}=*)", scan=False,
+          hints=("bearer",)),
     _rule("secret assignment",
-          r"(?i)(?:api[_-]?key|secret|token)['\"]?\s*[:=]\s*['\"](?P<secret>[A-Za-z0-9_\-]{24,})['\"]",
+          r"(?i)(?:api[_-]?key|secret|token)" + _Q + r"?\s*[:=]\s*\\?['\"](?P<secret>[A-Za-z0-9_\-]{24,})\\?['\"]",
           hints=("key", "secret", "token")),
+    # Runtime only, too broad for the scan: quoted token-shaped values (OAuth access tokens with dots, base64
+    # secrets), and environment-style assignments (env dumps, `docker run -e`, .env lines, shell exports).
+    # Neither takes <, >, | or brackets, so tokenizer settings in build logs ("pad_token": "<|...|>") stay.
+    _rule("quoted secret",
+          r"(?i)(?:api[_-]?key|secret|token|password|passwd)" + _Q
+          + r"?\s*[:=]\s*\\?['\"](?P<secret>[A-Za-z0-9._~+/\-]{20,}=*)\\?['\"]",
+          scan=False, hints=("key", "secret", "token", "password", "passwd")),
+    _rule("environment variable",
+          r"(?<![A-Z0-9])(?:API_?KEY|ACCESS_KEY|TOKEN|SECRET|PASSWORD|PASSWD)(?:_[A-Z0-9]{1,32}){0,4}(?:=|:[ \t]*)"
+          r"['\"]?(?P<secret>[^\s'\"<>|(){}\[\]]{8,})",
+          scan=False, hints=("api_key", "apikey", "access_key", "token", "secret", "password", "passwd")),
 )
 
 # Obvious placeholders in documentation and tests: marker words, runs a random key never has (sequential digits
@@ -108,15 +129,30 @@ def _alternatives(names: Tuple[str, ...]) -> str:
     return "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
 
 
-# "Name: value" (header line, also inside quotes), 'name': 'value' (dict, JSON) and ('name', 'value') (tuples,
-# also bytes). An unquoted value runs to the end of the line, a quote, a closing bracket or an "&".
+# "Name: value" (header line, also inside quotes), 'name': 'value' (dict, JSON, also with escaped quotes) and
+# ('name', 'value') (tuples, also bytes). An unquoted value runs to the end of the line, a quote, a backslash
+# (an escaped line break), a closing bracket or an "&".
 _HEADER = re.compile(
     r"(?i)(?<![\w-])(?:" + _alternatives(SENSITIVE_HEADERS) + r")"
-    r"(?:['\"]?[ \t]*[:=][ \t]*(?:(?-i:b)?(?P<q1>['\"])(?P<v1>.*?)(?P=q1)|(?P<v2>[^\s'\",)}\]&][^\r\n'\",)}\]&]*))"
-    r"|['\"][ \t]*,[ \t]*(?-i:b)?(?P<q2>['\"])(?P<v3>.*?)(?P=q2))")
-_QUERY = re.compile(r"(?i)([?&#;](?:" + _alternatives(SENSITIVE_QUERY_PARAMETERS) + r")=)[^&#\s'\"<>]+")
-# A URL with an id_token_hint (an OpenID reauthorization link) loses its whole query.
-_TOKEN_HINT_URL = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://[^\s?#'\"<>]*)\?[^\s'\"<>]*\bid_token_hint=[^\s'\"<>]*")
+    r"(?:" + _Q + r"?[ \t]*[:=][ \t]*(?:(?-i:b)?(?P<q1>\\?['\"])(?P<v1>.*?)(?P=q1)"
+    r"|(?P<v2>[^\s'\",)}\]&\\][^\r\n'\",)}\]&\\]*))"
+    r"|" + _Q + r"[ \t]*,[ \t]*(?-i:b)?(?P<q2>\\?['\"])(?P<v3>.*?)(?P=q2))")
+# In a URL, or at the start of a line as in a form-encoded body ("code=...&grant_type=authorization_code").
+_QUERY = re.compile(r"(?im)((?:^|[?&#;])(?:" + _alternatives(SENSITIVE_QUERY_PARAMETERS) + r")=)[^&#\s'\"<>]+")
+# A URL with an id_token_hint (an OpenID reauthorization link) loses its whole query. Found word by word, so
+# the cost stays linear whatever the text.
+_WORD = re.compile(r"[^\s'\"<>]+")
+_SCHEME = re.compile(r"(?i)(?<![a-z0-9+.\-])[a-z][a-z0-9+.\-]{0,30}://")
+_TOKEN_HINT = re.compile(r"(?i)\bid_token_hint=")
+
+
+def _without_token_hint_query(m: "re.Match[str]") -> str:
+    word = m.group(0)
+    scheme = _SCHEME.search(word)
+    query = word.find("?", scheme.end()) if scheme else -1
+    if query < 0 or "#" in word[scheme.end():query] or not _TOKEN_HINT.search(word, query):
+        return word
+    return word[:query] + "?REDACTED"
 
 
 def _may_match(rule: SecretPattern, lowered: str) -> bool:
@@ -169,7 +205,7 @@ def redact(text: str) -> str:
         if rule.redact and _may_match(rule, lowered):
             text = rule.regex.sub(_replacer(rule), text)
     if "id_token_hint" in lowered:
-        text = _TOKEN_HINT_URL.sub(r"\1?REDACTED", text)
+        text = _WORD.sub(_without_token_hint_query, text)
     if any(name in lowered for name in SENSITIVE_HEADERS):
         text = _HEADER.sub(_header_value, text)
     return _QUERY.sub(r"\1REDACTED", text)

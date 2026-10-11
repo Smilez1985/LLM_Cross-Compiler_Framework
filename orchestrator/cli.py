@@ -1473,7 +1473,7 @@ def swarm_upload(ctx: FrameworkContext, file_path, user):
     
     if not token:
         console.print("[red]No GitHub Token found in secrets![/red]")
-        console.print("Use 'llm-cli secrets set github_token <TOKEN>' first.")
+        console.print("Run 'llm-cli secrets set github_token' first (it asks for the token).")
         sys.exit(1)
 
     with console.status(f"Encrypting & Uploading {file_path}...", spinner="dots"):
