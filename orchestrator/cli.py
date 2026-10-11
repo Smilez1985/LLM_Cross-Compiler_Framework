@@ -933,6 +933,7 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
     """Run the MCP server (stdout carries the protocol; logs go to stderr)"""
     import contextlib
     from orchestrator import mcp_server
+    mcp_server.no_programs_from_the_working_directory()
     # Nothing may reach stdout before the transport owns it.
     with contextlib.redirect_stdout(sys.stderr):
         ctx.require_framework()
