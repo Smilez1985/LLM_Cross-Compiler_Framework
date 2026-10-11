@@ -1161,9 +1161,11 @@ What goes into the pack:
 
 The file is called `contribution-<kind>-<id>-<version>.zip`, or `<kind>-<id>-<version>.lcfpack` when it is
 encrypted. Your keys are created in the secrets store on first use (see [zoo keys](#zoo-keys)). The recipient of
-an encrypted pack opens it with `llm-cli zoo install --file`, or without the framework: unzip it, then
-`age -d -i key.txt -o pack.zip pack.zip.age` (the `age` or `rage` tool; this does not check the sender's
-signature).
+an encrypted pack opens it with `llm-cli zoo install --file`. A passphrase pack, or one encrypted to a recipient
+made with `age-keygen` or `rage-keygen`, also opens without the framework: unzip it, then
+`age -d -i key.txt -o pack.zip pack.zip.age` (`key.txt` is that identity file; omit `-i key.txt` for a passphrase;
+the `age` or `rage` tool does not check the sender's signature). The age identity of `llm-cli zoo keys` stays in
+the secrets store, so packs encrypted to it need `llm-cli zoo install`.
 
 The privacy scrub replaces home folders with `~`, and IP and MAC addresses, e-mail addresses, JWTs, this
 computer's host name and your user name with placeholders such as `<ip>` and `<user>`, and it redacts API keys.
@@ -1212,8 +1214,9 @@ llm-cli zoo export target my-board --author "<your name>" --pr
 llm-cli zoo keys
 ```
 
-Prints your public keys: an age recipient (`age1...`), to which others encrypt packs for you (`--to`, or the
-`age -r` option of the age tools), and an `ed25519:` line, which checks your signatures (others use it with
+Prints your public keys: an age recipient (`age1...`), to which others encrypt packs for you with
+`llm-cli zoo export --to` (its private part stays in the secrets store, so a file encrypted to it with the age tools
+cannot be opened), and an `ed25519:` line, which checks your signatures (others use it with
 `--from`). They are not secret; save the output to a file and give it to the people you exchange packs with. The
 keys are created on first use and kept only in the encrypted secrets store (names `community_signing_key` and
 `community_age_identity`). A stored key that cannot be read is never replaced automatically; for a damaged one the
@@ -1225,7 +1228,7 @@ llm-cli zoo keys > my.keys
 
 ```
 # LCF public keys, key id 0123456789abcdef. Not secret: give them to people who send you
-# encrypted packs (the age recipient, also for the age and rage tools) or check your signed packs.
+# encrypted packs (llm-cli zoo export --to) or check your signed packs.
 age1<58 characters>
 ed25519:<base64>
 ```

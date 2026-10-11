@@ -102,7 +102,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Encrypted packs for private sharing** (with your own machines or a team): encrypted in the age format by rage
   (through `pyrage`) to one or more recipients' age keys or to one passphrase, and signed by the sender, so
   recipients see who sent it and any change, including an added or removed recipient, is detected. The standard
-  `age` and `rage` tools open them too. A passphrase pack whose scrypt work factor needs more than 1 GiB of memory
+  `age` and `rage` tools open them too when they are encrypted to a passphrase or to a key made with `age-keygen`
+  or `rage-keygen`. A passphrase pack whose scrypt work factor needs more than 1 GiB of memory
   is refused before anything is decrypted. Each user gets an Ed25519 key and an age identity on first use, kept
   only in the encrypted secrets store; the public keys can be exported as text.
 - **Recipes**, the model zoo's "model templates": the model at a pinned commit, the target with a fingerprint

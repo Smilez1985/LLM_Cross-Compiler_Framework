@@ -1191,9 +1191,12 @@ Was in das Paket kommt:
 
 Die Datei heißt `contribution-<Art>-<ID>-<Version>.zip`, verschlüsselt `<Art>-<ID>-<Version>.lcfpack`. Deine
 Schlüssel werden beim ersten Mal im Secrets-Speicher angelegt (siehe [zoo keys](#zoo-keys)). Der Empfänger eines
-verschlüsselten Pakets öffnet es mit `llm-cli zoo install --file` oder ohne das Framework: entpacken, dann
-`age -d -i key.txt -o pack.zip pack.zip.age` (das Werkzeug `age` oder `rage`; die Signatur des Absenders wird dabei
-nicht geprüft).
+verschlüsselten Pakets öffnet es mit `llm-cli zoo install --file`. Ein Paket mit Passphrase oder eines, das für
+einen Empfänger aus `age-keygen` oder `rage-keygen` verschlüsselt ist, öffnet sich auch ohne das Framework:
+entpacken, dann `age -d -i key.txt -o pack.zip pack.zip.age` (`key.txt` ist diese Identitätsdatei; bei einer
+Passphrase entfällt `-i key.txt`; das Werkzeug `age` oder `rage` prüft die Signatur des Absenders nicht). Die
+age-Identität von `llm-cli zoo keys` bleibt im Secrets-Speicher; Pakete, die für sie verschlüsselt sind, brauchen
+also `llm-cli zoo install`.
 
 Die Datenschutz-Bereinigung ersetzt Home-Ordner durch `~` sowie IP- und MAC-Adressen, E-Mail-Adressen, JWTs, den
 Hostnamen dieses Rechners und deinen Benutzernamen durch Platzhalter wie `<ip>` und `<user>`, und sie schwärzt
@@ -1243,8 +1246,9 @@ llm-cli zoo export target my-board --author "<dein Name>" --pr
 llm-cli zoo keys
 ```
 
-Gibt deine öffentlichen Schlüssel aus: einen age-Empfänger (`age1...`), an den andere Pakete für dich verschlüsseln
-(`--to` oder die Option `age -r` der age-Werkzeuge), und eine Zeile `ed25519:`, mit der deine Signaturen geprüft
+Gibt deine öffentlichen Schlüssel aus: einen age-Empfänger (`age1...`), an den andere Pakete für dich mit
+`llm-cli zoo export --to` verschlüsseln (sein privater Teil bleibt im Secrets-Speicher, eine mit den age-Werkzeugen
+dafür verschlüsselte Datei lässt sich also nicht öffnen), und eine Zeile `ed25519:`, mit der deine Signaturen geprüft
 werden (andere nutzen sie mit `--from`). Sie sind nicht geheim; speichere die Ausgabe in einer Datei und gib sie den
 Leuten, mit denen du Pakete austauschst. Die Schlüssel werden beim ersten Mal angelegt und nur im verschlüsselten
 Secrets-Speicher aufbewahrt (Namen `community_signing_key` und `community_age_identity`). Ein gespeicherter
@@ -1257,7 +1261,7 @@ llm-cli zoo keys > my.keys
 
 ```
 # LCF public keys, key id 0123456789abcdef. Not secret: give them to people who send you
-# encrypted packs (the age recipient, also for the age and rage tools) or check your signed packs.
+# encrypted packs (llm-cli zoo export --to) or check your signed packs.
 age1<58 Zeichen>
 ed25519:<base64>
 ```

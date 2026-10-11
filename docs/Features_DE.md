@@ -1013,9 +1013,12 @@ Für deine eigenen Rechner oder ein Team lässt sich ein Pack verschlüsseln, st
   verschlüsselte Datei mit Ed25519; so sehen Empfänger, wer sie geschickt hat, und jede Änderung, auch ein
   hinzugefügter oder entfernter Empfänger, fällt auf.
 - Die Datei `.lcfpack` ist eine ZIP-Datei mit der age-Datei `pack.zip.age` und der Signatur des Absenders
-  `pack.zip.age.sig`. Die üblichen Werkzeuge `age` und `rage` öffnen sie ebenfalls: entpacken, dann
-  `age -d -i key.txt -o pack.zip pack.zip.age` (bei einem Pack mit Passphrase ohne `-i key.txt`). Die Signatur des
-  Absenders prüfen sie nicht; das Framework schon.
+  `pack.zip.age.sig`. Die üblichen Werkzeuge `age` und `rage` öffnen sie ebenfalls, wenn sie für eine Passphrase
+  oder für einen Empfänger aus `age-keygen` oder `rage-keygen` verschlüsselt ist: entpacken, dann
+  `age -d -i key.txt -o pack.zip pack.zip.age`, wobei `key.txt` diese Identitätsdatei ist (bei einem Pack mit
+  Passphrase ohne `-i key.txt`). Die age-Identität, die das Framework für dich anlegt, verlässt den
+  Secrets-Speicher nie; ein Pack, das für sie verschlüsselt ist, öffnet also nur `llm-cli zoo install`. Die
+  Signatur des Absenders prüfen die age-Werkzeuge nicht; das Framework schon.
 - **Deine Schlüssel:** Bei der ersten Nutzung bekommt jeder Benutzer einen Ed25519-Schlüssel (signiert Packs) und
   eine age-Identität (empfängt verschlüsselte Packs). Sie liegen nur im verschlüsselten Secrets-Speicher.
   `llm-cli zoo keys` gibt die öffentlichen Schlüssel als Text aus (einen Empfänger `age1...` und eine Zeile

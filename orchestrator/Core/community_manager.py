@@ -785,12 +785,19 @@ class CommunityManager:
                     continue
 
                 if isinstance(data, list):
+                    failed = 0
                     for entry in data:
                         meta = entry.get("metadata", {})
                         meta["origin_pack"] = json_file.name if json_file.parent == self.knowledge_dir else \
                             json_file.parent.name
                         if rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""), meta):
                             imported_count += 1
+                        elif str(entry.get("content") or "").strip():
+                            failed += 1  # refused, e.g. offline without the embedding model
+                    if failed:  # importing again updates the pages already stored in place
+                        self.logger.warning(f"{json_file.name}: {failed} page(s) not imported; trying again when "
+                                            "the knowledge base starts next time.")
+                        continue
 
                 with open(marker, 'w') as f:
                     f.write(datetime.now().isoformat())

@@ -950,8 +950,11 @@ file>` or `--passphrase`):
   characters, scrypt), never to both, as age requires. The sender signs the encrypted file with Ed25519, so
   recipients see who sent it, and any change, including an added or removed recipient, is detected.
 - The `.lcfpack` file is a zip with the age file `pack.zip.age` and the sender's signature `pack.zip.age.sig`. The
-  standard `age` and `rage` tools open it too: unzip it, then `age -d -i key.txt -o pack.zip pack.zip.age` (for a
-  passphrase pack without `-i key.txt`). They do not check the sender's signature; the framework does.
+  standard `age` and `rage` tools open it too when it is encrypted to a passphrase or to a recipient made with
+  `age-keygen` or `rage-keygen`: unzip it, then `age -d -i key.txt -o pack.zip pack.zip.age`, where `key.txt` is
+  that identity file (for a passphrase pack without `-i key.txt`). The age identity the framework creates for you
+  never leaves the secrets store, so a pack encrypted to it opens only with `llm-cli zoo install`. The age tools do
+  not check the sender's signature; the framework does.
 - **Your keys:** on first use every user gets an Ed25519 key (signs packs) and an age identity (receives encrypted
   packs). They are kept only in the encrypted secrets store. `llm-cli zoo keys` prints the public keys as text (an
   `age1...` recipient and an `ed25519:` line) to give to others; a recipient made with `age-keygen` or

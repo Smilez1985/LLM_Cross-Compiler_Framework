@@ -470,6 +470,30 @@ class TestEncryption:
         with pytest.raises(PackError, match=f"2\\^{log_n}"):
             decrypt_pack(forged, passphrase="correct horse battery")
 
+    def test_too_many_stanzas_are_refused_before_decryption(self, people, no_decryption):
+        # rage's header processing grows with the square of the stanza count: a 60 KB header of tiny stanzas,
+        # signed by anyone, kept it busy for about 30 seconds.
+        forged = seal(age_header(*[f"X25519 {'D' * 43}"] * (cp.MAX_RECIPIENTS + 5)), people["dave"][0])
+        with pytest.raises(PackError, match="too many"):
+            decrypt_pack(forged, identity=people["bob"][1])
+
+    def test_the_most_recipients_still_open(self, people):
+        alice_sign, _ = people["alice"]
+        identities = [pyrage.x25519.Identity.generate() for _ in range(cp.MAX_RECIPIENTS)]
+        blob = encrypt_pack(SECRET_TEXT, sender=alice_sign, recipients=[i.to_public() for i in identities])
+        assert decrypt_pack(blob, identity=identities[-1])[0] == SECRET_TEXT
+
+    def test_a_work_factor_too_slow_for_this_computer_is_not_called_a_wrong_passphrase(self, passphrase_pack,
+                                                                                         monkeypatch):
+        # rage refuses a work factor 2^4 above what this computer does in a second; the passphrase may be right.
+        def excessive(*args):
+            raise pyrage.DecryptError("Excessive work parameter for passphrase.\nDecryption would take around 64 "
+                                      "seconds.")
+        monkeypatch.setattr(cp.pyrage.passphrase, "decrypt", excessive)
+        with pytest.raises(PackError, match="too slow") as info:
+            decrypt_pack(passphrase_pack[1], passphrase="correct horse battery")
+        assert "wrong" not in str(info.value)
+
     @pytest.mark.parametrize("stanzas", [(f"X25519 {'D' * 43}", f"scrypt {'C' * 22} 18"),
                                          (f"scrypt {'C' * 22} 18", f"scrypt {'E' * 22} 18"),
                                          (f"scrypt {'C' * 22} 018",), (f"scrypt {'C' * 22}",)])
@@ -489,6 +513,13 @@ class TestEncryption:
                         lambda: pyrage.passphrase.decrypt(mixed, "correct horse battery")):
             with pytest.raises(pyrage.DecryptError, match="Header is invalid"):
                 decrypt()
+
+    def test_a_plain_pack_with_a_file_named_like_the_age_member_is_not_taken_for_an_encrypted_one(self, tmp_path):
+        root = make_tree(tmp_path / "src")
+        (root / cp.AGE_NAME).write_bytes(b"not encrypted, just a file of the target")
+        data = write_pack(root, manifest_of(root))
+        assert not cp.is_encrypted_pack(data)
+        assert read_pack(data, tmp_path / "out").manifest.id == "Demo"
 
     def test_the_old_format_is_refused_with_a_clear_message(self, tmp_path):
         old = b'lcf-encrypted-pack/v1\n{"v":1}\nmac x\n' + b"\x00" * 80
@@ -595,6 +626,15 @@ class TestUserKeys:
             cp.UserKeys(store).signing_key()
         assert writes == []
 
+    def test_a_new_key_that_cannot_be_read_back_is_not_called_damaged(self):
+        # Nothing is stored, so the advice to replace a damaged key would be wrong.
+        store = type("Store", (), {"get_secret": lambda self, name: None, "list_secrets": lambda self: [],
+                                   "set_secret": lambda self, name, value: True})()
+        for load in (cp.UserKeys(store).signing_key, cp.UserKeys(store).age_identity):
+            with pytest.raises(PackError, match="could not be read back") as info:
+                load()
+            assert "damaged" not in str(info.value)
+
     def test_no_secrets_store_means_no_keys(self):
         with pytest.raises(PackError, match="secrets store"):
             cp.UserKeys(None).signing_key()
@@ -632,6 +672,19 @@ class TestUserKeys:
         assert [kind for kind, _ in secret_patterns.find_secrets(f'key = "{secret}"')] == ["age secret key"]
         assert secret not in secret_patterns.redact(f"loaded {secret}") and secret not in scrub(f"key {secret}")
         assert secret_patterns.find_secrets("AGE-SECRET-KEY-1" + "X" * 58) == [], "placeholders are skipped"
+
+    def test_lower_case_age_secret_keys_are_caught_too(self):
+        # rage and pyrage accept the key in lower case as well (bech32 is case-insensitive, never mixed).
+        from orchestrator.security import secret_patterns
+        secret = str(pyrage.x25519.Identity.generate()).lower()
+        assert str(pyrage.x25519.Identity.from_str(secret).to_public()).startswith("age1")
+        assert [kind for kind, _ in secret_patterns.find_secrets(f'key = "{secret}"')] == ["age secret key"]
+        assert secret not in secret_patterns.redact(f"loaded {secret}") and secret not in scrub(f"key {secret}")
+
+    def test_the_public_key_text_does_not_suggest_the_age_tools_for_your_own_identity(self, secrets_store):
+        # Your age identity stays in the secrets store: a file someone encrypts to it with `age -r` opens nowhere.
+        header = cp.UserKeys(secrets_store()).export_public().split("\nage1")[0]
+        assert "zoo export --to" in " ".join(header.split()) and "age tools" not in header
 
 
 # --- Privacy scrub ----------------------------------------------------------------------------------------

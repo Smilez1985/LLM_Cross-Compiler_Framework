@@ -446,6 +446,22 @@ class TestInstall:
         framework_mod.FrameworkManager.ensure_rag_manager(framework)  # the next start
         assert world.rag.ingested == [("s", "c")], "imported once"
 
+    def test_a_knowledge_pack_the_knowledge_base_refused_is_tried_again(self, world, tmp_path):
+        # Started offline without its embedding model, the knowledge base refuses every page (ingest_document
+        # returns False); the pack must not count as imported then.
+        world.framework.get_component = lambda name: None  # knowledge base off
+        root = tmp_path / "k"
+        root.mkdir()
+        (root / "knowledge.json").write_text(json.dumps([{"source": "s", "content": "c", "metadata": {}},
+                                                         {"source": "s2", "content": " ", "metadata": {}}]))
+        (tmp_path / "k.zip").write_bytes(pack_bytes(root, kind="knowledge", pack_id="notes", version="1.0.0"))
+        world.cm.finish_install(world.cm.prepare_install_file(tmp_path / "k.zip"))
+        assert world.cm.sync_knowledge_base(SimpleNamespace(ingest_document=lambda s, c, m: False)) == 0
+        # Like the real one: an empty page stores nothing (False), and that is no failure.
+        online = SimpleNamespace(ingest_document=lambda s, c, m: bool(c.strip()) and world.rag.ingest_document(s, c, m))
+        assert world.cm.sync_knowledge_base(online) == 1 and world.rag.ingested == [("s", "c")]
+        assert world.cm.sync_knowledge_base(online) == 0 and world.rag.ingested == [("s", "c")], "imported once"
+
     def test_a_newer_knowledge_pack_is_ingested_after_the_old_folder_was_deleted(self, world, tmp_path):
         for version, content in (("1.0.0", "old"), ("1.1.0", "new")):
             root = tmp_path / version
