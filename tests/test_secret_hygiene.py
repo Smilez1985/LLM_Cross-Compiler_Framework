@@ -57,8 +57,11 @@ def test_redaction_keeps_what_is_not_secret():
     for text in ("MAX_TOKENS=16000", "TOKENIZER_PATH=/models/qwen/tokenizer.json", "NUM_TOKENS_LIMIT=4096",
                  "eos_token = '<|im_end|>'", '"pad_token": "<|finetune_right_pad_id|>"',
                  "EOS_TOKEN=<|reserved_special_token_250|>", "Bearer authentication is required",
-                 "max_tokens: 16000"):
+                 "max_tokens: 16000", 'given = headers.get(b"authorization", b"")'):
         assert redact_secrets(text) == text
+    # Source code keeps its shape: only the quoted value goes, string prefix included.
+    assert redact_secrets('headers={"Authorization": f"Bearer {key}"}') == 'headers={"Authorization": f"REDACTED"}'
+    assert redact_secrets("{'x-api-key': u'" + TOKEN + "'}") == "{'x-api-key': u'REDACTED'}"
 
 
 @pytest.mark.parametrize("text, secret", [
