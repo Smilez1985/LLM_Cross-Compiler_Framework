@@ -167,8 +167,9 @@ In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm
 | API keys and tokens | encrypted in `~/.llm-framework/secrets.store`; the key for it is kept in your operating system's keyring |
 | Models for Ditto's offline mode | `models/ditto/` in the installation folder (`LLM_FRAMEWORK_MODELS_DIR` sets another folder) |
 
-The installers also copy `targets/`, `models/` and `configs/` to a separate data folder. The framework does not
-use that folder.
+The installers also copy `targets/`, `models/` and `configs/` to a separate data folder (on Windows in the public
+documents folder, with a desktop shortcut **LLM-Conversion-Framework Data**). The framework does not use that
+folder.
 
 ---
 
@@ -194,8 +195,9 @@ use that folder.
 1. **Source Model:** a Hugging Face ID, or a local folder or file via the folder button.
 2. **Target Hardware:** the target (profile). **Scan / Import...** reads a board's hardware: import a probe
    file, scan a board over SSH, or scan this PC.
-3. **AI Optimization (Ditto):** optional. **Ask Ditto for Config** suggests format, quantization and
-   optimization from the options the target offers. This needs a configured AI provider.
+3. **AI Optimization (Ditto):** optional. Tick **Enable Ditto AI Optimization**, then **Ask Ditto for Config**
+   suggests format, quantization and optimization from the options the target offers. This needs a configured AI
+   provider.
 4. **Build Configuration:** format, board, quantization and optimization. Only combinations the target supports
    are offered. **Calibration:** importance matrix (GGUF) and a calibration file. **Use Host GPU for Build
    Process** passes a GPU into the container; Rockchip conversions do not need it.
@@ -235,8 +237,9 @@ mode is experimental and not verified in this version.
 
 To run the model on the board you need a runtime there, which the framework does not install: llama.cpp
 (`llama-server`) for GGUF, Rockchip's RKLLM runtime for `.rkllm` files (RK3588/RK3576), and the RKNN runtime for
-`.rknn` files. For GGUF, `deploy.sh` prints a matching `llama-server` command line. A runtime that the deploy
-step installs on the board is on the [roadmap](docs/BLUEPRINT.md#roadmap).
+`.rknn` files. For GGUF, `deploy.sh` prints a matching `llama-server` command line if `llama-server` is already
+installed on the board, otherwise a hint to install llama.cpp. A runtime that the deploy step installs on the
+board is on the [roadmap](docs/BLUEPRINT.md#roadmap).
 
 ---
 
@@ -245,7 +248,7 @@ step installs on the board is on the [roadmap](docs/BLUEPRINT.md#roadmap).
 ```bash
 llm-cli --version
 llm-cli doctor                 # health check; exit code 0 = OK, 1 = warnings, 2 = errors
-llm-cli doctor --fix           # harmless automatic fixes (folders, permissions); --tier 2 also clears the Docker build cache
+llm-cli doctor --fix           # harmless automatic fixes (makes the personal folder private); --tier 2 also clears the Docker build cache
 llm-cli targets list           # available targets; the --target value is the folder name in targets/ (Rockchip)
 ```
 
@@ -270,8 +273,9 @@ llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
 - A combination the target does not support stops before anything runs, with exit code 2 and the reason (for
   example "Format 'rkllm' does not run on rk3566").
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token` (asks for the value).
-- The command stays in the foreground until the build has finished; `--follow` prints each stage, Ctrl+C cancels
-  the build. If the build waits for a self-healing decision, the CLI asks in the terminal.
+- The command stays in the foreground until the build has finished; `--follow` prints each stage. If the build
+  waits for a self-healing decision, the CLI asks in the terminal. Ctrl+C does not cancel the build in this
+  version: the CLI keeps waiting until the build has ended (see [Known gaps](#known-gaps)).
 
 **Deploying** (the same steps as in the GUI):
 
@@ -360,7 +364,9 @@ the key with `llm-cli secrets set <key name>` and set `ai_provider` in `config.y
   are checked; an invalid answer is an error and is never applied. A proposal that contains a
   dangerous command (for example a download piped into a shell) is discarded.
 - **Sign-in per provider** (the **Sign in...** button) is not available yet; it is being built. Until then
-  Ditto uses API keys.
+  Ditto uses API keys. One exception today: if an `ant auth login` profile exists on this computer, the
+  `anthropic` provider uses it before a stored API key. The sign-in work changes this so that the API key comes
+  first.
 - The provider list on this development branch still shows an entry for a Claude subscription through Claude
   Code. It is being removed, because Anthropic does not allow third-party apps to use subscription limits. Do not
   rely on it; use MCP or an API key as described [above](#quick-start-ai-clients-over-mcp-claude-code-claude-desktop-vs-code).
@@ -384,9 +390,9 @@ llm-cli ditto runtime start        # starts llama-server; it keeps running until
 llm-cli ditto runtime stop
 ```
 
-Then choose **Local model (managed llama-server)** in the AI settings (provider `local`) and turn on **Offline
-Mode**. Ditto finds the running server by itself. In this version the server is controlled from the command line
-only.
+Then choose **Local model (managed llama-server)** in the AI settings (provider `local`). Turn on **Offline Mode**
+as well if Ditto should never use a cloud provider. Ditto finds the running server by itself. In this version the
+server is controlled from the command line only.
 
 | Tier | Model | Download | Chosen automatically when |
 |---|---|---|---|
@@ -459,9 +465,11 @@ The GUI saves its settings in `config.yml` in the settings folder (see [Where yo
 You can also edit the file, or override single values with environment variables of the form
 `LLM_FRAMEWORK_<KEY>`, for example `LLM_FRAMEWORK_BUILD_MEMORY_LIMIT=24g`.
 
+Some settings with their default values:
+
 ```yaml
 language: en                  # en or de
-ai_provider: local            # see the provider table above
+ai_provider: OpenAI           # a provider ID from the table above, e.g. local; older names such as OpenAI still work
 ai_security_level: STRICT     # STRICT, BALANCED or OFF (cloud providers only)
 offline_mode: false           # true: only local providers
 enable_rag_knowledge: false   # the local knowledge base
@@ -478,16 +486,19 @@ crawler_max_depth: 2
 
 ## Known gaps
 
-- **Docker setup of the framework itself:** `Docker Setup/` and the Makefile targets `make build`, `make up`,
-  `make gui` and `make test-container` do not work (the referenced `orchestrator/Dockerfile` does not exist). A
-  hardened headless image for the CLI and the MCP server is being built ([roadmap](docs/BLUEPRINT.md#roadmap)).
-  Conversions themselves run in Docker and are not affected.
+- **Docker setup of the framework itself:** `Docker Setup/` and the Makefile targets `make setup`, `make build`,
+  `make up`, `make gui` and `make test-container` do not work (the referenced `scripts/setup_linux.sh` and
+  `orchestrator/Dockerfile` do not exist). A hardened headless image for the CLI and the MCP server is being built
+  ([roadmap](docs/BLUEPRINT.md#roadmap)). Conversions themselves run in Docker and are not affected.
 - **Windows hosts:** the test suite runs on Windows in CI, but conversions on a Windows host have not been
   verified. The installation folder under `C:\Program Files` is usually not writable for your user; set
   `output_dir`, `cache_dir` and `logs_dir` to folders you own if builds cannot write their results.
 - **`llm-cli build status`** only knows builds started in the same process. Builds started by the GUI, the MCP
   server or another CLI call are not listed; use `build start --follow`, the GUI log or
   `llm-cli deploy list-artifacts`.
+- **Cancelling a build:** the GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not stop the
+  build (the CLI waits until it has ended). A build can be cancelled with the `cancel_build` tool, through Ditto in
+  the GUI chat or an MCP client, in the process that started it.
 - **Signing in per provider** is not available yet; Ditto uses API keys.
 
 ---

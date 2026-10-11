@@ -107,13 +107,14 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
 
 Weiteres Verhalten:
 
-- **Abbrechen:** Ein Abbruch (Strg+C in der CLI, die GUI oder das Tool `cancel_build`) stoppt den laufenden
-  Container, auch einen laufenden Sicherheits-Scan oder Image-Build, und kein späterer Schritt kann ihn rückgängig
-  machen.
+- **Abbrechen:** Das Tool `cancel_build` (Ditto im GUI-Chat oder ein MCP-Client, für Builds des eigenen Prozesses)
+  stoppt den laufenden Container, auch einen laufenden Sicherheits-Scan oder Image-Build, und kein späterer Schritt
+  kann den Abbruch rückgängig machen. Die GUI hat keine Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start`
+  bricht nicht ab (siehe [Bekannte Lücken](#bekannte-lücken)).
 - **Zeitlimits:** Jeder Container-Schritt hat ein Zeitlimit (Einstellung `build_timeout`, Standard 3600 s); nur
   ein echtes Überschreiten zählt als Zeitüberschreitung.
 - **Ausgabeordner:** CLI-Builds landen in `output/build_<Datum>_<Uhrzeit>/<Target>/<Modell>/<Quantisierung>/` in der
-  Installation (oder in dem mit `-o` angegebenen Ordner), Builds von Ditto oder MCP-Clients in
+  Installation (oder in dem mit `-o` angegebenen Ordner), Builds aus der GUI, von Ditto oder von MCP-Clients in
   `output/<Target>/<Modell>/<Quantisierung>/`.
 
 ---
@@ -178,8 +179,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   `.bin`); ein Build mit mehreren Gewichtsdateien wird abgelehnt.
 - **Auf dem Board:** Das Paket kommt in einen privaten temporären Ordner (`mktemp -d`), `deploy.sh` prüft jede
   Prüfsumme mit `sha256sum -c`, kopiert das Modell nach `~/models` (oder `$MODEL_DIR`), und der temporäre Ordner wird
-  gelöscht. Für GGUF gibt es eine `llama-server`-Befehlszeile aus, die auf 127.0.0.1 lauscht, und warnt davor, den
-  Server je ohne Schlüssel freizugeben.
+  gelöscht. Für GGUF gibt es, wenn `llama-server` auf dem Board installiert ist, eine `llama-server`-Befehlszeile aus,
+  die auf 127.0.0.1 lauscht, und warnt davor, den Server je ohne Schlüssel freizugeben; sonst rät es, llama.cpp zu
+  installieren. Für RKLLM nennt es die RKLLM-Runtime.
 - **Docker-Modus** (`--docker`, Option in der GUI): packt zusätzlich Container-Images ein und startet sie auf dem
   Board. Dieser Modus ist experimentell und in dieser Version nicht geprüft.
 
@@ -220,7 +222,7 @@ Anbieter übersetzt sie in das, was er versteht.
 | `openrouter` | OpenRouter | Cloud | API-Schlüssel (`openrouter_api_key`) |
 | `ollama` | Ollama | lokal (Basis-URL einstellbar) | keine |
 | `local` | verwalteter llama-server | lokal | Schlüssel pro Start, wird automatisch verwaltet |
-| `custom` | jeder OpenAI-kompatible Server | ergibt sich aus der Adresse: Loopback, private Netze und Namen auf `.local`/`.lan` gelten als lokal | API-Schlüssel (`custom_api_key`) oder keine |
+| `custom` | jeder OpenAI-kompatible Server | ergibt sich aus der Adresse: Loopback-, private und Link-Local-Adressen sowie Namen auf `.local`, `.lan`, `.localhost` oder `.home.arpa` gelten als lokal | API-Schlüssel (`custom_api_key`) oder keine |
 
 - Cloud-Anbieter haben feste Adressen; eine von Ollama oder einem eigenen Server übrig gebliebene Basis-URL bekommt
   nie ihren Schlüssel.
@@ -356,10 +358,10 @@ llm-cli ditto eval --tier small --tier small-q2 --effort low --json eval.json
 llm-cli ditto eval --kind chat --repeat 3 --min-pass 0.8
 ```
 
-Mit `--tier` startet die CLI den verwalteten lokalen Server nacheinander mit jeder Stufe und stoppt ihn am Ende. Der
-Bericht zeigt den bestandenen Anteil pro Lauf, pro Art und die durchschnittliche Zeit pro Fall; `--json` ergänzt die
-Einrichtung (Anbieter, Modell pro Aufgabe, Aufwand, Framework-Version, sha256 der Fall-Datei) und jede Antwort.
-Cloud-Anbieter berechnen etwa 20 Anfragen pro Lauf und Wiederholung. Alle Optionen:
+Mit `--tier` startet die CLI den verwalteten lokalen Server nacheinander mit jeder Stufe und stoppt ihn nach jeder
+Stufe. Der Bericht zeigt den bestandenen Anteil pro Lauf, pro Art und die durchschnittliche Zeit pro Fall; `--json`
+ergänzt die Einrichtung (Anbieter, Modell pro Aufgabe, Aufwand, Framework-Version, sha256 der Fall-Datei) und jede
+Antwort. Cloud-Anbieter berechnen etwa 20 Anfragen pro Lauf und Wiederholung. Alle Optionen:
 [CLI_Usage_DE.md](CLI_Usage_DE.md#ditto-eval).
 
 **Erste Messung** (zur Einordnung, kein Benchmark): Auf einem Rechner nur mit CPU, mit Qwen3.5 2B, Aufwand `low`
@@ -579,7 +581,7 @@ Kette nicht aufspalten.
   lokale Laufzeit und zwei Zufallswerte pro Installation (einer für die Datenschutz-Platzhalter, einer als anonyme
   Cache-ID für OpenAI).
 - **Einstellungen** werden nie aus dem Arbeitsverzeichnis gelesen: `LLM_FRAMEWORK_CONFIG_DIR`, dann `configs/` in der
-  Installation, dann der persönliche Ordner.
+  Installation, wenn du dort schreiben darfst, dann der persönliche Ordner.
 
 ---
 
@@ -619,9 +621,9 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 | KI | Tool-Berechtigungen eingerichtet und lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel) |
 | Daten | mitgelieferte Kalibrierungsdaten intakt (Prüfsummen) |
 
-`--fix` wendet die automatischen Korrekturen bis `--tier` an (1: Rechte und Ordner; 2: zusätzlich verwaiste
-Framework-Images und den Docker-Build-Cache) und prüft danach erneut. Exit-Codes: 0 OK, 1 Warnungen, 2 Fehler;
-`--json` für Skripte.
+`--fix` wendet die automatischen Korrekturen bis `--tier` an (1: macht den persönlichen Ordner privat; 2: entfernt
+zusätzlich verwaiste Framework-Images und den Docker-Build-Cache) und prüft danach erneut. Exit-Codes: 0 OK,
+1 Warnungen, 2 Fehler; `--json` für Skripte.
 
 ---
 
@@ -655,12 +657,15 @@ werden geschwärzt ausgegeben. Einzelheiten: [CONTRIBUTING_DE.md](../CONTRIBUTIN
 
 Was noch nicht funktioniert, damit dich nichts überrascht:
 
-- **Docker-Setup des Frameworks selbst:** `Docker Setup/` sowie `make build`, `make up`, `make gui` und
-  `make test-container` funktionieren nicht (`orchestrator/Dockerfile` gibt es nicht). Ein gehärtetes Image ohne
-  Oberfläche für CLI und MCP-Server wird gerade gebaut. Die Konvertierungen sind nicht betroffen.
+- **Docker-Setup des Frameworks selbst:** `Docker Setup/` sowie `make setup`, `make build`, `make up`, `make gui`
+  und `make test-container` funktionieren nicht (`scripts/setup_linux.sh` und `orchestrator/Dockerfile` gibt es
+  nicht). Ein gehärtetes Image ohne Oberfläche für CLI und MCP-Server wird gerade gebaut. Die Konvertierungen sind
+  nicht betroffen.
 - **Windows-Hosts:** Konvertierungen auf einem Windows-Host sind nicht geprüft.
 - **Build-Status über Prozesse hinweg:** Builds leben in dem Prozess, der sie gestartet hat; `llm-cli build status`
   in einem anderen Prozess sieht sie nicht.
+- **Abbrechen:** Die GUI hat keine Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start` stoppt den Build
+  nicht (die CLI wartet, bis er zu Ende ist); abbrechen kann nur das Tool `cancel_build`.
 - **Anmeldung pro Anbieter:** noch nicht verfügbar; Ditto arbeitet mit API-Schlüsseln.
 - **Laufzeit auf dem Gerät:** Das Framework installiert keine Laufzeitumgebung auf dem Board.
 - **GUI:** Die Reiter Auto-Tuning und Models sind Platzhalter; die lokale Laufzeit wird nur über die CLI gesteuert.

@@ -172,8 +172,9 @@ Befehl `llm-cli`. Die Beispiele in dieser README verwenden `llm-cli`.
 | API-Schlüssel und Tokens | verschlüsselt in `~/.llm-framework/secrets.store`; der Schlüssel dafür liegt im Schlüsselbund deines Betriebssystems |
 | Modelle für Dittos Offline-Modus | `models/ditto/` im Installationsordner (`LLM_FRAMEWORK_MODELS_DIR` legt einen anderen Ordner fest) |
 
-Die Installer kopieren außerdem `targets/`, `models/` und `configs/` in einen eigenen Datenordner. Das Framework
-nutzt diesen Ordner nicht.
+Die Installer kopieren außerdem `targets/`, `models/` und `configs/` in einen eigenen Datenordner (unter Windows
+in den öffentlichen Dokumente-Ordner, mit einer Desktop-Verknüpfung **LLM-Conversion-Framework Data**). Das
+Framework nutzt diesen Ordner nicht.
 
 ---
 
@@ -201,8 +202,9 @@ nutzt diesen Ordner nicht.
 1. **Source Model:** eine Hugging-Face-ID oder ein lokaler Ordner bzw. eine Datei über die Ordner-Schaltfläche.
 2. **Target Hardware:** das Target (Profil). **Scan / Import...** liest die Hardware eines Boards ein: eine
    Probe-Datei importieren, ein Board per SSH scannen oder diesen PC scannen.
-3. **AI Optimization (Ditto):** optional. **Ask Ditto for Config** schlägt Format, Quantisierung und Optimierung
-   aus den Optionen des Targets vor. Dafür braucht es einen eingerichteten KI-Anbieter.
+3. **AI Optimization (Ditto):** optional. Setze den Haken bei **Enable Ditto AI Optimization**; dann schlägt
+   **Ask Ditto for Config** Format, Quantisierung und Optimierung aus den Optionen des Targets vor. Dafür braucht es
+   einen eingerichteten KI-Anbieter.
 4. **Build Configuration:** Format, Board, Quantisierung und Optimierung. Angeboten werden nur Kombinationen, die
    das Target unterstützt. **Calibration:** Importance Matrix (GGUF) und eine Kalibrierungsdatei. **Use Host GPU
    for Build Process** reicht eine GPU in den Container durch; Rockchip-Konvertierungen brauchen das nicht.
@@ -244,7 +246,8 @@ dieser Modus ist experimentell und in dieser Version nicht geprüft.
 Um das Modell auf dem Board auszuführen, brauchst du dort eine Laufzeitumgebung, die das Framework nicht
 installiert: llama.cpp (`llama-server`) für GGUF, Rockchips RKLLM-Runtime für `.rkllm`-Dateien (RK3588/RK3576)
 und die RKNN-Runtime für `.rknn`-Dateien. Für GGUF gibt `deploy.sh` eine passende `llama-server`-Befehlszeile
-aus. Eine Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, steht in der
+aus, wenn `llama-server` auf dem Board schon installiert ist, sonst einen Hinweis, llama.cpp zu installieren. Eine
+Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, steht in der
 [Roadmap](docs/BLUEPRINT_DE.md#roadmap).
 
 ---
@@ -254,7 +257,7 @@ aus. Eine Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, st
 ```bash
 llm-cli --version
 llm-cli doctor                 # Gesundheitscheck; Exit-Code 0 = OK, 1 = Warnungen, 2 = Fehler
-llm-cli doctor --fix           # harmlose automatische Korrekturen (Ordner, Rechte); --tier 2 leert auch den Docker-Build-Cache
+llm-cli doctor --fix           # harmlose automatische Korrekturen (macht den persönlichen Ordner privat); --tier 2 leert auch den Docker-Build-Cache
 llm-cli targets list           # verfügbare Targets; der Wert für --target ist der Ordnername in targets/ (Rockchip)
 ```
 
@@ -280,8 +283,9 @@ llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
   (zum Beispiel „Format 'rkllm' does not run on rk3566“).
 - Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token` (fragt nach dem
   Wert).
-- Der Befehl bleibt im Vordergrund, bis der Build fertig ist; `--follow` zeigt jede Stufe, Strg+C bricht den Build
-  ab. Wartet der Build auf eine Self-Healing-Entscheidung, fragt die CLI im Terminal.
+- Der Befehl bleibt im Vordergrund, bis der Build fertig ist; `--follow` zeigt jede Stufe. Wartet der Build auf
+  eine Self-Healing-Entscheidung, fragt die CLI im Terminal. Strg+C bricht den Build in dieser Version nicht ab:
+  Die CLI wartet weiter, bis der Build zu Ende ist (siehe [Bekannte Lücken](#bekannte-lücken)).
 
 **Übertragen** (dieselben Schritte wie in der GUI):
 
@@ -347,8 +351,8 @@ Hardware-Module vor. Dabei nutzt es die Tools des Frameworks im Rahmen deiner To
 **Ditto einrichten** unter **Tools > Configure AI Agent (Ditto)...**: Anbieter, Modell (die Liste wird live beim
 Anbieter abgefragt; du kannst auch einen Modellnamen eintippen), API-Schlüssel, Basis-URL (Ollama und eigene
 Server), Aufwand (Effort), Datenschutzstufe für Cloud-Anbieter, eine Ersatzkette, die Wissensbasis und der
-Offline-Modus. Auf einem Rechner ohne Bildschirm speicherst du den Schlüssel mit `llm-cli secrets set
-<Schlüsselname>` und setzt `ai_provider` in der `config.yml` (oder die Umgebungsvariable
+Offline-Modus. Auf einem Rechner ohne Bildschirm speicherst du den Schlüssel mit
+`llm-cli secrets set <Schlüsselname>` und setzt `ai_provider` in der `config.yml` (oder die Umgebungsvariable
 `LLM_FRAMEWORK_AI_PROVIDER`).
 
 | Anbieter (ID) | Was es ist | Anmeldung | Schlüsselname für `llm-cli secrets set` |
@@ -374,7 +378,9 @@ Offline-Modus. Auf einem Rechner ohne Bildschirm speicherst du den Schlüssel mi
   entsprechen und werden geprüft; eine ungültige Antwort ist ein Fehler und wird nie angewendet. Ein Vorschlag mit
   einem gefährlichen Befehl (zum Beispiel einem Download, der direkt in eine Shell geleitet wird) wird verworfen.
 - **Anmeldung pro Anbieter** (die Schaltfläche **Sign in...**) gibt es noch nicht; sie wird gerade gebaut. Bis dahin
-  arbeitet Ditto mit API-Schlüsseln.
+  arbeitet Ditto mit API-Schlüsseln. Eine Ausnahme gibt es heute: Liegt auf diesem Rechner ein Profil aus
+  `ant auth login`, nutzt der Anbieter `anthropic` es vor einem gespeicherten API-Schlüssel. Die Arbeit an der
+  Anmeldung ändert das, sodass der API-Schlüssel Vorrang hat.
 - Die Anbieterliste zeigt auf diesem Entwicklungszweig noch einen Eintrag für ein Claude-Abo über Claude Code. Er
   wird entfernt, weil Anthropic Drittanbieter-Apps nicht erlaubt, Abo-Limits zu nutzen. Verlass dich nicht darauf;
   nutze MCP oder einen API-Schlüssel wie [oben](#schnellstart-ki-clients-über-mcp-claude-code-claude-desktop-vs-code)
@@ -399,9 +405,9 @@ llm-cli ditto runtime start        # startet llama-server; er läuft weiter bis 
 llm-cli ditto runtime stop
 ```
 
-Wähle danach in den KI-Einstellungen **Local model (managed llama-server)** (Anbieter `local`) und schalte den
-**Offline Mode** ein. Ditto findet den laufenden Server von selbst. In dieser Version wird der Server nur über die
-Kommandozeile gesteuert.
+Wähle danach in den KI-Einstellungen **Local model (managed llama-server)** (Anbieter `local`). Schalte zusätzlich
+den **Offline Mode** ein, wenn Ditto nie einen Cloud-Anbieter nutzen soll. Ditto findet den laufenden Server von
+selbst. In dieser Version wird der Server nur über die Kommandozeile gesteuert.
 
 | Stufe | Modell | Download | Automatisch gewählt, wenn |
 |---|---|---|---|
@@ -483,9 +489,11 @@ Die GUI speichert ihre Einstellungen in der `config.yml` im Einstellungsordner (
 Werte mit Umgebungsvariablen der Form `LLM_FRAMEWORK_<SCHLÜSSEL>` überschreiben, zum Beispiel
 `LLM_FRAMEWORK_BUILD_MEMORY_LIMIT=24g`.
 
+Einige Einstellungen mit ihren Standardwerten:
+
 ```yaml
-language: de                  # en oder de
-ai_provider: local            # siehe die Anbietertabelle oben
+language: en                  # en oder de
+ai_provider: OpenAI           # Anbieter-ID aus der Tabelle oben, z. B. local; alte Namen wie OpenAI gehen auch
 ai_security_level: STRICT     # STRICT, BALANCED oder OFF (nur Cloud-Anbieter)
 offline_mode: false           # true: nur lokale Anbieter
 enable_rag_knowledge: false   # die lokale Wissensbasis
@@ -502,10 +510,11 @@ crawler_max_depth: 2
 
 ## Bekannte Lücken
 
-- **Docker-Setup des Frameworks selbst:** `Docker Setup/` und die Makefile-Ziele `make build`, `make up`,
-  `make gui` und `make test-container` funktionieren nicht (die angegebene `orchestrator/Dockerfile` gibt es
-  nicht). Ein gehärtetes Image ohne Oberfläche für CLI und MCP-Server wird gerade gebaut
-  ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)). Die Konvertierungen selbst laufen in Docker und sind nicht betroffen.
+- **Docker-Setup des Frameworks selbst:** `Docker Setup/` und die Makefile-Ziele `make setup`, `make build`,
+  `make up`, `make gui` und `make test-container` funktionieren nicht (die angegebenen Dateien
+  `scripts/setup_linux.sh` und `orchestrator/Dockerfile` gibt es nicht). Ein gehärtetes Image ohne Oberfläche für
+  CLI und MCP-Server wird gerade gebaut ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)). Die Konvertierungen selbst
+  laufen in Docker und sind nicht betroffen.
 - **Windows-Hosts:** Die Testsuite läuft in der CI unter Windows, Konvertierungen auf einem Windows-Host sind aber
   nicht geprüft. Der Installationsordner unter `C:\Program Files` ist für deinen Benutzer meist nicht beschreibbar;
   setze `output_dir`, `cache_dir` und `logs_dir` auf eigene Ordner, wenn Builds ihre Ergebnisse nicht schreiben
@@ -513,6 +522,9 @@ crawler_max_depth: 2
 - **`llm-cli build status`** kennt nur Builds, die im selben Prozess gestartet wurden. Builds aus der GUI, dem
   MCP-Server oder einem anderen CLI-Aufruf erscheinen nicht; nutze `build start --follow`, das Log in der GUI oder
   `llm-cli deploy list-artifacts`.
+- **Einen Build abbrechen:** Die GUI hat keine Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start` stoppt
+  den Build nicht (die CLI wartet, bis er zu Ende ist). Abbrechen lässt sich ein Build mit dem Tool `cancel_build`,
+  über Ditto im GUI-Chat oder einen MCP-Client, in dem Prozess, der ihn gestartet hat.
 - **Anmeldung pro Anbieter** gibt es noch nicht; Ditto arbeitet mit API-Schlüsseln.
 
 ---

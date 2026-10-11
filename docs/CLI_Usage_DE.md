@@ -71,7 +71,7 @@ llm-cli [OPTIONEN] BEFEHL [ARGUMENTE]...
 | Option | Bedeutung |
 |---|---|
 | `--version` | Version ausgeben und beenden. |
-| `-c, --config PATH` | Diese Einstellungsdatei verwenden (YAML oder JSON, muss existieren). Ihre Werte überschreiben die gespeicherten Einstellungen, und ihr Ordner dient für diesen Aufruf als Einstellungsordner. |
+| `-c, --config PATH` | Diese Einstellungsdatei verwenden (YAML oder JSON, muss existieren). Ihr Ordner wird für diesen Aufruf zum Einstellungsordner (eine `config.yml` dort wird ebenfalls gelesen), und die Werte der Datei haben Vorrang davor. Der übliche Einstellungsordner wird dann nicht gelesen. |
 | `-v, --verbose` | Log-Level `DEBUG`. |
 | `-q, --quiet` | Log-Level `ERROR` und kein Start-Banner. |
 | `--log-level [DEBUG\|INFO\|WARNING\|ERROR]` | Log-Level (Standard `INFO`). |
@@ -79,8 +79,9 @@ llm-cli [OPTIONEN] BEFEHL [ARGUMENTE]...
 
 Globale Optionen stehen vor dem Befehl: `llm-cli -q doctor`, nicht `llm-cli doctor -q`.
 
-**Ausgabe:** Das Start-Banner und Log-Meldungen gehen nach stderr, Ergebnisse nach stdout. Bei `llm-cli ditto ask`
-geht nur die Antwort nach stdout, und bei `llm-cli mcp serve` trägt stdout das MCP-Protokoll.
+**Ausgabe:** Das Start-Banner und Log-Meldungen gehen nach stderr, Ergebnisse nach stdout, ebenso die meisten
+Meldungen, die ein Befehl selbst ausgibt, auch seine Fehlermeldungen. Bei `llm-cli ditto ask` geht nur die Antwort
+nach stdout, und bei `llm-cli mcp serve` trägt stdout das MCP-Protokoll.
 
 **Exit-Codes:**
 
@@ -88,11 +89,12 @@ geht nur die Antwort nach stdout, und bei `llm-cli mcp serve` trägt stdout das 
 |---|---|
 | 0 | Erfolg |
 | 1 | Der Befehl ist gescheitert (zum Beispiel ein gescheiterter Build, eine gescheiterte Übertragung, ein beschädigtes Audit-Log, ein KI-Fehler) |
-| 2 | Ungültige Eingabe: unbekannte Option, eine nicht unterstützte Kombination aus Format, Board und Quantisierung, ein unbekannter Anbieter oder eine unbekannte Modellstufe |
-| 130 | `build start` wurde mit Strg+C unterbrochen |
+| 2 | Ungültige Eingabe: unbekannte Option, eine nicht unterstützte Kombination aus Format, Board und Quantisierung, ein unbekannter Anbieter (`--provider`), eine unbekannte Modellstufe (`ditto models download`) |
+| 130 | `build start` wurde mit Strg+C unterbrochen (die CLI endet erst, wenn der Build zu Ende ist) |
 
 `llm-cli doctor` verwendet 0 (OK), 1 (Warnungen) und 2 (Fehler); `llm-cli ditto eval --min-pass` liefert 1, wenn
-ein Lauf unter dem angegebenen Anteil bleibt.
+ein Lauf unter dem angegebenen Anteil bleibt. Einige Befehle melden einen Fehler, enden aber trotzdem mit 0 (siehe
+[Bekannte Einschränkungen](#bekannte-einschränkungen)).
 
 ---
 
@@ -104,7 +106,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `targets list` / `targets validate` | Hardware-Targets auflisten / prüfen, ob ein Target geladen werden kann |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / die Builds dieses Prozesses zeigen |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
-| `ditto setup` | Die Tool-Berechtigungen festlegen (derselbe Dialog wie beim ersten Start der GUI) |
+| `ditto setup` | Die Tool-Berechtigungen festlegen (dieselbe Auswahl wie im Dialog beim ersten Start der GUI) |
 | `ditto ask` | Ditto eine Frage stellen |
 | `ditto eval` | Ditto anhand fester Testfälle bewerten |
 | `ditto runtime install/start/status/stop` | Der verwaltete lokale Modellserver (llama.cpp) für den Offline-Modus |
@@ -134,7 +136,7 @@ gibt es einen Hinweis, wie du ihn behebst.
 |---|---|
 | `--json` | Maschinenlesbare Ausgabe (Befunde, Korrekturen, Exit-Code). |
 | `--fix` | Die automatischen Korrekturen bis `--tier` anwenden, dann erneut prüfen. |
-| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (Rechte, Ordner). `2`: entfernt auch Caches (verwaiste Framework-Images und den Docker-Build-Cache). |
+| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (die Hilfe nennt „permissions, folders“; in dieser Version heißt das, den persönlichen Ordner privat zu machen). `2`: entfernt auch Caches (verwaiste Framework-Images und den Docker-Build-Cache). |
 
 Speicherplatz: Unter 20 GB frei gibt es eine Warnung, unter 5 GB einen Fehler.
 
@@ -191,7 +193,7 @@ Fehlendes Board und fehlende Quantisierung werden mit den Standardwerten des Tar
 | Option | Bedeutung |
 |---|---|
 | `-m, --model TEXT` | **Pflicht.** Hugging-Face-ID (z. B. `HuggingFaceTB/SmolLM2-135M-Instruct`) oder ein lokaler Ordner bzw. eine Datei. |
-| `-t, --target TEXT` | **Pflicht.** Ordnername des Targets in `targets/`, z. B. `Rockchip`. |
+| `-t, --target TEXT` | **Pflicht.** Ordnername des Targets in `targets/`, z. B. `Rockchip` (Groß- und Kleinschreibung zählt; prüfe ihn mit `targets validate`). |
 | `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Ausgabeformat (Standard `gguf`). Die Liste ist länger als das, was ein Target unterstützt; Rockchip nimmt `gguf`, `rkllm` und `rknn`. |
 | `-b, --board TEXT` | Board der Target-Familie, z. B. `rk3588`, `rk3576`, `rk3566`. Standard: das Standard-Board des Targets (Rockchip: `rk3588`). Groß- und Kleinschreibung spielt keine Rolle. |
 | `-q, --quantization TEXT` | Quantisierung, z. B. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Standard: der Standard des Formats für das Board. Gängige Schreibweisen wie `INT8` werden übersetzt. |
@@ -200,13 +202,14 @@ Fehlendes Board und fehlende Quantisierung werden mit den Standardwerten des Tar
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in der Build-Warteschlange dieses Prozesses (Standard `normal`). |
 | `--parallel` | Hat in dieser Version keine Wirkung (es ist immer an, und ein Aufruf startet einen Build). |
 | `-F, --follow` | Jede Stufe ausgeben, während der Build läuft. |
-| `--gpu / --no-gpu` | Die NVIDIA-GPU des Hosts in den Container durchreichen (Standard aus; braucht `nvidia-smi` auf dem Host). Rockchip-Konvertierungen brauchen das nicht. |
+| `--gpu / --no-gpu` | Die GPU des Hosts in den Container durchreichen (Standard aus): eine NVIDIA-GPU, wenn `nvidia-smi` gefunden wird, sonst `/dev/dri`, falls vorhanden. Rockchip-Konvertierungen brauchen das nicht. |
 | `--imatrix / --no-imatrix` | Importance Matrix für GGUF (Standard aus). Pflicht für `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`. |
 | `--dataset PATH` | Deine eigene Kalibrierungsdatei (muss existieren): eine Textdatei für die GGUF-Importance-Matrix oder für RKLLM, eine Liste mit Beispieleingaben für RKNN `i8`. Ohne sie nutzt die Importance Matrix den mitgelieferten Kalibrierungstext. |
 
 Verhalten:
 
-- Der Befehl bleibt im Vordergrund, bis der Build fertig ist. Strg+C bricht den Build ab (Exit-Code 130).
+- Der Befehl bleibt im Vordergrund, bis der Build fertig ist. Strg+C bricht den Build in dieser Version nicht ab:
+  Die CLI zeigt keinen Fortschritt mehr, wartet aber, bis der Build zu Ende ist, und endet dann mit Exit-Code 130.
 - Scheitert der Build an einem bekannten Problem mit einer Korrektur, die das Framework selbst anwenden kann, zeigt
   die CLI die Ursache und fragt „Apply this fix and retry the build?“. Ohne Terminal wird der Vorschlag verworfen.
   Manuelle Schritte werden nur angezeigt.
@@ -301,11 +304,11 @@ llm-cli deploy run PACKAGE_PATH --ip IP --user BENUTZER [--port 22] [--password 
 
 Lädt ein Paket per SSH in einen privaten temporären Ordner auf dem Board, führt dort `deploy.sh` aus und löscht den
 Ordner danach. `deploy.sh` prüft die Prüfsummen und kopiert das Modell nach `~/models` (oder `$MODEL_DIR`); für GGUF
-gibt es eine passende `llama-server`-Befehlszeile aus.
+gibt es eine passende `llama-server`-Befehlszeile aus, wenn `llama-server` auf dem Board installiert ist.
 
 | Argument / Option | Bedeutung |
 |---|---|
-| `PACKAGE_PATH` | Die ZIP-Datei aus `deploy package` (muss existieren). |
+| `PACKAGE_PATH` | Die ZIP-Datei aus `deploy package`, das ihren vollständigen Pfad ausgibt (muss existieren). |
 | `--ip TEXT` | **Pflicht.** Die IP-Adresse des Boards. |
 | `--user TEXT` | **Pflicht.** Benutzer auf dem Board. |
 | `--port INTEGER` | SSH-Port (Standard 22). |
@@ -400,7 +403,8 @@ Lauf und Wiederholung). Wie es funktioniert: [Features_DE.md](Features_DE.md#dit
 | `--effort [low\|medium\|high]` | Aufwand für diesen Lauf (lokale Modelle: `low` = ohne Nachdenken). Standard: KI-Einstellungen. |
 
 Mit `--tier` muss die lokale Laufzeit installiert und das Modell der Stufe heruntergeladen sein. Die CLI startet
-`llama-server` nacheinander mit jeder Stufe und **stoppt den lokalen Server am Ende**, auch einen, der vorher lief.
+`llama-server` nacheinander mit jeder Stufe und **stoppt den lokalen Server nach jeder Stufe**; ein Server, der
+vorher lief, wird also ebenfalls gestoppt.
 
 ```bash
 # Das 2B-Modell mit 4 und 2 Bit auf diesem Rechner vergleichen, ohne Nachdenken
@@ -776,7 +780,12 @@ Braucht ein GitHub-Token: `llm-cli secrets set github_token` (der Wert wird abge
 ## Bekannte Einschränkungen
 
 - `build status` sieht nur Builds des eigenen Prozesses (siehe [build status](#build-status)).
+- Strg+C in `build start` bricht den Build nicht ab; die CLI wartet, bis er zu Ende ist.
+- `build start` mit einem unbekannten Target-Namen (oder falscher Schreibweise wie `rockchip`) wird nicht
+  abgelehnt: Es meldet „Target '...' not found. Skipping.“, baut nichts und endet mit Exit-Code 0.
 - `build start --parallel` und `--optimization` wirken sich auf Rockchip-Builds nicht aus.
+- `deploy package`, `secrets set` und `scan` melden einen Fehler („Package generation failed“, „Failed to store
+  secret“, „output file was not created“), enden aber mit Exit-Code 0; prüfe in Skripten die Ausgabe.
 - `scan --output` ändert nicht, wohin die Probe schreibt.
 - `module create` schreibt nach `targets/` im aktuellen Ordner.
 - `config show` zeigt nur die Grundeinstellungen der CLI; `config repos --add` erreicht die Builds nicht.
