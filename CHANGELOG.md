@@ -366,9 +366,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - `install.sh` checks the connection over HTTPS to the package index (`pypi.org` or `PIP_INDEX_URL`) instead of
   pinging 8.8.8.8, which many networks block. It loads one small project page, not the whole index, does not show
   credentials contained in `PIP_INDEX_URL`, and stops with a clear message when started with `sh` instead of bash.
-  It no longer creates an unused data folder in root's home folder,
-  and running it again keeps the builds, cache, models and `configs/config.yml` in `/opt` instead of deleting
-  them.
+  It no longer creates an unused data folder in root's home folder. Running it again removes only files that an
+  earlier run copied (listed in `.lcf-installed-files`) and the repository no longer ships; before, its
+  `rsync --delete` deleted everything in `/opt` the repository does not ship: targets made with the module wizard
+  or `llm-cli module create`, installed community packs, and the builds, cache, models and `configs/config.yml`.
 - Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
   `config/` folder in the working directory.
 - The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).
