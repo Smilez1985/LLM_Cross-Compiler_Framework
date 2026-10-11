@@ -328,6 +328,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   it changes only those values; comments and layout stay (it rewrote the whole file with `yaml.dump`).
 - The header of `configs/project_sources.yml` says who reads the file (no part of the framework while it runs; the
   two SSOT scripts), and its outdated roadmap section (v2.2 to v2.4) is gone.
+- Generated target modules (module wizard, `llm-cli module create`, `llm-cli module generate-ai`): the template
+  `build.sh` follows the Rockchip dispatcher. It uses llama.cpp's `convert_hf_to_gguf.py` and
+  `build/bin/llama-quantize`, writes the F16 intermediate into the work folder instead of `/tmp` (a 1 GB tmpfs in
+  the sandbox), and stops with an error instead of copying the model unchanged. Its packaging step no longer copies
+  a `build/` folder that does not exist, which made every build of a generated module fail at the end.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped

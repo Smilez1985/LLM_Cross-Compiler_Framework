@@ -724,11 +724,11 @@ These are real limitations of the current state. Most are scheduled in the [road
   3.1.0.
 - **The privacy filter works with patterns.** It recognizes the formats listed above, not every personal detail
   in free text, such as a name in a sentence. Use a local provider for sensitive material.
-- **Generated targets are skeletons.** The module generator now writes a `capabilities:` block (support level
-  community: the boards, and GGUF with the types the build script handles), but the template `build.sh` does not
-  match the current pipeline (it writes intermediates to `/tmp`, which is a 1 GB tmpfs in the sandbox, and looks
-  for llama.cpp tools in old places). See the [Module Developer Guide](Module_Developer_Guide.md); an updated
-  template is planned for 3.4.0.
+- **Generated targets are skeletons.** The module generator writes a `capabilities:` block (support level
+  community: the boards, and GGUF with the types the build script handles), and the template `build.sh` follows the
+  Rockchip dispatcher, but the template Dockerfile does not build llama.cpp yet, so a generated target needs that
+  part from `targets/Rockchip/dockerfile` before it can build. See the
+  [Module Developer Guide](Module_Developer_Guide.md).
 - **The community zoo has no published index yet.** The community repository, its signed index and the
   maintainer's key are not published: `configs/community_keys.yml` lists no key, and `community_index_url` and
   `community_repo` are empty. Listing the index and installing by id stop with a message; packs can be exchanged
@@ -903,7 +903,7 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **Dependabot cooldown** for LLM SDKs. | planned |
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
 | **Signed updates.** | planned |
-| **Clean-up**: removal of the legacy four-module scripts and a target template that matches the current pipeline (capabilities block, GGUF through llama.cpp, intermediates in the work folder). | planned |
+| **Clean-up**: removal of the legacy four-module scripts, and a template Dockerfile that builds llama.cpp (the template `build.sh` already matches the current pipeline: GGUF through llama.cpp, intermediates in the work folder). | planned |
 | **SSOT corrections** for the project-sources catalogue and its scripts. | done |
 
 ### Later (planned)

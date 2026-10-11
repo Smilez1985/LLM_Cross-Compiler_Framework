@@ -177,7 +177,7 @@ requirements:
 # Machine-readable capabilities (schema: orchestrator/schemas/targets.py). GUI, CLI, the build
 # service, Ditto and the MCP server offer and validate exactly what is listed here.
 # Keep in sync with modules/build.sh (GGUF types) and scripts/export_rkllm.py (RKLLM types);
-# tests/test_capabilities.py checks that.
+# tests/test_foundation.py (TestCapabilities) and tests/test_review_capabilities_paths.py check that.
 capabilities:
   schema_version: 1
   support_level: official

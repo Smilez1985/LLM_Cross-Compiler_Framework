@@ -773,11 +773,11 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
   Anmeldeverfahren entstehen gerade für 3.1.0.
 - **Der Datenschutzfilter arbeitet mit Mustern.** Er erkennt die oben genannten Formate, nicht jede persönliche
   Angabe in freiem Text, etwa einen Namen in einem Satz. Für heikles Material nutzt du besser einen lokalen Anbieter.
-- **Erzeugte Targets sind Gerüste.** Der Modulgenerator schreibt inzwischen einen Block `capabilities:`
-  (Unterstützungsstufe community: die Boards und GGUF mit den Typen, die das Build-Skript behandelt), aber das
-  Vorlagen-`build.sh` passt nicht zur aktuellen Pipeline (es schreibt Zwischendateien nach `/tmp`, in der Sandbox ein
-  1-GB-tmpfs, und sucht llama.cpp-Werkzeuge an alten Orten). Siehe
-  [Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md); eine überarbeitete Vorlage ist für 3.4.0 geplant.
+- **Erzeugte Targets sind Gerüste.** Der Modulgenerator schreibt einen Block `capabilities:` (Unterstützungsstufe
+  community: die Boards und GGUF mit den Typen, die das Build-Skript behandelt), und das Vorlagen-`build.sh` folgt dem
+  Rockchip-Dispatcher, aber das Vorlagen-Dockerfile baut llama.cpp noch nicht; ein erzeugtes Target braucht diesen
+  Teil aus `targets/Rockchip/dockerfile`, bevor es bauen kann. Siehe
+  [Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md).
 - **Der Community-Zoo hat noch keinen veröffentlichten Index.** Das Community-Repository, sein signierter Index und
   der Schlüssel des Maintainers sind nicht veröffentlicht: `configs/community_keys.yml` enthält keinen Schlüssel,
   und `community_index_url` und `community_repo` sind leer. Den Index auflisten und per ID installieren endet mit
@@ -958,7 +958,7 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **Dependabot-Wartezeit** für LLM-SDKs. | geplant |
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
 | **Signierte Updates.** | geplant |
-| **Aufräumen**: Entfernung der alten Vier-Module-Skripte und eine Target-Vorlage, die zur aktuellen Pipeline passt (Capabilities-Block, GGUF über llama.cpp, Zwischendateien im Arbeitsordner). | geplant |
+| **Aufräumen**: Entfernung der alten Vier-Module-Skripte und ein Vorlagen-Dockerfile, das llama.cpp baut (das Vorlagen-`build.sh` passt bereits zur aktuellen Pipeline: GGUF über llama.cpp, Zwischendateien im Arbeitsordner). | geplant |
 | **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
 
 ### Später (geplant)
