@@ -8,7 +8,9 @@ candidates that do not answer the question at all. pack_excerpts fits the best e
 """
 
 import hashlib
+import json
 import math
+import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
@@ -22,6 +24,7 @@ from orchestrator.utils.helpers import redact_secrets
 
 DEFAULT_MIN_SCORE = 0.2  # for cross-encoders without a calibrated floor
 CUT_MARK = "\n[…]"
+_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")  # a Markdown code fence, as in chunking
 
 
 class RerankerSpec(BaseModel):
@@ -121,8 +124,9 @@ class FastEmbedReranker(_FastEmbedBase):
         return TextCrossEncoder(self.model_id, cache_dir=str(self.cache_dir), local_files_only=offline)
 
     def _key(self, query: str, document: str) -> str:
-        # By text, never by position in a candidate list: the same document keeps its score in any order.
-        return hashlib.sha256(f"{self.model_id}\x1f{query}\x1f{document}".encode("utf-8")).hexdigest()
+        # By text, never by position in a candidate list: the same document keeps its score in any order. JSON keeps
+        # the parts apart whatever characters they hold.
+        return hashlib.sha256(json.dumps([self.model_id, query, document]).encode("utf-8")).hexdigest()
 
     def scores(self, query: str, documents: Sequence[str]) -> List[float]:
         """The relevance (0..1) of each document for the query."""
@@ -171,14 +175,29 @@ def pack_excerpts(texts: Sequence[str], max_tokens: int, count: Callable[[str], 
     return packed
 
 
+def _fence_after(fence: str, line: str) -> str:
+    """The code fence still open after `line` ("" when none)."""
+    found = _FENCE.match(line)
+    if not found:
+        return fence
+    if not fence:
+        return found.group(1)
+    marker = found.group(1)
+    closes = marker[0] == fence[0] and len(marker) >= len(fence) and not line.strip().strip(fence[0])
+    return "" if closes else fence
+
+
 def _cut(text: str, max_tokens: int, count: Callable[[str], int]) -> str:
-    """The leading lines of text within max_tokens (a single over-long line is cut inside), marked as cut."""
+    """The leading lines of text within max_tokens (a single over-long line is cut inside), marked as cut. A code
+    block open at the cut is closed, so the rest of the prompt does not read as code."""
     budget = max_tokens - count(CUT_MARK)
     lines: List[str] = []
     used = 0
+    fence = ""
     for line in text.split("\n"):
         tokens = count(line) + 1  # the line break
-        if used + tokens > budget:
+        after = _fence_after(fence, line)
+        if used + tokens + (count(after) + 1 if after else 0) > budget:
             if not lines:  # the first line alone is too long: keep its share of the budget
                 part = line[:max(int(len(line) * budget / max(tokens, 1)), 0)]
                 while part and count(part) > budget:
@@ -187,5 +206,8 @@ def _cut(text: str, max_tokens: int, count: Callable[[str], int]) -> str:
             break
         lines.append(line)
         used += tokens
+        fence = after
     kept = "\n".join(lines).rstrip()
+    if kept and fence:
+        kept += "\n" + fence
     return kept + CUT_MARK if kept else ""

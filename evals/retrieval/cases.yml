@@ -3,7 +3,9 @@
 # relevant: corpus document ids, any of them counts; within: rank the first relevant excerpt must reach.
 # none_relevant: an unrelated question, where nothing should reach Ditto (needs a relevance floor).
 # Tags group the report: en/de (query language), cross-lingual, identifier, oversized (answer deep inside a
-# block larger than the embedding model's context), framework (this framework's own docs), negative.
+# block larger than the embedding model's context), framework (this framework's own docs), log (the last three
+# lines of a failed build, as build-log analysis searches), callsite (Ditto's module and recommendation searches),
+# negative.
 version: 1
 corpus: corpus
 cases:
@@ -189,6 +191,75 @@ cases:
     query: "/sys/kernel/debug/rknpu/version"
     tags: [identifier]
     expect: {relevant: [npu-treiber-version], within: 3}
+
+  # --- build-log tails: build-log analysis searches with the last three log lines (reranked, limit 3) ----------
+  - id: retr-log-exec-format
+    kind: retrieval
+    query: |-
+      #9 [builder 3/7] RUN cmake -B build -DGGML_NATIVE=OFF
+      #9 0.412 exec /bin/sh: exec format error
+      ERROR: process "/bin/sh -c cmake -B build -DGGML_NATIVE=OFF" did not complete successfully: exit code: 1
+    tags: [log]
+    expect: {relevant: [docker-exec-format-error], within: 3}
+
+  - id: retr-log-cuda-oom
+    kind: retrieval
+    query: |-
+      llama_kv_cache: CUDA0 KV buffer size = 4096.00 MiB
+      ggml_backend_cuda_buffer_type_alloc_buffer: allocating 4096.00 MiB on device 0: cudaMalloc failed: out of memory
+      llama_init_from_model: failed to initialize the context: failed to allocate buffer for kv cache
+    tags: [log]
+    expect: {relevant: [llama-cpp-cuda-oom], within: 3}
+
+  - id: retr-log-pep668
+    kind: retrieval
+    query: |-
+      note: If you believe this is a mistake, please contact your Python installation or OS distribution provider.
+      hint: See PEP 668 for the detailed specification.
+      The command '/bin/sh -c pip3 install rknn-toolkit-lite2' returned a non-zero code: 1
+    tags: [log]
+    expect: {relevant: [pip-externally-managed], within: 3}
+
+  - id: retr-log-docker-socket
+    kind: retrieval
+    query: |-
+      [INFO] Building image for target rockchip (rk3588)
+      Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?
+      [ERROR] docker build failed with exit code 1
+    tags: [log, cross-lingual]
+    expect: {relevant: [docker-daemon-start], within: 3}
+
+  - id: retr-log-no-space
+    kind: retrieval
+    query: |-
+      #14 [stage-1 5/8] RUN python3 convert_hf_to_gguf.py /models/src --outtype f16 --outfile /work/model-f16.gguf
+      #14 212.7 OSError: [Errno 28] No space left on device
+      ERROR: failed to solve: process did not complete successfully: exit code: 1
+    tags: [log, cross-lingual]
+    expect: {relevant: [build-cache-bereinigen], within: 3}
+
+  - id: retr-log-wheel-tag
+    kind: retrieval
+    query: |-
+      Processing ./rknn_toolkit2-2.3.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl
+      ERROR: rknn_toolkit2-2.3.0-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl is not a supported wheel on this platform.
+      The command '/bin/sh -c pip install /tmp/rknn_toolkit2-2.3.0-cp311-cp311-manylinux_2_17_x86_64.whl' returned a non-zero code: 1
+    tags: [log]
+    expect: {relevant: [rknn-toolkit2-install], within: 3}
+
+  # --- the searches of module proposals and build recommendations (keyword strings built by Ditto) -------------
+  - id: retr-site-module-nvidia
+    kind: retrieval
+    query: "nvidia SDK compilation flags build configuration optimization parameters"
+    tags: [callsite]
+    expect: {relevant: [llama-cpp-cuda-flags, jetson-jetpack-cuda, llama-cpp-cuda-oom], within: 3}
+
+  - id: retr-site-optimizer-rockchip
+    kind: retrieval
+    query: "Rockchip rk3588 example-org/example-1.5b-instruct quantization performance"
+    tags: [callsite]
+    expect: {relevant: [rkllm-quantisierung, rknn-onnx-conversion, kalibrierungsdaten-int8, rk3566-npu-grenzen],
+             within: 3}
 
   # --- unrelated questions: nothing should come back -----------------------------------------------------------
   - id: retr-neg-weather-de

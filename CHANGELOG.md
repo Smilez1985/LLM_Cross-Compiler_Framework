@@ -32,25 +32,30 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
-- **Retrieval evaluation** (`llm-cli ditto eval --kind retrieval`): 34 German and English questions
-  (cross-lingual, identifiers such as `GGML_CUDA`, answers deep inside a large table or script, unrelated
-  questions) against a corpus of 30 framework and SDK documentation excerpts (`evals/retrieval/`). The corpus
-  is indexed into a temporary knowledge base with the configured local embedding model: no AI model is needed
-  and your own knowledge base is not touched. The report gives hit@1, hit@3, MRR, how often an unrelated
+- **Retrieval evaluation** (`llm-cli ditto eval --kind retrieval`): 42 German and English searches
+  (cross-lingual questions, identifiers such as `GGML_CUDA`, answers deep inside a large table or script, the
+  last lines of failed builds and Ditto's own search strings, unrelated questions) against a corpus of 30
+  framework and SDK documentation excerpts (`evals/retrieval/`). The corpus is indexed into a temporary
+  knowledge base with the configured local embedding model: no AI model is needed and your own knowledge base
+  is not touched. The report gives hit@1, hit@3, MRR, how often an unrelated
   question gets no excerpt, figures per tag and the search latency; it works offline once the embedding model
   is downloaded. A manual and nightly CI workflow runs it with cached models. Baseline with the default CPU
-  embedding model: hit@1 83 %, hit@3 97 %, MRR 0.91; all 4 unrelated questions still get excerpts.
+  embedding model on the 34 questions: hit@1 83 %, hit@3 97 %, MRR 0.91; all 4 unrelated questions still get
+  excerpts.
 - **Reranking of knowledge-base results**: a local multilingual cross-encoder (FastEmbed/ONNX, about 120 MB,
   downloaded on first use, never in offline mode) reads the question together with each candidate and drops
-  the ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build-log analysis,
-  module proposals and build recommendations use it. Settings: `rag_reranker` (`auto`: from 6 GB RAM, the
-  larger bge-reranker-v2-m3 with CUDA and 16 GB; `off`; or a model id), `rag_rerank_min_score` and
+  the ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build recommendations
+  use it. Settings: `rag_reranker` (`auto`: from 6 GB RAM, the larger bge-reranker-v2-m3 with CUDA and 16 GB;
+  `off`; or a model id), `rag_rerank_min_score` and
   `rag_rerank_default` (also rerank chat and MCP searches; off). A reranker that cannot run is logged and the
-  search keeps its order. `llm-cli ditto eval --kind retrieval --rag-variant rerank` grades it: on the
-  retrieval set hit@1 93 % and MRR 0.97 (hybrid search: 87 % and 0.93), and all 4 unrelated questions get no
+  search keeps its order. `llm-cli ditto eval --kind retrieval --rag-variant rerank` grades it: on the 34
+  questions hit@1 93 % and MRR 0.97 (hybrid search: 87 % and 0.93), and all 4 unrelated questions get no
   excerpt (floor 0.2: relevant excerpts scored 0.80 or more, unrelated ones 0.009 or less). It takes about
   1 s for 12 candidates and 2-2.6 s for 20 on a shared 4-core CPU and gained less than the 0.05 MRR required
-  for chat, so chat stays without it by default.
+  for chat, so chat stays without it by default. Build-log analysis and module proposals keep the hybrid order:
+  on the last lines of failed builds the reranker found the relevant excerpt within 3 in 2 of 6 cases (hybrid
+  search: 5 of 6) and dropped it below the floor in one, and for the module search string it dropped every
+  excerpt.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -79,9 +84,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   found at all (answers deep inside such blocks: hit@1 50 % to 100 %). Smaller blocks stay whole. Re-import a
   document to apply it.
 - **Ditto's knowledge excerpts fit the context**: they take at most a third of `chat_context_limit`; an excerpt
-  that does not fit is skipped and a too long first one is shortened at a line.
+  that does not fit is skipped and a too long first one is shortened at a line (an open code block is closed).
 - Knowledge-base models are unloaded after 10 minutes without use and loaded again on the next search
-  (setting `rag_model_idle_minutes`, 0 keeps them loaded).
+  (setting `rag_model_idle_minutes`, 0 keeps them loaded). The time counts from the end of the last search or
+  import, never during one.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).

@@ -592,7 +592,9 @@ class DittoCoder:
         log_content = log_content or ""
         parts = ["Build context:\n" + wrap_untrusted(context_info or "(none)", "build context", max_len=2000),
                  "Build log (last part):\n" + wrap_untrusted(log_content[-6000:], "build log")]
-        known = self._knowledge("\n".join(log_content.strip().splitlines()[-3:]), limit=3, rerank=True)
+        # Not reranked by default: the cross-encoder scores log lines against prose poorly and lost relevant
+        # excerpts in the retrieval evaluation (cases tagged log).
+        known = self._knowledge("\n".join(log_content.strip().splitlines()[-3:]), limit=3)
         if known:
             parts.append("Possibly related knowledge-base excerpts:\n" + known)
         parts.append("Analyze why the build failed and propose one fix.")
@@ -612,8 +614,8 @@ class DittoCoder:
         lowered = probe.lower()
         sdk_hint = next((sdk for marker, sdk in SDK_HINTS if marker in lowered), "generic")
         parts = ["Hardware probe (target_hardware_config.txt):\n" + wrap_untrusted(probe[:8000], "hardware probe")]
-        docs = self._knowledge(f"{sdk_hint} SDK compilation flags build configuration optimization parameters",
-                               rerank=True)
+        # Not reranked by default either: for this keyword string the floor dropped the relevant excerpts too.
+        docs = self._knowledge(f"{sdk_hint} SDK compilation flags build configuration optimization parameters")
         if docs:
             parts.append("Documentation excerpts:\n" + docs)
         parts.append("Propose the module definition for this hardware.")

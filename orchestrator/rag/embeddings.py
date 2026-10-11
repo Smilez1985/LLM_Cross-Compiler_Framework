@@ -317,9 +317,10 @@ class FastEmbedDenseEmbedder(_FastEmbedBase):
         if not text:
             return 0
         self._load()
-        if self._tokenizer is None:
+        tokenizer = self._tokenizer  # read once: release() may drop it at any time
+        if tokenizer is None:
             return approx_tokens(text)
-        return len(self._tokenizer.encode(text, add_special_tokens=False).ids)
+        return len(tokenizer.encode(text, add_special_tokens=False).ids)
 
     def embed_passages(self, texts: Sequence[str]) -> List[List[float]]:
         texts = list(texts)
