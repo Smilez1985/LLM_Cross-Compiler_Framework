@@ -204,9 +204,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   while the build was still being handed to the build engine.
 - **More context in audit entries**: the confirmation channel (`elicitation`, `framework-gui`, `framework-cli`),
   the SHA-256 of the question text, the person's answer (accepted, declined, cancelled, unavailable, unanswered,
-  timeout), the client's self-reported name and version (a label only), a hash of the connection, the duration, the
-  SHA-256 and size of the result (never the result itself) and a link from the end entry to the call's write-ahead
-  entry. The fields are bound to the hash chain without changing how 3.0.0 hashes an entry: logs written before them
+  timeout), the client's self-reported name, version, transport and protocol (a label only; a key in it is removed
+  before the label is shortened, as in the stderr line), a hash of the connection, the duration, the SHA-256 and size
+  of the result (never the result itself) and a link from the end entry to the call's write-ahead entry. The fields are bound to the hash chain without changing how 3.0.0 hashes an entry: logs written before them
   stay verifiable, and a 3.0.0 process that is still running (an MCP server an AI client started before the update)
   keeps verifying and appending to the same log instead of reporting the new entries as modified.
 - **Tool permissions per caller**: Ditto and local MCP clients over stdio can have permissions of their own
@@ -243,6 +243,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   soon as the build or job changes or ends, at most after 50 seconds (a larger value is reduced with a note), with
   progress notifications for clients that ask for them. Waiting holds no worker thread, at most 4 waits run per
   client, and cancelling a wait never touches the build or job.
+- **MCP server names its clients:** for each new client `llm-cli mcp serve` writes one line to stderr (never to
+  the client) with the name and version the client reports, the protocol version, the transport and the declared
+  capabilities, including whether it can ask you (elicitation). The tools see the same label. Docs: a table of
+  what Claude Code, Claude Desktop, Cowork and VS Code support.
+- **Named MCP tokens, one per client** (`llm-cli mcp token add|list|rotate|revoke`): a token is shown once and
+  stored only as its SHA-256 (`mcp_tokens.json`, mode 0600). Its name is the caller in the audit log
+  (`mcp:<name>`) and it has its own permissions: a new token can only read (never a tool your shared permissions
+  or the tool's own default deny) until you allow more with `llm-cli tools permissions --token NAME` (not together
+  with `--caller`); `--policy-from mcp|ditto|<token>` starts with a copy of that caller's decisions and reviewed
+  tools, `--link ditto` uses Ditto's permissions by reference (for Ditto on another computer). The same name owns
+  the builds and jobs the client starts, counts its waits and is audited when its session ends. Over stdio the client's server entry sets
+  `LCF_MCP_TOKEN`; the server reads it once, removes it from its environment and does not start with an invalid
+  value. Rotating or revoking takes effect at once, also for a running server (the calls a revoked stdio client
+  still sends are refused and audited); a revoked token loses its permissions. Only a person at a terminal manages
+  tokens (audited with actor `cli`, never the token itself), and a token that ends up in a tool argument, a log line
+  or the audit log is redacted like other keys.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -321,10 +337,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - A local model file is mounted into the build containers alone, no longer together with the folder it lies in
   (a model that needs files next to it, such as ONNX external data, is given as its folder). An RKNN sample list
   next to a model file now gets its own folder mount.
-- MCP and Ditto: builds belong to the caller that started them (an MCP connection, Ditto). Cancelling its own build
+- MCP and Ditto: builds belong to the caller that started them (an MCP connection, each named token over HTTP,
+  Ditto). Cancelling its own build
   with `cancel_build` no longer asks; cancelling another client's build follows the tool permissions (by default it
   asks). A per-tool setting still wins, a tier you denied stays denied, and a damaged permission file still denies.
   `get_build_status` shows the caller class that started a build.
+- **MCP over HTTP needs a named token per client.** The one shared per-user token of 3.0.0
+  (`~/.llm-framework/mcp_http_token`) is no longer accepted: create a token per client with
+  `llm-cli mcp token add NAME`, give it to the client, and delete the old file. `llm-cli mcp serve --transport http`
+  does not start before a named token exists.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -617,6 +638,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   container starts. A Hugging Face repo id from an AI caller is no longer looked up as a local path, neither by the
   build service nor by the build engine (which mounted a folder of that name below its working directory).
   Refusals name the label, never the real path.
+- **MCP over HTTP is closed to web pages and DNS rebinding.** In 3.0.0 a page served from any port on localhost
+  passed the Origin check (only the token stopped it), the Host check accepted a loopback name with any port, and
+  all HTTP clients shared one token and one audit actor. Now every request with an `Origin` header (also a CORS
+  preflight) is refused before the token is checked, the `Host` header must be a loopback name with the server's
+  own port (in the framework and again in the SDK), the server keeps at most 8 sessions (was 10,000) and takes at
+  most 1 MiB per request (was 4 MiB), a session and a pending question round of the 2026-07-28 protocol only answer
+  the token that opened them, and no token is accepted (and the server does not start) while other users can read or
+  change the token file or it belongs to another user.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

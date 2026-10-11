@@ -64,8 +64,8 @@ class BuildStatusOut(BaseModel):
     errors: List[UntrustedText] = Field(default_factory=list)
     warnings: List[UntrustedText] = Field(default_factory=list)
     pending_healing: Optional[PendingHealing] = None
-    owner: Optional[str] = Field(default=None, description="Caller class that started it through a tool (mcp, "
-                                                           "ditto); empty for the GUI and the CLI")
+    owner: Optional[str] = Field(default=None, description="Caller that started it through a tool (mcp, "
+                                                           "mcp:<token name>, ditto); empty for the GUI and the CLI")
 
 
 class BuildList(BaseModel):
