@@ -97,7 +97,10 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
    einem Fehler wird die echte Ursache gemeldet. Spätere Builds nutzen Dockers Build-Cache.
 4. **Modell auf dem Host bereitstellen:** Ein Hugging-Face-Modell wird auf deinem Rechner heruntergeladen (mit dem
    Token `hf_token` für zugangsbeschränkte Modelle), ein lokaler Ordner bzw. eine Datei wird direkt verwendet. Die
-   Container bekommen es nur lesend.
+   Container bekommen es nur lesend: Eine einzelne Datei wird allein eingebunden, nie der Ordner, in dem sie liegt,
+   und ein Ordner nur er selbst (ein Modell, das Dateien daneben braucht, etwa externe ONNX-Daten, wird als Ordner
+   angegeben). Ein lokales Modell oder ein Datensatz, den Ditto oder ein MCP-Client genannt hat, wird unmittelbar
+   vor jedem Containerstart erneut geprüft ([Lokale Dateien für KI-Clients](#mcp-server)).
 5. **Sicherheits-Scan:** Trivy durchsucht das Image nach Schwachstellen der Stufen HIGH und CRITICAL (Einstellung
    `enable_security_scan`, festgelegtes Image `aquasec/trivy:0.75.0`). Funde erscheinen als Warnung im Log, nicht
    als Fehler. Ein Scan, der nicht innerhalb des Zeitlimits des Builds (`build_timeout`) fertig wird, wird mit
@@ -385,24 +388,64 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `list_targets` | lesen | Targets mit Boards, Formaten und Quantisierungen |
 | `get_target_capabilities` | lesen | Was ein Target bauen kann |
 | `list_build_requests` | lesen | Build-Anfragen dieser Sitzung |
-| `get_build_status` | lesen | Status, Fortschritt, Fehler, ein offener Self-Healing-Vorschlag |
+| `get_build_status` | lesen | Status, Fortschritt, Fehler, ein offener Self-Healing-Vorschlag; mit `wait_seconds` (höchstens 50) wartet es auf eine Änderung |
 | `read_build_log` | lesen | Die letzten Zeilen eines Build-Logs (Geheimnisse geschwärzt) |
 | `list_artifacts` | lesen | Fertige Builds aus ihren Manifesten |
 | `run_doctor` | lesen | Der Gesundheitscheck, ohne Korrekturen |
 | `search_knowledge` | lesen | In der Wissensbasis suchen |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen) |
-| `cancel_build` | lokal schreiben | Einen Build abbrechen |
+| `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
+| `get_status` | lesen | Deine Tool-Berechtigungen für diesen Aufrufer: jedes Tool mit Entscheidung und Grund (auch die ausgeblendeten) und was kein Tool tut, mit dem Ort, wo du es tust |
+| `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
+| `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |
 
 So läuft eine Frage mit Tools ab:
 
-1. Ditto bekommt die Definitionen der Tools, die deine Berechtigungen nicht verbieten.
+1. Ditto bekommt die Definitionen der Tools, die deine Berechtigungen nicht verbieten: dieselben Tools, die ein
+   MCP-Client mit denselben Berechtigungen angeboten bekommt, egal wie groß das Modell ist.
 2. Das Modell darf Tools aufrufen. Jeder Aufruf läuft durch die Tool-Registry: Prüfung der Eingabe, deine
    Berechtigung, Bestätigung, wo die Berechtigung „fragen“ sagt (ein Dialog in der GUI mit dem Titel des Tools und
    jedem Argument; eine Abfrage in der CLI, ohne Terminal abgelehnt), Eintrag im Audit-Log mit dem Akteur `ditto`.
 3. Tool-Ergebnisse gehen als nicht vertrauenswürdige Daten zurück an das Modell. Ein abgelehnter oder gescheiterter
    Aufruf wird dem Modell gemeldet, das angewiesen ist, denselben Aufruf nicht zu wiederholen.
 4. Nach höchstens 8 Modell-Turns pro Frage hört Ditto auf und sagt das.
+
+**Wie Namen und Werte abgeglichen werden** (gleich für Ditto und jeden MCP-Client, egal wie groß das Modell ist):
+
+- Ein Tool-Name läuft, wenn er genau stimmt oder derselbe Name in anderer Groß- und Kleinschreibung oder mit `_`,
+  `-`, `.` oder Leerzeichen an anderer Stelle ist (`StartBuild` startet `start_build`, mit einem Hinweis). Jeder
+  andere Name wird abgelehnt, mit bis zu drei Vorschlägen aus den Tools, die deine Berechtigungen erlauben; ein
+  Vorschlag läuft nie von selbst.
+- Argumentnamen: Nur die Aliasse, die ein Tool angibt (`quant` und `quantization_type` für `quantization`,
+  `repo` und `repo_id` für `model`), werden umbenannt, mit einem Hinweis. Jedes andere unbekannte Argument, auch
+  ein Feldname in anderer Groß- und Kleinschreibung (`Board`), wird mit der Liste der gültigen und einem Vorschlag
+  abgelehnt; nichts wird stillschweigend weggelassen und nichts Unangegebenes zugeordnet. Ein Alias und sein Feld
+  mit verschiedenen Werten werden abgelehnt. Das Eingabemodell jedes Tools verbietet Felder, die es nicht angibt,
+  auch bei später hinzukommenden Tools.
+- Werte: Zahlen und Ja/Nein als Text sowie Listen als JSON-Text werden als solche gelesen. Targets, Formate, Boards
+  und Quantisierungstypen passen genau, über Groß- und Kleinschreibung und Trennzeichen, wenn das genau einen Wert
+  meint (`q4-k-m` ist `Q4_K_M`; ein Target-Name, der zwei Targets meinen könnte, wird mit beiden abgelehnt), oder
+  über einen Alias, den das Target angibt (`Q4` für GGUF). Ein knapp danebenliegender Wert (`rk3567`) wird mit
+  Vorschlägen abgelehnt, nie korrigiert. Eine Anzahl von Zeilen oder Ergebnissen über dem Höchstwert wird gekürzt,
+  mit einem Hinweis.
+- Nie geändert: IDs (nur Leerzeichen um sie herum werden entfernt), Modellnamen und Pfade, Commits und Hashes sowie
+  `approve`, das ein echtes `true` oder `false` sein muss.
+- Jede Ablehnung und jeder Fehler trägt einen Grundcode (zum Beispiel `unknown_argument`, `unknown_id`,
+  `not_supported`, `permission_denied`, `needs_person`, `declined`) und den nächsten Schritt. Derselbe
+  fehlschlagende Aufruf sagt beim zweiten Mal in einer Sitzung, dass er schon gescheitert ist; beim dritten Mal wird
+  er abgelehnt, ohne zu laufen und ohne dich erneut zu fragen („versuche diesen Aufruf nicht mehr, sag dem Benutzer
+  warum“), und nach drei Eingabefehlern in einer Sitzung zeigt ein Fehler zusätzlich einen gültigen Beispielaufruf.
+  Eine Sitzung ist eine Frage an Ditto oder ein MCP-Client: seine Verbindung, seine HTTP-Sitzung oder bei einem
+  Client des Protokolls 2026-07-28 der Serverprozess (über stdio startet jeder Client seinen eigenen; HTTP-Clients
+  ohne Sitzung teilen sich einen, bis benannte Tokens sie unterscheiden).
+- Was repariert wurde, ist in der Bestätigungsfrage markiert, in den `notes` des Ergebnisses aufgeführt und im
+  Audit-Log festgehalten (`name_requested`, `repairs`). Dittos Bestätigung zeigt genau die Frage des Frameworks.
+- MCP-Clients bekommen das eigene geschlossene Eingabeschema jedes Tools (`additionalProperties: false`), dasselbe,
+  das Dittos Modell sieht.
+- Tool-Argumente, die ein lokales Modell mit Codeblock-Zäunen oder in Python-Schreibweise schickt (einfache
+  Anführungszeichen, `True`, `None`, ein Komma am Ende), werden einmal als solche gelesen; alles andere bleibt ein
+  Fehler.
 
 Dittos Prompts weisen es an, vor einem Build die Capabilities des Targets zu prüfen, Builds nur zu starten oder
 abzubrechen, wenn du im Gespräch darum gebeten hast, über Self-Healing nur mit deiner ausdrücklichen Entscheidung zu
@@ -444,7 +487,10 @@ llm-cli ditto eval --kind chat --repeat 3 --min-pass 0.8
 Mit `--tier` startet die CLI den verwalteten lokalen Server nacheinander mit jeder Stufe und stoppt ihn nach jeder
 Stufe. Der Bericht zeigt den bestandenen Anteil pro Lauf, pro Art und die durchschnittliche Zeit pro Fall; `--json`
 ergänzt die Einrichtung (Anbieter, Modell pro Aufgabe, Aufwand, Framework-Version, sha256 der Fall-Datei) und jede
-Antwort. Cloud-Anbieter berechnen etwa 20 Anfragen pro Lauf und Wiederholung. Alle Optionen:
+Antwort, und bei Chat-Fällen jeden Tool-Aufruf, den das Modell versucht hat (auch abgelehnte: unbekannte Namen,
+ungültige Argumente, Verweigerungen, Ablehnungen wiederholter Aufrufe), mit einer Zusammenfassung `tool_use`:
+Tool-Aufrufe pro Aufgabe, der Anteil fehlerhafter Aufrufe und unbekannter Tool-Namen, die Reparaturen des Frameworks
+und die Ablehnungen wiederholter Aufrufe. Cloud-Anbieter berechnen etwa 20 Anfragen pro Lauf und Wiederholung. Alle Optionen:
 [CLI_Usage_DE.md](CLI_Usage_DE.md#ditto-eval).
 
 **Erste Messung** (zur Einordnung, kein Benchmark): Auf einem Rechner nur mit CPU, mit Qwen3.5 2B, Aufwand `low`
@@ -811,8 +857,10 @@ bereit (offizielles Python-SDK `mcp` 2.3.0, Spezifikation 2026-07-28). KI-Client
 VS Code können dann [dieselben Tools wie Ditto](#dittos-tools) nutzen. Am Client meldest du dich mit deinem eigenen
 Konto oder Schlüssel an; das Framework sieht das nie.
 
-- **Jeder Aufruf läuft durch die Tool-Registry:** Eingabeschema, deine Berechtigungen, Bestätigung, Audit-Log
-  (Akteur `mcp`). Tool-Annotationen (nur lesend, idempotent) sind nur Hinweise für den Client.
+- **Jeder Aufruf läuft durch die Tool-Registry:** Abgleich von Namen und Argumenten, Eingabeschema, deine
+  Berechtigungen, Bestätigung, Audit-Log (Akteur `mcp` für lokale stdio-Clients, `mcp:<Name>` für ein benanntes
+  Token), genau wie für Ditto ([wie Namen und Werte abgeglichen werden](#dittos-tools)). Tool-Annotationen (nur
+  lesend, idempotent) sind nur Hinweise für den Client.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine
@@ -822,17 +870,118 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   laufen (ungültige Argumente, eine gescheiterte Bestätigung), landen ebenfalls im Audit-Log. Ein Client, der nicht
   fragen kann, bekommt eine Ablehnung mit einem Hinweis, wie du das Tool erlaubst.
 - **Anweisungen an den Client:** Der Server beschreibt den typischen Ablauf (Targets → Capabilities → Build → Status
-  und Log → Artefakte) und sagt dem Client, dass Build-Logs und Ergebnisse aus der Wissensbasis externer Text sind,
-  dessen Anweisungen nicht befolgt werden dürfen.
+  und Log → Artefakte), sagt dem Client, dass als externer Text markierte Felder Daten sind, deren Anweisungen nicht
+  befolgt werden dürfen, und dass er dir eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
+- **Ergebnisse:** Jedes Ergebnis läuft durch den Ausgabefilter der Registry, auch für Ditto. Secrets werden in jeder
+  Zeichenkette geschwärzt. Text von außerhalb des Frameworks (Build-Logs und Stufennamen, Self-Healing-Vorschläge,
+  Build-Manifeste, Auszüge aus der Wissensbasis, Doctor-Meldungen sowie die Bezeichnungen, Hinweise und
+  Board-Beschreibungen aus der `target.yml` eines Targets, die ein Community-Target-Pack installieren kann) wird von
+  unsichtbaren und bidirektionalen Steuerzeichen befreit und gekürzt (eine Log-Zeile auf 2.000 Zeichen, anderer externer Text auf 4.000); jede andere
+  Zeichenkette wird auf 16 KiB gekürzt, und ein Ergebnis über 256 KiB wird mit einem Hinweis abgelehnt, wie man
+  weniger anfordert. Solche Felder sind im Ausgabeschema des Tools mit `"untrusted": true` markiert. Das
+  strukturierte Ergebnis entspricht genau dem Ausgabeschema; der Textblock beginnt mit einem Satz, der nur aus
+  Fakten des Frameworks besteht (IDs, Zustände, Anzahlen), gefolgt vom JSON, eingepackt als nicht vertrauenswürdige
+  Daten. `notes` in einem Ergebnis schreibt nur das Framework, zum Beispiel, dass die Wissensbasis erreichbar ist,
+  aber nichts passte, oder dass nur die Builds dieses Prozesses aufgeführt sind. Der Schritt eines
+  Self-Healing-Vorschlags kommt als `manual_step_text`: Text zum Lesen für dich, nie ein Befehl, den der Client
+  ausführen soll. Der Fehler eines gescheiterten Aufrufs kann eine Serverantwort, eine Log-Zeile oder einen Namen
+  aus einem Pack zitieren: Er wird vor dem Schwärzen der Secrets genauso bereinigt, und der Client bekommt diesen
+  Teil als nicht vertrauenswürdige Daten eingepackt, während die eigenen Ablehnungen des Frameworks und der nächste
+  Schritt unverpackt bleiben (Dittos Modell bekommt solche Fehler ebenfalls in einem Block für nicht
+  vertrauenswürdige Daten).
+- **Lokale Dateien für KI-Clients:** MCP-Clients und Ditto nennen nie einen Pfad. Ein lokales Modell oder ein
+  Kalibrierungsdatensatz wird als `<Label>:<relativer Pfad>` in einem Ordner genannt, den die KI nutzen darf, zum
+  Beispiel `models:qwen2.5-0.5b-instruct` oder `datasets:calib/de.txt`, oder über die Datei-ID (`lf_` und 16
+  Hex-Zeichen), die das Framework dafür festgehalten hat. Die Ordner sind der Modellordner (`models`, Einstellung
+  `models_dir`), der Datensatzordner (`datasets`, Einstellung `datasets_dir`, standardmäßig neben dem Modellordner)
+  und die Ordner, die du mit [`llm-cli tools folders add`](CLI_Usage_DE.md#tools-folders) oder in der GUI (Tools >
+  Folders the AI May Use...) hinzufügst. Für den Modell- und den Datensatzordner gelten dieselben Grenzen wie für
+  einen hinzugefügten Ordner: Zeigt eine Einstellung auf `/`, dein Home oder einen Ordner, der den persönlichen
+  Ordner enthält, ist ihr Label nicht nutzbar. Die Datei muss in ihrem Ordner liegen (Links werden verfolgt und
+  geprüft) und außerhalb jedes gesperrten Ordners: des persönlichen Ordners des Frameworks (außer den Datenordnern,
+  die eine schreibgeschützte Installation dort hält), `~/.ssh`, `~/.gnupg` (und `GNUPGHOME`), `~/.config` (und
+  `XDG_CONFIG_HOME`), Schlüsselbunde, `~/.password-store`, `~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.aws`,
+  `~/.kube`, der eigenen Anmeldungen und Einstellungen der KI-Clients (`~/.claude`, `~/.claude.json`, `~/.codex`,
+  `~/.gemini`, `~/.cursor`), des Hugging-Face-Ordners mit seinen Token-Dateien (sein Unterordner `hub` lässt sich
+  als Ordner hinzufügen), Browserprofile, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (außer es ist dein eigenes Home)
+  und der Windows-Ordner für Anmeldedaten. Innen und außen werden über die Identität der Datei entschieden, nicht
+  über Namensvergleiche, deshalb kann ein Dateisystem ohne Unterscheidung von Groß- und Kleinschreibung `~/.SSH`
+  nicht verstecken. Eine Datei mit mehr als einem Hardlink wird abgelehnt. Die Datei wird festgehalten (Identität,
+  Größe, Änderungszeit) und unmittelbar vor jedem Start eines Build-Containers erneut geprüft; eine inzwischen
+  ersetzte Datei stoppt den Build. Ein Ordner (ein Hugging-Face-Modellordner) wird nur genutzt, wenn er echt
+  unterhalb seines Label-Ordners liegt und weder einen gesperrten Ordner noch eine Datei mit Hardlink enthält und
+  nur Dateien, Ordner und Links (keinen Socket, kein Gerät, keine Pipe); ein Snapshot aus dem Hugging-Face-Cache wird
+  Datei für Datei eingebunden. Dasselbe gilt für den Ordner einer RKNN-Beispielliste, deshalb wird eine Liste direkt
+  in einem Label-Ordner abgelehnt. Eine Hugging-Face-Repo-ID von einem KI-Client wird immer heruntergeladen, nie als
+  Ordner auf diesem Rechner nachgeschlagen. Ablehnungen nennen das Label, nie den echten Pfad. GUI- und CLI-Builds,
+  die du selbst startest, nehmen weiterhin jeden Pfad.
+- **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
+  größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
+  endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je
+  Client, und schickt alle 5 Sekunden eine Fortschrittsmeldung, wenn der Client Fortschritt angefordert hat. Ein
+  Client, der ein Warten abbricht, stoppt nur das Warten, nie den Build oder Job. Lange Operationen außer Builds (aus
+  den kommenden Tools für Crawlen, Herunterladen, Deployen und Freigaben) sind Jobs mit einer ID (`job_...`):
+  `get_job_status` zeigt Zustand, Fortschritt und Ergebnis, `cancel_job` stoppt sie. Eine Zusammenfassung jedes Jobs
+  (nie sein Ergebnis) bleibt in `~/.llm-framework/jobs/` für GUI und CLI.
+- **Wem ein Build gehört:** Der Aufrufer, der einen Build oder Job startet, besitzt ihn zusammen mit seiner
+  Verbindung: eine stdio-Sitzung (Akteur `mcp`, oder `mcp:<Name>` mit `LCF_MCP_TOKEN`) oder über HTTP jedes benannte
+  Token. Eigene darf er ohne Frage abbrechen; einen Build oder Job eines anderen Clients abzubrechen folgt deinen
+  Tool-Berechtigungen (standardmäßig fragt es dich). Dieselbe Identität des Aufrufers entscheidet über die
+  Berechtigungen, steht im Audit-Log und zählt die 4 Wartevorgänge je Client. `get_build_status` zeigt den
+  Aufrufer, der einen Build gestartet hat (`mcp`, `mcp:<Name>`, `ditto`).
+- **Wenn ein Client die Verbindung trennt:** Die Builds und Jobs, die seine Sitzung gestartet hat, werden
+  abgebrochen, jeweils mit einem Audit-Eintrag („client disconnected“); der Server wartet bis zu 30 Sekunden, bis
+  ihre Container gestoppt sind, und fährt dann das Framework herunter, damit kein Build ohne Besitzer weiterläuft.
+  Das gilt auch, wenn der Client einen stdio-Server mit SIGTERM beendet (wie Clients es tun, wenn er einige Sekunden
+  nach dem Schließen seiner Eingabe nicht beendet ist). Über HTTP werden die Builds und Jobs jedes Tokens
+  abgebrochen, wenn der Server endet, jeweils unter diesem Token protokolliert.
 - **Transporte:** stdio (Standard; der Client startet den Server) oder Streamable HTTP nur auf einer
-  Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). HTTP prüft Host und Origin und
-  braucht ein Bearer-Token, das pro Benutzer in `~/.llm-framework/mcp_http_token` angelegt wird.
+  Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). Über HTTP schickt jeder Client sein
+  eigenes benanntes Token als `Authorization: Bearer <Token>`; eine Anfrage mit `Origin`-Header (eine Webseite, auch
+  ein CORS-Preflight) wird abgelehnt, der `Host`-Header muss eine Loopback-Adresse mit dem Port des Servers nennen
+  (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Eine
+  Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet hat.
+- **Benannte Tokens:** `llm-cli mcp token add NAME` legt ein Token für einen Client an und zeigt es einmal; das
+  Framework behält nur seinen SHA-256 in `~/.llm-framework/mcp_tokens.json` (Modus 0600; solange andere Benutzer
+  die Datei lesen oder ändern können oder sie einem anderen Benutzer gehört, wird kein Token angenommen und der
+  Server startet nicht). Der Name des Tokens ist der Aufrufer im Audit-Log (`mcp:<Name>`),
+  und es hat eigene Berechtigungen: Ein neues Token darf nur lesen, bis du mit
+  `llm-cli tools permissions --token NAME` mehr erlaubst, es mit einer Kopie der Berechtigungen eines anderen
+  Aufrufers anlegst (`--policy-from mcp`) oder es an Dittos Berechtigungen bindest (`--link ditto`, für Ditto auf
+  einem anderen Rechner; eine Änderung an Dittos Berechtigungen gilt sofort auch dafür). `rotate` ersetzt ein Token,
+  `revoke` löscht es mit seinen Berechtigungen; beides wirkt sofort, auch für einen laufenden Server, und die
+  Aufrufe, die ein widerrufener stdio-Client noch schickt, werden abgelehnt und protokolliert. Ein
+  stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag: Der
+  Server liest sie einmal beim Start, entfernt sie aus seiner Umgebung und startet nicht mit einem Wert, der kein
+  gültiges Token ist. Ohne sie teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen
+  Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal: Kein Tool kann sie anlegen, lesen oder ändern,
+  und kein Token erscheint in einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag.
 - **Arbeitsordner:** Der Server liest nie Einstellungen und importiert nie Code aus dem Ordner, in dem er gestartet
   wird (der Client startet ihn mit `python -P`), und unter Windows startet er von dort keine Programme wie `docker`
   oder `git`. Ein Projektordner kann sein Verhalten nicht ändern.
 - **Client-Einrichtung:** `llm-cli mcp config` gibt die Befehle und das JSON so gequotet aus, dass sie in
   POSIX-Shells und in cmd wie PowerShell halten; `--write claude-desktop` trägt den Server in die Konfiguration von
   Claude Desktop ein, behält andere Einträge und schreibt eine private Sicherung.
+- **Wer verbunden ist:** Für jeden neuen Client schreibt der Server eine Zeile nach stderr, nie an den Client: Name
+  und Version, die der Client über sich selbst angibt, die Protokollversion, den Transport, den Aufrufer (`mcp` oder
+  `mcp:<Name>` des benannten Tokens, nie das Token selbst) und die Fähigkeiten, die er erklärt hat, zum Beispiel
+  `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
+  capabilities: elicitation, roots`. `elicitation none` heißt, dass der Client dich nicht fragen kann; ein Tool auf
+  „fragen“ wird dort abgelehnt. Text vom Client wird zuerst von allem befreit, was wie ein Schlüssel oder Token
+  aussieht, dann escapet und auf 64 Zeichen gekürzt; er ist eine Beschriftung, nie eine Berechtigung.
+
+Was die Clients unterstützen, laut der Dokumentation ihrer Hersteller (2026-10-11). „Nicht dokumentiert“ heißt, dass
+der Hersteller nichts dazu sagt; die stderr-Zeile oben zeigt, was ein Client wirklich erklärt.
+
+| Client | Fragt dich (Elicitation) | Fortschritt | Ressourcen | Prompts | Protokoll 2026-07-28 |
+|---|---|---|---|---|---|
+| Claude Code (Laufzeit v1 und v2) | ja, Formular und URL | ja | ja | ja | Laufzeit v2 (Standard ab 2.1.232, ohne Feature-Flags ab 2.1.274) |
+| Claude Desktop (Chat) | nicht dokumentiert | nicht dokumentiert | ja | ja | nicht dokumentiert |
+| Claude Cowork | nicht dokumentiert | nicht dokumentiert | nicht dokumentiert | nicht dokumentiert | nicht dokumentiert |
+| VS Code (GitHub Copilot) | ja, Modi nicht dokumentiert | nicht dokumentiert | ja, mit Vorlagen | ja | nicht dokumentiert |
+
+Von Claude-Desktop-Chat und Cowork wird erwartet, dass sie keine Elicitation erklären (eine Quelle eines Dritten
+sagt das): Dort wird jedes Tool auf „fragen“ abgelehnt, erlaubte Tools funktionieren.
 
 **Claude-Abonnenten:** Das ist der Weg, das Framework mit einem Claude-Abo zu nutzen. Anthropic erlaubt
 Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines Abos zu verwenden; Ditto selbst braucht deshalb einen
@@ -848,7 +997,7 @@ Jedes Tool gehört zu einer Risikostufe:
 |---|---|---|---|
 | `read` | Targets, Builds, Logs, Wissen ansehen | allow | allow, ask, deny |
 | `local_write` | Auf diesem Rechner etwas ändern (Builds starten oder abbrechen, über Healing entscheiden) | ask | allow, ask, deny |
-| `external` | Andere Geräte erreichen oder Daten löschen | ask | ask, deny; einzelne Tools lassen sich einzeln erlauben |
+| `external` | Andere Geräte erreichen oder Daten löschen | ask | ask, deny (ein Tool dieser Stufe fragt höchstens) |
 | `forbidden` | Nie aufrufbar (zum Beispiel beliebige Shell-Befehle) | deny | deny |
 
 Tools der Stufen `external` und `forbidden` gibt es noch nicht; Übertragen und Hochladen stehen nicht als Tools zur
@@ -858,9 +1007,30 @@ Verfügung.
   `~/.llm-framework/tool_policy.json` gespeichert (nur für dich lesbar). Einzelne Tools lassen sich in der GUI
   abweichend einstellen.
 - Bis zur Einrichtung sind nur lesende Tools erlaubt, alles andere fragt.
+- **Pro Aufrufer:** Ditto (`ditto`) und lokale MCP-Clients über stdio (`mcp`) können eigene Berechtigungen haben
+  (`llm-cli tools permissions --caller ditto` oder `--caller mcp`); ein Aufrufer ohne eigene nutzt die gemeinsamen.
+  Die Berechtigungen eines neuen Aufrufers beginnen mit den gemeinsamen, samt deinen Einstellungen für einzelne
+  Tools. Ein benanntes Token für einen HTTP-Client (geplant) ohne eigene Berechtigungen darf nur lesen, und nie ein
+  Tool, das deine gemeinsame Einstellung für dieses Tool oder die eigene Voreinstellung des Tools verbietet.
+- **Eigene Vorgabe und Obergrenze eines Tools:** Ein Tool kann eine eigene Vorgabe mitbringen (ein optionales Tool
+  beginnt mit `deny` und ist ausgeblendet) und eine höchste Entscheidung, die keine Einstellung anhebt (ein Tool, das
+  andere Geräte erreicht oder Daten löscht, fragt höchstens). Die Reihenfolge ist: deine Einstellung für das Tool,
+  sonst die Vorgabe des Tools, sonst deine Einstellung für seine Stufe; danach die Obergrenze. Die Vorgabe eines Tools
+  öffnet nie eine Stufe, die du verweigert hast.
+- **Neue Tools:** Die Berechtigungsdatei hält fest, welche Tools du gesehen hast; das Speichern der Einrichtung,
+  `llm-cli tools permissions` oder der GUI-Dialog markiert jedes aufgeführte Tool. Ein später hinzugekommenes Tool
+  nutzt seine eigene Vorgabe, nie eine lockerere Einstellung der Stufe, bis du es gesehen hast; `llm-cli tools list`
+  und der GUI-Dialog kennzeichnen es als neu. Eine Berechtigungsdatei aus 3.0.0 zählt ihre elf Tools als gesehen.
+- **Verweigerte Tools werden nicht aufgeführt**, weder MCP-Clients noch Ditto; ein Aufruf eines solchen Tools wird
+  trotzdem abgelehnt und festgehalten. `get_status` führt jedes Tool mit Entscheidung und Grund auf, auch die
+  ausgeblendeten, und die Handlungen, die kein Tool übernimmt, mit dem Ort, wo du sie erledigst, damit eine KI dir
+  den echten Grund nennen kann.
 - Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
   lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
   `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
+- Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
+  `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
+  nicht lesen lässt, darf nicht einmal lesen.
 
 **Audit-Log** (`~/.llm-framework/audit.db`, SQLite): Jeder Tool-Aufruf wird mit Zeit, Akteur, Tool, Entscheidung, ob
 ein Mensch bestätigt hat, und Ergebnis festgehalten. Argumente werden geschwärzt und gekürzt gespeichert, dazu ein
@@ -871,6 +1041,26 @@ neuesten Einträge auffällt. `llm-cli tools audit --verify` prüft die Kette un
 von einem falschen Schlüssel. Jeder Eintrag wird in einer eigenen Transaktion geschrieben, damit mehrere Prozesse die
 Kette nicht aufspalten. `llm-cli tools audit --archive` legt das Log und seinen Anker beiseite (mit Zeitstempel
 aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli doctor` ein Problem mit dem Log gemeldet hat.
+
+**Festgehalten, bevor er läuft.** Ein Aufruf, der etwas ändert (jede Stufe außer `read`), bekommt einen Eintrag
+`started`, bevor er läuft. Lässt sich dieser Eintrag nicht schreiben, wird der Aufruf abgelehnt und nichts läuft:
+Aufrufe, die etwas ändern, laufen nur, wenn sie festgehalten werden. Lesende Aufrufe bleiben verfügbar, und der
+gescheiterte Schreibversuch wird protokolliert. Eine Frage an dich wird als `confirmation_requested` mit dem SHA-256
+des Fragetexts festgehalten, bevor sie gestellt wird; eine Frage zu einer Änderung, die sich nicht festhalten lässt,
+wird nicht gestellt. Jedes Ende wird festgehalten: `ok`, `error`, `denied`, `not_confirmed` mit der Antwort
+(`accepted`, `declined`, `cancelled`, `unavailable`, wenn niemand gefragt werden konnte, `unanswered`),
+`confirmation_timeout` (eine MCP-Frage während des Aufrufs wartet höchstens 5 Minuten) und `cancelled` (der Client
+hat den Aufruf aufgegeben). Eine Frage des Protokolls 2026-07-28, die an den Client zurückgeht und nie beantwortet
+wird, wird nach 15 Minuten als `unanswered` festgehalten, solange der Server läuft; der Eintrag
+`confirmation_requested` ist der bleibende Nachweis. Bricht ein Client einen laufenden Aufruf ab, wird der Abbruch
+sofort festgehalten und an den laufenden Aufruf weitergegeben; was schon läuft, endet, und sein Abschlusseintrag
+folgt. Einträge enthalten außerdem den selbst angegebenen Namen und die Version des Clients (eine Bezeichnung, kein
+Nachweis, wer er ist), einen Hash der Verbindung, den Bestätigungsweg (`elicitation`, `framework-gui`,
+`framework-cli`), die Dauer, SHA-256 und Größe des Ergebnisses (nie das Ergebnis selbst) und einen Verweis auf den
+Eintrag `started` des Aufrufs. Diese Felder sind an die Hash-Kette gebunden (ihr SHA-256 steht am Ende des
+verketteten Detailtexts des Eintrags), so dass Hinzufügen, Entfernen oder Ändern erkannt wird, während ein Eintrag den
+Hash behält, den 3.0.0 berechnet: Logs, die vor ihnen geschrieben wurden, bleiben prüfbar, und ein 3.0.0-Prozess, der
+neben dieser Version noch läuft, prüft dasselbe Log weiter und schreibt hinein.
 
 ---
 

@@ -14,6 +14,7 @@ from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtWidgets import QMessageBox, QWidget
 
 from orchestrator.tools.confirmation import CallTooLong, describe_call
+from orchestrator.tools.registry import current_question
 from orchestrator.utils.logging import get_logger
 
 logger = get_logger("ToolConfirmation")
@@ -44,7 +45,8 @@ class ToolConfirmation(QObject):
         if self._closed.is_set():
             return False
         try:
-            text = describe_call(spec, inp.model_dump(mode="json"), actor=self.actor)
+            # The registry's question (with repaired values marked) when it asks; it is what the audit log hashes.
+            text = current_question() or describe_call(spec, inp.model_dump(mode="json"), actor=self.actor)
         except CallTooLong as e:
             logger.warning(str(e))
             return False
@@ -86,3 +88,7 @@ class ToolConfirmation(QObject):
     def close(self) -> None:
         """Answers open and later questions with "no" (e.g. when the window closes)."""
         self._closed.set()
+
+
+# The audit log records which channel a confirmation came from (ToolRegistry reads this attribute).
+ToolConfirmation.confirm.confirm_channel = "framework-gui"

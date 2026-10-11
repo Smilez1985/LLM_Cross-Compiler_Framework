@@ -8,7 +8,7 @@ approve exactly the values the tool will run with. Arguments too long to show ca
 
 import json
 import unicodedata
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 # Shown first in a confirmation, because they decide what a call touches.
 PRIORITY_FIELDS = ("model", "dataset_path", "use_gpu", "target", "format", "board", "quantization",
@@ -65,12 +65,18 @@ def visible(value: Any) -> str:
     return "".join(pieces)
 
 
-def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI client") -> str:
+def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI client",
+                  marks: Optional[Dict[str, str]] = None, renamed: str = "") -> str:
     """Every argument the tool will run with, complete. For MCP the question text is part of the elicitation's
-    identity, so an answer can only ever confirm exactly these values."""
+    identity, so an answer can only ever confirm exactly these values. `marks`: values the framework repaired,
+    with what the AI wrote; `renamed`: the tool name as the AI wrote it, when it was a spelling variant."""
+    marks = marks or {}
     shown = {k: v for k, v in arguments.items() if v is not None}
     order = [k for k in PRIORITY_FIELDS if k in shown] + [k for k in shown if k not in PRIORITY_FIELDS]
-    lines = [f"  {visible(k)}: {visible(shown[k])}" for k in order]
+    lines = [f"  {visible(k)}: {visible(shown[k])}"
+             + (f" (repaired; the AI wrote {visible(marks[k])})" if k in marks else "") for k in order]
+    if renamed:
+        lines.append(f"  (tool name repaired; the AI wrote {visible(renamed)})")
     text = (f"{actor} wants to run '{spec.title}' in the LLM Cross-Compiler Framework with:\n"
             + ("\n".join(lines) if lines else "  (no arguments)"))
     if len(text) > MAX_DESCRIPTION:

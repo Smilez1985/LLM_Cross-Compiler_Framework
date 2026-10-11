@@ -40,7 +40,7 @@ from orchestrator.schemas.build import (ArtifactList, ArtifactOut, BuildHandle, 
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.framework_tools import register_framework_tools
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier
-from orchestrator.tools.registry import ToolRegistry
+from orchestrator.tools.registry import ToolError, ToolRegistry
 
 if TYPE_CHECKING:
     from orchestrator.Core.rag_manager import RAGManager
@@ -220,7 +220,8 @@ class EvalBuildService(BuildService):
 
     def get_status(self, request_id: str) -> BuildStatusOut:
         if request_id not in self._requests:
-            raise BuildServiceError(f"Unknown build request '{request_id}'.")
+            raise BuildServiceError(f"Unknown build request '{request_id}'.", code="unknown_id",
+                                    next="Call list_build_requests for the ids you can use.")
         return self._requests[request_id]
 
     def list_requests(self) -> BuildList:
@@ -237,8 +238,8 @@ class EvalBuildService(BuildService):
             quantization="Q4_K_M", board="rk3588", target="Rockchip", created="2026-10-01T12:00:00Z",
             primary="model-Q4_K_M.gguf", sha256="0" * 64)])
 
-    def start_build(self, request: BuildRequestIn) -> BuildHandle:
-        req = self.validate(request)
+    def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "") -> BuildHandle:
+        req = self.validate(request, local_paths=local_paths)
         request_id = f"eval-{len(self.started) + 1}"
         self.started.append(req.model_dump())
         self._requests[request_id] = BuildStatusOut(
@@ -279,26 +280,71 @@ class EvalFramework:
         return Path(value)
 
 
+class RecordingRegistry(ToolRegistry):
+    """Records every attempt the model makes, including invalid input, unknown names, denials and repeat refusals
+    (not only the calls that reached a handler): the tool name as written, the outcome, the reason code and how
+    many repairs the fool-proof layer made."""
+
+    def __init__(self, *args, attempts: List[Dict[str, Any]], **kwargs):
+        super().__init__(*args, **kwargs)
+        self.attempts = attempts
+
+    def call(self, name, arguments, ctx, approved=None):
+        entry = {"tool": str(name)[:64], "outcome": "ok", "code": "", "repairs": 0}
+        self.attempts.append(entry)
+        try:
+            return super().call(name, arguments, ctx, approved=approved)
+        except ToolError as e:
+            entry.update(outcome="error", code=e.code)
+            raise
+
+    def prepare(self, name, arguments, ctx):
+        prepared = super().prepare(name, arguments, ctx)
+        if self.attempts:
+            self.attempts[-1]["repairs"] = len(prepared.repairs)
+        return prepared
+
+
+INPUT_ERROR_CODES = ("unknown_argument", "missing_argument", "invalid_value")
+
+
+def tool_use_metrics(results: Sequence["CaseResult"]) -> Optional[Dict[str, Any]]:
+    """Over every attempt of the chat cases: tool calls per task, the share of malformed calls and of unknown tool
+    names, repairs the fool-proof layer applied, and repeat refusals (design D14)."""
+    runs = [a.tool_calls for r in results if r.case.kind == "chat" for a in r.attempts if a.tool_calls is not None]
+    calls = [c for run in runs for c in run]
+    if not runs:
+        return None
+    return {"tasks": len(runs), "tool_calls": len(calls),
+            "steps_per_task": round(len(calls) / len(runs), 2),
+            "malformed_rate": _share([c["code"] in INPUT_ERROR_CODES for c in calls]),
+            "unknown_name_rate": _share([c["code"] == "unknown_tool" for c in calls]),
+            "repairs": sum(c.get("repairs", 0) for c in calls),
+            "repeat_refusals": sum(c["code"] == "repeat_refused" for c in calls)}
+
+
 class EvalEnvironment:
-    """A throw-away tool registry (own policy and audit log in a temp folder) that records every tool call."""
+    """A throw-away tool registry (own policy and audit log in a temp folder) that records every tool call and,
+    in `attempts`, every attempt the model made."""
 
     def __init__(self, targets_dir: Path):
         self._tmp = tempfile.TemporaryDirectory(prefix="ditto-eval-")
         state = Path(self._tmp.name)
         self.framework = EvalFramework(targets_dir)
         self.calls: List[Dict[str, Any]] = []
+        self.attempts: List[Dict[str, Any]] = []
         store = PolicyStore(state)
         store.save(ToolPolicy(configured=True, tiers={ToolTier.READ: Decision.ALLOW, ToolTier.LOCAL_WRITE: Decision.ASK,
                                                       ToolTier.EXTERNAL: Decision.DENY}))
-        self.registry = ToolRegistry(store, AuditLog(state / "audit.db"))
+        self.registry = RecordingRegistry(store, AuditLog(state / "audit.db"), attempts=self.attempts)
         staging = ToolRegistry(PolicyStore(state / "staging"))
         for spec in register_framework_tools(staging, self.framework).list():
             self.registry.register(dataclasses.replace(spec, handler=self._recording(spec.name, spec.handler)))
 
     def _recording(self, name: str, handler: Callable):
-        def run(inp: BaseModel):
+        def run(inp: BaseModel, *ctx):  # tools that take the caller's context get it as a second argument
             self.calls.append({"tool": name, "arguments": inp.model_dump(mode="json")})
-            return handler(inp)
+            return handler(inp, *ctx)
         return run
 
     def close(self) -> None:
@@ -409,6 +455,7 @@ class Attempt:
     error: str = ""
     answer: str = ""  # excerpt, for reading why a case failed
     retrieved: Optional[List[Dict[str, Any]]] = None  # retrieval: document id and score of each result
+    tool_calls: Optional[List[Dict[str, Any]]] = None  # chat: every tool call the model attempted
 
 
 @dataclass
@@ -500,6 +547,9 @@ class EvalReport:
         retrieval = self.retrieval()
         if retrieval is not None:
             data["retrieval"] = retrieval
+        tool_use = tool_use_metrics(self.results)
+        if tool_use is not None:
+            data["tool_use"] = tool_use
         return data
 
 
@@ -557,6 +607,7 @@ class DittoEval:
 
     def run_case(self, case: Case) -> Attempt:
         start = time.monotonic()
+        tool_calls = None
         try:
             if case.kind == "chat":
                 env = EvalEnvironment(self.targets_dir)
@@ -566,6 +617,7 @@ class DittoEval:
                     tools = ", ".join(c["tool"] for c in env.calls) or "none"
                     text = f"[tools: {tools}] {reply.text}"
                 finally:
+                    tool_calls = list(env.attempts)
                     env.close()
             else:
                 ditto = self._isolated(None)
@@ -587,8 +639,8 @@ class DittoEval:
                     raise ValueError(f"case {case.id}: {case.kind} cases run with RetrievalEval")
                 text = json.dumps(answer.model_dump(), ensure_ascii=False)
         except DittoError as e:
-            return Attempt(False, time.monotonic() - start, error=f"Ditto error: {e}"[:500])
-        return Attempt(not problems, time.monotonic() - start, problems, answer=text[:1500])
+            return Attempt(False, time.monotonic() - start, error=f"Ditto error: {e}"[:500], tool_calls=tool_calls)
+        return Attempt(not problems, time.monotonic() - start, problems, answer=text[:1500], tool_calls=tool_calls)
 
     def run(self, cases: Sequence[Case], repeat: int = 1,
             on_result: Optional[Callable[[CaseResult], None]] = None) -> EvalReport:

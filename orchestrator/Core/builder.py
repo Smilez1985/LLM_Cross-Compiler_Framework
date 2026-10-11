@@ -38,6 +38,7 @@ from docker.types import DeviceRequest
 
 from orchestrator import __version__
 from orchestrator.Core import build_records
+from orchestrator.tools import local_files
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
 from orchestrator.utils.llama_pin import pinned_tag
@@ -191,6 +192,10 @@ class BuildConfiguration:
     target_version: Optional[str] = None      # metadata.version of its target.yml
     toolchain_image: Optional[str] = None     # id of the image that ran the conversion
     request_id: Optional[str] = None  # the orchestrator request the build belongs to (shown by `build status`)
+    # Local inputs of an AI caller's build (orchestrator.tools.local_files.LocalInputs): pinned files that are checked
+    # again right before each container starts; without a pinned model the source is a Hugging Face repo id and is
+    # never looked up on disk. None only for a person's own builds (GUI, CLI), whose paths are used as given.
+    local_inputs: Optional[Any] = None
 
 @dataclass
 class BuildProgress:
@@ -898,13 +903,22 @@ class BuildEngine:
         if not source:
             # Path("") is the current directory, which must never be mounted as "the model".
             raise ValueError("No model source given.")
+        pin = getattr(config.local_inputs, "model", None)
+        if pin is not None:  # named by an AI caller: confined, pinned, never more than the file or its own folder
+            inner, volumes = local_files.mount_plan(pin, "/build-cache/input-model")
+            progress.add_log(f"Using local model {pin.ref}")
+            return inner, volumes
+        # An AI caller's build without a pinned model names a Hugging Face repo: never looked up on disk, where
+        # 'Documents/private' would be a folder below the working directory (G8).
         local = Path(source).expanduser()
-        if local.exists():
+        if config.local_inputs is None and local.exists():
             local = local.resolve()
-            mount = local if local.is_dir() else local.parent
-            inner = "/build-cache/input-model" + ("" if local.is_dir() else f"/{local.name}")
             progress.add_log(f"Using local model {local}")
-            return inner, {str(mount): {"bind": "/build-cache/input-model", "mode": "ro"}}
+            if local.is_dir():
+                return "/build-cache/input-model", {str(local): {"bind": "/build-cache/input-model", "mode": "ro"}}
+            # Only the file itself: the folder it lies in may hold anything else (G8).
+            inner = f"/build-cache/input-model/{local.name}"
+            return inner, {str(local): {"bind": inner, "mode": "ro"}}
 
         if not HF_REPO_ID.match(source) or ".." in source:
             raise ValueError(f"Model '{source}' is neither an existing local path nor a HuggingFace repo id (owner/name).")
@@ -1003,20 +1017,35 @@ class BuildEngine:
         host path, so a second bind of the same folder would replace the first."""
         if not config.dataset_path:
             return {}, None
-        path = Path(config.dataset_path).expanduser().resolve()
+        pin = getattr(config.local_inputs, "dataset", None)
+        path = pin.verify() if pin is not None else Path(config.dataset_path).expanduser().resolve()
         if not path.is_file():
             raise ValueError(f"Calibration dataset '{config.dataset_path}' not found.")
         for host, bind in (staged_volumes or {}).items():
+            if not Path(host).is_dir():
+                continue  # a single bound file (the model itself) holds no dataset
             try:
                 rel = path.relative_to(Path(host).resolve())
             except ValueError:
                 continue
             return {}, f"{bind['bind'].rstrip('/')}/{rel.as_posix()}"
         if config.target_format == ModelFormat.RKNN:
-            return {str(path.parent): {"bind": "/build-cache/dataset", "mode": "ro"}}, f"/build-cache/dataset/{path.name}"
+            # A sample list names files relative to its folder; an AI caller's folder must be wholly allowed.
+            folder = local_files.dataset_folder(pin) if pin is not None else path.parent
+            return {str(folder): {"bind": "/build-cache/dataset", "mode": "ro"}}, f"/build-cache/dataset/{path.name}"
         suffix = path.suffix.lower() if path.suffix.lower() in (".txt", ".json") else ".txt"
         inner = f"/build-cache/dataset{suffix}"
         return {str(path): {"bind": inner, "mode": "ro"}}, inner
+
+    @staticmethod
+    def _verify_local_inputs(config: BuildConfiguration) -> None:
+        """Right before a container starts: the files an AI caller named are still the ones it was shown (same
+        identity, size and modification time, still inside a folder the AI may use)."""
+        inputs = config.local_inputs
+        if getattr(inputs, "model", None) is not None:
+            inputs.model.verify()
+        if getattr(inputs, "dataset", None) is not None and config.dataset_path:
+            inputs.dataset.verify()
 
     SANDBOX_FALLBACK_USER = (1000, 1000)  # the image's build user, used when the host user is root or on Windows
 
@@ -1095,6 +1124,7 @@ class BuildEngine:
             str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
             str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "ro" if sandbox.get("read_only") else "rw"},
         }
+        self._verify_local_inputs(config)
         dataset_vols, dataset_inner = self._dataset_mount(config, staged[1])
         vols.update(dataset_vols)
         vols.update(staged[1])
@@ -1168,6 +1198,7 @@ class BuildEngine:
         env.update(self._repo_overrides())  # SSOT repository overrides
 
         # Calibration dataset (RKLLM calibration text, RKNN INT8 sample list; GGUF uses it via the imatrix)
+        self._verify_local_inputs(config)
         dataset_vols, dataset_inner = self._dataset_mount(config, staged[1])
         if dataset_inner:
             vols.update(dataset_vols)

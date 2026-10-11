@@ -24,7 +24,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
-- [mcp](#mcp): `serve`, `config`
+- [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
 - [secrets](#secrets): `set`, `list`
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): Hardware-Probe
@@ -242,6 +242,10 @@ Verhalten:
   `Model_Card.md`, dazu ein ZIP davon neben diesem Ordner. Sie erscheinen dort erst, wenn der Build abgeschlossen
   ist; ein abgebrochener oder gescheiterter Build hinterlässt dort keine Dateien.
 - Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token`.
+- Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nie der Ordner, in dem sie liegt; ein
+  Modell, das Dateien daneben braucht (zum Beispiel externe ONNX-Daten), wird als Ordner angegeben. Ditto und
+  MCP-Clients können gar keinen Pfad nennen: Sie verwenden `<Label>:<relativer Pfad>` in den
+  [Ordnern, die die KI nutzen darf](#tools-folders).
 - Der erste Build eines Targets baut zuerst sein Docker-Image und dauert deutlich länger.
 
 ```bash
@@ -778,32 +782,40 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 8 nur lesende Tools (`list_targets`,
+Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 10 nur lesende Tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`) und 3, die auf diesem Rechner etwas ändern (`start_build`, `cancel_build`,
-`resolve_healing`).
+`run_doctor`, `search_knowledge`, `get_status`, `get_job_status`) und 4, die auf diesem Rechner etwas ändern
+(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`).
 
 ### tools list
 
 ```
-llm-cli tools list
+llm-cli tools list [--caller ditto|mcp]
 ```
 
 Jedes Tool mit seiner Stufe (`read`, `local_write`), der aktuellen Berechtigung (`allow`, `ask`, `deny`) und einer
-Beschreibung. Der Titel sagt, wenn die Berechtigungen noch nicht eingerichtet sind.
+Beschreibung, gefolgt von der eigenen Vorgabe des Tools, der höchsten Entscheidung, die eine Einstellung ihm geben
+kann (`at most`), ob es neu ist (noch nicht gesehen: es nutzt seine eigene Vorgabe, bis du es gesehen hast) und ob
+eine Bestätigung eine dauerhafte Freigabe anbieten darf. Ohne `--caller` zeigt es die gemeinsamen Berechtigungen und
+nennt die Aufrufer, die eigene haben. Der Titel sagt, wenn die Berechtigungen noch nicht eingerichtet sind.
 
 ### tools permissions
 
 ```
-llm-cli tools permissions [--reset]
+llm-cli tools permissions [--caller ditto|mcp | --token NAME] [--reset]
 ```
 
 Stellt dieselben drei Fragen wie [`ditto setup`](#ditto-setup) und speichert die Antworten. Berechtigungen für
-einzelne Tools, die in der GUI gesetzt wurden, bleiben erhalten.
+einzelne Tools, die in der GUI gesetzt wurden, bleiben erhalten. Vorher führt es jedes Tool mit seiner eigenen
+Voreinstellung auf, der höchsten Entscheidung, die eine Einstellung ihm geben kann (`at most`), ob es seit dem
+letzten Durchgang neu ist und ob eine Bestätigung eine dauerhafte Freigabe anbieten darf; das Speichern zählt jedes
+aufgeführte Tool als gesehen. Der GUI-Dialog zeigt dieselben Angaben.
 
 | Option | Bedeutung |
 |---|---|
-| `--reset` | Zurück zu den empfohlenen Standardwerten (die Einrichtung fragt beim nächsten Mal erneut). |
+| `--caller ditto\|mcp` | Die Berechtigungen eines Aufrufers setzen (Ditto oder lokale MCP-Clients über stdio) statt der gemeinsamen. Die ersten Berechtigungen eines Aufrufers beginnen mit den gemeinsamen, samt den Einstellungen für einzelne Tools. |
+| `--token TEXT` | Stattdessen die Berechtigungen dieses [benannten MCP-Tokens](#mcp-token) setzen (nicht zusammen mit `--caller`). Braucht ein Terminal; bei einem an Ditto gebundenen Token wird zuerst gefragt, ob es eigene bekommen soll. Es führt dieselben Angaben zu den Tools für dieses Token auf. Protokolliert mit dem Akteur `cli`. |
+| `--reset` | Zurück zu den empfohlenen Standardwerten (die Einrichtung fragt beim nächsten Mal erneut). Mit `--caller`: Dieser Aufrufer nutzt wieder die gemeinsamen Berechtigungen. Mit `--token`: zurück auf nur lesen. |
 
 ### tools audit
 
@@ -811,8 +823,8 @@ einzelne Tools, die in der GUI gesetzt wurden, bleiben erhalten.
 llm-cli tools audit [--limit N] [--verify] [--archive]
 ```
 
-Zeigt die letzten Tool-Aufrufe: Zeit, Akteur (`ditto` oder `mcp`), Tool, Entscheidung, ob ein Mensch bestätigt hat,
-und das Ergebnis.
+Zeigt die letzten Tool-Aufrufe: Zeit, Akteur (`ditto`, `mcp`, `mcp:<Token-Name>` oder `cli` für eine Änderung an
+den benannten Tokens), Tool, Entscheidung, ob ein Mensch bestätigt hat, und das Ergebnis.
 
 | Option | Bedeutung |
 |---|---|
@@ -824,6 +836,44 @@ und das Ergebnis.
 llm-cli tools audit --limit 100
 llm-cli tools audit --verify
 llm-cli tools audit --archive
+```
+
+### tools folders
+
+```
+llm-cli tools folders list
+llm-cli tools folders add PATH --label LABEL [--kind model|dataset|any]
+llm-cli tools folders remove LABEL
+```
+
+Die Ordner, deren Modell- und Datensatzdateien Ditto und MCP-Clients nutzen dürfen. Sie nennen nie einen Pfad,
+sondern eine Datei als `<Label>:<relativer Pfad>`, zum Beispiel `models:qwen2.5-0.5b-instruct` oder
+`mymodels:llama/model.gguf`. Der Modellordner (`models`, Einstellung `models_dir`) und der Datensatzordner
+(`datasets`, Einstellung `datasets_dir`) sind immer da; mit `add` dürfen sie einen weiteren Ordner unter einem Label
+nutzen, das du wählst (Kleinbuchstaben, Ziffern, `-` und `_`).
+
+- `add` und `remove` brauchen ein Terminal (weitergeleitete Antworten werden abgelehnt), und `add` zeigt den Ordner
+  und fragt vorher: Dateien darin können in Builds eingebunden werden, die Community- oder KI-geschriebenen Code
+  ausführen, und können über Build-Logs KI-Clients erreichen.
+- `add` lehnt `/`, dein Home selbst, einen Ordner, der den persönlichen Ordner des Frameworks enthält, und einen
+  Ordner in einem gesperrten Ordner oder mit einem gesperrten Ordner darin ab (Schlüssel, Anmeldedaten, das
+  Hugging-Face-Token, Systemordner; die Liste steht in den [Funktionen](Features_DE.md#mcp-server)). Der Unterordner
+  `hub` des Hugging-Face-Caches lässt sich hinzufügen (`~/.cache/huggingface/hub`, wo `hf download` Modelle
+  ablegt); die Token-Dateien daneben bleiben gesperrt. Dieselben Grenzen gelten für `models_dir` und
+  `datasets_dir`: Zeigt eine der Einstellungen auf `/`, dein Home oder einen Ordner mit dem persönlichen Ordner
+  darin, markiert `list` das Label als nicht nutzbar.
+- Der echte Pfad des Ordners wird festgehalten, und zwar der, den `add` dir gezeigt hat: Zeigt ein Link während der
+  Frage woandershin, wird nichts hinzugefügt. Ändert er sich später, markiert `list` ihn als nicht nutzbar, und
+  KI-Clients werden abgewiesen, bis du `add` mit demselben Label erneut ausführst.
+- Jede Änderung landet im Audit-Log (Akteur `cli`; `gui` für dieselbe Liste in der GUI unter Tools > Folders the AI
+  May Use...); lässt sich das Hinzufügen nicht festhalten, wird der Ordner nicht hinzugefügt. Die Liste liegt in
+  `~/.llm-framework/ai_folders.json`, nur für dich lesbar.
+
+```bash
+llm-cli tools folders add ~/llm-models --label mymodels --kind model
+llm-cli tools folders add ~/.cache/huggingface/hub --label hub
+llm-cli tools folders list
+llm-cli tools folders remove mymodels
 ```
 
 ---
@@ -842,13 +892,23 @@ Tools ohne Nachfrage, alles andere fragt (oder wird abgelehnt, wenn der Client n
 
 | Option | Bedeutung |
 |---|---|
-| `--transport [stdio\|http]` | `stdio` (Standard): vom Client gestartet. `http`: lokales Streamable HTTP mit Bearer-Token. |
+| `--transport [stdio\|http]` | `stdio` (Standard): vom Client gestartet. `http`: lokales Streamable HTTP mit einem benannten Token je Client. |
 | `--host TEXT` | Nur HTTP; nur Loopback-Adressen (Standard `127.0.0.1`; außerdem `::1`, `localhost`). |
 | `--port INTEGER` | Nur HTTP (Standard 8765). |
 
 Mit `--transport http` lauscht der Server auf `http://<Host>:<Port>/mcp`, und jede Anfrage braucht
-`Authorization: Bearer <Token>`; das Token steht in `~/.llm-framework/mcp_http_token` (wird beim ersten Mal
-angelegt).
+`Authorization: Bearer <Token>` mit einem [benannten Token](#mcp-token); der Server startet nicht, bevor es eins gibt,
+und kein Token wird angenommen (und der Server startet nicht), solange andere Benutzer die Token-Datei lesen oder
+ändern können oder sie einem anderen Benutzer gehört. Anfragen mit `Origin`-Header (Webseiten, CORS-Preflights)
+werden abgelehnt, der `Host`-Header muss `127.0.0.1`, `localhost` oder `[::1]` mit dem Port des Servers sein, und der
+Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Die alte gemeinsame Token-Datei
+`mcp_http_token` wird nicht mehr akzeptiert.
+
+Über stdio macht die Umgebungsvariable `LCF_MCP_TOKEN` im Server-Eintrag des Clients den Client zum Aufrufer dieses
+benannten Tokens (`mcp:<Name>`, mit den Berechtigungen des Tokens) statt zum gemeinsamen Aufrufer `mcp`. Der Server
+liest sie einmal, entfernt sie aus seiner Umgebung (Kindprozesse erben sie nicht) und endet mit Exit-Code 2, wenn der
+Wert kein gültiges Token ist; ein laufender Server antwortet nicht mehr, sobald sein Token widerrufen oder rotiert
+wird.
 
 ```bash
 llm-cli mcp serve --transport http --port 8765
@@ -877,6 +937,38 @@ llm-cli mcp config --write claude-desktop
 ```
 
 An diesen Clients meldest du dich mit deinem eigenen Konto oder Schlüssel an; das Framework sieht das nie.
+
+### mcp token
+
+```
+llm-cli mcp token add NAME [--policy-from CALLER | --link ditto]
+llm-cli mcp token list
+llm-cli mcp token rotate NAME
+llm-cli mcp token revoke NAME
+```
+
+Benannte Tokens, eins pro Client, der sich über HTTP oder über stdio mit `LCF_MCP_TOKEN` verbindet. Ein Token wird
+einmal gezeigt, wenn es angelegt oder rotiert wird; das Framework behält nur seinen SHA-256 in
+`~/.llm-framework/mcp_tokens.json` (Modus 0600). Sein Name (1-32 Kleinbuchstaben, Ziffern und Bindestriche) ist der
+Aufrufer `mcp:<Name>` im Audit-Log, und es hat eigene Berechtigungen. `add`, `rotate` und `revoke` brauchen einen
+Menschen an einem Terminal (`add` und `rotate` geben außerdem nur auf ein Terminal aus) und werden mit dem Akteur
+`cli` protokolliert, ohne das Token. Kein Tool kann Tokens anlegen, auflisten, ändern oder lesen.
+
+| Befehl / Option | Bedeutung |
+|---|---|
+| `add NAME` | Legt ein Token an, das nur lesen darf, bis du mit `tools permissions --token NAME` mehr erlaubst. |
+| `--policy-from CALLER` | Beginnt mit einer Kopie der Berechtigungen eines anderen Aufrufers: `mcp` (lokale stdio-Clients), `ditto` oder ein Token-Name; `mcp:NAME` meint immer ein Token, auch eins namens `mcp` oder `ditto`. Spätere Änderungen der Quelle gelten nicht. |
+| `--link ditto` | Nutzt Dittos Berechtigungen per Verweis, für Ditto auf einem anderen Rechner: Eine Änderung an Dittos Berechtigungen gilt sofort. |
+| `list` | Namen, Audit-Akteure, Berechtigungen, Zeit des Anlegens und Rotierens; nie ein Token oder sein Hash. |
+| `rotate NAME` | Ein neues Token für denselben Namen und dieselben Berechtigungen; das alte funktioniert sofort nicht mehr. |
+| `revoke NAME` | Löscht das Token und seine Berechtigungen nach einer Rückfrage; sein Client verliert sofort den Zugang. |
+
+```bash
+llm-cli mcp token add laptop                          # nur lesen
+llm-cli tools permissions --token laptop              # mehr erlauben
+llm-cli mcp token add ditto-laptop --link ditto       # Ditto auf einem anderen Rechner
+claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
+```
 
 ---
 

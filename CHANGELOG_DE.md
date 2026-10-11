@@ -283,6 +283,74 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Cancel Build** im Builder-Tab: bricht den laufenden Build nach einer Bestätigung über den Build-Service ab
   (nur aktiv, solange der Build läuft, den der Tab gestartet hat); das Log meldet, wenn er angehalten hat, auch
   nach einem Abbruch, während der Build noch an die Build-Engine übergeben wurde.
+- **Mehr Zusammenhang in Audit-Einträgen**: der Bestätigungsweg (`elicitation`, `framework-gui`, `framework-cli`),
+  der SHA-256 des Fragetexts, die Antwort der Person (angenommen, abgelehnt, abgebrochen, nicht möglich,
+  unbeantwortet, abgelaufen), der selbst angegebene Name, die Version, der Transport und das Protokoll des Clients
+  (nur eine Bezeichnung; ein Schlüssel darin wird vor dem Kürzen entfernt, wie in der Zeile auf stderr), ein Hash
+  der Verbindung, die Dauer, SHA-256 und Größe des Ergebnisses (nie das Ergebnis selbst) und ein Verweis vom
+  Abschlusseintrag auf den vorab geschriebenen Eintrag des Aufrufs. Die Felder sind an die Hash-Kette gebunden, ohne
+  zu ändern, wie 3.0.0 einen Eintrag hasht: Logs, die vor ihnen geschrieben wurden, bleiben prüfbar, und ein noch
+  laufender 3.0.0-Prozess (ein MCP-Server, den ein KI-Client vor dem Update gestartet hat) prüft das Log weiter und
+  schreibt hinein, statt die neuen Einträge als verändert zu melden.
+- **Tool-Berechtigungen pro Aufrufer**: Ditto und lokale MCP-Clients über stdio können eigene Berechtigungen haben
+  (`llm-cli tools permissions --caller ditto|mcp`, `--reset --caller` kehrt zu den gemeinsamen zurück); die ersten
+  Berechtigungen eines Aufrufers beginnen mit den gemeinsamen, samt Einstellungen für einzelne Tools.
+  `llm-cli tools list --caller`, die Einrichtung in der CLI und der GUI-Dialog zeigen die eigene Vorgabe jedes Tools,
+  die höchste Entscheidung, die eine Einstellung ihm geben kann, ob es neu ist (noch nicht gesehen) und ob eine
+  dauerhafte Freigabe angeboten werden darf.
+- **Tool `get_status`** (Ditto und MCP-Clients): die Tool-Berechtigungen des Aufrufers, mit Entscheidung und Grund
+  für jedes Tool, auch für die Tools, die nicht aufgeführt werden, weil sie verweigert sind, und die Handlungen, die
+  kein Tool übernimmt, mit dem Ort, wo die Person sie erledigt, damit eine KI den echten Grund nennen kann, wenn sie
+  etwas nicht tun kann.
+- **Abgesicherte Tool-Aufrufe** (Ditto und MCP-Clients, jede Modellgröße): Schreibvarianten von Tool-Namen
+  (`StartBuild` startet `start_build`) und angegebene Argument-Aliasse (`quant` für `quantization`) laufen mit
+  einem Hinweis, während jeder andere unbekannte Argumentname, auch einer in anderer Groß- und Kleinschreibung, mit
+  einem Vorschlag abgelehnt wird; Werte werden auf beiden Wegen gleich umgewandelt und mit Formaten, Boards und Quantisierungstypen
+  des Targets abgeglichen, genau, über die kanonische Form, wenn sie eindeutig ist, oder über die Aliasse des
+  Targets, nie durch Raten eines knapp danebenliegenden Werts; jede Ablehnung trägt einen Grundcode und den nächsten
+  Schritt; derselbe fehlschlagende Aufruf wird beim zweiten Mal gekennzeichnet und beim dritten Mal abgelehnt, ohne
+  zu laufen; nach drei Eingabefehlern zeigt ein Fehler einen gültigen Beispielaufruf. Was repariert wurde, ist in
+  der Frage markiert, in den `notes` des Ergebnisses aufgeführt und im Audit-Log festgehalten. Tool-Argumente, die
+  ein lokales Modell mit Codeblock-Zäunen oder in Python-Schreibweise schickt, werden einmal erneut gelesen.
+- **`llm-cli ditto eval` hält jeden Versuch eines Tool-Aufrufs fest**, nicht nur die, die ein Tool erreicht haben:
+  Der Block `tool_use` des Berichts nennt Tool-Aufrufe pro Aufgabe, den Anteil fehlerhafter Aufrufe und unbekannter
+  Tool-Namen, Reparaturen und Ablehnungen wiederholter Aufrufe.
+- **Ordner, die die KI nutzen darf**: Ditto und MCP-Clients nennen ein lokales Modell oder einen
+  Kalibrierungsdatensatz als `<Label>:<relativer Pfad>` (zum Beispiel `models:qwen2.5-0.5b-instruct`,
+  `datasets:calib/de.txt`) oder über seine Datei-ID im Modellordner, im neuen Datensatzordner (Einstellung
+  `datasets_dir`, standardmäßig neben dem Modellordner) oder in einem Ordner, den du mit
+  `llm-cli tools folders add|list|remove` (Terminal nötig) oder in der GUI (Tools > Folders the AI May Use...)
+  hinzufügst. Das Hinzufügen zeigt, was das Teilen bedeutet, und wird im Audit-Log festgehalten (ein Hinzufügen,
+  das sich nicht festhalten lässt oder dessen Ordner sich während der Frage ändert, findet nicht statt); `/`, dein
+  Home, ein Ordner mit dem persönlichen Ordner oder einem gesperrten Ordner darin lassen sich nicht hinzufügen, und
+  dieselben Grenzen gelten für die Einstellungen des Modell- und des Datensatzordners. Der Ordner `hub` des
+  Hugging-Face-Caches lässt sich hinzufügen; seine Token-Dateien bleiben gesperrt.
+- **Jobs und Warten für MCP-Clients und Ditto**: die Tools `get_job_status` und `cancel_job` für lange Operationen
+  außer Builds (eine Job-ID `job_...`, ihr Zustand, Fortschritt, Ergebnis oder Fehler; eine Zusammenfassung jedes
+  Jobs bleibt in `~/.llm-framework/jobs/`), und `wait_seconds` bei `get_build_status` und `get_job_status`: Der
+  Aufruf kehrt zurück, sobald sich der Build oder Job ändert oder endet, spätestens nach 50 Sekunden (ein größerer
+  Wert wird mit einem Hinweis verringert), mit Fortschrittsmeldungen für Clients, die sie anfordern. Das Warten
+  belegt keinen Thread, je Client laufen höchstens 4 Wartevorgänge, und ein abgebrochenes Warten berührt den Build
+  oder Job nie.
+- **Der MCP-Server nennt seine Clients:** Für jeden neuen Client schreibt `llm-cli mcp serve` eine Zeile nach
+  stderr (nie an den Client) mit Name und Version, die der Client angibt, der Protokollversion, dem Transport und
+  den erklärten Fähigkeiten, auch ob er dich fragen kann (Elicitation). Die Tools sehen dieselbe Beschriftung.
+  Doku: eine Tabelle, was Claude Code, Claude Desktop, Cowork und VS Code unterstützen.
+- **Benannte MCP-Tokens, eins pro Client** (`llm-cli mcp token add|list|rotate|revoke`): Ein Token wird einmal
+  gezeigt und nur als SHA-256 gespeichert (`mcp_tokens.json`, Modus 0600). Sein Name ist der Aufrufer im Audit-Log
+  (`mcp:<Name>`), und es hat eigene Berechtigungen: Ein neues Token darf nur lesen (nie ein Tool, das deine
+  gemeinsamen Berechtigungen oder die eigene Vorgabe des Tools verweigern), bis du mit
+  `llm-cli tools permissions --token NAME` mehr erlaubst (nicht zusammen mit `--caller`);
+  `--policy-from mcp|ditto|<Token>` beginnt mit einer Kopie der Entscheidungen und gesehenen Tools dieses
+  Aufrufers, `--link ditto` nutzt Dittos Berechtigungen per Verweis (für Ditto auf einem anderen Rechner).
+  Demselben Namen gehören die Builds und Jobs, die der Client startet; er zählt seine Wartevorgänge und wird beim
+  Ende seiner Sitzung protokolliert. Über stdio
+  setzt der Server-Eintrag des Clients `LCF_MCP_TOKEN`; der Server liest es einmal, entfernt es aus seiner Umgebung
+  und startet nicht mit einem ungültigen Wert. Rotieren oder Widerrufen wirkt sofort, auch für einen laufenden
+  Server (die Aufrufe, die ein widerrufener stdio-Client noch schickt, werden abgelehnt und protokolliert); ein
+  widerrufenes Token verliert seine Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal (protokolliert
+  mit dem Akteur `cli`, nie das Token selbst), und ein Token, das in ein Tool-Argument, eine Logzeile oder das
+  Audit-Log gerät, wird wie andere Schlüssel geschwärzt.
 
 ### Geändert
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
@@ -367,6 +435,32 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   llama.cpp-Pins in `configs/llama_runtime.yml`, jetzt `b11429`, statt eines fest geschriebenen `v0.6.0`; beide nennen
   denselben Commit, die Images bauen also denselben Quelltext. Das Rockchip-Dockerfile, die Build-Argumente in
   `target.yml` und `configs/project_sources.yml` (dort stand noch `b4009`) nennen denselben Tag.
+- **MCP-Ergebnisse**: Der Textblock eines Tool-Ergebnisses beginnt mit einem Satz, der nur aus Fakten des Frameworks
+  besteht (IDs, Zustände, Anzahlen), gefolgt vom JSON, eingepackt als nicht vertrauenswürdige Daten;
+  Ausgabeschemas markieren jedes Feld mit externem Text (`"untrusted": true`); Ergebnisse tragen `notes`, die das
+  Framework schreibt (zum Beispiel „die Wissensbasis ist erreichbar; kein Auszug passte“ oder dass nur die Builds
+  dieses Prozesses aufgeführt sind); `suggested_step` eines offenen Self-Healing-Vorschlags heißt jetzt
+  `manual_step_text`, Text zum Lesen für die Person. Die Serveranweisungen sagen, wie markierte Felder zu behandeln
+  sind und dass der Client eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
+- **MCP-Clients sehen nur die Tools, die sie nutzen dürfen**: Tools, die deine Berechtigungen verweigern, fehlen in
+  der Tool-Liste (dieselben Tools, die Ditto bei denselben Berechtigungen bekommt); ein Aufruf eines solchen Tools
+  wird trotzdem abgelehnt und festgehalten. `destructiveHint` folgt der eigenen Angabe jedes Tools statt seiner
+  Stufe (`resolve_healing` ist zerstörend, weil eine seiner Korrekturen den Docker-Build-Cache löscht), und Tools,
+  die andere Geräte erreichen, bitten den Client, bei jedem Aufruf seine eigene Rückfrage zu zeigen
+  (`anthropic/requiresUserInteraction`).
+- Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nicht mehr zusammen mit dem Ordner, in
+  dem sie liegt (ein Modell, das Dateien daneben braucht, etwa externe ONNX-Daten, wird als Ordner angegeben). Eine
+  RKNN-Beispielliste neben einer Modelldatei bekommt jetzt ihre eigene Ordnereinbindung.
+- MCP und Ditto: Builds gehören dem Aufrufer, der sie gestartet hat (einer MCP-Verbindung, jedem benannten Token
+  über HTTP, Ditto). Den eigenen Build
+  mit `cancel_build` abzubrechen fragt nicht mehr; den Build eines anderen Clients abzubrechen folgt den
+  Tool-Berechtigungen (standardmäßig fragt es). Eine Einstellung für das einzelne Tool gilt weiter, eine verweigerte
+  Stufe bleibt verweigert, und eine beschädigte Berechtigungsdatei verbietet weiter. `get_build_status` zeigt die
+  Aufruferklasse, die einen Build gestartet hat.
+- **MCP über HTTP braucht ein benanntes Token je Client.** Das eine gemeinsame Token je Benutzer aus 3.0.0
+  (`~/.llm-framework/mcp_http_token`) wird nicht mehr akzeptiert: Lege mit `llm-cli mcp token add NAME` ein Token je
+  Client an, gib es dem Client und lösche die alte Datei. `llm-cli mcp serve --transport http` startet nicht, bevor
+  es ein benanntes Token gibt.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -406,6 +500,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- MCP-Server: Ein Client, der die Verbindung trennt, lässt seine Builds nicht mehr ohne jemanden laufen, der
+  aufräumt. Die Builds und Jobs, die seine Sitzung gestartet hat, werden abgebrochen, jeweils mit einem Audit-Eintrag
+  („client disconnected“), der Server wartet bis zu 30 Sekunden, bis ihre Container gestoppt sind, und
+  `llm-cli mcp serve` fährt danach das Framework herunter. Ein SIGTERM des Clients (so beenden Clients einen
+  stdio-Server, der nach dem Schließen seiner Eingabe nicht endet) beendet den Prozess nicht mehr vor diesem
+  Aufräumen.
 - Secrets-Speicher: Ein Speicher einer früheren Version, der sich nicht entschlüsseln lässt, wird von
   `llm-cli doctor` gemeldet, statt unlesbar in den Speicher im Benutzerordner übernommen zu werden.
 - Lesen oder Speichern eines Geheimnisses scheitert nicht mehr in einem Container, dessen Benutzer keinen Namen hat
@@ -536,6 +636,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - `hardware_probe.sh` sah weder das ARM-Skalarprodukt noch die FP16-Arithmetik, schrieb das x86-Flag `f16c` auf ARM
   als FP16-Unterstützung, erkannte nur RK3588 und RK3566 und behielt nur die erste GPU; jetzt schreibt es die
   ARM-Merkmale, die Kerncluster, jeden SoC aus dem Device Tree und alle GPUs.
+- **Unbeantwortete, abgelaufene und abgebrochene Bestätigungen werden protokolliert** (MCP-Server): Eine Frage
+  während des Aufrufs (klassisches Protokoll) wartet höchstens 5 Minuten und wird dann als `confirmation_timeout`
+  festgehalten, eine nie beantwortete Frage des Protokolls 2026-07-28 nach 15 Minuten als `unanswered`, und ein
+  Aufruf, den der Client abbricht, auch während seine Frage offen ist, als `cancelled`. Bisher endeten diese ohne
+  Audit-Eintrag, und eine Frage konnte unbegrenzt offen bleiben.
+- **Der Abbruch eines Clients erreicht einen laufenden Aufruf sofort** (MCP-Server): Der Aufruf wird als abgebrochen
+  festgehalten und der laufende Handler sofort benachrichtigt; was schon läuft, endet, und sein Abschlusseintrag
+  folgt. Bisher kam der Abbruch erst an, nachdem der Handler fertig war, und nichts wurde festgehalten.
+- **Unbekannte Argumente werden über MCP nicht mehr weggelassen**: `quant` statt `quantization` baute die
+  Standard-Quantisierung des Targets und meldete Erfolg, während Dittos Weg denselben Aufruf ablehnte. Beide Wege
+  lassen jetzt denselben Normalisierer über die rohen Argumente laufen, MCP-Clients bekommen die geschlossenen
+  Eingabeschemas der Tools (`additionalProperties: false`) statt offener, JSON-Text in einem Listenfeld wird auf
+  beiden Wegen angenommen, und unbekannte Tool-Namen werden im Audit-Log festgehalten (bisher auf keinem Weg).
 
 ### Sicherheit
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
@@ -655,6 +768,48 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   werden nie gelesen, und freier Text wird auf druckbares ASCII reduziert. Werte, die auf einem Board gelesen werden,
   werden vor dem Schreiben geprüft, und der SSH-Scan behandelt die Antwort des Boards als nicht vertrauenswürdig
   (Größengrenze, strenger Parser).
+- **Aufrufe, die etwas ändern, laufen nur, wenn sie festgehalten werden** (Ditto und MCP-Clients): Bevor ein solcher
+  Aufruf läuft, wird ein Eintrag `started` ins Audit-Log geschrieben; lässt er sich nicht schreiben, wird der Aufruf
+  abgelehnt, und eine Frage dazu wird nicht gestellt. Lesende Aufrufe bleiben verfügbar. Bisher wurde ein
+  gescheiterter Audit-Eintrag nur protokolliert und der Aufruf lief trotzdem, und der einzige Eintrag entstand nach
+  dem Handler, sodass ein Absturz mitten in einer Änderung keine Spur hinterließ.
+- **Jedes Tool-Ergebnis wird zentral gefiltert** (Ditto und MCP-Clients): Secrets werden in jeder Zeichenkette eines
+  Ergebnisses geschwärzt, externer Text (Build-Logs und Stufennamen, Healing-Vorschläge, Build-Manifeste, Auszüge
+  aus der Wissensbasis, Doctor-Meldungen, Bezeichnungen und Hinweise von Targets aus der `target.yml`) wird von
+  unsichtbaren und bidirektionalen Steuerzeichen befreit und gekürzt, andere Zeichenketten werden auf 16 KiB
+  gekürzt, und ein Ergebnis über 256 KiB wird mit einem Hinweis abgelehnt, wie man weniger anfordert. Der Fehler
+  eines gescheiterten Aufrufs wird vor dem Schwärzen der Secrets genauso bereinigt, und ein MCP-Client bekommt den
+  Teil, der externen Text zitiert, als nicht vertrauenswürdige Daten eingepackt, wie Dittos Modell. Bisher wurden
+  nur Fehler, Warnungen und Log-Zeilen geschwärzt, nur Auszüge aus der Wissensbasis bereinigt, Log-Zeilen und
+  Ergebnisse hatten keine Größengrenze, und ein MCP-Client bekam Fehlertext eines Tools unmarkiert.
+- **Neue Tools erben nie eine gelockerte Einstellung der Stufe, und die Obergrenze eines Tools gilt**: Die
+  Berechtigungsdatei hält fest, welche Tools du gesehen hast, und ein später hinzugekommenes Tool nutzt seine eigene
+  Vorgabe (oder die empfohlene Einstellung der Stufe), bis du es gesehen hast; eine einmal erlaubte Stufe erlaubt also
+  nicht mehr jedes Tool, das ihr später hinzugefügt wird. Die eigene Vorgabe eines Tools (zum Beispiel `deny` für ein
+  optionales Tool) gilt auch, wenn seine Stufe erlaubt ist, öffnet aber nie eine Stufe, die du verweigert hast, und
+  ein Tool, das andere Geräte erreicht oder Daten löscht, fragt höchstens. Bisher konnte eine Einstellung für ein
+  einzelnes Tool ein solches Tool ohne Rückfrage erlauben. Eine Berechtigungsdatei aus 3.0.0 zählt ihre elf Tools als
+  gesehen; 3.0.0 selbst liest eine von dieser Version gespeicherte Datei als beschädigt und verweigert jedes Tool.
+- MCP und Ditto: `start_build` nimmt für `model` und `dataset_path` keinen Pfad mehr an (ein MCP-Client konnte jede
+  lesbare Datei, etwa `~/.ssh/id_ed25519`, in einen Build einbinden und über das Log zurücklesen). Nur Verweise in
+  den Ordnern, die die KI nutzen darf, werden angenommen; die aufgelöste Datei muss in ihrem Ordner und außerhalb
+  jedes gesperrten Ordners liegen (Schlüssel, Anmeldedaten, die eigenen Anmeldungen der KI-Clients, das
+  Hugging-Face-Token, der persönliche Ordner des Frameworks, Systemordner), entschieden über die Identität der
+  Datei, sodass ein Dateisystem ohne Unterscheidung von Groß- und Kleinschreibung keinen verstecken kann. Dateien
+  mit Hardlinks werden abgelehnt, ein Ordner wird nur echt unterhalb seines Label-Ordners und ohne gesperrten
+  Ordner, Datei mit Hardlink, Socket, Gerät oder Pipe darin genutzt, und die Datei wird unmittelbar vor jedem Start
+  eines Build-Containers erneut geprüft. Eine Hugging-Face-Repo-ID eines KI-Aufrufers wird nicht mehr als lokaler
+  Pfad nachgeschlagen, weder vom Build-Service noch von der Build-Engine (die einen gleichnamigen Ordner unter ihrem
+  Arbeitsverzeichnis einband). Ablehnungen nennen das Label, nie den echten Pfad.
+- **MCP über HTTP ist für Webseiten und DNS-Rebinding geschlossen.** In 3.0.0 kam eine Seite von einem beliebigen
+  Port auf localhost durch die Origin-Prüfung (nur das Token hielt sie auf), die Host-Prüfung nahm einen
+  Loopback-Namen mit jedem Port an, und alle HTTP-Clients teilten sich ein Token und einen Audit-Akteur. Jetzt wird
+  jede Anfrage mit `Origin`-Header (auch ein CORS-Preflight) abgelehnt, bevor das Token geprüft wird, der
+  `Host`-Header muss ein Loopback-Name mit dem eigenen Port des Servers sein (im Framework und noch einmal im SDK),
+  der Server hält höchstens 8 Sitzungen (vorher 10.000) und nimmt höchstens 1 MiB pro Anfrage an (vorher 4 MiB),
+  eine Sitzung und eine offene Fragerunde des Protokolls 2026-07-28 antworten nur dem Token, das sie geöffnet hat,
+  und kein Token wird angenommen (und der Server startet nicht), solange andere Benutzer die Token-Datei lesen oder
+  ändern können oder sie einem anderen Benutzer gehört.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

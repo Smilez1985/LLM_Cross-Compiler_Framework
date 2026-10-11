@@ -24,7 +24,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
-- [mcp](#mcp): `serve`, `config`
+- [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
 - [secrets](#secrets): `set`, `list`
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): hardware probe
@@ -239,6 +239,9 @@ Behaviour:
   `Model_Card.md`, and a ZIP of them next to that folder. They appear there only when the build has completed; a
   cancelled or failed build leaves no files there.
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token`.
+- A local model file is mounted into the build containers alone, never the folder it lies in; a model that needs
+  files next to it (for example ONNX external data) is given as its folder. Ditto and MCP clients cannot name a path
+  at all: they use `<label>:<relative path>` inside the [folders the AI may use](#tools-folders).
 - The first build of a target builds its Docker image first and takes much longer.
 
 ```bash
@@ -756,32 +759,39 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-The framework tools are what Ditto and MCP clients use: 8 read-only tools (`list_targets`,
+The framework tools are what Ditto and MCP clients use: 10 read-only tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`) and 3 that change things on this computer (`start_build`, `cancel_build`,
-`resolve_healing`).
+`run_doctor`, `search_knowledge`, `get_status`, `get_job_status`) and 4 that change things on this computer
+(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`).
 
 ### tools list
 
 ```
-llm-cli tools list
+llm-cli tools list [--caller ditto|mcp]
 ```
 
 Every tool with its tier (`read`, `local_write`), the current permission (`allow`, `ask`, `deny`) and a
-description. The title says when the permissions are not set up yet.
+description, followed by the tool's own default, the highest decision any setting can give it (`at most`), whether
+it is new (not reviewed yet: it uses its own default until you review it) and whether a confirmation may offer a
+standing approval. Without `--caller` it shows the shared permissions and names the callers that have their own.
+The title says when the permissions are not set up yet.
 
 ### tools permissions
 
 ```
-llm-cli tools permissions [--reset]
+llm-cli tools permissions [--caller ditto|mcp | --token NAME] [--reset]
 ```
 
 Asks the same three questions as [`ditto setup`](#ditto-setup) and saves the answers. Permissions for single tools
-set in the GUI are kept.
+set in the GUI are kept. It first lists every tool with its own default, the highest decision any setting can give
+it (`at most`), whether it is new since the last review and whether a confirmation may offer a standing approval;
+saving counts every listed tool as reviewed. The GUI dialog shows the same facts.
 
 | Option | Meaning |
 |---|---|
-| `--reset` | Back to the recommended defaults (the setup asks again next time). |
+| `--caller ditto\|mcp` | Set the permissions of one caller (Ditto, or local MCP clients over stdio) instead of the shared ones. A caller's first permissions start from the shared ones, including the settings for single tools. |
+| `--token TEXT` | Set the permissions of this [named MCP token](#mcp-token) instead (not together with `--caller`). Needs a terminal; a token linked to Ditto is asked first whether it should get its own. It lists the same tool facts for that token. Audited with actor `cli`. |
+| `--reset` | Back to the recommended defaults (the setup asks again next time). With `--caller`: that caller uses the shared permissions again. With `--token`: back to read only. |
 
 ### tools audit
 
@@ -789,8 +799,8 @@ set in the GUI are kept.
 llm-cli tools audit [--limit N] [--verify] [--archive]
 ```
 
-Shows the most recent tool calls: time, actor (`ditto` or `mcp`), tool, decision, whether a person confirmed it,
-and the outcome.
+Shows the most recent tool calls: time, actor (`ditto`, `mcp`, `mcp:<token name>`, or `cli` for a change to the
+named tokens), tool, decision, whether a person confirmed it, and the outcome.
 
 | Option | Meaning |
 |---|---|
@@ -802,6 +812,42 @@ and the outcome.
 llm-cli tools audit --limit 100
 llm-cli tools audit --verify
 llm-cli tools audit --archive
+```
+
+### tools folders
+
+```
+llm-cli tools folders list
+llm-cli tools folders add PATH --label LABEL [--kind model|dataset|any]
+llm-cli tools folders remove LABEL
+```
+
+The folders whose model and dataset files Ditto and MCP clients may use. They never name a path; they name a file
+as `<label>:<relative path>`, for example `models:qwen2.5-0.5b-instruct` or `mymodels:llama/model.gguf`. The models
+folder (`models`, setting `models_dir`) and the datasets folder (`datasets`, setting `datasets_dir`) are always
+there; `add` lets them use another folder under a label you choose (lowercase letters, digits, `-` and `_`).
+
+- `add` and `remove` need a terminal (piped answers are refused), and `add` shows the folder and asks first:
+  files in it can be mounted into builds that run community or AI-written code, and can reach AI clients through
+  build logs.
+- `add` refuses `/`, your home folder itself, a folder that contains the framework's per-user folder, and a folder
+  inside or containing a denied folder (keys, credentials, the Hugging Face token, system folders; the list is in
+  [Features](Features.md#mcp-server)). The Hugging Face cache's `hub` subfolder may be added
+  (`~/.cache/huggingface/hub`, where `hf download` stores models); the token files next to it stay denied. The same
+  limits hold for `models_dir` and `datasets_dir`: if either setting points at `/`, your home folder or a folder
+  holding the per-user folder, `list` marks the label as not usable.
+- The folder's real path is recorded, and it is the one `add` showed you: if a link points elsewhere while you are
+  asked, nothing is added. If it changes later, `list` marks it as not usable and AI clients are refused until you
+  run `add` with the same label again.
+- Each change is written to the audit log (actor `cli`; `gui` for the same list in the GUI under Tools > Folders
+  the AI May Use...); an addition that cannot be recorded does not happen. The list is stored in
+  `~/.llm-framework/ai_folders.json`, readable only by you.
+
+```bash
+llm-cli tools folders add ~/llm-models --label mymodels --kind model
+llm-cli tools folders add ~/.cache/huggingface/hub --label hub
+llm-cli tools folders list
+llm-cli tools folders remove mymodels
 ```
 
 ---
@@ -820,12 +866,21 @@ denied when the client cannot ask).
 
 | Option | Meaning |
 |---|---|
-| `--transport [stdio\|http]` | `stdio` (default): started by the client. `http`: local Streamable HTTP with a bearer token. |
+| `--transport [stdio\|http]` | `stdio` (default): started by the client. `http`: local Streamable HTTP with a named token per client. |
 | `--host TEXT` | HTTP only; loopback addresses only (default `127.0.0.1`; also `::1`, `localhost`). |
 | `--port INTEGER` | HTTP only (default 8765). |
 
-With `--transport http` the server listens on `http://<host>:<port>/mcp` and every request needs
-`Authorization: Bearer <token>`; the token is in `~/.llm-framework/mcp_http_token` (created on first use).
+With `--transport http` the server listens on `http://<host>:<port>/mcp`, and every request needs
+`Authorization: Bearer <token>` with a [named token](#mcp-token); the server does not start before one exists, and
+no token is accepted (nor does the server start) while other users can read or change the token file or it belongs
+to another user. Requests with an `Origin` header (web pages, CORS preflights) are refused,
+the `Host` header must be `127.0.0.1`, `localhost` or `[::1]` with the server's port, and the server keeps at most
+8 sessions and takes at most 1 MiB per request. The old shared token file `mcp_http_token` is no longer accepted.
+
+Over stdio, the environment variable `LCF_MCP_TOKEN` in the client's server entry makes the client the caller of
+that named token (`mcp:<name>`, with the token's permissions) instead of the shared caller `mcp`. The server reads
+it once, removes it from its environment (child processes do not inherit it) and exits with code 2 if the value is
+not a valid token; a running server stops answering when its token is revoked or rotated.
 
 ```bash
 llm-cli mcp serve --transport http --port 8765
@@ -853,6 +908,37 @@ llm-cli mcp config --write claude-desktop
 ```
 
 You sign in to these clients with your own account or key; the framework never sees it.
+
+### mcp token
+
+```
+llm-cli mcp token add NAME [--policy-from CALLER | --link ditto]
+llm-cli mcp token list
+llm-cli mcp token rotate NAME
+llm-cli mcp token revoke NAME
+```
+
+Named tokens, one per client that connects over HTTP or over stdio with `LCF_MCP_TOKEN`. A token is shown once,
+when it is created or rotated; the framework keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode
+0600). Its name (1-32 lower-case letters, digits and hyphens) is the caller `mcp:<name>` in the audit log, and it has
+its own permissions. `add`, `rotate` and `revoke` need a person at a terminal (`add` and `rotate` also print only to
+a terminal) and are audited with actor `cli`, without the token. No tool can create, list, change or read tokens.
+
+| Command / option | Meaning |
+|---|---|
+| `add NAME` | Creates a token that can only read, until you allow more with `tools permissions --token NAME`. |
+| `--policy-from CALLER` | Starts with a copy of another caller's permissions: `mcp` (local stdio clients), `ditto`, or a token name; `mcp:NAME` always names a token, also one called `mcp` or `ditto`. Later changes of the source do not apply. |
+| `--link ditto` | Uses Ditto's permissions by reference, for Ditto running on another computer: a change to Ditto's permissions applies at once. |
+| `list` | Names, audit actors, permissions, creation and rotation time; never a token or its hash. |
+| `rotate NAME` | A new token for the same name and permissions; the old one stops working at once. |
+| `revoke NAME` | Deletes the token and its permissions after a question; its client loses access at once. |
+
+```bash
+llm-cli mcp token add laptop                          # read only
+llm-cli tools permissions --token laptop              # allow more
+llm-cli mcp token add ditto-laptop --link ditto       # Ditto on another computer
+claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
+```
 
 ---
 

@@ -153,6 +153,10 @@ class MainOrchestrator(QMainWindow):
         act_perms.triggered.connect(self._open_tool_permissions)
         tools_menu.addAction(act_perms)
 
+        act_folders = QAction("Folders the AI May Use...", self)
+        act_folders.triggered.connect(self._open_ai_folders)
+        tools_menu.addAction(act_folders)
+
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
         self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
         self.act_audio.setCheckable(True)
@@ -316,6 +320,13 @@ class MainOrchestrator(QMainWindow):
             return
         if ToolPermissionsDialog(registry, self, first_run=first_run).exec():
             self.status.showMessage("Tool permissions saved.", 5000)
+
+    def _open_ai_folders(self):
+        from orchestrator.gui.dialogs import AIFoldersDialog
+        try:
+            AIFoldersDialog(self.framework, getattr(self.framework, "tool_registry", None), self).exec()
+        except Exception as e:  # e.g. no per-user folder
+            QMessageBox.critical(self, "Folders the AI may use", str(e))
 
     def _set_audio_announcements(self, enabled: bool):
         cfg = self.framework.config
