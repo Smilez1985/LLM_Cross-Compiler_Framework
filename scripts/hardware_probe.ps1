@@ -4,25 +4,31 @@
     
 .DESCRIPTION
     Performs a deep scan of system hardware (SoC, CPU Caches, RAM Speed/Timings, Accelerators).
-    Generates 'target_hardware_config.txt'.
+    Generates 'target_hardware_config.txt' in the current folder, or the file given with -OutputFile.
     
     HISTORY:
     v2.5.0: Added SoC detection via WMI/Registry, Deep RAM PartNumbers.
     v2.4.0: Added Deep RAM Scan (Speed per DIMM), L2/L3 Cache Info.
     v2.3.0: Strict VID/PID extraction.
 #>
+param(
+    # File the probe writes
+    [string]$OutputFile = "target_hardware_config.txt"
+)
+# Absolute, because an elevated restart starts in another folder.
+$OutputFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputFile)
 
 # 1. ADMIN CHECK
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Warning "Deep Scan requires Administrator privileges for SoC/RAM timings."
-    try { Start-Process PowerShell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""; Exit }
+    # -Wait: the caller (llm-cli scan) reads the output file as soon as this script returns.
+    try { $elevated = Start-Process PowerShell -Verb RunAs -Wait -PassThru -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -OutputFile `"$OutputFile`""; Exit $elevated.ExitCode }
     catch { Write-Error "Failed to elevate."; Exit 1 }
 }
 
 Set-ExecutionPolicy -ExecutionPolicy Bypass -Scope Process -Force -ErrorAction SilentlyContinue
 $ErrorActionPreference = "Stop"
-$OutputFile = "target_hardware_config.txt"
 
 function Log-Output {
     param ([string]$Key, [string]$Value)

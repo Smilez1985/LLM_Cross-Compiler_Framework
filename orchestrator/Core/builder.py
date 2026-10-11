@@ -37,6 +37,7 @@ from docker.models.images import Image
 from docker.types import DeviceRequest
 
 from orchestrator import __version__
+from orchestrator.Core import build_records
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
 
@@ -174,6 +175,7 @@ class BuildConfiguration:
     target_pack_sha256: Optional[str] = None  # content digest of the target folder used
     target_version: Optional[str] = None      # metadata.version of its target.yml
     toolchain_image: Optional[str] = None     # id of the image that ran the conversion
+    request_id: Optional[str] = None  # the orchestrator request the build belongs to (shown by `build status`)
 
 @dataclass
 class BuildProgress:
@@ -217,10 +219,9 @@ class BuildEngine:
     6. Artifact Extraction
     """
     
-    def __init__(self, config_or_framework, max_concurrent_builds: int = 2, default_timeout: int = 3600,
+    def __init__(self, config_or_framework, max_concurrent_builds: Optional[int] = None, default_timeout: int = 3600,
                  secrets_manager=None, base_dir: Optional[Path] = None):
         self.logger = get_logger("BuildEngine")
-        self.max_concurrent_builds = max_concurrent_builds
         self.default_timeout = default_timeout
         
         # --- Robust Initialization ---
@@ -242,6 +243,16 @@ class BuildEngine:
             self.base_dir = Path(base_dir).resolve() if base_dir else Path(".").resolve()
             self.docker_client = None
 
+        # Build slots: the argument, else the setting max_concurrent_builds (1-10, default 2).
+        if max_concurrent_builds is None:
+            try:
+                max_concurrent_builds = int(self._get_conf("max_concurrent_builds", 2) or 2)
+            except (TypeError, ValueError):
+                max_concurrent_builds = 2
+        self.max_concurrent_builds = max(1, min(int(max_concurrent_builds), 10))
+        # The framework's target registry (set by FrameworkManager): its id -> folder map resolves targets.
+        self.target_manager = None
+
         # Docker Client Fallback
         if not self.docker_client:
             try:
@@ -256,7 +267,8 @@ class BuildEngine:
         self._running: set = set()  # builds whose worker thread has not returned yet
         self._settled: set = set()  # builds whose outcome is fixed; a cancel comes too late for them
         self._build_images: Dict[str, str] = {}
-        self._executor = ThreadPoolExecutor(max_workers=max_concurrent_builds)
+        self._records: Dict[str, Dict[str, Any]] = {}  # what each build's record says besides its progress
+        self._executor = ThreadPoolExecutor(max_workers=self.max_concurrent_builds)
         
         # Paths initialization using centralized config getter
         # Relative to the installation; "~" means the user's home (same rule as FrameworkManager.resolve_path).
@@ -264,12 +276,14 @@ class BuildEngine:
         self.models_dir = self.base_dir / Path(str(self._get_conf("models_dir", "models"))).expanduser()
         self.output_dir = self.base_dir / Path(str(self._get_conf("output_dir", "output"))).expanduser()
         self.cache_dir = self.base_dir / Path(str(self._get_conf("cache_dir", "cache"))).expanduser()
+        # One record per build for `llm-cli build status` in other processes (see build_records).
+        self.records_dir = build_records.records_dir(self.cache_dir)
         
         self._ensure_directories()
         if self.docker_client:
             self._validate_docker_environment()
         
-        self.logger.info(f"Build Engine initialized (max_workers: {max_concurrent_builds})")
+        self.logger.info(f"Build Engine initialized (max_workers: {self.max_concurrent_builds})")
 
     def _get_conf(self, key: str, default: Any = None) -> Any:
         """Centralized safe configuration retrieval."""
@@ -297,25 +311,25 @@ class BuildEngine:
         except Exception as e:
             self.logger.warning(f"Docker environment check failed: {e}")
 
-    def list_available_targets(self) -> List[Dict[str, Any]]:
-        """Scans targets directory for valid target.yml files."""
-        targets = []
-        if not self.targets_dir.exists(): return targets
-        
-        for tp in self.targets_dir.iterdir():
-            if tp.is_dir() and not tp.name.startswith("_") and (tp / "target.yml").exists():
-                try:
-                    with open(tp / "target.yml", "r") as f:
-                        meta = yaml.safe_load(f)
-                        targets.append({
-                            "id": tp.name,
-                            "target_arch": meta.get("metadata", {}).get("architecture_family", tp.name),
-                            "name": meta.get("metadata", {}).get("name", tp.name),
-                            "available": True,
-                            "path": str(tp)
-                        })
-                except Exception: pass
-        return targets
+    def resolve_target_dir(self, name: str) -> Optional[Path]:
+        """The folder of a target given by id or folder name (any letter case), through the same id -> folder map
+        as the target registry. A folder without a loadable target.yml is still found by its own name, as
+        before; None if there is no such folder."""
+        tm = self.target_manager
+        if tm is not None and hasattr(tm, "folder_of"):
+            folder = tm.folder_of(name)
+        else:
+            from orchestrator.Core.target_manager import read_target_folders, resolve_target_name
+            folders = {tid: path for tid, (path, _) in read_target_folders(self.targets_dir, self.logger).items()}
+            tid = resolve_target_name(name, folders)
+            folder = folders.get(tid) if tid else None
+        if folder is not None or not name or not self.targets_dir.is_dir():
+            return folder
+        for exact in (True, False):
+            for path in self.targets_dir.iterdir():
+                if path.is_dir() and (path.name == name if exact else path.name.casefold() == name.casefold()):
+                    return path
+        return None
 
     def build_model(self, config: BuildConfiguration) -> str:
         """Submits a new build job."""
@@ -332,6 +346,17 @@ class BuildEngine:
             self._builds[config.build_id] = progress
             self._running.add(config.build_id)
 
+        self._records[config.build_id] = {
+            "build_id": config.build_id, "request_id": config.request_id, **build_records.this_process(),
+            "model": config.model_source, "target": config.target_arch, "format": config.target_format.value,
+            "quantization": config.quantization, "board": config.target_board, "output_dir": config.output_dir,
+            "started": progress.start_time.isoformat(timespec="seconds"),
+        }
+        self._save_record(config.build_id)
+        try:
+            build_records.prune(self.records_dir)
+        except OSError as e:
+            self.logger.debug(f"Old build records not pruned: {e}")
         try:
             self._executor.submit(self._execute_build, config)
         except BaseException:
@@ -341,8 +366,28 @@ class BuildEngine:
         self.logger.info(f"Build started: {config.build_id}")
         return config.build_id
 
+    def _save_record(self, build_id: str):
+        """Writes the build's record with its current status; a record that cannot be written never stops a build."""
+        info, progress = self._records.get(build_id), self._builds.get(build_id)
+        if info is None or progress is None:
+            return
+        record = dict(info, status=progress.status.value, stage=progress.current_stage,
+                      progress=progress.progress_percent,
+                      ended=progress.end_time.isoformat(timespec="seconds") if progress.end_time else None,
+                      error=progress.errors[-1] if progress.errors else None)
+        try:
+            build_records.write_record(self.records_dir, record)
+        except (OSError, TypeError, ValueError) as e:
+            self.logger.debug(f"Build record of {build_id} not written: {e}")
+
     def get_build_status(self, build_id: str) -> Optional[BuildProgress]:
         return self._builds.get(build_id)
+
+    def is_active(self, build_id: str) -> bool:
+        """True while the build's worker runs (also after a cancel, until its container has stopped and its files
+        are discarded)."""
+        with self._lock:
+            return build_id in self._running
     
     def list_builds(self) -> List[BuildProgress]:
         with self._lock: return list(self._builds.values())
@@ -358,6 +403,7 @@ class BuildEngine:
             container = self._active_containers.get(build_id)
             process = self._active_processes.get(build_id)
         progress.add_log("Build cancelled by user.")
+        self._save_record(build_id)
 
         # Stop whatever runs right now (image build, security scan, imatrix or conversion container);
         # every stage checks the status afterwards and ends the build.
@@ -385,6 +431,7 @@ class BuildEngine:
             if progress.status == BuildStatus.CANCELLED:
                 raise BuildCancelled("Build cancelled by user.")
             progress.status = status
+        self._save_record(progress.build_id)
 
     def _settle(self, progress: "BuildProgress"):
         """Fixes a successful outcome before its files are published: raises BuildCancelled after a cancel,
@@ -504,6 +551,8 @@ class BuildEngine:
                     prog.status = outcome
                 self._running.discard(bid)
                 self._settled.discard(bid)
+            prog.end_time = prog.end_time or datetime.now()
+            self._save_record(bid)
 
     def _execute_build_stages(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
         """Runs the stages and returns the outcome; _execute_build publishes it."""
@@ -512,20 +561,12 @@ class BuildEngine:
             self._enter_stage(prog, BuildStatus.PREPARING)
             self._resolve_dataset(config, prog)
             
-            # 1. Resolve Target Path (a plain folder name: no separators, no '..')
+            # 1. Resolve the target's folder (id or folder name; a plain name: no separators, no '..')
             if not TARGET_ID.fullmatch(config.target_arch or ""):
                 raise ValueError(f"Invalid target name {config.target_arch!r}.")
-            target_path = self.targets_dir / config.target_arch
-            if not target_path.exists():
-                # Fallback search (case insensitive)
-                found = False
-                for p in self.targets_dir.iterdir():
-                    if p.name.lower() == config.target_arch.lower():
-                        target_path = p
-                        found = True
-                        break
-                if not found:
-                    raise FileNotFoundError(f"Target {config.target_arch} not found in {self.targets_dir}")
+            target_path = self.resolve_target_dir(config.target_arch)
+            if target_path is None:
+                raise FileNotFoundError(f"Target {config.target_arch} not found in {self.targets_dir}")
 
             self._record_target(config, prog, target_path)
 
@@ -899,6 +940,17 @@ class BuildEngine:
             env["PUID"], env["PGID"] = str(os.getuid()), str(os.getgid())
         return env
 
+    def _repo_overrides(self) -> Dict[str, str]:
+        """<NAME>_REPO_OVERRIDE variables from the setting source_repositories: entries {url: ...} as
+        `llm-cli config repos --add` stores them, and plain URLs as earlier versions stored them."""
+        env = {}
+        repos = self._get_conf("source_repositories", {}) or {}
+        for name, entry in (repos.items() if isinstance(repos, dict) else []):
+            url = entry.get("url") if isinstance(entry, dict) else entry
+            if isinstance(url, str) and url.strip():
+                env[f"{str(name).split('.')[-1].upper()}_REPO_OVERRIDE"] = url.strip()
+        return env
+
     RKNN_DATASET_QUANTS = ("i8", "int8", "q8", "q8_0")
 
     def _resolve_dataset(self, config: BuildConfiguration, progress: BuildProgress):
@@ -1035,12 +1087,7 @@ class BuildEngine:
             "DATASET_PATH": dataset_inner,
         })
         
-        # SSOT Repo Injection
-        source_repos = self._get_conf("source_repositories", {})
-        if source_repos:
-            for k, v in source_repos.items():
-                if isinstance(v, dict) and 'url' in v:
-                    env[f"{k.split('.')[-1].upper()}_REPO_OVERRIDE"] = v['url']
+        env.update(self._repo_overrides())  # SSOT repository overrides
 
         # GPU Handling for Calculation
         device_requests = []
@@ -1098,12 +1145,7 @@ class BuildEngine:
             env["IMATRIX_PATH"] = "/build-cache/imatrix/imatrix.dat"
             progress.add_log("Using generated IMatrix for Quantization.")
         
-        # Inject SSOT Vars
-        source_repos = self._get_conf("source_repositories", {})
-        if source_repos:
-            for k, v in source_repos.items():
-                if isinstance(v, dict) and 'url' in v:
-                    env[f"{k.split('.')[-1].upper()}_REPO_OVERRIDE"] = v['url']
+        env.update(self._repo_overrides())  # SSOT repository overrides
 
         # Calibration dataset (RKLLM calibration text, RKNN INT8 sample list; GGUF uses it via the imatrix)
         dataset_vols, dataset_inner = self._dataset_mount(config, staged[1])

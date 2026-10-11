@@ -226,10 +226,10 @@ hand.
 `llm-cli config repos` (help text: "Manage SSOT Source Repositories") has nothing to do with
 `project_sources.yml`. It edits the setting `source_repositories` in `config.yml`: `--add <name> <url>` stores an
 entry, `--remove <name>` removes it, and without options it lists the entries. The build engine turns entries of
-the form `{name: {url: ...}}` into variables `<NAME>_REPO_OVERRIDE` for the stage containers. Entries added with
-`--add` are stored as plain URLs and are therefore not passed on, and only the legacy `source_module.sh` reads
-`LLAMA_CPP_REPO_OVERRIDE`, which the current Rockchip `build.sh` does not call. In practice the setting has no effect
-on builds at the moment.
+the form `{name: {url: ...}}`, which `--add` stores, and plain URLs stored by earlier versions into variables
+`<NAME>_REPO_OVERRIDE` for the stage containers. Only the legacy `source_module.sh` reads `LLAMA_CPP_REPO_OVERRIDE`,
+and the current Rockchip `build.sh` does not call it. In practice the setting has no effect on builds at the
+moment.
 
 ## Other single sources of the project
 

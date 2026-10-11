@@ -52,11 +52,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
   pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, Metal or CPU;
   ROCm on request; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
-  at pinned revisions, checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
+  at pinned revisions into the `ditto/` folder of the configured models folder (`models_dir`, the one Ditto uses),
+  checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
   (3 GB RAM). The "local" provider follows the running server without configuration.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
-  model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
+  model tier (`--tier small --tier small-q2`; the servers the run starts are stopped afterwards, one you started
+  yourself keeps running if it serves the tier). Nothing is built; `--json` writes the report.
 - **Retrieval evaluation** (`llm-cli ditto eval --kind retrieval`): 42 German and English searches (cross-lingual
   questions, identifiers such as `GGML_CUDA`, answers deep inside a large table or script, the last lines of
   failed builds and Ditto's own search strings, unrelated questions) against a corpus of 30 framework and SDK
@@ -192,6 +194,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   shows the access in use, for example "Local · Ollama". A key typed in the AI settings' own key field replaces a
   method a sign-in remembered (such as the `ant` profile), so it is not left unused.
 - `llm-cli secrets set --with-token` reads the value from stdin.
+- **Cancel Build** in the Builder tab: cancels the running build through the build service after a confirmation
+  (enabled only while the build the tab started runs); the log says when it has stopped.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -256,6 +260,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
   list. Use the hidden prompt or `--with-token`.
+- `llm-cli build start --parallel`: it never had an effect (one call runs one build). It is hidden from the help
+  and prints a warning. `--optimization` stays; its help now says that the Rockchip target ignores it.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
@@ -290,6 +296,35 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The CLI and the CLI guides no longer tell you to put the GitHub token on the command line, where the shell
   history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
   hidden prompt.
+- `llm-cli --help` and the CLI's description named version 2.4.0; every version string now comes from the
+  package version.
+- `llm-cli build status` lists builds that the GUI, the MCP server or another CLI call started: every build engine
+  writes one record per build into `<cache_dir>/build_records/` (status, stage, progress, the error redacted), and
+  a build whose program ended before it finished is shown as interrupted. The command needs neither the credential
+  vault nor Docker; `--all` lists every kept build instead of the 20 newest.
+- Ctrl+C in `llm-cli build start` cancels the build through the build service: its container is stopped, the CLI
+  waits until the build has stopped, says so and exits with code 130. Before, the build and its container kept
+  running.
+- `llm-cli scan --output FILE` reaches the hardware probe (`hardware_probe.sh --output`,
+  `hardware_probe.ps1 -OutputFile`), which always wrote `target_hardware_config.txt` into the current folder. On
+  Windows without administrator rights the CLI waits for the probe's elevated restart instead of reporting at once
+  that no file was written.
+- `llm-cli module create` writes into the configured targets folder (`targets_dir`, relative to the installation)
+  instead of `targets/` in the current folder.
+- `llm-cli config show` prints the effective settings (`config.yml`, a `-c` file, `LLM_FRAMEWORK_*` variables,
+  defaults), each with its source and with credentials redacted, instead of the CLI's built-in defaults.
+- `llm-cli config repos --add` stores the `{url: ...}` entry that the build engine passes on as
+  `<NAME>_REPO_OVERRIDE`; plain URLs stored by earlier versions are passed on as well.
+- `llm-cli targets list` shows each target's id (the value for `--target`), name, boards and formats from its
+  capabilities instead of placeholders; `llm-cli targets validate` checks the capabilities block against the
+  schema and prints every error (exit code 1).
+- `llm-cli deploy package`, `secrets set` and `scan` exit with code 1 when they fail (they exited with 0).
+- The help of `llm-cli doctor --tier` names only fixes that exist (tier 1 makes the personal folder private; there
+  is no folder fix).
+- A target whose `metadata.id` differs from its folder name builds: the CLI, the build service, the orchestrator
+  and the build engine resolve targets through one id -> folder map (before, the orchestrator skipped such a target
+  with "Nothing to build"), and `-t` takes the id or the folder name.
+- The setting `max_concurrent_builds` sets the number of build slots (it had no effect; the engine always used 2).
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -367,6 +402,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   sign-in panel and the AI settings' key field; `--yes` in scripts) and never chooses how the vault is protected:
   `--insecure-storage` never replaces a protection that works, nor a credential helper or passphrase you chose. A
   key with a space, a line break or an invisible character inside is refused before anything is sent or stored.
+- The Builder log shows every message as plain text, so names from community recipes, Ditto's answers or build
+  output cannot render as HTML (links, images, formatting).
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

@@ -38,6 +38,16 @@ from orchestrator.Core.orchestrator import LLMOrchestrator
 from orchestrator.Core.build_service import BuildService
 from orchestrator.tools.framework_tools import build_tool_registry
 
+APP_ROOT = Path(__file__).resolve().parents[2]
+
+
+def resolve_install_path(value, root=APP_ROOT) -> Path:
+    """A configured path: "~" is the user's home, relative paths are relative to the installation (`root`), never
+    the working directory."""
+    path = Path(str(value)).expanduser()
+    return path if path.is_absolute() else Path(root) / path
+
+
 @dataclass
 class FrameworkInfo:
     name: str = "LLM Cross-Compiler Framework"
@@ -52,7 +62,7 @@ class FrameworkManager:
     
     def __init__(self, config_file: Optional[str] = None, log_level: Optional[str] = None):
         # 0. Basic Setup (Pfade)
-        self.app_root = Path(__file__).resolve().parents[2] # Root dir calculation
+        self.app_root = APP_ROOT
         self.info = FrameworkInfo(installation_path=self.app_root)
 
         # Init Config & Logger first
@@ -140,6 +150,8 @@ class FrameworkManager:
             # Orchestrator - needs everything
             build_engine = self.docker_manager.builder or BuildEngine(
                 self.config, base_dir=self.info.installation_path, secrets_manager=self.secrets_manager)
+            # One id -> folder map for the CLI, the build service, the orchestrator and the engine.
+            build_engine.target_manager = self.target_manager
             self.orchestrator = LLMOrchestrator(self.config, build_engine=build_engine)
             # Typed entry point for tools (MCP server, Ditto) on top of the orchestrator
             self.build_service = BuildService(self)
@@ -182,8 +194,7 @@ class FrameworkManager:
 
     def resolve_path(self, value) -> Path:
         """A configured path; relative ones are relative to the installation path, not the working directory."""
-        path = Path(str(value)).expanduser()
-        return path if path.is_absolute() else Path(self.info.installation_path) / path
+        return resolve_install_path(value, self.info.installation_path)
 
     def get_component(self, name: str) -> Any:
         """Service Locator für CLI/GUI Zugriff."""

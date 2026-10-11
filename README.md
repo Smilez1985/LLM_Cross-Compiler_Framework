@@ -202,7 +202,8 @@ folder.
    are offered. **Calibration:** importance matrix (GGUF) and a calibration file. **Use Host GPU for Build
    Process** passes a GPU into the container; Rockchip conversions do not need it.
 5. **Start Build Pipeline:** the log appears on the right. The first build takes much longer because the Docker
-   image with all toolkits is built first; later builds reuse Docker's build cache.
+   image with all toolkits is built first; later builds reuse Docker's build cache. **Cancel Build** stops the
+   running build after a confirmation; nothing is written to the output folder then.
 
 If a build fails because of a known problem, a **self-healing** dialog shows the cause and a proposed fix.
 Nothing changes until you agree. The framework only applies a few fixed steps itself (fewer parallel compile
@@ -253,7 +254,7 @@ board is on the [roadmap](docs/BLUEPRINT.md#roadmap).
 llm-cli --version
 llm-cli doctor                 # health check; exit code 0 = OK, 1 = warnings, 2 = errors
 llm-cli doctor --fix           # harmless automatic fixes (makes the personal folder private); --tier 2 also clears the Docker build cache
-llm-cli targets list           # available targets; the --target value is the folder name in targets/ (Rockchip)
+llm-cli targets list           # available targets with boards and formats; the --target value is the id (Rockchip)
 ```
 
 **Converting a model** (`--target Rockchip`; format, board and quantization as in the tables above):
@@ -278,8 +279,9 @@ llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
   example "Format 'rkllm' does not run on rk3566").
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token` (asks for the value).
 - The command stays in the foreground until the build has finished; `--follow` prints each stage. If the build
-  waits for a self-healing decision, the CLI asks in the terminal. Ctrl+C does not cancel the build in this
-  version: the CLI keeps waiting until the build has ended (see [Known gaps](#known-gaps)).
+  waits for a self-healing decision, the CLI asks in the terminal. Ctrl+C cancels the build (its container is
+  stopped), waits until it has stopped and exits with code 130. `llm-cli build status` also lists builds that the
+  GUI, the MCP server or another CLI call started.
 
 **Deploying** (the same steps as in the GUI):
 
@@ -538,12 +540,6 @@ The knowledge-base, Deep Ingest and community settings are explained in [docs/Fe
 - **Windows hosts:** the test suite runs on Windows in CI, but conversions on a Windows host have not been
   verified. The installation folder under `C:\Program Files` is usually not writable for your user; set
   `output_dir`, `cache_dir` and `logs_dir` to folders you own if builds cannot write their results.
-- **`llm-cli build status`** only knows builds started in the same process. Builds started by the GUI, the MCP
-  server or another CLI call are not listed; use `build start --follow`, the GUI log or
-  `llm-cli deploy list-artifacts`.
-- **Cancelling a build:** the GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not stop the
-  build (the CLI waits until it has ended). A build can be cancelled with the `cancel_build` tool, through Ditto in
-  the GUI chat or an MCP client, in the process that started it.
 - **Browser and cloud sign-in** (OAuth, AWS, Google Cloud, Azure) are not available yet; Ditto signs in with API
   keys, local engines need none, and an `ant auth login` profile is an advanced option.
 - **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it.

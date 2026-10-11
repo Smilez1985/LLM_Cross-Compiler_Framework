@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QComboBox, QPushButton, QGroupBox, QCheckBox, 
     QMessageBox, QFileDialog, QStackedWidget,
-    QTextEdit, QFormLayout, QMenu, QDialog, QLineEdit, QDialogButtonBox
+    QPlainTextEdit, QFormLayout, QMenu, QDialog, QLineEdit, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect
 from PySide6.QtGui import QPixmap, QAction
@@ -175,6 +175,26 @@ class SSHProbeWorker(QThread):
             self.finished.emit(False, f"SSH Error: {e}", "")
         finally:
             ssh.close()
+
+class CancelBuildWorker(QThread):
+    """Cancels a build through the build service and waits until it has stopped (off the GUI thread)."""
+    finished = Signal(str, str)  # outcome ("cancelled", "finished", "running" or "error"), message
+
+    def __init__(self, service, request_id, wait_seconds=120):
+        super().__init__()
+        self.service = service
+        self.request_id = request_id
+        self.wait_seconds = wait_seconds
+
+    def run(self):
+        try:
+            self.service.cancel(self.request_id)
+            outcome = self.service.wait_stopped(self.request_id, self.wait_seconds)
+            warnings = self.service.get_status(self.request_id).warnings
+            self.finished.emit(outcome, " ".join(warnings))
+        except Exception as e:  # BuildServiceError (it ended meanwhile) or the service is unavailable
+            self.finished.emit("error", str(e))
+
 
 class AIOptimizerWorker(QThread):
     finished = Signal(bool, dict, str)
@@ -407,6 +427,17 @@ class BuilderTab(QWidget):
         self.btn_start.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold; font-size: 14px;")
         self.btn_start.clicked.connect(self._submit_build)
         left_col.addWidget(self.btn_start)
+        # Cancels the build this tab started (through the build service); enabled only while it runs.
+        self.btn_cancel = QPushButton("Cancel Build")
+        self.btn_cancel.setEnabled(False)
+        self.btn_cancel.setToolTip("Stops the running build and its container; nothing is written to the output "
+                                   "folder.")
+        self.btn_cancel.clicked.connect(self._cancel_build)
+        left_col.addWidget(self.btn_cancel)
+        self._active_request = None
+        self._build_timer = QTimer(self)
+        self._build_timer.setInterval(1500)
+        self._build_timer.timeout.connect(self._poll_build)
         left_col.addStretch()
         main_layout.addLayout(left_col, 2)
         
@@ -422,7 +453,8 @@ class BuilderTab(QWidget):
         av_layout.addStretch()
         right_col.addWidget(av_container)
         right_col.addWidget(QLabel("Builder Log:"))
-        self.log_area = QTextEdit()
+        # Plain text: build output, Ditto's answers and names from community packs never render as HTML.
+        self.log_area = QPlainTextEdit()
         self.log_area.setReadOnly(True)
         self.log_area.setStyleSheet("font-family: Consolas; background: #222; color: #0f0;")
         self.log_area.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -463,7 +495,7 @@ class BuilderTab(QWidget):
             if isinstance(new_wid, SpriteAnimationWidget): new_wid.start()
 
     def _log(self, msg):
-        self.log_area.append(f"> {msg}")
+        self.log_area.appendPlainText(f"> {msg}")
 
     # --- NEW SCAN LOGIC ---
 
@@ -882,8 +914,65 @@ class BuilderTab(QWidget):
             rid = self.framework.run_coroutine(self.framework.orchestrator.submit_build_request(req), timeout=30)
             self._set_state("success")
             self._log(f"Job Submitted! ID: {rid}")
+            self._track_build(rid)
             self._remember_build(model, self.target_combo.currentData(), board, dataset)
             QMessageBox.information(self, "Success", f"Job {rid} started.")
         except Exception as e:
             self._set_state("fail")
             self._log(f"Submission Error: {e}")
+
+    # --- RUNNING BUILD (Cancel button) ---
+
+    def _build_service(self):
+        return getattr(self.framework, "build_service", None)
+
+    def _track_build(self, request_id):
+        """Follows the submitted build until it ends; Cancel is enabled meanwhile."""
+        self._active_request = request_id
+        self.btn_cancel.setEnabled(True)
+        self._build_timer.start()
+
+    def _poll_build(self):
+        rid, service = self._active_request, self._build_service()
+        if rid is None or service is None:
+            self._build_timer.stop()
+            return
+        try:
+            status = service.get_status(rid).status
+        except Exception:  # unknown to the service: nothing to cancel any more
+            status = None
+        if status in (None, "completed", "error", "cancelled"):
+            self._build_timer.stop()
+            self._active_request = None
+            self.btn_cancel.setEnabled(False)
+            if status:
+                self._log(f"Build {rid} ended: {status}.")
+
+    def _cancel_build(self):
+        rid, service = self._active_request, self._build_service()
+        if rid is None or service is None:
+            return
+        answer = QMessageBox.question(
+            self, "Cancel build",
+            f"Cancel build {rid}? Its container is stopped and nothing is written to the output folder.",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        self.btn_cancel.setEnabled(False)
+        self._log(f"Cancelling build {rid} ...")
+        self.cancel_worker = CancelBuildWorker(service, rid)
+        self.cancel_worker.finished.connect(self._on_cancel_finished)
+        self.cancel_worker.start()
+
+    def _on_cancel_finished(self, outcome, message):
+        rid = self._active_request
+        if outcome == "cancelled":
+            self._set_state("default")
+            self._log(f"Build {rid} cancelled; its container was stopped.")
+        elif outcome == "finished":
+            self._log(f"Build {rid} could no longer be cancelled and has ended on its own. {message}".strip())
+        elif outcome == "running":
+            self._log(f"Build {rid} is cancelled but has not stopped yet.")
+        else:
+            self._log(f"Cancel failed: {message}")
+        self._poll_build()

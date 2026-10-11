@@ -96,17 +96,16 @@ sign-in commands (`ditto login`, `logout`, `auth`) print errors, warnings and qu
 | Code | Meaning |
 |---|---|
 | 0 | Success |
-| 1 | The command failed (for example a failed build, a failed deployment, a damaged audit log, an AI error) |
+| 1 | The command failed (for example a failed build, a failed deployment, a package that could not be created, a secret that could not be stored, a hardware probe that wrote no file, a damaged audit log, an AI error) |
 | 2 | Invalid input: unknown option, an unknown target or an unsupported format/board/quantization combination (`build start`), an unknown provider (`--provider`), an unknown model tier (`ditto models download`), no matching evaluation case (`ditto eval`), a missing pack id, file or source (`zoo install`, `zoo export`), a key file without a usable key (`--to`, `--from`) |
 | 3 | Sign-in: the provider rejected the credential (`ditto login`, `ditto auth status --check`) |
 | 4 | Sign-in: the provider or the local server cannot be reached |
 | 5 | The credential vault cannot be used (no usable keyring, no passphrase, a damaged vault); the message names the choices. Every command that needs the vault uses it |
 | 6 | Sign-in: the method is not available in this version, or the provider was removed |
-| 130 | `build start` was interrupted with Ctrl+C (the CLI exits only after the build has ended) |
+| 130 | `build start` was interrupted with Ctrl+C (the build was cancelled first) |
 
 `llm-cli doctor` uses 0 (OK), 1 (warnings) and 2 (errors); `llm-cli ditto eval --min-pass` returns 1 when a run
-stays below the given share. A few commands report a failure but still exit with 0 (see
-[Known limitations](#known-limitations)).
+stays below the given share.
 
 ---
 
@@ -115,8 +114,8 @@ stays below the given share. A few commands report a failure but still exit with
 | Command | What it does |
 |---|---|
 | `doctor` | Check the installation and explain how to fix problems |
-| `targets list` / `targets validate` | List hardware targets / check that a target can be loaded |
-| `build start` / `build status` | Convert and quantize a model / show the builds of this process |
+| `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
+| `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
 | `ditto login` / `ditto logout` | Sign Ditto in to a provider (the key from a hidden prompt, stdin or an environment variable, checked before it is stored) / sign out |
 | `ditto auth status/methods/storage/rotate-key` | Sign-in state of every provider / the sign-in methods / how the credential vault is protected / a new vault key |
@@ -130,7 +129,7 @@ stays below the given share. A few commands report a failure but still exit with
 | `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
 | `module create` / `module generate-ai` | Create a new hardware target, by questions or from a probe file with Ditto |
 | `scan` | Run the hardware probe on this computer |
-| `config show` / `config repos` | Show the CLI's base settings / manage source repository overrides |
+| `config show` / `config repos` | Show the effective settings and where each comes from / manage source repository overrides |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
 | `zoo export` / `zoo keys` | Make a signed pack of your own target, build or knowledge base (and open a pull request) / show your public keys |
@@ -152,7 +151,7 @@ imported from a file). Each finding comes with a hint how to fix it.
 |---|---|
 | `--json` | Machine-readable output (findings, fixes, exit code). |
 | `--fix` | Apply the automatic fixes up to `--tier`, then check again. |
-| `--tier INTEGER RANGE` | `1` (default): harmless fixes (the help says "permissions, folders"; in this version that is making the personal folder private). `2`: also removes caches (dangling framework images and the Docker build cache). |
+| `--tier INTEGER RANGE` | `1` (default): harmless fixes (makes the personal folder private). `2`: also removes caches (dangling framework images and the Docker build cache). |
 
 Disk space: below 20 GB free is a warning, below 5 GB an error.
 
@@ -172,9 +171,10 @@ llm-cli doctor --fix --tier 2
 llm-cli targets list [-f table|json|yaml]
 ```
 
-Lists the targets in `targets/`. The table shows the target's display name (for example "Rockchip Family"), its
-architecture, whether it is ready, and its folder. **The value for `--target` is the folder name**, for example
-`Rockchip`.
+Lists the targets in the configured targets folder. The table shows each target's id, name (for example
+"Rockchip Family"), architecture, and the boards and formats its `capabilities:` block declares; a target without
+one is marked "no capabilities declared". **The value for `--target` is the id** (for example `Rockchip`); the
+target's folder name works as well. `json` and `yaml` give the same data with the quantizations per format.
 
 | Option | Meaning |
 |---|---|
@@ -186,7 +186,9 @@ architecture, whether it is ready, and its folder. **The value for `--target` is
 llm-cli targets validate TARGET_NAME
 ```
 
-Checks that the target can be loaded. Exit code 1 if it is not found.
+Checks that the target loads (by id or folder name) and that its `capabilities:` block passes the schema that
+the GUI, the CLI, the build service and the tools use; every schema error is printed. Exit code 1 if the target is
+not found or its capabilities are invalid. A target without capabilities is reported but counts as valid.
 
 ```bash
 llm-cli targets validate Rockchip
@@ -209,14 +211,14 @@ quantization are filled with the target's defaults.
 | Option | Meaning |
 |---|---|
 | `-m, --model TEXT` | **Required.** Hugging Face ID (e.g. `HuggingFaceTB/SmolLM2-135M-Instruct`) or a local folder or file. |
-| `-t, --target TEXT` | **Required.** Target folder name in `targets/`, e.g. `Rockchip`. Not case-sensitive. An unknown target stops with exit code 2 and the list of known targets. |
+| `-t, --target TEXT` | **Required.** Target id as listed by `targets list`, e.g. `Rockchip`, or the target's folder name. Not case-sensitive. An unknown target stops with exit code 2 and the list of known targets. |
 | `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Output format (default `gguf`). The list is longer than what any target supports; Rockchip accepts `gguf`, `rkllm` and `rknn`. |
 | `-b, --board TEXT` | Board of the target family, e.g. `rk3588`, `rk3576`, `rk3566`. Default: the target's default board (Rockchip: `rk3588`). Not case-sensitive. |
 | `-q, --quantization TEXT` | Quantization, e.g. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Default: the format's default for the board. Common spellings such as `INT8` are translated. |
 | `-o, --output-dir TEXT` | Output folder, relative to the current folder. Default: `output/build_<date>_<time>` in the installation. |
 | `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimization level (default `balanced`), passed to the build scripts as `OPTIMIZATION_LEVEL`. The Rockchip scripts do not use it. |
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in this process's build queue (default `normal`). |
-| `--parallel` | Has no effect in this version (it is always on, and one call runs one build). |
+| `--parallel` | Deprecated and hidden from `--help`: it has no effect (one call runs one build) and prints a warning. |
 | `-F, --follow` | Print each stage while the build runs. |
 | `--gpu / --no-gpu` | Pass the host's GPU into the container (default off): an NVIDIA GPU when `nvidia-smi` is found, otherwise `/dev/dri` if it exists. Rockchip conversions do not need it. |
 | `--imatrix / --no-imatrix` | Importance matrix for GGUF (default off). Required for `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`. |
@@ -224,8 +226,11 @@ quantization are filled with the target's defaults.
 
 Behaviour:
 
-- The command stays in the foreground until the build has finished. Ctrl+C does not cancel the build in this
-  version: the CLI stops showing progress but waits until the build has ended, then exits with code 130.
+- The command stays in the foreground until the build has finished. Ctrl+C cancels the build through the build
+  service: its running container (image build, security scan or conversion) is stopped, the CLI waits until the
+  build has stopped (at most 120 s), says so and exits with code 130. Nothing is written to the output folder. A
+  build that is already moving its files into the output folder can no longer be cancelled; the CLI then says that
+  it has ended on its own.
 - If the build fails with a known problem and a fix the framework can apply itself, the CLI shows the cause and
   asks "Apply this fix and retry the build?". Without a terminal the proposal is dismissed. Manual steps are only
   shown.
@@ -267,16 +272,18 @@ $ echo $?
 llm-cli build status [REQUEST_ID] [-a|--all]
 ```
 
-Shows the builds this process knows about: without a request ID (or with `--all`) a table with request ID, status
-and progress; with a request ID its status and progress.
+Shows builds from the build records in the cache folder (`<cache_dir>/build_records/`): every program that builds
+(CLI, GUI, MCP server) writes one record per build with its request, model, target, format, quantization, status,
+stage and progress, so builds that another process started are listed too. Without an ID: a table of the 20 newest
+builds; with a request ID (`req_...`) or a build ID: the details of each attempt, including the error of a failed
+build (credentials redacted). A build whose process has ended before the build finished is shown as `interrupted`.
+Exit code 1 if the ID is not found. The command needs neither the credential vault nor Docker.
 
 | Option | Meaning |
 |---|---|
-| `-a, --all` | Show all builds. |
+| `-a, --all` | Show every kept build instead of the 20 newest (the 200 newest finished or interrupted builds are kept). |
 
-Builds live in the process that started them. A separate `llm-cli build status` call does not see builds started
-by the GUI, the MCP server or another CLI call and prints "No builds found". Use `build start --follow`, the GUI log
-or `llm-cli deploy list-artifacts` for finished builds.
+A request that waits for a self-healing decision shows its failed first attempt; decide in the program that runs it.
 
 ---
 
@@ -549,8 +556,8 @@ and repeat). How it works: [Features.md](Features.md#ditto-evaluation).
 | `--effort [low\|medium\|high]` | Effort for this run (local models: `low` = no thinking). Default: AI settings. |
 
 With `--tier`, the local runtime must be installed and the tier's model downloaded. The CLI starts `llama-server`
-with each tier in turn and **stops the local server after each tier**, so a server that was running before is
-stopped as well.
+with each tier in turn and stops the servers it started. A server you started yourself keeps running if it already
+serves the tier; otherwise the evaluation replaces it for that tier and says so at the end.
 
 ```bash
 # Compare the 2B model at 4 and 2 bits on this machine, without thinking
@@ -885,8 +892,8 @@ target is never overwritten.
 | `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU architecture. |
 | `--sdk TEXT` | Special SDK, e.g. `CUDA`, `RKNN` (default `None`). |
 
-The target is written to `targets/` **of the current folder**; run the command from the installation folder. Its
-`target.yml` has a `capabilities:` block (support level `community`) with the module name as the only board and
+The target is written to the configured targets folder (setting `targets_dir`; a relative path is relative to the
+installation, not the current folder). Its `target.yml` has a `capabilities:` block (support level `community`) with the module name as the only board and
 GGUF as the only format; add your real boards and formats there. The command's hint to customize
 `modules/config_module.sh` refers to a legacy script that the build pipeline does not call
 ([Module Developer Guide](Module_Developer_Guide.md#10-legacy-files)).
@@ -922,12 +929,14 @@ llm-cli scan [--output TEXT]
 ```
 
 Runs the hardware probe on this computer (`scripts/hardware_probe.sh` on Linux, `scripts/hardware_probe.ps1` on
-Windows). The probe writes `target_hardware_config.txt` into the current folder. It may ask whether to install
-missing helper tools (`pciutils`, `usbutils`, `dmidecode`) with your package manager; answer `n` to skip them.
+Windows). The probe writes the file given with `--output` (its folder is created). It may ask whether to install
+missing helper tools (`pciutils`, `usbutils`, `dmidecode`) with your package manager; answer `n` to skip them. On
+Windows without administrator rights the probe restarts itself elevated (Windows asks for permission) and the CLI
+waits for it. Exit code 1 if the probe fails or writes no file.
 
 | Option | Meaning |
 |---|---|
-| `--output TEXT` | File name the command checks for afterwards (default `target_hardware_config.txt`). The probe itself always writes `target_hardware_config.txt`, so keep the default. |
+| `--output TEXT` | File the probe writes, relative to the current folder (default `target_hardware_config.txt`). The CLI passes it to the probe (`hardware_probe.sh --output FILE`, `hardware_probe.ps1 -OutputFile FILE`). |
 
 To probe a board instead of this computer, run `scripts/hardware_probe.sh` on the board, or use **Scan / Import...
 > Remote Scan via SSH** in the GUI.
@@ -942,9 +951,15 @@ To probe a board instead of this computer, run `scripts/hardware_probe.sh` on th
 llm-cli config show
 ```
 
-Prints the CLI's base settings as JSON: the folders (`targets_dir`, `models_dir`, `output_dir`, `configs_dir`,
-`cache_dir`, `logs_dir`), `log_level` and `max_concurrent_builds`, merged with a file given with `-c`. It does not
-show the settings in `config.yml` (AI provider, sandbox, crawler and so on); look at that file directly.
+Prints the effective settings as JSON, as the framework reads them: every setting with its `value` and its
+`source` (`default`, `file <path>` for `config.yml` or a file given with `-c`, `environment` for an
+`LLM_FRAMEWORK_<KEY>` variable). Credentials are redacted: tokens, keys and passwords inside values (for example in
+a URL), and every value under a name that looks like a credential, whether an unknown setting (`hf_token`) or a key
+inside a setting (`password`, `api_key`). The command needs neither the credential vault nor Docker.
+
+```bash
+llm-cli -q config show | jq '.models_dir'
+```
 
 ### config repos
 
@@ -953,15 +968,17 @@ llm-cli config repos [--add NAME URL] [--remove NAME]
 ```
 
 Without options it lists the source repository overrides (setting `source_repositories`). `--add` and `--remove`
-change them and save `config.yml`.
+change them and save `config.yml`. `--add` stores an entry `{url: ...}`; the build engine passes every entry, and
+plain URLs stored by earlier versions, to the stage containers as `<NAME>_REPO_OVERRIDE` (`NAME`: the part after the
+last dot, in upper case, for example `llama_cpp` -> `LLAMA_CPP_REPO_OVERRIDE`).
 
 | Option | Meaning |
 |---|---|
 | `--add TEXT...` | Add an override: `NAME URL`. |
 | `--remove TEXT` | Remove the override `NAME`. |
 
-In this version, overrides added here do not reach builds: the build engine only passes entries of the form
-`{url: ...}`, and `--add` stores a plain URL.
+The current Rockchip scripts read none of these variables (only the legacy `source_module.sh` reads
+`LLAMA_CPP_REPO_OVERRIDE`), so the overrides have no effect on Rockchip builds.
 
 ---
 
@@ -1227,14 +1244,9 @@ x25519:<base64>
 
 ## Known limitations
 
-- `build status` only sees builds of its own process (see [build status](#build-status)).
-- Ctrl+C in `build start` does not cancel the build; the CLI waits until it has ended.
-- `build start --parallel` and `--optimization` have no effect on Rockchip builds.
-- `deploy package`, `secrets set` and `scan` print a failure ("Package generation failed", "Failed to store
-  secret", "output file was not created") but exit with code 0; check the output in scripts.
-- `scan --output` does not change where the probe writes.
-- `module create` writes to `targets/` of the current folder.
-- `config show` shows only the CLI's base settings; `config repos --add` does not reach builds.
+- `build start --optimization` has no effect on Rockchip builds (the scripts have no matching setting);
+  `--parallel` is deprecated and has no effect.
+- `config repos` overrides reach builds as `<NAME>_REPO_OVERRIDE`, but the Rockchip scripts do not read them.
 - `deploy package --docker` is experimental.
 - There is no CLI command yet to choose Ditto's provider permanently; use the GUI, `config.yml` or
   `LLM_FRAMEWORK_AI_PROVIDER` (`ditto login` signs in but does not switch the provider). Browser and cloud

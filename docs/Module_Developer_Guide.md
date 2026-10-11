@@ -29,10 +29,9 @@ hardware (or its specifications).
 
 1. **Loading.** At start, the `TargetManager` reads `target.yml` in every folder below `targets/`. Folders whose
    name starts with `_` or `.` (such as `_template`) are skipped, and so is a `target.yml` without a `metadata:`
-   block. The target id is `metadata.id` if set, otherwise the folder name. Capabilities are looked up by the id,
-   but the build engine finds the target by its folder name (`llm-cli build start -t <folder>`). Leave
-   `metadata.id` unset (or equal to the folder name); otherwise either the capabilities are not found or the build
-   does not find the target folder.
+   block. The target id is `metadata.id` if set, otherwise the folder name. The CLI, the build service, the
+   orchestrator and the build engine resolve a target through one id -> folder map, so `llm-cli build start -t`
+   takes the id or the folder name (in any letter case) and the build uses the right folder either way.
 2. **Capabilities.** The `capabilities:` block is validated against the schema in `orchestrator/schemas/targets.py`.
    The GUI offers exactly the formats, boards and quantizations listed there, the CLI refuses anything else, and the
    tools of the MCP server and Ditto start builds only for targets that have a valid block. An invalid block is
@@ -203,7 +202,7 @@ metadata:
   version: "1.0.0"
   architecture_family: "aarch64"
   vendor: "community"
-  # id: leave it out; the target id must match the folder name (see section 1)
+  # id: optional; without it the folder name is the target id (see section 1)
 ```
 
 ### 4.2 capabilities
@@ -349,7 +348,7 @@ Environment variables set by the engine:
 | `TARGET_BOARD` | board id, or empty (then use the same fallback as `default_board`) |
 | `QUANTIZATION` | quantization type, already normalized; empty only for targets without capabilities |
 | `TARGET_ARCH` | the target id |
-| `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | task (default `LLM`), optimization level, build id |
+| `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | task (default `LLM`), optimization level (`fast`, `balanced`, `size`, `speed`, `aggressive`; the Rockchip scripts ignore it), build id |
 | `MAX_CONTEXT_LENGTH` | only if set for the build |
 | `USE_IMATRIX`, `IMATRIX_PATH` | build stage: `1` and the path of `imatrix.dat` if an importance matrix was computed |
 | `DATASET_PATH` | calibration dataset, if the build uses one |
@@ -474,7 +473,8 @@ find out whether a failure is caused by the sandbox.
    T.model_validate(yaml.safe_load(open('targets/my_board/target.yml', encoding='utf-8'))['capabilities']); print('ok')"
    ```
 
-   `llm-cli targets validate <id>` only confirms that `target.yml` was loaded; it does not check the capabilities.
+   `llm-cli targets validate <id>` does the same check through the framework and prints every schema error
+   (exit code 1 if the block is invalid).
 2. **Does the image build?** Stage the context the same way the engine does and build it:
 
    ```bash
