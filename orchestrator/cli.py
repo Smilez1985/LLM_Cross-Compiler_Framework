@@ -513,6 +513,16 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         
         # Validate against the target's declared capabilities and fill its defaults.
         tm = getattr(ctx.framework_manager, "target_manager", None)
+        if tm:
+            # The registered spelling, so `-t rockchip` is checked like `-t Rockchip`; an unknown target
+            # would otherwise "complete" with nothing built.
+            known = [str(t.get("id")) for t in tm.list_targets() if t.get("id")]
+            match = next((tid for tid in known if tid == target), None) or \
+                next((tid for tid in known if tid.casefold() == target.strip().casefold()), None)
+            if match is None:
+                console.print(f"[red]Unknown target '{escape(target)}' (targets: {escape(', '.join(known) or 'none')}).[/red]")
+                sys.exit(2)
+            target = target_arch_str = match
         caps = tm.get_capabilities(target) if tm else None
         if caps:
             # The values the build really runs with (canonical spellings, the scripts' default board).
@@ -801,14 +811,29 @@ def tools_permissions(ctx: FrameworkContext, reset: bool):
 @click.option('--limit', default=30, show_default=True, help='Number of entries')
 @click.option('--verify', is_flag=True,
               help='Check the chain: changed or removed entries, and removal of the newest entries (anchor)')
+@click.option('--archive', is_flag=True,
+              help='Move the log and its anchor aside (kept with a timestamp) and start a new log')
 @pass_context
-def tools_audit(ctx: FrameworkContext, limit: int, verify: bool):
+def tools_audit(ctx: FrameworkContext, limit: int, verify: bool, archive: bool):
     """Show the audit log of tool calls"""
     import sqlite3
     registry = _tool_registry(ctx)
     if registry.audit is None:
         console.print("[red]No audit log.[/red]")
         sys.exit(1)
+    if archive:
+        try:
+            target = registry.audit.archive()
+        except (OSError, sqlite3.Error) as e:
+            console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be moved: "
+                          f"{escape(str(e))}[/red] Close the GUI and AI clients using the framework and try again.")
+            sys.exit(1)
+        if target is None:
+            console.print("No audit log to archive.")
+        else:
+            console.print(f"[green]Audit log moved to {escape(str(target))}; the next tool call starts a new "
+                          "log.[/green]")
+        return
     try:
         if verify:
             result = registry.audit.check()
@@ -1247,6 +1272,7 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
     """Run the MCP server (stdout carries the protocol; logs go to stderr)"""
     import contextlib
     from orchestrator import mcp_server
+    mcp_server.no_programs_from_the_working_directory()
     # Nothing may reach stdout before the transport owns it.
     with contextlib.redirect_stdout(sys.stderr):
         ctx.require_framework()
@@ -1276,15 +1302,17 @@ def mcp_config(ctx: FrameworkContext, write_client: Optional[str]):
     """Show how to connect Claude Code, Claude Desktop or VS Code to this framework"""
     from orchestrator import mcp_server
     app_root = Path(__file__).resolve().parents[1]
-    if write_client == 'claude-desktop':
-        try:
+    try:
+        if write_client == 'claude-desktop':
             path = mcp_server.write_claude_desktop_config(app_root)
-        except ValueError as e:
-            console.print(f"[red]{escape(str(e))}[/red]")
-            sys.exit(1)
-        console.print(f"[green]Added to {path}. Restart Claude Desktop.[/green]")
+        else:
+            snippets = mcp_server.client_snippets(app_root)
+    except (ValueError, OSError) as e:  # OSError: unwritable folder, read-only dotfile target, ...
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if write_client == 'claude-desktop':
+        console.print(f"[green]Added to {escape(str(path))}. Restart Claude Desktop.[/green]")
         return
-    snippets = mcp_server.client_snippets(app_root)
     # Plain text without panels or wrapping, so the snippets can be copied exactly.
     sections = [("Claude Code (run once in a terminal)", snippets["claude-code"]),
                 (f"Claude Desktop ({mcp_server.claude_desktop_config_path()}), "

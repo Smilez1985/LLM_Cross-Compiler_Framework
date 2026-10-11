@@ -207,9 +207,6 @@ class TestConfigLocation:
         finally:
             fm.shutdown()
 
-    @pytest.mark.xfail(strict=True, reason="BUG: ModelManager(self.config) has no root_path and resolves "
-                                           "models_dir against the working directory: every boot creates "
-                                           "<cwd>/models/tiny_models")
     def test_framework_boot_writes_nothing_into_the_working_directory(self, project, install_configs,
                                                                      tmp_path, monkeypatch, memory_keyring):
         monkeypatch.delenv("LLM_FRAMEWORK_CONFIG_DIR")
@@ -218,6 +215,17 @@ class TestConfigLocation:
         fm = boot_framework(tmp_path)
         fm.shutdown()
         assert snapshot(project) == before
+
+    def test_models_dir_resolves_against_the_installation(self, project, install_configs, tmp_path,
+                                                          monkeypatch, memory_keyring):
+        monkeypatch.delenv("LLM_FRAMEWORK_CONFIG_DIR")
+        monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+        fm = boot_framework(tmp_path)
+        try:
+            assert fm.model_manager.models_dir == tmp_path / "models"
+            assert fm.model_manager.tiny_models_dir.is_dir()
+        finally:
+            fm.shutdown()
 
 
 class TestCliFromForeignProject:
@@ -331,9 +339,6 @@ class TestSecretsStore:
         assert again.get_secret("hf_token") is None
         assert again.get_secret("openai_api_key") == SK
 
-    @pytest.mark.xfail(strict=True, reason="BUG: migration is not one-time; when the per-user store is moved "
-                                           "aside (doctor's advice for a damaged store) the old config-folder "
-                                           "store is copied again and deleted secrets come back")
     def test_secrets_deleted_after_the_migration_never_come_back(self, memory_keyring, tmp_path):
         old = SecretsManager(tmp_path / "configs")
         assert old.initialize() and old.set_secret("hf_token", HF)
@@ -347,9 +352,6 @@ class TestSecretsStore:
 
         assert fresh.get_secret("hf_token") is None
 
-    @pytest.mark.xfail(strict=True, reason="BUG: a damaged legacy store only logs a warning; the store counts as "
-                                           "healthy, the first set_secret creates the per-user store and the old "
-                                           "secrets are never taken over (doctor says 'Secrets store ready')")
     def test_damaged_legacy_store_is_reported_not_silently_skipped(self, memory_keyring, tmp_path):
         legacy = tmp_path / "configs" / "secrets.store"
         legacy.parent.mkdir(parents=True)
@@ -455,9 +457,6 @@ class TestSecretsStore:
         assert fresh.get_secret("openai_api_key") is None
         assert fresh.get_secret("hf_token") == HF
 
-    @pytest.mark.xfail(strict=True, reason="BUG: SecretsManager.audit_log_file is the relative logs_dir "
-                                           "('logs'), so reading a secret writes <cwd>/logs/audit.log (user "
-                                           "name, secret names) into whatever project the process started in")
     def test_reading_secrets_writes_nothing_into_the_working_directory(self, make_framework, tmp_path,
                                                                        monkeypatch):
         first = make_framework()
@@ -470,6 +469,184 @@ class TestSecretsStore:
         assert fm.secrets_manager.get_secret("openai_api_key") == SK
 
         assert not (project / "logs").exists()
+
+
+class TestSecretsFollowUp:
+    """Follow-up checks for the secrets store fixes: audit log, legacy takeover, links, threads, doctor."""
+
+    def test_secrets_audit_log_is_private_and_in_the_per_user_folder(self, memory_keyring, tmp_path, monkeypatch):
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.chdir(project)
+        sm = secrets_for(tmp_path)
+        assert sm.set_secret("hf_token", HF) and sm.get_secret("hf_token") == HF
+
+        log = tmp_path / "state" / "secrets-audit.log"
+        assert sm.audit_log_file == log and "ACTION=READ KEY=hf_token" in log.read_text()
+        assert HF not in log.read_text()
+        if os.name == "posix":
+            assert log.stat().st_mode & 0o777 == 0o600
+        assert not (tmp_path / "logs").exists() and list(project.iterdir()) == []
+
+    def test_secrets_audit_log_lines_end_with_one_line_break(self, memory_keyring, tmp_path):
+        """os.open() gives a text-mode descriptor on Windows unless O_BINARY is set; with the text layer on
+        top, every entry would end in \\r\\r\\n."""
+        sm = secrets_for(tmp_path)
+        assert sm.set_secret("hf_token", HF) and sm.get_secret("hf_token") == HF
+
+        raw = sm.audit_log_file.read_bytes()
+        assert b"\r\r" not in raw
+        assert raw.count(os.linesep.encode()) == 2 and raw.endswith(os.linesep.encode())
+
+    def test_legacy_merge_keeps_per_user_values_and_runs_once(self, memory_keyring, tmp_path):
+        gui_store = SecretsManager(tmp_path / "configs")
+        assert gui_store.initialize()
+        assert gui_store.set_secret("hf_token", "hf_oldTokenFromTheGuiStore0123456789")
+        assert gui_store.set_secret("gemini_api_key", "AIzaSyA1234567890abcdefghijklmnopqrstuv")
+        cli_store = SecretsManager(tmp_path / "state")
+        assert cli_store.initialize() and cli_store.set_secret("hf_token", HF)
+
+        sm = secrets_for(tmp_path)
+
+        assert sm.get_secret("hf_token") == HF, "a secret already in the per-user store is never overwritten"
+        assert sm.get_secret("gemini_api_key") == "AIzaSyA1234567890abcdefghijklmnopqrstuv"
+        assert sm.delete_secret("gemini_api_key")
+        assert secrets_for(tmp_path).get_secret("gemini_api_key") is None, "the takeover ran a second time"
+
+    def test_moved_installation_does_not_bring_deleted_secrets_back(self, memory_keyring, tmp_path):
+        """The old store is recognised by its content too: after the installation folder is moved (or seen
+        under another mount point), its configs/secrets.store is not taken over a second time."""
+        old_configs = tmp_path / "install-a" / "configs"
+        old = SecretsManager(old_configs)
+        assert old.initialize() and old.set_secret("hf_token", HF) and old.set_secret("openai_api_key", SK)
+        sm = secrets_for(tmp_path, old_configs)
+        assert sm.get_secret("hf_token") == HF
+        assert sm.delete_secret("hf_token")  # leaked and revoked
+
+        (tmp_path / "install-a").rename(tmp_path / "install-b")
+        moved = secrets_for(tmp_path, tmp_path / "install-b" / "configs")
+
+        assert moved.get_secret("hf_token") is None, "a secret deleted after the takeover came back"
+        assert moved.get_secret("openai_api_key") == SK
+
+        # Another old store with other content is still taken over once.
+        gemini = "AIzaSyA1234567890abcdefghijklmnopqrstuv"
+        other = SecretsManager(tmp_path / "other" / "configs")
+        assert other.initialize() and other.set_secret("gemini_api_key", gemini)
+        assert secrets_for(tmp_path, tmp_path / "other" / "configs").get_secret("gemini_api_key") == gemini
+
+    @pytest.mark.parametrize("record", [b"garbage", b"[]", b'{"stores": "/opt/llm/configs/secrets.store"}'])
+    def test_unreadable_takeover_record_never_takes_the_old_store_over_again(self, memory_keyring, tmp_path,
+                                                                            record):
+        old = SecretsManager(tmp_path / "configs")
+        assert old.initialize() and old.set_secret("hf_token", HF)
+        sm = secrets_for(tmp_path)
+        assert sm.get_secret("hf_token") == HF
+        assert sm.delete_secret("hf_token")
+        marker = tmp_path / "state" / "secrets.store.migrated"
+        assert marker.is_file()
+        marker.write_bytes(record)  # damaged or edited by hand
+
+        fresh = secrets_for(tmp_path)
+
+        assert fresh.get_secret("hf_token") is None, "a secret deleted after the takeover came back"
+        assert fresh.set_secret("openai_api_key", SK)
+        assert secrets_for(tmp_path).list_secrets() == ["openai_api_key"]
+
+    def test_damaged_legacy_store_is_taken_over_once_repaired(self, memory_keyring, tmp_path):
+        legacy = tmp_path / "configs" / "secrets.store"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_bytes(b'{"hf_token": "gAAAAABk')
+
+        sm = secrets_for(tmp_path)
+
+        finding = check_secrets(SimpleNamespace(secrets_manager=sm))[0]
+        assert finding.severity == Severity.ERROR and str(legacy) in finding.message
+        assert sm.set_secret("openai_api_key", SK) is False, "writing now would make the old secrets unreachable"
+        assert not sm.secrets_file.exists()
+
+        # Repaired (e.g. restored from a backup) while the GUI keeps running.
+        intact = SecretsManager(tmp_path / "backup")
+        assert intact.initialize() and intact.set_secret("hf_token", HF)
+        legacy.write_bytes((tmp_path / "backup" / "secrets.store").read_bytes())
+
+        assert sm.get_secret("hf_token") == HF
+        assert check_secrets(SimpleNamespace(secrets_manager=sm))[0].severity == Severity.OK
+        assert sm.set_secret("openai_api_key", SK)
+        fresh = secrets_for(tmp_path)
+        assert fresh.get_secret("hf_token") == HF and fresh.get_secret("openai_api_key") == SK
+
+    @pytest.mark.skipif(os.name != "posix", reason="symlinks need privileges on Windows")
+    def test_dangling_store_link_is_not_replaced_by_a_new_store(self, memory_keyring, tmp_path):
+        """secrets.store linked by a dotfile manager onto a drive that is not mounted: writing would replace
+        the link with a store holding only the new secret, and the real one would never be used again."""
+        target = tmp_path / "unmounted-drive" / "secrets.store"
+        link = tmp_path / "state" / "secrets.store"
+        link.parent.mkdir(parents=True)
+        os.symlink(target, link)
+
+        sm = secrets_for(tmp_path)
+
+        assert sm.set_secret("openai_api_key", SK) is False
+        assert link.is_symlink() and not target.exists()
+        finding = check_secrets(SimpleNamespace(secrets_manager=sm))[0]
+        assert finding.severity == Severity.ERROR and str(link) in finding.message
+
+        # The drive is mounted again.
+        intact = SecretsManager(tmp_path / "backup")
+        assert intact.initialize() and intact.set_secret("hf_token", HF)
+        target.parent.mkdir()
+        target.write_bytes((tmp_path / "backup" / "secrets.store").read_bytes())
+        assert sm.get_secret("hf_token") == HF
+        assert sm.set_secret("openai_api_key", SK)
+        assert link.is_symlink(), "a write goes through the link instead of replacing it"
+        assert leftovers(link.parent) == [] and leftovers(target.parent) == []
+        fresh = secrets_for(tmp_path)
+        assert fresh.get_secret("hf_token") == HF and fresh.get_secret("openai_api_key") == SK
+
+    def test_concurrent_writes_in_one_process_are_not_lost(self, memory_keyring, tmp_path, monkeypatch):
+        """GUI workers and MCP tool calls share one SecretsManager; a write must not drop another thread's."""
+        sm = secrets_for(tmp_path)
+        assert sm.set_secret("hf_token", HF)
+        real_dump = secrets_module.json.dump
+        inside, release = threading.Event(), threading.Event()
+
+        def slow_first_dump(obj, f, **kwargs):
+            if threading.current_thread().name == "first" and not inside.is_set():
+                inside.set()
+                release.wait(10)
+            return real_dump(obj, f, **kwargs)
+
+        monkeypatch.setattr(secrets_module.json, "dump", slow_first_dump)
+        results = {}
+        first = threading.Thread(name="first", target=lambda: results.update(a=sm.set_secret("openai_api_key", SK)))
+        second = threading.Thread(name="second", target=lambda: results.update(b=sm.set_secret("gemini_api_key", "g")))
+        first.start()
+        assert inside.wait(10)
+        second.start()
+        second.join(0.5)
+        release.set()
+        first.join(10)
+        second.join(10)
+
+        assert results == {"a": True, "b": True}
+        fresh = secrets_for(tmp_path)
+        assert fresh.get_secret("openai_api_key") == SK and fresh.get_secret("gemini_api_key") == "g"
+        assert fresh.get_secret("hf_token") == HF
+
+    def test_doctor_in_a_long_running_process_reports_the_current_store(self, memory_keyring, tmp_path):
+        gui = secrets_for(tmp_path)
+        assert gui.set_secret("hf_token", HF)
+        good = gui.secrets_file.read_bytes()
+        assert check_secrets(SimpleNamespace(secrets_manager=gui))[0].severity == Severity.OK
+
+        gui.secrets_file.write_bytes(b'{"hf_token": "gAAAA')  # damaged by another (older) process
+        assert check_secrets(SimpleNamespace(secrets_manager=gui))[0].severity == Severity.ERROR
+        assert gui.get_secret("hf_token") == HF, "the last good copy keeps serving reads"
+
+        gui.secrets_file.write_bytes(good)  # repaired
+        assert check_secrets(SimpleNamespace(secrets_manager=gui))[0].severity == Severity.OK
+        assert gui.list_secrets() == ["hf_token"]
 
 
 # ======================================================================================================
@@ -547,9 +724,6 @@ class TestAuditKey:
         monkeypatch.setattr(memory_keyring, "get_password", broken)
         assert framework_tools._audit_key(SimpleNamespace(secrets_manager=None)) is None
 
-    @pytest.mark.xfail(strict=True, reason="BUG: _audit_key's get/set/re-read is not serialized between "
-                                           "processes; two first starts can each keep their own key (the later "
-                                           "set_password overwrites the earlier one after it was re-read)")
     def test_two_first_starts_end_up_with_the_same_key(self, memory_keyring, monkeypatch):
         """Two processes start for the first time together (e.g. the GUI and an MCP server). The scripted
         keyring lets both read 'no key yet'; the second store lands after the first process re-read its key.
@@ -750,9 +924,6 @@ class TestAuditLog:
         assert "different key" in other.message
 
     @pytest.mark.parametrize("anchor_too", [False, True], ids=["newest-row", "newest-row-and-anchor"])
-    @pytest.mark.xfail(strict=True, reason="BUG: record() moves the anchor to the new head without checking the "
-                                           "old anchor, so the next ordinary tool call erases the evidence of "
-                                           "removed newest entries (or of a removed anchor)")
     def test_removed_entries_stay_detectable_after_the_next_call(self, tmp_path, anchor_too):
         log = filled_log(tmp_path / "a.db")
         run_sql(log.path, "DELETE FROM events WHERE id = 3")  # hide the last start_build
@@ -765,9 +936,6 @@ class TestAuditLog:
         assert not log.check().intact
 
     @pytest.mark.parametrize("writer_key", [None, b"another-key"], ids=["no-key", "other-key"])
-    @pytest.mark.xfail(strict=True, reason="BUG: record() appends with whatever key it has although meta.key_id "
-                                           "names another key; the owner's check() then reports 'modified' (a "
-                                           "tamper alarm, doctor ERROR) for an untouched log")
     def test_a_writer_with_another_key_does_not_cause_a_tamper_alarm(self, tmp_path, writer_key):
         log = filled_log(tmp_path / "a.db", key=b"key-of-this-user")
         # e.g. a process whose keyring lookup failed transiently (_audit_key returned None); refusing is fine
@@ -878,12 +1046,13 @@ class TestDoctorAuditFindings:
         finding = self.audit_finding(registry)
         assert finding.severity == severity and words in finding.message
 
-    def test_missing_anchor_and_other_key_are_warnings(self, registry, tmp_path):
+    def test_missing_anchor_is_a_warning_and_other_key_an_error(self, registry, tmp_path):
         registry.audit.anchor_path.unlink()
         assert self.audit_finding(registry).severity == Severity.WARN
+        # A log this key cannot verify may also have been rewritten with a key of the attacker's choice.
         other = ToolRegistry(PolicyStore(tmp_path), AuditLog(tmp_path / "audit.db", key=b"other"))
         finding = self.audit_finding(other)
-        assert finding.severity == Severity.WARN and "different key" in finding.message
+        assert finding.severity == Severity.ERROR and "different key" in finding.message
 
     def test_unkeyed_log_is_a_warning(self, tmp_path):
         registry = ToolRegistry(PolicyStore(tmp_path), filled_log(tmp_path / "plain.db", key=None))
@@ -1132,9 +1301,6 @@ class TestRegistryErrors:
             registry.call("probe", {"text": "x"}, ToolContext("mcp"))
         assert last_entry(registry)["outcome"] == "error"
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the ToolError branch re-raises the handler's message unredacted "
-                                           "(only ValueError/Exception messages go through redact_secrets), "
-                                           "although every message reaching the client should be redacted")
     def test_tool_errors_from_handlers_are_redacted_too(self, tmp_path):
         def handler(_inp):
             raise ToolError(f"Download refused for token {HF}")
@@ -1145,6 +1311,20 @@ class TestRegistryErrors:
             registry.call("probe", {"text": "x"}, ToolContext("mcp"))
 
         assert HF not in str(exc.value)
+
+    def test_redacted_tool_errors_keep_their_kind(self, tmp_path):
+        def handler(_inp):
+            raise ToolDenied(f"Upload refused for key {SK}")
+
+        registry = make_registry(tmp_path, handler)
+
+        with pytest.raises(ToolDenied) as exc:
+            registry.call("probe", {"text": "x"}, ToolContext("mcp"))
+
+        assert SK not in str(exc.value) and "Upload refused" in str(exc.value)
+        assert exc.value.__cause__ is None and exc.value.__suppress_context__
+        entry = last_entry(registry)
+        assert entry["outcome"] == "error" and SK not in entry["detail"]
 
     def test_audit_failure_never_breaks_the_call(self, tmp_path):
         registry = make_registry(tmp_path, lambda i: Out(text=i.text))
@@ -1229,10 +1409,6 @@ class TestAdversarialConfigAndLaunch:
         cfg = ConfigManager()
         assert "config_dir" not in cfg.config_values and "home" not in cfg.config_values
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the MCP launch command is 'python -m orchestrator.cli', which puts "
-                                           "the working directory first on sys.path; Claude Code starts the server "
-                                           "inside the project, so a project's orchestrator/ (or secrets.py, mcp.py, "
-                                           "yaml.py ...) is imported and runs inside the MCP server")
     def test_mcp_launch_command_does_not_import_code_from_the_working_directory(self, tmp_path):
         from orchestrator import mcp_server
         project = tmp_path / "cloned-repo"
@@ -1263,9 +1439,6 @@ class TestAdversarialConfigAndLaunch:
 class TestAdversarialSecrets:
 
     @pytest.mark.parametrize("change", ["set", "deleted"])
-    @pytest.mark.xfail(strict=True, reason="BUG: get_secret() reads a per-process cache that is only refreshed "
-                                           "before writes; a long-running MCP server (or the GUI) never sees a "
-                                           "secret set later by another process and keeps using a deleted one")
     def test_a_long_running_process_sees_secret_changes_of_other_processes(self, memory_keyring, tmp_path,
                                                                            change):
         cli = secrets_for(tmp_path)
@@ -1280,9 +1453,6 @@ class TestAdversarialSecrets:
             assert cli.delete_secret("hf_token")  # the token leaked and was revoked
             assert mcp.get_secret("hf_token") is None
 
-    @pytest.mark.xfail(strict=True, reason="BUG: _load_store() keeps the old in-memory cache when the store file "
-                                           "is gone, so after the store is moved aside (doctor's advice) or "
-                                           "deleted, the next set_secret writes every old secret back")
     def test_removing_the_store_file_does_not_bring_its_secrets_back(self, memory_keyring, tmp_path):
         gui = secrets_for(tmp_path)
         assert gui.set_secret("hf_token", HF)
@@ -1294,10 +1464,6 @@ class TestAdversarialSecrets:
         assert fresh.get_secret("openai_api_key") == SK
         assert fresh.get_secret("hf_token") is None, "a secret from the removed store came back"
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the legacy store is migrated only when no per-user store exists; "
-                                           "pre-3.0 users who also ran llm-cli from their home folder already have "
-                                           "~/.llm-framework/secrets.store, so the GUI's secrets in configs/ are "
-                                           "silently never taken over (doctor: 'Secrets store ready')")
     def test_legacy_store_is_taken_over_even_if_a_per_user_store_exists(self, memory_keyring, tmp_path):
         gui_store = SecretsManager(tmp_path / "configs")  # pre-3.0 GUI, started from the installation
         assert gui_store.initialize() and gui_store.set_secret("hf_token", HF)
@@ -1334,10 +1500,6 @@ class TestAdversarialAuditLog:
         ("DELETE FROM events WHERE id = 3", "removed"),
         ("UPDATE events SET tool = 'list_targets', approved = 1 WHERE id = 2", "modified"),
     ], ids=["newest-row-deleted", "middle-row-changed"])
-    @pytest.mark.xfail(strict=True, reason="BUG: meta.key_id is not authenticated and check() stops at a key_id "
-                                           "mismatch, so whoever edits audit.db can hide any deletion or change "
-                                           "by also changing key_id: doctor then shows a WARN 'different key "
-                                           "(keyring reset)' instead of the tamper ERROR")
     def test_changing_the_key_id_does_not_hide_tampering(self, tmp_path, damage, expected):
         registry = ToolRegistry(PolicyStore(tmp_path), filled_log(tmp_path / "audit.db", key=b"key"))
         run_sql(registry.audit.path, damage)
@@ -1354,10 +1516,6 @@ class TestAdversarialAuditLog:
         result = AuditLog(tmp_path / "a.db", key=b"new-key").check()
         assert result.problem == "key_mismatch"
 
-    @pytest.mark.xfail(strict=True, reason="BUG: check() reads the rows and then the anchor without blocking "
-                                           "writers; an append by another process in between (MCP session busy "
-                                           "while 'doctor' or 'tools audit --verify' runs) is reported as removed "
-                                           "entries")
     def test_an_append_during_check_is_not_reported_as_removed(self, tmp_path, monkeypatch):
         log = filled_log(tmp_path / "a.db")
         other_process = AuditLog(log.path, key=b"audit-key")
@@ -1377,9 +1535,6 @@ class TestAdversarialAuditLog:
         assert result.intact, result.message
         assert log.check().intact and log.check().entries == 4
 
-    @pytest.mark.xfail(strict=True, reason="BUG: record() writes the anchor before COMMIT and does not restore it "
-                                           "when COMMIT fails (disk full, I/O error); the anchor then names an entry "
-                                           "that was rolled back and check() raises a false 'removed' alarm")
     def test_a_failed_commit_does_not_cause_a_tamper_alarm(self, tmp_path, monkeypatch):
         log = filled_log(tmp_path / "a.db", n=2)
         real_connect = sqlite3.connect
@@ -1404,9 +1559,6 @@ class TestAdversarialAuditLog:
         result = log.check()
         assert result.intact and result.entries == 2, result.message
 
-    @pytest.mark.xfail(strict=True, reason="BUG: a failure to replace the anchor file (on Windows: another process "
-                                           "has audit.db.anchor open, e.g. a concurrent check()) rolls back the "
-                                           "audit entry itself, so the tool call is not audited at all")
     def test_an_anchor_that_cannot_be_replaced_does_not_drop_the_entry(self, tmp_path, monkeypatch):
         log = filled_log(tmp_path / "a.db", n=1)
         real_replace = os.replace
@@ -1425,10 +1577,6 @@ class TestAdversarialAuditLog:
         assert [e["tool"] for e in log.entries()] == ["start_build", "start_build"]
         assert log.check().problem not in ("modified", "removed")
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the schema is created only on an instance's first connect; after "
-                                           "audit.db is moved aside while the GUI or an MCP server runs (doctor: "
-                                           "'keep a copy before starting a new log'), every record() fails with "
-                                           "'no such table' and no tool call is audited until a restart")
     def test_a_running_process_keeps_auditing_after_the_log_was_moved_aside(self, tmp_path):
         log = filled_log(tmp_path / "a.db", n=2)  # a long-running process that has written before
         for suffix in ("", "-wal", "-shm"):
@@ -1442,11 +1590,6 @@ class TestAdversarialAuditLog:
         assert [e["tool"] for e in fresh.entries()] == ["start_build"]
         assert fresh.check().intact
 
-    @pytest.mark.xfail(strict=True, reason="BUG: after installing a keyring (doctor's advice for an unkeyed log) "
-                                           "the keyed process appends HMAC rows to the unkeyed chain; the log is "
-                                           "then 'key_mismatch' for good and the new keyed entries can never be "
-                                           "verified (refusing to write, as suggested for the other-key bug, would "
-                                           "stop auditing instead)")
     def test_installing_a_keyring_leads_to_a_verifiable_keyed_log(self, tmp_path):
         unkeyed = filled_log(tmp_path / "a.db", n=2, key=None)  # no keyring yet: doctor warns 'unkeyed'
         assert unkeyed.check().intact
@@ -1476,9 +1619,6 @@ class TestAdversarialAuditLog:
 
 class TestAdversarialPolicy:
 
-    @pytest.mark.xfail(strict=True, reason="BUG: deeply nested JSON makes json.loads raise RecursionError, which "
-                                           "PolicyStore.load() does not catch: tools list, mcp serve and every "
-                                           "tool call crash instead of denying with a problem text")
     def test_deeply_nested_file_denies_instead_of_crashing(self, tmp_path):
         store = PolicyStore(tmp_path)
         store.path.write_text("[" * 100_000 + "]" * 100_000)
@@ -1486,9 +1626,6 @@ class TestAdversarialPolicy:
         assert store.damaged
 
     @pytest.mark.skipif(os.name != "posix", reason="symlinks need privileges on Windows")
-    @pytest.mark.xfail(strict=True, reason="BUG: a dangling tool_policy.json symlink (dotfile manager, unmounted "
-                                           "drive) raises FileNotFoundError and silently gives the looser "
-                                           "recommended defaults instead of denying")
     def test_dangling_symlink_is_not_treated_as_a_missing_file(self, tmp_path):
         store = PolicyStore(tmp_path)
         os.symlink(tmp_path / "unmounted-drive" / "tool_policy.json", store.path)
@@ -1508,10 +1645,6 @@ class TestAdversarialRegistry:
         (framework_tools.TargetIn, "invalid_input"),  # like every real tool: pydantic rejects the surrogate
         (In, "ok"),                                   # an unconstrained str field accepts it and the tool runs
     ], ids=["rejected-like-real-tools", "accepted-plain-str"])
-    @pytest.mark.xfail(strict=True, reason="BUG: AuditLog.record() encodes arguments as strict UTF-8; a lone "
-                                           "surrogate (valid JSON for Python's json, e.g. in Ditto's model output) "
-                                           "raises UnicodeEncodeError, so the attempt (or, for a plain str field, "
-                                           "the executed call) is never audited")
     def test_arguments_with_a_lone_surrogate_are_still_audited(self, tmp_path, input_model, outcome):
         registry = ToolRegistry(PolicyStore(tmp_path), AuditLog(tmp_path / "audit.db", key=b"k"))
         registry.logger = RecordingLogger()

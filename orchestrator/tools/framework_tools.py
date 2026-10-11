@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 """The framework's own tools (targets, builds, artifacts, logs, healing, knowledge base)."""
 
+import contextlib
+import os
 import secrets
+import threading
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -137,27 +141,102 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
 
 
 AUDIT_KEY_ID = "audit-hmac-key"
+_KEY_THREAD_LOCK = threading.Lock()
 
 
-def _audit_key(framework) -> Optional[bytes]:
+def _lock_file(fd: int, deadline: float) -> bool:
+    """True once locked, False if the file system cannot lock; TimeoutError when another holder stays."""
+    while True:
+        try:
+            if os.name == "nt":
+                import msvcrt
+                os.lseek(fd, 0, os.SEEK_SET)
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except OSError as e:
+            if os.name != "nt" and not isinstance(e, BlockingIOError):
+                return False
+            if time.monotonic() >= deadline:
+                raise TimeoutError("another process holds the audit key lock") from e
+            time.sleep(0.05)
+
+
+def _unlock_file(fd: int) -> None:
+    try:
+        if os.name == "nt":
+            import msvcrt
+            os.lseek(fd, 0, os.SEEK_SET)
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    except OSError:
+        pass  # closing the file releases it as well
+
+
+@contextlib.contextmanager
+def _key_lock(state_dir: Path, timeout: float = 30.0):
+    """Serializes the audit key's get-or-create between threads and processes (GUI, CLI, MCP servers) with a
+    lock file in the per-user folder. Without a usable lock file it goes on unlocked."""
+    deadline = time.monotonic() + timeout
+    if not _KEY_THREAD_LOCK.acquire(timeout=timeout):
+        raise TimeoutError("another thread holds the audit key lock")
+    try:
+        try:
+            state_dir.mkdir(parents=True, exist_ok=True)
+            fd = os.open(state_dir / "audit-key.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        except OSError:
+            fd = None
+        try:
+            locked = fd is not None and _lock_file(fd, deadline)
+            try:
+                yield
+            finally:
+                if locked:
+                    _unlock_file(fd)
+        finally:
+            if fd is not None:
+                os.close(fd)
+    finally:
+        _KEY_THREAD_LOCK.release()
+
+
+def _state_dir(framework) -> Path:
+    try:
+        path = getattr(getattr(framework, "config", None), "user_state_dir", None)
+    except OSError:
+        path = None
+    if isinstance(path, (str, Path)):
+        return Path(path)
+    return Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
+
+
+def _audit_key(framework, state_dir: Optional[Path] = None) -> Optional[bytes]:
     """The audit HMAC key: its own entry in the OS keyring, per user like the audit database itself, and
     never in a file an editor of the database could also read. None (an unkeyed chain, reported by
-    `llm-cli doctor`) when no keyring is available."""
+    `llm-cli doctor`) when no keyring is available. A key is created under a lock, so two first starts at
+    the same time (GUI and MCP server) end up with the same key."""
     try:
         import keyring
         from orchestrator.Core.secrets_manager import SecretsManager
         service = SecretsManager.SERVICE_ID
         key = keyring.get_password(service, AUDIT_KEY_ID)
         if not key:
-            legacy = None
-            sm = getattr(framework, "secrets_manager", None)
-            if sm is not None:  # 3.0.0 development builds kept the key in the secrets store
-                try:
-                    legacy = sm.get_secret("audit_hmac_key")
-                except Exception:
+            with _key_lock(Path(state_dir) if state_dir else _state_dir(framework)):
+                key = keyring.get_password(service, AUDIT_KEY_ID)  # another process may have been first
+                if not key:
                     legacy = None
-            keyring.set_password(service, AUDIT_KEY_ID, legacy or secrets.token_hex(32))
-            key = keyring.get_password(service, AUDIT_KEY_ID)  # re-read: another process may have been first
+                    sm = getattr(framework, "secrets_manager", None)
+                    if sm is not None:  # 3.0.0 development builds kept the key in the secrets store
+                        try:
+                            legacy = sm.get_secret("audit_hmac_key")
+                        except Exception:
+                            legacy = None
+                    keyring.set_password(service, AUDIT_KEY_ID, legacy or secrets.token_hex(32))
+                    key = keyring.get_password(service, AUDIT_KEY_ID)  # None if the backend keeps nothing
         return key.encode("utf-8") if key else None
     except Exception:
         return None
@@ -166,5 +245,6 @@ def _audit_key(framework) -> Optional[bytes]:
 def build_tool_registry(framework) -> ToolRegistry:
     """The registry with the user's policy, the audit log and all framework tools."""
     state_dir = Path(framework.config.user_state_dir)
-    registry = ToolRegistry(PolicyStore(state_dir), AuditLog(state_dir / "audit.db", key=_audit_key(framework)))
+    audit = AuditLog(state_dir / "audit.db", key=_audit_key(framework, state_dir))
+    registry = ToolRegistry(PolicyStore(state_dir), audit)
     return register_framework_tools(registry, framework)

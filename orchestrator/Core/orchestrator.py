@@ -25,7 +25,8 @@ from datetime import datetime
 from enum import Enum
 
 from orchestrator.utils.logging import get_logger
-from orchestrator.Core.builder import BuildEngine, BuildStatus, OptimizationLevel, ModelFormat, BuildConfiguration
+from orchestrator.Core.builder import (BuildEngine, BuildStatus, OptimizationLevel, ModelFormat, BuildConfiguration,
+                                       BuildSlotsBusy)
 from orchestrator.utils.calibration import CalibrationDataError, write_calibration_dataset
 from orchestrator.Core.module_generator import ModuleGenerator
 
@@ -216,7 +217,14 @@ class LLMOrchestrator:
         state.status = OrchestrationStatus.CANCELLED
         loop = asyncio.get_running_loop()
         for build_id in list(state.build_ids):
-            await loop.run_in_executor(None, self.build_engine.cancel_build, build_id)
+            if await loop.run_in_executor(None, self.build_engine.cancel_build, build_id):
+                continue
+            # A build that still runs but refuses: its outcome is settled (its files are being published,
+            # or it failed and cleans up). Say so instead of letting "cancelled" stand alone.
+            progress = self.build_engine.get_build_status(build_id)
+            if progress is not None and getattr(progress, "status", None) not in (
+                    BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED):
+                state.warnings.append(f"Build {build_id} could no longer be cancelled; it finishes on its own.")
         event = self._healing_events.get(request_id)
         if event is not None:
             event.set()  # a pending approval counts as dismissed
@@ -295,15 +303,13 @@ class LLMOrchestrator:
             build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
         )
 
-    async def _run_job(self, job: "BuildJob", req: BuildRequest, attempt: int = 1) -> bool:
-        """Runs one build job on the BuildEngine and waits for its terminal state."""
+    async def _submit_to_engine(self, build_config: BuildConfiguration, state: Optional[WorkflowState]) -> Optional[str]:
+        """Hands a build to the engine. While every engine slot is taken (another request's build, or a
+        cancelled one that is still stopping) it waits for a free slot instead of failing the job.
+        Returns None if the request was cancelled meanwhile."""
         loop = asyncio.get_running_loop()
-        try:
-            build_config = self._map_job_to_config(job, req, attempt)
-            state = self._workflows.get(req.request_id)
-            # Known before it is submitted, so a cancel arriving meanwhile reaches it.
-            if state is not None and build_config.build_id not in state.build_ids:
-                state.build_ids.append(build_config.build_id)
+        stage = state.current_stage if state is not None else None
+        while True:
             submit = loop.run_in_executor(None, self.build_engine.build_model, build_config)
             try:
                 returned_id = await asyncio.shield(submit)
@@ -314,6 +320,30 @@ class LLMOrchestrator:
                         loop.run_in_executor(None, self.build_engine.cancel_build, fut.result())
                 submit.add_done_callback(cancel_submitted)
                 raise
+            except BuildSlotsBusy:
+                if state is not None and state.status == OrchestrationStatus.CANCELLED:
+                    return None
+                if state is not None:
+                    state.current_stage = f"Waiting for a free build slot ({build_config.build_id})"
+                await asyncio.sleep(1)
+                continue
+            if state is not None and stage is not None:
+                state.current_stage = stage
+            return returned_id
+
+    async def _run_job(self, job: "BuildJob", req: BuildRequest, attempt: int = 1) -> bool:
+        """Runs one build job on the BuildEngine and waits for its terminal state."""
+        loop = asyncio.get_running_loop()
+        try:
+            build_config = self._map_job_to_config(job, req, attempt)
+            state = self._workflows.get(req.request_id)
+            # Known before it is submitted, so a cancel arriving meanwhile reaches it.
+            if state is not None and build_config.build_id not in state.build_ids:
+                state.build_ids.append(build_config.build_id)
+            returned_id = await self._submit_to_engine(build_config, state)
+            if returned_id is None:
+                job.error_log = "Cancelled by the user."
+                return False
             if state is not None and state.status == OrchestrationStatus.CANCELLED:
                 await loop.run_in_executor(None, self.build_engine.cancel_build, returned_id)
             while True:
@@ -483,6 +513,13 @@ class LLMOrchestrator:
                         build_jobs.append(job)
 
         state.total_builds = len(build_jobs)
+        if not build_jobs:
+            # Every target was skipped: nothing was built, which is no success.
+            state.status = OrchestrationStatus.ERROR
+            state.current_stage = "Failed"
+            state.errors.append("Nothing to build: none of the requested targets was found.")
+            state.end_time = datetime.now()
+            return
         state.status = OrchestrationStatus.BUILDING
         
         self.logger.info(f"Generated {len(build_jobs)} build jobs.")

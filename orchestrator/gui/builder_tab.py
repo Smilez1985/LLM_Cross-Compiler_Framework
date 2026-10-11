@@ -348,8 +348,10 @@ class BuilderTab(QWidget):
         self._quant_user_set = False
         self.quant_combo.activated.connect(self._mark_quant_user_set)
         self.quant_combo.lineEdit().textEdited.connect(self._mark_quant_user_set)
+        # Empty: the board's default type, or for a target without capabilities its scripts' own default.
+        self.quant_combo.lineEdit().setPlaceholderText("default")
+        # Filled from the selected target's capabilities (_apply_target_capabilities).
         self.board_combo = QComboBox()
-        self.board_combo.addItems(["rk3588", "rk3576", "rk3566"])
         self.format_combo.currentIndexChanged.connect(self._update_boards)
         self.board_combo.currentIndexChanged.connect(self._update_quant_options)
         self._update_quant_options()
@@ -556,7 +558,12 @@ class BuilderTab(QWidget):
 
     def _update_boards(self):
         caps = self._capabilities()
+        target = self.target_combo.currentData()
         current = self.board_combo.currentData() or self.board_combo.currentText().strip()
+        # Free text survives only for the target it was typed for: another target's board id is never
+        # carried into a target without capabilities.
+        keep_typed = self.board_combo.isEditable() and getattr(self, "_boards_target", None) == target
+        self._boards_target = target
         self.board_combo.blockSignals(True)
         self.board_combo.clear()
         if caps:
@@ -569,11 +576,9 @@ class BuilderTab(QWidget):
             # A target without capabilities (e.g. from the module wizard): no board, or one the user types.
             self.board_combo.setEditable(True)
             self.board_combo.addItem("(none)", None)
-            idx = self.board_combo.findText(current) if current else -1
-            if idx < 0 and current and current != "(none)":
+            self.board_combo.setCurrentIndex(0)
+            if keep_typed and current and current != "(none)":
                 self.board_combo.setEditText(current)
-            else:
-                self.board_combo.setCurrentIndex(max(idx, 0))
         self.board_combo.blockSignals(False)
         self._update_quant_options()
 
@@ -600,14 +605,17 @@ class BuilderTab(QWidget):
         else:
             self.quant_combo.addItems(QUANT_SUGGESTIONS.get(self.format_combo.currentData(), []))
             default = None
-        # Keep a type the user picked if the new board/format allows it; otherwise use the new default.
-        if self._quant_user_set and current and self.quant_combo.findText(current) >= 0:
+        # Keep a type the user picked if the new board/format allows it (free text for a target without
+        # capabilities); otherwise the new default. Without capabilities that is the scripts' own: empty.
+        if self._quant_user_set and current and (not cap or self.quant_combo.findText(current) >= 0):
             self.quant_combo.setCurrentText(current)
         elif default:
             self.quant_combo.setCurrentText(default)
             self._quant_user_set = False
-        elif current and not cap:
-            self.quant_combo.setCurrentText(current)
+        else:
+            self.quant_combo.setCurrentIndex(-1)
+            self.quant_combo.setEditText("")
+            self._quant_user_set = False
         self.quant_combo.blockSignals(False)
         self._last_default_quant = default
 
