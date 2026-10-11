@@ -1146,6 +1146,28 @@ class TestCrawlerLimits:
             (f"{site}/huge", "response larger than 256 KiB (the limit for HTML pages)")]  # refused by its header
         assert elapsed < 15, elapsed
 
+    def test_an_oversized_page_counts_toward_the_page_limit(self, make_crawler, monkeypatch):
+        # Every page that arrives (HTTP 200) counts, stored or not; an oversized one used to be free, so a site of
+        # huge pages could cost up to the request budget (five times the page limit) of 8 MiB downloads.
+        from orchestrator.Core.crawler_manager import CrawlerManager
+        monkeypatch.setitem(CrawlerManager.BODY_LIMITS, "html", 4096)
+        crawler, web = make_crawler({f"{SITE}/": page_with(body='<a href="/big">b</a> <a href="/next">n</a>'),
+                                     f"{SITE}/big": page_with(body="x" * 5000), f"{SITE}/next": page_with(body="")},
+                                    max_pages=2)
+
+        assert [d.metadata["source"] for d in crawler.crawl(f"{SITE}/")] == [f"{SITE}/"]
+        assert f"{SITE}/next" not in web.urls
+
+    def test_an_oversized_robots_txt_with_cr_line_ends_keeps_its_complete_lines(self, make_crawler, monkeypatch):
+        # RFC 9309 allows CR, LF and CRLF line ends; cutting at the last LF only dropped every rule of a CR file.
+        from orchestrator.Core.crawler_manager import CrawlerManager
+        monkeypatch.setitem(CrawlerManager.BODY_LIMITS, "robots", 2048)
+        robots = "User-agent: *\rDisallow: /private\r" + "#" * 2100 + "\rDisallow: /late\r"
+        crawler, _ = make_crawler({f"{SITE}/robots.txt": response(html=robots, content_type="text/plain")},
+                                  respect_robots=True)
+
+        assert not crawler._can_fetch(f"{SITE}/private/a") and crawler._can_fetch(f"{SITE}/late/a")
+
 
 class TestCrawlsStayWithTheUser:
     """Crawls start only from the GUI's Deep Ingest: MCP clients and Ditto have no way to start one, nor to

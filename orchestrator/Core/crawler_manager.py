@@ -582,6 +582,7 @@ class CrawlerManager:
                 self.stopped = True
                 break
             except ResponseTooLarge as e:  # left out by a limit, like a type the crawl does not read
+                pages_crawled += 1  # it arrived (only 200 responses are read): it counts like any other page
                 self._skip(url, str(e), level=logging.WARNING)
             except ResponseTooSlow as e:  # could not be read
                 self._fail(url, str(e))
@@ -695,7 +696,8 @@ class CrawlerManager:
                 text = _utf8(response)
                 if getattr(response, "body_cut", False):
                     # RFC 9309 2.5: a parsing limit of at least 500 KiB; the last line may be cut in the middle.
-                    text = text[:text.rfind("\n") + 1]
+                    # Lines end with LF, CR or CRLF (RFC 9309 2.2).
+                    text = text[:max(text.rfind("\n"), text.rfind("\r")) + 1]
                     limit = _size_text(self.BODY_LIMITS["robots"])
                     self.logger.warning(f"{robots_url} is larger than {limit}; only its first {limit} are used.")
                 return robots_rules(text)
