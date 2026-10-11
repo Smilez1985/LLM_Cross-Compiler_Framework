@@ -15,7 +15,6 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from orchestrator import __version__
-from orchestrator.schemas.build import BuildRequestIn
 from orchestrator.schemas.targets import TargetCapabilities
 
 _SHA256 = r"^[0-9a-f]{64}$"
@@ -112,16 +111,6 @@ class Recipe(_Strict):
         """Problems of this recipe on the named target (empty: it can be built there)."""
         return capabilities.check_request(self.format, self.board, self.quantization,
                                           dataset=self.options.dataset is not None, imatrix=self.options.use_imatrix)
-
-    def to_build_request(self, dataset_path: Optional[str] = None, use_gpu: bool = False) -> BuildRequestIn:
-        """The build that reproduces this recipe, through the existing build service."""
-        if self.options.dataset is not None and not dataset_path:
-            raise ValueError(f"This recipe needs the calibration dataset {self.options.dataset.name} "
-                             f"(sha256 {self.options.dataset.sha256}).")
-        return BuildRequestIn(model=self.model.repo, revision=self.model.revision, target=self.target.id,
-                              format=self.format, board=self.board, quantization=self.quantization,
-                              use_imatrix=self.options.use_imatrix, dataset_path=dataset_path, use_gpu=use_gpu,
-                              max_context_length=self.options.max_context_length)
 
     def to_yaml(self) -> str:
         return yaml.safe_dump(self.model_dump(mode="json", exclude_none=True), sort_keys=False, allow_unicode=True)

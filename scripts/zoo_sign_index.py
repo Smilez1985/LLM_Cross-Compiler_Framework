@@ -27,7 +27,6 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from cryptography.hazmat.primitives import serialization  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey  # noqa: E402
 
 from orchestrator.Core.community_manager import CommunityIndex, CommunityManager, IndexEntry  # noqa: E402
@@ -47,9 +46,8 @@ def keygen(name: str) -> int:
         print(f"A key named {name!r} exists already; choose another name (keys are never replaced).", file=sys.stderr)
         return 1
     key = Ed25519PrivateKey.generate()
-    raw = key.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw, serialization.NoEncryption())
-    kr.set_password(SERVICE, name, base64.b64encode(raw).decode("ascii"))
-    public = key.public_key().public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
+    kr.set_password(SERVICE, name, base64.b64encode(key.private_bytes_raw()).decode("ascii"))
+    public = key.public_key().public_bytes_raw()
     print("# Add to configs/community_keys.yml (keys:) and ship it with a release:")
     print(f"  - key_id: {key_id(key.public_key())}")
     print(f"    pubkey_b64: {base64.b64encode(public).decode('ascii')}")

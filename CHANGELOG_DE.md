@@ -107,16 +107,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   mit einem Zugangs- oder Sitzungsparameter (etwa `?token=` oder `;jsessionid=`) werden nicht gemerkt.
   *Werkzeuge > Eingabeverlauf löschen...* vergisst ihn.
 - **Signierte Community-Packs**: Ein Pack ist ein Zip mit einem Manifest (sha256, Größe und Rechte jeder Datei)
-  und einer optionalen Ed25519-Signatur des Autors. Beim Lesen eines Packs werden genau die aufgeführten Dateien
-  angenommen, nie Links oder Sonderdateien, und jeder Hash wird geprüft. Vertrauenswürdige Herausgeberschlüssel
-  werden in `configs/community_keys.yml` mitgeliefert, jeder mit einem Ablaufdatum.
-- **Verschlüsselte Packs zum privaten Teilen** (mit deinen eigenen Rechnern oder einem Team): verschlüsselt für die
-  öffentlichen X25519-Schlüssel eines oder mehrerer Empfänger und/oder eine Passphrase (scrypt), nach dem Vorbild
-  von age (ChaCha20-Poly1305, HKDF-SHA256, authentifizierter Header), und vom Absender signiert, sodass Empfänger
-  sehen, wer es geschickt hat, und jede Änderung erkannt wird, auch ein hinzugefügter oder entfernter Empfänger.
-  Wie bei age enthält eine Datei höchstens einen Passphrase-Eintrag. Jeder Benutzer bekommt beim ersten Gebrauch
-  ein Ed25519/X25519-Schlüsselpaar, das nur im verschlüsselten Secrets-Speicher liegt; die öffentlichen Schlüssel
-  lassen sich als Text exportieren.
+  und einer optionalen Ed25519-Signatur des Autors; der öffentliche Schlüssel des Autors wird bei der ersten
+  Installation festgehalten, und ein anderer Schlüssel unter demselben Autorennamen wird mit einer Warnung
+  gezeigt. Beim Lesen eines Packs werden genau die aufgeführten Dateien angenommen, nie Links oder Sonderdateien,
+  und jeder Hash wird geprüft. Vertrauenswürdige Herausgeberschlüssel werden in `configs/community_keys.yml`
+  mitgeliefert, jeder mit einem Ablaufdatum.
+- **Verschlüsselte Packs zum privaten Teilen** (mit deinen eigenen Rechnern oder einem Team): im Format age von
+  rage verschlüsselt (über `pyrage`), für die age-Schlüssel eines oder mehrerer Empfänger oder für eine
+  Passphrase, und vom Absender signiert, sodass Empfänger sehen, wer es geschickt hat, und jede Änderung erkannt
+  wird, auch ein hinzugefügter oder entfernter Empfänger. Die üblichen Werkzeuge `age` und `rage` öffnen sie
+  ebenfalls, wenn sie für eine Passphrase oder für einen Schlüssel aus `age-keygen` oder `rage-keygen`
+  verschlüsselt sind. Ein Pack mit Passphrase, dessen scrypt-Arbeitsfaktor mehr als 1 GiB Speicher braucht, wird
+  abgelehnt, bevor irgendetwas entschlüsselt wird. Jeder Benutzer bekommt beim ersten Gebrauch einen
+  Ed25519-Schlüssel und eine age-Identität, die nur im verschlüsselten Secrets-Speicher liegen; die öffentlichen
+  Schlüssel lassen sich als Text exportieren.
 - **Rezepte**, die „Modellvorlagen“ des Model Zoo: das Modell in einem gepinnten Commit, das Target mit einem
   Fingerabdruck seiner Dateien, Board, Format, Quantisierung, Optionen und geprüfte Ergebnisse (Hashes der
   Artefakte, Toolchain-Image, Gerätetests). Ein Rezept entsteht aus einem fertigen Build, wird gegen die
@@ -132,12 +136,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Eine Installation liest immer zuerst den aktuellen Index (so wird kein Widerruf verpasst), lädt das Pack
   gepinnt nach Größe und sha256 herunter, prüft es in einem Quarantäne-Ordner (genaue Dateiliste und Hashes, die
   Target-Prüfungen, die Schemas für Rezepte und Wissen), zeigt eine Zusammenfassung mit seiner Vertrauensstufe und
-  installiert es erst nach deiner Bestätigung, atomar und mit einer Herkunftsdatei. Vertrauensstufen: official,
-  verified, community, local (eine Datei ohne Indexeintrag: immer mit Bestätigung und mit einer Warnung bei jedem
-  Build) und revoked (gesperrt; installierte Kopien werden von `llm-cli doctor` und dem Hub markiert und nicht
-  gebaut, auch nachdem der Schlüssel, der den Widerruf signiert hat, abgelaufen ist). `llm-cli zoo verify` findet
-  installierte Packs, die verändert oder widerrufen wurden. Die Zusammenfassung vor der Installation wird immer als
-  reiner Text gezeigt, sodass Text aus einem Pack seine Vertrauensstufe nicht verdecken kann.
+  installiert es erst nach deiner Bestätigung, atomar und mit einer Herkunftsdatei. Vertrauensstufen: verified,
+  community, local (eine Datei ohne Indexeintrag: immer mit Bestätigung und mit einer Warnung bei jedem Build) und
+  revoked (gesperrt; installierte Kopien werden von `llm-cli zoo list`, `zoo verify`, `llm-cli doctor` und dem Hub
+  markiert und nicht gebaut, auch nachdem der Schlüssel, der den Widerruf signiert hat, abgelaufen ist).
+  `llm-cli zoo verify` findet installierte Packs, die verändert oder widerrufen wurden. Die Zusammenfassung vor der
+  Installation wird immer als reiner Text gezeigt, sodass Text aus einem Pack seine Vertrauensstufe nicht verdecken
+  kann. Ein Wissenspack wird bei seiner Installation in die Wissensbasis aufgenommen oder, wenn die Wissensbasis
+  erst später eingeschaltet wird, dann.
 - **Community Hub** im Menü Werkzeuge: eine Spalte für die Vertrauensstufe, Filter nach Art und Vertrauen, Import
   von Pack-Dateien (auch von Packs, die für deinen Schlüssel verschlüsselt sind), und „Build“ bei einem
   installierten Rezept füllt den Builder aus, einschließlich des gepinnten Commits des Modells.
@@ -146,7 +152,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   deiner Wissensbasis, von persönlichen Daten bereinigt (die Änderungen werden gezeigt), geprüft und mit deinem
   Schlüssel signiert; mit `--to` oder `--passphrase` wird es stattdessen zum privaten Teilen verschlüsselt.
   Wissenspacks behalten die Quelladresse jeder Seite und beanspruchen keine Lizenz für sie (`NOASSERTION`); ein
-  Community-Pack, das du installiert hast, wird nicht als dein eigenes neu signiert. „Open pull request“ (`--pr`,
+  Community-Pack, das du installiert hast, wird nicht als dein eigenes neu signiert, und Seiten aus installierten
+  Wissenspacks bleiben aus einem Wissens-Export draußen. „Open pull request“ (`--pr`,
   das nach der Zusammenfassung nachfragt, außer mit `--yes`) übergibt es an das Community-Repository (Einstellung
   `community_repo`): über die GitHub CLI, wenn sie installiert und angemeldet ist, sonst öffnet sich die
   Upload-Seite des Repositorys im Browser. Das Framework fragt nie nach einem Token, liest keins und zeigt keins.
@@ -248,8 +255,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   CPU-Features.
 - Lokales Modell: Aufwand „low“ schaltet das Nachdenken (Thinking) ab (Qwen3.5 auf llama-server denkt sonst in
   voller Länge, was auf einer CPU Minuten dauert); ab „medium“ bleibt es an.
-- Abhängigkeiten: `anthropic` 1.13.0, `openai` 3.28.0 (vorher 2.54.0) und `fastembed` 0.8.1 (lokale Embeddings,
-  ONNX auf der CPU) sind exakt gepinnt; pip-audit meldet keine bekannten Schwachstellen.
+- Abhängigkeiten: `anthropic` 1.13.0, `openai` 3.28.0 (vorher 2.54.0), `fastembed` 0.8.1 (lokale Embeddings, ONNX
+  auf der CPU) und `pyrage` 1.4.0 (age-Verschlüsselung privat geteilter Community-Packs) sind exakt gepinnt;
+  pip-audit meldet keine bekannten Schwachstellen.
 - **Dittos Wissensauszüge passen in den Kontext**: Sie belegen höchstens ein Drittel von `chat_context_limit`; ein
   Auszug, der nicht passt, wird übersprungen, und ein zu langer erster wird an einer Zeile gekürzt (ein offener
   Codeblock wird geschlossen).
@@ -390,9 +398,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   mit einer langen Folge von `sk-` brauchte vorher Minuten.
 - **Eine Tabelle der Secret-Formate** (`orchestrator/security/secret_patterns.py`) für den Secret-Scan und die
   Schwärzung zur Laufzeit, die vorher nur fünf Formate kannte. Neu: Schlüssel von Unsloth Studio (`sk-unsloth-`),
-  kurzlebige Bedrock-Schlüssel (`bedrock-api-key-`), LocalAI-Schlüssel (`lai-`), Zeilen mit
-  `Authorization: Bearer` und Werte in Anführungszeichen, die `api_key`, `secret` oder `token` zugewiesen werden
-  (ein Name in Kleinbuchstaben wie `"community_encryption_key"` wird nicht gemeldet). Die Schwärzung zur Laufzeit
+  kurzlebige Bedrock-Schlüssel (`bedrock-api-key-`), LocalAI-Schlüssel (`lai-`), geheime age-Schlüssel
+  (`AGE-SECRET-KEY-1...`), Zeilen mit `Authorization: Bearer` und Werte in Anführungszeichen, die `api_key`,
+  `secret` oder `token` zugewiesen werden (ein Name in Kleinbuchstaben wie `"community_signing_key"` wird nicht
+  gemeldet). Die Schwärzung zur Laufzeit
   erfasst jetzt auch JWTs, Blöcke privater Schlüssel und Passwörter in URLs.
 - API-Schlüssel, die Dittos Anbieterschicht im Speicher hält, erscheinen in `str()` und `repr()` als
   `<redacted>` und lassen sich nicht mit pickle serialisieren.

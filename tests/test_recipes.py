@@ -90,19 +90,6 @@ class TestRecipeSchema:
         bad_quant = Recipe.model_validate(recipe_data(quantization="Q4_K_M"))
         assert any("not supported" in p for p in bad_quant.check_target(rockchip()))
 
-    def test_maps_to_a_build_request(self):
-        request = Recipe.model_validate(recipe_data()).to_build_request()
-        assert request == BuildRequestIn(model="Qwen/Qwen3.5-2B", revision=COMMIT, target="Rockchip", format="rkllm",
-                                         board="rk3588", quantization="w8a8", use_imatrix=False,
-                                         max_context_length=4096)
-
-    def test_dataset_recipe_needs_the_dataset(self):
-        data = recipe_data(options={"dataset": {"name": "calib.txt", "sha256": SHA}})
-        recipe = Recipe.model_validate(data)
-        with pytest.raises(ValueError, match="calib.txt"):
-            recipe.to_build_request()
-        assert recipe.to_build_request(dataset_path="/data/calib.txt").dataset_path == "/data/calib.txt"
-
 
 class TestRecipeFromBuildInfo:
 

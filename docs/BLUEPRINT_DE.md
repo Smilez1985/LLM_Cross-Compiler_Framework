@@ -217,7 +217,7 @@ ihn zur Laufzeit nicht; wofür jede Datei in `configs/` da ist, steht in
 | `models/ditto/` | Dittos lokale GGUF-Modelle mit je einer Markierung `.verified.json` (unveröffentlicht). |
 | `models/embeddings/` | Embedding- und Reranking-Modelle der Wissensbasis (unveröffentlicht). |
 | `community/` | Installierte Community-Rezepte (`recipes/`) und Wissenspakete (`knowledge/`), jeweils mit einer `.lcf-provenance.json`, und die Pakete, die du exportierst (`contributions/`). Community-Targets werden nach `targets/` installiert. Ein Ordner `.quarantine/` in einem Installationsordner enthält ein Paket nur, solange es geprüft wird (unveröffentlicht). |
-| `~/.llm-framework/` (oder `LLM_FRAMEWORK_HOME`) | `secrets.store` (auch deine Community-Schlüsselpaare), `tool_policy.json`, `audit.db` mit `audit.db.anchor`, `known_hosts`, der SSH-Schlüssel des Frameworks `id_ed25519_llm_framework` (+ `.pub`), `mcp_http_token`, `chat_history.json`, `llm_privacy_key` und `llm_install_id`; `crawl_notice.json` und `input_history.json` (unveröffentlicht); der zwischengespeicherte Community-Index `community/index.json` mit `index.json.sig` und die bei der ersten Installation gemerkten Schlüssel-IDs der Autoren, `community/authors.json` (unveröffentlicht); die eingebettete Wissensbasis `qdrant/` und `knowledge_snapshots/`; der lokale Modellserver unter `runtime/llama.cpp/` (Builds, `active.json`, `server.json`, die Schlüsseldatei, solange der Server läuft) und sein Log in `logs/llama-server.log`. |
+| `~/.llm-framework/` (oder `LLM_FRAMEWORK_HOME`) | `secrets.store` (auch deine Community-Schlüssel), `tool_policy.json`, `audit.db` mit `audit.db.anchor`, `known_hosts`, der SSH-Schlüssel des Frameworks `id_ed25519_llm_framework` (+ `.pub`), `mcp_http_token`, `chat_history.json`, `llm_privacy_key` und `llm_install_id`; `crawl_notice.json` und `input_history.json` (unveröffentlicht); der zwischengespeicherte Community-Index `community/index.json` mit `index.json.sig` und die bei der ersten Installation gemerkten öffentlichen Schlüssel der Autoren, `community/authors.json` (unveröffentlicht); die eingebettete Wissensbasis `qdrant/` und `knowledge_snapshots/`; der lokale Modellserver unter `runtime/llama.cpp/` (Builds, `active.json`, `server.json`, die Schlüsseldatei, solange der Server läuft) und sein Log in `logs/llama-server.log`. |
 | Einstellungsordner (meist `configs/`) | `config.yml` (Benutzereinstellungen); auf Wunsch eine eigene `llm_providers.yml`, die Anbietervorlagen ergänzt oder ersetzt. |
 
 `cache/`, `output/` und `models/` sind relativ zum Installationsordner, sofern die Einstellungen `cache_dir`,
@@ -605,36 +605,38 @@ kommen nur Builds eines Hugging-Face-Modells mit bekanntem Commit. Ein Rezept wi
 Targets geprüft und wird zu einem normalen Build-Auftrag.
 
 **Signaturen.** Ed25519 über ein Zweck-Präfix, gefolgt von den signierten Bytes: dem kanonischen JSON eines
-Paket-Manifests (sortierte Schlüssel, keine Leerzeichen, UTF-8), den genauen Bytes von `index.json` oder allem vor
-der Signatur eines verschlüsselten Pakets. Es gibt für diese drei je ein Präfix; eine Signatur für einen Zweck lässt
-sich also nie für einen anderen verwenden. Eine Schlüssel-ID sind die ersten 16 Hex-Zeichen des SHA-256 des rohen
+Paket-Manifests (sortierte Schlüssel, keine Leerzeichen, UTF-8), den genauen Bytes von `index.json` oder der
+age-Datei eines verschlüsselten Pakets. Es gibt für diese drei je ein Präfix; eine Signatur für einen Zweck lässt sich
+also nie für einen anderen verwenden. Eine Schlüssel-ID sind die ersten 16 Hex-Zeichen des SHA-256 des rohen
 öffentlichen Schlüssels. Eine Autorensignatur ist Herkunftsangabe, kein Vertrauen: Sie wird geprüft, wenn das Paket
-den öffentlichen Schlüssel mitbringt, die Schlüssel-ID des Autors wird bei der ersten Installation gemerkt
-(`authors.json`), und ein anderer Schlüssel später wird als Warnung angezeigt.
+den öffentlichen Schlüssel mitbringt, der ganze öffentliche Schlüssel des Autors (nicht die kurze Schlüssel-ID, die
+ein eigens dafür erzeugter Schlüssel treffen könnte) wird bei der ersten Installation gemerkt (`authors.json`), und
+ein anderer Schlüssel später wird als Warnung angezeigt.
 
-**Verschlüsselung zum privaten Teilen** (Format v1, nach dem Vorbild von [age](https://age-encryption.org/v1)),
-für die eigenen Rechner oder ein Team:
+**Verschlüsselung zum privaten Teilen** im Format [age](https://age-encryption.org/v1), für die eigenen Rechner oder
+ein Team:
 
-- Jedes Paket bekommt einen zufälligen Dateischlüssel aus 32 Byte. Für jeden Empfänger enthält ein
-  X25519-Abschnitt den Dateischlüssel, mit ChaCha20-Poly1305 versiegelt unter einem Schlüssel, der mit
-  HKDF-SHA256 aus einem Schlüsseltausch mit einem Einmalschlüssel abgeleitet ist (Salt: beide öffentlichen
-  Schlüssel). Für eine Passphrase tut ein scrypt-Abschnitt dasselbe (N = 2^17, r = 8, p = 1; mindestens 12
-  Zeichen; wie bei age höchstens einer je Datei). Die Abschnitte nennen ihren Empfänger nicht; es gibt höchstens
-  64.
-- Der Kopf (kanonisches JSON mit dem öffentlichen Schlüssel des Absenders, einem Payload-Salt und den
-  Abschnitten) ist durch einen HMAC-SHA256 geschützt, dessen Schlüssel aus dem Dateischlüssel abgeleitet ist. Das
-  Paket selbst wird mit ChaCha20-Poly1305 unter einem Schlüssel versiegelt, der mit HKDF aus Dateischlüssel und
-  Payload-Salt abgeleitet ist, mit dem Kopf als zugehörigen Daten. Jeder abgeleitete Schlüssel wird einmal
-  benutzt, die feste Null-Nonce ist also sicher.
-- Der Absender signiert die ganze Datei mit Ed25519. Ein Leser prüft in dieser Reihenfolge und bevor irgendein
-  Klartext herausgegeben wird: die Signatur (jede Änderung, auch ein hinzugefügter oder entfernter Empfänger,
-  bricht sie), den Absender, wenn vertrauenswürdige Absender angegeben sind (`--from`), den verpackten
-  Dateischlüssel, den HMAC des Kopfs und das Authentifizierungs-Tag der Nutzdaten. Ohne `--from` wird die
-  Schlüssel-ID des Absenders angezeigt.
-- Jeder Benutzer bekommt bei der ersten Nutzung ein Ed25519-Schlüsselpaar (Signieren) und ein
-  X25519-Schlüsselpaar (Empfangen). Sie liegen nur im verschlüsselten Secrets-Speicher und werden nie
-  stillschweigend ersetzt; `llm-cli zoo keys` gibt die öffentlichen Schlüssel als Text zum Weitergeben aus.
-- Kombiniert werden nur Standardbausteine des Pakets `cryptography`; eine eigene Verschlüsselung gibt es nicht.
+- Das Paket wird von rage verschlüsselt, der Rust-Implementierung von age, über ihre Python-Anbindung `pyrage`
+  (exakt festgelegt): an die X25519-Schlüssel der Empfänger (`age1...`, höchstens 64) oder an eine Passphrase
+  (scrypt, mindestens 12 Zeichen, mit dem Arbeitsfaktor, den rage für den Rechner des Absenders wählt), nie an
+  beides, wie age es verlangt. Eine eigene Verschlüsselung gibt es nicht.
+- Ein verschlüsseltes Paket (`.lcfpack`) ist eine ZIP-Datei mit zwei Einträgen: `pack.zip.age`, eine übliche
+  age-Datei, die auch die Werkzeuge `age` und `rage` öffnen, und `pack.zip.age.sig`, die Ed25519-Signatur des
+  Absenders darüber (das Format von `pack.sig` mit dem öffentlichen Schlüssel). Die Signatur deckt die ganze
+  age-Datei ab; ein hinzugefügter oder entfernter Empfänger oder ein Empfänger, der das Paket neu verschlüsselt,
+  bricht sie also.
+- Ein Leser prüft in dieser Reihenfolge und bevor irgendetwas entschlüsselt wird: Aufbau und Größen der ZIP-Datei,
+  den Kopf der age-Datei (höchstens 68 Abschnitte, 64 Empfänger und Platz für den Grease-Abschnitt von rage, weil
+  die Verarbeitung des Kopfs in rage mit dem Quadrat ihrer Zahl wächst; ein scrypt-Abschnitt muss allein stehen und
+  sein Arbeitsfaktor höchstens 2^20 sein: die eigene Grenze von pyrage richtet sich nach der Geschwindigkeit des
+  Rechners und lässt Arbeitsfaktoren durch, deren Speicherbedarf den Prozess abbricht), die Signatur und den
+  Absender, wenn vertrauenswürdige Absender angegeben sind (`--from`). Ohne `--from` wird die Schlüssel-ID des
+  Absenders angezeigt.
+- Jeder Benutzer bekommt bei der ersten Nutzung einen Ed25519-Schlüssel (Signieren) und eine age-Identität
+  (Empfangen). Sie liegen nur im verschlüsselten Secrets-Speicher, werden unter der Sperre des Speichers für diesen
+  Eintrag angelegt (zwei Prozesse legen nie zwei Schlüssel an) und nie stillschweigend ersetzt; `llm-cli zoo keys`
+  gibt die öffentlichen Schlüssel als Text zum Weitergeben aus. Die gemeinsame Tabelle der Geheimnis-Formate kennt
+  geheime age-Schlüssel, damit der Secret-Scan und die Schwärzung zur Laufzeit sie erkennen.
 
 **Der signierte Index.** `index.json` führt die Pakete auf (Art, ID, Version, Autor, Lizenz, Vertrauen `verified`
 oder `community`, HTTPS-Adresse, Größe und sha256) und die Widerrufe (per sha256 oder per Art und ID, auf Wunsch
@@ -665,28 +667,29 @@ nicht aktualisiert wurde.
    (Vertrauen `verified` oder `community`), auch bei einer Paketdatei.
 6. Ein atomares Umbenennen bringt das Paket an seinen Platz, nie über einen bestehenden Ordner (auch nicht, wenn
    sich nur die Groß- und Kleinschreibung unterscheidet), zusammen mit `.lcf-provenance.json` (Vertrauen, Quelle,
-   Hashes, Signierer, Absender). Ein Wissenspaket wird danach in die Wissensbasis eingelesen. Was unterwegs
-   scheitert, wird entfernt.
+   Hashes, Signierer, Absender). Ein Wissenspaket wird danach in die Wissensbasis eingelesen oder, wenn sie
+   ausgeschaltet ist, sobald sie startet. Was unterwegs scheitert, wird entfernt.
 
 Eine Paketdatei (`llm-cli zoo install --file` oder Import file... im Community-Hub) läuft durch dieselbe
 Quarantäne; eine verschlüsselte wird zuerst entschlüsselt (`--from`, `--passphrase`). Ihr Vertrauen kommt aus dem
 Index, wenn der Index ihren sha256 aufführt; sonst ist es `local`.
 
-**Vertrauensstufen.** `official` (mit dem Framework ausgeliefert; ausgelieferte Targets haben keine Herkunftsdatei
-und stehen nicht im Zoo, deshalb zeigt bisher keine Liste diese Stufe), `verified` (im signierten Index: geprüft und
-unabhängig nachgebaut), `community` (im signierten Index: geprüft), `local` (eine Datei ohne Indexeintrag: immer
-bestätigt, und jeder Build davon zeigt eine Warnung) und `revoked` (in der signierten Widerrufsliste: nicht
-installiert; installierte Kopien werden von `llm-cli doctor` und dem Community-Hub markiert und nicht gebaut).
-`llm-cli zoo verify` findet installierte Pakete, die verändert oder widerrufen wurden.
+**Vertrauensstufen.** `verified` (im signierten Index: geprüft und unabhängig nachgebaut), `community` (im
+signierten Index: geprüft), `local` (eine Datei ohne Indexeintrag: immer bestätigt, und jeder Build davon zeigt eine
+Warnung) und `revoked` (in der signierten Widerrufsliste: nicht installiert; installierte Kopien werden von
+`llm-cli zoo list`, `llm-cli doctor` und dem Community-Hub markiert und nicht gebaut). Ausgelieferte Targets haben
+keine Herkunftsdatei; sie sind keine Pakete und haben keine Vertrauensstufe. `llm-cli zoo verify` findet installierte
+Pakete, die verändert oder widerrufen wurden.
 
 **Export und Übergabe.** `llm-cli zoo export target|recipe|knowledge`, das Kontrollkästchen „Export for community“
 auf der letzten Seite des Modul-Assistenten und „Export a finished build for the community...“ im Kontextmenü des
 Builder-Logs erstellen ein Paket: Seine Dateien werden datenschutzbereinigt (Home-Ordner, IP- und MAC-Adressen,
 E-Mail-Adressen, JWTs, Host- und Benutzername, Schlüssel; die Änderungen werden angezeigt), geprüft und mit deinem
-Schlüssel signiert. Mit `--to` (Dateien mit öffentlichen Schlüsseln) oder `--passphrase` wird das signierte Paket
+Schlüssel signiert. Mit `--to` (Dateien mit age-Empfängern) oder `--passphrase` wird das signierte Paket
 zusätzlich zum privaten Teilen verschlüsselt; ein verschlüsseltes Paket wird nie mit `--pr` eingereicht. Die Lizenz
 ist standardmäßig MIT, bei Wissen `NOASSERTION`, und jede Seite behält ihre Quelladresse. Ein Target, das du von
-jemand anderem installiert hast, wird nicht als deines neu signiert. „Open pull request“ (`--pr`) übergibt das Paket
+jemand anderem installiert hast, wird nicht als deines neu signiert, und Seiten aus installierten
+Community-Wissenspaketen bleiben aus einem Wissens-Export draußen. „Open pull request“ (`--pr`) übergibt das Paket
 an das Community-Repository (`community_repo`): über die GitHub-CLI, wenn sie installiert und angemeldet ist, sonst
 öffnet sich die Upload-Seite des Repositorys im Browser. Beide behalten ihre eigenen Zugangsdaten; das Framework
 fragt nie nach einem Token, liest keines und zeigt keines an.
@@ -696,14 +699,15 @@ an (`keygen`), prüft ein Paket und gibt seinen Indexeintrag aus (`entry`) und s
 `--previous` muss die Version höher sein als die des alten Index).
 `scripts/community_repo/validate-contribution.yml` ist die Workflow-Vorlage für das Community-Repository: Sie nimmt
 nur Paket-ZIPs bis 5 MB an und lässt über jedes `llm-cli zoo verify` laufen, das auch Pakete ablehnt, die noch
-Schlüssel oder persönliche Daten enthalten. Der Signierschlüssel erreicht die CI nie.
+Schlüssel oder persönliche Daten enthalten (der Secret-Scan des Repositorys überspringt Binärdateien und läuft
+deshalb nicht über die ZIP-Dateien). Der Signierschlüssel erreicht die CI nie.
 
 **Stand.** Das Community-Repository, sein Index und der Schlüssel des Maintainers sind noch nicht veröffentlicht:
 `configs/community_keys.yml` enthält keinen Schlüssel, und `community_index_url` und `community_repo` sind leer. Den
 Index auflisten und per ID installieren endet deshalb mit einer Meldung (`llm-cli zoo list` zeigt installierte
-Pakete trotzdem an), und `--pr` sagt nur, wo das Paket liegt. Die Workflow-Vorlage prüft Pakete mit dem
-Framework-Release `v3.1.0`, das es noch nicht gibt. Pakete lassen sich schon als Dateien austauschen (Vertrauen
-`local`) und zwischen Benutzern verschlüsselt weitergeben.
+Pakete trotzdem an), und `--pr` sagt nur, wo das Paket liegt. Das Framework-Release, mit dem die Workflow-Vorlage
+Pakete prüft (`LCF_REF`), ist ein Platzhalter, den der Maintainer einträgt. Pakete lassen sich schon als Dateien
+austauschen (Vertrauen `local`) und zwischen Benutzern verschlüsselt weitergeben.
 
 ### Zuletzt verwendete Eingaben (unveröffentlicht)
 
@@ -753,7 +757,7 @@ jedes davon erreichen kann. Die Tabelle nennt jede Bedrohung, den Schutz und wo 
 | Jemand gibt sich beim Deployment als dein Gerät aus | Vertrauen beim ersten Kontakt, aber nie stillschweigend: Unbekannte Host-Schlüssel werden mit ihrem SHA256-Fingerabdruck angezeigt und erst nach Bestätigung gespeichert; ein geänderter Schlüssel oder Schlüsseltyp scheitert immer. Die Anmeldung nutzt den eigenen Ed25519-Schlüssel des Frameworks. Der OpenSSH-Rückfallweg läuft mit `BatchMode=yes` und `StrictHostKeyChecking=yes`. Benutzernamen und IP-Adressen werden geprüft; das Hochladen geht in einen privaten temporären Ordner; `deploy.sh` prüft alle Prüfsummen. Ohne Docker werden nur Modelldateien deployt, nie beliebige Programme. | `orchestrator/utils/ssh_trust.py`, `orchestrator/Core/deployment_manager.py` |
 | Ein präpariertes Archiv schreibt außerhalb seines Ordners | Das Entpacken lehnt Pfadüberschreitungen, nach außen zeigende Links und Gerätedateien ab und nutzt für tar-Dateien den `data`-Filter von Python. | `safe_extract_archive` in `orchestrator/utils/helpers.py` |
 | Ein Community-Paket wird unterwegs verändert, durch einen älteren Index ersetzt oder nach seiner Veröffentlichung widerrufen | Pakete aus dem Index werden, festgelegt durch Größe und sha256, aus einem Index geladen, der mit einem Schlüssel signiert ist, der mit dem Framework ausgeliefert wird (mit Ablaufdatum). Ein Index, der sich nicht prüfen lässt, wird nicht genutzt, ein älterer wird abgelehnt, eine Installation per ID lädt immer den aktuellen Index, und widerrufene Pakete werden weder installiert noch gebaut. Jedes Paket wird in einem Quarantäneordner geprüft (genaue Dateiliste und Hashes, keine Links oder Spezialdateien, die Prüfer, die in einem Target Binärdateien ablehnen) und erst nach deiner Bestätigung einer Zusammenfassung in reinem Text mit seiner Vertrauensstufe atomar an seinen Platz gebracht; Text aus einem Paket kann diese also nicht verdecken. Eine Datei ohne Indexeintrag ist `local` und warnt bei jedem Build. | `orchestrator/Core/community_manager.py` (mit `build_trust_check`, das `orchestrator/Core/builder.py` aufruft), `orchestrator/Core/community_pack.py` |
-| Jemand liest oder verändert ein privat geteiltes Paket | Verschlüsselt an X25519-Empfänger und/oder eine scrypt-Passphrase mit ChaCha20-Poly1305 und HKDF-SHA256, mit einem HMAC über den Kopf und der Ed25519-Signatur des Absenders. Jede Änderung, auch an der Empfängerliste, fällt auf, bevor irgendein Klartext herausgegeben wird; `--from` nimmt nur bekannte Absender an. Die privaten Schlüssel liegen nur im verschlüsselten Secrets-Speicher. | `encrypt_pack`, `decrypt_pack`, `UserKeys` in `orchestrator/Core/community_pack.py` |
+| Jemand liest oder verändert ein privat geteiltes Paket | Im Format age von rage (`pyrage`) an X25519-Empfänger oder eine scrypt-Passphrase verschlüsselt, mit der Ed25519-Signatur des Absenders über die ganze age-Datei. Jede Änderung, auch an der Empfängerliste, fällt auf, bevor irgendetwas entschlüsselt wird; ein Kopf mit mehr als 68 Abschnitten oder ein scrypt-Arbeitsfaktor über 2^20 wird abgelehnt, bevor rage ihn liest; `--from` nimmt nur bekannte Absender an. Die privaten Schlüssel liegen nur im verschlüsselten Secrets-Speicher. | `encrypt_pack`, `decrypt_pack`, `UserKeys` in `orchestrator/Core/community_pack.py` |
 | Ein geteiltes Paket oder die Eingabe-Historie verrät persönliche Daten oder Zugangsdaten | Exporte werden datenschutzbereinigt (Home-Ordner, IP- und MAC-Adressen, E-Mail-Adressen, JWTs, Host- und Benutzername, Schlüssel), und die Änderungen werden angezeigt; `llm-cli zoo verify`, auch in der CI des Community-Repositorys, lehnt ein Paket ab, das die Bereinigung noch verändern würde. Die Eingabe-Historie lehnt Werte ab, die nach Secrets aussehen, und URLs mit Zugangsdaten. Das Framework fragt nie nach einem Repository-Token und speichert keines: Ein Pull-Request läuft über die GitHub-CLI oder den Browser, die ihre eigenen Zugangsdaten behalten. | `scrub` in `orchestrator/Core/community_pack.py`, `submit_contribution` in `orchestrator/Core/community_manager.py`, `orchestrator/utils/input_history.py` |
 | Eine kompromittierte Abhängigkeit (Lieferkette) | Host-Abhängigkeiten sind mit Hashes festgelegt (`requirements*.txt`, Poetry-2-Lock); `anthropic` (1.13.0), `openai` (3.28.0), `fastembed` (0.8.1) und `mcp` (2.3.0) sind exakt festgelegt. GitHub Actions sind per Commit-SHA festgelegt; die CI führt pip-audit und bandit aus; Dependabot prüft pip, Actions und Docker wöchentlich. Im Rockchip-Image wird das RKLLM-Wheel per SHA256 geprüft, und die Versionen von Toolkit, torch und onnx sind festgelegt. Der Kalibriertext wird per SHA256 geprüft. | `pyproject.toml`, `poetry.lock`, `.github/`, `targets/Rockchip/dockerfile`, `orchestrator/utils/calibration.py` |
 
@@ -829,7 +833,7 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
 | **Der mMARCO-Cross-Encoder ist der Standard-Reranker für die CPU** | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` ist mehrsprachig (deutsche und englische Fragen), klein (etwa 0,12 GB) und auf einer CPU schnell genug; seine Model Card nennt die Lizenz Apache-2.0. Trainiert wurde er auf mMARCO, einer Übersetzung von MS MARCO, das eigene Nutzungsbedingungen hat; der Maintainer hat ihn als Vorgabe akzeptiert, die `rag_reranker: auto` bei der ersten Nutzung herunterlädt. `rag_reranker: off` oder eine andere Modell-ID ersetzt ihn. |
 | **Die Abruf-Evaluation entscheidet über die Vorgaben der Suche** | Eine Änderung an der Suche kann einer Art Frage helfen und einer anderen schaden. Ein fester Korpus mit festen Fällen, nach Regeln bewertet und ohne KI als Schiedsrichter, zeigt das, bevor eine Änderung zur Vorgabe wird. |
 | **Bezeichner werden nur für den Stichwortindex zerlegt** | Flags und Namen wie `-DGGML_CUDA=ON` waren für BM25 ein einziges Token und über ihre Teile nicht zu finden. Die Teile nur der BM25-Eingabe hinzuzufügen, lässt die dichten Vektoren und den gespeicherten Text unverändert. Sie teilen das gehashte BM25-Vokabular, ältere Abschnitte brauchen also keine Migration: Erneutes Aufnehmen ergänzt ihre Teile. |
-| **Öffentliche Pakete signiert, private verschlüsselt, mit Standardbausteinen** | Bei öffentlichen Daten zählen Echtheit und Unversehrtheit, beim privaten Teilen auch Vertraulichkeit. Die XOR-„SwarmCipher“ konnte jeder rückgängig machen. Ed25519, X25519, HKDF-SHA256, scrypt und ChaCha20-Poly1305, nach dem Vorbild von age kombiniert, sind gut untersucht; ein Signatur-Präfix je Zweck verhindert, dass eine Signatur für das eine auch für etwas anderes gilt. |
+| **Öffentliche Pakete signiert, private im Format age verschlüsselt** | Bei öffentlichen Daten zählen Echtheit und Unversehrtheit, beim privaten Teilen auch Vertraulichkeit. Die XOR-„SwarmCipher“ konnte jeder rückgängig machen. age ist ein veröffentlichtes, gut geprüftes Format und rage eine gepflegte Implementierung davon; es gibt also keine eigene Verschlüsselung zu prüfen, und Empfänger können auch die üblichen age-Werkzeuge nutzen. Ein Signatur-Präfix je Zweck verhindert, dass eine Signatur für das eine auch für etwas anderes gilt. |
 | **Eine Installation liest immer zuerst den aktuellen Index** | Ein Widerruf schützt nur Benutzer, die ihn sehen. Eine Installation braucht ohnehin das Netz, also lädt sie zuerst den Index und installiert ohne ihn nichts. Ein zwischengespeicherter Index dient dem Auflisten und Installationen aus Dateien und wird nie durch einen älteren ersetzt. |
 | **Kein Token im Framework und kein eigener Upload** | Ein Repository-Token im Framework wäre ein wertvolles Geheimnis an einer Stelle mehr, und ein Upload-Knopf schickt Daten ohne Prüfschritt hinaus. Das Framework bereitet ein bereinigtes, signiertes Paket vor und zeigt, was die Bereinigung geändert hat; erst wenn du den Pull-Request öffnest, verschicken die GitHub-CLI oder der Browser es mit ihren eigenen Zugangsdaten. |
 | **`NOASSERTION` für Wissenspakete** | Ein Wissenspaket enthält Seiten anderer Leute. Wer es exportiert, kann sie nicht lizenzieren; das Paket beansprucht deshalb keine Lizenz für sie, und jede Seite behält ihre Quelladresse. |
@@ -898,7 +902,7 @@ dieser Version.
 | **Crawler, der die eigenen Signale der Seite prüft.** Ob eine Seite ausgewertet werden darf, kann ein Nutzer nicht wissen. Deshalb prüft der Crawler die maschinenlesbaren Nutzungsvorbehalte selbst (robots.txt nach RFC 9309, den Header `X-Robots-Tag`, Robots-Meta-Tags einschließlich `noai` und seines eigenen Bot-Namens, das TDM Reservation Protocol) und überspringt vorbehaltene Seiten mit Nennung im Log; jeder Vorbehalt gewinnt, und keine Prüfung lässt sich abschalten. Statt einer rechtlichen Bestätigung erklärt ein einmaliger Hinweis (je Benutzer, erneut, wenn sich sein Text ändert), was gelesen und behalten wird, mit Sprachansage über die Sprachausgabe des Betriebssystems (die Technik des USB-Watchers aus rag4ll); ein Stopp-Knopf behält das Gespeicherte, der Fortschritt zeigt „Seite N von M“, das Ergebnis nennt ehrlich Erfolg, Teilerfolg oder Fehler, und der Crawler meldet seine echte Version. Deep Ingest startet nur aus der GUI. | fertig |
 | **Eingabe-Historie**: zuletzt verwendete Modelle, Targets, Boards, URLs, Geräte und Datensätze als Auswahl in den GUI-Feldern, je Benutzer, ohne Geheimnisse; Tools > Eingabeverlauf löschen... vergisst sie. | fertig |
 | **Bessere Antworten aus der Wissensbasis**, aus rag4ll übernommen und klein gehalten: Reranking mit einem Cross-Encoder auf der CPU und eine Relevanzschwelle, die unpassende Auszüge aus Dittos Prompt heraushält (eingeschaltet für Build-Empfehlungen; für Chat und MCP-Suchen mit `rag_rerank_default`), ein Größenbudget für die Auszüge, das Aufteilen übergroßer Code- und Tabellenblöcke, eine Stichwortsuche, die Bezeichner wie `-DGGML_CUDA=ON` versteht, und das Entladen unbenutzter Modelle; gemessen mit der Abruf-Evaluation (`llm-cli ditto eval --kind retrieval`). | fertig |
-| **Community-Pakete mit echter Kryptografie**: Pakete mit einem Manifest jeder Datei, öffentliche Pakete mit Ed25519 signiert, private Pakete an die Schlüssel der Empfänger (X25519 mit ChaCha20-Poly1305) oder mit einer Passphrase (scrypt) verschlüsselt und vom Absender signiert. Der Upload mit der XOR-„SwarmCipher“ und seine Abfrage eines GitHub-Tokens entfallen; das Framework fragt nie nach einem Token. | fertig |
+| **Community-Pakete mit echter Kryptografie**: Pakete mit einem Manifest jeder Datei, öffentliche Pakete mit Ed25519 signiert, private Pakete im Format age (rage, über `pyrage`) an die Schlüssel der Empfänger oder eine Passphrase verschlüsselt, vom Absender signiert und mit den üblichen age-Werkzeugen lesbar. Der Upload mit der XOR-„SwarmCipher“ und seine Abfrage eines GitHub-Tokens entfallen; das Framework fragt nie nach einem Token. | fertig |
 | **Model-Zoo aus der Community**: Rezepte (Modell mit festgelegtem Commit, Target-Fingerabdruck, Format, Quantisierung, Toolchain-Image und geprüfte Hashes), aus fertigen Builds erzeugt; ein signierter Index mit Widerrufen, Installation über eine Quarantäne mit Vertrauensstufen, `llm-cli zoo`, der Community-Hub, der Export für die Community mit Übergabe an einen Pull-Request und die Werkzeuge des Maintainers für das Community-Repository. | fertig |
 | **Community-Repository und Index veröffentlicht**: das Community-Repository mit dem Beitrags-Workflow, der erste signierte Index, der Schlüssel des Maintainers in `configs/community_keys.yml` und die ausgefüllten Einstellungen `community_index_url` und `community_repo`, ausgeliefert mit einem Release. Bis dahin arbeitet der Zoo nur mit Paketdateien. | geplant |
 
@@ -1019,7 +1023,7 @@ Was jede veröffentlichte Version enthält, steht im [Changelog](../CHANGELOG_DE
 | Community-Paket | Eine ZIP-Datei mit einem Target, einem Rezept oder Wissen, einem Manifest ihrer Dateien und meist einer Signatur; private Pakete sind verschlüsselt. |
 | Rezept | Wie ein Modell gebaut wurde (Modell-Commit, Target, Format, Quantisierung, Optionen, Hashes der Ergebnisse), damit andere es nachbauen können; enthält keine Modelldateien. |
 | Community-Index | Die signierte Liste geprüfter Community-Pakete mit ihren Download-Adressen, Hashes und Widerrufen. |
-| Vertrauensstufe | Wie weit ein Paket geprüft wurde: official, verified, community, local oder revoked. |
+| Vertrauensstufe | Wie weit ein Paket geprüft wurde: verified, community, local oder revoked. |
 | Quarantäne | Ein Ordner, in dem ein Paket entpackt und geprüft wird, bevor es installiert wird. |
 | Sandbox | Ein abgeriegelter Container ohne Netzwerk und mit minimalen Rechten. |
 | Vertrauen beim ersten Kontakt (TOFU) | Beim ersten Verbinden mit einem Gerät bestätigst du seinen Schlüssel; danach fällt jede Änderung auf. |

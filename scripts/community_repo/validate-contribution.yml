@@ -3,9 +3,10 @@
 #   - only pack files (.zip), each at most 5 MB;
 #   - `llm-cli zoo verify`: manifest and hashes, no links, no extra or binary files, the target validators
 #     (capabilities, every FROM pinned by digest, the shell deny-list, bash -n, no template placeholders), the
-#     recipe and knowledge schemas, an included author signature, and the privacy scrub (no home folders,
-#     addresses, host or user names, keys);
-#   - the secret scan over the changed files.
+#     recipe and knowledge schemas, an included author signature, and the privacy scrub over every file in the
+#     pack (no home folders, addresses, host or user names, and no key of the framework's secret table: a pack
+#     with a key is rejected). The repository's secret scan is not run on the zips: it skips binary files, so it
+#     would check nothing inside a pack.
 # A maintainer then reviews the pack, merges it, adds its entry to index.json and signs the index offline with
 # scripts/zoo_sign_index.py (the signing key never reaches CI).
 name: Validate contribution
@@ -18,7 +19,9 @@ permissions:
   contents: read
 
 env:
-  LCF_REF: v3.1.0   # framework release the packs are checked with
+  # The framework release whose `llm-cli zoo verify` checks the packs: set it to the tag of a published release
+  # (the first one with the community zoo, later the newest one). The placeholder makes the checkout fail until then.
+  LCF_REF: SET-TO-A-RELEASE-TAG
 
 jobs:
   validate:
@@ -70,6 +73,3 @@ jobs:
             esac
           done < changed.txt
           exit "$status"
-
-      - name: Secret scan
-        run: xargs -r python .lcf/scripts/secret_scan.py < changed.txt

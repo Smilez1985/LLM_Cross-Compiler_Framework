@@ -31,6 +31,9 @@ keyring = ">=25.6"
 # Cross-process lock of the credential vault (GUI, CLI and MCP server write it); already installed through
 # huggingface-hub, now a direct dependency.
 filelock = ">=3.20,<5"
+# Privately shared community packs use the age format: rage (the Rust implementation of age) through its binding.
+# Exact pin: it encrypts and decrypts user data.
+pyrage = "1.4.0"
 
 # --- 5. AI Agent & RAG (host side) ---
 # Ditto's provider layer uses the official SDKs only (OpenAI-compatible servers go through openai).

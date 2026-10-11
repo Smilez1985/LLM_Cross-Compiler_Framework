@@ -1416,6 +1416,12 @@ pynacl==1.6.2 ; python_version >= "3.11" and python_version < "3.15" \
 pypdf==6.20.0 ; python_version >= "3.11" and python_version < "3.15" \
     --hash=sha256:72b1e897fef7f5bbed7f2a93881a4861d98dbf25ae39981c8a023583239edbda \
     --hash=sha256:f003fc2014814d264fe7dd3f9d435c158e23e1a85a2233f87a0a2d6d21c914ad
+pyrage==1.4.0 ; python_version >= "3.11" and python_version < "3.15" \
+    --hash=sha256:545bf188e8d217ec88c32bc8e8bf56026c8c0b1b1f96d2688cedf1427ab0e827 \
+    --hash=sha256:7f4eb0cbc2b4aee5deac9862c47b3895866df5554153951af822e9c581e68558 \
+    --hash=sha256:bcf4177aea91a9f48951db8001c1385baafbae62cc15d691ef43efebaab6b8db \
+    --hash=sha256:c4a5dcd24a14b5e0d4cccff13649a2b8f1609ad45d6438bb85f35d84b0c8155e \
+    --hash=sha256:f868b360ccd3f836326d42b532fae3e8eb8340a88cca0a39c0ae10fce68f6cc5
 pyside6-essentials==6.12.0 ; python_version >= "3.11" and python_version < "3.15" \
     --hash=sha256:0867b709a724db28b161227c7d6ecb5ed10cc09226a53542417ac6dee1308239 \
     --hash=sha256:08c5841063fc1df69b7fa1ee405f539e66576a83fc48004be3e2c5e35ccbfa69 \
