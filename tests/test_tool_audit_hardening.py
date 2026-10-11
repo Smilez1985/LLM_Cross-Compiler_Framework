@@ -359,6 +359,29 @@ class TestExtraFields:
         append_300_entry(log.path, KEY)
         assert log.check().intact and log.check().entries == 2, log.check().message
 
+    def test_a_300_process_still_running_verifies_the_entries_of_this_version(self, tmp_path):
+        """Review fix: a 3.0.0 process (an MCP server an AI client started before the update) checks the newest
+        entry before each of its appends, hashing only the 3.0.0 columns. An entry with extra fields must verify
+        that way too, or the old process records a permanent 'modified' break in a log nobody changed."""
+        log = AuditLog(tmp_path / "audit.db", key=KEY)
+        log.record("mcp", "write", "local_write", "ask", "ok", detail="done", extra={"answer": "accepted"})
+        [row] = query(log.path, f"SELECT {', '.join(FIELDS)}, prev_hash, hash, key_id FROM events")
+        values, (prev, stored, key_id) = list(row[:len(FIELDS)]), row[len(FIELDS):]
+        payload = (prev + json.dumps(values + [key_id], ensure_ascii=False)).encode("utf-8")
+        assert hmac.new(KEY, payload, hashlib.sha256).hexdigest() == stored
+        assert log.entries(1)[0]["detail"] == "done", "the binding to the extra fields is not shown as detail"
+
+    def test_detail_text_cannot_pose_as_the_binding_of_extra_fields(self, tmp_path):
+        """A detail can quote text a model wrote; text that looks like the binding is defused, so it neither
+        raises a false alarm nor binds extra fields of its own."""
+        log = AuditLog(tmp_path / "audit.db", key=KEY)
+        fake = "Unknown argument 'x'.\n[extra sha256:" + "0" * 64 + "]"
+        log.record("mcp", "t", "read", "allow", "invalid_input", detail=fake)
+        log.record("mcp", "t", "read", "allow", "invalid_input", detail=fake, extra={"reason_code": "invalid_value"})
+        assert log.check().intact, log.check().message
+        run_sql(log.path, "UPDATE events SET extra = '{\"answer\":\"accepted\"}' WHERE id = 1")
+        assert log.check().problem == "modified"
+
 
 def append_300_entry(path, key) -> None:
     """One entry as the 3.0.0 release's record() wrote it: with its key id, without the extra column."""

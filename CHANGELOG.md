@@ -204,8 +204,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the SHA-256 of the question text, the person's answer (accepted, declined, cancelled, unavailable, unanswered,
   timeout), the client's self-reported name and version (a label only), a hash of the connection, the duration, the
   SHA-256 and size of the result (never the result itself) and a link from the end entry to the call's write-ahead
-  entry. The fields are part of the hash chain; logs written before them, also by a 3.0.0 process that is still
-  running, stay verifiable.
+  entry. The fields are bound to the hash chain without changing how 3.0.0 hashes an entry: logs written before them
+  stay verifiable, and a 3.0.0 process that is still running (an MCP server an AI client started before the update)
+  keeps verifying and appending to the same log instead of reporting the new entries as modified.
 - **Tool permissions per caller**: Ditto and local MCP clients over stdio can have permissions of their own
   (`llm-cli tools permissions --caller ditto|mcp`, `--reset --caller` returns to the shared ones); a caller's first
   permissions start from the shared ones, including settings for single tools. `llm-cli tools list --caller`, the

@@ -947,8 +947,10 @@ sofort festgehalten und an den laufenden Aufruf weitergegeben; was schon läuft,
 folgt. Einträge enthalten außerdem den selbst angegebenen Namen und die Version des Clients (eine Bezeichnung, kein
 Nachweis, wer er ist), einen Hash der Verbindung, den Bestätigungsweg (`elicitation`, `framework-gui`,
 `framework-cli`), die Dauer, SHA-256 und Größe des Ergebnisses (nie das Ergebnis selbst) und einen Verweis auf den
-Eintrag `started` des Aufrufs. Diese Felder gehören zur Hash-Kette; Logs, die vor ihnen geschrieben wurden, bleiben
-prüfbar.
+Eintrag `started` des Aufrufs. Diese Felder sind an die Hash-Kette gebunden (ihr SHA-256 steht am Ende des
+verketteten Detailtexts des Eintrags), so dass Hinzufügen, Entfernen oder Ändern erkannt wird, während ein Eintrag den
+Hash behält, den 3.0.0 berechnet: Logs, die vor ihnen geschrieben wurden, bleiben prüfbar, und ein 3.0.0-Prozess, der
+neben dieser Version noch läuft, prüft dasselbe Log weiter und schreibt hinein.
 
 ---
 
