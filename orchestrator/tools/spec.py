@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+"""
+Declarations a tool's author adds to its ToolSpec beyond the schemas: how the fool-proof layer may treat each
+input field, which argument names are aliases, whether a confirmation may offer a standing approval, and the
+tool's limits. The registry and the normalizer (orchestrator/tools/normalize.py) read them; nothing here runs a
+tool.
+"""
+
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+
+from orchestrator.tools.output import MAX_RESULT_BYTES
+
+# What a field holds, which decides what may be repaired (design 6.11, "What is never repaired"):
+#   value     - an ordinary value: types are coerced (text to number, "yes" to true, JSON text for lists)
+#   choice    - one of a closed list (`choices` / `choices_from`): exact, canonical form if unique, declared alias
+#   id        - an id the framework issued: only surrounding whitespace is removed
+#   path, url, trust - a path, an address, or a value that carries trust (image digest, commit, hash, authorizing
+#               boolean): never changed
+#   filename  - a file name: exact, or one unique case-insensitive match
+#   amount    - a number of things to return: above the maximum it is reduced with a note (`reduce_to_max`)
+FIELD_KINDS = ("value", "choice", "id", "path", "url", "trust", "filename", "amount")
+
+
+@dataclass(frozen=True)
+class Choices:
+    """The values a choice field accepts, with the aliases that map to them (alias -> value)."""
+    values: Tuple[str, ...]
+    aliases: Mapping[str, str] = field(default_factory=dict)
+    where: str = ""  # for messages, e.g. "for gguf on Rockchip"
+
+
+@dataclass(frozen=True)
+class FieldMeta:
+    """How the fool-proof layer may treat one input field."""
+    kind: str = "value"
+    choices: Tuple[str, ...] = ()
+    # Computed choices; gets the arguments normalized so far (fields earlier in the schema), returns None when the
+    # choices cannot be known yet (then the value is only checked later, by the tool itself).
+    choices_from: Optional[Callable[[Dict[str, Any]], Optional[Choices]]] = None
+    aliases: Mapping[str, str] = field(default_factory=dict)
+    unit: Optional[str] = None             # "seconds" or "bytes": "30s", "2 min", "8GB" are converted, with a note
+    null_means_default: bool = False       # "", "null", "none", "default" mean "not given" (least-impact default)
+    split: bool = False                    # "a, b" becomes ["a", "b"] for a list field
+    list_tool: str = ""                    # for ids: the tool that lists the valid ones
+
+    def __post_init__(self):
+        if self.kind not in FIELD_KINDS:
+            raise ValueError(f"unknown field kind {self.kind!r}")
+        if self.unit not in (None, "seconds", "bytes"):
+            raise ValueError(f"unknown unit {self.unit!r}")
+
+
+@dataclass(frozen=True)
+class GrantRule:
+    """Whether a confirmation may offer "yes, and do not ask again" for a tool, and for which scope. The scope key
+    is computed from the facts the person was shown; None means "outside every scope, ask". Standing approvals
+    themselves come with the framework's approval window; until then no tool declares one."""
+    scope: Callable[[Any], Optional[str]]
+    warning: str
+    version: int = 1
+
+
+@dataclass(frozen=True)
+class ToolLimits:
+    """A tool's limits. The registry enforces the result size; rates and quotas come with the limiter."""
+    max_result_bytes: int = MAX_RESULT_BYTES
+
+
+CHANNELS = ("framework", "elicitation")  # confirmation channels, strongest first
+
+
+def example_problems(examples: List[Dict[str, Any]], validate: Callable[[Dict[str, Any]], Any]) -> List[str]:
+    """Example calls that do not pass the tool's own input check (each example must be a valid call)."""
+    problems = []
+    for example in examples:
+        try:
+            validate(example)
+        except Exception as e:  # noqa: BLE001 - every failure is a problem with the example
+            problems.append(f"{example}: {e}")
+    return problems

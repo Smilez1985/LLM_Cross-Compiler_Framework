@@ -26,7 +26,12 @@ AUTOMATIC_STRATEGIES = {"config_adjustment", "docker_prune", "retry_build"}
 
 
 class BuildServiceError(ValueError):
-    """A request the service refuses, with a message meant for the user (or the calling model)."""
+    """A request the service refuses, with a message meant for the user (or the calling model), a reason code
+    (the tool registry's codes, e.g. unknown_id, not_supported) and the next step."""
+
+    def __init__(self, message: str, code: str = "failed", next: str = ""):
+        super().__init__(message)
+        self.code, self.next = code, next
 
 
 class BuildService:
@@ -62,8 +67,21 @@ class BuildService:
         tid = resolve(target) if callable(resolve) else target
         if tid is None:
             known = ", ".join(t.get("id", "?") for t in self._targets().list_targets()) or "none"
-            raise BuildServiceError(f"Target '{target}' is unknown (targets: {known}).")
+            raise BuildServiceError(f"Target '{target}' is unknown (targets: {known}).", code="invalid_value",
+                                    next="Call list_targets for the targets you can use.")
         return tid
+
+    def target_choices(self):
+        """(target ids, {folder name: id} for folders named differently): the names a request may use."""
+        tm = self._targets()
+        ids = [t.get("id") for t in tm.list_targets() if t.get("id")]
+        folder_of = getattr(tm, "folder_of", None)
+        aliases = {}
+        for tid in ids:
+            folder = folder_of(tid) if callable(folder_of) else None
+            if folder is not None and folder.name != tid:
+                aliases[folder.name] = tid
+        return ids, aliases
 
     def capabilities(self, target: str) -> TargetCapabilities:
         caps = self._targets().get_capabilities(self.resolve_target(target))
@@ -113,7 +131,7 @@ class BuildService:
         if hp is not None:
             strategy = getattr(getattr(hp, "strategy", None), "value", "")
             pending = PendingHealing(summary=str(hp.summary), root_cause=str(hp.root_cause),
-                                     suggested_step=str(hp.fix_command),
+                                     manual_step_text=str(hp.fix_command),
                                      automatic=strategy in AUTOMATIC_STRATEGIES and not hp.is_ai_generated,
                                      ai_generated=bool(hp.is_ai_generated))
         return BuildStatusOut(
@@ -126,7 +144,8 @@ class BuildService:
     def _state(self, request_id: str) -> WorkflowState:
         state = self._orchestrator._workflows.get(request_id)
         if state is None:
-            raise BuildServiceError(f"Unknown build request '{request_id}'.")
+            raise BuildServiceError(f"Unknown build request '{request_id}'.", code="unknown_id",
+                                    next="Call list_build_requests for the ids you can use.")
         return state
 
     def get_status(self, request_id: str) -> BuildStatusOut:
@@ -183,7 +202,9 @@ class BuildService:
             dataset = str(path.resolve())
         problems = caps.check_request(fmt, board, quant, dataset=bool(dataset), imatrix=request.use_imatrix)
         if problems:
-            raise BuildServiceError(" ".join(problems))
+            raise BuildServiceError(" ".join(problems), code="not_supported",
+                                    next=f"Call get_target_capabilities for {target}, then choose a supported "
+                                         "combination.")
         model = self._check_model_source(request.model)
         if request.revision and Path(model).is_absolute():
             raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.")

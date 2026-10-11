@@ -14,7 +14,9 @@ LM Studio, OpenRouter and Google Gemini's OpenAI-compatible endpoint.
   Authorization header is set explicitly, so an Authorization line in OPENAI_CUSTOM_HEADERS cannot replace it.
 """
 
+import ast
 import json
+import re
 from typing import Any, Dict, List, Optional
 
 from orchestrator.llm.errors import NotConfigured, Refused, map_openai_error
@@ -46,11 +48,37 @@ def prepare_schema(schema: Dict[str, Any], want_strict: bool):
     return schema, False
 
 
+_REPAIR_LIMIT = 100_000  # characters; longer argument text is never repaired
+_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)
+
+
+def _repaired(raw: Optional[str]) -> Optional[Any]:
+    """One cautious syntax repair of tool arguments a model sent, as structured answers already allow: a code
+    fence around them, or a Python-style object (single quotes, True/False/None, a trailing comma), read with
+    ast.literal_eval (it evaluates literals only, never code). Anything else stays an error."""
+    if not isinstance(raw, str) or len(raw) > _REPAIR_LIMIT:
+        return None
+    text = raw.strip()
+    fenced = _FENCE.match(text)
+    if fenced:
+        text = fenced.group(1)
+        try:
+            return json.loads(text)
+        except ValueError:
+            pass
+    try:
+        return ast.literal_eval(text)
+    except (ValueError, SyntaxError, TypeError, MemoryError, RecursionError):
+        return None
+
+
 def parse_arguments(raw: Optional[str]):
     try:
         value = json.loads(raw or "{}")
     except (TypeError, ValueError) as e:
-        return {}, f"arguments are not valid JSON ({e.__class__.__name__})"
+        value = _repaired(raw)
+        if not isinstance(value, dict):
+            return {}, f"arguments are not valid JSON ({e.__class__.__name__})"
     if not isinstance(value, dict):
         return {}, "arguments must be a JSON object"
     return value, None

@@ -370,16 +370,48 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `start_build` | local write | Start a build (must match the target's capabilities) |
 | `cancel_build` | local write | Cancel a build |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
+| `get_status` | read | Your tool permissions for this caller: every tool with its decision and why (also the hidden ones), and what no tool does, with where you do it |
 
 How a question with tools runs:
 
-1. Ditto gets the definitions of the tools your permissions do not deny.
+1. Ditto gets the definitions of the tools your permissions do not deny: the same tools an MCP client with the same
+   permissions is offered, whatever the model's size.
 2. The model may call tools. Each call goes through the tool registry: input check, your permission, confirmation
    where the permission says "ask" (a dialog in the GUI with the tool's title and every argument; a prompt in the
    CLI, denied without a terminal), audit log entry with actor `ditto`.
 3. Tool results go back to the model as untrusted data. A denied or failed call is reported to the model, which is
    told not to retry the same call.
 4. After at most 8 model turns per question Ditto stops and says so.
+
+**How names and values are matched** (the same for Ditto and every MCP client, whatever the model's size):
+
+- A tool name runs when it is exact, or the same name in other letter case or with `_`, `-`, `.` or spaces in
+  other places (`StartBuild` runs `start_build`, with a note). Any other name is refused with up to three
+  suggestions from the tools your permissions allow; a suggestion never runs by itself.
+- Argument names: only the aliases a tool declares (`quant` and `quantization_type` for `quantization`, `repo`
+  and `repo_id` for `model`) are renamed, with a note. Any other unknown argument, also a field name in other
+  letter case (`Board`), is refused with the list of valid ones and a suggestion; nothing is dropped silently and
+  nothing undeclared is mapped. An alias and its field with different values are refused. Every tool's input
+  model forbids fields it does not declare, also for tools added later.
+- Values: numbers and yes/no given as text, and lists given as JSON text, are read as such. Targets, formats,
+  boards and quantization types match exactly, by letter case and separators when that names exactly one value
+  (`q4-k-m` is `Q4_K_M`; a target name that could mean two targets is refused with both), or by an alias the
+  target declares (`Q4` for GGUF). A near miss (`rk3567`) is refused with suggestions, never corrected. A number of
+  lines or results above the maximum is reduced, with a note.
+- Never changed: ids (only spaces around them are removed), model names and paths, commits and hashes, and
+  `approve`, which must be a real `true` or `false`.
+- Every refusal and error carries a reason code (for example `unknown_argument`, `unknown_id`, `not_supported`,
+  `permission_denied`, `needs_person`, `declined`) and the next step. The same failing call a second time in a
+  session says so; a third time it is refused without running and without asking you again ("stop retrying this
+  call, tell the user why"), and after three input errors in a session an error also shows a valid example call.
+  A session is one question to Ditto, or one MCP client: its connection, its HTTP session, or for a client of the
+  2026-07-28 protocol the server process (over stdio each client starts its own; HTTP clients without a session
+  share one until named tokens tell them apart).
+- What was repaired is marked in the confirmation question, listed in the result's `notes` and recorded in the
+  audit log (`name_requested`, `repairs`). Ditto's confirmation shows exactly the framework's question.
+- MCP clients get each tool's own closed input schema (`additionalProperties: false`), the one Ditto's model sees.
+- Tool arguments a local model sends with a code fence or in Python notation (single quotes, `True`, `None`, a
+  trailing comma) are read once more as such; anything else stays an error.
 
 Ditto's prompts tell it to check a target's capabilities before starting a build, to start or cancel builds only
 when you asked for it in the conversation, to decide on self-healing only with your explicit decision, to answer
@@ -418,8 +450,10 @@ llm-cli ditto eval --kind chat --repeat 3 --min-pass 0.8
 
 With `--tier` the CLI starts the managed local server with each tier in turn and stops it after each tier. The
 report shows the passed share per run, per kind and the average time per case; `--json` adds the setup (provider,
-model per task, effort, framework version, sha256 of the cases file) and every answer. Cloud providers bill about 20
-requests per run and repeat. All options: [CLI_Usage.md](CLI_Usage.md#ditto-eval).
+model per task, effort, framework version, sha256 of the cases file) and every answer, and for chat cases every
+tool call the model attempted (also refused ones: unknown names, invalid arguments, denials, repeat refusals) with a
+`tool_use` summary: tool calls per task, the share of malformed calls and of unknown tool names, the repairs the
+framework applied and the repeat refusals. Cloud providers bill about 20 requests per run and repeat. All options: [CLI_Usage.md](CLI_Usage.md#ditto-eval).
 
 **First measurement** (for context, not a benchmark): on a CPU-only machine with Qwen3.5 2B, effort `low` (thinking
 off) and the prompts of that time, the 2-bit tier `small-q2` passed 42% of the 19 cases and the 4-bit tier `small`
@@ -760,8 +794,9 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
 can then use the [same tools as Ditto](#dittos-tools). You sign in to the client with your own account or key; the
 framework never sees it.
 
-- **Every call goes through the tool registry:** input schema, your permissions, confirmation, audit log (actor
-  `mcp`). Tool annotations (read-only, idempotent) are only hints for the client.
+- **Every call goes through the tool registry:** name and argument matching, input schema, your permissions,
+  confirmation, audit log (actor `mcp`), exactly as for Ditto ([how names and values are
+  matched](#dittos-tools)). Tool annotations (read-only, idempotent) are only hints for the client.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
   elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
   and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be
@@ -770,8 +805,22 @@ framework never sees it.
   cancelled calls, and calls refused before they run (invalid arguments, a confirmation that fails), are audited
   too. A client that cannot ask gets a refusal with a hint how to allow the tool.
 - **Instructions to the client:** the server describes the typical flow (targets → capabilities → build → status
-  and log → artifacts) and tells the client that build logs and knowledge-base results are external text whose
-  instructions must not be followed.
+  and log → artifacts), tells the client that fields marked as external text are data whose instructions must not
+  be followed, and that a task it cannot do is reported to you with its specific reason.
+- **Results:** every result goes through the registry's output filter, for Ditto as well. Secrets are redacted in
+  every string. Text from outside the framework (build logs and stage names, self-healing proposals, build
+  manifests, knowledge-base excerpts, doctor messages, and the labels, notes and board descriptions of a target's
+  `target.yml`, which a community target pack can install) is cleaned of invisible and bidirectional control
+  characters and capped (a log line at 2,000 characters, other external text at 4,000); every other string is capped at 16 KiB,
+  and a result over 256 KiB is refused with a hint how to ask for less. Such fields are marked `"untrusted": true`
+  in the tool's output schema. The structured result matches the output schema exactly; the text block starts with
+  one sentence built only from framework facts (ids, states, counts), followed by the JSON wrapped as untrusted
+  data. `notes` in a result are written by the framework only, for example that the knowledge base is reachable
+  but nothing matched, or that only the builds of this process are listed. A self-healing proposal's step comes as
+  `manual_step_text`: text for you to read, never a command for the client to run. The error of a failed call can
+  quote a server reply, a log line or a name from a pack: it is cleaned the same way before secrets are redacted,
+  and the client gets that part wrapped as untrusted data, while the framework's own refusals and the next step
+  stay plain (Ditto's model gets such errors in an untrusted block too).
 - **Transports:** stdio (default; the client starts the server) or Streamable HTTP on a loopback address only
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). HTTP checks Host and Origin and needs a bearer token
   that is created per user in `~/.llm-framework/mcp_http_token`.
@@ -796,7 +845,7 @@ Every tool belongs to a risk tier:
 |---|---|---|---|
 | `read` | Look at targets, builds, logs, knowledge | allow | allow, ask, deny |
 | `local_write` | Change things on this computer (start or cancel builds, decide on healing) | ask | allow, ask, deny |
-| `external` | Reach other devices or delete data | ask | ask, deny; single tools can be allowed one by one |
+| `external` | Reach other devices or delete data | ask | ask, deny (a tool of this tier always asks at most) |
 | `forbidden` | Never callable (for example arbitrary shell commands) | deny | deny |
 
 There are no `external` or `forbidden` tools yet; deploying and uploading are not available as tools.
@@ -804,6 +853,22 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
 - The permissions are asked once (GUI dialog on the first start, `llm-cli ditto setup`) and stored in
   `~/.llm-framework/tool_policy.json` (readable only by you). Single tools can be set differently in the GUI.
 - Until the setup is done, read-only tools are allowed and everything else asks.
+- **Per caller:** Ditto (`ditto`) and local MCP clients over stdio (`mcp`) can have permissions of their own
+  (`llm-cli tools permissions --caller ditto` or `--caller mcp`); a caller without them uses the shared ones. A new
+  caller's permissions start from the shared ones, including your settings for single tools. A named token for an
+  HTTP client (planned) that has no permissions of its own may only read, and never a tool that your shared
+  setting for that tool or the tool's own default denies.
+- **A tool's own default and cap:** a tool can bring its own default (an optional tool starts as `deny` and is
+  hidden) and a highest decision that no setting lifts (a tool that reaches other devices or deletes data always
+  asks at most). The order is: your setting for the tool, else the tool's default, else your setting for its tier;
+  then the cap. A tool's default never opens a tier you denied.
+- **New tools:** the permission file records which tools you have reviewed; saving the setup, `llm-cli tools
+  permissions` or the GUI dialog marks every listed tool. A tool added later uses its own default, never a looser
+  tier setting, until you review it; `llm-cli tools list` and the GUI dialog mark it as new. A permission file from
+  3.0.0 counts its eleven tools as reviewed.
+- **Denied tools are not listed** to MCP clients and Ditto; a call to one is still refused and audited.
+  `get_status` lists every tool with its decision and why, also the hidden ones, and the actions no tool does, with
+  where you do them, so an AI can tell you the real reason.
 - A damaged or unreadable permission file, or a link to a missing one, denies every tool instead of falling back to
   looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and
   `llm-cli mcp serve` say so.
@@ -816,6 +881,24 @@ written to an anchor file, so removing the newest entries is detected too. `llm-
 chain and tells a changed entry apart from a wrong key. Each entry is written in its own transaction, so several
 processes cannot fork the chain. `llm-cli tools audit --archive` moves the log and its anchor aside (kept with a
 timestamp) and starts a new chain, for example after `llm-cli doctor` has reported a problem with the log.
+
+**Recorded before it runs.** A call that changes something (every tier except `read`) gets a `started` entry before
+it runs. If that entry cannot be written, the call is refused and nothing runs: calls that change something run only
+when they are recorded. Read-only calls stay available, and the failed write is logged. A question to you is recorded
+as `confirmation_requested` with the SHA-256 of the question text before it is asked; a question about a change that
+cannot be recorded is not asked. Every end is recorded: `ok`, `error`, `denied`, `not_confirmed` with the answer
+(`accepted`, `declined`, `cancelled`, `unavailable` when nobody could be asked, `unanswered`), `confirmation_timeout`
+(an MCP question asked during the call waits at most 5 minutes) and `cancelled` (the client gave up on the call). A
+question of the 2026-07-28 protocol that is returned to the client and never answered is recorded as `unanswered`
+after 15 minutes while the server runs; the `confirmation_requested` entry is the lasting record. When a client
+cancels a running call, the cancellation is recorded at once and passed to the running call; what already runs
+finishes, and its end entry follows. Entries also carry the client's self-reported name and version (a label, not
+proof of who it is), a hash of the connection, the confirmation channel (`elicitation`, `framework-gui`,
+`framework-cli`), the duration, the SHA-256 and size of the result (never the result itself) and a link to the call's
+`started` entry. These fields are bound to the hash chain (their SHA-256 ends the entry's chained detail), so
+adding, removing or changing them is detected, while an entry keeps the hash 3.0.0 computes: logs written before them
+stay verifiable, and a 3.0.0 process that still runs next to this version keeps verifying and appending to the same
+log.
 
 ---
 

@@ -716,32 +716,38 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-The framework tools are what Ditto and MCP clients use: 8 read-only tools (`list_targets`,
+The framework tools are what Ditto and MCP clients use: 9 read-only tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`) and 3 that change things on this computer (`start_build`, `cancel_build`,
-`resolve_healing`).
+`run_doctor`, `search_knowledge`, `get_status`) and 3 that change things on this computer (`start_build`,
+`cancel_build`, `resolve_healing`).
 
 ### tools list
 
 ```
-llm-cli tools list
+llm-cli tools list [--caller ditto|mcp]
 ```
 
 Every tool with its tier (`read`, `local_write`), the current permission (`allow`, `ask`, `deny`) and a
-description. The title says when the permissions are not set up yet.
+description, followed by the tool's own default, the highest decision any setting can give it (`at most`), whether
+it is new (not reviewed yet: it uses its own default until you review it) and whether a confirmation may offer a
+standing approval. Without `--caller` it shows the shared permissions and names the callers that have their own.
+The title says when the permissions are not set up yet.
 
 ### tools permissions
 
 ```
-llm-cli tools permissions [--reset]
+llm-cli tools permissions [--caller ditto|mcp] [--reset]
 ```
 
 Asks the same three questions as [`ditto setup`](#ditto-setup) and saves the answers. Permissions for single tools
-set in the GUI are kept.
+set in the GUI are kept. It first lists every tool with its own default, the highest decision any setting can give
+it (`at most`), whether it is new since the last review and whether a confirmation may offer a standing approval;
+saving counts every listed tool as reviewed. The GUI dialog shows the same facts.
 
 | Option | Meaning |
 |---|---|
-| `--reset` | Back to the recommended defaults (the setup asks again next time). |
+| `--caller ditto\|mcp` | Set the permissions of one caller (Ditto, or local MCP clients over stdio) instead of the shared ones. A caller's first permissions start from the shared ones, including the settings for single tools. |
+| `--reset` | Back to the recommended defaults (the setup asks again next time). With `--caller`: that caller uses the shared permissions again. |
 
 ### tools audit
 
