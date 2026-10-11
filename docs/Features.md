@@ -803,12 +803,13 @@ framework never sees it.
   A summary of each job (never its result) is kept in `~/.llm-framework/jobs/` for the GUI and the CLI.
 - **Who owns a build:** each connection (one stdio session; for HTTP the whole server until named tokens exist)
   owns the builds and jobs it starts. It may cancel its own without a question; cancelling another client's build
-  or job asks you (unless you set the tool to "allow"). `get_build_status` shows the caller class that started a
-  build (`mcp`, `ditto`).
+  or job follows your tool permissions (by default it asks you). `get_build_status` shows the caller class that
+  started a build (`mcp`, `ditto`).
 - **When a client disconnects:** the builds and jobs its session started are cancelled, each with an audit entry
   ("client disconnected"), the server waits up to 30 seconds for their containers to stop and then shuts the
-  framework down, so no build is left running without an owner. HTTP builds belong to the server and are cancelled
-  when it stops.
+  framework down, so no build is left running without an owner. This also holds when the client ends a stdio
+  server with SIGTERM (as clients do when it has not exited a few seconds after they closed its input). HTTP builds
+  belong to the server and are cancelled when it stops.
 - **Transports:** stdio (default; the client starts the server) or Streamable HTTP on a loopback address only
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). HTTP checks Host and Origin and needs a bearer token
   that is created per user in `~/.llm-framework/mcp_http_token`.

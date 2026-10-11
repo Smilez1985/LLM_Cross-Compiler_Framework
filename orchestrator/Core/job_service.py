@@ -317,8 +317,15 @@ class JobService:
         except OSError as e:
             logger.warning(f"Could not keep the summary of job {job.job_id}: {e}")
 
+    @staticmethod
+    def _mtime(path: Path) -> float:
+        try:
+            return path.stat().st_mtime
+        except OSError:  # removed meanwhile (another process pruned it)
+            return 0.0
+
     def _prune(self) -> None:
-        files = sorted(self.folder.glob("job_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        files = sorted(self.folder.glob("job_*.json"), key=self._mtime, reverse=True)
         for old in files[self.keep:]:
             try:
                 old.unlink()
@@ -330,7 +337,7 @@ class JobService:
         if self.folder is None or not self.folder.is_dir():
             return []
         found = []
-        for path in sorted(self.folder.glob("job_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        for path in sorted(self.folder.glob("job_*.json"), key=self._mtime, reverse=True):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):

@@ -349,7 +349,9 @@ sequenceDiagram
    alle 5 s, wenn der Client ein Fortschritts-Token mitgegeben hat) und läuft dann einmal durch die Registry; ein
    abgebrochenes Warten lässt den Build oder Job in Ruhe. Endet die Sitzung, werden ihre unfertigen Builds und Jobs
    abgebrochen und als `cancelled` („client disconnected“) im Audit-Log festgehalten, der Server wartet bis zu
-   30 s, bis die Build-Container gestoppt sind, und `llm-cli mcp serve` fährt danach das Framework herunter.
+   30 s, bis die Build-Container gestoppt sind, und `llm-cli mcp serve` fährt danach das Framework herunter. Über
+   stdio beendet ein SIGTERM des Clients die Sitzung genauso (es unterbricht den Server wie Strg+C, statt den
+   Prozess sofort zu beenden).
 
 Die dreizehn Tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
 `read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `get_job_status` (Stufe `read`) sowie

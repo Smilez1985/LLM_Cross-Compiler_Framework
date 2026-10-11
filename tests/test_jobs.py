@@ -424,3 +424,62 @@ class TestLongPolls:
                 return await client.call_tool("get_build_status", {"request_id": "req_missing", "wait_seconds": 5})
         result = run(go())
         assert result.is_error and "Unknown build request" in text_of(result)
+
+
+# --- adversarial review of S7 ----------------------------------------------------------------------------------
+
+SIGTERM_SCRIPT = r"""
+import os, signal, sys, threading
+from types import SimpleNamespace
+import anyio
+from orchestrator import mcp_server
+
+calls = []
+
+def run(transport):
+    async def session():
+        try:
+            threading.Timer(0.3, os.kill, (os.getpid(), signal.SIGTERM)).start()
+            await anyio.sleep(30)
+        finally:
+            with anyio.CancelScope(shield=True):  # the lifespan's cleanup (end_session) is shielded the same way
+                os.kill(os.getpid(), signal.SIGTERM)  # a second SIGTERM while cleaning up
+                await anyio.sleep(0.3)
+                calls.append("session cleanup")
+    anyio.run(session)
+
+mcp_server.build_mcp_server = lambda framework, **kw: SimpleNamespace(run=run)
+mcp_server._logging_to_stderr = lambda: None
+mcp_server._stdout_fd_to_stderr = lambda stdout: None
+mcp_server.serve(SimpleNamespace(tool_registry=None, shutdown=lambda: calls.append("shutdown")))
+print(" | ".join(calls), flush=True)
+"""
+
+
+class TestReviewS7:
+    """Findings of the adversarial review: each test fails without its fix."""
+
+    @pytest.mark.skipif(not hasattr(__import__("signal"), "SIGKILL"), reason="POSIX signals")
+    def test_sigterm_ends_a_stdio_server_with_its_session_cleanup(self):
+        """Clients stop a stdio server with SIGTERM when it has not ended a few seconds after its input closed (and
+        some send it right away). Python's default ended the process at once: the lifespan never cancelled the
+        session's builds and jobs, and their containers ran on with nobody to clean up."""
+        import subprocess
+        import sys
+        from conftest import REPO_ROOT
+        proc = subprocess.run([sys.executable, "-c", SIGTERM_SCRIPT], capture_output=True, text=True, timeout=60,
+                              cwd=str(REPO_ROOT))
+        assert proc.returncode == 0, (proc.returncode, proc.stderr[-2000:])
+        assert proc.stdout.strip() == "session cleanup | shutdown"
+
+    def test_summaries_and_pruning_survive_a_summary_removed_meanwhile(self, tmp_path):
+        """Several processes keep summaries in one folder and prune it; a file another process removed between the
+        listing and the look at its time stopped every later pruning and made summaries() fail."""
+        folder = tmp_path / "jobs"
+        jobs = JobService(folder, keep=1)
+        first = jobs.create("crawl", "mcp#a", state="running")
+        (folder / "job_0000000000000000.json").symlink_to(folder / "removed-by-another-process.json")
+        time.sleep(0.05)
+        second = jobs.create("crawl", "mcp#a", state="running")
+        assert not (folder / f"{first.job_id}.json").exists(), "the older summary is pruned"
+        assert [s["job_id"] for s in jobs.summaries()] == [second.job_id]
