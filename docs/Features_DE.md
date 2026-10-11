@@ -234,6 +234,32 @@ Einstellungen überschreiben sie: `ai_model` und `ai_effort` für alle Aufgaben,
 `ai_effort_<Aufgabe>` für eine Aufgabe. Aufwandsstufen sind `low`, `medium`, `high`, `xhigh` und `max`; jeder
 Anbieter übersetzt sie in das, was er versteht.
 
+### Ehrliches „kann ich nicht“ und ungetestete Hardware
+
+Die Aufgabentexte stehen in einem Modul (`orchestrator/llm/task_prompts.py`), das Ditto und die
+[MCP-Prompts](#mcp-server) teilen. Jeder von ihnen sagt dem Modell: Wenn es eine Aufgabe nicht erledigen kann, sagt es
+das mit dem konkreten Grund (welche Information fehlt, welche Fähigkeit oder welches Tool es nicht gibt, welche
+Berechtigung verweigert ist, welches Gerät oder welche Hardware nicht verfügbar ist, welches Limit erreicht ist) und
+behauptet nie ein Ergebnis, das es nicht bekommen hat; dass sich ein Ergebnis nicht auf echter Hardware testen lässt,
+ist kein Grund abzulehnen. Modulvorschläge und Build-Empfehlungen dürfen mit `cannot` und einem solchen Grund
+antworten. Wenn die eigene Prüfung des Frameworks in den Eingaben der Aufgabe findet, was die Aufgabe braucht (eine
+Probe oder das Board mit seinem SoC; Formate, die das Target anbietet), fragt Ditto das Modell noch einmal, und ein
+zweites `cannot` erreicht dich als „vom Framework nicht bestätigt“. Ohne Probe und ohne Board gibt es nichts, worauf
+ein Modul aufbauen könnte: Das sagt Ditto selbst und fragt kein Modell. Die Healing-Analyse hat kein `cannot`; eine
+unklare Ursache kommt mit einer niedrigen Sicherheit.
+
+**Modulvorschläge** dürfen jedes Basis-Image verwenden. Ditto bevorzugt ein Docker Official Image (`debian`,
+`ubuntu`) mit den Paketen des Herstellers; für jedes andere Image, zum Beispiel das Toolchain-Image eines Herstellers
+auf `nvcr.io`, muss es seinen Grund angeben (`base_image_reason`). Werte, die es geraten hat, listet es in
+`assumptions` auf (höchstens 10). Bevor das Modul angelegt wird, zeigen der Modul-Assistent und
+`llm-cli module generate-ai` das Basis-Image offen: Registry, Image, Digest (oder dass es noch nicht festgelegt ist:
+der Modulgenerator braucht einen Digest für Images außerhalb seiner kurzen Liste offizieller Basis-Images),
+„Docker Official Image“ oder „andere Registry: ...; fertiges Image seines Herausgebers, vom Framework nicht geprüft“,
+dass der Image-Build mit Netzwerkzugriff auf diesem Rechner außerhalb der Build-Sandbox läuft, und den Grund der KI.
+Der Assistent übernimmt das vorgeschlagene Image unverändert (ein Image mit „debian“ im Namen wird nicht mehr durch
+`debian:bookworm-slim` ersetzt). Das angelegte Modul sagt in seiner Beschreibung, dass es ungetestet ist, und nennt
+die Annahmen; seine Unterstützungsstufe ist community.
+
 ### Anbieter
 
 | ID | Art | Wo es läuft | Anmeldung heute |
@@ -906,6 +932,24 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   gestartet hat. Der Server veröffentlicht sie über seinen eigenen Ereignisbus; er prüft jede Sekunde auf Änderungen.
   Auf den älteren Handshake-Revisionen kündigt er keine Änderungsmeldungen an, daher sehen diese Clients eine
   geänderte Berechtigung bei ihrer nächsten Sitzung.
+- **Prompts:** Dittos Aufgaben für einen Client, der Dittos Arbeit übernimmt, mit demselben Aufgabentext und
+  demselben Wissenskontext, den Ditto bekommt (die meisten Clients zeigen sie als Slash-Befehle):
+  `ask_about_framework` (eine Frage; Auszüge aus der Wissensbasis und die Dokumentationsressourcen),
+  `convert_model_for_board` (Modell, Target, Board; die Capabilities des Targets und die Schritte von der Prüfung bis
+  zum gebauten Modell), `recommend_build_settings` (Modell, Target, Board, `use_knowledge`; die Formate und
+  Quantisierungstypen, die das Target für das Board anbietet) und `diagnose_build_failure` (ein Build-Request; sein
+  Zustand, das Ende seines Logs und drei Auszüge aus der Wissensbasis). `add_board` und `deploy_to_board` sind fertig
+  und werden angeboten, sobald es die Tools gibt, zu denen sie führen (ein Target-Modul anlegen, Pakete bauen und
+  übertragen). Ein Prompt gewährt nichts: Jeder Schritt läuft weiter über die Tools und deine Berechtigungen. Seine
+  erste Nachricht ist der eigene Text des Frameworks, bei jedem Aufruf derselbe; die zweite enthält den Kontext, in dem
+  jeder Wert von außerhalb des Frameworks (auch deine Argumente) als nicht vertrauenswürdige Daten eingepackt ist,
+  Secrets geschwärzt sind und der ganze Prompt auf 24.000 Zeichen begrenzt ist. Jeder Prompt trägt die Regel für das
+  ehrliche „kann ich nicht“ (siehe [Ditto](#ehrliches-kann-ich-nicht-und-ungetestete-hardware)). Ein Prompt wird wie
+  ein Lese-Tool gelesen: Deine Leseberechtigung entscheidet, ein unbekanntes Argument wird mit den gültigen Namen
+  abgelehnt (nie verworfen), und jeder Abruf landet als `get_prompt:<Name>` im Audit-Log.
+- **Vervollständigung:** Clients, die Argumente vervollständigen (VS Code), bekommen Target-IDs, die Boards eines
+  Targets, Dokumentnamen und die eigenen Build-Requests des Aufrufers, nur für Prompts und Ressourcen, die der
+  Aufrufer nutzen darf.
 - **Lokale Dateien für KI-Clients:** MCP-Clients und Ditto nennen nie einen Pfad. Ein lokales Modell oder ein
   Kalibrierungsdatensatz wird als `<Label>:<relativer Pfad>` in einem Ordner genannt, den die KI nutzen darf, zum
   Beispiel `models:qwen2.5-0.5b-instruct` oder `datasets:calib/de.txt`, oder über die Datei-ID (`lf_` und 16

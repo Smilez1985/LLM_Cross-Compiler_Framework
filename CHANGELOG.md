@@ -316,8 +316,30 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   parameters with `..`, an absolute path or a NUL byte are invalid params (-32602). Clients on protocol 2026-07-28
   can listen for changes: the tool, prompt and resource lists change with the permissions, and a build's status and
   log resources report each change to the caller that started the build, from the server's own event bus.
+- **MCP prompts**: Ditto's tasks for a client that does Ditto's job, with the same task text and knowledge context:
+  `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings`, `diagnose_build_failure`, and
+  `add_board` and `deploy_to_board`, which are offered once the tools they lead to exist. The first message is the
+  framework's constant text, the second the context with every outside value (the arguments too) wrapped as untrusted
+  data, secrets redacted, at most 24,000 characters. A prompt is read like a read tool: the read permission decides,
+  an unknown argument is refused with the valid names, every get is audited as `get_prompt:<name>`. Completions
+  (VS Code) offer target ids, boards, document names and the caller's own build requests.
+- **Honest "cannot" for Ditto's module proposals and build recommendations**: the model may answer `cannot` with a
+  reason code (missing information, not supported, no tool, permission, needs a person, hardware, resources, limit;
+  "untested" is none of them). Ditto asks once more when the framework's check of the task input finds what the task
+  needs, and shows a second `cannot` as not confirmed by the framework; with neither a probe nor a board it says so
+  itself without asking a model. Module proposals gain `assumptions` (the guessed values, at most 10) and
+  `base_image_reason` (required for an image that is not a Docker Official Image), and can start from the board and
+  its SoC when there is no probe. The wizard and `llm-cli module generate-ai` show the base image plainly before the
+  module is created: registry, digest, official image or another registry's prebuilt image, network access of the
+  image build, and the AI's reason.
 
 ### Changed
+- **Ditto's task texts** (chat with tools, healing analysis, module proposal, build recommendation) live in one
+  module, `orchestrator/llm/task_prompts.py`, shared with the MCP prompts, and each carries the honest-"cannot" rule:
+  name the specific reason, never claim a result you did not get, and untested hardware is no reason to refuse. The
+  module task no longer limits base images to `debian:*` and `ubuntu:*`: it prefers a Docker Official Image with the
+  vendor's packages and gives its reason for any other image. A module Ditto proposed says in its description that it
+  is untested on real hardware and names the assumptions.
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
   built-in Transformers model for offline mode is gone (offline mode uses local providers: Ollama, the
   managed llama-server, a server on your network). Healing analyses, module proposals and build
@@ -447,6 +469,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- Module wizard: a base image Ditto proposed was replaced by `debian:bookworm-slim` or `ubuntu:22.04` when its name
+  merely contained "debian" or "ubuntu" (for example a vendor image on `nvcr.io`), so another image than the proposed
+  one would have been built. The proposed image is now kept as it is and shown with its registry, and the message
+  with the AI's text is shown as plain text instead of rich text.
 - MCP server: on protocol 2026-07-28 it advertised change notifications for tools, prompts and resources and
   resource subscriptions, but never sent one. It now advertises them only together with the events it publishes,
   and without events it is built with subscriptions turned off.

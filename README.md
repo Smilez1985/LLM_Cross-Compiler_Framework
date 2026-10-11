@@ -361,6 +361,9 @@ Python (see [Calling `llm-cli`](#calling-llm-cli)). After `--write claude-deskto
   framework's documentation can also be attached as resources (`lcf://targets`, `lcf://builds/<id>/log`,
   `lcf://docs/Features`, ...). They follow the permissions of the matching read tool and are audited like a tool
   call; clients on protocol 2026-07-28 are told when a build or the permissions change.
+- **Prompts:** Ditto's tasks for your client, with the same instructions and knowledge context Ditto gets:
+  `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings` and `diagnose_build_failure` (in
+  Claude Code as slash commands). They grant nothing; every step still goes through the tools and your permissions.
 - There is no deployment tool over MCP.
 
 **Using a Claude subscription:** Anthropic does not allow third-party apps to use a Claude subscription's sign-in

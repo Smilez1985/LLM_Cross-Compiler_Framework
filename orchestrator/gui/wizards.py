@@ -866,9 +866,11 @@ Setup commands:
                 warnings.append(f"Unknown architecture '{arch}' - please choose one.")
         if "sdk" in config: self.sdk_edit.setText(text("sdk"))
         if "base_os" in config:
+            # Only the exact images of the two buttons select them; any other image (also one with "debian" in its
+            # name, a tag or a digest) is kept as it is, so the image shown below is the one that is built.
             base_os = text("base_os")
-            if "debian" in base_os: self.rad_debian.setChecked(True)
-            elif "ubuntu" in base_os: self.rad_ubuntu.setChecked(True)
+            if base_os == "debian:bookworm-slim": self.rad_debian.setChecked(True)
+            elif base_os == "ubuntu:22.04": self.rad_ubuntu.setChecked(True)
             else:
                 self.rad_custom.setChecked(True)
                 self.custom_os_edit.setText(base_os)
@@ -879,10 +881,14 @@ Setup commands:
         if "quantization_logic" in config: self.quant_logic.setPlainText(text("quantization_logic"))
         if "setup_commands" in config: self.setup_commands.setPlainText(text("setup_commands"))
         
-        message = "Values filled from AI analysis.\nReview them on the next pages, especially the shell code."
+        from orchestrator.Core.ditto_manager import proposal_facts
+        message = ("Values filled from AI analysis.\nReview them on the next pages, especially the shell code.\n\n"
+                   + proposal_facts(config))
         if warnings:
             message += "\n\n" + "\n".join(warnings)
-        QMessageBox.information(self, "Ditto", message)
+        box = QMessageBox(QMessageBox.Information, "Ditto", message, QMessageBox.Ok, self)
+        box.setTextFormat(Qt.PlainText)  # AI text is never rendered as rich text
+        box.exec()
         self.next()
 
     def accept(self):
