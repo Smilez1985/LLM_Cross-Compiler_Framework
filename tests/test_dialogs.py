@@ -926,8 +926,8 @@ class TestMainWindowWiring:
             assert opened == [True], "the permissions are asked once at the first start"
             menus = {m.title(): [a.text() for a in m.actions()] for m in win.findChildren(QMenu) if m.title()}
             assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module...",
-                                      "Tool Permissions (Ditto / MCP)...", "Spoken Announcements",
-                                      "Clear Input History..."]
+                                      "Open Community Hub", "Tool Permissions (Ditto / MCP)...",
+                                      "Spoken Announcements", "Clear Input History..."]
             # The audio switch is a persisted setting, on by default.
             assert win.act_audio.isCheckable() and win.act_audio.isChecked()
             win.act_audio.setChecked(False)

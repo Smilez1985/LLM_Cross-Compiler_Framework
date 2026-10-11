@@ -94,6 +94,8 @@ class BuildRequest:
     max_context_length: Optional[int] = None
     # True when the dataset is the framework's shipped calibration text (used for GGUF importance matrices only)
     dataset_generated: bool = False
+    # Commit of a Hugging Face model (recipes pin one); None builds the default branch
+    model_revision: Optional[str] = None
     
     def __post_init__(self):
         if not self.request_id:
@@ -285,6 +287,7 @@ class LLMOrchestrator:
             build_id=job.job_id if attempt <= 1 else f"{job.job_id}_r{attempt - 1}",
             timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
             model_source=job.source_model,
+            model_branch=req.model_revision or "main",
             target_arch=job.target_architecture,
             target_format=job.target_format,
             output_dir=job.output_path,

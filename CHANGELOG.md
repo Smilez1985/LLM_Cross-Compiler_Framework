@@ -84,6 +84,50 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   on the last lines of failed builds the reranker found the relevant excerpt within 3 in 2 of 6 cases (hybrid
   search: 5 of 6) and dropped it below the floor in one, and for the module search string it dropped every
   excerpt.
+- **Signed community packs**: a pack is a zip with a manifest (sha256, size and mode of every file) and an
+  optional Ed25519 author signature. Reading a pack accepts exactly the listed files, never links or special
+  files, and checks every hash. Trusted publisher keys ship in `configs/community_keys.yml`, each with an
+  expiry date.
+- **Encrypted packs for private sharing** (with your own machines or a team): encrypted to one or more
+  recipients' X25519 public keys and/or a passphrase (scrypt), in the style of age (ChaCha20-Poly1305,
+  HKDF-SHA256, authenticated header), and signed by the sender, so recipients see who sent it and any change,
+  including an added or removed recipient, is detected. As in age, a file holds at most one passphrase entry.
+  Each user gets an Ed25519/X25519 key pair on first use, kept only in the encrypted secrets store; the public
+  keys can be exported as text.
+- **Recipes**, the model zoo's "model templates": the model at a pinned commit, the target with a fingerprint
+  of its files, board, format, quantization, options and verified results (artifact hashes, toolchain image,
+  device tests). A recipe is generated from a finished build, checked against the target's capabilities and
+  maps to a normal build request.
+- `build_info.json` records what a recipe needs: the model's commit (the download is pinned to it), the target
+  fingerprint and version, the toolchain image, the context length, the calibration dataset's hash and the
+  framework version. Build requests accept a `revision` (commit) for Hugging Face models.
+- **Community zoo** (`llm-cli zoo list|show|install|verify|export|keys`): community targets, recipes and
+  knowledge packs listed from a signed community index (setting `community_index_url`: `index.json` plus
+  `index.json.sig`, verified with the keys in `configs/community_keys.yml`, cached per user, fetched again when
+  the cache is older than a day and never replaced by an older index). Installing always reads the current
+  index first (so a revocation is never missed), downloads the pack pinned by size and sha256, checks it in a
+  quarantine folder (exact file list and hashes, the target validators, the recipe and knowledge schemas), shows
+  a summary with its trust level and installs it only after you confirm, atomically and with a provenance file.
+  Trust levels:
+  official, verified, community, local (a file without an index entry: always confirmed, and a warning on
+  every build) and revoked (blocked; installed copies are flagged by `llm-cli doctor` and the hub and are not
+  built, also after the key that signed the revocation has expired). `llm-cli zoo verify` finds installed packs
+  that were changed or revoked. The install summary is always shown as plain text, so text from a pack cannot
+  hide its trust level.
+- **Community Hub** in the Tools menu: a trust column, filters for kind and trust, import of pack files (also
+  packs encrypted to your key), and "Build" on an installed recipe fills in the Builder, including the model's
+  pinned commit.
+- **Export for community** on the module wizard's last page, in the Builder log's context menu (a finished
+  build becomes a recipe) and with `llm-cli zoo export`: a pack of a target, a recipe or your knowledge base,
+  privacy-scrubbed (the changes are shown), validated and signed with your key; with `--to` or `--passphrase`
+  it is encrypted for private sharing instead. Knowledge packs keep the source address of every page and claim
+  no licence for them (`NOASSERTION`); a community pack you installed is not re-signed as your own. "Open pull
+  request" (`--pr`, which asks after the summary unless `--yes` is given) hands it to the community repository
+  (setting `community_repo`): through the GitHub CLI if it is installed and logged in, otherwise the
+  repository's upload page opens in the browser. The framework never asks for, reads or shows a token.
+- Maintainer tools for the community repository: `scripts/zoo_sign_index.py` (signing key in the OS keyring,
+  index entries from packs, signature of `index.json`) and the CI workflow template
+  `scripts/community_repo/validate-contribution.yml`, which runs `llm-cli zoo verify` on every submitted pack.
 
 - **Documentation in English and German** for every document (README, blueprint with design and roadmap, CLI
   usage, features, contributing, module developer guide, SSOT, changelog), checked by `tests/test_docs.py`:
@@ -129,6 +173,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Knowledge-base models are unloaded after 10 minutes without use and loaded again on the next search
   (setting `rag_model_idle_minutes`, 0 keeps them loaded). The time counts from the end of the last search or
   import, never during one.
+- Knowledge exports, and with them the knowledge snapshot of new target modules, are scrubbed: home folders,
+  IP and MAC addresses, e-mail addresses, JWTs, the host name and the user name are removed, besides API keys.
+  Image digests (`name@sha256:...`) and the paths of default accounts such as `/root` or `/home/runner` stay
+  as they are, so a scrubbed target still builds.
+- The knowledge snapshot of a new target module is opt-in (a check box on the wizard's last page) and holds only
+  the pages crawled for that target in the wizard; before, the whole local knowledge base went into every module.
+- Target modules created with the wizard, `llm-cli module create` or Ditto get a `capabilities:` block (support
+  level community: their boards, and GGUF with the types their build script handles), so the Builder, the CLI
+  and AI clients check their build settings. Generation fails if a template placeholder is left anywhere.
+- The pinned download code moved to `orchestrator/utils/download.py`, shared by the local model runtime and
+  the community zoo.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
@@ -137,6 +192,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The *Respect robots.txt* option of the Deep Ingest dialog and the setting `crawler_respect_robots`: robots.txt
   is a machine-readable opt-out like the others, so it is always honoured.
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
+- The "swarm" upload: the XOR "SwarmCipher" (obfuscation anyone could undo), `llm-cli swarm upload`, the
+  Community Hub's "Contribute to Swarm" button and its GitHub token prompt. The framework never asks for or
+  stores a repository token. Old swarm packets in `community/knowledge/` are skipped with a warning.
+- Installing hand-copied module folders from `community/`: community packs are installed with
+  `llm-cli zoo install` or the Community Hub.
 
 ### Fixed
 - The knowledge base works in offline mode once its models are downloaded: the downloaded BM25 keyword model
@@ -152,6 +212,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Requests to local model servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment.
 - Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
   the same way and installed atomically.
+- Community packs are installed only through a quarantine folder after their checks: an id without paths,
+  exactly the listed files with their hashes, no links, special or binary files, every image a Dockerfile pulls
+  (`FROM`, `COPY --from`, `RUN --mount=...,from=`, also in a lowercase `dockerfile`) pinned by digest unless it
+  is an official base image, the shell deny-list on every script line that is not from the shipped template,
+  and `bash -n`. A copy of the shipped Rockchip target passes these checks. A pack appears under its final name only when it is complete, never over an
+  existing target (also when only the case differs). Before, a link in a community module could copy any file
+  of the user into `targets/`.
+- The Docker build context never follows symbolic links or special files of a target, a linked Dockerfile is
+  refused, and a build's target name cannot contain a path.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

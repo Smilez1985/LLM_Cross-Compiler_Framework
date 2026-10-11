@@ -93,6 +93,54 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   fehlgeschlagener Builds fand der Reranker den relevanten Auszug in 2 von 6 Fällen unter den ersten 3 (hybride
   Suche: 5 von 6) und schob ihn in einem Fall unter die Schwelle, und beim Suchbegriff für Module verwarf er jeden
   Auszug.
+- **Signierte Community-Packs**: Ein Pack ist ein Zip mit einem Manifest (sha256, Größe und Rechte jeder Datei)
+  und einer optionalen Ed25519-Signatur des Autors. Beim Lesen eines Packs werden genau die aufgeführten Dateien
+  angenommen, nie Links oder Sonderdateien, und jeder Hash wird geprüft. Vertrauenswürdige Herausgeberschlüssel
+  werden in `configs/community_keys.yml` mitgeliefert, jeder mit einem Ablaufdatum.
+- **Verschlüsselte Packs zum privaten Teilen** (mit deinen eigenen Rechnern oder einem Team): verschlüsselt für die
+  öffentlichen X25519-Schlüssel eines oder mehrerer Empfänger und/oder eine Passphrase (scrypt), nach dem Vorbild
+  von age (ChaCha20-Poly1305, HKDF-SHA256, authentifizierter Header), und vom Absender signiert, sodass Empfänger
+  sehen, wer es geschickt hat, und jede Änderung erkannt wird, auch ein hinzugefügter oder entfernter Empfänger.
+  Wie bei age enthält eine Datei höchstens einen Passphrase-Eintrag. Jeder Benutzer bekommt beim ersten Gebrauch
+  ein Ed25519/X25519-Schlüsselpaar, das nur im verschlüsselten Secrets-Speicher liegt; die öffentlichen Schlüssel
+  lassen sich als Text exportieren.
+- **Rezepte**, die „Modellvorlagen“ des Model Zoo: das Modell in einem gepinnten Commit, das Target mit einem
+  Fingerabdruck seiner Dateien, Board, Format, Quantisierung, Optionen und geprüfte Ergebnisse (Hashes der
+  Artefakte, Toolchain-Image, Gerätetests). Ein Rezept entsteht aus einem fertigen Build, wird gegen die
+  Capabilities des Targets geprüft und ergibt eine normale Build-Anfrage.
+- `build_info.json` hält fest, was ein Rezept braucht: den Commit des Modells (der Download wird darauf gepinnt),
+  Fingerabdruck und Version des Targets, das Toolchain-Image, die Kontextlänge, den Hash des
+  Kalibrierungsdatensatzes und die Version des Frameworks. Build-Anfragen nehmen für Hugging-Face-Modelle eine
+  `revision` (Commit) an.
+- **Community Zoo** (`llm-cli zoo list|show|install|verify|export|keys`): Community-Targets, Rezepte und
+  Wissenspacks aus einem signierten Community-Index (Einstellung `community_index_url`: `index.json` plus
+  `index.json.sig`, geprüft mit den Schlüsseln in `configs/community_keys.yml`, je Benutzer zwischengespeichert,
+  neu abgerufen, wenn der Zwischenspeicher älter als einen Tag ist, und nie durch einen älteren Index ersetzt).
+  Eine Installation liest immer zuerst den aktuellen Index (so wird kein Widerruf verpasst), lädt das Pack
+  gepinnt nach Größe und sha256 herunter, prüft es in einem Quarantäne-Ordner (genaue Dateiliste und Hashes, die
+  Target-Prüfungen, die Schemas für Rezepte und Wissen), zeigt eine Zusammenfassung mit seiner Vertrauensstufe und
+  installiert es erst nach deiner Bestätigung, atomar und mit einer Herkunftsdatei. Vertrauensstufen: official,
+  verified, community, local (eine Datei ohne Indexeintrag: immer mit Bestätigung und mit einer Warnung bei jedem
+  Build) und revoked (gesperrt; installierte Kopien werden von `llm-cli doctor` und dem Hub markiert und nicht
+  gebaut, auch nachdem der Schlüssel, der den Widerruf signiert hat, abgelaufen ist). `llm-cli zoo verify` findet
+  installierte Packs, die verändert oder widerrufen wurden. Die Zusammenfassung vor der Installation wird immer als
+  reiner Text gezeigt, sodass Text aus einem Pack seine Vertrauensstufe nicht verdecken kann.
+- **Community Hub** im Menü Werkzeuge: eine Spalte für die Vertrauensstufe, Filter nach Art und Vertrauen, Import
+  von Pack-Dateien (auch von Packs, die für deinen Schlüssel verschlüsselt sind), und „Build“ bei einem
+  installierten Rezept füllt den Builder aus, einschließlich des gepinnten Commits des Modells.
+- **Export für die Community** auf der letzten Seite des Modul-Assistenten, im Kontextmenü des Builder-Protokolls
+  (ein fertiger Build wird zum Rezept) und mit `llm-cli zoo export`: ein Pack eines Targets, eines Rezepts oder
+  deiner Wissensbasis, von persönlichen Daten bereinigt (die Änderungen werden gezeigt), geprüft und mit deinem
+  Schlüssel signiert; mit `--to` oder `--passphrase` wird es stattdessen zum privaten Teilen verschlüsselt.
+  Wissenspacks behalten die Quelladresse jeder Seite und beanspruchen keine Lizenz für sie (`NOASSERTION`); ein
+  Community-Pack, das du installiert hast, wird nicht als dein eigenes neu signiert. „Open pull request“ (`--pr`,
+  das nach der Zusammenfassung nachfragt, außer mit `--yes`) übergibt es an das Community-Repository (Einstellung
+  `community_repo`): über die GitHub CLI, wenn sie installiert und angemeldet ist, sonst öffnet sich die
+  Upload-Seite des Repositorys im Browser. Das Framework fragt nie nach einem Token, liest keins und zeigt keins.
+- Werkzeuge für die Maintainer des Community-Repositorys: `scripts/zoo_sign_index.py` (Signaturschlüssel im
+  Schlüsselbund des Betriebssystems, Indexeinträge aus Packs, Signatur von `index.json`) und die
+  CI-Workflow-Vorlage `scripts/community_repo/validate-contribution.yml`, die `llm-cli zoo verify` für jedes
+  eingereichte Pack ausführt.
 
 - **Dokumentation auf Englisch und Deutsch** für jedes Dokument (README, Blaupause mit Design und Roadmap,
   CLI-Anleitung, Funktionen, Mitwirken, Leitfaden für Modulentwickler, SSOT, Changelog), geprüft durch
@@ -142,6 +190,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Modelle der Wissensbasis werden nach 10 Minuten ohne Nutzung entladen und bei der nächsten Suche wieder geladen
   (Einstellung `rag_model_idle_minutes`, 0 hält sie geladen). Die Zeit läuft ab dem Ende der letzten Suche oder
   des letzten Imports, nie währenddessen.
+- Wissensexporte und mit ihnen der Wissens-Snapshot neuer Target-Module werden bereinigt: Home-Ordner, IP- und
+  MAC-Adressen, E-Mail-Adressen, JWTs, der Hostname und der Benutzername werden entfernt, zusätzlich zu
+  API-Schlüsseln. Image-Digests (`name@sha256:...`) und die Pfade von Standardkonten wie `/root` oder
+  `/home/runner` bleiben, wie sie sind, sodass ein bereinigtes Target weiterhin baut.
+- Der Wissens-Snapshot eines neuen Target-Moduls ist freiwillig (ein Kontrollkästchen auf der letzten Seite des
+  Assistenten) und enthält nur die Seiten, die im Assistenten für dieses Target gecrawlt wurden; vorher ging die
+  ganze lokale Wissensbasis in jedes Modul.
+- Target-Module, die mit dem Assistenten, `llm-cli module create` oder Ditto erstellt werden, bekommen einen Block
+  `capabilities:` (Support-Level community: ihre Boards und GGUF mit den Typen, die ihr Build-Skript verarbeitet),
+  sodass Builder, CLI und KI-Clients ihre Build-Einstellungen prüfen. Die Erzeugung schlägt fehl, wenn irgendwo ein
+  Platzhalter der Vorlage übrig bleibt.
+- Der Code für gepinnte Downloads liegt jetzt in `orchestrator/utils/download.py` und wird von der lokalen
+  Modell-Laufzeit und dem Community Zoo gemeinsam genutzt.
 
 ### Entfernt
 - Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen
@@ -151,6 +212,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Die Option *Respect robots.txt* im Deep-Ingest-Dialog und die Einstellung `crawler_respect_robots`: robots.txt
   ist ein maschinenlesbarer Vorbehalt wie die anderen und wird deshalb immer beachtet.
 - `litellm` und `tiktoken` und mit ihnen 19 indirekte Pakete (aiohttp, boto3, jinja2 und andere).
+- Der „Swarm“-Upload: die XOR-„SwarmCipher“ (eine Verschleierung, die jeder rückgängig machen konnte),
+  `llm-cli swarm upload`, der Knopf „Contribute to Swarm“ im Community Hub und seine Abfrage eines GitHub-Tokens.
+  Das Framework fragt nie nach einem Repository-Token und speichert keins. Alte Swarm-Pakete in
+  `community/knowledge/` werden mit einer Warnung übersprungen.
+- Die Installation von Hand kopierter Modulordner aus `community/`: Community-Packs werden mit
+  `llm-cli zoo install` oder dem Community Hub installiert.
 
 ### Behoben
 - Die Wissensbasis funktioniert im Offline-Modus, sobald ihre Modelle heruntergeladen sind: Das heruntergeladene
@@ -169,6 +236,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Anfragen an lokale Modellserver auf 127.0.0.1 laufen nie über einen HTTP(S)-Proxy aus der Umgebung.
 - Downloads lokaler Modelle werden abgelehnt, wenn Größe und sha256 nicht gepinnt sind; das Archiv mit dem
   Server-Programm wird genauso geprüft und atomar installiert.
+- Community-Packs werden nur über einen Quarantäne-Ordner und nach ihren Prüfungen installiert: eine ID ohne
+  Pfade, genau die aufgeführten Dateien mit ihren Hashes, keine Links, Sonder- oder Binärdateien, jedes Image, das
+  ein Dockerfile bezieht (`FROM`, `COPY --from`, `RUN --mount=...,from=`, auch in einem kleingeschriebenen
+  `dockerfile`), per Digest gepinnt, außer es ist ein offizielles Basis-Image, die Sperrliste für Shell-Code auf
+  jeder Skriptzeile, die nicht aus der mitgelieferten Vorlage stammt, und `bash -n`. Eine Kopie des
+  mitgelieferten Rockchip-Targets besteht diese Prüfungen. Ein Pack erscheint erst unter seinem endgültigen Namen,
+  wenn es vollständig ist, und nie über einem bestehenden Target (auch nicht, wenn sich nur die Groß- und
+  Kleinschreibung unterscheidet). Vorher konnte ein Link in einem Community-Modul jede Datei des Benutzers nach
+  `targets/` kopieren.
+- Der Docker-Build-Kontext folgt nie symbolischen Links oder Sonderdateien eines Targets, ein verlinktes Dockerfile
+  wird abgelehnt, und der Target-Name eines Builds kann keinen Pfad enthalten.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

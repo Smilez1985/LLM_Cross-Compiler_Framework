@@ -174,6 +174,8 @@ class BuildService:
         if problems:
             raise BuildServiceError(" ".join(problems))
         model = self._check_model_source(request.model)
+        if request.revision and Path(model).is_absolute():
+            raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.")
         return request.model_copy(update={"format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model})
 
@@ -184,6 +186,7 @@ class BuildService:
             workflow_type=WorkflowType.SIMPLE_CONVERSION,
             priority=PriorityLevel.NORMAL,
             models=[req.model],
+            model_revision=req.revision,
             targets=[req.target],
             target_formats=[ModelFormat(req.format)],
             optimization_level=OptimizationLevel.BALANCED,

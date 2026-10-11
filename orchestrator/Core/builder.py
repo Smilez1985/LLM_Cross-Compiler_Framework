@@ -39,6 +39,7 @@ from docker.models.containers import Container
 from docker.models.images import Image
 from docker.types import DeviceRequest
 
+from orchestrator import __version__
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
 
@@ -128,6 +129,9 @@ TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"
 # owner/name as used on huggingface.co; no path traversal
 HF_REPO_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
+TARGET_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
+COMMIT_ID = re.compile(r"^[0-9a-f]{40}$")
+IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 # ============================================================================
 # DATA MODELS
@@ -167,6 +171,12 @@ class BuildConfiguration:
     use_gpu: bool = False
     use_imatrix: bool = False # New flag for IMatrix generation
     dataset_path: Optional[str] = None
+
+    # Recorded during the build for build_info.json (recipes are written from it)
+    model_revision: Optional[str] = None      # Hugging Face commit the downloaded files belong to
+    target_pack_sha256: Optional[str] = None  # content digest of the target folder used
+    target_version: Optional[str] = None      # metadata.version of its target.yml
+    toolchain_image: Optional[str] = None     # id of the image that ran the conversion
 
 @dataclass
 class BuildProgress:
@@ -505,7 +515,9 @@ class BuildEngine:
             self._enter_stage(prog, BuildStatus.PREPARING)
             self._resolve_dataset(config, prog)
             
-            # 1. Resolve Target Path
+            # 1. Resolve Target Path (a plain folder name: no separators, no '..')
+            if not TARGET_ID.fullmatch(config.target_arch or ""):
+                raise ValueError(f"Invalid target name {config.target_arch!r}.")
             target_path = self.targets_dir / config.target_arch
             if not target_path.exists():
                 # Fallback search (case insensitive)
@@ -518,6 +530,8 @@ class BuildEngine:
                 if not found:
                     raise FileNotFoundError(f"Target {config.target_arch} not found in {self.targets_dir}")
 
+            self._record_target(config, prog, target_path)
+
             # 2. Prepare Environment
             self._prepare_build_environment(config, prog, target_path)
             
@@ -526,6 +540,8 @@ class BuildEngine:
             
             # 4. Build Docker Image
             image = self._build_docker_image(config, prog, df_path)
+            image_id = getattr(image, "id", None)
+            config.toolchain_image = image_id if isinstance(image_id, str) and IMAGE_ID.fullmatch(image_id) else None
             self._check_cancelled(prog)
 
             # 4a. Make the model available inside the containers
@@ -590,6 +606,26 @@ class BuildEngine:
         try: self.cleanup_build(config.build_id)
         except Exception: pass
         return BuildStatus.CANCELLED
+
+    def _record_target(self, config: BuildConfiguration, progress: BuildProgress, target_path: Path):
+        """Notes which target content the build used, for build_info.json and recipes. A community target the
+        signed index revoked is not built; one imported from a file without an index entry gets a warning."""
+        from orchestrator.Core.community_manager import build_trust_check
+        from orchestrator.Core.community_pack import PackError, tree_sha256
+        state = getattr(self.config, "user_state_dir", None)
+        warning = build_trust_check(target_path, Path(state) / "community" if state else None)
+        if warning:
+            progress.add_warning(warning)
+        try:
+            config.target_pack_sha256 = tree_sha256(target_path)
+        except (PackError, OSError) as e:
+            progress.add_warning(f"Target fingerprint not recorded, so this build cannot become a recipe: {e}")
+        try:
+            meta = yaml.safe_load((target_path / "target.yml").read_text(encoding="utf-8")) or {}
+            version = (meta.get("metadata") or {}).get("version")
+            config.target_version = str(version) if version else None
+        except (OSError, yaml.YAMLError, AttributeError):
+            config.target_version = None
 
     def _validate_build_config(self, config: BuildConfiguration):
         if not config.build_id or not config.model_source or not config.output_dir:
@@ -820,8 +856,12 @@ class BuildEngine:
 
         from huggingface_hub import HfApi, snapshot_download
         token = self._hf_token()
+        api = HfApi(token=token)
         revision = config.model_branch or None
-        files = HfApi(token=token).list_repo_files(source, revision=revision)
+        commit = self._model_commit(api, source, revision)
+        if commit:
+            revision = config.model_revision = commit  # listing and download see the same commit
+        files = api.list_repo_files(source, revision=revision)
         ignore = ["*.gguf", "*.onnx", "*.onnx_data", "*.h5", "*.msgpack", "*.ot", "*.tflite", "original/*", "onnx/*"]
         if any(f.endswith(".safetensors") for f in files):
             ignore += ["*.bin", "*.pt", "*.pth"]  # same weights twice otherwise
@@ -830,6 +870,17 @@ class BuildEngine:
         progress.add_log(f"Downloading {source} from Hugging Face to {dest} ...")
         snapshot_download(repo_id=source, revision=revision, local_dir=str(dest), token=token, ignore_patterns=ignore)
         return f"/build-cache/models/hf/{dest.name}", {}
+
+    @staticmethod
+    def _model_commit(api, source: str, revision: Optional[str]) -> Optional[str]:
+        """The commit a branch or tag points to (None when it cannot be found out)."""
+        if revision and COMMIT_ID.fullmatch(revision):
+            return revision
+        try:
+            sha = getattr(api.model_info(source, revision=revision), "sha", None)
+        except Exception:
+            return None
+        return sha if isinstance(sha, str) and COMMIT_ID.fullmatch(sha) else None
 
     def _container_env(self, config: BuildConfiguration, model_path: str) -> Dict[str, str]:
         name = config.output_name or re.sub(r"[^\w.-]", "_", Path(config.model_source.rstrip("/")).name) or "model"
@@ -1223,9 +1274,23 @@ class BuildEngine:
             "artifacts": artifacts,
             "primary": primary,
             "multi_file": multi_file,
+            # What a recipe needs to reproduce the build
+            "model_revision": config.model_revision,
+            "target_pack_sha256": config.target_pack_sha256,
+            "target_version": config.target_version,
+            "toolchain_image": config.toolchain_image,
+            "max_context_length": config.max_context_length,
+            "dataset": self._dataset_ref(config, progress),
+            "lcf_version": __version__,
         })
         manifest_path.write_text(json.dumps(info, indent=2), encoding="utf-8")
         return info
+
+    def _dataset_ref(self, config: BuildConfiguration, progress: Optional[BuildProgress]) -> Optional[Dict[str, str]]:
+        path = Path(config.dataset_path) if config.dataset_path else None
+        if path is None or not path.is_file():
+            return None
+        return {"name": path.name, "sha256": self._sha256_file(path, progress)}
 
     def _generate_model_card(self, config: BuildConfiguration, output_dir: Path, manifest: Optional[Dict[str, Any]] = None):
         readme_path = output_dir / "Model_Card.md"

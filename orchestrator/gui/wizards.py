@@ -202,6 +202,7 @@ class ModuleCreationWizard(QWizard):
         self.ai_config = {} 
         self.crawl_worker = None
         self._close_result = None   # closing waits for a running crawl to store its current page
+        self.crawled_roots = set()  # URLs crawled in this wizard: the only pages a knowledge snapshot may hold
         
         self.signals = WizardSignals()
         self.signals.analysis_finished.connect(self.on_ai_finished)
@@ -493,6 +494,13 @@ class ModuleCreationWizard(QWizard):
         self.summary_text.setReadOnly(True)
         self.summary_text.setStyleSheet("font-family: Consolas, Monospace;")
         layout.addWidget(self.summary_text)
+        # Both off by default: nothing of the knowledge base goes into the module, nothing is shared.
+        self.chk_knowledge = QCheckBox("Attach the knowledge crawled for this target (Deep Ingest, privacy scrub applied)")
+        self.chk_knowledge.setToolTip("Only pages crawled in this wizard are attached, never the rest of your "
+                                      "knowledge base.")
+        layout.addWidget(self.chk_knowledge)
+        self.chk_export = QCheckBox("Export for community after creating (a scrubbed, signed pack for a pull request)")
+        layout.addWidget(self.chk_export)
         
         page.setLayout(layout)
         return page
@@ -530,6 +538,9 @@ Setup commands:
 {self.setup_commands.toPlainText() or '(none)'}
 """
         self.summary_text.setText(summary)
+        self.chk_knowledge.setEnabled(bool(self.crawled_roots))
+        if not self.crawled_roots:
+            self.chk_knowledge.setChecked(False)
 
     # --- DEEP INGEST LOGIC (v1.6.0) ---
     def run_deep_ingest(self):
@@ -569,6 +580,7 @@ Setup commands:
             self._set_avatar_state("read")
             self.crawl_log.setVisible(True)
             self.crawl_log.clear()
+            self.crawled_roots.update(urls)
             self.crawl_log.appendPlainText(f"Initializing Crawler for {len(urls)} URLs...")
             self.btn_deep_ingest.setEnabled(False)
             self.btn_stop_crawl.setEnabled(True)
@@ -885,12 +897,16 @@ Setup commands:
         try:
             if not self.targets_dir.exists(): self.targets_dir.mkdir(parents=True, exist_ok=True)
             generator = ModuleGenerator(self.targets_dir)
+            roots = sorted(self.crawled_roots) if self.chk_knowledge.isChecked() else None
             if self.framework_manager:
-                output_path = generator.generate_module(self.module_data, self.framework_manager)
+                output_path = generator.generate_module(self.module_data, self.framework_manager, knowledge_roots=roots)
             else:
                 output_path = generator.generate_module(self.module_data)
                 
             QMessageBox.information(self, tr("msg.success"), f"{tr('msg.module_created')}\n{output_path}")
+            if self.chk_export.isChecked():
+                from orchestrator.gui.community_hub import CommunityExportDialog
+                CommunityExportDialog(self.framework_manager, "target", output_path.name, self).exec()
             super().accept()
         except Exception as e:
             QMessageBox.critical(self, tr("status.error"), f"Failed to generate module:\n{e}")

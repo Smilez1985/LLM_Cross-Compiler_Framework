@@ -255,8 +255,33 @@ def check_calibration(_framework) -> List[Finding]:
     return [_ok("data", "data.calibration", "Calibration data intact")]
 
 
+def check_community(framework) -> List[Finding]:
+    """Installed community packs against the cached signed index (no network): revoked or changed packs."""
+    cm = getattr(framework, "community_manager", None)
+    if cm is None:
+        return []
+    findings = []
+    for folder, prov, trust, problems in cm.verify_installed():
+        name = f"{prov.kind} {prov.id} {prov.version}"
+        if trust is not None and trust.value == "revoked":
+            findings.append(Finding("community", f"community.{prov.id}.revoked", Severity.ERROR,
+                                    f"Community {name} was revoked: {'; '.join(problems)}",
+                                    f"Delete the folder {folder}; it is not built any more."))
+        elif problems:
+            findings.append(Finding("community", f"community.{prov.id}.changed", Severity.WARN,
+                                    f"Community {name}: {'; '.join(problems)}",
+                                    f"Check the changes, or delete {folder} and install it again (llm-cli zoo "
+                                    "install)."))
+        elif trust is not None and trust.value == "local":
+            findings.append(Finding("community", f"community.{prov.id}.local", Severity.INFO,
+                                    f"Community {name} was imported from a file without a signed index entry."))
+        else:
+            findings.append(_ok("community", f"community.{prov.id}", f"Community {name} ({trust.value if trust else '?'})"))
+    return findings
+
+
 DEFAULT_CHECKS: List[Check] = [check_python, check_docker, check_disk, check_targets, check_user_state,
-                               check_secrets, check_tool_policy, check_calibration]
+                               check_secrets, check_tool_policy, check_calibration, check_community]
 
 
 @dataclass

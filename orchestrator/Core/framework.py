@@ -118,7 +118,7 @@ class FrameworkManager:
             
             self.model_manager = ModelManager(self)  # models_dir resolves against the installation
             
-            self.community_manager = CommunityManager(self) # Swarm Logic
+            self.community_manager = CommunityManager(self)  # community modules and knowledge packs
             
             # === PHASE 3: AI SERVICES ===
             self.logger.info("[Boot Phase 3] AI & Knowledge Services")
