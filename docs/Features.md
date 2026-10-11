@@ -388,10 +388,11 @@ How a question with tools runs:
 - A tool name runs when it is exact, or the same name in other letter case or with `_`, `-`, `.` or spaces in
   other places (`StartBuild` runs `start_build`, with a note). Any other name is refused with up to three
   suggestions from the tools your permissions allow; a suggestion never runs by itself.
-- Argument names: aliases a tool declares (`quant` and `quantization_type` for `quantization`, `repo` and
-  `repo_id` for `model`) and keys that differ only in letter case or in `-` versus `_` are renamed, with a note.
-  Any other unknown argument is refused with the list of valid ones; nothing is dropped silently. Two keys for one
-  field with different values are refused.
+- Argument names: only the aliases a tool declares (`quant` and `quantization_type` for `quantization`, `repo`
+  and `repo_id` for `model`) are renamed, with a note. Any other unknown argument, also a field name in other
+  letter case (`Board`), is refused with the list of valid ones and a suggestion; nothing is dropped silently and
+  nothing undeclared is mapped. An alias and its field with different values are refused. Every tool's input
+  model forbids fields it does not declare, also for tools added later.
 - Values: numbers and yes/no given as text, and lists given as JSON text, are read as such. Targets, formats,
   boards and quantization types match exactly, by letter case and separators when that names exactly one value
   (`q4-k-m` is `Q4_K_M`; a target name that could mean two targets is refused with both), or by an alias the
@@ -401,8 +402,11 @@ How a question with tools runs:
   `approve`, which must be a real `true` or `false`.
 - Every refusal and error carries a reason code (for example `unknown_argument`, `unknown_id`, `not_supported`,
   `permission_denied`, `needs_person`, `declined`) and the next step. The same failing call a second time in a
-  session says so; a third time it is refused without running ("stop retrying this call, tell the user why"), and
-  after three input errors in a session an error also shows a valid example call.
+  session says so; a third time it is refused without running and without asking you again ("stop retrying this
+  call, tell the user why"), and after three input errors in a session an error also shows a valid example call.
+  A session is one question to Ditto, or one MCP client: its connection, its HTTP session, or for a client of the
+  2026-07-28 protocol the server process (over stdio each client starts its own; HTTP clients without a session
+  share one until named tokens tell them apart).
 - What was repaired is marked in the confirmation question, listed in the result's `notes` and recorded in the
   audit log (`name_requested`, `repairs`). Ditto's confirmation shows exactly the framework's question.
 - MCP clients get each tool's own closed input schema (`additionalProperties: false`), the one Ditto's model sees.

@@ -19,7 +19,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Type
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.confirmation import CallTooLong, describe_call
@@ -206,11 +206,23 @@ class ToolContext:
 
 @dataclass
 class Prepared:
-    """A call after name resolution, normalization and validation."""
+    """A call after name resolution, normalization and validation. `key` is the validated input with every
+    default filled in: the repeat guard's key for the call, the same whichever path (Ditto's raw arguments, an
+    MCP client's raw arguments, or the SDK's parsed ones) it came on."""
     spec: "ToolSpec"
     arguments: Dict[str, Any]
     input: BaseModel
     repairs: List[Repair]
+    key: Dict[str, Any] = field(default_factory=dict)
+
+
+def closed_input_model(model: Type[BaseModel]) -> Type[BaseModel]:
+    """The input model, forbidding fields it does not declare (maintainer decision: every tool input model forbids
+    extra fields, so nothing a caller sends is ever dropped silently)."""
+    if model.model_config.get("extra") == "forbid":
+        return model
+    return type(model.__name__, (model,), {"__module__": model.__module__, "__qualname__": model.__qualname__,
+                                           "__doc__": model.__doc__, "model_config": ConfigDict(extra="forbid")})
 
 
 def _merge(*groups: List[Repair]) -> List[Repair]:
@@ -260,6 +272,7 @@ class ToolRegistry:
             raise ValueError(f"Tool '{spec.name}' is already registered.")
         if spec.tier == ToolTier.FORBIDDEN:
             raise ValueError(f"Tool '{spec.name}' is in the forbidden tier and cannot be registered.")
+        spec = dataclasses.replace(spec, input_model=closed_input_model(spec.input_model))
         names = set(spec.input_model.model_fields)
         unknown = sorted((set(spec.fields) - names) | {f for f in spec.arg_aliases.values() if f not in names})
         if unknown:
@@ -461,7 +474,9 @@ class ToolRegistry:
             inp = self.validate_input(spec, args)
         except ToolInputError as e:
             raise self._input_failed(work, spec, decision, args, e) from None
-        return Prepared(spec, args, inp, work.repairs)
+        key = inp.model_dump(mode="json")
+        refuse_repeat(key)  # a call that already failed twice after validation: refused before any question
+        return Prepared(spec, args, inp, work.repairs, key)
 
     def _session(self, ctx: ToolContext) -> Dict[str, int]:
         key = (ctx.actor, ctx.session)
@@ -581,11 +596,11 @@ class ToolRegistry:
         try:
             result = self._run(spec, inp, arguments, ctx, approved, began)
         except ToolError as e:
-            error = self._failed(ctx, spec.name, arguments, e)
+            error = self._failed(ctx, spec.name, prepared.key, e)
             if error is e:
                 raise
             raise error from None
-        self._succeeded(ctx, spec.name, arguments)
+        self._succeeded(ctx, spec.name, prepared.key)
         return result
 
     def _run(self, spec: ToolSpec, inp: BaseModel, arguments: Dict[str, Any], ctx: ToolContext,

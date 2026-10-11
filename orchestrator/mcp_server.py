@@ -118,9 +118,26 @@ def _label(value: Any, limit: int = 80) -> str:
     return text[:limit]
 
 
-def _tool_context(ctx, caller: str = "mcp") -> ToolContext:
+def _session_seed(ctx, instance: str) -> str:
+    """What groups the calls of one client (the repeat guard and the per-session counters): the HTTP session id,
+    the connection of a client that did the handshake, or this server itself for a 2026-07-28 client, which keeps no
+    connection between requests (over stdio one server process serves one client; over HTTP without a session the
+    clients of one server share it until named tokens tell them apart). The SDK's `ServerSession` is built anew for
+    every request, so it never identifies a client."""
+    from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+    request_session = ctx.request_context.session
+    connection = getattr(request_session, "_connection", None) or request_session
+    session_id = getattr(connection, "session_id", None)
+    if session_id:
+        return f"session:{session_id}"
+    if (getattr(connection, "protocol_version", None) or ctx.protocol_version) in MODERN_PROTOCOL_VERSIONS:
+        return f"server:{instance}"
+    return f"connection:{instance}:{id(connection)}"
+
+
+def _tool_context(ctx, caller: str = "mcp", instance: str = "") -> ToolContext:
     """The registry context of an MCP request: the caller (`mcp` for local stdio clients), the client's
-    self-reported name and version as a label, and a hash that groups the calls of one connection."""
+    self-reported name and version as a label, and a hash that groups the calls of one client (_session_seed)."""
     client, session = "", ""
     with contextlib.suppress(Exception):
         connection = ctx.request_context.session
@@ -130,7 +147,7 @@ def _tool_context(ctx, caller: str = "mcp") -> ToolContext:
             client = _label(f"{getattr(info, 'name', '')} {getattr(info, 'version', '')}".strip())
         if ctx.protocol_version:
             client = (client + f" (protocol {_label(ctx.protocol_version, 16)})").strip()
-        seed = f"{os.getpid()}:{id(connection)}".encode("ascii")
+        seed = f"{os.getpid()}:{_session_seed(ctx, instance)}".encode("utf-8", "backslashreplace")
         session = hashlib.sha256(seed).hexdigest()[:16]
     request_id = ""
     with contextlib.suppress(Exception):
@@ -212,9 +229,10 @@ def _parsed(spec: ToolSpec, arguments: Dict[str, Any]) -> Optional[BaseModel]:
 
 
 def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Optional["_OpenQuestions"] = None,
-                       caller: str = "mcp"):
+                       caller: str = "mcp", instance: str = ""):
     """An MCPServer tool function for a registry tool: same input schema, typed structured output,
-    confirmation through elicitation when the user's policy says "ask"."""
+    confirmation through elicitation when the user's policy says "ask". `instance` names the server (the same
+    for every tool of one server, see _session_seed)."""
     import anyio
     import anyio.to_thread
     from mcp.server.elicitation import (AcceptedElicitation, CancelledElicitation, DeclinedElicitation,
@@ -248,7 +266,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             message = describe_call(spec, arguments, marks=marks, renamed=renamed)
         except CallTooLong as e:
             return NotAsked(approve=False, refused=str(e))
-        tool_ctx = _tool_context(ctx, caller)
+        tool_ctx = _tool_context(ctx, caller, instance)
         tool_ctx.confirm_channel = "elicitation"
         await anyio.to_thread.run_sync(questions.expire)
         if rounds and ctx.input_responses:
@@ -293,7 +311,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         # elicitations still go through the registry, so they are audited like every other call.
         data = outcome.data if isinstance(outcome, AcceptedElicitation) else None
         state = _call_state()
-        tool_ctx = _tool_context(ctx, caller)
+        tool_ctx = _tool_context(ctx, caller, instance)
         tool_ctx.repairs = list(state.repairs)
         if isinstance(data, NotAsked) and data.refused:
             await anyio.to_thread.run_sync(functools.partial(
@@ -426,6 +444,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
     if registry is None:
         raise RuntimeError("The framework has no tool registry (not initialized).")
     questions = _OpenQuestions(registry)
+    instance = secrets.token_hex(8)  # this server, for the calls of clients without a connection (_session_seed)
 
     class AuditedServer(MCPServer):
         async def list_tools(self):
@@ -438,23 +457,28 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
         async def call_tool(self, name, arguments, context=None):
             state = _CallState()
             token = _CALL.set(state)
+            audit_name, audit_arguments = name, arguments  # the resolved tool once the name is known
             try:
                 # The fool-proof layer runs on the raw arguments, before the SDK's argument model could drop an
                 # unknown key: the same name resolution, normalization and checks as Ditto's path.
-                ctx = _tool_context(context, caller) if context is not None else ToolContext(caller)
+                ctx = _tool_context(context, caller, instance) if context is not None else ToolContext(caller)
                 try:
                     prepared = await anyio.to_thread.run_sync(registry.prepare, name, arguments, ctx)
                 except ToolError as e:
                     state.audited = True
                     raise _audited(MCPToolError(error_text(str(name), e))) from None
                 state.repairs = prepared.repairs
+                audit_name, audit_arguments = prepared.spec.name, prepared.arguments
                 return await super().call_tool(prepared.spec.name, prepared.arguments, context)
             except BaseException as e:
                 if not state.audited:
-                    ctx = _tool_context(context, caller) if context is not None else ToolContext(caller)
+                    ctx = (_tool_context(context, caller, instance) if context is not None
+                           else ToolContext(caller))
+                    ctx.repairs = list(state.repairs)
                     try:
                         with anyio.CancelScope(shield=True):  # a cancelled call is recorded as well
-                            await anyio.to_thread.run_sync(_audit_rejection, registry, name, arguments, e, ctx)
+                            await anyio.to_thread.run_sync(_audit_rejection, registry, audit_name, audit_arguments,
+                                                           e, ctx)
                     except Exception as audit_error:  # never hide the refusal itself
                         logger.warning(f"Could not audit the refused call of '{name}': {audit_error}")
                 raise
@@ -466,7 +490,8 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                            lifespan=lifespan)
     server.open_questions = questions
     for spec in registry.list():
-        server.add_tool(make_tool_function(spec, registry, questions, caller), name=spec.name, title=spec.title,
+        server.add_tool(make_tool_function(spec, registry, questions, caller, instance), name=spec.name,
+                        title=spec.title,
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
                         structured_output=True, meta=spec.meta())
     return server

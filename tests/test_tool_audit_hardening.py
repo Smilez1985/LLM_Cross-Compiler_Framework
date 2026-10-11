@@ -227,7 +227,9 @@ class TestQuestions:
         assert server.open_questions.expire(time.monotonic() + mcp_server.QUESTION_EXPIRY + 1) == 0
         assert [o for _, o in outcomes(registry)] == ["confirmation_requested", "started", "ok"]
 
-    def test_a_question_abandoned_by_the_client_is_audited(self, server, registry):
+    # "Write": review fix, a call made with a spelling variant of the tool name was not recorded when cancelled.
+    @pytest.mark.parametrize("name", ["write", "Write"])
+    def test_a_question_abandoned_by_the_client_is_audited(self, server, registry, name):
         """Classic era: the client cancels the call while its question is open."""
         opened = threading.Event()
 
@@ -238,11 +240,11 @@ class TestQuestions:
         async def go():
             async with Client(server, elicitation_callback=hang, mode="legacy") as client:
                 with anyio.move_on_after(0.5):
-                    await client.call_tool("write", {"text": "x"})
+                    await client.call_tool(name, {"text": "x"})
         asyncio.run(go())
         assert opened.is_set() and wait_for(lambda: len(entries(registry)) == 2)
         requested, end = entries(registry)
-        assert (end["outcome"], end["answer"]) == ("cancelled", "unanswered")
+        assert (end["tool"], end["outcome"], end["answer"]) == ("write", "cancelled", "unanswered")
         assert end["question_sha256"] == requested["question_sha256"] and registry.writes == []
 
 

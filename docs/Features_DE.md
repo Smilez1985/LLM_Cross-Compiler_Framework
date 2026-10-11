@@ -412,11 +412,12 @@ So läuft eine Frage mit Tools ab:
   `-`, `.` oder Leerzeichen an anderer Stelle ist (`StartBuild` startet `start_build`, mit einem Hinweis). Jeder
   andere Name wird abgelehnt, mit bis zu drei Vorschlägen aus den Tools, die deine Berechtigungen erlauben; ein
   Vorschlag läuft nie von selbst.
-- Argumentnamen: Aliasse, die ein Tool angibt (`quant` und `quantization_type` für `quantization`, `repo` und
-  `repo_id` für `model`), und Schlüssel, die sich nur in Groß- und Kleinschreibung oder in `-` statt `_`
-  unterscheiden, werden umbenannt, mit einem Hinweis. Jedes andere unbekannte Argument wird mit der Liste der
-  gültigen abgelehnt; nichts wird stillschweigend weggelassen. Zwei Schlüssel für ein Feld mit verschiedenen Werten
-  werden abgelehnt.
+- Argumentnamen: Nur die Aliasse, die ein Tool angibt (`quant` und `quantization_type` für `quantization`,
+  `repo` und `repo_id` für `model`), werden umbenannt, mit einem Hinweis. Jedes andere unbekannte Argument, auch
+  ein Feldname in anderer Groß- und Kleinschreibung (`Board`), wird mit der Liste der gültigen und einem Vorschlag
+  abgelehnt; nichts wird stillschweigend weggelassen und nichts Unangegebenes zugeordnet. Ein Alias und sein Feld
+  mit verschiedenen Werten werden abgelehnt. Das Eingabemodell jedes Tools verbietet Felder, die es nicht angibt,
+  auch bei später hinzukommenden Tools.
 - Werte: Zahlen und Ja/Nein als Text sowie Listen als JSON-Text werden als solche gelesen. Targets, Formate, Boards
   und Quantisierungstypen passen genau, über Groß- und Kleinschreibung und Trennzeichen, wenn das genau einen Wert
   meint (`q4-k-m` ist `Q4_K_M`; ein Target-Name, der zwei Targets meinen könnte, wird mit beiden abgelehnt), oder
@@ -428,8 +429,11 @@ So läuft eine Frage mit Tools ab:
 - Jede Ablehnung und jeder Fehler trägt einen Grundcode (zum Beispiel `unknown_argument`, `unknown_id`,
   `not_supported`, `permission_denied`, `needs_person`, `declined`) und den nächsten Schritt. Derselbe
   fehlschlagende Aufruf sagt beim zweiten Mal in einer Sitzung, dass er schon gescheitert ist; beim dritten Mal wird
-  er abgelehnt, ohne zu laufen („versuche diesen Aufruf nicht mehr, sag dem Benutzer warum“), und nach drei
-  Eingabefehlern in einer Sitzung zeigt ein Fehler zusätzlich einen gültigen Beispielaufruf.
+  er abgelehnt, ohne zu laufen und ohne dich erneut zu fragen („versuche diesen Aufruf nicht mehr, sag dem Benutzer
+  warum“), und nach drei Eingabefehlern in einer Sitzung zeigt ein Fehler zusätzlich einen gültigen Beispielaufruf.
+  Eine Sitzung ist eine Frage an Ditto oder ein MCP-Client: seine Verbindung, seine HTTP-Sitzung oder bei einem
+  Client des Protokolls 2026-07-28 der Serverprozess (über stdio startet jeder Client seinen eigenen; HTTP-Clients
+  ohne Sitzung teilen sich einen, bis benannte Tokens sie unterscheiden).
 - Was repariert wurde, ist in der Bestätigungsfrage markiert, in den `notes` des Ergebnisses aufgeführt und im
   Audit-Log festgehalten (`name_requested`, `repairs`). Dittos Bestätigung zeigt genau die Frage des Frameworks.
 - MCP-Clients bekommen das eigene geschlossene Eingabeschema jedes Tools (`additionalProperties: false`), dasselbe,
