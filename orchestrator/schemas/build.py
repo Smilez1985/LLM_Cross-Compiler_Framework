@@ -14,6 +14,9 @@ class BuildRequestIn(BaseModel):
 
     model: str = Field(min_length=1, max_length=512,
                        description="Hugging Face repo id (owner/name) or a local model path")
+    revision: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{40}$",
+                                    description="Commit of the Hugging Face model (a recipe's pinned revision); "
+                                                "the default branch when omitted")
     target: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][\w.-]*$",
                         description="Target id, e.g. Rockchip")
     format: str = Field(min_length=1, max_length=32, description="Output format, e.g. gguf, rkllm, rknn")

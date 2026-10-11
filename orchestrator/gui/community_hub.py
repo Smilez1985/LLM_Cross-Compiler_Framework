@@ -1,24 +1,17 @@
 #!/usr/bin/env python3
 """
-LLM Cross-Compiler Framework - Community Hub (v2.3.0 Enterprise)
-DIREKTIVE: Goldstandard, GUI, Swarm Integration.
+LLM Cross-Compiler Framework - Community Hub
 
-Zweck:
-Ermöglicht den Zugriff auf Community-Module und den 'Swarm Memory' Upload.
-
-Updates v2.3.0:
-- Reuse existing CommunityManager instance.
-- Robust SecretsManager integration for GitHub tokens.
-- Dark Mode styling.
+Lists the community target modules found locally and installs them. Nothing is uploaded from here:
+the framework never asks for or stores a repository token.
 """
 
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QLabel, QPushButton, QTableWidget, QTableWidgetItem, 
-    QHeaderView, QMessageBox, QLineEdit, QInputDialog
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QHeaderView, QMessageBox, QLineEdit
 )
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QThread, Signal
 
 # Localization Import
 try:
@@ -61,34 +54,6 @@ class DownloadWorker(QThread):
         except Exception as e:
             self.error.emit(str(e))
 
-class UploadWorker(QThread):
-    """Worker für den Swarm Upload"""
-    finished = Signal(bool)
-    log = Signal(str)
-    
-    def __init__(self, manager, token, username):
-        super().__init__()
-        self.manager = manager
-        self.token = token
-        self.username = username
-        
-    def run(self):
-        try:
-            self.log.emit("Exporting Knowledge Base...")
-            export_path = self.manager.export_knowledge_base("swarm_upload")
-            
-            if not export_path:
-                self.log.emit("Export failed (Empty RAG?).")
-                self.finished.emit(False)
-                return
-
-            self.log.emit(f"Encrypting & Uploading {export_path}...")
-            success = self.manager.upload_knowledge_to_swarm(export_path, self.token, self.username)
-            self.finished.emit(success)
-        except Exception as e:
-            self.log.emit(f"Error: {e}")
-            self.finished.emit(False)
-
 # --- MAIN WINDOW ---
 
 class CommunityHubWindow(QMainWindow):
@@ -127,12 +92,6 @@ class CommunityHubWindow(QMainWindow):
         self.refresh_btn = QPushButton(refresh_txt)
         self.refresh_btn.clicked.connect(self.refresh_list)
         hbox.addWidget(self.refresh_btn)
-        
-        # Upload Button
-        self.upload_btn = QPushButton("🧠 Contribute to Swarm")
-        self.upload_btn.setStyleSheet("background-color: #673AB7; color: white; font-weight: bold;")
-        self.upload_btn.clicked.connect(self.on_upload_click)
-        hbox.addWidget(self.upload_btn)
         
         layout.addLayout(hbox)
         
@@ -199,45 +158,3 @@ class CommunityHubWindow(QMainWindow):
         self.dl_worker.finished.connect(lambda p: QMessageBox.information(self, "Success", "Module installed!"))
         self.dl_worker.error.connect(self.on_error)
         self.dl_worker.start()
-
-    # --- UPLOAD LOGIC ---
-
-    def on_upload_click(self):
-        if not self.comm_manager: return
-
-        # 1. Credentials
-        token = None
-        user = "CommunityUser"
-        
-        # Try Keyring first via SecretsManager
-        sm = getattr(self.framework_manager, 'secrets_manager', None)
-        if sm:
-            token = sm.get_secret("github_token")
-            
-        if not token:
-            token, ok = QInputDialog.getText(self, "GitHub Auth", "Enter GitHub Token (repo scope):", QLineEdit.Password)
-            if not ok or not token: return
-            
-            # Save for future?
-            if sm:
-                sm.set_secret("github_token", token)
-
-        user_in, ok = QInputDialog.getText(self, "Contributor Name", "Enter your Username:", text=user)
-        if ok: user = user_in
-
-        # 2. Start Upload
-        self.status_label.setText("Uploading to Swarm...")
-        self.upload_btn.setEnabled(False)
-        
-        self.up_worker = UploadWorker(self.comm_manager, token, user)
-        self.up_worker.log.connect(lambda s: self.status_label.setText(s))
-        self.up_worker.finished.connect(self.on_upload_finished)
-        self.up_worker.start()
-
-    def on_upload_finished(self, success):
-        self.upload_btn.setEnabled(True)
-        if success:
-            QMessageBox.information(self, "Swarm Upload", "✅ Knowledge successfully contributed to the Swarm!")
-        else:
-            QMessageBox.warning(self, "Swarm Upload", "❌ Upload failed. Check logs.")
-        self.status_label.setText("Ready.")

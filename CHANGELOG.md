@@ -32,6 +32,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
+- **Signed community packs**: a pack is a zip with a manifest (sha256, size and mode of every file) and an
+  optional Ed25519 author signature. Reading a pack accepts exactly the listed files, never links or special
+  files, and checks every hash. Trusted publisher keys ship in `configs/community_keys.yml`, each with an
+  expiry date.
+- **Encrypted packs for private sharing** (with your own machines or a team): encrypted to one or more
+  recipients' X25519 public keys and/or a passphrase (scrypt), in the style of age (ChaCha20-Poly1305,
+  HKDF-SHA256, authenticated header), and signed by the sender, so recipients see who sent it and any change,
+  including an added or removed recipient, is detected. Each user gets an Ed25519/X25519 key pair on first use,
+  kept only in the encrypted secrets store; the public keys can be exported as text.
+- **Recipes**, the model zoo's "model templates": the model at a pinned commit, the target with a fingerprint
+  of its files, board, format, quantization, options and verified results (artifact hashes, toolchain image,
+  device tests). A recipe is generated from a finished build, checked against the target's capabilities and
+  maps to a normal build request.
+- `build_info.json` records what a recipe needs: the model's commit (the download is pinned to it), the target
+  fingerprint and version, the toolchain image, the context length, the calibration dataset's hash and the
+  framework version. Build requests accept a `revision` (commit) for Hugging Face models.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -50,10 +66,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   takes minutes on a CPU); "medium" and up keep it.
 - Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0) and `fastembed` 0.8.1 (local embeddings,
   ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
+- Knowledge exports, and with them the knowledge snapshot of new target modules, are scrubbed: home folders,
+  IP and MAC addresses, e-mail addresses, JWTs, the host name and the user name are removed, besides API keys.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
+- The "swarm" upload: the XOR "SwarmCipher" (obfuscation anyone could undo), `llm-cli swarm upload`, the
+  Community Hub's "Contribute to Swarm" button and its GitHub token prompt. The framework never asks for or
+  stores a repository token. Old swarm packets in `community/knowledge/` are skipped with a warning.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -62,6 +83,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Requests to local model servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment.
 - Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
   the same way and installed atomically.
+- Installing a community module checks its id (no paths, no `..`), refuses links and special files anywhere in
+  it and an existing target that differs only in case, and the module appears under its final name only when
+  it is complete. Before, a link in a module could copy any file of the user into `targets/`.
+- The Docker build context never follows symbolic links or special files of a target, a linked Dockerfile is
+  refused, and a build's target name cannot contain a path.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
