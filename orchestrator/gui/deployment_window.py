@@ -55,8 +55,11 @@ class DeploymentWorker(QThread):
             
             # Safe config access
             get_cfg = getattr(self.framework.config, 'get', lambda k, d=None: getattr(self.framework.config, k, d))
+            # The configured folder (relative to the installation), the one the artifact list shows; never the cwd.
             output_dir = Path(get_cfg("output_dir", "output"))
-            
+            if hasattr(self.framework, "resolve_path"):
+                output_dir = self.framework.resolve_path(output_dir)
+
             pkg_path = dep_mgr.create_deployment_package(
                 artifact_path=self.artifact_path,
                 profile_name=self.profile_name,

@@ -943,7 +943,8 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 - **Probe:** `scripts/hardware_probe.sh` (Linux) und `scripts/hardware_probe.ps1` (Windows) schreiben
   `target_hardware_config.txt` mit Angaben zu CPU, Flags, Speicher, GPU und NPU. Führe sie auf dem Board aus, nutze
   `llm-cli scan` auf diesem Rechner oder **Scan / Import...** in der GUI (Datei importieren, Scan per SSH mit
-  denselben Regeln für das Vertrauen beim ersten Kontakt wie beim Deployment, oder dieser PC).
+  denselben Regeln für das Vertrauen beim ersten Kontakt wie beim Deployment, oder dieser PC; die GUI legt die
+  Scan-Ergebnisse in `<cache_dir>/probes/` ab).
 - **Neues Target per Fragen:** `llm-cli module create` oder der Assistent unter **Tools > Create Hardware
   Module...**.
 - **Neues Target aus einer Probe:** `llm-cli module generate-ai <Probe-Datei>` oder die KI-Analyse im Assistenten.

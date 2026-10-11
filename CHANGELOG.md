@@ -52,9 +52,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
   pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, Metal or CPU;
   ROCm on request; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
-  at pinned revisions into the `ditto/` folder of the configured models folder (`models_dir`, the one Ditto uses),
-  checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
-  (3 GB RAM). The "local" provider follows the running server without configuration.
+  at pinned revisions into the `ditto/` folder of the configured models folder (`models_dir`, the one Ditto uses;
+  the runtime also takes it when it is given no folder), checked by size and sha256. Model tiers go down to 2-bit
+  models for weak hardware (3 GB RAM). The "local" provider follows the running server without configuration.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`; the servers the run starts are stopped afterwards, one you started
@@ -84,7 +84,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the operating system (Windows System.Speech, macOS `say`, Linux `spd-say` or `espeak-ng`), in the interface
   language. Best effort and never in the way: no audio files, the system volume is never touched, and it is
   silent in CI, over SSH without a display, on headless systems, with `LLM_FRAMEWORK_NO_AUDIO=1` or when
-  *Tools > Spoken Announcements* (setting `audio_announcements`) is off. Every announcement is also logged.
+  *Tools > Spoken Announcements* (setting `audio_announcements`) is off. Every announcement is also logged. The
+  switch warns when it cannot save the setting.
 - **Deep Ingest progress and Stop**: the wizard shows "Page N of M: <url>" instead of an endless spinner, and a
   Stop button ends the crawl after the current page. Closing the wizard stops a running crawl the same way and
   closes once the current page is stored, without freezing the window.
@@ -199,7 +200,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   method a sign-in remembered (such as the `ant` profile), so it is not left unused.
 - `llm-cli secrets set --with-token` reads the value from stdin.
 - **Cancel Build** in the Builder tab: cancels the running build through the build service after a confirmation
-  (enabled only while the build the tab started runs); the log says when it has stopped.
+  (enabled only while the build the tab started runs); the log says when it has stopped, also after a cancel
+  while the build was still being handed to the build engine.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -321,18 +323,37 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   vault nor Docker; `--all` lists every kept build instead of the 20 newest. On Linux and macOS the records are
   readable only by the user who built (folder 0700, files 0600).
 - Ctrl+C in `llm-cli build start` cancels the build through the build service: its container is stopped, the CLI
-  waits until the build has stopped, says so and exits with code 130. Before, the build and its container kept
-  running.
+  waits until the build has stopped (also when it was still being handed to the build engine), says so and exits
+  with code 130. Before, the build and its container kept running.
 - `llm-cli scan --output FILE` reaches the hardware probe (`hardware_probe.sh --output`,
   `hardware_probe.ps1 -OutputFile`), which always wrote `target_hardware_config.txt` into the current folder. On
   Windows without administrator rights the CLI waits for the probe's elevated restart instead of reporting at once
   that no file was written.
 - `llm-cli module create` writes into the configured targets folder (`targets_dir`, relative to the installation)
-  instead of `targets/` in the current folder.
+  instead of `targets/` in the current folder; its next steps name `modules/build.sh`, the script builds run,
+  instead of the legacy `config_module.sh`.
 - `llm-cli config show` prints the effective settings (`config.yml`, a `-c` file, `LLM_FRAMEWORK_*` variables,
   defaults), each with its source and with credentials redacted, instead of the CLI's built-in defaults.
 - `llm-cli config repos --add` stores the `{url: ...}` entry that the build engine passes on as
-  `<NAME>_REPO_OVERRIDE`; plain URLs stored by earlier versions are passed on as well.
+  `<NAME>_REPO_OVERRIDE`; plain URLs stored by earlier versions are passed on as well. The name comes from the
+  whole entry name (`llama.cpp` and `llama_cpp` both give `LLAMA_CPP_REPO_OVERRIDE`, the name the target scripts
+  read; `llama.cpp` gave `CPP_REPO_OVERRIDE`). `--add` and `--remove` exit with code 1 when `config.yml` cannot
+  be saved, instead of reporting success; `--add` refuses a name without any ASCII letter or digit (exit code 2).
+- A settings file given with `-c` that cannot be read no longer drops the `LLM_FRAMEWORK_*` variables as well: it
+  is named on stderr and ignored, and the other settings apply.
+- The GUI's hardware scan of this PC (**Scan / Import...**) writes its result into `<cache_dir>/probes/` instead of
+  the GUI's working folder, and the module wizard's *Auto-fill from Probe Result* reads it there.
+- Deployment from the GUI writes the package into the configured output folder (`output_dir`, relative to the
+  installation) instead of `output/` in the working folder.
+- The AI settings dialog warns when the settings could not be saved to `config.yml` (they apply until the program
+  ends); before, only the log said so.
+- Windows: the uninstaller (`scripts/Uninstall-LLM-Conversion-Framework.bat`) finds the installation. `install.bat`
+  now writes the marker with the installation folder that the uninstaller reads, next to `install.bat`, where the
+  uninstaller looks for it; before, no installer wrote it and the uninstaller always reported that nothing was
+  installed. When PowerShell reports no script path (the PowerShell part of `install.bat` runs through
+  `Invoke-Expression`), `install.bat` uses the current folder, which its batch part has set to its own. The start script
+  `scripts/start-llm_convertion_framework.bat` also works from `scripts\` (it looked for `orchestrator\main.py`
+  and `.venv` there).
 - `llm-cli targets list` shows each target's id (the value for `--target`), name, boards and formats from its
   capabilities instead of placeholders; `llm-cli targets validate` checks the capabilities block against the
   schema and prints every error (exit code 1).

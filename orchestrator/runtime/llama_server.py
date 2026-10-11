@@ -128,7 +128,15 @@ def user_data_dir() -> Path:
 
 
 def framework_models_dir(value: Optional[str] = None) -> Path:
-    """The framework's models directory; relative values are relative to the installation, not the cwd."""
+    """The framework's models directory: `value`, else the effective setting models_dir (LLM_FRAMEWORK_MODELS_DIR,
+    config.yml, or the per-user folder when the installation is read-only), as from_framework uses it. Relative
+    values are relative to the installation, not the cwd."""
+    if not value:
+        try:
+            from orchestrator.Core.config_manager import ConfigManager
+            value = ConfigManager().get("models_dir", None)
+        except Exception as e:  # settings that cannot be read: the variable or the installation's folder
+            get_logger("LocalLLMRuntime").warning(f"Could not read the setting models_dir ({e}).")
     path = Path(value or os.environ.get("LLM_FRAMEWORK_MODELS_DIR") or "models").expanduser()
     return path if path.is_absolute() else APP_ROOT / path
 

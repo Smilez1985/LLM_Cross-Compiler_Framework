@@ -402,9 +402,14 @@ class ModuleCreationWizard(QWizard):
     def load_probe_data(self):
         if not self.detect_cb.isChecked(): return
         
-        # Use standard probe filename
-        probe_file = Path("target_hardware_config.txt") 
-        
+        # The Builder tab's local probe (in the probe folder), else the file `llm-cli scan` writes by default
+        probe_file = Path("target_hardware_config.txt")
+        if self.framework_manager is not None:
+            from orchestrator.gui.builder_tab import LOCAL_PROBE_FILE, probe_result_dir
+            local_probe = probe_result_dir(self.framework_manager) / LOCAL_PROBE_FILE
+            if local_probe.exists():
+                probe_file = local_probe
+
         if probe_file.exists():
             try:
                 data = {}
