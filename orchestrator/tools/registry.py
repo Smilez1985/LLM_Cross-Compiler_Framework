@@ -196,10 +196,46 @@ class ResourceSpec:
     arguments: Callable[[Dict[str, str]], Dict[str, Any]] = field(default=lambda params: dict(params))
     read: Optional[Callable[[Dict[str, str]], str]] = None
     listed: Optional[Callable[[], List[Dict[str, str]]]] = None
+    # Completion of template parameters (MCP completion/complete): parameter -> f(arguments so far, ctx) -> values.
+    completions: Mapping[str, Callable[[Dict[str, str], "ToolContext"], List[str]]] = field(default_factory=dict)
 
     @property
     def audit_name(self) -> str:
         return f"read_resource:{self.uri}"
+
+
+@dataclass(frozen=True)
+class PromptArg:
+    """One argument of a prompt: a string. Free text is only ever the last argument (Claude Code splits prompt
+    arguments on whitespace)."""
+    name: str
+    description: str
+    required: bool = False
+    max_chars: int = 200
+
+
+@dataclass(frozen=True)
+class PromptSpec:
+    """An MCP prompt read through the registry like a read tool (design 4.3, 4.4). `instructions` is a constant the
+    framework wrote (no argument value, no external text); `render(arguments, ctx)` builds the context message, with
+    every value from outside the framework inside a wrap_untrusted block. `tools` are the tools the prompt leads to:
+    it is offered only when all of them are registered, so a prompt never names a tool that does not exist."""
+    name: str
+    title: str
+    description: str
+    instructions: str
+    arguments: Tuple[PromptArg, ...]
+    render: Callable[[Dict[str, str], "ToolContext"], str]
+    tools: Tuple[str, ...] = ()
+    completions: Mapping[str, Callable[[Dict[str, str], "ToolContext"], List[str]]] = field(default_factory=dict)
+
+    @property
+    def audit_name(self) -> str:
+        return f"get_prompt:{self.name}"
+
+
+MAX_PROMPT_CHARS = 24000  # a whole prompt (instructions and context)
+MAX_COMPLETIONS = 100     # values one completion returns (the MCP limit)
 
 
 @dataclass(frozen=True)
@@ -328,6 +364,7 @@ class ToolRegistry:
         self.tokens = tokens  # named MCP tokens, each with its own policy
         self._tools: Dict[str, ToolSpec] = {}
         self._resources: Dict[str, ResourceSpec] = {}  # by URI (template)
+        self._prompts: Dict[str, PromptSpec] = {}
         # Repeat guard and per-session counters (in memory; per caller and session).
         self._guard_lock = threading.Lock()
         self._failures: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
@@ -927,6 +964,142 @@ class ToolRegistry:
             _CALL.reset(token)
         end("ok", text=text)
         return text, external
+
+    # --- prompts (design 4.3, 4.4): read like a read tool, filtered and audited ----------------------------------------
+
+    def register_prompt(self, spec: PromptSpec) -> PromptSpec:
+        if spec.name in self._prompts:
+            raise ValueError(f"Prompt '{spec.name}' is already registered.")
+        names = [a.name for a in spec.arguments]
+        if len(names) != len(set(names)):
+            raise ValueError(f"Prompt '{spec.name}' declares an argument twice.")
+        self._prompts[spec.name] = spec
+        return spec
+
+    def missing_tools(self, spec: PromptSpec) -> List[str]:
+        """The tools a prompt leads to that are not registered (then it is not offered)."""
+        return [t for t in spec.tools if t not in self._tools]
+
+    def prompts(self, caller: Optional[str] = None) -> List[PromptSpec]:
+        """Every prompt, or the ones offered to `caller`: every tool it leads to is registered and its read
+        permission allows it (pseudo-tool get_prompt:<name>, read tier)."""
+        if caller is None:
+            return list(self._prompts.values())
+        policy, section = self._policy_of(caller)
+        return [p for p in self._prompts.values()
+                if not self.missing_tools(p)
+                and policy.decide_tool(_Surface(p.audit_name, p.title), None, section, owner=caller) != Decision.DENY]
+
+    def get_prompt(self, name: Any, arguments: Any, ctx: ToolContext) -> Tuple[str, List[str]]:
+        """A prompt for `ctx.actor`: (description, [instructions, context]). The arguments are checked against the
+        prompt's own (an unknown one is refused with the valid names, never dropped); the read permission decides;
+        the context is built by the prompt (external text in untrusted blocks), secrets are redacted and the whole is
+        capped at MAX_PROMPT_CHARS; every get is audited as `get_prompt:<name>`. ResourceUnknown (invalid params):
+        no such prompt, a tool it needs is missing, invalid arguments or an unknown id."""
+        spec = self._prompts.get(name) if isinstance(name, str) else None
+        if spec is None:
+            from orchestrator.tools.normalize import suggest
+            close = suggest(str(name), [p.name for p in self.prompts(ctx.actor)])
+            shown = redact_secrets("".join(ch if ch.isprintable() else "?" for ch in str(name))[:64])
+            raise ResourceUnknown(f"Unknown prompt '{shown}'." + (f" Did you mean '{close[0]}'?" if close else ""),
+                                  next="List the prompts (prompts/list).", suggestions=close)
+        began, surface = time.monotonic(), _Surface(spec.audit_name, spec.title)
+        raw = dict(arguments) if isinstance(arguments, dict) else {}
+        missing = self.missing_tools(spec)
+        if missing:
+            message = (f"The prompt '{spec.name}' leads to the tool {', '.join(missing)}, which this framework "
+                       "version does not have yet.")
+            self._audit(ctx, surface, self.decide(surface, None, ctx), "error", raw, detail=message,
+                        reason_code="no_tool")
+            raise ResourceUnknown(message, code="no_tool", next="Do the task with the tools that are listed, or tell "
+                                                                "the user which tool is missing.")
+        known = {a.name: a for a in spec.arguments}
+        args: Dict[str, str] = {}
+        problems: List[str] = []
+        for key, value in raw.items():
+            if key not in known:
+                from orchestrator.tools.normalize import suggest
+                close = suggest(str(key), list(known))
+                shown = redact_secrets("".join(ch if ch.isprintable() else "?" for ch in str(key))[:64])
+                problems.append(f"unknown argument '{shown}'" + (f" (did you mean '{close[0]}'?)" if close else ""))
+            elif value is None:
+                continue
+            elif not isinstance(value, str):
+                problems.append(f"'{key}' must be text")
+            elif len(value) > known[key].max_chars:
+                problems.append(f"'{key}' is longer than {known[key].max_chars} characters")
+            elif value.strip():
+                args[key] = value.strip()
+        problems += [f"'{a.name}' is required" for a in spec.arguments if a.required and a.name not in args]
+        decision = self.decide(surface, None, ctx)
+        if problems:
+            message = (f"Invalid arguments for the prompt {spec.name}: {'; '.join(problems)}. Valid arguments: "
+                       f"{', '.join(known) or 'none'}.")
+            self._audit(ctx, surface, decision, "invalid_input", raw, detail=message, reason_code="invalid_value")
+            raise ResourceUnknown(message, code="invalid_value", next=f"Get the prompt {spec.name} again with these "
+                                                                     "arguments fixed.")
+        if decision != Decision.ALLOW:
+            asks = decision == Decision.ASK
+            self._audit(ctx, surface, decision, "not_confirmed" if asks else "denied", args,
+                        reason_code="needs_person" if asks else "permission_denied",
+                        answer="unavailable" if asks else "")
+            if asks:
+                raise ToolDenied(f"The prompt '{spec.title}' needs the person's confirmation, which getting a prompt "
+                                 "cannot ask for.", code="needs_person", next=UNASKED_HINT)
+            raise ToolDenied(f"The prompt '{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
+
+        def end(outcome: str, detail: str = "", reason_code: str = "", text: str = "") -> None:
+            extra = {"result": {"sha256": text_sha256(text), "bytes": len(text.encode("utf-8"))}} if text else {}
+            self._audit(ctx, surface, decision, outcome, args, detail=detail, reason_code=reason_code,
+                        duration_ms=int((time.monotonic() - began) * 1000), **extra)
+
+        token = _CALL.set((self, ctx.actor))
+        try:
+            context = redact_secrets(str(spec.render(dict(args), ctx) or ""))
+        except (ToolError, ValueError, LookupError) as e:
+            code = getattr(e, "code", None) or "failed"
+            message = external_error_text(getattr(e, "message", None) or str(e))
+            next_step = redact_secrets(getattr(e, "next", "") or "")
+            end("error", message, code)
+            if code in ("unknown_id", "invalid_value") or isinstance(e, LookupError):
+                raise ResourceUnknown(message, code="unknown_id", next=next_step) from None
+            raise ToolError(message, code=code, next=next_step, quoted=message) from None
+        except Exception as e:
+            self.logger.error(f"Prompt {spec.name} failed: {e}", exc_info=True)
+            end("error", repr(e), "failed")
+            message = external_error_text(str(e))
+            raise ToolError(f"{spec.title} failed: {message}", quoted=message) from None
+        finally:
+            _CALL.reset(token)
+        room = MAX_PROMPT_CHARS - len(spec.instructions)
+        if len(context) > room:
+            context = context[:max(0, room - 40)] + "\n[... truncated at the prompt limit ...]"
+        end("ok", text=spec.instructions + context)
+        return spec.description, [spec.instructions, context]
+
+    def complete(self, kind: str, ref: str, argument: str, value: str, context: Optional[Dict[str, str]],
+                 ctx: ToolContext) -> List[str]:
+        """Completion values for a prompt argument (kind "prompt") or a resource template parameter ("resource"):
+        only for a prompt or resource this caller is offered, filtered by what was typed (any letter case), at most
+        MAX_COMPLETIONS. A provider that fails gives nothing."""
+        if kind == "prompt":
+            spec: Any = self._prompts.get(ref)
+            offered = spec is not None and spec.name in {p.name for p in self.prompts(ctx.actor)}
+        else:
+            spec = self._resources.get(ref)
+            offered = spec is not None and spec.uri in {r.uri for r in self.resources(ctx.actor)}
+        provider = spec.completions.get(argument) if offered else None
+        if provider is None:
+            return []
+        token = _CALL.set((self, ctx.actor))
+        try:
+            values = provider(dict(context or {}), ctx)
+        except Exception:  # noqa: BLE001 - completions are hints
+            return []
+        finally:
+            _CALL.reset(token)
+        typed = (value or "").lower()
+        return [v for v in dict.fromkeys(str(x) for x in values or []) if v.lower().startswith(typed)][:MAX_COMPLETIONS]
 
 
 def framework_text(text: Any, limit: int = MAX_RESULT_BYTES) -> str:

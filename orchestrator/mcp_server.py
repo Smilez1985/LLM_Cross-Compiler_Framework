@@ -1037,6 +1037,32 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
             readable = await self._readable()
             return [t for t in await super().list_resource_templates() if t.uri_template in readable]
 
+        async def list_prompts(self):
+            """The prompts offered to this caller (every tool a prompt leads to is registered, its permission
+            allows it); straight from the registry, so their arguments are the registry's own."""
+            from mcp_types import Prompt as MCPPrompt, PromptArgument as MCPPromptArgument
+            specs = await anyio.to_thread.run_sync(registry.prompts, current_caller() or caller)
+            return [MCPPrompt(name=s.name, title=s.title, description=s.description,
+                              arguments=[MCPPromptArgument(name=a.name, description=a.description, required=a.required)
+                                         for a in s.arguments]) for s in specs]
+
+        async def get_prompt(self, name, arguments=None, context=None):
+            """prompts/get through the registry with the raw arguments (an unknown one is refused, never dropped)."""
+            from mcp_types import INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST
+            from mcp_types import GetPromptResult, PromptMessage, TextContent
+            tool_ctx = _tool_context(context, caller, instance)
+            try:
+                description, texts = await anyio.to_thread.run_sync(registry.get_prompt, name, arguments or {},
+                                                                    tool_ctx)
+            except ResourceUnknown as e:
+                raise _mcp_error(INVALID_PARAMS, error_text(str(name), e)) from None
+            except ToolDenied as e:
+                raise _mcp_error(INVALID_REQUEST, error_text(str(name), e)) from None
+            except ToolError as e:
+                raise _mcp_error(INTERNAL_ERROR, error_text(str(name), e)) from None
+            return GetPromptResult(description=description, messages=[
+                PromptMessage(role="user", content=TextContent(type="text", text=text)) for text in texts])
+
         async def call_tool(self, name, arguments, context=None):
             state = _CallState()
             token = _CALL.set(state)
@@ -1089,7 +1115,26 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
                         structured_output=True, meta=spec.meta())
     resource_of = _add_resources(server, registry, caller, instance)
+    _add_completions(server, registry, caller, instance)
     return server
+
+
+def _add_completions(server, registry: ToolRegistry, caller: str, instance: str) -> None:
+    """completion/complete for prompt arguments and resource template parameters (documented by VS Code): values
+    only for a prompt or resource this caller is offered, from framework ids (targets, boards, the caller's own
+    build requests, document names)."""
+    import anyio.to_thread
+    from mcp_types import Completion
+
+    @server.completion()
+    async def complete(ref, argument, context):
+        kind, name = ("prompt", getattr(ref, "name", "")) if getattr(ref, "type", "") == "ref/prompt" else \
+            ("resource", getattr(ref, "uri", ""))
+        given = dict(getattr(context, "arguments", None) or {})
+        tool_ctx = _tool_context(None, caller, instance)
+        values = await anyio.to_thread.run_sync(registry.complete, kind, str(name), str(argument.name),
+                                                str(argument.value or ""), given, tool_ctx)
+        return Completion(values=values, total=len(values), has_more=False)
 
 
 # --- Streamable HTTP: loopback, a named token per client, no web pages ------------------------------

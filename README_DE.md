@@ -378,6 +378,10 @@ du Claude Desktop neu.
   (`lcf://targets`, `lcf://builds/<ID>/log`, `lcf://docs/Features`, ...). Sie folgen den Berechtigungen des
   passenden Lese-Tools und landen wie ein Tool-Aufruf im Audit-Log; Clients mit Protokoll 2026-07-28 erfahren, wenn
   sich ein Build oder die Berechtigungen ändern.
+- **Prompts:** Dittos Aufgaben für deinen Client, mit denselben Anweisungen und demselben Wissenskontext, den Ditto
+  bekommt: `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings` und `diagnose_build_failure`
+  (in Claude Code als Slash-Befehle). Sie gewähren nichts; jeder Schritt läuft weiter über die Tools und deine
+  Berechtigungen.
 - Ein Tool zum Übertragen auf Boards gibt es über MCP nicht.
 
 **Ein Claude-Abo nutzen:** Anthropic erlaubt Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines

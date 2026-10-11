@@ -226,6 +226,29 @@ Defaults per task come from [`configs/llm_providers.yml`](../configs/llm_provide
 `ai_model` and `ai_effort` for every task, or `ai_model_<task>` and `ai_effort_<task>` for one task. Effort levels
 are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what it understands.
 
+### Honest "cannot" and untested hardware
+
+The task texts live in one module (`orchestrator/llm/task_prompts.py`), which Ditto and the
+[MCP prompts](#mcp-server) share. Each of them tells the model: when it cannot do a task, it says so with the specific
+reason (which information is missing, which capability or tool does not exist, which permission is denied, which
+device or hardware is not available, which limit was reached) and never claims a result it did not get; not being
+able to test a result on real hardware is no reason to refuse. Module proposals and build recommendations may answer
+`cannot` with such a reason. When the framework's own check of the task input finds what the task needs (a probe or
+the board and its SoC; formats the target offers), Ditto asks the model once more, and a second `cannot` reaches you
+as "not confirmed by the framework". With neither a probe nor a board there is nothing to base a module on: Ditto
+says so itself and asks no model. The healing analysis has no `cannot`; an unclear cause comes with a low confidence.
+
+**Module proposals** may use any base image. Ditto prefers a Docker Official Image (`debian`, `ubuntu`) with the
+vendor's packages; for any other image, for example a vendor's toolchain image on `nvcr.io`, it must give its reason
+(`base_image_reason`). It lists the values it guessed in `assumptions` (at most 10). Before the module is created, the
+module wizard and `llm-cli module generate-ai` show the base image plainly: registry, image, digest (or that it is
+not pinned yet: the module generator needs a digest for images outside its short list of official base images),
+"Docker Official Image" or "other registry: ...; prebuilt image made by its publisher, not checked by the framework",
+that the image build runs with network access on this computer outside the build sandbox, and the AI's reason. The
+wizard keeps the proposed image as it is (an image with "debian" in its name is no longer replaced by
+`debian:bookworm-slim`). The created module says in its description that it is untested and names the assumptions;
+its support level is community.
+
 ### Providers
 
 | ID | Kind | Where it runs | Sign-in today |
@@ -842,6 +865,22 @@ framework never sees it.
   resources of a build report each change, only to the caller that started the build. The server publishes them on
   its own event bus; it checks for changes every second. On the older handshake revisions it advertises no change
   notifications, so those clients see a permission change at their next session.
+- **Prompts:** Ditto's tasks for a client that does Ditto's job, with the same task text and the same knowledge
+  context Ditto gets (most clients show them as slash commands): `ask_about_framework` (a question; knowledge
+  excerpts and the documentation resources), `convert_model_for_board` (model, target, board; the target's
+  capabilities and the steps from the check to the built model), `recommend_build_settings` (model, target, board,
+  `use_knowledge`; the formats and quantization types the target offers for the board) and `diagnose_build_failure`
+  (a build request; its state, the end of its log and three knowledge excerpts). `add_board` and `deploy_to_board`
+  are ready and are offered once the tools they lead to exist (creating a target module, packaging and deploying). A
+  prompt grants nothing: every step still goes through the tools and your permissions. Its first message is the
+  framework's own text, the same for every call; the second holds the context, where every value from outside the
+  framework (your arguments too) is wrapped as untrusted data, secrets are redacted, and the whole prompt is capped
+  at 24,000 characters. Each prompt carries the honest-"cannot" rule (see
+  [Ditto](#honest-cannot-and-untested-hardware)). A prompt is read like a read tool: your read permission decides,
+  an unknown argument is refused with the valid names (never dropped), and every get is audited as
+  `get_prompt:<name>`.
+- **Completions:** clients that complete arguments (VS Code) get target ids, a target's boards, document names and
+  the caller's own build requests, only for prompts and resources the caller may use.
 - **Local files for AI clients:** MCP clients and Ditto never name a path. A local model or calibration dataset is
   named as `<label>:<relative path>` inside a folder the AI may use, for example `models:qwen2.5-0.5b-instruct` or
   `datasets:calib/de.txt`, or by the file id (`lf_` and 16 hex characters) the framework recorded for it. The

@@ -362,8 +362,32 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Änderungen hören: Die Listen der Tools, Prompts und Ressourcen ändern sich mit den Berechtigungen, und die Status-
   und Log-Ressourcen eines Builds melden jede Änderung an den Aufrufer, der den Build gestartet hat, über den eigenen
   Ereignisbus des Servers.
+- **MCP-Prompts**: Dittos Aufgaben für einen Client, der Dittos Arbeit übernimmt, mit demselben Aufgabentext und
+  Wissenskontext: `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings`,
+  `diagnose_build_failure`, dazu `add_board` und `deploy_to_board`, die angeboten werden, sobald es die Tools gibt, zu
+  denen sie führen. Die erste Nachricht ist der feste Text des Frameworks, die zweite der Kontext, in dem jeder Wert
+  von außen (auch die Argumente) als nicht vertrauenswürdige Daten eingepackt ist, Secrets geschwärzt, höchstens
+  24.000 Zeichen. Ein Prompt wird wie ein Lese-Tool gelesen: Die Leseberechtigung entscheidet, ein unbekanntes Argument
+  wird mit den gültigen Namen abgelehnt, jeder Abruf landet als `get_prompt:<Name>` im Audit-Log. Vervollständigung
+  (VS Code) bietet Target-IDs, Boards, Dokumentnamen und die eigenen Build-Requests des Aufrufers an.
+- **Ehrliches „kann ich nicht“ für Dittos Modulvorschläge und Build-Empfehlungen**: Das Modell darf mit `cannot` und
+  einem Grundcode antworten (fehlende Information, nicht unterstützt, kein Tool, Berechtigung, braucht einen Menschen,
+  Hardware, Ressourcen, Limit; „ungetestet“ ist keiner davon). Ditto fragt noch einmal, wenn die Prüfung des
+  Frameworks in den Eingaben der Aufgabe findet, was die Aufgabe braucht, und zeigt ein zweites `cannot` als vom
+  Framework nicht bestätigt; ohne Probe und ohne Board sagt es das selbst, ohne ein Modell zu fragen. Modulvorschläge
+  bekommen `assumptions` (die geratenen Werte, höchstens 10) und `base_image_reason` (Pflicht für ein Image, das kein
+  Docker Official Image ist) und können ohne Probe vom Board und seinem SoC ausgehen. Der Assistent und
+  `llm-cli module generate-ai` zeigen das Basis-Image offen, bevor das Modul angelegt wird: Registry, Digest,
+  offizielles Image oder fertiges Image einer anderen Registry, Netzwerkzugriff des Image-Builds und den Grund der KI.
 
 ### Geändert
+- **Dittos Aufgabentexte** (Chat mit Tools, Healing-Analyse, Modulvorschlag, Build-Empfehlung) stehen in einem Modul,
+  `orchestrator/llm/task_prompts.py`, das sie mit den MCP-Prompts teilen, und jeder trägt die Regel für das ehrliche
+  „kann ich nicht“: den konkreten Grund nennen, nie ein Ergebnis behaupten, das man nicht bekommen hat, und
+  ungetestete Hardware ist kein Grund abzulehnen. Die Modulaufgabe beschränkt Basis-Images nicht mehr auf `debian:*`
+  und `ubuntu:*`: Sie bevorzugt ein Docker Official Image mit den Paketen des Herstellers und begründet jedes andere
+  Image. Ein von Ditto vorgeschlagenes Modul sagt in seiner Beschreibung, dass es auf echter Hardware ungetestet ist,
+  und nennt die Annahmen.
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
   eingebaute Transformers-Modell für den Offline-Modus ist entfernt (der Offline-Modus nutzt lokale Anbieter:
   Ollama, den verwalteten llama-server, einen Server in deinem Netzwerk). Healing-Analysen, Modulvorschläge und
@@ -511,6 +535,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- Modul-Assistent: Ein Basis-Image, das Ditto vorgeschlagen hatte, wurde durch `debian:bookworm-slim` oder
+  `ubuntu:22.04` ersetzt, wenn sein Name nur „debian“ oder „ubuntu“ enthielt (zum Beispiel ein Hersteller-Image auf
+  `nvcr.io`), sodass ein anderes Image als das vorgeschlagene gebaut worden wäre. Das vorgeschlagene Image bleibt jetzt
+  unverändert und wird mit seiner Registry gezeigt, und die Meldung mit dem Text der KI erscheint als reiner Text statt
+  als Rich Text.
 - MCP-Server: Auf Protokoll 2026-07-28 kündigte er Änderungsmeldungen für Tools, Prompts und Ressourcen sowie
   Ressourcen-Abonnements an, schickte aber nie eine. Jetzt kündigt er sie nur zusammen mit den Ereignissen an, die er
   veröffentlicht, und ohne Ereignisse wird er mit abgeschalteten Abonnements gebaut.

@@ -400,7 +400,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
 
     Ditto uses the provider's stored sign-in (llm-cli ditto login <provider>).
     """
-    from orchestrator.Core.ditto_manager import DittoError
+    from orchestrator.Core.ditto_manager import DittoError, proposal_facts
     ctx.require_framework()
     ditto = _ai_override(ctx, provider, model)
     try:
@@ -419,7 +419,8 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
 
     # The definition is shown in full before anything is written; the module generator checks it again.
     console.print("\n[bold green]AI analysis finished. Review the proposal:[/bold green]")
-    click.echo(json.dumps(definition.model_dump(), indent=2, ensure_ascii=False))
+    click.echo(json.dumps(definition.model_dump(exclude={"cannot"}), indent=2, ensure_ascii=False))
+    click.echo(proposal_facts(definition))
     if not Confirm.ask("Generate module with these settings?"):
         return
     fm = ctx.framework_manager
