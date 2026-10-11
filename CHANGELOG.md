@@ -307,6 +307,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   still sends are refused and audited); a revoked token loses its permissions. Only a person at a terminal manages
   tokens (audited with actor `cli`, never the token itself), and a token that ends up in a tool argument, a log line
   or the audit log is redacted like other keys.
+- **MCP resources**: `lcf://targets`, `lcf://targets/<target>/capabilities`, `lcf://builds/<id>/status`,
+  `lcf://builds/<id>/log`, `lcf://permissions` and the installation's documents `lcf://docs/<name>` (CLI_Usage,
+  Features, Module_Developer_Guide, BLUEPRINT and their `_DE` twins, from a fixed list). A resource is read through
+  the tool registry like the read tool it mirrors: that tool's permission decides (a denied tool hides its
+  resources, "ask" refuses with the tool to call), the same output filter cleans the result and wraps external text
+  as untrusted data, and every read is audited as `read_resource:<uri>`. Unknown ids, documents outside the list and
+  parameters with `..`, an absolute path or a NUL byte are invalid params (-32602). Clients on protocol 2026-07-28
+  can listen for changes: the tool, prompt and resource lists change with the permissions, and a build's status and
+  log resources report each change to the caller that started the build, from the server's own event bus.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -438,6 +447,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- MCP server: on protocol 2026-07-28 it advertised change notifications for tools, prompts and resources and
+  resource subscriptions, but never sent one. It now advertises them only together with the events it publishes,
+  and without events it is built with subscriptions turned off.
 - MCP server: a client that disconnects no longer leaves its builds running with nobody to clean up. The builds
   and jobs its session started are cancelled, each with an audit entry ("client disconnected"), the server waits
   up to 30 seconds for their containers to stop, and `llm-cli mcp serve` then shuts the framework down. A SIGTERM

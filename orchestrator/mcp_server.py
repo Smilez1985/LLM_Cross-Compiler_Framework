@@ -15,6 +15,10 @@ Security model
 - Results go through the registry's output filter (secrets redacted, external text cleaned and marked as
   untrusted in the output schema); the text block starts with one sentence of framework facts and wraps the
   JSON as untrusted data.
+- Resources (`lcf://...`) are read through the registry as well (ToolRegistry.read_resource): the permission of
+  the read tool a resource mirrors decides, the same filter applies, every read is audited. The server owns an
+  event bus (CallerBus) and publishes list changes and build updates on it (ServerEvents), so it serves
+  `subscriptions/listen` only together with events it really sends.
 - "Ask" permissions become an MCP elicitation (the client shows the question to the user). A client
   without elicitation support cannot confirm, so such calls are denied with a hint on how to allow them.
   A person's "no" is final for that call, even if the policy is loosened while the dialog is open.
@@ -58,8 +62,8 @@ from orchestrator.tools.confirmation import CallTooLong, describe_call
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, ENV_VAR, TokenStore, TokenStoreError, token_digest
 from orchestrator.tools.output import has_untrusted
 from orchestrator.tools.policy import Decision
-from orchestrator.tools.registry import (AuditUnavailable, ToolContext, ToolDenied, ToolError, ToolRegistry, ToolSpec,
-                                         repair_marks, text_sha256)
+from orchestrator.tools.registry import (AuditUnavailable, ResourceSpec, ResourceUnknown, ToolContext, ToolDenied,
+                                         ToolError, ToolRegistry, ToolSpec, repair_marks, text_sha256)
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.untrusted import wrap_untrusted
@@ -753,9 +757,10 @@ def end_session(framework, registry: Optional[ToolRegistry], session: McpSession
             logger.info(f"Could not wait for build {rid} to stop: {e}")
 
 
-def _session_lifespan(framework, registry, inner=None, caller: str = "mcp"):
+def _session_lifespan(framework, registry, inner=None, caller: str = "mcp", events=None):
     """The server lifespan: one McpSession per connection (per stdio session; once for the HTTP server), composed
-    with `inner` (stdout to stderr for stdio). On exit the session's own builds and jobs are cancelled."""
+    with `inner` (stdout to stderr for stdio), and the change events (`events`, a ServerEvents) published while it
+    runs. On exit the session's own builds and jobs are cancelled."""
     import anyio
     import anyio.to_thread
 
@@ -768,6 +773,10 @@ def _session_lifespan(framework, registry, inner=None, caller: str = "mcp"):
                 entered = await stack.enter_async_context(inner(server))
                 if isinstance(entered, dict):
                     state.update(entered)
+            if events is not None:
+                tasks = await stack.enter_async_context(anyio.create_task_group())
+                tasks.start_soon(events.run)
+                stack.callback(tasks.cancel_scope.cancel)
             state[SESSION_STATE_KEY] = session
             try:
                 yield state
@@ -780,6 +789,201 @@ def _session_lifespan(framework, registry, inner=None, caller: str = "mcp"):
     return lifespan
 
 
+# --- Resources and change events (design 4.2, 4.4) ------------------------------------------------------------
+
+def _mcp_error(code: int, message: str) -> Exception:
+    from mcp.shared.exceptions import MCPError
+    return MCPError(code, message)
+
+
+def _resource_reader(spec: ResourceSpec, registry: ToolRegistry, caller: str, instance: str):
+    """Reads `spec` through the registry for the caller of the request (its permission, output filter, audit).
+    Errors become JSON-RPC errors: invalid params (-32602) for an unknown resource, id or parameter, invalid
+    request for a refusal, internal error otherwise."""
+    import anyio.to_thread
+    from mcp_types import INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST
+
+    async def read(params: Dict[str, str], mcp_ctx=None) -> str:
+        tool_ctx = _tool_context(mcp_ctx, caller, instance)  # static resources have no Context: the caller's label
+        try:
+            text, _ = await anyio.to_thread.run_sync(registry.read_resource, spec.uri, dict(params), tool_ctx)
+        except ResourceUnknown as e:
+            raise _mcp_error(INVALID_PARAMS, error_text(spec.uri, e)) from None
+        except ToolDenied as e:
+            raise _mcp_error(INVALID_REQUEST, error_text(spec.uri, e)) from None
+        except ToolError as e:
+            raise _mcp_error(INTERNAL_ERROR, error_text(spec.uri, e)) from None
+        return text
+    return read
+
+
+def _add_resources(server, registry: ToolRegistry, caller: str, instance: str) -> Dict[str, str]:
+    """Registers every registry resource with the SDK (templates, static resources and the concrete resources a
+    template lists, such as the documents that exist) and returns listed URI -> registry URI, for filtering the
+    lists per caller. The SDK checks template parameters (no `..`, absolute path or NUL byte) before a read."""
+    from mcp.server.mcpserver import Context
+    from mcp.server.mcpserver.resources import FunctionResource
+    from mcp.shared.uri_template import UriTemplate
+    listed: Dict[str, str] = {}
+
+    def static(uri: str, spec: ResourceSpec, params: Dict[str, str]) -> None:
+        read = _resource_reader(spec, registry, caller, instance)
+
+        async def fixed():
+            return await read(params)
+        server.add_resource(FunctionResource.from_function(fixed, uri=uri, name=spec.name, title=spec.title,
+                                                           description=spec.description, mime_type=spec.mime_type))
+        listed[uri] = spec.uri
+
+    for spec in registry.resources():
+        names = list(UriTemplate.parse(spec.uri).variable_names)
+        if not names:
+            static(spec.uri, spec, {})
+            continue
+        read = _resource_reader(spec, registry, caller, instance)
+
+        async def template(_read=read, **kwargs):
+            mcp_ctx = kwargs.pop("ctx", None)
+            return await _read({k: str(v) for k, v in kwargs.items()}, mcp_ctx)
+        params = [inspect.Parameter(n, inspect.Parameter.KEYWORD_ONLY, annotation=str) for n in names]
+        params.append(inspect.Parameter("ctx", inspect.Parameter.KEYWORD_ONLY, annotation=Context))
+        template.__signature__ = inspect.Signature(params, return_annotation=str)
+        template.__annotations__ = {**{n: str for n in names}, "ctx": Context, "return": str}
+        template.__name__ = spec.name
+        server.resource(spec.uri, name=spec.name, title=spec.title, description=spec.description,
+                        mime_type=spec.mime_type)(template)
+        listed[spec.uri] = spec.uri
+        for concrete in (spec.listed() if spec.listed is not None else []):
+            static(spec.uri.format(**concrete), spec, dict(concrete))
+    return listed
+
+
+class CallerBus:
+    """The server's own event bus for `subscriptions/listen` (the SDK's SubscriptionBus protocol, 2026-07-28). Each
+    listen stream is registered with the caller ClientTracker checked for its request, so an event that concerns
+    one caller (the status of its build) reaches only that caller's streams; list changes reach every stream."""
+
+    def __init__(self):
+        self._listeners: Dict[object, Tuple[str, Callable[[Any], None]]] = {}
+
+    async def publish(self, event, callers: Optional[set] = None) -> None:
+        import anyio.lowlevel
+        for caller, listener in list(self._listeners.values()):
+            if callers is not None and caller not in callers:
+                continue
+            try:
+                listener(event)
+            except Exception:  # one stream must not stop the others
+                logger.exception("A subscription listener failed; continuing")
+        await anyio.lowlevel.checkpoint()
+
+    def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], None]:
+        token = object()
+        self._listeners[token] = (current_caller(), listener)
+        return lambda: self._listeners.pop(token, None)
+
+    def callers(self) -> List[str]:
+        return [caller for caller, _ in self._listeners.values()]
+
+
+class ServerEvents:
+    """Publishes the server's change events on its bus: tools, prompts and resources list changed when the policy
+    file or the token store changes (what a caller may see depends on them), and resource-updated for the status and
+    log URIs of a build request when it changes (only to the caller that owns the build). Polls in a worker thread
+    every POLL_SECONDS while the server runs. `ended()`: True once the stdio server's token was revoked or rotated;
+    the listen streams are then closed (`close_streams`) and nothing more is published."""
+
+    POLL_SECONDS = 1.0
+
+    def __init__(self, registry: ToolRegistry, framework, bus: CallerBus, ended: Optional[Callable[[], bool]] = None,
+                 close_streams: Optional[Callable[[], None]] = None):
+        self.registry, self.framework, self.bus = registry, framework, bus
+        self.ended, self.close_streams = ended, close_streams
+        self._seen: Optional[Tuple[str, Dict[str, tuple]]] = None
+
+    def _files(self) -> str:
+        digest = hashlib.sha256()
+        for path in (getattr(self.registry.policy_store, "path", None),
+                     getattr(getattr(self.registry, "tokens", None), "path", None)):
+            try:
+                digest.update(hashlib.sha256(Path(path).read_bytes()).digest() if path else b"-")
+            except OSError:
+                digest.update(b"missing")
+        return digest.hexdigest()
+
+    def _builds(self) -> Dict[str, tuple]:
+        service = getattr(self.framework, "build_service", None)
+        try:
+            builds = service.list_requests().builds if service is not None else []
+        except Exception:  # no orchestrator (yet)
+            return {}
+        state = {}
+        for b in builds:
+            try:
+                tail = service.log_tail(b.request_id, 1).lines
+            except Exception:
+                tail = []
+            state[b.request_id] = ((b.status, b.stage, b.progress_percent, b.completed_builds, b.failed_builds,
+                                    len(b.errors), len(b.warnings), b.pending_healing is not None),
+                                   text_sha256(tail[-1]) if tail else "", b.owner or "")
+        return state
+
+    def snapshot(self) -> Tuple[str, Dict[str, tuple]]:
+        return self._files(), self._builds()
+
+    def changes(self) -> List[Tuple[Any, Optional[set]]]:
+        """The events since the last snapshot (none on the first)."""
+        from mcp.server.subscriptions import PromptsListChanged, ResourcesListChanged, ResourceUpdated, \
+            ToolsListChanged
+        from orchestrator.tools.framework_resources import build_uris
+        files, builds = self.snapshot()
+        if self._seen is None:
+            self._seen = (files, builds)
+            return []
+        events: List[Tuple[Any, Optional[set]]] = []
+        if files != self._seen[0]:
+            events += [(ToolsListChanged(), None), (PromptsListChanged(), None), (ResourcesListChanged(), None)]
+        for rid, (status, log, owner) in builds.items():
+            before = self._seen[1].get(rid)
+            callers = {owner} if owner else None
+            status_uri, log_uri = build_uris(rid)
+            if before is None or before[0] != status:
+                events.append((ResourceUpdated(status_uri), callers))
+            if before is None or before[1] != log:
+                events.append((ResourceUpdated(log_uri), callers))
+        self._seen = (files, builds)
+        return events
+
+    async def run(self) -> None:
+        import anyio
+        import anyio.to_thread
+        await anyio.to_thread.run_sync(self.changes)  # the starting point
+        while True:
+            await anyio.sleep(self.POLL_SECONDS)
+            if self.ended is not None and self.ended():
+                if self.close_streams is not None:
+                    self.close_streams()
+                return
+            try:
+                events = await anyio.to_thread.run_sync(self.changes)
+            except Exception as e:  # events are a convenience; the server goes on without them
+                logger.debug(f"Could not check for changes: {e}")
+                continue
+            for event, callers in events:
+                await self.bus.publish(event, callers)
+
+
+def _listen_closer(server) -> Callable[[], None]:
+    """Closes every open listen stream of `server` (the SDK's ListenHandler)."""
+    def close() -> None:
+        entry = getattr(getattr(server, "_lowlevel_server", None), "get_request_handler", lambda m: None)(
+            "subscriptions/listen")
+        handler = getattr(entry, "handler", None)
+        with contextlib.suppress(Exception):
+            handler.close()
+    return close
+
+
 def closed_schema(model: type) -> Dict[str, Any]:
     """A tool's input schema as clients get it: the input model's own schema, closed to unknown keys."""
     schema = model.model_json_schema()
@@ -788,11 +992,16 @@ def closed_schema(model: type) -> Dict[str, Any]:
 
 
 def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None, caller: str = "mcp",
-                     transport: str = "stdio", still_valid: Optional[Callable[[], bool]] = None):
+                     transport: str = "stdio", still_valid: Optional[Callable[[], bool]] = None,
+                     events: bool = True):
     """The MCP server for the registry. Each request's caller comes from ClientTracker: over stdio `caller` ("mcp"
     for the local stdio clients, "mcp:<name>" for LCF_MCP_TOKEN; `still_valid` ends it once that token is revoked
-    or rotated), over HTTP the named token TokenAuth checked. Tools the caller's permissions deny are not listed;
-    a call to one is still refused and audited."""
+    or rotated), over HTTP the named token TokenAuth checked. Tools, resources and prompts the caller's permissions
+    deny are not listed; a call to one is still refused and audited.
+
+    `events`: the server owns a bus and publishes list changes and build updates on it, so `subscriptions/listen`
+    is served (2026-07-28 clients; the handshake revisions advertise no list changes). Without events the server is
+    built with subscriptions=False and advertises none."""
     import anyio
     caller = caller if transport == "stdio" else UNCHECKED_CALLER
     import anyio.to_thread
@@ -814,6 +1023,19 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                                                                                   current_caller() or caller)}
             return [tool.model_copy(update={"input_schema": closed_schema(listed[tool.name].input_model)})
                     for tool in await super().list_tools() if tool.name in listed]
+
+        async def _readable(self) -> set:
+            return {spec.uri for spec in await anyio.to_thread.run_sync(registry.resources,
+                                                                         current_caller() or caller)}
+
+        async def list_resources(self):
+            """The resources this caller may read (a denied read tool hides the resources that mirror it)."""
+            readable = await self._readable()
+            return [r for r in await super().list_resources() if resource_of.get(str(r.uri)) in readable]
+
+        async def list_resource_templates(self):
+            readable = await self._readable()
+            return [t for t in await super().list_resource_templates() if t.uri_template in readable]
 
         async def call_tool(self, name, arguments, context=None):
             state = _CallState()
@@ -847,17 +1069,26 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
             finally:
                 _CALL.reset(token)
 
+    bus = CallerBus() if events else None
+    publisher = None
+    if bus is not None:
+        publisher = ServerEvents(registry, framework, bus, ended=(lambda: not still_valid()) if still_valid else None)
     server = AuditedServer(SERVER_NAME, title="LLM Cross-Compiler Framework", instructions=INSTRUCTIONS,
                            version=getattr(getattr(framework, "info", None), "version", "") or "",
-                           lifespan=_session_lifespan(framework, registry, lifespan, caller),
+                           lifespan=_session_lifespan(framework, registry, lifespan, caller, publisher),
                            middleware=[ClientTracker(transport, caller=caller, still_valid=still_valid,
-                                                     refused=lambda *args: _audit_refused_call(registry, *args))])
+                                                     refused=lambda *args: _audit_refused_call(registry, *args))],
+                           subscriptions=bus if bus is not None else False)
     server.open_questions = questions
+    server.events = publisher
+    if publisher is not None:
+        publisher.close_streams = _listen_closer(server)
     for spec in registry.list():
         server.add_tool(make_tool_function(spec, registry, questions, caller, instance), name=spec.name,
                         title=spec.title,
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
                         structured_output=True, meta=spec.meta())
+    resource_of = _add_resources(server, registry, caller, instance)
     return server
 
 

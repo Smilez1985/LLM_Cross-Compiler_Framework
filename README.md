@@ -357,6 +357,10 @@ Python (see [Calling `llm-cli`](#calling-llm-cli)). After `--write claude-deskto
   permissions; a new one can only read until you allow more (`llm-cli tools permissions --token NAME`). A stdio
   client gets its own token with `LCF_MCP_TOKEN` in its server entry; without it, all local stdio clients share your
   own permissions.
+- **Resources:** the targets, a target's capabilities, a build's status and log, your tool permissions and the
+  framework's documentation can also be attached as resources (`lcf://targets`, `lcf://builds/<id>/log`,
+  `lcf://docs/Features`, ...). They follow the permissions of the matching read tool and are audited like a tool
+  call; clients on protocol 2026-07-28 are told when a build or the permissions change.
 - There is no deployment tool over MCP.
 
 **Using a Claude subscription:** Anthropic does not allow third-party apps to use a Claude subscription's sign-in

@@ -373,6 +373,11 @@ du Claude Desktop neu.
   Berechtigungen; ein neues darf nur lesen, bis du mehr erlaubst (`llm-cli tools permissions --token NAME`). Ein
   stdio-Client bekommt sein eigenes Token mit `LCF_MCP_TOKEN` in seinem Server-Eintrag; ohne es teilen sich alle
   lokalen stdio-Clients deine eigenen Berechtigungen.
+- **Ressourcen:** Die Targets, die Capabilities eines Targets, Status und Log eines Builds, deine
+  Tool-Berechtigungen und die Dokumentation des Frameworks lassen sich auch als Ressourcen anhängen
+  (`lcf://targets`, `lcf://builds/<ID>/log`, `lcf://docs/Features`, ...). Sie folgen den Berechtigungen des
+  passenden Lese-Tools und landen wie ein Tool-Aufruf im Audit-Log; Clients mit Protokoll 2026-07-28 erfahren, wenn
+  sich ein Build oder die Berechtigungen ändern.
 - Ein Tool zum Übertragen auf Boards gibt es über MCP nicht.
 
 **Ein Claude-Abo nutzen:** Anthropic erlaubt Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines

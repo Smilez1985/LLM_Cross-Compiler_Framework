@@ -889,6 +889,23 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Teil als nicht vertrauenswürdige Daten eingepackt, während die eigenen Ablehnungen des Frameworks und der nächste
   Schritt unverpackt bleiben (Dittos Modell bekommt solche Fehler ebenfalls in einem Block für nicht
   vertrauenswürdige Daten).
+- **Ressourcen:** Neben den Tools bietet der Server Ressourcen, die ein Client anhängen oder lesen kann:
+  `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<Request-ID>/status`,
+  `lcf://builds/<Request-ID>/log` (die letzten 200 Zeilen), `lcf://permissions` und die Dokumente der Installation
+  `lcf://docs/<Name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` und ihre deutschen
+  `_DE`-Zwillinge; aufgeführt werden nur die vorhandenen). Eine Ressource liefert, was ihr Lese-Tool liefert, und wird
+  über die Tool-Registry gelesen: Deine Berechtigung für dieses Tool entscheidet (die Ressource eines verbotenen Tools
+  wird weder aufgeführt noch gelesen, und eine, deren Tool auf „fragen“ steht, wird mit dem Tool abgelehnt, das
+  stattdessen aufzurufen ist, weil das Lesen einer Ressource dich nicht fragen kann), derselbe Ausgabefilter bereinigt
+  sie (externer Text als nicht vertrauenswürdige Daten eingepackt, daher kommen diese Ressourcen als Text), und jedes
+  Lesen landet als `read_resource:<URI>` im Audit-Log. Eine unbekannte ID, ein Dokument außerhalb der Liste oder ein
+  Parameter mit `..`, einem absoluten Pfad oder einem NUL-Byte ist ein Fehler wegen ungültiger Parameter (-32602).
+- **Änderungsereignisse:** Ein Client mit Protokoll 2026-07-28 kann auf Änderungen hören (`subscriptions/listen`):
+  Die Listen der Tools, Prompts und Ressourcen ändern sich, wenn sich deine Berechtigungen oder die eines Tokens
+  ändern, und die Status- und Log-Ressourcen eines Builds melden jede Änderung, nur an den Aufrufer, der den Build
+  gestartet hat. Der Server veröffentlicht sie über seinen eigenen Ereignisbus; er prüft jede Sekunde auf Änderungen.
+  Auf den älteren Handshake-Revisionen kündigt er keine Änderungsmeldungen an, daher sehen diese Clients eine
+  geänderte Berechtigung bei ihrer nächsten Sitzung.
 - **Lokale Dateien für KI-Clients:** MCP-Clients und Ditto nennen nie einen Pfad. Ein lokales Modell oder ein
   Kalibrierungsdatensatz wird als `<Label>:<relativer Pfad>` in einem Ordner genannt, den die KI nutzen darf, zum
   Beispiel `models:qwen2.5-0.5b-instruct` oder `datasets:calib/de.txt`, oder über die Datei-ID (`lf_` und 16
