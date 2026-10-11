@@ -92,6 +92,7 @@ class FrameworkManager:
         self._initialized = False
         self.init_error: Optional[Exception] = None  # why initialize() failed (e.g. a StorageError)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_thread: Optional[threading.Thread] = None
 
     def initialize(self) -> bool:
         """Führt die Boot-Sequenz durch."""
@@ -183,8 +184,41 @@ class FrameworkManager:
         The orchestrator keeps build tasks on its loop, so that loop must outlive the caller (e.g. a GUI slot)."""
         if self._loop is None:
             self._loop = asyncio.new_event_loop()
-            threading.Thread(target=self._loop.run_forever, name="framework-asyncio", daemon=True).start()
+            self._loop_thread = threading.Thread(target=self._loop.run_forever, name="framework-asyncio", daemon=True)
+            self._loop_thread.start()
         return asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout)
+
+    def _stop_loop(self, timeout: float = 10.0):
+        """Ends the background event loop of run_coroutine: cancels what still runs on it (a request whose build is
+        not finished stops being followed; the build itself is the engine's), stops the loop and waits for its
+        thread. Without this every framework left a thread running until the process ended."""
+        loop, thread = self._loop, self._loop_thread
+        if loop is None:
+            return
+        self._loop, self._loop_thread = None, None
+        if thread is threading.current_thread():  # called on the loop itself: it can only be told to stop
+            loop.call_soon(loop.stop)
+            return
+
+        async def cancel_tasks():
+            for _ in range(3):  # a cancelled worker may start the next one (the orchestrator's queue worker)
+                tasks = [t for t in asyncio.all_tasks() if t is not asyncio.current_task()]
+                if not tasks:
+                    break
+                for task in tasks:
+                    task.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+        if loop.is_running():
+            try:
+                asyncio.run_coroutine_threadsafe(cancel_tasks(), loop).result(timeout)
+            except Exception as e:  # a task that ignores its cancellation: stop the loop anyway
+                self.logger.warning(f"Background tasks did not end: {e.__class__.__name__}")
+            loop.call_soon_threadsafe(loop.stop)
+        if thread is not None:
+            thread.join(timeout)
+        if thread is None or not thread.is_alive():
+            loop.close()
 
     def ensure_rag_manager(self) -> Optional[RAGManager]:
         """Creates the RAG manager on demand once RAG is enabled (also at runtime via GUI)."""
@@ -225,4 +259,5 @@ class FrameworkManager:
         self.logger.info("Shutting down Framework...")
         if self.rag_manager is not None:
             self.rag_manager.close()  # releases the lock on the embedded knowledge base storage
+        self._stop_loop()
         self.logger.info("Shutdown complete.")
