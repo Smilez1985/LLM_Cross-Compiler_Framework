@@ -111,7 +111,7 @@ class AskTokenDialog(QDialog):
         layout.addWidget(self.token_input)
         
         # Checkbox to save token
-        self.chk_save = QCheckBox(tr("chk.save_token", "Save Token securely (Keyring)"))
+        self.chk_save = QCheckBox(tr("chk.save_token", "Save the token in the encrypted credential vault"))
         layout.addWidget(self.chk_save)
         
         # Try to pre-fill from secrets if available
