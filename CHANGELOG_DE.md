@@ -26,7 +26,36 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Hostnamen und Seriennummern werden durch stabile Platzhalter ersetzt, die in der Antwort lokal zurückübersetzt
   werden.
 - **Lokale Wissensbasis** auf lokalen Embeddings (FastEmbed, ONNX auf der CPU) und einem eingebetteten
-  Qdrant-Speicher: kein Vektordatenbank-Server und keine Cloud-Embeddings nötig.
+  Qdrant-Speicher: kein Vektordatenbank-Server und keine Cloud-Embeddings nötig, und sie funktioniert offline,
+  sobald ihre Modelle heruntergeladen sind.
+- **Reranking der Ergebnisse der Wissensbasis**: Ein lokaler mehrsprachiger Cross-Encoder (FastEmbed/ONNX, etwa
+  120 MB, beim ersten Gebrauch heruntergeladen, nie im Offline-Modus) liest die Frage zusammen mit jedem
+  Kandidaten und verwirft die unter einer Relevanzschwelle, sodass Ditto lieber keinen Auszug bekommt als
+  unpassende. Build-Empfehlungen nutzen ihn. Einstellungen: `rag_reranker` (`auto`: ab 6 GB RAM, das größere
+  bge-reranker-v2-m3 mit CUDA und 16 GB; `off`; oder eine Modell-ID), `rag_rerank_min_score` und
+  `rag_rerank_default` (auch Chat- und MCP-Suchen reranken; aus). Ein Reranker, der nicht laufen kann, wird
+  protokolliert, und die Suche behält ihre Reihenfolge. `llm-cli ditto eval --kind retrieval --rag-variant rerank`
+  bewertet ihn: bei den 34 Fragen hit@1 93 % und MRR 0,97 (hybride Suche: 87 % und 0,93), und alle 4 themenfremden
+  Fragen bekommen keinen Auszug (Schwelle 0,2: relevante Auszüge erreichten 0,80 oder mehr, themenfremde 0,009
+  oder weniger). Er braucht etwa 1 s für 12 Kandidaten und 2–2,6 s für 20 auf einer geteilten CPU mit 4 Kernen und
+  brachte weniger als die für den Chat geforderten 0,05 MRR, deshalb bleibt der Chat standardmäßig ohne ihn. Die
+  Analyse von Build-Logs und Modulvorschläge behalten die hybride Reihenfolge: Bei den letzten Zeilen
+  fehlgeschlagener Builds fand der Reranker den relevanten Auszug in 2 von 6 Fällen unter den ersten 3 (hybride
+  Suche: 5 von 6) und schob ihn in einem Fall unter die Schwelle, und beim Suchbegriff für Module verwarf er jeden
+  Auszug.
+- **Die Stichwortsuche versteht Bezeichner**: `-DGGML_CUDA=ON`, `rknn_toolkit2` oder `rknnToolkitLite` werden
+  auch über ihre Teile gefunden (`GGML_CUDA`, `rknn toolkit2`), und Suchen aus einem oder zwei Wörtern wie `E2041`
+  oder `GGML_CUDA` nutzen den Stichwortindex. Bezeichner-Fragen des Retrieval-Satzes: hit@3 von 83 % auf 100 %,
+  der Rest unverändert. Bestehende Wissensbasen bekommen ihren Stichwortindex einmalig beim ersten Gebrauch aus
+  dem gespeicherten Text neu aufgebaut (Dokumente und Vektoren bleiben erhalten); ältere Snapshots werden beim
+  Wiederherstellen genauso neu aufgebaut.
+- **Große Codeblöcke und Tabellen**, die über den Kontext des Embedding-Modells hinausgehen (512 Tokens beim
+  Standardmodell), werden an Zeilengrenzen geteilt, jedes Stück mit dem Tabellenkopf oder dem Code-Zaun, sodass
+  ihre hinteren Teile überhaupt gefunden werden (Antworten tief in solchen Blöcken: hit@1 von 50 % auf 100 %).
+  Kleinere Blöcke bleiben ganz. Importiere ein Dokument erneut, damit es wirkt.
+- Modelle der Wissensbasis werden nach 10 Minuten ohne Nutzung entladen und bei der nächsten Suche wieder geladen
+  (Einstellung `rag_model_idle_minutes`, 0 hält sie geladen). Die Zeit läuft ab dem Ende der letzten Suche oder
+  des letzten Imports, nie währenddessen.
 - **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install|start|stop|status`
   betreibt einen gepinnten llama.cpp-`llama-server` auf 127.0.0.1 (Build passend zur Hardware: CUDA, Vulkan,
   Metal oder CPU, ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei), und `llm-cli ditto models list|download`
@@ -36,6 +65,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Ditto-Evaluation** (`llm-cli ditto eval`): feste Fälle (Analyse von Build-Logs, Build-Empfehlungen,
   Modulvorschläge, Chat mit Tools, Prompt-Injection), nach Regeln bewertet, gegen den konfigurierten Anbieter oder
   je lokaler Modellstufe (`--tier small --tier small-q2`). Es wird nichts gebaut; `--json` schreibt den Bericht.
+- **Retrieval-Evaluation** (`llm-cli ditto eval --kind retrieval`): 42 deutsche und englische Suchen
+  (sprachübergreifende Fragen, Bezeichner wie `GGML_CUDA`, Antworten tief in einer großen Tabelle oder einem
+  Skript, die letzten Zeilen fehlgeschlagener Builds und Dittos eigene Suchbegriffe, themenfremde Fragen) gegen
+  einen Korpus aus 30 Auszügen aus Framework- und SDK-Dokumentation (`evals/retrieval/`). Der Korpus wird mit dem
+  konfigurierten lokalen Embedding-Modell in eine temporäre Wissensbasis indexiert: Es wird kein KI-Modell
+  gebraucht, und deine eigene Wissensbasis bleibt unberührt. Der Bericht nennt hit@1, hit@3, MRR, wie oft eine
+  themenfremde Frage keinen Auszug bekommt, Werte je Tag und die Suchdauer; er funktioniert offline, sobald das
+  Embedding-Modell heruntergeladen ist. Ein manueller und nächtlicher CI-Workflow führt ihn mit
+  zwischengespeicherten Modellen aus. Ausgangswerte mit dem Standard-Embedding-Modell für die CPU bei den 34
+  Fragen: hit@1 83 %, hit@3 97 %, MRR 0,91; alle 4 themenfremden Fragen bekommen noch Auszüge.
 - **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in
@@ -68,31 +107,6 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nie Secrets: Werte, die wie ein API-Schlüssel oder Token aussehen, URLs mit Benutzername oder Passwort und URLs
   mit einem Zugangs- oder Sitzungsparameter (etwa `?token=` oder `;jsessionid=`) werden nicht gemerkt.
   *Werkzeuge > Eingabeverlauf löschen...* vergisst ihn.
-- **Retrieval-Evaluation** (`llm-cli ditto eval --kind retrieval`): 42 deutsche und englische Suchen
-  (sprachübergreifende Fragen, Bezeichner wie `GGML_CUDA`, Antworten tief in einer großen Tabelle oder einem
-  Skript, die letzten Zeilen fehlgeschlagener Builds und Dittos eigene Suchbegriffe, themenfremde Fragen) gegen
-  einen Korpus aus 30 Auszügen aus Framework- und SDK-Dokumentation (`evals/retrieval/`). Der Korpus wird mit dem
-  konfigurierten lokalen Embedding-Modell in eine temporäre Wissensbasis indexiert: Es wird kein KI-Modell
-  gebraucht, und deine eigene Wissensbasis bleibt unberührt. Der Bericht nennt hit@1, hit@3, MRR, wie oft eine
-  themenfremde Frage keinen Auszug bekommt, Werte je Tag und die Suchdauer; er funktioniert offline, sobald das
-  Embedding-Modell heruntergeladen ist. Ein manueller und nächtlicher CI-Workflow führt ihn mit
-  zwischengespeicherten Modellen aus. Ausgangswerte mit dem Standard-Embedding-Modell für die CPU bei den 34
-  Fragen: hit@1 83 %, hit@3 97 %, MRR 0,91; alle 4 themenfremden Fragen bekommen noch Auszüge.
-- **Reranking der Ergebnisse der Wissensbasis**: Ein lokaler mehrsprachiger Cross-Encoder (FastEmbed/ONNX, etwa
-  120 MB, beim ersten Gebrauch heruntergeladen, nie im Offline-Modus) liest die Frage zusammen mit jedem
-  Kandidaten und verwirft die unter einer Relevanzschwelle, sodass Ditto lieber keinen Auszug bekommt als
-  unpassende. Build-Empfehlungen nutzen ihn. Einstellungen: `rag_reranker` (`auto`: ab 6 GB RAM, das größere
-  bge-reranker-v2-m3 mit CUDA und 16 GB; `off`; oder eine Modell-ID), `rag_rerank_min_score` und
-  `rag_rerank_default` (auch Chat- und MCP-Suchen reranken; aus). Ein Reranker, der nicht laufen kann, wird
-  protokolliert, und die Suche behält ihre Reihenfolge. `llm-cli ditto eval --kind retrieval --rag-variant rerank`
-  bewertet ihn: bei den 34 Fragen hit@1 93 % und MRR 0,97 (hybride Suche: 87 % und 0,93), und alle 4 themenfremden
-  Fragen bekommen keinen Auszug (Schwelle 0,2: relevante Auszüge erreichten 0,80 oder mehr, themenfremde 0,009
-  oder weniger). Er braucht etwa 1 s für 12 Kandidaten und 2–2,6 s für 20 auf einer geteilten CPU mit 4 Kernen und
-  brachte weniger als die für den Chat geforderten 0,05 MRR, deshalb bleibt der Chat standardmäßig ohne ihn. Die
-  Analyse von Build-Logs und Modulvorschläge behalten die hybride Reihenfolge: Bei den letzten Zeilen
-  fehlgeschlagener Builds fand der Reranker den relevanten Auszug in 2 von 6 Fällen unter den ersten 3 (hybride
-  Suche: 5 von 6) und schob ihn in einem Fall unter die Schwelle, und beim Suchbegriff für Module verwarf er jeden
-  Auszug.
 - **Signierte Community-Packs**: Ein Pack ist ein Zip mit einem Manifest (sha256, Größe und Rechte jeder Datei)
   und einer optionalen Ed25519-Signatur des Autors. Beim Lesen eines Packs werden genau die aufgeführten Dateien
   angenommen, nie Links oder Sonderdateien, und jeder Hash wird geprüft. Vertrauenswürdige Herausgeberschlüssel
@@ -141,19 +155,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schlüsselbund des Betriebssystems, Indexeinträge aus Packs, Signatur von `index.json`) und die
   CI-Workflow-Vorlage `scripts/community_repo/validate-contribution.yml`, die `llm-cli zoo verify` für jedes
   eingereichte Pack ausführt.
-
 - **Dokumentation auf Englisch und Deutsch** für jedes Dokument (README, Blaupause mit Design und Roadmap,
   CLI-Anleitung, Funktionen, Mitwirken, Leitfaden für Modulentwickler, SSOT, Changelog), geprüft durch
   `tests/test_docs.py`: Jedes Dokument hat sein Gegenstück, Links und Anker funktionieren, beide Changelogs nennen
   dieselben Versionen, und die Roadmap nennt nur, was kommt.
 
 ### Geändert
-- **Ergebnis von Deep Ingest**: Es meldete „Deep Ingest complete“, selbst wenn jede URL fehlschlug. Jetzt meldet
-  es Erfolg (alles gespeichert), teilweise (einige Seiten gespeichert; andere schlugen fehl, waren von der Site
-  vorbehalten, oder der Crawl wurde gestoppt) oder Fehlschlag (nichts gespeichert), jeweils mit eigener Meldung und
-  erst, nachdem der letzte Schreibvorgang zurückgekehrt ist. Seiten werden gespeichert, sobald sie gelesen sind;
-  ein gestoppter oder unterbrochener Crawl behält also, was er schon gespeichert hat, und Seiten, die nicht
-  abgerufen werden konnten, stehen im Crawl-Protokoll.
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
   eingebaute Transformers-Modell für den Offline-Modus ist entfernt (der Offline-Modus nutzt lokale Anbieter:
   Ollama, den verwalteten llama-server, einen Server in deinem Netzwerk). Healing-Analysen, Modulvorschläge und
@@ -171,25 +178,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   voller Länge, was auf einer CPU Minuten dauert); ab „medium“ bleibt es an.
 - Abhängigkeiten: `anthropic` 1.13.0, `openai` 3.28.0 (vorher 2.54.0) und `fastembed` 0.8.1 (lokale Embeddings,
   ONNX auf der CPU) sind exakt gepinnt; pip-audit meldet keine bekannten Schwachstellen.
-- Der User-Agent des Crawlers nennt die echte Version des Frameworks (er nannte 1.6.0).
-- Deep Ingest: Ein Link, der auf einen anderen Host weiterleitet, wird wie jeder andere externe Link übersprungen;
-  nur eine Weiterleitung der Start-URL kann den Crawl auf einen anderen Host verlegen.
-- **Die Stichwortsuche versteht Bezeichner**: `-DGGML_CUDA=ON`, `rknn_toolkit2` oder `rknnToolkitLite` werden
-  auch über ihre Teile gefunden (`GGML_CUDA`, `rknn toolkit2`), und Suchen aus einem oder zwei Wörtern wie `E2041`
-  oder `GGML_CUDA` nutzen den Stichwortindex. Bezeichner-Fragen des Retrieval-Satzes: hit@3 von 83 % auf 100 %,
-  der Rest unverändert. Bestehende Wissensbasen bekommen ihren Stichwortindex einmalig beim ersten Gebrauch aus
-  dem gespeicherten Text neu aufgebaut (Dokumente und Vektoren bleiben erhalten); ältere Snapshots werden beim
-  Wiederherstellen genauso neu aufgebaut.
-- **Große Codeblöcke und Tabellen**, die über den Kontext des Embedding-Modells hinausgehen (512 Tokens beim
-  Standardmodell), werden an Zeilengrenzen geteilt, jedes Stück mit dem Tabellenkopf oder dem Code-Zaun, sodass
-  ihre hinteren Teile überhaupt gefunden werden (Antworten tief in solchen Blöcken: hit@1 von 50 % auf 100 %).
-  Kleinere Blöcke bleiben ganz. Importiere ein Dokument erneut, damit es wirkt.
 - **Dittos Wissensauszüge passen in den Kontext**: Sie belegen höchstens ein Drittel von `chat_context_limit`; ein
   Auszug, der nicht passt, wird übersprungen, und ein zu langer erster wird an einer Zeile gekürzt (ein offener
   Codeblock wird geschlossen).
-- Modelle der Wissensbasis werden nach 10 Minuten ohne Nutzung entladen und bei der nächsten Suche wieder geladen
-  (Einstellung `rag_model_idle_minutes`, 0 hält sie geladen). Die Zeit läuft ab dem Ende der letzten Suche oder
-  des letzten Imports, nie währenddessen.
+- **Ergebnis von Deep Ingest**: Es meldete „Deep Ingest complete“, selbst wenn jede URL fehlschlug. Jetzt meldet
+  es Erfolg (alles gespeichert), teilweise (einige Seiten gespeichert; andere schlugen fehl, waren von der Site
+  vorbehalten, oder der Crawl wurde gestoppt) oder Fehlschlag (nichts gespeichert), jeweils mit eigener Meldung und
+  erst, nachdem der letzte Schreibvorgang zurückgekehrt ist. Seiten werden gespeichert, sobald sie gelesen sind;
+  ein gestoppter oder unterbrochener Crawl behält also, was er schon gespeichert hat, und Seiten, die nicht
+  abgerufen werden konnten, stehen im Crawl-Protokoll.
+- Der User-Agent des Crawlers nennt die echte Version des Frameworks (er nannte 1.6.0).
+- Deep Ingest: Ein Link, der auf einen anderen Host weiterleitet, wird wie jeder andere externe Link übersprungen;
+  nur eine Weiterleitung der Start-URL kann den Crawl auf einen anderen Host verlegen.
 - Wissensexporte und mit ihnen der Wissens-Snapshot neuer Target-Module werden bereinigt: Home-Ordner, IP- und
   MAC-Adressen, E-Mail-Adressen, JWTs, der Hostname und der Benutzername werden entfernt, zusätzlich zu
   API-Schlüsseln. Image-Digests (`name@sha256:...`) und die Pfade von Standardkonten wie `/root` oder
@@ -201,17 +201,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `capabilities:` (Support-Level community: ihre Boards und GGUF mit den Typen, die ihr Build-Skript verarbeitet),
   sodass Builder, CLI und KI-Clients ihre Build-Einstellungen prüfen. Die Erzeugung schlägt fehl, wenn irgendwo ein
   Platzhalter der Vorlage übrig bleibt.
-- Der Code für gepinnte Downloads liegt jetzt in `orchestrator/utils/download.py` und wird von der lokalen
-  Modell-Laufzeit und dem Community Zoo gemeinsam genutzt.
 
 ### Entfernt
 - Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen
   eigenen Datensatz).
+- `litellm` und `tiktoken` und mit ihnen 19 indirekte Pakete (aiohttp, boto3, jinja2 und andere).
 - Die ungenutzte Einstellung `input_history` (der Eingabeverlauf ist persönlich und liegt im Zustandsordner des
   Benutzers, nicht in der gemeinsamen `configs/config.yml`).
 - Die Option *Respect robots.txt* im Deep-Ingest-Dialog und die Einstellung `crawler_respect_robots`: robots.txt
   ist ein maschinenlesbarer Vorbehalt wie die anderen und wird deshalb immer beachtet.
-- `litellm` und `tiktoken` und mit ihnen 19 indirekte Pakete (aiohttp, boto3, jinja2 und andere).
 - Der „Swarm“-Upload: die XOR-„SwarmCipher“ (eine Verschleierung, die jeder rückgängig machen konnte),
   `llm-cli swarm upload`, der Knopf „Contribute to Swarm“ im Community Hub und seine Abfrage eines GitHub-Tokens.
   Das Framework fragt nie nach einem Repository-Token und speichert keins. Alte Swarm-Pakete in
@@ -219,16 +217,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Die Installation von Hand kopierter Modulordner aus `community/`: Community-Packs werden mit
   `llm-cli zoo install` oder dem Community Hub installiert.
 
-### Behoben
-- Die Wissensbasis funktioniert im Offline-Modus, sobald ihre Modelle heruntergeladen sind: Das heruntergeladene
-  BM25-Stichwortmodell wurde offline nie gefunden, deshalb schlug jeder Import und jede Suche mit „not in ... and
-  offline mode is on“ fehl.
-
 ### Sicherheit
-- Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt. Regeln mit `*` oder `$` (etwa
-  `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach der ersten und
-  eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler Seiten abrief, die
-  die Site ausgeschlossen hatte.
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
   Download, der direkt in eine Shell geleitet wird, das Löschen des Wurzel- oder Home-Ordners, Schreibrechte für
   alle, das Überschreiben eines Datenträgers), ganz gleich, welche Anweisungen ein Build-Log oder ein
@@ -236,6 +225,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Anfragen an lokale Modellserver auf 127.0.0.1 laufen nie über einen HTTP(S)-Proxy aus der Umgebung.
 - Downloads lokaler Modelle werden abgelehnt, wenn Größe und sha256 nicht gepinnt sind; das Archiv mit dem
   Server-Programm wird genauso geprüft und atomar installiert.
+- Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt. Regeln mit `*` oder `$` (etwa
+  `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach der ersten und
+  eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler Seiten abrief, die
+  die Site ausgeschlossen hatte.
 - Community-Packs werden nur über einen Quarantäne-Ordner und nach ihren Prüfungen installiert: eine ID ohne
   Pfade, genau die aufgeführten Dateien mit ihren Hashes, keine Links, Sonder- oder Binärdateien, jedes Image, das
   ein Dockerfile bezieht (`FROM`, `COPY --from`, `RUN --mount=...,from=`, auch in einem kleingeschriebenen
