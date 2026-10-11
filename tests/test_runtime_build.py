@@ -971,6 +971,21 @@ class TestStore:
                                                          confirm=lambda info: True, host=("linux", "x86_64"))
         assert verifier.calls == []
 
+    def test_an_archive_that_unpacks_to_more_than_the_limit_is_refused_before_extraction(self, tmp_path, monkeypatch):
+        from orchestrator.runtime.build import store as store_module
+        monkeypatch.setattr(store_module, "MAX_IMPORT_BYTES", 100_000)
+        big = tmp_path / "zeros"
+        big.write_bytes(b"\0" * 1_000_000)  # packs to a few KiB
+        archive = tmp_path / "bomb.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(big, arcname="bin/llama-server")
+        assert archive.stat().st_size < 100_000
+        store = BuildStore(tmp_path / "laptop")
+        with pytest.raises(StoreError, match="unpack"):
+            store.import_build(archive, pin=PIN, verifier=FakeVerifier(), confirm=lambda i: True,
+                               host=("linux", "x86_64"))
+        assert not any(store.builds_dir.rglob("llama-server")), "nothing was extracted"
+
     def test_an_import_for_another_machine_is_refused(self, tmp_path):
         source_store = BuildStore(tmp_path / "pc")
         build = store_build(source_store, tmp_path)
