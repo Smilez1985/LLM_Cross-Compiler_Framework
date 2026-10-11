@@ -164,6 +164,15 @@ def test_cache_is_keyed_by_text_not_by_position(tmp_path):
     assert [b[1] for b in model.batches[1:]] == [["dddd"], ["a"]]
 
 
+def test_cache_keys_do_not_collide_at_the_separator(tmp_path):
+    """Crawled text may hold any control character: query 'a<US>b' with 'c' is another pair than 'a' with 'b<US>c'."""
+    model = ScriptedCrossEncoder()
+    reranker = scripted_reranker(tmp_path, model)
+    reranker.scores("a\x1fb", ["c"])
+    reranker.scores("a", ["b\x1fc"])
+    assert [b[:2] for b in model.batches] == [("a\x1fb", ["c"]), ("a", ["b\x1fc"])]
+
+
 def test_cache_is_bounded(tmp_path):
     model = ScriptedCrossEncoder()
     reranker = scripted_reranker(tmp_path, model)
@@ -237,6 +246,21 @@ def test_an_over_long_first_excerpt_is_cut_at_a_line():
     assert cut.endswith(CUT_MARK) and words(cut) + words(later) <= 22 and later == "short one"
     kept = cut[:-len(CUT_MARK)].split("\n")
     assert kept == lines[:len(kept)] and len(kept) >= 3  # whole lines only
+
+
+def test_a_cut_inside_a_code_block_closes_its_fence():
+    """An unclosed fence would turn the rest of the prompt, the instruction after the excerpts included, into code."""
+    for fence in ("```", "~~~~"):
+        code = "\n".join(f"cmake --build build --target step_{i}" for i in range(60))
+        excerpt = f"[Source: https://docs.example/build]\nBuild it:\n{fence}bash\n{code}\n{fence}\nDone."
+
+        (cut,) = pack_excerpts([excerpt], 40, words)
+
+        body = cut[:-len(CUT_MARK)]
+        assert body.endswith(f"\n{fence}") and body.count(fence) == 2 and words(cut) <= 40, cut
+    closed = "Intro.\n```\nshort\n```\n" + "\n".join(f"plain line {i} of prose" for i in range(40))
+    (cut,) = pack_excerpts([closed], 30, words)  # a block closed before the cut gets no extra fence
+    assert cut[:-len(CUT_MARK)].count("```") == 2 and not cut[:-len(CUT_MARK)].endswith("```")
 
 
 def test_an_over_long_single_line_is_cut_inside():
@@ -390,7 +414,9 @@ def test_ditto_packs_excerpts_into_a_third_of_the_context(tmp_path):
     assert searches == [None]
 
 
-def test_ditto_reranks_for_healing_modules_and_recommendations(tmp_path, monkeypatch):
+def test_ditto_reranks_only_build_recommendations(tmp_path, monkeypatch):
+    """Build-log tails and the module search lost relevant excerpts to the reranker in the retrieval evaluation
+    (tags log and callsite), so those follow rag_rerank_default (None); recommendations gained."""
     from test_ditto import make_ditto
 
     class Stop(Exception):
@@ -407,7 +433,7 @@ def test_ditto_reranks_for_healing_modules_and_recommendations(tmp_path, monkeyp
                                                         notes={})):
         with pytest.raises(Stop):
             call()
-    assert seen == [True, True, True]
+    assert seen == [None, None, True]
 
 
 # --- oversized code blocks and tables -----------------------------------------------------------------------------
@@ -631,6 +657,57 @@ def test_idle_models_are_released_after_the_configured_time(knowledge):
     latest = rag._model_timer
     rag.close()
     assert rag._model_timer is None and latest.finished.is_set()
+
+
+def test_models_in_use_are_not_released_and_the_countdown_starts_after_the_use(knowledge):
+    """A first download or a long document can outlast the idle time. Counting from the start of a use released
+    the model while it was still working (and the tokenizer under count_tokens), only to load it again."""
+    rag = None
+
+    class Slow(Releasable):
+        def embed_passages(self, texts):
+            rag._release_if_idle(rag._model_generation)  # the countdown ends while the import still runs
+            return super().embed_passages(texts)
+
+        def embed_query(self, text):
+            rag._release_if_idle(rag._model_generation)
+            return super().embed_query(text)
+
+    embedder, reranker = Slow(), FakeReranker(LICENSE_FIRST)
+    rag = knowledge(embedder=embedder, reranker=reranker)
+    rag.model_idle_seconds = 600
+    rag.ingest_document("https://docs.example/a", "Model memory note.")
+    rag.search("model memory note", rerank=True)
+    assert embedder.released == reranker.released == 0
+
+    timer = rag._model_timer  # started when the search returned
+    assert timer is not None and timer.interval == 600 and rag._models_in_use == 0
+    rag._release_if_idle(rag._model_generation)
+    assert embedder.released == reranker.released == 1
+
+
+def test_count_tokens_survives_a_release_between_check_and_use(tmp_path):
+    from orchestrator.rag.embeddings import MODEL_REGISTRY, FastEmbedDenseEmbedder
+
+    class Tokenizer:
+        def encode(self, text, add_special_tokens=False):
+            return SimpleNamespace(ids=text.split())
+
+    class Racing(FastEmbedDenseEmbedder):
+        reads = 0
+
+        @property
+        def _tokenizer(self):  # released right after the first look, as by the idle timer
+            Racing.reads += 1
+            return Tokenizer() if Racing.reads == 1 else None
+
+        @_tokenizer.setter
+        def _tokenizer(self, value):
+            pass
+
+    dense = Racing(MODEL_REGISTRY["intfloat/multilingual-e5-small"], tmp_path)
+    dense._model = object()
+    assert dense.count_tokens("three short words") == 3
 
 
 def test_idle_release_runs_on_its_timer_and_can_be_turned_off(knowledge):

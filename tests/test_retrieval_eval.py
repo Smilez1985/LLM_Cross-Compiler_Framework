@@ -74,12 +74,14 @@ def test_shipped_cases_and_corpus_are_valid_and_consistent():
     cases = load_cases(RETRIEVAL_CASES)
     docs = load_corpus(CORPUS)
     check_retrieval_cases(cases, docs)
-    assert all(c.kind == "retrieval" for c in cases) and 28 <= len(cases) <= 40
+    assert all(c.kind == "retrieval" for c in cases) and 28 <= len(cases) <= 50
     assert 25 <= len(docs) <= 40
     assert Counter(d.lang for d in docs)["de"] >= 10 and Counter(d.lang for d in docs)["en"] >= 10
     tags = Counter(t for c in cases for t in c.tags)
     assert tags["de"] >= 10 and tags["en"] >= 10
     assert tags["identifier"] >= 6 and tags["cross-lingual"] >= 3 and tags["oversized"] >= 2
+    # Build-log analysis searches with log lines, module proposals and recommendations with keyword strings.
+    assert tags["log"] >= 5 and tags["callsite"] >= 2
     negatives = [c for c in cases if c.expect.none_relevant]
     assert len(negatives) >= 4 and all("negative" in c.tags for c in negatives)
     assert all(c.expect.within <= RETRIEVAL_DEPTH for c in cases)

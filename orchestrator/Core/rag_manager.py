@@ -11,6 +11,7 @@ Search results are plain data from external sources; callers wrap them as untrus
 A cross-encoder can rerank them and drop the irrelevant ones; it is quality on top and never a reason to fail.
 """
 
+import functools
 import ipaddress
 import os
 import re
@@ -88,6 +89,22 @@ def _clean_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return clean
 
 
+def _uses_models(method):
+    """Marks a call that uses the models: no idle release while one runs, and the countdown starts at its end."""
+    @functools.wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with self._model_timer_lock:
+            self._models_in_use += 1
+            self._model_generation += 1  # a countdown already running is void
+        try:
+            return method(self, *args, **kwargs)
+        finally:
+            with self._model_timer_lock:
+                self._models_in_use -= 1
+            self._schedule_model_release()
+    return wrapper
+
+
 def _kind_of(meta: Dict[str, Any]) -> str:
     content_type = str(meta.get("content_type", "")).lower()
     if content_type in ("pdf", "text"):
@@ -136,6 +153,7 @@ class RAGManager:
         self._model_timer_lock = threading.Lock()
         self._model_timer: Optional[threading.Timer] = None
         self._model_generation = 0
+        self._models_in_use = 0
 
     # --- configuration ---
 
@@ -367,6 +385,8 @@ class RAGManager:
         if seconds <= 0:
             return
         with self._model_timer_lock:
+            if self._models_in_use:
+                return  # the last use to end starts the countdown
             self._model_generation += 1
             if self._model_timer is not None:
                 self._model_timer.cancel()
@@ -376,7 +396,7 @@ class RAGManager:
 
     def _release_if_idle(self, generation: int) -> None:
         with self._model_timer_lock:
-            if generation != self._model_generation:
+            if generation != self._model_generation or self._models_in_use:
                 return
             self._model_timer = None
         self.release_models()
@@ -405,10 +425,9 @@ class RAGManager:
         self.logger.warning(f"Knowledge base: {self.last_error}")
 
     def _models(self) -> Tuple[DenseEmbedder, SparseEmbedder]:
-        models = self._with_store(lambda store: (self._embedder, self._sparse))
-        self._schedule_model_release()
-        return models
+        return self._with_store(lambda store: (self._embedder, self._sparse))
 
+    @_uses_models
     def prepare_models(self) -> bool:
         """Downloads (unless offline) and loads the embedding models, and the reranker unless rag_reranker
         rules it out, now instead of on first use."""
@@ -441,6 +460,7 @@ class RAGManager:
             self._fail(e)
             return False
 
+    @_uses_models
     def _ingest(self, source_name: str, content: str, metadata: Optional[Dict[str, Any]], replace: bool) -> int:
         if not isinstance(content, str) or not content.strip():
             return 0
@@ -616,6 +636,7 @@ class RAGManager:
 
     # --- SEARCH ---
 
+    @_uses_models
     def search(self, query: str, limit: int = 3, score_threshold: Optional[float] = None,
                strict: bool = False, rerank: Optional[bool] = None) -> List[SearchResult]:
         """
