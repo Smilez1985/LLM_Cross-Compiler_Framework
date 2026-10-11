@@ -20,6 +20,7 @@ from typing import Optional, Any
 from orchestrator import __version__
 from orchestrator.utils.logging import setup_logging, get_logger
 from orchestrator.utils.telemetry import TelemetryManager
+from orchestrator.utils.updater import UpdateManager
 
 # Managers
 from orchestrator.Core.config_manager import ConfigManager
@@ -86,6 +87,7 @@ class FrameworkManager:
         self.orchestrator: Optional[LLMOrchestrator] = None
         self.build_service: Optional[BuildService] = None
         self.tool_registry = None
+        self.updater: Optional[UpdateManager] = None
 
         self._initialized = False
         self.init_error: Optional[Exception] = None  # why initialize() failed (e.g. a StorageError)
@@ -164,6 +166,9 @@ class FrameworkManager:
             # === DEPENDENCY INJECTION ===
             # Connect the Guardian (Self-Healing, which asks Ditto) to the Orchestrator
             self.orchestrator.inject_self_healing(self.self_healing_manager)
+
+            # Updater (in development: not wired yet, see the roadmap)
+            self.updater = UpdateManager(self.app_root)
 
             self._initialized = True
             self.logger.info("Framework successfully initialized.")

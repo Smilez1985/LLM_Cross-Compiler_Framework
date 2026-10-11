@@ -946,6 +946,8 @@ AMD Ryzen Z1 Extreme, unter Windows und Linux.
 | **NVIDIA-GPU-Target**: GGUF mit CUDA für die RTX 2080 Ti und RTX 3090 (CUDA-Version je nach Treiber), die vLLM-Formate AWQ und GPTQ, EXL3 und natives Deployment auf Windows-Rechner mit NVIDIA-GPU. | geplant |
 | **GPU-Beschleunigung** für die Importance-Matrix und den RKLLM-Export. | geplant |
 | **Target für AMD-RDNA3-APUs** für den Ryzen Z1 Extreme: llama.cpp mit Vulkan und HIP, Linux-Container und natives Deployment unter Windows. | geplant |
+| **Prüfung vor dem Build** (`orchestrator/Core/consistency_manager.py`, in Entwicklung): vergleicht die Treiber, die die Hardware-Probe gefunden hat, mit dem, was das SDK des Targets braucht (etwa die CUDA- und Treiber-Matrix), und hält einen Build an, der nicht gelingen kann, bevor er startet; muss noch in den Build-Start eingebunden werden. | geplant |
+| **Benchmark-Fenster** (`orchestrator/gui/benchmark_window.py`, in Entwicklung): llama-bench ausführen und die Ergebnisse als Tabelle zeigen; muss noch auf Basis der Laufzeit auf dem Gerät fertig gebaut und in der GUI erreichbar gemacht werden. | geplant |
 
 ### 3.3.0 - LoRA und große Modelle (geplant)
 
@@ -954,6 +956,7 @@ AMD Ryzen Z1 Extreme, unter Windows und Linux.
 | **LoRA-Adapter**: in das Modell einrechnen oder als Adapter behalten (oder beides), mit eigenem Streaming-Merger, GGUF-Adaptern für `llama-server --lora`, RKLLM-LoRA und einem Block `lora` in den Target-Capabilities. | geplant |
 | **Optionales LoRA-Training** mit einem eigenen, schlanken Trainer: Ideen von Unsloth, aber kein Unsloth-Code und keine Unsloth-Installation. | geplant |
 | **Große Modelle**: eine Prüfung von Speicherplatz und RAM vor dem Build, Wiederverwendung von F16-Zwischenständen, GGUF als Eingabe (Durchreichen und Neu-Quantisieren), Quantisierungsrezepte je Tensor, per KL-Divergenz geprüft, eine Importance-Matrix berechnet, von Hugging Face übernommen oder aus einer Datei geladen, und Prüfungen von Tokenizer und Chat-Vorlage nach jedem Build. | geplant |
+| **Vorgaben für Importance-Matrix und Kalibrierung** (Einstellungen `default_enable_imatrix` und `default_calibration_dataset`, in Entwicklung): als Vorgaben in Builder, CLI und den KI-Tools genutzt. | geplant |
 
 Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht in die Pipeline.
 
@@ -966,7 +969,7 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **CycloneDX-SBOM** und Herkunftsnachweise für Artefakte. | geplant |
 | **Dependabot-Wartezeit** für LLM-SDKs. | geplant |
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
-| **Signierte Updates.** | geplant |
+| **Signierte Updates** des Frameworks selbst (`orchestrator/utils/updater.py`, in Entwicklung: Update-Prüfung, Update und Neustart; noch nicht eingebunden), fertig gebaut als geprüfte Updates einer signierten Veröffentlichung statt eines einfachen `git pull`. Die Einstellungen `docker_registry` und `docker_namespace` benennen die eigenen Werkzeugketten-Images des Frameworks, sobald sie veröffentlicht und signiert werden. | geplant |
 | **Aufräumen**: Entfernung der alten Vier-Module-Skripte und ein Vorlagen-Dockerfile, das llama.cpp baut (das Vorlagen-`build.sh` passt bereits zur aktuellen Pipeline: GGUF über llama.cpp, Zwischendateien im Arbeitsordner). | geplant |
 | **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
 
@@ -983,6 +986,11 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
   der Abruf-Evaluation auf einem Rechner mit CUDA bewerten.
 - **Anmeldewege, die Registrierungen brauchen**: AWS IAM Identity Center mit eigenem registriertem Client, GitHub
   Copilot über eine eigene GitHub-App, Gemini mit dem eigenen OAuth-Client des Benutzers.
+- **Lokaler API-Server** (Einstellungen `api_enabled`, `api_host`, `api_port`, in Entwicklung).
+- **GUI-Design und automatische Aktualisierung** (Einstellungen `gui_theme`, `gui_auto_refresh`,
+  `gui_refresh_interval`, in Entwicklung).
+- **Aufräumen** (Einstellungen `auto_cleanup` und `logs_dir`, in Entwicklung): Arbeitsordner nach Builds aufräumen und
+  ein einstellbarer Log-Ordner.
 - **MCP-Apps-Oberfläche.**
 - **Ein MCP-Server auf Edge-Geräten.**
 

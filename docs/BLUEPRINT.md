@@ -897,6 +897,8 @@ Ryzen Z1 Extreme, on Windows and Linux.
 | **NVIDIA GPU target**: GGUF with CUDA for the RTX 2080 Ti and RTX 3090 (CUDA version chosen by driver), vLLM formats AWQ and GPTQ, EXL3, and native deployment to Windows machines with NVIDIA GPUs. | planned |
 | **GPU acceleration** for the importance matrix and the RKLLM export. | planned |
 | **AMD RDNA3 APU target** for the Ryzen Z1 Extreme: llama.cpp with Vulkan and HIP, Linux container and native Windows deployment. | planned |
+| **Pre-flight check before a build** (`orchestrator/Core/consistency_manager.py`, in development): compares the drivers the hardware probe found with what the target's SDK needs (for example the CUDA and driver matrix) and stops a build that cannot succeed before it starts; still to be wired into the build start. | planned |
+| **Benchmark window** (`orchestrator/gui/benchmark_window.py`, in development): run llama-bench and show the results as a table; still to be finished on top of the runtime on the device and made reachable from the GUI. | planned |
 
 ### 3.3.0 - LoRA and large models (planned)
 
@@ -905,6 +907,7 @@ Ryzen Z1 Extreme, on Windows and Linux.
 | **LoRA adapters**: merge them into the model or keep them as an adapter (or both), with an own streaming merger, GGUF adapters for `llama-server --lora`, RKLLM LoRA, and a `lora` block in the target capabilities. | planned |
 | **Optional LoRA training** with a lean trainer of our own: ideas from Unsloth, but no Unsloth code and no Unsloth installation. | planned |
 | **Large models**: a check of disk space and RAM before a build, reuse of F16 intermediates, GGUF as input (passthrough and requantization), per-tensor quantization recipes checked by KL divergence, an importance matrix computed, taken from Hugging Face or loaded from a file, and tokenizer and chat-template checks after each build. | planned |
+| **Defaults for the importance matrix and calibration** (settings `default_enable_imatrix` and `default_calibration_dataset`, in development): used as the defaults of the Builder, the CLI and the AI tools. | planned |
 
 Not planned: airllm. It is a runtime, not a converter, and does not belong in the pipeline.
 
@@ -917,7 +920,7 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **CycloneDX SBOM** and artifact provenance. | planned |
 | **Dependabot cooldown** for LLM SDKs. | planned |
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
-| **Signed updates.** | planned |
+| **Signed updates** of the framework itself (`orchestrator/utils/updater.py`, in development: update check, update and restart; not wired yet), finished as verified updates of a signed release instead of a plain `git pull`. The settings `docker_registry` and `docker_namespace` name the framework's own toolchain images once they are published and signed. | planned |
 | **Clean-up**: removal of the legacy four-module scripts, and a template Dockerfile that builds llama.cpp (the template `build.sh` already matches the current pipeline: GGUF through llama.cpp, intermediates in the work folder). | planned |
 | **SSOT corrections** for the project-sources catalogue and its scripts. | done |
 
@@ -933,6 +936,11 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
   with CUDA, with the retrieval evaluation on a CUDA machine.
 - **Sign-in methods that need registrations**: AWS IAM Identity Center with an own registered client, GitHub
   Copilot through an own GitHub App, Gemini with the user's own OAuth client.
+- **Local API server** (settings `api_enabled`, `api_host`, `api_port`, in development).
+- **GUI theme and automatic refresh** (settings `gui_theme`, `gui_auto_refresh`, `gui_refresh_interval`, in
+  development).
+- **Housekeeping** (settings `auto_cleanup` and `logs_dir`, in development): clean up work folders after builds and
+  a configurable log folder.
 - **MCP Apps UI.**
 - **An MCP server on edge devices.**
 

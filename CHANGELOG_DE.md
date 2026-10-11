@@ -336,19 +336,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Code selbst heraus nutzen (`llm-cli mcp config`). Es wechselt nie von sich aus zur Claude-API. Ein
   `claude_code`-Eintrag in einem Anbieterkatalog in deinem Konfigurationsordner wird mit einer Warnung
   übersprungen; die anderen Anbieter funktionieren weiter.
-- Einstellungen, die nichts las: `preferred_tiny_model`, `default_calibration_dataset`, `default_enable_imatrix`,
-  `logs_dir`, `auto_cleanup`, `docker_namespace`, `gui_theme`, `gui_auto_refresh`, `gui_refresh_interval`,
-  `api_enabled`, `api_host` und `api_port`. Eine `config.yml`, die sie noch enthält, lädt wie bisher; die Werte
-  werden ignoriert und bleiben in der Datei.
+- Die Einstellung `preferred_tiny_model` des entfernten Transformers-Offline-Modus. Eine `config.yml`, die sie noch
+  enthält, lädt wie bisher; der Wert wird ignoriert und bleibt in der Datei.
 - Reste des entfernten Transformers-Offline-Modus und des Qdrant-Containers: der Download kleiner Modelle im
   Model-Manager (er las `source_repositories['tiny_models']`) und `DockerManager.ensure_qdrant_service` (die
   Wissensbasis nutzt ein eingebettetes Qdrant). `image_qdrant` bleibt: Deployment-Pakete bringen Qdrant auf das
   Gerät.
-- Der Update-Manager (`orchestrator/utils/updater.py`): Er wurde bei jedem Start angelegt, aber nie aufgerufen, und
-  seine Liste der Dateien, die eine neue Einrichtung verlangen, nannte ein Skript, das es nicht gibt.
-- Das Benchmark-Fenster (`orchestrator/gui/benchmark_window.py`): Kein Menü öffnete es, und es konnte nicht
-  funktionieren (es las ein Attribut des Docker-Managers, das es nicht gibt, startete ein Image, das es nicht gibt,
-  und maß einen Platzhalter-Modellpfad).
 
 ### Behoben
 - Secrets-Speicher: Ein Speicher einer früheren Version, der sich nicht entschlüsseln lässt, wird von
