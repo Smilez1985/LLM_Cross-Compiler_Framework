@@ -207,6 +207,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Folders the AI May Use...). Adding one shows what sharing it means and is audited; `/`, your home folder, a
   folder containing the per-user folder or a denied folder cannot be added. The Hugging Face cache's `hub` folder
   may be added; its token files stay denied.
+- **Jobs and waiting for MCP clients and Ditto**: the tools `get_job_status` and `cancel_job` for long operations
+  other than builds (a job id `job_...`, its state, progress, result or error; a summary of each job is kept in
+  `~/.llm-framework/jobs/`), and `wait_seconds` on `get_build_status` and `get_job_status`: the call returns as
+  soon as the build or job changes or ends, at most after 50 seconds (a larger value is reduced with a note), with
+  progress notifications for clients that ask for them. Waiting holds no worker thread, at most 4 waits run per
+  client, and cancelling a wait never touches the build or job.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -274,6 +280,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - A local model file is mounted into the build containers alone, no longer together with the folder it lies in
   (a model that needs files next to it, such as ONNX external data, is given as its folder). An RKNN sample list
   next to a model file now gets its own folder mount.
+- MCP and Ditto: builds belong to the caller that started them (an MCP connection, Ditto). Cancelling its own build
+  with `cancel_build` no longer asks; cancelling another client's build asks unless the tool is set to "allow". A
+  per-tool setting still wins and a damaged permission file still denies. `get_build_status` shows the caller class
+  that started a build.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -308,6 +318,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- MCP server: a client that disconnects no longer leaves its builds running with nobody to clean up. The builds
+  and jobs its session started are cancelled, each with an audit entry ("client disconnected"), the server waits
+  up to 30 seconds for their containers to stop, and `llm-cli mcp serve` then shuts the framework down.
 - Secrets store: a store of an earlier version that cannot be decrypted is reported by `llm-cli doctor`
   instead of being merged unreadable into the per-user store.
 - Reading or storing a secret no longer fails in a container whose user has no name (no `USER` variable and

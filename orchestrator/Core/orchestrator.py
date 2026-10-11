@@ -95,6 +95,9 @@ class BuildRequest:
     # Local model and dataset an AI caller named (orchestrator.tools.local_files.LocalInputs), checked again by
     # the build engine right before each container starts
     local_inputs: Optional[Any] = None
+    # Who started it through a tool ("mcp#<session>", "ditto"; empty for the GUI and the CLI): that caller may
+    # cancel it without a question, and a disconnected MCP session's builds are cancelled
+    owner: str = ""
 
     def __post_init__(self):
         if not self.request_id:
@@ -117,6 +120,7 @@ class WorkflowState:
     healing_proposal: Optional[Any] = None
     healing_decision: Optional[bool] = None
     build_ids: List[str] = field(default_factory=list)
+    owner: str = ""  # BuildRequest.owner
 
     @property
     def progress_percent(self) -> int:
@@ -183,7 +187,8 @@ class LLMOrchestrator:
             state = WorkflowState(
                 request_id=request.request_id,
                 status=OrchestrationStatus.QUEUED,
-                start_time=datetime.now()
+                start_time=datetime.now(),
+                owner=getattr(request, "owner", "") or "",
             )
             self._workflows[request.request_id] = state
             
