@@ -290,6 +290,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The CLI and the CLI guides no longer tell you to put the GitHub token on the command line, where the shell
   history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
   hidden prompt.
+- Audit log: when several processes (GUI, CLI, MCP servers) wrote the first entries of a new log at the same
+  moment, the log could be reported as damaged ("The audit anchor file was missing when entry 2 was written").
+  The anchor of a new log is now written before its first entry becomes visible to other processes.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
