@@ -545,6 +545,47 @@ recommendation.
 - **Thinking:** Qwen3.5 on `llama-server` otherwise thinks at full length, which takes minutes on a CPU. So effort
   `low` turns thinking off, `medium` and higher keep it.
 
+### How the runtime is built (self-built llama.cpp)
+
+`llm-cli ditto runtime install` still downloads the official prebuilt archive described above. The framework can
+also build llama.cpp itself from the pinned source; Ditto moves to that build in a later step, and the prebuilt
+download then stays only as an explicit choice, shown as "not self-built".
+
+- **One recipe:** the hardware profile of the machine that will run the binaries becomes a build plan: the pinned
+  commit, every download-capable option of llama.cpp off, the server without subprocess support
+  (`LLAMA_SUBPROCESS=OFF`), `-march=native` on that machine itself or the probe's CPU features for another machine.
+  A Linux build with Clang uses OpenMP only when libomp is installed. All CPU variants for an ARM board whose
+  features the probe could not tell need GCC 14 or Clang 18 (upstream's list contains `armv9.2-a+sme`); with an
+  older compiler the plan asks for a new probe instead.
+- **Toolchain:** the framework looks for the compiler, CMake (3.15 or newer) and Ninja and names what is missing; it
+  never installs a toolchain or accepts a licence for you. Parallel jobs follow the memory: `-j` is the number of
+  CPUs, but at most the available RAM divided by an estimate per job (1 GiB for a CPU build; `build_jobs` in the
+  catalog).
+- **Where it builds:** natively on Linux, in a cleared environment, or in the framework's builder container. That
+  image is built on your machine from `orchestrator/runtime/build/builder.Dockerfile` and a Debian, Ubuntu or Alpine
+  base pinned by digest whose C library is not newer than the one of the machine that runs the binaries. Configure
+  and build run in containers of that image without network, with the source mounted read-only, no capabilities, a
+  read-only root file system and your user, as the conversion stages run. The framework shares this recipe, never a
+  compiled image.
+- **No downloads:** besides the options, the configure output is checked: a line that says llama.cpp fetched or
+  downloaded anything fails the build.
+- **Checks before use:** every binary must be an ELF file for the planned architecture whose libraries are in the
+  build or are system libraries; device builds must not need a newer glibc symbol version than the device has, nor a
+  shared C++ runtime. `llama-bench --version` and `llama-server --version` must report the pinned build and commit,
+  `llama-bench --list-devices` must show the planned GPU, and `llama-server --tools all` must be refused. A smoke run
+  and a short `llama-bench` run on a tiny pinned model follow once the catalog pins one; until then they are skipped
+  with a note. Binaries are only ever taken from the build's own folder, never from `PATH`, and run with a cleared
+  environment.
+- **Store:** `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` holds the binaries with `build.json` (the plan)
+  and `manifest.json` (sha256 of every file, duration, build host, verification results). The build ID is the hash of
+  everything that changes the binaries, so a stored build is reused and never stamped again. Only a build verified on
+  this machine can become the active one; retention keeps the active build, the CPU fallback, the build a running
+  server uses and the two newest others. A build made on another of your machines can be imported: every file is
+  checked against its manifest and the commit against the pin, you confirm before any of its programs runs, and then
+  it is verified like a local build.
+- **Measured** on a 4-core x86-64 virtual machine (GCC 13.3, `-j4`): `llama-server` and `llama-bench` at the pin in
+  189 seconds including the checks, 28 MB of binaries.
+
 ---
 
 ## Knowledge base (RAG)
@@ -890,7 +931,9 @@ The GUI's input fields offer what you used recently, newest first.
   product), memory, SoC, NPU and every GPU (NVIDIA compute capability, AMD gfx target, Vulkan); no host name, serial
   number or MAC address. The probes need no network, never prompt, install or ask for administrator rights, and run
   external tools with a time limit. Tests run the `.py` and the `.sh` on the same fixture machines and require the
-  same result.
+  same result. The installed package carries a byte-identical copy of `hardware_probe.py`
+  (`orchestrator/runtime/hardware_probe.py`), so the framework's own probing also works without the `scripts/`
+  folder.
 - **Where it runs:** on the machine the build is for. `llm-cli scan` probes this computer with the Python probe and
   keeps the profile as `local`; `llm-cli scan --device` runs it on a board over SSH (the Python probe with `python3
   -I` if the board has Python 3.8 or newer, else the shell probe; nothing is installed on the board) and keeps the
@@ -935,6 +978,7 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key) |
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
+| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning); the prebuilt archive in use, labelled not self-built (information); whether this machine has the toolchain for a native build (information) |
 
 `--fix` applies the automatic fixes up to `--tier` (1: makes the personal folder private; 2: also removes dangling
 framework images and the Docker build cache) and checks again. Exit codes: 0 OK, 1 warnings, 2 errors; `--json`

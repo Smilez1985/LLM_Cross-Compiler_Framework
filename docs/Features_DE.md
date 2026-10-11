@@ -580,6 +580,49 @@ deshalb zählt bei ihnen nur der RAM. `runtime start --model <Stufe>` überstimm
 - **Nachdenken:** Qwen3.5 denkt auf `llama-server` sonst in voller Länge nach, was auf einer CPU Minuten dauert.
   Deshalb schaltet der Aufwand `low` das Nachdenken aus; `medium` und höher behalten es.
 
+### Wie die Laufzeit gebaut wird (selbst gebautes llama.cpp)
+
+`llm-cli ditto runtime install` lädt weiterhin das oben beschriebene offizielle vorgefertigte Archiv. Das Framework
+kann llama.cpp aber auch selbst aus der festgelegten Quelle bauen; Ditto wechselt in einem späteren Schritt auf diesen
+Build, und der vorgefertigte Download bleibt dann nur als ausdrückliche Wahl, angezeigt als „nicht selbst gebaut“.
+
+- **Ein Rezept:** Aus dem Hardwareprofil des Rechners, der die Programme ausführen wird, wird ein Bauplan: der
+  festgelegte Commit, jede Option von llama.cpp, die etwas herunterladen kann, aus, der Server ohne
+  Unterprozess-Unterstützung (`LLAMA_SUBPROCESS=OFF`), `-march=native` auf diesem Rechner selbst oder die
+  CPU-Merkmale der Probe für einen anderen Rechner. Ein Linux-Build mit Clang nutzt OpenMP nur, wenn libomp
+  installiert ist. Alle CPU-Varianten für ein ARM-Board, dessen Merkmale die Probe nicht erkennen konnte, brauchen
+  GCC 14 oder Clang 18 (die Liste von upstream enthält `armv9.2-a+sme`); mit einem älteren Compiler verlangt der
+  Bauplan stattdessen eine neue Probe.
+- **Werkzeuge:** Das Framework sucht Compiler, CMake (3.15 oder neuer) und Ninja und nennt, was fehlt; es installiert
+  nie Werkzeuge und akzeptiert nie eine Lizenz für dich. Die parallelen Jobs richten sich nach dem Speicher: `-j` ist
+  die Zahl der CPUs, aber höchstens der verfügbare RAM geteilt durch eine Schätzung pro Job (1 GiB für einen
+  CPU-Build; `build_jobs` im Katalog).
+- **Wo gebaut wird:** nativ unter Linux, in einer geleerten Umgebung, oder im Builder-Container des Frameworks. Dieses
+  Image wird auf deinem Rechner aus `orchestrator/runtime/build/builder.Dockerfile` und einer per Digest festgelegten
+  Debian-, Ubuntu- oder Alpine-Basis gebaut, deren C-Bibliothek nicht neuer ist als die des Rechners, der die
+  Programme ausführt. Konfigurieren und Bauen laufen in Containern dieses Images ohne Netz, mit schreibgeschützt
+  eingehängter Quelle, ohne Capabilities, mit schreibgeschütztem Wurzeldateisystem und deinem Benutzer, so wie die
+  Konvertierungsschritte laufen. Das Framework teilt dieses Rezept, nie ein fertig gebautes Image.
+- **Keine Downloads:** Neben den Optionen wird die Ausgabe des Konfigurierens geprüft: Eine Zeile, die sagt, dass
+  llama.cpp etwas geholt oder heruntergeladen hat, lässt den Build scheitern.
+- **Prüfungen vor der Nutzung:** Jedes Programm muss eine ELF-Datei für die geplante Architektur sein, deren
+  Bibliotheken im Build liegen oder Systembibliotheken sind; Geräte-Builds dürfen keine neuere glibc-Symbolversion
+  brauchen, als das Gerät hat, und keine geteilte C++-Laufzeit. `llama-bench --version` und `llama-server --version`
+  müssen den festgelegten Build und Commit melden, `llama-bench --list-devices` muss die geplante GPU zeigen, und
+  `llama-server --tools all` muss abgelehnt werden. Ein Rauchtest und ein kurzer `llama-bench`-Lauf auf einem
+  winzigen festgelegten Modell folgen, sobald der Katalog eines festlegt; bis dahin werden sie mit einem Hinweis
+  übersprungen. Programme werden nur aus dem eigenen Ordner des Builds genommen, nie aus `PATH`, und laufen mit
+  geleerter Umgebung.
+- **Ablage:** `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` enthält die Programme mit `build.json` (der
+  Bauplan) und `manifest.json` (sha256 jeder Datei, Dauer, Bau-Rechner, Prüfergebnisse). Die Build-ID ist der Hash
+  von allem, was die Programme verändert, also wird ein abgelegter Build wiederverwendet und nie neu gestempelt. Nur
+  ein auf diesem Rechner geprüfter Build kann der aktive werden; die Aufbewahrung behält den aktiven Build, den
+  CPU-Ersatz, den Build, aus dem ein laufender Server gestartet wurde, und die zwei neuesten anderen. Ein Build von
+  einem deiner anderen Rechner kann importiert werden: Jede Datei wird gegen sein Manifest geprüft und der Commit
+  gegen den Pin, du bestätigst, bevor eines seiner Programme läuft, und danach wird er wie ein lokaler Build geprüft.
+- **Gemessen** auf einer virtuellen x86-64-Maschine mit 4 Kernen (GCC 13.3, `-j4`): `llama-server` und `llama-bench`
+  am Pin in 189 Sekunden samt Prüfungen, 28 MB Programme.
+
 ---
 
 ## Wissensbasis (RAG)
@@ -949,7 +992,9 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
   Skalarprodukt), Speicher, SoC, NPU und jede GPU (NVIDIA Compute Capability, AMD gfx-Target, Vulkan); keinen
   Hostnamen, keine Seriennummer und keine MAC-Adresse. Die Probes brauchen kein Netz, fragen nie nach, installieren
   nichts und verlangen keine Administratorrechte, und externe Werkzeuge laufen mit Zeitlimit. Tests führen die `.py`
-  und die `.sh` auf denselben Testrechnern aus und verlangen dasselbe Ergebnis.
+  und die `.sh` auf denselben Testrechnern aus und verlangen dasselbe Ergebnis. Das installierte Paket enthält eine
+  byte-gleiche Kopie von `hardware_probe.py` (`orchestrator/runtime/hardware_probe.py`), also funktioniert die
+  Hardware-Erkennung des Frameworks auch ohne den Ordner `scripts/`.
 - **Wo sie läuft:** auf dem Rechner, für den gebaut wird. `llm-cli scan` untersucht diesen Rechner mit der
   Python-Probe und behält das Profil als `local`; `llm-cli scan --device` führt sie per SSH auf einem Board aus (die
   Python-Probe mit `python3 -I`, wenn das Board Python 3.8 oder neuer hat, sonst die Shell-Probe; auf dem Board wird
@@ -998,6 +1043,7 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 | KI | Tool-Berechtigungen eingerichtet und lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel) |
 | Daten | mitgelieferte Kalibrierungsdaten intakt (Prüfsummen) |
 | Community | installierte Community-Packs gegen den zwischengespeicherten Index: gesperrt (Fehler), seit der Installation verändert (Warnung), Vertrauensstufe `local` (Information) |
+| Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung); das genutzte vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
 
 `--fix` wendet die automatischen Korrekturen bis `--tier` an (1: macht den persönlichen Ordner privat; 2: entfernt
 zusätzlich verwaiste Framework-Images und den Docker-Build-Cache) und prüft danach erneut. Exit-Codes: 0 OK,

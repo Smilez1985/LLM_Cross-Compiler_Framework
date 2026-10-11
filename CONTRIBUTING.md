@@ -483,7 +483,13 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   providers or models are presets in `configs/llm_providers.yml`.
 - **Local runtime downloads are pinned.** A new llama.cpp build or model in `configs/llama_runtime.yml` needs size
   and SHA256 from a complete download, and models a Hugging Face commit as revision. Never pass options to
-  `llama-server` that give it tools, an agent mode, MCP clients or a web UI.
+  `llama-server` that give it tools, an agent mode, MCP clients or a web UI: every launcher takes the forbidden
+  options and the environment rules from `orchestrator/runtime/server_policy.py`, and a llama.cpp program is only
+  ever started from a verified build folder, never found on `PATH`.
+- **The hardware probe exists twice.** `scripts/hardware_probe.py` is the standalone file that is sent to devices
+  and run by hand; `orchestrator/runtime/hardware_probe.py` is its byte-identical copy inside the package. Edit the
+  script, then copy it (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`); a test fails while
+  the two differ.
 - New actions for AI clients and Ditto are tools in `orchestrator/tools/framework_tools.py` with the correct tier
   (`read`, `local_write`, `external`). Never bypass the registry, the permissions or the audit log.
 - The framework never asks for, reads or stores a repository token. Hand work over to GitHub through an installed

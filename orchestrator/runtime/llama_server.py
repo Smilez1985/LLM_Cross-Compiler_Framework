@@ -40,6 +40,7 @@ from pydantic import BaseModel, Field
 from orchestrator.runtime.catalog import GPU_BACKENDS, ModelEntry, RuntimeAsset, RuntimeCatalog, load_catalog
 from orchestrator.runtime.hardware import (BackendChoice, HardwareInfo, Runner, choose_model_tier, compute_context,
                                            detect_hardware, select_backend)
+from orchestrator.runtime.server_policy import FORBIDDEN_FLAGS, forbidden_in, server_env  # noqa: F401 (re-export)
 from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloader
 from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
 from orchestrator.utils.helpers import redact_secrets, safe_extract_archive
@@ -50,17 +51,8 @@ LOOPBACK = "127.0.0.1"
 MIB = 1024 ** 2
 SERVER_NAMES = ("llama-server", "llama-server.exe")
 
-# llama-server options that give the model its own tools, file/shell access, MCP clients, a web UI, remote
-# compute (RPC), state endpoints or a command-line key. None of them may ever reach the command line.
-FORBIDDEN_FLAGS = frozenset({
-    "--tools", "--tools-runtime", "-ag", "--agent", "--mcp-servers-config", "--mcp-servers-json",
-    "--ui-mcp-proxy", "--webui-mcp-proxy", "--ui", "--webui", "--api-key", "--props", "--media-path",
-    "--slot-save-path", "--models-dir", "--models-preset", "--path", "-hf", "--hf-repo", "-mu", "--model-url",
-    "--rpc", "--slots", "--metrics",
-})
-# Environment variables are a second way to set every llama-server option (LLAMA_ARG_*, LLAMA_API_KEY);
-# secrets of other programs have no business in the server's environment either.
-_SECRET_ENV = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL|AUTH", re.IGNORECASE)
+# The forbidden options and the environment rules are shared by every launcher (decision D22):
+# orchestrator/runtime/server_policy.py.
 _LOG_HEADER = "=== llama-server start"
 
 ProgressFn = Callable[[str, int, Optional[int]], None]
@@ -172,11 +164,6 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def server_env(base: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    env = dict(os.environ if base is None else base)
-    return {k: v for k, v in env.items() if not k.upper().startswith("LLAMA_") and not _SECRET_ENV.search(k)}
-
-
 def build_server_command(server: Path, model: Path, port: int, key_file: Path, ctx: int, alias: str,
                          gpu: bool, cache_ram_mib: int, sleep_idle_seconds: Optional[int] = None) -> List[str]:
     """The complete llama-server command line. Only loopback, only the key file, no tools/agent/MCP/web UI."""
@@ -193,9 +180,9 @@ def build_server_command(server: Path, model: Path, port: int, key_file: Path, c
         cmd += ["-ngl", "auto"]    # offload as many layers as fit (llama.cpp's --fit is on by default)
     if sleep_idle_seconds:
         cmd += ["--sleep-idle-seconds", str(sleep_idle_seconds)]
-    bad = FORBIDDEN_FLAGS.intersection(cmd)
+    bad = forbidden_in(cmd)
     if bad:
-        raise LocalRuntimeError(f"Refusing to start llama-server with {sorted(bad)}")
+        raise LocalRuntimeError(f"Refusing to start llama-server with {bad}")
     return cmd
 
 

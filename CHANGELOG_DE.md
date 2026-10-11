@@ -100,7 +100,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   schreibt die JSON-Ansicht); `llm-cli scan --device HOST --user BENUTZER` führt sie per SSH mit `python3 -I` auf
   einem Board aus und weicht auf `hardware_probe.sh` aus, wenn das Board kein Python 3.8 hat. Das Skript kommt über
   den SSH-Kanal, also bleibt auf dem Board nichts zurück, und das Profil wird unter der ID des Boards gespeichert. Für
-  Rechner ohne Netzzugang beschreibt die README die Probe von Hand.
+  Rechner ohne Netzzugang beschreibt die README die Probe von Hand. Das installierte Paket enthält eine byte-gleiche
+  Kopie der Probe (`orchestrator/runtime/hardware_probe.py`), also funktioniert die Hardware-Erkennung des Frameworks
+  auch ohne den Ordner `scripts/`.
 - **Build-Rezept für selbst gebautes llama.cpp** (`orchestrator/runtime/build/recipe.py`): Aus dem Hardware-Profil
   des Rechners, der die Programme ausführen wird, wird ein Build-Plan (CMake-Optionen, Ziele, Toolchain-Datei,
   Builder, Prüfungen) mit einer Build-ID, die sich mit jeder Option und jeder Werkzeugversion ändert, aber nicht mit
@@ -114,7 +116,35 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (ROCm unter Linux, auf Wunsch); Vulkan und Metal sind Schalter; Windows-Builds nutzen Clang. Der Plan folgt
   Betriebssystem und C-Bibliothek des Ziels: eine Builder-Basis, deren C-Bibliothek (glibc, oder musl unter Alpine)
   nicht neuer ist als die des Geräts, ein Build für einen anderen Rechner braucht also die `LIBC_VERSION`, die seine
-  Probe meldet, und eine statisch gelinkte C++-Laufzeit für Geräte-Builds. Ausgeführt werden die Pläne noch nicht.
+  Probe meldet, und eine statisch gelinkte C++-Laufzeit für Geräte-Builds. Ein Linux-Build mit Clang nutzt OpenMP nur,
+  wenn libomp installiert ist, und die Build-ID unterscheidet beide; alle CPU-Varianten für ein ARM-Board, dessen
+  Merkmale die Probe nicht erkennen konnte, brauchen GCC 14 oder Clang 18 (die Liste von upstream enthält
+  `armv9.2-a+sme`), sonst verlangt der Plan eine neue Probe.
+- **Selbst gebautes llama.cpp: Bauen, Prüfen, Ablegen** (`orchestrator/runtime/build/`): Ein Plan wird nativ unter
+  Linux gebaut (mit dem erkannten Compiler, CMake 3.15 oder neuer und Ninja, in einer geleerten Umgebung) oder im
+  Builder-Container des Frameworks, einem Image, das auf deinem Rechner aus `builder.Dockerfile` und einer per Digest
+  festgelegten Basis gebaut wird und dessen Schritte Konfigurieren und Bauen ohne Netz laufen, mit schreibgeschützter
+  Quelle und der Sandbox der Konvertierungsschritte. Das Framework teilt dieses Rezept, nie ein fertig gebautes Image.
+  Die parallelen Jobs richten sich nach dem verfügbaren Speicher. Sagt die Ausgabe des Konfigurierens, dass etwas
+  geholt oder heruntergeladen wurde, scheitert der Build. Bevor ein Build abgelegt wird, wird er geprüft:
+  ELF-Architektur und Bibliotheken (Geräte-Builds: keine neuere glibc-Symbolversion als auf dem Gerät, keine geteilte
+  C++-Laufzeit), der festgelegte Build und Commit in `--version`, die geplante GPU in `llama-bench --list-devices`,
+  und `llama-server` muss `--tools` ablehnen. Rauchtest und kurzer Benchmark auf einem winzigen festgelegten Modell
+  werden mit einem Hinweis übersprungen, bis der Katalog eines festlegt. Programme kommen nur aus dem eigenen Ordner
+  des Builds, nie aus `PATH`, und jedes Programm, das das Framework startet, bekommt dieselbe Liste verbotener
+  Optionen und eine Umgebung ohne `LLAMA_*`-Variablen. Builds liegen unter
+  `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` mit `build.json` und `manifest.json` (sha256 jeder Datei,
+  Dauer, Prüfung) und werden wiederverwendet, nie neu gestempelt; nur ein auf diesem Rechner geprüfter Build kann
+  aktiv werden, und die Aufbewahrung entfernt nie den aktiven Build, den CPU-Ersatz oder den Build, aus dem ein
+  laufender Server gestartet wurde. Ein Build von einem deiner anderen Rechner kann importiert werden: Seine Dateien
+  werden gegen das Manifest geprüft und sein Commit gegen den Pin, und du bestätigst, bevor eines seiner Programme
+  läuft. `runtime install` von Ditto lädt weiterhin das vorgefertigte Archiv, bis Ditto auf diesen Build wechselt. Ein
+  CPU-Build von `llama-server` und `llama-bench` am Pin dauerte auf einer virtuellen Maschine mit 4 Kernen 189 s und
+  ergab 28 MB Programme.
+- `llm-cli doctor` prüft die lokale llama.cpp-Laufzeit: einen genutzten selbst gebauten Build, der verändert wurde
+  (Fehler) oder älter als der Pin ist (Warnung), das genutzte vorgefertigte Archiv (Information: nicht selbst gebaut)
+  und ob dieser Rechner Compiler, CMake und Ninja für einen nativen Build hat (Information, mit dem Builder-Container
+  als Alternative).
 - **llama.cpp per Commit festgelegt**: `llama_cpp.source` in `configs/llama_runtime.yml` (Commit
   `d81235049384534c167caea52b85a694f6103d14`, Tag `b11429`) ist die eine Stelle. Dazu kommen die CUDA-Toolkits für
   selbst gebaute CUDA-Builds (die Redist-Manifeste von NVIDIA per Größe und SHA256 festgelegt, mit den Grenzen für
@@ -361,8 +391,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Python-Probe (Tests führen die `.sh` und die `.py` auf denselben Testrechnern aus). Beide sind standardmäßig nicht
   interaktiv: Die Paketinstallations-Abfrage der `.sh` braucht `--install-tools` (sie bietet jetzt `vulkan-tools` an,
   das einzige Hilfsprogramm, das die Probe nutzt), und die `.ps1` startet sich nur mit `-Elevate` mit erhöhten Rechten
-  neu. Die `.sh` läuft in jeder POSIX-Shell (dash, BusyBox ash), liest `/proc` und `/sys` direkt statt über `lspci`
-  und `lsusb` und schreibt alle GPUs; die `.ps1` liest den nutzbaren Speicher statt der Summe der Speicherplätze.
+  neu. Die `.sh` läuft in jeder POSIX-Shell (dash, BusyBox ash), und `llm-cli scan --script` und der GUI-Scan dieses
+  PCs führen sie mit `sh` aus, also geht es auch ohne bash; sie liest `/proc` und `/sys` direkt statt über `lspci` und
+  `lsusb` und schreibt alle GPUs; die `.ps1` liest den nutzbaren Speicher statt der Summe der Speicherplätze.
 - Die Einstellung `llama_cpp_version` (der llama.cpp-Tag, den Target-Images klonen) hat als Vorgabe den Tag des
   llama.cpp-Pins in `configs/llama_runtime.yml`, jetzt `b11429`, statt eines fest geschriebenen `v0.6.0`; beide nennen
   denselben Commit, die Images bauen also denselben Quelltext. Das Rockchip-Dockerfile, die Build-Argumente in

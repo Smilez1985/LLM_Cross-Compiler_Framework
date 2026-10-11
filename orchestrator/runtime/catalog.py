@@ -247,6 +247,37 @@ class BuildBase(_Strict):
     image: str = Field(pattern=_IMAGE_BY_DIGEST, max_length=300)
 
 
+class BuildJobs(_Strict):
+    """Parallel compile jobs of a self-built llama.cpp: -j = min(logical CPUs, available RAM / memory_mib of the
+    backend), at least 1. The values are estimates of the peak memory per job (MiB)."""
+    memory_mib: Dict[Backend, int] = Field(default_factory=lambda: {"cpu": 1024, "vulkan": 1536, "cuda": 3072,
+                                                                    "rocm": 2048, "metal": 1024})
+
+    @field_validator("memory_mib")
+    @classmethod
+    def _positive(cls, v: Dict[str, int]) -> Dict[str, int]:
+        if any(m < 128 or m > 65536 for m in v.values()):
+            raise ValueError("memory_mib values must be between 128 and 65536")
+        return v
+
+    def per_job_mib(self, backend: str) -> int:
+        return self.memory_mib.get(backend) or self.memory_mib.get("cpu") or 1024
+
+
+class SmokeModel(_Strict):
+    """The tiny pinned GGUF of the build check (decision D17): loaded once and asked for a few tokens after every
+    build. A catalog model pinned by revision, size and sha256, so it runs natively (it is no untrusted model)."""
+    repo: str = Field(pattern=r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
+    revision: str = Field(pattern=r"^[0-9a-f]{40}$")
+    file: str = Field(pattern=_MODEL_NAME, max_length=200)
+    size: int = Field(gt=0, le=512 * 1024 ** 2)
+    sha256: str = Field(pattern=_SHA256)
+    license: str
+
+    def url(self, base_url: str) -> str:
+        return f"{base_url}{self.repo}/resolve/{self.revision}/{self.file}"
+
+
 class ServerDefaults(_Strict):
     ctx_cap: int = Field(default=32768, ge=512, le=1_048_576)
     ctx_min: int = Field(default=4096, ge=256)
@@ -299,6 +330,8 @@ class RuntimeCatalog(_Strict):
     llama_cpp: LlamaCppBuild
     cuda: Optional[CudaCatalog] = None
     build_bases: List[BuildBase] = Field(default_factory=list)
+    build_jobs: BuildJobs = BuildJobs()
+    smoke_model: Optional[SmokeModel] = None
     model_base_url: str = "https://huggingface.co/"
     server: ServerDefaults = ServerDefaults()
     models: List[ModelEntry]

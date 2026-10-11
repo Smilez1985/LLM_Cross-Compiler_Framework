@@ -982,7 +982,8 @@ that runs the model, so the probe runs on that machine.
   written to the file given with `--output` and stored as this computer's profile
   (`~/.llm-framework/hardware/local.txt`, without volatile values such as free RAM). If the Python probe cannot run,
   the CLI says why and runs the fallback script instead; `--script` uses the script directly
-  (`scripts/hardware_probe.sh` on Linux, `scripts/hardware_probe.ps1` on Windows).
+  (`scripts/hardware_probe.sh` with `sh` on Linux, so hosts without bash such as Alpine or BusyBox work too;
+  `scripts/hardware_probe.ps1` on Windows).
 - **A board over SSH** (`--device`): the first connection shows the board's SSH host key fingerprint and asks you to
   confirm it, as `deploy run` does (`--trust-fingerprint` confirms it without asking); a password is used once to
   install the framework's SSH key and is not stored. The CLI then sends `hardware_probe.py` to `python3 -I` when the

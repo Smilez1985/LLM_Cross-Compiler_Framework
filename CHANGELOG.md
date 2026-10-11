@@ -90,7 +90,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   view); `llm-cli scan --device HOST --user USER` runs it on a board over SSH with `python3 -I` and falls back to
   `hardware_probe.sh` when the board has no Python 3.8. The script travels over the SSH channel, so nothing is left
   on the board, and the profile is stored under the board's ID. For machines without network access the README
-  explains the probe by hand.
+  explains the probe by hand. The installed package carries a byte-identical copy of the probe
+  (`orchestrator/runtime/hardware_probe.py`), so the framework's own probing works without the `scripts/` folder.
 - **Build recipe for self-built llama.cpp** (`orchestrator/runtime/build/recipe.py`): the hardware profile of the
   machine that will run the binaries becomes a build plan (CMake options, targets, toolchain file, builder, checks)
   with a build ID that changes with every option and toolchain version but not with volatile values such as free
@@ -102,8 +103,31 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   a CUDA toolkit no newer than the driver supports, on glibc systems; AMD GPUs their gfx target (ROCm on Linux, on
   request); Vulkan and Metal are switches; Windows builds use Clang. The plan follows the target's OS and C library:
   a builder base whose C library (glibc, or musl on Alpine) is not newer than the device's, so a build for another
-  machine needs the `LIBC_VERSION` its probe reports, and a statically linked C++ runtime for device builds. Plans are
-  not run yet.
+  machine needs the `LIBC_VERSION` its probe reports, and a statically linked C++ runtime for device builds. A Linux
+  build with Clang uses OpenMP only when libomp is installed, and the build ID tells the two apart; all CPU variants
+  for an ARM board whose features the probe could not tell need GCC 14 or Clang 18 (upstream's list contains
+  `armv9.2-a+sme`), otherwise the plan asks for a new probe.
+- **Self-built llama.cpp: build, checks and store** (`orchestrator/runtime/build/`): a plan is built natively on Linux
+  (with the detected compiler, CMake 3.15 or newer and Ninja, in a cleared environment) or in the framework's builder
+  container, an image built on your machine from `builder.Dockerfile` and a base pinned by digest, whose configure
+  and build steps run without network, with the source read-only and the sandbox of the conversion stages. The
+  framework shares this recipe, never a compiled image. Parallel jobs follow the available memory. A configure
+  output that says something was fetched or downloaded fails the build. Before a build is stored it is checked: ELF
+  architecture and libraries (device builds: no newer glibc symbol version than the device, no shared C++ runtime),
+  the pinned build and commit in `--version`, the planned GPU in `llama-bench --list-devices`, and `llama-server`
+  must refuse `--tools`. The smoke run and short benchmark on a tiny pinned model are skipped with a note until the
+  catalog pins one. Binaries come only from the build's own folder, never from `PATH`, and every program the
+  framework starts takes the same forbidden-option list and an environment without `LLAMA_*` variables. Builds are
+  stored under `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` with `build.json` and `manifest.json` (sha256
+  of every file, duration, verification) and reused, never stamped again; only a build verified on this machine can
+  become active, and retention never removes the active build, the CPU fallback or the build a running server uses.
+  A build from another of your machines can be imported: its files are checked against the manifest and its commit
+  against the pin, and you confirm before any of its programs runs. Ditto's `runtime install` still downloads the
+  prebuilt archive until it moves to this build. A CPU build of `llama-server` and `llama-bench` at the pin took 189 s
+  on a 4-core virtual machine and gave 28 MB of binaries.
+- `llm-cli doctor` checks the local llama.cpp runtime: a self-built build in use that was changed (error) or is older
+  than the pin (warning), the prebuilt archive in use (information: not self-built), and whether this machine has the
+  compiler, CMake and Ninja for a native build (information, with the builder container as the alternative).
 - **llama.cpp pinned by commit**: `llama_cpp.source` in `configs/llama_runtime.yml` (commit
   `d81235049384534c167caea52b85a694f6103d14`, tag `b11429`) is the one place. With it come the CUDA toolkits for
   self-built CUDA builds (NVIDIA's redist manifests pinned by size and SHA256, with the driver, compute capability,
@@ -317,7 +341,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - `scripts/hardware_probe.sh` and `scripts/hardware_probe.ps1` write schema 2, the same keys as the Python probe
   (tests run the `.sh` and the `.py` on the same fixture machines). Both are non-interactive by default: the package
   install prompt of the `.sh` needs `--install-tools` (it now offers `vulkan-tools`, the only helper the probe uses),
-  and the `.ps1` restarts elevated only with `-Elevate`. The `.sh` runs in any POSIX shell (dash, BusyBox ash), reads
+  and the `.ps1` restarts elevated only with `-Elevate`. The `.sh` runs in any POSIX shell (dash, BusyBox ash), and
+  `llm-cli scan --script` and the GUI's scan of this PC run it with `sh`, so hosts without bash work; it reads
   `/proc` and `/sys` directly instead of `lspci` and `lsusb`, and writes all GPUs; the `.ps1` reads the usable memory
   instead of the sum of the memory slots.
 - The setting `llama_cpp_version` (the llama.cpp tag target images clone) defaults to the tag of the llama.cpp pin in

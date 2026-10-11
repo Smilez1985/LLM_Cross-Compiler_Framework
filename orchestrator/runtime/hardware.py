@@ -3,11 +3,11 @@
 Hardware detection for the local runtime: which llama.cpp build fits this machine, which Ditto model
 tier, and how much context fits next to the model. Every decision carries a human-readable reason.
 
-detect_hardware() runs the hardware probe (scripts/hardware_probe.py, the same file that probes boards) in-process
-for its memory and GPU parts, checks the result with the probe file parser (orchestrator/runtime/profile.py) and
-builds HardwareInfo from that profile. Free RAM and free GPU memory are volatile: they are read again at every call
-and never taken from a stored profile. hardware_from_profile() builds HardwareInfo from any profile, for example a
-stored one or a device's.
+detect_hardware() runs the hardware probe in-process (orchestrator/runtime/hardware_probe.py, a byte-identical copy of
+scripts/hardware_probe.py, the file that probes boards) for its memory and GPU parts, checks the result with the
+probe file parser (orchestrator/runtime/profile.py) and builds HardwareInfo from that profile. Free RAM and free GPU
+memory are volatile: they are read again at every call and never taken from a stored profile.
+hardware_from_profile() builds HardwareInfo from any profile, for example a stored one or a device's.
 
 The probe's GPU sources (each optional; a missing tool contributes nothing): nvidia-smi for NVIDIA GPUs (driver,
 compute capability, VRAM), vulkaninfo for any Vulkan device, amdgpu's sysfs and the KFD topology on Linux (VRAM, gfx
@@ -15,7 +15,7 @@ target), WMI and the display-class registry on Windows (adapter names, dedicated
 into GpuInfo for existing callers.
 """
 
-import importlib.util
+import importlib
 import logging
 import os
 import platform
@@ -33,7 +33,9 @@ from orchestrator.runtime.profile import HardwareProfile, ProfileError, load_sch
 GIB = 1024 ** 3
 MIB = 1024 ** 2
 SYSTEM_RESERVE = int(1.5 * GIB)  # RAM left to the OS, the GUI and the knowledge base when a model is chosen
-PROBE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "hardware_probe.py"
+# The package copy of scripts/hardware_probe.py (byte-identical, tests/test_hardware_probe.py compares them): a wheel
+# install has no scripts/ folder.
+PROBE_PATH = Path(__file__).resolve().with_name("hardware_probe.py")
 
 # (command, timeout) -> (returncode, stdout, stderr); returncode -1 means "not found / not runnable".
 Runner = Callable[[Sequence[str], float], Tuple[int, str, str]]
@@ -107,17 +109,15 @@ def normalize_platform(system: Optional[str] = None, machine: Optional[str] = No
 # --- the probe ---------------------------------------------------------------------------------------------
 
 def load_probe():
-    """scripts/hardware_probe.py as a module (loaded once). It is a standalone file, not part of the package,
-    because the same file is copied to devices; RuntimeError when it is missing from this installation."""
+    """The hardware probe as a module: orchestrator.runtime.hardware_probe, the package copy of the standalone
+    scripts/hardware_probe.py that is sent to devices. RuntimeError when it is missing from this installation."""
     global _probe_module
     with _probe_lock:
         if _probe_module is None:
-            spec = importlib.util.spec_from_file_location("llm_framework_hardware_probe", PROBE_PATH)
-            if spec is None or spec.loader is None or not PROBE_PATH.is_file():
-                raise RuntimeError(f"The hardware probe {PROBE_PATH} is missing from this installation.")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            _probe_module = module
+            try:
+                _probe_module = importlib.import_module("orchestrator.runtime.hardware_probe")
+            except ImportError as e:
+                raise RuntimeError(f"The hardware probe {PROBE_PATH} is missing from this installation.") from e
         return _probe_module
 
 

@@ -502,7 +502,13 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 - **Downloads der lokalen Laufzeit sind festgelegt.** Ein neuer llama.cpp-Build oder ein neues Modell in
   `configs/llama_runtime.yml` braucht Größe und SHA256 aus einem vollständigen Download, Modelle zusätzlich einen
   Hugging-Face-Commit als Revision. Übergib `llama-server` nie Optionen, die ihm Tools, einen Agentenmodus,
-  MCP-Clients oder eine Weboberfläche geben.
+  MCP-Clients oder eine Weboberfläche geben: Jeder Startweg nimmt die verbotenen Optionen und die Regeln für die
+  Umgebung aus `orchestrator/runtime/server_policy.py`, und ein llama.cpp-Programm wird nur aus einem geprüften
+  Build-Ordner gestartet, nie über `PATH` gefunden.
+- **Die Hardware-Probe gibt es zweimal.** `scripts/hardware_probe.py` ist die eigenständige Datei, die an Geräte
+  geschickt und von Hand ausgeführt wird; `orchestrator/runtime/hardware_probe.py` ist ihre byte-gleiche Kopie im
+  Paket. Ändere das Skript und kopiere es dann (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`);
+  ein Test schlägt fehl, solange die beiden sich unterscheiden.
 - Neue Aktionen für KI-Clients und Ditto sind Tools in `orchestrator/tools/framework_tools.py` mit der richtigen
   Stufe (`read`, `local_write`, `external`). Umgehe nie die Tool-Registry, die Berechtigungen oder das Audit-Log.
 - Das Framework fragt nie nach einem Repository-Token, liest keines und speichert keines. Übergib Arbeit an GitHub

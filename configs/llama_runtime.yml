@@ -250,6 +250,17 @@ build_bases:
   - {id: debian-13, libc: glibc, libc_version: "2.41", gcc: "14.2", image: "debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"}
   - {id: alpine-3.22, libc: musl, libc_version: "1.2.5", gcc: "14.2", image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"}
 
+# Parallel compile jobs of a self-built llama.cpp (orchestrator/runtime/build/toolchain.py, parallel_jobs):
+# -j = min(logical CPUs, available RAM / the value of the backend), at least 1, and never more than the setting
+# build_jobs when that is set. The values are estimates of the peak memory per compile job in MiB (nvcc needs far
+# more than g++), to be replaced by measured peaks.
+build_jobs:
+  memory_mib: {cpu: 1024, vulkan: 1536, cuda: 3072, rocm: 2048, metal: 1024}
+
+# smoke_model: the tiny pinned GGUF the build verification loads after every build (decision D17), with repo,
+# revision, file, size, sha256 and license like the models below. None is pinned yet, so the smoke run and the short
+# llama-bench run of the verification are skipped with a note.
+
 # Models are downloaded from <model_base_url><repo>/resolve/<revision>/<file> (resumable, verified).
 model_base_url: https://huggingface.co/
 
