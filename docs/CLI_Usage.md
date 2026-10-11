@@ -820,6 +820,31 @@ llm-cli tools audit --verify
 llm-cli tools audit --archive
 ```
 
+### tools approvals
+
+```
+llm-cli tools approvals [list]
+llm-cli tools approvals show ID
+llm-cli tools approvals approve ID
+llm-cli tools approvals decline ID
+```
+
+Calls of AI clients that could not ask you themselves (the client has no form elicitation, the question is longer
+than 4,000 characters, or you set the tool with `tools permissions --confirm-in-framework TOOL`). `list` (also
+without a subcommand) shows each waiting call with its id, tool, caller class, the client's self-reported name and
+the time left; `show` prints the full question; `approve` and `decline` show it again and ask "Approve this call?"
+or "Decline this call?" before anything is decided. On approval the framework runs the call for the client, under
+the client's caller; the client reads the result with `get_job_status`. Every subcommand needs a terminal (exit code
+2 otherwise); a decision is refused (exit code 1) when the approval has expired (15 minutes), was already decided,
+its client's session has ended, its question changed meanwhile, or the audit log cannot record the decision. On a
+headless machine, such as the Docker image, run it in a terminal there (`docker exec -it <container> llm-cli tools
+approvals`). The GUI shows the same calls under **Tools > Pending Approvals...**.
+
+| Option of `tools permissions` | Meaning |
+|---|---|
+| `--confirm-in-framework TOOL` | Always put this tool's questions to you in the framework (the approval window or this command), never in the AI client's own dialog. Repeatable; with `--caller` for one caller. Needs a terminal; audited. |
+| `--confirm-anywhere TOOL` | Undo `--confirm-in-framework` for this tool. |
+
 ### tools folders
 
 ```
@@ -867,8 +892,8 @@ llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT]
 ```
 
 Runs the MCP server. Normally the AI client starts it for you (see `mcp config`). stdout carries the protocol;
-logs go to stderr. If the tool permissions are not set up yet, read-only tools work and everything else asks (or is
-denied when the client cannot ask).
+logs go to stderr. If the tool permissions are not set up yet, read-only tools work and everything else asks (when
+the client cannot ask, the question waits in the framework: see [tools approvals](#tools-approvals)).
 
 | Option | Meaning |
 |---|---|

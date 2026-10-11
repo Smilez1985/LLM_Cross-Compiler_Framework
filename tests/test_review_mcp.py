@@ -317,7 +317,23 @@ class TestApprovals:
 class TestUrlOnlyClients:
 
     @pytest.mark.parametrize("mode", MODES)
-    def test_url_only_client_gets_a_clean_denial(self, server, registry, declare_elicitation, mode):
+    def test_url_only_client_gets_a_pending_approval(self, server, registry, declare_elicitation, mode, tmp_path):
+        """S9: a client that cannot ask the person gets its question shown in the framework instead of a refusal."""
+        from orchestrator.Core.job_service import JobService
+        from orchestrator.tools.approvals import ApprovalService, ApprovalStore
+        registry.attach_approvals(ApprovalService(ApprovalStore(tmp_path), JobService()))
+        declare_elicitation(mcp_types.ElicitationCapability(url=mcp_types.UrlElicitationCapability()))
+        asked = []
+        result = call(server, "write", {"text": "x"}, answering("accept", asked=asked), mode)  # no exception
+        assert result.is_error and "Waiting for the person to approve" in text_of(result)
+        assert "-32021" not in text_of(result) and "elicitation capability" not in text_of(result)
+        assert asked == [] and registry.writes == []
+        assert [(e["tool"], e["outcome"]) for e in registry.audit.entries(50)][-1] == ("write",
+                                                                                     "confirmation_requested")
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_url_only_client_gets_a_clean_denial_without_pending_approvals(self, server, registry,
+                                                                           declare_elicitation, mode):
         declare_elicitation(mcp_types.ElicitationCapability(url=mcp_types.UrlElicitationCapability()))
         asked = []
         result = call(server, "write", {"text": "x"}, answering("accept", asked=asked), mode)  # no exception
@@ -816,7 +832,9 @@ def test_broken_config_file_real_stdio_client(tmp_path, broken_config):
     assert problems == [], f"non-JSON-RPC output on stdout: {problems}"
     assert {"list_targets", "start_build"} <= names
     assert not caps.is_error and "gguf" in caps.structured_content["formats"]
-    assert start.is_error and PERMISSIONS_HINT in text_of(start)
+    # This client cannot ask: the question waits in the framework instead (S9), nothing runs before the person decides.
+    assert start.is_error and "Waiting for the person to approve" in text_of(start)
+    assert "llm-cli tools approvals" in text_of(start) and "get_job_status" in text_of(start)
 
 
 # --- Adversarial pass: cases the tests above do not reach ------------------------------------------

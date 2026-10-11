@@ -328,8 +328,11 @@ sequenceDiagram
 3. **Elicitation.** "Ask" becomes an MCP elicitation: the client shows you the tool and every argument in full
    (arguments too long to show cannot be confirmed). Only a real answer counts as approval, and a "no" is final
    for that call, even if the permission is loosened meanwhile. A confirmation that fails is refused and audited.
-   A client without elicitation support cannot confirm, so the call is denied with a hint to allow the tool with
-   `llm-cli tools permissions` or in the GUI (Tools > Tool Permissions (Ditto / MCP)...).
+   When the client cannot ask (no form elicitation), the question is too long for an elicitation, or you set the
+   tool to be confirmed in the framework, the call becomes a pending approval instead: the registry stores the
+   question (signed, bound to caller, tool, argument hash and question hash, 15 minutes), the client gets
+   `waiting_for_approval` with a job id, and you decide in the GUI or with `llm-cli tools approvals`. On approval the
+   framework rebuilds the question and runs the call itself under the original caller if it reads the same.
 4. **Execution.** A call that changes something is first recorded (`started`) and refused if that entry cannot
    be written. The handler runs in a worker thread; a client's cancel reaches it at once. Its result is checked
    against the output model and filtered: secrets redacted in every string, fields with external text (logs,

@@ -157,6 +157,10 @@ class MainOrchestrator(QMainWindow):
         act_folders.triggered.connect(self._open_ai_folders)
         tools_menu.addAction(act_folders)
 
+        act_approvals = QAction("Pending Approvals...", self)  # calls of AI clients that could not ask you
+        act_approvals.triggered.connect(self._open_approvals)
+        tools_menu.addAction(act_approvals)
+
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
         self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
         self.act_audio.setCheckable(True)
@@ -236,8 +240,51 @@ class MainOrchestrator(QMainWindow):
             self.lbl_heal = QLabel("🏥 Healing Active")
             self.lbl_heal.setStyleSheet("color: #2196F3; font-weight: bold; margin-right: 10px;")
             self.status.addPermanentWidget(self.lbl_heal)
-            
+
+        self._setup_approval_notice()
         self.status.showMessage("System Ready.")
+
+    def _setup_approval_notice(self):
+        """A notice while calls of AI clients wait for your approval (design 6.9); a click opens the window."""
+        registry = getattr(self.framework, "tool_registry", None)
+        approvals = getattr(registry, "approvals", None)
+        self.approval_notifier = None
+        if approvals is None:
+            return
+        from PySide6.QtWidgets import QPushButton
+        from orchestrator.gui.approvals_window import ApprovalNotifier
+        self.btn_approvals = QPushButton("")
+        self.btn_approvals.setFlat(True)
+        self.btn_approvals.setStyleSheet("color: #E65100; font-weight: bold;")
+        self.btn_approvals.clicked.connect(self._open_approvals)
+        self.btn_approvals.hide()
+        self.status.addPermanentWidget(self.btn_approvals)
+        self.approval_notifier = ApprovalNotifier(approvals.store, self)
+        self.approval_notifier.changed.connect(self._approvals_changed)
+        self.approval_notifier.check()
+
+    def _approvals_changed(self, count: int):
+        self.btn_approvals.setText(f"{count} call(s) wait for your approval" if count else "")
+        self.btn_approvals.setVisible(bool(count))
+        if count and self.approval_notifier.new_ids:
+            from PySide6.QtWidgets import QSystemTrayIcon
+            if QSystemTrayIcon.isSystemTrayAvailable():  # a desktop notification where the system offers one
+                tray = getattr(self, "_approval_tray", None)
+                if tray is None:
+                    tray = self._approval_tray = QSystemTrayIcon(self.windowIcon(), self)
+                    tray.show()
+                tray.showMessage("LLM Cross-Compiler Framework",
+                                 f"{count} call(s) of AI clients wait for your approval (Tools > Pending Approvals).")
+
+    def _open_approvals(self):
+        registry = getattr(self.framework, "tool_registry", None)
+        if getattr(registry, "approvals", None) is None:
+            QMessageBox.critical(self, "Error", "Pending approvals are not available.")
+            return
+        from orchestrator.gui.approvals_window import ApprovalsDialog
+        ApprovalsDialog(registry, self).exec()
+        if self.approval_notifier is not None:
+            self.approval_notifier.check()
 
     def _update_system_state(self):
         """

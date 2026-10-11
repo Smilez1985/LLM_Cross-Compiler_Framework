@@ -845,6 +845,33 @@ llm-cli tools audit --verify
 llm-cli tools audit --archive
 ```
 
+### tools approvals
+
+```
+llm-cli tools approvals [list]
+llm-cli tools approvals show ID
+llm-cli tools approvals approve ID
+llm-cli tools approvals decline ID
+```
+
+Aufrufe von KI-Clients, die dich nicht selbst fragen konnten (der Client hat keine Formular-Elicitation, die Frage ist
+länger als 4.000 Zeichen, oder du hast das Tool mit `tools permissions --confirm-in-framework TOOL` gesetzt). `list`
+(auch ohne Unterbefehl) zeigt jeden wartenden Aufruf mit ID, Tool, Aufruferklasse, dem selbst angegebenen Namen des
+Clients und der verbleibenden Zeit; `show` gibt die vollständige Frage aus; `approve` und `decline` zeigen sie erneut
+und fragen „Approve this call?“ oder „Decline this call?“, bevor etwas entschieden wird. Bei der Freigabe führt das
+Framework den Aufruf für den Client aus, unter dem Aufrufer des Clients; der Client liest das Ergebnis mit
+`get_job_status`. Jeder Unterbefehl braucht ein Terminal (sonst Exit-Code 2); eine Entscheidung wird abgelehnt
+(Exit-Code 1), wenn die Freigabe verfallen ist (15 Minuten), schon entschieden wurde, die Sitzung ihres Clients
+beendet ist, sich ihre Frage inzwischen geändert hat oder das Audit-Log die Entscheidung nicht festhalten kann. Auf
+einem Rechner ohne Bildschirm, etwa im Docker-Image, führst du es dort in einem Terminal aus
+(`docker exec -it <container> llm-cli tools approvals`). Die GUI zeigt dieselben Aufrufe unter
+**Tools > Pending Approvals...**.
+
+| Option von `tools permissions` | Bedeutung |
+|---|---|
+| `--confirm-in-framework TOOL` | Fragen zu diesem Tool immer im Framework stellen (im Freigabefenster oder mit diesem Befehl), nie im eigenen Dialog des KI-Clients. Wiederholbar; mit `--caller` für einen Aufrufer. Braucht ein Terminal; wird festgehalten. |
+| `--confirm-anywhere TOOL` | `--confirm-in-framework` für dieses Tool zurücknehmen. |
+
 ### tools folders
 
 ```
@@ -895,7 +922,8 @@ llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT]
 
 Betreibt den MCP-Server. Normalerweise startet ihn der KI-Client für dich (siehe `mcp config`). stdout trägt das
 Protokoll, Logs gehen nach stderr. Sind die Tool-Berechtigungen noch nicht eingerichtet, funktionieren nur lesende
-Tools ohne Nachfrage, alles andere fragt (oder wird abgelehnt, wenn der Client nicht fragen kann).
+Tools ohne Nachfrage, alles andere fragt (kann der Client nicht fragen, wartet die Frage im Framework: siehe
+[tools approvals](#tools-approvals)).
 
 | Option | Bedeutung |
 |---|---|

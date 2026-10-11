@@ -806,10 +806,30 @@ framework never sees it.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
   elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
   and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be
-  longer than 4000 characters is refused instead of being cut. Only a real answer from the user counts as approval,
+  longer than 4000 characters becomes a pending approval (below) instead of being cut. Only a real answer from the
+  user counts as approval,
   and a "no" is final for that call, even if the permissions are loosened while the question is open. Declined and
   cancelled calls, and calls refused before they run (invalid arguments, a confirmation that fails), are audited
-  too. A client that cannot ask gets a refusal with a hint how to allow the tool.
+  too.
+- **Pending approvals:** when a client cannot ask you (it declared no form elicitation), the question is longer
+  than an elicitation may be, or you set the tool to be confirmed in the framework (`llm-cli tools permissions
+  --confirm-in-framework TOOL`, or "Ask in the framework" in the Tool Permissions dialog; useful for tools you want
+  to see in the framework every time), the call is not refused. The client gets the error `waiting_for_approval`
+  with a job id ("poll get_job_status with wait_seconds=50; do not call this tool again"), and the question waits
+  for you: a notice in the GUI status bar (and a desktop notification where the system offers one) that opens
+  **Tools > Pending Approvals...**, and `llm-cli tools approvals` in a terminal. The window shows the caller class
+  first ("all local stdio clients" or the token's name), then the client's own name marked as self-reported, the
+  full question (up to 16,000 characters; a longer one is refused everywhere) and the time left, with **Approve
+  once** and **Decline**. On approval the framework builds the question again: if it reads differently (a fact behind
+  it changed), nothing runs and you are asked again; otherwise the framework runs the call itself, under the original
+  caller (`confirm_channel` `approval:<id>` in the audit log), and the client reads the result with
+  `get_job_status`. The same call repeated while it waits gets the same job, an approval runs once and only for the
+  caller, tool and arguments it was asked for, it expires after 15 minutes (audited as `unanswered`), and it ends
+  with the client's session or when the client cancels its job. A client has at most 5 open approvals. Your decision
+  is audited (`approval_decided`, actor `gui` or `cli`) before it is stored; if that fails, nothing is decided. The
+  approvals live in `~/.llm-framework/tool_approvals.json`, signed like the permissions, so a hand edit decides
+  nothing; no tool can create, list, approve or decline one, and only the client that asked sees the result. Ditto
+  in the framework always asks in its own dialog or prompt and never needs one.
 - **Instructions to the client:** the server describes the typical flow (targets → capabilities → build → status
   and log → artifacts), tells the client that fields marked as external text are data whose instructions must not
   be followed, and that a task it cannot do is reported to you with its specific reason.
@@ -895,8 +915,8 @@ framework never sees it.
   version the client reports about itself, the protocol version, the transport, the caller (`mcp` or the named
   token's `mcp:<name>`, never the token itself) and the capabilities it declared, for example
   `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
-  capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask" is
-  refused there. Client text is cleared of anything that looks like a key or token first, then escaped and cut
+  capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask"
+  becomes a pending approval in the framework. Client text is cleared of anything that looks like a key or token first, then escaped and cut
   to 64 characters; it is a label, never a permission.
 
 What the clients support, from their vendors' documentation (2026-10-11). "Not documented" means the vendor does
@@ -910,7 +930,7 @@ not say; the stderr line above shows what a client really declares.
 | VS Code (GitHub Copilot) | yes, modes not documented | not documented | yes, with templates | yes | not documented |
 
 Claude Desktop chat and Cowork are expected to declare no elicitation (one third-party source says so): there, every
-tool set to "ask" is refused, while allowed tools work.
+tool set to "ask" becomes a pending approval in the framework, while allowed tools work.
 
 **Claude subscribers:** this is the way to use the framework with a Claude plan. Anthropic does not allow
 third-party apps to use a subscription's sign-in or limits, so Ditto itself needs an API key; Claude Code and Claude

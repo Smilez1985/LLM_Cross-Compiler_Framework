@@ -901,14 +901,44 @@ def _save_policy(registry, policy=None, change=None):
         sys.exit(1)
 
 
+def _set_framework_only(registry, caller: Optional[str], add: Tuple[str, ...], remove: Tuple[str, ...]) -> None:
+    from orchestrator.tools.policy import CallerPolicy
+    known = {spec.name for spec in registry.list()}
+    unknown = sorted((set(add) | set(remove)) - known)
+    if unknown:
+        console.print(f"[red]Unknown tools: {escape(', '.join(unknown))} ('llm-cli tools list' shows them).[/red]")
+        sys.exit(2)
+
+    def change(current):
+        section = current.callers.get(caller) if caller else current
+        if caller and section is None:  # a caller's first own section starts from the shared permissions
+            section = CallerPolicy(tiers=dict(current.tiers), overrides=dict(current.overrides),
+                                   reviewed=current.reviewed, framework_only=list(current.framework_only))
+        tools = sorted((set(section.framework_only) | set(add)) - set(remove))
+        if caller:
+            return current.model_copy(update={"callers": {**current.callers,
+                                                          caller: section.model_copy(update={"framework_only": tools})}})
+        return current.model_copy(update={"framework_only": tools})
+    policy = _save_policy(registry, change=change)
+    tools = policy.framework_only_for(caller)
+    console.print(f"[green]Asked in the framework only, for {escape(CALLER_LABELS[caller])}: "
+                  f"{escape(', '.join(tools) or 'none')}[/green]")
+
+
 @tools.command('permissions')
 @click.option('--caller', type=CALLER_CHOICE, default=None,
               help="Set the permissions of one caller (ditto or mcp) instead of the shared ones")
 @click.option('--token', 'token_name', help='Set the permissions of this named MCP token (with --reset: read only)')
 @click.option('--reset', is_flag=True, help='Back to the recommended defaults (asks again at the next setup); '
                                             'with --caller: that caller uses the shared permissions again')
+@click.option('--confirm-in-framework', 'framework_only', multiple=True, metavar='TOOL',
+              help="Always put this tool's questions to you in the framework (approval window or 'tools approvals'), "
+                   "never in the AI client's own dialog (repeatable)")
+@click.option('--confirm-anywhere', 'anywhere', multiple=True, metavar='TOOL',
+              help='Undo --confirm-in-framework for this tool (repeatable)')
 @pass_context
-def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: Optional[str], reset: bool):
+def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: Optional[str], reset: bool,
+                      framework_only: Tuple[str, ...] = (), anywhere: Tuple[str, ...] = ()):
     """Set which tool calls are allowed, need confirmation, or are denied (needs a terminal)"""
     from orchestrator.tools.policy import ToolPolicy
     registry = _tool_registry(ctx)
@@ -917,6 +947,10 @@ def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: 
             console.print("[red]Use either --caller or --token.[/red]")
             sys.exit(2)
         _token_permissions(registry, token_name, reset)
+        return
+    if framework_only or anywhere:
+        _require_terminal("llm-cli tools permissions --confirm-in-framework")
+        _set_framework_only(registry, caller, framework_only, anywhere)
         return
     if reset:
         _require_terminal("llm-cli tools permissions --reset")
@@ -984,6 +1018,121 @@ def tools_audit(ctx: FrameworkContext, limit: int, verify: bool, archive: bool):
         table.add_row(escape(entry["ts"]), escape(entry["actor"]), escape(entry["tool"]), escape(entry["decision"]),
                       confirmed.get(entry["approved"], "?"), escape(entry["outcome"]))
     console.print(table)
+
+
+# Pending approvals: questions of AI clients that could not ask you themselves (design 6.9).
+
+def _approval_store(registry):
+    service = getattr(registry, "approvals", None)
+    if service is None:
+        console.print("[red]Pending approvals are not available.[/red]")
+        sys.exit(1)
+    return service.store
+
+
+def _show_approval(record) -> None:
+    left = record.seconds_left()
+    console.print(f"[bold]{escape(record.id)}[/bold]  {escape(record.title)} ({escape(record.tool)}), "
+                  f"{left // 60} min {left % 60:02d} s left")
+    console.print(f"Caller: {escape(record.caller_class)}")
+    console.print(f"Client: {escape(record.client or 'unnamed client')} (self-reported)")
+    click.echo("")
+    click.echo(record.question)  # escaped by the framework (visible()), shown as plain text
+    click.echo("")
+
+
+@tools.group('approvals', invoke_without_command=True)
+@click.pass_context
+def tools_approvals(click_ctx):
+    """Calls of AI clients waiting for your approval (needs a terminal)"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(tools_approvals_list)
+
+
+@tools_approvals.command('list')
+@pass_context
+def tools_approvals_list(ctx: FrameworkContext):
+    """The calls waiting for your approval"""
+    _require_terminal("llm-cli tools approvals")
+    store = _approval_store(_tool_registry(ctx))
+    pending = store.pending()
+    if store.problem:
+        console.print(f"[red]{escape(store.problem)}[/red]")
+    if not pending:
+        console.print("No call is waiting for your approval.")
+        return
+    console.print("[bold]Calls waiting for your approval[/bold]")
+    for record in pending:  # one line each: ids stay whole in a narrow terminal
+        left = record.seconds_left()
+        console.print(f"  {escape(record.id)}  {escape(record.tool)}  caller: {escape(record.caller_class)}  "
+                      f"client: {escape(record.client or 'unnamed')} (self-reported)  {left // 60} min left")
+    console.print("Show one with 'llm-cli tools approvals show ID', then approve or decline it.")
+
+
+def _pending_record(store, approval_id: str):
+    record = store.get(approval_id)
+    if record is None:
+        console.print(f"[red]There is no approval '{escape(approval_id)}' ('llm-cli tools approvals' lists "
+                      "them).[/red]")
+        sys.exit(1)
+    return record
+
+
+@tools_approvals.command('show')
+@click.argument('approval_id')
+@pass_context
+def tools_approvals_show(ctx: FrameworkContext, approval_id: str):
+    """Show the full question of a waiting call"""
+    _require_terminal("llm-cli tools approvals show")
+    record = _pending_record(_approval_store(_tool_registry(ctx)), approval_id)
+    _show_approval(record)
+    if record.state != "pending":
+        console.print(f"State: {escape(record.state)}")
+
+
+def _decide_approval(ctx: FrameworkContext, approval_id: str, approve: bool) -> None:
+    from orchestrator.tools.approvals import ApprovalStoreError, audit_decision
+    registry = _tool_registry(ctx)
+    store = _approval_store(registry)
+    record = _pending_record(store, approval_id)
+    _show_approval(record)
+    question = "Approve this call? The framework then runs it for the AI client." if approve else \
+        "Decline this call?"
+    if not click.confirm(question, default=False):
+        console.print("Nothing decided.")
+        sys.exit(1)
+
+    def audit(decided):
+        audit_decision(registry, decided, "cli")
+    try:
+        store.decide(approval_id, approve, "cli", expected_question=record.question_sha256, record_decision=audit)
+    except ApprovalStoreError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    except Exception as e:  # the audit log cannot record it: nothing was decided
+        console.print(f"[red]The audit log could not record your decision ({escape(str(e))}); nothing was "
+                      "decided.[/red]")
+        sys.exit(1)
+    console.print(f"[green]Approved: the framework runs '{escape(record.title)}' now.[/green]" if approve else
+                  f"[yellow]Declined: '{escape(record.title)}' does not run.[/yellow]")
+
+
+@tools_approvals.command('approve')
+@click.argument('approval_id')
+@pass_context
+def tools_approvals_approve(ctx: FrameworkContext, approval_id: str):
+    """Approve a waiting call; the framework runs it for the AI client"""
+    _require_terminal("llm-cli tools approvals approve")
+    _decide_approval(ctx, approval_id, True)
+
+
+@tools_approvals.command('decline')
+@click.argument('approval_id')
+@pass_context
+def tools_approvals_decline(ctx: FrameworkContext, approval_id: str):
+    """Decline a waiting call"""
+    _require_terminal("llm-cli tools approvals decline")
+    _decide_approval(ctx, approval_id, False)
 
 
 @tools.group('folders')

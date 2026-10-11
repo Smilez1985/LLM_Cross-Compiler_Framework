@@ -307,6 +307,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   still sends are refused and audited); a revoked token loses its permissions. Only a person at a terminal manages
   tokens (audited with actor `cli`, never the token itself), and a token that ends up in a tool argument, a log line
   or the audit log is redacted like other keys.
+- **Pending approvals for AI clients that cannot ask you** (MCP server). When a client has no form elicitation
+  (Claude Desktop chat, Cowork), a question is longer than 4,000 characters, or you set a tool with
+  `llm-cli tools permissions --confirm-in-framework TOOL` (or "Ask in the framework" in the GUI), the question waits
+  for you in the framework: a notice in the GUI status bar opens **Tools > Pending Approvals...**, and
+  `llm-cli tools approvals` (`list`, `show`, `approve`, `decline`; needs a terminal) works on a headless machine. The
+  client gets `waiting_for_approval` with a job id; once you approve, the framework runs the call itself under the
+  client's caller, unless its question would read differently by then (then you are asked again), and the client
+  reads the result with `get_job_status`. An approval is bound to the caller, tool, argument hash and question hash,
+  runs once, expires after 15 minutes and ends with the client's session or `cancel_job`; a client has at most 5
+  open; the question shows the caller class first and the client's name as self-reported, up to 16,000 characters.
+  Decisions are audited before they are stored, and the approval file is signed like the permissions.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -404,6 +415,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`~/.llm-framework/mcp_http_token`) is no longer accepted: create a token per client with
   `llm-cli mcp token add NAME`, give it to the client, and delete the old file. `llm-cli mcp serve --transport http`
   does not start before a named token exists.
+- **A client that cannot ask you is no longer refused** for a tool set to "ask": the call waits for your approval in
+  the framework instead (see Added); before, it failed with a hint how to allow the tool.
 - **Confirm your tool permissions once after the update.** The permission file is signed now, and one saved by 3.0.0
   carries no signature, so every tool is denied until you set the permissions up again (the GUI shows the dialog at
   the first start and says why; `llm-cli tools permissions`). `llm-cli tools permissions`, also with `--reset`, and

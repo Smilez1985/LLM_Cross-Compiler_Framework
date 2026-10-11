@@ -351,6 +351,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   widerrufenes Token verliert seine Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal (protokolliert
   mit dem Akteur `cli`, nie das Token selbst), und ein Token, das in ein Tool-Argument, eine Logzeile oder das
   Audit-Log gerät, wird wie andere Schlüssel geschwärzt.
+- **Wartende Freigaben für KI-Clients, die dich nicht fragen können** (MCP-Server). Hat ein Client keine
+  Formular-Elicitation (Claude-Desktop-Chat, Cowork), ist eine Frage länger als 4.000 Zeichen oder hast du ein Tool
+  mit `llm-cli tools permissions --confirm-in-framework TOOL` gesetzt (oder „Ask in the framework“ in der GUI),
+  wartet die Frage im Framework auf dich: Ein Hinweis in der Statusleiste der GUI öffnet
+  **Tools > Pending Approvals...**, und `llm-cli tools approvals` (`list`, `show`, `approve`, `decline`; braucht ein
+  Terminal) funktioniert auf einem Rechner ohne Bildschirm. Der Client bekommt `waiting_for_approval` mit einer
+  Job-ID; sobald du freigibst, führt das Framework den Aufruf selbst unter dem Aufrufer des Clients aus, außer seine
+  Frage würde inzwischen anders lauten (dann wirst du erneut gefragt), und der Client liest das Ergebnis mit
+  `get_job_status`. Eine Freigabe ist an Aufrufer, Tool, Argument-Hash und Fragen-Hash gebunden, läuft einmal,
+  verfällt nach 15 Minuten und endet mit der Sitzung des Clients oder `cancel_job`; ein Client hat höchstens 5 offen;
+  die Frage zeigt zuerst die Aufruferklasse und den Namen des Clients als selbst angegeben, bis zu 16.000 Zeichen.
+  Entscheidungen werden festgehalten, bevor sie gespeichert werden, und die Datei der Freigaben ist signiert wie die
+  Berechtigungen.
 
 ### Geändert
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
@@ -461,6 +474,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (`~/.llm-framework/mcp_http_token`) wird nicht mehr akzeptiert: Lege mit `llm-cli mcp token add NAME` ein Token je
   Client an, gib es dem Client und lösche die alte Datei. `llm-cli mcp serve --transport http` startet nicht, bevor
   es ein benanntes Token gibt.
+- **Ein Client, der dich nicht fragen kann, wird nicht mehr abgewiesen**, wenn ein Tool auf „fragen“ steht: Der
+  Aufruf wartet stattdessen im Framework auf deine Freigabe (siehe Hinzugefügt); bisher scheiterte er mit einem
+  Hinweis, wie du das Tool erlaubst.
 - **Bestätige deine Tool-Berechtigungen nach dem Update einmal.** Die Berechtigungsdatei ist jetzt signiert, und eine
   von 3.0.0 gespeicherte trägt keine Signatur, daher ist jedes Tool verboten, bis du die Berechtigungen neu einrichtest
   (die GUI zeigt den Dialog beim ersten Start und nennt den Grund; `llm-cli tools permissions`).

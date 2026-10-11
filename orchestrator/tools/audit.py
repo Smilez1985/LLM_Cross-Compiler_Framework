@@ -60,12 +60,12 @@ UNKEYED = "unkeyed"
 # the handler runs; the call is refused when it cannot be written), `confirmation_requested` the record of a
 # question put to a person; the other outcomes are end states. `folder_added` and `folder_removed` record a person's
 # change to the folders the AI may use, `policy_changed` a saved change of the tool permissions with the old and new
-# decisions (framework-side events, actor cli or gui).
+# decisions, `approval_decided` a person's answer to a pending approval (framework-side events, actor cli or gui).
 OUTCOMES = frozenset({
     "ok", "error", "denied", "not_confirmed", "invalid_input",
     "started", "confirmation_requested", "cancelled", "rate_limited", "confirmation_timeout",
     "audit_unavailable", "unknown_tool", "repeat_refused", "cannot_reported",
-    "folder_added", "folder_removed", "policy_changed",
+    "folder_added", "folder_removed", "policy_changed", "approval_decided",
 })
 # How a person answered (or did not answer) a question.
 ANSWERS = frozenset({"accepted", "declined", "cancelled", "timeout", "client_disconnected", "unavailable",

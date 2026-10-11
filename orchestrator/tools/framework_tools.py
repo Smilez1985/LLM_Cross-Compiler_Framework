@@ -270,9 +270,11 @@ def _wait_seconds(requested: int, notes: List[str]) -> int:
 
 def _job_out(job, ctx: ToolContext) -> JobStatusOut:
     error = JobErrorOut(**{k: job.error.get(k, "") for k in ("code", "message", "next")}) if job.error else None
+    # An approved call's result belongs to the caller that asked for it.
+    result = job.result if job.kind != "approval" or job.owner == ctx.owner else None
     return JobStatusOut(job_id=job.job_id, kind=job.kind, state=job.state,
                         progress=JobProgress(done=job.done, total=job.total, message=job.message),
-                        result=job.result, error=error, owner=job_service.owner_actor(job.owner),
+                        result=result, error=error, owner=job_service.owner_actor(job.owner),
                         yours=job.owner == ctx.owner, created=job.created, updated=job.updated, note=job.note)
 
 
@@ -527,4 +529,9 @@ def build_tool_registry(framework) -> ToolRegistry:
     refuse_unkeyed = None if key else audit.kept_with_key
     registry = ToolRegistry(PolicyStore(state_dir, key=key, audit=audit, refuse_unkeyed=refuse_unkeyed), audit,
                             tokens=TokenStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed))
-    return register_framework_tools(registry, framework)
+    register_framework_tools(registry, framework)
+    # Pending approvals: a client that cannot ask gets its question shown in the framework instead (design 6.9).
+    from orchestrator.tools.approvals import ApprovalService, ApprovalStore
+    registry.attach_approvals(ApprovalService(ApprovalStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed),
+                                              framework.job_service))
+    return registry
