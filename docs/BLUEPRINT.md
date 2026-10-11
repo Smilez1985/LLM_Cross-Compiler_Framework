@@ -61,10 +61,10 @@ guide every design choice.
 
 | Principle | What it means in practice |
 |---|---|
-| **Local-first** | Conversions run on your computer in Docker. Models are downloaded on the host, and the conversion containers have no network. The knowledge base computes its embeddings locally, and Ditto can run completely offline on a local model. Apart from downloads, nothing leaves your computer unless you choose a cloud AI provider for Ditto (then the privacy filter applies, see [Security model](#security-model)), turn on the anonymous error reports (`enable_telemetry`, off by default) or share a knowledge pack yourself. |
+| **Local-first** | Conversions run on your computer in Docker. Models are downloaded on the host, and the conversion containers have no network. The knowledge base computes its embeddings and reranking locally, and Ditto can run completely offline on a local model. Apart from downloads, nothing leaves your computer unless you choose a cloud AI provider for Ditto (then the privacy filter applies, see [Security model](#security-model)), turn on the anonymous error reports (`enable_telemetry`, off by default) or open a pull request with a community pack (the framework prepares the pack; the GitHub CLI or the browser sends it, with their own credentials). |
 | **Laypeople-friendly** | The GUI offers only what the selected target supports, the CLI refuses anything else, and both fill in sensible defaults per board (for example Q4_0 on the RK3566). `llm-cli doctor` explains problems with fix hints. AI errors are explained in plain words (for example that a Claude API key valid in every workspace needs the workspace ID). Self-healing proposals wait for your decision. |
-| **Safe by default** | The conversion sandbox is on (`build_sandbox: true`). AI clients and Ditto may read freely but must ask before changing anything. New SSH devices are trusted only after you confirm their fingerprint. Passwords are never stored. Text suggested by an AI is never executed. |
-| **Data over code** | What a target can build is declared in its `target.yml` (`capabilities:` block, checked by a schema). AI providers are presets in `configs/llm_providers.yml`, the local model server and its models are pinned in `configs/llama_runtime.yml`, and Ditto's evaluation cases live in `evals/ditto/cases.yml`. A new board, model or OpenAI-compatible server is an edit of data, as long as the code behind it supports it. |
+| **Safe by default** | The conversion sandbox is on (`build_sandbox: true`). AI clients and Ditto may read freely but must ask before changing anything. New SSH devices are trusted only after you confirm their fingerprint. Passwords are never stored. Text suggested by an AI is never executed. The crawler honours every machine-readable opt-out of a site, and no switch turns that off. Community packs are installed only after checks in a quarantine folder and your confirmation. |
+| **Data over code** | What a target can build is declared in its `target.yml` (`capabilities:` block, checked by a schema). AI providers are presets in `configs/llm_providers.yml`, the local model server and its models are pinned in `configs/llama_runtime.yml`, Ditto's evaluation cases live in `evals/ditto/cases.yml`, the retrieval evaluation's corpus and cases in `evals/retrieval/`, and the trusted community keys in `configs/community_keys.yml`. A new board, model or OpenAI-compatible server is an edit of data, as long as the code behind it supports it. |
 | **Verifiable builds** | Every build writes a manifest (`build_info.json`) with the SHA256 hash of each model file, a `Model_Card.md` and a ZIP archive. The deployment package checks the hashes on the device before installing. Python dependencies are pinned by hash, downloads of the local model server and its models by size and SHA256, and the tool audit log can be verified. |
 
 ## Architecture overview
@@ -73,7 +73,9 @@ In plain words: there are three front doors (GUI, CLI, MCP). Behind them sits on
 which starts all other parts and hands them to each other. A build request ends up in the `BuildEngine`, which
 builds a Docker image for the target and runs the conversion in sandboxed containers. The finished model lands in
 `output/`, and the `DeploymentManager` copies it to the device. Ditto talks to AI providers only through the
-provider layer, and uses the same tool registry as the MCP server.
+provider layer, and uses the same tool registry as the MCP server. Deep Ingest, which only the GUI can start,
+sends the crawler to public web pages for the knowledge base; the community zoo installs community packs into
+`targets/`, the recipe folder and the knowledge base.
 
 ```mermaid
 flowchart TB
@@ -94,6 +96,8 @@ flowchart TB
         HEAL["Self-healing"]
         DITTO["Ditto<br/>Core/ditto_manager.py"]
         RAG["Knowledge base<br/>FastEmbed + embedded Qdrant"]
+        CRAWL["Crawler<br/>Core/crawler_manager.py"]
+        ZOO["Community zoo<br/>Core/community_manager.py"]
         DOC["Doctor"]
         DEP["DeploymentManager<br/>+ ssh_trust"]
     end
@@ -101,6 +105,8 @@ flowchart TB
     LLM["Provider layer<br/>orchestrator/llm"]
     RT["Local model server<br/>orchestrator/runtime<br/>llama-server on 127.0.0.1"]
     CLOUD["Cloud AI providers<br/>and local engines"]
+    WEB["Public web pages"]
+    IDX["Signed community index<br/>and pack downloads"]
 
     BE["BuildEngine<br/>orchestrator/Core/builder.py"]
     subgraph Docker["Docker with BuildKit"]
@@ -135,6 +141,14 @@ flowchart TB
     ORC --> HEAL
     HEAL --> DITTO
     DITTO --> RAG
+    GUI -->|"Deep Ingest"| RAG
+    RAG --> CRAWL
+    CRAWL -->|"SSRF guard, opt-out checks"| WEB
+    GUI --> ZOO
+    CLI --> ZOO
+    ZOO -->|"signature check, pinned download"| IDX
+    ZOO --> TGT
+    ZOO --> RAG
     DITTO --> LLM
     LLM -->|"privacy filter for cloud providers"| CLOUD
     LLM -->|"per-start API key"| RT
@@ -151,8 +165,8 @@ flowchart TB
 
 | Component | Where | Role |
 |---|---|---|
-| GUI | `orchestrator/gui/` (start: `llm-gui`) | Main window, build tab, deployment window, Ditto chat (its header shows the access in use), module wizard, Hugging Face browser, dialogs for AI settings, the sign-in panel (`sign_in.py`: method cards, key form, storage chooser, passphrase dialog; vault and network calls in worker threads), tool permissions, tool confirmations, healing proposals and SSH trust. |
-| CLI | `orchestrator/cli.py` (`llm-cli`) | Top-level commands `build`, `config`, `deploy`, `ditto`, `doctor`, `mcp`, `module`, `scan`, `secrets`, `swarm`, `targets`, `tools` (`doctor` and `scan` are single commands, the others are groups). The sign-in commands `ditto login`, `logout` and `auth` use the same sign-in operations as the GUI (`orchestrator/llm/auth/signin.py`). |
+| GUI | `orchestrator/gui/` (start: `llm-gui`) | Main window, build tab, deployment window, Ditto chat (its header shows the access in use), module wizard with Deep Ingest, Hugging Face browser, Community Hub, dialogs for AI settings, the sign-in panel (`sign_in.py`: method cards, key form, storage chooser, passphrase dialog; vault and network calls in worker threads), tool permissions, tool confirmations, healing proposals, SSH trust, the Deep Ingest notice and the export for the community. |
+| CLI | `orchestrator/cli.py` (`llm-cli`) | Top-level commands `build`, `config`, `deploy`, `ditto`, `doctor`, `mcp`, `module`, `scan`, `secrets`, `targets`, `tools`, `zoo` (`doctor` and `scan` are single commands, the others are groups). The sign-in commands `ditto login`, `logout` and `auth` use the same sign-in operations as the GUI (`orchestrator/llm/auth/signin.py`). |
 | FrameworkManager | `orchestrator/Core/framework.py` | Starts all managers in four phases (security and infrastructure, core logic, AI and knowledge, guardians and operations), connects them, keeps one long-lived asyncio loop for builds and resolves relative data paths against the installation folder, not the working directory. |
 | ConfigManager | `orchestrator/Core/config_manager.py` | Settings with a schema (type, default, validation rule). The config folder is `LLM_FRAMEWORK_CONFIG_DIR` if set, otherwise the installation's `configs/` if it is writable, otherwise the per-user folder; never the working directory. User settings are saved to `config.yml` there. Environment variables with the prefix `LLM_FRAMEWORK_`, `FRAMEWORK_` or `LLM_` override known settings. Personal state lives in `~/.llm-framework` (override with `LLM_FRAMEWORK_HOME`), mode 0700 on Linux and macOS. |
 | SecretsManager | `orchestrator/Core/secrets_manager.py`, `orchestrator/Core/vault_key.py`, `orchestrator/utils/file_lock.py` | Encrypted vault (`secrets.store` in the per-user folder, format v2: Fernet entries with key ids, read with MultiFernet, key rotation). Its key comes from the operating system's keyring by default (one entry per vault; a keyring that hangs, keeps nothing or stores in plain text is refused) or from the explicit choice in `secret_storage` (credential helper, passphrase, unencrypted key file, memory only). Every change runs under a cross-process lock; the vault refuses a location inside a git working copy. Holds API keys (as records under `cred/<provider>/api_key`; the old names still work) and the Hugging Face token (`hf_token`). The secrets of a store in the old location (config folder) are taken over once and re-encrypted with the vault key, also into an existing per-user store; secrets already there win, and the old file is left unchanged. A long-running process (GUI, MCP server) re-reads the vault when another process has changed it. |
@@ -169,10 +183,13 @@ flowchart TB
 | Provider layer (unreleased) | `orchestrator/llm/` | One client (`LLMClient`) for every AI provider, built on the official `anthropic` and `openai` SDKs; OpenAI-compatible servers go through `openai`. Picks provider, model and effort per task from the settings and the presets in `configs/llm_providers.yml` (a file of the same name in the config folder adds or replaces presets). Retries (two, the SDKs' own retries are off), a fallback chain for refusals and outages (`ai_fallback_chain`), structured answers validated against schemas with one repair attempt, typed errors, the privacy filter for cloud providers, and a tool loop. The sign-in core (`orchestrator/llm/auth/`) resolves the credential of each call from the sign-in methods in the catalog: keys from the vault (keys of custom servers bound to their address) or from the environment variables the catalog lists, a free credential check, errors with a known cause and the next step, and token renewal under a lock shared by all processes. |
 | Ditto (rebuilt, unreleased) | `orchestrator/Core/ditto_manager.py` | The assistant: chat with the framework tools (at most 8 model turns per question, tool calls as actor `ditto` through the registry), analysis of failed builds, module proposals from a hardware probe and build recommendations. The last three are validated structured answers; an invalid answer is an error and is never applied. A healing analysis or build recommendation with a dangerous command is discarded; a module proposal is checked again by the module generator. The chat history is append-only (`chat_history.json`); a long conversation is summarized into a new one. |
 | Managed local model (unreleased) | `orchestrator/runtime/`, `configs/llama_runtime.yml` | Downloads a pinned llama.cpp build (b11429, the same commit as v0.6.0) for the hardware (CPU, Vulkan, CUDA, Metal; ROCm only when chosen) and pinned GGUF models in tiers (Qwen3.5 9B, 4B and 2B, 2-bit variants for weak hardware, and an IBM Granite 4.2 3B model on request), each checked by size and SHA256. Runs `llama-server` on 127.0.0.1 with a free port and a per-start API key. The `local` provider finds the running server by itself. |
-| Ditto evaluation (unreleased) | `orchestrator/evals/ditto_eval.py`, `evals/ditto/cases.yml` | `llm-cli ditto eval`: 19 fixed cases (build-log analysis, build recommendations, module proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local model tier. Nothing is built: chat cases use the real tool definitions over a stand-in build service. |
+| Ditto evaluation (unreleased) | `orchestrator/evals/ditto_eval.py`, `evals/ditto/cases.yml`, `evals/retrieval/` | `llm-cli ditto eval`: 19 fixed cases (build-log analysis, build recommendations, module proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local model tier. Nothing is built: chat cases use the real tool definitions over a stand-in build service. With `--kind retrieval`, 42 searches grade the knowledge-base search on a fixed corpus, without an AI model (see [A knowledge-base search](#a-knowledge-base-search-unreleased)). |
 | Self-healing | `orchestrator/Core/self_healing_manager.py` | Recognizes known failures with fixed patterns first and asks Ditto only for unknown ones. Applies only framework-defined fixes, and only after your approval. |
-| Knowledge base and crawler | `orchestrator/Core/rag_manager.py`, `orchestrator/rag/`, `orchestrator/Core/crawler_manager.py`, `orchestrator/Core/community_manager.py` | Optional (`enable_rag_knowledge`). Web pages, PDFs, community packs and the framework's own code are split into chunks and stored with a local dense embedding (FastEmbed on ONNX Runtime, CPU; model chosen by hardware unless `rag_embedding_model` is set) and a BM25 vector. Searches combine both rankings with Reciprocal Rank Fusion. Qdrant runs embedded in the process with its storage in the per-user folder (unreleased); a Qdrant server is used only when `qdrant_url` is set. Knowledge packs can be shared as JSON in `community/knowledge/`. |
-| Doctor | `orchestrator/Core/doctor.py` | Deterministic health checks (Python, Docker and BuildKit, disk space, targets, state folder permissions, secrets and keyring, tool permissions and audit log, calibration data) with stable codes, fix hints and tiered automatic fixes. |
+| Knowledge base and crawler | `orchestrator/Core/rag_manager.py`, `orchestrator/rag/`, `orchestrator/Core/crawler_manager.py` | Optional (`enable_rag_knowledge`). Web pages, PDFs, community knowledge packs and the framework's own code are split into chunks and stored with a local dense embedding (FastEmbed on ONNX Runtime, CPU; model chosen by hardware unless `rag_embedding_model` is set) and a BM25 vector. Searches combine both rankings with Reciprocal Rank Fusion; a local cross-encoder can rerank the results and drop those below a relevance floor (unreleased, see [A knowledge-base search](#a-knowledge-base-search-unreleased)). Qdrant runs embedded in the process with its storage in the per-user folder (unreleased); a Qdrant server is used only when `qdrant_url` is set. The crawler of Deep Ingest honours the sites' machine-readable opt-outs (see [Deep Ingest](#deep-ingest-from-a-web-page-to-the-knowledge-base-unreleased)). |
+| Deep Ingest notice and spoken announcements (unreleased) | `orchestrator/utils/crawl_notice.py`, `orchestrator/utils/announce.py` | The one-time notice before the first Deep Ingest, remembered per user, and short announcements through the speech engine of the operating system. |
+| Community zoo (unreleased) | `orchestrator/Core/community_manager.py`, `orchestrator/Core/community_pack.py`, `orchestrator/schemas/recipes.py`, `orchestrator/gui/community_hub.py`, `configs/community_keys.yml` | Signed and encrypted community packs (targets, recipes, knowledge), the signed community index, installation through a quarantine with trust levels, export with privacy scrub and the hand-over to a pull request (see [Community packs](#community-packs-format-trust-and-exchange-unreleased)). |
+| Input history (unreleased) | `orchestrator/utils/input_history.py` | Recent values of the GUI input fields, per user and without secrets (see [Recent inputs](#recent-inputs-unreleased)). |
+| Doctor | `orchestrator/Core/doctor.py` | Deterministic health checks (Python, Docker and BuildKit, disk space, targets, state folder permissions, secrets and keyring, tool permissions and audit log, calibration data, installed community packs) with stable codes, fix hints and tiered automatic fixes. |
 | Calibration data | `data/calibration/`, `orchestrator/utils/calibration.py` | Curated German, English and tool-use text (MIT licence) with SHA256 checks, used for importance matrices. |
 | Untrusted text handling | `orchestrator/utils/untrusted.py` | Cleans and wraps external text before it reaches a language model. |
 
@@ -194,8 +211,9 @@ is for.
 | `cache/calibration/` | Calibration text written for importance matrices. |
 | `output/` | Finished builds, one folder per build with model files, `build_info.json`, `Model_Card.md`, plus a ZIP next to it. |
 | `models/ditto/` | Ditto's local GGUF models with a `.verified.json` marker each (unreleased). |
-| `models/embeddings/` | Embedding models of the knowledge base (unreleased). |
-| `~/.llm-framework/` (or `LLM_FRAMEWORK_HOME`) | `secrets.store`, `tool_policy.json`, `audit.db` with `audit.db.anchor`, `known_hosts`, the framework SSH key `id_ed25519_llm_framework` (+ `.pub`), `mcp_http_token`, `chat_history.json`, `llm_privacy_key` and `llm_install_id`; the embedded knowledge base `qdrant/` and `knowledge_snapshots/`; the local model server under `runtime/llama.cpp/` (builds, `active.json`, `server.json`, the key file while the server runs) and its log in `logs/llama-server.log`. |
+| `models/embeddings/` | Embedding and reranking models of the knowledge base (unreleased). |
+| `community/` | Installed community recipes (`recipes/`) and knowledge packs (`knowledge/`), each with a `.lcf-provenance.json`, and the packs you export (`contributions/`). Community targets are installed into `targets/`. A `.quarantine/` folder inside an install folder holds a pack only while it is checked (unreleased). |
+| `~/.llm-framework/` (or `LLM_FRAMEWORK_HOME`) | `secrets.store` (also your community key pairs), `tool_policy.json`, `audit.db` with `audit.db.anchor`, `known_hosts`, the framework SSH key `id_ed25519_llm_framework` (+ `.pub`), `mcp_http_token`, `chat_history.json`, `llm_privacy_key` and `llm_install_id`; `crawl_notice.json` and `input_history.json` (unreleased); the cached community index `community/index.json` with `index.json.sig` and the author key ids remembered at the first install, `community/authors.json` (unreleased); the embedded knowledge base `qdrant/` and `knowledge_snapshots/`; the local model server under `runtime/llama.cpp/` (builds, `active.json`, `server.json`, the key file while the server runs) and its log in `logs/llama-server.log`. |
 | Config folder (usually `configs/`) | `config.yml` (user settings); optionally an own `llm_providers.yml` that adds or replaces provider presets. |
 
 `cache/`, `output/` and `models/` are relative to the installation folder unless the settings `cache_dir`,
@@ -380,6 +398,289 @@ run them on your computer only. Ditto then needs no internet.
    minutes on a CPU).
 6. **Stop.** `llm-cli ditto runtime stop` stops the server (and leftovers of a crash) and deletes the key file.
 
+### Deep Ingest: from a web page to the knowledge base (unreleased)
+
+In plain words: you give the framework the address of a documentation site. It reads the public pages of that
+site into your local knowledge base, so Ditto can use them. Before it keeps a page, it checks whether the site's
+owner has said "no text and data mining" in a machine-readable way, and skips the page if so. You do not have to
+judge that yourself.
+
+1. **Start.** Deep Ingest starts only from the GUI: the module wizard (Tools > Create Hardware Module...) has the
+   button "Deep Ingest (Add Docs)", which needs the knowledge base (`enable_rag_knowledge`). The CLI has no crawl
+   command, and MCP clients and Ditto have no tool that crawls or takes a URL. The test `TestCrawlsStayWithTheUser`
+   in `tests/test_security.py` fails if code of the MCP server, Ditto, the tools or the provider layer reaches the
+   crawler.
+2. **Notice.** Before the first crawl a notice says what is read (only publicly reachable pages), which opt-outs are
+   honoured, that the knowledge stays on this computer (only the excerpts Ditto uses go to the AI provider you
+   chose) and that sharing it needs your explicit release. It is information, not a legal confirmation, so it has
+   one button, "Understood". A short spoken hint starts once the notice is on screen. The per-user file
+   `crawl_notice.json` (mode 0600, written atomically) records the notice version and a SHA-256 hash of its English
+   and German texts: the notice comes back when its text changes, and also when the file is missing or damaged.
+3. **Options and snapshot.** The Deep Ingest dialog takes the start URLs and, for this crawl, the depth (1 to 5),
+   PDF downloads and the delay between requests (0 to 10 seconds). It opens with 2, on and 1 second and does not
+   read the settings `crawler_max_depth`, `crawler_download_pdfs` and `crawler_rate_limit`; its values decide. The
+   page limit `crawler_max_pages` (default 50) and the languages `crawler_languages` (default `en` and `de`) come
+   from the settings. There is no switch for robots.txt or any other opt-out. Before each start URL the knowledge
+   base saves a snapshot of itself in `knowledge_snapshots/` (the last five are kept; an empty knowledge base gets
+   none). Neither the GUI nor the CLI can restore a snapshot yet.
+4. **Checks before the request.** For each URL, breadth-first, in this order: the SSRF check of the address (see
+   [Security model](#security-model)), then, with PDF downloads off, the skip of a URL ending in `.pdf`, the host's
+   robots.txt (fetched once per host) and the origin's `/.well-known/tdmrep.json` (fetched once per origin). Both
+   files are fetched through the same SSRF guard as the pages, and every redirect hop on the way is checked again.
+5. **Request.** The wizard shows "Page N of M: <url>", and the crawler waits the delay between requests (a Stop
+   cuts it short). The request does not follow redirects: a redirect target is queued and goes through steps 4
+   and 5 itself, so it is checked against its own host's robots.txt and `tdmrep.json`. A link that redirects to
+   another host is skipped like any external link; only the start URL may move the crawl to another host (for
+   example from `example.com` to `www.example.com`). More than five redirects count as a failure, and a crawl
+   makes at most five times `crawler_max_pages` page requests (the fetches of robots.txt and `tdmrep.json` are
+   not counted).
+6. **Checks after the response.** First the `X-Robots-Tag` header and the TDMRep `tdm-reservation` header; then,
+   for HTML, `<meta name="robots">`, `<meta name="llm-conversion-framework-bot">` and
+   `<meta name="tdm-reservation">`, and for a PDF, `tdm:reservation` in its metadata. `noindex`, `none`, `noai`
+   and `noimageai` keep the page out; `nofollow` and `none` stop the crawler from following its links.
+7. **Store.** An HTML page is converted to Markdown (headings, code blocks and tables kept) and filtered by
+   language (`crawler_languages`), a PDF is read as text; each page is stored at once, replacing its earlier
+   version. A Stop, or closing the wizard, ends the crawl after the current page; what is stored stays.
+8. **Outcome.** Only after the last write has returned does the result say success (pages stored; none failed
+   or was reserved by the site, and the crawl was not stopped), partial (some pages stored; others failed, were
+   reserved by the site, or the crawl was stopped) or failure (nothing stored). It is shown, logged and spoken.
+   Pages left out by an opt-out, the address check, switched-off PDF downloads, a redirect or the language filter
+   are listed in the crawl log with their reason, and so are pages that could not be fetched.
+
+Which signals count, and when they are read:
+
+| Signal | When | Rule |
+|---|---|---|
+| robots.txt ([RFC 9309](https://www.rfc-editor.org/rfc/rfc9309)) | before the request, once per host | The groups that name this crawler (`LLM-Conversion-Framework-Bot`) count, otherwise all `*` groups together; `*` and `$` patterns work; the longest matching rule decides and `Allow` wins a tie. A 401, a 403, a server error or an unreachable file means "disallow everything" (for 401 and 403 this is stricter than RFC 9309, which allows crawling when the file is unavailable with a 4xx code); a missing file (404) means everything is allowed. A file that the SSRF guard blocks or that lies behind more than five redirects counts as unavailable, which RFC 9309 treats as allowed. |
+| TDMRep file `/.well-known/tdmrep.json` | before the request, once per origin | The first rule whose location matches the path decides; `"tdm-reservation": 1` reserves the page. A missing or unreadable file means the site does not use the protocol. |
+| `X-Robots-Tag` and `tdm-reservation` headers | after the response | `noindex`, `none`, `noai`, `noimageai` or `tdm-reservation: 1` reserve the page. Directives for other crawlers (`otherbot: noindex`) are ignored. |
+| Robots meta tags (`robots` and `llm-conversion-framework-bot`), `tdm-reservation` meta tag | after the response, HTML | as for the headers |
+| `tdm:reservation` in the PDF metadata | after the response, PDF | the value 1 reserves the PDF |
+
+A reservation from any source wins. TDMRep lets a later source lift a reservation found in an earlier one; the
+crawler deviates from that on purpose and stays on the cautious side: once any source reserves a page, nothing
+lifts it. None of these checks can be switched off; the old *Respect robots.txt* option and the setting
+`crawler_respect_robots` are gone.
+
+A short hint with the notice and the outcome are also **spoken**, through the speech engine built into the operating
+system and in the interface language: Windows PowerShell 5.1 with System.Speech (started from the system folder; the
+text travels in environment variables, so it never becomes code), macOS `say` (with an installed voice of the
+language when there is one), Linux `spd-say`, otherwise `espeak-ng` or `espeak`. There are no audio files and no new
+dependency, and the system volume is never touched. Speech runs in a background thread, one announcement at a time,
+at most 300 characters, with a time limit; it never blocks or fails the caller, and every announcement is also
+written to the log. It stays silent when the setting `audio_announcements` (Tools > Spoken Announcements) is off,
+with `LLM_FRAMEWORK_NO_AUDIO=1`, under CI or tests, in an SSH session without a display, on Linux without a display,
+and when no engine works. The shape of the call follows the USB watcher of rag4ll (MIT licence, see
+[THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)), and so does its rule that a state is announced only once it is
+true: the outcome is spoken after the last write has returned.
+
+### A knowledge-base search (unreleased)
+
+In plain words: when Ditto needs background knowledge, it searches your local knowledge base by meaning and by
+keywords at the same time and merges both result lists. A small second model can then read the question together
+with each hit and throw out the hits that do not answer it. Only as much text as fits into a third of Ditto's
+context goes into the prompt.
+
+**Storing.** Text is split into chunks along its structure (headings, paragraphs, lists, code blocks, tables),
+sized with the embedding model's tokenizer; each chunk is embedded together with a line naming its source, title
+and section. Code blocks and tables stay whole as long as the embedding model sees them whole. A larger one
+(above the model's context minus 96 tokens for that line; the default model reads 512 tokens) is split at line
+boundaries, and each piece repeats the table header or reopens the code block, so its later parts can be found
+at all; a document is split this way when it is imported again. Every chunk gets a dense vector (FastEmbed:
+`intfloat/multilingual-e5-small` on a CPU, `BAAI/bge-m3` with CUDA and at least 8 GB RAM, or the model in
+`rag_embedding_model`) and a BM25 vector. For the BM25 vector only, identifiers are added split into their parts:
+`-DGGML_CUDA=ON` adds `GGML_CUDA`, `GGML` and `CUDA`, `rknn_toolkit2` adds `rknn` and `toolkit2`,
+`rknnToolkitLite` adds `rknn`, `Toolkit` and `Lite`. The dense input and the stored text stay as they are. The
+collection records this keyword encoding (`Qdrant/bm25+ids1`); a knowledge base or a snapshot of an older encoding
+gets its keyword vectors rebuilt once from the stored text, and its documents and dense vectors are kept.
+
+**Searching.**
+
+1. **Query.** The query gets a dense vector. It also gets a BM25 vector when it has at least three words or
+   contains an identifier (a digit, an underscore, two capital letters in a row, or a dot or hyphen inside a
+   word), so one-word searches such as `E2041` or `GGML_CUDA` use the keyword index as well.
+2. **Hybrid search.** Qdrant ranks the candidates by both vectors and fuses the two rankings with Reciprocal Rank
+   Fusion. The same text stored under several sources is returned once.
+3. **Reranking (optional).** A cross-encoder reads the query together with each candidate (its heading and the
+   first 1500 characters; up to 20 candidates, at least 12) and rates it between 0 and 1. Candidates below the
+   relevance floor are dropped, so the list may be empty: no excerpt is better than an unrelated one. The floor is
+   `rag_rerank_min_score`, or, with 0 (the default), the model's own floor, 0.2 for both registered models. The
+   model comes from `rag_reranker`: `auto` takes `onnx-community/bge-reranker-v2-m3-ONNX` with CUDA and at least
+   16 GB RAM, `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (a download of about 0.12 GB) from 6 GB RAM, and none
+   below that; `off` turns reranking off; a model id picks one. The model is downloaded on first use, never in
+   offline mode. Scores are cached by text. A reranker that cannot run is logged once, the search keeps the fused
+   order, and the reranker is tried again after five minutes.
+4. **Excerpt budget.** Ditto takes the excerpts, best first, that fit together into a third of
+   `chat_context_limit` (default 4096 tokens). One that does not fit is skipped, so a smaller one after it can
+   still come along; a first excerpt that alone is too long is cut at a line, an open code block is closed and
+   the cut is marked. The excerpts reach the model as untrusted data. The MCP tool `search_knowledge` returns its
+   hits cleaned, each shortened to 4000 characters.
+
+Where reranking is used:
+
+| Search | Reranked | Why |
+|---|---|---|
+| Build recommendation with knowledge-base excerpts | yes, unless `rag_reranker` is `off` or no reranker suits the machine | Its query is prose about model, target and quantization; there the reranker improved the order and its floor kept unrelated excerpts out. |
+| Ditto chat, MCP tool `search_knowledge` | only with `rag_rerank_default` (off by default) | In the retrieval evaluation the gain was too small for the cost of about 1 to 2.5 seconds per search on one free CPU core. |
+| Build-log analysis of self-healing | not asked for (follows `rag_rerank_default`) | The cross-encoder rates log lines against prose poorly: it lost relevant excerpts that the hybrid search found. |
+| Module proposal | not asked for (follows `rag_rerank_default`) | For its keyword search string the floor dropped every excerpt, the relevant ones too. |
+
+`rag_rerank_default` applies to every search that does not ask for reranking itself; the build-log analysis and
+the module proposal do not ask, so with the setting on they are reranked as well.
+
+**Model memory.** The embedding, keyword and reranking models are unloaded after `rag_model_idle_minutes`
+(default 10; 0 keeps them loaded) without use and loaded again on the next search. The time counts from the end
+of the last search or import, never during one. The embedded storage itself is released after 30 seconds without
+use, so the GUI and the MCP server can take turns.
+
+**The retrieval evaluation decides the defaults.** `llm-cli ditto eval --kind retrieval` indexes a fixed corpus
+(`evals/retrieval/corpus/`, 30 German and English documentation excerpts) into a temporary knowledge base with
+the configured embedding model and runs 42 searches from `evals/retrieval/cases.yml`: German, English and
+cross-lingual questions, identifiers, answers deep inside an oversized table or script, the last lines of failed
+builds, Ditto's own search strings, and unrelated questions that must get no excerpt. No AI model is involved,
+your own knowledge base is not touched, and no Qdrant server is used. `--rag-variant fused` grades the hybrid
+search, `--rag-variant rerank` adds the reranker and its floor (an attempt where the reranker did not run counts
+as failed). The report gives hit@1, hit@3, MRR over 10 results, the share of unrelated questions without an
+excerpt, figures per tag and the search latency. A GitHub workflow (`retrieval-eval.yml`) runs both variants
+nightly and on demand with cached models. A change to the search becomes a default only when this evaluation
+shows that it helps: the floor, the identifier splitting and the block splitting were measured this way, and the
+reranker stays off where it did not help. The figures are in the [changelog](../CHANGELOG.md).
+
+### Community packs: format, trust and exchange (unreleased)
+
+In plain words: you can share a target, a recipe (how a model was built) or knowledge as a pack. A public pack is
+signed, so others can check that nobody changed it; a private pack is encrypted, so only the people you choose
+can open it. Packs are listed in a signed community index. Installing always goes through a quarantine folder
+where every file is checked, and you confirm before anything is put in place. Nothing is sent unless you open a
+pull request, which goes through the GitHub CLI or the browser; the framework never asks for a token.
+
+**The pack.** A zip file with `pack.json`, an optional author signature `pack.sig` and exactly the files the
+manifest lists. The manifest names the schema version, the kind (`target`, `recipe` or `knowledge`), id, version,
+author, licence (an SPDX id), the minimum framework version, the creation time in UTC and, for every file, its path,
+sha256, size and mode (0644 or 0755). Paths are plain relative paths that every operating system can store; links
+and special files are refused (binary files are refused by the export and by the target validators); a pack holds at
+most 10,000 files and 512 MB. The zip entries carry a fixed date, so the same manifest and files always give the
+same zip bytes. Reading a pack accepts exactly the listed files and checks every size and hash; on any problem
+nothing of it stays.
+
+**Recipes**, the zoo's model templates, carry no weights. A recipe names a Hugging Face model at a pinned commit,
+the target with a fingerprint of its files, board, format, quantization, options (importance matrix, context length,
+the calibration dataset's hash) and verified results (artifact name, size and sha256, framework version, toolchain
+image pinned by digest, device tests). It is generated from a finished build's `build_info.json`, which records what
+it needs (device tests are not recorded there); only builds of a Hugging Face model at a known commit qualify. A
+recipe is checked against the target's capabilities and becomes a normal build request.
+
+**Signatures.** Ed25519 over a purpose prefix followed by the signed bytes: the canonical JSON of a pack manifest
+(sorted keys, no whitespace, UTF-8), the exact bytes of `index.json`, or everything before the signature of an
+encrypted pack. There is one prefix each for these three, so a signature made for one purpose never verifies for
+another. A key id is the first 16 hex characters of the SHA-256 of the raw public key. An author signature is
+provenance, not trust: it is checked when the pack carries the public key, the author's key id is remembered at the
+first install (`authors.json`), and a different key later is shown as a warning.
+
+**Encryption for private sharing** (format v1, in the style of [age](https://age-encryption.org/v1)), for your
+own machines or a team:
+
+- Each pack gets a random 32-byte file key. For each recipient an X25519 stanza holds the file key sealed with
+  ChaCha20-Poly1305 under a wrap key derived with HKDF-SHA256 from an ephemeral key exchange (salt: both public
+  keys). For a passphrase, one scrypt stanza does the same (N = 2^17, r = 8, p = 1; at least 12 characters; as in
+  age, at most one per file). Stanzas do not name their recipient; there are at most 64.
+- The header (canonical JSON with the sender's public key, a payload salt and the stanzas) is protected by an
+  HMAC-SHA256 whose key is derived from the file key. The pack itself is sealed with ChaCha20-Poly1305 under a key
+  derived with HKDF from the file key and the payload salt, with the header as associated data. Every derived key
+  is used once, so the fixed zero nonce is safe.
+- The sender signs the whole file with Ed25519. A reader checks, in this order and before any plaintext is
+  returned: the signature (any change, also an added or removed recipient, breaks it), the sender if trusted
+  senders are given (`--from`), the wrapped file key, the header MAC and the payload tag. Without `--from`, the
+  sender's key id is shown.
+- Each user gets an Ed25519 key pair (signing) and an X25519 key pair (receiving) on first use. They are kept
+  only in the encrypted secrets store and never replaced silently; `llm-cli zoo keys` prints the public keys as
+  text to give to others.
+- Only standard primitives of the `cryptography` package are combined; there is no cipher of our own.
+
+**The signed index.** `index.json` lists the packs (kind, id, version, author, licence, trust `verified` or
+`community`, HTTPS address, size and sha256) and the revocations (by sha256, or by kind and id, optionally for one
+version, each with a reason). Its version number grows with every signed index, and `index.json.sig` signs its
+exact bytes. The keys that may sign it ship with the framework in `configs/community_keys.yml`, each with an
+expiry date. The index comes from `community_index_url`, is verified, cached per user and fetched again when the
+cache is older than a day. An index that does not verify is not used, and one with a lower version than the
+cached one is refused. For revocations only, a cached index stays valid after the key that signed it has
+expired, so a revocation never stops applying because the framework was not updated.
+
+**Install** (`llm-cli zoo install`, or Install in the Community Hub):
+
+1. Installing by id always fetches the current index first; without it nothing is installed, so a revocation is
+   never missed. A revoked pack is refused.
+2. The pack is downloaded, pinned by the size and sha256 from the index, into a `.quarantine/` folder inside the
+   install folder.
+3. It is read as described above and must match its index entry (kind, id and version).
+4. Validators: a target must pass the same checks as a generated module (capabilities, every image a Dockerfile
+   pulls pinned by digest unless it is an official base image, the shell deny-list, `bash -n`, no template
+   placeholders, no binary files); a recipe must match its schema and the capabilities of its target if that is
+   installed; knowledge must be a list of entries that each keep their source. A recipe or knowledge pack may hold
+   only its `recipe.yml` or `knowledge.json` and a `README.md`.
+5. A summary in plain text shows kind, id, version, author, licence, trust level, source, files and destination,
+   and you confirm. `--yes` skips the question only when the signed index lists the pack (trust `verified` or
+   `community`), also for a pack file.
+6. An atomic rename puts the pack in place, never over an existing folder (also when only the case differs),
+   together with `.lcf-provenance.json` (trust, source, hashes, signer, sender). A knowledge pack is then imported
+   into the knowledge base. Anything that fails on the way is removed.
+
+A pack file (`llm-cli zoo install --file`, or Import file... in the Community Hub) goes through the same
+quarantine; an encrypted one is decrypted first (`--from`, `--passphrase`). Its trust comes from the index when
+the index lists its sha256; otherwise it is `local`.
+
+**Trust levels.** `official` (shipped with the framework; shipped targets carry no provenance file and are not
+listed in the zoo, so no listing shows this level yet), `verified` (in the signed index: reviewed and
+reproduced independently), `community` (in the signed index: reviewed), `local` (a file without an index entry:
+always confirmed, and every build of it shows a warning) and `revoked` (in the signed revocation list: not
+installed; installed copies are flagged by `llm-cli doctor` and the Community Hub and are not built).
+`llm-cli zoo verify` finds installed packs that were changed or revoked.
+
+**Export and hand-over.** `llm-cli zoo export target|recipe|knowledge`, the check box "Export for community" on the
+module wizard's last page and "Export a finished build for the community..." in the Builder log's context menu make
+a pack: its files are privacy-scrubbed (home folders, IP and MAC addresses, e-mail addresses, JWTs, the host and
+user name, keys; the changes are shown), validated and signed with your key. With `--to` (files with public keys) or
+`--passphrase` the signed pack is also encrypted for private sharing; an encrypted pack is never submitted with
+`--pr`. The licence defaults to MIT, for knowledge to `NOASSERTION`, and every page keeps its source address. A
+target you installed from someone else is not re-signed as yours. "Open pull request" (`--pr`) hands the pack to the
+community repository (`community_repo`): through the GitHub CLI when it is installed and logged in, otherwise the
+repository's upload page opens in the browser. Both keep their own credentials; the framework never asks for, reads
+or shows a token.
+
+**Maintainer tools.** `scripts/zoo_sign_index.py` creates the index key in the OS keyring (`keygen`), checks a pack
+and prints its index entry (`entry`) and signs `index.json` (`sign`; with `--previous` the version must be higher
+than that of the old index). `scripts/community_repo/validate-contribution.yml` is the workflow template for the
+community repository: it accepts only pack zips of at most 5 MB and runs `llm-cli zoo verify` on each, which also
+rejects packs that still contain keys or personal data. The signing key never reaches CI.
+
+**State.** The community repository, its index and the maintainer's key are not published yet:
+`configs/community_keys.yml` lists no key, and `community_index_url` and `community_repo` are empty. Listing the
+index and installing by id therefore stop with a message (`llm-cli zoo list` still shows installed packs), and
+`--pr` only says where the pack is. The workflow template checks packs with the framework release `v3.1.0`, which
+does not exist yet. Packs can already be exchanged as files (trust `local`) and encrypted between users.
+
+### Recent inputs (unreleased)
+
+In plain words: the input fields of the GUI remember what you used recently, so you need not type it again.
+Nothing secret is remembered.
+
+- **Fields.** Model, calibration dataset, Deep Ingest URL and device (Deployment window, remote hardware scan) are
+  editable lists, newest first. The most recent model and device are filled in; datasets and URLs are only
+  offered. Targets and boards come from the target definitions: the most recently built one that is still offered
+  is preselected, and a target without declared boards offers recent boards as suggestions.
+- **When.** A value is remembered once it was used: a submitted build (model, target, board, dataset), the URLs
+  of a crawl, a device whose host key was confirmed (for a deployment also its hardware profile).
+- **Where.** `input_history.json` in the per-user folder (mode 0600, written atomically), at most 20 values per
+  field; a value longer than 1000 characters is not remembered. Every read loads the file, so several windows stay
+  in step. A damaged file starts a new history and is kept as `input_history.json.bad`; errors are logged and never
+  break the GUI.
+- **Never secrets.** A value is refused when the secret redaction would change it (API keys, tokens), when it is a
+  URL with a user name or password, when its query, fragment or path parameters have a credential-like name
+  (token, key, secret, password, auth, signature, credential, session, jwt, sid and similar), when it has the form
+  `user:password@host`, and when it contains control characters. A file edited by hand is held to the same rules.
+- **Forget.** Tools > Clear Input History... deletes the file and the copy of a damaged one. The earlier setting
+  `input_history` in the shared `config.yml` was removed: the history is personal.
+
 ## Security model
 
 In plain words: the framework works with third-party conversion tools, AI-generated code, AI answers and text from
@@ -389,9 +690,10 @@ threat, the protection and where it is implemented.
 | Threat | Protection | Where |
 |---|---|---|
 | Conversion code (vendor toolkits, AI-generated target scripts) harms the host or sends data out | Conversion stages run as the host user instead of root (1000:1000 if the host user is root or on Windows), with no network (`network_mode: none`), all capabilities dropped, `no-new-privileges`, a read-only image filesystem, a 1 GB `/tmp` tmpfs, a process limit (`build_pids_limit`, default 4096) and an optional memory limit (`build_memory_limit`). Only the per-build folders (work space, output, importance matrix) are writable; model, cache and dataset mounts are read-only. Hugging Face libraries are forced offline. `build_sandbox: false` switches back to the old root-plus-entrypoint mode. | `BuildEngine._sandbox` in `orchestrator/Core/builder.py` |
-| The crawler is abused to reach internal services (SSRF), also through DNS rebinding or redirects | Only http(s); URLs with backslashes, whitespace, control characters or ambiguous hosts are refused; every resolved address must be public (no private, loopback, link-local, CGNAT, multicast or reserved ranges, also inside IPv4-mapped, NAT64, 6to4 and Teredo addresses). At connect time the address is resolved and checked again and the connection goes to exactly that IP. Redirects are followed manually (at most 5, each checked); a request budget of five times `crawler_max_pages`; robots.txt per RFC 9309 (server errors mean "disallow"); delay between requests (`crawler_rate_limit`). Behind a configured proxy only the URL check applies. | `validate_public_url`, `is_public_ip` in `orchestrator/utils/validation.py`; `PublicOnlyAdapter` in `orchestrator/Core/crawler_manager.py` |
+| The crawler is abused to reach internal services (SSRF), also through DNS rebinding or redirects | Only http(s); URLs with backslashes, whitespace, control characters or ambiguous hosts are refused; every resolved address must be public (no private, loopback, link-local, CGNAT, multicast or reserved ranges, also inside IPv4-mapped, NAT64, 6to4 and Teredo addresses). At connect time the address is resolved and checked again and the connection goes to exactly that IP. Redirects are never followed automatically: each target is checked like a new URL (at most 5 hops); robots.txt and `tdmrep.json` are fetched through the same guard; a request budget of five times `crawler_max_pages`; delay between requests (`crawler_rate_limit`). Behind a configured proxy only the URL check applies. | `validate_public_url`, `is_public_ip` in `orchestrator/utils/validation.py`; `PublicOnlyAdapter` in `orchestrator/Core/crawler_manager.py` |
+| Pages whose owner reserved text and data mining end up in the knowledge base, or an AI is steered into crawling | The crawler checks robots.txt (RFC 9309), the `X-Robots-Tag` header, robots meta tags (also for its own bot name) and the TDM Reservation Protocol (site file, header, meta tag, PDF metadata) before and after each request. A reservation from any source wins, and no check can be switched off. Skipped pages are named in the crawl log. Crawls start only from the GUI; no tool takes a URL, and a test fails if the MCP server, Ditto, the tools or the provider layer reach the crawler. | `CrawlerManager` in `orchestrator/Core/crawler_manager.py`; `TestCrawlsStayWithTheUser` in `tests/test_security.py` |
 | Instructions hidden in external text steer a language model (prompt injection) | Web pages, knowledge-base hits, build logs, hardware probes, tool results and conversation summaries never go into a system prompt. They are normalized, stripped of invisible characters and HTML comments, shortened and wrapped in a block with a random id; the system prompt tells the model to treat such blocks as data. MCP tool descriptions and server instructions mark logs and search results as untrusted. Ditto's healing analyses, module proposals and build recommendations are validated structured answers; a healing fix or recommendation with a dangerous command (a download piped into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk) is discarded. Chat output is HTML-escaped; links open only after confirmation. | `orchestrator/utils/untrusted.py`, `orchestrator/Core/ditto_manager.py`, `orchestrator/llm/tool_loop.py`, `orchestrator/gui/chat_window.py`, `orchestrator/mcp_server.py` |
-| A generated or shared target module contains harmful code | Before any template is rendered, names, architecture, Debian package names, compiler/CMake flags and the detection command are checked against strict patterns; base images must be pinned by digest unless they are official base images (`debian:`, `ubuntu:`, `nvidia/cuda:`, `rocm/dev-ubuntu-*`, `rocm/rocm-terminal:`, `python:`). Shell code fields must pass a fixed deny-list (downloads, `sudo`, deleting `/`, `chmod 777`, raw device writes, Docker socket or `docker run`, evaluating generated code) and every generated script must pass `bash -n`. New targets stay inside `targets/`, never overwrite an existing target and are removed again if generation fails. The wizard and `llm-cli module generate-ai` show the proposal for review. | `validate_module_data`, `ModuleGenerator` in `orchestrator/Core/module_generator.py` |
+| A generated or shared target module contains harmful code | Before any template is rendered, names, architecture, Debian package names, compiler/CMake flags and the detection command are checked against strict patterns; base images must be pinned by digest unless they are official base images (`debian:`, `ubuntu:`, `nvidia/cuda:`, `rocm/dev-ubuntu-*`, `rocm/rocm-terminal:`, `python:`). Shell code fields must pass a fixed deny-list (downloads, `sudo`, deleting `/`, `chmod 777`, raw device writes, Docker socket or `docker run`, evaluating generated code) and every generated script must pass `bash -n`. New targets stay inside `targets/`, never overwrite an existing target and are removed again if generation fails. The wizard and `llm-cli module generate-ai` show the proposal for review. Generated modules, community exports and community target packs in quarantine also pass `validate_target_folder`: valid capabilities, every image a Dockerfile pulls (`FROM`, `COPY --from`, `RUN --mount=...,from=`) pinned by digest unless it is an official base image, the deny-list on every script line that is not from the shipped template, `bash -n`, no template placeholders and no binary files. | `validate_module_data`, `validate_target_folder`, `ModuleGenerator` in `orchestrator/Core/module_generator.py` |
 | An AI client or Ditto does something you did not want | Four risk tiers; the registry enforces your stored permissions on every call, whatever the client's tool annotations say. `forbidden` tools cannot be registered; `external` tools can only be allowed one by one, never as a whole tier; a damaged permission file denies every tool. Confirmations show every argument in full (MCP elicitation, Ditto's dialog or prompt). Every call is recorded in an audit log whose entries are chained with an HMAC; the key is a separate entry in the OS keyring, not next to the database (without a keyring the chain is unkeyed, and the doctor says so). An anchor file (`audit.db.anchor`) also reveals removed newest entries. | `orchestrator/tools/` |
 | Other local programs or websites talk to the MCP server | stdio is the default. Streamable HTTP binds only to loopback addresses, requires a per-user bearer token (compared in constant time, file `mcp_http_token`, mode 0600) and uses the SDK's Host/Origin checks against DNS rebinding. | `orchestrator/mcp_server.py` |
 | Personal data reaches a cloud AI provider | The privacy filter runs on everything sent to a cloud provider: system prompt, messages, tool results and tool arguments. `OFF`: only secrets are redacted (always). `BALANCED`: also IP and MAC addresses, e-mail addresses, `user@host` logins and user names in home paths. `STRICT` (default): also host names from probe files, serial numbers, UUIDs and the folders of absolute paths. Placeholders come from an HMAC with a per-install key and are mapped back locally. Local providers (loopback, private network, `*.local`) are never filtered. Offline mode uses local providers only, and the knowledge base computes embeddings locally. | `orchestrator/llm/privacy.py`, `orchestrator/llm/client.py` |
@@ -400,6 +702,9 @@ threat, the protection and where it is implemented.
 | Secrets leak | Secrets are stored encrypted in a vault whose key is in the OS keyring, or protected the way you choose explicitly (`secret_storage`); nothing falls back silently. The vault is changed under a cross-process lock, never lies inside a git working copy, and its key can be rotated. API keys are passed per call, never exported to the environment of child processes; every SDK client gets its key and base URL explicitly, and `OPENAI_CUSTOM_HEADERS`/`ANTHROPIC_CUSTOM_HEADERS` are removed at startup. Cloud presets have fixed endpoints, so a cloud key never reaches a leftover custom URL, and the key of a custom server is bound to the address it was saved for; Claude Admin API keys are refused. Key variables from the environment are read only as the provider catalog lists them and are shown as the key's source. The Hugging Face token stays on the host. The SSH password is used once and never stored. One table of secret formats is shared by the repository's secret scan and the runtime redaction, which covers every log record (also those of the SDKs and HTTP libraries, and tracebacks), build logs and errors handed to tools, the audit log, requests to cloud AI providers, telemetry reports and community exports. The SDKs' debug logs stay off unless `--debug-http` is given. In the repository, a secret scan refuses credentials in commits and pushes, and CI scans the whole history. | `orchestrator/Core/secrets_manager.py`, `orchestrator/Core/vault_key.py`, `orchestrator/security/`, `orchestrator/llm/sdk_env.py`, `orchestrator/llm/client.py`, `orchestrator/llm/auth/`, `scripts/secret_scan.py` |
 | Someone impersonates your device during deployment | Trust on first use, but never silently: unknown host keys are shown with their SHA256 fingerprint and stored only after confirmation; a changed key or key type always fails. Authentication uses the framework's own Ed25519 key. The OpenSSH fallback runs with `BatchMode=yes` and `StrictHostKeyChecking=yes`. User names and IP addresses are validated; the upload goes into a private temporary folder; `deploy.sh` verifies all checksums. Without Docker only model files are deployed, never arbitrary programs. | `orchestrator/utils/ssh_trust.py`, `orchestrator/Core/deployment_manager.py` |
 | A crafted archive writes outside its folder | Extraction refuses path traversal, links pointing outside and device files, and uses Python's `data` filter for tar files. | `safe_extract_archive` in `orchestrator/utils/helpers.py` |
+| A community pack is changed on the way, replaced by an older index, or revoked after its release | Packs from the index are downloaded pinned by size and sha256 from an index signed with a key that ships with the framework (with an expiry date). An index that does not verify is not used, an older one is refused, installing by id always fetches the current index, and revoked packs are neither installed nor built. Every pack is checked in a quarantine folder (exact file list and hashes, no links or special files, the validators, which refuse binary files in a target) and moved into place atomically only after you confirm a plain-text summary with its trust level, so text from a pack cannot hide it. A file without an index entry is `local` and warns on every build. | `orchestrator/Core/community_manager.py` (with `build_trust_check`, which `orchestrator/Core/builder.py` calls), `orchestrator/Core/community_pack.py` |
+| Someone reads or changes a privately shared pack | Encrypted to X25519 recipients and/or a scrypt passphrase with ChaCha20-Poly1305 and HKDF-SHA256, with a header MAC and the sender's Ed25519 signature. Any change, also to the recipient list, is detected before any plaintext is returned; `--from` accepts only known senders. The private keys live only in the encrypted secrets store. | `encrypt_pack`, `decrypt_pack`, `UserKeys` in `orchestrator/Core/community_pack.py` |
+| A shared pack or the input history gives away personal data or a credential | Exports are privacy-scrubbed (home folders, IP and MAC addresses, e-mail addresses, JWTs, host and user name, keys) and the changes are shown; `llm-cli zoo verify`, also in the community repository's CI, rejects a pack that the scrub would still change. The input history refuses values that look like secrets and URLs with credentials. The framework never asks for or stores a repository token: a pull request goes through the GitHub CLI or the browser, which keep their own credentials. | `scrub` in `orchestrator/Core/community_pack.py`, `submit_contribution` in `orchestrator/Core/community_manager.py`, `orchestrator/utils/input_history.py` |
 | A compromised dependency (supply chain) | Host dependencies are pinned with hashes (`requirements*.txt`, Poetry 2 lock); `anthropic` (1.13.0), `openai` (3.28.0), `fastembed` (0.8.1) and `mcp` (2.3.0) are pinned exactly. GitHub Actions are pinned by commit SHA; CI runs pip-audit and bandit; Dependabot checks pip, Actions and Docker weekly. In the Rockchip image the RKLLM wheel is checked by SHA256 and the toolkit, torch and onnx versions are pinned. The calibration text is checked by SHA256. | `pyproject.toml`, `poetry.lock`, `.github/`, `targets/Rockchip/dockerfile`, `orchestrator/utils/calibration.py` |
 
 ### Known gaps
@@ -417,12 +722,20 @@ These are real limitations of the current state. Most are scheduled in the [road
   3.1.0.
 - **The privacy filter works with patterns.** It recognizes the formats listed above, not every personal detail
   in free text, such as a name in a sentence. Use a local provider for sensitive material.
-- **Generated targets are skeletons.** The module generator writes no `capabilities:` block, and the template
-  `build.sh` does not match the current pipeline (it writes intermediates to `/tmp`, which is a 1 GB tmpfs in the
-  sandbox, and looks for llama.cpp tools in old places). See the [Module Developer Guide](Module_Developer_Guide.md);
-  an updated template is planned for 3.4.0.
-- **Community knowledge packs** are only obfuscated (XOR "SwarmCipher"), not signed. Signed packs with review and
-  quarantine are planned for 3.4.0.
+- **Generated targets are skeletons.** The module generator now writes a `capabilities:` block (support level
+  community: the boards, and GGUF with the types the build script handles), but the template `build.sh` does not
+  match the current pipeline (it writes intermediates to `/tmp`, which is a 1 GB tmpfs in the sandbox, and looks
+  for llama.cpp tools in old places). See the [Module Developer Guide](Module_Developer_Guide.md); an updated
+  template is planned for 3.4.0.
+- **The community zoo has no published index yet.** The community repository, its signed index and the
+  maintainer's key are not published: `configs/community_keys.yml` lists no key, and `community_index_url` and
+  `community_repo` are empty. Listing the index and installing by id stop with a message; packs can be exchanged
+  as files (trust `local`) and encrypted between users. Publishing is planned for 3.1.0.
+- **Deep Ingest runs only in the GUI.** The CLI has no crawl command; MCP clients and Ditto cannot start a crawl,
+  on purpose.
+- **Reranking is on only for build recommendations.** The chat and the MCP search use it only with
+  `rag_rerank_default`. The reranker's floor is calibrated for questions; for short keyword searches, such as the
+  module proposal's, it drops relevant excerpts too.
 - **Trivy and the Docker socket.** The scanner container gets the Docker socket; mounting it read-only does not
   limit what the Docker API allows. Planned for 3.4.0: Trivy pinned by digest, without the socket.
 - **Pins inside images.** Base images are pinned by tag (`debian:bookworm-slim`), llama.cpp by tag (`v0.6.0`),
@@ -454,6 +767,21 @@ These are real limitations of the current state. Most are scheduled in the [road
 | **Only fixed self-healing actions** | A build log can contain text written by anyone, and model output can be wrong. Letting either one run commands on the host would be a remote-code-execution path. AI output is therefore advice; the framework applies only three fixed strategies, and only with your approval. |
 | **Trust on first use with confirmation, framework key instead of passwords** | Silently accepting host keys makes man-in-the-middle attacks easy; stored passwords leak. Confirming a fingerprint once and pairing a dedicated key gives password-free, verifiable deployments. |
 | **One version source** | `orchestrator.__version__` is the only place the version is written in code; a test keeps `pyproject.toml` and the changelog in line, so the GUI, CLI and MCP server always report the same version. |
+| **The site's machine-readable opt-outs decide, and any reservation wins** | Text and data mining of public pages is allowed unless the rightsholder reserved it in machine-readable form (EU DSM Directive Art. 4, German UrhG § 44b). A user cannot judge that for each page, so the crawler reads the signals itself. TDMRep lets a later source lift a reservation from an earlier one; the crawler deviates on purpose and keeps a page out once any source reserves it, because skipping a page costs little and a wrong guess cannot be undone once the text is shared. |
+| **No switch for robots.txt or the other opt-outs** | A switch would turn a reservation into a user choice. robots.txt is a machine-readable opt-out like the others, so the *Respect robots.txt* option and `crawler_respect_robots` were removed; the crawler keeps a parameter only for tests with a fake web. |
+| **A notice instead of a legal confirmation** | A check box such as "I have the right to mine this site" would ask the user to confirm something they cannot know. The notice informs and has one button; its stored hash brings it back when its text changes. |
+| **Crawls start only from the GUI** | A tool that fetches URLs would let text in a build log or a web page steer an AI client or Ditto into crawling. A guard test keeps the crawler out of reach of the MCP server, Ditto, the tools and the provider layer. |
+| **Spoken announcements through the operating system's speech engine** | No audio files, no new dependency and nothing that can fail a crawl: the engines ship with Windows, macOS and most Linux desktops, and an announcement is always also shown and logged. |
+| **Rerank only build recommendations by default** | In the retrieval evaluation the reranker improved the order and kept unrelated excerpts out for questions, but for the chat the gain did not justify about 1 to 2.5 seconds per search on a CPU, and on build-log lines and the module proposal's keyword string it lost or dropped relevant excerpts. |
+| **No excerpt rather than an unrelated one** | Unrelated excerpts take room in a small context and mislead small local models. A relevance floor, calibrated with the retrieval evaluation, lets a reranked search return nothing. |
+| **The retrieval evaluation is the gate for search defaults** | Retrieval changes can help one kind of question and hurt another. A fixed corpus with fixed cases, graded by rules and without an AI judge, shows that before a change becomes a default. |
+| **Identifiers are split for the keyword index only** | Flags and names such as `-DGGML_CUDA=ON` were one token for BM25 and could not be found by their parts. Adding the parts only to the BM25 input leaves the dense vectors and the stored text unchanged; the stamped encoding rebuilds older keyword indexes once. |
+| **Public packs signed, private packs encrypted, with standard primitives** | For public data, authenticity and integrity matter; for private sharing, confidentiality too. The XOR "SwarmCipher" could be undone by anyone. Ed25519, X25519, HKDF-SHA256, scrypt and ChaCha20-Poly1305 composed in the style of age are well studied; one signing prefix per purpose keeps a signature for one thing from verifying another. |
+| **Installing always reads the current index first** | A revocation only protects users who see it. An install needs the network anyway, so it fetches the index first and installs nothing without it. A cached index serves listing and file installs, and is never replaced by an older one. |
+| **No token in the framework, and no upload of its own** | A repository token in the framework would be a valuable secret in one more place, and an upload button sends data without a review step. The framework prepares a scrubbed, signed pack and shows what the scrub changed; only when you open the pull request do the GitHub CLI or the browser send it, with their own credentials. |
+| **`NOASSERTION` for knowledge packs** | A knowledge pack holds other people's pages. The exporter cannot license them, so the pack claims no licence for them and every page keeps its source address. |
+| **Recipes instead of shared model files** | Model files are large and come with their own licences. A recipe pins the model commit, the target fingerprint and the toolchain image and lists the artifact hashes, so anyone can rebuild the model and compare; "verified" means reproduced independently. |
+| **Input history per user and without secrets** | The shared `config.yml` may sit in the installation folder and be shared. Recent inputs are personal, so they live in the per-user folder (mode 0600), and values that look like credentials are never written. |
 
 ## Versioning and documentation policy
 
@@ -510,11 +838,12 @@ When a version is released, its done items leave the roadmap and appear in the c
 | **Removal of the `claude_code` provider.** Anthropic does not allow third-party apps to use Claude subscription logins. Claude subscribers use the framework from Claude Code or Claude Desktop through the MCP server (`llm-cli mcp config` prints the setup), or give Ditto an Anthropic API key; Max and Team plans include monthly API credits. | done |
 | **Hardened headless Docker image** for the CLI and the MCP server, with a working compose file and Makefile targets; replaces the broken `Docker Setup/`. | in progress |
 | **Documentation in English and German** for every document. | in progress |
-| **Crawler that checks the site's own signals.** A user cannot know whether a site may be evaluated, so the crawler checks the machine-readable opt-outs itself (robots.txt, the `X-Robots-Tag` header, robots meta tags including "noai", the TDM Reservation Protocol) and skips reserved pages, naming them in the log. Instead of a legal confirmation, a one-time notice explains what is read and kept, with a spoken announcement (the technique of the rag4ll USB watcher); a Stop button keeps what was collected, the progress shows "page N of M", the result says success, partial or failure honestly, and the crawler reports its real version. | in progress |
-| **Input history**: recent models, targets, URLs, devices and datasets offered in the GUI fields, per user, without secrets. | in progress |
-| **Better answers from the knowledge base**, taken from rag4ll and kept small: reranking with a cross-encoder on the CPU, a relevance floor that keeps unrelated excerpts out of Ditto's prompt, a size budget for the excerpts, splitting of oversized code and table blocks, and keyword search that understands identifiers such as `-DGGML_CUDA=ON`; measured with retrieval cases in the Ditto evaluation. | in progress |
-| **Community packs with real cryptography**: public packs signed with Ed25519, private packs encrypted to the recipients' keys (X25519 with ChaCha20-Poly1305) or a passphrase. The XOR "SwarmCipher" upload and its GitHub token prompt are removed; the framework never asks for a token. | in progress |
-| **Model zoo from the community**: recipes (model, target, format, quantization, toolchain image and verified hashes) made with the template wizard and contributed by pull request; a signed index, installation with quarantine and trust levels, `llm-cli zoo` and the Community Hub. | in progress |
+| **Crawler that checks the site's own signals.** A user cannot know whether a site may be evaluated, so the crawler checks the machine-readable opt-outs itself (robots.txt per RFC 9309, the `X-Robots-Tag` header, robots meta tags including `noai` and its own bot name, the TDM Reservation Protocol) and skips reserved pages, naming them in the log; any reservation wins, and no check can be switched off. Instead of a legal confirmation, a one-time notice (per user, again when its text changes) explains what is read and kept, with a spoken announcement through the operating system's speech engine (the technique of the rag4ll USB watcher); a Stop button keeps what was stored, the progress shows "Page N of M", the result says success, partial or failure honestly, and the crawler reports its real version. Deep Ingest starts only from the GUI. | done |
+| **Input history**: recent models, targets, boards, URLs, devices and datasets offered in the GUI fields, per user, without secrets; Tools > Clear Input History... forgets them. | done |
+| **Better answers from the knowledge base**, taken from rag4ll and kept small: reranking with a cross-encoder on the CPU and a relevance floor that keeps unrelated excerpts out of Ditto's prompt (on for build recommendations; for the chat and MCP searches with `rag_rerank_default`), a size budget for the excerpts, splitting of oversized code and table blocks, keyword search that understands identifiers such as `-DGGML_CUDA=ON`, and unloading of idle models; measured with the retrieval evaluation (`llm-cli ditto eval --kind retrieval`). | done |
+| **Community packs with real cryptography**: packs with a manifest of every file, public packs signed with Ed25519, private packs encrypted to the recipients' keys (X25519 with ChaCha20-Poly1305) or a passphrase (scrypt) and signed by the sender. The XOR "SwarmCipher" upload and its GitHub token prompt are removed; the framework never asks for a token. | done |
+| **Model zoo from the community**: recipes (model at a pinned commit, target fingerprint, format, quantization, toolchain image and verified hashes) generated from finished builds; a signed index with revocations, installation through a quarantine with trust levels, `llm-cli zoo`, the Community Hub, export for the community with a hand-over to a pull request, and the maintainer tools for the community repository. | done |
+| **Community repository and index published**: the community repository with the contribution workflow, the first signed index, the maintainer's key in `configs/community_keys.yml` and the settings `community_index_url` and `community_repo` filled in, shipped with a release. Until then the zoo works with pack files only. | planned |
 
 Sign-in per access type, as designed. Built so far (listed in the changelog): the API key first for Anthropic,
 the credential store's second version, the one pattern table, the sign-in core (methods per provider, check,
@@ -580,10 +909,22 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 - **Builds on a GPU machine you provide** (rented or your own): the framework offers the connections (SSH to
   your host, provider APIs with your own key); it does not rent, start or bill machines.
 - **Crawls of large documentation sites with resume**: continue a stopped crawl later instead of only a page limit.
+- **A reranker floor for keyword searches**: calibrate the relevance floor for short keyword queries, such as the
+  module proposal's search string, with the retrieval evaluation, so those searches can be reranked too.
+- **Measurement of the GPU tier**: grade `BAAI/bge-m3` and `bge-reranker-v2-m3`, which are chosen automatically
+  with CUDA, with the retrieval evaluation on a CUDA machine.
 - **Sign-in methods that need registrations**: AWS IAM Identity Center with an own registered client, GitHub
   Copilot through an own GitHub App, Gemini with the user's own OAuth client.
 - **MCP Apps UI.**
 - **An MCP server on edge devices.**
+
+### Open decisions for the maintainer
+
+- **The default CPU reranker.** `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` is the model `rag_reranker: auto`
+  downloads on first use from 6 GB RAM. Its model card names the Apache-2.0 licence, but it was trained on mMARCO,
+  a translation of the MS MARCO dataset, which comes with its own terms of use. Whether it is acceptable as the
+  default that is downloaded automatically is not decided; the alternatives are another cross-encoder or no
+  reranker unless one is chosen.
 
 ## History
 
@@ -620,5 +961,14 @@ What each released version contains is recorded in the [changelog](../CHANGELOG.
 | Embedding | A list of numbers that represents the meaning of a text, used to find similar text. |
 | Hybrid search / RRF | Searching with keywords (BM25) and meaning (embeddings) at the same time and combining both rankings (Reciprocal Rank Fusion). |
 | RAG | Retrieval-augmented generation: the assistant looks up relevant text in a local knowledge base before answering. |
+| Reranker / cross-encoder | A small model that reads a question together with one search hit and rates how well the hit answers it; used to reorder hits and drop unrelated ones. |
+| Relevance floor | The lowest reranker rating (0 to 1) a hit needs to be kept. |
+| Deep Ingest | Reading the public pages of a documentation site into the local knowledge base. |
+| Opt-out / TDM reservation | A machine-readable signal by which a site's owner says that its pages must not be used for text and data mining (robots.txt, robots tags, the TDM Reservation Protocol). |
+| Community pack | A zip file with a target, a recipe or knowledge, a manifest of its files and usually a signature; private packs are encrypted. |
+| Recipe | How a model was built (model commit, target, format, quantization, options, result hashes), so others can rebuild it; contains no model files. |
+| Community index | The signed list of reviewed community packs, with their download addresses, hashes and revocations. |
+| Trust level | How far a pack was checked: official, verified, community, local or revoked. |
+| Quarantine | A folder where a pack is unpacked and checked before it is installed. |
 | Sandbox | A locked-down container with no network and minimal rights. |
 | Trust on first use (TOFU) | The first time you connect to a device you confirm its key; afterwards any change is detected. |
