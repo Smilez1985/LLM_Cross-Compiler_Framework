@@ -7,12 +7,15 @@ Settings (all optional except ai_provider):
   ai_provider            preset id from configs/llm_providers.yml (old values such as "OpenAI" still work)
   ai_model               model for every task; ai_model_<task> (chat, tools, json, healing) wins over it
   ai_base_url            endpoint for presets that allow one (Ollama, custom); ai_base_url_<provider> per provider
-  ai_auth / ai_auth_<provider>   api_key | ant_profile | none (default: the first usable method of the preset;
-                         methods in the preset's opt_in_auth, such as ant_profile, only through ai_auth_<provider>)
+  ai_auth / ai_auth_<provider>   a sign-in method id of the preset (api_key, ant_profile, none, ...; default:
+                         the first usable method in the catalog's order; opt-in methods such as ant_profile only
+                         through ai_auth_<provider>). Keys come from the vault, else from the environment variables
+                         the catalog lists for the method (shown as the source); see orchestrator/llm/auth/.
   ai_oauth_profile       `ant auth login` profile for Claude when ai_auth_anthropic is ant_profile (default: the
                          CLI's active profile)
   ai_anthropic_workspace_id   wrkspc_... for Claude API keys that are valid in every workspace of the organization
-                         (sent with the API key to the Claude API only; an `ant` profile keeps its own workspace)
+                         (sent with the API key to the Claude API only; an `ant` profile keeps its own workspace).
+                         While set it wins over the workspace ID stored with the key.
   ai_effort / ai_effort_<task>   low | medium | high | xhigh | max
   ai_fallback_chain      e.g. ["local"] or ["ollama:qwen3.5:4b"]; tried on refusals and outages
   ai_security_level      STRICT | BALANCED | OFF for cloud providers (local ones are never filtered)
@@ -25,7 +28,6 @@ and the loaded model are read from the running server's state for every call, so
 restarted by the CLI or the GUI is picked up without configuration. set_runtime_endpoint() overrides that.
 """
 
-import hashlib
 import ipaddress
 import os
 import random
@@ -38,9 +40,11 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-from orchestrator.llm.catalog import LEGACY_AUTH, Catalog, ProviderPreset, load_catalog
-from orchestrator.llm.errors import (LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused,
-                                     rejected_key_error)
+from orchestrator.llm.auth.resolver import CredentialResolver, ResolvedCredential
+from orchestrator.llm.auth.store import CredentialStore
+from orchestrator.llm.auth.validate import ValidationResult, validate_credential
+from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
+from orchestrator.llm.errors import LLMError, NotConfigured, ProviderUnavailable, RateLimited, Refused
 from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj
 from orchestrator.llm.providers import adapter_class
 from orchestrator.llm.types import EFFORTS, TASKS, ChatRequest, ChatResult, Message, ModelInfo
@@ -98,6 +102,9 @@ class LLMClient:
         self._adapters: Dict[tuple, Any] = {}
         self._state_cache: Dict[str, SecretStr] = {}
         self._lock = threading.Lock()
+        # Credentials: vault records and their metadata (next to the vault), resolved per call.
+        self.credentials = CredentialStore(secrets_manager, state_dir=lambda: self._state_path(""))
+        self.resolver = CredentialResolver(self.credentials, setting=self._setting, runtime_key=self._runtime_key)
 
     # --- settings ---------------------------------------------------------------------------------------------
     def _setting(self, key: str, default: Any = None) -> Any:
@@ -183,41 +190,19 @@ class LLMClient:
                     or preset.base_url)
         return preset.base_url  # cloud endpoints are fixed: a leftover custom URL must never receive their key
 
-    def _api_key(self, preset: ProviderPreset) -> Optional[str]:
-        if preset.runtime_endpoint:
-            return reveal((self._runtime_endpoint(preset) or (None, None, None))[1])
-        if not preset.secret or self.secrets is None:
+    def _runtime_key(self, preset: ProviderPreset) -> Optional[str]:
+        """The per-start key of the running local server of a runtime_endpoint preset."""
+        if not preset.runtime_endpoint:
             return None
-        try:
-            return self.secrets.get_secret(preset.secret) or None
-        except Exception as e:
-            self.logger.warning(f"Could not read the stored key for {preset.id}: {e.__class__.__name__}")
-            return None
+        return reveal((self._runtime_endpoint(preset) or (None, None, None))[1])
 
-    def _auth(self, preset: ProviderPreset, primary: bool) -> str:
-        """The sign-in method: the one the user chose, else the first usable one. Opt-in methods (an `ant`
-        profile) are never picked automatically, so a profile on disk cannot switch the billed account."""
+    def _auth(self, preset: ProviderPreset, primary: bool, base_url: Optional[str]) -> str:
+        """The sign-in method: the one the user chose, else the first usable one in the catalog's order. Opt-in
+        methods (an `ant` profile) are never picked automatically, so a profile on disk cannot switch the billed
+        account."""
         own = self._setting(f"ai_auth_{preset.id}")
         chosen = own or (self._setting("ai_auth") if primary else None)
-        if chosen:
-            if LEGACY_AUTH.get(chosen) in preset.auth:
-                chosen = LEGACY_AUTH[chosen]
-            if chosen not in preset.auth:
-                raise NotConfigured(f"{preset.label} does not support sign-in method '{chosen}'.", provider=preset.id)
-            if chosen in preset.opt_in_auth and not own:
-                raise NotConfigured(f"{preset.label}: the sign-in method '{chosen}' is used only when "
-                                    f"ai_auth_{preset.id} is set to it.", provider=preset.id)
-            return chosen
-        for method in preset.auth:
-            if method in preset.opt_in_auth:
-                continue
-            if method == "none" or (method == "api_key" and self._api_key(preset)):
-                return method
-        if preset.adapter == "anthropic":
-            raise NotConfigured("Claude API: no API key stored. Add one in the AI settings (Max and Team plans include "
-                                "monthly API credits for a linked Console organization). To use an `ant auth login` "
-                                "profile instead, set ai_auth_anthropic to ant_profile.", provider=preset.id)
-        raise NotConfigured(f"{preset.label}: no API key stored. Add one in the AI settings.", provider=preset.id)
+        return self.resolver.select(preset, chosen=chosen, explicit=bool(own), base_url=base_url).id
 
     def _model(self, preset: ProviderPreset, task: str, primary: bool, explicit: Optional[str]) -> str:
         if explicit:
@@ -261,7 +246,7 @@ class LLMClient:
             raise NotConfigured(f"Offline mode is on: {preset.label} is a cloud provider. Choose a local model.",
                                 provider=preset.id)
         return Target(preset=preset, model=self._model(preset, task, primary, model), base_url=base_url,
-                      auth=self._auth(preset, primary), local=local)
+                      auth=self._auth(preset, primary, base_url), local=local)
 
     def fallback_targets(self, task: str) -> List[Tuple[str, Optional[str]]]:
         chain = self._setting("ai_fallback_chain") or []
@@ -274,27 +259,49 @@ class LLMClient:
         return out
 
     # --- adapters ---------------------------------------------------------------------------------------------
+    def credential(self, target: Target) -> ResolvedCredential:
+        """The credential for the target's sign-in method (key, profile, token provider); repr shows no value."""
+        return self.resolver.resolve(target.preset, target.auth, target.base_url)
+
     def adapter(self, target: Target):
-        api_key = self._api_key(target.preset) if target.auth == "api_key" or target.preset.runtime_endpoint else None
-        if target.preset.rejected_key(api_key):
-            raise rejected_key_error(target.preset)  # before any request
-        fingerprint = hashlib.sha256(api_key.encode()).hexdigest()[:16] if api_key else ""
+        credential = self.credential(target)  # raises before any request: no key, admin key, bad workspace ID
         options = dict(self.adapter_options.get(target.preset.adapter, {}))
         if target.preset.adapter == "anthropic":
-            options.update(auth=target.auth, oauth_profile=self._setting("ai_oauth_profile"),
-                           workspace_id=self._setting("ai_anthropic_workspace_id"))
+            options.update(auth="ant_profile" if credential.kind == "anthropic_profile" else "api_key",
+                           oauth_profile=credential.profile, workspace_id=credential.workspace_id)
         elif target.preset.adapter == "openai_responses":
             options.update(prompt_cache_key=self.install_id())
-        key = (target.preset.id, target.base_url, target.auth, fingerprint, repr(sorted(options.items(), key=str)))
+        key = (target.preset.id, target.base_url, target.auth, credential.fingerprint,
+               repr(sorted(options.items(), key=str)))
         with self._lock:
             adapter = self._adapters.get(key)
             if adapter is None:
                 cls = adapter_class(target.preset.adapter)
-                adapter = cls(target.preset, base_url=target.base_url, api_key=api_key,
-                              http_client=self._http_client_for(target),
+                adapter = cls(target.preset, base_url=target.base_url, api_key=credential.api_key,
+                              credential=credential, http_client=self._http_client_for(target),
                               timeout=float(self._setting("ai_timeout", 600)), **options)
                 self._adapters[key] = adapter
         return adapter
+
+    def check_credentials(self, provider: Optional[str] = None) -> ValidationResult:
+        """The zero-cost check behind "Check": resolves the provider's credential and sends the catalog's GET.
+        A success stores when it was checked and the account it belongs to (no secrets) with the key."""
+        target = self.resolve("chat", provider=provider)
+        spec = target.preset.method(target.auth)
+        credential = self.credential(target)
+        result = validate_credential(target.preset, spec, credential, target.base_url,
+                                     http_client=self._check_http_client(target),
+                                     timeout=min(float(self._setting("ai_timeout", 600)), 30.0),
+                                     list_models=lambda: self.adapter(target).list_models())
+        if result.ok and credential.source == "vault":
+            origin = credential.origin if spec.binds_origin(target.preset) else None
+            self.credentials.update_metadata(target.preset.id, spec.id, {
+                "validated_at": self.credentials.now(), "account_label": result.account_label}, origin)
+        return result
+
+    def _check_http_client(self, target: Target):
+        client = self._http_client_for(target)
+        return client if client is not self._loopback_http else None  # validate builds its own proxy-free client
 
     def _http_client_for(self, target: Target):
         """Loopback servers are reached directly: an HTTP(S)_PROXY from the environment would otherwise receive
@@ -475,8 +482,13 @@ class LLMClient:
         raise last_error
 
     def describe(self, task: str = "chat") -> Dict[str, Any]:
-        """What a call for `task` would use, for the settings dialog (no secrets)."""
+        """What a call for `task` would use, for the settings dialog and Ditto's header (no secrets). `source`
+        says where the credential comes from: vault, env:<VARIABLE>, runtime, profile:<name> or none."""
         target = self.resolve(task)
+        try:
+            source = self.credential(target).source
+        except LLMError:
+            source = "none"
         return {"provider": target.provider, "label": target.preset.label, "model": target.model,
-                "base_url": target.base_url, "auth": target.auth, "local": target.local,
+                "base_url": target.base_url, "auth": target.auth, "auth_source": source, "local": target.local,
                 "privacy": "off (local)" if target.local else self.privacy_level()}

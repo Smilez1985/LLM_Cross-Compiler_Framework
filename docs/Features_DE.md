@@ -228,16 +228,27 @@ Anbieter übersetzt sie in das, was er versteht.
 
 | ID | Art | Wo es läuft | Anmeldung heute |
 |---|---|---|---|
-| `anthropic` | Anthropic-Claude-API | Cloud | API-Schlüssel (`anthropic_api_key`) |
-| `openai` | OpenAI Responses API | Cloud | API-Schlüssel (`openai_api_key`) |
-| `google` | Gemini, OpenAI-kompatibler Endpunkt | Cloud | API-Schlüssel (`gemini_api_key`) |
-| `openrouter` | OpenRouter | Cloud | API-Schlüssel (`openrouter_api_key`) |
+| `anthropic` | Anthropic-Claude-API | Cloud | API-Schlüssel (`anthropic_api_key` oder `ANTHROPIC_API_KEY`) |
+| `openai` | OpenAI Responses API | Cloud | API-Schlüssel (`openai_api_key` oder `OPENAI_API_KEY`) |
+| `google` | Gemini, OpenAI-kompatibler Endpunkt | Cloud | API-Schlüssel (`gemini_api_key` oder `GEMINI_API_KEY`) |
+| `openrouter` | OpenRouter | Cloud | API-Schlüssel (`openrouter_api_key` oder `OPENROUTER_API_KEY`) |
 | `ollama` | Ollama | lokal (Basis-URL einstellbar) | keine |
 | `local` | verwalteter llama-server | lokal | Schlüssel pro Start, wird automatisch verwaltet |
-| `custom` | jeder OpenAI-kompatible Server | ergibt sich aus der Adresse: Loopback-, private und Link-Local-Adressen sowie Namen auf `.local`, `.lan`, `.localhost` oder `.home.arpa` gelten als lokal | API-Schlüssel (`custom_api_key`) oder keine |
+| `custom` | jeder OpenAI-kompatible Server | ergibt sich aus der Adresse: Loopback-, private und Link-Local-Adressen sowie Namen auf `.local`, `.lan`, `.localhost` oder `.home.arpa` gelten als lokal | API-Schlüssel der Serveradresse (`custom_api_key`) oder keine |
 
 - Cloud-Anbieter haben feste Adressen; eine von Ollama oder einem eigenen Server übrig gebliebene Basis-URL bekommt
   nie ihren Schlüssel.
+- Ein Schlüssel eines eigenen Servers gehört zu der Adresse, für die er gespeichert wurde (Schema, Host und Port):
+  Nach einer Änderung der Basis-URL wird er nicht mehr mitgeschickt, und der neue Server braucht seinen eigenen
+  Schlüssel.
+- Jeder Anbieter nennt seine Anmeldeverfahren in `configs/llm_providers.yml` in der Reihenfolge, in der sie
+  bevorzugt werden; das erste nutzbare wird genutzt, außer `ai_auth_<Anbieter>` nennt eines. Ein Schlüssel in einer
+  der Umgebungsvariablen aus der Tabelle oben wird nur genutzt, wenn kein Schlüssel gespeichert ist, und die
+  KI-Einstellungen zeigen die Variable als Quelle; er wird nie in den Tresor kopiert.
+- Eine kostenlose Prüfung (die Modellliste des Anbieters, bei OpenRouter der Schlüssel-Endpunkt) zeigt, ob der
+  gespeicherte Schlüssel funktioniert, zu welchem Workspace oder Schlüsselnamen er gehört und wie viele Modelle er
+  nutzen kann. Angaben zu einer Anmeldung, die nicht geheim sind (Konto oder Workspace, die letzten vier Zeichen
+  eines Schlüssels, Zeitpunkt der Prüfung), liegen in `auth.json` neben dem Tresor.
 - Die Modellliste in den Einstellungen wird live beim Anbieter abgefragt; jeder Modellname lässt sich auch
   eintippen.
 - Eine Datei `llm_providers.yml` in deinem Einstellungsordner ergänzt oder ersetzt Anbieter anhand ihrer ID; ein
@@ -245,16 +256,19 @@ Anbieter übersetzt sie in das, was er versteht.
 - **Claude-API (`anthropic`):** Der gespeicherte API-Schlüssel hat immer Vorrang. Ein Profil aus `ant auth login`
   wird nur genutzt, wenn du es auswählst (`ai_auth_anthropic: ant_profile`; der frühere Wert `oauth` bedeutet
   dasselbe). Ein Schlüssel, der in jedem Workspace der Organisation gilt, braucht die Workspace-ID (Feld „Workspace
-  ID“ in den KI-Einstellungen, Einstellung `ai_anthropic_workspace_id`, `wrkspc_...`); sie geht nur mit dem
-  API-Schlüssel und nur an die Claude-API. Admin-API-Schlüssel (`sk-ant-admin01-`) werden vor jeder Anfrage
-  abgelehnt.
+  ID“ in den KI-Einstellungen, Einstellung `ai_anthropic_workspace_id`, `wrkspc_...`; solange sie gesetzt ist,
+  hat sie Vorrang vor einer mit dem Schlüssel gespeicherten Workspace-ID); sie geht nur mit dem API-Schlüssel und
+  nur an die Claude-API. Admin-API-Schlüssel (`sk-ant-admin01-`) werden vor jeder Anfrage abgelehnt.
+- **OpenAI (`openai`):** Eine mit dem Schlüssel gespeicherte Organisation und ein Projekt (`org-...`, `proj_...`)
+  gehen als Header `OpenAI-Organization` und `OpenAI-Project` mit; ein Schlüssel, der funktioniert, aber keine
+  Modelle auflisten darf, wird als solcher gemeldet, und die Modell-ID lässt sich eintippen.
 - Einen Anbieter `claude_code` (Ditto über ein Claude-Abo) gibt es nicht: Anthropic erlaubt Drittanbieter-Apps nicht,
   Abo-Limits zu nutzen. Ein gespeichertes `claude_code` (auch in der Ersatzkette oder bei `--provider`) bricht mit
   einer Meldung ab, die die Alternativen nennt; ein solcher Eintrag in deiner eigenen `llm_providers.yml` wird mit
   einer Warnung übersprungen. Claude-Abonnenten nutzen das Framework aus Claude Code oder Claude Desktop über
   [MCP](#mcp-server) oder mit einem API-Schlüssel (Max- und Team-Abos enthalten monatliches API-Guthaben).
-- Die SDKs übernehmen nie Zugangsdaten, Header oder Adressen aus der Umgebung: Jeder Client bekommt Schlüssel und
-  Basis-URL ausdrücklich, und `OPENAI_CUSTOM_HEADERS` / `ANTHROPIC_CUSTOM_HEADERS` werden beim Start mit einer
+- Die SDKs lesen selbst nie Zugangsdaten, Header oder Adressen aus der Umgebung: Jeder Client bekommt Schlüssel
+  und Basis-URL ausdrücklich, und `OPENAI_CUSTOM_HEADERS` / `ANTHROPIC_CUSTOM_HEADERS` werden beim Start mit einer
   Warnung entfernt (die Einstellung `ai_allow_sdk_env_headers: true` behält sie).
 
 ### Aufrufe, Wiederholungen und Ersatzkette

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Provider presets (configs/llm_providers.yml) as typed data."""
+"""Provider presets (configs/llm_providers.yml, schema v2; v1 files still load) as typed data. The sign-in methods
+of a preset are AuthMethodSpecs (orchestrator/llm/auth/spec.py)."""
 
 import ipaddress
 import re
@@ -10,15 +11,15 @@ from urllib.parse import urlparse
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from orchestrator.llm.auth.spec import ALWAYS_OPT_IN, LEGACY_AUTH, AuthMethodSpec, parse_methods
 from orchestrator.llm.types import Effort
 from orchestrator.utils.logging import get_logger
 
 DEFAULT_CATALOG = Path(__file__).resolve().parents[2] / "configs" / "llm_providers.yml"
 CATALOG_FILENAME = "llm_providers.yml"
 
-AuthMethod = Literal["api_key", "ant_profile", "none"]
-LEGACY_AUTH = {"oauth": "ant_profile"}  # earlier name of the `ant auth login` method (catalogs and settings)
-ALWAYS_OPT_IN = ("ant_profile",)  # never picked automatically, whatever a (user) catalog says
+SCHEMA_VERSIONS = (1, 2)
+__all__ = ["ALWAYS_OPT_IN", "LEGACY_AUTH", "Catalog", "ProviderPreset", "is_local_url", "load_catalog"]
 
 # Providers that no longer exist. Selecting one, also by an old alias or spelling ("Claude Code"), raises
 # NotConfigured with this text. Keys are normalized (see _removed_key).
@@ -44,19 +45,20 @@ def _removed_keys(name: Optional[str]) -> List[str]:
 
 
 class ProviderPreset(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     id: str
     label: str
     adapter: Literal["anthropic", "openai_responses", "openai_compat"]
+    group: Optional[str] = None          # GUI grouping (the vendor)
+    category: Literal["cloud_api", "cloud_platform", "aggregator", "local_engine", "mcp_reverse"] = "cloud_api"
     base_url: Optional[str] = None
     base_url_configurable: bool = False  # ai_base_url applies; cloud presets keep their fixed endpoint
     runtime_endpoint: bool = False       # endpoint is supplied by a running local server
     location: Literal["cloud", "local", "auto"] = "cloud"
-    auth: List[AuthMethod] = Field(default_factory=lambda: ["api_key"])
-    opt_in_auth: List[AuthMethod] = Field(default_factory=list)  # used only when ai_auth_<id> names it
-    reject_key_prefixes: List[str] = Field(default_factory=list)  # admin keys, refused before any request
-    secret: Optional[str] = None
+    # Sign-in methods in preferred order (`auth` in the file; the v1 name list expands to default specs).
+    methods: List[AuthMethodSpec] = Field(default_factory=list, alias="auth")
+    secret: Optional[str] = None         # earlier name of the API key in the vault (kept as cred/<id>/api_key)
     models: Dict[str, str] = Field(default_factory=dict)
     suggested_models: List[str] = Field(default_factory=list)
     efforts: Dict[str, Effort] = Field(default_factory=dict)
@@ -71,28 +73,59 @@ class ProviderPreset(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _legacy_auth_names(cls, data):
-        # A user catalog written for an earlier version still loads: "oauth" meant the `ant auth login` profile.
+    def _methods(cls, data):
+        # Both schema versions: v1 lists method names (with opt_in_auth and reject_key_prefixes next to them),
+        # v2 lists method specs; "oauth" in a v1 list is the earlier name of the `ant auth login` profile.
         if isinstance(data, dict):
             data = dict(data)
-            for name in ("auth", "opt_in_auth"):
-                if isinstance(data.get(name), list):
-                    data[name] = [LEGACY_AUTH.get(m, m) if isinstance(m, str) else m for m in data[name]]
+            key = "auth" if "auth" in data or "methods" not in data else "methods"
+            methods = parse_methods({**data, "auth": data.get(key)})
+            for name in ("auth", "methods", "opt_in_auth", "reject_key_prefixes"):
+                data.pop(name, None)
+            data["auth"] = methods
+            if "category" not in data and data.get("location") == "local":
+                data["category"] = "local_engine"
         return data
 
     @model_validator(mode="after")
-    def _opt_in_methods_are_offered(self):
-        unknown = [m for m in self.opt_in_auth if m not in self.auth]
-        if unknown:
-            raise ValueError(f"opt_in_auth lists methods that are not in auth: {', '.join(unknown)}")
-        self.opt_in_auth = [*self.opt_in_auth, *(m for m in ALWAYS_OPT_IN
-                                                 if m in self.auth and m not in self.opt_in_auth)]
+    def _key_name(self):
+        # The AI settings store a key under `secret`; a schema-2 preset may leave it out.
+        if self.secret is None and not self.runtime_endpoint:
+            first = next((m for m in self.methods if m.type == "api_key"), None)
+            if first is not None and re.match(r"^[a-z0-9][a-z0-9_.-]{0,63}$", self.id):
+                self.secret = f"cred/{self.id}/{first.id}"
         return self
+
+    @property
+    def auth(self) -> List[str]:
+        """Method ids in preferred order."""
+        return [m.id for m in self.methods]
+
+    @property
+    def opt_in_auth(self) -> List[str]:
+        """Methods used only when ai_auth_<id> names them."""
+        return [m.id for m in self.methods if m.opt_in]
+
+    @property
+    def reject_key_prefixes(self) -> List[str]:
+        return [p for m in self.methods for p in m.reject_prefixes]
+
+    @property
+    def env_names(self) -> List[str]:
+        """Every environment variable a method of this preset reads."""
+        return [name for m in self.methods for name in m.env]
+
+    def method(self, method_id: Optional[str]) -> Optional[AuthMethodSpec]:
+        """The method with this id; an earlier name ("oauth" for ant_profile) only when no method has it."""
+        found = next((m for m in self.methods if m.id == method_id), None)
+        if found is None and method_id in LEGACY_AUTH:
+            found = next((m for m in self.methods if m.id == LEGACY_AUTH[method_id]), None)
+        return found
 
     def rejected_key(self, key: Optional[str]) -> bool:
         """True for a key of a kind this provider refuses for chat (e.g. an Admin API key), also when it was
         stored with surrounding whitespace (a pasted key)."""
-        return bool(key) and any(key.strip().startswith(p) for p in self.reject_key_prefixes if p)
+        return any(m.rejected(key) for m in self.methods)
 
     def model_for(self, task: str) -> Optional[str]:
         return self.models.get(task) or self.models.get("default")
@@ -188,6 +221,9 @@ def _read(path: Path) -> dict:
 def load_catalog(path: Optional[Path] = None, user_dir: Optional[Path] = None) -> Catalog:
     """Loads the bundled presets; a llm_providers.yml in `user_dir` adds or replaces presets by id."""
     data = _read(Path(path) if path else DEFAULT_CATALOG)
+    if data.get("version", 1) not in SCHEMA_VERSIONS:
+        raise ValueError(f"llm_providers.yml: schema version {data.get('version')!r} is not supported "
+                         f"(known: {', '.join(map(str, SCHEMA_VERSIONS))})")
     providers = dict(data.get("providers") or {})
     aliases = dict(data.get("aliases") or {})
     if user_dir is not None:

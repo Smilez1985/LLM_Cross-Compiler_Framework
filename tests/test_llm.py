@@ -301,10 +301,20 @@ class TestAnthropic:
         assert info.value.category == "cyber" and info.value.explanation == "Exploit development"
         assert info.value.result.stop == "refusal"
 
-    def test_env_key_is_never_used(self, make_client, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-FROMENV0123456789abcdefghijk")
-        with pytest.raises(NotConfigured):
-            make_client(FakeHTTP(), {}, **ANTHROPIC).chat(ask())
+    def test_env_key_is_a_source_only_as_listed_and_shown(self, make_client, monkeypatch):
+        # The catalog's env list (ANTHROPIC_API_KEY) is read by the framework, never by the SDK, and the source is
+        # always shown; a stored key wins over it.
+        env_key = "sk-ant-" + "api03-FROMENV0123456789abcdefghijk"
+        monkeypatch.setenv("ANTHROPIC_API_KEY", env_key)
+        http = FakeHTTP().add(claude_message([text_block("ok")])).add(claude_message([text_block("ok")]))
+        client = make_client(http, {}, **ANTHROPIC)
+        assert client.describe()["auth_source"] == "env:ANTHROPIC_API_KEY"
+        client.chat(ask())
+        assert http.last.headers["x-api-key"] == env_key
+        stored = make_client(http, SECRETS, **ANTHROPIC)
+        assert stored.describe()["auth_source"] == "vault"
+        stored.chat(ask())
+        assert http.last.headers["x-api-key"] == KEY
 
     def test_custom_base_url_never_receives_the_cloud_key(self, make_client):
         http = FakeHTTP().add(claude_message([text_block("ok")]))

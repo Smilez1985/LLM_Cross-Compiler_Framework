@@ -36,6 +36,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   keys that are valid in every workspace of the organization now work. The ID is sent as the
   `anthropic-workspace-id` header on every request made with the API key to the Claude API, the model list
   included. An `ant auth login` profile keeps its own workspace, and other servers never receive the ID.
+- **Sign-in methods per provider** (`configs/llm_providers.yml` schema 2, `orchestrator/llm/auth`): each
+  provider lists its sign-in methods in the order they are preferred, with the page where the key is created,
+  the environment variables it reads, a free check and extra fields such as the Claude workspace ID or the
+  OpenAI organization and project. Catalogs of schema 1 in your config directory still load. Sign-in details
+  that are not secret (account or workspace, the last four characters of a key, extra fields, when it was
+  checked) are kept in `auth.json` next to the credential vault. Tokens of the sign-in flows that come later are
+  renewed under a lock shared by the GUI, the CLI and the MCP server; the new refresh token is stored before it
+  is used, and a refused renewal marks the sign-in as expired.
+- **Credential check** (for the coming "Check" button and `auth status --check`): one free GET request (the
+  model list, OpenRouter's key endpoint) says whether the stored key works, which workspace or key name it
+  belongs to and how many models it can use; a key that works but may not list models is reported as such.
+  Redirects are not followed, so the key goes to the provider only.
+- **API keys from environment variables**: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and
+  `OPENROUTER_API_KEY` are used when no key is stored for the provider (only the variables the provider catalog
+  lists, read by the framework and never by the SDKs). The AI settings name the variable, nothing is copied
+  into the vault, and a stored key always wins.
 - **How credentials are protected is your choice** (setting `secret_storage`, or `LLM_SECRET_STORAGE` for
   one run): the OS keyring (default), a credential helper command (`secret_helper`, e.g.
   `pass show llmcc/vault-key`, run without a shell), a passphrase asked once per start (scrypt), a key file
@@ -59,6 +75,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Provider errors are explained in plain language, e.g. a Claude API key that needs a workspace ID, a
   workspace the key cannot use, a key that is wrong, revoked or expired, or an `ant auth login` profile that
   needs a new sign-in.
+- More provider errors say what happened and what to do next, with a code for the GUI and the CLI: no credits
+  or a spend limit in the Claude Console, a rejected OpenAI key or a used-up OpenAI quota, a Gemini key that
+  Google refuses, an OpenRouter key at its credit limit, a local server that is not running or needs a key,
+  Ollama without its ollama.com sign-in, a locked keyring and an unreadable vault. A Claude spend cap is no
+  longer retried like a rate limit.
 - **Claude API sign-in**: a stored API key is always used first. An `ant auth login` profile is used only when
   you choose it (`ai_auth_anthropic: ant_profile`); before, a profile on disk silently took the place of the
   stored key, and with it the account that is billed. The earlier name `oauth` still means the profile, in the
@@ -151,6 +172,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   reported). Runtime redaction now also covers JWTs, private key blocks and passwords in URLs.
 - API keys held in memory by Ditto's provider layer show as `<redacted>` in `str()` and `repr()` and cannot be
   pickled.
+- A key of a custom OpenAI-compatible server belongs to the address it was saved for (scheme, host and port):
+  after the base URL changes it is no longer sent. A key saved by an earlier version is bound to the address it
+  is next used with. Claude Admin API keys are also refused for a Claude API preset in your own provider
+  catalog that does not list them.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

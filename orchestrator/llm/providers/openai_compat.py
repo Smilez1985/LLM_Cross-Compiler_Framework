@@ -71,10 +71,12 @@ class OpenAICompatAdapter(ProviderAdapter):
         if self._client is None:
             if not self.base_url:
                 raise NotConfigured(f"{self.label}: no server URL is set.", provider=self.provider)
+            self.check_credential_kind()
             import openai
             api_key = self._api_key or NO_KEY
             kwargs = dict(api_key=api_key, base_url=self.base_url, max_retries=0, timeout=self.timeout,
-                          default_headers={**self.preset.headers, "Authorization": f"Bearer {api_key}"})
+                          default_headers={**self.preset.headers, **self.credential_headers("Authorization"),
+                                           "Authorization": f"Bearer {api_key}"})
             if self.http_client is not None:
                 kwargs["http_client"] = self.http_client
             self._client = openai.OpenAI(**kwargs)
@@ -127,7 +129,8 @@ class OpenAICompatAdapter(ProviderAdapter):
         try:
             response = client.chat.completions.create(**params)
         except Exception as e:
-            raise map_openai_error(e, label=self.label, provider=self.provider) from None
+            raise map_openai_error(e, label=self.label, provider=self.provider, preset=self.preset,
+                                   base_url=self.base_url) from None
         return self.to_result(response, model)
 
     def to_result(self, response: Any, requested_model: str) -> ChatResult:
@@ -189,7 +192,8 @@ class OpenAICompatAdapter(ProviderAdapter):
                                         capabilities={k: extra[k] for k in ("supported_parameters",) if k in extra}))
             return models
         except Exception as e:
-            raise map_openai_error(e, label=self.label, provider=self.provider) from None
+            raise map_openai_error(e, label=self.label, provider=self.provider, preset=self.preset,
+                                   base_url=self.base_url) from None
 
 
 def _content(content) -> Any:

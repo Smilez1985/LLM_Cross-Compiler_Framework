@@ -367,7 +367,9 @@ the key with `llm-cli secrets set <key name>` and set `ai_provider` in `config.y
 - **Sign-in per provider** (the **Sign in...** button) is not available yet; it is being built. Until then
   Ditto uses API keys. For `anthropic` the stored API key always comes first; an `ant auth login` profile is used
   only when you choose it (setting `ai_auth_anthropic: ant_profile`). Claude Admin API keys (`sk-ant-admin01-`)
-  are refused.
+  are refused. Without a stored key, a key in `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or
+  `OPENROUTER_API_KEY` is used, and the AI settings name the variable. A key of a `custom` server belongs to the
+  address it was saved for and is not sent after the base URL changes.
 - There is no provider for a Claude subscription: Anthropic does not allow third-party apps to use subscription
   limits. A saved `claude_code` provider stops with a message that names the alternatives; use MCP or an API key
   as described [above](#quick-start-ai-clients-over-mcp-claude-code-claude-desktop-vs-code).

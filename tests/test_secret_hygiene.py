@@ -369,4 +369,4 @@ def test_adapter_errors_never_carry_the_key(tmp_path, caplog, redacted_logging, 
     assert key not in str(err) and key not in repr(err) and err.__cause__ is None and err.__suppress_context__
     caplog.set_level(logging.INFO, logger="orchestrator.test")
     logging.getLogger("orchestrator.test").error("chat failed", exc_info=err)
-    assert key not in caplog.text and "AuthFailed" in caplog.text
+    assert key not in caplog.text and type(err).__name__ in caplog.text  # the traceback was logged, redacted

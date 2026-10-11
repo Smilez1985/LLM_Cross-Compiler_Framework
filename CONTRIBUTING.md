@@ -111,8 +111,9 @@ python -m pytest
 ```
 
 - `tests/conftest.py` isolates every test: a temporary home and working directory, `LLM_FRAMEWORK_CONFIG_DIR`
-  pointing to a temporary folder, all `LLM_*` and `FRAMEWORK_*` variables and the provider keys `OPENAI_API_KEY`,
-  `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` removed. Tests must not depend on your real `~/.llm-framework`, your
+  pointing to a temporary folder, all `LLM_*` and `FRAMEWORK_*` variables and the provider keys removed
+  (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and every other variable a method in
+  `configs/llm_providers.yml` lists under `env`). Tests must not depend on your real `~/.llm-framework`, your
   keyring, real API keys or the network; use the `memory_keyring` fixture and fake servers.
 - `tests/test_versioning.py` checks that `orchestrator/__init__.py`, `pyproject.toml` and the newest released
   changelog entry carry the same version.
