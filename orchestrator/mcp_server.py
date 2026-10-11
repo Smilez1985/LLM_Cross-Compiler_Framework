@@ -180,6 +180,17 @@ def _model_parameters(model: type) -> list:
     return params
 
 
+def error_text(tool: str, error: ToolError) -> str:
+    """The text an MCP client gets for a refused or failed call: the framework's own words plain, the part that
+    quotes external text (a handler's error) wrapped as untrusted data, then the next step."""
+    quoted = getattr(error, "quoted", "")
+    if not quoted or not error.message.endswith(quoted):
+        return str(error)
+    text = error.message[:-len(quoted)] + wrap_untrusted(quoted, source=f"tool error:{tool}",
+                                                         max_len=len(quoted) + 1)
+    return f"{text} Next: {error.next}" if error.next else text
+
+
 def _audited(error: Exception) -> Exception:
     """Marks an error whose call is already in the audit log (see AuditedServer.call_tool)."""
     error.audited = True
@@ -320,7 +331,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             raise
         except ToolError as e:
             state.audited = True
-            message = str(e)
+            message = error_text(spec.name, e)
             if asked and not approved:
                 message = f"The user declined '{spec.title}'. Do not retry it unless they ask for it."
             elif "needs your confirmation" in message and not can_ask:
@@ -435,7 +446,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                     prepared = await anyio.to_thread.run_sync(registry.prepare, name, arguments, ctx)
                 except ToolError as e:
                     state.audited = True
-                    raise _audited(MCPToolError(str(e))) from None
+                    raise _audited(MCPToolError(error_text(str(name), e))) from None
                 state.repairs = prepared.repairs
                 return await super().call_tool(prepared.spec.name, prepared.arguments, context)
             except BaseException as e:

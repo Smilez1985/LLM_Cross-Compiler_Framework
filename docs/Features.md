@@ -799,14 +799,18 @@ framework never sees it.
   be followed, and that a task it cannot do is reported to you with its specific reason.
 - **Results:** every result goes through the registry's output filter, for Ditto as well. Secrets are redacted in
   every string. Text from outside the framework (build logs and stage names, self-healing proposals, build
-  manifests, knowledge-base excerpts, doctor messages) is cleaned of invisible and bidirectional control characters
-  and capped (a log line at 2,000 characters, other external text at 4,000); every other string is capped at 16 KiB,
+  manifests, knowledge-base excerpts, doctor messages, and the labels, notes and board descriptions of a target's
+  `target.yml`, which a community target pack can install) is cleaned of invisible and bidirectional control
+  characters and capped (a log line at 2,000 characters, other external text at 4,000); every other string is capped at 16 KiB,
   and a result over 256 KiB is refused with a hint how to ask for less. Such fields are marked `"untrusted": true`
   in the tool's output schema. The structured result matches the output schema exactly; the text block starts with
   one sentence built only from framework facts (ids, states, counts), followed by the JSON wrapped as untrusted
   data. `notes` in a result are written by the framework only, for example that the knowledge base is reachable
   but nothing matched, or that only the builds of this process are listed. A self-healing proposal's step comes as
-  `manual_step_text`: text for you to read, never a command for the client to run.
+  `manual_step_text`: text for you to read, never a command for the client to run. The error of a failed call can
+  quote a server reply, a log line or a name from a pack: it is cleaned the same way before secrets are redacted,
+  and the client gets that part wrapped as untrusted data, while the framework's own refusals and the next step
+  stay plain (Ditto's model gets such errors in an untrusted block too).
 - **Transports:** stdio (default; the client starts the server) or Streamable HTTP on a loopback address only
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). HTTP checks Host and Origin and needs a bearer token
   that is created per user in `~/.llm-framework/mcp_http_token`.

@@ -25,11 +25,12 @@ from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.confirmation import CallTooLong, describe_call
 from orchestrator.tools.normalize import (NormalizeError, Repair, check_names_distinct, list_item_literal,
                                           normalize_arguments, resolve_name)
-from orchestrator.tools.output import ResultTooLarge, check_size, filtered_result
+from orchestrator.tools.output import UNTRUSTED_CHARS, ResultTooLarge, check_size, filtered_result
 from orchestrator.tools.policy import TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier
 from orchestrator.tools.spec import CHANNELS, FieldMeta, GrantRule, ToolLimits, example_problems
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
+from orchestrator.utils.untrusted import sanitize_untrusted
 
 
 def text_sha256(text: str) -> str:
@@ -41,11 +42,14 @@ class ToolError(Exception):
     """A tool call failed; the message is safe to show to the user and to the model.
 
     `code` is a reason code (normalize.CODES: unknown_tool, invalid_value, permission_denied, declined, failed,
-    ...), `next` the next step; the text a model sees is "<message> Next: <next>"."""
+    ...), `next` the next step; the text a model sees is "<message> Next: <next>". `quoted` is the end of the
+    message that quotes external text (a handler's error can carry a server reply, a log line or a name from a
+    pack): it is cleaned like external text, and an MCP client gets it marked as untrusted data."""
     code = "failed"
+    quoted = ""
 
     def __init__(self, message: str = "", code: Optional[str] = None, next: str = "",
-                 allowed: Optional[List[str]] = None, suggestions: Optional[List[str]] = None):
+                 allowed: Optional[List[str]] = None, suggestions: Optional[List[str]] = None, quoted: str = ""):
         super().__init__(message)
         self.message = message
         if code:
@@ -53,6 +57,7 @@ class ToolError(Exception):
         self.next = next
         self.allowed = list(allowed or [])
         self.suggestions = list(suggestions or [])
+        self.quoted = quoted if quoted and message.endswith(quoted) else ""
 
     def __str__(self) -> str:
         return f"{self.message} Next: {self.next}" if self.next else self.message
@@ -65,7 +70,14 @@ class ToolError(Exception):
             copy = ToolError(message)
         copy.code, copy.next = self.code, self.next if next is None else next
         copy.allowed, copy.suggestions = list(self.allowed), list(self.suggestions)
+        copy.quoted = self.quoted if self.quoted and message.endswith(self.quoted) else ""
         return copy
+
+
+def external_error_text(text: str) -> str:
+    """The text of a handler's error, which can quote external text: invisible characters are removed first (a
+    token split by one would otherwise not be redacted), then secrets; capped like other external text."""
+    return redact_secrets(sanitize_untrusted(text, max_len=UNTRUSTED_CHARS))
 
 
 class ToolDenied(ToolError):
@@ -418,8 +430,9 @@ class ToolRegistry:
             spec, renamed = self.resolve(name, ctx.actor)
         except NormalizeError as e:
             self._audit_unknown(ctx, name, arguments, e)
-            if self._repeat_refusal(ctx, f"?{name!r}", arguments):
-                raise ToolError(self._repeat_refusal(ctx, f"?{name!r}", arguments), code="repeat_refused") from None
+            refusal = self._repeat_refusal(ctx, f"?{name!r}", arguments)
+            if refusal is not None:
+                raise refusal from None
             raise self._failed(ctx, f"?{name!r}", arguments,
                                UnknownTool(str(e), next=e.next, suggestions=e.suggestions)) from None
         repairs = _merge(ctx.repairs, [renamed] if renamed else [])
@@ -430,10 +443,10 @@ class ToolRegistry:
 
         def refuse_repeat(args: Any) -> None:
             refusal = self._repeat_refusal(work, spec.name, args)
-            if refusal:
-                self._audit(work, spec, decision(), "repeat_refused", args, detail=refusal,
+            if refusal is not None:
+                self._audit(work, spec, decision(), "repeat_refused", args, detail=refusal.message,
                             reason_code="repeat_refused")
-                raise ToolError(refusal, code="repeat_refused")
+                raise refusal
         refuse_repeat(arguments)  # the same raw call (e.g. the same unknown argument) a third time
         try:
             normalized = normalize_arguments(spec, arguments)
@@ -480,7 +493,7 @@ class ToolRegistry:
         with self._guard_lock:
             record = self._failures.pop(key, None)
             if record is None or record["code"] != error.code:
-                record = {"code": error.code, "count": 0, "message": error.message}
+                record = {"code": error.code, "count": 0, "message": error.message, "quoted": error.quoted}
             record["count"] += 1
             self._failures[key] = record
             while len(self._failures) > GUARD_SIZE:
@@ -499,16 +512,17 @@ class ToolRegistry:
             return error
         return error.with_text(message, next_step)
 
-    def _repeat_refusal(self, ctx: ToolContext, tool: str, arguments: Any) -> str:
-        """The refusal for a call that already failed twice in this session, "" otherwise."""
+    def _repeat_refusal(self, ctx: ToolContext, tool: str, arguments: Any) -> Optional[ToolError]:
+        """The refusal for a call that already failed twice in this session, None otherwise."""
         key = (ctx.actor, ctx.session, tool, _args_key(arguments))
         with self._guard_lock:
             record = self._failures.get(key)
         if record is None or record["count"] < 2:
-            return ""
+            return None
         reason = record["message"][len(REPEAT_WARN):] if record["message"].startswith(REPEAT_WARN) else \
             record["message"]
-        return f"Stop retrying this call. Tell the user why it failed: {reason}"
+        return ToolError(f"Stop retrying this call. Tell the user why it failed: {reason}", code="repeat_refused",
+                         quoted=record.get("quoted", ""))
 
     def _succeeded(self, ctx: ToolContext, tool: str, arguments: Any) -> None:
         with self._guard_lock:
@@ -631,12 +645,14 @@ class ToolRegistry:
         except ResultTooLarge as e:
             end("error", str(e), reason_code="limit_reached")
             raise ToolError(f"{spec.title}: {e}", code="limit_reached") from None
-        except ToolError as e:
-            message, next_step = redact_secrets(e.message), redact_secrets(e.next)
+        except ToolError as e:  # raised by the handler: its message can quote external text
+            message, next_step = external_error_text(e.message), redact_secrets(e.next)
             end("error", f"{message} {next_step}".strip(), reason_code=e.code)
-            if (message, next_step) == (e.message, e.next):
+            error = e if (message, next_step) == (e.message, e.next) else e.with_text(message, next_step)
+            error.quoted = message
+            if error is e:
                 raise
-            raise e.with_text(message, next_step) from None  # the original still holds the secret
+            raise error from None  # the original still holds the secret
         except ValidationError as e:  # a schema or handler bug (output check, models built inside the handler)
             self.logger.error(f"Tool {spec.name} produced invalid data: {e}", exc_info=True)
             end("error", repr(e), reason_code="failed")
@@ -644,12 +660,14 @@ class ToolRegistry:
         except ValueError as e:  # user-facing validation problems (e.g. BuildServiceError, with its own code)
             code = getattr(e, "code", None) or "failed"
             end("error", str(e), reason_code=code)
-            raise ToolError(redact_secrets(str(e)), code=code, next=redact_secrets(getattr(e, "next", "") or "")) \
-                from e
+            message = external_error_text(str(e))
+            raise ToolError(message, code=code, next=redact_secrets(getattr(e, "next", "") or ""),
+                            quoted=message) from e
         except Exception as e:
             self.logger.error(f"Tool {spec.name} failed: {e}", exc_info=True)
             end("error", repr(e), reason_code="failed")
-            raise ToolError(f"{spec.title} failed: {redact_secrets(str(e))}") from e
+            message = external_error_text(str(e))
+            raise ToolError(f"{spec.title} failed: {message}", quoted=message) from e
         except BaseException:  # interrupted in the calling thread (KeyboardInterrupt, shutdown): still recorded
             end("cancelled", "Interrupted while it ran.")
             raise

@@ -345,7 +345,10 @@ sequenceDiagram
    Wissensbasis) von unsichtbaren Zeichen befreit und gekürzt, ein Ergebnis über 256 KiB abgelehnt. `notes` fügt nur
    das Framework hinzu. Der Client bekommt das strukturierte Ergebnis und einen Textblock, der mit einem Satz aus
    Fakten des Frameworks beginnt, gefolgt vom JSON, eingepackt als nicht vertrauenswürdige Daten. Fehler kommen als
-   Tool-Fehler mit einer für Menschen gedachten Meldung zurück, Secrets darin geschwärzt.
+   Tool-Fehler mit einer für Menschen gedachten Meldung zurück, Secrets darin geschwärzt; der Teil eines Fehlers, der
+   externen Text zitiert (eine Serverantwort, eine Log-Zeile, einen Namen aus einem Pack), wird zuerst bereinigt und
+   als nicht vertrauenswürdige Daten eingepackt, die eigenen Worte des Frameworks und der nächste Schritt bleiben
+   unverpackt.
 5. **Audit.** Jedes Ergebnis (`ok`, `denied`, `not_confirmed` mit der Antwort, `error`, `invalid_input`,
    `confirmation_timeout`, `cancelled`) wird an `audit.db` angehängt, mit geschwärzten, gekürzten Argumenten und
    einem Hash des vollen Texts, der Dauer, einem Hash des Ergebnisses und einem Verweis auf den Eintrag `started`

@@ -269,3 +269,76 @@ def test_instructions_are_static_short_and_say_how_to_treat_external_text():
     text = mcp_server.INSTRUCTIONS
     assert len(text) < 2048, "Claude Code cuts server instructions at 2048 characters"
     assert "untrusted" in text and "never instructions" in text and "specific reason" in text
+
+
+# --- review fixes: handler errors and target texts are external text ------------------------------------------
+
+SPLIT_TOKEN = "hf_" + "​" + "abcdefghijklmnopqrstuvwxyz0123"  # a token with a zero-width space inside
+
+
+def raising(error):
+    def handler(_inp):
+        raise error
+    return handler
+
+
+def mcp_registry_call(reg, name, arguments):
+    server = mcp_server.build_mcp_server(SimpleNamespace(info=SimpleNamespace(version="t"), tool_registry=reg))
+
+    async def go():
+        async with Client(server) as client:
+            return await client.call_tool(name, arguments)
+    return asyncio.run(go())
+
+
+def text_of_error(result) -> str:
+    assert result.is_error
+    return " ".join(getattr(c, "text", "") for c in result.content)
+
+
+class TestHandlerErrors:
+    """Review fix: an error a handler raises can quote external text (a server reply, a log line, a name from a
+    pack). It is cleaned like external text before secrets are redacted, for every caller, and an MCP client gets
+    it marked as untrusted data as Ditto's model does; the framework's own refusals and next steps stay plain."""
+
+    @pytest.mark.parametrize("error", [ToolError(f"server said {SPLIT_TOKEN}"), ValueError(f"bad {SPLIT_TOKEN}"),
+                                       RuntimeError(f"boom {SPLIT_TOKEN}")])
+    def test_a_token_split_by_an_invisible_character_is_redacted(self, tmp_path, error):
+        with pytest.raises(ToolError) as exc:
+            run(registry_with(tmp_path, raising(error)))
+        text = str(exc.value)
+        assert SPLIT_TOKEN.replace("​", "") not in text and "​" not in text
+
+    def test_mcp_marks_handler_error_text_as_untrusted(self, tmp_path):
+        from orchestrator.Core.build_service import BuildServiceError
+        reg = registry_with(tmp_path, raising(BuildServiceError(f"Model {INJECTION} not found.",
+                                                                next="Call list_targets.")))
+        text = text_of_error(mcp_registry_call(reg, "probe", {}))
+        assert re.fullmatch(r'(Error executing tool probe: )?<untrusted_data id="\w+" source="tool error:probe">\n.*'
+                            r'\n</untrusted_data id="\w+"> Next: Call list_targets\.', text, re.DOTALL), text
+        assert INJECTION in unwrap(text.rsplit(" Next:", 1)[0])
+
+    def test_framework_refusals_stay_plain(self, tmp_path):
+        reg = registry_with(tmp_path, lambda i: Probe())
+        reg.policy_store.save(ToolPolicy(configured=True, overrides={"probe": Decision.DENY}))
+        text = text_of_error(mcp_registry_call(reg, "probe", {}))
+        assert "untrusted_data" not in text and "not allowed by your tool permissions" in text
+
+
+class TestTargetTexts:
+    """Review fix: labels, notes and board descriptions come from target.yml, which a community target pack
+    installs; they are external text like a pack's other texts."""
+
+    def test_target_outputs_mark_their_free_text(self, tools):
+        for name in ("list_targets", "get_target_capabilities"):
+            assert has_untrusted(tools.get(name).output_model), name
+
+    def test_a_pack_name_is_cleaned_and_the_text_block_wrapped(self, tools, framework):
+        from orchestrator.schemas.build import TargetOut
+        framework.build_service.list_targets = lambda: TargetList(targets=[
+            TargetOut(id="evil", name=f"Evil{HIDDEN} {INJECTION}")])
+        out = tools.call("list_targets", {}, ToolContext("mcp"))
+        assert out.targets[0].name == f"Evil {INJECTION}"
+        _, result = mcp_call(framework, "list_targets", {})
+        first, rest = text_block(result).split("\n", 1)
+        assert "IGNORE" not in first and json.loads(unwrap(rest)) == result.structured_content
