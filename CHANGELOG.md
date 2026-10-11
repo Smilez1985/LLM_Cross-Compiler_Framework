@@ -42,8 +42,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   next to the vault (`insecure`, not encrypted at rest) or memory only (`ephemeral`, for CI). Nothing is
   picked automatically: without a usable keyring and without a choice, the framework stops and names the
   options. `llm-cli doctor` warns about the key file and reports memory-only storage.
-- **`llm-cli --debug-http`** shows the debug output of the HTTP libraries and the AI provider SDKs on stderr,
-  with credentials redacted.
+- **`--debug-http`** (`llm-cli --debug-http`, and the same option when starting the GUI) shows the debug output
+  of the HTTP libraries and the AI provider SDKs on stderr, with credentials redacted.
 - **Documentation in English and German** for every document (README, blueprint with design and roadmap, CLI
   usage, features, contributing, module developer guide, SSOT, changelog), checked by `tests/test_docs.py`:
   every document has its twin, links and anchors resolve, both changelogs list the same versions, and the

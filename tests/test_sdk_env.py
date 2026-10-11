@@ -159,3 +159,30 @@ class TestEntryPoints:
             gui_main.main()
         assert seen == [(["llm-gui"], False, "debug")]
         assert "Ignoring ANTHROPIC_CUSTOM_HEADERS" in capsys.readouterr().err
+
+    @pytest.mark.parametrize("argv, sdk_debug", [(["llm-gui", "--debug-http"], True), (["llm-gui"], False)])
+    def test_gui_flag_sets_the_sdk_logger_levels(self, monkeypatch, tmp_path, argv, sdk_debug):
+        # The flag keeps ANTHROPIC_LOG and also lets the SDK loggers log DEBUG; the framework's own
+        # setup_logging(level=...) at boot keeps that choice.
+        pytest.importorskip("PySide6")
+        import orchestrator.main as gui_main
+        from orchestrator.utils.logging import setup_logging
+        monkeypatch.setattr(gui_main, "root_dir", tmp_path)
+
+        class QtStarted(Exception):
+            pass
+
+        def qt_application(argv):
+            raise QtStarted
+
+        monkeypatch.setenv("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+        monkeypatch.setattr(sys, "argv", argv)
+        monkeypatch.setattr(gui_main, "QApplication", qt_application)
+        try:
+            with pytest.raises(QtStarted):
+                gui_main.main()
+            setup_logging(level="DEBUG")  # what FrameworkManager does with a DEBUG log level
+            assert logging.getLogger("anthropic").isEnabledFor(logging.DEBUG) is sdk_debug
+            assert logging.getLogger("httpx").isEnabledFor(logging.DEBUG) is sdk_debug
+        finally:
+            setup_logging(level="INFO", debug_http=False)

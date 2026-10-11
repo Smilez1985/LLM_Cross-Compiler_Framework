@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from pathlib import Path
@@ -30,6 +31,16 @@ def isolated_environment(tmp_path, monkeypatch):
                 "OPENAI_ORG_ID", "OPENAI_PROJECT_ID", "ANTHROPIC_PROFILE", "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_LOG",
                 "OPENAI_LOG"):
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def sdk_debug_logging_off():
+    """A CLI or GUI test with --debug-http must not leave the SDK loggers at DEBUG, with a stderr handler, for
+    the tests after it (the choice is process-wide and kept by later setup_logging() calls)."""
+    yield
+    from orchestrator.security import redaction
+    if getattr(redaction, "_debug_http", False):
+        redaction.configure_sdk_loggers(logging.INFO, debug_http=False)
 
 
 @pytest.fixture
