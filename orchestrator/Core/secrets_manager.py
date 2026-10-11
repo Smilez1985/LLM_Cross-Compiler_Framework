@@ -321,7 +321,7 @@ class SecretsManager:
             self._load_store(strict=True)
             if self._load_failed:
                 return  # never written; reported by doctor
-            needs_header = self._created_key and self._version == 0
+            needs_header = self._created_key
             if needs_header or len(self._keys) > 1:
                 # A new vault records its key id (and scrypt parameters) at once, so another process starting
                 # now uses the same key; an interrupted rotation is completed.
@@ -546,7 +546,7 @@ class SecretsManager:
                 if plain is None:
                     return False
                 old_keys, old_header = self._keys, self._key_header
-                material = fresh or self._provider.rotate(self._header)
+                material = fresh or self._provider.rotate({**self._header, **self._key_header})  # the keys in use
                 self._keys, self._key_header = material.keys, material.header
                 self._entries = {name: self._encrypt(value) for name, value in plain.items()}
                 if not self._save_store():
