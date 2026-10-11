@@ -713,14 +713,14 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 - Er ist eine Information, keine rechtliche Bestätigung: eine Schaltfläche, **Verstanden** (englische Oberfläche:
   *Understood*, auch Esc), nichts zum Ankreuzen.
 - Er erscheint einmal pro Benutzer und erneut, wenn sich sein Text in einer Sprache ändert. Die Zustandsdatei
-  `crawl_notice.json` im persönlichen Ordner (`~/.llm-framework`) speichert die Version des Hinweises und einen Hash
-  seiner Texte. Lässt sich dieser Ordner nicht nutzen, erscheint der Hinweis jedes Mal.
+  `crawl_notice.json` im persönlichen Ordner (`~/.llm-framework`) speichert einen Hash seiner Texte. Lässt sich
+  dieser Ordner nicht nutzen, erscheint der Hinweis jedes Mal.
 
 ### Was der Crawler beachtet
 
 | Signal | Wo es gelesen wird | Wirkung |
 |---|---|---|
-| robots.txt (RFC 9309) | `/robots.txt` jedes Hosts, einmal pro Host | Gesperrte Pfade werden nicht abgerufen. Es gelten die Gruppen für `LLM-Conversion-Framework-Bot`, sonst alle `*`-Gruppen; Muster mit `*` und `$` wirken; die längste Regel gewinnt, bei Gleichstand `Allow`. Eine robots.txt, die nicht erreichbar ist oder mit 401, 403 oder einem Serverfehler antwortet, gilt als „alles gesperrt“. |
+| robots.txt (RFC 9309) | `/robots.txt` jeder Site, einmal pro Schema, Host und Port | Gesperrte Pfade werden nicht abgerufen. Es gelten die Gruppen, deren `User-agent` `LLM-Conversion-Framework-Bot` lautet (gleich in welcher Schreibweise), sonst alle `*`-Gruppen (eine Gruppe für `bot` gehört einem anderen Crawler); Muster mit `*` und `$` wirken; die längste Regel gewinnt, bei Gleichstand `Allow`. Eine robots.txt, die nicht erreichbar ist oder mit einem Serverfehler, 401 oder 403 antwortet, gilt als „alles gesperrt“ (bei 401 und 403 strenger als RFC 9309, das dann Crawlen erlaubt: eine verschlossene robots.txt kann einen Vorbehalt enthalten). |
 | Header `X-Robots-Tag` | jede Antwort | `noindex`, `none`, `noai` und `noimageai` halten die Seite heraus; bei `nofollow` und `none` werden ihre Links nicht verfolgt. Direktiven für diesen Crawler (`LLM-Conversion-Framework-Bot: noai`) zählen, solche für andere Crawler nicht. |
 | `<meta name="robots">` und `<meta name="llm-conversion-framework-bot">` | HTML-Seiten | dieselben Direktiven wie beim Header |
 | TDM Reservation Protocol (W3C TDMRep 1.0) | `/.well-known/tdmrep.json` pro Site (die erste passende Regel entscheidet), der Header `tdm-reservation`, `<meta name="tdm-reservation">`, `tdm:reservation` in den PDF-Metadaten | Ein Vorbehalt hält die Seite heraus; eine `tdm-policy` wird im Log genannt. |
@@ -739,10 +739,11 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 
 - Private, Loopback- und andere nicht öffentliche Adressen sind gesperrt (SSRF-Schutz), und jede Verbindung wird an
   die geprüfte Adresse gebunden, damit eine DNS-Antwort nicht zwischendurch ausgetauscht werden kann.
-- Der Deep-Ingest-Dialog legt für jeden Crawl die Link-Tiefe (1 bis 5, Standard 2), das Lesen von PDFs und die
-  Pause zwischen Anfragen (ganze Sekunden von 0 bis 10, Standard 1 s) fest. Die Einstellungen `crawler_max_depth`,
-  `crawler_rate_limit` und `crawler_download_pdfs` sind nur die Standardwerte für Crawls ohne diese Angaben; der
-  Dialog übergibt immer seine eigenen Werte.
+- Der Deep-Ingest-Dialog legt für jeden Crawl die Link-Tiefe (0 bis 5; 0 liest nur die eingegebenen Seiten), das
+  Lesen von PDFs und die Pause zwischen Anfragen (0 bis 10 s, auch Bruchteile einer Sekunde) fest. Er öffnet sich
+  mit den Einstellungen `crawler_max_depth` (Standard 2), `crawler_download_pdfs` (Standard an) und
+  `crawler_rate_limit` (Standard 1 s); eine größere eingestellte Tiefe oder Pause bleibt und hebt die Obergrenze an.
+  Was du im Dialog änderst, gilt nur für diesen Crawl.
 - Aus den Einstellungen: höchstens `crawler_max_pages` Seiten pro eingegebener URL (Standard 50) und nur Seiten in
   den Sprachen aus `crawler_languages` (Standard Englisch und Deutsch; eine leere Liste behält alle). Ein Crawl hört
   außerdem nach fünfmal so vielen Anfragen auf, wie seine Seitengrenze erlaubt (Weiterleitungen und gescheiterte
@@ -758,17 +759,19 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   gespeichert ist.
 - Das Ergebnis über alle eingegebenen URLs wird erst gemeldet, wenn der letzte Schreibvorgang zurückgekehrt ist:
 
-  | Ergebnis | Wann | Dialogtitel |
+  | Ergebnis | Wann | Meldungsfenster |
   |---|---|---|
-  | Erfolg | jede eingegebene URL hat Seiten gespeichert; nichts ist gescheitert, nichts hat eine Site vorbehalten, der Crawl wurde nicht gestoppt | Deep Ingest abgeschlossen |
-  | teilweise | Seiten sind gespeichert, aber andere sind gescheitert, wurden von der Site vorbehalten oder der Crawl wurde gestoppt | Deep Ingest teilweise abgeschlossen |
-  | Fehlschlag | nichts wurde gespeichert | Deep Ingest fehlgeschlagen |
+  | Erfolg | jede eingegebene URL hat Seiten gespeichert; nichts ist gescheitert, nichts hat eine Site vorbehalten, der Crawl wurde nicht gestoppt | Information |
+  | teilweise | Seiten sind gespeichert, aber andere sind gescheitert, wurden von der Site vorbehalten oder der Crawl wurde gestoppt | Warnung |
+  | Fehlschlag | nichts wurde gespeichert | Fehler |
 
-- Das Crawl-Protokoll im Assistenten (und das Log des Frameworks) nennt jede übersprungene Seite mit ihrem Grund, zum
-  Beispiel „disallowed by robots.txt“, „X-Robots-Tag: noai“, „TDM reservation (...)“, „redirect from ... leaves the
-  crawled site“ oder „language 'fr' is not one of de, en“, und jede Seite, die sich nicht abrufen oder lesen ließ
-  (HTTP-Status, unlesbares PDF, zu viele Weiterleitungen). Seiten, die wegen ihrer Sprache oder einer Weiterleitung
-  auf einen anderen Host wegfallen, machen das Ergebnis nicht zu „teilweise“; Fehler und Vorbehalte von Sites schon.
+- Das Crawl-Protokoll im Assistenten (und das Log des Frameworks) nennt jede Seite, die nicht gespeichert wurde, mit
+  ihrem Grund, zum Beispiel „disallowed by robots.txt“, „X-Robots-Tag: noai“, „TDM reservation (...)“, „redirect
+  from ... leaves the crawled site“, „language 'fr' is not one of de, en“, „PDF downloads are switched off“,
+  „neither HTML nor PDF (image/png)“, „no text“ oder „PDF support (pypdf) is not installed“, und jede Seite, die sich
+  nicht abrufen oder lesen ließ (HTTP-Status, unlesbares PDF, zu viele Weiterleitungen). Jede Seite, die ankommt
+  (HTTP 200), zählt zur Seitengrenze, ob gespeichert oder nicht. Vorbehalte von Sites und Fehler machen das Ergebnis zu „teilweise“,
+  die übrigen Gründe nicht.
 
 ### Gesprochene Ansagen
 
@@ -784,7 +787,7 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 - Still bleibt es, wenn die Einstellung `audio_announcements` aus ist (Menü **Tools > Gesprochene Ansagen**,
   englische Oberfläche: *Spoken Announcements*, ein Häkchen, das sofort gespeichert wird), wenn
   `LLM_FRAMEWORK_NO_AUDIO` gesetzt ist (auf alles außer leer, `0`, `false`, `no` oder `off`), unter CI (`CI`
-  ebenso gesetzt), während Tests, in einer SSH-Sitzung ohne Bildschirm und unter Linux ohne Bildschirm (kein
+  ebenso gesetzt), in einer SSH-Sitzung ohne Bildschirm und unter Linux ohne Bildschirm (kein
   `DISPLAY` oder `WAYLAND_DISPLAY`).
 
 ---
@@ -938,9 +941,12 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 - **Wissens-Schnappschuss (auf Wunsch):** Auf der letzten Seite des Assistenten schreibt **Attach the knowledge
   crawled for this target** (standardmäßig aus, erst nach einem Deep Ingest im Assistenten wählbar) die Seiten, die
   von den Deep-Ingest-URLs des Assistenten gecrawlt wurden, bereinigt nach `knowledge/initial_knowledge.json` im
-  neuen Target. Der Rest deiner Wissensbasis kommt nie in ein Modul, und `llm-cli module create` und
-  `module generate-ai` hängen nichts an. Das Framework nimmt einen solchen Schnappschuss nicht von selbst in eine
-  Wissensbasis auf.
+  neuen Target, mit einer `README.md`, die sagt, was darin steht. Solange ein Deep Ingest noch läuft, bleibt die
+  Schaltfläche *Finish* des Assistenten gesperrt (die Seite sagt, warum), damit der Schnappschuss jede gecrawlte
+  Seite enthält; stammt keine gespeicherte Seite von diesen URLs, sagt der Assistent, dass kein Schnappschuss
+  angehängt wurde. Der Rest deiner Wissensbasis kommt nie in ein Modul, und `llm-cli module create` und
+  `module generate-ai` hängen nichts an. Das Framework nimmt einen solchen Schnappschuss nicht in eine Wissensbasis
+  auf; zum Teilen von Wissen exportierst du ein Wissens-Pack.
 - **Export für die Community:** Die letzte Seite des Assistenten bietet außerdem **Export for community after
   creating** an (siehe [Export für die Community](#export-für-die-community)).
 
@@ -1216,10 +1222,8 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
   Anmeldung.
 - **Laufzeit auf dem Gerät:** Das Framework installiert keine Laufzeitumgebung auf dem Board.
 - **GUI:** Die Reiter Auto-Tuning und Models sind Platzhalter; die lokale Laufzeit wird nur über die CLI gesteuert.
-- **Deep Ingest** läuft nur aus dem Modul-Assistenten in der GUI; einen CLI-Befehl dafür gibt es nicht. Sein Dialog
-  übergibt immer eigene Werte für Tiefe, PDFs und Pause zwischen Anfragen (ganze Sekunden), sodass
-  `crawler_max_depth`, `crawler_download_pdfs` und `crawler_rate_limit` dort nicht wirken. Einen Schnappschuss der
-  Wissensbasis wiederherstellen kann man über GUI oder CLI nicht.
+- **Deep Ingest** läuft nur aus dem Modul-Assistenten in der GUI; einen CLI-Befehl dafür gibt es nicht. Einen
+  Schnappschuss der Wissensbasis wiederherstellen kann man über GUI oder CLI nicht.
 - **Reranking** läuft nur bei Build-Empfehlungen; `rag_rerank_default` nimmt den Chat und das MCP-Tool
   `search_knowledge` hinzu.
 - **Gesprochene Ansagen** sind nur mit nachgebildeten Sprachausgaben getestet, nicht mit den echten Stimmen von
