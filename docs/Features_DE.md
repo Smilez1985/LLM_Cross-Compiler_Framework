@@ -424,7 +424,8 @@ Modells. Kein KI-Modell ist beteiligt, und deine eigene Wissensbasis wird nicht 
   `callsite` (Dittos eigene Suchtexte für Modulvorschläge und Build-Empfehlungen) und `negative` (fachfremde Fragen).
 - **Ablauf:** Der Korpus wird mit dem eingestellten lokalen Embedding-Modell in eine temporäre Wissensbasis in einem
   temporären Ordner aufgenommen, der danach gelöscht wird. Das Modell wird bei der ersten Nutzung heruntergeladen;
-  danach läuft die Evaluation offline. Retrieval-Fälle laufen nur, wenn `--kind retrieval` angegeben ist.
+  danach läuft die Evaluation offline. Retrieval-Fälle laufen nur, wenn `--kind retrieval` angegeben ist oder
+  `--case` einen von ihnen nennt.
 - **Varianten** (`--rag-variant`, mehrfach möglich, Standard `fused`): `fused` ist die hybride Suche; `rerank` nimmt
   den Cross-Encoder aus `rag_reranker` und seine Relevanzschwelle hinzu ([Reranking](#reranking)). `rerank` bricht
   mit einer Meldung ab, wenn kein Reranker zum Rechner passt (setze `rag_reranker` auf eine Modell-ID, um trotzdem
@@ -633,7 +634,8 @@ nimm die Dokumente dann erneut auf.
 ### Große Codeblöcke und Tabellen
 
 Codeblöcke und Tabellen bleiben ganz, solange das Embedding-Modell sie ganz sieht: bis zu seinem Kontext abzüglich
-96 Tokens für die Quellzeile (512 Tokens beim Standardmodell `intfloat/multilingual-e5-small`, also 416 Tokens).
+96 Tokens für die Zeile mit Quelle, Titel und Kapitel, die mit jedem Abschnitt eingebettet wird (512 Tokens beim
+Standardmodell `intfloat/multilingual-e5-small`, also 416 Tokens).
 Größere werden an Zeilengrenzen in Stücke der normalen Abschnittsgröße geteilt (384 Tokens beim Standardmodell).
 Jedes Stück wiederholt den Tabellenkopf oder öffnet den Codeblock neu, sodass auch die späteren Teile einer langen
 Tabelle oder eines Skripts überhaupt gefunden werden (in der Retrieval-Evaluation, Antworten tief in solchen Blöcken:
@@ -698,12 +700,13 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 - Private, Loopback- und andere nicht öffentliche Adressen sind gesperrt (SSRF-Schutz), und jede Verbindung wird an
   die geprüfte Adresse gebunden, damit eine DNS-Antwort nicht zwischendurch ausgetauscht werden kann.
 - Der Deep-Ingest-Dialog legt für jeden Crawl die Link-Tiefe (1 bis 5, Standard 2), das Lesen von PDFs und die
-  Pause zwischen Anfragen (0 bis 10 s, Standard 1 s) fest. Die Einstellungen `crawler_max_depth`,
+  Pause zwischen Anfragen (ganze Sekunden von 0 bis 10, Standard 1 s) fest. Die Einstellungen `crawler_max_depth`,
   `crawler_rate_limit` und `crawler_download_pdfs` sind nur die Standardwerte für Crawls ohne diese Angaben; der
   Dialog übergibt immer seine eigenen Werte.
-- Aus den Einstellungen: höchstens `crawler_max_pages` Seiten (Standard 50) und nur Seiten in den Sprachen aus
-  `crawler_languages` (Standard Englisch und Deutsch; eine leere Liste behält alle). Ein Crawl hört außerdem nach
-  fünfmal so vielen Anfragen auf, wie seine Seitengrenze erlaubt (Weiterleitungen und gescheiterte Abrufe zählen mit).
+- Aus den Einstellungen: höchstens `crawler_max_pages` Seiten pro eingegebener URL (Standard 50) und nur Seiten in
+  den Sprachen aus `crawler_languages` (Standard Englisch und Deutsch; eine leere Liste behält alle). Ein Crawl hört
+  außerdem nach fünfmal so vielen Anfragen auf, wie seine Seitengrenze erlaubt (Weiterleitungen und gescheiterte
+  Abrufe zählen mit).
 
 ### Fortschritt, Stopp und Ergebnis
 
@@ -741,8 +744,8 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 - Still bleibt es, wenn die Einstellung `audio_announcements` aus ist (Menü **Tools > Gesprochene Ansagen**,
   englische Oberfläche: *Spoken Announcements*, ein Häkchen, das sofort gespeichert wird), wenn
   `LLM_FRAMEWORK_NO_AUDIO` gesetzt ist (auf alles außer leer, `0`, `false`, `no` oder `off`), unter CI (`CI`
-  gesetzt), während Tests, in einer SSH-Sitzung ohne Bildschirm und unter Linux ohne Bildschirm (kein `DISPLAY` oder
-  `WAYLAND_DISPLAY`).
+  ebenso gesetzt), während Tests, in einer SSH-Sitzung ohne Bildschirm und unter Linux ohne Bildschirm (kein
+  `DISPLAY` oder `WAYLAND_DISPLAY`).
 
 ---
 
@@ -1027,8 +1030,8 @@ und **Import file...** im Hub:
 4. Eine Zusammenfassung (Art, ID, Version, Autor, Lizenz, Vertrauensstufe, Quelle, Dateien, Ziel und Hinweise wie
    die Signatur des Autors) wird als reiner Text gezeigt, damit Text aus einem Pack die Vertrauensstufe nicht
    verdecken kann. Installiert wird erst nach deiner Bestätigung; die Standardantwort ist Nein. `--yes` überspringt
-   die Frage nur bei Packs aus dem signierten Index; eine Datei fragt immer, und ohne Terminal wird nichts
-   installiert.
+   die Frage nur bei Packs, deren Vertrauensstufe aus dem signierten Index kommt, auch bei einer Datei, deren sha256
+   der Index führt; ein Pack mit der Vertrauensstufe `local` fragt immer, und ohne Terminal wird nichts installiert.
 5. Das Pack kommt mit einer einzigen Umbenennung an seinen Platz, nie über einen vorhandenen Ordner (auch nicht, wenn
    sich nur die Groß- und Kleinschreibung unterscheidet), mit einer Herkunftsdatei `.lcf-provenance.json` (Quelle,
    Vertrauensstufe, Hashes, Signierer, Zeit). Alles, was scheitert, wird entfernt.
@@ -1083,9 +1086,10 @@ gesperrtes Pack zeigt eine abgeschaltete Schaltfläche **Revoked**.
 - **Lizenz:** standardmäßig MIT für dein eigenes Target oder Rezept (`--license`; in der GUI eine Liste).
   Wissens-Packs enthalten Seiten anderer Leute: Ihre Lizenz ist `NOASSERTION`, jede Seite behält ihre Quelladresse,
   und eine Seite ohne Quelle wird nie exportiert.
-- Ein Community-Pack, das du installiert hast, wird nicht als deins exportiert: Es neu zu signieren, würde Autor und
-  Lizenz durch deine ersetzen. Ist das Target eines Rezepts dein eigenes, erinnert ein Hinweis daran, das Target
-  ebenfalls zu exportieren.
+- Ein Target, das du aus einem Community-Pack installiert hast, wird nicht als deins exportiert: Es neu zu
+  signieren, würde Autor und Lizenz durch deine ersetzen. Ist das Target eines Rezepts dein eigenes, erinnert ein
+  Hinweis daran, das Target ebenfalls zu exportieren. Ein Wissens-Export nimmt jede Seite deiner Wissensbasis mit,
+  auch die Seiten aus installierten Wissens-Packs; jede behält ihre Quelladresse.
 - Mit `--to` oder `--passphrase` wird das Pack stattdessen zum privaten Teilen
   [verschlüsselt](#verschlüsselte-packs-zum-privaten-teilen).
 
@@ -1154,9 +1158,9 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
 - **Laufzeit auf dem Gerät:** Das Framework installiert keine Laufzeitumgebung auf dem Board.
 - **GUI:** Die Reiter Auto-Tuning und Models sind Platzhalter; die lokale Laufzeit wird nur über die CLI gesteuert.
 - **Deep Ingest** läuft nur aus dem Modul-Assistenten in der GUI; einen CLI-Befehl dafür gibt es nicht. Sein Dialog
-  übergibt immer eigene Werte für Tiefe und Pause zwischen Anfragen, sodass `crawler_max_depth` und
-  `crawler_rate_limit` dort nicht wirken. Einen Schnappschuss der Wissensbasis wiederherstellen kann man über GUI oder
-  CLI nicht.
+  übergibt immer eigene Werte für Tiefe, PDFs und Pause zwischen Anfragen (ganze Sekunden), sodass
+  `crawler_max_depth`, `crawler_download_pdfs` und `crawler_rate_limit` dort nicht wirken. Einen Schnappschuss der
+  Wissensbasis wiederherstellen kann man über GUI oder CLI nicht.
 - **Reranking** läuft nur bei Build-Empfehlungen, außer `rag_rerank_default` ist eingeschaltet.
 - **Gesprochene Ansagen** sind nur mit nachgebildeten Sprachausgaben getestet, nicht mit den echten Stimmen von
   Windows, macOS oder Linux.
