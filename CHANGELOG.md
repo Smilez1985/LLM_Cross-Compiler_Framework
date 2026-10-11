@@ -522,9 +522,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   ran anyway, and the only entry was written after the handler, so a crash in the middle of a change left no trace.
 - **Every tool result is filtered centrally** (Ditto and MCP clients): secrets are redacted in every string of a
   result, external text (build logs and stage names, healing proposals, build manifests, knowledge excerpts, doctor
-  messages) is cleaned of invisible and bidirectional control characters and capped, other strings are capped at
-  16 KiB, and a result over 256 KiB is refused with a hint how to ask for less. Before, only errors, warnings and
-  log lines were redacted, only knowledge excerpts were cleaned, and log lines and results had no size limit.
+  messages, target labels and notes from `target.yml`) is cleaned of invisible and bidirectional control characters
+  and capped, other strings are capped at 16 KiB, and a result over 256 KiB is refused with a hint how to ask for
+  less. The error of a failed call is cleaned the same way before secrets are redacted, and an MCP client gets the
+  part that quotes external text wrapped as untrusted data, as Ditto's model does. Before, only errors, warnings
+  and log lines were redacted, only knowledge excerpts were cleaned, log lines and results had no size limit, and
+  an MCP client got error text from a tool unmarked.
 - **New tools never inherit a loosened tier setting, and a tool's cap holds**: the permission file records the
   tools you have reviewed, and a tool added later uses its own default (or the recommended tier setting) until you
   review it, so allowing a tier once no longer allows every tool added to it later. A tool's own default (for

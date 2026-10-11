@@ -335,7 +335,9 @@ sequenceDiagram
    healing proposals, manifests, knowledge excerpts) cleaned of invisible characters and capped, a result over
    256 KiB refused. `notes` are added by the framework only. The client gets the structured result and a text
    block that starts with one sentence of framework facts, followed by the JSON wrapped as untrusted data. Errors
-   come back as tool errors with a message meant for people, with secrets redacted.
+   come back as tool errors with a message meant for people, with secrets redacted; the part of an error that
+   quotes external text (a server reply, a log line, a name from a pack) is cleaned first and wrapped as untrusted
+   data, the framework's own words and the next step stay plain.
 5. **Audit.** Every outcome (`ok`, `denied`, `not_confirmed` with the answer, `error`, `invalid_input`,
    `confirmation_timeout`, `cancelled`) is appended to `audit.db` with redacted, shortened arguments and a hash of
    the full text, the duration, a hash of the result and a link to the call's `started` entry. `llm-cli tools

@@ -85,7 +85,7 @@ class ArtifactList(BaseModel):
 
 class FormatSummary(BaseModel):
     id: str
-    label: str
+    label: untrusted_text(200)  # from target.yml (a community target pack can install one)
     boards: List[str]
     default_quantization: str
     quantizations: List[str]
@@ -93,8 +93,8 @@ class FormatSummary(BaseModel):
 
 class TargetOut(BaseModel):
     id: str
-    name: str
-    architecture: Optional[str] = None
+    name: untrusted_text(200)  # from target.yml (a community target pack can install one)
+    architecture: Optional[untrusted_text(200)] = None
     support_level: Optional[SupportLevel] = None
     boards: List[str] = Field(default_factory=list)
     formats: List[FormatSummary] = Field(default_factory=list)
