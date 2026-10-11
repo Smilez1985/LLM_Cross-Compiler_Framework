@@ -825,6 +825,7 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
 | **Sprachansagen über die Sprachausgabe des Betriebssystems** | Keine Audiodateien, keine neue Abhängigkeit und nichts, was einen Crawl scheitern lassen kann: Die Sprachausgaben gehören zu Windows, macOS und den meisten Linux-Desktops, und eine Ansage wird immer auch angezeigt und protokolliert. |
 | **Standardmäßig nur Build-Empfehlungen neu ordnen** | In der Abruf-Evaluation hat der Reranker bei Fragen die Reihenfolge verbessert und unpassende Auszüge herausgehalten, aber im Chat rechtfertigte der Gewinn nicht etwa 1 bis 2,5 Sekunden je Suche auf einer CPU, und bei Build-Log-Zeilen und der Stichwortsuche des Modulvorschlags hat er passende Auszüge verloren oder verworfen. |
 | **Lieber kein Auszug als ein unpassender** | Unpassende Auszüge belegen Platz in einem kleinen Kontext und führen kleine lokale Modelle in die Irre. Eine Relevanzschwelle, mit der Abruf-Evaluation kalibriert, erlaubt einer neu geordneten Suche, nichts zurückzugeben. |
+| **Der mMARCO-Cross-Encoder ist der Standard-Reranker für die CPU** | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` ist mehrsprachig (deutsche und englische Fragen), klein (etwa 0,12 GB) und auf einer CPU schnell genug; seine Model Card nennt die Lizenz Apache-2.0. Trainiert wurde er auf mMARCO, einer Übersetzung von MS MARCO, das eigene Nutzungsbedingungen hat; der Maintainer hat ihn als Vorgabe akzeptiert, die `rag_reranker: auto` bei der ersten Nutzung herunterlädt. `rag_reranker: off` oder eine andere Modell-ID ersetzt ihn. |
 | **Die Abruf-Evaluation entscheidet über die Vorgaben der Suche** | Eine Änderung an der Suche kann einer Art Frage helfen und einer anderen schaden. Ein fester Korpus mit festen Fällen, nach Regeln bewertet und ohne KI als Schiedsrichter, zeigt das, bevor eine Änderung zur Vorgabe wird. |
 | **Bezeichner werden nur für den Stichwortindex zerlegt** | Flags und Namen wie `-DGGML_CUDA=ON` waren für BM25 ein einziges Token und über ihre Teile nicht zu finden. Die Teile nur der BM25-Eingabe hinzuzufügen, lässt die dichten Vektoren und den gespeicherten Text unverändert; die festgehaltene Kodierung baut ältere Stichwortindizes einmal neu auf. |
 | **Öffentliche Pakete signiert, private verschlüsselt, mit Standardbausteinen** | Bei öffentlichen Daten zählen Echtheit und Unversehrtheit, beim privaten Teilen auch Vertraulichkeit. Die XOR-„SwarmCipher“ konnte jeder rückgängig machen. Ed25519, X25519, HKDF-SHA256, scrypt und ChaCha20-Poly1305, nach dem Vorbild von age kombiniert, sind gut untersucht; ein Signatur-Präfix je Zweck verhindert, dass eine Signatur für das eine auch für etwas anderes gilt. |
@@ -974,14 +975,6 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
   Copilot über eine eigene GitHub-App, Gemini mit dem eigenen OAuth-Client des Benutzers.
 - **MCP-Apps-Oberfläche.**
 - **Ein MCP-Server auf Edge-Geräten.**
-
-### Offene Entscheidungen für den Maintainer
-
-- **Der Standard-Reranker für die CPU.** `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` ist das Modell, das
-  `rag_reranker: auto` ab 6 GB RAM bei der ersten Nutzung herunterlädt. Seine Model Card nennt die Lizenz
-  Apache-2.0, trainiert wurde es aber auf mMARCO, einer Übersetzung des Datensatzes MS MARCO, der eigene
-  Nutzungsbedingungen hat. Ob es als Vorgabe taugt, die automatisch heruntergeladen wird, ist nicht entschieden;
-  die Alternativen sind ein anderer Cross-Encoder oder kein Reranker, solange keiner gewählt ist.
 
 ## Geschichte
 
