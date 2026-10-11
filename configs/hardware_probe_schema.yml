@@ -2,9 +2,11 @@
 #
 # The probe runs on the machine that will run the binaries (a PC or a board) and writes target_hardware_config.txt.
 # One parser reads it: orchestrator/runtime/profile.py. The parser loads this file, so the validation below is
-# enforced, not only documented. Every emitter of schema 2 (PROBE_TOOL python, sh or ps1) writes exactly these keys.
-# Today's scripts/hardware_probe.sh and scripts/hardware_probe.ps1 still write schema 1, which the parser converts
-# (see the end of this file).
+# enforced, not only documented. Three emitters write exactly these keys: scripts/hardware_probe.py (PROBE_TOOL
+# python, the main path) and the manual fallbacks scripts/hardware_probe.sh (sh, any POSIX shell) and
+# scripts/hardware_probe.ps1 (ps1). The emitters carry a copy of the validation and tables below; tests compare them
+# with this file and run the .py and .sh on the same fixture machines. Files of the older scripts (schema 1) are
+# converted by the parser (see the end of this file).
 #
 # File rules (section "file"):
 #   - UTF-8 (a byte order mark is accepted), LF line ends (CRLF is accepted); lines starting with "#" are comments.
@@ -633,15 +635,17 @@ keys:
 
   # --- x86 CPU features: exactly ggml's x86 options at the pinned llama.cpp commit -----------------------------
   # Linux: ON if every token of cpuinfo is in CPU_FLAGS_ALL, else OFF; UNKNOWN when /proc/cpuinfo has no flags.
-  # Windows: IsProcessorFeaturePresent(windows_feature) TRUE -> ON; FALSE -> OFF only on Windows builds that know
-  # the constant (older builds return FALSE for constants they do not know: UNKNOWN; build thresholds unverified);
-  # no constant -> UNKNOWN. macOS (x86): the sysctl token in machdep.cpu.features / leaf7_features.
+  # Windows: IsProcessorFeaturePresent(windows_feature) TRUE -> ON; FALSE -> OFF only on Windows builds from
+  # windows_min_build on (older builds return FALSE for constants they do not know: UNKNOWN). The thresholds are
+  # conservative and unverified: below them a FALSE costs speed (UNKNOWN), never a wrong ON. No constant -> UNKNOWN.
+  # macOS (x86): the sysctl token in machdep.cpu.features / leaf7_features.
   # Non-x86 ARCH: OFF.
   SUPPORTS_SSE42:
     group: x86
     type: bool
     cpuinfo: [sse4_2]
     windows_feature: 38
+    windows_min_build: 22000
     macos_sysctl: SSE4.2
     only_arch: [x86_64, x86]
     stability: stable
@@ -655,6 +659,7 @@ keys:
     type: bool
     cpuinfo: [avx]
     windows_feature: 39
+    windows_min_build: 22000
     macos_sysctl: AVX1.0
     only_arch: [x86_64, x86]
     stability: stable
@@ -668,6 +673,7 @@ keys:
     type: bool
     cpuinfo: [avx2]
     windows_feature: 40
+    windows_min_build: 22000
     macos_sysctl: AVX2
     only_arch: [x86_64, x86]
     stability: stable
@@ -681,6 +687,7 @@ keys:
     type: bool
     cpuinfo: [bmi2]
     windows_feature: 60
+    windows_min_build: 26100
     macos_sysctl: BMI2
     only_arch: [x86_64, x86]
     stability: stable
@@ -721,6 +728,7 @@ keys:
     type: bool
     cpuinfo: [avx512f]
     windows_feature: 41
+    windows_min_build: 22000
     macos_sysctl: AVX512F
     only_arch: [x86_64, x86]
     stability: stable
@@ -814,13 +822,15 @@ keys:
 
   # --- ARM CPU features --------------------------------------------------------------------------------------
   # Linux: ON if every token of cpuinfo is in the Features line (any one of cpuinfo_any for NEON), else OFF;
-  # UNKNOWN when /proc/cpuinfo has no Features line. Windows on ARM: IsProcessorFeaturePresent(windows_feature) as
-  # for x86; no constant -> UNKNOWN. macOS: sysctl hw.optional.arm.<macos_sysctl> = 1 -> ON. Non-ARM ARCH: OFF.
+  # UNKNOWN when /proc/cpuinfo has no Features line. Windows on ARM: IsProcessorFeaturePresent(windows_feature) with
+  # windows_min_build as for x86; no constant -> UNKNOWN. macOS: sysctl hw.optional.arm.<macos_sysctl> = 1 -> ON.
+  # Non-ARM ARCH: OFF.
   SUPPORTS_NEON:
     group: arm
     type: bool
     cpuinfo_any: [asimd, neon]
     windows_feature: 29
+    windows_min_build: 0
     macos_sysctl: hw.optional.neon
     only_arch: [arm64, armv7, armv6]
     stability: stable
@@ -837,6 +847,7 @@ keys:
     type: bool
     cpuinfo: [asimddp]
     windows_feature: 43
+    windows_min_build: 22000
     macos_sysctl: FEAT_DotProd
     only_arch: [arm64, armv7, armv6]
     stability: stable
@@ -853,6 +864,7 @@ keys:
     type: bool
     cpuinfo: [fphp, asimdhp]
     windows_feature: 67
+    windows_min_build: 26100
     macos_sysctl: FEAT_FP16
     only_arch: [arm64, armv7, armv6]
     stability: stable
@@ -869,6 +881,7 @@ keys:
     type: bool
     cpuinfo: [i8mm]
     windows_feature: 66
+    windows_min_build: 26100
     macos_sysctl: FEAT_I8MM
     only_arch: [arm64, armv7, armv6]
     stability: stable
@@ -885,6 +898,7 @@ keys:
     type: bool
     cpuinfo: [sve]
     windows_feature: 46
+    windows_min_build: 26100
     macos_sysctl: FEAT_SVE
     only_arch: [arm64, armv7, armv6]
     stability: stable
@@ -901,6 +915,7 @@ keys:
     type: bool
     cpuinfo: [sve2]
     windows_feature: 47
+    windows_min_build: 26100
     macos_sysctl: FEAT_SVE2
     only_arch: [arm64, armv7, armv6]
     stability: stable
@@ -917,6 +932,7 @@ keys:
     type: bool
     cpuinfo: [sme]
     windows_feature: 70
+    windows_min_build: 26100
     macos_sysctl: FEAT_SME
     only_arch: [arm64, armv7, armv6]
     stability: stable
@@ -1014,7 +1030,7 @@ keys:
     perf: recorded
     platforms: [windows]
     sources:
-      linux: "only when readable without root (not with dmidecode): left out with needs_root:RAM_TYPE"
+      linux: "not read (dmidecode needs root, and the probes never ask for it): left out"
       windows: "SMBIOSMemoryType of the first Win32_PhysicalMemory entry via tables.smbios_memory_types"
     normalise: "table lookup; not in the table -> left out"
     consumers: [bench, gui]
@@ -1028,7 +1044,7 @@ keys:
     perf: recorded
     platforms: [windows]
     sources:
-      linux: "only when readable without root: left out with needs_root:RAM_SPEED_MTS"
+      linux: "not read (dmidecode needs root): left out"
       windows: "highest ConfiguredClockSpeed (else Speed) of Win32_PhysicalMemory"
     normalise: "MT/s, decimal integer"
     consumers: [bench, gui]
@@ -1260,10 +1276,17 @@ keys:
     perf: none
     platforms: [linux, windows, macos]
     sources:
-      linux: "nvidia-smi, amdgpu sysfs and KFD topology, /sys/class/drm, device tree (Mali), merged per PCI address"
-      windows: "display adapters of WMI Win32_VideoController and the display-class registry, nvidia-smi"
+      linux: >-
+        nvidia-smi; vulkaninfo --summary; /sys/class/drm display-class PCI devices with the amdgpu sysfs and the KFD
+        topology; device tree (Mali). vulkaninfo's GPUs are matched with sysfs by PCI id (AMD GPUs without one in
+        order when the counts agree); without vulkaninfo the sysfs and device-tree GPUs are listed
+      windows: >-
+        nvidia-smi; vulkaninfo --summary; display adapters of WMI Win32_VideoController and the display-class
+        registry
       macos: "system_profiler SPDisplaysDataType"
-    normalise: "number of GPU<n> entries; GPUs ordered by PCI address where known, else in the order of the source"
+    normalise: >-
+      number of GPU<n> entries: the NVIDIA GPUs of nvidia-smi first (its order is the PCI bus order), then the other
+      GPUs in the order of their source; at most 16
     consumers: [recipe, ditto, preflight, gui]
   NVIDIA_DRIVER_CUDA_MAX:
     group: gpu
@@ -1305,7 +1328,13 @@ keys:
     perf: recorded
     platforms: [linux, windows, macos]
     sources:
-      any: "ON when a Vulkan loader (libvulkan.so.1, vulkan-1.dll) or a Vulkan device (vulkaninfo --summary) is present"
+      linux: >-
+        ON when vulkaninfo --summary lists a device, or a Vulkan loader (libvulkan.so.1) is present together with a
+        GPU (its driver ships the Vulkan ICD)
+      windows: >-
+        ON when vulkaninfo --summary lists a device, an AMD, Intel or NVIDIA display adapter is present (their drivers
+        ship the Vulkan runtime) or vulkan-1.dll is in System32
+      macos: "ON only when vulkaninfo lists a device (not probed today: OFF)"
     normalise: "ON/OFF"
     consumers: [recipe, ditto]
   VULKAN_DEVICES:

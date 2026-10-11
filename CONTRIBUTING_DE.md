@@ -309,8 +309,9 @@ Schlüssel, behandle ihn trotzdem als offengelegt und folge [Abschnitt 12](#12-w
 
 Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.md). Kurz:
 
-1. **Das Board untersuchen:** Führe `scripts/hardware_probe.sh` auf dem Gerät aus; es schreibt
-   `target_hardware_config.txt`.
+1. **Das Board untersuchen:** `llm-cli scan --device <Adresse> --user <Benutzer>` führt die Probe per SSH auf dem
+   Gerät aus (oder du führst `scripts/hardware_probe.py` oder `scripts/hardware_probe.sh` von Hand auf dem Gerät aus);
+   sie schreibt `target_hardware_config.txt`.
 2. **Das Target anlegen:** in der GUI unter **Tools > Create Hardware Module...**, mit `llm-cli module create` oder
    mit Ditto: `llm-cli module generate-ai target_hardware_config.txt`. Der Generator prüft Namen, Images, Pakete,
    Flags und Shell-Code, schreibt nur unterhalb von `targets/` und überschreibt nie ein bestehendes Target, und der
