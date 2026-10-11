@@ -295,6 +295,12 @@ Anbieter übersetzt sie in das, was er versteht.
   (`--with-token`) oder aus der dokumentierten Umgebungsvariable des Anbieters (`--from-env`). Ohne Terminal fragt
   sie nichts, und ein Anbieter mit mehreren Verfahren braucht `--method`. Exit-Codes: 0 angemeldet, 2 Bedienfehler,
   3 abgelehnt, 4 Netz, 5 Speicher, 6 nicht verfügbar.
+- **Schlüssel bleiben heil und erscheinen nicht in Ausgaben:** Ein Schlüssel mit einem Leerzeichen, einem
+  Zeilenumbruch oder einem unsichtbaren Zeichen darin wird abgelehnt, bevor etwas gesendet oder gespeichert wird; ein
+  Fehlertext des Servers, der den Schlüssel wiederholt, zeigt stattdessen `REDACTED`; und ein eingetippter Schlüssel
+  geht über einfaches `http://` an einen anderen Computer erst, wenn du es bestätigst (CLI: `--yes`). Ein Schlüssel
+  im eigenen Schlüsselfeld der KI-Einstellungen ersetzt ein Verfahren, das sich eine Anmeldung gemerkt hat (zum
+  Beispiel das `ant`-Profil).
 - **Abmelden zuerst lokal:** Der gespeicherte Schlüssel wird gelöscht, und die Schlüsselseite, auf der du den
   Schlüssel selbst widerrufst, wird genannt; ein Schlüssel in einer Umgebungsvariable bleibt in Gebrauch, bis du sie
   entfernst.

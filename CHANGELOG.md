@@ -73,14 +73,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   local copy and names the key page where the key itself is revoked. `llm-cli ditto auth status [--json]
   [--check]` shows the sign-in of every provider (method, source, account, the last four characters of a key),
   `auth methods` the methods with policy notes, `auth storage [--use ...]` how the credential vault is
-  protected, and `auth rotate-key` replaces the vault key. Exit codes: 2 usage, 3 rejected, 4 network,
-  5 credential storage unavailable, 6 not allowed or not available.
+  protected (a choice that fails changes nothing, `config.yml` included), and `auth rotate-key` replaces the
+  vault key. After a checked login the status names the account or workspace. Exit codes: 2 usage (also an
+  empty stdin, a missing server address, a malformed option value or a key with a space or line break inside),
+  3 rejected, 4 network, 5 credential storage unavailable, 6 not allowed or not available.
 - **Sign-in panel in the AI settings** (**Sign in...**): the provider's methods as cards in the catalog's order,
   the first usable one marked "Recommended"; a key form with the key page, the extra fields, **Check**,
   **Save** and **Sign out**; a status line ("Signed in as ...", "Not signed in", "Using key from environment
   variable X"); and, without a usable keyring, the storage chooser, which the GUI also shows at startup before
   it gives up. A vault protected by a passphrase asks for it in a dialog. Every vault, keyring and network call
-  runs in a worker thread. Ditto's chat header shows the access in use, for example "Local · Ollama".
+  runs in a worker thread, and an older read that finishes late never replaces a newer state. Ditto's chat header
+  shows the access in use, for example "Local · Ollama". A key typed in the AI settings' own key field replaces a
+  method a sign-in remembered (such as the `ant` profile), so it is not left unused.
 - `llm-cli secrets set --with-token` reads the value from stdin.
 
 ### Changed
@@ -208,11 +212,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   address to that address only; a key variable of a local engine in your own catalog goes only to the address
   the catalog gives. A non-secret field (workspace ID, project) can no longer be declared with a credential
   header such as `Authorization` or `x-api-key`, where it would replace the stored key. A failed token renewal
-  names only the kind of failure, and a vendor message that quotes the refresh token is shown without it.
+  names only the kind of failure, and a vendor message that quotes the refresh token is shown without it. A key
+  of an earlier version is bound to the address before a check with typed fields sends it there.
 - Sign-in never takes a secret from the command line (`ditto login` has no option for a key, and an unknown
-  provider name that looks like a key is not echoed), shows a key only as its last four characters (also in
-  `auth status --json`), asks before a key goes over plain `http://` to another computer (`--yes` in scripts)
-  and never chooses how the vault is protected: `--insecure-storage` never replaces a protection that works.
+  provider name or `--method` value that looks like a key is not echoed), shows a key only as its last four
+  characters (also in `auth status --json`, and as `REDACTED` when a server's error text or account name repeats
+  it, in Ditto's chat errors too), asks before a key goes over plain `http://` to another computer (in the
+  sign-in panel too; `--yes` in scripts) and never chooses how the vault is protected: `--insecure-storage` never
+  replaces a protection that works, nor a credential helper or passphrase you chose. A key with a space, a line
+  break or an invisible character inside is refused before anything is sent or stored.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

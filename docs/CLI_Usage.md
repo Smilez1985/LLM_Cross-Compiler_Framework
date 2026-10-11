@@ -359,13 +359,14 @@ Signs Ditto in to a provider (`anthropic`, `openai`, `google`, `openrouter`, `ol
 command line, where the shell history and the process list would keep it: it is asked with a hidden prompt, read
 from stdin (`--with-token`) or copied once from the provider's documented environment variable (`--from-env`).
 Before it is stored in the credential vault, a free request checks it (the model list; OpenRouter's key endpoint),
-and a rejected key is not stored. The method is remembered as `ai_auth_<provider>`. The output shows at most the
-last four characters of a key.
+and a rejected key is not stored. A key with a space, a line break or an invisible character inside is refused
+before anything is sent. The method is remembered as `ai_auth_<provider>`. The output shows at most the last four
+characters of a key, also when a server's error text repeats it.
 
 | Method type | What `ditto login` does |
 |---|---|
 | `api_key` (cloud providers, `custom` servers) | Asks for the key, checks it and stores it. The key of a server whose address you set belongs to that address only. Admin keys (`sk-ant-admin01-`) are refused before anything is sent. |
-| `bearer_optional` (local engines whose key is optional) | Asks for a token ("Enter for none"); without one the server is used without a key. |
+| `bearer_optional` (local engines whose key is optional) | Asks for a token ("Enter for none"); without one the server is used without a key. An empty stdin with `--with-token` is a usage error and never deletes a stored token; `ditto logout` does that. |
 | `none` (Ollama, `custom` without a key) | Stores nothing; checks the address and counts the models. |
 | `cli_session` (`--method ant_profile`) | Uses a profile of Anthropic's own `ant` CLI; only the profile name is kept. When the check through the Anthropic SDK fails, it tells you to run `ant auth login`. Advanced: never chosen automatically, and Anthropic has not confirmed that other apps may use these profiles. |
 | OAuth and cloud sign-ins | Not available in this version (exit code 6). |
@@ -382,14 +383,14 @@ opt-in method such as `ant_profile` does not count), and the key must come from 
 | `--workspace-id ID` | Claude API: workspace ID (`wrkspc_...`) for keys that are valid in every workspace of the organization; stored with the key. |
 | `--organization ID`, `--project ID` | OpenAI: organization (`org-...`) and project (`proj_...`), sent with the key. |
 | `--profile NAME` | With `--method ant_profile`: the profile (default: the `ant` CLI's active profile). |
-| `--insecure-storage` | Without a usable keyring: keep the vault key in a file next to the vault (**not encrypted at rest**). Ignored when the vault is protected another way that works. |
+| `--insecure-storage` | Without a usable keyring: keep the vault key in a file next to the vault (**not encrypted at rest**). Ignored when the vault is protected another way that works; a credential helper or passphrase you chose (`secret_storage`) is never replaced by it (exit code 5). |
 | `--no-check` | Store without the check (for example offline). |
 | `-y, --yes` | Do not ask before sending a key over plain `http://` or before `--insecure-storage`. |
 
-Exit codes: 0 signed in; 2 usage (an unknown provider or method, a missing `--method` or key without a terminal);
-3 rejected (a wrong, revoked or admin key, a workspace problem); 4 the provider or the local server cannot be
-reached; 5 the credential vault cannot be used (the message names the choices); 6 the method is not available in
-this version or the provider was removed.
+Exit codes: 0 signed in; 2 usage (an unknown provider or method, a missing `--method`, key or server address, a
+malformed option value or key); 3 rejected (a wrong, revoked or admin key, a workspace problem); 4 the provider or
+the local server cannot be reached; 5 the credential vault cannot be used (the message names the choices); 6 the
+method is not available in this version or the provider was removed.
 
 ```bash
 llm-cli ditto login anthropic                      # asks for the key without echo

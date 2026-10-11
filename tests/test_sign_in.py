@@ -554,6 +554,143 @@ class TestOtherCommands:
             assert command in result.output
 
 
+STUDIO = ("version: 2\nproviders:\n  studio:\n    label: Studio (local)\n    adapter: openai_compat\n"
+          "    location: local\n    base_url: http://127.0.0.1:1234/v1\n    base_url_configurable: true\n"
+          "    auth:\n      - {id: token, type: bearer_optional, where: \"Developer > Manage Tokens\"}\n")
+
+
+def user_catalog(folder, text):
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "llm_providers.yml").write_text(text, encoding="utf-8")
+
+
+class TestReviewFindings:
+    """Problems found by the review of the sign-in package, each reproduced before it was fixed."""
+
+    def test_a_key_echoed_by_the_server_never_reaches_the_output(self, tmp_path, home):
+        url = "http://127.0.0.1:8000/v1"
+        assert run("ditto", "login", "custom", "--method", "api_key", "--base-url", url, "--with-token", "--no-check",
+                   input=CUSTOM_KEY).exit_code == 0
+        echo = {"error": {"message": "invalid api key " + CUSTOM_KEY}}  # no secret pattern knows this key
+        result = run("ditto", "auth", "status", "--check", "--json", http=FakeHTTP().add(echo, status=401))
+        assert result.exit_code == 3 and CUSTOM_KEY not in result.output
+        rows = {row["provider"]: row for row in json.loads(result.stdout)["providers"]}
+        assert "invalid api key REDACTED" in rows["custom"]["check"]["message"]
+        result = run("ditto", "login", "custom", "--method", "api_key", "--with-token",
+                     http=FakeHTTP().add(echo, status=401), input=CUSTOM_KEY)
+        assert result.exit_code == 3 and CUSTOM_KEY not in result.output
+
+    def test_a_chat_error_that_echoes_the_key_is_masked(self, tmp_path, home):
+        # `module generate-ai`, `ditto ask` and the chat go through LLMClient: the same server, the same echo.
+        from orchestrator.llm import ChatRequest, LLMClient, LLMError, Message
+        url = "http://127.0.0.1:8000/v1"
+        vault = open_vault(home)
+        service = service_for(tmp_path, vault, ai_provider="custom", ai_base_url_custom=url, ai_model="m1")
+        custom = service.catalog.get("custom")
+        service.save_key(custom, custom.method("api_key"), CUSTOM_KEY, url)
+        http = FakeHTTP().add({"error": {"message": "invalid api key " + CUSTOM_KEY}}, status=401)
+        client = LLMClient(service.config, vault, http_client=http.client())
+        with pytest.raises(LLMError) as info:
+            client.chat(ChatRequest(system="You are Ditto.", messages=[Message.user("Hello")]))
+        assert http.last.headers["authorization"] == f"Bearer {CUSTOM_KEY}"
+        assert CUSTOM_KEY not in str(info.value) and "REDACTED" in str(info.value)
+
+    def test_an_account_label_that_echoes_the_key_is_masked(self, tmp_path, home):
+        user_catalog(tmp_path / "cfg", "version: 2\nproviders:\n  echo:\n    label: Echo\n    adapter: openai_compat\n"
+                                       "    base_url: https://echo.example.com/v1\n    auth:\n      - {id: api_key, "
+                                       "type: api_key, validate: {path: /me, account_field: owner}}\n")
+        http = FakeHTTP().add({"owner": "user " + CUSTOM_KEY})
+        service = service_for(tmp_path, open_vault(home), http)
+        echo = service.catalog.get("echo")
+        result = service.check(echo, echo.method("api_key"), key=CUSTOM_KEY)
+        assert result.ok and result.account_label == "user REDACTED"
+        assert CUSTOM_KEY not in json.dumps(result.to_dict())
+
+    def test_a_key_with_a_line_break_or_an_invisible_character_is_refused(self, tmp_path, home):
+        http = FakeHTTP()
+        result = run("ditto", "login", "openai", "--with-token", http=http, input=OPENAI_KEY + "\nsecond line\n")
+        assert result.exit_code == 2 and "line break" in result.output and http.requests == []
+        invisible = OPENAI_KEY[:10] + "​" + OPENAI_KEY[10:]  # copied from a web page
+        result = run("ditto", "login", "openai", "--with-token", http=http, input=invisible)
+        assert result.exit_code == 2 and isinstance(result.exception, SystemExit), "no traceback holding the key"
+        assert http.requests == [] and open_vault(home).list_secrets() == []
+        vault = open_vault(home)
+        service = service_for(tmp_path, vault, http)
+        openai = service.catalog.get("openai")
+        spec = openai.method("api_key")
+        with pytest.raises(AuthError) as info:
+            service.save_key(openai, spec, OPENAI_KEY + " " + OPENAI_KEY)
+        assert info.value.code == "auth.key_malformed" and vault.list_secrets() == []
+        assert service.check(openai, spec, key=invisible).error.code == "auth.key_malformed"
+        assert vault.set_secret("openai_api_key", invisible)  # stored by an earlier version
+        assert service.check(openai, spec).error.code == "auth.key_malformed" and http.requests == []
+
+    def test_an_empty_stdin_never_deletes_an_optional_key(self, tmp_path, home):
+        user_catalog(tmp_path / "configs", STUDIO)
+        assert run("ditto", "login", "studio", "--with-token", "--no-check", input=CUSTOM_KEY).exit_code == 0
+        result = run("ditto", "login", "studio", "--with-token", "--no-check", input="")  # an unset variable
+        assert result.exit_code == 2 and "llm-cli ditto logout studio" in flat(result.output)
+        assert open_vault(home).list_secrets() == [credential_name("studio", "token", "http://127.0.0.1:1234")]
+
+    def test_a_field_check_binds_a_key_stored_without_an_address_first(self, tmp_path, home):
+        user_catalog(tmp_path / "cfg", "version: 2\nproviders:\n  studio:\n    label: Studio\n    adapter: "
+                                       "openai_compat\n    location: local\n    base_url: http://127.0.0.1:1234/v1\n"
+                                       "    base_url_configurable: true\n    auth:\n      - {id: api_key, type: "
+                                       "api_key, fields: [{id: project, label: Project, pattern: '^p[0-9]+$'}]}\n")
+        vault = open_vault(home)
+        assert vault.set_record("cred/studio/api_key", {"kind": "api_key", "secret": CUSTOM_KEY})  # no address yet
+        http = FakeHTTP().add(MODELS).add(MODELS)
+        service = service_for(tmp_path, vault, http)
+        studio = service.catalog.get("studio")
+        spec = studio.method("api_key")
+        assert service.check(studio, spec, "http://127.0.0.1:9001/v1", fields={"project": "p1"}).ok
+        assert vault.list_secrets() == [credential_name("studio", "api_key", "http://127.0.0.1:9001")]
+        result = service.check(studio, spec, "http://127.0.0.1:9002/v1")
+        assert not result.ok and len(http.requests) == 1, "the key went to one address only"
+
+    def test_a_provider_without_an_address_is_a_usage_error(self, home):
+        result = run("ditto", "login", "custom", "--method", "api_key", "--with-token", input=CUSTOM_KEY)
+        assert result.exit_code == 2 and "--base-url" in result.output
+        assert run("ditto", "login", "custom", "--method", "none").exit_code == 2
+
+    def test_insecure_storage_never_replaces_a_chosen_helper(self, tmp_path, home):
+        (tmp_path / "configs").mkdir(exist_ok=True)
+        (tmp_path / "configs" / "config.yml").write_text("secret_storage: helper\nsecret_helper: /nonexistent/helper\n",
+                                                         encoding="utf-8")
+        result = run("ditto", "login", "openai", "--with-token", "--no-check", "--insecure-storage", input=OPENAI_KEY)
+        assert result.exit_code == 5 and "only replaces a keyring" in flat(result.output)
+        assert settings(tmp_path)["secret_storage"] == "helper"
+        assert not (home / "secrets.store.insecure-key").exists()
+
+    def test_a_failed_storage_choice_leaves_the_user_config_alone(self, tmp_path, home, monkeypatch,
+                                                                   memory_keyring):
+        lock_keyring(monkeypatch, memory_keyring)
+        monkeypatch.setenv("LLM_FRAMEWORK_SECRET_HELPER", "/nonexistent/env-helper")
+        result = run("ditto", "auth", "storage", "--use", "passphrase")  # no terminal for the passphrase
+        assert result.exit_code == 5
+        assert not {"secret_storage", "secret_helper"} & set(settings(tmp_path)), "no default or env value saved"
+
+    def test_a_key_typed_as_the_method_is_not_echoed(self, home):
+        for command in ("login", "logout"):
+            result = run("ditto", command, "openai", "--method", OPENAI_KEY)
+            assert result.exit_code == 2 and OPENAI_KEY not in result.output
+
+    def test_a_malformed_option_value_is_a_usage_error(self, home):
+        http = FakeHTTP()
+        result = run("ditto", "login", "anthropic", "--with-token", "--workspace-id", "workspace-1", http=http,
+                     input=CLAUDE_KEY)
+        assert result.exit_code == 2 and "wrkspc_" in result.output and http.requests == []
+        assert open_vault(home).list_secrets() == []
+
+    def test_the_status_after_a_checked_login_names_the_account(self, tmp_path, home):
+        http = FakeHTTP().add(MODELS, headers={"anthropic-workspace-id": WORKSPACE})
+        assert run("ditto", "login", "anthropic", "--with-token", http=http, input=CLAUDE_KEY).exit_code == 0
+        result = run("ditto", "auth", "status")
+        assert result.exit_code == 0 and f"Signed in as workspace {WORKSPACE}" in flat(result.output)
+        meta = SignIn(ConfigManager(None), open_vault(home)).store.metadata("anthropic", "api_key")
+        assert meta["validated_at"] and meta["account_label"] == f"workspace {WORKSPACE}"
+
+
 # ======================================================================================================
 # GUI: SignInPanel, the storage chooser, the chat header
 # ======================================================================================================
@@ -767,6 +904,61 @@ class TestSignInPanel:
         assert window.panel.base_url == "http://127.0.0.1:9000/v1"
         assert wait_for(qapp, lambda: not window.panel.busy)
         window.close()
+
+    def test_a_typed_key_over_plain_http_to_another_computer_needs_a_yes(self, qapp, tmp_path, home, monkeypatch):
+        from orchestrator.gui import sign_in
+        vault = open_vault(home)
+        http = FakeHTTP().add(MODELS)
+        panel = self.panel(tmp_path, vault, "custom", http, ai_provider="custom",
+                           ai_base_url_custom="http://192.0.2.10:8000/v1")
+        assert wait_for(qapp, lambda: not panel.busy)
+        asked, answers = [], [sign_in.QMessageBox.No]
+
+        def question(parent, title, text, *args):
+            asked.append((threading.current_thread() is threading.main_thread(), text))
+            return answers[-1]
+
+        monkeypatch.setattr(sign_in.QMessageBox, "question", question)
+        panel.forms["api_key"].txt_key.setText(CUSTOM_KEY)
+        panel.check("api_key")
+        panel.save("api_key")
+        assert not panel.busy and "Cancelled" in panel.lbl_result.text()
+        assert http.requests == [] and vault.list_secrets() == []
+        assert len(asked) == 2 and all(on_gui for on_gui, _ in asked) and "192.0.2.10:8000" in asked[0][1]
+        answers.append(sign_in.QMessageBox.Yes)
+        panel.check("api_key")
+        assert wait_for(qapp, lambda: not panel.busy) and panel.lbl_result.text() == "Valid, 2 models"
+        panel.save("api_key")  # the address was confirmed once
+        assert wait_for(qapp, lambda: not panel.busy and vault.list_secrets() != [])
+        assert len(asked) == 3 and OffThreadService.on_gui_thread == []
+        loopback = self.panel(tmp_path, vault, "custom", ai_base_url_custom="http://127.0.0.1:8000/v1")
+        assert wait_for(qapp, lambda: not loopback.busy)
+        loopback.forms["api_key"].txt_key.setText(CUSTOM_KEY)
+        loopback.save("api_key")
+        assert wait_for(qapp, lambda: not loopback.busy) and len(asked) == 3, "this computer: no question"
+
+    def test_a_late_status_read_does_not_replace_a_newer_one(self, qapp, tmp_path, home, monkeypatch):
+        vault = open_vault(home)
+        release, calls = threading.Event(), []
+        original = OffThreadService.status
+
+        def status(self, preset, base_url=None):
+            calls.append(1)
+            if len(calls) == 1:  # the first read hangs on a slow vault and then reports an old state
+                release.wait(5)
+                return AuthStatus(provider=preset.id, label=preset.label, state=NOT_SIGNED_IN)
+            return original(self, preset, base_url)
+
+        monkeypatch.setattr(OffThreadService, "status", status)
+        service = service_for(tmp_path, vault)
+        openai = service.catalog.get("openai")
+        service.save_key(openai, openai.method("api_key"), OPENAI_KEY)
+        panel = self.panel(tmp_path, vault, "openai")
+        panel.refresh()
+        assert wait_for(qapp, lambda: "OOOO" in panel.lbl_status.text())
+        release.set()
+        assert wait_for(qapp, lambda: not panel.busy)
+        assert "OOOO" in panel.lbl_status.text() and panel.status.state == SIGNED_IN
 
 
 @pytest.mark.usefixtures("gui_threads")

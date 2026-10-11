@@ -363,13 +363,15 @@ Meldet Ditto bei einem Anbieter an (`anthropic`, `openai`, `google`, `openrouter
 Kommandozeile, wo ihn der Shell-Verlauf und die Prozessliste behalten würden: Er wird verdeckt abgefragt, von stdin
 gelesen (`--with-token`) oder einmal aus der dokumentierten Umgebungsvariable des Anbieters übernommen
 (`--from-env`). Bevor er im Tresor gespeichert wird, prüft ihn eine kostenlose Anfrage (die Modellliste, bei
-OpenRouter der Schlüssel-Endpunkt); ein abgelehnter Schlüssel wird nicht gespeichert. Das Verfahren wird als
-`ai_auth_<anbieter>` gemerkt. Die Ausgabe zeigt höchstens die letzten vier Zeichen eines Schlüssels.
+OpenRouter der Schlüssel-Endpunkt); ein abgelehnter Schlüssel wird nicht gespeichert. Ein Schlüssel mit einem
+Leerzeichen, einem Zeilenumbruch oder einem unsichtbaren Zeichen darin wird abgelehnt, bevor etwas gesendet wird. Das
+Verfahren wird als `ai_auth_<anbieter>` gemerkt. Die Ausgabe zeigt höchstens die letzten vier Zeichen eines
+Schlüssels, auch wenn ein Fehlertext des Servers ihn wiederholt.
 
 | Art des Verfahrens | Was `ditto login` tut |
 |---|---|
 | `api_key` (Cloud-Anbieter, `custom`-Server) | Fragt den Schlüssel ab, prüft ihn und speichert ihn. Der Schlüssel eines Servers, dessen Adresse du festlegst, gehört nur zu dieser Adresse. Admin-Schlüssel (`sk-ant-admin01-`) werden abgelehnt, bevor etwas gesendet wird. |
-| `bearer_optional` (lokale Engines mit optionalem Schlüssel) | Fragt ein Token ab („Enter für keins“); ohne Token wird der Server ohne Schlüssel genutzt. |
+| `bearer_optional` (lokale Engines mit optionalem Schlüssel) | Fragt ein Token ab („Enter für keins“); ohne Token wird der Server ohne Schlüssel genutzt. Ein leeres stdin mit `--with-token` ist ein Bedienfehler und löscht nie ein gespeichertes Token; das macht `ditto logout`. |
 | `none` (Ollama, `custom` ohne Schlüssel) | Speichert nichts; prüft die Adresse und zählt die Modelle. |
 | `cli_session` (`--method ant_profile`) | Nutzt ein Profil von Anthropics eigener `ant`-CLI; nur der Name des Profils wird gespeichert. Schlägt die Prüfung über das Anthropic-SDK fehl, sagt der Befehl, dass du `ant auth login` ausführen sollst. Erweitert: wird nie automatisch gewählt, und Anthropic hat nicht bestätigt, dass andere Apps diese Profile nutzen dürfen. |
 | OAuth- und Cloud-Anmeldungen | In dieser Version nicht verfügbar (Exit-Code 6). |
@@ -387,14 +389,15 @@ Ohne Terminal (Skripte, CI) wird nichts abgefragt: Ein Anbieter mit mehr als ein
 | `--workspace-id ID` | Claude-API: Workspace-ID (`wrkspc_...`) für Schlüssel, die in jedem Workspace der Organisation gelten; wird mit dem Schlüssel gespeichert. |
 | `--organization ID`, `--project ID` | OpenAI: Organisation (`org-...`) und Projekt (`proj_...`), die mit dem Schlüssel gesendet werden. |
 | `--profile NAME` | Mit `--method ant_profile`: das Profil (Standard: das aktive Profil der `ant`-CLI). |
-| `--insecure-storage` | Ohne nutzbaren Schlüsselbund: den Schlüssel des Tresors in einer Datei neben dem Tresor ablegen (**im Ruhezustand nicht verschlüsselt**). Wird ignoriert, wenn der Tresor auf eine andere Art geschützt ist, die funktioniert. |
+| `--insecure-storage` | Ohne nutzbaren Schlüsselbund: den Schlüssel des Tresors in einer Datei neben dem Tresor ablegen (**im Ruhezustand nicht verschlüsselt**). Wird ignoriert, wenn der Tresor auf eine andere Art geschützt ist, die funktioniert; einen Credential-Helper oder eine Passphrase, die du gewählt hast (`secret_storage`), ersetzt es nie (Exit-Code 5). |
 | `--no-check` | Ohne Prüfung speichern (zum Beispiel offline). |
 | `-y, --yes` | Nicht nachfragen, bevor ein Schlüssel über reines `http://` gesendet oder `--insecure-storage` verwendet wird. |
 
-Exit-Codes: 0 angemeldet; 2 Bedienfehler (unbekannter Anbieter oder unbekanntes Verfahren, fehlendes `--method`
-oder fehlender Schlüssel ohne Terminal); 3 abgelehnt (falscher, widerrufener oder Admin-Schlüssel, ein Problem mit
-dem Workspace); 4 Anbieter oder lokaler Server nicht erreichbar; 5 der Tresor lässt sich nicht nutzen (die Meldung
-nennt die Möglichkeiten); 6 das Verfahren ist in dieser Version nicht verfügbar oder der Anbieter wurde entfernt.
+Exit-Codes: 0 angemeldet; 2 Bedienfehler (unbekannter Anbieter oder unbekanntes Verfahren, fehlendes `--method`,
+fehlender Schlüssel oder fehlende Serveradresse, ein fehlerhafter Optionswert oder Schlüssel); 3 abgelehnt
+(falscher, widerrufener oder Admin-Schlüssel, ein Problem mit dem Workspace); 4 Anbieter oder lokaler Server nicht
+erreichbar; 5 der Tresor lässt sich nicht nutzen (die Meldung nennt die Möglichkeiten); 6 das Verfahren ist in
+dieser Version nicht verfügbar oder der Anbieter wurde entfernt.
 
 ```bash
 llm-cli ditto login anthropic                      # fragt den Schlüssel ohne Anzeige ab

@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 from orchestrator.llm.auth.errors import EXIT_AUTH, EXIT_NETWORK, EXIT_STORAGE, AuthError, auth_error
 from orchestrator.llm.auth.resolver import ResolvedCredential
 from orchestrator.llm.auth.spec import KEY_TYPES, OAUTH_TYPES, AuthMethodSpec
-from orchestrator.llm.auth.store import display_origin, last4
+from orchestrator.llm.auth.store import display_origin, key_malformed_error, last4, malformed_key
 from orchestrator.llm.auth.tokens import sign_out as sign_out_tokens
 from orchestrator.llm.auth.validate import ValidationResult, validate_credential
 from orchestrator.llm.errors import (AuthFailed, BadRequest, LLMError, NotConfigured, PermissionDenied,
@@ -488,12 +488,16 @@ class SignIn:
         value, source = (key or "").strip(), "input"
         if value and spec.rejected(value):
             raise rejected_key_error(preset)  # before any request
+        if malformed_key(value):
+            raise key_malformed_error(preset, spec.key_page)
         if key is not None and not value and spec.type == "api_key":
             raise auth_error("auth.not_signed_in", provider=preset.id, message="No key was entered.")
         typed = self.store.check_fields(preset, spec, fields)
         values = self._merged_fields(preset, spec, origin, typed)
         if key is None:
-            found = self.store.find_secret(preset, spec, url, adopt=False)
+            # As when it is used: a key stored without an address is bound to this one first, so it never goes to
+            # one address unbound and is then bound to (and sent to) another.
+            found = self.store.find_secret(preset, spec, url)
             if found is not None:
                 value, source = found.value.get_secret_value().strip(), found.source
             elif spec.type == "api_key":
@@ -507,9 +511,10 @@ class SignIn:
     # --- storing ----------------------------------------------------------------------------------------------
     def save_key(self, preset: Any, spec: AuthMethodSpec, key: str, base_url: Optional[str] = None, *,
                  fields: Optional[Mapping[str, Any]] = None, source: str = "manual",
-                 remember_url: bool = False) -> Saved:
+                 remember_url: bool = False, checked: Optional[ValidationResult] = None) -> Saved:
         """Stores a typed key with its fields (stored values the user did not give are kept) and remembers the
-        method. Raises an AuthError when the key, a field or the vault refuses."""
+        method; `checked` (the check of this key just before) gives the account for "Signed in as ...". Raises an
+        AuthError when the key, a field or the vault refuses."""
         if spec.type not in KEY_TYPES or preset.runtime_endpoint:
             raise ValueError(f"{preset.label}: '{spec.id}' does not take a key")
         self._require_vault(preset.id)
@@ -519,6 +524,10 @@ class SignIn:
         old = self.store.metadata(preset.id, spec.id, origin)
         kept = {f.id: old[f.id] for f in spec.fields if old.get(f.id) and f.id not in given}
         metadata = self.store.save_api_key(preset, spec, key, base_url=url, fields={**kept, **given}, source=source)
+        if checked is not None and checked.ok and checked.key_checked:
+            self.store.update_metadata(preset.id, spec.id, {"validated_at": self.store.now(),
+                                                            "account_label": checked.account_label}, origin)
+            metadata = self.store.metadata(preset.id, spec.id, origin)
         saved = Saved(metadata, self._sync_field_settings(preset, spec, given))
         self._remember(preset, spec, base_url if remember_url else None)
         return saved
@@ -655,15 +664,28 @@ class SignIn:
                     "storage.write_failed", "The vault could not be moved to the new protection; it was not "
                                             "changed (the log says why).")
             return
-        previous = {key: self.config.get(key, None) for key in ("secret_storage", "secret_helper")}
-        self._set("secret_storage", mode)
+        # Saved only once the vault opens with it: a failed choice leaves the user config as it was (no default or
+        # environment value is written into it).
+        keys = ("secret_storage", "secret_helper")
+        values = getattr(self.config, "config_values", None)
+        previous = {key: (values.get(key) if isinstance(values, dict) else self.config.get(key, None)) for key in keys}
+        self.config.set("secret_storage", mode)
         if helper:
-            self._set("secret_helper", helper)
+            self.config.set("secret_helper", helper)
         if sm.initialize():
+            save = getattr(self.config, "save_user_config", None)
+            if callable(save) and save() is False:
+                self.logger.warning("The storage choice could not be saved in the user config.")
             return
         error = sm.storage_error
         for key, value in previous.items():
-            self._set(key, value if value is not None else "")
+            if isinstance(values, dict):
+                if value is None:
+                    values.pop(key, None)
+                else:
+                    values[key] = value
+            else:
+                self.config.set(key, value if value is not None else "")
         raise error or StorageError("storage.unavailable", f"The {mode} storage cannot be used.")
 
     def rotate_key(self) -> None:
