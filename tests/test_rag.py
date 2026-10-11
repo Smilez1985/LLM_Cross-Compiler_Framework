@@ -689,6 +689,27 @@ class TestOfflineMode:
         assert no_network == []
         assert hub_calls and all(call.get("local_files_only") for call in hub_calls)
 
+    def test_downloaded_bm25_files_are_used_offline(self, tmp_path, no_network):
+        """FastEmbed alone does not find a downloaded BM25 model offline (it looks for a model file BM25 lacks)."""
+        pytest.importorskip("fastembed")
+        from orchestrator.rag.embeddings import FastEmbedSparseEmbedder
+
+        # The layout FastEmbed leaves behind: only the files it needs out of the repository's file list.
+        commit = "0123abcd" * 5
+        repo = tmp_path / "cache" / "models--Qdrant--bm25"
+        for folder in ("refs", "blobs", "trees", f"snapshots/{commit}"):
+            (repo / folder).mkdir(parents=True)
+        (repo / "refs" / "main").write_text(commit)
+        (repo / "trees" / f"{commit}.json").write_text(json.dumps({"format_version": 1, "files": {
+            name: {"size": 9, "blob_id": f"{i:040x}"} for i, name in enumerate(["README.md", "english.txt",
+                                                                                 "german.txt"])}}))
+        (repo / "snapshots" / commit / "english.txt").write_text("the\nand\n")
+
+        bm25 = FastEmbedSparseEmbedder(tmp_path / "cache", offline=lambda: True)
+        with_stop_word = bm25.embed_query("the npu runs")
+        assert len(with_stop_word.indices) == 2  # "the" is a stop word from the cached file
+        assert no_network == []
+
     def test_framework_offline_mode_keeps_rag_and_never_downloads(self, booted_framework, monkeypatch):
         import orchestrator.Core.rag_manager as rm
 

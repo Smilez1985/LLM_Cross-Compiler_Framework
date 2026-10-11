@@ -32,6 +32,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
+- **Retrieval evaluation** (`llm-cli ditto eval --kind retrieval`): 34 German and English questions
+  (cross-lingual, identifiers such as `GGML_CUDA`, answers deep inside a large table or script, unrelated
+  questions) against a corpus of 30 framework and SDK documentation excerpts (`evals/retrieval/`). The corpus
+  is indexed into a temporary knowledge base with the configured local embedding model: no AI model is needed
+  and your own knowledge base is not touched. The report gives hit@1, hit@3, MRR, how often an unrelated
+  question gets no excerpt, figures per tag and the search latency; it works offline once the embedding model
+  is downloaded. A manual and nightly CI workflow runs it with cached models. Baseline with the default CPU
+  embedding model: hit@1 83 %, hit@3 97 %, MRR 0.91; all 4 unrelated questions still get excerpts.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -54,6 +62,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
+
+### Fixed
+- The knowledge base works in offline mode once its models are downloaded: the downloaded BM25 keyword model
+  was never found while offline, so every import and search failed with "not in ... and offline mode is on".
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped

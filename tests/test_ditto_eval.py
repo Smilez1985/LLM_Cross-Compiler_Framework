@@ -81,7 +81,9 @@ HEALING_OK = {"summary": "The disk is full.", "root_cause": "No space left on de
 def test_shipped_cases_are_valid_and_cover_every_kind():
     cases = load_cases()
     assert len(cases) >= 15
-    assert {c.kind for c in cases} == set(ditto_eval.KINDS)
+    # Retrieval cases (knowledge base, no AI model) have their own file next to their corpus.
+    assert {c.kind for c in cases} == set(ditto_eval.KINDS) - {"retrieval"}
+    assert {c.kind for c in load_cases(ditto_eval.RETRIEVAL_CASES)} == {"retrieval"}
     assert any("inject" in c.id for c in cases), "prompt-injection cases belong to the set"
 
 
@@ -261,6 +263,61 @@ def test_cli_eval_runs_the_filtered_cases_and_writes_json(tmp_path, llm, monkeyp
     report = json.loads(out.read_text())["runs"][0]
     assert report["pass_rate"] == 1 and report["setup"]["cases"] == ["healing-disk-full"]
     assert report["setup"]["task_models"]["healing"]
+
+
+def test_cli_runs_ai_and_retrieval_cases_as_separate_runs(tmp_path, llm, monkeypatch):
+    """AI cases run against the model, retrieval cases against a temporary knowledge base; one report each."""
+    import orchestrator.Core.rag_manager as rm
+    from click.testing import CliRunner
+    from orchestrator import cli
+    from orchestrator.rag.embeddings import SparseVec
+
+    class Dense:
+        model_id, dim, spec = "fake/dense", 4, SimpleNamespace(chunk_tokens=200)
+
+        def embed_passages(self, texts):
+            return [[1.0, 0.0, 0.0, float(len(t) % 7)] for t in texts]
+
+        def embed_query(self, text):
+            return [1.0, 0.0, 0.0, 1.0]
+
+        def count_tokens(self, text):
+            return len(text.split())
+
+    class Sparse:
+        model_id = "fake/bm25"
+
+        def embed_passages(self, texts):
+            return [SparseVec([1], [1.0]) for _ in texts]
+
+        def embed_query(self, text):
+            return SparseVec([1], [1.0])
+
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+    monkeypatch.setattr(rm, "create_dense_embedder", lambda spec, cache_dir, offline: Dense())
+    monkeypatch.setattr(rm, "create_sparse_embedder", lambda cache_dir, offline: Sparse())
+    config = FakeConfig(targets_dir=str(TARGETS))
+    client = LLMClient(config, SimpleNamespace(get_secret=lambda name: None), state_dir=tmp_path / "state",
+                       sleep=lambda s: None)
+    ditto = DittoCoder(None, config_manager=config, client=client)
+    framework = SimpleNamespace(config=config, get_component=lambda name: ditto, resolve_path=lambda p: tmp_path / p)
+
+    def require(self):
+        self.framework_manager = framework
+        return self
+
+    monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+    llm.script.append(answer(json.dumps(HEALING_OK)))
+    out = tmp_path / "report.json"
+    result = CliRunner().invoke(cli.cli, ["-q", "ditto", "eval", "--case", "healing-disk-full",
+                                          "--case", "retr-neg-tax-en", "--json", str(out)])
+    assert result.exit_code == 0, result.output
+    ai, retrieval = json.loads(out.read_text())["runs"]
+    assert ai["setup"]["cases"] == ["healing-disk-full"] and "retrieval" not in ai
+    assert retrieval["setup"]["cases"] == ["retr-neg-tax-en"] and retrieval["setup"]["model"] == "fake/dense"
+    # Without a relevance floor the unrelated question gets excerpts.
+    assert retrieval["retrieval"]["empty_when_irrelevant"] == 0.0 and retrieval["pass_rate"] == 0
+    assert len(llm.requests) == 1
 
 
 def test_cli_refuses_tier_with_provider(monkeypatch):
