@@ -565,6 +565,21 @@ class TestDeepIngestOutcome:
         assert errors == ["disk full"] and done == []
         assert rag.events == [("spoken", "Deep Ingest failed: nothing was stored. See the log.")]
 
+    def test_an_error_after_stored_sites_does_not_claim_nothing_was_stored(self, qapp):
+        from orchestrator.gui.wizards import CrawlWorker
+
+        rag = ScriptedRag({"https://a.example/": page_result("success", 2, 5),
+                           "https://b.example/": RuntimeError("disk full")})
+        worker = CrawlWorker(rag, list(rag.results), {}, announcer=lambda t: rag.events.append(("spoken", t)),
+                             lang="en")
+        errors = []
+        worker.error.connect(errors.append)
+        worker.run()
+        assert errors == ["disk full"]
+        assert rag.events == [("stored", "https://a.example/"), ("spoken", (
+            "Deep Ingest partly finished: 2 pages (5 chunks) are searchable; other pages were left out or failed. "
+            "See the log."))]
+
     def test_a_broken_announcer_never_breaks_the_report(self, qapp):
         from orchestrator.gui.wizards import CrawlWorker
 

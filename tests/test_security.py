@@ -730,6 +730,7 @@ class TestCrawlerOptOuts:
         ("\ufeffUser-agent: *\nDisallow: /\n", "/docs"),                     # byte order mark
         ("User-agent: LLM-Conversion-Framework-Bot/3.1\nDisallow: /\n", "/docs"),   # our token with a version
         ("User-agent: otherbot\nUser-agent: *\nDisallow: /docs # comment\n", "/docs"),
+        ("User-agent: *\nAllow: https://example.org/\nDisallow: /private\n", "/private"),   # URL counts as "/"
     ])
     def test_robots_txt_as_in_rfc_9309(self, make_crawler, rules, path):
         raw = rules.encode()   # requests decodes text/plain without a charset as ISO-8859-1

@@ -104,14 +104,17 @@ def tdm_flag(value: Any) -> Optional[bool]:
     return None if value is None else {"1": True, "0": False}.get(str(value).strip())
 
 
+def _root_pattern(location: str) -> str:
+    """A pattern written relative ("docs/*") or as a full URL means the same path from the root (cautious)."""
+    if re.match(r"https?://", location, re.I):
+        return urlparse(location).path or "/"
+    return location if location.startswith(("/", "*")) else "/" + location
+
+
 def tdm_location_matches(location: str, path: str) -> bool:
     """TDMRep location pattern (robots.txt syntax, case-sensitive): matches from the start of the path,
-    '*' is any run of characters, a trailing '$' anchors the end. Greedy segment search, no regex. A pattern
-    written relative ("docs/*") or as a full URL means the same path from the root (cautious reading)."""
-    if re.match(r"https?://", location, re.I):
-        location = urlparse(location).path or "/"
-    elif not location.startswith(("/", "*")):
-        location = "/" + location
+    '*' is any run of characters, a trailing '$' anchors the end. Greedy segment search, no regex."""
+    location = _root_pattern(location)
     anchored = location.endswith("$")
     parts = requote_uri(location[:-1] if anchored else location).split("*")
     if not path.startswith(parts[0]):
@@ -145,7 +148,7 @@ def robots_rules(text: str, bot: str = BOT_NAME) -> List[Tuple[bool, str]]:
         elif key in ("allow", "disallow") and groups:
             in_rules = True
             if value:   # "Disallow:" (empty) allows everything
-                groups[-1][1].append((key == "allow", value))
+                groups[-1][1].append((key == "allow", _root_pattern(value)))
     bot = bot.lower()
     ours = [group for group in groups if any(agent not in ("", "*") and agent in bot for agent in group[0])]
     return [rule for _, rules in (ours or [g for g in groups if "*" in g[0]]) for rule in rules]
