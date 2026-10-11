@@ -1,172 +1,551 @@
-# 🚀 LLM Cross-Compiler Framework
-### DITTO: Definitive Inference Target Translation On-Edge
+Version 3.0.0 plus the [unreleased changes](CHANGELOG.md#unreleased) · Last updated 2026-10-11
 
-**Enterprise-grade toolchain for cross-compiling, quantizing, and deploying Local LLMs to Rockchip NPU targets (RK3588, RK3576, RK3566).**
+**English** · [Deutsch](README_DE.md)
 
-This framework automates the entire lifecycle of Edge AI deployment: from downloading models from HuggingFace, converting them to GGUF format, applying hardware-specific quantization, to air-gapped deployment on embedded devices.
+# LLM Cross-Compiler Framework
 
----
+The framework prepares language models (LLMs) so they run on small edge devices, starting with Rockchip boards
+such as the Radxa ZERO 3W or the Radxa ROCK 5B. It has a desktop app (GUI), a command line (`llm-cli`), a server
+that lets AI clients such as Claude Code, Claude Desktop or VS Code operate it (MCP), and a built-in assistant
+called **Ditto**.
 
-## 🚀 Key Features
-
-### 🛡️ Enterprise Security (v2.3)
-The framework enforces strict security validation across all modules to ensure safe operation in corporate environments:
-* **SSRF Protection:** The Crawler utilizes centralized validation logic to strictly block access to localhost, private IP ranges, and non-HTTP schemes.
-* **Deployment Hardening:** Target IP addresses are validated against strict patterns before any socket connection or SSH handshake is attempted.
-* **Audit-Ready:** Automated CI scripts (`ci_image_audit.sh`) verify Docker container efficiency and layer security without host dependencies.
-
-### 🏗️ Core Architecture
-* **Cross-Compilation:** Native Docker container ensures reproducible builds for AArch64 architectures on x86 hosts.
-* **Smart Quantization:** Automated selection of quantization methods (e.g., `Q4_K_M`) balanced for specific NPU constraints.
-* **Slim-RAG Strategy:** Deploys a "clean slate" Vector DB structure to the target. The device learns locally; no massive pre-built databases are transferred.
-* **Polite Crawler:** A respectful documentation ingest engine that honors `robots.txt`, handles rate limits, and parses PDFs/HTML for RAG context.
+This README describes the state of the development branch: release 3.0.0 (2026-10-10) plus the work listed under
+"Unreleased" in the [CHANGELOG](CHANGELOG.md). What comes next is in the [roadmap](docs/BLUEPRINT.md#roadmap).
 
 ---
 
-## 📋 Prerequisites
+## What does the framework do?
 
-Before installing the framework, ensure your system meets the following requirements:
+Language models are usually published for large PCs: several gigabytes in size and in formats a small board
+cannot run efficiently. The framework takes such a model and prepares it for one specific board:
 
-### Windows Users ⚠️
-* **Docker Desktop** must be installed and running.
-* **WSL 2 Backend** must be enabled in Docker settings.
-* This is mandatory for the cross-compilation containers to function correctly.
+1. **Fetch:** a model from [Hugging Face](https://huggingface.co/) (for example
+   `HuggingFaceTB/SmolLM2-135M-Instruct`) or a folder or file on your computer.
+2. **Convert:** into a format the board understands: **GGUF** for the processor (CPU, via llama.cpp), **RKLLM**
+   for the AI accelerator (NPU) of Rockchip chips, **RKNN** for vision and audio models on the NPU.
+3. **Quantize:** store the model's numbers with fewer bits (for example 4 instead of 16). The model becomes much
+   smaller and faster and loses a little quality.
+4. **Deploy:** copy the result to the board over SSH and check it with checksums.
 
-### Linux Users
-* A standard installation of **Docker** is required (the installer can attempt to set this up automatically).
+The conversion tools run in a Docker container on your PC, so you do not install any vendor SDKs yourself. The
+container has no network access while it converts. Every build writes a manifest (`build_info.json`) with the
+model files and their SHA256 hashes, plus a `Model_Card.md`.
+
+The framework does not install software that runs the model on the board (see [The board](#the-board)).
+
+## Supported targets and formats
+
+| Target | Status | Boards | Formats |
+|---|---|---|---|
+| Rockchip | official | RK3566, RK3568, RK3576, RK3588 | GGUF, RKLLM, RKNN |
+| NVIDIA GPUs, AMD (Ryzen Z1 Extreme) | planned ([roadmap](docs/BLUEPRINT.md#roadmap)) | – | – |
+
+You can add other hardware yourself: [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md).
+
+The values below come from the `capabilities:` block in [`targets/Rockchip/target.yml`](targets/Rockchip/target.yml).
+The GUI, the CLI, Ditto and the MCP server offer exactly these options and reject anything else.
+
+| Board (`--board`) | CPU | NPU | RAM (max.) | Example boards |
+|---|---|---|---|---|
+| `rk3566` | 4× Cortex-A55 | 1 TOPS | 8 GB | Radxa ZERO 3W, Radxa CM3, ROCK 3C |
+| `rk3568` | 4× Cortex-A55 | 1 TOPS | 8 GB | ROCK 3A, Radxa E25 |
+| `rk3576` | 4× Cortex-A72 + 4× Cortex-A53 | 6 TOPS | 16 GB | Radxa ROCK 4D |
+| `rk3588` | 4× Cortex-A76 + 4× Cortex-A55 | 6 TOPS | 32 GB | Radxa ROCK 5B, Radxa ROCK 5ITX, Orange Pi 5 |
+
+| Format (`--format`) | Runs on | Input | Boards | Quantizations | Default |
+|---|---|---|---|---|---|
+| `gguf` | CPU (llama.cpp v0.6.0) | Hugging Face model | all four | 33 llama.cpp types, e.g. `Q4_K_M`, `Q4_0`, `IQ4_NL`, `IQ4_XS`, `Q5_K_M`, `Q6_K`, `Q8_0`, `F16` | `Q4_K_M`; `Q4_0` on rk3566/rk3568 |
+| `rkllm` | NPU, language models (RKLLM-Toolkit 1.3.1) | Hugging Face model | rk3588, rk3576 | rk3588: `w8a8`, `w8a8_g128`, `w8a8_g256`, `w8a8_g512` · rk3576: `w4a16`, `w4a16_g32`, `w4a16_g64`, `w4a16_g128`, `w8a8` | `w8a8` (rk3588), `w4a16` (rk3576) |
+| `rknn` | NPU, ONNX vision/audio models (RKNN-Toolkit2 2.3.2) | local `.onnx` file | all four | `fp16`, `i8` | `fp16` |
+
+<details>
+<summary>All GGUF quantization types</summary>
+
+`Q4_K_M`, `Q4_0`, `IQ4_NL`, `IQ4_XS`, `Q5_K_M`, `Q6_K`, `Q8_0`, `Q4_1`, `Q5_0`, `Q5_1`, `Q2_K`, `Q2_K_S`,
+`Q3_K_S`, `Q3_K_M`, `Q3_K_L`, `Q4_K_S`, `Q5_K_S`, `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`, `IQ2_M`,
+`IQ3_XXS`, `IQ3_XS`, `IQ3_S`, `IQ3_M`, `TQ1_0`, `TQ2_0`, `MXFP4_MOE`, `F16`, `BF16`, `F32`
+</details>
+
+- **RK3566 and RK3568** are not supported by RKLLM; use GGUF there. `Q4_0` and `IQ4_NL` are repacked for fast
+  ARM kernels.
+- **Importance matrix (IMatrix):** GGUF only. It improves low-bit quantization. `IQ1_S`, `IQ1_M`, `IQ2_XXS`,
+  `IQ2_XS` and `IQ2_S` require it. Without your own text file the framework uses its shipped calibration text
+  ([data/calibration](data/calibration/README.md)).
+- **Calibration data:** optional for RKLLM and RKNN. RKNN `i8` needs a list of sample inputs (paths relative to
+  the list file).
+- Common spellings are accepted and translated, for example `INT8` → `Q8_0` for GGUF or `int4` → `w4a16` for
+  RKLLM. Board names are not case-sensitive.
 
 ---
 
-## 📦 Installation
+## Requirements
 
-We have simplified the installation process into single-file installers ("Single Source of Truth").
+**Your PC (the "host")**
+
+- An **x86-64 computer** (Intel or AMD). The Rockchip build image installs Rockchip's toolkits as x86-64 Linux
+  packages.
+- **Linux** (the installer uses `apt`, so Debian, Ubuntu and similar) or **Windows** with Docker Desktop.
+- **Python 3.11 to 3.14.**
+- **Docker:** on Linux, Docker Engine (the installer sets it up if it is missing); on Windows, **Docker Desktop**
+  with the **WSL 2 backend**, installed and running before you install the framework.
+- **Disk space:** at least 20 GB free for the build image, downloaded models and results (`llm-cli doctor` warns
+  below 20 GB and reports an error below 5 GB). Large models need 2 to 3 times their size during conversion.
+- **Internet access** for the installation, the first image build and model downloads.
+
+**The board (only for deployment)**
+
+- Linux with an SSH server, a user account you can log in to, and the tools `unzip` and `sha256sum`.
+
+---
+
+## Installation
+
+### Linux
+
+Open a terminal in the downloaded repository folder and run:
+
+```bash
+sudo ./install.sh
+```
+
+The installer:
+
+1. checks the internet connection and Python (installs it with `apt` if it is missing, then requires 3.11 to
+   3.14),
+2. installs Docker via `get.docker.com` if it is missing and adds your user to the `docker` group,
+3. copies the framework to `/opt/llm-conversion-framework` (owned by your user),
+4. creates a virtual environment (`.venv`) there and installs the pinned packages from `requirements.txt`,
+5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI.
+
+Log out and back in once so the `docker` group takes effect. Then start the GUI with `llm-framework`.
 
 ### Windows
-1. **Run as Admin:** Right-click `install.bat` and select **"Run as Administrator"**.
-2. **Process:** The script checks for Python 3.11-3.14 (installing 3.13 via Winget if missing), creates an isolated `.venv`, installs all dependencies, and creates Desktop shortcuts.
 
-### Linux / macOS
-1. Open your terminal in the repository root.
-2. Run the installer:
+1. Install and start Docker Desktop (WSL 2 backend).
+2. Right-click `install.bat` and choose **Run as administrator**.
+
+The installer checks for Python (installs Python 3.13 with `winget` if none is found, then requires 3.11 to
+3.14), copies the framework to `C:\Program Files\LLM-Conversion-Framework`, creates `.venv` there, installs
+`requirements.txt`, and puts a **LLM-Conversion-Framework** shortcut on the desktop. The shortcut runs
+`start_framework.bat`, which starts the GUI.
+
+Conversions on a Windows host have not been verified yet (see [Known gaps](#known-gaps)).
+
+### Calling `llm-cli`
+
+The installers do not put `llm-cli` on your PATH. Use the framework's Python from the installation folder:
+
 ```bash
-   sudo ./install.sh
+# Linux
+cd /opt/llm-conversion-framework
+.venv/bin/python -m orchestrator.cli --help
 ```
-3. **Process:** The script installs system dependencies, fixes Docker group permissions for your user, and deploys the framework to `/opt/llm-conversion-framework`.
+
+```bat
+:: Windows (Command Prompt)
+cd /d "C:\Program Files\LLM-Conversion-Framework"
+.venv\Scripts\python.exe -m orchestrator.cli --help
+```
+
+On Linux you can make a shortcut that works from any folder:
+
+```bash
+alias llm-cli='PYTHONPATH=/opt/llm-conversion-framework /opt/llm-conversion-framework/.venv/bin/python -m orchestrator.cli'
+```
+
+In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm-cli` exists after
+`poetry install`. The examples in this README use `llm-cli`.
+
+### Where your files are
+
+| What | Where |
+|---|---|
+| Program and Python environment | Linux: `/opt/llm-conversion-framework` · Windows: `C:\Program Files\LLM-Conversion-Framework` |
+| Builds, logs, cache | `output/`, `logs/` and `cache/` in the installation folder (settings `output_dir`, `logs_dir`, `cache_dir`) |
+| Settings (`config.yml`) | `configs/` in the installation folder if your user may write there, otherwise the personal folder below; `LLM_FRAMEWORK_CONFIG_DIR` sets another folder |
+| Personal state: tool permissions, audit log, SSH key and known devices, MCP token, chat history, knowledge base, local model server | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` sets another folder |
+| API keys and tokens | encrypted in `~/.llm-framework/secrets.store`; the key for it is kept in your operating system's keyring |
+| Models for Ditto's offline mode | `models/ditto/` in the installation folder (`LLM_FRAMEWORK_MODELS_DIR` sets another folder) |
+
+The installers also copy `targets/`, `models/` and `configs/` to a separate data folder. The framework does not
+use that folder.
 
 ---
 
-## 🖥️ Usage Guide
+## Quick start: the GUI
 
-### 1. The Orchestrator GUI
-Start via the Desktop Shortcut (Windows) or command line.
+1. **Start** the GUI: `llm-framework` on Linux, the desktop shortcut on Windows.
+2. **Language:** on the first start a dialog asks for English or German. The choice is saved as `language`.
+3. **Tool permissions ("Ditto setup"):** decide once what Ditto and connected AI clients may do on their own:
 
-* **Source Tab:** Search and download models directly from HuggingFace. Validates SHA256 integrity.
-* **Convert Tab:** Manages the conversion pipeline.
-    * *Input:* Raw PyTorch/Safetensors model.
-    * *Output:* NPU-optimized GGUF format.
-    * *Opt-in:* Toggle specific hardware flags for your target board.
-* **Deploy Tab:** Connection management for Edge Devices.
-    * *Features:* SSH Key management, Air-Gap package generation (ZIP with Docker images), and one-click deployment.
+   | Category | Recommended | Choices |
+   |---|---|---|
+   | Read information (targets, builds, logs, knowledge base) | Allow | Allow, Ask, Deny |
+   | Change things on this computer (start or cancel builds) | Ask | Allow, Ask, Deny |
+   | Reach other devices or delete data | Ask | Ask, Deny (never "Allow" for the whole category) |
 
-### 2. The Wizard (CLI)
-For headless servers or Linux users, the Wizard provides an interactive guide.
+   Below that you can set single tools differently. Change it later under **Tools > Tool Permissions (Ditto /
+   MCP)...** or with `llm-cli tools permissions`.
+4. **Health check (recommended):** `llm-cli doctor` checks Python, Docker, disk space, targets, security
+   settings, tool permissions and the calibration data, and explains how to fix problems.
 
-**Start:**
-```bash
-./start_framework.bat   # Windows
-llm-framework           # Linux (if installed globally)
-```
+**Builder tab:** this is where you convert a model.
 
-**Workflow:**
-1. **Select Operation:** Download / Convert / Quantize / Deploy.
-2. **Target Selection:** Choose your board (e.g., "Orange Pi 5").
-3. **Optimization:** The wizard suggests the best quantization based on target RAM.
+1. **Source Model:** a Hugging Face ID, or a local folder or file via the folder button.
+2. **Target Hardware:** the target (profile). **Scan / Import...** reads a board's hardware: import a probe
+   file, scan a board over SSH, or scan this PC.
+3. **AI Optimization (Ditto):** optional. **Ask Ditto for Config** suggests format, quantization and
+   optimization from the options the target offers. This needs a configured AI provider.
+4. **Build Configuration:** format, board, quantization and optimization. Only combinations the target supports
+   are offered. **Calibration:** importance matrix (GGUF) and a calibration file. **Use Host GPU for Build
+   Process** passes a GPU into the container; Rockchip conversions do not need it.
+5. **Start Build Pipeline:** the log appears on the right. The first build takes much longer because the Docker
+   image with all toolkits is built first; later builds reuse Docker's build cache.
 
-### 3. Containerized Build System
-Ensure cross-platform compatibility by running the core logic in Docker.
-```bash
-make build              # Build the image
-make test-container     # Run isolated tests
-```
+If a build fails because of a known problem, a **self-healing** dialog shows the cause and a proposed fix.
+Nothing changes until you agree. The framework only applies a few fixed steps itself (fewer parallel compile
+jobs after an out-of-memory error, removing its own images and the build cache when the disk is full, one retry
+after a network error). Suggestions from an AI are only shown as advice.
+
+**AI Chat tab:** talk to Ditto (see [Ditto](#ditto-the-built-in-assistant)). **Deployment tab:** copy a finished
+build to a board. The **Auto-Tuning** and **Models** tabs are placeholders.
+
+Menus: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
+Module...** (wizard for a new target, including "Deep Ingest" to add documentation to the knowledge base),
+**Tools > Tool Permissions (Ditto / MCP)...**
+
+### Deploying to the board
+
+1. In the **Deployment** tab, pick a build. Builds are listed from their manifests.
+2. Choose the profile (the target, e.g. `Rockchip`), enter the board's IP address and user, and click **Deploy to
+   Target**.
+3. **First connection:** the framework shows the fingerprint of the board's SSH host key. Compare it with the
+   output of `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the board and confirm. Then enter the password
+   once: it installs the framework's own SSH key on the board and is not stored. Later deployments need no
+   password.
+4. The framework packs the model, manifest, model card, checksums and a `deploy.sh` into a ZIP file in
+   `output/`, uploads it to a private temporary folder on the board and runs `deploy.sh` there. The script checks
+   the checksums and copies the model to `~/models` (another folder can be set with `MODEL_DIR`), then removes
+   the temporary folder.
+
+Leave the Docker option off for a plain model file. With it, the package also contains container images; that
+mode is experimental and not verified in this version.
+
+### The board
+
+To run the model on the board you need a runtime there, which the framework does not install: llama.cpp
+(`llama-server`) for GGUF, Rockchip's RKLLM runtime for `.rkllm` files (RK3588/RK3576), and the RKNN runtime for
+`.rknn` files. For GGUF, `deploy.sh` prints a matching `llama-server` command line. A runtime that the deploy
+step installs on the board is on the [roadmap](docs/BLUEPRINT.md#roadmap).
 
 ---
 
-### 4. AI Clients via MCP (Claude Code, Claude Desktop, VS Code)
-
-The framework runs as a [Model Context Protocol](https://modelcontextprotocol.io) server, so an AI client you
-already use can drive it: list targets, check what a board supports, start and watch builds, read logs and
-decide on self-healing proposals. You sign in to the client with your own Claude account or API key; the
-framework never sees those credentials.
+## Quick start: the command line
 
 ```bash
-llm-cli ditto setup        # once: what AI clients may do on their own, what needs your confirmation
-llm-cli mcp config         # shows the commands/snippets for Claude Code, Claude Desktop and VS Code
-llm-cli mcp config --write claude-desktop   # or add it to Claude Desktop directly (backup is kept)
+llm-cli --version
+llm-cli doctor                 # health check; exit code 0 = OK, 1 = warnings, 2 = errors
+llm-cli doctor --fix           # harmless automatic fixes (folders, permissions); --tier 2 also clears the Docker build cache
+llm-cli targets list           # available targets; the --target value is the folder name in targets/ (Rockchip)
 ```
 
-- **Permissions:** read-only tools are allowed by default; starting or cancelling builds asks for your
-  confirmation (the client shows the question), unless you allowed it. Tools that reach other devices can
-  only be allowed one by one. Every call is written to a tamper-evident audit log (`llm-cli tools audit`).
+**Converting a model** (`--target Rockchip`; format, board and quantization as in the tables above):
+
+```bash
+# GGUF for the RK3566 CPU (Radxa ZERO 3W), default quantization Q4_0, follow the progress
+llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t Rockchip --format gguf --board rk3566 --follow
+
+# RKLLM for the RK3588 NPU
+llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t Rockchip -f rkllm -b rk3588 -q w8a8 -F
+
+# GGUF with an importance matrix from your own calibration text
+llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t Rockchip -f gguf -b rk3588 -q IQ4_XS --imatrix --dataset ./calibration.txt -F
+
+# RKNN from a local ONNX file
+llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
+```
+
+- Results go to `output/build_<date>_<time>/Rockchip/<model>/<quantization>/` (model file, `build_info.json`,
+  `Model_Card.md`). `-o/--output-dir` sets another folder.
+- A combination the target does not support stops before anything runs, with exit code 2 and the reason (for
+  example "Format 'rkllm' does not run on rk3566").
+- Gated Hugging Face models need a token: `llm-cli secrets set hf_token` (asks for the value).
+- The command stays in the foreground until the build has finished; `--follow` prints each stage, Ctrl+C cancels
+  the build. If the build waits for a self-healing decision, the CLI asks in the terminal.
+
+**Deploying** (the same steps as in the GUI):
+
+```bash
+llm-cli deploy list-artifacts
+llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
+llm-cli deploy run output/deploy_<model>_<timestamp>.zip --ip 192.168.1.50 --user rock
+```
+
+Every command and option, with examples: [docs/CLI_Usage.md](docs/CLI_Usage.md).
+
+---
+
+## Quick start: AI clients over MCP (Claude Code, Claude Desktop, VS Code)
+
+The framework runs as a [Model Context Protocol](https://modelcontextprotocol.io) server. An AI client you
+already use can then operate it: list targets, check what a board supports, start and watch builds, read logs,
+search the knowledge base, run the health check and decide on self-healing proposals. You sign in to the client
+with your own account or key; the framework never sees those credentials.
+
+```bash
+llm-cli ditto setup                         # once: what AI clients may do on their own, what needs your confirmation
+llm-cli mcp config                          # prints the setup for Claude Code, Claude Desktop and VS Code
+llm-cli mcp config --write claude-desktop   # or add it to Claude Desktop directly (other entries are kept, a backup is written)
+```
+
+`llm-cli mcp config` prints a `claude mcp add ...` command for Claude Code and JSON snippets for Claude Desktop
+and VS Code (`.vscode/mcp.json`), with the Python and folder of your installation. Run it with the framework's
+Python (see [Calling `llm-cli`](#calling-llm-cli)). After `--write claude-desktop`, restart Claude Desktop.
+
+- **Permissions:** read-only tools are allowed by default. Starting or cancelling builds and deciding on
+  self-healing proposals ask for your confirmation, which the client shows as a question, unless you allowed
+  them. A client that cannot ask is refused, with a hint how to allow the tool. Every call is written to a
+  tamper-evident audit log (`llm-cli tools audit`).
 - **Transports:** stdio (default, started by the client) or local Streamable HTTP
-  (`llm-cli mcp serve --transport http`, loopback only, bearer token in `~/.llm-framework/mcp_http_token`).
+  (`llm-cli mcp serve --transport http`, loopback only, default address `http://127.0.0.1:8765/mcp`, bearer token
+  in `~/.llm-framework/mcp_http_token`).
+- There is no deployment tool over MCP.
 
-### 5. Ditto Offline: Local Model Server (llama.cpp)
+**Using a Claude subscription:** Anthropic does not allow third-party apps to use a Claude subscription's sign-in
+or limits. If you have a Claude plan, use the framework **from Claude Code or Claude Desktop over MCP** as shown
+above, or give Ditto an **Anthropic API key** (Max and Team plans include monthly API credits for a linked Claude
+Console organization).
 
-Ditto can run without any cloud account on a local model served by a managed `llama-server`.
+---
+
+## Ditto, the built-in assistant
+
+Ditto answers questions, suggests build settings, analyzes failed builds and proposes new hardware modules. It
+uses the framework's tools within your tool permissions:
+
+- **GUI:** the **AI Chat** tab. Tools that need a confirmation open a dialog that shows the tool and every
+  argument. The conversation is saved per user (`~/.llm-framework/chat_history.json`); a long conversation is
+  summarized into a new one. **Clear History** deletes it.
+- **CLI:** `llm-cli ditto ask "Which boards can run RKLLM?"` asks one question (no saved history).
+  Confirmations are asked in the terminal and denied when there is no terminal. `--no-tools` answers without
+  tools.
+- **Module proposals:** `llm-cli module generate-ai target_hardware_config.txt` or the wizard under **Tools >
+  Create Hardware Module...**. You see the whole proposal before anything is written.
+
+**Set up Ditto** under **Tools > Configure AI Agent (Ditto)...**: provider, model (the list is loaded live from
+the provider; you can also type a model name), API key, base URL (Ollama and custom servers), effort, privacy
+level for cloud providers, a fallback chain, the knowledge base and offline mode. On a headless machine, store
+the key with `llm-cli secrets set <key name>` and set `ai_provider` in `config.yml` (or the environment variable
+`LLM_FRAMEWORK_AI_PROVIDER`).
+
+| Provider (id) | What it is | Sign-in | Key name for `llm-cli secrets set` |
+|---|---|---|---|
+| `anthropic` | Anthropic Claude API | API key | `anthropic_api_key` |
+| `openai` | OpenAI (Responses API) | API key | `openai_api_key` |
+| `google` | Google Gemini (OpenAI-compatible endpoint) | API key | `gemini_api_key` |
+| `openrouter` | OpenRouter (many models behind one key) | API key | `openrouter_api_key` |
+| `ollama` | Ollama on this computer or your network | none | – |
+| `local` | the managed local model server (see [Offline mode](#offline-mode-the-managed-local-model)) | none (a key per start is handled for you) | – |
+| `custom` | any OpenAI-compatible server (vLLM, LM Studio, ...) | API key or none | `custom_api_key` |
+
+- The providers are data in [`configs/llm_providers.yml`](configs/llm_providers.yml); a file with the same name
+  in your settings folder adds or replaces entries. The default models per task are set there.
+- **Privacy filter for cloud providers** (setting `ai_security_level`): secrets are always removed. *Balanced*
+  also replaces IP, MAC and e-mail addresses, logins and user names; *Strict* (default) also host names, serial
+  numbers, UUIDs and directory names. Ditto puts the real values back into the answer on your computer. Local
+  providers are never filtered.
+- **Fallback chain** (setting `ai_fallback_chain`, e.g. `local, ollama:qwen3.5:4b`): tried in order when the
+  model declines or the provider is unavailable.
+- Structured answers (healing analysis, module proposal, build recommendation) must match a fixed structure and
+  are checked; an invalid answer is an error and is never applied. A proposal that contains a
+  dangerous command (for example a download piped into a shell) is discarded.
+- **Sign-in per provider** (the **Sign in...** button) is not available yet; it is being built. Until then
+  Ditto uses API keys.
+- The provider list on this development branch still shows an entry for a Claude subscription through Claude
+  Code. It is being removed, because Anthropic does not allow third-party apps to use subscription limits. Do not
+  rely on it; use MCP or an API key as described [above](#quick-start-ai-clients-over-mcp-claude-code-claude-desktop-vs-code).
+
+`llm-cli ditto eval` grades Ditto on fixed test cases, for example to check whether a small local model is good
+enough. Details and a first measurement: [docs/Features.md](docs/Features.md#ditto-evaluation).
+
+---
+
+## Offline mode: the managed local model
+
+Ditto can run without any cloud account on a local model. The framework downloads a pinned llama.cpp build and a
+pinned Qwen3.5 model and runs `llama-server` on your computer:
 
 ```bash
 llm-cli ditto runtime status       # hardware, recommended llama.cpp build and model, server state
 llm-cli ditto runtime install      # the pinned llama.cpp build for this machine
-llm-cli ditto models download      # the recommended model (or a tier: small-q2, small, default, large, ...)
-llm-cli ditto runtime start        # Ditto then uses it as the "local" AI provider
+llm-cli ditto models list          # the model tiers, their size and whether they are downloaded
+llm-cli ditto models download      # the recommended model (or a tier, e.g. small-q2)
+llm-cli ditto runtime start        # starts llama-server; it keeps running until "runtime stop"
 llm-cli ditto runtime stop
 ```
 
-- **Verified downloads:** every build and model is pinned with size and sha256 in `configs/llama_runtime.yml`
-  (models at a fixed Hugging Face commit) and checked before it is unpacked or loaded; unpinned entries are
-  refused. Downloads resume after an interruption. New models are added in that file, not in code.
-- **Hardware:** NVIDIA GPUs get a CUDA build that matches driver and GPU (an RTX 2080 Ti needs driver 570.26
-  for the CUDA 12.8 build and R615 for CUDA 13.4, otherwise Vulkan is used); AMD Radeon GPUs and APUs such as
-  the Ryzen Z1 Extreme use Vulkan (ROCm only with `--backend rocm`); Apple Silicon uses Metal; everything else
-  the CPU build. The model tier follows RAM and GPU memory; machines with 3 GB RAM or less get a 2-bit model,
-  and `runtime start --model <tier>` picks any tier.
+Then choose **Local model (managed llama-server)** in the AI settings (provider `local`) and turn on **Offline
+Mode**. Ditto finds the running server by itself. In this version the server is controlled from the command line
+only.
+
+| Tier | Model | Download | Chosen automatically when |
+|---|---|---|---|
+| `large` | Qwen3.5 9B, 4-bit (Q4_K_M) | 5.3 GiB | a dedicated GPU (or Apple Silicon) with at least 7.5 GiB of memory is used |
+| `default` | Qwen3.5 4B, 4-bit (Q4_K_M) | 2.6 GiB | otherwise |
+| `small` | Qwen3.5 2B, 4-bit (Q4_K_M) | 1.2 GiB | up to 4.5 GiB RAM, or when `default` does not fit |
+| `small-q2` | Qwen3.5 2B, 2-bit (UD-Q2_K_XL) | 0.9 GiB | up to 3 GiB RAM; less accurate |
+| `default-q2`, `large-iq2`, `granite` | 2-bit variants and IBM Granite 4.2 3B | 1.8 / 3.4 / 2.1 GiB | only on request |
+
+- `llm-cli ditto runtime start --model <tier>` picks a tier and remembers it; `--model auto` returns to the
+  recommendation.
+- **Hardware:** NVIDIA GPUs get a CUDA build that matches GPU and driver; AMD Radeon GPUs and APUs (e.g. Ryzen Z1
+  Extreme) and Intel Arc use Vulkan (ROCm only with `runtime install --backend rocm`); Apple Silicon uses Metal;
+  everything else uses the CPU build. `runtime status` explains each choice.
+- **Verified downloads:** every build and model is pinned with size and sha256 in
+  [`configs/llama_runtime.yml`](configs/llama_runtime.yml) (models at a fixed Hugging Face commit) and checked
+  before it is unpacked or loaded; unpinned entries are refused.
 - **Isolation:** the server listens on 127.0.0.1 only, on a free port, with a new API key per start that is
-  passed in a file only you can read. Its web UI, built-in tools and MCP client stay off.
+  passed in a file only you can read. Its web UI, its own tools and its MCP client stay off.
+- **Effort:** with effort "low" the local model answers without thinking first (much faster on a CPU); "medium"
+  and higher let it think.
 
-## 🤝 Community & Collaboration
-
-We believe in the power of open collaboration.
-
-* **Share Target Modules:** If you have generated a config module for a new board using the Wizard, please contribute it back via Pull Request.
-* **RAG Knowledge:** We encourage sharing non-sensitive RAG datasets to improve the collective intelligence of edge devices.
+Ollama or another OpenAI-compatible server on your network also count as local providers in offline mode.
 
 ---
 
-## 🛠️ Configuration
+## The knowledge base
 
-**Location:** `configs/user_config.yml` (or in your Data directory).
+The optional knowledge base lets Ditto and MCP clients search documentation you added (for example SDK manuals).
+Turn it on in the AI settings (**Enable Local Knowledge Base**). Everything runs on your computer:
+
+- embeddings are computed locally with FastEmbed (ONNX Runtime); the model is downloaded once into
+  `models/embeddings/` (about 0.5 GB on a machine without CUDA); in offline mode nothing is downloaded,
+- the vectors are stored in an embedded Qdrant database in `~/.llm-framework/qdrant`, without Docker and
+  without an open port,
+- searches combine meaning (vectors) with exact words (BM25), so error codes and compiler flags are found too.
+
+Add documentation with **Deep Ingest (Add Docs)** in the module wizard (**Tools > Create Hardware Module...**).
+The crawler respects `robots.txt`, blocks private network addresses and limits pages and depth. Search results are
+treated as external text, never as instructions. More: [docs/Features.md](docs/Features.md#knowledge-base-rag).
+
+---
+
+## Security in short
+
+- **Sandboxed builds:** conversion containers run as your user instead of root, without network access, without
+  Linux capabilities, with `no-new-privileges`, a read-only image filesystem and a process limit; a memory limit
+  can be set. Models are downloaded on the host beforehand.
+- **Tool permissions and audit log:** Ditto and MCP clients act only through registered tools with risk
+  categories. You decide what runs on its own, what asks and what is denied. Every call lands in an HMAC-chained
+  audit log; `llm-cli tools audit --verify` detects changed or removed entries.
+- **SSH trust on first use:** an unknown board's host key is shown with its SHA256 fingerprint and stored only
+  after you confirm. A changed key is always refused. The SSH password is used once to install the framework's
+  own key and is never stored.
+- **Secrets:** API keys and tokens are stored encrypted; the key for them is in your operating system's keyring.
+  `llm-cli doctor` warns when the keyring does not protect them.
+- **Untrusted text:** web pages, knowledge-base text, build logs, tool results and probe files are cleaned of
+  hidden characters and passed to the AI as marked data, never as instructions. Chat output is escaped, and links
+  open only after you confirm.
+- **Privacy:** for cloud providers, personal data is replaced by placeholders before it leaves your computer
+  (see [Ditto](#ditto-the-built-in-assistant)).
+
+Details: [docs/Features.md](docs/Features.md).
+
+---
+
+## Settings
+
+The GUI saves its settings in `config.yml` in the settings folder (see [Where your files are](#where-your-files-are)).
+You can also edit the file, or override single values with environment variables of the form
+`LLM_FRAMEWORK_<KEY>`, for example `LLM_FRAMEWORK_BUILD_MEMORY_LIMIT=24g`.
+
 ```yaml
+language: en                  # en or de
+ai_provider: local            # see the provider table above
+ai_security_level: STRICT     # STRICT, BALANCED or OFF (cloud providers only)
+offline_mode: false           # true: only local providers
+enable_rag_knowledge: false   # the local knowledge base
+calibration_language: mixed   # shipped calibration text: mixed, de or en
+build_sandbox: true           # sandbox for conversion containers
+build_memory_limit: ""        # e.g. 24g; empty = no limit
+build_pids_limit: 4096        # process limit in the container
+build_jobs: 0                 # parallel compile jobs for image builds; 0 = all cores
 crawler_respect_robots: true
 crawler_max_depth: 2
-enable_rag_knowledge: true
-target_architecture: "aarch64"
 ```
 
 ---
 
-## 🙏 Credits
+## Known gaps
 
-* **[llama.cpp](https://github.com/ggerganov/llama.cpp)** - The core of inference
-* **[Hugging Face](https://huggingface.co/)** - For the model ecosystem
-* **[Ditto](https://github.com/yoheinakajima/ditto)** - AI-Agent Framework for automatic hardware module generation (developed by [@yoheinakajima](https://github.com/yoheinakajima))
-* **[Qdrant](https://qdrant.tech/)** - Vector database for our Local Knowledge Base
-* **[Radxa Community](https://forum.radxa.com/)** - For support with RK3566 integration
-* **[Docker](https://www.docker.com/)** - Containerization Platform
-* **[PySide6](https://doc.qt.io/qtforpython-6/)** - Professional GUI Framework
-* **[Poetry](https://python-poetry.org/)** - Modern Python Dependency Management
+- **Docker setup of the framework itself:** `Docker Setup/` and the Makefile targets `make build`, `make up`,
+  `make gui` and `make test-container` do not work (the referenced `orchestrator/Dockerfile` does not exist). A
+  hardened headless image for the CLI and the MCP server is being built ([roadmap](docs/BLUEPRINT.md#roadmap)).
+  Conversions themselves run in Docker and are not affected.
+- **Windows hosts:** the test suite runs on Windows in CI, but conversions on a Windows host have not been
+  verified. The installation folder under `C:\Program Files` is usually not writable for your user; set
+  `output_dir`, `cache_dir` and `logs_dir` to folders you own if builds cannot write their results.
+- **`llm-cli build status`** only knows builds started in the same process. Builds started by the GUI, the MCP
+  server or another CLI call are not listed; use `build start --follow`, the GUI log or
+  `llm-cli deploy list-artifacts`.
+- **Signing in per provider** is not available yet; Ditto uses API keys.
 
 ---
 
-## 📄 License
+## What comes next
 
-This project is licensed under the **MIT License**.
+The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGELOG.md) at release. In short:
+
+- **In progress:** sign-in per provider and access type; removal of the Claude-subscription provider (Claude
+  subscribers use MCP or an API key); a hardened headless Docker image for the CLI and the MCP server; a new Ditto
+  evaluation run with the improved prompts.
+- **Planned:** a runtime that the deploy step installs on the board, targets for NVIDIA GPUs and AMD (Ryzen Z1
+  Extreme), more formats, LoRA and large models, and supply-chain hardening.
+
+Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [docs/CLI_Usage.md](docs/CLI_Usage.md) | Every CLI command and option, with examples |
+| [docs/Features.md](docs/Features.md) | Features in detail: build pipeline, sandbox, Ditto, evaluation, local runtime, knowledge base, MCP |
+| [docs/BLUEPRINT.md](docs/BLUEPRINT.md) | Architecture and roadmap |
+| [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md) | Adding a new hardware target |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, conventions |
+| [configs/SSOT_ARCHITECTURE.md](configs/SSOT_ARCHITECTURE.md) | Project sources (single source of truth) |
+| [data/calibration/README.md](data/calibration/README.md) | Shipped calibration texts: sources, checksums, license |
+
+Every document is also available in German (`<name>_DE.md`).
+
+## Contributing
+
+Contributions are welcome, especially new hardware targets. How to set up a development environment, run the
+tests and submit changes: [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Credits
+
+- **[llama.cpp](https://github.com/ggml-org/llama.cpp)**: GGUF conversion, quantization and the local model server
+- **[Hugging Face](https://huggingface.co/)**: the model ecosystem
+- **[Rockchip RKNN-LLM](https://github.com/airockchip/rknn-llm)** and
+  **[RKNN-Toolkit2](https://github.com/airockchip/rknn-toolkit2)**: the NPU toolkits
+- **[Qwen](https://huggingface.co/Qwen)** and **[IBM Granite](https://huggingface.co/ibm-granite)**: the models
+  of Ditto's offline mode
+- **[Ditto](https://github.com/yoheinakajima/ditto)** by [@yoheinakajima](https://github.com/yoheinakajima):
+  AI agent framework and namesake of the assistant
+- **[Model Context Protocol](https://modelcontextprotocol.io)**: the Python SDK behind the MCP server
+- **[eaddario/imatrix-calibration](https://huggingface.co/datasets/eaddario/imatrix-calibration)**: the shipped
+  calibration texts (MIT)
+- **[Qdrant](https://qdrant.tech/)** and **[FastEmbed](https://github.com/qdrant/fastembed)**: the local
+  knowledge base
+- **[Radxa Community](https://forum.radxa.com/)**: support with the RK3566 integration
+- **[Docker](https://www.docker.com/)**, **[PySide6](https://doc.qt.io/qtforpython-6/)**,
+  **[Poetry](https://python-poetry.org/)**
+
+## License
+
+MIT License, see [LICENSE.txt](LICENSE.txt). The file also contains additional terms on attribution, third-party
+software, vendor SDKs and model licenses. Models you convert keep their own licenses.
