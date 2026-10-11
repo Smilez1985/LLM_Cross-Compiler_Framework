@@ -5,6 +5,12 @@
 # Framework legt Builds, Cache und Modelle dort an, wenn sie gebraucht werden (Einstellungen output_dir,
 # cache_dir, models_dir); persönlicher Zustand liegt in ~/.llm-framework des Benutzers.
 
+# Das Skript braucht bash; unter sh (dash) mit einer klaren Meldung abbrechen statt mit "Bad substitution".
+if [ -z "${BASH_VERSION:-}" ]; then
+    echo "install.sh braucht bash: sudo ./install.sh (oder sudo bash install.sh)" >&2
+    exit 1
+fi
+
 set -u
 
 # --- KONFIGURATION ---
@@ -36,18 +42,27 @@ check_root() {
     fi
 }
 
+# Die URL ohne benutzer:passwort@ (PIP_INDEX_URL eines Spiegels kann Zugangsdaten enthalten).
+redact_url() { echo "$1" | sed -E 's#://[^/@]*@#://***@#'; }
+
 wait_for_internet() {
     # HTTPS zum Paketindex statt ping: ICMP ist in vielen Netzen gesperrt, und pip braucht genau diesen Weg.
-    log_info "Prüfe Internetverbindung (HTTPS zu $PACKAGE_INDEX_URL)..."
+    # Geladen wird die kleine Projektseite von pip (<index>/pip/, etwa 100 KB), nicht die Startseite des Index
+    # (bei pypi.org über 40 MB, in 10 s nur mit schneller Leitung). Die URL geht über stdin an curl/wget statt auf
+    # die Kommandozeile, die jeder Benutzer mit ps sieht.
+    local probe shown
+    probe="${PACKAGE_INDEX_URL%/}/pip/"
+    shown="$(redact_url "$PACKAGE_INDEX_URL")"
+    log_info "Prüfe Internetverbindung (HTTPS zu $shown)..."
     if command -v curl &> /dev/null; then
-        curl -fsS --max-time 10 -o /dev/null "$PACKAGE_INDEX_URL" && return 0
+        printf 'url = "%s"\n' "$probe" | curl -fsS --max-time 10 -o /dev/null -K - && return 0
     elif command -v wget &> /dev/null; then
-        wget -q --timeout=10 --tries=1 -O /dev/null "$PACKAGE_INDEX_URL" && return 0
+        printf '%s\n' "$probe" | wget -q --timeout=10 --tries=1 -O /dev/null -i - && return 0
     else
         log_warn "Weder curl noch wget gefunden; die Internetprüfung wird übersprungen."
         return 0
     fi
-    log_error "$PACKAGE_INDEX_URL ist per HTTPS nicht erreichbar. Proxy? Dann mit 'sudo -E ./install.sh' starten, damit https_proxy erhalten bleibt (oder PIP_INDEX_URL auf einen erreichbaren Spiegel setzen)."
+    log_error "$shown ist per HTTPS nicht erreichbar. Proxy? Dann mit 'sudo -E ./install.sh' starten, damit https_proxy erhalten bleibt (oder PIP_INDEX_URL auf einen erreichbaren Spiegel setzen)."
 }
 
 # --- SCHRITT 1: PREREQUISITES (Docker & Python) ---

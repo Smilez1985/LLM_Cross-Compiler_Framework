@@ -50,7 +50,8 @@ class SearchWorker(QThread):
             self.error.emit(str(e))
 
 class FileListWorker(QThread):
-    finished = Signal(list)
+    """Checks the licence and lists the files of a repository: both are network calls, never on the GUI thread."""
+    finished = Signal(dict, list)
     error = Signal(str)
 
     def __init__(self, manager, repo_id, token=None):
@@ -61,8 +62,9 @@ class FileListWorker(QThread):
 
     def run(self):
         try:
+            licence = self.manager.check_license(self.repo_id)
             files = self.manager.list_repo_files(self.repo_id, self.token)
-            self.finished.emit(files)
+            self.finished.emit(licence, files)
         except Exception as e:
             self.error.emit(str(e))
 
@@ -84,6 +86,11 @@ class DownloadWorker(QThread):
             else: self.error.emit("Download returned None (Check logs)")
         except Exception as e:
             self.error.emit(str(e))
+
+def _running(*workers) -> bool:
+    """A worker may only be replaced once its thread has ended: PySide6 aborts the whole program when a QThread
+    object is destroyed while its thread still runs."""
+    return any(w is not None and w.isRunning() for w in workers)
 
 # --- DIALOGS ---
 
@@ -183,6 +190,7 @@ class HuggingFaceWindow(QMainWindow):
         self.setWindowTitle("Hugging Face Model Hub")
         self.resize(1000, 700)
         self.all_results = [] 
+        self.worker = self.list_worker = self.dl_worker = None
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -225,7 +233,7 @@ class HuggingFaceWindow(QMainWindow):
 
     def start_search(self):
         query = self.search_edit.text()
-        if not query: return
+        if not query or _running(self.worker): return  # Enter while a search runs (only the button is disabled)
         
         self.status_label.setText("Searching Hugging Face...")
         self.search_btn.setEnabled(False)
@@ -278,6 +286,9 @@ class HuggingFaceWindow(QMainWindow):
             self.table.setItem(row, 3, item)
 
     def on_download_request(self, row, col):
+        if _running(self.list_worker, self.dl_worker):
+            self.status_label.setText("Please wait: a file list or a download is still running.")
+            return
         model_id = self.table.item(row, 0).text()
         access_item = self.table.item(row, 3)
         is_gated = "🔒" in access_item.text()
@@ -291,20 +302,22 @@ class HuggingFaceWindow(QMainWindow):
             else:
                 return # Cancelled
         
-        # Check license via ModelManager (Ethics Gate)
-        lic_info = self.model_manager.check_license(model_id)
-        if lic_info.get("is_restrictive"):
-            res = QMessageBox.warning(self, "License Warning", f"{lic_info['message']}\nContinue anyway?", QMessageBox.Yes | QMessageBox.No)
-            if res == QMessageBox.No: return
-
-        # List files first
-        self.status_label.setText(f"Listing files for {model_id}...")
+        # Licence check (Ethics Gate) and file list in a worker thread; the warning follows in show_file_selection
+        self.status_label.setText(f"Checking the licence and listing files for {model_id}...")
         self.list_worker = FileListWorker(self.model_manager, model_id, token)
-        self.list_worker.finished.connect(lambda files: self.show_file_selection(model_id, files, token))
+        self.list_worker.finished.connect(
+            lambda licence, files: self.show_file_selection(model_id, files, token, licence))
         self.list_worker.error.connect(lambda e: QMessageBox.critical(self, "Error", str(e)))
         self.list_worker.start()
 
-    def show_file_selection(self, model_id, files, token):
+    def show_file_selection(self, model_id, files, token, licence=None):
+        if licence and licence.get("is_restrictive"):
+            box = QMessageBox(QMessageBox.Warning, "License Warning",
+                              f"{licence.get('message', '')}\nContinue anyway?", QMessageBox.Yes | QMessageBox.No, self)
+            box.setTextFormat(Qt.PlainText)  # the licence name comes from the model card
+            if box.exec() != QMessageBox.Yes:
+                self.status_label.setText("Ready.")
+                return
         self.status_label.setText("Select file to download...")
         dlg = FileSelectionDialog(model_id, files, self)
         if dlg.exec() and dlg.selected_file:

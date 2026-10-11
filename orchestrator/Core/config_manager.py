@@ -587,12 +587,19 @@ class ConfigManager:
         data = {}
         
         if config_file.exists():
+            # A file that cannot be read was not loaded either: overwriting it would replace all its settings with
+            # the few changed at runtime (e.g. the first-run language), so it is left alone.
             try:
                 with open(config_file, 'r') as f:
                     loaded = yaml.safe_load(f)
-                    if loaded: data = loaded
-            except: pass
-            
+            except (OSError, ValueError, yaml.YAMLError) as e:
+                self.logger.error(f"Configuration not saved: {config_file} cannot be read ({e}); fix or move it.")
+                return False
+            if loaded is not None and not isinstance(loaded, dict):
+                self.logger.error(f"Configuration not saved: {config_file} does not contain settings (key: value).")
+                return False
+            data = loaded or {}
+
         with self._lock:
             persist_keys = [
                 "language", "ai_security_level", "secret_storage", "secret_helper", "docker_registry",
