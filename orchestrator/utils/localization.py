@@ -247,9 +247,8 @@ class LocalizationManager(QObject):
             "crawl.done.stopped": "Deep Ingest stopped: {pages} pages ({chunks} chunks) are kept and searchable.",
             "crawl.done.stopped_empty": "Deep Ingest stopped: nothing was stored.",
             "crawl.done.failure": "Deep Ingest failed: nothing was stored. See the log.",
-            "crawl.title.success": "Deep Ingest Complete",
-            "crawl.title.partial": "Deep Ingest Partly Complete",
-            "crawl.title.failure": "Deep Ingest Failed",
+            "crawl.finish_waits": "Deep Ingest is still running. The module can be created once it has finished or "
+                                  "was stopped, so that a knowledge snapshot holds every page.",
 
             # Input history (recent values in the input fields, per user)
             "menu.clear_history": "Clear Input History...",
@@ -483,9 +482,8 @@ class LocalizationManager(QObject):
                                    "sind durchsuchbar."),
             "crawl.done.stopped_empty": "Deep Ingest gestoppt: Es wurde nichts gespeichert.",
             "crawl.done.failure": "Deep Ingest fehlgeschlagen: Es wurde nichts gespeichert. Siehe Protokoll.",
-            "crawl.title.success": "Deep Ingest abgeschlossen",
-            "crawl.title.partial": "Deep Ingest teilweise abgeschlossen",
-            "crawl.title.failure": "Deep Ingest fehlgeschlagen",
+            "crawl.finish_waits": "Deep Ingest läuft noch. Das Modul kann erstellt werden, sobald er beendet oder "
+                                  "gestoppt ist, damit ein Wissens-Snapshot jede Seite enthält.",
 
             # Eingabeverlauf (zuletzt verwendete Werte in den Eingabefeldern, je Benutzer)
             "menu.clear_history": "Eingabeverlauf löschen...",

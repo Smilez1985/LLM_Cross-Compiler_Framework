@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QDialogButtonBox, QMessageBox, QComboBox, QPushButton, QSizePolicy,
-    QFormLayout, QTextEdit, QSpinBox,
+    QFormLayout, QTextEdit, QSpinBox, QDoubleSpinBox,
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QWidget
 )
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
@@ -230,8 +230,21 @@ def list_provider_models(config: Any, secrets: Any, provider: str) -> List[str]:
     return [m.id for m in LLMClient(config, secrets).list_models(provider)]
 
 
-class _ModelListSignals(QObject):
-    done = Signal(int, object, str)  # request number, model ids (None on failure), message
+class _ModelListRelay(QObject):
+    """Hands model lists from worker threads to the GUI thread. A single instance, created in the GUI thread and
+    never deleted: a worker never emits on, or frees, a Qt object that a closed dialog took with it, and the
+    queued connection runs the dialog's slot in the GUI thread (or not at all once the dialog is gone)."""
+    done = Signal(object, object, str)  # request token, model ids (None on failure), message
+
+
+_model_list_relay: Optional[_ModelListRelay] = None
+
+
+def model_list_relay() -> _ModelListRelay:
+    global _model_list_relay
+    if _model_list_relay is None:
+        _model_list_relay = _ModelListRelay()
+    return _model_list_relay
 
 
 EFFORT_CHOICES = [("Provider default", ""), ("Low", "low"), ("Medium", "medium"), ("High", "high"),
@@ -258,7 +271,8 @@ class AIConfigurationDialog(QDialog):
         self.framework = framework
         self.i18n = get_i18n()
         self._result_config: Dict[str, Any] = {}
-        self._model_request = 0
+        self._model_request = object()  # token of the model list that may still change the combo
+        model_list_relay().done.connect(self._on_models_listed, Qt.QueuedConnection)
         self.catalog = load_catalog(user_dir=getattr(self._config(), "config_dir", None))
 
         self.setWindowTitle("Configure AI Agent (Ditto)")
@@ -473,8 +487,7 @@ class AIConfigurationDialog(QDialog):
     def _refresh_models(self):
         """Loads the provider's model list in a worker thread; on failure the free text stays as it is."""
         preset = self._preset()
-        self._model_request += 1
-        request = self._model_request
+        request = self._model_request = object()
         if preset is None or not preset.live_models:
             self.lbl_models.setText("")
             return
@@ -486,29 +499,22 @@ class AIConfigurationDialog(QDialog):
             overrides["ai_anthropic_workspace_id"] = self._workspace_id(preset)  # also when cleared
         config = SettingsOverlay(self._config(), overrides)
         secrets = _SecretsOverlay(self._secrets(), preset.secret, self.txt_api_key.text().strip())
-        lister = self.model_lister
-        # No parent: the worker emits on this object, so it must not die with the dialog (closing the dialog while
-        # the list loads would free it under the worker). The connection ends when the dialog is destroyed.
-        signals = _ModelListSignals()
-        signals.done.connect(self._on_models_listed)
+        lister, relay = self.model_lister, model_list_relay()
         self.lbl_models.setText("Loading the provider's models...")
 
-        def work():
+        def work():  # touches no Qt object of the dialog; the relay lives as long as the application
             try:
                 ids, message = list(lister(config, secrets, preset.id)), ""
             except Exception as e:  # LLMError text is already redacted and readable
                 text = redact_secrets(str(e)).strip()
                 ids, message = None, (text.splitlines()[0][:300] if text else type(e).__name__)
-            try:
-                signals.done.emit(request, ids, message)
-            except RuntimeError:
-                pass  # the dialog was closed meanwhile
+            relay.done.emit(request, ids, message)
 
         threading.Thread(target=work, name="ai-model-list", daemon=True).start()
 
-    def _on_models_listed(self, request: int, ids, message: str):
-        if request != self._model_request:
-            return  # the provider changed meanwhile
+    def _on_models_listed(self, request: object, ids, message: str):
+        if request is not self._model_request:
+            return  # another dialog's list, or the provider changed meanwhile
         if ids is None:
             self.lbl_models.setText(f"Live model list unavailable ({message}). Type the model id.")
             return
@@ -718,12 +724,14 @@ def select_recent(combo: QComboBox, recent: Sequence[str]) -> bool:
 class URLInputDialog(QDialog):
     """
     Dialog for inputting multiple URLs for RAG crawling.
-    Supports Deep Ingest options (depth, PDFs, delay). There is no switch for robots.txt or the other opt-outs:
-    the site's machine-readable reservations decide, not the user.
+    Supports Deep Ingest options (depth, PDFs, delay), preset from the settings crawler_max_depth,
+    crawler_download_pdfs and crawler_rate_limit of config. There is no switch for robots.txt or the other
+    opt-outs: the site's machine-readable reservations decide, not the user.
     recent: URLs crawled before (newest first), offered in an editable list.
     """
-    def __init__(self, parent=None, recent: Sequence[str] = ()):
+    def __init__(self, parent=None, recent: Sequence[str] = (), config: Any = None):
         super().__init__(parent)
+        setting = config.get if config is not None else (lambda key, default: default)
         self.setWindowTitle("Deep Ingest: Add Documentation URLs")
         self.resize(600, 400)
 
@@ -767,23 +775,22 @@ class URLInputDialog(QDialog):
         grp_options = QGroupBox("Crawl Options")
         opt_layout = QFormLayout()
 
-        # Max Depth
         self.spin_depth = QSpinBox()
-        self.spin_depth.setRange(1, 5)
-        self.spin_depth.setValue(2)
-        self.spin_depth.setToolTip("How many levels deep to follow links")
+        self.spin_depth.setRange(0, 5)
+        self.spin_depth.setValue(int(setting("crawler_max_depth", 2)))
+        self.spin_depth.setToolTip("How many levels deep to follow links (0: only the entered pages)")
         opt_layout.addRow("Max Depth:", self.spin_depth)
 
-        # Download PDFs
         self.chk_pdfs = QCheckBox("Download and parse PDF files")
-        self.chk_pdfs.setChecked(True)
+        self.chk_pdfs.setChecked(bool(setting("crawler_download_pdfs", True)))
         opt_layout.addRow("", self.chk_pdfs)
 
-        # Rate Limiting
-        self.spin_delay = QSpinBox()
+        self.spin_delay = QDoubleSpinBox()
         self.spin_delay.setRange(0, 10)
-        self.spin_delay.setValue(1)
-        self.spin_delay.setSuffix(" sec")
+        self.spin_delay.setDecimals(2)
+        self.spin_delay.setSingleStep(0.5)
+        self.spin_delay.setValue(float(setting("crawler_rate_limit", 1.0)))
+        self.spin_delay.setSuffix(" s")
         self.spin_delay.setToolTip("Delay between requests (be polite!)")
         opt_layout.addRow("Request Delay:", self.spin_delay)
 
@@ -885,7 +892,7 @@ def show_crawl_notice_once(parent, config, announcer: Optional[Callable[[str], A
     CrawlNoticeDialog(parent, announcer).exec()
     try:
         if notice is not None:
-            notice.acknowledge("gui")
+            notice.acknowledge()
     except OSError as e:
         logging.getLogger(__name__).warning(f"Could not remember the Deep Ingest notice ({e}); it is shown again.")
 
