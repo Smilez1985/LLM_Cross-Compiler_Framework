@@ -61,6 +61,14 @@ def message_boxes(monkeypatch):
     shown = []
 
     class RecordingMessageBox:
+        Yes, No = dialogs.QMessageBox.Yes, dialogs.QMessageBox.No
+        answer, asked = dialogs.QMessageBox.Yes, []  # questions are answered, not counted as messages
+
+        @classmethod
+        def question(cls, parent, title, text, *args):
+            cls.asked.append(text)
+            return cls.answer
+
         @staticmethod
         def warning(parent, title, text, *args):
             shown.append(("warning", title))
@@ -489,6 +497,30 @@ class TestAIConfigurationDialog:
         window.close()
         without = AIConfigurationDialog(None)
         assert not without.btn_sign_in.isEnabled() and without._sign_in() is None
+
+    def test_a_key_for_plain_http_to_another_computer_needs_a_yes(self, qapp, tmp_path, memory_keyring,
+                                                                  message_boxes):
+        from orchestrator.Core.secrets_manager import SecretsManager
+        vault = SecretsManager(tmp_path / "state")
+        assert vault.initialize(), vault.storage_error
+        fw = FakeFramework(ConfigManager(tmp_path), vault)
+        dialogs.QMessageBox.answer = dialogs.QMessageBox.No
+
+        def save(url):
+            dlg = AIConfigurationDialog(fw)
+            select_provider(dlg, "custom")
+            dlg.cb_model.setCurrentText("my-model")
+            dlg.txt_base_url.setText(url)
+            dlg.txt_api_key.setText("custom-" + "secret-0123456789")
+            dlg._save_config()
+            return dlg
+
+        assert save("http://192.0.2.10:8000/v1").result() != dialogs.QDialog.Accepted
+        assert vault.list_secrets() == [] and "192.0.2.10:8000" in dialogs.QMessageBox.asked[0]
+        dialogs.QMessageBox.answer = dialogs.QMessageBox.Yes
+        assert save("http://192.0.2.10:8000/v1").result() == dialogs.QDialog.Accepted and vault.list_secrets()
+        assert save("http://127.0.0.1:8000/v1").result() == dialogs.QDialog.Accepted
+        assert len(dialogs.QMessageBox.asked) == 2 and message_boxes == [], "this computer: no question"
 
     def test_a_key_typed_here_replaces_the_method_a_sign_in_remembered(self, qapp, tmp_path, framework,
                                                                       message_boxes):

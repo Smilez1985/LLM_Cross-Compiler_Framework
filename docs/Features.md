@@ -289,7 +289,8 @@ are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what 
   a key in an environment variable stays in use until you unset it.
 - **No usable keyring:** the panel shows the storage chooser (passphrase, credential helper, or the unencrypted key
   file after a confirmation), and the GUI shows the same chooser at startup before it gives up; a passphrase is asked
-  in a dialog. The CLI exits with code 5 and names `llm-cli ditto auth storage --use ...`. Nothing is picked for you.
+  in a dialog. A choice that cannot open the existing vault (one protected by the locked keyring) is not kept. The
+  CLI exits with code 5 and names `llm-cli ditto auth storage --use ...`. Nothing is picked for you.
 - **Responsive:** every vault, keyring or network call of the panel and of the chat header runs in a worker thread.
 
 ### Calls, retries and fallback

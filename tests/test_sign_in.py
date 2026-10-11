@@ -1042,3 +1042,34 @@ class TestGuiHelpers:
         with pytest.raises(SystemExit):
             main_window.MainOrchestrator(tmp_path)
         assert offered == ["storage.keyring_unavailable"] * 2 and "secret_storage" in shown[0]
+
+    def test_a_startup_choice_that_cannot_open_the_vault_is_not_kept(self, qapp, tmp_path, monkeypatch):
+        # The keyring is locked for a moment, the vault is protected by it, and the user picks a passphrase: the
+        # vault cannot be opened that way, and the saved choice used to break every later start as well.
+        from orchestrator.Core import vault_key
+        from orchestrator.gui import main_window, sign_in
+        (tmp_path / "cfg").mkdir()
+        (tmp_path / "cfg" / "config.yml").write_text("language: de\n", encoding="utf-8")
+        errors = [vault_key.keyring_unavailable("it did not answer within 3 s"),
+                  vault_key.StorageUnavailable("storage.mode_mismatch", "The vault is protected with 'keyring'.")]
+
+        class FailingFramework:
+            def __init__(self):
+                self.config = ConfigManager(tmp_path / "cfg")
+                self.init_error = errors.pop(0)
+
+            def initialize(self):
+                return False
+
+        def choose(self):
+            self.chooser.rb_passphrase.setChecked(True)
+            self.chooser.btn_use.click()
+            return self.result()
+
+        monkeypatch.setattr(main_window, "FrameworkManager", FailingFramework)
+        monkeypatch.setattr(sign_in.StorageChooserDialog, "exec", choose)
+        monkeypatch.setattr(main_window.QMessageBox, "critical", lambda *args: None)
+        with pytest.raises(SystemExit):
+            main_window.MainOrchestrator(tmp_path)
+        assert errors == [], "the choice was tried"
+        assert (tmp_path / "cfg" / "config.yml").read_text(encoding="utf-8") == "language: de\n"

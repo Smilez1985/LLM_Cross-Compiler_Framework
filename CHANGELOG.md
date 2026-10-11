@@ -81,7 +81,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the first usable one marked "Recommended"; a key form with the key page, the extra fields, **Check**,
   **Save** and **Sign out**; a status line ("Signed in as ...", "Not signed in", "Using key from environment
   variable X"); and, without a usable keyring, the storage chooser, which the GUI also shows at startup before
-  it gives up. A vault protected by a passphrase asks for it in a dialog. Every vault, keyring and network call
+  it gives up (a choice there that cannot open the existing vault is not kept, so the next start still works). A
+  vault protected by a passphrase asks for it in a dialog. Every vault, keyring and network call
   runs in a worker thread, and an older read that finishes late never replaces a newer state. Ditto's chat header
   shows the access in use, for example "Local · Ollama". A key typed in the AI settings' own key field replaces a
   method a sign-in remembered (such as the `ant` profile), so it is not left unused.
@@ -217,10 +218,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Sign-in never takes a secret from the command line (`ditto login` has no option for a key, and an unknown
   provider name or `--method` value that looks like a key is not echoed), shows a key only as its last four
   characters (also in `auth status --json`, and as `REDACTED` when a server's error text or account name repeats
-  it, in Ditto's chat errors too), asks before a key goes over plain `http://` to another computer (in the
-  sign-in panel too; `--yes` in scripts) and never chooses how the vault is protected: `--insecure-storage` never
-  replaces a protection that works, nor a credential helper or passphrase you chose. A key with a space, a line
-  break or an invisible character inside is refused before anything is sent or stored.
+  it, in Ditto's chat errors too), asks before a key goes over plain `http://` to another computer (also in the
+  sign-in panel and the AI settings' key field; `--yes` in scripts) and never chooses how the vault is protected:
+  `--insecure-storage` never replaces a protection that works, nor a credential helper or passphrase you chose. A
+  key with a space, a line break or an invisible character inside is refused before anything is sent or stored.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
