@@ -531,18 +531,21 @@ def read_manifest(data: bytes) -> PackManifest:
 #                     (scrypt), never both (age keeps a passphrase stanza alone)
 #   pack.zip.age.sig  the sender's Ed25519 signature (the pack.sig format, with the public key) of
 #                     "lcf-encrypted-pack/v2 signature\n" followed by the bytes of pack.zip.age
-# The age and rage tools open it too: unzip it, then `age -d -i key.txt -o pack.zip pack.zip.age`.
+# The age and rage tools open it too, with the passphrase or an identity file of their own (the identity UserKeys
+# creates never leaves the secrets store): unzip it, then `age -d -i key.txt -o pack.zip pack.zip.age`.
 #
-# Reading checks, before anything is decrypted: the zip layout and sizes, the age header (a scrypt stanza must be
-# alone and its work factor at most 2^MAX_SCRYPT_LOG_N: pyrage's own limit follows the machine's speed and lets
-# through factors that need more memory than the machine has, which aborts the process), the signature, and the
-# sender when trusted senders are given.
+# Reading checks, before anything is decrypted: the zip layout and sizes, the age header (at most _MAX_STANZAS
+# stanzas, because rage's header processing grows with the square of their number; a scrypt stanza must be alone
+# and its work factor at most 2^MAX_SCRYPT_LOG_N: pyrage's own limit follows the machine's speed and lets through
+# factors that need more memory than the machine has, which aborts the process), the signature, and the sender
+# when trusted senders are given.
 
 AGE_NAME = "pack.zip.age"
 AGE_SIG_NAME = AGE_NAME + ".sig"
 MIN_PASSPHRASE = 12
 MAX_RECIPIENTS = 64
 MAX_SCRYPT_LOG_N = 20  # 1 GiB of memory (scrypt with r = 8 needs 2^log_n KiB)
+_MAX_STANZAS = MAX_RECIPIENTS + 4  # rage adds a grease stanza to every file
 _OLD_ENCRYPTED_MAGIC = b"lcf-encrypted-pack/v1\n"  # the format of development versions, no longer read
 _AGE_MAGIC = b"age-encryption.org/v1\n"
 _MAX_AGE_HEADER = 64 * 1024
@@ -557,7 +560,8 @@ def is_encrypted_pack(source: Union[Path, bytes]) -> bool:
             if f.read(len(_OLD_ENCRYPTED_MAGIC)) == _OLD_ENCRYPTED_MAGIC:
                 return True
             with zipfile.ZipFile(f) as zf:
-                return AGE_NAME in zf.namelist()
+                names = zf.namelist()
+                return AGE_NAME in names and MANIFEST_NAME not in names  # a pack with a manifest is a plain pack
     except (OSError, ValueError, EOFError, zipfile.BadZipFile):
         return False
 
@@ -568,6 +572,9 @@ def _age_header(blob: bytes) -> bool:
     if not blob.startswith(_AGE_MAGIC) or end < 0:
         raise PackError("The encrypted pack is damaged (no age header).")
     stanzas = [line.split(b" ")[1:] for line in blob[:end].split(b"\n") if line.startswith(b"-> ")]
+    if len(stanzas) > _MAX_STANZAS:
+        raise PackError(f"The encrypted pack is damaged (too many recipient stanzas; at most {MAX_RECIPIENTS} "
+                        "recipients).")
     scrypt = [args for args in stanzas if args[0] == b"scrypt"]
     if not scrypt:
         return False
@@ -638,7 +645,10 @@ def decrypt_pack(blob: bytes, *, identity: Optional["pyrage.x25519.Identity"] = 
         raise PackError("This pack is encrypted to keys, not to a passphrase.")
     try:
         data = pyrage.passphrase.decrypt(age, passphrase) if scrypt else pyrage.decrypt(age, [identity])
-    except pyrage.DecryptError:
+    except pyrage.DecryptError as e:
+        if "Excessive work" in str(e):  # rage's own limit: 2^4 above what this computer does in a second
+            raise PackError("This computer is too slow for the scrypt work factor of the passphrase; ask the sender "
+                            "to encrypt the pack to your key (llm-cli zoo keys) instead.") from None
         raise PackError("This pack is not encrypted to your key, or the passphrase is wrong.") from None
     return data, signature.key_id
 
@@ -668,7 +678,7 @@ class UserKeys:
         """The public keys as text to give to others (they are not secret)."""
         signing = self.signing_key().public_key()
         return (f"# LCF public keys, key id {key_id(signing)}. Not secret: give them to people who send you\n"
-                f"# encrypted packs (the age recipient, also for the age and rage tools) or check your signed packs.\n"
+                f"# encrypted packs (llm-cli zoo export --to) or check your signed packs.\n"
                 f"{self.age_identity().to_public()}\n{public_key_text(signing)}\n")
 
     def _key(self, name: str, new, parse, by_hand: str):
@@ -687,6 +697,8 @@ class UserKeys:
                 if not stored and not self._secrets.set_secret(name, new()):
                     raise PackError("The new key could not be saved in the secrets store.")
                 stored = stored or self._secrets.get_secret(name)
+                if not stored:
+                    raise PackError("The new key could not be read back from the secrets store.")
         try:
             return parse(str(stored).strip())
         except (ValueError, pyrage.IdentityError):
