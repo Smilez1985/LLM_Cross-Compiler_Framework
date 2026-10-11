@@ -588,7 +588,8 @@ in `evals/retrieval/corpus/` (a cases file names its corpus folder with `corpus:
 - `rerank` needs a reranker. With `rag_reranker: off`, or `auto` on a computer with less than 6 GB RAM, there is
   none, and the command stops with exit code 2 and the reason; set `rag_reranker` to a model id to grade one
   anyway. A reranker that cannot be loaded stops the run with exit code 1, and a search in which the reranker did
-  not run counts as failed. The floor is `rag_rerank_min_score` (default 0: the reranker's calibrated floor).
+  not run counts as failed. The floor is `rag_rerank_min_score` (not set by default: the reranker's calibrated
+  floor; 0: none).
 - A corpus that cannot be read, or a case that expects a document the corpus does not have, stops with exit
   code 2. If the corpus cannot be indexed (for example in offline mode before the embedding model was downloaded), the
   command exits with code 1.

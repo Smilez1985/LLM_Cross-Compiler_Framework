@@ -1,7 +1,8 @@
 """Retrieval quality on top of the hybrid search: the cross-encoder reranker (relevance mapping, a cache keyed by
 text, degrading when it cannot run), the relevance floor, the excerpt budget, oversized code blocks and tables,
-identifier-aware BM25 with its encoding stamp, and idle unloading of models. Fake models only, no download."""
+identifier-aware BM25, and idle unloading of models. Fake models only, no download."""
 
+import logging
 import math
 import re
 import socket
@@ -12,12 +13,12 @@ import pytest
 
 from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.rag.chunking import chunk_document
-from orchestrator.rag.embeddings import SPARSE_ENCODING, SPARSE_MODEL, _FastEmbedBase, expand_identifiers
-from orchestrator.rag.errors import EmbeddingError, EmbeddingModelNotCached, KnowledgeBaseError, SparseEncodingMismatch
+from orchestrator.rag.embeddings import SPARSE_MODEL, _FastEmbedBase, expand_identifiers
+from orchestrator.rag.errors import EmbeddingError, EmbeddingModelNotCached
 from orchestrator.rag.retrieval import (CUT_MARK, DEFAULT_CPU_RERANKER, DEFAULT_GPU_RERANKER, DEFAULT_MIN_SCORE,
                                         RERANKER_REGISTRY, FastEmbedReranker, pack_excerpts, relevance,
                                         select_reranker)
-from test_rag import DOCS, FakeEmbedder, FakeSparse, ingest_all
+from test_rag import FakeEmbedder, FakeSparse, ingest_all
 
 
 class FakeReranker:
@@ -62,6 +63,7 @@ def knowledge(tmp_path, monkeypatch):
     created = []
 
     def factory(embedder=None, sparse=None, reranker=None, **settings):
+        settings.setdefault("rag_model_idle_minutes", 0)  # no idle release unless a test asks for it
         config = ConfigManager(tmp_path / "configs")
         for key, value in settings.items():
             assert config.set(key, value), key
@@ -69,7 +71,6 @@ def knowledge(tmp_path, monkeypatch):
         rag = RAGManager(framework, embedder=embedder or FakeEmbedder(), sparse_embedder=sparse or FakeSparse(),
                          reranker=reranker)
         rag.idle_close_seconds = 0
-        rag.model_idle_seconds = 0
         created.append(rag)
         return rag
 
@@ -297,6 +298,34 @@ def test_the_floor_may_leave_nothing_and_can_be_configured(knowledge):
     assert rag.search("model memory", limit=4, rerank=True) == []  # no excerpt beats an irrelevant one
 
 
+def test_unset_floor_is_the_models_and_zero_turns_it_off(knowledge, tmp_path):
+    """0 used to mean "the model's floor", so the floor could not be switched off at all."""
+    rag = knowledge(reranker=FakeReranker(LICENSE_FIRST))
+    ingest_all(rag)
+    assert rag.config.get("rag_rerank_min_score") is None
+    assert [h.score for h in rag.search("model memory", limit=4, rerank=True)] == [0.9, 0.5]  # floor 0.2
+    rag.close()
+
+    (tmp_path / "configs" / "config.yml").write_text("rag_rerank_min_score: 0\n")  # a config file still loads
+    rag = knowledge(reranker=FakeReranker(LICENSE_FIRST))
+    assert rag.config.get("rag_rerank_min_score") == 0
+    assert [h.score for h in rag.search("model memory", limit=4, rerank=True)] == [0.9, 0.5, 0.05, 0.05]
+
+
+def test_a_floor_without_a_value_is_unset_not_invalid(knowledge, tmp_path, caplog):
+    """`rag_rerank_min_score:` without a value (YAML null) is the documented unset state: no "invalid value"
+    warning, and setting None at run time goes back to the model's floor."""
+    (tmp_path / "configs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "configs" / "config.yml").write_text("rag_rerank_min_score:\n")
+    with caplog.at_level(logging.WARNING):
+        rag = knowledge(reranker=FakeReranker(LICENSE_FIRST), rag_rerank_min_score=0)
+    assert "rag_rerank_min_score" not in caplog.text
+    ingest_all(rag)
+    assert len(rag.search("model memory", limit=4, rerank=True)) == 4  # 0: no floor
+    assert rag.config.set("rag_rerank_min_score", None)
+    assert [h.score for h in rag.search("model memory", limit=4, rerank=True)] == [0.9, 0.5]  # the model's floor
+
+
 def test_default_and_off_switch(knowledge):
     reranker = FakeReranker(LICENSE_FIRST)
     rag = knowledge(reranker=reranker)
@@ -311,20 +340,22 @@ def test_default_and_off_switch(knowledge):
     assert len(reranker.calls) == 1
 
 
-def test_a_failing_reranker_keeps_the_fused_order_and_is_retried_later(knowledge):
-    reranker = FakeReranker(LICENSE_FIRST, fail=EmbeddingModelNotCached("The reranking model x is not in /cache"))
-    rag = knowledge(reranker=reranker)
+def test_a_failing_reranker_keeps_the_fused_order_until_the_setting_changes(knowledge, monkeypatch):
+    import orchestrator.Core.rag_manager as rm
+
+    failing = FakeReranker(LICENSE_FIRST, fail=EmbeddingModelNotCached("The reranking model x is not in /cache"))
+    rerankers = iter([failing, FakeReranker(LICENSE_FIRST)])
+    monkeypatch.setattr(rm, "create_reranker", lambda spec, cache_dir, offline: next(rerankers))
+    rag = knowledge(rag_reranker=DEFAULT_CPU_RERANKER)
     ingest_all(rag)
     fused = [h.source for h in rag.search("model memory", limit=3, rerank=False)]
 
     assert [h.source for h in rag.search("model memory", limit=3, rerank=True, strict=True)] == fused
-    assert "not in /cache" in rag.last_error
+    assert "not in /cache" in rag.last_error and "next start" in rag.last_error
     rag.search("model memory", limit=3, rerank=True)
-    assert len(reranker.calls) == 1  # not retried at once
-    rag._rerank_failed_at -= 301
-    reranker.fail = None
+    assert len(failing.calls) == 1 and rag.reranker() is None  # not tried again in this run
+    rag.config.set("rag_reranker", DEFAULT_GPU_RERANKER)  # a changed setting tries again
     assert rag.search("model memory", limit=3, rerank=True)[0].source == "https://docs.example/license"
-    assert len(reranker.calls) == 2 and rag._rerank_failed_at is None
 
 
 def test_an_unknown_reranker_keeps_the_fused_order(knowledge):
@@ -332,7 +363,7 @@ def test_an_unknown_reranker_keeps_the_fused_order(knowledge):
     ingest_all(rag)
     assert rag.search("model memory", limit=2, rerank=True)
     assert "Unknown reranker" in rag.last_error
-    assert rag.reranker_info()["model"] == "" and "Unknown reranker" in rag.reranker_info()["reason"]
+    assert rag.reranker() is None and "Unknown reranker" in rag.reranker_reason
 
 
 def test_candidates_are_deduplicated_and_pooled_before_reranking(knowledge):
@@ -359,15 +390,14 @@ def test_the_reranker_reads_title_section_and_the_start_of_the_content(knowledge
     assert max(len(t) for t in texts) == len("Guide > Install\n") + 1500  # long chunks are cut for the model
 
 
-def test_prepare_models_and_status_cover_the_reranker(knowledge):
+def test_prepare_models_covers_the_reranker_unless_it_is_off(knowledge):
     reranker = FakeReranker()
     rag = knowledge(reranker=reranker)
     assert rag.prepare_models() and reranker.prepared == 1
-    assert rag.get_status()["reranker"] == {"model": "fake/reranker", "reason": "provided by the caller",
-                                            "min_score": 0.2, "default": False}
+    assert rag.reranker() is reranker and rag.reranker(None) is None  # rag_rerank_default is off
     rag.config.set("rag_reranker", "off")
     assert rag.prepare_models() and reranker.prepared == 1
-    assert rag.reranker_info()["model"] == "" and "off" in rag.reranker_info()["reason"]
+    assert rag.reranker() is None and "off" in rag.reranker_reason
 
 
 def test_the_configured_reranker_is_created_from_the_registry(knowledge, monkeypatch):
@@ -416,13 +446,14 @@ def test_ditto_packs_excerpts_into_a_third_of_the_context(tmp_path):
 
 def test_ditto_reranks_only_build_recommendations(tmp_path, monkeypatch):
     """Build-log tails and the module search lost relevant excerpts to the reranker in the retrieval evaluation
-    (tags log and callsite), so those follow rag_rerank_default (None); recommendations gained."""
+    (tags log and callsite), so those keep the hybrid order even with rag_rerank_default (it covers chat and MCP
+    searches only); recommendations gained."""
     from test_ditto import make_ditto
 
     class Stop(Exception):
         pass
 
-    ditto = make_ditto(tmp_path)
+    ditto = make_ditto(tmp_path, rag_rerank_default=True)
     seen = []
     monkeypatch.setattr(ditto, "_knowledge", lambda query, limit=5, rerank=None: seen.append(rerank) or "")
     monkeypatch.setattr(ditto, "_structured", lambda *a, **k: (_ for _ in ()).throw(Stop()))
@@ -433,7 +464,7 @@ def test_ditto_reranks_only_build_recommendations(tmp_path, monkeypatch):
                                                         notes={})):
         with pytest.raises(Stop):
             call()
-    assert seen == [None, None, True]
+    assert seen == [False, False, True]
 
 
 # --- oversized code blocks and tables -----------------------------------------------------------------------------
@@ -512,13 +543,20 @@ def test_ingest_splits_blocks_beyond_the_model_context(knowledge):
     ("pip install rknn_toolkit2", "rknn toolkit2"),
     ("rknnToolkitLite and XMLParser", "rknn Toolkit Lite XML Parser"),
     ("CMAKE_CUDA_ARCHITECTURES=87 and CMAKE_CUDA_ARCHITECTURES", "CMAKE CUDA ARCHITECTURES"),
-    ("-DNDEBUG", "NDEBUG"),
+    ("-DNDEBUG=1", "NDEBUG"),
+    ("-DBUILD_SHARED_LIBS", "BUILD_SHARED_LIBS BUILD SHARED LIBS"),
+    ("-D_FORTIFY_SOURCE=2 -D_GNU_SOURCE", "_FORTIFY_SOURCE FORTIFY SOURCE _GNU_SOURCE GNU"),  # no stray "D"
+    # Version numbers are no search words: no fragments of one or two digits (the identifier itself stays).
+    ("x86_64 wheels for manylinux_2_17", "x86 manylinux"),
+    ("manylinux2014_x86_64 and gcc_12", "manylinux2014 x86 gcc"),
 ])
 def test_identifiers_get_their_parts(text, added):
     assert expand_identifiers(text) == f"{text}\n{added}"
 
 
-@pytest.mark.parametrize("text", ["plain words", "E2041 on the RK3588", "GPUs and PDFs", "Build-Container", ""])
+# Only a CMake-style definition loses its -D: -DEBUG is not "EBUG", -DNS not "NS" (nor is -DNDEBUG told apart).
+@pytest.mark.parametrize("text", ["plain words", "E2041 on the RK3588", "GPUs and PDFs", "Build-Container", "",
+                                  "link with -DEBUG", "resolver -DNS", "-DNDEBUG"])
 def test_plain_text_is_unchanged(text):
     assert expand_identifiers(text) == text
 
@@ -533,7 +571,7 @@ def real_bm25(tmp_path):
 
 
 def test_real_bm25_matches_identifier_parts(real_bm25, knowledge):
-    assert real_bm25.model_id == SPARSE_ENCODING and real_bm25.model_name == SPARSE_MODEL
+    assert real_bm25.model_id == SPARSE_MODEL
     doc, = real_bm25.embed_passages(["Configure with -DGGML_CUDA=ON and install rknn_toolkit2."])
     for query in ("GGML_CUDA", "ggml cuda", "rknn toolkit2"):
         assert set(real_bm25.embed_query(query).indices) <= set(doc.indices), query
@@ -545,72 +583,26 @@ def test_real_bm25_matches_identifier_parts(real_bm25, knowledge):
     assert rag.search("GGML_CUDA")[0].source == "https://docs.example/flags"
 
 
-class OtherEncoding(FakeSparse):
-    """BM25 of a newer encoding: an extra term per text, so its vectors differ from FakeSparse's."""
-    model_id = "fake/bm25+v2"
+def test_keyword_vectors_without_identifier_parts_stay_valid_until_re_imported(real_bm25, knowledge, monkeypatch):
+    """Chunks imported before the identifier splitting (or by an earlier build) share the hashed BM25 vocabulary,
+    so they stay searchable in the same index without a migration; importing the document again adds the parts."""
+    import orchestrator.rag.embeddings as embeddings
 
-    def embed_passages(self, texts):
-        return super().embed_passages([t + " encodingtwo" for t in texts])
+    def keyword_ids(rag):
+        (record,) = rag._ensure_store().records(with_vectors=True)
+        return set(record.vector["bm25"].indices)
 
-
-def sparse_of(rag, source):
-    store = rag._ensure_store()
-    (record,) = [r for r in store.records(with_vectors=True) if r.payload["source"] == source]
-    return record.vector["bm25"], record.vector["dense"]
-
-
-def test_an_older_keyword_encoding_is_rebuilt_not_mixed(knowledge):
-    from qdrant_client import QdrantClient
-
-    from orchestrator.rag.store import KnowledgeStore
-
-    old = knowledge()
-    ingest_all(old)
-    old_sparse, old_dense = sparse_of(old, "https://docs.example/npu")
-    old.close()
-
-    client = QdrantClient(path=str(old.storage_dir))
-    try:
-        with pytest.raises(SparseEncodingMismatch, match="needs a rebuild"):  # no re-encoder: an error
-            KnowledgeStore(client, "framework_knowledge", "fake/concepts", 16, OtherEncoding.model_id).ensure()
-    finally:
-        client.close()
-
-    rag = knowledge(sparse=OtherEncoding())
-    new_sparse, new_dense = sparse_of(rag, "https://docs.example/npu")  # the RAG manager re-encodes
-    assert len(new_sparse.indices) == len(old_sparse.indices) + 1 and new_dense == pytest.approx(old_dense)
-    meta = rag._store.client.get_collection(rag._store.collection).config.metadata
-    assert meta["sparse_model"] == OtherEncoding.model_id
-    assert rag.search("what does E2041 mean")[0].source == "https://docs.example/e2041"
-    assert rag.get_status()["vector_count"] == len(DOCS)
-
-
-def test_a_snapshot_of_the_older_encoding_is_re_encoded_on_restore(knowledge):
-    old = knowledge()
-    ingest_all(old)
-    name = old.create_snapshot("before")
-    old.close()
-
-    rag = knowledge(sparse=OtherEncoding())
-    assert rag.restore_snapshot(name), rag.last_error
-    new_sparse, _ = sparse_of(rag, "https://docs.example/npu")
-    assert zlib_term("encodingtwo") in new_sparse.indices
-
-
-def test_restoring_another_encoding_without_a_re_encoder_is_refused(knowledge):
-    rag = knowledge()
-    ingest_all(rag)
-    name = rag.create_snapshot("before")
-    store = rag._ensure_store()
-    store.sparse_model = "fake/bm25+v2"
-    with pytest.raises(KnowledgeBaseError, match="another encoding"):
-        store.restore_file(rag.snapshot_dir / f"{name}.jsonl.gz")
-    assert store.count() == len(DOCS)  # nothing was deleted
-
-
-def zlib_term(term):
-    import zlib
-    return zlib.crc32(term.encode()) & 0x7FFFFFFF
+    url, text = "https://docs.example/flags", "Configure llama.cpp with -DGGML_CUDA=ON for NVIDIA GPUs."
+    parts = set(real_bm25.embed_query("ggml cuda").indices)
+    rag = knowledge(sparse=real_bm25)
+    with monkeypatch.context() as earlier:
+        earlier.setattr(embeddings, "expand_identifiers", lambda value: value)
+        rag.ingest_document(url, text)
+    assert not parts <= keyword_ids(rag)
+    assert rag.search("Configure llama.cpp for NVIDIA")[0].source == url  # mixed with today's query encoding
+    rag.ingest_document(url, text, replace=True)
+    assert parts <= keyword_ids(rag)
+    assert rag.search("GGML_CUDA")[0].source == url
 
 
 # --- unloading idle models ----------------------------------------------------------------------------------------
@@ -637,53 +629,59 @@ def test_release_frees_the_model_and_the_next_use_loads_it_again(tmp_path):
     assert model._load() is not first and model.created == 2
 
 
-def test_idle_models_are_released_after_the_configured_time(knowledge):
-    embedder, reranker = Releasable(), FakeReranker(LICENSE_FIRST)
+def test_idle_models_are_released_after_the_configured_time(knowledge, monkeypatch):
+    released = threading.Event()
+
+    class Signalling(FakeReranker):
+        def release(self):
+            released.set()
+            return super().release()
+
+    embedder, reranker = Releasable(), Signalling(LICENSE_FIRST)
     rag = knowledge(embedder=embedder, reranker=reranker, rag_model_idle_minutes=5)
-    rag.model_idle_seconds = None  # from the configuration
     ingest_all(rag)
     rag.search("model memory", rerank=True)
-    timer = rag._model_timer
-    assert timer.interval == 300 and timer.daemon
-
-    rag._release_if_idle(rag._model_generation - 1)  # a later use made this timer stale
-    assert embedder.released == reranker.released == 0
-    rag._release_if_idle(rag._model_generation)
-    assert embedder.released == reranker.released == 1
-    assert rag.search("model memory", rerank=True)  # loads again on the next use
     earlier = rag._model_timer
+    assert earlier.interval == 300 and earlier.daemon
     rag.search("model memory")
     assert rag._model_timer is not earlier and earlier.finished.is_set()  # each use restarts the countdown
+
+    monkeypatch.setattr(rag, "_model_idle", lambda: 0.05)
+    rag.search("model memory", rerank=True)
+    assert released.wait(10)
+    with rag._model_lock:  # held while the models are released
+        assert embedder.released == reranker.released == 1 and rag._model_timer is None
+    assert rag.search("model memory", rerank=True)  # loads again on the next use
     latest = rag._model_timer
     rag.close()
     assert rag._model_timer is None and latest.finished.is_set()
 
 
-def test_models_in_use_are_not_released_and_the_countdown_starts_after_the_use(knowledge):
-    """A first download or a long document can outlast the idle time. Counting from the start of a use released
-    the model while it was still working (and the tokenizer under count_tokens), only to load it again."""
-    rag = None
+def test_models_in_use_are_not_released_and_the_countdown_starts_after_the_last_use(knowledge):
+    """A first download or a long document can outlast the idle time; a countdown must never release the models
+    (and the tokenizer under count_tokens) while they work, only to load them again."""
+    rag, seen = None, []
 
     class Slow(Releasable):
-        def embed_passages(self, texts):
-            rag._release_if_idle(rag._model_generation)  # the countdown ends while the import still runs
-            return super().embed_passages(texts)
-
         def embed_query(self, text):
-            rag._release_if_idle(rag._model_generation)
+            seen.append(rag._model_timer)  # no countdown while the search runs
+            late = threading.Thread(target=rag._release_if_idle)  # a countdown that fired just before the use
+            late.start()
+            late.join()
+            rag.ingest_document("https://docs.example/b", "Another note.")  # an overlapping use ends first
+            seen.append(rag._model_timer)
             return super().embed_query(text)
 
     embedder, reranker = Slow(), FakeReranker(LICENSE_FIRST)
-    rag = knowledge(embedder=embedder, reranker=reranker)
-    rag.model_idle_seconds = 600
+    rag = knowledge(embedder=embedder, reranker=reranker, rag_model_idle_minutes=10)
     rag.ingest_document("https://docs.example/a", "Model memory note.")
+    earlier = rag._model_timer
     rag.search("model memory note", rerank=True)
-    assert embedder.released == reranker.released == 0
 
+    assert seen == [None, None] and earlier.finished.is_set()
+    assert embedder.released == reranker.released == 0
     timer = rag._model_timer  # started when the search returned
     assert timer is not None and timer.interval == 600 and rag._models_in_use == 0
-    rag._release_if_idle(rag._model_generation)
-    assert embedder.released == reranker.released == 1
 
 
 def test_count_tokens_survives_a_release_between_check_and_use(tmp_path):
@@ -710,21 +708,11 @@ def test_count_tokens_survives_a_release_between_check_and_use(tmp_path):
     assert dense.count_tokens("three short words") == 3
 
 
-def test_idle_release_runs_on_its_timer_and_can_be_turned_off(knowledge):
-    released = threading.Event()
-
-    class Signalling(Releasable):
-        def release(self):
-            released.set()
-            return True
-
-    rag = knowledge(embedder=Signalling(), rag_model_idle_minutes=0)
-    rag.model_idle_seconds = None
+def test_idle_release_can_be_turned_off(knowledge):
+    rag = knowledge(embedder=Releasable(), rag_model_idle_minutes=0)
     ingest_all(rag)
-    assert rag._model_timer is None  # 0 = keep the models loaded
-    rag.model_idle_seconds = 0.05
     rag.search("model memory")
-    assert released.wait(10)
+    assert rag._model_timer is None and rag._embedder.released == 0  # 0 = keep the models loaded
 
 
 def test_release_reports_what_was_loaded(tmp_path):
@@ -733,4 +721,4 @@ def test_release_reports_what_was_loaded(tmp_path):
     dense = FastEmbedDenseEmbedder(MODEL_REGISTRY["intfloat/multilingual-e5-small"], tmp_path)
     dense._model, dense._tokenizer = object(), object()
     assert dense.release() is True and dense._tokenizer is None
-    assert re.search("e5-small", dense.model_name)
+    assert re.search("e5-small", dense.model_id)

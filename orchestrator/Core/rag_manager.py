@@ -46,7 +46,6 @@ MIN_SPARSE_QUERY_TOKENS = 3  # shorter queries use the dense ranking only, unles
 _IDENTIFIER = re.compile(r"\d|_|[A-Z]{2,}|\w[.-]\w")  # E2041, GGML_CUDA, RKNN, librkllmrt.so
 RERANK_POOL = 20  # most candidates a search reranks (about 1-2.5 s on one free CPU core)
 RERANK_INPUT_CHARS = 1500  # of each candidate; about what fits next to the query into 512 tokens
-RERANK_RETRY_SECONDS = 300.0  # after a reranker failure, searches keep the fused order this long
 MAX_SNAPSHOTS = 5
 MAX_CODE_FILE_BYTES = 512 * 1024
 _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
@@ -89,19 +88,33 @@ def _clean_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     return clean
 
 
+def _restart_timer(timer: Optional[threading.Timer], seconds: float, function=None) -> Optional[threading.Timer]:
+    """Cancels `timer`; for seconds > 0 returns a started daemon timer that calls `function`. The function checks
+    that it is still the current timer: a cancel comes too late for a timer that has already fired."""
+    if timer is not None:
+        timer.cancel()
+    if seconds <= 0:
+        return None
+    timer = threading.Timer(seconds, function)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 def _uses_models(method):
-    """Marks a call that uses the models: no idle release while one runs, and the countdown starts at its end."""
+    """Marks a call that uses the models: no idle countdown while one runs; it starts when the last one ends."""
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
-        with self._model_timer_lock:
+        with self._model_lock:
             self._models_in_use += 1
-            self._model_generation += 1  # a countdown already running is void
+            self._model_timer = _restart_timer(self._model_timer, 0)
         try:
             return method(self, *args, **kwargs)
         finally:
-            with self._model_timer_lock:
+            with self._model_lock:
                 self._models_in_use -= 1
-            self._schedule_model_release()
+                if not self._models_in_use:
+                    self._model_timer = _restart_timer(None, self._model_idle(), self._release_if_idle)
     return wrapper
 
 
@@ -143,16 +156,12 @@ class RAGManager:
         self.idle_close_seconds = self.IDLE_CLOSE_SECONDS
         self._lock = threading.RLock()
         self._idle_timer: Optional[threading.Timer] = None
-        self._generation = 0
         # Reranker: chosen from rag_reranker on first use (or provided); scores(query, texts) -> 0..1 each.
         self._reranker = reranker
         self._reranker_setting: Optional[str] = None if reranker is None else "provided"
-        self.reranker_reason = "provided by the caller" if reranker is not None else ""
-        self._rerank_failed_at: Optional[float] = None
-        self.model_idle_seconds: Optional[float] = None  # None: rag_model_idle_minutes of the configuration
-        self._model_timer_lock = threading.Lock()
+        self.reranker_reason = ""  # why reranker() returns None
+        self._model_lock = threading.Lock()
         self._model_timer: Optional[threading.Timer] = None
-        self._model_generation = 0
         self._models_in_use = 0
 
     # --- configuration ---
@@ -300,11 +309,8 @@ class RAGManager:
                 if self._sparse is None:
                     self._sparse = create_sparse_embedder(self.models_cache_dir, self._offline)
                 store = KnowledgeStore(client, COLLECTION_NAME, self._embedder.model_id, self._embedder.dim,
-                                       self._sparse.model_id, server_mode=server)
-                rebuilt = store.ensure(reencode=self._sparse.embed_passages)
-                if rebuilt:
-                    self.logger.warning(f"Knowledge base: rebuilt the keyword index of {rebuilt} chunks for the "
-                                        f"encoding {store.sparse_model}; the documents and their vectors are kept.")
+                                       server_mode=server)
+                store.ensure()
             except Exception as e:
                 try:
                     client.close()
@@ -333,18 +339,13 @@ class RAGManager:
                 self._schedule_idle_close()
 
     def _schedule_idle_close(self) -> None:
-        if self._server_mode or not self.idle_close_seconds or self.idle_close_seconds <= 0:
-            return
-        self._generation += 1
-        if self._idle_timer is not None:
-            self._idle_timer.cancel()
-        self._idle_timer = threading.Timer(self.idle_close_seconds, self._close_if_idle, args=(self._generation,))
-        self._idle_timer.daemon = True
-        self._idle_timer.start()
+        if not self._server_mode:
+            self._idle_timer = _restart_timer(self._idle_timer, self.idle_close_seconds or 0, self._close_if_idle)
 
-    def _close_if_idle(self, generation: int) -> None:
+    def _close_if_idle(self) -> None:
         with self._lock:
-            if generation == self._generation:
+            if self._idle_timer is threading.current_thread():  # else used, closed or rescheduled meanwhile
+                self._idle_timer = None
                 self._close_client()
 
     def _close_client(self) -> None:
@@ -359,47 +360,25 @@ class RAGManager:
         """Releases the storage (the embedded one is locked by this process while open). Models stay loaded
         (release_models() frees them); their idle release starts again with the next use."""
         with self._lock:
-            if self._idle_timer is not None:
-                self._idle_timer.cancel()
-                self._idle_timer = None
-            self._generation += 1
+            self._idle_timer = _restart_timer(self._idle_timer, 0)
             self._close_client()
-        with self._model_timer_lock:
-            self._model_generation += 1
-            if self._model_timer is not None:
-                self._model_timer.cancel()
-                self._model_timer = None
+        with self._model_lock:
+            self._model_timer = _restart_timer(self._model_timer, 0)
 
     # --- model memory ---
 
     def _model_idle(self) -> float:
-        if self.model_idle_seconds is not None:
-            return self.model_idle_seconds
+        """Seconds after the last use until the models are released (rag_model_idle_minutes; 0 = never)."""
         try:
-            return max(0.0, float(self._cfg("rag_model_idle_minutes", 10))) * 60
+            return float(self._cfg("rag_model_idle_minutes", 10)) * 60
         except (TypeError, ValueError):
             return 600.0
 
-    def _schedule_model_release(self) -> None:
-        seconds = self._model_idle()
-        if seconds <= 0:
-            return
-        with self._model_timer_lock:
-            if self._models_in_use:
-                return  # the last use to end starts the countdown
-            self._model_generation += 1
-            if self._model_timer is not None:
-                self._model_timer.cancel()
-            self._model_timer = threading.Timer(seconds, self._release_if_idle, args=(self._model_generation,))
-            self._model_timer.daemon = True
-            self._model_timer.start()
-
-    def _release_if_idle(self, generation: int) -> None:
-        with self._model_timer_lock:
-            if generation != self._model_generation or self._models_in_use:
-                return
-            self._model_timer = None
-        self.release_models()
+    def _release_if_idle(self) -> None:
+        with self._model_lock:  # a use that starts now waits until the models are released
+            if self._model_timer is threading.current_thread():  # else a use started meanwhile, or close()
+                self._model_timer = None
+                self.release_models()
 
     def release_models(self) -> List[str]:
         """Frees the memory of the loaded models (embeddings, reranker); the next search loads them again."""
@@ -433,7 +412,7 @@ class RAGManager:
         rules it out, now instead of on first use."""
         try:
             models = list(self._models())
-            reranker = self._reranker_for(True)
+            reranker = self.reranker()
             if reranker is not None:
                 models.append(reranker)
             for model in models:
@@ -649,7 +628,7 @@ class RAGManager:
             self.logger.error(f"Snapshot {snapshot_name} not found.")
             return False
         try:
-            count = self._with_store(lambda store: store.restore_file(path, reencode=self._sparse.embed_passages))
+            count = self._with_store(lambda store: store.restore_file(path))
         except (KnowledgeBaseError, OSError, ValueError) as e:
             self._fail(e)
             return False
@@ -669,21 +648,14 @@ class RAGManager:
         rerank (None: the setting rag_rerank_default) lets a cross-encoder score each candidate: score is then
         its 0..1 relevance, metadata["fused_score"] keeps the rank score, and results below the reranker's floor
         are dropped, so the list may be empty (no excerpt is better than an irrelevant one). A reranker that
-        cannot run is logged and the fused order is kept.
+        cannot run is logged, and searches keep the fused order until the next start or a change of rag_reranker.
 
         strict=True raises KnowledgeBaseError for storage and embedding errors instead of returning [].
         """
         query = (query or "").strip()
         if not query:
             return []
-        try:
-            reranker = self._reranker_for(rerank)
-        except KnowledgeBaseError as e:  # e.g. an unknown model id in rag_reranker
-            self._rerank_failed(e)
-            reranker = None
-        if reranker is not None and self._rerank_failed_at is not None \
-                and time.monotonic() - self._rerank_failed_at < RERANK_RETRY_SECONDS:
-            reranker = None
+        reranker = self.reranker(rerank)
         pool = max(limit, min(max(limit * 3, 12), RERANK_POOL)) if reranker is not None else max(limit * 2, limit + 4)
         try:
             embedder, sparse = self._models()
@@ -714,26 +686,33 @@ class RAGManager:
 
     # --- reranking ---
 
-    def _reranker_for(self, rerank: Optional[bool]):
-        """The reranker for a search, or None: not asked for, turned off, or none suits this machine."""
+    def reranker(self, rerank: Optional[bool] = True):
+        """The reranker of a search (rerank None: the setting rag_rerank_default), or None: not asked for, turned
+        off, failed, or none suits this machine (reranker_reason says why)."""
         if rerank is None:
             rerank = bool(self._cfg("rag_rerank_default", False))
         setting = str(self._cfg("rag_reranker", "auto") or "auto").strip()
-        if not rerank or setting.lower() == "off":
+        if not rerank:
+            return None
+        if setting.lower() == "off":
+            self.reranker_reason = "turned off (rag_reranker: off)"
             return None
         with self._lock:
             if self._reranker_setting not in (setting, "provided"):
-                spec, reason = select_reranker(setting)
-                self._reranker = create_reranker(spec, self.models_cache_dir, self._offline) if spec else None
-                self._reranker_setting, self.reranker_reason, self._rerank_failed_at = setting, reason, None
+                self._reranker_setting = setting
+                try:
+                    spec, self.reranker_reason = select_reranker(setting)
+                    self._reranker = create_reranker(spec, self.models_cache_dir, self._offline) if spec else None
+                except KnowledgeBaseError as e:  # e.g. an unknown model id in rag_reranker
+                    self._rerank_failed(e)
             return self._reranker
 
-    def _rerank_floor(self, reranker) -> float:
+    def rerank_floor(self, reranker) -> float:
+        """rag_rerank_min_score (0: no floor), or the reranker's calibrated floor when it is not set."""
         try:
-            configured = float(self._cfg("rag_rerank_min_score", 0.0) or 0.0)
+            return float(self._cfg("rag_rerank_min_score"))
         except (TypeError, ValueError):
-            configured = 0.0
-        return configured or float(getattr(getattr(reranker, "spec", None), "min_score", 0.0))
+            return float(getattr(getattr(reranker, "spec", None), "min_score", 0.0))
 
     def _rerank(self, reranker, query: str, results: List[SearchResult]) -> List[SearchResult]:
         def text(result: SearchResult) -> str:
@@ -746,8 +725,7 @@ class RAGManager:
         except KnowledgeBaseError as e:
             self._rerank_failed(e)
             return results
-        self._rerank_failed_at = None
-        floor = self._rerank_floor(reranker)
+        floor = self.rerank_floor(reranker)
         ranked = []
         for result, score in sorted(zip(results, scores), key=lambda pair: -pair[1]):
             if score < floor:
@@ -758,26 +736,11 @@ class RAGManager:
         return ranked
 
     def _rerank_failed(self, error: Exception) -> None:
-        """The reranker is quality on top, never a gate: the search keeps the fused order (logged once)."""
-        first = self._rerank_failed_at is None
-        self._rerank_failed_at = time.monotonic()
-        self.last_error = redact_secrets(str(error))
-        (self.logger.warning if first else self.logger.debug)(
-            f"Knowledge base: reranking skipped, keeping the search order: {self.last_error}")
-
-    def reranker_info(self) -> Dict[str, Any]:
-        """The reranker searches use when asked to rerank (no model when none), why, and its floor."""
-        default = bool(self._cfg("rag_rerank_default", False))
-        try:
-            reranker = self._reranker_for(True)
-        except KnowledgeBaseError as e:
-            return {"model": "", "reason": redact_secrets(str(e)), "min_score": None, "default": default}
-        if reranker is None:
-            off = str(self._cfg("rag_reranker", "auto") or "auto").strip().lower() == "off"
-            return {"model": "", "reason": "turned off (rag_reranker: off)" if off else self.reranker_reason,
-                    "min_score": None, "default": default}
-        return {"model": str(reranker.model_id), "reason": self.reranker_reason,
-                "min_score": self._rerank_floor(reranker), "default": default}
+        """The reranker is quality on top, never a gate: it is dropped (logged once) and searches keep the fused
+        order; it is tried again after the next start or a change of rag_reranker."""
+        self._reranker = None
+        self._fail(KnowledgeBaseError(f"reranking is off until the next start or a change of rag_reranker: {error}"))
+        self.reranker_reason = self.last_error
 
     def export_records(self) -> Iterator[Dict[str, Any]]:
         """All stored chunks as plain records (source, content, metadata), e.g. for a community export."""
@@ -826,5 +789,4 @@ class RAGManager:
         except KnowledgeBaseError as e:
             status["error"] = redact_secrets(str(e))
         status["model_reason"] = self.model_reason
-        status["reranker"] = self.reranker_info()
         return status

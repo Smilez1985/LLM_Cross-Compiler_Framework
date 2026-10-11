@@ -627,12 +627,12 @@ unpassenden.
   | weniger als 6 GB RAM | keiner |
 
   `off` schaltet das Reranking aus. Eine Modell-ID wählt einen anderen Cross-Encoder, den FastEmbed aufführt.
-- **Relevanzschwelle** (Einstellung `rag_rerank_min_score`, 0 bis 1, Standard 0): 0 bedeutet die für das Modell
-  kalibrierte Schwelle, 0,2 für beide Modelle oben. In der Retrieval-Evaluation bekamen passende Auszüge 0,80 oder
-  mehr und fachfremde 0,009 oder weniger.
+- **Relevanzschwelle** (Einstellung `rag_rerank_min_score`, 0 bis 1, standardmäßig nicht gesetzt): Ohne Wert gilt
+  die für das Modell kalibrierte Schwelle, 0,2 für beide Modelle oben; 0 schaltet die Schwelle ab. In der
+  Retrieval-Evaluation bekamen passende Auszüge 0,80 oder mehr und fachfremde 0,009 oder weniger.
 - **Welche Suchen neu bewertet werden:** standardmäßig nur Build-Empfehlungen. Die Einstellung
-  `rag_rerank_default: true` bewertet auch jede andere Suche neu: den Chat, das MCP-Tool `search_knowledge`,
-  Healing-Analysen und Modulvorschläge.
+  `rag_rerank_default: true` bewertet auch den Chat und das MCP-Tool `search_knowledge` neu. Healing-Analysen und
+  Modulvorschläge werden nie neu bewertet.
 - **Warum nur Build-Empfehlungen:** gemessen mit der [Retrieval-Evaluation](#retrieval-evaluation) auf einer
   geteilten CPU mit 4 Kernen. An den 34 Fällen, die keine `log`- oder `callsite`-Suchen sind, hob Reranking hit@1 von
   87 % auf 93 % und MRR von 0,93 auf 0,97, und alle 4 fachfremden Fragen bekamen keinen Auszug. Es kostet etwa 1 s für
@@ -644,7 +644,8 @@ unpassenden.
 - **Wie eine Suche neu bewertet wird:** bis zu 20 Kandidaten (das Dreifache der gewünschten Anzahl, mindestens 12),
   von jedem Titel, Kapitel und die ersten 1500 Zeichen; die Werte werden nach Text zwischengespeichert. Ein Reranker,
   der nicht laufen kann (im Offline-Modus nicht heruntergeladen, unbekannte Modell-ID, ein Fehler), wird einmal
-  protokolliert, die Suche behält die hybride Reihenfolge, und der Reranker wird nach 5 Minuten erneut versucht.
+  protokolliert, und Suchen behalten die hybride Reihenfolge bis zum nächsten Start oder einer Änderung von
+  `rag_reranker`.
 
 ### Budget für Auszüge
 
@@ -658,18 +659,17 @@ geschlossen, damit der Rest des Prompts nicht als Code gelesen wird.
 ### Stichwortsuche für Bezeichner
 
 Der Stichwortindex (BM25) kennt auch die Teile von Bezeichnern: `-DGGML_CUDA=ON` wird über `GGML_CUDA`, `GGML` oder
-`CUDA` gefunden, `rknn_toolkit2` über `rknn toolkit2` und `rknnToolkitLite` über `rknn Toolkit Lite`. Nur der
+`CUDA` gefunden, `rknn_toolkit2` über `rknn toolkit2` und `rknnToolkitLite` über `rknn Toolkit Lite`. Ein
+führendes `-D` fällt nur bei Definitionen wie `-DNAME=WERT` oder `-DNAME_MIT_UNTERSTRICH` weg (`-DEBUG` behält es),
+und Teile aus einer oder zwei Ziffern werden ausgelassen (`x86_64` ergibt `x86`, nicht `64`). Nur der
 Stichwortindex bekommt die zerlegten Formen; der gespeicherte Text und die Vektoren bleiben, wie sie sind. Suchen aus
 einem oder zwei Wörtern nutzen den Stichwortindex, wenn sie einen Bezeichner enthalten (eine Ziffer, einen
 Unterstrich, zwei Großbuchstaben hintereinander oder einen Punkt oder Bindestrich innerhalb eines Worts, etwa
 `E2041`, `GGML_CUDA`, `RKNN` oder `librkllmrt.so`); andere kurze Suchen nutzen nur die Bedeutung. In der
 Retrieval-Evaluation hob das hit@3 der Bezeichner-Fragen von 83 % auf 100 %; die übrigen Ergebnisse blieben gleich.
 
-Bei einer Wissensbasis aus einer früheren Version wird der Stichwortindex einmal, bei der ersten Nutzung, aus dem
-gespeicherten Text neu aufgebaut; Dokumente und Vektoren bleiben erhalten, und das Log nennt die Zahl der neu
-aufgebauten Abschnitte. Schnappschüsse früherer Versionen werden beim Wiederherstellen genauso neu aufgebaut. Ein
-Qdrant-Server älter als 1.16 speichert keine Metadaten zur Sammlung; dort lässt sich der Neuaufbau nicht erkennen,
-nimm die Dokumente dann erneut auf.
+Ein Dokument behält die Stichwortvektoren, mit denen es aufgenommen wurde, und bleibt auffindbar; nimmst du es
+erneut auf (zum Beispiel mit einem neuen Deep Ingest derselben URL), gilt die aktuelle Zerlegung.
 
 ### Große Codeblöcke und Tabellen
 
@@ -1206,7 +1206,8 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
   übergibt immer eigene Werte für Tiefe, PDFs und Pause zwischen Anfragen (ganze Sekunden), sodass
   `crawler_max_depth`, `crawler_download_pdfs` und `crawler_rate_limit` dort nicht wirken. Einen Schnappschuss der
   Wissensbasis wiederherstellen kann man über GUI oder CLI nicht.
-- **Reranking** läuft nur bei Build-Empfehlungen, außer `rag_rerank_default` ist eingeschaltet.
+- **Reranking** läuft nur bei Build-Empfehlungen; `rag_rerank_default` nimmt den Chat und das MCP-Tool
+  `search_knowledge` hinzu.
 - **Gesprochene Ansagen** sind nur mit nachgebildeten Sprachausgaben getestet, nicht mit den echten Stimmen von
   Windows, macOS oder Linux.
 - **Community-Zoo:** Ein Community-Repository, ein Index oder ein Maintainer-Schlüssel ist noch nicht veröffentlicht

@@ -601,8 +601,8 @@ Framework- und SDK-Dokumentation in `evals/retrieval/corpus/` (eine Datei mit F�
 - `rerank` braucht einen Reranker. Mit `rag_reranker: off` oder mit `auto` auf einem Rechner mit weniger als 6 GB RAM
   gibt es keinen, und der Befehl stoppt mit Exit-Code 2 und dem Grund; setze `rag_reranker` auf eine Modell-ID, um
   trotzdem einen zu bewerten. Lässt sich der Reranker nicht laden, endet der Lauf mit Exit-Code 1, und eine Suche,
-  in der der Reranker nicht lief, zählt als gescheitert. Die Schwelle ist `rag_rerank_min_score` (Standard 0: die
-  kalibrierte Schwelle des Rerankers).
+  in der der Reranker nicht lief, zählt als gescheitert. Die Schwelle ist `rag_rerank_min_score` (standardmäßig
+  nicht gesetzt: die kalibrierte Schwelle des Rerankers; 0: keine).
 - Ein Korpus, der sich nicht lesen lässt, oder ein Fall, der ein Dokument erwartet, das der Korpus nicht hat, stoppt
   mit Exit-Code 2. Lässt sich der Korpus nicht indizieren (zum Beispiel im Offline-Modus, bevor das Embedding-Modell
   heruntergeladen wurde), endet der Befehl mit Exit-Code 1.
