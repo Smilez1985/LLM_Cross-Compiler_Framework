@@ -97,7 +97,7 @@ stderr aus, und bei `llm-cli mcp serve` trägt stdout das MCP-Protokoll.
 |---|---|
 | 0 | Erfolg |
 | 1 | Der Befehl ist gescheitert (zum Beispiel ein gescheiterter Build, eine gescheiterte Übertragung, ein Paket, das sich nicht erstellen ließ, ein Geheimnis, das sich nicht speichern ließ, eine Hardware-Probe, die keine Datei geschrieben hat, ein beschädigtes Audit-Log, ein KI-Fehler) |
-| 2 | Ungültige Eingabe: unbekannte Option, ein unbekanntes Target oder eine nicht unterstützte Kombination aus Format, Board und Quantisierung (`build start`), ein unbekannter Anbieter (`--provider`), eine unbekannte Modellstufe (`ditto models download`), kein passender Evaluationsfall (`ditto eval`), eine fehlende Paket-ID, Datei oder Quelle (`zoo install`, `zoo export`), eine Schlüsseldatei ohne verwendbaren Schlüssel (`--to`, `--from`), `--to` zusammen mit `--passphrase` (`zoo export`) |
+| 2 | Ungültige Eingabe: unbekannte Option, ein unbekanntes Target oder eine nicht unterstützte Kombination aus Format, Board und Quantisierung (`build start`), ein unbekannter Anbieter (`--provider`), eine unbekannte Modellstufe (`ditto models download`), kein passender Evaluationsfall (`ditto eval`), eine fehlende Paket-ID, Datei oder Quelle (`zoo install`, `zoo export`), eine Schlüsseldatei ohne verwendbaren Schlüssel oder keine Textdatei (`--to`, `--from`), `--from` für ein Paket, das nicht verschlüsselt ist (`zoo install`), `--to` zusammen mit `--passphrase` (`zoo export`) |
 | 3 | Anmeldung: Der Anbieter hat die Zugangsdaten abgelehnt (`ditto login`, `ditto auth status --check`) |
 | 4 | Anmeldung: Anbieter oder lokaler Server nicht erreichbar |
 | 5 | Der Tresor für Zugangsdaten lässt sich nicht nutzen (kein nutzbarer Schlüsselbund, keine Passphrase, ein beschädigter Tresor); die Meldung nennt die Möglichkeiten. Jeder Befehl, der den Tresor braucht, verwendet ihn |
@@ -1121,7 +1121,7 @@ Note: signed by author key 0123456789abcdef (first pack seen from this author)
 | `PACK_ID` | Eine ID aus dem Index (`zoo list`). Installiert wird die neueste Version. |
 | `--kind [target\|recipe\|knowledge]` | Art von `PACK_ID` (Standard `target`). Eine Paketdatei nennt ihre Art selbst. |
 | `--file FILE` | Eine Paketdatei installieren, die dir jemand gegeben hat, oder ein verschlüsseltes Paket (`.lcfpack`). Ihre Vertrauensstufe ist `local`, außer der signierte Index führt ihre sha256 auf. Funktioniert ohne Netzwerk. |
-| `--from FILE` | Verschlüsselte Pakete: nur von diesen Absendern annehmen. Die Datei enthält die öffentlichen Schlüssel der Absender, wie `llm-cli zoo keys` sie ausgibt; wiederholbar. Ohne die Option wird jeder Absender angenommen; die Zusammenfassung nennt immer die Schlüssel-ID des Absenders. |
+| `--from FILE` | Verschlüsselte Pakete: nur von diesen Absendern annehmen. Die Datei enthält die öffentlichen Schlüssel der Absender, wie `llm-cli zoo keys` sie ausgibt; wiederholbar. Ohne die Option wird jeder Absender angenommen; die Zusammenfassung nennt immer die Schlüssel-ID des Absenders. Bei einem Paket, das nicht verschlüsselt ist, bricht der Befehl mit Exit-Code 2 ab (ein einfaches Paket hat keinen Absender; seine Zusammenfassung zeigt die Signatur des Autors). |
 | `--passphrase` | Verschlüsselte Pakete: nach der Passphrase fragen, statt das Paket mit deinem eigenen Schlüssel zu öffnen. |
 | `--yes` | Bei einem Paket, dessen Vertrauensstufe aus dem signierten Index kommt, nicht nachfragen, auch bei einer Datei, die der Index führt. Eine Datei ohne Eintrag im Index ist `local` und wird immer bestätigt; ohne Terminal wird sie nicht installiert. |
 
@@ -1132,9 +1132,10 @@ Verhalten:
 - Ein verschlüsseltes Paket (eine age-Datei und die Signatur ihres Absenders, siehe
   [Funktionen](Features_DE.md#verschlüsselte-packs-zum-privaten-teilen)) wird vor dem Entschlüsseln gegen die
   Signatur geprüft. Es öffnet sich mit deiner eigenen age-Identität (siehe [zoo keys](#zoo-keys)) oder mit
-  `--passphrase` mit der Passphrase; eine Passphrase mit einem scrypt-Arbeitsfaktor über 2^20 wird abgelehnt. Der
-  Community Hub öffnet Pakete, die an deinen Schlüssel verschlüsselt sind; Pakete mit Passphrase brauchen diesen
-  Befehl.
+  `--passphrase` mit der Passphrase; eine Passphrase mit einem scrypt-Arbeitsfaktor über 2^20 wird abgelehnt. Ein
+  Paket mit Passphrase, das ohne `--passphrase` geöffnet wird, sagt das; deine eigene Identität wird nur für ein an
+  Schlüssel verschlüsseltes Paket gelesen (und beim ersten Mal angelegt). Der Community Hub öffnet Pakete, die an
+  deinen Schlüssel verschlüsselt sind; Pakete mit Passphrase brauchen diesen Befehl.
 - Nichts wird über einen vorhandenen Ordner gleichen Namens installiert, auch wenn sich nur die Groß- und
   Kleinschreibung unterscheidet; entferne den alten Ordner zuerst.
 - Exit-Code 1: Eine Prüfung ist gescheitert (die Probleme werden aufgeführt und der Quarantäne-Ordner wird gelöscht),
