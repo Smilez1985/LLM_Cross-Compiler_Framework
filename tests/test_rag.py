@@ -684,6 +684,7 @@ class TestDeepIngestOptOuts:
         result = rag.ingest_url("http://93.184.215.14/", {"request_delay": 0})
 
         assert result["success"] and result["documents"] == 2
+        assert result["outcome"] == "partial"   # the site reserved a page: not everything was stored
         assert result["skipped"] == [{"url": "http://93.184.215.14/reserved", "reason": "X-Robots-Tag: noai",
                                       "opt_out": True}]
         assert "1 pages skipped" in result["message"]
@@ -695,9 +696,89 @@ class TestDeepIngestOptOuts:
 
         result = make_rag().ingest_url("http://93.184.215.14/", {"request_delay": 0})
 
-        assert not result["success"]
+        assert not result["success"] and result["outcome"] == "failure"
         assert result["message"] == "No documents found, 1 pages skipped (see the log)"
         assert [page["reason"] for page in result["skipped"]] == ["X-Robots-Tag: none"]
+
+    def test_everything_stored_is_a_success(self, make_rag, web, monkeypatch):
+        monkeypatch.setitem(self.PAGES, "http://93.184.215.14/", ('<a href="/open">o</a>', {}))
+
+        result = make_rag().ingest_url("http://93.184.215.14/", {"request_delay": 0})
+
+        assert result["outcome"] == "success" and result["documents"] == 2
+        assert result["skipped"] == result["failed"] == [] and result["stopped"] is False
+
+    def test_a_missing_page_is_listed_as_failed_and_makes_it_partial(self, make_rag, web, monkeypatch):
+        monkeypatch.setitem(self.PAGES, "http://93.184.215.14/", ('<a href="/open">o</a><a href="/gone">g</a>', {}))
+
+        result = make_rag().ingest_url("http://93.184.215.14/", {"request_delay": 0})
+
+        assert result["outcome"] == "partial" and result["documents"] == 2
+        assert result["failed"] == [{"url": "http://93.184.215.14/gone", "reason": "HTTP status 404",
+                                     "opt_out": False}]
+        assert result["message"].endswith("pages (" + str(result["count"]) + " chunks), 1 failed (see the log)")
+
+    def test_pages_are_stored_while_crawling_and_progress_names_each_page(self, make_rag, web):
+        rag = make_rag()
+        seen = []
+
+        def progress(number, maximum, url):
+            # The previous page is already searchable when the next one is requested.
+            seen.append((number, maximum, url, {hit.source for hit in rag.search("open guide", limit=5)}))
+
+        rag.ingest_url("http://93.184.215.14/", {"request_delay": 0, "max_pages": 10}, progress=progress)
+
+        assert [s[:3] for s in seen] == [(1, 10, "http://93.184.215.14/"), (2, 10, "http://93.184.215.14/open"),
+                                         (3, 10, "http://93.184.215.14/reserved")]
+        assert seen[0][3] == set() and "http://93.184.215.14/" in seen[1][3]
+
+    def test_stop_keeps_the_stored_pages_and_requests_nothing_more(self, make_rag, web, monkeypatch):
+        import threading
+        import requests
+
+        rag = make_rag()
+        stop = threading.Event()
+        requested = []
+        send = requests.Session.send
+        monkeypatch.setattr(requests.Session, "send",
+                            lambda session, prepared, **kw: requested.append(prepared.url) or send(session, prepared, **kw))
+
+        def progress(number, maximum, url):
+            if number == 2:
+                stop.set()   # the user presses Stop while the second page is due
+
+        result = rag.ingest_url("http://93.184.215.14/", {"request_delay": 0}, stop=stop, progress=progress)
+
+        assert result["stopped"] and result["outcome"] == "partial" and result["documents"] == 1
+        assert result["message"].endswith(", stopped on request")
+        assert "http://93.184.215.14/open" not in requested
+        assert {hit.source for hit in rag.search("open guide", limit=5)} == {"http://93.184.215.14/"}
+
+    def test_stop_before_the_first_page_is_a_failure(self, make_rag, web):
+        import threading
+
+        stop = threading.Event()
+        stop.set()
+        result = make_rag().ingest_url("http://93.184.215.14/", {"request_delay": 0}, stop=stop)
+        assert result["outcome"] == "failure" and result["stopped"]
+        assert result["message"] == "Stopped before a page was stored, stopped on request"
+
+    def test_a_store_error_after_some_pages_is_partial(self, make_rag, web, monkeypatch):
+        rag = make_rag()
+        ingest = rag._ingest
+        calls = []
+
+        def flaky(*args, **kwargs):
+            calls.append(args[0])
+            if len(calls) == 2:
+                raise KnowledgeBaseError("disk full")
+            return ingest(*args, **kwargs)
+
+        monkeypatch.setattr(rag, "_ingest", flaky)
+        result = rag.ingest_url("http://93.184.215.14/", {"request_delay": 0})
+
+        assert result["outcome"] == "partial" and result["documents"] == 1 and len(calls) == 2
+        assert result["message"].endswith("; then: disk full")
 
 
 class TestOfflineMode:

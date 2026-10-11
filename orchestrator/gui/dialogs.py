@@ -9,19 +9,21 @@ Updates:
 - LanguageSelectionDialog for first-run setup.
 """
 
+import logging
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import urlparse
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QDialogButtonBox, QMessageBox, QComboBox, QPushButton, QSizePolicy,
-    QWidget, QFormLayout, QTextEdit, QSpinBox,
+    QFormLayout, QTextEdit, QSpinBox,
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 )
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from orchestrator.utils.crawl_notice import CrawlNotice, notice_text
 from orchestrator.utils.helpers import redact_secrets
-from orchestrator.utils.localization import get_instance as get_i18n
+from orchestrator.utils.localization import current_language, get_instance as get_i18n, ui_text
 
 class LanguageSelectionDialog(QDialog):
     """
@@ -666,6 +668,49 @@ class URLInputDialog(QDialog):
             "download_pdfs": self.chk_pdfs.isChecked(),
             "request_delay": self.spin_delay.value()
         }
+
+
+class CrawlNoticeDialog(QMessageBox):
+    """
+    The notice before the first Deep Ingest. It is information, not a legal confirmation (the site's
+    machine-readable opt-outs decide what may be mined), so it has one "Understood" button and no checkbox.
+    The spoken hint starts only once the notice is on screen.
+    """
+
+    def __init__(self, parent=None, announcer: Optional[Callable[[str], Any]] = None, lang: Optional[str] = None):
+        super().__init__(parent)
+        lang = lang or current_language()
+        title, text = notice_text(lang)
+        self.setIcon(QMessageBox.Information)
+        self.setWindowTitle(title)
+        self.setTextFormat(Qt.PlainText)
+        self.setText(text)
+        self.setAccessibleName(title)
+        self.setAccessibleDescription(text)
+        self.understood = self.addButton(ui_text("crawl.notice.ok", lang), QMessageBox.AcceptRole)
+        self.setDefaultButton(self.understood)
+        self.setEscapeButton(self.understood)
+        self._announcer = announcer
+        self._spoken = ui_text("crawl.notice.spoken", lang)
+        self.announced = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._announcer and not self.announced:
+            self.announced = True
+            QTimer.singleShot(0, lambda: self._announcer(self._spoken))
+
+
+def show_crawl_notice_once(parent, config, announcer: Optional[Callable[[str], Any]] = None) -> None:
+    """Shows the notice before the user's first crawl, and again after its text changed."""
+    notice = CrawlNotice(config.user_state_dir)
+    if not notice.needed():
+        return
+    CrawlNoticeDialog(parent, announcer).exec()
+    try:
+        notice.acknowledge("gui")
+    except OSError as e:
+        logging.getLogger(__name__).warning(f"Could not remember the Deep Ingest notice ({e}); it is shown again.")
 
 
 class ToolPermissionsDialog(QDialog):
