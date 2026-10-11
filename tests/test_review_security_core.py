@@ -1409,10 +1409,6 @@ class TestAdversarialConfigAndLaunch:
         cfg = ConfigManager()
         assert "config_dir" not in cfg.config_values and "home" not in cfg.config_values
 
-    @pytest.mark.xfail(strict=True, reason="BUG: the MCP launch command is 'python -m orchestrator.cli', which puts "
-                                           "the working directory first on sys.path; Claude Code starts the server "
-                                           "inside the project, so a project's orchestrator/ (or secrets.py, mcp.py, "
-                                           "yaml.py ...) is imported and runs inside the MCP server")
     def test_mcp_launch_command_does_not_import_code_from_the_working_directory(self, tmp_path):
         from orchestrator import mcp_server
         project = tmp_path / "cloned-repo"

@@ -118,10 +118,18 @@ class ToolRegistry:
             problems = "; ".join(f"{'.'.join(str(p) for p in err['loc']) or 'input'}: {err['msg']}" for err in e.errors())
             raise ToolInputError(f"Invalid arguments for {spec.name}: {problems}") from None
 
+    def refuse(self, name: str, arguments: Optional[Dict[str, Any]], ctx: ToolContext,
+               outcome: str = "not_confirmed", detail: str = "") -> None:
+        """Audits a call that was refused before it could reach call(), e.g. because it could not be
+        confirmed. Nobody approved it, so `approved` stays NULL."""
+        spec = self.get(name)
+        self._audit(ctx, spec, self.decide(spec), outcome, arguments, detail=detail)
+
     def call(self, name: str, arguments: Optional[Dict[str, Any]], ctx: ToolContext,
              approved: Optional[bool] = None) -> BaseModel:
         """Runs a tool for `ctx.actor`. `approved` is the caller's own confirmation result
-        (e.g. from an MCP elicitation); without it, ctx.confirm is asked when the policy says "ask"."""
+        (e.g. from an MCP elicitation); without it, ctx.confirm is asked when the policy says "ask".
+        False refuses the call whatever the policy says."""
         spec = self.get(name)
         decision = self.decide(spec)
         try:
@@ -133,7 +141,8 @@ class ToolRegistry:
         if decision == Decision.DENY:
             self._audit(ctx, spec, decision, "denied", arguments)
             raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.")
-        if decision == Decision.ASK:
+        # A person's "no" is final, even if the policy was loosened to "allow" while they were asked.
+        if decision == Decision.ASK or approved is False:
             if approved is None and ctx.confirm is not None:
                 approved = bool(ctx.confirm(spec, inp))
             if not approved:
