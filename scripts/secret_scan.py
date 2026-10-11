@@ -27,8 +27,11 @@ format does not allow.
 Old commits cannot be fixed that way. ALLOWLIST (.secret-scan-allow at the repository root) names documented test
 mocks that are already in the history by the sha256 of the exact value; --history skips an exact-format finding
 whose digest is listed, and nothing else: every other mode still reports the value (GitHub may block a new commit
-with it), and the other rules (provider keys, local patterns, file names) never look at the list. Never list a real
-credential: rotate it and rewrite the history. A malformed line in the list is a usage error in every mode.
+with it), a longer value of another format around it is still reported, and the other rules (provider keys, local
+patterns, file names) never drop a finding because of the list; they also read the line without the listed value,
+so a value next to a mock cannot pass as a placeholder. Never list a real credential: rotate it and rewrite the
+history. A malformed line in the list (also one with a control or invisible character) is a usage error in every
+mode.
 Exit code: 0 clean, 1 findings, 2 usage or git error. Standard library only.
 """
 
@@ -40,6 +43,7 @@ import re
 import subprocess
 import sys
 import textwrap
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import AbstractSet, Dict, FrozenSet, Iterable, Iterator, List, Optional, Sequence, Tuple
@@ -116,18 +120,31 @@ def digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def _hidden_character(line: str) -> bool:
+    """A control, format or line separator character other than a tab: a viewer may show it as nothing, and other
+    tools take some of them as line breaks, so a line holding one could hide an entry inside a comment."""
+    return any(c != "\t" and unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in line)
+
+
 def load_allowlist(repo: Path) -> FrozenSet[str]:
-    """The digests listed in ALLOWLIST at the repository root (none without the file). A malformed line raises
-    RuntimeError (exit 2) without echoing it, as it may hold a value pasted by mistake."""
+    """The digests listed in ALLOWLIST at the repository root (none without the file). Lines end at a line feed
+    (CRLF too); a malformed line raises RuntimeError (exit 2) without echoing it, as it may hold a value pasted by
+    mistake."""
     path = repo / ALLOWLIST
     try:
-        text = path.read_text(encoding="utf-8")
+        text = path.read_bytes().decode("utf-8")  # not read_text(): it turns a lone carriage return into a line end
     except FileNotFoundError:
         return frozenset()
     except (OSError, UnicodeDecodeError) as e:
         raise RuntimeError(f"cannot read {path}: {type(e).__name__}: {e}") from None
     digests = set()
-    for number, line in enumerate(text.splitlines(), 1):
+    # Not splitlines() either: it also breaks at \r, \v, \f, \x1c-\x1e, \x85, U+2028 and U+2029, which a reviewer's
+    # diff shows inside one line.
+    for number, line in enumerate(text.split("\n"), 1):
+        line = line[:-1] if line.endswith("\r") else line
+        if _hidden_character(line):
+            raise RuntimeError(f"{path}:{number}: malformed line; it holds a control, format or line separator "
+                               "character (a lone carriage return, a byte order mark, a zero-width space, ...)")
         if not line.strip() or line.startswith("#"):
             continue
         entry = ALLOWLIST_ENTRY.fullmatch(line)
@@ -164,26 +181,68 @@ def load_local_patterns(repo: Path) -> List["re.Pattern[str]"]:
     return patterns
 
 
+def exact_matches(line: str, allowed: AbstractSet[str]) -> List[Tuple[str, str, Tuple[int, int], bool]]:
+    """(rule name, value, span, listed) for each exact-format value in line; listed: its digest is in `allowed`.
+    A listed value hides nothing: it claims no part of the line, and each format is also searched inside it, so a
+    longer value of another format around a mock (a PyPI- or Anthropic-shaped value that holds it) is still found."""
+    found = find_exact_formats(line)
+    if not allowed or not any(digest(value) in allowed for _, value in found):
+        return [(kind, value, (-1, -1), False) for kind, value in found]  # as without a list
+    result: List[Tuple[str, str, Tuple[int, int], bool]] = []
+    spans: List[Tuple[int, int]] = []
+    for fmt in EXACT_FORMATS:
+        pos = 0
+        while pos <= len(line):
+            m = fmt.regex.search(line, pos)
+            if not m:
+                break
+            start, end = m.span()
+            if digest(m.group(0)) in allowed:
+                result.append((fmt.name, m.group(0), (start, end), True))
+                pos = start + 1  # a match of this format may start inside it
+                continue
+            if not any(start < e and s < end for s, e in spans):
+                spans.append((start, end))
+                result.append((fmt.name, m.group(0), (start, end), False))
+            pos = max(end, start + 1)
+    return result
+
+
+def _without(line: str, spans: Sequence[Tuple[int, int]]) -> str:
+    """line with the text of the given spans cut out."""
+    kept, pos = [], 0
+    for start, end in sorted(spans):
+        kept.append(line[pos:max(pos, start)])
+        pos = max(pos, end)
+    return "".join(kept) + line[pos:]
+
+
 def scan_text(where: str, text: str, local: Sequence["re.Pattern[str]"] = (), exact_only: bool = False,
               allowed: AbstractSet[str] = frozenset()) -> List[Finding]:
     """Findings of every rule in text. An exact-format value whose digest is in `allowed` comes back marked as
-    allowed and leaves the other rules alone: they still report it if it looks real."""
+    allowed and hides nothing: the other rules still report it if it looks real, and they also read the line
+    without it, so a value next to it is reported even where one match would take in the mock and look like a
+    placeholder."""
     findings = []
     for number, line in enumerate(text.splitlines(), 1):
         # Before the marker: GitHub blocks these values whatever the line says.
-        exact = []
-        for kind, match in find_exact_formats(line):
-            listed = bool(allowed) and digest(match) in allowed
-            findings.append(Finding(where, number, kind, redact(match), exact=True, allowed=listed))
-            if not listed:
-                exact.append((kind, match))
+        exact, listed = [], []  # the values reported, the spans of the listed ones
+        for kind, value, span, is_listed in exact_matches(line, allowed):
+            findings.append(Finding(where, number, kind, redact(value), exact=True, allowed=is_listed))
+            if is_listed:
+                listed.append(span)
+            else:
+                exact.append(value)
         if exact_only or ALLOW_PRAGMA in line:
             continue
-        for kind, match in find_secrets(line):
-            if not any(value in match or match in value for _, value in exact):  # each value reported once
+        variants = [line, _without(line, listed)] if listed else [line]
+        whole = find_secrets(line)
+        hits = whole + ([hit for hit in find_secrets(variants[1]) if hit not in whole] if listed else [])
+        for kind, match in hits:
+            if not any(value in match or match in value for value in exact):  # each value reported once
                 findings.append(Finding(where, number, kind, redact(match)))
         for i, rx in enumerate(local, 1):
-            if rx.search(line):
+            if any(rx.search(variant) for variant in variants):
                 findings.append(Finding(where, number, f"local pattern #{i}", ""))
     return findings
 

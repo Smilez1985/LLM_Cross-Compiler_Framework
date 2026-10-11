@@ -453,7 +453,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   also in text files over 5 MB, which the other rules skip: GitHub refuses such a push however fake the value is
   and ignores the marker. Tests build such values at runtime. Only `--history` skips the two documented test
   mocks that old commits still contain, listed in `.secret-scan-allow` by the sha256 of the exact value, never
-  the value itself; every other mode still reports them, and the other rules never look at the list.
+  the value itself; every other mode still reports them. A listed mock hides nothing else: a longer value of
+  another format around it is still reported, the other rules also read the line without it, and a line of the
+  list with a control or invisible character is malformed (exit code 2), so a comment cannot hide an entry.
 - API keys held in memory by Ditto's provider layer show as `<redacted>` in `str()` and `repr()` and cannot be
   pickled.
 - A key of a custom OpenAI-compatible server belongs to the address it was saved for (scheme, host and port):

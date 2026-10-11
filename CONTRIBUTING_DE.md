@@ -319,12 +319,16 @@ Shell-Historie zu hinterlassen:
 python3 -c "import getpass, hashlib; print(hashlib.sha256(getpass.getpass('value: ').encode()).hexdigest())"
 ```
 
-Die Liste gilt nur für `--history` und nur für Funde im exakten Format: Jeder andere Modus meldet den Wert
-weiterhin, ein neuer Commit damit scheitert also, und die übrigen Regeln (Anbieterschlüssel, lokale Muster,
-Dateinamen) lesen die Liste nie, ein echt aussehender Schlüssel wird also auch dann gemeldet, wenn sein Hexwert
-gelistet ist. Eine fehlerhafte Zeile stoppt den Scan in jedem Modus (Exit-Code 2), damit ein Tippfehler nicht mehr
-erlaubt. Trage nie echte Zugangsdaten ein, so alt sie auch sind: Tausche sie aus und schreibe die Historie um
-([Abschnitt 12](#12-wenn-ein-secret-offengelegt-wurde)).
+Die Liste gilt nur für `--history` und nur für den gelisteten Wert selbst: Jeder andere Modus meldet ihn weiterhin,
+die Git-Hooks halten einen neuen Commit damit also auf. Ein gelisteter Wert verdeckt nichts anderes: Ein längerer
+Wert eines anderen Formats, der ihn enthält, wird weiterhin gemeldet, und die übrigen Regeln (Anbieterschlüssel,
+lokale Muster, Dateinamen) lassen nie einen Fund wegen der Liste weg, ein echt aussehender Schlüssel wird also auch
+dann gemeldet, wenn sein Hexwert gelistet ist. Sie lesen die Zeile außerdem ohne den gelisteten Wert, damit ein Wert
+neben einem unechten Testwert nicht als Platzhalter durchgeht. Eine fehlerhafte Zeile stoppt den Scan in jedem Modus
+(Exit-Code 2), damit ein Tippfehler nicht mehr erlaubt; ein Steuer-, Format- oder Zeilentrennzeichen (ein einzelnes
+Carriage Return, eine Byte Order Mark, ein Leerzeichen der Breite null) macht eine Zeile ebenfalls fehlerhaft, damit
+ein Kommentar keinen Eintrag verstecken kann. Trage nie echte Zugangsdaten ein, so alt sie auch sind: Tausche sie aus
+und schreibe die Historie um ([Abschnitt 12](#12-wenn-ein-secret-offengelegt-wurde)).
 
 **Persönliche Zeichenfolgen** wie deine E-Mail-Adresse, dein Benutzername oder Hostnamen gehören ebenfalls nicht ins
 Repository, können aber nicht in einer öffentlichen Musterliste stehen. Trage sie in `.git/info/secret-patterns`

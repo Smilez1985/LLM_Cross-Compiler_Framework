@@ -513,7 +513,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   GitHub lehnt einen solchen Push ab, so unecht der Wert auch aussieht, und kennt die Markierung nicht. Tests bauen
   solche Werte zur Laufzeit zusammen. Nur `--history` überspringt die zwei dokumentierten unechten Testwerte, die
   alte Commits noch enthalten; `.secret-scan-allow` listet sie über den sha256 des exakten Werts, nie über den Wert
-  selbst. Jeder andere Modus meldet sie weiterhin, und die übrigen Regeln lesen die Liste nie.
+  selbst. Jeder andere Modus meldet sie weiterhin. Ein gelisteter Testwert verdeckt nichts anderes: Ein längerer
+  Wert eines anderen Formats, der ihn enthält, wird weiterhin gemeldet, die übrigen Regeln lesen die Zeile auch ohne
+  ihn, und eine Zeile der Liste mit einem Steuer- oder unsichtbaren Zeichen ist fehlerhaft (Exit-Code 2), damit ein
+  Kommentar keinen Eintrag verstecken kann.
 - API-Schlüssel, die Dittos Anbieterschicht im Speicher hält, erscheinen in `str()` und `repr()` als
   `<redacted>` und lassen sich nicht mit pickle serialisieren.
 - Ein Schlüssel eines eigenen OpenAI-kompatiblen Servers gehört zu der Adresse, für die er gespeichert wurde
