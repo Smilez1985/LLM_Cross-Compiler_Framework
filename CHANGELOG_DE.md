@@ -649,6 +649,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   lassen jetzt denselben Normalisierer über die rohen Argumente laufen, MCP-Clients bekommen die geschlossenen
   Eingabeschemas der Tools (`additionalProperties: false`) statt offener, JSON-Text in einem Listenfeld wird auf
   beiden Wegen angenommen, und unbekannte Tool-Namen werden im Audit-Log festgehalten (bisher auf keinem Weg).
+- **Die Tests berühren den echten Benutzerordner nicht mehr.** Ein Testlauf hatte dort SSH- und Hugging-Face-Dateien
+  angelegt (`~/.ssh`, `~/.cache/huggingface`). Bevor irgendetwas das Framework importiert, lenkt `tests/conftest.py`
+  jetzt `HOME`, `USERPROFILE`, die `XDG_*`-Ordner, `HF_HOME`, `HF_TOKEN_PATH` und die übrigen Variablen für
+  Benutzerordner in einen temporären Ordner um (jeder Test bekommt seinen eigenen), entfernt Zugangsdaten wie
+  `HF_TOKEN` und `SSH_AUTH_SOCK` aus der Umgebung und lässt den Lauf scheitern, wenn sich die Schlüssel-, Token-,
+  Schlüsselbund- oder Framework-Ordner des echten Benutzerordners verändert haben (er vergleicht ihre Auflistungen
+  und öffnet nie eine Datei).
 
 ### Sicherheit
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
