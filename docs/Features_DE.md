@@ -865,6 +865,24 @@ von einem falschen Schlüssel. Jeder Eintrag wird in einer eigenen Transaktion g
 Kette nicht aufspalten. `llm-cli tools audit --archive` legt das Log und seinen Anker beiseite (mit Zeitstempel
 aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli doctor` ein Problem mit dem Log gemeldet hat.
 
+**Festgehalten, bevor er läuft.** Ein Aufruf, der etwas ändert (jede Stufe außer `read`), bekommt einen Eintrag
+`started`, bevor er läuft. Lässt sich dieser Eintrag nicht schreiben, wird der Aufruf abgelehnt und nichts läuft:
+Aufrufe, die etwas ändern, laufen nur, wenn sie festgehalten werden. Lesende Aufrufe bleiben verfügbar, und der
+gescheiterte Schreibversuch wird protokolliert. Eine Frage an dich wird als `confirmation_requested` mit dem SHA-256
+des Fragetexts festgehalten, bevor sie gestellt wird; eine Frage zu einer Änderung, die sich nicht festhalten lässt,
+wird nicht gestellt. Jedes Ende wird festgehalten: `ok`, `error`, `denied`, `not_confirmed` mit der Antwort
+(`accepted`, `declined`, `cancelled`, `unavailable`, wenn niemand gefragt werden konnte, `unanswered`),
+`confirmation_timeout` (eine MCP-Frage während des Aufrufs wartet höchstens 5 Minuten) und `cancelled` (der Client
+hat den Aufruf aufgegeben). Eine Frage des Protokolls 2026-07-28, die an den Client zurückgeht und nie beantwortet
+wird, wird nach 15 Minuten als `unanswered` festgehalten, solange der Server läuft; der Eintrag
+`confirmation_requested` ist der bleibende Nachweis. Bricht ein Client einen laufenden Aufruf ab, wird der Abbruch
+sofort festgehalten und an den laufenden Aufruf weitergegeben; was schon läuft, endet, und sein Abschlusseintrag
+folgt. Einträge enthalten außerdem den selbst angegebenen Namen und die Version des Clients (eine Bezeichnung, kein
+Nachweis, wer er ist), einen Hash der Verbindung, den Bestätigungsweg (`elicitation`, `framework-gui`,
+`framework-cli`), die Dauer, SHA-256 und Größe des Ergebnisses (nie das Ergebnis selbst) und einen Verweis auf den
+Eintrag `started` des Aufrufs. Diese Felder gehören zur Hash-Kette; Logs, die vor ihnen geschrieben wurden, bleiben
+prüfbar.
+
 ---
 
 ## Geheimnisse und persönlicher Zustand
