@@ -29,8 +29,10 @@ hardware (or its specifications).
 
 1. **Loading.** At start, the `TargetManager` reads `target.yml` in every folder below `targets/`. Folders whose
    name starts with `_` or `.` (such as `_template`) are skipped, and so is a `target.yml` without a `metadata:`
-   block. The target id is `metadata.id` if set, otherwise the folder name; it is what you pass as
-   `llm-cli build start -t <id>`.
+   block. The target id is `metadata.id` if set, otherwise the folder name. Capabilities are looked up by the id,
+   but the build engine finds the target by its folder name (`llm-cli build start -t <folder>`). Leave
+   `metadata.id` unset (or equal to the folder name); otherwise either the capabilities are not found or the build
+   does not find the target folder.
 2. **Capabilities.** The `capabilities:` block is validated against the schema in `orchestrator/schemas/targets.py`.
    The GUI offers exactly the formats, boards and quantizations listed there, the CLI refuses anything else, and the
    tools of the MCP server and Ditto start builds only for targets that have a valid block. An invalid block is
@@ -129,8 +131,10 @@ The generator writes `target.yml` (metadata, `supported_boards`, `docker`, `modu
 contains "nvidia"), `modules/build.sh`, `modules/config_module.sh`, `modules/source_module.sh`,
 `modules/rkllm_module.sh`, `modules/rknn_module.sh`, `modules/benchmark_module.sh`, placeholders for
 `convert_module.sh` and `target_module.sh`, `generate_profile.sh`, the template's `scripts/` and an empty
-`knowledge/` folder. If the knowledge base is enabled, it also exports it to `knowledge/initial_knowledge.json`; the
-framework does not import that file again by itself, so check it for private data before you share it.
+`knowledge/` folder. If the target is created in the GUI wizard or with `generate-ai` and the knowledge base is
+enabled, the generator also exports the knowledge base to `knowledge/initial_knowledge.json`. The framework does not
+import that file again by itself (whatever the `README.md` written next to it says), so check it for private data
+before you share it.
 
 The result is a **skeleton**, not a working target yet:
 
@@ -155,7 +159,7 @@ metadata:
   version: "1.0.0"
   architecture_family: "aarch64"
   vendor: "community"
-  # id: "my_board"   optional; default: the folder name
+  # id: leave it out; the target id must match the folder name (see section 1)
 ```
 
 ### 4.2 capabilities

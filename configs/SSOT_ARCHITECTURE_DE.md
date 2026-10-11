@@ -15,7 +15,7 @@ des Projekts liegen.
   **`llama_runtime.yml`** (der lokale Modellserver und seine Modelle). Beide sind neu und noch nicht veröffentlicht.
 - **`project_sources.yml`** und **`detailed_project_sources.yml`** sind ein Nachschlagekatalog vorgelagerter
   Projekte und Dokumentationslinks für Entwickler. Das Framework liest sie im Betrieb **nicht**.
-- Ihre eigenen Einstellungen landen in **`config.yml`** im Konfigurationsordner. Die Datei ist persönlich und wird
+- Deine eigenen Einstellungen landen in **`config.yml`** im Einstellungsordner. Die Datei ist persönlich und wird
   nie committet.
 
 ## Die Dateien in configs/
@@ -26,10 +26,10 @@ des Projekts liegen.
 | `llama_runtime.yml` | Festgelegter llama.cpp-Build, festgelegte GGUF-Modelle, Servervorgaben, Regeln für das empfohlene Modell | ja | `orchestrator/runtime/catalog.py` |
 | `project_sources.yml` | Katalog vorgelagerter Projekte: Repositorys, Versionen, Dokumentationslinks, Notizen | nein | Menschen; `scripts/validate_ssot.py` |
 | `detailed_project_sources.yml` | Ausführliche Entwicklerreferenz: Anleitungen, Entscheidungsbäume, weitere Herstellerabschnitte | nein | Menschen |
-| `config.yml` (nicht in git) | Ihre Einstellungen | ja | `orchestrator/Core/config_manager.py` |
+| `config.yml` (nicht in git) | Deine Einstellungen | ja | `orchestrator/Core/config_manager.py` |
 | `SSOT_ARCHITECTURE.md`, `SSOT_ARCHITECTURE_DE.md` | Dieses Dokument | nein | Menschen |
 
-Der Konfigurationsordner ist nur dann das `configs/` der Installation, wenn kein anderer Ordner festgelegt ist: Das
+Der Einstellungsordner ist nur dann das `configs/` der Installation, wenn kein anderer Ordner festgelegt ist: Das
 Framework nutzt `LLM_FRAMEWORK_CONFIG_DIR`, wenn die Variable gesetzt ist, sonst das `configs/` der Installation,
 wenn es beschreibbar ist, sonst den Benutzerordner (`~/.llm-framework` oder `LLM_FRAMEWORK_HOME`). Das
 Arbeitsverzeichnis nutzt es nie.
@@ -62,12 +62,12 @@ Felder einer Vorlage:
 | `runtime_endpoint` | `true` für den verwalteten lokalen Server: Adresse, Schlüssel und Modell kommen vom laufenden Server, nicht aus den Einstellungen. |
 | `location` | `cloud` (der Datenschutzfilter greift), `local` (nie gefiltert) oder `auto` (entschieden am Host der Adresse: Loopback, private Netze und `*.local` gelten als lokal). |
 | `auth` | Angenommene Verfahren, das bevorzugte zuerst: `api_key`, `oauth`, `none`. |
-| `secret` | Name des API-Schlüssels im verschlüsselten Geheimnisspeicher, etwa `openai_api_key`. Setzen Sie ihn mit `llm-cli secrets set <Name>` oder in den KI-Einstellungen. |
+| `secret` | Name des API-Schlüssels im verschlüsselten Secrets-Speicher, etwa `openai_api_key`. Setz ihn mit `llm-cli secrets set <Name>` oder in den KI-Einstellungen. |
 | `models` | Vorgabemodell je Aufgabe (`chat`, `tools`, `json`, `healing`), `default` für den Rest. |
 | `suggested_models`, `live_models` | Angebotene Modellnamen; mit `live_models: true` (Vorgabe) wird die Liste beim Anbieter abgefragt. |
 | `efforts`, `effort_map`, `reasoning` | Vorgabe-Aufwand je Aufgabe, Übersetzung der Aufwandsstufen für diesen Anbieter und wie der Aufwand übergeben wird (`none`, `reasoning_effort`, `reasoning_object`). |
-| `server_fallback_models`, `no_effort_models` | Modelle mit serverseitigem Ausweichen und Modelle, die keine Aufwandseinstellung annehmen (Anthropic). |
-| `no_tools_with_response_format` | `true`, wenn der Server Werkzeuge ignoriert, sobald ein JSON-Schema gesetzt ist (llama-server). |
+| `server_fallback_models`, `no_effort_models` | Modelle mit serverseitigem Fallback und Modelle, die keine Aufwandseinstellung annehmen (Anthropic). |
+| `no_tools_with_response_format` | `true`, wenn der Server Tools ignoriert, sobald ein JSON-Schema gesetzt ist (llama-server). |
 | `headers`, `docs_url` | Zusätzliche Anfrage-Header und ein Dokumentationslink. |
 
 Vorlagen in der Datei: `anthropic`, `openai`, `google` (Gemini über seinen OpenAI-kompatiblen Endpunkt),
@@ -76,9 +76,9 @@ Datei enthält noch eine Vorlage `claude_code`, die Ditto über ein Claude-Abo b
 Drittanbieter-Apps die Anmeldung mit einem Abo nicht, sie ist daher keine unterstützte Funktion und wird entfernt
 (siehe [Roadmap](../docs/BLUEPRINT_DE.md#roadmap)).
 
-**Eigene Vorlagen:** Eine Datei namens `llm_providers.yml` im Konfigurationsordner ergänzt Vorlagen oder ersetzt sie
-anhand der ID und ergänzt Aliasse. Das gilt nur, wenn der Konfigurationsordner nicht das `configs/` der Installation
-ist (sonst sind beide dieselbe Datei). Welche Vorlage benutzt wird, bestimmen Ihre Einstellungen: `ai_provider`,
+**Eigene Vorlagen:** Eine Datei namens `llm_providers.yml` im Einstellungsordner ergänzt Vorlagen oder ersetzt sie
+anhand der ID und ergänzt Aliasse. Das gilt nur, wenn der Einstellungsordner nicht das `configs/` der Installation
+ist (sonst sind beide dieselbe Datei). Welche Vorlage benutzt wird, bestimmen deine Einstellungen: `ai_provider`,
 `ai_model` (oder `ai_model_<Aufgabe>`), `ai_base_url`, `ai_effort`, `ai_fallback_chain` und `ai_security_level`.
 
 **Prüfen:**
@@ -103,16 +103,16 @@ geschlossen). Der Kommentar oben nennt die Quellen jedes Werts.
 | `llama_cpp` | `build` (b-Nummer, etwa `b11429`), `version`, `base_url` (https), `features` (Serveroptionen dieses Builds) und `assets`: ein Eintrag je Betriebssystem, Architektur und Backend (`cpu`, `vulkan`, `cuda`, `rocm`, `metal`) mit seinen Dateien (`name`, `size`, `sha256`, `libs` für CUDA-Laufzeitbibliotheken) und bei GPU-Builds `cuda`, `min_driver`, `jit_min_driver`, `native_compute_caps`, `min_compute_cap` oder `gpu_targets`. `opt_in: true` kennzeichnet Builds, die nur auf Wunsch installiert werden (ROCm). |
 | `model_base_url` | Woher Modelle geladen werden (https). |
 | `server` | `ctx_cap` und `ctx_min` (Grenzen der Kontextlänge), `sleep_idle_seconds`, `health_timeout_seconds`, `log_max_mib`, `log_backups`. |
-| `models` | Ein Eintrag je Stufe: `tier`, `repo`, `revision` (ein Commit mit 40 Zeichen, nie ein Branch), `file`, `size`, `sha256`, `license`, `native_context`, `kv_bytes_per_token`, `description`; `on_request: true` für Stufen, die nur auf Nachfrage geladen werden. |
+| `models` | Ein Eintrag je Stufe: `tier`, `repo`, `revision` (ein Commit mit 40 Zeichen, nie ein Branch), `file`, `size`, `sha256`, `license`, `native_context`, `kv_bytes_per_token`, `description`; `on_request: true` kennzeichnet Stufen, die nur über ihren Namen geladen werden sollen (in `llm-cli ditto models list` als „on request“ angezeigt; keine Stufenregel nennt sie). |
 | `tier_rules` | Automatische Wahl der empfohlenen Stufe: Die erste Regel, deren Bedingungen (`min_vram_gib`, `min_ram_gib`, `max_ram_gib`) erfüllt sind und deren Modell passt, gewinnt. Die letzte Regel darf keine Bedingungen haben, damit jeder Rechner ein Modell bekommt. |
 
 Der Lader lehnt außerdem doppelte Stufen oder Asset-IDs ab, Stufenregeln mit unbekannter Stufe und Treiberversionen,
-die als Dezimalzahl ohne Anführungszeichen geschrieben sind (YAML würde `570.60` als `570.6` lesen; schreiben Sie
+die als Dezimalzahl ohne Anführungszeichen geschrieben sind (YAML würde `570.60` als `570.6` lesen; schreib
 `"570.60"`). Eine Überschreibung je Benutzer gibt es nicht: Es gilt immer die Datei der Installation.
 
-**Ein Modell hinzufügen:** Ermitteln Sie Größe und SHA256 der Datei bei einem festen Commit (etwa mit
-`HfApi().model_info(repo, revision, files_metadata=True)` aus `huggingface_hub`), tragen Sie den Commit als
-`revision` ein und ergänzen Sie eine Stufenregel nur, wenn das Modell automatisch empfohlen werden soll.
+**Ein Modell hinzufügen:** Ermittle Größe und SHA256 der Datei bei einem festen Commit (etwa mit
+`HfApi().model_info(repo, revision, files_metadata=True)` aus `huggingface_hub`), trag den Commit als `revision` ein
+und ergänze eine Stufenregel nur, wenn das Modell automatisch empfohlen werden soll.
 
 **Prüfen:**
 
@@ -154,8 +154,8 @@ Was die Datei **nicht** ist, egal was ihr Kopfkommentar sagt:
 - Ihr Abschnitt `roadmap` (v2.2 bis v2.4) ist veraltet. Die Roadmap des Projekts steht in
   [docs/BLUEPRINT_DE.md](../docs/BLUEPRINT_DE.md#roadmap).
 
-Nutzen Sie sie als Liste von Links und Notizen. Halten Sie Notizen kurz, verwenden Sie vollständige URLs und führen
-Sie nach einer Änderung das Prüfskript aus.
+Nutze sie als Liste von Links und Notizen. Halte Notizen kurz, verwende vollständige URLs und führe nach einer
+Änderung das Prüfskript aus.
 
 ## detailed_project_sources.yml
 
@@ -178,7 +178,7 @@ Prüft `project_sources.yml`:
 - die Zahl der Inferenz-Backends und Hardware-Targets.
 
 Links, Commits und die ausführliche Datei prüft es nicht, und es läuft nicht in der CI. Es liest
-`project_sources.yml` aus dem aktuellen Ordner; führen Sie es also in `configs/` aus:
+`project_sources.yml` aus dem aktuellen Ordner; führe es also in `configs/` aus:
 
 ```bash
 cd configs
@@ -192,17 +192,17 @@ unter `models` und `tiny_models`), 4 Inferenz-Backends und 8 Hardware-Targets.
 
 Soll die Werte `commit`, `version`, `pypi_package` und `docker_tag` (in jeder Tiefe) und die Metadatenfelder
 `ssot_version` und `last_updated` (als `last_synced`) aus `project_sources.yml` in die ausführliche Datei übernehmen
-und alles andere behalten. **Nutzen Sie es in der jetzigen Form nicht:**
+und alles andere behalten. **Nutze es in der jetzigen Form nicht:**
 
 1. Es sucht `detailed_project.sources.yml` (mit Punkt), die Datei heißt aber `detailed_project_sources.yml`. In
    `configs/` ausgeführt, legt es deshalb eine neue Datei `detailed_project.sources.yml` als reine Kopie von
    `project_sources.yml` an, und die echte ausführliche Datei bleibt unverändert.
 2. Selbst mit dem richtigen Namen würde es die ganze Datei mit `yaml.dump` neu schreiben: Alle Kommentare gingen
-   verloren, und das Layout ändert sich. Außerdem würde es jeden Abschnitt aus `project_sources.yml` ergänzen, der
-   in der ausführlichen Datei fehlt.
+   verloren, und das Layout ändert sich. Außerdem würde es für jeden Abschnitt aus `project_sources.yml`, der in der
+   ausführlichen Datei fehlt, ein Gerüst (nur mit den übernommenen Werten) anlegen.
 3. Wie das Prüfskript funktioniert es nur in `configs/`.
 
-Bis es behoben ist (geplant für 3.4.0, siehe [Roadmap](../docs/BLUEPRINT_DE.md#roadmap)), pflegen Sie die
+Bis es behoben ist (geplant für 3.4.0, siehe [Roadmap](../docs/BLUEPRINT_DE.md#roadmap)), pflegst du die
 ausführliche Datei von Hand.
 
 ## Nicht verwandt: llm-cli config repos
@@ -222,19 +222,19 @@ die Einstellung derzeit keine Wirkung auf Builds.
 | Was ein Target bauen kann | `targets/<ID>/target.yml`, Block `capabilities:` | `orchestrator/schemas/targets.py`; `tests/test_foundation.py`, `tests/test_review_capabilities_paths.py` |
 | Version des Frameworks | `orchestrator/__init__.py` (`__version__`) | `tests/test_versioning.py` |
 | Python-Abhängigkeiten | `pyproject.toml`, fixiert in `poetry.lock`, exportiert nach `requirements*.txt` | `poetry check --lock`; pip-audit in der CI |
-| Einstellungen und ihre Vorgaben | Einträge `ConfigSchema` in `orchestrator/Core/config_manager.py`; Ihre Werte in `config.yml` | Schemaprüfung beim Start |
-| Werkzeuge für KI-Clients und Ditto | `orchestrator/tools/framework_tools.py` | `tests/test_foundation.py`, `tests/test_mcp_server.py` |
+| Einstellungen und ihre Vorgaben | Einträge `ConfigSchema` in `orchestrator/Core/config_manager.py`; deine Werte in `config.yml` | Schemaprüfung beim Start |
+| Tools für KI-Clients und Ditto | `orchestrator/tools/framework_tools.py` | `tests/test_foundation.py`, `tests/test_mcp_server.py` |
 | Dittos Evaluationsfälle | `evals/ditto/cases.yml` | `tests/test_ditto_eval.py` |
 | Kalibriertext für Importance-Matrizen | `data/calibration/`, SHA256-Werte in `orchestrator/utils/calibration.py` | `llm-cli doctor` (Code `data.calibration`) |
 | Versionen in den Target-Images | das Dockerfile des Targets und die Einstellung `llama_cpp_version` | hadolint und der Image-Build in `.github/workflows/docker.yml` |
 | Was war | [CHANGELOG_DE.md](../CHANGELOG_DE.md) | `tests/test_versioning.py` (neueste Version, an `CHANGELOG.md`) |
 | Was kommt | [docs/BLUEPRINT_DE.md#roadmap](../docs/BLUEPRINT_DE.md#roadmap) | Durchsicht |
 
-## Welche Datei Sie ändern
+## Welche Datei du änderst
 
-| Sie wollen | Ändern | Danach |
+| Du willst | Ändern | Danach |
 |---|---|---|
-| einen neuen KI-Anbieter oder ein neues Modell anbieten | `llm_providers.yml` (oder Ihre eigene Kopie im Konfigurationsordner) | die Prüfung oben und `tests/test_llm.py` ausführen; Changelog-Eintrag |
+| einen neuen KI-Anbieter oder ein neues Modell anbieten | `llm_providers.yml` (oder deine eigene Kopie im Einstellungsordner) | die Prüfung oben und `tests/test_llm.py` ausführen; Changelog-Eintrag |
 | ein lokales Modell oder einen neueren llama.cpp-Build ergänzen | `llama_runtime.yml`, mit Größe, SHA256 und Commit | die Prüfung oben und `tests/test_runtime.py` ausführen; Changelog-Eintrag |
 | ein Target ein neues Board, Format oder einen neuen Typ bauen lassen | `target.yml` und `build.sh` des Targets | Tests; siehe [Leitfaden für Modulentwickler](../docs/Module_Developer_Guide_DE.md) |
 | ein vorgelagertes Projekt oder einen Dokumentationslink festhalten | `project_sources.yml` (und von Hand die ausführliche Datei, wenn sie den Eintrag hat) | `python ../scripts/validate_ssot.py` in `configs/` |

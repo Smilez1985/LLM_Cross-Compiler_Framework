@@ -101,7 +101,7 @@ every value.
 | `llama_cpp` | `build` (b-number, for example `b11429`), `version`, `base_url` (https), `features` (server options of this build), and `assets`: one entry per operating system, architecture and backend (`cpu`, `vulkan`, `cuda`, `rocm`, `metal`) with its files (`name`, `size`, `sha256`, `libs` for CUDA runtime libraries) and, for GPU builds, `cuda`, `min_driver`, `jit_min_driver`, `native_compute_caps`, `min_compute_cap` or `gpu_targets`. `opt_in: true` marks builds that are installed only when chosen (ROCm). |
 | `model_base_url` | Where models are downloaded from (https). |
 | `server` | `ctx_cap` and `ctx_min` (context length limits), `sleep_idle_seconds`, `health_timeout_seconds`, `log_max_mib`, `log_backups`. |
-| `models` | One entry per tier: `tier`, `repo`, `revision` (a 40-character commit, never a branch), `file`, `size`, `sha256`, `license`, `native_context`, `kv_bytes_per_token`, `description`; `on_request: true` for tiers that are only downloaded when asked for. |
+| `models` | One entry per tier: `tier`, `repo`, `revision` (a 40-character commit, never a branch), `file`, `size`, `sha256`, `license`, `native_context`, `kv_bytes_per_token`, `description`; `on_request: true` marks tiers that are meant to be downloaded only by name (shown as "on request" in `llm-cli ditto models list`; no tier rule names them). |
 | `tier_rules` | Automatic choice of the recommended tier: the first rule whose conditions (`min_vram_gib`, `min_ram_gib`, `max_ram_gib`) hold and whose model fits wins. The last rule must have no conditions, so every machine gets a model. |
 
 The loader also refuses duplicate tiers or asset ids, tier rules that name an unknown tier, and driver versions
@@ -193,7 +193,8 @@ keeping everything else. **Do not use it in its current form:**
    Run inside `configs/`, it therefore creates a new file `detailed_project.sources.yml` as a plain copy of
    `project_sources.yml`, and the real detailed file stays unchanged.
 2. Even with the right name it would rewrite the whole file with `yaml.dump`: all comments are lost and the layout
-   changes. It would also add every section of `project_sources.yml` that the detailed file lacks.
+   changes. It would also add a skeleton (only the copied values) for every section of `project_sources.yml` that
+   the detailed file lacks.
 3. Like the validation script, it works only inside `configs/`.
 
 Until it is fixed (planned for 3.4.0, see the [roadmap](../docs/BLUEPRINT.md#roadmap)), update the detailed file by

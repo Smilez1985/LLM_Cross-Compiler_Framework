@@ -4,15 +4,15 @@ Version 3.0.0 + unveröffentlichte Änderungen · Stand 2026-10-11
 
 # Mitarbeit am LLM Cross-Compiler Framework
 
-Danke, dass Sie helfen. Dieser Leitfaden erklärt, wie Sie eine Entwicklungsumgebung einrichten, dieselben
-Prüfungen wie die CI ausführen, Zugangsdaten aus dem Repository heraushalten und Änderungen einreichen. Wenn Sie
-das Framework nur benutzen wollen, beginnen Sie mit der [README](README_DE.md). Wie das Framework aufgebaut ist,
-steht im [Bauplan](docs/BLUEPRINT_DE.md).
+Danke, dass du hilfst. Dieser Leitfaden erklärt, wie du eine Entwicklungsumgebung einrichtest, dieselben Prüfungen
+wie die CI ausführst, Zugangsdaten aus dem Repository heraushältst und Änderungen einreichst. Wenn du das Framework
+nur benutzen willst, beginne mit der [README](README_DE.md). Wie das Framework aufgebaut ist, steht im
+[Bauplan](docs/BLUEPRINT_DE.md).
 
 Möglichkeiten mitzuhelfen:
 
-- **Probleme melden:** Beschreiben Sie, was Sie getan haben und was passiert ist, und hängen Sie die Ausgabe von
-  `llm-cli doctor --json` und das Build-Log an. Entfernen Sie vorher persönliche Daten (Hostnamen, Benutzernamen,
+- **Probleme melden:** Beschreibe, was du getan hast und was passiert ist, und hänge die Ausgabe von
+  `llm-cli doctor --json` und das Build-Log an. Entferne vorher persönliche Daten (Hostnamen, Benutzernamen,
   Schlüssel).
 - **Ein Hardware-Target hinzufügen oder verbessern** (siehe [Abschnitt 7](#7-ein-hardware-target-hinzufügen)).
 - **Fehler beheben und Tests schreiben.**
@@ -26,14 +26,14 @@ Möglichkeiten mitzuhelfen:
 - [ ] Neues Verhalten ist durch Tests in `tests/` abgedeckt
 - [ ] Eintrag unter `[Unreleased]` in `CHANGELOG.md` und `CHANGELOG_DE.md`
 - [ ] Dokumentation auf Englisch und Deutsch aktualisiert
-- [ ] Keine Geheimnisse, kein persönlicher Zustand, keine Binärdateien und keine Modelldateien im Diff
+- [ ] Keine Secrets, kein persönlicher Zustand, keine Binärdateien und keine Modelldateien im Diff
 
 ---
 
 ## 1. Entwicklungsumgebung
 
-Sie brauchen **Python 3.11 bis 3.14**, Git und für echte Builds Docker. Auf einem Linux-Rechner ohne Desktop
-brauchen die Qt-Tests der GUI ein paar Systembibliotheken; die CI installiert
+Du brauchst **Python 3.11 bis 3.14**, Git und für echte Builds Docker. Auf einem Linux-Rechner ohne Desktop brauchen
+die Qt-Tests der GUI ein paar Systembibliotheken; die CI installiert
 `libegl1 libgl1 libxkbcommon0 libfontconfig1 libdbus-1-3 libglib2.0-0`.
 
 ### Variante A: uv
@@ -62,11 +62,11 @@ poetry run llm-gui
 - `LLM_FRAMEWORK_CONFIG_DIR=/ein/ordner` lässt das Framework diesen Ordner für seine Einstellungen nutzen. Ohne die
   Variable nutzt ein Checkout seinen eigenen Ordner `configs/` und schreibt hinein (`config.yml` und die Ordner
   `environments/`, `templates/`, `backups/`).
-- `LLM_FRAMEWORK_HOME=~/.llm-framework-dev` trennt Geheimnisse, Werkzeugrechte, Audit-Log, SSH-Schlüssel, bekannte
-  Hosts, Chatverlauf und den lokalen Modellserver Ihrer Entwicklungsumgebung von Ihrem echten `~/.llm-framework`.
+- `LLM_FRAMEWORK_HOME=~/.llm-framework-dev` trennt Secrets, Tool-Berechtigungen, Audit-Log, SSH-Schlüssel, bekannte
+  Hosts, Chatverlauf und den lokalen Modellserver deiner Entwicklungsumgebung von deinem echten `~/.llm-framework`.
 - `PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring` lässt die CLI auch auf Rechnern ohne Schlüsselbund des
-  Systems starten (etwa in Containern). Dieser Schlüsselbund behält keine Geheimnisse; nutzen Sie ihn nur zum
-  Entwickeln. `llm-cli doctor` warnt davor.
+  Systems starten (etwa in Containern). Dieser Schlüsselbund behält keine Secrets; nutze ihn nur zum Entwickeln.
+  `llm-cli doctor` warnt davor.
 
 ---
 
@@ -74,10 +74,10 @@ poetry run llm-gui
 
 - `pyproject.toml` legt die erlaubten Versionen fest, `poetry.lock` fixiert sie (Lock-Datei von Poetry 2).
 - `requirements.txt` (Laufzeit) und `requirements-dev.txt` (Entwicklungswerkzeuge) sind Exporte der Lock-Datei mit
-  Hashes. Die Installer und die CI installieren daraus. **Bearbeiten Sie sie nie von Hand.**
+  Hashes. Die Installer und die CI installieren daraus. **Bearbeite sie nie von Hand.**
 - `anthropic`, `openai`, `fastembed` und `mcp` sind absichtlich auf exakte Versionen festgelegt: KI-Werkzeuge sind
-  ein Ziel von Angriffen auf die Lieferkette (siehe die Kommentare in `pyproject.toml`). Wenn Sie eine solche
-  Festlegung ändern, begründen Sie es im Pull-Request.
+  ein Ziel von Angriffen auf die Lieferkette (siehe die Kommentare in `pyproject.toml`). Wenn du eine solche
+  Festlegung änderst, begründe es im Pull-Request.
 
 Nach dem Hinzufügen, Entfernen oder Aktualisieren einer Abhängigkeit:
 
@@ -93,9 +93,8 @@ Warnungen zu veralteten Feldern in `[tool.poetry]` ausgeben; entscheidend ist de
 ([Abschnitt 5](#5-lint--und-sicherheitsprüfungen)) und die Tests ausführen und `pyproject.toml`, `poetry.lock` und
 beide Requirements-Dateien zusammen committen.
 
-Dependabot öffnet wöchentlich Pull-Requests für Python-Pakete, GitHub Actions und die Dockerfiles der Targets. Bei
-Python-Updates prüfen Sie, ob beide Requirements-Dateien noch zu `poetry.lock` passen; sonst exportieren Sie sie
-neu.
+Dependabot öffnet wöchentlich Pull-Requests für Python-Pakete, GitHub Actions und die Dockerfiles der Targets. Prüfe
+bei Python-Updates, ob beide Requirements-Dateien noch zu `poetry.lock` passen; sonst exportiere sie neu.
 
 ---
 
@@ -115,8 +114,8 @@ python -m pytest
 - `tests/conftest.py` schottet jeden Test ab: ein temporäres Home- und Arbeitsverzeichnis,
   `LLM_FRAMEWORK_CONFIG_DIR` zeigt auf einen temporären Ordner, alle Variablen `LLM_*` und `FRAMEWORK_*` sowie die
   Anbieterschlüssel `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` und `GEMINI_API_KEY` werden entfernt. Tests dürfen nicht
-  von Ihrem echten `~/.llm-framework`, Ihrem Schlüsselbund, echten API-Schlüsseln oder dem Netzwerk abhängen; nutzen
-  Sie die Fixture `memory_keyring` und nachgebaute Server.
+  von deinem echten `~/.llm-framework`, deinem Schlüsselbund, echten API-Schlüsseln oder dem Netzwerk abhängen;
+  nutze die Fixture `memory_keyring` und nachgebaute Server.
 - `tests/test_versioning.py` prüft, dass `orchestrator/__init__.py`, `pyproject.toml` und der neueste
   veröffentlichte Changelog-Eintrag dieselbe Version tragen.
 - `tests/test_foundation.py` und `tests/test_review_capabilities_paths.py` prüfen, dass die Rockchip-Capabilities
@@ -144,7 +143,7 @@ Version noch fehlen.
 
 ## 4. Das lokale Modell und die Evaluation
 
-Tests laden nie Modelle herunter. Um Dittos Offline-Modus von Hand auszuprobieren, nutzen Sie ein eigenes
+Tests laden nie Modelle herunter. Um Dittos Offline-Modus von Hand auszuprobieren, nutze ein eigenes
 `LLM_FRAMEWORK_HOME` (Modelle landen im Ordner `models/ditto/` der Installation, den git ignoriert):
 
 ```bash
@@ -156,8 +155,8 @@ llm-cli ditto ask "Welche Formate kann das Rockchip-Target bauen?"
 llm-cli ditto runtime stop
 ```
 
-Wenn Sie Dittos Prompts, ein Modell für strukturierte Antworten oder eine Werkzeugbeschreibung ändern, führen Sie
-die Evaluation vor und nach der Änderung aus und vergleichen Sie die Berichte:
+Wenn du Dittos Prompts, ein Modell für strukturierte Antworten oder eine Tool-Beschreibung änderst, führe die
+Evaluation vor und nach der Änderung aus und vergleiche die Berichte:
 
 ```bash
 llm-cli ditto eval --tier small --tier small-q2 --json vorher.json
@@ -165,8 +164,8 @@ llm-cli ditto eval --provider ollama --model qwen3.5:4b --kind chat
 ```
 
 Die Fälle stehen in `evals/ditto/cases.yml` und werden nach Regeln bewertet; gebaut wird nichts. Cloud-Anbieter
-berechnen jede Anfrage (etwa 20 je Lauf und Wiederholung). Neue Fälle sind Daten: Ergänzen Sie sie in der
-Falldatei, nicht im Code.
+berechnen jede Anfrage (etwa 20 je Lauf und Wiederholung). Neue Fälle sind Daten: Ergänze sie in der Falldatei,
+nicht im Code.
 
 ---
 
@@ -203,7 +202,7 @@ bandit -r orchestrator scripts targets --severity-level high --confidence-level 
 bandit -r orchestrator scripts targets --severity-level medium --exit-zero
 ```
 
-**pip-audit** (`security.yml`): bekannte Schwachstellen. Lokal prüfen Sie Ihre Umgebung und die
+**pip-audit** (`security.yml`): bekannte Schwachstellen. Lokal prüfst du deine Umgebung und die
 Entwicklungswerkzeuge:
 
 ```bash
@@ -226,28 +225,29 @@ docker run --rm -i hadolint/hadolint hadolint --failure-threshold error - < targ
 
 **Image-Build** (`docker.yml`): Wenn sich `targets/**`, `entrypoint.sh`, `orchestrator/utils/build_context.py` oder
 `orchestrator/Core/builder.py` ändern, baut die CI das Rockchip-Image und führt Rauchtests aus (Werkzeugketten,
-Entrypoint, abgeschotteter Container). So bauen Sie das Image lokal aus demselben Kontext, den das Framework nutzt:
+Entrypoint, abgeschotteter Container). So baust du das Image lokal aus demselben Kontext, den das Framework nutzt:
 
 ```bash
 python3 -m orchestrator.utils.build_context targets/Rockchip /tmp/rockchip-context
 docker build -t llm-framework/rockchip:dev /tmp/rockchip-context
 ```
 
-GitHub Actions sind per Commit-SHA festgelegt, mit der Version als Kommentar. Halten Sie das bei neuen Actions so.
+GitHub Actions sind per Commit-SHA festgelegt, mit der Version als Kommentar. Halte das bei neuen Actions so.
 
 Die Makefile-Ziele `make build`, `make up`, `make gui`, `make test-container` und `make audit` funktionieren derzeit
-nicht: Sie nutzen `Docker Setup/docker-compose.yml`, die auf eine nicht vorhandene `orchestrator/Dockerfile`
-verweist, und ein fehlendes `scripts/setup_linux.sh`. Ein gehärtetes Image ohne Oberfläche steht in der
-[Roadmap](docs/BLUEPRINT_DE.md#roadmap). `make test` (Poetry), `make hooks` und `make secret-scan` funktionieren.
+nicht: Sie nutzen `Docker Setup/docker-compose.yml`, die aus einer nicht vorhandenen `orchestrator/Dockerfile`
+baut, und `build`, `up` und `gui` rufen außerdem das fehlende `scripts/setup_linux.sh` auf. Ein gehärtetes Image
+ohne Oberfläche steht in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap). `make test` (Poetry), `make hooks` und
+`make secret-scan` funktionieren.
 
 ---
 
 ## 6. Secret-Scan und Git-Hooks
 
 API-Schlüssel, Tokens, private Schlüssel und persönlicher Zustand dürfen nie committet werden.
-`scripts/secret_scan.py` (nur Standardbibliothek) findet sie; Git-Hooks und die CI führen ihn für Sie aus.
+`scripts/secret_scan.py` (nur Standardbibliothek) findet sie; Git-Hooks und die CI führen ihn für dich aus.
 
-**Schalten Sie die Hooks einmal je Klon ein:**
+**Schalte die Hooks einmal je Klon ein:**
 
 ```bash
 make hooks          # dasselbe wie: git config core.hooksPath .githooks
@@ -277,11 +277,11 @@ GitHub, GitLab, AWS, Google, Groq, xAI und andere), JSON Web Tokens, private Sch
 Passwort. Manche Dateien werden schon am Namen abgelehnt, egal was drinsteht, etwa `.env`, `credentials.json`,
 `secrets.store`, `audit.db`, `known_hosts`, `id_ed25519`, `chat_history.json`, `tool_policy.json` und `*.pem`.
 Offensichtliche Platzhalter (`EXAMPLE`, `REDACTED`, `xxxxxxxx`, `<...>`, Beispiel-Domains) werden ignoriert. Eine
-Zeile mit `secret-scan: allow` wird übersprungen; nutzen Sie das nur für dokumentierte Fantasiewerte.
+Zeile mit `secret-scan: allow` wird übersprungen; nutze das nur für dokumentierte Fantasiewerte.
 
-**Persönliche Zeichenfolgen** wie Ihre E-Mail-Adresse, Ihr Benutzername oder Hostnamen gehören ebenfalls nicht ins
-Repository, können aber nicht in einer öffentlichen Musterliste stehen. Tragen Sie sie in
-`.git/info/secret-patterns` ein; git committet diese Datei nie:
+**Persönliche Zeichenfolgen** wie deine E-Mail-Adresse, dein Benutzername oder Hostnamen gehören ebenfalls nicht ins
+Repository, können aber nicht in einer öffentlichen Musterliste stehen. Trage sie in `.git/info/secret-patterns`
+ein; git committet diese Datei nie:
 
 ```text
 # eine Zeichenfolge je Zeile (ohne Beachtung der Groß- und Kleinschreibung) oder ein regulärer Ausdruck nach "re:"
@@ -293,10 +293,9 @@ re:\bmein\.name@[a-z.]+\b
 In einem Git-Worktree gilt die Datei im `.git/info/` des Haupt-Repositorys. Alternativ zeigt
 `SECRET_SCAN_PATTERNS_FILE` auf eine Datei an einem anderen Ort. Lokale Muster erscheinen nie in der Ausgabe.
 
-**Findet der Scan etwas** in einem Commit, den Sie noch nicht gepusht haben: Entfernen Sie den Wert, legen Sie ihn
-stattdessen im Geheimnisspeicher oder in einer Umgebungsvariablen ab und ändern Sie den Commit (`--amend`). War der
-Wert ein echter Schlüssel, behandeln Sie ihn trotzdem als offengelegt und folgen Sie
-[Abschnitt 12](#12-wenn-ein-geheimnis-offengelegt-wurde).
+**Findet der Scan etwas** in einem Commit, den du noch nicht gepusht hast: Entferne den Wert, lege ihn stattdessen
+im Secrets-Speicher oder in einer Umgebungsvariablen ab und ändere den Commit (`--amend`). War der Wert ein echter
+Schlüssel, behandle ihn trotzdem als offengelegt und folge [Abschnitt 12](#12-wenn-ein-secret-offengelegt-wurde).
 
 ---
 
@@ -304,16 +303,16 @@ Wert ein echter Schlüssel, behandeln Sie ihn trotzdem als offengelegt und folge
 
 Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.md). Kurz:
 
-1. **Das Board untersuchen:** Führen Sie `scripts/hardware_probe.sh` auf dem Gerät aus; es schreibt
+1. **Das Board untersuchen:** Führe `scripts/hardware_probe.sh` auf dem Gerät aus; es schreibt
    `target_hardware_config.txt`.
 2. **Das Target anlegen:** in der GUI unter **Tools > Create Hardware Module...**, mit `llm-cli module create` oder
    mit Ditto: `llm-cli module generate-ai target_hardware_config.txt`. Der Generator prüft Namen, Images, Pakete,
    Flags und Shell-Code, schreibt nur unterhalb von `targets/` und überschreibt nie ein bestehendes Target.
-3. **Die Capabilities angeben:** Ergänzen Sie einen Block `capabilities:` in `targets/<Name>/target.yml` (Boards,
+3. **Die Capabilities angeben:** Ergänze einen Block `capabilities:` in `targets/<Name>/target.yml` (Boards,
    Formate, Quantisierungen je Board, Aliasse, Vorgaben, Bedarf an Kalibrierdaten; Schema in
-   `orchestrator/schemas/targets.py`). Der Generator schreibt ihn noch nicht; nehmen Sie den Rockchip-Block als
-   Vorbild. GUI, CLI, Ditto und der MCP-Server bieten genau das an und prüfen genau das, was dort steht.
-4. **Dockerfile und Build-Skript:** Legen Sie jede Version fest (Tags, Commits, Hashes, wie `RKLLM_WHEEL_SHA256` im
+   `orchestrator/schemas/targets.py`). Der Generator schreibt ihn noch nicht; nimm den Rockchip-Block als Vorbild.
+   GUI, CLI, Ditto und der MCP-Server bieten genau das an und prüfen genau das, was dort steht.
+4. **Dockerfile und Build-Skript:** Lege jede Version fest (Tags, Commits, Hashes, wie `RKLLM_WHEEL_SHA256` im
    Rockchip-Dockerfile). Die Umwandlung muss in der Sandbox funktionieren: als Benutzer ohne root-Rechte, ohne
    Netzwerk, mit schreibgeschütztem Image-Dateisystem und nur den eigenen Ordnern des Builds beschreibbar.
 5. **Mit einem echten Build testen**, zum Beispiel
@@ -321,48 +320,47 @@ Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module
    in die hadolint-Matrix in `.github/workflows/docker.yml` und in `.github/dependabot.yml` aufnehmen.
 
 **Wissenspakete** (`community/knowledge/`) sind noch nicht signiert (siehe [Roadmap](docs/BLUEPRINT_DE.md#roadmap)).
-Bitte öffnen Sie ein Issue, bevor Sie eines beisteuern.
+Bitte öffne ein Issue, bevor du eines beisteuerst.
 
 ---
 
 ## 8. Regeln für den Code
 
-- Nutzen Sie Typangaben für neue Funktionen.
-- Protokollieren Sie mit `orchestrator.utils.logging.get_logger`, nicht mit `print()`. CLI-Ausgaben laufen über
-  `rich`; maskieren Sie externen Text vor der Ausgabe mit `rich.markup.escape`.
-- Starten Sie Unterprozesse mit Argumentlisten, nie mit Shell-Zeichenketten, die Benutzereingaben enthalten. Werte
-  für Shell-Befehle auf entfernten Rechnern setzen Sie mit `shlex.quote` in Anführungszeichen.
-- Externer Text (Webseiten, Logs, Probe-Dateien, Wissensdatenbank, Werkzeugergebnisse) erreicht ein Sprachmodell nur
-  über `orchestrator/utils/untrusted.py` und nie in einem System-Prompt.
-- **KI-Aufrufe laufen über die Anbieterschicht.** Nutzen Sie `LLMClient` aus `orchestrator/llm`; bauen Sie nie einen
-  eigenen SDK-Client. Antworten, nach denen das Framework handelt, sind pydantic-Modelle (strukturierte Antworten),
-  nie ausgewerteter freier Text. Neue Anbieter oder Modelle sind Vorlagen in `configs/llm_providers.yml`.
+- Nutze Typangaben für neue Funktionen.
+- Protokolliere mit `orchestrator.utils.logging.get_logger`, nicht mit `print()`. CLI-Ausgaben laufen über `rich`;
+  maskiere externen Text vor der Ausgabe mit `rich.markup.escape`.
+- Starte Unterprozesse mit Argumentlisten, nie mit Shell-Zeichenketten, die Benutzereingaben enthalten. Werte für
+  Shell-Befehle auf entfernten Rechnern setzt du mit `shlex.quote` in Anführungszeichen.
+- Externer Text (Webseiten, Logs, Probe-Dateien, Wissensbasis, Tool-Ergebnisse) erreicht ein Sprachmodell nur über
+  `orchestrator/utils/untrusted.py` und nie in einem System-Prompt.
+- **KI-Aufrufe laufen über die Anbieterschicht.** Nutze `LLMClient` aus `orchestrator/llm`; baue nie einen eigenen
+  SDK-Client. Antworten, nach denen das Framework handelt, sind pydantic-Modelle (strukturierte Antworten), nie
+  ausgewerteter freier Text. Neue Anbieter oder Modelle sind Vorlagen in `configs/llm_providers.yml`.
 - **Downloads der lokalen Laufzeit sind festgelegt.** Ein neuer llama.cpp-Build oder ein neues Modell in
   `configs/llama_runtime.yml` braucht Größe und SHA256 aus einem vollständigen Download, Modelle zusätzlich einen
-  Hugging-Face-Commit als Revision. Übergeben Sie `llama-server` nie Optionen, die ihm Werkzeuge, einen
-  Agentenmodus, MCP-Clients oder eine Weboberfläche geben.
-- Neue Aktionen für KI-Clients und Ditto sind Werkzeuge in `orchestrator/tools/framework_tools.py` mit der
-  richtigen Stufe (`read`, `local_write`, `external`). Umgehen Sie nie die Registrierung, die Rechte oder das
-  Audit-Log.
-- Schwächen Sie nicht die Build-Sandbox, den Datenschutzfilter oder die Regeln für SSH-Vertrauen.
+  Hugging-Face-Commit als Revision. Übergib `llama-server` nie Optionen, die ihm Tools, einen Agentenmodus,
+  MCP-Clients oder eine Weboberfläche geben.
+- Neue Aktionen für KI-Clients und Ditto sind Tools in `orchestrator/tools/framework_tools.py` mit der richtigen
+  Stufe (`read`, `local_write`, `external`). Umgehe nie die Tool-Registry, die Berechtigungen oder das Audit-Log.
+- Schwäche nicht die Build-Sandbox, den Datenschutzfilter oder die Regeln für SSH-Vertrauen.
 
 ---
 
 ## 9. Commits und Pull-Requests
 
-- Zweigen Sie von `main` ab; ein Thema je Pull-Request.
+- Zweige von `main` ab; ein Thema je Pull-Request.
 - Commit-Nachrichten: eine Zusammenfassungszeile auf Englisch, im Imperativ, nur der erste Buchstabe groß, ohne
-  Typ-Präfix, etwa 72 Zeichen. Beispiele aus der Historie: `Harden SSH: trust on first use with fingerprints,
-  framework key, no stored passwords` und `Pin the provider SDKs and local embeddings, drop LiteLLM and tiktoken`.
-  Der Text darunter erklärt das Warum.
-- Nehmen Sie Dateien mit ausdrücklichen Pfaden auf (`git add pfad/zur/datei`), nicht mit `git add -A` oder
-  `git add .`, damit kein lokaler Zustand hineinrutscht.
+  Typ-Präfix, möglichst nicht länger als etwa 72 Zeichen. Beispiele aus der Historie: `Add a secret scan:
+  pre-commit and pre-push hooks and a CI job` und `Pin the provider SDKs and local embeddings, drop LiteLLM and
+  tiktoken`. Der Text darunter erklärt das Warum.
+- Nimm Dateien mit ausdrücklichen Pfaden auf (`git add pfad/zur/datei`), nicht mit `git add -A` oder `git add .`,
+  damit kein lokaler Zustand hineinrutscht.
 - Code, Tests, Dokumentation (Englisch und Deutsch) und der Changelog-Eintrag gehören in denselben Pull-Request.
-- Beschreiben Sie im Pull-Request, wie Sie getestet haben, etwa mit welchem Board und welchem Modell.
-- Committen Sie nie Geheimnisse oder persönlichen Zustand: `configs/config.yml`, `secrets.store`, API-Schlüssel,
-  Tokens oder Dateien aus `~/.llm-framework`.
-- Keine Binärdateien: keine `.whl`-, `.so`- oder Modelldateien. Laden Sie sie im Dockerfile herunter und prüfen Sie
-  ihre Hashes.
+- Beschreibe im Pull-Request, wie du getestet hast, etwa mit welchem Board und welchem Modell.
+- Committe nie Secrets oder persönlichen Zustand: `configs/config.yml`, `secrets.store`, API-Schlüssel, Tokens oder
+  Dateien aus `~/.llm-framework`.
+- Keine Binärdateien: keine `.whl`-, `.so`- oder Modelldateien. Lade sie im Dockerfile herunter und prüfe ihre
+  Hashes.
 
 ---
 
@@ -371,13 +369,12 @@ Bitte öffnen Sie ein Issue, bevor Sie eines beisteuern.
 - Format: [Keep a Changelog 1.1.0](https://keepachangelog.com/de/1.1.0/); Versionen folgen
   [Semantic Versioning 2.0.0](https://semver.org/lang/de/spec/v2.0.0.html).
 - **Der Changelog sagt, was war.** Jede Änderung, die Benutzer bemerken, bekommt einen Eintrag unter
-  `## [Unreleased]` in `CHANGELOG.md` und denselben Eintrag auf Deutsch in `CHANGELOG_DE.md`. Nutzen Sie die
-  Abschnitte Added, Changed, Deprecated, Removed, Fixed und Security und im deutschen Changelog die entsprechenden
-  Abschnitte.
-- Schreiben Sie für Benutzer: was sich geändert hat und was das für sie bedeutet.
+  `## [Unreleased]` in `CHANGELOG.md` und denselben Eintrag auf Deutsch in `CHANGELOG_DE.md`. Nutze die Abschnitte
+  Added, Changed, Deprecated, Removed, Fixed und Security und im deutschen Changelog die entsprechenden Abschnitte.
+- Schreib für Benutzer: was sich geändert hat und was das für sie bedeutet.
 - **Die Roadmap sagt, was kommt.** Geplante oder unfertige Arbeit gehört in die Roadmap
-  ([docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap)), nicht in den Changelog. Wenn Sie einen Roadmap-Punkt
-  fertigstellen, setzen Sie seinen Status in beiden Sprachfassungen des Bauplans auf „fertig“ und ergänzen den
+  ([docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap)), nicht in den Changelog. Wenn du einen Roadmap-Punkt
+  fertigstellst, setze seinen Status in beiden Sprachfassungen des Bauplans auf „fertig“ und ergänze den
   Changelog-Eintrag.
 - Für ein Release machen die Maintainer aus `[Unreleased]` ein `## [x.y.z] - JJJJ-MM-TT`, setzen dieselbe Version in
   `orchestrator/__init__.py` (`__version__`) und `pyproject.toml` und nehmen die veröffentlichten Punkte aus der
@@ -389,29 +386,28 @@ Bitte öffnen Sie ein Issue, bevor Sie eines beisteuern.
 
 - Englisch ist die Hauptsprache, Deutsch die zweite. **Jedes Dokument gibt es zweimal:** `<Name>.md` (Englisch) und
   `<Name>_DE.md` (Deutsch), mit gleicher Gliederung und gleichem Inhalt.
-- Schreiben Sie natürliches Deutsch mit korrekten Umlauten (ä, ö, ü, ß) und typografischen Anführungszeichen („…“),
-  keine Wort-für-Wort-Übersetzung.
+- Schreib natürliches Deutsch mit korrekten Umlauten (ä, ö, ü, ß) und typografischen Anführungszeichen („…“), keine
+  Wort-für-Wort-Übersetzung.
 - Beide Dateien verlinken oben aufeinander. Jedes Dokument beginnt mit einer Zeile wie
-  `Version 3.0.0 · Stand 2026-10-10` (Englisch: `Version 3.0.0 · Last updated 2026-10-10`); aktualisieren Sie sie,
-  wenn Sie das Dokument ändern. Beschreibt es auch unveröffentlichte Arbeit, sagen Sie das:
+  `Version 3.0.0 · Stand 2026-10-10` (Englisch: `Version 3.0.0 · Last updated 2026-10-10`); aktualisiere sie, wenn
+  du das Dokument änderst. Beschreibt es auch unveröffentlichte Arbeit, sag das:
   `Version 3.0.0 + unveröffentlichte Änderungen`.
-- Beschreiben Sie nur, was es auf dem aktuellen Zweig gibt; geplante Funktionen kommen in die Roadmap. Prüfen Sie
-  jeden Befehl, jede Option, jeden Pfad und jeden Konfigurationsschlüssel am Code oder an der Ausgabe von `--help`,
-  bevor Sie ihn aufschreiben.
-- Schreiben Sie zuerst für Einsteiger, dann ergänzen Sie die Einzelheiten. Keine Werbesprache.
-- Schreiben Sie nie echte Schlüssel, E-Mail-Adressen oder andere persönliche Daten in Beispiele; nutzen Sie
-  Platzhalter wie `<Ihr Schlüssel>`.
-- Ändern Sie beide Sprachfassungen im selben Pull-Request.
+- Beschreibe nur, was es auf dem aktuellen Zweig gibt; geplante Funktionen kommen in die Roadmap. Prüfe jeden
+  Befehl, jede Option, jeden Pfad und jeden Konfigurationsschlüssel am Code oder an der Ausgabe von `--help`, bevor
+  du ihn aufschreibst.
+- Schreib zuerst für Einsteiger, dann ergänze die Einzelheiten. Keine Werbesprache.
+- Schreib nie echte Schlüssel, E-Mail-Adressen oder andere persönliche Daten in Beispiele; nutze Platzhalter wie
+  `<dein Schlüssel>`.
+- Ändere beide Sprachfassungen im selben Pull-Request.
 
 ---
 
-## 12. Wenn ein Geheimnis offengelegt wurde
+## 12. Wenn ein Secret offengelegt wurde
 
 Ein Schlüssel, der in einen Commit, einen Pull-Request, ein Issue, ein geteiltes Log oder einen öffentlichen Fork
-gelangt ist, gilt als offengelegt, auch wenn Sie ihn eine Minute später entfernen. Gehen Sie in dieser Reihenfolge
-vor:
+gelangt ist, gilt als offengelegt, auch wenn du ihn eine Minute später entfernst. Geh in dieser Reihenfolge vor:
 
-1. **Widerrufen oder erneuern Sie ihn zuerst beim Anbieter.** Nur dieser Schritt macht den Schlüssel nutzlos.
+1. **Widerrufe oder erneuere ihn zuerst beim Anbieter.** Nur dieser Schritt macht den Schlüssel nutzlos.
    - Anthropic: https://platform.claude.com/settings/keys
    - OpenAI: https://platform.openai.com/settings/organization/api-keys
    - OpenRouter: https://openrouter.ai/keys
@@ -419,27 +415,27 @@ vor:
    - Hugging Face: https://huggingface.co/settings/tokens (ein offengelegtes Hugging-Face-Token kann außerdem jeder
      ungültig machen, siehe https://huggingface.co/docs/hub/security-tokens)
    - GitHub-Tokens: https://github.com/settings/tokens
-2. **Legen Sie den neuen Schlüssel nur im Geheimnisspeicher ab** (`llm-cli secrets set <Name>` oder die
-   KI-Einstellungen der GUI), nie in einer Datei im Repository.
-3. **Prüfen Sie, wofür der Schlüssel benutzt wurde**, in der Nutzungs- oder Abrechnungsansicht des Anbieters, und
-   melden Sie Missbrauch dem Anbieter.
-4. **Entfernen Sie den Wert aus dem Repository** mit einem normalen Commit. Die Historie umzuschreiben ist optional
-   und kommt erst danach: Ein gepushtes Geheimnis bleibt in Klonen, Forks und Caches erhalten; eine umgeschriebene
-   Historie macht einen Schlüssel also nie wieder sicher.
-5. **Informieren Sie die Maintainer vertraulich** über ein Security Advisory (siehe
+2. **Lege den neuen Schlüssel nur im Secrets-Speicher ab** (`llm-cli secrets set <Name>` oder die KI-Einstellungen
+   der GUI), nie in einer Datei im Repository.
+3. **Prüfe, wofür der Schlüssel benutzt wurde**, in der Nutzungs- oder Abrechnungsansicht des Anbieters, und melde
+   Missbrauch dem Anbieter.
+4. **Entferne den Wert aus dem Repository** mit einem normalen Commit. Die Historie umzuschreiben ist optional und
+   kommt erst danach: Ein gepushtes Secret bleibt in Klonen, Forks und Caches erhalten; eine umgeschriebene Historie
+   macht einen Schlüssel also nie wieder sicher.
+5. **Informiere die Maintainer vertraulich** über ein Security Advisory (siehe
    [Abschnitt 13](#13-sicherheitsprobleme-melden)), wenn der Schlüssel ins öffentliche Repository gelangt ist, und
-   ergänzen Sie ein lokales Muster ([Abschnitt 6](#6-secret-scan-und-git-hooks)), wenn der Scan sein Format nicht
+   ergänze ein lokales Muster ([Abschnitt 6](#6-secret-scan-und-git-hooks)), wenn der Scan sein Format nicht
    erkannt hat.
 
-Für Maintainer: Das Secret Scanning von GitHub läuft auf öffentlichen Repositorys; schalten Sie außerdem den
-Push-Schutz für das Repository ein (Settings > Advanced Security,
+Für Maintainer: Das Secret Scanning von GitHub läuft auf öffentlichen Repositorys; schaltet außerdem den Push-Schutz
+für das Repository ein (Settings > Advanced Security,
 https://docs.github.com/en/code-security/secret-scanning/enabling-secret-scanning-features/enabling-push-protection-for-your-repository).
 
 ---
 
 ## 13. Sicherheitsprobleme melden
 
-Bitte melden Sie Schwachstellen nicht in einem öffentlichen Issue. Öffnen Sie stattdessen ein vertrauliches
-Security Advisory auf GitHub.
+Bitte melde Schwachstellen nicht in einem öffentlichen Issue. Öffne stattdessen ein vertrauliches Security Advisory
+auf GitHub.
 
-Bleiben Sie respektvoll. Uns ist stabil und sicher lieber als schnell und kaputt.
+Bleib respektvoll. Uns ist stabil und sicher lieber als schnell und kaputt.

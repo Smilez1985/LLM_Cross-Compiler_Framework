@@ -230,9 +230,9 @@ docker build -t llm-framework/rockchip:dev /tmp/rockchip-context
 GitHub Actions are pinned by commit SHA with the version as a comment. Keep it that way for new actions.
 
 The Makefile targets `make build`, `make up`, `make gui`, `make test-container` and `make audit` do not work at the
-moment: they use `Docker Setup/docker-compose.yml`, which refers to an `orchestrator/Dockerfile` that does not
-exist, and a missing `scripts/setup_linux.sh`. A hardened headless image is on the
-[roadmap](docs/BLUEPRINT.md#roadmap). `make test` (Poetry), `make hooks` and `make secret-scan` work.
+moment: they use `Docker Setup/docker-compose.yml`, which builds from an `orchestrator/Dockerfile` that does not
+exist, and `build`, `up` and `gui` also call the missing `scripts/setup_linux.sh`. A hardened headless image is on
+the [roadmap](docs/BLUEPRINT.md#roadmap). `make test` (Poetry), `make hooks` and `make secret-scan` work.
 
 ---
 
@@ -341,10 +341,9 @@ Please open an issue before you contribute one.
 ## 9. Commits and pull requests
 
 - Branch from `main`; one topic per pull request.
-- Commit messages: a summary line in English, in the imperative, sentence case, no type prefix, about 72
-  characters. Examples from the history: `Harden SSH: trust on first use with fingerprints, framework key, no
-  stored passwords` and `Pin the provider SDKs and local embeddings, drop LiteLLM and tiktoken`. The body explains
-  why.
+- Commit messages: a summary line in English, in the imperative, sentence case, no type prefix, ideally no longer
+  than about 72 characters. Examples from the history: `Add a secret scan: pre-commit and pre-push hooks and a CI
+  job` and `Pin the provider SDKs and local embeddings, drop LiteLLM and tiktoken`. The body explains why.
 - Stage files with explicit paths (`git add path/to/file`), not with `git add -A` or `git add .`, so that no local
   state slips in.
 - Code, tests, documentation (English and German) and the changelog entry belong in the same pull request.
