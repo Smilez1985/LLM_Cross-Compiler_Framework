@@ -843,7 +843,7 @@ def tools_audit(ctx: FrameworkContext, limit: int, verify: bool, archive: bool):
     if archive:
         try:
             target = registry.audit.archive()
-        except OSError as e:
+        except (OSError, sqlite3.Error) as e:
             console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be moved: "
                           f"{escape(str(e))}[/red] Close the GUI and AI clients using the framework and try again.")
             sys.exit(1)
