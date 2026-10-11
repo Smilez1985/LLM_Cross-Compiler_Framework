@@ -56,8 +56,8 @@ Die Beispiele unten verwenden `llm-cli`.
 | Variable | Wirkung |
 |---|---|
 | `LLM_FRAMEWORK_CONFIG_DIR` | Einstellungsordner (`config.yml`). Standard: `configs/` in der Installation, wenn beschreibbar, sonst `~/.llm-framework`. Das Arbeitsverzeichnis wird nie verwendet. |
-| `LLM_FRAMEWORK_HOME` | Ordner für den persönlichen Zustand. Standard: `~/.llm-framework`. |
-| `LLM_FRAMEWORK_MODELS_DIR` | Modellordner; Dittos lokale Modelle liegen im Unterordner `ditto/`. Standard: `models/` in der Installation. |
+| `LLM_FRAMEWORK_HOME` | Ordner für den persönlichen Zustand. Standard: `~/.llm-framework`. Darfst du im Installationsordner nicht schreiben (zum Beispiel `C:\Program Files`), liegen auch die Datenordner `output/`, `cache/` und `models/` dort. |
+| `LLM_FRAMEWORK_MODELS_DIR` | Modellordner; Dittos lokale Modelle liegen im Unterordner `ditto/`. Standard: `models/` in der Installation, wenn beschreibbar, sonst im persönlichen Ordner. |
 | `LLM_FRAMEWORK_<SCHLÜSSEL>` | Überschreibt eine Einstellung für diesen Aufruf, z. B. `LLM_FRAMEWORK_AI_PROVIDER=local` oder `LLM_FRAMEWORK_BUILD_MEMORY_LIMIT=24g`. Es zählen nur bekannte Einstellungsnamen. |
 | `LLM_SECRET_STORAGE` | Wie der Secrets-Tresor für diesen Aufruf geschützt wird, z. B. `ephemeral` in der CI (siehe [secrets](#secrets)). |
 | `OPENAI_CUSTOM_HEADERS`, `ANTHROPIC_CUSTOM_HEADERS` | Werden beim Start mit einer Warnung entfernt, damit sie den gespeicherten Schlüssel nicht ersetzen können; die Einstellung `ai_allow_sdk_env_headers: true` behält sie. |
@@ -96,17 +96,16 @@ stderr aus, und bei `llm-cli mcp serve` trägt stdout das MCP-Protokoll.
 | Code | Bedeutung |
 |---|---|
 | 0 | Erfolg |
-| 1 | Der Befehl ist gescheitert (zum Beispiel ein gescheiterter Build, eine gescheiterte Übertragung, ein beschädigtes Audit-Log, ein KI-Fehler) |
+| 1 | Der Befehl ist gescheitert (zum Beispiel ein gescheiterter Build, eine gescheiterte Übertragung, ein Paket, das sich nicht erstellen ließ, ein Geheimnis, das sich nicht speichern ließ, eine Hardware-Probe, die keine Datei geschrieben hat, ein beschädigtes Audit-Log, ein KI-Fehler) |
 | 2 | Ungültige Eingabe: unbekannte Option, ein unbekanntes Target oder eine nicht unterstützte Kombination aus Format, Board und Quantisierung (`build start`), ein unbekannter Anbieter (`--provider`), eine unbekannte Modellstufe (`ditto models download`), kein passender Evaluationsfall (`ditto eval`), eine fehlende Paket-ID, Datei oder Quelle (`zoo install`, `zoo export`), eine Schlüsseldatei ohne verwendbaren Schlüssel (`--to`, `--from`), `--to` zusammen mit `--passphrase` (`zoo export`) |
 | 3 | Anmeldung: Der Anbieter hat die Zugangsdaten abgelehnt (`ditto login`, `ditto auth status --check`) |
 | 4 | Anmeldung: Anbieter oder lokaler Server nicht erreichbar |
 | 5 | Der Tresor für Zugangsdaten lässt sich nicht nutzen (kein nutzbarer Schlüsselbund, keine Passphrase, ein beschädigter Tresor); die Meldung nennt die Möglichkeiten. Jeder Befehl, der den Tresor braucht, verwendet ihn |
 | 6 | Anmeldung: Das Verfahren ist in dieser Version nicht verfügbar, oder der Anbieter wurde entfernt |
-| 130 | `build start` wurde mit Strg+C unterbrochen (die CLI endet erst, wenn der Build zu Ende ist) |
+| 130 | `build start` wurde mit Strg+C unterbrochen (der Build wurde vorher abgebrochen) |
 
 `llm-cli doctor` verwendet 0 (OK), 1 (Warnungen) und 2 (Fehler); `llm-cli ditto eval --min-pass` liefert 1, wenn
-ein Lauf unter dem angegebenen Anteil bleibt. Einige Befehle melden einen Fehler, enden aber trotzdem mit 0 (siehe
-[Bekannte Einschränkungen](#bekannte-einschränkungen)).
+ein Lauf unter dem angegebenen Anteil bleibt.
 
 ---
 
@@ -115,8 +114,8 @@ ein Lauf unter dem angegebenen Anteil bleibt. Einige Befehle melden einen Fehler
 | Befehl | Was er tut |
 |---|---|
 | `doctor` | Die Installation prüfen und erklären, wie man Probleme behebt |
-| `targets list` / `targets validate` | Hardware-Targets auflisten / prüfen, ob ein Target geladen werden kann |
-| `build start` / `build status` | Ein Modell konvertieren und quantisieren / die Builds dieses Prozesses zeigen |
+| `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
+| `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
 | `ditto login` / `ditto logout` | Ditto bei einem Anbieter anmelden (der Schlüssel verdeckt abgefragt, von stdin oder aus einer Umgebungsvariable, vor dem Speichern geprüft) / abmelden |
 | `ditto auth status/methods/storage/rotate-key` | Anmeldestand aller Anbieter / die Anmeldeverfahren / wie der Tresor geschützt ist / ein neuer Schlüssel für den Tresor |
@@ -130,7 +129,7 @@ ein Lauf unter dem angegebenen Anteil bleibt. Einige Befehle melden einen Fehler
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
 | `module create` / `module generate-ai` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei |
 | `scan` | Die Hardware-Probe auf diesem Rechner ausführen |
-| `config show` / `config repos` | Die Grundeinstellungen der CLI zeigen / Überschreibungen für Quell-Repositorys verwalten |
+| `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
 | `zoo export` / `zoo keys` | Ein signiertes Paket aus deinem Target, Build oder deiner Wissensbasis machen (und einen Pull-Request öffnen) / deine öffentlichen Schlüssel zeigen |
@@ -153,7 +152,7 @@ wie du ihn behebst.
 |---|---|
 | `--json` | Maschinenlesbare Ausgabe (Befunde, Korrekturen, Exit-Code). |
 | `--fix` | Die automatischen Korrekturen bis `--tier` anwenden, dann erneut prüfen. |
-| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (die Hilfe nennt „permissions, folders“; in dieser Version heißt das, den persönlichen Ordner privat zu machen). `2`: entfernt auch Caches (verwaiste Framework-Images und den Docker-Build-Cache). |
+| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (macht den persönlichen Ordner privat). `2`: entfernt auch Caches (verwaiste Framework-Images und den Docker-Build-Cache). |
 
 Speicherplatz: Unter 20 GB frei gibt es eine Warnung, unter 5 GB einen Fehler.
 
@@ -173,9 +172,11 @@ llm-cli doctor --fix --tier 2
 llm-cli targets list [-f table|json|yaml]
 ```
 
-Listet die Targets in `targets/` auf. Die Tabelle zeigt den Anzeigenamen des Targets (zum Beispiel „Rockchip
-Family“), seine Architektur, ob es bereit ist, und seinen Ordner. **Der Wert für `--target` ist der Ordnername**,
-zum Beispiel `Rockchip`.
+Listet die Targets im eingestellten Targets-Ordner auf. Die Tabelle zeigt für jedes Target die ID, den Namen (zum
+Beispiel „Rockchip Family“), die Architektur sowie die Boards und Formate, die sein Block `capabilities:` angibt; ein
+Target ohne diesen Block ist mit „no capabilities declared“ markiert. **Der Wert für `--target` ist die ID** (zum
+Beispiel `Rockchip`); der Ordnername des Targets funktioniert ebenso. `json` und `yaml` liefern dieselben Daten mit
+den Quantisierungen je Format.
 
 | Option | Bedeutung |
 |---|---|
@@ -187,7 +188,10 @@ zum Beispiel `Rockchip`.
 llm-cli targets validate TARGET_NAME
 ```
 
-Prüft, ob das Target geladen werden kann. Exit-Code 1, wenn es nicht gefunden wird.
+Prüft, ob das Target lädt (per ID oder Ordnername) und ob sein Block `capabilities:` das Schema besteht, das GUI,
+CLI, Build-Service und Werkzeuge verwenden; jeder Schemafehler wird ausgegeben. Exit-Code 1, wenn das Target nicht
+gefunden wird oder seine Capabilities ungültig sind. Ein Target ohne Capabilities wird gemeldet, gilt aber als
+gültig.
 
 ```bash
 llm-cli targets validate Rockchip
@@ -210,14 +214,14 @@ Fehlendes Board und fehlende Quantisierung werden mit den Standardwerten des Tar
 | Option | Bedeutung |
 |---|---|
 | `-m, --model TEXT` | **Pflicht.** Hugging-Face-ID (z. B. `HuggingFaceTB/SmolLM2-135M-Instruct`) oder ein lokaler Ordner bzw. eine Datei. |
-| `-t, --target TEXT` | **Pflicht.** Ordnername des Targets in `targets/`, z. B. `Rockchip`. Groß- und Kleinschreibung spielt keine Rolle. Ein unbekanntes Target stoppt mit Exit-Code 2 und der Liste der bekannten Targets. |
+| `-t, --target TEXT` | **Pflicht.** Target-ID, wie `targets list` sie zeigt, z. B. `Rockchip`, oder der Ordnername des Targets. Groß- und Kleinschreibung spielt keine Rolle. Ein unbekanntes Target stoppt mit Exit-Code 2 und der Liste der bekannten Targets. |
 | `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Ausgabeformat (Standard `gguf`). Die Liste ist länger als das, was ein Target unterstützt; Rockchip nimmt `gguf`, `rkllm` und `rknn`. |
 | `-b, --board TEXT` | Board der Target-Familie, z. B. `rk3588`, `rk3576`, `rk3566`. Standard: das Standard-Board des Targets (Rockchip: `rk3588`). Groß- und Kleinschreibung spielt keine Rolle. |
 | `-q, --quantization TEXT` | Quantisierung, z. B. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Standard: der Standard des Formats für das Board. Gängige Schreibweisen wie `INT8` werden übersetzt. |
 | `-o, --output-dir TEXT` | Ausgabeordner, relativ zum aktuellen Ordner. Standard: `output/build_<Datum>_<Uhrzeit>` in der Installation. |
 | `--optimization [fast\|balanced\|size\|speed\|aggressive]` | Optimierungsstufe (Standard `balanced`), wird den Build-Skripten als `OPTIMIZATION_LEVEL` übergeben. Die Rockchip-Skripte werten sie nicht aus. |
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in der Build-Warteschlange dieses Prozesses (Standard `normal`). |
-| `--parallel` | Hat in dieser Version keine Wirkung (es ist immer an, und ein Aufruf startet einen Build). |
+| `--parallel` | Veraltet und in `--help` ausgeblendet: Hat keine Wirkung (ein Aufruf startet einen Build) und gibt eine Warnung aus. |
 | `-F, --follow` | Jede Stufe ausgeben, während der Build läuft. |
 | `--gpu / --no-gpu` | Die GPU des Hosts in den Container durchreichen (Standard aus): eine NVIDIA-GPU, wenn `nvidia-smi` gefunden wird, sonst `/dev/dri`, falls vorhanden. Rockchip-Konvertierungen brauchen das nicht. |
 | `--imatrix / --no-imatrix` | Importance Matrix für GGUF (Standard aus). Pflicht für `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`. |
@@ -225,8 +229,11 @@ Fehlendes Board und fehlende Quantisierung werden mit den Standardwerten des Tar
 
 Verhalten:
 
-- Der Befehl bleibt im Vordergrund, bis der Build fertig ist. Strg+C bricht den Build in dieser Version nicht ab:
-  Die CLI zeigt keinen Fortschritt mehr, wartet aber, bis der Build zu Ende ist, und endet dann mit Exit-Code 130.
+- Der Befehl bleibt im Vordergrund, bis der Build fertig ist. Strg+C bricht den Build über den Build-Service ab:
+  Sein laufender Container (Image-Build, Sicherheits-Scan oder Konvertierung) wird gestoppt, die CLI wartet, bis der
+  Build angehalten hat (höchstens 120 s), sagt das und endet mit Exit-Code 130. In den Ausgabeordner wird nichts
+  geschrieben. Ein Build, der seine Dateien schon in den Ausgabeordner verschiebt, lässt sich nicht mehr abbrechen;
+  die CLI meldet dann, dass er von selbst zu Ende gelaufen ist.
 - Scheitert der Build an einem bekannten Problem mit einer Korrektur, die das Framework selbst anwenden kann, zeigt
   die CLI die Ursache und fragt „Apply this fix and retry the build?“. Ohne Terminal wird der Vorschlag verworfen.
   Manuelle Schritte werden nur angezeigt.
@@ -268,16 +275,20 @@ $ echo $?
 llm-cli build status [REQUEST_ID] [-a|--all]
 ```
 
-Zeigt die Builds, die dieser Prozess kennt: ohne Request-ID (oder mit `--all`) eine Tabelle mit Request-ID, Status
-und Fortschritt; mit Request-ID deren Status und Fortschritt.
+Zeigt Builds aus den Build-Einträgen im Cache-Ordner (`<cache_dir>/build_records/`): Jedes Programm, das baut
+(CLI, GUI, MCP-Server), schreibt je Build einen Eintrag mit Request, Modell, Target, Format, Quantisierung, Status,
+Stufe und Fortschritt, deshalb erscheinen auch Builds, die ein anderer Prozess gestartet hat. Ohne ID: eine Tabelle
+der 20 neuesten Builds; mit einer Request-ID (`req_...`) oder einer Build-ID: die Einzelheiten jedes Versuchs,
+einschließlich des Fehlers eines gescheiterten Builds (Zugangsdaten geschwärzt). Ein Build, dessen Prozess endete,
+bevor der Build fertig war, erscheint als `interrupted`. Exit-Code 1, wenn die ID nicht gefunden wird. Der Befehl
+braucht weder den Tresor für Zugangsdaten noch Docker.
 
 | Option | Bedeutung |
 |---|---|
-| `-a, --all` | Alle Builds zeigen. |
+| `-a, --all` | Jeden aufbewahrten Build statt der 20 neuesten zeigen (aufbewahrt werden die 200 neuesten fertigen oder unterbrochenen Builds). |
 
-Builds leben in dem Prozess, der sie gestartet hat. Ein eigener Aufruf von `llm-cli build status` sieht keine Builds
-aus der GUI, dem MCP-Server oder einem anderen CLI-Aufruf und meldet „No builds found“. Nutze `build start --follow`,
-das Log in der GUI oder `llm-cli deploy list-artifacts` für fertige Builds.
+Ein Request, der auf eine Self-Healing-Entscheidung wartet, zeigt seinen gescheiterten ersten Versuch; entscheide in
+dem Programm, das ihn ausführt.
 
 ---
 
@@ -559,8 +570,9 @@ wird gebaut oder geändert: Chat-Fälle laufen gegen einen Ersatz-Build-Dienst. 
 | `--effort [low\|medium\|high]` | Aufwand für diesen Lauf (lokale Modelle: `low` = ohne Nachdenken). Standard: KI-Einstellungen. |
 
 Mit `--tier` muss die lokale Laufzeit installiert und das Modell der Stufe heruntergeladen sein. Die CLI startet
-`llama-server` nacheinander mit jeder Stufe und **stoppt den lokalen Server nach jeder Stufe**; ein Server, der
-vorher lief, wird also ebenfalls gestoppt.
+`llama-server` nacheinander mit jeder Stufe und stoppt die Server, die sie gestartet hat. Ein Server, den du selbst
+gestartet hast, läuft weiter, wenn er die Stufe schon bedient; sonst ersetzt die Evaluation ihn für diese Stufe und
+sagt das am Ende.
 
 ```bash
 # Das 2B-Modell mit 4 und 2 Bit auf diesem Rechner vergleichen, ohne Nachdenken
@@ -905,8 +917,8 @@ Target wird nie überschrieben.
 | `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU-Architektur. |
 | `--sdk TEXT` | Besonderes SDK, z. B. `CUDA`, `RKNN` (Standard `None`). |
 
-Das Target wird nach `targets/` **im aktuellen Ordner** geschrieben; ruf den Befehl im Installationsordner auf.
-Seine `target.yml` hat einen Block `capabilities:` (Unterstützungsstufe `community`) mit dem Modulnamen als einzigem
+Das Target wird in den eingestellten Targets-Ordner geschrieben (Einstellung `targets_dir`; ein relativer Pfad
+gilt relativ zur Installation, nicht zum aktuellen Ordner). Seine `target.yml` hat einen Block `capabilities:` (Unterstützungsstufe `community`) mit dem Modulnamen als einzigem
 Board und GGUF als einzigem Format; trag dort deine echten Boards und Formate ein. Der Hinweis des Befehls,
 `modules/config_module.sh` anzupassen, betrifft ein Altlast-Skript, das die Build-Pipeline nicht aufruft
 ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#10-altlasten)).
@@ -943,13 +955,15 @@ llm-cli scan [--output TEXT]
 ```
 
 Führt die Hardware-Probe auf diesem Rechner aus (`scripts/hardware_probe.sh` unter Linux,
-`scripts/hardware_probe.ps1` unter Windows). Die Probe schreibt `target_hardware_config.txt` in den aktuellen
-Ordner. Sie fragt eventuell, ob fehlende Hilfsprogramme (`pciutils`, `usbutils`, `dmidecode`) mit deinem
-Paketmanager installiert werden sollen; mit `n` überspringst du das.
+`scripts/hardware_probe.ps1` unter Windows). Die Probe schreibt die mit `--output` angegebene Datei (ihr Ordner
+wird angelegt). Sie fragt eventuell, ob fehlende Hilfsprogramme (`pciutils`, `usbutils`, `dmidecode`) mit deinem
+Paketmanager installiert werden sollen; mit `n` überspringst du das. Unter Windows ohne Administratorrechte startet
+sich die Probe mit erhöhten Rechten neu (Windows fragt nach der Erlaubnis), und die CLI wartet auf sie. Exit-Code 1,
+wenn die Probe scheitert oder keine Datei schreibt.
 
 | Option | Bedeutung |
 |---|---|
-| `--output TEXT` | Dateiname, nach dem der Befehl danach sucht (Standard `target_hardware_config.txt`). Die Probe selbst schreibt immer `target_hardware_config.txt`; lass also den Standard stehen. |
+| `--output TEXT` | Datei, die die Probe schreibt, relativ zum aktuellen Ordner (Standard `target_hardware_config.txt`). Die CLI gibt sie an die Probe weiter (`hardware_probe.sh --output DATEI`, `hardware_probe.ps1 -OutputFile DATEI`). |
 
 Um ein Board statt dieses Rechners zu untersuchen, führst du `scripts/hardware_probe.sh` auf dem Board aus oder
 nutzt in der GUI **Scan / Import... > Remote Scan via SSH**.
@@ -964,10 +978,16 @@ nutzt in der GUI **Scan / Import... > Remote Scan via SSH**.
 llm-cli config show
 ```
 
-Gibt die Grundeinstellungen der CLI als JSON aus: die Ordner (`targets_dir`, `models_dir`, `output_dir`,
-`configs_dir`, `cache_dir`, `logs_dir`), `log_level` und `max_concurrent_builds`, ergänzt um eine mit `-c`
-angegebene Datei. Die Einstellungen in der `config.yml` (KI-Anbieter, Sandbox, Crawler und so weiter) zeigt es
-nicht; sieh dafür direkt in diese Datei.
+Gibt die wirksamen Einstellungen als JSON aus, so wie das Framework sie liest: jede Einstellung mit ihrem Wert
+(`value`) und ihrer Herkunft (`source`: `default`, `file <Pfad>` für die `config.yml` oder eine mit `-c` angegebene
+Datei, `environment` für eine Variable `LLM_FRAMEWORK_<KEY>`). Zugangsdaten werden geschwärzt: Tokens, Schlüssel und
+Passwörter in Werten (zum Beispiel in einer URL) und jeder Wert unter einem Namen, der nach Zugangsdaten aussieht,
+ob eine unbekannte Einstellung (`hf_token`) oder ein Schlüssel innerhalb einer Einstellung (`password`, `api_key`).
+Der Befehl braucht weder den Tresor für Zugangsdaten noch Docker.
+
+```bash
+llm-cli -q config show | jq '.models_dir'
+```
 
 ### config repos
 
@@ -976,15 +996,18 @@ llm-cli config repos [--add NAME URL] [--remove NAME]
 ```
 
 Ohne Optionen listet es die Überschreibungen für Quell-Repositorys auf (Einstellung `source_repositories`). `--add`
-und `--remove` ändern sie und speichern die `config.yml`.
+und `--remove` ändern sie und speichern die `config.yml`. `--add` speichert einen Eintrag `{url: ...}`; die
+Build-Engine reicht jeden Eintrag, auch einfache URLs aus früheren Versionen, als `<NAME>_REPO_OVERRIDE` an die
+Stufen-Container weiter (`NAME`: der Teil nach dem letzten Punkt, in Großbuchstaben, zum Beispiel `llama_cpp` ->
+`LLAMA_CPP_REPO_OVERRIDE`).
 
 | Option | Bedeutung |
 |---|---|
 | `--add TEXT...` | Eine Überschreibung hinzufügen: `NAME URL`. |
 | `--remove TEXT` | Die Überschreibung `NAME` entfernen. |
 
-In dieser Version erreichen Überschreibungen, die hier hinzugefügt werden, die Builds nicht: Die Build-Engine reicht
-nur Einträge der Form `{url: ...}` weiter, und `--add` speichert eine einfache URL.
+Die aktuellen Rockchip-Skripte lesen keine dieser Variablen (nur das Altlast-Skript `source_module.sh` liest
+`LLAMA_CPP_REPO_OVERRIDE`), daher wirken sich die Überschreibungen auf Rockchip-Builds nicht aus.
 
 ---
 
@@ -1270,14 +1293,10 @@ ed25519:<base64>
 
 ## Bekannte Einschränkungen
 
-- `build status` sieht nur Builds des eigenen Prozesses (siehe [build status](#build-status)).
-- Strg+C in `build start` bricht den Build nicht ab; die CLI wartet, bis er zu Ende ist.
-- `build start --parallel` und `--optimization` wirken sich auf Rockchip-Builds nicht aus.
-- `deploy package`, `secrets set` und `scan` melden einen Fehler („Package generation failed“, „Failed to store
-  secret“, „output file was not created“), enden aber mit Exit-Code 0; prüfe in Skripten die Ausgabe.
-- `scan --output` ändert nicht, wohin die Probe schreibt.
-- `module create` schreibt nach `targets/` im aktuellen Ordner.
-- `config show` zeigt nur die Grundeinstellungen der CLI; `config repos --add` erreicht die Builds nicht.
+- `build start --optimization` wirkt sich auf Rockchip-Builds nicht aus (die Skripte haben keine passende
+  Einstellung); `--parallel` ist veraltet und hat keine Wirkung.
+- Überschreibungen aus `config repos` erreichen die Builds als `<NAME>_REPO_OVERRIDE`, aber die Rockchip-Skripte
+  lesen sie nicht.
 - `deploy package --docker` ist experimentell.
 - Einen CLI-Befehl, um Dittos Anbieter dauerhaft zu wählen, gibt es noch nicht; nutze die GUI, die `config.yml` oder
   `LLM_FRAMEWORK_AI_PROVIDER` (`ditto login` meldet an, wechselt den Anbieter aber nicht). Anmeldungen im Browser

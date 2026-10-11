@@ -12,6 +12,7 @@ newest entries or of the anchor itself) is stored in the database, so it stays r
 appends. Arguments are stored redacted and truncated, plus a hash of the full text.
 """
 
+import contextlib
 import hashlib
 import hmac
 import json
@@ -323,13 +324,26 @@ class AuditLog:
                 # One write transaction for checking the anchor, reading the last hash and appending: other
                 # processes (GUI, CLI, one MCP server per AI client session) wait instead of forking the chain.
                 db.execute("BEGIN IMMEDIATE")
+                first_anchor = False
                 try:
-                    entry_id, digest, anchor_readable = self._append(db, row)
+                    entry_id, digest, anchor_readable, new_log = self._append(db, row)
+                    if new_log and anchor_readable:
+                        # The first entry of a log gets its anchor before the commit makes it visible: a writer
+                        # waiting for this transaction would otherwise find entries but no anchor and record
+                        # "anchor_missing". Later entries only move an anchor that exists (a lagging one is fine).
+                        try:
+                            self._write_anchor(entry_id, digest)
+                            first_anchor = True
+                        except OSError as e:
+                            self._warn(f"Audit anchor not written: {e}")
                     db.execute("COMMIT")
                 except BaseException:
+                    if first_anchor:  # it names an entry that was never committed; removed while still locked
+                        with contextlib.suppress(OSError):
+                            os.unlink(self.anchor_path)
                     _rollback(db)
                     raise
-                if anchor_readable:
+                if anchor_readable and not first_anchor:
                     # The entry is kept even if the anchor cannot follow it; the anchor then lags behind.
                     try:
                         self._move_anchor(db, entry_id, digest)
@@ -338,7 +352,8 @@ class AuditLog:
             finally:
                 db.close()
 
-    def _append(self, db, row: Dict[str, Any]) -> Tuple[int, str, bool]:
+    def _append(self, db, row: Dict[str, Any]) -> Tuple[int, str, bool, bool]:
+        """Appends row; returns (entry id, hash, whether the anchor could be read, whether a new log started)."""
         meta = dict(db.execute("SELECT k, v FROM meta").fetchall())
         found = _dicts(db.execute("SELECT * FROM events ORDER BY id DESC LIMIT 1"))
         last = found[0] if found else None
@@ -367,7 +382,7 @@ class AuditLog:
         if problem:
             db.execute("INSERT INTO meta (k, v) VALUES ('break', ?)",
                        (json.dumps({"problem": problem[0], "entry": problem[1] or entry_id}),))
-        return entry_id, digest, readable
+        return entry_id, digest, readable, new_log
 
     @staticmethod
     def _warn(message: str) -> None:

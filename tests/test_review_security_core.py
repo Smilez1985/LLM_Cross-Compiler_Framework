@@ -223,7 +223,8 @@ class TestConfigLocation:
         fm = boot_framework(tmp_path)
         try:
             assert fm.model_manager.models_dir == tmp_path / "models"
-            assert fm.model_manager.tiny_models_dir.is_dir()
+            # Made by the download or build that needs them, not at every start (empty folders in the install).
+            assert not any((tmp_path / name).exists() for name in ("models", "output", "cache"))
         finally:
             fm.shutdown()
 
@@ -261,7 +262,9 @@ class TestCliFromForeignProject:
         assert result.returncode == 0, result.stderr
         assert "Traceback" not in result.stderr
         assert "start_build" in result.stdout
-        assert (setup.safe / "models" / "tiny_models").is_dir(), "the trusted configuration was used"
+        listed = self.run_cli(setup.project, tmp_path, "deploy", "list-artifacts")
+        assert listed.returncode == 0, listed.stderr
+        assert str(setup.safe / "output") in "".join(listed.stdout.split()), "the trusted configuration was used"
         for folder in setup.evil.values():
             assert not Path(folder).exists(), f"project setting used: {folder}"
         assert snapshot(setup.project) == setup.before, "nothing may be written into the project"
@@ -843,6 +846,62 @@ class TestAuditLog:
         assert all(sum(1 for r in rows if r[1] == w) == 100 for w in ("w0", "w1", "w2"))
         anchor = json.loads(log.anchor_path.read_text())
         assert anchor["id"] == 300 and anchor["hash"] == rows[-1][3]
+
+    def test_a_writer_right_after_the_first_entry_sees_its_anchor(self, tmp_path):
+        """The race behind the flaky test above: another process appends as soon as the first entry of a new
+        log is committed. The anchor must already exist then, or that writer records 'anchor_missing'."""
+        db = tmp_path / "state" / "audit.db"
+        first, second = AuditLog(db, key=b"shared-key"), AuditLog(db, key=b"shared-key")
+        interleaved = []
+
+        class CommitHook:
+            """first's connection; the second writer runs right after the first COMMIT, before anything else."""
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, *args):
+                cursor = self._conn.execute(sql, *args)
+                if sql == "COMMIT" and not interleaved:
+                    interleaved.append(True)
+                    second.record("w1", "start_build", "local_write", "ask", "ok")
+                return cursor
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        real_connect = first._connect
+        first._connect = lambda: CommitHook(real_connect())
+        first.record("w0", "start_build", "local_write", "ask", "ok")
+
+        assert interleaved, "the second writer did not run"
+        result = AuditLog(db, key=b"shared-key").check()
+        assert result.intact and result.entries == 2, result.message
+        assert json.loads(first.anchor_path.read_text())["id"] == 2
+
+    def test_first_anchor_is_removed_when_the_first_entry_is_rolled_back(self, tmp_path, monkeypatch):
+        db = tmp_path / "state" / "audit.db"
+        log = AuditLog(db, key=b"k")
+        real_connect = log._connect
+
+        class FailingCommit:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def execute(self, sql, *args):
+                if sql == "COMMIT":
+                    raise sqlite3.OperationalError("disk I/O error")
+                return self._conn.execute(sql, *args)
+
+            def __getattr__(self, name):
+                return getattr(self._conn, name)
+
+        log._connect = lambda: FailingCommit(real_connect())
+        with pytest.raises(sqlite3.OperationalError):
+            log.record("cli", "t", "read", "allow", "ok")
+        assert not log.anchor_path.exists(), "an anchor naming an entry that was never committed"
+        log._connect = real_connect
+        log.record("cli", "t", "read", "allow", "ok")
+        assert log.check().intact and json.loads(log.anchor_path.read_text())["id"] == 1
 
     def test_opening_is_lazy(self, tmp_path):
         log = AuditLog(tmp_path / "not-yet" / "audit.db", key=b"k")

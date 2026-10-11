@@ -8,6 +8,7 @@
 #   QUANTIZATION   e.g. Q4_K_M, IQ4_XS, F16 (gguf) / w4a16, w8a8 (rkllm) / i8, fp16 (rknn)
 #   JOB_TYPE       build | imatrix
 #   USE_IMATRIX / IMATRIX_PATH, DATASET_PATH, MODEL_NAME (optional)
+#   OPTIMIZATION_LEVEL is set as well but not used: the Rockchip conversions have no matching setting.
 # Outputs go to $BUILD_CACHE_DIR/output (mounted from the host).
 
 set -euo pipefail
@@ -114,7 +115,7 @@ build_imatrix() {
     convert_to_gguf f16 "$f16_file"
     echo ">> Computing importance matrix..."
     # -o *.dat keeps the legacy format, which llama-quantize --imatrix accepts.
-    "$IMATRIX_BIN" -m "$f16_file" -f "$dataset" -o "$IMATRIX_DIR/imatrix.dat" --chunks "${IMATRIX_CHUNKS:-100}"
+    "$IMATRIX_BIN" -m "$f16_file" -f "$dataset" -o "$IMATRIX_DIR/imatrix.dat" --chunks 100
     rm -f "$f16_file"
 }
 

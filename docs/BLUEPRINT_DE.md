@@ -176,7 +176,7 @@ flowchart TB
 | SecretsManager | `orchestrator/Core/secrets_manager.py`, `orchestrator/Core/vault_key.py`, `orchestrator/utils/file_lock.py` | Verschlüsselter Tresor (`secrets.store` im Benutzerordner, Format v2: Fernet-Einträge mit Schlüssel-IDs, gelesen mit MultiFernet, Schlüsselwechsel). Sein Schlüssel kommt standardmäßig aus dem Schlüsselbund des Betriebssystems (ein Eintrag je Tresor; ein Schlüsselbund, der hängt, nichts behält oder im Klartext speichert, wird abgelehnt) oder aus der ausdrücklichen Wahl in `secret_storage` (Credential-Helper, Passphrase, unverschlüsselte Schlüsseldatei, nur Arbeitsspeicher). Jede Änderung läuft unter einer Sperre über Prozessgrenzen; der Tresor lehnt einen Ort innerhalb einer Git-Arbeitskopie ab. Enthält API-Schlüssel (als Datensätze unter `cred/<anbieter>/api_key`; die alten Namen gelten weiter) und das Hugging-Face-Token (`hf_token`). Die Secrets eines Speichers am alten Ort (Einstellungsordner) werden einmalig übernommen und mit dem Schlüssel des Tresors neu verschlüsselt, auch in einen schon vorhandenen Speicher im Benutzerordner; dort bereits vorhandene Secrets haben Vorrang, und die alte Datei bleibt unverändert. Ein lange laufender Prozess (GUI, MCP-Server) liest den Tresor neu, wenn ein anderer Prozess ihn geändert hat. |
 | Secret-Formate und Schwärzung in Logs | `orchestrator/security/` | Eine Tabelle der Secret-Formate, die nur die Standardbibliothek braucht (`secret_patterns.py`); `scripts/secret_scan.py` lädt sie, `redact_secrets` nutzt sie. `redaction.py` schwärzt jeden Logeintrag beim Erzeugen (Logger des Frameworks, der SDKs und der HTTP-Bibliotheken, Tracebacks), hält die SDK-Logger auf INFO oder darüber, außer `--debug-http` ist angegeben, und stellt `SecretStr` bereit, in dem die Anbieterschicht ihre Schlüssel hält. |
 | TargetManager und Capabilities | `orchestrator/Core/target_manager.py`, `orchestrator/schemas/targets.py` | Lädt die `target.yml` jedes Target-Ordners (Ordner, die mit `_` oder `.` beginnen, etwa `_template`, werden übersprungen) und prüft ihren Block `capabilities:`: Boards, Formate, Quantisierungstypen (auch je Board), Aliasse, Board-Vorgaben, Standard-Board, Bedarf an Importance-Matrix und Kalibrierdaten, Unterstützungsstufe (`official`, `community`, `experimental`). |
-| BuildService | `orchestrator/Core/build_service.py`, `orchestrator/schemas/build.py` | Ein typisierter Einstieg für Builds: prüfen, starten, Status, abbrechen, Log-Ende, Ergebnisse, Self-Healing-Entscheidung. Die Tools (MCP-Server und Ditto) nutzen ihn. GUI und CLI prüfen dieselben Capabilities und reichen den Auftrag dann direkt beim Orchestrator ein. |
+| BuildService | `orchestrator/Core/build_service.py`, `orchestrator/schemas/build.py` | Ein typisierter Einstieg für Builds: prüfen, starten, Status, abbrechen, Log-Ende, Ergebnisse, Self-Healing-Entscheidung. Die Tools (MCP-Server und Ditto) nutzen ihn. GUI und CLI prüfen dieselben Capabilities und reichen den Auftrag dann direkt beim Orchestrator ein; abbrechen tun sie über ihn (Schaltfläche Cancel im Builder-Tab, Strg+C in `llm-cli build start`). |
 | LLMOrchestrator | `orchestrator/Core/orchestrator.py` | Warteschlange und Pipeline: bereitet Kalibriertext vor, zerlegt einen Auftrag in Jobs (Modell x Target x Format x Quantisierung), führt sie auf der Build-Engine aus, behandelt Abbrüche und die Freigabeschleife des Self-Healing. |
 | BuildEngine | `orchestrator/Core/builder.py`, `orchestrator/utils/build_context.py` | Stellt den Docker-Build-Kontext zusammen, baut das Image (mit BuildKit, wenn vorhanden), lädt oder bindet das Modell ein, führt den optionalen Trivy-Scan, die Importance-Matrix-Stufe und die Build-Stufe in abgeschotteten Containern aus, schreibt Manifest, Model Card und ZIP in einen versteckten Zwischenordner, verschiebt sie in den Ausgabeordner, sobald der Build nicht mehr abgebrochen werden kann, und räumt auf. |
 | DockerManager | `orchestrator/Core/docker_manager.py` | Docker-Verbindung und laufende CPU-/RAM-Werte für die GUI. |
@@ -221,7 +221,9 @@ ihn zur Laufzeit nicht; wofür jede Datei in `configs/` da ist, steht in
 | Einstellungsordner (meist `configs/`) | `config.yml` (Benutzereinstellungen); auf Wunsch eine eigene `llm_providers.yml`, die Anbietervorlagen ergänzt oder ersetzt. |
 
 `cache/`, `output/` und `models/` sind relativ zum Installationsordner, sofern die Einstellungen `cache_dir`,
-`output_dir` und `models_dir` nichts anderes sagen.
+`output_dir` und `models_dir` nichts anderes sagen. Darf der Benutzer im Installationsordner nicht schreiben (zum
+Beispiel `C:\Program Files`), liegen ihre Vorgaben stattdessen im Benutzerordner (`ConfigManager.default_data_root`).
+Keiner von ihnen wird beim Start angelegt; ein Build, ein Download oder die Wissensbasis legt an, was sie nutzen.
 
 ## Datenflüsse
 
@@ -281,8 +283,12 @@ Container um, hält Hashes fest und lässt dich das Ergebnis auf deinem Gerät i
     prüft alle Hashes mit `sha256sum -c`, bevor es das Modell nach `$MODEL_DIR` (Vorgabe `$HOME/models`) kopiert
     und anzeigt, wie man es startet (bei GGUF mit `llama-server`).
 
-Das Tool `cancel_build` stoppt den laufenden Stufen-Container. Jeder Stufen-Container hat ein eigenes Zeitlimit
-(`build_timeout`, Vorgabe 3600 Sekunden).
+Das Tool `cancel_build`, die Schaltfläche Cancel im Builder-Tab und Strg+C in `llm-cli build start` stoppen den
+laufenden Stufen-Container über den Build-Service. Jeder Stufen-Container hat ein eigenes Zeitlimit
+(`build_timeout`, Vorgabe 3600 Sekunden). Jede Build-Engine schreibt je Build einen Eintrag nach
+`<cache_dir>/build_records/` (`orchestrator/Core/build_records.py`), den `llm-cli build status` liest; so sieht es
+auch Builds anderer Programme. CLI, Build-Service, Orchestrator und Engine lösen ein Target über die eine Zuordnung
+von ID zu Ordner der Target-Registry auf, deshalb darf eine Target-ID vom Ordnernamen abweichen.
 
 ### Ein Tool-Aufruf eines MCP-Clients
 
@@ -776,11 +782,11 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
   Anmeldeverfahren entstehen gerade für 3.1.0.
 - **Der Datenschutzfilter arbeitet mit Mustern.** Er erkennt die oben genannten Formate, nicht jede persönliche
   Angabe in freiem Text, etwa einen Namen in einem Satz. Für heikles Material nutzt du besser einen lokalen Anbieter.
-- **Erzeugte Targets sind Gerüste.** Der Modulgenerator schreibt inzwischen einen Block `capabilities:`
-  (Unterstützungsstufe community: die Boards und GGUF mit den Typen, die das Build-Skript behandelt), aber das
-  Vorlagen-`build.sh` passt nicht zur aktuellen Pipeline (es schreibt Zwischendateien nach `/tmp`, in der Sandbox ein
-  1-GB-tmpfs, und sucht llama.cpp-Werkzeuge an alten Orten). Siehe
-  [Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md); eine überarbeitete Vorlage ist für 3.4.0 geplant.
+- **Erzeugte Targets sind Gerüste.** Der Modulgenerator schreibt einen Block `capabilities:` (Unterstützungsstufe
+  community: die Boards und GGUF mit den Typen, die das Build-Skript behandelt), und das Vorlagen-`build.sh` folgt dem
+  Rockchip-Dispatcher, aber das Vorlagen-Dockerfile baut llama.cpp noch nicht; ein erzeugtes Target braucht diesen
+  Teil aus `targets/Rockchip/dockerfile`, bevor es bauen kann. Siehe
+  [Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md).
 - **Der Community-Zoo hat noch keinen veröffentlichten Index.** Das Community-Repository, sein signierter Index und
   der Schlüssel des Maintainers sind nicht veröffentlicht: `configs/community_keys.yml` enthält keinen Schlüssel,
   und `community_index_url` und `community_repo` sind leer. Den Index auflisten und per ID installieren endet mit
@@ -797,9 +803,8 @@ Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [R
   (`v0.6.0`), und die venvs im Image haben keine Lock-Dateien mit Hashes. Geplant für 3.4.0.
 - **Image-Builds haben Netzwerk.** Das ist Absicht (sie laden Werkzeugketten); nur die Umwandlungsstufen sind
   offline.
-- **Der Katalog der Projektquellen** (`configs/project_sources.yml`) wird zur Laufzeit nicht gelesen, und sein
-  Abgleichskript hat Fehler; siehe [SSOT_ARCHITECTURE_DE.md](../configs/SSOT_ARCHITECTURE_DE.md). Korrekturen sind
-  für 3.4.0 geplant.
+- **Der Katalog der Projektquellen** (`configs/project_sources.yml`) wird zur Laufzeit nicht gelesen; er ist eine
+  Referenz für Entwickler (siehe [SSOT_ARCHITECTURE_DE.md](../configs/SSOT_ARCHITECTURE_DE.md)).
 
 ## Wichtige Entscheidungen
 
@@ -962,8 +967,8 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **Dependabot-Wartezeit** für LLM-SDKs. | geplant |
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
 | **Signierte Updates.** | geplant |
-| **Aufräumen**: Entfernung der alten Vier-Module-Skripte und eine Target-Vorlage, die zur aktuellen Pipeline passt (Capabilities-Block, GGUF über llama.cpp, Zwischendateien im Arbeitsordner). | geplant |
-| **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | geplant |
+| **Aufräumen**: Entfernung der alten Vier-Module-Skripte und ein Vorlagen-Dockerfile, das llama.cpp baut (das Vorlagen-`build.sh` passt bereits zur aktuellen Pipeline: GGUF über llama.cpp, Zwischendateien im Arbeitsordner). | geplant |
+| **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
 
 ### Später (geplant)
 

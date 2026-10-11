@@ -11,7 +11,23 @@
 
 set -u
 
+# Usage: hardware_probe.sh [--output FILE]   (default: target_hardware_config.txt in the current folder)
 OUTPUT_FILE="target_hardware_config.txt"
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -o|--output)
+            [ $# -ge 2 ] && [ -n "$2" ] || { echo "Usage: $0 [--output FILE]" >&2; exit 2; }
+            OUTPUT_FILE="$2"; shift 2 ;;
+        --output=*)
+            OUTPUT_FILE="${1#--output=}"
+            [ -n "$OUTPUT_FILE" ] || { echo "Usage: $0 [--output FILE]" >&2; exit 2; }
+            shift ;;
+        -h|--help)
+            echo "Usage: $0 [--output FILE]"; exit 0 ;;
+        *)
+            echo "Unknown option: $1 (usage: $0 [--output FILE])" >&2; exit 2 ;;
+    esac
+done
 
 # --- HELPER FUNCTIONS ---
 log() { echo -e "\033[1;34m[PROBE]\033[0m $1"; }

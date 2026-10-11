@@ -172,7 +172,7 @@ flowchart TB
 | SecretsManager | `orchestrator/Core/secrets_manager.py`, `orchestrator/Core/vault_key.py`, `orchestrator/utils/file_lock.py` | Encrypted vault (`secrets.store` in the per-user folder, format v2: Fernet entries with key ids, read with MultiFernet, key rotation). Its key comes from the operating system's keyring by default (one entry per vault; a keyring that hangs, keeps nothing or stores in plain text is refused) or from the explicit choice in `secret_storage` (credential helper, passphrase, unencrypted key file, memory only). Every change runs under a cross-process lock; the vault refuses a location inside a git working copy. Holds API keys (as records under `cred/<provider>/api_key`; the old names still work) and the Hugging Face token (`hf_token`). The secrets of a store in the old location (config folder) are taken over once and re-encrypted with the vault key, also into an existing per-user store; secrets already there win, and the old file is left unchanged. A long-running process (GUI, MCP server) re-reads the vault when another process has changed it. |
 | Secret patterns and log redaction | `orchestrator/security/` | One standard-library table of secret formats (`secret_patterns.py`), loaded by `scripts/secret_scan.py` and used by `redact_secrets`. `redaction.py` redacts every log record when it is created (framework, SDK and HTTP loggers, tracebacks), keeps the SDK loggers at INFO or above unless `--debug-http` is given, and provides `SecretStr`, in which the provider layer holds its keys. |
 | TargetManager and capabilities | `orchestrator/Core/target_manager.py`, `orchestrator/schemas/targets.py` | Loads the `target.yml` of every target folder (folders starting with `_` or `.`, such as `_template`, are skipped) and validates its `capabilities:` block: boards, formats, quantization types (also per board), aliases, board defaults, default board, importance matrix and calibration needs, support level (`official`, `community`, `experimental`). |
-| BuildService | `orchestrator/Core/build_service.py`, `orchestrator/schemas/build.py` | One typed entry point for builds: validate, start, status, cancel, log tail, artifacts, healing decision. The tools (MCP server and Ditto) use it. GUI and CLI check the same capabilities and then submit to the orchestrator directly. |
+| BuildService | `orchestrator/Core/build_service.py`, `orchestrator/schemas/build.py` | One typed entry point for builds: validate, start, status, cancel, log tail, artifacts, healing decision. The tools (MCP server and Ditto) use it. GUI and CLI check the same capabilities and then submit to the orchestrator directly; they cancel through it (the Builder tab's Cancel button, Ctrl+C in `llm-cli build start`). |
 | LLMOrchestrator | `orchestrator/Core/orchestrator.py` | Queue and pipeline: prepares calibration text, expands a request into jobs (model x target x format x quantization), runs them on the build engine, handles cancellation and the self-healing approval loop. |
 | BuildEngine | `orchestrator/Core/builder.py`, `orchestrator/utils/build_context.py` | Stages the Docker build context, builds the image (BuildKit when available), downloads or mounts the model, runs the optional Trivy scan, the importance-matrix stage and the build stage in sandboxed containers, writes the manifest, model card and ZIP into a hidden staging folder, moves them into the output folder once the build can no longer be cancelled, and cleans up. |
 | DockerManager | `orchestrator/Core/docker_manager.py` | Docker connection and live CPU/RAM figures for the GUI. |
@@ -217,7 +217,9 @@ is for.
 | Config folder (usually `configs/`) | `config.yml` (user settings); optionally an own `llm_providers.yml` that adds or replaces provider presets. |
 
 `cache/`, `output/` and `models/` are relative to the installation folder unless the settings `cache_dir`,
-`output_dir` and `models_dir` say otherwise.
+`output_dir` and `models_dir` say otherwise. If the user may not write to the installation folder (for example
+`C:\Program Files`), their defaults are in the per-user folder instead (`ConfigManager.default_data_root`). None of
+them is created at startup; a build, a download or the knowledge base creates what it uses.
 
 ## Data flows
 
@@ -274,8 +276,12 @@ records hashes and lets you install the result on your device.
     before it copies the model to `$MODEL_DIR` (default `$HOME/models`) and prints how to start it (for GGUF with
     `llama-server`).
 
-The tool `cancel_build` stops the running stage container. Each stage container has its own time limit
-(`build_timeout`, default 3600 seconds).
+The tool `cancel_build`, the Builder tab's Cancel button and Ctrl+C in `llm-cli build start` stop the running
+stage container through the build service. Each stage container has its own time limit (`build_timeout`, default
+3600 seconds). Every build engine writes one record per build into `<cache_dir>/build_records/`
+(`orchestrator/Core/build_records.py`), which `llm-cli build status` reads, so it sees builds of other programs too.
+The CLI, the build service, the orchestrator and the engine resolve a target through the target registry's one
+id -> folder map, so a target id may differ from its folder name.
 
 ### A tool call from an MCP client
 
@@ -733,11 +739,11 @@ These are real limitations of the current state. Most are scheduled in the [road
   3.1.0.
 - **The privacy filter works with patterns.** It recognizes the formats listed above, not every personal detail
   in free text, such as a name in a sentence. Use a local provider for sensitive material.
-- **Generated targets are skeletons.** The module generator now writes a `capabilities:` block (support level
-  community: the boards, and GGUF with the types the build script handles), but the template `build.sh` does not
-  match the current pipeline (it writes intermediates to `/tmp`, which is a 1 GB tmpfs in the sandbox, and looks
-  for llama.cpp tools in old places). See the [Module Developer Guide](Module_Developer_Guide.md); an updated
-  template is planned for 3.4.0.
+- **Generated targets are skeletons.** The module generator writes a `capabilities:` block (support level
+  community: the boards, and GGUF with the types the build script handles), and the template `build.sh` follows the
+  Rockchip dispatcher, but the template Dockerfile does not build llama.cpp yet, so a generated target needs that
+  part from `targets/Rockchip/dockerfile` before it can build. See the
+  [Module Developer Guide](Module_Developer_Guide.md).
 - **The community zoo has no published index yet.** The community repository, its signed index and the
   maintainer's key are not published: `configs/community_keys.yml` lists no key, and `community_index_url` and
   `community_repo` are empty. Listing the index and installing by id stop with a message; packs can be exchanged
@@ -753,8 +759,8 @@ These are real limitations of the current state. Most are scheduled in the [road
   and the venvs inside the image have no hashed lock files. Planned for 3.4.0.
 - **Image builds have network access.** This is by design (they download toolchains); only the conversion stages
   are offline.
-- **The project-sources catalogue** (`configs/project_sources.yml`) is not read at runtime, and its sync script
-  has errors; see [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md). Corrections are planned for 3.4.0.
+- **The project-sources catalogue** (`configs/project_sources.yml`) is not read at runtime; it is a reference for
+  developers (see [SSOT_ARCHITECTURE.md](../configs/SSOT_ARCHITECTURE.md)).
 
 ## Key decisions
 
@@ -912,8 +918,8 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **Dependabot cooldown** for LLM SDKs. | planned |
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
 | **Signed updates.** | planned |
-| **Clean-up**: removal of the legacy four-module scripts and a target template that matches the current pipeline (capabilities block, GGUF through llama.cpp, intermediates in the work folder). | planned |
-| **SSOT corrections** for the project-sources catalogue and its scripts. | planned |
+| **Clean-up**: removal of the legacy four-module scripts, and a template Dockerfile that builds llama.cpp (the template `build.sh` already matches the current pipeline: GGUF through llama.cpp, intermediates in the work folder). | planned |
+| **SSOT corrections** for the project-sources catalogue and its scripts. | done |
 
 ### Later (planned)
 

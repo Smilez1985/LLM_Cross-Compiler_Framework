@@ -52,11 +52,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
   pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, Metal or CPU;
   ROCm on request; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
-  at pinned revisions, checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
+  at pinned revisions into the `ditto/` folder of the configured models folder (`models_dir`, the one Ditto uses),
+  checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
   (3 GB RAM). The "local" provider follows the running server without configuration.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
-  model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
+  model tier (`--tier small --tier small-q2`; the servers the run starts are stopped afterwards, one you started
+  yourself keeps running if it serves the tier). Nothing is built; `--json` writes the report.
 - **Retrieval evaluation** (`llm-cli ditto eval --kind retrieval`): 42 German and English searches (cross-lingual
   questions, identifiers such as `GGML_CUDA`, answers deep inside a large table or script, the last lines of
   failed builds and Ditto's own search strings, unrelated questions) against a corpus of 30 framework and SDK
@@ -196,6 +198,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   shows the access in use, for example "Local · Ollama". A key typed in the AI settings' own key field replaces a
   method a sign-in remembered (such as the `ant` profile), so it is not left unused.
 - `llm-cli secrets set --with-token` reads the value from stdin.
+- **Cancel Build** in the Builder tab: cancels the running build through the build service after a confirmation
+  (enabled only while the build the tab started runs); the log says when it has stopped.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -264,6 +268,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
   list. Use the hidden prompt or `--with-token`.
+- `llm-cli build start --parallel`: it never had an effect (one call runs one build). It is hidden from the help
+  and prints a warning. `--optimization` stays; its help now says that the Rockchip target ignores it.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
@@ -285,6 +291,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Bedrock, Vertex or Foundry, or using the framework from Claude Code itself (`llm-cli mcp config`). It never
   switches to the Claude API on its own. A `claude_code` preset left in a provider catalog in your config
   directory is skipped with a warning; the other providers keep working.
+- Settings that nothing read: `preferred_tiny_model`, `default_calibration_dataset`, `default_enable_imatrix`,
+  `logs_dir`, `auto_cleanup`, `docker_namespace`, `gui_theme`, `gui_auto_refresh`, `gui_refresh_interval`,
+  `api_enabled`, `api_host` and `api_port`. A `config.yml` that still contains them loads as before; the values are
+  ignored and kept in the file.
+- Leftovers of the removed Transformers offline mode and of the Qdrant container: the tiny-model download of the
+  model manager (it read `source_repositories['tiny_models']`) and `DockerManager.ensure_qdrant_service` (the
+  knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
+- The update manager (`orchestrator/utils/updater.py`): it was created at every start but never called, and its
+  list of files that need a new setup named a script that does not exist.
+- The benchmark window (`orchestrator/gui/benchmark_window.py`): no menu opened it, and it could not work (it read
+  a Docker manager attribute that does not exist, started an image that does not exist and benchmarked a
+  placeholder model path).
 
 ### Fixed
 - Secrets store: a store of an earlier version that cannot be decrypted is reported by `llm-cli doctor`
@@ -294,13 +312,83 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - On Windows, saving a secret no longer fails when another process or a virus scanner has the store open for
   a moment.
 - `llm-cli secrets set` says where the secret went (the encrypted vault, or memory only with `ephemeral`)
-  instead of always "Keyring".
+  instead of always "Keyring". The GUI names the encrypted credential vault as well (the secret dialog, the API key
+  field and its error message in the AI settings, the token check box of the Hugging Face browser).
 - The CLI and the CLI guides no longer tell you to put the GitHub token on the command line, where the shell
   history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
   hidden prompt.
 - The Deep Ingest dialog opens with the settings `crawler_max_depth`, `crawler_download_pdfs` and
   `crawler_rate_limit` (depth 0 and delays below a second possible, larger values kept); before, its fixed values
   (2, PDFs on, 1 s) always overrode them.
+- `llm-cli --help` and the CLI's description named version 2.4.0; every version string now comes from the
+  package version.
+- `llm-cli build status` lists builds that the GUI, the MCP server or another CLI call started: every build engine
+  writes one record per build into `<cache_dir>/build_records/` (status, stage, progress, the error redacted), and
+  a build whose program ended before it finished is shown as interrupted. The command needs neither the credential
+  vault nor Docker; `--all` lists every kept build instead of the 20 newest.
+- Ctrl+C in `llm-cli build start` cancels the build through the build service: its container is stopped, the CLI
+  waits until the build has stopped, says so and exits with code 130. Before, the build and its container kept
+  running.
+- `llm-cli scan --output FILE` reaches the hardware probe (`hardware_probe.sh --output`,
+  `hardware_probe.ps1 -OutputFile`), which always wrote `target_hardware_config.txt` into the current folder. On
+  Windows without administrator rights the CLI waits for the probe's elevated restart instead of reporting at once
+  that no file was written.
+- `llm-cli module create` writes into the configured targets folder (`targets_dir`, relative to the installation)
+  instead of `targets/` in the current folder.
+- `llm-cli config show` prints the effective settings (`config.yml`, a `-c` file, `LLM_FRAMEWORK_*` variables,
+  defaults), each with its source and with credentials redacted, instead of the CLI's built-in defaults.
+- `llm-cli config repos --add` stores the `{url: ...}` entry that the build engine passes on as
+  `<NAME>_REPO_OVERRIDE`; plain URLs stored by earlier versions are passed on as well.
+- `llm-cli targets list` shows each target's id (the value for `--target`), name, boards and formats from its
+  capabilities instead of placeholders; `llm-cli targets validate` checks the capabilities block against the
+  schema and prints every error (exit code 1).
+- `llm-cli deploy package`, `secrets set` and `scan` exit with code 1 when they fail (they exited with 0).
+- The help of `llm-cli doctor --tier` names only fixes that exist (tier 1 makes the personal folder private; there
+  is no folder fix).
+- A target whose `metadata.id` differs from its folder name builds: the CLI, the build service, the orchestrator
+  and the build engine resolve targets through one id -> folder map (before, the orchestrator skipped such a target
+  with "Nothing to build"), and `-t` takes the id or the folder name.
+- The setting `max_concurrent_builds` sets the number of build slots (it had no effect; the engine always used 2).
+- Audit log: when several processes (GUI, CLI, MCP servers) wrote the first entries of a new log at the same
+  moment, the log could be reported as damaged ("The audit anchor file was missing when entry 2 was written").
+  The anchor of a new log is now written before its first entry becomes visible to other processes.
+- The CLI, the GUI and the MCP server no longer create empty `cache/`, `models/` and `output/` folders in the
+  installation at every start, also when `LLM_FRAMEWORK_CONFIG_DIR` or `LLM_FRAMEWORK_HOME` point elsewhere; a
+  build or a download creates the folders it uses. The repository's `.gitignore` covers `output/`, `cache/`,
+  `models/` and `logs/`, so build results and downloads cannot be committed.
+- The language chosen at the first start of the GUI is saved in the effective config folder
+  (`LLM_FRAMEWORK_CONFIG_DIR`, the installation's `configs/` if writable, otherwise the per-user folder) instead
+  of always in the installation's `configs/`.
+- Saving a setting (for example the first-run language or the AI settings) no longer overwrites a `config.yml`
+  that cannot be read (a YAML error, or no `key: value` settings) with only the changed values; the file stays as
+  it is and the error is logged.
+- Windows: with the framework in `C:\Program Files`, which standard users cannot write to, the settings and the
+  data folders `output/`, `cache/` and `models/` are in the per-user folder (`%USERPROFILE%\.llm-framework`).
+  The writability check no longer trusts `os.access`, which ignores folder permissions on Windows. The installer
+  no longer creates an unused data folder in the public documents folder with a desktop shortcut to it.
+- `install.sh` checks the connection over HTTPS to the package index (`pypi.org` or `PIP_INDEX_URL`) instead of
+  pinging 8.8.8.8, which many networks block. It loads one small project page, not the whole index, does not show
+  credentials contained in `PIP_INDEX_URL`, and stops with a clear message when started with `sh` instead of bash.
+  It no longer creates an unused data folder in root's home folder,
+  and running it again keeps the builds, cache, models and `configs/config.yml` in `/opt` instead of deleting
+  them.
+- Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
+  `config/` folder in the working directory.
+- The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).
+  Its licence check no longer freezes the window, and pressing Enter during a search or double-clicking another
+  model during a download no longer crashes the GUI.
+- `scripts/sync_ssot.py` uses the real file `configs/detailed_project_sources.yml` (it created a copy named
+  `detailed_project.sources.yml` instead) and works from any folder. It lists the differences, and with `--write`
+  it changes only those values; comments and layout stay (it rewrote the whole file with `yaml.dump`).
+- The header of `configs/project_sources.yml` says who reads the file (no part of the framework while it runs; the
+  two SSOT scripts), and its outdated roadmap section (v2.2 to v2.4) is gone.
+- Generated target modules (module wizard, `llm-cli module create`, `llm-cli module generate-ai`): the template
+  `build.sh` follows the Rockchip dispatcher. It uses llama.cpp's `convert_hf_to_gguf.py` and
+  `build/bin/llama-quantize`, writes the F16 intermediate into the work folder instead of `/tmp` (a 1 GB tmpfs in
+  the sandbox), and stops with an error instead of copying the model unchanged. Its packaging step no longer copies
+  a `build/` folder that does not exist, which made every build of a generated module fail at the end.
+- Secret scan with the pre-commit tool: its pre-push stage scans the commits being pushed (`--push`, which now
+  reads the pushed commit from `PRE_COMMIT_TO_REF`) like `.githooks/pre-push`, instead of the whole history.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -383,6 +471,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   sign-in panel and the AI settings' key field; `--yes` in scripts) and never chooses how the vault is protected:
   `--insecure-storage` never replaces a protection that works, nor a credential helper or passphrase you chose. A
   key with a space, a line break or an invisible character inside is refused before anything is sent or stored.
+- The Builder log shows every message as plain text, so names from community recipes, Ditto's answers or build
+  output cannot render as HTML (links, images, formatting).
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
