@@ -11,6 +11,10 @@ Follow-up round: a build's files are staged and reach its output folder only onc
 cancelled; an outcome becomes visible together with the free slot; the orchestrator waits for a slot
 instead of failing a job; a request with nothing to build is an error.
 
+Second follow-up: links in a build's output are never followed, a build is staged next to its real output
+folder and only staging folders are hidden from the listings, the cleanup runs before the outcome is settled,
+a cancel that comes too late is reported, and a hanging security scan ends with the build timeout.
+
 Docker is replaced by FakeDockerClient (containers follow Docker's semantics: stopping a container that is
 not running is a no-op, killing one is a 409) and `docker buildx` by FakeBuildx. Every fake blocks at most
 SAFETY seconds, so a regression fails the test instead of hanging it.
@@ -21,6 +25,7 @@ import json
 import subprocess
 import threading
 import time
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
@@ -508,6 +513,31 @@ class TestCancelDuringSecurityScan:
         assert progress.status == BuildStatus.COMPLETED
         assert any("Security scan failed to run" in w for w in progress.warnings)
 
+    @pytest.mark.xfail(strict=True, reason="BUG: a security scan that never ends holds its build slot forever "
+                                           "(no timeout; requests waiting for a slot wait with it)")
+    def test_a_hanging_scan_is_stopped_after_the_build_timeout(self, engine, client, tmp_path):
+        client.scan_options = dict(auto_exit=False, lines=["Downloading vulnerability DB..."])
+        timeouts = []
+
+        def honour_the_timeout():  # the daemon answers wait(timeout=...) with a read timeout
+            scan = client.scans[-1]
+
+            def wait(timeout=None):
+                timeouts.append(timeout)
+                if not scan.exited.wait(min(timeout or SAFETY, SAFETY)):
+                    raise requests.exceptions.ReadTimeout("Read timed out.")
+                return {"StatusCode": scan.exit_code}
+
+            scan.wait = wait
+
+        client.on_scan_run = honour_the_timeout
+        engine.build_model(config_for(tmp_path, build_timeout=1))
+        progress = finish(engine, "b1", timeout=SAFETY / 2)
+        assert progress.status == BuildStatus.COMPLETED, progress.errors
+        assert timeouts == [1]
+        assert any("Security scan" in w and "1 s" in w for w in progress.warnings), progress.warnings
+        assert client.scans[0].removed and engine._active_containers == {}
+
 
 class TestCancelDuringImageBuild:
 
@@ -788,6 +818,77 @@ class TestCancelIsNeverUndone:
             assert engine.cancel_build(status.value) is False
             assert engine._builds[status.value].status == status
         assert engine.cancel_build("nope") is False
+
+
+class TestArtifactExtraction:
+
+    @pytest.mark.xfail(strict=True, reason="BUG: the artifact copy follows a link the sandboxed conversion left "
+                                           "in its output folder and publishes a host file")
+    def test_a_link_in_the_build_output_never_copies_a_host_file(self, engine, client, tmp_path):
+        # The conversion runs target code (possibly generated) without access to the user's files; the host
+        # copies its output folder, so a link there must not reach a file outside it.
+        secret = tmp_path / "home" / ".ssh" / "id_ed25519"
+        secret.parent.mkdir(parents=True)
+        secret.write_text("PRIVATE KEY")
+        try:
+            (tmp_path / "probe").symlink_to(secret)
+        except OSError:
+            pytest.skip("symlinks not permitted")
+        real_extract = engine._extract_artifacts
+
+        def plant_links(config, progress):
+            output = engine.cache_dir / "builds" / config.build_id / "output"
+            (output / "id_ed25519.gguf").symlink_to(secret)
+            (output / "ssh").symlink_to(secret.parent, target_is_directory=True)
+            real_extract(config, progress)
+
+        engine._extract_artifacts = plant_links
+        cfg = config_for(tmp_path)
+        engine.build_model(cfg)
+        progress = finish(engine, "b1")
+        out = Path(cfg.output_dir)
+        assert progress.status == BuildStatus.COMPLETED, progress.errors
+        assert [p for p in out.rglob("*") if p.is_file() and b"PRIVATE KEY" in p.read_bytes()] == []
+        with zipfile.ZipFile(out.parent / f"{out.name}.zip") as zf:
+            assert not any(b"PRIVATE KEY" in zf.read(n) for n in zf.namelist() if not n.endswith("/"))
+        manifest = json.loads((out / BUILD_MANIFEST).read_text())
+        assert [a["file"] for a in manifest["artifacts"]] == [FakeDockerClient.MODEL_FILE]
+        assert any("id_ed25519.gguf" in w for w in progress.warnings), progress.warnings
+
+    @pytest.mark.xfail(strict=True, reason="BUG: list_builds skips every folder whose name starts with a dot, "
+                                           "not only the engine's staging folders")
+    def test_a_build_below_a_folder_whose_name_starts_with_a_dot_is_listed(self, engine, client, tmp_path):
+        # e.g. a local model folder ".qwen": the orchestrator builds into <out>/<target>/.qwen/<quantization>
+        cfg = config_for(tmp_path, output_dir=str(tmp_path / "out" / "Rockchip" / ".qwen" / "Q4_K_M"))
+        engine.build_model(cfg)
+        assert finish(engine, "b1").status == BuildStatus.COMPLETED
+        assert [b["build_id"] for b in list_builds(tmp_path / "out")] == ["b1"]
+        assert [p.name for p in Path(cfg.output_dir).parent.iterdir()] == ["Q4_K_M", "Q4_K_M.zip"]
+
+    @pytest.mark.xfail(strict=True, reason="BUG: a symlinked output folder is staged next to the link, i.e. on "
+                                           "the link's disk, so the model is copied twice across disks")
+    def test_a_symlinked_output_folder_is_staged_on_its_own_disk(self, engine, client, tmp_path):
+        disk = tmp_path / "bigdisk" / "Q4_K_M"  # the output folder moved to another disk
+        disk.mkdir(parents=True)
+        link = tmp_path / "out" / "Q4_K_M"
+        link.parent.mkdir()
+        try:
+            link.symlink_to(disk, target_is_directory=True)
+        except OSError:
+            pytest.skip("symlinks not permitted")
+        staged_in = []
+        real_package = engine._create_golden_artifact
+
+        def package_and_look(config, progress):
+            real_package(config, progress)
+            staged_in.extend(p.parent for p in tmp_path.rglob(".*.partial"))
+
+        engine._create_golden_artifact = package_and_look
+        engine.build_model(config_for(tmp_path, output_dir=str(link)))
+        assert finish(engine, "b1").status == BuildStatus.COMPLETED
+        assert staged_in == [disk.parent], "os.replace cannot move a file from one disk to another"
+        assert link.is_symlink() and (disk / FakeDockerClient.MODEL_FILE).is_file()
+        assert [b["build_id"] for b in list_builds(tmp_path / "out")] == ["b1"]
 
 
 class TestContainerStartRace:
@@ -1244,6 +1345,62 @@ class TestOrchestratorCancel:
         assert ("r1_001_r1", True) in engine.cancels
         assert engine.builds["r1_001_r1"].status == BuildStatus.CANCELLED
         assert engine.builds["r1_001"].status == BuildStatus.FAILED, "the failed attempt keeps its outcome"
+
+    @pytest.mark.xfail(strict=True, reason="BUG: a request cancelled while its build removes its image reports "
+                                           "'cancelled', but the build completes and is listed as deployable")
+    def test_a_request_cancelled_during_the_final_cleanup_lists_no_build(self, engine, client, tmp_path,
+                                                                         fast_polling):
+        orch = LLMOrchestrator(engine.config, build_engine=engine)
+        in_cleanup, release = threading.Event(), threading.Event()
+
+        def slow_prune(filters=None):  # removing the build's image layers can take a while
+            in_cleanup.set()
+            release.wait(SAFETY)
+
+        client.images.prune = slow_prune
+
+        async def scenario():
+            rid = await orch.submit_build_request(make_request(tmp_path))
+            await until(in_cleanup.is_set, what="the final cleanup")
+            assert await orch.cancel_request(rid) is True  # e.g. BuildService.cancel from an MCP client
+            release.set()
+            await until(lambda: "r1_001" not in engine._running, what="the build's worker")
+            await until(lambda: not orch._active_tasks)
+            return orch._workflows[rid]
+
+        state = asyncio.run(scenario())
+        assert state.status == OrchestrationStatus.CANCELLED
+        assert engine.get_build_status("r1_001").status == BuildStatus.CANCELLED
+        assert list_builds(tmp_path / "out") == []
+
+    @pytest.mark.xfail(strict=True, reason="BUG: a cancel that comes too late for a build (its files are being "
+                                           "published) reports the request cancelled without a word about it")
+    def test_a_build_too_far_along_to_cancel_is_reported(self, engine, client, tmp_path, fast_polling):
+        orch = LLMOrchestrator(engine.config, build_engine=engine)
+        publishing, release = threading.Event(), threading.Event()
+        real_publish = engine._publish_artifacts
+
+        def slow_publish(config, progress):
+            publishing.set()
+            release.wait(SAFETY)
+            real_publish(config, progress)
+
+        engine._publish_artifacts = slow_publish
+
+        async def scenario():
+            rid = await orch.submit_build_request(make_request(tmp_path))
+            await until(publishing.is_set, what="publishing")
+            assert await orch.cancel_request(rid) is True
+            release.set()
+            await until(lambda: "r1_001" not in engine._running, what="the build's worker")
+            await until(lambda: not orch._active_tasks)
+            return orch._workflows[rid]
+
+        state = asyncio.run(scenario())
+        assert state.status == OrchestrationStatus.CANCELLED
+        assert engine.get_build_status("r1_001").status == BuildStatus.COMPLETED
+        assert [b["build_id"] for b in list_builds(tmp_path / "out")] == ["r1_001"]
+        assert any("r1_001" in w and "could no longer be cancelled" in w for w in state.warnings), state.warnings
 
 
 class TestHealingRetryLog:
