@@ -284,10 +284,11 @@ provider's exact token format, however fake the value looks: `hf_` followed by 3
 `ghp_` followed by 36 letters and digits, a complete `sk-ant-api03-...AA` key, and so on. GitHub does not know the
 marker `secret-scan: allow`. So the scan reports such values even when they look like placeholders, and the marker
 does not silence these findings; the message says that GitHub will block the push. This holds in every mode:
-`--push` and `--history` also report older commits that still contain such a value, because a push of those commits
-would be refused as well. It also holds for text files over 5 MB, which the other rules skip. The formats are `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py` (Hugging
-Face, GitHub, AWS, Slack, GitLab, Stripe, PyPI, OpenAI, Anthropic, OpenRouter, Groq, xAI, Perplexity, Replicate).
-Build such a test value at runtime instead, so the file never contains it as one piece:
+`--push` also reports older commits that still contain such a value, because a push of those commits would be
+refused as well, and so does `--history`, except for the listed test mocks below. It also holds for text files over
+5 MB, which the other rules skip. The formats are `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py`
+(Hugging Face, GitHub, AWS, Slack, GitLab, Stripe, PyPI, OpenAI, Anthropic, OpenRouter, Groq, xAI, Perplexity,
+Replicate). Build such a test value at runtime instead, so the file never contains it as one piece:
 
 ```python
 TOKEN = "hf_" "abcdefghijklmnopqrstuvwxyzABCDEFGH"  # adjacent string literals: one string at runtime
@@ -296,6 +297,24 @@ TOKEN = "hf_" + "x" * 34                            # or concatenation
 
 Or use a value that does not match the exact format: another length, or a character the format does not allow
 (a digit in a Hugging Face token). In documentation, shorten the value (`hf_...`).
+
+**Test mocks in old commits:** a commit that is already published cannot be changed without rewriting the history.
+`.secret-scan-allow` at the repository root lists the documented test mocks that old commits still contain, so that
+`--history` (the CI job, `make secret-scan`) passes. It holds two today, from old versions of
+`tests/test_security.py` and `tests/test_cli_builds.py`. Each line names one exact value by the sha256 hex digest of
+that value, never the value itself (that would be an exact-format literal that GitHub blocks), then two spaces and
+a note: the first and last 4 characters, the length, why it is a mock and where it is. Compute the digest without
+leaving the value in your shell history:
+
+```bash
+python3 -c "import getpass, hashlib; print(hashlib.sha256(getpass.getpass('value: ').encode()).hexdigest())"
+```
+
+The list applies to `--history` only, and only to exact-format findings: every other mode still reports the value,
+so a new commit that contains it fails, and the other rules (provider keys, local patterns, file names) never look
+at the list, so a real-looking key is reported even if its digest is listed. A malformed line stops the scan in
+every mode (exit code 2), so a typo cannot allow more. Never list a real credential, however old: rotate it and
+rewrite the history ([section 12](#12-if-a-secret-leaked)).
 
 **Personal strings** such as your e-mail address, your user name or host names must not be in the repository
 either, but they cannot be in a public pattern list. Put them into `.git/info/secret-patterns`, which git never
