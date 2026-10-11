@@ -272,6 +272,14 @@ class LLMOrchestrator:
             self._queue.task_done()
             self._ensure_worker_running()
 
+    def _target_exists(self, target: str) -> bool:
+        """Through the engine's id -> folder map (a target id may differ from its folder name)."""
+        resolve = getattr(self.build_engine, "resolve_target_dir", None)
+        if callable(resolve):
+            return resolve(target) is not None
+        targets_dir = Path(getattr(self.build_engine, "targets_dir", None) or self.config.targets_dir)
+        return (targets_dir / target).exists()
+
     def _map_job_to_config(self, job: BuildJob, req: BuildRequest, attempt: int = 1) -> BuildConfiguration:
         """Konvertiert internen Job zu Builder Config"""
         base_img = "debian:bookworm-slim"
@@ -281,6 +289,7 @@ class LLMOrchestrator:
         return BuildConfiguration(
             # every attempt keeps its own progress and log (a retry after a fix must not hide the failure)
             build_id=job.job_id if attempt <= 1 else f"{job.job_id}_r{attempt - 1}",
+            request_id=req.request_id,
             timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
             model_source=job.source_model,
             model_branch=req.model_revision or "main",
@@ -479,9 +488,7 @@ class LLMOrchestrator:
         
         for model in req.models:
             for target in req.targets:
-                # Validierung Target
-                targets_dir = Path(getattr(self.build_engine, "targets_dir", None) or self.config.targets_dir)
-                if not (targets_dir / target).exists():
+                if not self._target_exists(target):
                     state.warnings.append(f"Target '{target}' not found. Skipping.")
                     continue
                 

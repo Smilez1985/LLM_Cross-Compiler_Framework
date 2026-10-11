@@ -7,6 +7,7 @@ that is not the GUI's own widgets (MCP server, Ditto's tools, scripts) goes thro
 requests are validated once, against the target's declared capabilities, and results have one shape.
 """
 
+import time
 from pathlib import Path
 from typing import List
 
@@ -55,8 +56,17 @@ class BuildService:
     def _output_dir(self) -> Path:
         return self.framework.resolve_path(self._config_get("output_dir", "output"))
 
+    def resolve_target(self, target: str) -> str:
+        """The registered id of a target given by id or folder name (any letter case)."""
+        resolve = getattr(self._targets(), "resolve", None)
+        tid = resolve(target) if callable(resolve) else target
+        if tid is None:
+            known = ", ".join(t.get("id", "?") for t in self._targets().list_targets()) or "none"
+            raise BuildServiceError(f"Target '{target}' is unknown (targets: {known}).")
+        return tid
+
     def capabilities(self, target: str) -> TargetCapabilities:
-        caps = self._targets().get_capabilities(target)
+        caps = self._targets().get_capabilities(self.resolve_target(target))
         if caps is None:
             known = ", ".join(t.get("id", "?") for t in self._targets().list_targets()) or "none"
             raise BuildServiceError(f"Target '{target}' is unknown or declares no capabilities (targets: {known}).")
@@ -161,7 +171,8 @@ class BuildService:
 
     def validate(self, request: BuildRequestIn) -> BuildRequestIn:
         """Checks a request against the target's capabilities and fills the default quantization."""
-        caps = self.capabilities(request.target)
+        target = self.resolve_target(request.target)
+        caps = self.capabilities(target)
         # Canonical spellings, the board the scripts use when none is given, the board's default type.
         fmt, board, quant = caps.normalize(request.format, request.board, request.quantization)
         dataset = None
@@ -176,7 +187,7 @@ class BuildService:
         model = self._check_model_source(request.model)
         if request.revision and Path(model).is_absolute():
             raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.")
-        return request.model_copy(update={"format": fmt, "board": board, "quantization": quant,
+        return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model})
 
     def start_build(self, request: BuildRequestIn) -> BuildHandle:
@@ -209,6 +220,28 @@ class BuildService:
         if not self.framework.run_coroutine(self._orchestrator.cancel_request(request_id), timeout=60):
             raise BuildServiceError(f"Build request '{request_id}' is not running.")
         return self.get_status(request_id)
+
+    def wait_stopped(self, request_id: str, timeout: float, poll: float = 0.2) -> str:
+        """After cancel(): waits until no build of the request runs in the engine any more (its container is
+        stopped and removed, staged files are discarded). Returns "cancelled" when every build that ran ended
+        cancelled, "finished" when one had already settled and ended on its own (completed or failed), and
+        "running" when it has not stopped within `timeout` seconds."""
+        engine = self._orchestrator.build_engine
+        active = getattr(engine, "is_active", None)
+        deadline = time.monotonic() + max(float(timeout), 0.0)
+        while True:
+            build_ids = list(self._state(request_id).build_ids)
+            if not callable(active) or not any(active(bid) for bid in build_ids):
+                break
+            if time.monotonic() >= deadline:
+                return "running"
+            time.sleep(poll)
+        for bid in build_ids:
+            progress = engine.get_build_status(bid) if hasattr(engine, "get_build_status") else None
+            outcome = getattr(getattr(progress, "status", None), "value", None)
+            if outcome in ("completed", "failed"):
+                return "finished"
+        return "cancelled"
 
     def resolve_healing(self, request_id: str, approve: bool) -> BuildStatusOut:
         state = self._state(request_id)

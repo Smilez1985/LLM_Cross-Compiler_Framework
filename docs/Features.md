@@ -109,14 +109,18 @@ A build runs these steps; each one is logged:
 
 Further behaviour:
 
-- **Cancel:** the `cancel_build` tool (Ditto in the GUI chat, or an MCP client, for builds of its own process)
-  stops the running container, including a running security scan or image build, and a later step can never undo
-  it. Once a build has failed or is moving its files into the output folder, it can no longer be cancelled and
-  finishes on its own. The GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not cancel (see
-  [Known gaps](#known-gaps)).
-- **Build slots:** at most two builds run at the same time in one program; a further build waits for a free slot
-  (its stage shows "Waiting for a free build slot") instead of failing. A cancelled build keeps its slot until its
-  container has stopped.
+- **Cancel:** the Builder tab's **Cancel Build** button (enabled while the build the tab started runs; it asks
+  for confirmation), Ctrl+C in `llm-cli build start` and the `cancel_build` tool (Ditto in the GUI chat, or an MCP
+  client, for builds of its own process) all cancel through the build service. The running container is stopped,
+  including a running security scan or image build, and a later step can never undo it; the button and Ctrl+C wait
+  until the build has stopped and say so. Once a build has failed or is moving its files into the output folder,
+  it can no longer be cancelled and finishes on its own.
+- **Build status across programs:** every program that builds writes one record per build into
+  `<cache_dir>/build_records/`, so `llm-cli build status` also lists builds that the GUI, the MCP server or another
+  CLI call started; a build whose program has ended before it finished is shown as interrupted.
+- **Build slots:** at most `max_concurrent_builds` builds (setting, 1 to 10, default 2) run at the same time in one
+  program; a further build waits for a free slot (its stage shows "Waiting for a free build slot") instead of
+  failing. A cancelled build keeps its slot until its container has stopped.
 - **Unknown target:** the CLI, Ditto and MCP clients refuse an unknown target before anything runs (the CLI with
   exit code 2). A request that still ends up with nothing to build fails with "Nothing to build" instead of
   reporting success.
@@ -1121,10 +1125,6 @@ What does not work yet, so you are not surprised:
   `make test-container` do not work (`scripts/setup_linux.sh` and `orchestrator/Dockerfile` do not exist). A
   hardened headless image for the CLI and the MCP server is being built. Conversions are not affected.
 - **Windows hosts:** conversions on a Windows host are not verified.
-- **Build status across processes:** builds live in the process that started them; `llm-cli build status` in
-  another process does not see them.
-- **Cancelling:** the GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not stop the build (the
-  CLI waits until it has ended); only the `cancel_build` tool cancels.
 - **Browser and cloud sign-in:** OAuth flows and the credential chains of AWS, Google Cloud and Azure are not
   available yet; Ditto signs in with API keys, and local engines need none.
 - **Device runtime:** the framework does not install a runtime on the board.

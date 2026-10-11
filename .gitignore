@@ -216,6 +216,8 @@ configs/backups/
 configs/environments/
 configs/chat_history.json
 cache/chat_history.json
+# One record per build for `llm-cli build status` (models, paths and errors of your builds)
+/cache/build_records/
 configs/known_hosts
 
 # Agent worktrees and local tool state
