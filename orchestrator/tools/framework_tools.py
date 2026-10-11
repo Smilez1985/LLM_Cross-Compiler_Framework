@@ -7,7 +7,7 @@ import secrets
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -18,7 +18,7 @@ from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
 from orchestrator.tools.policy import PolicyStore, ToolTier
-from orchestrator.tools.registry import ToolError, ToolRegistry, ToolSpec
+from orchestrator.tools.registry import ToolError, ToolRegistry, ToolSpec, current_actor, current_registry
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.untrusted import sanitize_untrusted
 
@@ -104,6 +104,65 @@ class BuildHandleOut(BuildHandle, ToolOutput):
     pass
 
 
+class StatusIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sections: List[Literal["permissions"]] = Field(
+        default_factory=lambda: ["permissions"], min_length=1, max_length=1,
+        description="Which part of the framework's state to show; for now: permissions")
+
+
+class ToolPermission(BaseModel):
+    tool: str
+    tier: str
+    decision: Literal["allow", "ask", "deny"]
+    why: str
+    default: str
+    max: str
+    listed: bool
+    new: bool = Field(description="Not reviewed by the person yet: it uses its own default, never a looser tier setting")
+    standing_approval: bool = Field(description="Whether a confirmation may offer 'yes, and do not ask again'")
+
+
+class NoToolAction(BaseModel):
+    action: str
+    where: str
+
+
+class PermissionsStatus(BaseModel):
+    caller: str
+    configured: bool
+    damaged: bool = Field(description="The permission file is damaged or unreadable: every tool is denied")
+    listed: int
+    tools: List[ToolPermission]
+    no_tool_actions: List[NoToolAction]
+    warning: str = ""
+
+
+class StatusOut(ToolOutput):
+    permissions: Optional[PermissionsStatus] = None
+
+
+# What no tool does (design section 3), with where the person does it, so a model can name the real reason.
+NO_TOOL_ACTIONS = [
+    ("sign_in", "Sign in, enter or rotate keys: the GUI's sign-in panel, 'llm-cli ditto login' or "
+                "'llm-cli secrets set' (keys never pass through an AI)."),
+    ("change_permissions", "Change tool permissions: 'llm-cli tools permissions' or Tools > Tool Permissions "
+                           "(Ditto / MCP) in the GUI (an AI never changes its own permissions)."),
+    ("audit_log", "Archive or repair the audit log: 'llm-cli tools audit --archive' (the person only)."),
+    ("trust_device", "Trust a device's SSH host key or pair it with a password: the GUI's Deployment window or "
+                     "'llm-cli deploy run' (only a person compares a fingerprint)."),
+    ("deploy_to_device", "Deploy to a device: the GUI's Deployment window or 'llm-cli deploy run' (no tool yet)."),
+    ("deep_ingest_notice", "Acknowledge the Deep Ingest notice and crawl documentation sites: the GUI "
+                                 "(Tools > Create Hardware Module...)."),
+    ("publish_pull_request", "Publish a community pull request: 'llm-cli zoo export --pr' (not for AI clients)."),
+    ("install_pack_from_file", "Install a pack from a file: the Community Hub in the GUI or "
+                               "'llm-cli zoo install --file' (unreviewed code an AI could write itself)."),
+    ("run_command", "Run shell commands, read or write files by path, download URLs, run Docker images: no tool, "
+                    "for any AI."),
+]
+MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
+
+
 # --- notes and summary lines (framework facts only: ids the framework issued, states, counts) ------------------
 
 VISIBILITY_NOTE = ("Only build requests of this framework process are listed: the GUI, the CLI and each MCP server "
@@ -136,6 +195,19 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         return SearchOut(results=[KnowledgeHit(source=sanitize_untrusted(str(h.source), 500),
                                                score=float(getattr(h, "score", 0.0)),
                                                content=sanitize_untrusted(str(h.content), 4000)) for h in hits])
+
+    def get_status(inp: StatusIn) -> StatusOut:
+        caller, running = current_actor(), current_registry() or registry
+        rows = running.permissions(caller)
+        policy = running.policy()  # loaded after permissions(): the damage flag below belongs to this load
+        listed = sum(1 for r in rows if r["listed"])
+        return StatusOut(permissions=PermissionsStatus(
+            caller=caller or "framework", configured=policy.configured,
+            damaged=bool(getattr(running.policy_store, "problem", None)), listed=listed,
+            tools=[ToolPermission(**{k: r[k] for k in ToolPermission.model_fields}) for r in rows],
+            no_tool_actions=[NoToolAction(action=a, where=w) for a, w in NO_TOOL_ACTIONS],
+            warning=(f"{listed} tools are listed; some clients take at most {MAX_LISTED_TOOLS}."
+                     if listed > MAX_LISTED_TOOLS else "")))
 
     def run_doctor(_inp: NoInput) -> DoctorOut:
         from orchestrator.Core.doctor import Doctor
@@ -196,7 +268,16 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         ToolSpec("resolve_healing", "Decide on a self-healing proposal",
                  "Approves (applies the automatic fix and retries the build) or dismisses a pending proposal.",
                  ToolTier.LOCAL_WRITE, ResolveHealingIn, BuildStatusResult,
-                 lambda i: service.resolve_healing(i.request_id, i.approve), summary=_status_summary),
+                 lambda i: service.resolve_healing(i.request_id, i.approve), summary=_status_summary,
+                 destructive=True),  # the docker_prune strategy deletes the Docker build cache
+        ToolSpec("get_status", "Framework status",
+                 "The framework's state for this caller: for now the tool permissions (decision and why for every "
+                 "tool, also the ones not listed because they are denied) and the actions no tool does, with where "
+                 "the person does them.",
+                 ToolTier.READ, StatusIn, StatusOut, get_status, idempotent=True,
+                 summary=lambda o: (f"Permissions for {fact(o.permissions.caller)}: "
+                                    + count(o.permissions.listed, "tool", "tools") + " listed."
+                                    if o.permissions else "Framework status.")),
     ]
     for spec in specs:
         registry.register(spec)

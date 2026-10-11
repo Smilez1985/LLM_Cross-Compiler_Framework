@@ -117,9 +117,9 @@ def _label(value: Any, limit: int = 80) -> str:
     return text[:limit]
 
 
-def _tool_context(ctx) -> ToolContext:
-    """The registry context of an MCP request: actor `mcp`, the client's self-reported name and version as a
-    label, and a hash that groups the calls of one connection."""
+def _tool_context(ctx, caller: str = "mcp") -> ToolContext:
+    """The registry context of an MCP request: the caller (`mcp` for local stdio clients), the client's
+    self-reported name and version as a label, and a hash that groups the calls of one connection."""
     client, session = "", ""
     with contextlib.suppress(Exception):
         connection = ctx.request_context.session
@@ -131,7 +131,7 @@ def _tool_context(ctx) -> ToolContext:
             client = (client + f" (protocol {_label(ctx.protocol_version, 16)})").strip()
         seed = f"{os.getpid()}:{id(connection)}".encode("ascii")
         session = hashlib.sha256(seed).hexdigest()[:16] + ":" + _label(ctx.request_id, 40)
-    return ToolContext("mcp", client=client, session=session)
+    return ToolContext(caller, client=client, session=session)
 
 
 class _OpenQuestions:
@@ -168,7 +168,9 @@ def _model_parameters(model: type) -> list:
     """Keyword-only parameters mirroring a pydantic model's fields (with their constraints)."""
     params = []
     for name, field in model.model_fields.items():
-        default = inspect.Parameter.empty if field.is_required() else field.get_default(call_default_factory=True)
+        # A default factory stays in the field (giving the parameter a default as well is refused by pydantic).
+        default = (inspect.Parameter.empty if field.is_required() or field.default_factory is not None
+                   else field.get_default())
         params.append(inspect.Parameter(name, inspect.Parameter.KEYWORD_ONLY, default=default,
                                         annotation=Annotated[field.annotation, field]))
     return params
@@ -186,7 +188,16 @@ def _uses_input_required(ctx) -> bool:
     return version is not None and is_version_at_least(version, INPUT_REQUIRED_VERSION)
 
 
-def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Optional["_OpenQuestions"] = None):
+def _parsed(spec: ToolSpec, arguments: Dict[str, Any]) -> Optional[BaseModel]:
+    """The arguments as the tool's input model, for decisions that depend on the input (None if invalid)."""
+    try:
+        return spec.input_model.model_validate(arguments)
+    except ValidationError:
+        return None
+
+
+def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Optional["_OpenQuestions"] = None,
+                       caller: str = "mcp"):
     """An MCPServer tool function for a registry tool: same input schema, typed structured output,
     confirmation through elicitation when the user's policy says "ask"."""
     import anyio
@@ -202,7 +213,8 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
     questions = questions or _OpenQuestions(registry)
 
     async def confirm(ctx: Context, **arguments):
-        decision = await anyio.to_thread.run_sync(registry.decide, spec)
+        decision = await anyio.to_thread.run_sync(
+            functools.partial(registry.decide, spec, _parsed(spec, arguments), caller))
         rounds = _uses_input_required(ctx)
         # The person already answered in an earlier round: their answer decides, even if the policy was
         # loosened to "allow" meanwhile (the SDK checks that it answers exactly this question).
@@ -220,7 +232,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         except CallTooLong as e:
             return NotAsked(approve=False, refused=str(e))
         state = _call_state()
-        tool_ctx = _tool_context(ctx)
+        tool_ctx = _tool_context(ctx, caller)
         tool_ctx.confirm_channel = "elicitation"
         await anyio.to_thread.run_sync(questions.expire)
         if rounds and ctx.input_responses:
@@ -265,7 +277,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         # elicitations still go through the registry, so they are audited like every other call.
         data = outcome.data if isinstance(outcome, AcceptedElicitation) else None
         state = _call_state()
-        tool_ctx = _tool_context(ctx)
+        tool_ctx = _tool_context(ctx, caller)
         if isinstance(data, NotAsked) and data.refused:
             await anyio.to_thread.run_sync(functools.partial(
                 registry.refuse, spec.name, kwargs, tool_ctx, outcome=data.outcome, detail=data.refused,
@@ -378,7 +390,9 @@ def _audit_rejection(registry: ToolRegistry, name: str, arguments: Any, error: B
     registry.refuse(name, arguments, ctx, outcome=outcome, detail=detail)
 
 
-def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None):
+def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None, caller: str = "mcp"):
+    """The MCP server for one caller's permissions (`mcp`: local stdio clients). Tools the caller's permissions
+    deny are not listed; a call to one is still refused and audited."""
     import anyio
     import anyio.to_thread
     from mcp.server.mcpserver import MCPServer
@@ -390,6 +404,10 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
     questions = _OpenQuestions(registry)
 
     class AuditedServer(MCPServer):
+        async def list_tools(self):
+            listed = {spec.name for spec in await anyio.to_thread.run_sync(registry.visible, caller)}
+            return [tool for tool in await super().list_tools() if tool.name in listed]
+
         async def call_tool(self, name, arguments, context=None):
             state = _CallState()
             token = _CALL.set(state)
@@ -397,7 +415,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                 return await super().call_tool(name, arguments, context)
             except BaseException as e:
                 if not state.audited:
-                    ctx = _tool_context(context) if context is not None else None
+                    ctx = _tool_context(context, caller) if context is not None else ToolContext(caller)
                     try:
                         with anyio.CancelScope(shield=True):  # a cancelled call is recorded as well
                             await anyio.to_thread.run_sync(_audit_rejection, registry, name, arguments, e, ctx)
@@ -412,9 +430,9 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                            lifespan=lifespan)
     server.open_questions = questions
     for spec in registry.list():
-        server.add_tool(make_tool_function(spec, registry, questions), name=spec.name, title=spec.title,
+        server.add_tool(make_tool_function(spec, registry, questions, caller), name=spec.name, title=spec.title,
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
-                        structured_output=True)
+                        structured_output=True, meta=spec.meta())
     return server
 
 

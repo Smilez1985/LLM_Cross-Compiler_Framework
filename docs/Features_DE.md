@@ -393,10 +393,12 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen) |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
+| `get_status` | lesen | Deine Tool-Berechtigungen für diesen Aufrufer: jedes Tool mit Entscheidung und Grund (auch die ausgeblendeten) und was kein Tool tut, mit dem Ort, wo du es tust |
 
 So läuft eine Frage mit Tools ab:
 
-1. Ditto bekommt die Definitionen der Tools, die deine Berechtigungen nicht verbieten.
+1. Ditto bekommt die Definitionen der Tools, die deine Berechtigungen nicht verbieten: dieselben Tools, die ein
+   MCP-Client mit denselben Berechtigungen angeboten bekommt, egal wie groß das Modell ist.
 2. Das Modell darf Tools aufrufen. Jeder Aufruf läuft durch die Tool-Registry: Prüfung der Eingabe, deine
    Berechtigung, Bestätigung, wo die Berechtigung „fragen“ sagt (ein Dialog in der GUI mit dem Titel des Tools und
    jedem Argument; eine Abfrage in der CLI, ohne Terminal abgelehnt), Eintrag im Audit-Log mit dem Akteur `ditto`.
@@ -853,7 +855,7 @@ Jedes Tool gehört zu einer Risikostufe:
 |---|---|---|---|
 | `read` | Targets, Builds, Logs, Wissen ansehen | allow | allow, ask, deny |
 | `local_write` | Auf diesem Rechner etwas ändern (Builds starten oder abbrechen, über Healing entscheiden) | ask | allow, ask, deny |
-| `external` | Andere Geräte erreichen oder Daten löschen | ask | ask, deny; einzelne Tools lassen sich einzeln erlauben |
+| `external` | Andere Geräte erreichen oder Daten löschen | ask | ask, deny (ein Tool dieser Stufe fragt höchstens) |
 | `forbidden` | Nie aufrufbar (zum Beispiel beliebige Shell-Befehle) | deny | deny |
 
 Tools der Stufen `external` und `forbidden` gibt es noch nicht; Übertragen und Hochladen stehen nicht als Tools zur
@@ -863,6 +865,23 @@ Verfügung.
   `~/.llm-framework/tool_policy.json` gespeichert (nur für dich lesbar). Einzelne Tools lassen sich in der GUI
   abweichend einstellen.
 - Bis zur Einrichtung sind nur lesende Tools erlaubt, alles andere fragt.
+- **Pro Aufrufer:** Ditto (`ditto`) und lokale MCP-Clients über stdio (`mcp`) können eigene Berechtigungen haben
+  (`llm-cli tools permissions --caller ditto` oder `--caller mcp`); ein Aufrufer ohne eigene nutzt die gemeinsamen.
+  Die Berechtigungen eines neuen Aufrufers beginnen mit den gemeinsamen, samt deinen Einstellungen für einzelne
+  Tools. Ein benanntes Token für einen HTTP-Client (geplant) ohne eigene Berechtigungen darf nur lesen.
+- **Eigene Vorgabe und Obergrenze eines Tools:** Ein Tool kann eine eigene Vorgabe mitbringen (ein optionales Tool
+  beginnt mit `deny` und ist ausgeblendet) und eine höchste Entscheidung, die keine Einstellung anhebt (ein Tool, das
+  andere Geräte erreicht oder Daten löscht, fragt höchstens). Die Reihenfolge ist: deine Einstellung für das Tool,
+  sonst die Vorgabe des Tools, sonst deine Einstellung für seine Stufe; danach die Obergrenze. Die Vorgabe eines Tools
+  öffnet nie eine Stufe, die du verweigert hast.
+- **Neue Tools:** Die Berechtigungsdatei hält fest, welche Tools du gesehen hast; das Speichern der Einrichtung,
+  `llm-cli tools permissions` oder der GUI-Dialog markiert jedes aufgeführte Tool. Ein später hinzugekommenes Tool
+  nutzt seine eigene Vorgabe, nie eine lockerere Einstellung der Stufe, bis du es gesehen hast; `llm-cli tools list`
+  und der GUI-Dialog kennzeichnen es als neu. Eine Berechtigungsdatei aus 3.0.0 zählt ihre elf Tools als gesehen.
+- **Verweigerte Tools werden nicht aufgeführt**, weder MCP-Clients noch Ditto; ein Aufruf eines solchen Tools wird
+  trotzdem abgelehnt und festgehalten. `get_status` führt jedes Tool mit Entscheidung und Grund auf, auch die
+  ausgeblendeten, und die Handlungen, die kein Tool übernimmt, mit dem Ort, wo du sie erledigst, damit eine KI dir
+  den echten Grund nennen kann.
 - Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
   lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
   `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.

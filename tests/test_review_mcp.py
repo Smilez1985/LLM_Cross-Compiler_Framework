@@ -355,8 +355,8 @@ class TestPolicyChanges:
         registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         real_decide, seen = registry.decide, []
 
-        def decide(spec):
-            decision = real_decide(spec)
+        def decide(spec, *args, **kwargs):  # registry.decide takes the input and the caller too (S3)
+            decision = real_decide(spec, *args, **kwargs)
             seen.append(decision)
             if len(seen) == 1:  # right after the resolver looked at it
                 registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
@@ -919,8 +919,8 @@ class TestAnswersAreBoundToTheCall:
         registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
         real_decide, seen = registry.decide, []
 
-        def decide(spec):
-            decision = real_decide(spec)
+        def decide(spec, *args, **kwargs):  # registry.decide takes the input and the caller too (S3)
+            decision = real_decide(spec, *args, **kwargs)
             seen.append(decision)
             if len(seen) == 1:
                 registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))

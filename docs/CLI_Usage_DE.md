@@ -735,32 +735,37 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 8 nur lesende Tools (`list_targets`,
+Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 9 nur lesende Tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`) und 3, die auf diesem Rechner etwas ändern (`start_build`, `cancel_build`,
-`resolve_healing`).
+`run_doctor`, `search_knowledge`, `get_status`) und 3, die auf diesem Rechner etwas ändern (`start_build`,
+`cancel_build`, `resolve_healing`).
 
 ### tools list
 
 ```
-llm-cli tools list
+llm-cli tools list [--caller ditto|mcp]
 ```
 
 Jedes Tool mit seiner Stufe (`read`, `local_write`), der aktuellen Berechtigung (`allow`, `ask`, `deny`) und einer
-Beschreibung. Der Titel sagt, wenn die Berechtigungen noch nicht eingerichtet sind.
+Beschreibung, gefolgt von der eigenen Vorgabe des Tools, der höchsten Entscheidung, die eine Einstellung ihm geben
+kann (`at most`), ob es neu ist (noch nicht gesehen: es nutzt seine eigene Vorgabe, bis du es gesehen hast) und ob
+eine Bestätigung eine dauerhafte Freigabe anbieten darf. Ohne `--caller` zeigt es die gemeinsamen Berechtigungen und
+nennt die Aufrufer, die eigene haben. Der Titel sagt, wenn die Berechtigungen noch nicht eingerichtet sind.
 
 ### tools permissions
 
 ```
-llm-cli tools permissions [--reset]
+llm-cli tools permissions [--caller ditto|mcp] [--reset]
 ```
 
 Stellt dieselben drei Fragen wie [`ditto setup`](#ditto-setup) und speichert die Antworten. Berechtigungen für
-einzelne Tools, die in der GUI gesetzt wurden, bleiben erhalten.
+einzelne Tools, die in der GUI gesetzt wurden, bleiben erhalten. Vorher nennt es die Tools, die seit dem letzten
+Durchgang neu sind; das Speichern zählt jedes aufgeführte Tool als gesehen.
 
 | Option | Bedeutung |
 |---|---|
-| `--reset` | Zurück zu den empfohlenen Standardwerten (die Einrichtung fragt beim nächsten Mal erneut). |
+| `--caller ditto\|mcp` | Die Berechtigungen eines Aufrufers setzen (Ditto oder lokale MCP-Clients über stdio) statt der gemeinsamen. Die ersten Berechtigungen eines Aufrufers beginnen mit den gemeinsamen, samt den Einstellungen für einzelne Tools. |
+| `--reset` | Zurück zu den empfohlenen Standardwerten (die Einrichtung fragt beim nächsten Mal erneut). Mit `--caller`: Dieser Aufrufer nutzt wieder die gemeinsamen Berechtigungen. |
 
 ### tools audit
 

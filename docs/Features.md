@@ -370,10 +370,12 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `start_build` | local write | Start a build (must match the target's capabilities) |
 | `cancel_build` | local write | Cancel a build |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
+| `get_status` | read | Your tool permissions for this caller: every tool with its decision and why (also the hidden ones), and what no tool does, with where you do it |
 
 How a question with tools runs:
 
-1. Ditto gets the definitions of the tools your permissions do not deny.
+1. Ditto gets the definitions of the tools your permissions do not deny: the same tools an MCP client with the same
+   permissions is offered, whatever the model's size.
 2. The model may call tools. Each call goes through the tool registry: input check, your permission, confirmation
    where the permission says "ask" (a dialog in the GUI with the tool's title and every argument; a prompt in the
    CLI, denied without a terminal), audit log entry with actor `ditto`.
@@ -800,7 +802,7 @@ Every tool belongs to a risk tier:
 |---|---|---|---|
 | `read` | Look at targets, builds, logs, knowledge | allow | allow, ask, deny |
 | `local_write` | Change things on this computer (start or cancel builds, decide on healing) | ask | allow, ask, deny |
-| `external` | Reach other devices or delete data | ask | ask, deny; single tools can be allowed one by one |
+| `external` | Reach other devices or delete data | ask | ask, deny (a tool of this tier always asks at most) |
 | `forbidden` | Never callable (for example arbitrary shell commands) | deny | deny |
 
 There are no `external` or `forbidden` tools yet; deploying and uploading are not available as tools.
@@ -808,6 +810,21 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
 - The permissions are asked once (GUI dialog on the first start, `llm-cli ditto setup`) and stored in
   `~/.llm-framework/tool_policy.json` (readable only by you). Single tools can be set differently in the GUI.
 - Until the setup is done, read-only tools are allowed and everything else asks.
+- **Per caller:** Ditto (`ditto`) and local MCP clients over stdio (`mcp`) can have permissions of their own
+  (`llm-cli tools permissions --caller ditto` or `--caller mcp`); a caller without them uses the shared ones. A new
+  caller's permissions start from the shared ones, including your settings for single tools. A named token for an
+  HTTP client (planned) that has no permissions of its own may only read.
+- **A tool's own default and cap:** a tool can bring its own default (an optional tool starts as `deny` and is
+  hidden) and a highest decision that no setting lifts (a tool that reaches other devices or deletes data always
+  asks at most). The order is: your setting for the tool, else the tool's default, else your setting for its tier;
+  then the cap. A tool's default never opens a tier you denied.
+- **New tools:** the permission file records which tools you have reviewed; saving the setup, `llm-cli tools
+  permissions` or the GUI dialog marks every listed tool. A tool added later uses its own default, never a looser
+  tier setting, until you review it; `llm-cli tools list` and the GUI dialog mark it as new. A permission file from
+  3.0.0 counts its eleven tools as reviewed.
+- **Denied tools are not listed** to MCP clients and Ditto; a call to one is still refused and audited.
+  `get_status` lists every tool with its decision and why, also the hidden ones, and the actions no tool does, with
+  where you do them, so an AI can tell you the real reason.
 - A damaged or unreadable permission file, or a link to a missing one, denies every tool instead of falling back to
   looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and
   `llm-cli mcp serve` say so.
