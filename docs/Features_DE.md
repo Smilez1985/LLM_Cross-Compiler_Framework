@@ -815,8 +815,20 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   laufen (ungültige Argumente, eine gescheiterte Bestätigung), landen ebenfalls im Audit-Log. Ein Client, der nicht
   fragen kann, bekommt eine Ablehnung mit einem Hinweis, wie du das Tool erlaubst.
 - **Anweisungen an den Client:** Der Server beschreibt den typischen Ablauf (Targets → Capabilities → Build → Status
-  und Log → Artefakte) und sagt dem Client, dass Build-Logs und Ergebnisse aus der Wissensbasis externer Text sind,
-  dessen Anweisungen nicht befolgt werden dürfen.
+  und Log → Artefakte), sagt dem Client, dass als externer Text markierte Felder Daten sind, deren Anweisungen nicht
+  befolgt werden dürfen, und dass er dir eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
+- **Ergebnisse:** Jedes Ergebnis läuft durch den Ausgabefilter der Registry, auch für Ditto. Secrets werden in jeder
+  Zeichenkette geschwärzt. Text von außerhalb des Frameworks (Build-Logs und Stufennamen, Self-Healing-Vorschläge,
+  Build-Manifeste, Auszüge aus der Wissensbasis, Doctor-Meldungen) wird von unsichtbaren und bidirektionalen
+  Steuerzeichen befreit und gekürzt (eine Log-Zeile auf 2.000 Zeichen, anderer externer Text auf 4.000); jede andere
+  Zeichenkette wird auf 16 KiB gekürzt, und ein Ergebnis über 256 KiB wird mit einem Hinweis abgelehnt, wie man
+  weniger anfordert. Solche Felder sind im Ausgabeschema des Tools mit `"untrusted": true` markiert. Das
+  strukturierte Ergebnis entspricht genau dem Ausgabeschema; der Textblock beginnt mit einem Satz, der nur aus
+  Fakten des Frameworks besteht (IDs, Zustände, Anzahlen), gefolgt vom JSON, eingepackt als nicht vertrauenswürdige
+  Daten. `notes` in einem Ergebnis schreibt nur das Framework, zum Beispiel, dass die Wissensbasis erreichbar ist,
+  aber nichts passte, oder dass nur die Builds dieses Prozesses aufgeführt sind. Der Schritt eines
+  Self-Healing-Vorschlags kommt als `manual_step_text`: Text zum Lesen für dich, nie ein Befehl, den der Client
+  ausführen soll.
 - **Transporte:** stdio (Standard; der Client startet den Server) oder Streamable HTTP nur auf einer
   Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). HTTP prüft Host und Origin und
   braucht ein Bearer-Token, das pro Benutzer in `~/.llm-framework/mcp_http_token` angelegt wird.

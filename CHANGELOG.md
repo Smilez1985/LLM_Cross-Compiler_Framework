@@ -270,6 +270,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli ditto auth storage --use ...`.
 - Error messages and hints name `llm-cli ditto login <provider>` instead of `llm-cli secrets set <key name>`;
   `llm-cli module generate-ai` uses the stored sign-in and never asks for a key itself.
+- **MCP results**: the text block of a tool result starts with one sentence built only from framework facts (ids,
+  states, counts), followed by the JSON wrapped as untrusted data; output schemas mark every field with external
+  text (`"untrusted": true`); results carry `notes` written by the framework (for example "the knowledge base is
+  reachable; no excerpt matched" or that only the builds of this process are listed); a pending self-healing
+  proposal's `suggested_step` is now `manual_step_text`, text for the person to read. The server instructions say
+  how to treat marked fields and that a task the client cannot do is reported with its specific reason.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -484,6 +490,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   runs, a `started` entry is written to the audit log; if it cannot be written, the call is refused, and a question
   about it is not asked. Read-only calls stay available. Before, a failed audit write was only logged and the call
   ran anyway, and the only entry was written after the handler, so a crash in the middle of a change left no trace.
+- **Every tool result is filtered centrally** (Ditto and MCP clients): secrets are redacted in every string of a
+  result, external text (build logs and stage names, healing proposals, build manifests, knowledge excerpts, doctor
+  messages) is cleaned of invisible and bidirectional control characters and capped, other strings are capped at
+  16 KiB, and a result over 256 KiB is refused with a hint how to ask for less. Before, only errors, warnings and
+  log lines were redacted, only knowledge excerpts were cleaned, and log lines and results had no size limit.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

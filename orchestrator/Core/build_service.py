@@ -113,7 +113,7 @@ class BuildService:
         if hp is not None:
             strategy = getattr(getattr(hp, "strategy", None), "value", "")
             pending = PendingHealing(summary=str(hp.summary), root_cause=str(hp.root_cause),
-                                     suggested_step=str(hp.fix_command),
+                                     manual_step_text=str(hp.fix_command),
                                      automatic=strategy in AUTOMATIC_STRATEGIES and not hp.is_ai_generated,
                                      ai_generated=bool(hp.is_ai_generated))
         return BuildStatusOut(
