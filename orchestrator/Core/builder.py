@@ -41,6 +41,7 @@ from orchestrator.Core import build_records
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
 from orchestrator.utils.llama_pin import pinned_tag
+from orchestrator.utils.sandbox import FALLBACK_USER, container_sandbox, hand_over, sandbox_user
 
 # Files a build may produce that are models (data to install), never programs to execute.
 MODEL_FILE_SUFFIXES = (".gguf", ".rkllm", ".rknn", ".onnx", ".safetensors", ".bin")
@@ -1018,7 +1019,7 @@ class BuildEngine:
         inner = f"/build-cache/dataset{suffix}"
         return {str(path): {"bind": inner, "mode": "ro"}}, inner
 
-    SANDBOX_FALLBACK_USER = (1000, 1000)  # the image's build user, used when the host user is root or on Windows
+    SANDBOX_FALLBACK_USER = FALLBACK_USER  # the image's build user, used when the host user is root or on Windows
 
     def _sandbox(self, config: BuildConfiguration, build_temp: Path) -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Dict[str, str]]]:
         """Container options for the conversion stages (imatrix, build). They run model tooling and the
@@ -1033,30 +1034,13 @@ class BuildEngine:
         if not self._get_conf("build_sandbox", True):
             return {"user": "0:0"}, env, volumes  # legacy mode: the entrypoint maps PUID/PGID and drops root
 
-        if sys.platform != "win32" and os.getuid() != 0:
-            uid, gid = os.getuid(), os.getgid()
-        else:
-            uid, gid = self.SANDBOX_FALLBACK_USER
-            if sys.platform != "win32":
-                # A root host owns the per-build folders; hand them to the container user.
-                for path in [build_temp, *build_temp.rglob("*")]:
-                    try:
-                        os.chown(path, uid, gid)
-                    except OSError:
-                        pass
-        kwargs: Dict[str, Any] = {
-            "user": f"{uid}:{gid}",
-            "network_mode": "none",
-            "cap_drop": ["ALL"],
-            "security_opt": ["no-new-privileges:true"],
-            "read_only": True,
-            "tmpfs": {"/tmp": "rw,nosuid,nodev,size=1g"},
-            "pids_limit": int(self._get_conf("build_pids_limit", 4096) or 4096),
-            "working_dir": "/build-cache/work",
-        }
+        # The same sandbox as the llama.cpp builder container (orchestrator/utils/sandbox.py).
+        user = sandbox_user()
+        hand_over(build_temp, user)  # a root host owns the per-build folders; hand them to the container user
         memory = str(self._get_conf("build_memory_limit", "") or "").strip()
-        if memory:
-            kwargs["mem_limit"] = memory
+        kwargs: Dict[str, Any] = container_sandbox(
+            user, working_dir="/build-cache/work", mem_limit=memory or None,
+            pids_limit=int(self._get_conf("build_pids_limit", 4096) or 4096))
         env.update({
             "HOME": "/build-cache/work/home",
             "XDG_CACHE_HOME": "/build-cache/work/cache",

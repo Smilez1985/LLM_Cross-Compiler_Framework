@@ -1,6 +1,6 @@
 {
   "backend": "cpu",
-  "build_id": "56f460dbb051624f0cffe10999716d84cadd3c2c8287a6b956464df16f4aaa16",
+  "build_id": "ff086c69fc8f7aac4a86deccd772b8c0d88f4afd4f92ca1f345e1e5eac078652",
   "builder": {
     "base": "target-image",
     "image": "debian:bookworm-slim",
@@ -13,7 +13,7 @@
   ],
   "placement": "container",
   "purpose": "host-tools",
-  "recipe_version": 1,
+  "recipe_version": 2,
   "source": {
     "build_number": 11429,
     "commit": "d81235049384534c167caea52b85a694f6103d14",

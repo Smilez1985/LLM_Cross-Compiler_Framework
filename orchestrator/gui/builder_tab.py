@@ -128,7 +128,7 @@ class LocalProbeWorker(QThread):
                 cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(self.script_path),
                        "-OutputFile", str(output_file)]
             else:
-                cmd = ["bash", str(self.script_path), "--output", str(output_file)]
+                cmd = ["sh", str(self.script_path), "--output", str(output_file)]  # POSIX sh, no bash needed
                 
             subprocess.run(cmd, check=True, capture_output=True, text=True)
             

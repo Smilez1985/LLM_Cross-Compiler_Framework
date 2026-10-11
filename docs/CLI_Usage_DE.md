@@ -1008,7 +1008,8 @@ den Rechner geplant, auf dem das Modell läuft, deshalb läuft die Probe auf die
   mit `--output` angegebene Datei geschrieben und als Profil dieses Rechners gespeichert
   (`~/.llm-framework/hardware/local.txt`, ohne flüchtige Werte wie den freien RAM). Kann die Python-Probe nicht
   laufen, sagt die CLI, warum, und führt stattdessen das Ersatzskript aus; `--script` nimmt das Skript direkt
-  (`scripts/hardware_probe.sh` unter Linux, `scripts/hardware_probe.ps1` unter Windows).
+  (`scripts/hardware_probe.sh` mit `sh` unter Linux, also auch auf Rechnern ohne bash wie Alpine oder BusyBox;
+  `scripts/hardware_probe.ps1` unter Windows).
 - **Ein Board per SSH** (`--device`): Beim ersten Kontakt zeigt die CLI den Fingerabdruck des SSH-Hostschlüssels und
   bittet dich, ihn zu bestätigen, wie bei `deploy run` (`--trust-fingerprint` bestätigt ihn ohne Nachfrage); ein
   Passwort wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu installieren, und nicht gespeichert. Dann

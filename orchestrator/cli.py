@@ -2304,7 +2304,7 @@ def _scan_with_script(output_file: Path):
     if is_windows:
         cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script), "-OutputFile", str(output_file)]
     else:
-        cmd = ["bash", str(script), "--output", str(output_file)]
+        cmd = ["sh", str(script), "--output", str(output_file)]  # POSIX sh: hosts without bash (Alpine, BusyBox)
     try:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.unlink(missing_ok=True)  # a file of an earlier run must not count as this run's result

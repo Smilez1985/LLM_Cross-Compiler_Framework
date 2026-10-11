@@ -262,9 +262,56 @@ class TestDerivedOptions:
         assert arm_arch(changed(RK3566, **base)) == expected
 
     def test_arm_board_with_unknown_features_gets_all_cpu_variants(self):
-        p = plan_build(changed(RK3566, SUPPORTS_DOTPROD="UNKNOWN"), purpose="device-runtime", placement="cross",
-                       catalog=CATALOG, toolchain=LINUX_BUILD_HOST)
+        # glibc 2.41: the Debian 13 builder with GCC 14, which knows the +sme of upstream's armv9.2 variants
+        p = plan_build(changed(RK3566, SUPPORTS_DOTPROD="UNKNOWN", LIBC_VERSION="2.41"), purpose="device-runtime",
+                       placement="cross", catalog=CATALOG, toolchain=LINUX_BUILD_HOST)
+        assert p.builder["base"] == "debian-13"
         assert p.options()["GGML_CPU_ALL_VARIANTS"] == "ON" and "GGML_CPU_ARM_ARCH" not in p.options()
+
+    @pytest.mark.parametrize("libc_version, base, gcc", [("2.36", "debian-12", "12.2"), ("2.39", "ubuntu-24.04", "13.3"),
+                                                         ("2.31", "debian-11", "10.2")])
+    def test_arm_variants_with_a_compiler_that_lacks_sme_are_refused(self, libc_version, base, gcc):
+        """GCC 13 and older reject -march=armv9.2-a+sme, which upstream's ARM variant list contains (no option
+        shortens it): the plan says why and how to get a build, instead of failing deep inside the build."""
+        with pytest.raises(PlanError) as e:
+            plan_build(changed(RK3566, SUPPORTS_DOTPROD="UNKNOWN", LIBC_VERSION=libc_version),
+                       purpose="device-runtime", placement="cross", catalog=CATALOG, toolchain=LINUX_BUILD_HOST)
+        message = str(e.value)
+        assert "armv9.2-a+sme" in message and "GCC 14" in message and f"{base} has GCC {gcc}" in message
+        assert "Probe the machine again" in message
+
+    def test_arm_variants_with_an_unknown_compiler_version_say_so(self):
+        alpine = changed(RK3566, SUPPORTS_DOTPROD="UNKNOWN", LIBC="musl", LIBC_VERSION="1.2.5", OS_ID="alpine",
+                         OS_FAMILY="alpine", drop=("OS_VARIANT_ID", "OS_VERSION_CODENAME"))
+        p = plan_build(alpine, purpose="device-runtime", placement="cross", catalog=CATALOG,
+                       toolchain=LINUX_BUILD_HOST)
+        assert p.options()["GGML_CPU_ALL_VARIANTS"] == "ON"
+        assert any("armv9.2-a+sme" in n and "not known" in n for n in p.notes)
+
+    def test_linux_clang_uses_openmp_only_with_libomp(self):
+        """CMake's FindOpenMP fails quietly without libomp, and a Clang build would lose OpenMP unnoticed."""
+        clang = ToolchainInfo(host_os="linux", host_arch="x86_64", compiler="clang-18.1.3", cmake="3.28.3")
+        without = plan_build(TWO_NVIDIA, purpose="host-runtime", placement="native", backend="cpu", catalog=CATALOG,
+                             toolchain=clang)
+        unchecked_is_off = without.options()["GGML_OPENMP"]
+        detected = plan_build(TWO_NVIDIA, purpose="host-runtime", placement="native", backend="cpu", catalog=CATALOG,
+                              toolchain=ToolchainInfo(**{**clang.__dict__, "openmp": True}))
+        missing = plan_build(TWO_NVIDIA, purpose="host-runtime", placement="native", backend="cpu", catalog=CATALOG,
+                             toolchain=ToolchainInfo(**{**clang.__dict__, "openmp": False}))
+        assert unchecked_is_off == "OFF" and missing.options()["GGML_OPENMP"] == "OFF"
+        assert any("libomp" in n for n in without.notes)
+        assert detected.options()["GGML_OPENMP"] == "ON"
+        assert detected.build_id != missing.build_id, "the build ID tells an OpenMP build from one without"
+        assert missing.build_id == without.build_id
+
+    def test_gcc_keeps_openmp_unless_detection_failed(self):
+        gcc = ToolchainInfo.from_profile(TWO_NVIDIA)
+        assert plan_build(TWO_NVIDIA, purpose="host-runtime", placement="native", backend="cpu", catalog=CATALOG,
+                          toolchain=gcc).options()["GGML_OPENMP"] == "ON"
+        broken = ToolchainInfo(**{**gcc.__dict__, "openmp": False})
+        p = plan_build(TWO_NVIDIA, purpose="host-runtime", placement="native", backend="cpu", catalog=CATALOG,
+                       toolchain=broken)
+        assert p.options()["GGML_OPENMP"] == "OFF" and any("OpenMP" in n for n in p.notes)
 
     def test_mali_vulkan_only_when_asked_for(self):
         assert choose_backend(RK3566, purpose="device-runtime", placement="cross", catalog=CATALOG,

@@ -553,6 +553,7 @@ class TestScan:
         result = invoke_plain("scan", "--script", "--output", "probes/board.txt")
         assert result.code == 0, result.out
         (cmd,) = calls
+        assert cmd[0] == "sh", "the fallback script is POSIX sh: hosts without bash (Alpine, BusyBox) run it too"
         assert cmd[-2:] == ["--output", str((tmp_path / "probes" / "board.txt").resolve())]
         assert (tmp_path / "probes" / "board.txt").exists()
         assert not (tmp_path / "target_hardware_config.txt").exists()
@@ -640,7 +641,7 @@ class TestScan:
         work.mkdir()
         target.parent.mkdir()
         env = dict(os.environ, NON_INTERACTIVE="true")
-        result = subprocess.run(["bash", str(REPO_ROOT / "scripts" / "hardware_probe.sh"), "--output", str(target)],
+        result = subprocess.run(["sh", str(REPO_ROOT / "scripts" / "hardware_probe.sh"), "--output", str(target)],
                                 cwd=work, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                 timeout=120, check=False)
         assert result.returncode == 0, result.stderr
@@ -650,7 +651,7 @@ class TestScan:
         assert not (work / "target_hardware_config.txt").exists()
 
     def test_the_probe_script_refuses_unknown_options(self, tmp_path):
-        result = subprocess.run(["bash", str(REPO_ROOT / "scripts" / "hardware_probe.sh"), "--bogus"], cwd=tmp_path,
+        result = subprocess.run(["sh", str(REPO_ROOT / "scripts" / "hardware_probe.sh"), "--bogus"], cwd=tmp_path,
                                 capture_output=True, text=True, timeout=30, check=False)
         assert result.returncode == 2 and "Unknown option" in result.stderr
         assert not (tmp_path / "target_hardware_config.txt").exists()
@@ -659,7 +660,7 @@ class TestScan:
     def test_the_probe_script_refuses_an_empty_output(self, tmp_path, args):
         work = tmp_path / "work"
         work.mkdir()
-        result = subprocess.run(["bash", str(REPO_ROOT / "scripts" / "hardware_probe.sh"), *args], cwd=work,
+        result = subprocess.run(["sh", str(REPO_ROOT / "scripts" / "hardware_probe.sh"), *args], cwd=work,
                                 capture_output=True, text=True, timeout=30, check=False)
         assert result.returncode == 2 and "Usage" in result.stderr, result.stderr
         assert list(work.iterdir()) == []
