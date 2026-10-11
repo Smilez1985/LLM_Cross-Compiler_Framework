@@ -163,7 +163,7 @@ In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm
 | Program and Python environment | Linux: `/opt/llm-conversion-framework` · Windows: `C:\Program Files\LLM-Conversion-Framework` |
 | Builds, logs, cache | `output/`, `logs/` and `cache/` in the installation folder (settings `output_dir`, `logs_dir`, `cache_dir`) |
 | Settings (`config.yml`) | `configs/` in the installation folder if your user may write there, otherwise the personal folder below; `LLM_FRAMEWORK_CONFIG_DIR` sets another folder |
-| Personal state: tool permissions, audit log, SSH key and known devices, MCP token, chat history, knowledge base, local model server | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` sets another folder |
+| Personal state: tool permissions, audit log, SSH key and known devices, MCP token, chat history, input history, knowledge base, local model server, community index cache | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` sets another folder |
 | API keys and tokens | encrypted in `~/.llm-framework/secrets.store`; the key for it is kept in your operating system's keyring, or as you choose with the setting `secret_storage` |
 | Models for Ditto's offline mode | `models/ditto/` in the installation folder (`LLM_FRAMEWORK_MODELS_DIR` sets another folder) |
 
@@ -214,7 +214,11 @@ build to a board. The **Auto-Tuning** and **Models** tabs are placeholders.
 
 Menus: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (wizard for a new target, including "Deep Ingest" to add documentation to the knowledge base),
-**Tools > Tool Permissions (Ditto / MCP)...**
+**Tools > Open Community Hub** (see [Community zoo](#community-zoo)), **Tools > Tool Permissions (Ditto / MCP)...**,
+**Tools > Spoken Announcements** (on or off) and **Tools > Clear Input History...**
+
+The input fields offer what you used recently (models, targets, boards, datasets, URLs, devices), per user and never
+secrets: [details](docs/Features.md#input-history).
 
 ### Deploying to the board
 
@@ -377,7 +381,8 @@ the key with `llm-cli secrets set <key name>` and set `ai_provider` in `config.y
   cannot replace your key; the setting `ai_allow_sdk_env_headers: true` keeps them.
 
 `llm-cli ditto eval` grades Ditto on fixed test cases, for example to check whether a small local model is good
-enough. Details and a first measurement: [docs/Features.md](docs/Features.md#ditto-evaluation).
+enough; `--kind retrieval` grades the knowledge-base search instead. Details and measurements:
+[docs/Features.md](docs/Features.md#ditto-evaluation).
 
 ---
 
@@ -433,11 +438,31 @@ Turn it on in the AI settings (**Enable Local Knowledge Base**). Everything runs
   `models/embeddings/` (about 0.5 GB on a machine without CUDA); in offline mode nothing is downloaded,
 - the vectors are stored in an embedded Qdrant database in `~/.llm-framework/qdrant`, without Docker and
   without an open port,
-- searches combine meaning (vectors) with exact words (BM25), so error codes and compiler flags are found too.
+- searches combine meaning (vectors) with exact words (BM25), so error codes and compiler flags are found too, also
+  parts of identifiers such as `GGML_CUDA` in `-DGGML_CUDA=ON`,
+- a local cross-encoder reranks the excerpts for build recommendations and drops irrelevant ones (setting
+  `rag_reranker`).
 
 Add documentation with **Deep Ingest (Add Docs)** in the module wizard (**Tools > Create Hardware Module...**).
-The crawler respects `robots.txt`, blocks private network addresses and limits pages and depth. Search results are
-treated as external text, never as instructions. More: [docs/Features.md](docs/Features.md#knowledge-base-rag).
+Before your first crawl, a one-time notice says what is read and kept; it is information, not a confirmation. The
+crawler blocks private network addresses, limits pages and depth, and honours every machine-readable opt-out of a
+site: robots.txt, the `X-Robots-Tag` header, robots meta tags (including `noai`) and the TDM Reservation Protocol.
+None of these checks can be switched off. The wizard shows "Page N of M", **Stop** keeps what is already stored, and
+the result says success, partial or failure; the outcome is also spoken, unless you turn that off. Search results are
+treated as external text, never as instructions. More: [knowledge base](docs/Features.md#knowledge-base-rag) and
+[Deep Ingest](docs/Features.md#deep-ingest).
+
+---
+
+## Community zoo
+
+Targets, recipes (how a model was built for a board) and knowledge can be shared as signed packs:
+`llm-cli zoo list|show|install|verify|export|keys` or **Tools > Open Community Hub**. A pack is installed only after
+checks in a quarantine folder and your confirmation, and it shows a trust level. Your own work is exported
+privacy-scrubbed and signed with your key; a pull request goes through the GitHub CLI or the browser, and the
+framework never asks for a token. Packs can also be encrypted for your own machines or a team. No community
+repository or index is published yet, so today only pack files can be installed. Details:
+[docs/Features.md](docs/Features.md#community-zoo).
 
 ---
 
@@ -487,9 +512,17 @@ build_sandbox: true           # sandbox for conversion containers
 build_memory_limit: ""        # e.g. 24g; empty = no limit
 build_pids_limit: 4096        # process limit in the container
 build_jobs: 0                 # parallel compile jobs for image builds; 0 = all cores
-crawler_respect_robots: true
 crawler_max_depth: 2
+rag_reranker: auto            # auto (chosen by hardware), off, or a cross-encoder model id
+rag_rerank_default: false     # true: rerank every search (default: build recommendations only)
+rag_rerank_min_score: 0.0     # relevance floor 0..1; 0 = the model's calibrated floor (0.2)
+rag_model_idle_minutes: 10    # unload the knowledge-base models after this idle time; 0 = keep them loaded
+audio_announcements: true     # spoken Deep Ingest notice and outcome (Tools > Spoken Announcements)
+community_index_url: ""       # https address of the signed community index; empty until one is published
+community_repo: ""            # GitHub owner/name that receives community packs as pull requests; empty for now
 ```
+
+The knowledge-base, Deep Ingest and community settings are explained in [docs/Features.md](docs/Features.md).
 
 ---
 
@@ -509,6 +542,9 @@ crawler_max_depth: 2
   build (the CLI waits until it has ended). A build can be cancelled with the `cancel_build` tool, through Ditto in
   the GUI chat or an MCP client, in the process that started it.
 - **Signing in per provider** is not available yet; Ditto uses API keys.
+- **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it.
+- **Community zoo:** no community repository, index or maintainer key is published yet (`configs/community_keys.yml`
+  is empty, `community_index_url` and `community_repo` are empty), so only pack files can be installed.
 
 ---
 
@@ -531,7 +567,7 @@ Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
 | Document | Contents |
 |---|---|
 | [docs/CLI_Usage.md](docs/CLI_Usage.md) | Every CLI command and option, with examples |
-| [docs/Features.md](docs/Features.md) | Features in detail: build pipeline, sandbox, Ditto, evaluation, local runtime, knowledge base, MCP |
+| [docs/Features.md](docs/Features.md) | Features in detail: build pipeline, sandbox, Ditto, evaluation, local runtime, knowledge base, Deep Ingest, MCP, community zoo |
 | [docs/BLUEPRINT.md](docs/BLUEPRINT.md) | Architecture and roadmap |
 | [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md) | Adding a new hardware target |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
@@ -561,6 +597,9 @@ tests and submit changes: [CONTRIBUTING.md](CONTRIBUTING.md).
   calibration texts (MIT)
 - **[Qdrant](https://qdrant.tech/)** and **[FastEmbed](https://github.com/qdrant/fastembed)**: the local
   knowledge base
+- **[rag4ll](https://github.com/Smilez1985/rag4ll)**: the reranker, the excerpt budget, the pack manifest, the
+  privacy scrub and the shape of the speech call are adapted from it (MIT, see
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md))
 - **[Radxa Community](https://forum.radxa.com/)**: support with the RK3566 integration
 - **[Docker](https://www.docker.com/)**, **[PySide6](https://doc.qt.io/qtforpython-6/)**,
   **[Poetry](https://python-poetry.org/)**
