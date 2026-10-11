@@ -105,20 +105,23 @@ class BuildService:
                                  "sample list).", next_step="name the dataset file inside its folder.")
         update = {"model": model_pin.path if model_pin else model,
                   "dataset_path": dataset_pin.path if dataset_pin else None}
-        inputs = LocalInputs(model_pin, dataset_pin) if (model_pin or dataset_pin) else None
-        return request.model_copy(update=update), inputs
+        # Always present for an AI caller, also without pins: the build engine then never looks the model source up
+        # on disk (a repo id that happens to name a folder below the working directory stays a repo id).
+        return request.model_copy(update=update), LocalInputs(model_pin, dataset_pin)
 
     @staticmethod
-    def _check_model_source(model: str) -> str:
+    def _check_model_source(model: str, shown: Optional[str] = None) -> str:
+        """`shown` names the model in errors instead of its path (an AI caller's `<label>:<relative path>`)."""
         local = Path(model).expanduser()
         if local.exists():
             local = local.resolve()
             if local.is_dir():
                 if not ((local / "config.json").is_file()
                         or any(f.name.lower().endswith(MODEL_FILE_SUFFIXES) for f in local.iterdir() if f.is_file())):
-                    raise BuildServiceError(f"'{local}' does not look like a model directory (no config.json or model file).")
+                    raise BuildServiceError(f"'{shown or local}' does not look like a model directory (no config.json "
+                                            "or model file).")
             elif not local.name.lower().endswith(MODEL_FILE_SUFFIXES):
-                raise BuildServiceError(f"'{local.name}' is not a model file.")
+                raise BuildServiceError(f"'{shown or local.name}' is not a model file.")
             return str(local)
         if ".." in model or not HF_REPO_ID.match(model):
             raise BuildServiceError(f"'{model}' is neither an existing local model nor a Hugging Face repo id (owner/name).")
@@ -291,7 +294,7 @@ class BuildService:
         if problems:
             raise BuildServiceError(" ".join(problems))
         if local_paths or getattr(inputs, "model", None) is not None:
-            model = self._check_model_source(request.model)
+            model = self._check_model_source(request.model, None if local_paths else inputs.model.ref)
         else:
             model = request.model  # a Hugging Face repo id: never looked up on disk for an AI caller
         if request.revision and Path(model).is_absolute():

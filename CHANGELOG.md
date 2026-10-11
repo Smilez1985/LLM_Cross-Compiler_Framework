@@ -204,9 +204,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `<label>:<relative path>` (for example `models:qwen2.5-0.5b-instruct`, `datasets:calib/de.txt`) or by its file id
   inside the models folder, the new datasets folder (setting `datasets_dir`, next to the models folder by default)
   or a folder you add with `llm-cli tools folders add|list|remove` (terminal required) or in the GUI (Tools >
-  Folders the AI May Use...). Adding one shows what sharing it means and is audited; `/`, your home folder, a
-  folder containing the per-user folder or a denied folder cannot be added. The Hugging Face cache's `hub` folder
-  may be added; its token files stay denied.
+  Folders the AI May Use...). Adding one shows what sharing it means and is audited (an addition that cannot be
+  audited, or whose folder changes while you are asked, does not happen); `/`, your home folder, a folder
+  containing the per-user folder or a denied folder cannot be added, and the same limits apply to the models and
+  datasets settings. The Hugging Face cache's `hub` folder may be added; its token files stay denied.
 - **Jobs and waiting for MCP clients and Ditto**: the tools `get_job_status` and `cancel_job` for long operations
   other than builds (a job id `job_...`, its state, progress, result or error; a summary of each job is kept in
   `~/.llm-framework/jobs/`), and `wait_seconds` on `get_build_status` and `get_job_status`: the call returns as
@@ -492,11 +493,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - MCP and Ditto: `start_build` no longer accepts a path for `model` or `dataset_path` (an MCP client could mount
   any readable file, such as `~/.ssh/id_ed25519`, into a build and read it back through the log). Only references
   inside the folders the AI may use are accepted; the resolved file must lie inside its folder and outside every
-  denied folder (keys, credentials, the Hugging Face token, the framework's per-user folder, system folders),
-  decided by file identity so a case-insensitive file system cannot hide one. Hard-linked files are refused, a
-  folder is used only strictly below its label folder and without a denied folder or hard-linked file inside, and
-  the file is checked again right before each build container starts. A Hugging Face repo id is no longer looked
-  up as a local path for AI callers.
+  denied folder (keys, credentials, AI clients' own sign-ins, the Hugging Face token, the framework's per-user
+  folder, system folders), decided by file identity so a case-insensitive file system cannot hide one. Hard-linked
+  files are refused, a folder is used only strictly below its label folder and without a denied folder, a
+  hard-linked file, a socket, a device or a pipe inside, and the file is checked again right before each build
+  container starts. A Hugging Face repo id from an AI caller is no longer looked up as a local path, neither by the
+  build service nor by the build engine (which mounted a folder of that name below its working directory).
+  Refusals name the label, never the real path.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

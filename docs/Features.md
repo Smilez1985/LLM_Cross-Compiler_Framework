@@ -777,17 +777,22 @@ framework never sees it.
   folders are the models folder (`models`, setting `models_dir`), the datasets folder (`datasets`, setting
   `datasets_dir`, next to the models folder by default) and the folders you add with
   [`llm-cli tools folders add`](CLI_Usage.md#tools-folders) or in the GUI (Tools > Folders the AI May Use...).
-  The file must lie inside its folder (links are followed and checked) and outside every denied folder: the
-  framework's per-user folder (except the data folders a read-only installation keeps there), `~/.ssh`,
-  `~/.gnupg`, `~/.config`, keyrings and keychains, `~/.password-store`, `~/.netrc`, `~/.git-credentials`,
-  `~/.docker`, `~/.aws`, `~/.kube`, the Hugging Face home folder with its token files (its `hub` subfolder may be
-  added as a folder), browser profiles, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (unless it is your own home) and
-  the Windows credential folders. Inside and outside are decided by file identity, not by comparing names, so a
+  The models and datasets folders follow the same limits as an added folder: when a setting points at `/`, your
+  home folder or a folder that holds the per-user folder, its label cannot be used. The file must lie inside its
+  folder (links are followed and checked) and outside every denied folder: the framework's per-user folder (except
+  the data folders a read-only installation keeps there), `~/.ssh`, `~/.gnupg` (and `GNUPGHOME`), `~/.config` (and
+  `XDG_CONFIG_HOME`), keyrings and keychains, `~/.password-store`, `~/.netrc`, `~/.git-credentials`, `~/.docker`,
+  `~/.aws`, `~/.kube`, the AI clients' own sign-ins and settings (`~/.claude`, `~/.claude.json`, `~/.codex`,
+  `~/.gemini`, `~/.cursor`), the Hugging Face home folder with its token files (its `hub` subfolder may be added
+  as a folder), browser profiles, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (unless it is your own home) and the
+  Windows credential folders. Inside and outside are decided by file identity, not by comparing names, so a
   case-insensitive file system cannot hide `~/.SSH`. A file with more than one hard link is refused. The file is
   pinned (identity, size, modification time) and checked again right before each build container starts; a file
   replaced meanwhile stops the build. A folder (a Hugging Face model folder) is used only strictly below its label
-  folder and when it holds no denied folder and no hard-linked file; a Hugging Face cache snapshot is mounted file
-  by file. The same holds for the folder of an RKNN sample list, so a list directly in a label folder is refused.
+  folder and when it holds no denied folder, no hard-linked file and nothing but files, folders and links (no
+  socket, device or pipe); a Hugging Face cache snapshot is mounted file by file. The same holds for the folder of
+  an RKNN sample list, so a list directly in a label folder is refused. A Hugging Face repo id from an AI client is
+  always downloaded, never looked up as a folder on this computer. Refusals name the label, never the real path.
   GUI and CLI builds you start yourself still take any path.
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the

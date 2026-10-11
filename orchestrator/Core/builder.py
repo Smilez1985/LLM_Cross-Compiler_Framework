@@ -177,8 +177,9 @@ class BuildConfiguration:
     target_version: Optional[str] = None      # metadata.version of its target.yml
     toolchain_image: Optional[str] = None     # id of the image that ran the conversion
     request_id: Optional[str] = None  # the orchestrator request the build belongs to (shown by `build status`)
-    # Local inputs an AI caller named (orchestrator.tools.local_files.LocalInputs): pinned files that are checked
-    # again right before each container starts. None for Hugging Face models and a person's own paths.
+    # Local inputs of an AI caller's build (orchestrator.tools.local_files.LocalInputs): pinned files that are checked
+    # again right before each container starts; without a pinned model the source is a Hugging Face repo id and is
+    # never looked up on disk. None only for a person's own builds (GUI, CLI), whose paths are used as given.
     local_inputs: Optional[Any] = None
 
 @dataclass
@@ -888,8 +889,10 @@ class BuildEngine:
             inner, volumes = local_files.mount_plan(pin, "/build-cache/input-model")
             progress.add_log(f"Using local model {pin.ref}")
             return inner, volumes
+        # An AI caller's build without a pinned model names a Hugging Face repo: never looked up on disk, where
+        # 'Documents/private' would be a folder below the working directory (G8).
         local = Path(source).expanduser()
-        if local.exists():
+        if config.local_inputs is None and local.exists():
             local = local.resolve()
             progress.add_log(f"Using local model {local}")
             if local.is_dir():

@@ -92,8 +92,8 @@ class BuildRequest:
     dataset_generated: bool = False
     # Commit of a Hugging Face model (recipes pin one); None builds the default branch
     model_revision: Optional[str] = None
-    # Local model and dataset an AI caller named (orchestrator.tools.local_files.LocalInputs), checked again by
-    # the build engine right before each container starts
+    # Local model and dataset of an AI caller's build (orchestrator.tools.local_files.LocalInputs), checked again by
+    # the build engine right before each container starts; set for every AI caller (None: a person's own paths)
     local_inputs: Optional[Any] = None
     # Who started it through a tool ("mcp#<session>", "ditto"; empty for the GUI and the CLI): that caller may
     # cancel it without a question, and a disconnected MCP session's builds are cancelled

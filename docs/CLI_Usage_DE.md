@@ -808,11 +808,15 @@ nutzen, das du wählst (Kleinbuchstaben, Ziffern, `-` und `_`).
   Ordner in einem gesperrten Ordner oder mit einem gesperrten Ordner darin ab (Schlüssel, Anmeldedaten, das
   Hugging-Face-Token, Systemordner; die Liste steht in den [Funktionen](Features_DE.md#mcp-server)). Der Unterordner
   `hub` des Hugging-Face-Caches lässt sich hinzufügen (`~/.cache/huggingface/hub`, wo `hf download` Modelle
-  ablegt); die Token-Dateien daneben bleiben gesperrt.
-- Der echte Pfad des Ordners wird festgehalten. Ändert er sich später (ein Link zeigt woandershin), markiert `list`
-  ihn als nicht nutzbar, und KI-Clients werden abgewiesen, bis du `add` mit demselben Label erneut ausführst.
+  ablegt); die Token-Dateien daneben bleiben gesperrt. Dieselben Grenzen gelten für `models_dir` und
+  `datasets_dir`: Zeigt eine der Einstellungen auf `/`, dein Home oder einen Ordner mit dem persönlichen Ordner
+  darin, markiert `list` das Label als nicht nutzbar.
+- Der echte Pfad des Ordners wird festgehalten, und zwar der, den `add` dir gezeigt hat: Zeigt ein Link während der
+  Frage woandershin, wird nichts hinzugefügt. Ändert er sich später, markiert `list` ihn als nicht nutzbar, und
+  KI-Clients werden abgewiesen, bis du `add` mit demselben Label erneut ausführst.
 - Jede Änderung landet im Audit-Log (Akteur `cli`; `gui` für dieselbe Liste in der GUI unter Tools > Folders the AI
-  May Use...). Die Liste liegt in `~/.llm-framework/ai_folders.json`, nur für dich lesbar.
+  May Use...); lässt sich das Hinzufügen nicht festhalten, wird der Ordner nicht hinzugefügt. Die Liste liegt in
+  `~/.llm-framework/ai_folders.json`, nur für dich lesbar.
 
 ```bash
 llm-cli tools folders add ~/llm-models --label mymodels --kind model

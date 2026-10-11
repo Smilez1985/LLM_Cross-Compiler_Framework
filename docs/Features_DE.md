@@ -828,20 +828,26 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Hex-Zeichen), die das Framework dafür festgehalten hat. Die Ordner sind der Modellordner (`models`, Einstellung
   `models_dir`), der Datensatzordner (`datasets`, Einstellung `datasets_dir`, standardmäßig neben dem Modellordner)
   und die Ordner, die du mit [`llm-cli tools folders add`](CLI_Usage_DE.md#tools-folders) oder in der GUI (Tools >
-  Folders the AI May Use...) hinzufügst. Die Datei muss in ihrem Ordner liegen (Links werden verfolgt und geprüft)
-  und außerhalb jedes gesperrten Ordners: des persönlichen Ordners des Frameworks (außer den Datenordnern, die eine
-  schreibgeschützte Installation dort hält), `~/.ssh`, `~/.gnupg`, `~/.config`, Schlüsselbunde, `~/.password-store`,
-  `~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.aws`, `~/.kube`, des Hugging-Face-Ordners mit seinen
-  Token-Dateien (sein Unterordner `hub` lässt sich als Ordner hinzufügen), Browserprofile, `/etc`, `/proc`, `/sys`,
-  `/dev`, `/root` (außer es ist dein eigenes Home) und der Windows-Ordner für Anmeldedaten. Innen und außen werden
-  über die Identität der Datei entschieden, nicht über Namensvergleiche, deshalb kann ein Dateisystem ohne
-  Unterscheidung von Groß- und Kleinschreibung `~/.SSH` nicht verstecken. Eine Datei mit mehr als einem Hardlink
-  wird abgelehnt. Die Datei wird festgehalten (Identität, Größe, Änderungszeit) und unmittelbar vor jedem Start
-  eines Build-Containers erneut geprüft; eine inzwischen ersetzte Datei stoppt den Build. Ein Ordner (ein
-  Hugging-Face-Modellordner) wird nur genutzt, wenn er echt unterhalb seines Label-Ordners liegt und weder einen
-  gesperrten Ordner noch eine Datei mit Hardlink enthält; ein Snapshot aus dem Hugging-Face-Cache wird Datei für
-  Datei eingebunden. Dasselbe gilt für den Ordner einer RKNN-Beispielliste, deshalb wird eine Liste direkt in einem
-  Label-Ordner abgelehnt. GUI- und CLI-Builds, die du selbst startest, nehmen weiterhin jeden Pfad.
+  Folders the AI May Use...) hinzufügst. Für den Modell- und den Datensatzordner gelten dieselben Grenzen wie für
+  einen hinzugefügten Ordner: Zeigt eine Einstellung auf `/`, dein Home oder einen Ordner, der den persönlichen
+  Ordner enthält, ist ihr Label nicht nutzbar. Die Datei muss in ihrem Ordner liegen (Links werden verfolgt und
+  geprüft) und außerhalb jedes gesperrten Ordners: des persönlichen Ordners des Frameworks (außer den Datenordnern,
+  die eine schreibgeschützte Installation dort hält), `~/.ssh`, `~/.gnupg` (und `GNUPGHOME`), `~/.config` (und
+  `XDG_CONFIG_HOME`), Schlüsselbunde, `~/.password-store`, `~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.aws`,
+  `~/.kube`, der eigenen Anmeldungen und Einstellungen der KI-Clients (`~/.claude`, `~/.claude.json`, `~/.codex`,
+  `~/.gemini`, `~/.cursor`), des Hugging-Face-Ordners mit seinen Token-Dateien (sein Unterordner `hub` lässt sich
+  als Ordner hinzufügen), Browserprofile, `/etc`, `/proc`, `/sys`, `/dev`, `/root` (außer es ist dein eigenes Home)
+  und der Windows-Ordner für Anmeldedaten. Innen und außen werden über die Identität der Datei entschieden, nicht
+  über Namensvergleiche, deshalb kann ein Dateisystem ohne Unterscheidung von Groß- und Kleinschreibung `~/.SSH`
+  nicht verstecken. Eine Datei mit mehr als einem Hardlink wird abgelehnt. Die Datei wird festgehalten (Identität,
+  Größe, Änderungszeit) und unmittelbar vor jedem Start eines Build-Containers erneut geprüft; eine inzwischen
+  ersetzte Datei stoppt den Build. Ein Ordner (ein Hugging-Face-Modellordner) wird nur genutzt, wenn er echt
+  unterhalb seines Label-Ordners liegt und weder einen gesperrten Ordner noch eine Datei mit Hardlink enthält und
+  nur Dateien, Ordner und Links (keinen Socket, kein Gerät, keine Pipe); ein Snapshot aus dem Hugging-Face-Cache wird
+  Datei für Datei eingebunden. Dasselbe gilt für den Ordner einer RKNN-Beispielliste, deshalb wird eine Liste direkt
+  in einem Label-Ordner abgelehnt. Eine Hugging-Face-Repo-ID von einem KI-Client wird immer heruntergeladen, nie als
+  Ordner auf diesem Rechner nachgeschlagen. Ablehnungen nennen das Label, nie den echten Pfad. GUI- und CLI-Builds,
+  die du selbst startest, nehmen weiterhin jeden Pfad.
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je
