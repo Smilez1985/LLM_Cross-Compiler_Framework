@@ -123,6 +123,7 @@ stays below the given share.
 | `ditto ask` | Ask Ditto one question |
 | `ditto eval` | Grade Ditto on fixed test cases, or the knowledge-base search |
 | `ditto runtime install/start/status/stop` | The managed local model server (llama.cpp) for offline mode |
+| `ditto runtime export-source/import-source` | Carry the pinned llama.cpp source to an air-gapped machine as a git bundle (checked by its commit) |
 | `ditto models list/download` | The model tiers for offline mode |
 | `tools list` / `tools permissions` / `tools audit` | The framework tools, their permissions and the audit log |
 | `mcp serve` / `mcp config` | Run the MCP server / show how to connect AI clients |
@@ -678,6 +679,43 @@ llm-cli ditto runtime install -y
 llm-cli ditto models download -y
 llm-cli ditto runtime start --model small --sleep-idle 0
 llm-cli ditto runtime stop
+```
+
+#### ditto runtime export-source
+
+```
+llm-cli ditto runtime export-source FILE [--mirror URL] [-y]
+```
+
+Writes the pinned llama.cpp source (the commit in `configs/llama_runtime.yml`, `llama_cpp.source`) as a git bundle
+to `FILE`, plus `FILE.json` with the commit, the tag, the size and SHA256 of the bundle and the framework version.
+Carry both files to a machine without internet access and import them there. If the source is not cached yet, it
+is fetched first (about 215 MB): by commit, never by a moving tag, and `git rev-parse HEAD` must give the pinned
+commit back. The verified tree is kept read-only in `~/.llm-framework/runtime/llama.cpp/src/<commit>/`, so later
+runs need no network. Needs `git`.
+
+| Option | Meaning |
+|---|---|
+| `--mirror URL` | Fetch from this mirror instead of the pinned repository. The commit is checked the same way. |
+| `-y, --yes` | Fetch without asking when the source is not cached yet. |
+
+#### ditto runtime import-source
+
+```
+llm-cli ditto runtime import-source FILE
+```
+
+Imports the pinned llama.cpp source from a bundle of `export-source` into
+`~/.llm-framework/runtime/llama.cpp/src/<commit>/`. Git checks every object by its hash, and the checked-out commit
+must be the pinned one, whoever made the bundle and with whichever git version. A bundle of another commit, a
+bundle that does not match its `FILE.json` (size or SHA256) and a damaged bundle are refused. Needs `git` on the
+air-gapped machine too.
+
+```bash
+# Online machine
+llm-cli ditto runtime export-source llama.cpp-source.bundle -y
+# Air-gapped machine (copy llama.cpp-source.bundle and llama.cpp-source.bundle.json first)
+llm-cli ditto runtime import-source llama.cpp-source.bundle
 ```
 
 ### ditto models

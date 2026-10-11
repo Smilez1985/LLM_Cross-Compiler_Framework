@@ -10,6 +10,7 @@ import pytest
 from orchestrator.Core.builder import (BuildConfiguration, BuildEngine, BuildProgress, BuildStatus,
                                        ModelFormat, OptimizationLevel)
 from orchestrator.Core.config_manager import ConfigManager
+from orchestrator.utils.llama_pin import pinned_tag
 
 
 @pytest.fixture
@@ -353,7 +354,7 @@ class TestImageBuild:
 
         cmd = seen["cmd"]
         assert cmd[:4] == ["docker", "buildx", "build", "--load"]
-        assert "LLAMA_CPP_TAG=v0.6.0" in cmd and "EXTRA=1" in cmd
+        assert f"LLAMA_CPP_TAG={pinned_tag()}" in cmd and pinned_tag() == "b11429" and "EXTRA=1" in cmd
         assert cmd[-1] == str(dockerfile.parent)
         assert "No space left on device" in str(excinfo.value)
 

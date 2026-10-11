@@ -9,6 +9,8 @@ __pycache__/
 # Distribution / packaging
 .Python
 build/
+# ... but not the llama.cpp build recipe package (source code)
+!orchestrator/runtime/build/
 develop-eggs/
 dist/
 downloads/

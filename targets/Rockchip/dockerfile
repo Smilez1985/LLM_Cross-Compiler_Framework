@@ -15,7 +15,8 @@ LABEL target.architecture="aarch64"
 
 ARG USER_ID=1000
 ARG GROUP_ID=1000
-ARG LLAMA_CPP_TAG=v0.6.0
+# The llama.cpp pin (configs/llama_runtime.yml, llama_cpp.source.tag; the framework passes it as a build argument).
+ARG LLAMA_CPP_TAG=b11429
 # Parallel compile jobs; empty = all cores (the framework lowers it after an out-of-memory build).
 ARG BUILD_JOBS=
 ARG RKLLM_VERSION=1.3.1

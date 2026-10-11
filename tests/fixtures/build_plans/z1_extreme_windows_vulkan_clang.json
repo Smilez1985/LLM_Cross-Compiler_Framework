@@ -1,0 +1,110 @@
+{
+  "backend": "vulkan",
+  "build_id": "6bbb68b8dc09261c66320eb78a41d94b932783847f8200f51c5d9031c78eca5a",
+  "builder": {
+    "kind": "native"
+  },
+  "notes": [
+    "backend vulkan: a GPU on which the Vulkan build beats the CPU",
+    "what -march/-mcpu=native expands to is recorded by the executor"
+  ],
+  "placement": "native",
+  "purpose": "host-runtime",
+  "recipe_version": 1,
+  "source": {
+    "build_number": 11429,
+    "commit": "d81235049384534c167caea52b85a694f6103d14",
+    "repo": "https://github.com/ggml-org/llama.cpp.git",
+    "tag": "b11429"
+  },
+  "steps": [
+    {
+      "compiler": "clang",
+      "generator": "Ninja",
+      "name": "main",
+      "options": {
+        "BUILD_SHARED_LIBS": "OFF",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "clang",
+        "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "GGML_CCACHE": "OFF",
+        "GGML_CPU_KLEIDIAI": "OFF",
+        "GGML_CUDA": "OFF",
+        "GGML_HIP": "OFF",
+        "GGML_METAL": "OFF",
+        "GGML_NATIVE": "ON",
+        "GGML_OPENMP": "OFF",
+        "GGML_OPENMP_FETCH": "OFF",
+        "GGML_VULKAN": "ON",
+        "LLAMA_BUILD_APP": "OFF",
+        "LLAMA_BUILD_COMMIT": "d8123504",
+        "LLAMA_BUILD_COMMON": "ON",
+        "LLAMA_BUILD_EXAMPLES": "OFF",
+        "LLAMA_BUILD_NUMBER": "11429",
+        "LLAMA_BUILD_SERVER": "ON",
+        "LLAMA_BUILD_TESTS": "OFF",
+        "LLAMA_BUILD_TOOLS": "ON",
+        "LLAMA_BUILD_UI": "OFF",
+        "LLAMA_LLGUIDANCE": "OFF",
+        "LLAMA_OPENSSL": "OFF",
+        "LLAMA_SUBPROCESS": "OFF",
+        "LLAMA_USE_PREBUILT_UI": "OFF"
+      },
+      "targets": [
+        "llama-server",
+        "llama-cli",
+        "llama-bench",
+        "llama-perplexity"
+      ],
+      "toolchain_file": null
+    }
+  ],
+  "target": {
+    "arch": "x86_64",
+    "libc": "ucrt",
+    "libc_version": null,
+    "os": "windows",
+    "triple": null
+  },
+  "toolchain": {
+    "cmake": "3.31.6",
+    "compiler": "clang-19.1.5",
+    "native": {
+      "ARCH": "x86_64",
+      "CPU_MODEL": "AMD Ryzen Z1 Extreme w/ Radeon 780M Graphics",
+      "CPU_VENDOR": "amd",
+      "features": {
+        "SUPPORTS_AMX_BF16": "UNKNOWN",
+        "SUPPORTS_AMX_INT8": "UNKNOWN",
+        "SUPPORTS_AMX_TILE": "UNKNOWN",
+        "SUPPORTS_AVX": "ON",
+        "SUPPORTS_AVX2": "ON",
+        "SUPPORTS_AVX512": "ON",
+        "SUPPORTS_AVX512_BF16": "UNKNOWN",
+        "SUPPORTS_AVX512_VBMI": "UNKNOWN",
+        "SUPPORTS_AVX512_VNNI": "UNKNOWN",
+        "SUPPORTS_AVX_VNNI": "UNKNOWN",
+        "SUPPORTS_BMI2": "ON",
+        "SUPPORTS_F16C": "UNKNOWN",
+        "SUPPORTS_FMA": "UNKNOWN",
+        "SUPPORTS_SSE42": "ON"
+      }
+    }
+  },
+  "verify": {
+    "binaries": [
+      "llama-server",
+      "llama-cli",
+      "llama-bench",
+      "llama-perplexity"
+    ],
+    "devices": [
+      "Vulkan0"
+    ],
+    "version": {
+      "build_number": 11429,
+      "commit": "d8123504"
+    }
+  }
+}

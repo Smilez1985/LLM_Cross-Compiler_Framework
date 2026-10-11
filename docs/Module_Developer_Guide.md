@@ -320,7 +320,7 @@ Build arguments the engine passes:
 
 | Argument | Value |
 |---|---|
-| `LLAMA_CPP_TAG` | the setting `llama_cpp_version` (default `v0.6.0`) |
+| `LLAMA_CPP_TAG` | the setting `llama_cpp_version` (default: the tag of the llama.cpp pin in `configs/llama_runtime.yml`, `b11429`) |
 | `BUILD_JOBS` | the setting `build_jobs`, only if it is greater than 0; self-healing lowers it to 1 after a compiler ran out of memory |
 | `USER_ID`, `GROUP_ID` | the host user's ids (Linux and macOS, when the host user is not root) |
 

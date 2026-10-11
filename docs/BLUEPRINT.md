@@ -244,8 +244,9 @@ records hashes and lets you install the result on your device.
 4. **Build context and image.** The engine copies the target's `modules/`, `scripts/` and the shared
    `entrypoint.sh` into a fresh build context and builds the image `llm-framework/<target>:<build id>` with
    `docker buildx build` (BuildKit), or with the Docker API if BuildKit is missing. This step needs network: it
-   downloads llama.cpp (tag from `llama_cpp_version`, default `v0.6.0`) and the Python toolchains. The number of
-   parallel compile jobs comes from `build_jobs` (0 means all cores).
+   downloads llama.cpp (tag from `llama_cpp_version`, default `b11429`, the tag of the commit pin in
+   `configs/llama_runtime.yml`) and the Python toolchains. The number of parallel compile jobs comes from
+   `build_jobs` (0 means all cores).
 5. **Staging on the host.** The model is made available before any conversion code runs: a local folder or file
    is mounted read-only; a Hugging Face repo is downloaded on the host into `cache/models/hf/`, using your stored
    `hf_token` if needed. The token never enters a container.
@@ -755,8 +756,9 @@ These are real limitations of the current state. Most are scheduled in the [road
   module proposal's, it drops relevant excerpts too.
 - **Trivy and the Docker socket.** The scanner container gets the Docker socket; mounting it read-only does not
   limit what the Docker API allows. Planned for 3.4.0: Trivy pinned by digest, without the socket.
-- **Pins inside images.** Base images are pinned by tag (`debian:bookworm-slim`), llama.cpp by tag (`v0.6.0`),
-  and the venvs inside the image have no hashed lock files. Planned for 3.4.0.
+- **Pins inside images.** Base images are pinned by tag (`debian:bookworm-slim`), llama.cpp by tag (`b11429`; the
+  commit pin in `configs/llama_runtime.yml` is not verified inside the image yet), and the venvs inside the image
+  have no hashed lock files. Planned for 3.4.0.
 - **Image builds have network access.** This is by design (they download toolchains); only the conversion stages
   are offline.
 - **The project-sources catalogue** (`configs/project_sources.yml`) is not read at runtime; it is a reference for
