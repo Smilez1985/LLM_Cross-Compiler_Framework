@@ -553,6 +553,17 @@ class TestAuditKeyLock:
         assert framework_tools._audit_key(SimpleNamespace(secrets_manager=None), state) is None
         assert not memory_keyring.store  # an unkeyed process, never a second key
 
+    def test_the_shared_file_lock_and_the_audit_key_lock_exclude_each_other(self, tmp_path):
+        # The audit key lock is built on the shared helper; a process holding either one blocks the other.
+        from orchestrator.utils.file_lock import file_lock
+        state = tmp_path / "state"
+        with file_lock(state / "audit-key.lock"):
+            with pytest.raises(TimeoutError):
+                with framework_tools._key_lock(state, timeout=0.3):
+                    pass
+        with framework_tools._key_lock(state, timeout=5):
+            pass
+
     def test_an_unusable_state_folder_does_not_stop_key_creation(self, tmp_path, memory_keyring):
         blocker = tmp_path / "a-file"
         blocker.write_text("")

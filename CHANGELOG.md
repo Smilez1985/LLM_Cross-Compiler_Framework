@@ -137,6 +137,36 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Maintainer tools for the community repository: `scripts/zoo_sign_index.py` (signing key in the OS keyring,
   index entries from packs, signature of `index.json`) and the CI workflow template
   `scripts/community_repo/validate-contribution.yml`, which runs `llm-cli zoo verify` on every submitted pack.
+- **Claude workspace ID** (AI settings field "Workspace ID", setting `ai_anthropic_workspace_id`): Claude API
+  keys that are valid in every workspace of the organization now work. The ID is sent as the
+  `anthropic-workspace-id` header on every request made with the API key to the Claude API, the model list
+  included. An `ant auth login` profile keeps its own workspace, and other servers never receive the ID.
+- **Sign-in methods per provider** (`configs/llm_providers.yml` schema 2, `orchestrator/llm/auth`): each
+  provider lists its sign-in methods in the order they are preferred, with the page where the key is created,
+  the environment variables it reads, a free check and extra fields such as the Claude workspace ID or the
+  OpenAI organization and project. Catalogs of schema 1 in your config directory still load; one of a newer
+  schema is refused with a message instead of being misread. Sign-in details
+  that are not secret (account or workspace, the last four characters of a key, extra fields, when it was
+  checked) are kept in `auth.json` next to the credential vault. Tokens of the sign-in flows that come later are
+  renewed under a lock shared by the GUI, the CLI and the MCP server; the new refresh token is stored before it
+  is used, and a refused renewal marks the sign-in as expired.
+- **Credential check** (for the coming "Check" button and `auth status --check`): one free GET request (the
+  model list, OpenRouter's key endpoint) says whether the stored key works, which workspace or key name it
+  belongs to and how many models it can use; a key that works but may not list models is reported as such, also
+  by the live model list in the AI settings. Redirects are not followed, so the key goes to the provider only.
+- **API keys from environment variables**: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` and
+  `OPENROUTER_API_KEY` are used when no key is stored for the provider (only the variables the provider catalog
+  lists, read by the framework and never by the SDKs). The AI settings name the variable, nothing is copied
+  into the vault, and a stored key always wins. When the credential vault cannot be read, no variable stands in
+  for the key that may be stored there: the error says what is wrong with the vault.
+- **How credentials are protected is your choice** (setting `secret_storage`, or `LLM_SECRET_STORAGE` for
+  one run): the OS keyring (default), a credential helper command (`secret_helper`, e.g.
+  `pass show llmcc/vault-key`, run without a shell), a passphrase asked once per start (scrypt), a key file
+  next to the vault (`insecure`, not encrypted at rest) or memory only (`ephemeral`, for CI). Nothing is
+  picked automatically: without a usable keyring and without a choice, the framework stops and names the
+  options. `llm-cli doctor` warns about the key file and reports memory-only storage.
+- **`--debug-http`** (`llm-cli --debug-http`, and the same option when starting the GUI) shows the debug output
+  of the HTTP libraries and the AI provider SDKs on stderr, with credentials redacted.
 - **Documentation in English and German** for every document (README, blueprint with design and roadmap, CLI
   usage, features, contributing, module developer guide, SSOT, changelog), checked by `tests/test_docs.py`:
   every document has its twin, links and anchors resolve, both changelogs list the same versions, and the
@@ -149,8 +179,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   recommendations are validated structured answers; an invalid answer is an error and is never applied.
 - **Chat history** is append-only and kept per user; a long conversation is summarized into a new one.
   Histories of earlier versions are migrated.
-- Provider errors are explained, e.g. that an Anthropic API key must belong to a workspace in the Claude
-  Console.
+- Provider errors are explained in plain language, e.g. a Claude API key that needs a workspace ID, a
+  workspace the key cannot use, a key that is wrong, revoked or expired, or an `ant auth login` profile that
+  needs a new sign-in.
+- More provider errors say what happened and what to do next, with a code for the GUI and the CLI: no credits
+  or a spend limit in the Claude Console, a rejected OpenAI key or a used-up OpenAI quota, a Gemini key that
+  Google refuses, an OpenRouter key at its credit limit, a local server that is not running or needs a key,
+  Ollama without its ollama.com sign-in, a locked keyring and an unreadable vault. A Claude spend cap is no
+  longer retried like a rate limit.
+- **Claude API sign-in**: a stored API key is always used first. An `ant auth login` profile is used only when
+  you choose it (`ai_auth_anthropic: ant_profile`); before, a profile on disk silently took the place of the
+  stored key, and with it the account that is billed. The earlier name `oauth` still means the profile, in the
+  setting and in a provider catalog in your config directory.
 - Ditto's prompts: build failures are attributed to the build machine or the device correctly, build
   recommendations know which inputs each format accepts (an ONNX model is not sent to GGUF), questions about
   targets and builds are answered from the tools, and module proposals use compiler flags rather than the
@@ -178,6 +218,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Target modules created with the wizard, `llm-cli module create` or Ditto get a `capabilities:` block (support
   level community: their boards, and GGUF with the types their build script handles), so the Builder, the CLI
   and AI clients check their build settings. Generation fails if a template placeholder is left anywhere.
+- **Credential vault format v2**: every entry carries a key id and the vault key can be rotated (every entry
+  is re-encrypted, the old key is removed; an interrupted rotation is completed at the next start). Each
+  vault keeps its key in its own keyring entry, so rotating it or changing its storage never touches another
+  vault (for example of another `LLM_FRAMEWORK_HOME` folder); a store of an earlier version moves to its own
+  entry at its first rotation. Provider keys are stored as credential records under
+  `cred/<provider>/api_key`; stores and key names of earlier versions are read as before and converted on
+  the next change.
+- Reading a secret is written to the secrets audit log once per process and name, not on every access.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
@@ -191,6 +239,27 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   stores a repository token. Old swarm packets in `community/knowledge/` are skipped with a warning.
 - Installing hand-copied module folders from `community/`: community packs are installed with
   `llm-cli zoo install` or the Community Hub.
+- **The Claude subscription provider `claude_code`** (Ditto through `claude -p` on Claude Pro/Max plan
+  limits): Anthropic does not allow other apps to use Claude subscription limits without approval. A saved
+  `ai_provider: claude_code` (or `ClaudeCode`, `Claude Code`), the same name in the fallback chain or in
+  `--provider`, now stops with a message, shown once in the AI settings, that names the alternatives: a Claude
+  API key (Max and Team plans include monthly API credits for a linked Console organization), Claude on
+  Bedrock, Vertex or Foundry, or using the framework from Claude Code itself (`llm-cli mcp config`). It never
+  switches to the Claude API on its own. A `claude_code` preset left in a provider catalog in your config
+  directory is skipped with a warning; the other providers keep working.
+
+### Fixed
+- Secrets store: a store of an earlier version that cannot be decrypted is reported by `llm-cli doctor`
+  instead of being merged unreadable into the per-user store.
+- Reading or storing a secret no longer fails in a container whose user has no name (no `USER` variable and
+  no passwd entry).
+- On Windows, saving a secret no longer fails when another process or a virus scanner has the store open for
+  a moment.
+- `llm-cli secrets set` says where the secret went (the encrypted vault, or memory only with `ephemeral`)
+  instead of always "Keyring".
+- The CLI and the CLI guides no longer tell you to put the GitHub token on the command line, where the shell
+  history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
+  hidden prompt.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -211,6 +280,55 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   community module could copy any file of the user into `targets/`.
 - The Docker build context never follows symbolic links or special files of a target, a linked Dockerfile is
   refused, and a build's target name cannot contain a path.
+- `OPENAI_CUSTOM_HEADERS` and `ANTHROPIC_CUSTOM_HEADERS` are dropped at startup of the CLI, the GUI and the MCP
+  server, with a warning, unless the setting `ai_allow_sdk_env_headers` is true (a quoted `"false"` counts as
+  false; settings that cannot be read count as false): they could replace the stored API key and reach every
+  server, local ones included. The OpenAI and OpenAI-compatible adapters also send the stored key as an
+  explicit `Authorization` header.
+- The debug output of the provider SDKs and HTTP libraries (request options, prompts, headers) stays off unless
+  `--debug-http` is given: their loggers never go below INFO, even with `--log-level DEBUG`, and
+  `ANTHROPIC_LOG=debug` / `OPENAI_LOG=debug` are lowered to `info`.
+- Claude Admin API keys (`sk-ant-admin01-`) are refused before any request is sent, also when they were stored
+  with surrounding spaces.
+- The credential vault is changed under a cross-process lock: the GUI, the CLI and an MCP server writing at
+  the same time no longer lose each other's changes.
+- A keyring that keeps nothing (such as `keyring.backends.null`) or does not answer within 3 seconds is no
+  longer used; before, secrets stored with it were unreadable after the next start. A keyring backend that
+  stores without encryption (`keyrings.alt`) is not used either: that is `secret_storage: insecure`, and
+  only you can choose it.
+- On Windows the vault key stays on the local machine instead of roaming with the user profile.
+- The secrets store refuses a location inside a git work tree (set `LLM_FRAMEWORK_HOME` elsewhere).
+- Secret names with line breaks or control characters are refused, and the secrets audit log escapes them,
+  so a name (or a user name) cannot forge audit entries.
+- **Credentials are redacted in every log**: the framework's own, those of the provider SDKs and HTTP libraries
+  (anthropic, openai, httpx, httpcore, urllib3, botocore, google.auth, azure, msal), tracebacks and the extra
+  fields of the JSON log format. Redacted are the values of credential headers (`Authorization`, `x-api-key`,
+  `api-key`, `x-goog-api-key`, `Cookie`, `Set-Cookie`, also in JSON with escaped quotes), sign-in and key
+  parameters in URLs and form-encoded token requests (`code`, `state`, `key`, `access_token`, `token`, ...)
+  and every known key format.
+- Redaction also finds credentials by their context, whatever their format: a bearer token quoted in a server's
+  error message, token-shaped values of `api_key`, `secret`, `token` or `password` fields, and environment
+  lines such as `HF_TOKEN=...` or `export OPENAI_API_KEY=...`. Tokenizer settings in build logs (for example
+  `"pad_token": "<|...|>"`) stay readable.
+- Redaction can no longer be slowed down by crafted text: an error message or build log with a long run of
+  `sk-` took minutes to redact before.
+- **One table of secret formats** (`orchestrator/security/secret_patterns.py`) for the secret scan and for
+  runtime redaction, which knew only five formats before. New: Unsloth Studio keys (`sk-unsloth-`), Bedrock
+  short-term keys (`bedrock-api-key-`), LocalAI keys (`lai-`), `Authorization: Bearer` lines and quoted values
+  assigned to `api_key`, `secret` or `token` (a lower-case name such as `"community_encryption_key"` is not
+  reported). Runtime redaction now also covers JWTs, private key blocks and passwords in URLs.
+- API keys held in memory by Ditto's provider layer show as `<redacted>` in `str()` and `repr()` and cannot be
+  pickled.
+- A key of a custom OpenAI-compatible server belongs to the address it was saved for (scheme, host and port):
+  after the base URL changes it is no longer sent. A key saved by an earlier version is bound to the address it
+  is next used with. Claude Admin API keys are also refused for a Claude API preset in your own provider
+  catalog that does not list them.
+- Sign-in hardening: the key hint in the AI settings never binds a key of an earlier version to an address that
+  is still being typed; signing out also removes such a key; the credential check sends a key bound to one
+  address to that address only; a key variable of a local engine in your own catalog goes only to the address
+  the catalog gives. A non-secret field (workspace ID, project) can no longer be declared with a credential
+  header such as `Authorization` or `x-api-key`, where it would replace the stored key. A failed token renewal
+  names only the kind of failure, and a vendor message that quotes the refresh token is shown without it.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

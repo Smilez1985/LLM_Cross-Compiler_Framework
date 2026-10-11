@@ -37,7 +37,8 @@ from orchestrator.Core.orchestrator import LLMOrchestrator, BuildRequest, Workfl
 from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel
 from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.Core.deployment_manager import DeploymentManager
-from orchestrator.utils.logging import setup_logging
+from orchestrator.llm.sdk_env import guard_sdk_environment
+from orchestrator.utils.logging import get_logger, setup_logging
 
 # ============================================================================
 # DATENKLASSEN
@@ -109,7 +110,9 @@ class FrameworkContext:
             self.framework_manager = FrameworkManager(self.config_path, log_level=self.log_level)
             
             if not self.framework_manager.initialize():
-                raise RuntimeError("Framework Manager initialization failed")
+                # The cause itself (e.g. the credential storage error with its choices), not just "failed".
+                raise (getattr(self.framework_manager, "init_error", None)
+                       or RuntimeError("Framework Manager initialization failed"))
             
             # Orchestrator initialisieren  
             self.orchestrator = self.framework_manager.orchestrator # Hole vom Kernel
@@ -132,7 +135,7 @@ class FrameworkContext:
             
         except Exception as e:
             self.init_error = e
-            Console(stderr=True).print(f"[red]Failed to initialize framework: {e}[/red]")
+            Console(stderr=True).print(f"[red]Failed to initialize framework: {escape(str(e))}[/red]")
 
     def require_framework(self) -> "FrameworkContext":
         """Boots the framework on first use; commands that do not need it work without a keyring or Docker."""
@@ -165,6 +168,17 @@ def load_config_file(config_path: Optional[str] = None) -> Dict[str, Any]:
             # stderr: stdout may carry a protocol (llm-cli mcp serve)
             Console(stderr=True).print(f"[yellow]Warning: Failed to load config file: {escape(str(e))}[/yellow]")
     return config
+
+
+def _allow_sdk_env_headers(config_path: Optional[str]) -> Any:
+    """The setting ai_allow_sdk_env_headers (read only when OPENAI/ANTHROPIC_CUSTOM_HEADERS is set). Settings that
+    cannot be read count as no: the variables are then dropped and the command still runs."""
+    try:
+        from orchestrator.Core.config_manager import ConfigManager
+        return ConfigManager(config_path).get("ai_allow_sdk_env_headers", False)
+    except Exception as e:
+        get_logger(__name__).warning(f"Could not read ai_allow_sdk_env_headers ({e.__class__.__name__}).")
+        return False
 
 
 def format_target_table(targets: List[TargetConfig]) -> Table:
@@ -207,8 +221,12 @@ def model_format_from_string(format_str: str) -> ModelFormat:
 @click.option('--verbose', '-v', is_flag=True, help='Verbose output')
 @click.option('--quiet', '-q', is_flag=True, help='Quiet output')
 @click.option('--log-level', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR']))
+@click.option('--debug-http', is_flag=True,
+              help='Log HTTP and provider SDK debug output to stderr and keep ANTHROPIC_LOG/OPENAI_LOG=debug '
+                   '(credentials stay redacted)')
 @pass_context
-def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str):
+def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str,
+        debug_http: bool):
     """
     🚀 LLM Cross-Compiler Framework CLI v2.4.0
     
@@ -225,8 +243,13 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     ctx.quiet = quiet
 
     # Applies to framework loggers too; they are created before FrameworkManager configures logging.
-    setup_logging(level=ctx.log_level)
-    
+    setup_logging(level=ctx.log_level, debug_http=debug_http)
+
+    # Every command, `mcp serve` included, passes here before anything starts a thread.
+    for warning in guard_sdk_environment(lambda: _allow_sdk_env_headers(config), debug_http=debug_http):
+        # One line each, whatever the terminal width (MCP clients log stderr line by line).
+        Console(stderr=True, soft_wrap=True).print(f"[yellow]Warning: {escape(warning)}[/yellow]")
+
     if not quiet:
         Console(stderr=True).print(Panel(
             f"[bold cyan]LLM Cross-Compiler Framework CLI v{__version__}[/bold cyan]\n"
@@ -382,7 +405,9 @@ def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional
         sys.exit(1)
     if provider:
         if ditto.client.catalog.get(provider) is None:
-            console.print(f"[red]Unknown AI provider '{escape(provider)}'. Choose one of: "
+            removed = ditto.client.catalog.removed_message(provider)
+            console.print(f"[red]{escape(removed)}[/red]" if removed else
+                          f"[red]Unknown AI provider '{escape(provider)}'. Choose one of: "
                           f"{escape(', '.join(ditto.client.catalog.ids()))}.[/red]")
             sys.exit(2)
         fm.config.set("ai_provider", provider)
@@ -708,10 +733,15 @@ def set_secret(ctx: FrameworkContext, key, password):
         console.print("[red]SecretsManager not available![/red]")
         sys.exit(1)
         
-    if ctx.framework_manager.secrets_manager.set_secret(key, password):
-        console.print(f"[green]Secret '{key}' stored successfully in Keyring.[/green]")
+    sm = ctx.framework_manager.secrets_manager
+    if not sm.set_secret(key, password):
+        console.print(f"[red]Failed to store secret '{escape(key)}'.[/red]")
+    elif getattr(sm, "storage_mode", None) == "ephemeral":
+        # Never let a CI user believe it was saved.
+        console.print(f"[yellow]Secret '{escape(key)}' is kept in memory for this run only "
+                      "(secret_storage: ephemeral); nothing was saved.[/yellow]")
     else:
-        console.print(f"[red]Failed to store secret '{key}'.[/red]")
+        console.print(f"[green]Secret '{escape(key)}' stored in the encrypted credential vault.[/green]")
 
 @secrets.command('list')
 @pass_context
