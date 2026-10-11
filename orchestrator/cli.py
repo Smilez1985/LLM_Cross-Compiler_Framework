@@ -915,8 +915,11 @@ def ditto():
 
 def _local_runtime(ctx: FrameworkContext):
     """The managed llama-server; needs neither the keyring nor Docker, so the framework is not booted."""
+    from orchestrator.Core.config_manager import ConfigManager
     from orchestrator.runtime.llama_server import LocalLLMRuntime, framework_models_dir
-    models = framework_models_dir(os.environ.get("LLM_FRAMEWORK_MODELS_DIR") or ctx.config.get("models_dir"))
+    # The effective models_dir (LLM_FRAMEWORK_MODELS_DIR, config.yml, or the per-user folder when the installation
+    # is read-only), the same folder the GUI and the MCP server use.
+    models = framework_models_dir(ConfigManager(ctx.config_path).get("models_dir"))
     return LocalLLMRuntime(models_dir=models / "ditto")
 
 

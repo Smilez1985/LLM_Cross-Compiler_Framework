@@ -293,6 +293,23 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Audit log: when several processes (GUI, CLI, MCP servers) wrote the first entries of a new log at the same
   moment, the log could be reported as damaged ("The audit anchor file was missing when entry 2 was written").
   The anchor of a new log is now written before its first entry becomes visible to other processes.
+- The CLI, the GUI and the MCP server no longer create empty `cache/`, `models/` and `output/` folders in the
+  installation at every start, also when `LLM_FRAMEWORK_CONFIG_DIR` or `LLM_FRAMEWORK_HOME` point elsewhere; a
+  build or a download creates the folders it uses. The repository's `.gitignore` covers `output/`, `cache/`,
+  `models/` and `logs/`, so build results and downloads cannot be committed.
+- The language chosen at the first start of the GUI is saved in the effective config folder
+  (`LLM_FRAMEWORK_CONFIG_DIR`, the installation's `configs/` if writable, otherwise the per-user folder) instead
+  of always in the installation's `configs/`.
+- Windows: with the framework in `C:\Program Files`, which standard users cannot write to, the settings and the
+  data folders `output/`, `cache/` and `models/` are in the per-user folder (`%USERPROFILE%\.llm-framework`).
+  The writability check no longer trusts `os.access`, which ignores folder permissions on Windows. The installer
+  no longer creates an unused data folder in the public documents folder with a desktop shortcut to it.
+- `install.sh` checks the connection over HTTPS to the package index (`pypi.org` or `PIP_INDEX_URL`) instead of
+  pinging 8.8.8.8, which many networks block; it no longer creates an unused data folder in root's home folder,
+  and running it again keeps the builds, cache, models and `configs/config.yml` in `/opt` instead of deleting
+  them.
+- Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
+  `config/` folder in the working directory.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped

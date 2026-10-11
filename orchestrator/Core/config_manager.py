@@ -17,6 +17,7 @@ Updates v2.4.0:
 
 import os
 import json
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable, Set, Tuple
 from dataclasses import dataclass, field
@@ -219,6 +220,20 @@ class ConfigManager:
     def installation_config_dir() -> Path:
         return Path(__file__).resolve().parents[2] / "configs"
 
+    @staticmethod
+    def writable_dir(path: Path) -> bool:
+        """Whether this user can create files in path. os.access alone is not enough on Windows: it ignores the
+        folder's permissions, so C:\\Program Files looks writable to every user. A temporary file is created
+        there and removed at once."""
+        path = Path(path)
+        if not path.is_dir() or not os.access(path, os.W_OK):
+            return False
+        try:
+            with tempfile.TemporaryFile(dir=path):
+                return True
+        except OSError:
+            return False
+
     def _detect_config_directory(self) -> Path:
         """LLM_FRAMEWORK_CONFIG_DIR, else the installation's configs/ folder, else the per-user folder.
         Never the working directory: AI clients start the MCP server inside arbitrary projects, and a
@@ -227,15 +242,29 @@ class ConfigManager:
         if override:
             return Path(override).expanduser()
         install = self.installation_config_dir()
-        if install.is_dir() and os.access(install, os.W_OK):
+        if self.writable_dir(install):
             return install
         return self.user_state_dir
-    
+
+    @classmethod
+    def default_data_root(cls) -> Optional[Path]:
+        """Where the data folders (models_dir, output_dir, cache_dir) are by default: None for the installation
+        folder (relative paths resolve against it), or the per-user folder when this user cannot write to the
+        installation (e.g. C:\\Program Files). Nothing is created here; folders are made when they are used."""
+        if cls.writable_dir(cls.installation_config_dir().parent):
+            return None
+        return cls.user_state_path()
+
+    @staticmethod
+    def user_state_path() -> Path:
+        """The per-user folder (LLM_FRAMEWORK_HOME, default ~/.llm-framework), without creating it."""
+        return Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
+
     @property
     def user_state_dir(self) -> Path:
         """Per-user directory for personal state (chat history, later consent and known hosts), outside the repo.
         LLM_FRAMEWORK_HOME overrides the default ~/.llm-framework."""
-        state = Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
+        state = self.user_state_path()
         state.mkdir(parents=True, exist_ok=True)
         if os.name == "posix":
             try:
@@ -261,12 +290,18 @@ class ConfigManager:
             ensure_directory(directory)
 
     def _initialize_core_schemas(self):
+        # Data folders: relative to the installation, or in the per-user folder if the installation is read-only.
+        data_root = self.default_data_root()
+
+        def data_dir(name: str) -> str:
+            return name if data_root is None else str(data_root / name)
+
         core_schemas = [
             # Core Paths & Settings
             ConfigSchema("targets_dir", str, True, "targets", "Directory for target definitions"),
-            ConfigSchema("models_dir", str, True, "models", "Directory for model storage"),
-            ConfigSchema("output_dir", str, True, "output", "Directory for build outputs"),
-            ConfigSchema("cache_dir", str, True, "cache", "Directory for cache files"),
+            ConfigSchema("models_dir", str, True, data_dir("models"), "Directory for model storage"),
+            ConfigSchema("output_dir", str, True, data_dir("output"), "Directory for build outputs"),
+            ConfigSchema("cache_dir", str, True, data_dir("cache"), "Directory for cache files"),
             ConfigSchema("logs_dir", str, True, "logs", "Directory for log files"),
             ConfigSchema("log_level", str, False, "INFO", "Logging level", ["regex:^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"]),
             

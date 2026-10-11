@@ -95,7 +95,8 @@ def check_disk(framework) -> List[Finding]:
         if path is None:
             continue
         path = Path(path)
-        probe = path if path.exists() else path.parent
+        # The folders are created by the first build, so the nearest existing parent holds their disk.
+        probe = next((p for p in (path, *path.parents) if p.exists()), path)
         try:
             usage = shutil.disk_usage(probe)
         except OSError:

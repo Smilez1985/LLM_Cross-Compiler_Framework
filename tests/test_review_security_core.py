@@ -223,7 +223,8 @@ class TestConfigLocation:
         fm = boot_framework(tmp_path)
         try:
             assert fm.model_manager.models_dir == tmp_path / "models"
-            assert fm.model_manager.tiny_models_dir.is_dir()
+            # Made by the download or build that needs them, not at every start (empty folders in the install).
+            assert not any((tmp_path / name).exists() for name in ("models", "output", "cache"))
         finally:
             fm.shutdown()
 
@@ -261,7 +262,9 @@ class TestCliFromForeignProject:
         assert result.returncode == 0, result.stderr
         assert "Traceback" not in result.stderr
         assert "start_build" in result.stdout
-        assert (setup.safe / "models" / "tiny_models").is_dir(), "the trusted configuration was used"
+        listed = self.run_cli(setup.project, tmp_path, "deploy", "list-artifacts")
+        assert listed.returncode == 0, listed.stderr
+        assert str(setup.safe / "output") in "".join(listed.stdout.split()), "the trusted configuration was used"
         for folder in setup.evil.values():
             assert not Path(folder).exists(), f"project setting used: {folder}"
         assert snapshot(setup.project) == setup.before, "nothing may be written into the project"

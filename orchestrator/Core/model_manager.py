@@ -27,11 +27,6 @@ import time
 import requests
 from orchestrator.utils.logging import get_logger
 
-# Fallback Helper, falls utils.helpers noch nicht existiert
-def ensure_directory(path: Path):
-    if not path.exists():
-        path.mkdir(parents=True, exist_ok=True)
-
 @dataclass
 class ModelMetadata:
     name: str
@@ -72,10 +67,8 @@ class ModelManager:
         else:
             self.models_dir = self.root_path / Path(str(models_dir_name)).expanduser()
         self.tiny_models_dir = self.models_dir / "tiny_models"
-        
-        ensure_directory(self.models_dir)
-        ensure_directory(self.tiny_models_dir)
-        
+        # Created by the downloads that use them, not at startup.
+
     def initialize(self) -> bool:
         self.logger.info(f"Model Manager initialized. Storage: {self.models_dir}")
         return True

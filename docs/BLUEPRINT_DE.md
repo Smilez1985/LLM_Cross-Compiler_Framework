@@ -221,7 +221,9 @@ ihn zur Laufzeit nicht; wofür jede Datei in `configs/` da ist, steht in
 | Einstellungsordner (meist `configs/`) | `config.yml` (Benutzereinstellungen); auf Wunsch eine eigene `llm_providers.yml`, die Anbietervorlagen ergänzt oder ersetzt. |
 
 `cache/`, `output/` und `models/` sind relativ zum Installationsordner, sofern die Einstellungen `cache_dir`,
-`output_dir` und `models_dir` nichts anderes sagen.
+`output_dir` und `models_dir` nichts anderes sagen. Darf der Benutzer im Installationsordner nicht schreiben (zum
+Beispiel `C:\Program Files`), liegen ihre Vorgaben stattdessen im Benutzerordner (`ConfigManager.default_data_root`).
+Keiner von ihnen wird beim Start angelegt; ein Build, ein Download oder die Wissensbasis legt an, was sie nutzen.
 
 ## Datenflüsse
 

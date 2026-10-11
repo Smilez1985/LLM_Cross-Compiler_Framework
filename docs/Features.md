@@ -836,6 +836,9 @@ timestamp) and starts a new chain, for example after `llm-cli doctor` has report
   [community packs](#encrypted-packs-for-private-sharing) are kept in the encrypted secrets store.
 - **Settings** are never read from the working directory: `LLM_FRAMEWORK_CONFIG_DIR`, then `configs/` in the
   installation if you may write there, then the personal folder.
+- **Data folders** (`output/`, `cache/`, `models/`) are in the installation if you may write there, otherwise in the
+  personal folder (on Windows `C:\Program Files` is read-only for standard users). They are created when a build or
+  a download first needs them, not at every start.
 
 ---
 
