@@ -72,8 +72,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `X-Robots-Tag` header or in `<meta name="robots">` / `<meta name="llm-conversion-framework-bot">`, does not
   follow the links of `nofollow` pages, and honours the W3C TDM Reservation Protocol (`/.well-known/tdmrep.json`
   per site, the `tdm-reservation` header and meta tag, PDF metadata). Redirect targets on other hosts are
-  checked the same way. Every skipped page is named in the crawl log with its reason. None of these checks can
-  be switched off.
+  checked the same way. Every page that is not stored is named in the crawl log with its reason. None of these
+  checks can be switched off.
 - **Notice before the first Deep Ingest** (English and German): what is read (only publicly reachable pages),
   which opt-outs are honoured, that the knowledge stays on this computer, and that sharing it keeps source and
   licence and needs your explicit release. It is information, not a legal confirmation: one "Understood"
@@ -235,10 +235,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Image digests (`name@sha256:...`) and the paths of default accounts such as `/root` or `/home/runner` stay
   as they are, so a scrubbed target still builds.
 - The knowledge snapshot of a new target module is opt-in (a check box on the wizard's last page) and holds only
-  the pages crawled for that target in the wizard; before, the whole local knowledge base went into every module.
+  the pages crawled for that target in the wizard, all of them: Finish stays disabled while a crawl runs. Before,
+  the whole local knowledge base went into every module. A `README.md` next to it says what it holds and that the
+  framework does not import it.
 - Target modules created with the wizard, `llm-cli module create` or Ditto get a `capabilities:` block (support
   level community: their boards, and GGUF with the types their build script handles), so the Builder, the CLI
-  and AI clients check their build settings. Generation fails if a template placeholder is left anywhere.
+  and AI clients check their build settings. Generation fails if a template placeholder is left anywhere except in
+  the knowledge snapshot, whose crawled pages may contain text such as `YYYY-MM-DD`.
 - **Credential vault format v2**: every entry carries a key id and the vault key can be rotated (every entry
   is re-encrypted, the old key is removed; an interrupted rotation is completed at the next start). Each
   vault keeps its key in its own keyring entry, so rotating it or changing its storage never touches another
@@ -290,6 +293,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The CLI and the CLI guides no longer tell you to put the GitHub token on the command line, where the shell
   history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
   hidden prompt.
+- The Deep Ingest dialog opens with the settings `crawler_max_depth`, `crawler_download_pdfs` and
+  `crawler_rate_limit` (delays below a second and depth 0 possible); before, its fixed values (2, PDFs on, 1 s)
+  always overrode them.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -298,9 +304,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Requests to local model servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment.
 - Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
   the same way and installed atomically.
-- Deep Ingest reads robots.txt as RFC 9309 describes it. Rules with `*` or `$` (such as `Disallow: /*.pdf$`), an
-  `Allow` listed before a longer `Disallow`, every `User-agent: *` group after the first and a file that starts
-  with a byte order mark used to be ignored, so the crawler fetched pages the site had excluded.
+- Deep Ingest reads robots.txt as RFC 9309 describes it, with one cautious deviation. Rules with `*` or `$` (such
+  as `Disallow: /*.pdf$`), an `Allow` listed before a longer `Disallow`, every `User-agent: *` group after the
+  first and a file that starts with a byte order mark used to be ignored, so the crawler fetched pages the site had
+  excluded. Its groups are found by the exact product token `LLM-Conversion-Framework-Bot` (any case), so a group
+  for `bot` no longer overrides `*`, and each scheme, host and port has its own robots.txt. The deviation: a
+  robots.txt that answers 401 or 403 means "disallow everything", where RFC 9309 would allow crawling; a
+  reservation the crawler cannot read still counts.
 - Community packs are installed only through a quarantine folder after their checks: an id without paths, exactly
   the listed files with their hashes, no links, special or binary files, every image a Dockerfile pulls (`FROM`,
   `COPY --from`, `RUN --mount=...,from=`, also in a lowercase `dockerfile`) pinned by digest unless it is an

@@ -172,10 +172,12 @@ capabilities:
 target (Deep Ingest, privacy scrub applied)" is off by default and can only be switched on after Deep Ingest ran in
 this wizard. Then the generator exports only the pages crawled from the URLs you entered in this wizard,
 privacy-scrubbed (home folders, addresses, host and user names, keys), to `knowledge/initial_knowledge.json`, with a
-`README.md` next to it. Nothing else from your knowledge base goes into the module, and without the check box there
-is no `knowledge/` folder. `llm-cli module create` and `generate-ai` never attach knowledge. The framework does not
-import that file again by itself (whatever the `README.md` says). The pages remain under their owners' terms; the
-licence of a pack does not cover them.
+`README.md` next to it that says what the file holds. While a Deep Ingest is still running, Finish stays disabled,
+so the snapshot holds every crawled page. Nothing else from your knowledge base goes into the module, and without
+the check box there is no `knowledge/` folder. `llm-cli module create` and `generate-ai` never attach knowledge.
+The framework does not import that file into a knowledge base, and the generator's placeholder check leaves it out
+(crawled pages may well contain text like `YYYY-MM-DD`). The pages remain under their owners' terms; the licence of
+a pack does not cover them.
 
 The result is a **skeleton**, not a working target yet:
 
@@ -533,7 +535,7 @@ and, for scripts, its line.
 | Shell deny-list | Every line of every `*.sh` file, comments included, unless the same line is in the template's file with the same path (for `modules/build.sh`: `targets/_template/modules/build.sh`). Refused: downloads (`curl`, `wget`, `aria2c`, and `fetch` as a word, which includes `git fetch`), deleting `/` (`rm -rf /`), `chmod 777`, `sudo`, `mkfs` and `dd if=`, the Docker socket or `docker run`, `eval`, `source` or `.` of a `$(...)` result, `sh -c "$(...)"`, and process substitution `<(...)` except as plain input (`done < <(grep ...)`). Downloads belong in the Dockerfile, pinned. |
 | Shell syntax | Every `*.sh` file passes `bash -n` (skipped where bash is not installed). |
 | Text only | No file contains a NUL byte: binary files are refused. On export every file must also be UTF-8 text. |
-| Placeholders | No file contains a template placeholder (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` or `YYYY-MM-DD`), and no value in `target.yml` holds text in square brackets, such as `[Board Name 1]`. |
+| Placeholders | No file except the knowledge snapshot `knowledge/initial_knowledge.json` (crawled pages) contains a template placeholder (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` or `YYYY-MM-DD`), and no value in `target.yml` holds text in square brackets, such as `[Board Name 1]`. |
 
 The pack format adds its own rules when a target is exported or installed:
 

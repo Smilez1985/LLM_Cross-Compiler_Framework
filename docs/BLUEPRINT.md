@@ -414,18 +414,18 @@ judge that yourself.
    honoured, that the knowledge stays on this computer (only the excerpts Ditto uses go to the AI provider you
    chose) and that sharing it needs your explicit release. It is information, not a legal confirmation, so it has
    one button, "Understood". A short spoken hint starts once the notice is on screen. The per-user file
-   `crawl_notice.json` (mode 0600, written atomically) records the notice version and a SHA-256 hash of its English
-   and German texts: the notice comes back when its text changes, and also when the file is missing or damaged.
-3. **Options and snapshot.** The Deep Ingest dialog takes the start URLs and, for this crawl, the depth (1 to 5),
-   PDF downloads and the delay between requests (0 to 10 seconds). It opens with 2, on and 1 second and does not
-   read the settings `crawler_max_depth`, `crawler_download_pdfs` and `crawler_rate_limit`; its values decide. The
+   `crawl_notice.json` (mode 0600, written atomically) records a SHA-256 hash of its English and German texts: the
+   notice comes back when its text changes, and also when the file is missing or damaged.
+3. **Options and snapshot.** The Deep Ingest dialog takes the start URLs and, for this crawl, the depth (0 to 5),
+   PDF downloads and the delay between requests (0 to 10 seconds, fractions allowed). It opens with the settings
+   `crawler_max_depth`, `crawler_download_pdfs` and `crawler_rate_limit`; the values in the dialog decide. The
    page limit `crawler_max_pages` (default 50) and the languages `crawler_languages` (default `en` and `de`) come
    from the settings. There is no switch for robots.txt or any other opt-out. Before each start URL the knowledge
    base saves a snapshot of itself in `knowledge_snapshots/` (the last five are kept; an empty knowledge base gets
    none). Neither the GUI nor the CLI can restore a snapshot yet.
 4. **Checks before the request.** For each URL, breadth-first, in this order: the SSRF check of the address (see
    [Security model](#security-model)), then, with PDF downloads off, the skip of a URL ending in `.pdf`, the host's
-   robots.txt (fetched once per host) and the origin's `/.well-known/tdmrep.json` (fetched once per origin). Both
+   robots.txt and `/.well-known/tdmrep.json` of the origin (scheme, host and port; each fetched once). Both
    files are fetched through the same SSRF guard as the pages, and every redirect hop on the way is checked again.
 5. **Request.** The wizard shows "Page N of M: <url>", and the crawler waits the delay between requests (a Stop
    cuts it short). The request does not follow redirects: a redirect target is queued and goes through steps 4
@@ -444,14 +444,15 @@ judge that yourself.
 8. **Outcome.** Only after the last write has returned does the result say success (pages stored; none failed
    or was reserved by the site, and the crawl was not stopped), partial (some pages stored; others failed, were
    reserved by the site, or the crawl was stopped) or failure (nothing stored). It is shown, logged and spoken.
-   Pages left out by an opt-out, the address check, switched-off PDF downloads, a redirect or the language filter
-   are listed in the crawl log with their reason, and so are pages that could not be fetched.
+   Pages left out by an opt-out, the address check, switched-off PDF downloads, a redirect or the language filter,
+   and fetched pages that are neither HTML nor PDF or have no text, are listed in the crawl log with their reason,
+   and so are pages that could not be fetched.
 
 Which signals count, and when they are read:
 
 | Signal | When | Rule |
 |---|---|---|
-| robots.txt ([RFC 9309](https://www.rfc-editor.org/rfc/rfc9309)) | before the request, once per host | The groups that name this crawler (`LLM-Conversion-Framework-Bot`) count, otherwise all `*` groups together; `*` and `$` patterns work; the longest matching rule decides and `Allow` wins a tie. A 401, a 403, a server error or an unreachable file means "disallow everything" (for 401 and 403 this is stricter than RFC 9309, which allows crawling when the file is unavailable with a 4xx code); a missing file (404) means everything is allowed. A file that the SSRF guard blocks or that lies behind more than five redirects counts as unavailable, which RFC 9309 treats as allowed. |
+| robots.txt ([RFC 9309](https://www.rfc-editor.org/rfc/rfc9309)) | before the request, once per origin (scheme, host and port) | The groups whose user-agent equals this crawler's product token (`LLM-Conversion-Framework-Bot`, any case; a group for `bot` is not ours) count, otherwise all `*` groups together; `*` and `$` patterns work; the longest matching rule decides and `Allow` wins a tie. A 401, a 403, a server error or an unreachable file means "disallow everything" (for 401 and 403 this is stricter than RFC 9309, which allows crawling when the file is unavailable with a 4xx code); a missing file (404) means everything is allowed. A file that the SSRF guard blocks or that lies behind more than five redirects counts as unavailable, which RFC 9309 treats as allowed. |
 | TDMRep file `/.well-known/tdmrep.json` | before the request, once per origin | The first rule whose location matches the path decides; `"tdm-reservation": 1` reserves the page. A missing or unreadable file means the site does not use the protocol. |
 | `X-Robots-Tag` and `tdm-reservation` headers | after the response | `noindex`, `none`, `noai`, `noimageai` or `tdm-reservation: 1` reserve the page. Directives for other crawlers (`otherbot: noindex`) are ignored. |
 | Robots meta tags (`robots` and `llm-conversion-framework-bot`), `tdm-reservation` meta tag | after the response, HTML | as for the headers |
@@ -469,7 +470,7 @@ language when there is one), Linux `spd-say`, otherwise `espeak-ng` or `espeak`.
 dependency, and the system volume is never touched. Speech runs in a background thread, one announcement at a time,
 at most 300 characters, with a time limit; it never blocks or fails the caller, and every announcement is also
 written to the log. It stays silent when the setting `audio_announcements` (Tools > Spoken Announcements) is off,
-with `LLM_FRAMEWORK_NO_AUDIO=1`, under CI or tests, in an SSH session without a display, on Linux without a display,
+with `LLM_FRAMEWORK_NO_AUDIO=1`, under CI, in an SSH session without a display, on Linux without a display,
 and when no engine works. The shape of the call follows the USB watcher of rag4ll (MIT licence, see
 [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md)), and so does its rule that a state is announced only once it is
 true: the outcome is spoken after the last write has returned.

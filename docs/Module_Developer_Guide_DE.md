@@ -177,11 +177,13 @@ capabilities:
 knowledge crawled for this target (Deep Ingest, privacy scrub applied)“ standardmäßig aus und lässt sich erst
 einschalten, wenn in diesem Assistenten Deep Ingest gelaufen ist. Dann exportiert der Generator nur die Seiten, die
 von den in diesem Assistenten eingegebenen URLs gecrawlt wurden, datenschutzbereinigt (Home-Ordner, Adressen, Host-
-und Benutzernamen, Schlüssel), nach `knowledge/initial_knowledge.json`, mit einer `README.md` daneben. Sonst kommt
-nichts aus deiner Wissensbasis in das Modul, und ohne das Kästchen gibt es keinen Ordner `knowledge/`.
-`llm-cli module create` und `generate-ai` hängen nie Wissen an. Das Framework liest diese Datei nicht von selbst
-wieder ein (egal was die `README.md` sagt). Die Seiten bleiben unter den Bedingungen ihrer Eigentümer; die Lizenz
-eines Pakets deckt sie nicht ab.
+und Benutzernamen, Schlüssel), nach `knowledge/initial_knowledge.json`, mit einer `README.md` daneben, die sagt,
+was die Datei enthält. Solange ein Deep Ingest noch läuft, bleibt Finish gesperrt, damit der Schnappschuss jede
+gecrawlte Seite enthält. Sonst kommt nichts aus deiner Wissensbasis in das Modul, und ohne das Kästchen gibt es
+keinen Ordner `knowledge/`. `llm-cli module create` und `generate-ai` hängen nie Wissen an. Das Framework nimmt
+diese Datei nicht in eine Wissensbasis auf, und die Platzhalterprüfung des Generators lässt sie aus (gecrawlte
+Seiten können durchaus Text wie `YYYY-MM-DD` enthalten). Die Seiten bleiben unter den Bedingungen ihrer Eigentümer;
+die Lizenz eines Pakets deckt sie nicht ab.
 
 Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
 
@@ -546,7 +548,7 @@ seiner Datei und bei Skripten mit seiner Zeile gemeldet.
 | Shell-Sperrliste | Jede Zeile jeder `*.sh`-Datei, Kommentare eingeschlossen, außer die gleiche Zeile steht in der Datei der Vorlage mit demselben Pfad (für `modules/build.sh`: `targets/_template/modules/build.sh`). Abgelehnt werden: Downloads (`curl`, `wget`, `aria2c` und `fetch` als Wort, also auch `git fetch`), das Löschen von `/` (`rm -rf /`), `chmod 777`, `sudo`, `mkfs` und `dd if=`, der Docker-Socket oder `docker run`, `eval`, `source` oder `.` mit dem Ergebnis von `$(...)`, `sh -c "$(...)"` und Prozess-Substitution `<(...)`, außer als reine Eingabe (`done < <(grep ...)`). Downloads gehören festgelegt ins Dockerfile. |
 | Shell-Syntax | Jede `*.sh`-Datei besteht `bash -n` (entfällt, wo bash nicht installiert ist). |
 | Nur Text | Keine Datei enthält ein NUL-Byte: Binärdateien werden abgelehnt. Beim Export muss außerdem jede Datei UTF-8-Text sein. |
-| Platzhalter | Keine Datei enthält einen Platzhalter der Vorlage (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` oder `YYYY-MM-DD`), und kein Wert in `target.yml` enthält Text in eckigen Klammern wie `[Board Name 1]`. |
+| Platzhalter | Keine Datei außer dem Wissens-Schnappschuss `knowledge/initial_knowledge.json` (gecrawlte Seiten) enthält einen Platzhalter der Vorlage (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` oder `YYYY-MM-DD`), und kein Wert in `target.yml` enthält Text in eckigen Klammern wie `[Board Name 1]`. |
 
 Das Paketformat bringt beim Export und bei der Installation eigene Regeln mit:
 

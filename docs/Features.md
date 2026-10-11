@@ -670,14 +670,14 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   or a community pack keeps the source and licence of every page and needs your explicit release.
 - It is information, not a legal confirmation: one button, **Understood** (also Esc), nothing to tick.
 - It is shown once per user and again when its text changes in any language. The state file `crawl_notice.json` in
-  the per-user folder (`~/.llm-framework`) stores the notice version and a hash of its texts. If that folder cannot
-  be used, the notice is shown every time.
+  the per-user folder (`~/.llm-framework`) stores a hash of its texts. If that folder cannot be used, the notice is
+  shown every time.
 
 ### What the crawler honours
 
 | Signal | Where it is read | Effect |
 |---|---|---|
-| robots.txt (RFC 9309) | `/robots.txt` of each host, once per host | Disallowed paths are not fetched. The groups for `LLM-Conversion-Framework-Bot` apply, otherwise all `*` groups; `*` and `$` patterns work; the longest rule wins, `Allow` wins a tie. A robots.txt that cannot be reached or answers 401, 403 or a server error counts as "disallow everything". |
+| robots.txt (RFC 9309) | `/robots.txt` of each site, once per scheme, host and port | Disallowed paths are not fetched. The groups whose `User-agent` is `LLM-Conversion-Framework-Bot` (any case) apply, otherwise all `*` groups (a group for `bot` is another crawler's); `*` and `$` patterns work; the longest rule wins, `Allow` wins a tie. A robots.txt that cannot be reached or answers a server error, 401 or 403 counts as "disallow everything" (for 401 and 403 stricter than RFC 9309, which allows crawling: a locked robots.txt may hold a reservation). |
 | `X-Robots-Tag` header | every response | `noindex`, `none`, `noai` and `noimageai` keep the page out; `nofollow` and `none` stop following its links. Directives for this crawler (`LLM-Conversion-Framework-Bot: noai`) count, those for other crawlers do not. |
 | `<meta name="robots">` and `<meta name="llm-conversion-framework-bot">` | HTML pages | the same directives as the header |
 | TDM Reservation Protocol (W3C TDMRep 1.0) | `/.well-known/tdmrep.json` per site (the first matching rule decides), the `tdm-reservation` header, `<meta name="tdm-reservation">`, `tdm:reservation` in PDF metadata | A reservation keeps the page out; a `tdm-policy` is named in the log. |
@@ -696,10 +696,10 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
 
 - Private, loopback and other non-public addresses are blocked (SSRF protection), and each connection is pinned to
   the checked address, so a DNS answer cannot be switched in between.
-- The Deep Ingest dialog sets, for each crawl, the link depth (1 to 5, default 2), whether PDFs are read and the
-  delay between requests (whole seconds from 0 to 10, default 1 s). The settings `crawler_max_depth`,
-  `crawler_rate_limit` and `crawler_download_pdfs` are only the defaults for crawls without these options; the
-  dialog always passes its own values.
+- The Deep Ingest dialog sets, for each crawl, the link depth (0 to 5; 0 reads only the entered pages), whether PDFs
+  are read and the delay between requests (0 to 10 s, fractions of a second allowed). It opens with the settings
+  `crawler_max_depth` (default 2), `crawler_download_pdfs` (default on) and `crawler_rate_limit` (default 1 s); what
+  you change in the dialog applies to that crawl only.
 - From the settings: at most `crawler_max_pages` pages per entered URL (default 50), and only pages in the
   languages of `crawler_languages` (default English and German; an empty list keeps all). A crawl also stops after
   five times as many requests as its page limit (redirects and failed fetches count too).
@@ -712,17 +712,18 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   stays responsive and closes once the current page is stored.
 - The outcome over all entered URLs is reported only after the last write has returned:
 
-  | Outcome | When | Dialog title |
+  | Outcome | When | Message box |
   |---|---|---|
-  | success | every entered URL stored pages; nothing failed, nothing was reserved by a site, the crawl was not stopped | Deep Ingest Complete |
-  | partial | pages are stored, but others failed, were reserved by the site, or the crawl was stopped | Deep Ingest Partly Complete |
-  | failure | nothing was stored | Deep Ingest Failed |
+  | success | every entered URL stored pages; nothing failed, nothing was reserved by a site, the crawl was not stopped | information |
+  | partial | pages are stored, but others failed, were reserved by the site, or the crawl was stopped | warning |
+  | failure | nothing was stored | error |
 
-- The crawl log in the wizard (and the framework's log) names every skipped page with its reason, for example
-  "disallowed by robots.txt", "X-Robots-Tag: noai", "TDM reservation (...)", "redirect from ... leaves the crawled
-  site" or "language 'fr' is not one of de, en", and every page that could not be fetched or read (HTTP status,
-  unreadable PDF, too many redirects). Pages left out for their language or an off-site redirect do not make the
-  outcome partial; failures and site reservations do.
+- The crawl log in the wizard (and the framework's log) names every page that was not stored with its reason, for
+  example "disallowed by robots.txt", "X-Robots-Tag: noai", "TDM reservation (...)", "redirect from ... leaves the
+  crawled site", "language 'fr' is not one of de, en", "PDF downloads are switched off", "neither HTML nor PDF
+  (image/png)", "no text" or "PDF support (pypdf) is not installed", and every page that could not be fetched or read
+  (HTTP status, unreadable PDF, too many redirects). Each fetched page counts toward the page limit, stored or not.
+  Site reservations and failures make the outcome partial; the other reasons do not.
 
 ### Spoken announcements
 
@@ -737,7 +738,7 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   written to the log, so it is never only audible.
 - It stays silent when the setting `audio_announcements` is off (menu **Tools > Spoken Announcements**, a check mark
   that is saved at once), when `LLM_FRAMEWORK_NO_AUDIO` is set (to anything but empty, `0`, `false`, `no` or
-  `off`), under CI (`CI` set in the same way), during tests, in an SSH session without a display, and on Linux
+  `off`), under CI (`CI` set in the same way), in an SSH session without a display, and on Linux
   without a display (no `DISPLAY` or `WAYLAND_DISPLAY`).
 
 ---
@@ -880,9 +881,11 @@ The GUI's input fields offer what you used recently, newest first.
   never overwritten. Setup commands run later as an unprivileged user without network.
 - **Knowledge snapshot (opt-in):** on the wizard's last page, **Attach the knowledge crawled for this target** (off
   by default, available after a Deep Ingest in the wizard) writes the pages crawled from the wizard's Deep Ingest
-  URLs, privacy-scrubbed, to `knowledge/initial_knowledge.json` in the new target. The rest of your knowledge base
-  never goes into a module, and `llm-cli module create` and `module generate-ai` attach nothing. The framework does
-  not import such a snapshot into a knowledge base by itself.
+  URLs, privacy-scrubbed, to `knowledge/initial_knowledge.json` in the new target, with a `README.md` that says
+  what it holds. While a Deep Ingest is still running, the wizard's **Finish** stays disabled (the page says why),
+  so the snapshot holds every crawled page. The rest of your knowledge base never goes into a module, and
+  `llm-cli module create` and `module generate-ai` attach nothing. The framework does not import such a snapshot
+  into a knowledge base; to share knowledge, export a knowledge pack.
 - **Export for community:** the wizard's last page also offers **Export for community after creating** (see
   [Export for community](#export-for-community)).
 
@@ -1129,10 +1132,8 @@ What does not work yet, so you are not surprised:
   available yet; Ditto signs in with API keys, and local engines need none.
 - **Device runtime:** the framework does not install a runtime on the board.
 - **GUI:** the Auto-Tuning and Models tabs are placeholders; the local runtime is controlled from the CLI only.
-- **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it. Its dialog always
-  passes its own depth, PDF choice and request delay (whole seconds), so `crawler_max_depth`,
-  `crawler_download_pdfs` and `crawler_rate_limit` do not apply there. Restoring a knowledge-base snapshot is not
-  available from the GUI or the CLI.
+- **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it. Restoring a
+  knowledge-base snapshot is not available from the GUI or the CLI.
 - **Reranking** runs only for build recommendations unless `rag_rerank_default` is turned on.
 - **Spoken announcements** are tested with simulated speech engines only, not with the real voices of Windows,
   macOS or Linux.
