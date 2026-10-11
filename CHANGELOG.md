@@ -370,6 +370,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   earlier run copied (listed in `.lcf-installed-files`) and the repository no longer ships; before, its
   `rsync --delete` deleted everything in `/opt` the repository does not ship: targets made with the module wizard
   or `llm-cli module create`, installed community packs, and the builds, cache, models and `configs/config.yml`.
+  A list that cannot be made stops it before anything is copied or removed, a stale link is removed itself, never
+  the file it points to, and the copy of `install.sh` in `/opt` copies and removes nothing.
 - Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
   `config/` folder in the working directory.
 - The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).

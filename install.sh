@@ -105,13 +105,17 @@ setup_system() {
 
 # --- SCHRITT 2: DATEIEN KOPIEREN ---
 # Die Dateien, die das Repository ausliefert, relativ zu REPO_ROOT und NUL-getrennt: in einem git-Klon die
-# verfolgten Dateien, sonst (etwa ein entpacktes Archiv) alle Dateien ohne Entwicklungsreste und Daten.
+# verfolgten Dateien, sonst (etwa ein entpacktes Archiv) alle Dateien ohne Entwicklungsreste und Daten. Scheitert
+# git oder find, scheitert auch die Funktion: Nach einer unvollständigen Liste wird nichts entfernt.
 shipped_files() {
     if command -v git &> /dev/null \
         && git -C "$REPO_ROOT" -c safe.directory="$REPO_ROOT" rev-parse --is-inside-work-tree &> /dev/null; then
-        git -C "$REPO_ROOT" -c safe.directory="$REPO_ROOT" ls-files -z | while IFS= read -r -d '' f; do
-            if [ -f "$REPO_ROOT/$f" ]; then printf '%s\0' "$f"; fi
-        done
+        (
+            set -o pipefail
+            git -C "$REPO_ROOT" -c safe.directory="$REPO_ROOT" ls-files -z | while IFS= read -r -d '' f; do
+                if [ -f "$REPO_ROOT/$f" ]; then printf '%s\0' "$f"; fi
+            done
+        )
     else
         (cd "$REPO_ROOT" && find . \( -name .git -o -name .venv -o -name __pycache__ -o -name build -o -name dist \
             -o -path ./output -o -path ./cache -o -path ./models -o -path ./logs \) -prune \
@@ -121,14 +125,17 @@ shipped_files() {
 
 # Entfernt Dateien der alten Liste ($1), die in der neuen ($2) fehlen: was das Repository nicht mehr ausliefert.
 # Was nie in einer Liste stand (eigene Targets, Community-Packs, Einstellungen, Builds, Cache, Modelle), bleibt.
-# Nur einfache relative Pfade, die innerhalb von INSTALL_DIR bleiben (kein .., kein Link nach draußen).
+# Nur einfache relative Pfade, die innerhalb von INSTALL_DIR bleiben (kein .., kein Link nach draußen). Aufgelöst
+# wird nur der Ordner: Ein Link wird selbst entfernt, nie die Datei, auf die er zeigt.
 remove_stale_files() {
-    local f base target
+    local f base dir path
     base="$(realpath -m -- "$INSTALL_DIR")"
     while IFS= read -r -d '' f; do
         case "/$f/" in */../*|*/./*|//*) continue ;; esac
-        target="$(realpath -m -- "$INSTALL_DIR/$f")"
-        case "$target" in "$base"/*) rm -f -- "$target" ;; esac
+        dir="$(realpath -m -- "$(dirname -- "$INSTALL_DIR/$f")")"
+        path="$dir/$(basename -- "$f")"
+        case "$dir/" in "$base"/*) ;; *) continue ;; esac
+        if [ -L "$path" ] || [ ! -d "$path" ]; then rm -f -- "$path"; fi
     done < <(comm -z -23 <(sort -z -u "$1") <(sort -z -u "$2"))
 }
 
@@ -150,16 +157,28 @@ deploy_files() {
     # (eigene Targets unter targets/, Community-Packs unter targets/ und community/, configs/config.yml, Builds,
     # Cache, Modelle, .venv). Entfernt wird nur, was ein früheres install.sh kopiert hat und nicht mehr ausgeliefert
     # wird; beim ersten Lauf ohne Liste wird nichts entfernt.
-    local list
-    list="$(mktemp)"
-    shipped_files > "$list"
-    rsync -a --from0 --files-from="$list" ./ "$INSTALL_DIR/" > /dev/null \
-        || log_error "Kopieren nach $INSTALL_DIR fehlgeschlagen."
-    if [ -f "$INSTALL_DIR/$MANIFEST_NAME" ]; then
-        remove_stale_files "$INSTALL_DIR/$MANIFEST_NAME" "$list"
+    # Die Kopie von install.sh in INSTALL_DIR kopiert und entfernt nichts: Ihre Liste enthielte sonst alles dort,
+    # auch eigene Targets und Community-Packs, und das nächste Update aus dem Repository löschte sie als "nicht mehr
+    # ausgeliefert".
+    if [ "$(realpath -m -- "$REPO_ROOT")" = "$(realpath -m -- "$INSTALL_DIR")" ]; then
+        log_warn "install.sh läuft aus $INSTALL_DIR selbst: nichts kopiert oder entfernt (Update: im Repository starten)."
+    else
+        local list
+        list="$(mktemp)"
+        if ! shipped_files > "$list" || [ ! -s "$list" ]; then
+            rm -f "$list"
+            log_error "Die Dateien in $REPO_ROOT ließen sich nicht auflisten; nichts kopiert oder entfernt."
+        fi
+        if ! rsync -a --from0 --files-from="$list" ./ "$INSTALL_DIR/" > /dev/null; then
+            rm -f "$list"
+            log_error "Kopieren nach $INSTALL_DIR fehlgeschlagen."
+        fi
+        if [ -f "$INSTALL_DIR/$MANIFEST_NAME" ]; then
+            remove_stale_files "$INSTALL_DIR/$MANIFEST_NAME" "$list"
+        fi
+        cp "$list" "$INSTALL_DIR/$MANIFEST_NAME"
+        rm -f "$list"
     fi
-    cp "$list" "$INSTALL_DIR/$MANIFEST_NAME"
-    rm -f "$list"
 
     # Rechte anpassen (Der normale User soll den Code besitzen, um ohne sudo auszuführen)
     REAL_USER="${SUDO_USER:-$USER}"
