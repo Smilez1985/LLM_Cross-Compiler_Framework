@@ -258,6 +258,36 @@ aus, wenn `llama-server` auf dem Board schon installiert ist, sonst einen Hinwei
 Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, steht in der
 [Roadmap](docs/BLUEPRINT_DE.md#roadmap).
 
+### Die Hardware des Boards untersuchen
+
+Ein Build wird für die Hardware geplant, auf der er laufen wird, deshalb läuft die Hardware-Probe auf diesem Rechner:
+
+```bash
+llm-cli scan --device 192.168.1.50 --user rock   # ein Board per SSH (Python-Probe mit Python 3.8+, sonst Shell-Probe)
+llm-cli scan                                      # dieser Rechner
+```
+
+Jeder Scan schreibt `target_hardware_config.txt` und behält das Profil in `~/.llm-framework/hardware/`. Das Profil
+enthält das Betriebssystem (ID, Version, Familie wie Debian, Variante wie DietPi, Kernel, Init-System), die
+Architektur, die C-Bibliothek und ihre Version (glibc oder musl), die CPU mit ihren Merkmalen und Kernclustern,
+Speicher, SoC, NPU und GPUs; keinen Hostnamen, keine Seriennummer und keine MAC-Adresse. Details:
+[CLI_Usage_DE.md](docs/CLI_Usage_DE.md#scan).
+
+**Rechner ohne Netzzugang (air-gapped):** Kopiere eine Probe aus `scripts/` auf den Rechner, etwa per USB-Stick, führe
+sie dort aus und bring `target_hardware_config.txt` zurück:
+
+| Auf dem Rechner | Befehl |
+|---|---|
+| Python 3.8 oder neuer (Linux, Windows, macOS) | `python3 -I hardware_probe.py` |
+| Linux ohne Python (jede POSIX-Shell, auch BusyBox) | `sh hardware_probe.sh` |
+| Windows ohne Python | `powershell -ExecutionPolicy Bypass -File hardware_probe.ps1` |
+
+Die Probes brauchen kein Netz, fragen nichts und installieren nichts. Die interaktiven Funktionen der alten Skripte
+bleiben als Optionen erhalten: `hardware_probe.sh --install-tools` bietet zuerst an, `vulkan-tools` mit dem
+Paketmanager zu installieren, und `hardware_probe.ps1 -Elevate` startet sich mit Administratorrechten neu. Die Datei
+holst du in der GUI mit **Scan / Import... > Import from File (USB/Disk)...** ins Framework oder übergibst sie an
+`llm-cli module generate-ai`.
+
 ---
 
 ## Schnellstart: die Kommandozeile

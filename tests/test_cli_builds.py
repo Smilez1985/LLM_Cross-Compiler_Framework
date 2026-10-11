@@ -498,6 +498,17 @@ class TestBuilderTabCancel:
 # 6. scan --output / 11. exit codes on failure
 # ---------------------------------------------------------------------------------------------------------------
 
+def board_profile():
+    from orchestrator.runtime.profile import parse_profile
+    return parse_profile((REPO_ROOT / "tests" / "fixtures" / "hardware_probe" / "schema2_rk3566_dietpi.txt")
+                         .read_text(encoding="utf-8"))
+
+
+def state_dir():
+    from orchestrator.Core.config_manager import ConfigManager
+    return Path(ConfigManager().user_state_dir)
+
+
 class TestScan:
 
     def fake_probe(self, monkeypatch, write=True):
@@ -519,7 +530,7 @@ class TestScan:
     def test_output_reaches_the_probe(self, tmp_path, monkeypatch):
         calls = self.fake_probe(monkeypatch)
         monkeypatch.chdir(tmp_path)
-        result = invoke_plain("scan", "--output", "probes/board.txt")
+        result = invoke_plain("scan", "--script", "--output", "probes/board.txt")
         assert result.code == 0, result.out
         (cmd,) = calls
         assert cmd[-2:] == ["--output", str((tmp_path / "probes" / "board.txt").resolve())]
@@ -530,8 +541,79 @@ class TestScan:
         self.fake_probe(monkeypatch, write=False)
         monkeypatch.chdir(tmp_path)
         (tmp_path / "target_hardware_config.txt").write_text("old run")  # never taken as this run's result
-        result = invoke_plain("scan")
+        result = invoke_plain("scan", "--script")
         assert result.code == 1, result.out
+
+    def test_python_probe_is_the_default_and_the_profile_is_stored_as_local(self, tmp_path, monkeypatch):
+        from orchestrator import cli as cli_module
+        from orchestrator.runtime import hardware
+        from orchestrator.runtime.profile import ProfileStore, read_profile
+        seen = {}
+
+        def local_profile(**options):
+            seen.update(options)
+            return board_profile()
+
+        monkeypatch.setattr(hardware, "local_profile", local_profile)
+        monkeypatch.setattr(cli_module, "subprocess", None)  # the script is not run
+        monkeypatch.chdir(tmp_path)
+        result = invoke_plain("scan", "--output", "probes/board.txt")
+        assert result.code == 0, result.out
+        assert "Python probe" in result.out and "Cortex-A55" in result.out
+        written = read_profile(tmp_path / "probes" / "board.txt")
+        assert written == board_profile()
+        stored = ProfileStore(state_dir()).load_local()
+        assert stored == board_profile().stable() and "RAM_AVAILABLE_MB" not in stored
+        assert "disk_path" in seen
+
+    def test_json_view(self, tmp_path, monkeypatch):
+        from orchestrator.runtime import hardware
+        from orchestrator.runtime.profile import parse_profile_json
+        monkeypatch.setattr(hardware, "local_profile", lambda **o: board_profile())
+        monkeypatch.chdir(tmp_path)
+        result = invoke_plain("scan", "--json", "--output", "board.json")
+        assert result.code == 0, result.out
+        assert parse_profile_json((tmp_path / "board.json").read_text()) == board_profile()
+
+    def test_a_failing_python_probe_falls_back_to_the_script(self, tmp_path, monkeypatch):
+        from orchestrator.runtime import hardware
+        from orchestrator.runtime.profile import ProfileStore
+
+        def broken(**options):
+            raise RuntimeError("probe file missing")
+
+        monkeypatch.setattr(hardware, "local_profile", broken)
+        calls = self.fake_probe(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        result = invoke_plain("scan")
+        assert result.code == 0, result.out
+        assert len(calls) == 1 and "fallback script" in result.out and "probe file missing" in result.out
+        stored = ProfileStore(state_dir()).load_local()
+        assert stored.converted and stored.get("ARCH") == "arm64"  # the fake script wrote a schema 1 line
+        assert "run the probe again" in result.out
+
+    def test_an_unreadable_script_result_exits_1(self, tmp_path, monkeypatch):
+        from orchestrator import cli as cli_module
+
+        def run(cmd, check, cwd):
+            Path(cmd[cmd.index("--output") + 1]).write_text("PROBE_SCHEMA=2\nOS=linux\nOS=linux\n")
+            return SimpleNamespace(returncode=0)
+
+        monkeypatch.setattr(cli_module, "platform", SimpleNamespace(system=lambda: "Linux"))
+        monkeypatch.setattr(cli_module, "subprocess", SimpleNamespace(
+            run=run, CalledProcessError=subprocess.CalledProcessError))
+        monkeypatch.chdir(tmp_path)
+        result = invoke_plain("scan", "--script")
+        assert result.code == 1 and "cannot read" in result.out
+
+    def test_the_real_python_probe(self, tmp_path, monkeypatch):
+        from orchestrator.runtime.profile import ProfileStore, read_profile
+        monkeypatch.chdir(tmp_path)
+        result = invoke_plain("scan")
+        assert result.code == 0, result.out
+        profile = read_profile(tmp_path / "target_hardware_config.txt")
+        assert profile.get("PROBE_TOOL") == "python" and profile.get("PROBE_SCHEMA") == "2"
+        assert ProfileStore(state_dir()).load_local() == profile.stable()
 
     def test_the_probe_script_writes_where_it_is_told(self, tmp_path):
         work, target = tmp_path / "work", tmp_path / "out" / "probe.txt"
@@ -542,7 +624,9 @@ class TestScan:
                                 cwd=work, env=env, stdin=subprocess.DEVNULL, capture_output=True, text=True,
                                 timeout=120, check=False)
         assert result.returncode == 0, result.stderr
-        assert target.read_text().startswith("# LLM Framework Hardware Profile")
+        assert target.read_text().startswith("# LLM Cross-Compiler Framework hardware profile (schema 2")
+        from orchestrator.runtime.profile import read_profile
+        assert read_profile(target).get("PROBE_TOOL") == "sh"
         assert not (work / "target_hardware_config.txt").exists()
 
     def test_the_probe_script_refuses_unknown_options(self, tmp_path):

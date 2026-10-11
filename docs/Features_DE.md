@@ -933,10 +933,25 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 
 ## Hardware-Probe und neue Targets
 
-- **Probe:** `scripts/hardware_probe.sh` (Linux) und `scripts/hardware_probe.ps1` (Windows) schreiben
-  `target_hardware_config.txt` mit Angaben zu CPU, Flags, Speicher, GPU und NPU. Führe sie auf dem Board aus, nutze
-  `llm-cli scan` auf diesem Rechner oder **Scan / Import...** in der GUI (Datei importieren, Scan per SSH mit
-  denselben Regeln für das Vertrauen beim ersten Kontakt wie beim Deployment, oder dieser PC).
+- **Probe:** Eine Hardware-Probe in drei Umsetzungen schreibt dieselbe Datei, `target_hardware_config.txt`
+  (Schema 2): `scripts/hardware_probe.py` (der Hauptweg: nur Standardbibliothek, Python 3.8 oder neuer, Linux, Windows
+  und macOS) und die Ersatzwege `scripts/hardware_probe.sh` (jede POSIX-Shell unter Linux, für Boards ohne Python)
+  und `scripts/hardware_probe.ps1` (Windows). Sie hält das Betriebssystem fest (ID, Version, Familie, Variante wie
+  DietPi, Kernel, Init-System), die Architektur des Userlands, die C-Bibliothek und ihre Version (glibc, musl), die
+  CPU (Modell, Kerne, ARM-Kerncluster, die x86- und ARM-Merkmale, für die ggml baut, etwa AVX-512 oder das ARM-
+  Skalarprodukt), Speicher, SoC, NPU und jede GPU (NVIDIA Compute Capability, AMD gfx-Target, Vulkan); keinen
+  Hostnamen, keine Seriennummer und keine MAC-Adresse. Die Probes brauchen kein Netz, fragen nie nach, installieren
+  nichts und verlangen keine Administratorrechte, und externe Werkzeuge laufen mit Zeitlimit. Tests führen die `.py`
+  und die `.sh` auf denselben Testrechnern aus und verlangen dasselbe Ergebnis.
+- **Wo sie läuft:** auf dem Rechner, für den gebaut wird. `llm-cli scan` untersucht diesen Rechner mit der
+  Python-Probe und behält das Profil als `local`; `llm-cli scan --device` führt sie per SSH auf einem Board aus (die
+  Python-Probe mit `python3 -I`, wenn das Board Python 3.8 oder neuer hat, sonst die Shell-Probe; auf dem Board wird
+  nichts installiert) und behält das Profil unter der ID des Boards. In der GUI importiert **Scan / Import...** eine
+  Probe-Datei, untersucht ein Board per SSH mit denselben Regeln für das Vertrauen beim ersten Kontakt wie beim
+  Deployment oder untersucht diesen PC. Rechner ohne Netzzugang führen eine Probe von Hand aus
+  ([README](../README_DE.md#die-hardware-des-boards-untersuchen)).
+- **Dittos lokales Modell** nutzt dieselbe Probe: Die Hardware, auf der Build- und Modellwahl beruhen, kommt aus einem
+  Probe-Profil, und freier RAM und freier VRAM werden bei jedem Start neu gelesen.
 - **Neues Target per Fragen:** `llm-cli module create` oder der Assistent unter **Tools > Create Hardware
   Module...**.
 - **Neues Target aus einer Probe:** `llm-cli module generate-ai <Probe-Datei>` oder die KI-Analyse im Assistenten.

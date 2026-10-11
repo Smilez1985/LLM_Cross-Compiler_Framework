@@ -157,16 +157,17 @@ people who write or read probe files.
 | `file` | File rules: file name, the size limit, at most 4096 characters per value, the key pattern, `ON`/`OFF`/`UNKNOWN`, at most 16 GPUs. |
 | `patterns` | Named patterns shared by keys (`version`, `identifier`). |
 | `tables` | Normalisation tables: architecture names, OS families, CPU vendors, ARM core names, PCI vendors, the SoC models the framework takes decisions on, SMBIOS memory types, Rockchip USB product ids, warning codes. |
-| `keys` | One entry per key: `group`, `type` (`bool`, `enum`, `int`, `pattern`, `version`, `text`, `list`, `timestamp`) with its validation, `required`, `stability` (`stable` or `volatile`), `perf` (`key`, `recorded` or `none`), `platforms`, `sources` per OS, `normalise`, `consumers`, and where a value only exists on some architectures, operating systems or GPU vendors (`only_arch`, `only_os`, `only_gpu_vendor`, `os_values`). |
+| `keys` | One entry per key: `group`, `type` (`bool`, `enum`, `int`, `pattern`, `version`, `text`, `list`, `timestamp`) with its validation, `required`, `stability` (`stable` or `volatile`), `perf` (`key`, `recorded` or `none`), `platforms`, `sources` per OS, `normalise`, `consumers`, and where a value only exists on some architectures, operating systems or GPU vendors (`only_arch`, `only_os`, `only_gpu_vendor`, `os_values`). CPU features also name their `/proc/cpuinfo` tokens, the Windows `IsProcessorFeaturePresent` constant with the lowest Windows build that knows it (`windows_feature`, `windows_min_build`) and the macOS sysctl. |
 | `gpu_keys` | The same for the per-GPU keys `GPU<n>_<NAME>`. |
 
 The loader refuses a key without sources, normalisation or validation, unquoted enum values (YAML reads `ON` as a
 boolean) and volatile keys that are required or enter the performance key. There is no per-user override: the file
 of the installation is always used.
 
-**Add a key:** add the entry with every field, write it in the probes, and add a test value to the fixtures in
-`tests/fixtures/hardware_probe/`. A new `perf: key` entry changes every stored performance key; say so in the
-changelog.
+**Add a key:** add the entry with every field, write it in the three probes (`scripts/hardware_probe.py`, `.sh`,
+`.ps1`; each carries a copy of the validation and the tables it uses), and add a test value to the fixtures in
+`tests/fixtures/hardware_probe/`. `tests/test_hardware_probe.py` fails until the copies match the schema. A new
+`perf: key` entry changes every stored performance key; say so in the changelog.
 
 **Check it:**
 
@@ -287,6 +288,6 @@ moment.
 |---|---|---|
 | offer a new AI provider or model | `llm_providers.yml` (or your own copy in the config folder) | run the check above and `tests/test_llm.py`; changelog entry |
 | add a local model or a newer llama.cpp build | `llama_runtime.yml`, with size, SHA256 and commit | run the check above and `tests/test_runtime.py`; changelog entry |
-| add or change a key of the hardware probe file | `hardware_probe_schema.yml` and the probes that write it | run the check above and `tests/test_hardware_profile.py`; changelog entry |
+| add or change a key of the hardware probe file | `hardware_probe_schema.yml` and the probes that write it | run the check above, `tests/test_hardware_profile.py` and `tests/test_hardware_probe.py`; changelog entry |
 | let a target build a new board, format or type | the target's `target.yml` and `build.sh` | tests; see the [Module Developer Guide](../docs/Module_Developer_Guide.md) |
 | record an upstream project or a documentation link | `project_sources.yml` (new entries in the detailed file by hand) | `python ../scripts/validate_ssot.py` inside `configs/`, then `python ../scripts/sync_ssot.py --write` for changed versions |

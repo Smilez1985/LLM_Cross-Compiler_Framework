@@ -77,22 +77,33 @@ targets/Rockchip/
 
 ### 3.1 Das Board untersuchen
 
-Kopiere `scripts/hardware_probe.sh` auf das Gerät und führe es dort aus (auf Windows-Geräten:
-`scripts/hardware_probe.ps1`):
+Die Probe läuft auf dem Gerät, weil der Build aus ihrem Ergebnis geplant wird. Per SSH:
 
 ```bash
-bash hardware_probe.sh
+llm-cli scan --device 192.0.2.10 --user dietpi
 ```
 
-Es schreibt `target_hardware_config.txt` in den aktuellen Ordner: CPU-Modell, Kerne und Flags, Speicher, Hersteller-
-IDs von GPU und NPU und mehr. Die Datei enthält auch den Hostnamen des Geräts; entferne ihn, bevor du die Datei
-teilst. Fehlt ein Hilfswerkzeug, bietet das Skript an, es zu installieren; mit `NON_INTERACTIVE=true` wird das
-übersprungen. Das Dateiformat, das neuere Schema 2 und wie das Framework die heutigen Dateien liest, beschreibt
-[Abschnitt 11](#11-die-datei-der-hardware-probe).
+Die CLI prüft beim ersten Mal den Hostschlüssel des Geräts (wie das Deployment), schickt `hardware_probe.py` an
+`python3 -I`, wenn das Gerät Python 3.8 oder neuer hat, sonst `hardware_probe.sh`, schreibt
+`target_hardware_config.txt` und behält das Profil unter der ID des Geräts
+([Abschnitt 11.5](#115-wo-profile-liegen)). Auf dem Gerät wird nichts installiert. Ohne SSH kopierst du eine Probe auf
+das Gerät, führst sie dort aus und bringst die Datei zurück:
 
-Im Build-Reiter der GUI führt **Scan / Import... > Remote Scan via SSH...** die Probe per SSH auf einem Gerät aus (mit
-derselben Prüfung beim ersten Kontakt wie das Deployment) und holt das Ergebnis ab. `llm-cli scan` führt die Probe auf
-dem Rechner aus, an dem du arbeitest; das hilft nur, wenn dieser Rechner die Ziel-Hardware ist.
+```bash
+python3 -I hardware_probe.py                                 # Python 3.8 oder neuer
+sh hardware_probe.sh                                         # Linux ohne Python, jede POSIX-Shell
+powershell -ExecutionPolicy Bypass -File hardware_probe.ps1  # Windows ohne Python
+```
+
+Die Datei enthält das Betriebssystem (ID, Version, Familie, Kernel, Init-System), die Architektur, die C-Bibliothek
+und ihre Version, CPU-Modell, Kerne, Cluster und Merkmale, Speicher, SoC, NPU und GPUs; keinen Hostnamen, keine
+Seriennummer und keine MAC-Adresse. Die Probes fragen nichts und installieren nichts; `hardware_probe.sh
+--install-tools` bietet zuerst an, `vulkan-tools` zu installieren, und `hardware_probe.ps1 -Elevate` startet sich mit
+Administratorrechten neu. Das Format beschreibt [Abschnitt 11](#11-die-datei-der-hardware-probe).
+
+Im Build-Reiter der GUI führt **Scan / Import... > Remote Scan via SSH...** die Shell-Probe per SSH auf einem Gerät
+aus (mit derselben Prüfung beim ersten Kontakt) und holt das Ergebnis ab. `llm-cli scan` ohne `--device` untersucht
+den Rechner, an dem du arbeitest.
 
 ### 3.2 Das Gerüst erzeugen
 
@@ -615,7 +626,11 @@ Quelle, Normalisierung und Prüfung jedes Schlüssels ist
 [`configs/hardware_probe_schema.yml`](../configs/hardware_probe_schema.yml). Dieser Abschnitt richtet sich an alle,
 die eine Probe schreiben, ein Profil lesen oder eines von einem Rechner ohne Netz mitbringen.
 
-`scripts/hardware_probe.sh` und `scripts/hardware_probe.ps1` schreiben noch Schema 1; der Parser wandelt es um
+Drei Probes schreiben sie mit denselben Schlüsseln und Regeln: `scripts/hardware_probe.py` (der Hauptweg; nur
+Standardbibliothek, Python 3.8 oder neuer) und die Ersatzwege `scripts/hardware_probe.sh` (jede POSIX-Shell unter
+Linux) und `scripts/hardware_probe.ps1` (Windows). Jede trägt eine Kopie der Prüfungen und Tabellen des Schemas, und
+`tests/test_hardware_probe.py` vergleicht die Kopien mit dem Schema und führt die `.py` und die `.sh` auf denselben
+Testrechnern aus. Dateien der älteren Skripte (Schema 1) werden umgewandelt
 ([Abschnitt 11.3](#113-wie-das-framework-ein-profil-prüft)).
 
 ### 11.1 Format (Schema 2)
@@ -629,7 +644,7 @@ die eine Probe schreiben, ein Profil lesen oder eines von einem Rechner ohne Net
 - Jeder `ON`/`OFF`-Schlüssel wird immer geschrieben: `ON`, `OFF` oder `UNKNOWN`. `UNKNOWN` heißt „diese Methode kann
   es nicht feststellen“ (etwa AVX-VNNI unter Windows); es wird nie aus einem Modellnamen geraten.
 - Jede andere Angabe, die die Probe nicht ermitteln kann, wird weggelassen, nie leer geschrieben, und ein Code kommt
-  in `PROBE_WARNINGS` (etwa `not_determined:LIBC_VERSION` oder `needs_root:RAM_TYPE`).
+  in `PROBE_WARNINGS` (etwa `not_determined:LIBC_VERSION` oder `needs_root:RKNPU_DRIVER_VERSION`).
 - Schlüssel je GPU sind nummeriert: `GPU0_VENDOR`, `GPU1_VENDOR`, ... unterhalb von `GPU_COUNT`.
 - Die JSON-Ansicht hat dieselben Schlüssel mit denselben Zeichenketten als Werten, `PROBE_SCHEMA` eingeschlossen.
 
@@ -707,14 +722,14 @@ vertrauenswürdig:
 - Freier Text (`CPU_MODEL`, GPU-Namen, `BOARD_MODEL`) dient nur der Anzeige und erreicht nie eine Befehlszeile oder
   einen Dateinamen.
 
-Dateien in **Schema 1** (die heutige Ausgabe von `hardware_probe.sh` und `.ps1`, ohne `PROBE_SCHEMA`-Zeile) werden
-weiter gelesen:
+Dateien in **Schema 1** (die Ausgabe von `hardware_probe.sh` 2.4 und `.ps1` 2.5, die das Framework bis einschließlich
+Release 3.0.0 mitbrachte, ohne `PROBE_SCHEMA`-Zeile) werden weiter gelesen:
 
 - Die bekannten Schlüssel werden umgewandelt: `CPU_ARCH_TYPE` zu `ARCH`, `TRUE`/`FALSE` zu `ON`/`OFF`, `RAM_SWAP_MB`
   zu `SWAP_TOTAL_MB`, die erste GPU zu `GPU0_*`, `DOCKER_VERSION` zu `TOOL_DOCKER`. Die CPU-Merkmale einer `.sh`-Datei
   werden aus ihrer Flag-Liste abgeleitet, nicht aus ihren eigenen `SUPPORTS_*`-Zeilen übernommen; ohne Flag-Liste
   sind sie `UNKNOWN`.
-- Jedes CPU-Merkmal einer `.ps1`-Datei wird `UNKNOWN`, weil dieses Skript Windows mit falschen Konstanten fragt. Ihr
+- Jedes CPU-Merkmal einer `.ps1`-Datei wird `UNKNOWN`, weil dieses Skript Windows mit falschen Konstanten fragte. Ihr
   `RAM_TOTAL_MB` (die Summe der Speicherplätze) wird verworfen.
 - Der Hostname, die RAM-Teilenummern und jeder andere Schlüssel ohne Bedeutung in Schema 2 werden verworfen, ohne den
   Wert zu behalten. Ein Schlüssel, der zweimal mit verschiedenen Werten vorkommt, wird verworfen, ebenso ein Wert, der
@@ -747,5 +762,6 @@ Eine Geräte-ID sind die ersten 16 Hex-Zeichen des sha256 über den Fingerabdruc
 Sie bleibt gleich, wenn sich die IP-Adresse ändert, und enthält keinen Hostnamen. Ein Profil, das ohne SSH importiert
 wird, bekommt eine zufällige ID. Die Dateien gehören nur dem Benutzer (Modus 0600 in Ordnern mit Modus 0700),
 flüchtige Werte werden nicht gespeichert, und gespeicherte Dateien werden beim Zurücklesen wie Probe-Dateien geprüft.
-`llm-cli scan` und die Scans des Build-Reiters der GUI nutzen den Speicher nicht; sie schreiben die Probe-Datei wie in
-[Abschnitt 3.1](#31-das-board-untersuchen) beschrieben.
+`llm-cli scan` speichert das Profil dieses Rechners als `local`, und `llm-cli scan --device` speichert das Profil
+eines Geräts unter seiner ID. Die Scans des Build-Reiters der GUI nutzen den Speicher noch nicht; sie schreiben die
+Probe-Datei wie in [Abschnitt 3.1](#31-das-board-untersuchen) beschrieben.
