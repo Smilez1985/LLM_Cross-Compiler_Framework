@@ -617,8 +617,19 @@ You sign in to these clients with your own account or key; the framework never s
 
 ## secrets
 
-API keys and tokens are stored encrypted in `~/.llm-framework/secrets.store`; the key for that file is in your
-operating system's keyring.
+API keys and tokens are stored encrypted in the credential vault `secrets.store` in your personal state folder
+(`~/.llm-framework`, or `LLM_FRAMEWORK_HOME`). The vault is never placed inside a git working copy. Its key is in
+your operating system's keyring by default. Without a usable keyring, commands that need the framework stop with
+exit code 1 and list the choices; choose another protection with the setting `secret_storage` in `config.yml`, or
+with the environment variable `LLM_SECRET_STORAGE` for one run:
+
+| `secret_storage` | Where the vault key comes from |
+|---|---|
+| `keyring` | The operating system's keyring (default). |
+| `helper` | The command in the setting `secret_helper`, e.g. `pass show llmcc/vault-key`, run without a shell. |
+| `passphrase` | A passphrase asked once per start (at least 8 characters), never read from a file or a variable. |
+| `insecure` | A key file next to the vault: **not encrypted at rest**. |
+| `ephemeral` | Memory only, nothing is saved (for CI). |
 
 ### secrets set
 
@@ -653,7 +664,8 @@ llm-cli secrets set hf_token
 llm-cli secrets list
 ```
 
-Lists the stored names, never the values.
+Lists the stored names, never the values. Ditto's provider keys are listed under their vault names, for example
+`cred/anthropic/api_key` for `anthropic_api_key`; `secrets set` accepts both forms.
 
 ---
 

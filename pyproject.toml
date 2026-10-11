@@ -28,6 +28,9 @@ rich = ">=13.9,<16"
 # --- 4. Security ---
 cryptography = ">=49,<51"
 keyring = ">=25.6"
+# Cross-process lock of the credential vault (GUI, CLI and MCP server write it); already installed through
+# huggingface-hub, now a direct dependency.
+filelock = ">=3.20,<5"
 
 # --- 5. AI Agent & RAG (host side) ---
 # Ditto's provider layer uses the official SDKs only (OpenAI-compatible servers go through openai).
