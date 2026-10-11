@@ -7,14 +7,17 @@ it for the knowledge base. Rate-limited, behind the SSRF guard (every request an
 
 Text and data mining of public pages is allowed unless the rightsholder reserved it in machine-readable form
 (EU DSM Directive Art. 4, German UrhG 44b). The crawler therefore honours, with no switch to turn them off:
-* robots.txt as in RFC 9309 (the groups for this crawler merged, '*' and '$' patterns, the longest rule wins);
+* robots.txt as in RFC 9309, per scheme, host and port (the groups naming our product token merged, else the
+  '*' groups; '*' and '$' patterns; the longest rule wins). One deliberate deviation: a robots.txt answering 401 or
+  403 means "disallow everything" (RFC 9309 allows crawling on a 4xx): a reservation we cannot read still counts;
 * X-Robots-Tag headers and <meta name="robots"> / <meta name="llm-conversion-framework-bot">:
   noindex, none, noai and noimageai keep the page out; nofollow and none stop following its links;
 * the W3C TDM Reservation Protocol (TDMRep 1.0): /.well-known/tdmrep.json per origin, the tdm-reservation
   header, <meta name="tdm-reservation"> and tdm:reservation in PDF metadata.
 A reservation from any of these sources wins (TDMRep lets a later source lift an earlier reservation; the
-crawler stays on the cautious side). Every skipped page is logged and listed in `skipped` with the reason,
-every page that could not be fetched or read in `failed`.
+crawler stays on the cautious side). Every page left out (opt-out, address check, PDFs off, other language,
+neither HTML nor PDF, no text) is logged and listed in `skipped` with the reason, every page that could not be
+fetched or read in `failed`.
 
 iter_crawl() yields each page as soon as it is extracted, so the caller can store it right away; a stop event
 ends the crawl cleanly between two pages, and a progress callback gets "page N of M" before each request.
@@ -99,6 +102,13 @@ def robots_directives(values: Iterable[str], bot: str = BOT_NAME) -> Set[str]:
     return found
 
 
+def _robots_opt_out(label: str, values: Iterable[str]) -> Tuple[List[str], bool]:
+    """The reason if noindex, none, noai or noimageai apply to this crawler; whether to stop following links."""
+    directives = robots_directives(values)
+    hits = sorted(directives & SKIP_DIRECTIVES)
+    return ([f"{label}: {', '.join(hits)}"] if hits else []), bool(directives & NOFOLLOW_DIRECTIVES)
+
+
 def tdm_flag(value: Any) -> Optional[bool]:
     """TDMRep value: 1 reserved, 0 not reserved; anything else is a protocol error and counts as unset."""
     return None if value is None else {"1": True, "0": False}.get(str(value).strip())
@@ -133,8 +143,9 @@ def tdm_location_matches(location: str, path: str) -> bool:
 
 
 def robots_rules(text: str, bot: str = BOT_NAME) -> List[Tuple[bool, str]]:
-    """(allow, pattern) rules of a robots.txt for this crawler (RFC 9309): all groups naming it, else all
-    '*' groups. urllib.robotparser would ignore '*'/'$' patterns and every '*' group after the first."""
+    """(allow, pattern) rules of a robots.txt for this crawler (RFC 9309): all groups whose user-agent equals
+    its product token (case-insensitive; a group for "bot" is not ours), else all '*' groups.
+    urllib.robotparser would ignore '*'/'$' patterns and every '*' group after the first."""
     groups: List[Tuple[Set[str], List[Tuple[bool, str]]]] = []
     in_rules = False
     for line in text.splitlines():
@@ -144,13 +155,13 @@ def robots_rules(text: str, bot: str = BOT_NAME) -> List[Tuple[bool, str]]:
             if not groups or in_rules:   # a user-agent line after rules starts a new group
                 groups.append((set(), []))
                 in_rules = False
-            groups[-1][0].add(value.split("/")[0].strip().lower())
+            # The product token is letters, '_' and '-' (RFC 9309 2.2.1): "Bot/3.1" names "bot".
+            groups[-1][0].add(value if value == "*" else re.match(r"[a-z_-]*", value.lower()).group(0))
         elif key in ("allow", "disallow") and groups:
             in_rules = True
             if value:   # "Disallow:" (empty) allows everything
                 groups[-1][1].append((key == "allow", _root_pattern(value)))
-    bot = bot.lower()
-    ours = [group for group in groups if any(agent not in ("", "*") and agent in bot for agent in group[0])]
+    ours = [group for group in groups if bot.lower() in group[0]]
     return [rule for _, rules in (ours or [g for g in groups if "*" in g[0]]) for rule in rules]
 
 
@@ -161,6 +172,13 @@ def robots_allows(rules: List[Tuple[bool, str]], path: str) -> bool:
         if tdm_location_matches(pattern, path):
             best = max(best, (len(pattern), allow))
     return best[1]
+
+
+def _origin_and_path(url: str) -> Tuple[str, str]:
+    """scheme://host[:port] and the path with its query: robots.txt (RFC 9309 2.3) and tdmrep.json apply per
+    origin, so http:// and https:// of one host have their own."""
+    parsed = urlparse(url)
+    return f"{parsed.scheme}://{parsed.netloc}", (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
 
 
 def _utf8(response) -> str:
@@ -259,7 +277,7 @@ class CrawlerManager:
         self.skipped: List[SkippedPage] = []
         self.failed: List[SkippedPage] = []
         self.stopped = False
-        self.robot_rules: Dict[str, List[Tuple[bool, str]]] = {}   # per host, from robots.txt
+        self.robot_rules: Dict[str, List[Tuple[bool, str]]] = {}   # per origin, from robots.txt
         self.tdm_rules: Dict[str, List[TdmRule]] = {}   # per origin, from /.well-known/tdmrep.json
         self.session = requests.Session()
         adapter = PublicOnlyAdapter()
@@ -376,28 +394,33 @@ class CrawlerManager:
 
                 # 4. Opt-outs in the response, then the content
                 reasons, nofollow = self._header_opt_outs(response)
-                doc = None
-                new_links = []
+                doc, new_links, left_out = None, [], None
 
                 if 'application/pdf' in content_type or url.endswith('.pdf'):
-                    if self.download_pdfs and not reasons:
-                        if _PDF_TDM_RESERVATION.search(response.content or b""):
-                            reasons.append("TDM reservation (tdm:reservation in the PDF metadata)")
+                    if not self.download_pdfs:
+                        left_out = "PDF downloads are switched off"
+                    elif not reasons and _PDF_TDM_RESERVATION.search(response.content or b""):
+                        reasons.append("TDM reservation (tdm:reservation in the PDF metadata)")
+                    elif not reasons:
+                        doc = self._process_pdf(response.content, url)
+                elif 'text/html' in content_type:
+                    if not (reasons and nofollow):
+                        soup = BeautifulSoup(response.text, 'html.parser')
+                        meta_reasons, meta_nofollow = self._meta_opt_outs(soup)
+                        reasons += meta_reasons
+                        nofollow = nofollow or meta_nofollow
+                        if reasons:
+                            self._strip_boilerplate(soup)
+                            new_links = [] if nofollow else self._html_links(soup, url, allowed_hosts)
                         else:
-                            doc = self._process_pdf(response.content, url)
-                elif 'text/html' in content_type and not (reasons and nofollow):
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    meta_reasons, meta_nofollow = self._meta_opt_outs(soup)
-                    reasons += meta_reasons
-                    nofollow = nofollow or meta_nofollow
-                    if reasons:
-                        self._strip_boilerplate(soup)
-                        new_links = [] if nofollow else self._html_links(soup, url, allowed_hosts)
-                    else:
-                        doc, new_links = self._process_html(soup, url, allowed_hosts)
+                            doc, new_links = self._process_html(soup, url, allowed_hosts)
+                else:
+                    left_out = f"neither HTML nor PDF ({_remote_text(content_type) or 'no content type'})"
 
                 if reasons:
                     self._skip(url, "; ".join(reasons), opt_out=True)
+                elif left_out:
+                    self._skip(url, left_out)
                 elif doc:
                     collected += 1
                     yield doc
@@ -432,15 +455,11 @@ class CrawlerManager:
     def _header_opt_outs(self, response) -> Tuple[List[str], bool]:
         """Reservations in the response headers (X-Robots-Tag, TDMRep tdm-reservation) and whether the
         page's links must not be followed."""
-        directives = robots_directives(_header_values(response, "X-Robots-Tag"))
-        reasons = []
-        hits = sorted(directives & SKIP_DIRECTIVES)
-        if hits:
-            reasons.append(f"X-Robots-Tag: {', '.join(hits)}")
+        reasons, nofollow = _robots_opt_out("X-Robots-Tag", _header_values(response, "X-Robots-Tag"))
         # Repeated headers arrive joined ("1, 1"); any reserving value counts.
         if any(tdm_flag(v) for value in _header_values(response, "tdm-reservation") for v in value.split(",")):
             reasons.append(self._tdm_reason("tdm-reservation header", response.headers.get("tdm-policy")))
-        return reasons, bool(directives & NOFOLLOW_DIRECTIVES)
+        return reasons, nofollow
 
     def _meta_opt_outs(self, soup: BeautifulSoup) -> Tuple[List[str], bool]:
         """Reservations in <meta name="robots">, <meta name="<our bot>"> and <meta name="tdm-reservation">."""
@@ -448,11 +467,8 @@ class CrawlerManager:
         for meta in soup.find_all("meta", attrs={"name": True, "content": True}):
             name = str(meta["name"]).strip().lower()
             if name in ("robots", bot):
-                directives = robots_directives([str(meta["content"])])
-                hits = sorted(directives & SKIP_DIRECTIVES)
-                if hits:
-                    reasons.append(f'<meta name="{name}">: {", ".join(hits)}')
-                nofollow = nofollow or bool(directives & NOFOLLOW_DIRECTIVES)
+                found, stop = _robots_opt_out(f'<meta name="{name}">', [str(meta["content"])])
+                reasons, nofollow = reasons + found, nofollow or stop
             elif name == "tdm-reservation" and tdm_flag(meta["content"]):
                 reasons.append('TDM reservation (<meta name="tdm-reservation">)')
         return reasons, nofollow
@@ -464,11 +480,9 @@ class CrawlerManager:
     def _tdm_file_reservation(self, url: str) -> Optional[str]:
         """The reason when the origin's /.well-known/tdmrep.json reserves this URL (the first matching rule
         decides, TDMRep 1.0 section 3.2). The file is fetched once per origin."""
-        parsed = urlparse(url)
-        origin = f"{parsed.scheme}://{parsed.netloc}"
+        origin, path = _origin_and_path(url)
         if origin not in self.tdm_rules:
             self.tdm_rules[origin] = self._load_tdm_rules(origin + TDMREP_PATH)
-        path = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
         for rule in self.tdm_rules[origin]:
             if tdm_location_matches(rule.location, path):
                 if rule.reserved:
@@ -508,14 +522,13 @@ class CrawlerManager:
         raise RuntimeError("too many redirects")
 
     def _can_fetch(self, url: str) -> bool:
-        """Checks the host's robots.txt (fetched once per host)."""
+        """Checks the origin's robots.txt (fetched once per scheme, host and port)."""
         if not self.respect_robots:
             return True
-        parsed = urlparse(url)
-        if parsed.netloc not in self.robot_rules:
-            self.robot_rules[parsed.netloc] = self._load_robots(f"{parsed.scheme}://{parsed.netloc}/robots.txt")
-        path = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
-        return robots_allows(self.robot_rules[parsed.netloc], path)
+        origin, path = _origin_and_path(url)
+        if origin not in self.robot_rules:
+            self.robot_rules[origin] = self._load_robots(origin + "/robots.txt")
+        return robots_allows(self.robot_rules[origin], path)
 
     def _load_robots(self, robots_url: str) -> List[Tuple[bool, str]]:
         """robots.txt rules through the SSRF guard, every redirect hop checked again."""
@@ -525,7 +538,9 @@ class CrawlerManager:
             if response.status_code == 200:
                 return robots_rules(_utf8(response))
             if response.status_code in (401, 403) or response.status_code >= 500:
-                # RFC 9309 2.3.1.4: an unreachable robots.txt (server error) means complete disallow.
+                # A server error means complete disallow (RFC 9309 2.3.1.4). 401 and 403 deviate on purpose:
+                # RFC 9309 2.3.1.3 allows crawling on a 4xx, but a robots.txt locked away may hold a reservation
+                # we cannot read, and when in doubt the crawler does not crawl.
                 return disallow_all
             return []
         except requests.RequestException as e:
@@ -583,6 +598,7 @@ class CrawlerManager:
             self._skip(url, f"language '{lang}' is not one of {', '.join(sorted(self.languages))}")
             return None, []
         if not text.strip():
+            self._skip(url, "no text")
             return None, links
         metadata = {"source": url, "content_type": "html", "title": title}
         if lang:
@@ -590,28 +606,21 @@ class CrawlerManager:
         return Document(page_content=text, metadata=metadata), links
 
     def _process_pdf(self, pdf_bytes: bytes, url: str) -> Optional[Document]:
-        """Extrahiert Text aus PDF-Streams."""
+        """The PDF's text; a PDF without text (e.g. scanned) is skipped, an unreadable one failed."""
         if not PdfReader:
-            self.logger.warning("pypdf not installed. Skipping PDF.")
+            self._skip(url, "PDF support (pypdf) is not installed", level=logging.WARNING)
             return None
-            
         try:
             reader = PdfReader(BytesIO(pdf_bytes))
-            text = ""
-            for page in reader.pages:
-                extracted = page.extract_text()
-                if extracted:
-                    text += extracted + "\n"
-            
+            text = "".join(extracted + "\n" for page in reader.pages if (extracted := page.extract_text()))
             if not text.strip():
+                self._skip(url, "no text in the PDF")
                 return None
-                
             metadata = {"source": url, "content_type": "pdf"}
             info_title = getattr(reader.metadata, "title", None) if reader.metadata else None
             if isinstance(info_title, str) and info_title.strip():
                 metadata["title"] = info_title.strip()
             return Document(page_content=text, metadata=metadata)
-            
         except Exception as e:
             self._fail(url, f"unreadable PDF ({_remote_text(e)})", level=logging.ERROR)
             return None

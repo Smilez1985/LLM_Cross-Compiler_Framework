@@ -528,6 +528,44 @@ class TestCrawlerPoliteness:
         assert failed[f"http://93.184.215.14/r/{CrawlerManager.MAX_REDIRECTS}"] == "more than 5 redirects"
         assert crawler.skipped == [] and not crawler.stopped
 
+    def test_fetched_pages_that_are_not_stored_are_named(self, make_crawler):
+        """Each page counts toward crawler_max_pages; one that is not stored is named in skipped with the reason."""
+        site = "http://93.184.215.14"
+        links = "".join(f'<a href="/{name}">{name}</a>' for name in ("logo.png", "manual", "empty", "scan.pdf"))
+        crawler, web = make_crawler({
+            f"{site}/": response(html=links + EN),
+            f"{site}/logo.png": response(content_type="image/png", content=b"\x89PNG\r\n"),
+            f"{site}/manual": response(content_type="application/pdf", content=b"%PDF-1.4"),
+            f"{site}/empty": response(html="<html><body><nav>Menu</nav></body></html>"),
+        }, respect_robots=False, download_pdfs=False)
+
+        assert [d.metadata["source"] for d in crawler.crawl(f"{site}/")] == [f"{site}/"]
+        assert {page.url: page.reason for page in crawler.skipped} == {
+            f"{site}/logo.png": "neither HTML nor PDF (image/png)",
+            f"{site}/manual": "PDF downloads are switched off",   # a PDF content type at a non-.pdf address
+            f"{site}/empty": "no text",
+            f"{site}/scan.pdf": "PDF downloads are switched off",  # known before the request
+        }
+        assert not any(page.opt_out for page in crawler.skipped) and crawler.failed == []
+
+    def test_pdfs_without_text_or_without_pypdf_are_named(self, make_crawler, monkeypatch):
+        from pypdf import PdfWriter
+        from orchestrator.Core import crawler_manager
+
+        blank = io.BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(72, 72)
+        writer.write(blank)
+        url = "http://93.184.215.14/scan.pdf"
+        crawler, _ = make_crawler({url: response(content_type="application/pdf", content=blank.getvalue())},
+                                  respect_robots=False)
+
+        assert crawler.crawl(url) == []
+        assert [(page.url, page.reason) for page in crawler.skipped] == [(url, "no text in the PDF")]
+        monkeypatch.setattr(crawler_manager, "PdfReader", None)
+        assert crawler.crawl(url) == []
+        assert [(page.url, page.reason) for page in crawler.skipped] == [(url, "PDF support (pypdf) is not installed")]
+
 
 SITE = "http://93.184.215.14"
 OTHER_SITE = "http://93.184.215.15"
@@ -757,6 +795,32 @@ class TestCrawlerOptOuts:
         }, respect_robots=True)
 
         assert self.sources(crawler.crawl(f"{SITE}/private/public")) == [f"{SITE}/private/public"]
+
+    @pytest.mark.parametrize("agent", ["bot", "llm", "framework", "Framework-Bot", "*bot"])
+    def test_robots_txt_group_of_a_part_of_our_name_is_not_ours(self, make_crawler, agent):
+        """RFC 9309 2.2.1: a group is ours when its user-agent equals our product token; 'bot' is another crawler,
+        so the '*' group applies."""
+        crawler, web = make_crawler({
+            f"{SITE}/robots.txt": response(html=f"User-agent: {agent}\nAllow: /\n\nUser-agent: *\nDisallow: /\n",
+                                           content_type="text/plain"),
+            f"{SITE}/docs": page_with(body="P."),
+        }, respect_robots=True)
+
+        assert crawler.crawl(f"{SITE}/docs") == [] and f"{SITE}/docs" not in web.urls
+        assert self.reasons(crawler) == {f"{SITE}/docs": "disallowed by robots.txt"}
+
+    def test_robots_txt_per_scheme_host_and_port(self, make_crawler):
+        """RFC 9309 2.3: http:// and https:// of one host each have their own robots.txt."""
+        crawler, web = make_crawler({
+            "https://93.184.215.14/": page_with(body='<a href="http://93.184.215.14/guide">Guide</a>'),
+            f"{SITE}/robots.txt": response(html="User-agent: *\nDisallow: /\n", content_type="text/plain"),
+            f"{SITE}/guide": page_with(body="Guide."),
+        }, respect_robots=True)
+
+        assert self.sources(crawler.crawl("https://93.184.215.14/")) == ["https://93.184.215.14/"]
+        assert "https://93.184.215.14/robots.txt" in web.urls and f"{SITE}/robots.txt" in web.urls
+        assert self.reasons(crawler) == {f"{SITE}/guide": "disallowed by robots.txt"}
+        assert f"{SITE}/guide" not in web.urls
 
     def test_tdmrep_file_alone_reserves_paths_before_they_are_fetched(self, make_crawler):
         crawler, web = make_crawler({
