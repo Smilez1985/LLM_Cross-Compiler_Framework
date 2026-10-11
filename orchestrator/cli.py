@@ -702,10 +702,15 @@ def set_secret(ctx: FrameworkContext, key, password):
         console.print("[red]SecretsManager not available![/red]")
         sys.exit(1)
         
-    if ctx.framework_manager.secrets_manager.set_secret(key, password):
-        console.print(f"[green]Secret '{key}' stored successfully in Keyring.[/green]")
+    sm = ctx.framework_manager.secrets_manager
+    if not sm.set_secret(key, password):
+        console.print(f"[red]Failed to store secret '{escape(key)}'.[/red]")
+    elif getattr(sm, "storage_mode", None) == "ephemeral":
+        # Never let a CI user believe it was saved.
+        console.print(f"[yellow]Secret '{escape(key)}' is kept in memory for this run only "
+                      "(secret_storage: ephemeral); nothing was saved.[/yellow]")
     else:
-        console.print(f"[red]Failed to store secret '{key}'.[/red]")
+        console.print(f"[green]Secret '{escape(key)}' stored in the encrypted credential vault.[/green]")
 
 @secrets.command('list')
 @pass_context

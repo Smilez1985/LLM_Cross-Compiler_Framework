@@ -9,8 +9,8 @@ other protections are chosen explicitly (orchestrator/Core/vault_key.py).
 
 Format v2 (Fernet: AES-128-CBC with HMAC-SHA256; MultiFernet reads entries of the previous key during a
 rotation):
-  {"version": 2, "protection": "keyring", "kid": "<current key id>", "kdf": {...}, "check": "<token>",
-   "entries": {"<name>": {"kid": "<key id>", "ct": "<Fernet token>"}}}
+  {"version": 2, "protection": "keyring", "vault_id": "<keyring entry of this vault>", "kid": "<current key id>",
+   "kdf": {...}, "check": "<token>", "entries": {"<name>": {"kid": "<key id>", "ct": "<Fernet token>"}}}
 
 Entry names: credentials are `cred/<provider>/<method>[@<origin-hash>]` and hold a JSON record
 ({"v": 1, "kind": "api_key", "secret": ...}); other secrets (hf_token, github_token, ...) keep their names and
@@ -326,9 +326,14 @@ class SecretsManager:
                 # A new vault records its key id (and scrypt parameters) at once, so another process starting
                 # now uses the same key; an interrupted rotation is completed.
                 if not self._save_store() and needs_header:
-                    self._provider.forget(self._key_header)
-                    raise StorageUnavailable("storage.unavailable",
-                                             f"The credential vault {self.secrets_file} cannot be written.")
+                    if isinstance(self._provider, vault_key.DerivedKeyProvider):
+                        # Without its recorded salt the passphrase would open nothing next time.
+                        raise StorageUnavailable("storage.unavailable",
+                                                 f"The credential vault {self.secrets_file} cannot be written.")
+                    # A read-only folder: commands that need no secret keep working; the key stays for the
+                    # first write that succeeds.
+                    self.logger.warning(f"The credential vault {self.secrets_file} cannot be written; secrets "
+                                        "cannot be stored until it can.")
 
     def _preload_keys(self) -> None:
         """Asks for the passphrase (or runs the credential helper) before the vault lock is taken: a prompt
@@ -382,7 +387,7 @@ class SecretsManager:
         entry = (f"[{timestamp}] USER={_log_safe(user)} ACTION={action} KEY={_log_safe(key_name)} "
                  f"STATUS={status}\n")
         try:
-            self.audit_log_file.parent.mkdir(parents=True, exist_ok=True)
+            self.audit_log_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
             # O_BINARY: on Windows a descriptor is text mode otherwise, and lines would end in \r\r\n
             flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
             fd = os.open(self.audit_log_file, flags, 0o600)
@@ -456,7 +461,7 @@ class SecretsManager:
             return False
         try:
             plain = json.dumps({**record, "v": 1}, ensure_ascii=True, allow_nan=False)
-        except (TypeError, ValueError) as e:
+        except (TypeError, ValueError, RecursionError) as e:
             self.logger.error(f"Credential record {name} is not JSON: {type(e).__name__}")
             return False
         if len(plain) > MAX_RECORD_BYTES:
@@ -518,7 +523,8 @@ class SecretsManager:
     @_locked
     def rotate_key(self) -> bool:
         """Creates a new vault key, re-encrypts every entry and removes the old key. In passphrase mode the
-        passphrase is asked again (it may stay the same; the salt changes)."""
+        passphrase is asked again (it may stay the same; the salt changes). A store of an earlier version
+        moves from the shared keyring entry to its own; the shared one stays for the other stores."""
         if not self._ready():
             return False
         if not self._provider.persistent:
@@ -562,14 +568,15 @@ class SecretsManager:
             self.logger.error(f"Key rotation failed ({type(e).__name__}); the vault was not changed.")
             return False
         self._audit_log("ROTATE", "*", "SUCCESS")
-        self.logger.info("Vault key rotated; every entry re-encrypted and the old key removed.")
+        self.logger.info("Vault key rotated; every entry is re-encrypted with the new key.")
         return True
 
     @_locked
     def change_storage(self, mode: str, *, helper: Optional[str] = None) -> bool:
         """Moves the vault to another protection (keyring, helper, passphrase, insecure): re-encrypts every
-        entry with a new key, removes the old key and remembers the choice in the user config. Raises
-        StorageError when the new protection cannot be used (the vault is then unchanged)."""
+        entry with a new key, removes the old key (not the shared keyring entry of earlier versions, which
+        other stores may need) and remembers the choice in the user config. Raises StorageError when the new
+        protection cannot be used (the vault is then unchanged)."""
         mode = (mode or "").strip().lower()
         if mode not in STORAGE_MODES or "ephemeral" in (mode, self._mode):
             raise StorageError("storage.invalid_mode",
@@ -697,7 +704,7 @@ class SecretsManager:
     def _parse_record(self, name: str, plain: str) -> Optional[Dict[str, Any]]:
         try:
             record = json.loads(plain)
-        except ValueError:
+        except (ValueError, RecursionError):
             record = None
         if not isinstance(record, dict):
             self.logger.error(f"Credential record {name} is damaged.")
@@ -818,7 +825,7 @@ class SecretsManager:
         path = Path(os.path.realpath(path))
         tmp = None
         try:
-            path.parent.mkdir(parents=True, exist_ok=True)
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)  # private like the store
             fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".secrets.", suffix=".tmp")
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)

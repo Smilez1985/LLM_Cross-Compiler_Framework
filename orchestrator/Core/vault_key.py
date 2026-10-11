@@ -166,7 +166,7 @@ def replace_file(src, dst) -> None:
 def write_private(path: Path, text: str) -> None:
     """Atomic write with mode 0600 (temp file in the same folder, then rename)."""
     path = Path(os.path.realpath(path))
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -223,6 +223,19 @@ def prefer_local_machine(backend: Any) -> None:
             candidate.persist = "local machine"
 
 
+def unencrypted_backend(backend: Any) -> Optional[str]:
+    """The name of the backend if it keeps secrets without encryption (keyrings.alt, which calls itself
+    possibly insecure, and plaintext backends): using it would be secret_storage 'insecure' without the
+    user choosing it. A chainer writes to its first backend."""
+    chained = getattr(backend, "backends", None)
+    if isinstance(chained, (list, tuple)) and chained:
+        backend = chained[0]
+    cls = type(backend)
+    if cls.__module__.startswith("keyrings.alt") or "plaintext" in cls.__name__.lower():
+        return f"{cls.__module__}.{cls.__name__}"
+    return None
+
+
 def _probe(backend: Any) -> Optional[str]:
     user = f"probe-{os.getpid()}-{secrets.token_hex(4)}"
     value = secrets.token_urlsafe(16)
@@ -269,7 +282,8 @@ def keyring_problem() -> Optional[str]:
             cached = _MISSING
     if cached is not _MISSING:
         return cached
-    problem = _probe(backend)
+    plaintext = unencrypted_backend(backend)
+    problem = f"its backend {plaintext} stores secrets without encryption" if plaintext else _probe(backend)
     with _probe_lock:
         try:
             _probe_results[backend] = problem
@@ -298,7 +312,7 @@ def vault_service(vault_id: Optional[str]) -> str:
     """The keyring service holding a vault's key. Each vault has its own (a rotation or a change of storage
     must never remove the key of another vault, e.g. of another LLM_FRAMEWORK_HOME folder); stores of
     earlier versions (no vault id) share the plain service."""
-    return f"{KEYRING_SERVICE}/vault-{vault_id}" if vault_id else KEYRING_SERVICE
+    return f"{KEYRING_SERVICE}-vault-{vault_id}" if vault_id else KEYRING_SERVICE
 
 
 class KeyringHolder:
