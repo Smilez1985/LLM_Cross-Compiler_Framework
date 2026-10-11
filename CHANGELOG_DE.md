@@ -59,12 +59,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install|start|stop|status`
   betreibt einen gepinnten llama.cpp-`llama-server` auf 127.0.0.1 (Build passend zur Hardware: CUDA, Vulkan,
   Metal oder CPU, ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei), und `llm-cli ditto models list|download`
-  lädt Qwen3.5-Modelle in gepinnten Revisionen und prüft sie anhand von Größe und sha256. Die Modellstufen reichen
+  lädt Qwen3.5-Modelle in gepinnten Revisionen in den Ordner `ditto/` des eingestellten Modellordners
+  (`models_dir`, den Ditto nutzt) und prüft sie anhand von Größe und sha256. Die Modellstufen reichen
   bis zu 2-Bit-Modellen für schwache Hardware (3 GB RAM). Der Anbieter „local“ folgt dem laufenden Server ohne
   Konfiguration.
 - **Ditto-Evaluation** (`llm-cli ditto eval`): feste Fälle (Analyse von Build-Logs, Build-Empfehlungen,
   Modulvorschläge, Chat mit Tools, Prompt-Injection), nach Regeln bewertet, gegen den konfigurierten Anbieter oder
-  je lokaler Modellstufe (`--tier small --tier small-q2`). Es wird nichts gebaut; `--json` schreibt den Bericht.
+  je lokaler Modellstufe (`--tier small --tier small-q2`; die Server, die der Lauf startet, werden danach gestoppt,
+  einer, den du selbst gestartet hast, läuft weiter, wenn er die Stufe bedient). Es wird nichts gebaut; `--json`
+  schreibt den Bericht.
 - **Retrieval-Evaluation** (`llm-cli ditto eval --kind retrieval`): 42 deutsche und englische Suchen
   (sprachübergreifende Fragen, Bezeichner wie `GGML_CUDA`, Antworten tief in einer großen Tabelle oder einem
   Skript, die letzten Zeilen fehlgeschlagener Builds und Dittos eigene Suchbegriffe, themenfremde Fragen) gegen
@@ -220,6 +223,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eigenen Schlüsselfeld der KI-Einstellungen ersetzt ein Verfahren, das sich eine Anmeldung gemerkt hat (etwa
   das `ant`-Profil), damit er nicht ungenutzt bleibt.
 - `llm-cli secrets set --with-token` liest den Wert von stdin.
+- **Cancel Build** im Builder-Tab: bricht den laufenden Build nach einer Bestätigung über den Build-Service ab
+  (nur aktiv, solange der Build läuft, den der Tab gestartet hat); das Log meldet, wenn er angehalten hat.
 
 ### Geändert
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
@@ -294,6 +299,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
   Prozessliste. Nutze die verdeckte Abfrage oder `--with-token`.
+- `llm-cli build start --parallel`: Die Option hatte nie eine Wirkung (ein Aufruf startet einen Build). Sie ist in
+  der Hilfe ausgeblendet und gibt eine Warnung aus. `--optimization` bleibt; seine Hilfe sagt jetzt, dass das
+  Rockchip-Target die Option nicht auswertet.
 
 ### Entfernt
 - Dittos generierte Füll-Kalibrierungsdaten (Builds nutzen den mitgelieferten Kalibrierungstext oder deinen
@@ -331,6 +339,36 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Die CLI und die CLI-Anleitungen raten nicht mehr dazu, das GitHub-Token auf der Kommandozeile zu übergeben, wo
   der Shell-Verlauf es behält (diese Form funktionierte auch nicht). `llm-cli secrets set <name>` fragt den Wert
   verdeckt ab.
+- `llm-cli --help` und die Beschreibung der CLI nannten Version 2.4.0; jede Versionsangabe kommt jetzt aus der
+  Paketversion.
+- `llm-cli build status` listet Builds, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat: Jede
+  Build-Engine schreibt je Build einen Eintrag nach `<cache_dir>/build_records/` (Status, Stufe, Fortschritt, der
+  Fehler geschwärzt), und ein Build, dessen Programm endete, bevor er fertig war, erscheint als unterbrochen. Der
+  Befehl braucht weder den Tresor für Zugangsdaten noch Docker; `--all` listet jeden aufbewahrten Build statt der
+  20 neuesten.
+- Strg+C in `llm-cli build start` bricht den Build über den Build-Service ab: Sein Container wird gestoppt, die CLI
+  wartet, bis der Build angehalten hat, sagt das und endet mit Exit-Code 130. Vorher liefen Build und Container
+  weiter.
+- `llm-cli scan --output DATEI` erreicht die Hardware-Probe (`hardware_probe.sh --output`,
+  `hardware_probe.ps1 -OutputFile`), die immer `target_hardware_config.txt` in den aktuellen Ordner schrieb.
+- `llm-cli module create` schreibt in den eingestellten Targets-Ordner (`targets_dir`, relativ zur Installation)
+  statt nach `targets/` im aktuellen Ordner.
+- `llm-cli config show` gibt die wirksamen Einstellungen aus (`config.yml`, eine Datei aus `-c`, Variablen
+  `LLM_FRAMEWORK_*`, Vorgaben), jeweils mit ihrer Herkunft und mit geschwärzten Zugangsdaten, statt der
+  eingebauten Vorgaben der CLI.
+- `llm-cli config repos --add` speichert den Eintrag `{url: ...}`, den die Build-Engine als `<NAME>_REPO_OVERRIDE`
+  weiterreicht; reine URLs aus früheren Versionen werden ebenfalls weitergereicht.
+- `llm-cli targets list` zeigt für jedes Target die ID (den Wert für `--target`), den Namen sowie Boards und
+  Formate aus seinen Capabilities statt Platzhaltern; `llm-cli targets validate` prüft den Block `capabilities:`
+  gegen das Schema und gibt jeden Fehler aus (Exit-Code 1).
+- `llm-cli deploy package`, `secrets set` und `scan` enden mit Exit-Code 1, wenn sie scheitern (vorher mit 0).
+- Die Hilfe zu `llm-cli doctor --tier` nennt nur Korrekturen, die es gibt (Stufe 1 macht den persönlichen Ordner
+  privat; eine Korrektur für Ordner gibt es nicht).
+- Ein Target, dessen `metadata.id` vom Ordnernamen abweicht, lässt sich bauen: CLI, Build-Service, Orchestrator und
+  Build-Engine lösen Targets über eine einzige Zuordnung von ID zu Ordner auf (vorher übersprang der Orchestrator
+  ein solches Target mit „Nothing to build“), und `-t` nimmt die ID oder den Ordnernamen.
+- Die Einstellung `max_concurrent_builds` legt die Zahl der Build-Slots fest (sie hatte keine Wirkung; die Engine
+  nutzte immer 2).
 
 ### Sicherheit
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
@@ -420,6 +458,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wird: `--insecure-storage` ersetzt nie einen Schutz, der funktioniert, und auch keinen Credential-Helper und
   keine Passphrase, die du gewählt hast. Ein Schlüssel mit einem Leerzeichen, einem Zeilenumbruch oder einem
   unsichtbaren Zeichen darin wird abgelehnt, bevor etwas gesendet oder gespeichert wird.
+- Das Builder-Log zeigt jede Meldung als reinen Text, sodass Namen aus Community-Rezepten, Dittos Antworten oder
+  Build-Ausgaben nicht als HTML erscheinen (Links, Bilder, Formatierung).
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

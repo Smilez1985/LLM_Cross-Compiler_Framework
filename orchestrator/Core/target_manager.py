@@ -7,14 +7,55 @@ Verwaltet Hardware-Zielprofile (Targets).
 Liest YAML-Definitionen und importiert Hardware-Probes.
 """
 
-import os
 import yaml
-import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 from orchestrator.utils.logging import get_logger
 from orchestrator.schemas.targets import TargetCapabilities
+
+def read_target_folders(targets_dir: Path, logger=None) -> Dict[str, Tuple[Path, Dict[str, Any]]]:
+    """Every loadable target in targets_dir: id -> (folder, data of its target.yml). The id is metadata.id, or the
+    folder name when it declares none. The one map from target ids to folders: the target registry, the build
+    service, the orchestrator and the build engine all resolve targets through it."""
+    found: Dict[str, Tuple[Path, Dict[str, Any]]] = {}
+    if not targets_dir.is_dir():
+        return found
+    for item in sorted(targets_dir.iterdir()):
+        if not item.is_dir() or item.name.startswith(("_", ".")) or not (item / "target.yml").exists():
+            continue
+        try:
+            with open(item / "target.yml", 'r', encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+        except Exception as e:
+            if logger:
+                logger.error(f"Failed to load target {item.name}: {e}")
+            continue
+        if not isinstance(data, dict) or not isinstance(data.get('metadata'), dict):
+            if logger:
+                logger.warning(f"Invalid target config in {item.name}")
+            continue
+        tid = str(data['metadata'].get('id') or item.name)
+        data['metadata']['id'] = tid
+        found[tid] = (item, data)
+    return found
+
+
+def resolve_target_name(name: Optional[str], folders: Dict[str, Path]) -> Optional[str]:
+    """The registered id for a name the user typed: the id itself, else its folder name, each first exactly and
+    then ignoring the letter case. None for an unknown name."""
+    name = (name or "").strip()
+    if not name:
+        return None
+    for matches in (lambda a, b: a == b, lambda a, b: a.casefold() == b.casefold()):
+        for tid in folders:
+            if matches(tid, name):
+                return tid
+        for tid, folder in folders.items():
+            if matches(folder.name, name):
+                return tid
+    return None
+
 
 class TargetManager:
     def __init__(self, framework_manager):
@@ -32,6 +73,7 @@ class TargetManager:
             
         self._targets: Dict[str, Any] = {}
         self._capabilities: Dict[str, TargetCapabilities] = {}
+        self._folders: Dict[str, Path] = {}  # target id -> its folder (the id may differ from the folder name)
         self._initialized = False
 
     def initialize(self):
@@ -39,6 +81,7 @@ class TargetManager:
         self.logger.info(f"Loading targets from {self.targets_dir}...")
         self._targets = {}
         self._capabilities = {}
+        self._folders = {}
         
         if not self.targets_dir.exists():
             self.logger.warning(f"Targets directory {self.targets_dir} does not exist.")
@@ -48,29 +91,15 @@ class TargetManager:
                 self.logger.error(f"Could not create targets dir: {e}")
                 return
 
-        # Scan subdirectories
-        for item in self.targets_dir.iterdir():
-            if item.is_dir() and not item.name.startswith(("_", ".")):
-                config_file = item / "target.yml"
-                if config_file.exists():
-                    try:
-                        with open(config_file, 'r', encoding='utf-8') as f:
-                            data = yaml.safe_load(f)
-                            # Basic Validation
-                            if isinstance(data, dict) and isinstance(data.get('metadata'), dict):
-                                tid = data['metadata'].get('id') or item.name
-                                data['metadata']['id'] = tid
-                                self._targets[tid] = data
-                                if 'capabilities' in data:
-                                    try:
-                                        self._capabilities[tid] = TargetCapabilities.model_validate(data['capabilities'])
-                                    except Exception as e:  # pydantic.ValidationError, but keep loading other targets
-                                        self.logger.error(f"Invalid capabilities in {config_file}: {e}")
-                                self.logger.debug(f"Loaded target: {tid}")
-                            else:
-                                self.logger.warning(f"Invalid target config in {item.name}")
-                    except Exception as e:
-                        self.logger.error(f"Failed to load target {item.name}: {e}")
+        for tid, (folder, data) in read_target_folders(self.targets_dir, self.logger).items():
+            self._targets[tid] = data
+            self._folders[tid] = folder
+            if 'capabilities' in data:
+                try:
+                    self._capabilities[tid] = TargetCapabilities.model_validate(data['capabilities'])
+                except Exception as e:  # pydantic.ValidationError, but keep loading other targets
+                    self.logger.error(f"Invalid capabilities in {folder / 'target.yml'}: {e}")
+            self.logger.debug(f"Loaded target: {tid}")
         
         self.logger.info(f"Loaded {len(self._targets)} targets.")
         self._initialized = True
@@ -78,6 +107,16 @@ class TargetManager:
     def get_target(self, target_id: str) -> Optional[Dict[str, Any]]:
         if not self._initialized: self.initialize()
         return self._targets.get(target_id)
+
+    def resolve(self, name: Optional[str]) -> Optional[str]:
+        """The registered id of a target given by id or folder name, in any letter case (None if unknown)."""
+        if not self._initialized: self.initialize()
+        return resolve_target_name(name, self._folders)
+
+    def folder_of(self, name: Optional[str]) -> Optional[Path]:
+        """The folder of a target given by id or folder name (None if unknown)."""
+        tid = self.resolve(name)
+        return self._folders.get(tid) if tid else None
 
     def list_targets(self) -> List[Dict[str, Any]]:
         if not self._initialized: self.initialize()
