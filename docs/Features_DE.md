@@ -1216,7 +1216,9 @@ Das Repository schützt sich vor eingecheckten Zugangsdaten. `scripts/secret_sca
 API-Schlüssel von Anbietern, Tokens, private Schlüssel, Zertifikate und Dateien mit Zugangsdaten. Es läuft als
 Pre-Commit- und Pre-Push-Hook (`make hooks`) und als CI-Job über die gesamte Historie. Persönliche Zeichenketten wie
 deine E-Mail-Adresse oder dein Benutzername kommen in `.git/info/secret-patterns`, das nie eingecheckt wird. Funde
-werden geschwärzt ausgegeben. Einzelheiten: [CONTRIBUTING_DE.md](../CONTRIBUTING_DE.md).
+werden geschwärzt ausgegeben. Ein Wert im exakten Token-Format eines Anbieters wird auch dann gemeldet, wenn er
+unecht aussieht, weil der Push-Schutz von GitHub den Push ohnehin ablehnen würde. Einzelheiten:
+[CONTRIBUTING_DE.md](../CONTRIBUTING_DE.md).
 
 ---
 

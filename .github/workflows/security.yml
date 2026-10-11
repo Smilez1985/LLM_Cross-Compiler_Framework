@@ -33,6 +33,11 @@ jobs:
       - name: Scan every commit for API keys, tokens and private keys
         run: python scripts/secret_scan.py --history
 
+      # The allowlist (.secret-scan-allow) applies to --history only; the tracked files of this commit get the
+      # full check, so a listed test mock added again fails here and not only in the optional git hooks.
+      - name: Scan the tracked files of this commit
+        run: python scripts/secret_scan.py
+
   bandit:
     name: Bandit (static analysis)
     runs-on: ubuntu-latest

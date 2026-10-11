@@ -465,7 +465,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   keinen Ordner `build/` mehr, den es nicht gibt, was jeden Build eines erzeugten Moduls am Ende scheitern ließ.
 - Secret-Scan mit dem Werkzeug pre-commit: Seine pre-push-Stufe durchsucht die Commits, die gepusht werden
   (`--push`, das den gepushten Commit jetzt aus `PRE_COMMIT_TO_REF` liest), wie `.githooks/pre-push`, statt der
-  ganzen Historie.
+  ganzen Historie. Die Prüfung vor dem Commit (`--staged`) durchsucht auch eine Datei, die einen symbolischen Link
+  ersetzt hat, und Dateien, deren Name einen Zeilenumbruch enthält oder wie `0:` beginnt; die übersprang sie vorher.
 
 ### Sicherheit
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
@@ -537,10 +538,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Eine Tabelle der Secret-Formate** (`orchestrator/security/secret_patterns.py`) für den Secret-Scan und die
   Schwärzung zur Laufzeit, die vorher nur fünf Formate kannte. Neu: Schlüssel von Unsloth Studio (`sk-unsloth-`),
   kurzlebige Bedrock-Schlüssel (`bedrock-api-key-`), LocalAI-Schlüssel (`lai-`), geheime age-Schlüssel
-  (`AGE-SECRET-KEY-1...`), Zeilen mit `Authorization: Bearer` und Werte in Anführungszeichen, die `api_key`,
+  (`AGE-SECRET-KEY-1...`), Organisations-Tokens von Hugging Face (`api_org_`), Test-Schlüssel von Stripe
+  (`sk_test_`, `rk_test_`), Zeilen mit `Authorization: Bearer` und Werte in Anführungszeichen, die `api_key`,
   `secret` oder `token` zugewiesen werden (ein Name in Kleinbuchstaben wie `"community_signing_key"` wird nicht
-  gemeldet). Die Schwärzung zur Laufzeit
-  erfasst jetzt auch JWTs, Blöcke privater Schlüssel und Passwörter in URLs.
+  gemeldet). Die Schwärzung zur Laufzeit erfasst jetzt auch JWTs, Blöcke privater Schlüssel, Passwörter in URLs,
+  routingfähige GitLab-Tokens vollständig, Tokens von xAI und Replicate, die `_` oder `-` enthalten, und
+  Schlüssel direkt hinter einem Buchstaben einer anderen Schrift (`令牌hf_...`, `éAKIA...`). Der Secret-Scan meldet
+  einen Wert im exakten Format eines Tokens, das der Push-Schutz von GitHub blockiert (etwa `hf_` gefolgt von 34
+  Buchstaben oder `ghp_` gefolgt von 36 Buchstaben und Ziffern), auch wenn er wie ein Platzhalter aussieht oder
+  seine Zeile `secret-scan: allow` trägt, und auch in Textdateien über 5 MB, die die übrigen Regeln überspringen:
+  GitHub lehnt einen solchen Push ab, so unecht der Wert auch aussieht, und kennt die Markierung nicht. Tests bauen
+  solche Werte zur Laufzeit zusammen. Nur `--history` überspringt die zwei dokumentierten unechten Testwerte, die
+  alte Commits noch enthalten; `.secret-scan-allow` listet sie über den sha256 des exakten Werts, nie über den Wert
+  selbst. Jeder andere Modus meldet sie weiterhin. Ein gelisteter Testwert verdeckt nichts anderes: Ein längerer
+  Wert eines anderen Formats, der ihn enthält, wird weiterhin gemeldet, die übrigen Regeln lesen die Zeile auch ohne
+  ihn, und eine Zeile der Liste mit einem Steuer- oder unsichtbaren Zeichen ist fehlerhaft (Exit-Code 2), damit ein
+  Kommentar keinen Eintrag verstecken kann.
 - API-Schlüssel, die Dittos Anbieterschicht im Speicher hält, erscheinen in `str()` und `repr()` als
   `<redacted>` und lassen sich nicht mit pickle serialisieren.
 - Ein Schlüssel eines eigenen OpenAI-kompatiblen Servers gehört zu der Adresse, für die er gespeichert wurde

@@ -283,7 +283,52 @@ GitHub, GitLab, AWS, Google, Groq, xAI und andere), JSON Web Tokens, private Sch
 Passwort. Manche Dateien werden schon am Namen abgelehnt, egal was drinsteht, etwa `.env`, `credentials.json`,
 `secrets.store`, `audit.db`, `known_hosts`, `id_ed25519`, `chat_history.json`, `tool_policy.json` und `*.pem`.
 Offensichtliche Platzhalter (`EXAMPLE`, `REDACTED`, `xxxxxxxx`, `<...>`, Beispiel-Domains) werden ignoriert. Eine
-Zeile mit `secret-scan: allow` wird übersprungen; nutze das nur für dokumentierte Fantasiewerte.
+Zeile mit `secret-scan: allow` wird übersprungen; nutze das nur für dokumentierte Fantasiewerte. Beides gilt nicht
+für die exakten Token-Formate unten.
+
+**Unechte Tokens in Tests und Dokumentation:** Der Push-Schutz von GitHub lehnt einen Push ab, der einen Wert im
+exakten Token-Format eines Anbieters enthält, so unecht der Wert auch aussieht: `hf_` gefolgt von 34 Buchstaben
+(auch das Alphabet), `ghp_` gefolgt von 36 Buchstaben und Ziffern, ein vollständiger Schlüssel
+`sk-ant-api03-...AA` und so weiter. Die Markierung `secret-scan: allow` kennt GitHub nicht. Deshalb meldet der Scan
+solche Werte auch dann, wenn sie wie Platzhalter aussehen, und die Markierung unterdrückt diese Funde nicht; die
+Meldung sagt, dass GitHub den Push blockieren wird. Das gilt in jedem Modus: Auch `--push` meldet ältere Commits,
+die einen solchen Wert noch enthalten, denn ein Push dieser Commits würde ebenfalls abgelehnt, und ebenso
+`--history`, ausgenommen die unten gelisteten unechten Testwerte. Es gilt auch für Textdateien über 5 MB, die die
+übrigen Regeln überspringen. Die Formate stehen in `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py`
+(Hugging Face, GitHub, AWS, Slack, GitLab, Stripe, PyPI, OpenAI, Anthropic, OpenRouter, Groq, xAI, Perplexity,
+Replicate). Baue einen solchen Testwert stattdessen zur Laufzeit zusammen, damit die Datei ihn nie am Stück enthält:
+
+```python
+TOKEN = "hf_" "abcdefghijklmnopqrstuvwxyzABCDEFGH"  # benachbarte String-Literale: zur Laufzeit ein String
+TOKEN = "hf_" + "x" * 34                            # oder Verkettung
+```
+
+Oder nimm einen Wert, der nicht zum exakten Format passt: eine andere Länge oder ein Zeichen, das das Format nicht
+erlaubt (eine Ziffer in einem Hugging-Face-Token). In der Dokumentation kürze den Wert (`hf_...`).
+
+**Unechte Testwerte in alten Commits:** Ein bereits veröffentlichter Commit lässt sich nicht ändern, ohne die
+Historie umzuschreiben. `.secret-scan-allow` im Wurzelverzeichnis des Repositorys listet die dokumentierten unechten
+Testwerte, die alte Commits noch enthalten, damit `--history` (der CI-Job, `make secret-scan`) durchläuft. Derzeit
+sind es zwei, aus alten Fassungen von `tests/test_security.py` und `tests/test_cli_builds.py`. Jede Zeile nennt
+genau einen Wert über den sha256-Hexwert dieses exakten Werts, nie über den Wert selbst (das wäre ein Literal im
+exakten Format, das GitHub blockiert), danach zwei Leerzeichen und eine Notiz: die ersten und letzten 4 Zeichen, die
+Länge, warum es ein unechter Testwert ist und wo er steht. Berechne den Hexwert, ohne den Wert in deiner
+Shell-Historie zu hinterlassen:
+
+```bash
+python3 -c "import getpass, hashlib; print(hashlib.sha256(getpass.getpass('value: ').encode()).hexdigest())"
+```
+
+Die Liste gilt nur für `--history` und nur für den gelisteten Wert selbst: Jeder andere Modus meldet ihn weiterhin,
+die Git-Hooks halten einen neuen Commit damit also auf. Ein gelisteter Wert verdeckt nichts anderes: Ein längerer
+Wert eines anderen Formats, der ihn enthält, wird weiterhin gemeldet, und die übrigen Regeln (Anbieterschlüssel,
+lokale Muster, Dateinamen) lassen nie einen Fund wegen der Liste weg, ein echt aussehender Schlüssel wird also auch
+dann gemeldet, wenn sein Hexwert gelistet ist. Sie lesen die Zeile außerdem ohne den gelisteten Wert, damit ein Wert
+neben einem unechten Testwert nicht als Platzhalter durchgeht. Eine fehlerhafte Zeile stoppt den Scan in jedem Modus
+(Exit-Code 2), damit ein Tippfehler nicht mehr erlaubt; ein Steuer-, Format- oder Zeilentrennzeichen (ein einzelnes
+Carriage Return, eine Byte Order Mark, ein Leerzeichen der Breite null) macht eine Zeile ebenfalls fehlerhaft, damit
+ein Kommentar keinen Eintrag verstecken kann. Trage nie echte Zugangsdaten ein, so alt sie auch sind: Tausche sie aus
+und schreibe die Historie um ([Abschnitt 12](#12-wenn-ein-secret-offengelegt-wurde)).
 
 **Persönliche Zeichenfolgen** wie deine E-Mail-Adresse, dein Benutzername oder Hostnamen gehören ebenfalls nicht ins
 Repository, können aber nicht in einer öffentlichen Musterliste stehen. Trage sie in `.git/info/secret-patterns`
