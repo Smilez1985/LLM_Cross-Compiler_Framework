@@ -257,7 +257,7 @@ class TestRegistry:
             registry.call("write", {"text": "y"}, ToolContext("ditto", confirm=lambda s, i: False))
 
     def test_policy_allow_skips_the_question(self, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         assert registry.call("write", {"text": "x"}, ToolContext("mcp")).text == "done"
 
     def test_invalid_arguments(self, registry):
@@ -367,6 +367,7 @@ class TestPermissionSetup:
                 self.framework_manager = booted_framework
                 return self
 
+        monkeypatch.setattr(cli_module, "_interactive", lambda: True)  # a person at a terminal (S4)
         result = CliRunner().invoke(cli_module.cli, ["ditto", "setup"], input="allow\nallow\nask\n", obj=Ctx())
         assert result.exit_code == 0, result.output
         policy = booted_framework.tool_registry.policy()

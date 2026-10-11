@@ -59,12 +59,13 @@ UNKEYED = "unkeyed"
 # What an entry can record. `started` is the write-ahead entry of a call that changes something (written before
 # the handler runs; the call is refused when it cannot be written), `confirmation_requested` the record of a
 # question put to a person; the other outcomes are end states. `folder_added` and `folder_removed` record a person's
-# change to the folders the AI may use (framework-side events, actor cli or gui).
+# change to the folders the AI may use, `policy_changed` a saved change of the tool permissions with the old and new
+# decisions (framework-side events, actor cli or gui).
 OUTCOMES = frozenset({
     "ok", "error", "denied", "not_confirmed", "invalid_input",
     "started", "confirmation_requested", "cancelled", "rate_limited", "confirmation_timeout",
     "audit_unavailable", "unknown_tool", "repeat_refused", "cannot_reported",
-    "folder_added", "folder_removed",
+    "folder_added", "folder_removed", "policy_changed",
 })
 # How a person answered (or did not answer) a question.
 ANSWERS = frozenset({"accepted", "declined", "cancelled", "timeout", "client_disconnected", "unavailable",
@@ -573,6 +574,29 @@ class AuditLog:
             return result("modified", anchor[0])
         # The newest entry the log had is gone (or was rewritten together with everything before it).
         return result("removed", anchor[0])
+
+    def kept_with_key(self) -> bool:
+        """Whether this log is kept with a key (its newest entry, or the key it started with, names one): then a
+        signed per-user file must carry a keyed signature too. Never creates the log; True when it cannot be read
+        (fail closed)."""
+        if not os.path.lexists(self.path):
+            return False
+        try:
+            db = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True, timeout=15)
+        except (sqlite3.Error, OSError, ValueError):
+            return True
+        try:
+            tables = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            if "events" not in tables:
+                return False
+            ids = [r[0] for r in db.execute("SELECT key_id FROM events ORDER BY id DESC LIMIT 1")]
+            if "meta" in tables:
+                ids += [r[0] for r in db.execute("SELECT v FROM meta WHERE k = 'key_id'")]
+            return any(kid not in (None, UNKEYED) for kid in ids)
+        except sqlite3.Error:
+            return True
+        finally:
+            db.close()
 
     def verify(self) -> Optional[int]:
         """None if the log is intact; else the first broken or missing entry (0 if no single entry is to blame)."""

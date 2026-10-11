@@ -29,6 +29,7 @@ from typing import Callable, Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from orchestrator.tools.policy import Decision, ToolPolicy, ToolTier, restrictive_policy
+from orchestrator.tools.signing import SIGNATURE_FIELD, SignatureError, sign, verify
 from orchestrator.utils.file_lock import file_lock
 
 ACTOR_PREFIX = "mcp:"          # the audit actor of a named token is "mcp:<name>"
@@ -93,14 +94,20 @@ class TokenStoreError(Exception):
 class TokenStore:
     """The named tokens in the per-user folder (`mcp_tokens.json`, mode 0600), changed under a cross-process lock.
     Reads are cached by the file's identity, so the HTTP server can check every request cheaply and sees a revoke
-    or rotate at once."""
+    or rotate at once. The file is signed like the tool permissions (orchestrator/tools/signing.py): a file edited
+    by hand, damaged, unsigned or signed with another key accepts no token at all."""
 
     FILE_NAME = "mcp_tokens.json"
     LOCK_NAME = ".mcp_tokens.lock"
+    KIND = "mcp_tokens"
 
-    def __init__(self, state_dir: Path):
+    def __init__(self, state_dir: Path, key: Optional[bytes] = None,
+                 refuse_unkeyed: Optional[Callable[[], bool]] = None):
+        """key and refuse_unkeyed: as for PolicyStore (the audit key from the OS keyring, None without one)."""
         self.path = Path(state_dir) / self.FILE_NAME
         self.lock_path = Path(state_dir) / self.LOCK_NAME
+        self.key = key
+        self.refuse_unkeyed = refuse_unkeyed
         self._cache: Optional[Tuple[tuple, Dict[str, TokenRecord]]] = None
         self._cache_lock = threading.Lock()
 
@@ -127,12 +134,20 @@ class TokenStore:
             if self._cache is not None and self._cache[0] == key:
                 return self._cache[1]
         try:
-            data = TokenFile.model_validate(json.loads(self.path.read_text(encoding="utf-8")))
+            raw = json.loads(self.path.read_text(encoding="utf-8"))
+            if not isinstance(raw, dict):
+                raise ValueError("not a JSON object")
+            data = TokenFile.model_validate({k: v for k, v in raw.items() if k != SIGNATURE_FIELD})
         except OSError as e:
             raise TokenStoreError(f"{self.path} cannot be read ({e}); no MCP token is accepted.") from None
         except (ValueError, ValidationError, RecursionError) as e:
             raise TokenStoreError(f"{self.path} is damaged ({str(e).splitlines()[0][:200]}); no MCP token is "
                                   "accepted. Remove the file and create the tokens again.") from None
+        try:
+            verify(self.KIND, raw, self.key, self.refuse_unkeyed)
+        except SignatureError as e:
+            raise TokenStoreError(f"{self.path} cannot be trusted: {e}. No MCP token is accepted. Remove the file and "
+                                  "create the tokens again ('llm-cli mcp token add NAME').") from None
         records = {t.name: t for t in data.tokens}
         with self._cache_lock:
             self._cache = (key, records)
@@ -210,7 +225,8 @@ class TokenStore:
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".mcp_tokens.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(data.model_dump_json(indent=2, exclude_none=True))
+                f.write(json.dumps(sign(self.KIND, data.model_dump(mode="json", exclude_none=True), self.key),
+                                   indent=2, ensure_ascii=False))
                 f.flush()
                 os.fsync(f.fileno())
             os.chmod(tmp, 0o600)

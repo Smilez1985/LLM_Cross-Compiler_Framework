@@ -177,7 +177,7 @@ def framework():
 @pytest.fixture
 def tools(tmp_path, framework):
     reg = ToolRegistry(PolicyStore(tmp_path), AuditLog(tmp_path / "audit.db"))
-    reg.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.READ: Decision.ALLOW,
+    reg.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.READ: Decision.ALLOW,
                                                              ToolTier.LOCAL_WRITE: Decision.ALLOW}))
     framework.tool_registry = reg
     return framework_tools.register_framework_tools(reg, framework)
@@ -320,7 +320,7 @@ class TestHandlerErrors:
 
     def test_framework_refusals_stay_plain(self, tmp_path):
         reg = registry_with(tmp_path, lambda i: Probe())
-        reg.policy_store.save(ToolPolicy(configured=True, overrides={"probe": Decision.DENY}))
+        reg.policy_store.replace(ToolPolicy(configured=True, overrides={"probe": Decision.DENY}))
         text = text_of_error(mcp_registry_call(reg, "probe", {}))
         assert "untrusted_data" not in text and "not allowed by your tool permissions" in text
 

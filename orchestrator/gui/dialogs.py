@@ -912,7 +912,9 @@ class ToolPermissionsDialog(QDialog):
         from orchestrator.tools.policy import Decision, TIER_LABELS, ToolTier
         self._Decision, self._ToolTier = Decision, ToolTier
         self.registry = registry
-        policy = registry.policy()
+        # What this window shows and changes: saving refuses when the stored permissions changed meanwhile
+        # (another window or process), so a change made elsewhere is never undone silently.
+        self.loaded = policy = registry.policy()
         self.setWindowTitle("Ditto setup - tool permissions" if first_run else "Tool permissions")
         self.resize(720, 520)
         layout = QVBoxLayout(self)
@@ -924,6 +926,12 @@ class ToolPermissionsDialog(QDialog):
             "Tools marked new use their own default until you save here.")
         intro.setWordWrap(True)
         layout.addWidget(intro)
+        problem = getattr(registry.policy_store, "problem", None)
+        if problem:  # e.g. not signed or edited by hand: everything is denied until saved here
+            warning = QLabel(problem)
+            warning.setWordWrap(True)
+            warning.setStyleSheet("color: #b00020;")
+            layout.addWidget(warning)
 
         tier_box = QGroupBox("Per category")
         form = QFormLayout(tier_box)
@@ -977,13 +985,13 @@ class ToolPermissionsDialog(QDialog):
         tiers = {tier: self._Decision(combo.currentData()) for tier, combo in self.tier_combos.items()}
         overrides = {name: self._Decision(combo.currentData())
                      for name, combo in self.override_combos.items() if combo.currentData()}
-        return self.registry.policy().model_copy(update={
+        return self.loaded.model_copy(update={
             "configured": True, "tiers": tiers, "overrides": overrides,
             "reviewed": sorted(self.override_combos)})
 
     def save(self):
         try:
-            self.registry.policy_store.save(self.build_policy())
+            self.registry.policy_store.save(self.build_policy(), actor="gui")
         except Exception as e:
             QMessageBox.critical(self, "Tool permissions", f"Could not save the permissions:\n{e}")
             return

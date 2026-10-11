@@ -787,6 +787,12 @@ set in the GUI are kept. It first lists every tool with its own default, the hig
 it (`at most`), whether it is new since the last review and whether a confirmation may offer a standing approval;
 saving counts every listed tool as reviewed. The GUI dialog shows the same facts.
 
+It needs a person at a terminal, with and without `--reset` (as does `ditto setup`): piped answers are refused with
+exit code 2. Every save is audited with actor `cli` and the old and new decisions before it takes effect, and is
+refused (exit code 1, nothing changed) when the audit entry cannot be written or when the permissions were saved
+elsewhere (the GUI, another terminal) while you answered. A permission file that is damaged, edited by hand or not
+signed (one saved by 3.0.0, too) denies every tool until you run this again; the questions then start from "deny".
+
 | Option | Meaning |
 |---|---|
 | `--caller ditto\|mcp` | Set the permissions of one caller (Ditto, or local MCP clients over stdio) instead of the shared ones. A caller's first permissions start from the shared ones, including the settings for single tools. |

@@ -855,8 +855,10 @@ def tools_list(ctx: FrameworkContext, caller: Optional[str]):
 def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for: str = ""):
     """Interactive questions for the tool permissions (one per tier), for one caller or the shared ones. Every
     registered tool counts as reviewed afterwards: the questions apply to the tools listed above them. `shown_for`:
-    whose tool facts to list (a named token's, whose own policy `current` is), else `caller`'s."""
+    whose tool facts to list (a named token's, whose own policy `current` is), else `caller`'s. Needs a person at a
+    terminal: piped answers (an AI client with a shell) are refused."""
     from orchestrator.tools.policy import TIER_LABELS, CallerPolicy, Decision, ToolTier
+    _require_terminal("llm-cli tools permissions")
     section = current.callers.get(caller) if caller else None
     base_tiers = section.tiers if section is not None else current.tiers
     # A caller's new section starts from the shared settings, so creating it never loosens a per-tool setting.
@@ -886,6 +888,19 @@ def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for:
                                       "reviewed": reviewed})
 
 
+def _save_policy(registry, policy=None, change=None):
+    """Saves the tool permissions a person set here (audited with actor cli). A change saved elsewhere meanwhile, or
+    an audit log that cannot record it, is reported and nothing is saved."""
+    from orchestrator.tools.policy import PolicyStoreError
+    try:
+        if change is not None:
+            return registry.policy_store.update(change, actor="cli")
+        return registry.policy_store.save(policy, actor="cli")
+    except PolicyStoreError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+
+
 @tools.command('permissions')
 @click.option('--caller', type=CALLER_CHOICE, default=None,
               help="Set the permissions of one caller (ditto or mcp) instead of the shared ones")
@@ -894,7 +909,7 @@ def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for:
                                             'with --caller: that caller uses the shared permissions again')
 @pass_context
 def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: Optional[str], reset: bool):
-    """Set which tool calls are allowed, need confirmation, or are denied"""
+    """Set which tool calls are allowed, need confirmation, or are denied (needs a terminal)"""
     from orchestrator.tools.policy import ToolPolicy
     registry = _tool_registry(ctx)
     if token_name is not None:
@@ -904,17 +919,20 @@ def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: 
         _token_permissions(registry, token_name, reset)
         return
     if reset:
+        _require_terminal("llm-cli tools permissions --reset")
         if caller:
-            current = registry.policy()
-            callers = {name: section for name, section in current.callers.items() if name != caller}
-            registry.policy_store.save(current.model_copy(update={"callers": callers}))
+            _save_policy(registry, change=lambda current: current.model_copy(update={
+                "callers": {name: section for name, section in current.callers.items() if name != caller}}))
             console.print(f"[yellow]{CALLER_LABELS[caller]} use the shared tool permissions again.[/yellow]")
             return
-        registry.policy_store.save(ToolPolicy())
+        _save_policy(registry, change=lambda current: ToolPolicy())
         console.print("[yellow]Tool permissions reset to the recommended defaults.[/yellow]")
         return
     console.print(f"Tool permissions for {CALLER_LABELS[caller]}.")
-    policy = registry.policy_store.save(_ask_tool_policy(registry, registry.policy(), caller))
+    current = registry.policy()
+    if registry.policy_store.problem:  # e.g. not signed: the questions start from "deny"
+        console.print(f"[yellow]{escape(registry.policy_store.problem)}[/yellow]")
+    policy = _save_policy(registry, _ask_tool_policy(registry, current, caller))
     console.print(f"[green]Saved to {registry.policy_store.path}[/green]")
     tiers = policy.callers[caller].tiers if caller else policy.tiers
     for tier, decision in tiers.items():
@@ -982,7 +1000,7 @@ def _local_files(ctx: FrameworkContext):
 
 def _require_terminal(command: str) -> None:
     """Changes to what an AI may do are a person's decision: no piped answers (an AI client with a shell)."""
-    if not (sys.stdin is not None and sys.stdin.isatty()):
+    if not _interactive():
         console.print(f"[red]'{escape(command)}' needs a terminal: run it yourself, not through a pipe or an AI "
                       "client.[/red]")
         sys.exit(2)
@@ -1351,7 +1369,7 @@ def ditto_setup(ctx: FrameworkContext):
         "Decide once what they may do on their own, what needs your confirmation, and what is never allowed.\n"
         "Tools that reach other devices or delete data always ask (you can deny them, never allow them unasked).",
         title="Ditto setup - tool permissions"))
-    policy = registry.policy_store.save(_ask_tool_policy(registry, registry.policy()))
+    policy = _save_policy(registry, _ask_tool_policy(registry, registry.policy()))
     console.print(f"[green]Permissions saved ({registry.policy_store.path}).[/green]")
     console.print("Change them later with: llm-cli tools permissions")
     return policy

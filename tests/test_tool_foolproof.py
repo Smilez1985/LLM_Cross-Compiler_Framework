@@ -40,7 +40,7 @@ BUILD = {"model": MODEL, "target": "Rockchip", "format": "gguf"}
 @pytest.fixture
 def env():
     environment = EvalEnvironment(REPO_ROOT / "targets")
-    environment.registry.policy_store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW},
+    environment.registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW},
                                                       reviewed=[s.name for s in environment.registry.list()]))
     yield environment
     environment.close()
@@ -134,7 +134,7 @@ class TestNames:
         assert error.suggestions[0].startswith("list_") and "start_build" not in error.suggestions[:1]
 
     def test_suggestions_never_name_a_hidden_tool(self, env):
-        env.registry.policy_store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
+        env.registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
         error = ditto_error(env, "start_buil", BUILD)
         assert "start_build" not in error.suggestions
 
@@ -310,7 +310,7 @@ class TestErrors:
         service = env.framework.build_service
         real = service.cancel
         monkeypatch.setattr(service, "cancel", lambda rid: ran.append(rid) or real(rid))
-        env.registry.policy_store.save(ToolPolicy(configured=True, overrides={"cancel_build": Decision.ALLOW},
+        env.registry.policy_store.replace(ToolPolicy(configured=True, overrides={"cancel_build": Decision.ALLOW},
                                                   reviewed=[s.name for s in env.registry.list()]))
         first = ditto_error(env, "cancel_build", {"request_id": "req-7"})
         second = ditto_error(env, "cancel_build", {"request_id": "req-7"})
@@ -341,16 +341,16 @@ class TestErrors:
         assert "A valid call looks like: start_build" in errors[2].next and MODEL in errors[2].next
 
     def test_refusals_carry_reason_codes(self, env):
-        env.registry.policy_store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
+        env.registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
         denied = ditto_error(env, "start_build", BUILD)
         assert denied.code == "permission_denied" and "Next:" in str(denied)
-        env.registry.policy_store.save(ToolPolicy(configured=True))
+        env.registry.policy_store.replace(ToolPolicy(configured=True))
         nobody = ditto_error(env, "start_build", BUILD, session="b")
         assert nobody.code == "needs_person"
         with pytest.raises(ToolError) as exc:
             ditto(env, "start_build", BUILD, session="c", confirm=lambda s, i: False)
         assert exc.value.code == "declined"
-        env.registry.policy_store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW}))
+        env.registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW}))
         unsupported = ditto_error(env, "start_build", {**BUILD, "format": "rkllm", "board": "rk3566"}, session="d")
         assert unsupported.code == "not_supported"
         entries = {e["reason_code"] for e in env.registry.audit.entries(20) if e.get("reason_code")}
@@ -362,7 +362,7 @@ class TestErrors:
 class TestRepairsAreShown:
 
     def test_the_mcp_question_marks_repaired_values(self, env):
-        env.registry.policy_store.save(ToolPolicy(configured=True))
+        env.registry.policy_store.replace(ToolPolicy(configured=True))
         asked = []
         result = mcp(env, "StartBuild", {**BUILD, "quant": "q4_k_m"}, answering("accept", asked=asked))
         assert not result.is_error, text_of(result)
@@ -370,7 +370,7 @@ class TestRepairsAreShown:
         assert "(tool name repaired; the AI wrote StartBuild)" in asked[0]
 
     def test_dittos_question_is_the_registrys_text_with_the_marks(self, env):
-        env.registry.policy_store.save(ToolPolicy(configured=True))
+        env.registry.policy_store.replace(ToolPolicy(configured=True))
         shown = []
         ditto(env, "start_build", {**BUILD, "quantization": "q4_k_m"}, confirm=lambda s, i: shown.append(
             current_question()) or True)
@@ -455,7 +455,7 @@ class TestRepeatGuardOverMcp:
 
     @pytest.mark.parametrize("approve", [True, False])
     def test_a_write_that_failed_twice_is_not_put_to_the_person_again(self, env, approve):
-        env.registry.policy_store.save(ToolPolicy(configured=True, reviewed=[s.name for s in env.registry.list()]))
+        env.registry.policy_store.replace(ToolPolicy(configured=True, reviewed=[s.name for s in env.registry.list()]))
         asked = []
         raw = {**BUILD, "format": "rkllm", "board": "rk3566"}  # refused by the build service: not_supported
         results = mcp_session(env, [("start_build", raw)] * 3, answering("accept", approve=approve, asked=asked))

@@ -404,6 +404,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`~/.llm-framework/mcp_http_token`) is no longer accepted: create a token per client with
   `llm-cli mcp token add NAME`, give it to the client, and delete the old file. `llm-cli mcp serve --transport http`
   does not start before a named token exists.
+- **Confirm your tool permissions once after the update.** The permission file is signed now, and one saved by 3.0.0
+  carries no signature, so every tool is denied until you set the permissions up again (the GUI shows the dialog at
+  the first start and says why; `llm-cli tools permissions`). `llm-cli tools permissions`, also with `--reset`, and
+  `llm-cli ditto setup` need a person at a terminal: piped answers are refused.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -722,6 +726,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   most 1 MiB per request (was 4 MiB), a session and a pending question round of the 2026-07-28 protocol only answer
   the token that opened them, and no token is accepted (and the server does not start) while other users can read or
   change the token file or it belongs to another user.
+- **Only a person changes what an AI may do.** The tool permissions (`tool_policy.json`) and the MCP token store
+  (`mcp_tokens.json`) are signed with a key derived from the audit key in the OS keyring. A file edited by hand,
+  damaged, signed with another key or unsigned denies every tool, and the token store accepts no token, until a
+  person sets them up again; `llm-cli doctor` reports it. Before, anyone who could write the per-user folder could
+  allow every tool or add a token, and nothing noticed. Every change of the permissions is recorded in the audit log
+  with the old and new decisions (actor `cli` or `gui`) before it takes effect, and is refused when the entry cannot
+  be written. Saves take a revision number under a lock shared by the GUI, the CLI and MCP servers; a save based on
+  an older revision is refused, so a window opened earlier can no longer undo a change made meanwhile. Without a
+  keyring the signature has no key, as for the audit chain; such a file is refused while the audit log is kept with
+  a key.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
