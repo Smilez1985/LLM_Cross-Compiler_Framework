@@ -6,6 +6,8 @@ imports it, so the two cannot drift apart. Standard library only, and nothing fr
 from a bare checkout and in git hooks.
 
 - find_secrets(line): what the repository scan reports (rules with scan=True; placeholders are skipped).
+- find_exact_formats(line): values in the exact format of a token that GitHub push protection blocks, which the
+  repository scan reports even when they look like placeholders (EXACT_FORMATS, scan only).
 - redact(text): what runtime redaction blanks (rules with redact=True, plus credential headers and query
   parameters, which are too generic for the scan).
 
@@ -33,9 +35,11 @@ def _rule(name: str, regex: str, replacement: str = "REDACTED", *, scan: bool = 
 def _key(start: str, rest: str) -> str:
     """A key beginning with `start` (a fixed-width regex) at the start of a word, or right after an escape
     ("\\nhf_...", "\\x00hf_...", "\\u00a0hf_...") or a percent-encoded character ("%20sk-..."), where \\b alone
-    would miss it. The literal comes first, so the regex engine can search for it quickly."""
+    would miss it. The literal comes first, so the regex engine can search for it quickly. Word characters are
+    ASCII ones, as for GitHub's detector: a key right after "é" or Chinese text ("令牌hf_...") is still a key."""
     escapes = (r"\\[nrt]", r"\\x[0-9A-Fa-f]{2}", r"\\u[0-9A-Fa-f]{4}", r"%[0-9A-Fa-f]{2}")
-    return start + r"(?:(?<!\w" + start + ")" + "".join("|(?<=" + e + start + ")" for e in escapes) + ")" + rest
+    return (start + r"(?:(?<![A-Za-z0-9_]" + start + ")" + "".join("|(?<=" + e + start + ")" for e in escapes) + ")"
+            + rest)
 
 
 # An optional quote, also escaped as in JSON inside a JSON string ("{\"api_key\": \"...\"}").
@@ -55,11 +59,13 @@ PATTERNS: Tuple[SecretPattern, ...] = (
     # Other sk- keys (DeepSeek, Moonshot, ...): too broad for the scan. The digit lookahead spares words such
     # as "disk-usage-monitoring-service"; it is bounded, so a long run of "sk-sk-sk-..." stays linear.
     _rule("sk- key", r"sk-(?=[A-Za-z_\-]{0,64}\d)[A-Za-z0-9_\-]{20,}", "sk-REDACTED", scan=False),
-    _rule("Hugging Face token", _key("hf_", r"[A-Za-z0-9]{20,}"), "hf_REDACTED"),
+    _rule("Hugging Face token",
+          _key("hf_", r"[A-Za-z0-9]{20,}") + "|" + _key("api_org_", r"[A-Za-z]{34}(?![A-Za-z0-9])"), "hf_REDACTED"),
     _rule("GitHub token", _key("gh[pousr]_", r"[A-Za-z0-9]{36,}") + "|" + _key("github_pat_", r"[A-Za-z0-9_]{22,}"),
           "gh-REDACTED"),
-    _rule("GitLab token", _key("glpat-", r"[A-Za-z0-9_\-]{20,}")),
-    _rule("AWS access key id", _key("A[KS]IA", r"[A-Z0-9]{16}\b")),
+    # With the version and checksum after the dot that a routable token carries.
+    _rule("GitLab token", _key("glpat-", r"[A-Za-z0-9_\-]{20,}(?:\.[0-9a-z]{9}(?![A-Za-z0-9_\-]))?")),
+    _rule("AWS access key id", _key("A[KS]IA", r"[A-Z0-9]{16}(?![A-Za-z0-9_])")),
     _rule("AWS secret key",
           r"(?i)aws_secret_access_key" + _Q + r"?\s*[:=]\s*" + _Q + r"?(?P<secret>[A-Za-z0-9/+]{40})\b",
           hints=("aws_secret_access_key",)),
@@ -68,15 +74,15 @@ PATTERNS: Tuple[SecretPattern, ...] = (
     _rule("Google API key", _key("AIza", r"[0-9A-Za-z_\-]{35}(?![0-9A-Za-z_\-])"), "AIza-REDACTED"),
     _rule("Google OAuth secret", _key("GOCSPX-", r"[A-Za-z0-9_\-]{20,}")),
     _rule("Groq key", _key("gsk_", r"[A-Za-z0-9]{40,}")),
-    _rule("xAI key", _key("xai-", r"[A-Za-z0-9]{40,}")),
+    _rule("xAI key", _key("xai-", r"[A-Za-z0-9_]{40,}")),
     _rule("Perplexity key", _key("pplx-", r"[A-Za-z0-9]{40,}")),
     _rule("NVIDIA key", _key("nvapi-", r"[A-Za-z0-9_\-]{40,}")),
     _rule("Cerebras key", _key("csk-", r"[a-z0-9]{40,}")),
-    _rule("Replicate token", _key("r8_", r"[A-Za-z0-9]{30,}")),
+    _rule("Replicate token", _key("r8_", r"[A-Za-z0-9_\-]{30,}")),
     _rule("Fireworks key", _key("fw_", r"[A-Za-z0-9]{20,}")),
     _rule("LocalAI key", _key("lai-", r"[A-Za-z0-9]{24,}")),
     _rule("Slack token", _key("xox[abprs]-", r"[A-Za-z0-9\-]{10,}")),
-    _rule("Stripe key", _key("[rs]k_live_", r"[A-Za-z0-9]{20,}")),
+    _rule("Stripe key", _key("[rs]k_", r"(?:live|test)_[A-Za-z0-9]{20,}")),
     _rule("PyPI token", _key("pypi-AgE", r"[A-Za-z0-9_\-]{50,}")),
     # An age identity (community packs, age-keygen, rage-keygen): bech32 of 32 bytes, upper case as the tools write
     # it, or lower case, which rage reads too (bech32 is never mixed case).
@@ -123,6 +129,69 @@ PLACEHOLDER = re.compile(
     r"EXAMPLE|PLACEHOLDER|REDACTED|DUMMY|FAKE|TESTKEY|x{8,}|X{8,}|0{12,}|\.\.\.|<[^>]*>"
     r"|123456789|abcdefghij|ABCDEFGHIJ|AbCdEf|aBcDeF"
     r"|@(?:[A-Za-z0-9\-]+\.)*(?:example|test|invalid|localhost)\b|@(?:[A-Za-z0-9\-]+\.)*example\.(?:com|org|net)\b")
+
+
+class ExactFormat(NamedTuple):
+    name: str                 # the rule of PATTERNS that also redacts such a value at runtime
+    regex: "Pattern[str]"
+    starts: Tuple[str, ...]   # regexes of the fixed-width prefixes; every match begins with one
+
+
+def _exact(name: str, *alternatives: Tuple[str, str]) -> ExactFormat:
+    """A format from (prefix, rest) alternatives, each a key that starts a word (see _key)."""
+    return ExactFormat(name, re.compile("|".join(_key(start, rest) for start, rest in alternatives)),
+                       tuple(start for start, _ in alternatives))
+
+
+# The exact formats of tokens that GitHub push protection blocks. GitHub refuses a push with such a value however
+# fake it looks ("hf_" and 34 letters of the alphabet) and does not know our "secret-scan: allow" marker, so the
+# scan reports these matches whatever PLACEHOLDER and the marker say. Scan only: runtime redaction uses PATTERNS,
+# and each format is a value its named rule there redacts (tests/test_secret_scan.py checks that).
+# Which providers push protection covers: GitHub's list of supported patterns,
+#   https://docs.github.com/en/code-security/secret-scanning/introduction/supported-secret-scanning-patterns
+# (push protection for hf_user_access_token, hf_org_api_key, the github_* tokens, aws_access_key_id,
+# slack_api_token, gitlab_access_token, stripe_api_key, stripe_live/test_restricted_key, stripe_test_secret_key,
+# pypi_api_token, openai_api_key, anthropic_api_key, anthropic_admin_api_key, openrouter_api_key, groq_api_key,
+# xai_api_key, perplexity_api_key, replicate_api_token; not for Google API keys). GitHub does not publish its
+# regular expressions; the formats come from the vendors where they document them, otherwise from the open
+# scanners gitleaks (config/gitleaks.toml) and TruffleHog (pkg/detectors/<provider>), all checked 2026-10-11:
+# - Prefixes: GitHub https://github.blog/engineering/platform-security/behind-githubs-new-authentication-token-formats/
+#   (ghp_, gho_, ghu_, ghs_, ghr_), AWS https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_identifiers.html
+#   (AKIA access key, ASIA temporary access key), Slack https://docs.slack.dev/authentication/tokens/, GitLab
+#   https://docs.gitlab.com/security/tokens/ (glpat-), Stripe https://docs.stripe.com/keys (sk_/rk_, live/test).
+# - PyPI documents the whole format, https://docs.pypi.org/api/secrets/: pypi-[A-Za-z0-9-_]{85,}. Real tokens are
+#   macaroons that start with "AgE", which the PyPI rule above redacts.
+# - Lengths: gitleaks for Hugging Face (hf_ or api_org_ and 34 letters), GitHub (36; github_pat_ 82), GitLab
+#   (20, or the routable form), OpenAI (the full form with "T3BlbkFJ" inside) and Anthropic (93 characters and
+#   "AA"); TruffleHog for Slack, Stripe (20 or more), OpenRouter (64 hex), Groq (52), xAI (80) and Replicate (37);
+#   both for Perplexity (48).
+# GitHub's list pairs the AWS access key id with its secret key; the scan reports the id alone, because the secret
+# key may sit in another line or file. A match must not run on into letters, digits or other characters its format
+# allows (one character too many is no longer the exact format).
+EXACT_FORMATS: Tuple[ExactFormat, ...] = (
+    _exact("Hugging Face token", ("hf_", r"[A-Za-z]{34}(?![A-Za-z0-9])"),
+           ("api_org_", r"[A-Za-z]{34}(?![A-Za-z0-9])")),
+    _exact("GitHub token", ("gh[pousr]_", r"[A-Za-z0-9]{36}(?![A-Za-z0-9])"),
+           ("github_pat_", r"[A-Za-z0-9_]{82}(?![A-Za-z0-9_])")),
+    _exact("AWS access key id", ("A[KS]IA", r"[A-Z0-9]{16}(?![A-Za-z0-9_])")),
+    _exact("Slack token", ("xox[abprs]-", r"[0-9]{10,13}-[0-9]{10,13}[A-Za-z0-9\-]*")),
+    _exact("GitLab token", ("glpat-", r"[A-Za-z0-9_\-]{20}(?![A-Za-z0-9_\-])"),
+           ("glpat-", r"[A-Za-z0-9_\-]{27,300}\.[0-9a-z]{9}(?![A-Za-z0-9_\-])")),
+    _exact("Stripe key", ("[rs]k_", r"(?:live|test)_[A-Za-z0-9]{20,}")),
+    _exact("PyPI token", ("pypi-", r"[A-Za-z0-9_\-]{85,}")),
+    _exact("OpenAI key",
+           ("sk-", r"(?:proj|svcacct|admin)-(?:[A-Za-z0-9_\-]{74}|[A-Za-z0-9_\-]{58})T3BlbkFJ"
+                   r"(?:[A-Za-z0-9_\-]{74}|[A-Za-z0-9_\-]{58})(?![A-Za-z0-9_\-])"),
+           ("sk-", r"[A-Za-z0-9]{20}T3BlbkFJ[A-Za-z0-9]{20}(?![A-Za-z0-9])")),
+    _exact("Anthropic key", ("sk-ant-", r"(?:api03|admin01)-[A-Za-z0-9_\-]{93}AA(?![A-Za-z0-9_\-])")),
+    _exact("OpenRouter key", ("sk-or-v1-", r"[0-9a-f]{64}(?![A-Za-z0-9])")),
+    _exact("Groq key", ("gsk_", r"[A-Za-z0-9]{52}(?![A-Za-z0-9])")),
+    _exact("xAI key", ("xai-", r"[A-Za-z0-9_]{80}(?![A-Za-z0-9_])")),
+    _exact("Perplexity key", ("pplx-", r"[A-Za-z0-9]{48}(?![A-Za-z0-9])")),
+    _exact("Replicate token", ("r8_", r"[A-Za-z0-9_\-]{37}(?![A-Za-z0-9_\-])")),
+)
+# Every match begins with one of the prefixes, so a line without any (nearly all of them) is done in one search.
+_EXACT_START = re.compile("|".join(sorted({start for fmt in EXACT_FORMATS for start in fmt.starts})))
 
 # Runtime only: values of credential headers and query parameters, whatever their format.
 SENSITIVE_HEADERS = ("authorization", "proxy-authorization", "x-api-key", "api-key", "x-goog-api-key",
@@ -181,6 +250,22 @@ def find_secrets(line: str) -> List[Tuple[str, str]]:
                 continue
             spans.append((start, end))
             found.append((rule.name, m.group(0)))
+    return found
+
+
+def find_exact_formats(line: str) -> List[Tuple[str, str]]:
+    """(rule name, matched text) for each value in one line in the exact format of a token that GitHub push
+    protection blocks, placeholder or not."""
+    found: List[Tuple[str, str]] = []
+    spans: List[Tuple[int, int]] = []
+    if not _EXACT_START.search(line):
+        return found
+    for fmt in EXACT_FORMATS:
+        for m in fmt.regex.finditer(line):
+            start, end = m.span()
+            if not any(start < e and s < end for s, e in spans):
+                spans.append((start, end))
+                found.append((fmt.name, m.group(0)))
     return found
 
 
