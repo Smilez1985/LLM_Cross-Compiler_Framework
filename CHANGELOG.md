@@ -79,6 +79,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   no passwd entry).
 - On Windows, saving a secret no longer fails when another process or a virus scanner has the store open for
   a moment.
+- `llm-cli secrets set` says where the secret went (the encrypted vault, or memory only with `ephemeral`)
+  instead of always "Keyring".
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -90,7 +92,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The credential vault is changed under a cross-process lock: the GUI, the CLI and an MCP server writing at
   the same time no longer lose each other's changes.
 - A keyring that keeps nothing (such as `keyring.backends.null`) or does not answer within 3 seconds is no
-  longer used; before, secrets stored with it were unreadable after the next start.
+  longer used; before, secrets stored with it were unreadable after the next start. A keyring backend that
+  stores without encryption (`keyrings.alt`) is not used either: that is `secret_storage: insecure`, and
+  only you can choose it.
 - On Windows the vault key stays on the local machine instead of roaming with the user profile.
 - The secrets store refuses a location inside a git work tree (set `LLM_FRAMEWORK_HOME` elsewhere).
 - Secret names with line breaks or control characters are refused, and the secrets audit log escapes them,

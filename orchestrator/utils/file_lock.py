@@ -20,7 +20,7 @@ class LockTimeout(TimeoutError):
 def file_lock(path: Union[str, Path], timeout: float = 30.0) -> Iterator[None]:
     """Holds the lock file `path` (created with mode 0600) for the duration of the block."""
     path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock = FileLock(str(path), timeout=timeout, mode=0o600)
     try:
         lock.acquire()

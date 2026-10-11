@@ -891,6 +891,18 @@ class TestReviewFindings:
         finally:
             release.set()
 
+    def test_a_plaintext_keyring_backend_is_never_used_silently(self, use_backend, tmp_path):
+        """keyrings.alt (pulled in by some distributions) can become the default on a headless machine: the
+        vault key would sit unencrypted in a file, i.e. secret_storage 'insecure' that nobody chose."""
+        backend = use_backend(backend_class(name="PlaintextKeyring", module="keyrings.alt.file")())
+        sm = SecretsManager(tmp_path / "state")
+        assert sm.initialize() is False
+        assert sm.storage_error.code == "storage.keyring_unavailable"
+        assert "keyrings.alt.file.PlaintextKeyring" in sm.storage_error.message
+        assert "without encryption" in sm.storage_error.message and "insecure" in sm.storage_error.message
+        assert backend.store == {} and not (tmp_path / "state" / "secrets.store").exists()
+        assert vault(tmp_path, storage="insecure").set_secret("hf_token", HF), "an explicit choice still works"
+
     def test_the_audit_key_stays_on_the_local_machine(self, use_backend):
         """The keyring probe sets persist on the backend that _audit_key then writes with."""
         from orchestrator.tools import framework_tools
@@ -967,6 +979,37 @@ class TestReviewFindings:
         assert sm.change_storage("insecure")
         assert "secret_storage: insecure" in caplog.text
 
+    def test_a_folder_that_cannot_be_written_does_not_stop_the_start(self, memory_keyring, tmp_path, monkeypatch):
+        """The first start records the new vault's key id; a read-only folder must not stop the commands that
+        need no secret, and the key is kept for the first write that succeeds."""
+        def read_only(path, data):
+            raise PermissionError(13, "Read-only file system")
+
+        with monkeypatch.context() as m:
+            m.setattr(SecretsManager, "_write_atomic", staticmethod(read_only))
+            sm = SecretsManager(tmp_path / "state")
+            assert sm.initialize(), sm.storage_error
+            assert sm.get_secret("hf_token") is None and sm.set_secret("hf_token", HF) is False
+        assert sm.set_secret("hf_token", HF)
+        assert vault(tmp_path).get_secret("hf_token") == HF
+        assert len(memory_keyring.store) == 1
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX permissions")
+    def test_folders_made_by_the_vault_are_private(self, memory_keyring, tmp_path):
+        sm = vault(tmp_path / "new")
+        assert sm.set_secret("hf_token", HF)
+        with sm.credential_lock("cred/openai/siwc"):
+            pass
+        for folder in (sm.secrets_file.parent, sm.secrets_file.parent / "locks"):
+            assert folder.stat().st_mode & 0o777 == 0o700, folder
+
+    def test_a_deeply_nested_record_is_refused(self, memory_keyring, tmp_path):
+        deep = {}
+        for _ in range(50_000):  # json.dumps raises RecursionError, not ValueError
+            deep = {"x": deep}
+        sm = vault(tmp_path)
+        assert sm.set_record("cred/openai/siwc", {"kind": "oauth", "extra": deep}) is False
+
     def test_the_gui_shows_why_the_start_failed(self, qapp, monkeypatch):
         from orchestrator.gui import main_window
         shown = []
@@ -982,6 +1025,19 @@ class TestReviewFindings:
         with pytest.raises(SystemExit):
             main_window.MainOrchestrator(REPO_ROOT)
         assert shown and "secret_storage" in shown[0] and "passphrase" in shown[0]
+
+    def test_the_cli_never_says_an_ephemeral_secret_was_saved(self, tmp_path):
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_", "FRAMEWORK_"))}
+        env.update(PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
+                   LLM_SECRET_STORAGE="ephemeral", LLM_FRAMEWORK_HOME=str(tmp_path / "state"),
+                   LLM_FRAMEWORK_CONFIG_DIR=str(tmp_path / "cfg"), COLUMNS="300")
+        result = subprocess.run([sys.executable, "-m", "orchestrator.cli", "-q", "secrets", "set", "hf_token"],
+                                cwd=tmp_path, env=env, input="placeholder-value\nplaceholder-value\n",
+                                capture_output=True, text=True, timeout=120)
+        assert result.returncode == 0, result.stderr
+        assert "nothing was saved" in result.stdout and "Keyring" not in result.stdout
+        assert "placeholder-value" not in result.stdout + result.stderr
+        assert not (tmp_path / "state" / "secrets.store").exists()
 
     def test_the_cli_prints_paths_in_the_storage_error_literally(self, tmp_path):
         repo = tmp_path / "[bold]project"
