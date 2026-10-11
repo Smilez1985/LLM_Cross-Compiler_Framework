@@ -858,8 +858,9 @@ VS Code können dann [dieselben Tools wie Ditto](#dittos-tools) nutzen. Am Clien
 Konto oder Schlüssel an; das Framework sieht das nie.
 
 - **Jeder Aufruf läuft durch die Tool-Registry:** Abgleich von Namen und Argumenten, Eingabeschema, deine
-  Berechtigungen, Bestätigung, Audit-Log (Akteur `mcp`), genau wie für Ditto ([wie Namen und Werte abgeglichen
-  werden](#dittos-tools)). Tool-Annotationen (nur lesend, idempotent) sind nur Hinweise für den Client.
+  Berechtigungen, Bestätigung, Audit-Log (Akteur `mcp` für lokale stdio-Clients, `mcp:<Name>` für ein benanntes
+  Token), genau wie für Ditto ([wie Namen und Werte abgeglichen werden](#dittos-tools)). Tool-Annotationen (nur
+  lesend, idempotent) sind nur Hinweise für den Client.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine
@@ -922,25 +923,65 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   den kommenden Tools für Crawlen, Herunterladen, Deployen und Freigaben) sind Jobs mit einer ID (`job_...`):
   `get_job_status` zeigt Zustand, Fortschritt und Ergebnis, `cancel_job` stoppt sie. Eine Zusammenfassung jedes Jobs
   (nie sein Ergebnis) bleibt in `~/.llm-framework/jobs/` für GUI und CLI.
-- **Wem ein Build gehört:** Jede Verbindung (eine stdio-Sitzung; bei HTTP der ganze Server, bis es benannte Tokens
-  gibt) besitzt die Builds und Jobs, die sie startet. Eigene darf sie ohne Frage abbrechen; einen Build oder Job
-  eines anderen Clients abzubrechen folgt deinen Tool-Berechtigungen (standardmäßig fragt es dich).
-  `get_build_status` zeigt die Aufruferklasse, die einen Build gestartet hat (`mcp`, `ditto`).
+- **Wem ein Build gehört:** Der Aufrufer, der einen Build oder Job startet, besitzt ihn zusammen mit seiner
+  Verbindung: eine stdio-Sitzung (Akteur `mcp`, oder `mcp:<Name>` mit `LCF_MCP_TOKEN`) oder über HTTP jedes benannte
+  Token. Eigene darf er ohne Frage abbrechen; einen Build oder Job eines anderen Clients abzubrechen folgt deinen
+  Tool-Berechtigungen (standardmäßig fragt es dich). Dieselbe Identität des Aufrufers entscheidet über die
+  Berechtigungen, steht im Audit-Log und zählt die 4 Wartevorgänge je Client. `get_build_status` zeigt den
+  Aufrufer, der einen Build gestartet hat (`mcp`, `mcp:<Name>`, `ditto`).
 - **Wenn ein Client die Verbindung trennt:** Die Builds und Jobs, die seine Sitzung gestartet hat, werden
   abgebrochen, jeweils mit einem Audit-Eintrag („client disconnected“); der Server wartet bis zu 30 Sekunden, bis
   ihre Container gestoppt sind, und fährt dann das Framework herunter, damit kein Build ohne Besitzer weiterläuft.
   Das gilt auch, wenn der Client einen stdio-Server mit SIGTERM beendet (wie Clients es tun, wenn er einige Sekunden
-  nach dem Schließen seiner Eingabe nicht beendet ist). HTTP-Builds gehören dem Server und werden abgebrochen, wenn
-  er endet.
+  nach dem Schließen seiner Eingabe nicht beendet ist). Über HTTP werden die Builds und Jobs jedes Tokens
+  abgebrochen, wenn der Server endet, jeweils unter diesem Token protokolliert.
 - **Transporte:** stdio (Standard; der Client startet den Server) oder Streamable HTTP nur auf einer
-  Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). HTTP prüft Host und Origin und
-  braucht ein Bearer-Token, das pro Benutzer in `~/.llm-framework/mcp_http_token` angelegt wird.
+  Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). Über HTTP schickt jeder Client sein
+  eigenes benanntes Token als `Authorization: Bearer <Token>`; eine Anfrage mit `Origin`-Header (eine Webseite, auch
+  ein CORS-Preflight) wird abgelehnt, der `Host`-Header muss eine Loopback-Adresse mit dem Port des Servers nennen
+  (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Eine
+  Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet hat.
+- **Benannte Tokens:** `llm-cli mcp token add NAME` legt ein Token für einen Client an und zeigt es einmal; das
+  Framework behält nur seinen SHA-256 in `~/.llm-framework/mcp_tokens.json` (Modus 0600; solange andere Benutzer
+  die Datei lesen oder ändern können oder sie einem anderen Benutzer gehört, wird kein Token angenommen und der
+  Server startet nicht). Der Name des Tokens ist der Aufrufer im Audit-Log (`mcp:<Name>`),
+  und es hat eigene Berechtigungen: Ein neues Token darf nur lesen, bis du mit
+  `llm-cli tools permissions --token NAME` mehr erlaubst, es mit einer Kopie der Berechtigungen eines anderen
+  Aufrufers anlegst (`--policy-from mcp`) oder es an Dittos Berechtigungen bindest (`--link ditto`, für Ditto auf
+  einem anderen Rechner; eine Änderung an Dittos Berechtigungen gilt sofort auch dafür). `rotate` ersetzt ein Token,
+  `revoke` löscht es mit seinen Berechtigungen; beides wirkt sofort, auch für einen laufenden Server, und die
+  Aufrufe, die ein widerrufener stdio-Client noch schickt, werden abgelehnt und protokolliert. Ein
+  stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag: Der
+  Server liest sie einmal beim Start, entfernt sie aus seiner Umgebung und startet nicht mit einem Wert, der kein
+  gültiges Token ist. Ohne sie teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen
+  Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal: Kein Tool kann sie anlegen, lesen oder ändern,
+  und kein Token erscheint in einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag.
 - **Arbeitsordner:** Der Server liest nie Einstellungen und importiert nie Code aus dem Ordner, in dem er gestartet
   wird (der Client startet ihn mit `python -P`), und unter Windows startet er von dort keine Programme wie `docker`
   oder `git`. Ein Projektordner kann sein Verhalten nicht ändern.
 - **Client-Einrichtung:** `llm-cli mcp config` gibt die Befehle und das JSON so gequotet aus, dass sie in
   POSIX-Shells und in cmd wie PowerShell halten; `--write claude-desktop` trägt den Server in die Konfiguration von
   Claude Desktop ein, behält andere Einträge und schreibt eine private Sicherung.
+- **Wer verbunden ist:** Für jeden neuen Client schreibt der Server eine Zeile nach stderr, nie an den Client: Name
+  und Version, die der Client über sich selbst angibt, die Protokollversion, den Transport, den Aufrufer (`mcp` oder
+  `mcp:<Name>` des benannten Tokens, nie das Token selbst) und die Fähigkeiten, die er erklärt hat, zum Beispiel
+  `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
+  capabilities: elicitation, roots`. `elicitation none` heißt, dass der Client dich nicht fragen kann; ein Tool auf
+  „fragen“ wird dort abgelehnt. Text vom Client wird zuerst von allem befreit, was wie ein Schlüssel oder Token
+  aussieht, dann escapet und auf 64 Zeichen gekürzt; er ist eine Beschriftung, nie eine Berechtigung.
+
+Was die Clients unterstützen, laut der Dokumentation ihrer Hersteller (2026-10-11). „Nicht dokumentiert“ heißt, dass
+der Hersteller nichts dazu sagt; die stderr-Zeile oben zeigt, was ein Client wirklich erklärt.
+
+| Client | Fragt dich (Elicitation) | Fortschritt | Ressourcen | Prompts | Protokoll 2026-07-28 |
+|---|---|---|---|---|---|
+| Claude Code (Laufzeit v1 und v2) | ja, Formular und URL | ja | ja | ja | Laufzeit v2 (Standard ab 2.1.232, ohne Feature-Flags ab 2.1.274) |
+| Claude Desktop (Chat) | nicht dokumentiert | nicht dokumentiert | ja | ja | nicht dokumentiert |
+| Claude Cowork | nicht dokumentiert | nicht dokumentiert | nicht dokumentiert | nicht dokumentiert | nicht dokumentiert |
+| VS Code (GitHub Copilot) | ja, Modi nicht dokumentiert | nicht dokumentiert | ja, mit Vorlagen | ja | nicht dokumentiert |
+
+Von Claude-Desktop-Chat und Cowork wird erwartet, dass sie keine Elicitation erklären (eine Quelle eines Dritten
+sagt das): Dort wird jedes Tool auf „fragen“ abgelehnt, erlaubte Tools funktionieren.
 
 **Claude-Abonnenten:** Das ist der Weg, das Framework mit einem Claude-Abo zu nutzen. Anthropic erlaubt
 Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines Abos zu verwenden; Ditto selbst braucht deshalb einen
@@ -987,6 +1028,9 @@ Verfügung.
 - Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
   lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
   `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
+- Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
+  `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
+  nicht lesen lässt, darf nicht einmal lesen.
 
 **Audit-Log** (`~/.llm-framework/audit.db`, SQLite): Jeder Tool-Aufruf wird mit Zeit, Akteur, Tool, Entscheidung, ob
 ein Mensch bestätigt hat, und Ergebnis festgehalten. Argumente werden geschwärzt und gekürzt gespeichert, dazu ein

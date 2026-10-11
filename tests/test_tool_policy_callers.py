@@ -21,6 +21,7 @@ from orchestrator import mcp_server  # noqa: E402
 from orchestrator.Core.ditto_manager import DittoCoder  # noqa: E402
 from orchestrator.tools import framework_tools  # noqa: E402
 from orchestrator.tools.audit import AuditLog  # noqa: E402
+from orchestrator.tools.mcp_tokens import TokenStore  # noqa: E402
 from orchestrator.tools.output import ToolOutput  # noqa: E402
 from orchestrator.tools.policy import (CallerPolicy, Decision, PolicyStore, ToolPolicy, ToolTier,  # noqa: E402
                                        restrictive_policy)
@@ -44,7 +45,10 @@ def spec(name, tier=ToolTier.LOCAL_WRITE, **fields):
 
 @pytest.fixture
 def registry(tmp_path):
-    reg = ToolRegistry(PolicyStore(tmp_path), AuditLog(tmp_path / "audit.db"))
+    # Named tokens come from the token store (S12); "laptop" is one whose permissions the person has not set yet.
+    tokens = TokenStore(tmp_path)
+    tokens.add("laptop")
+    reg = ToolRegistry(PolicyStore(tmp_path), AuditLog(tmp_path / "audit.db"), tokens=tokens)
     for s in (spec("read_thing", ToolTier.READ, idempotent=True), spec("start_build"), spec("export_pack"),
               spec("deploy_to_device", ToolTier.EXTERNAL, destructive=False, open_world=True),
               spec("delete_artifact", ToolTier.EXTERNAL, destructive=True, default_decision=Decision.DENY),

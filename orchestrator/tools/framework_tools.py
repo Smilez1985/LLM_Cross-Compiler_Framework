@@ -19,6 +19,7 @@ from orchestrator.rag.errors import KnowledgeBaseError
 from orchestrator.schemas.jobs import CancelJobOut, JobErrorOut, JobIn, JobProgress, JobStatusOut, JobWaitIn
 from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.audit import AuditLog
+from orchestrator.tools.mcp_tokens import TokenStore
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
 from orchestrator.tools.policy import Decision, PolicyStore, ToolTier
 from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, ToolSpec, current_actor,
@@ -310,12 +311,13 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         return CancelJobOut(job_id=job.job_id, state=job.state, note=note)
 
     # The tool's own default for a call (ToolSpec.default_decision): `who` is the caller's owner identity
-    # (ToolContext.owner). Its own build or job: allow; anything else (no call, another caller's work): the policy.
+    # (ToolContext.owner). Its own build or job: allow; anything else (no call, another caller's work, or no caller
+    # named at all, which must never match work the GUI or the CLI started, owner ""): the policy.
     def own_build(inp, who: str):
-        return Decision.ALLOW if inp is not None and service.owner_of(inp.request_id) == who else None
+        return Decision.ALLOW if inp is not None and who and service.owner_of(inp.request_id) == who else None
 
     def own_job(inp, who: str):
-        return Decision.ALLOW if inp is not None and jobs.owner_of(inp.job_id) == who else None
+        return Decision.ALLOW if inp is not None and who and jobs.owner_of(inp.job_id) == who else None
 
     def search_knowledge(inp: SearchIn) -> SearchOut:
         rag = framework.ensure_rag_manager() if hasattr(framework, "ensure_rag_manager") else None
@@ -336,7 +338,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     def get_status(inp: StatusIn) -> StatusOut:
         caller, running = current_actor(), current_registry() or registry
         rows = running.permissions(caller)
-        policy = running.policy()  # loaded after permissions(): the damage flag below belongs to this load
+        # loaded after permissions(): the damage flag below belongs to this load; a token's own permissions for it
+        policy = running.policy(caller) if caller else running.policy()
         listed = sum(1 for r in rows if r["listed"])
         return StatusOut(permissions=PermissionsStatus(
             caller=caller or "framework", configured=policy.configured,
@@ -518,5 +521,5 @@ def build_tool_registry(framework) -> ToolRegistry:
     """The registry with the user's policy, the audit log and all framework tools."""
     state_dir = Path(framework.config.user_state_dir)
     audit = AuditLog(state_dir / "audit.db", key=_audit_key(framework, state_dir))
-    registry = ToolRegistry(PolicyStore(state_dir), audit)
+    registry = ToolRegistry(PolicyStore(state_dir), audit, tokens=TokenStore(state_dir))
     return register_framework_tools(registry, framework)

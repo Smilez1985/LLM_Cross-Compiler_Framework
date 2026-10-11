@@ -800,8 +800,9 @@ can then use the [same tools as Ditto](#dittos-tools). You sign in to the client
 framework never sees it.
 
 - **Every call goes through the tool registry:** name and argument matching, input schema, your permissions,
-  confirmation, audit log (actor `mcp`), exactly as for Ditto ([how names and values are
-  matched](#dittos-tools)). Tool annotations (read-only, idempotent) are only hints for the client.
+  confirmation, audit log (actor `mcp` for local stdio clients, `mcp:<name>` for a named token), exactly as for
+  Ditto ([how names and values are matched](#dittos-tools)). Tool annotations (read-only, idempotent) are only
+  hints for the client.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
   elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
   and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be
@@ -856,24 +857,60 @@ framework never sees it.
   build or job. Long operations other than builds (from the coming crawl, download, deploy and approval tools) are
   jobs with an id (`job_...`): `get_job_status` shows their state, progress and result, `cancel_job` stops them.
   A summary of each job (never its result) is kept in `~/.llm-framework/jobs/` for the GUI and the CLI.
-- **Who owns a build:** each connection (one stdio session; for HTTP the whole server until named tokens exist)
-  owns the builds and jobs it starts. It may cancel its own without a question; cancelling another client's build
-  or job follows your tool permissions (by default it asks you). `get_build_status` shows the caller class that
-  started a build (`mcp`, `ditto`).
+- **Who owns a build:** the caller that starts a build or job owns it, together with its connection: one stdio
+  session (actor `mcp`, or `mcp:<name>` with `LCF_MCP_TOKEN`), or over HTTP each named token. It may cancel its own
+  without a question; cancelling another client's build or job follows your tool permissions (by default it asks
+  you). The same caller identity decides the permissions, appears in the audit log and counts the 4 waits per
+  client. `get_build_status` shows the caller that started a build (`mcp`, `mcp:<name>`, `ditto`).
 - **When a client disconnects:** the builds and jobs its session started are cancelled, each with an audit entry
   ("client disconnected"), the server waits up to 30 seconds for their containers to stop and then shuts the
   framework down, so no build is left running without an owner. This also holds when the client ends a stdio
-  server with SIGTERM (as clients do when it has not exited a few seconds after they closed its input). HTTP builds
-  belong to the server and are cancelled when it stops.
+  server with SIGTERM (as clients do when it has not exited a few seconds after they closed its input). Over HTTP the
+  builds and jobs of every token are cancelled when the server stops, each audited under that token.
 - **Transports:** stdio (default; the client starts the server) or Streamable HTTP on a loopback address only
-  (`--transport http`, default `http://127.0.0.1:8765/mcp`). HTTP checks Host and Origin and needs a bearer token
-  that is created per user in `~/.llm-framework/mcp_http_token`.
+  (`--transport http`, default `http://127.0.0.1:8765/mcp`). Over HTTP every client sends its own named token as
+  `Authorization: Bearer <token>`; a request with an `Origin` header (a web page, also a CORS preflight) is refused,
+  the `Host` header must name a loopback address with the server's port (against DNS rebinding), and the server
+  keeps at most 8 sessions and takes at most 1 MiB per request. A session, and a pending question round of the
+  2026-07-28 protocol, belongs to the token that opened it.
+- **Named tokens:** `llm-cli mcp token add NAME` creates a token for one client and shows it once; the framework
+  keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode 0600; while other users can read or change
+  it, or it belongs to another user, no token is accepted and the server does not start). The token's name is the caller in the audit log (`mcp:<name>`), and it has its own permissions: a
+  new token can only read until you allow more with `llm-cli tools permissions --token NAME`, start it with a copy
+  of another caller's permissions (`--policy-from mcp`), or link it to Ditto's (`--link ditto`, for Ditto on another
+  computer; a change to Ditto's permissions applies to it at once). `rotate` replaces a token, `revoke` deletes it
+  with its permissions; both take effect at once, also for a running server, and the calls a revoked stdio client
+  still sends are refused and audited. A stdio client gets its own token
+  through the environment variable `LCF_MCP_TOKEN` in its server entry: the server reads it once at the start,
+  removes it from its environment and does not start with a value that is not a valid token. Without it, all local
+  stdio clients share the caller `mcp` and your own permissions. Only a person at a terminal manages tokens: no tool
+  can create, read or change them, and no token appears in a tool result, log line or audit entry.
 - **Working folder:** the server never reads settings or imports code from the folder it is started in (the client
   starts it with `python -P`), and on Windows it does not run programs such as `docker` or `git` from there. A
   project folder cannot change its behaviour.
 - **Client setup:** `llm-cli mcp config` prints the commands and JSON with quoting that holds in POSIX shells and in
   both cmd and PowerShell; `--write claude-desktop` adds the server to Claude Desktop's configuration, keeps other
   entries and writes a private backup.
+- **Who is connected:** for each new client the server writes one line to stderr, never to the client: the name and
+  version the client reports about itself, the protocol version, the transport, the caller (`mcp` or the named
+  token's `mcp:<name>`, never the token itself) and the capabilities it declared, for example
+  `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
+  capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask" is
+  refused there. Client text is cleared of anything that looks like a key or token first, then escaped and cut
+  to 64 characters; it is a label, never a permission.
+
+What the clients support, from their vendors' documentation (2026-10-11). "Not documented" means the vendor does
+not say; the stderr line above shows what a client really declares.
+
+| Client | Asks you (elicitation) | Progress | Resources | Prompts | Protocol 2026-07-28 |
+|---|---|---|---|---|---|
+| Claude Code (v1 and v2 runtimes) | yes, form and URL | yes | yes | yes | v2 runtime (the default from 2.1.232, or 2.1.274 without feature flags) |
+| Claude Desktop (chat) | not documented | not documented | yes | yes | not documented |
+| Claude Cowork | not documented | not documented | not documented | not documented | not documented |
+| VS Code (GitHub Copilot) | yes, modes not documented | not documented | yes, with templates | yes | not documented |
+
+Claude Desktop chat and Cowork are expected to declare no elicitation (one third-party source says so): there, every
+tool set to "ask" is refused, while allowed tools work.
 
 **Claude subscribers:** this is the way to use the framework with a Claude plan. Anthropic does not allow
 third-party apps to use a subscription's sign-in or limits, so Ditto itself needs an API key; Claude Code and Claude
@@ -916,6 +953,8 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
 - A damaged or unreadable permission file, or a link to a missing one, denies every tool instead of falling back to
   looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and
   `llm-cli mcp serve` say so.
+- A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
+  unknown or revoked token, or a token file that cannot be read, may not even read.
 
 **Audit log** (`~/.llm-framework/audit.db`, SQLite): every tool call is recorded with time, actor, tool, decision,
 whether a person confirmed it, and the outcome. Arguments are stored redacted and shortened, plus a hash of the full

@@ -852,15 +852,16 @@ def tools_list(ctx: FrameworkContext, caller: Optional[str]):
         console.print(f"Callers with their own permissions: {', '.join(own)} (see --caller).")
 
 
-def _ask_tool_policy(registry, current, caller: Optional[str] = None):
+def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for: str = ""):
     """Interactive questions for the tool permissions (one per tier), for one caller or the shared ones. Every
-    registered tool counts as reviewed afterwards: the questions apply to the tools listed above them."""
+    registered tool counts as reviewed afterwards: the questions apply to the tools listed above them. `shown_for`:
+    whose tool facts to list (a named token's, whose own policy `current` is), else `caller`'s."""
     from orchestrator.tools.policy import TIER_LABELS, CallerPolicy, Decision, ToolTier
     section = current.callers.get(caller) if caller else None
     base_tiers = section.tiers if section is not None else current.tiers
     # A caller's new section starts from the shared settings, so creating it never loosens a per-tool setting.
     overrides = dict((section if section is not None else current).overrides)
-    rows = registry.permissions(caller or "")
+    rows = registry.permissions(shown_for or caller or "")
     for row in rows:  # what each tool brings, shown before the person decides
         facts = [f"default {row['default']}", f"at most {row['max']}"] + (["new"] if row["new"] else []) + [
             "standing approval possible" if row["standing_approval"] else "no standing approval"]
@@ -888,13 +889,20 @@ def _ask_tool_policy(registry, current, caller: Optional[str] = None):
 @tools.command('permissions')
 @click.option('--caller', type=CALLER_CHOICE, default=None,
               help="Set the permissions of one caller (ditto or mcp) instead of the shared ones")
+@click.option('--token', 'token_name', help='Set the permissions of this named MCP token (with --reset: read only)')
 @click.option('--reset', is_flag=True, help='Back to the recommended defaults (asks again at the next setup); '
                                             'with --caller: that caller uses the shared permissions again')
 @pass_context
-def tools_permissions(ctx: FrameworkContext, caller: Optional[str], reset: bool):
+def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: Optional[str], reset: bool):
     """Set which tool calls are allowed, need confirmation, or are denied"""
     from orchestrator.tools.policy import ToolPolicy
     registry = _tool_registry(ctx)
+    if token_name is not None:
+        if caller:
+            console.print("[red]Use either --caller or --token.[/red]")
+            sys.exit(2)
+        _token_permissions(registry, token_name, reset)
+        return
     if reset:
         if caller:
             current = registry.policy()
@@ -2160,7 +2168,7 @@ def mcp():
 
 @mcp.command('serve')
 @click.option('--transport', type=click.Choice(['stdio', 'http']), default='stdio', show_default=True,
-              help='stdio: started by the client (default). http: local Streamable HTTP with a bearer token.')
+              help='stdio: started by the client (default). http: local Streamable HTTP with a named token per client.')
 @click.option('--host', default='127.0.0.1', show_default=True, help='HTTP only; loopback addresses only')
 @click.option('--port', default=8765, show_default=True, type=int, help='HTTP only')
 @pass_context
@@ -2168,7 +2176,13 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
     """Run the MCP server (stdout carries the protocol; logs go to stderr)"""
     import contextlib
     from orchestrator import mcp_server
+    from orchestrator.tools.mcp_tokens import ENV_VAR
     mcp_server.no_programs_from_the_working_directory()
+    # Read once and removed before anything starts a child process (the token must not be inherited).
+    token = os.environ.pop(ENV_VAR, None)
+    if token is not None and transport != 'stdio':
+        Console(stderr=True).print(f"[yellow]{ENV_VAR} is ignored over HTTP: each client sends its own "
+                                   "token.[/yellow]")
     # Nothing may reach stdout before the transport owns it.
     with contextlib.redirect_stdout(sys.stderr):
         ctx.require_framework()
@@ -2183,8 +2197,9 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
             Console(stderr=True).print("[yellow]Tool permissions are not set up yet: read-only tools work, "
                                        "everything else asks (or is denied without elicitation). "
                                        "Run 'llm-cli ditto setup'.[/yellow]")
+    stdio_token = {"stdio_token": token} if token is not None and transport == 'stdio' else {}
     try:
-        mcp_server.serve(ctx.framework_manager, transport=transport, host=host, port=port)
+        mcp_server.serve(ctx.framework_manager, transport=transport, host=host, port=port, **stdio_token)
     except ValueError as e:
         Console(stderr=True).print(f"[red]{escape(str(e))}[/red]")
         sys.exit(2)
@@ -2219,6 +2234,198 @@ def mcp_config(ctx: FrameworkContext, write_client: Optional[str]):
         click.echo(text)
         click.echo("")
     click.echo("Sign in to these clients with your own Claude account or key; the framework never sees it.")
+
+
+# Named MCP tokens: created, changed and revoked only by a person at a terminal, never by a tool.
+
+def _stdout_is_terminal() -> bool:
+    try:
+        return sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _at_a_terminal(action: str, *, shows_token: bool = False) -> None:
+    """Piped input (an agent's shell) is refused, and a token is printed only to a terminal, never into a pipe."""
+    if not (_interactive() and (not shows_token or _stdout_is_terminal())):
+        where = "stdin and stdout" if shows_token else "stdin"
+        Console(stderr=True).print(f"[red]{action} needs a person at a terminal ({where}); it is refused "
+                                   "here.[/red]")
+        sys.exit(1)
+
+
+def _token_store(registry):
+    from orchestrator.tools.mcp_tokens import TokenStoreError
+    if registry.tokens is None:
+        Console(stderr=True).print("[red]The MCP token store is not available.[/red]")
+        sys.exit(1)
+    try:
+        registry.tokens.list()  # a damaged or unreadable store is reported before anything else
+    except TokenStoreError as e:
+        Console(stderr=True).print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    return registry.tokens
+
+
+def _audit_person(registry, event: str, arguments: dict) -> None:
+    """A person's change to who may call the tools, in the audit log (actor cli). Names only, never a token."""
+    if registry.audit is None:
+        return
+    try:
+        registry.audit.record("cli", event, "framework", "person", "ok", arguments=arguments, approved=True)
+    except Exception as e:
+        Console(stderr=True).print(f"[yellow]Done, but the audit log could not record it: {escape(str(e))}[/yellow]")
+
+
+def _policy_summary(policy) -> str:
+    from orchestrator.tools.policy import TIER_LABELS
+    tiers = ", ".join(f"{tier.value}: {policy.tiers[tier].value}" for tier in TIER_LABELS)
+    return tiers + (f" (+{len(policy.overrides)} per tool)" if policy.overrides else "")
+
+
+def _show_new_token(name: str, token: str, what: str) -> None:
+    click.echo(f"{what} for '{name}' (shown only now; the framework keeps only its hash):\n")
+    click.echo(token)
+    click.echo("\nOver HTTP the client sends 'Authorization: Bearer <token>'. Over stdio, put it into the client's "
+               "server entry as the environment variable LCF_MCP_TOKEN.")
+
+
+@mcp.group('token')
+def mcp_token():
+    """Named tokens for MCP clients (HTTP, or stdio with LCF_MCP_TOKEN), each with its own permissions"""
+    pass
+
+
+@mcp_token.command('add')
+@click.argument('name')
+@click.option('--policy-from', 'policy_from',
+              help="Start with a copy of another caller's permissions: mcp (local stdio clients), ditto, or a "
+                   "token name (mcp:NAME is always a token). Default: read only")
+@click.option('--link', type=click.Choice(['ditto']),
+              help="Use Ditto's permissions by reference (Ditto on another computer); changes apply at once")
+@pass_context
+def mcp_token_add(ctx: FrameworkContext, name: str, policy_from: Optional[str], link: Optional[str]):
+    """Create a token; it can only read until you allow more (tools permissions --token NAME)"""
+    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStoreError
+    _at_a_terminal("Creating an MCP token", shows_token=True)
+    registry = _tool_registry(ctx)
+    tokens = _token_store(registry)
+    policy = None
+    if policy_from and link:
+        console.print("[red]Use either --policy-from or --link.[/red]")
+        sys.exit(2)
+    if policy_from:
+        # "mcp:<name>" (a token's audit actor) is always a token, also one named like a caller ("mcp", "ditto").
+        named_token = policy_from.startswith(ACTOR_PREFIX)
+        source = policy_from[len(ACTOR_PREFIX):] if named_token else policy_from
+        if not named_token and source in ("mcp", "ditto"):
+            if registry.policy_store.problem:
+                console.print(f"[red]{escape(registry.policy_store.problem)}[/red]")
+                sys.exit(1)
+            policy = registry.policy(source)
+        elif tokens.get(source) is not None:
+            policy = registry.policy(ACTOR_PREFIX + source)
+        else:
+            console.print(f"[red]Unknown caller '{escape(policy_from)}': use mcp, ditto or a token name.[/red]")
+            sys.exit(2)
+        # A copy (later changes of the source do not apply): the source's decisions and reviewed tools; copied
+        # from ditto or mcp it counts as set by you, so the token is no longer treated as a new, read-only one.
+        policy = policy.model_copy(deep=True, update={"configured": True} if not named_token else {})
+    try:
+        token = tokens.add(name, policy=policy, link=link)
+    except TokenStoreError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    _audit_person(registry, "mcp_token.add", {"token": name, "policy_from": policy_from, "link": link})
+    _show_new_token(name, token, "Token")
+    if link:
+        click.echo(f"It uses {link}'s permissions; changes to them apply to it at once.")
+    else:
+        click.echo(f"Permissions: {_policy_summary(tokens.get(name).policy)}. Change them with "
+                   f"'llm-cli tools permissions --token {name}'.")
+
+
+@mcp_token.command('list')
+@pass_context
+def mcp_token_list(ctx: FrameworkContext):
+    """List the tokens (names and permissions; tokens themselves are never shown again)"""
+    tokens = _token_store(_tool_registry(ctx))
+    records = tokens.list()
+    if not records:
+        console.print("No MCP tokens. Create one with 'llm-cli mcp token add NAME'.")
+        return
+    table = Table(title="MCP tokens")
+    for column in ("Name", "Audit actor", "Permissions", "Created", "Rotated"):
+        table.add_column(column)
+    for record in records:
+        permissions = f"linked to {record.link}" if record.link else _policy_summary(record.policy)
+        table.add_row(record.name, f"mcp:{record.name}", permissions, record.created, record.rotated or "-")
+    console.print(table)
+
+
+@mcp_token.command('rotate')
+@click.argument('name')
+@pass_context
+def mcp_token_rotate(ctx: FrameworkContext, name: str):
+    """Replace a token; the old one stops working at once, the permissions stay"""
+    from orchestrator.tools.mcp_tokens import TokenStoreError
+    _at_a_terminal("Rotating an MCP token", shows_token=True)
+    registry = _tool_registry(ctx)
+    try:
+        token = _token_store(registry).rotate(name)
+    except TokenStoreError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    _audit_person(registry, "mcp_token.rotate", {"token": name})
+    _show_new_token(name, token, "New token")
+
+
+@mcp_token.command('revoke')
+@click.argument('name')
+@pass_context
+def mcp_token_revoke(ctx: FrameworkContext, name: str):
+    """Delete a token and its permissions; its client loses access at once"""
+    from orchestrator.tools.mcp_tokens import TokenStoreError
+    _at_a_terminal("Revoking an MCP token")
+    registry = _tool_registry(ctx)
+    tokens = _token_store(registry)
+    if tokens.get(name) is None:
+        console.print(f"[red]There is no token named '{escape(name)}'.[/red]")
+        sys.exit(1)
+    if not click.confirm(f"Revoke the token '{name}'? Its client loses access at once.", default=False):
+        return
+    try:
+        tokens.revoke(name)
+    except TokenStoreError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    _audit_person(registry, "mcp_token.revoke", {"token": name})
+    console.print(f"[green]Token '{escape(name)}' and its permissions are deleted.[/green]")
+
+
+def _token_permissions(registry, name: str, reset: bool) -> None:
+    """`tools permissions --token NAME`: the same questions, saved as that token's own permissions."""
+    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStoreError, read_only_policy
+    _at_a_terminal("Changing a token's permissions")
+    tokens = _token_store(registry)
+    record = tokens.get(name)
+    if record is None:
+        console.print(f"[red]There is no token named '{escape(name)}' ('llm-cli mcp token list').[/red]")
+        sys.exit(1)
+    before = registry.policy(ACTOR_PREFIX + name)
+    if record.link and not click.confirm(f"The token '{name}' uses {record.link}'s permissions. Give it its own "
+                                         "instead?", default=False):
+        return
+    policy = read_only_policy() if reset else _ask_tool_policy(registry, before,
+                                                               shown_for=ACTOR_PREFIX + name)
+    try:
+        tokens.set_policy(name, policy)
+    except TokenStoreError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    _audit_person(registry, "mcp_token.permissions", {"token": name, "before": _policy_summary(before),
+                                                      "after": _policy_summary(policy), "was_linked": record.link})
+    console.print(f"[green]Token '{escape(name)}': {escape(_policy_summary(policy))}[/green]")
 
 
 @cli.group()

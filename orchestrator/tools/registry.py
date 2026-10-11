@@ -26,7 +26,9 @@ from orchestrator.tools.confirmation import CallTooLong, describe_call
 from orchestrator.tools.normalize import (NormalizeError, Repair, check_names_distinct, list_item_literal,
                                           normalize_arguments, resolve_name)
 from orchestrator.tools.output import UNTRUSTED_CHARS, ResultTooLarge, check_size, filtered_result
-from orchestrator.tools.policy import TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier
+from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStore, TokenStoreError
+from orchestrator.tools.policy import (TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier,
+                                       restrictive_policy)
 from orchestrator.tools.spec import CHANNELS, FieldMeta, GrantRule, ToolLimits, example_problems
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -277,10 +279,12 @@ def repair_marks(repairs: List[Repair]) -> Tuple[Dict[str, str], str]:
 
 
 class ToolRegistry:
-    def __init__(self, policy_store: PolicyStore, audit: Optional[AuditLog] = None):
+    def __init__(self, policy_store: PolicyStore, audit: Optional[AuditLog] = None,
+                 tokens: Optional[TokenStore] = None):
         self.logger = get_logger("ToolRegistry")
         self.policy_store = policy_store
         self.audit = audit
+        self.tokens = tokens  # named MCP tokens, each with its own policy
         self._tools: Dict[str, ToolSpec] = {}
         # Repeat guard and per-session counters (in memory; per caller and session).
         self._guard_lock = threading.Lock()
@@ -321,37 +325,78 @@ class ToolRegistry:
     def list(self) -> List[ToolSpec]:
         return list(self._tools.values())
 
-    def policy(self) -> ToolPolicy:
-        return self.policy_store.load()
+    def policy(self, actor: str = "") -> ToolPolicy:
+        """Without `actor`: the user's policy file as stored (the shared permissions and a section per caller).
+        With an actor: that caller's permissions as one policy, for showing and copying them (`--policy-from`):
+        a named MCP token's own (a new token's: read only), the linked caller's for a linked token, nothing for an
+        unknown or revoked token; for ditto and mcp their section, or the shared permissions."""
+        if not actor:
+            return self.policy_store.load()
+        policy, section = self._policy_of(actor)
+        if not section:  # a token's own policy, or one that denies everything
+            return policy
+        own = policy.callers.get(section)
+        if own is None and section.startswith(ACTOR_PREFIX):  # a token without permissions of its own
+            from orchestrator.tools.mcp_tokens import read_only_policy
+            return read_only_policy()
+        source = own if own is not None else policy
+        return ToolPolicy(configured=policy.configured, tiers=dict(source.tiers), overrides=dict(source.overrides),
+                          reviewed=list(source.reviewed) if source.reviewed is not None else None)
+
+    def _policy_of(self, actor: str) -> Tuple[ToolPolicy, str]:
+        """(the policy that decides for `actor`, the caller whose section in it applies). A named MCP token
+        (`mcp:<name>`, checked by the framework) uses its own policy (section ""), or the linked caller's section of
+        the user's policy. A token whose permissions the person has not set yet is decided as a new token in the
+        user's policy: read only, never more than the shared setting for a tool or the tool's own default. An
+        unknown or revoked token (also a name no token can have, such as the caller of an HTTP request nobody
+        checked), a registry without a token store and an unusable token store get nothing."""
+        stored = self.policy_store.load()
+        if not actor.startswith(ACTOR_PREFIX):
+            return stored, actor
+        if self.tokens is None:  # no store to check a token against
+            return restrictive_policy(), ""
+        try:
+            record = self.tokens.get(actor[len(ACTOR_PREFIX):])
+        except TokenStoreError:
+            return restrictive_policy(), ""
+        if record is None:
+            return restrictive_policy(), ""
+        if record.link is not None:
+            return stored, record.link
+        if record.policy is None or not record.policy.configured:
+            return stored, actor
+        return record.policy, ""
 
     def decide(self, spec: ToolSpec, inp: Any = None, caller: Union[str, "ToolContext"] = "") -> Decision:
         """The decision for a call of `spec` by `caller` (ditto, mcp, mcp:<token>, or the call's ToolContext): the
         caller's own permissions (or the shared ones), the tool's default for tools the person has not reviewed or
         for this call (e.g. "allow" when the caller cancels its own build, decided on ToolContext.owner), and the
         tool's cap."""
-        actor, owner = (caller.actor, caller.owner) if isinstance(caller, ToolContext) else (caller, None)
-        return self.policy().decide_tool(spec, inp, actor, owner=owner)
+        actor, owner = (caller.actor, caller.owner) if isinstance(caller, ToolContext) else (caller, caller)
+        policy, section = self._policy_of(actor)
+        return policy.decide_tool(spec, inp, section, owner=owner)
 
     def visible(self, caller: str) -> List[ToolSpec]:
         """The tools a caller is offered: every tool its permissions do not deny (MCP tools/list, Ditto's tool
         definitions). Denied tools stay registered; a call to one is refused and audited."""
-        policy = self.policy()
-        return [s for s in self._tools.values() if policy.decide_tool(s, None, caller) != Decision.DENY]
+        policy, section = self._policy_of(caller)
+        return [s for s in self._tools.values()
+                if policy.decide_tool(s, None, section, owner=caller) != Decision.DENY]
 
     def permissions(self, caller: str) -> List[Dict[str, Any]]:
         """Per tool, for one caller: decision and why, default, cap, listed or hidden, new (not reviewed yet), and
         whether a confirmation may offer a standing approval."""
-        policy = self.policy()
+        policy, section = self._policy_of(caller)
         rows = []
         for spec in self._tools.values():
-            decision, why = policy.explain_tool(spec, None, caller)
+            decision, why = policy.explain_tool(spec, None, section, owner=caller)
             default = spec.default_decision
             rows.append({
                 "tool": spec.name, "title": spec.title, "tier": spec.tier.value, "decision": decision.value,
                 "why": why, "default": ("depends on the call" if callable(default) else
                                         default.value if default is not None else "tier setting"),
                 "max": ("depends on the call" if callable(spec.max_decision) else spec.cap().value),
-                "listed": decision != Decision.DENY, "new": not policy.reviewed_tool(caller, spec.name),
+                "listed": decision != Decision.DENY, "new": not policy.reviewed_tool(section, spec.name),
                 "standing_approval": spec.grant is not None,
             })
         return rows
@@ -441,11 +486,14 @@ class ToolRegistry:
         return []
 
     def refuse(self, name: str, arguments: Optional[Dict[str, Any]], ctx: ToolContext,
-               outcome: str = "not_confirmed", detail: str = "", **extra: Any) -> None:
+               outcome: str = "not_confirmed", detail: str = "", decision: Optional[Decision] = None,
+               **extra: Any) -> None:
         """Audits a call that was refused, cancelled or left unanswered outside call() (e.g. because it could
-        not be confirmed). Nobody approved it, so `approved` stays NULL."""
+        not be confirmed). Nobody approved it, so `approved` stays NULL. `decision`: when the refusal was not the
+        policy's (e.g. the caller's token ended); otherwise the policy decides what is recorded."""
         spec = self.get(name)
-        self._audit(ctx, spec, self.decide(spec, caller=ctx.actor), outcome, arguments, detail=detail, **extra)
+        self._audit(ctx, spec, decision or self.decide(spec, caller=ctx.actor), outcome, arguments, detail=detail,
+                    **extra)
 
     # --- the fool-proof layer and the repeat guard -------------------------------------------------------------
 
