@@ -24,6 +24,7 @@ import shutil
 import tempfile
 import hashlib
 import re
+import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union, Callable, Tuple
 from dataclasses import dataclass, field, asdict
@@ -44,6 +45,14 @@ from orchestrator.utils.build_context import stage_build_context
 # Files a build may produce that are models (data to install), never programs to execute.
 MODEL_FILE_SUFFIXES = (".gguf", ".rkllm", ".rknn", ".onnx", ".safetensors", ".bin")
 BUILD_MANIFEST = "build_info.json"
+# Large models are copied, hashed and zipped in chunks; a cancel is noticed between two of them.
+COPY_CHUNK = 8 * 1024 * 1024
+# A build is staged in ".<output folder>.<build id>.partial" next to its output folder until it has completed.
+STAGING_SUFFIX = ".partial"
+
+
+def is_staging_folder(name: str) -> bool:
+    return name.startswith(".") and name.endswith(STAGING_SUFFIX)
 
 # Fallback Helper if utils module not fully ready during bootstrap
 def ensure_directory(path: Path):
@@ -55,6 +64,10 @@ class ValidationError(Exception): pass
 
 class BuildCancelled(Exception):
     """The user cancelled the build; not a failure."""
+
+
+class BuildSlotsBusy(RuntimeError):
+    """Every build slot is taken (a cancelled build keeps its slot until its worker has stopped)."""
 
 
 def _is_read_timeout(exc: Optional[BaseException]) -> bool:
@@ -234,6 +247,7 @@ class BuildEngine:
         self._active_containers: Dict[str, Container] = {}
         self._active_processes: Dict[str, subprocess.Popen] = {}
         self._running: set = set()  # builds whose worker thread has not returned yet
+        self._settled: set = set()  # builds whose outcome is fixed; a cancel comes too late for them
         self._build_images: Dict[str, str] = {}
         self._executor = ThreadPoolExecutor(max_workers=max_concurrent_builds)
         
@@ -305,7 +319,7 @@ class BuildEngine:
         with self._lock:
             # A cancelled build still counts until its worker has really stopped.
             if len(self._running) >= self.max_concurrent_builds:
-                raise RuntimeError("Max concurrent builds reached")
+                raise BuildSlotsBusy("Max concurrent builds reached")
             if config.build_id in self._running:
                 raise RuntimeError(f"Build {config.build_id} is still running")
             self._builds[config.build_id] = progress
@@ -330,6 +344,8 @@ class BuildEngine:
         with self._lock:
             progress = self._builds.get(build_id)
             if not progress or progress.status in [BuildStatus.COMPLETED, BuildStatus.FAILED, BuildStatus.CANCELLED]:
+                return False
+            if build_id in self._settled:  # failed and cleaning up, or publishing its files: too late
                 return False
             progress.status = BuildStatus.CANCELLED
             container = self._active_containers.get(build_id)
@@ -362,6 +378,14 @@ class BuildEngine:
             if progress.status == BuildStatus.CANCELLED:
                 raise BuildCancelled("Build cancelled by user.")
             progress.status = status
+
+    def _settle(self, progress: "BuildProgress"):
+        """Fixes a successful outcome before its files are published: raises BuildCancelled after a cancel,
+        otherwise cancel_build refuses from now on."""
+        with self._lock:
+            if progress.status == BuildStatus.CANCELLED:
+                raise BuildCancelled("Build cancelled by user.")
+            self._settled.add(progress.build_id)
 
     def _run_container(self, config: "BuildConfiguration", progress: "BuildProgress", container: Container,
                        prefix: str) -> int:
@@ -462,13 +486,20 @@ class BuildEngine:
         """Main execution flow running in worker thread."""
         bid = config.build_id
         prog = self._builds[bid]
+        outcome = BuildStatus.FAILED
         try:
-            self._execute_build_stages(config, prog)
+            outcome = self._execute_build_stages(config, prog)
         finally:
+            # The outcome becomes visible together with the free slot, so a poller that sees it can submit
+            # its next build right away. A cancel is never undone.
             with self._lock:
+                if prog.status != BuildStatus.CANCELLED:
+                    prog.status = outcome
                 self._running.discard(bid)
+                self._settled.discard(bid)
 
-    def _execute_build_stages(self, config: BuildConfiguration, prog: "BuildProgress"):
+    def _execute_build_stages(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
+        """Runs the stages and returns the outcome; _execute_build publishes it."""
         bid = config.build_id
         try:
             self._enter_stage(prog, BuildStatus.PREPARING)
@@ -502,7 +533,8 @@ class BuildEngine:
             self._check_cancelled(prog)
             
             # 5. Security Scan
-            self._scan_image_security(image.tags[0], prog, build_id=bid)
+            self._scan_image_security(image.tags[0], prog, build_id=bid,
+                                      timeout=config.build_timeout or self.default_timeout)
             self._check_cancelled(prog)
             
             # 5a. Importance matrix: a llama.cpp (GGUF) concept. Other formats use the dataset directly.
@@ -517,39 +549,47 @@ class BuildEngine:
             # 6. Run Build Modules (Main Conversion/Quantization)
             self._execute_build_modules(config, prog, image, target_path, staged)
             
-            # 7. Extract Artifacts
+            # 7./8. Artifacts, manifest and golden ZIP are staged next to the output folder. They reach it
+            # (and the deployment listings) only once the build can no longer be cancelled.
+            self._enter_stage(prog, BuildStatus.PACKAGING)
             self._extract_artifacts(config, prog)
-            
-            # 8. Create Golden Artifact
             self._create_golden_artifact(config, prog)
-            
-            # 9. Cleanup
-            if config.cleanup_after_build: 
+
+            # 9. Cleanup, before the outcome is settled: a cancel meanwhile still discards the staged files.
+            if config.cleanup_after_build:
                 self.cleanup_build(bid)
-                
-            self._enter_stage(prog, BuildStatus.COMPLETED)
+
+            self._settle(prog)
+            self._publish_artifacts(config, prog)
             prog.end_time = datetime.now()
             prog.progress_percent = 100
+            return BuildStatus.COMPLETED
             
         except BuildCancelled:
-            prog.status = BuildStatus.CANCELLED
-            prog.end_time = datetime.now()
-            try: self.cleanup_build(bid)
-            except Exception: pass
+            return self._end_cancelled(config, prog)
         except Exception as e:
-            if prog.status == BuildStatus.CANCELLED:
+            with self._lock:
+                cancelled = prog.status == BuildStatus.CANCELLED
+                if not cancelled:
+                    self._settled.add(bid)  # failed: a cancel now would only hide the error
+            if cancelled:
                 # Stopping the container makes the stage fail; that is the cancellation, not an error.
-                prog.end_time = datetime.now()
-                try: self.cleanup_build(bid)
-                except Exception: pass
-                return
-            prog.status = BuildStatus.FAILED
+                return self._end_cancelled(config, prog)
+            self._discard_staged(config, prog)
             prog.end_time = datetime.now()
             prog.add_error(str(e))
             self.logger.error(f"Build {bid} failed: {e}", exc_info=True)
             # Try cleanup even on failure
             try: self.cleanup_build(bid)
             except Exception: pass
+            return BuildStatus.FAILED
+
+    def _end_cancelled(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
+        self._discard_staged(config, prog)
+        prog.end_time = datetime.now()
+        try: self.cleanup_build(config.build_id)
+        except Exception: pass
+        return BuildStatus.CANCELLED
 
     def _validate_build_config(self, config: BuildConfiguration):
         if not config.build_id or not config.model_source or not config.output_dir:
@@ -679,7 +719,8 @@ class BuildEngine:
         tail = [l for l in progress.logs if prefix in l][-lines:]
         return "\n".join(tail)
 
-    def _scan_image_security(self, image_tag: str, progress: BuildProgress, build_id: Optional[str] = None):
+    def _scan_image_security(self, image_tag: str, progress: BuildProgress, build_id: Optional[str] = None,
+                             timeout: Optional[int] = None):
         if not self._get_conf("enable_security_scan", True):
             progress.add_log("Security scan disabled (enable_security_scan=false).")
             return
@@ -703,9 +744,32 @@ class BuildEngine:
             with self._lock:
                 self._active_containers[build_id] = container
             self._check_cancelled(progress)
-            for line in container.logs(stream=True, follow=True):
-                progress.add_log(f"TRIVY: {line.decode(errors='replace').strip()}")
-            code = int(container.wait().get("StatusCode", 1))
+
+            def pump():
+                try:
+                    for line in container.logs(stream=True, follow=True):
+                        progress.add_log(f"TRIVY: {line.decode(errors='replace').strip()}")
+                except Exception as e:  # the container may be removed while streaming
+                    self.logger.debug(f"Scan log stream of {build_id} ended: {e}")
+
+            reader = threading.Thread(target=pump, name=f"trivy-logs-{build_id}", daemon=True)
+            reader.start()
+            # A scan that hangs (e.g. on its database download) must not hold the build slot forever.
+            timeout = timeout or self.default_timeout
+            try:
+                code = int(container.wait(timeout=timeout).get("StatusCode", 1))
+            except Exception as e:
+                self._check_cancelled(progress)
+                if not _is_read_timeout(e):
+                    raise
+                try:
+                    container.kill()
+                except Exception:
+                    pass
+                progress.add_warning(f"Security scan did not finish within {timeout} s and was stopped "
+                                     f"(setting build_timeout).")
+                return
+            reader.join(timeout=10)
             self._check_cancelled(progress)
             if code == 0:
                 progress.add_log("Security scan passed.")
@@ -1026,38 +1090,104 @@ class BuildEngine:
         if exit_code != 0:
             raise RuntimeError(f"Build script failed with exit code {exit_code}\n{self._log_tail(progress, 'CONT: ')}")
 
+    @staticmethod
+    def _staging_root(config: BuildConfiguration) -> Path:
+        """Hidden folder next to the output folder (next to its target if it is a link): the same filesystem,
+        so publishing is a rename, and deployment listings skip it."""
+        out = Path(os.path.realpath(config.output_dir))
+        return out.parent / f".{out.name}.{config.build_id}{STAGING_SUFFIX}"
+
+    def _staged_output(self, config: BuildConfiguration) -> Path:
+        return self._staging_root(config) / Path(config.output_dir).name
+
+    def _discard_staged(self, config: BuildConfiguration, progress: BuildProgress):
+        """Drops what a build that did not complete has staged; its output folder was never touched."""
+        shutil.rmtree(self._staging_root(config), ignore_errors=True)
+        progress.artifacts.clear()
+
+    @staticmethod
+    def _move(src: Path, dst: Path):
+        try:
+            os.replace(src, dst)  # atomic on one filesystem
+        except OSError:
+            shutil.move(str(src), str(dst))
+
+    def _publish_artifacts(self, config: BuildConfiguration, progress: BuildProgress):
+        """Moves the staged files into the output folder (the manifest last) and the ZIP next to it.
+        Files of earlier builds in that folder are replaced only now."""
+        root = self._staging_root(config)
+        if not root.is_dir():
+            return
+        staged, dst = self._staged_output(config), Path(config.output_dir)
+        files = sorted((f for f in staged.rglob("*") if f.is_file()),
+                       key=lambda f: (f.name == BUILD_MANIFEST, str(f))) if staged.is_dir() else []
+        ensure_directory(dst)
+        for f in files:
+            target = dst / f.relative_to(staged)
+            ensure_directory(target.parent)
+            self._move(f, target)
+        archive = root / f"{dst.name}.zip"
+        if archive.is_file():
+            self._move(archive, dst.parent / archive.name)
+            progress.add_log(f"✅ Golden Artifact created: {dst.parent / archive.name}")
+        shutil.rmtree(root, ignore_errors=True)
+
+    def _copy_file(self, src: Path, dst: Path, progress: BuildProgress):
+        """shutil.copy2 that stops after a cancel and never follows a link."""
+        self._check_cancelled(progress)
+        fd = os.open(src, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+        with open(fd, "rb") as fin, open(dst, "wb") as fout:
+            for chunk in iter(lambda: fin.read(COPY_CHUNK), b""):
+                self._check_cancelled(progress)
+                fout.write(chunk)
+        shutil.copystat(src, dst)
+
     def _extract_artifacts(self, config, progress):
         progress.current_stage = "Extracting"
         progress.progress_percent = 85
         
         src = self.cache_dir / "builds" / config.build_id / "output"
         dst = Path(config.output_dir)
+        staged = self._staged_output(config)
         
         progress.add_log(f"Copying artifacts to {dst}...")
-        ensure_directory(dst)
+        shutil.rmtree(self._staging_root(config), ignore_errors=True)  # left over by an interrupted run
+        ensure_directory(staged)
         
         if src.exists():
             count = 0
-            for f in src.rglob("*"):
+            root = os.path.realpath(src)
+            for f in sorted(src.rglob("*")):
+                inside = os.path.realpath(f).startswith(root + os.sep)
+                if f.is_symlink() or not inside:
+                    # Left by the sandboxed conversion: following it would copy a host file it cannot read.
+                    # A link within the output is redundant, its target is copied anyway.
+                    if not inside:
+                        progress.add_warning(f"Not copied: '{f.relative_to(src)}' in the build output links "
+                                             f"outside it.")
+                    continue
                 if f.is_file():
                     rel = f.relative_to(src)
-                    target = dst / rel
+                    target = staged / rel
                     ensure_directory(target.parent)
-                    shutil.copy2(f, target)
-                    progress.artifacts.append(str(target))
+                    self._copy_file(f, target, progress)
+                    progress.artifacts.append(str(dst / rel))  # where it is published
                     count += 1
             progress.add_log(f"Extracted {count} artifacts.")
 
     @staticmethod
-    def _sha256_file(path: Path) -> str:
+    def _sha256_file(path: Path, progress: Optional[BuildProgress] = None) -> str:
         sha256 = hashlib.sha256()
         with open(path, "rb") as f:
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                if progress is not None:
+                    BuildEngine._check_cancelled(progress)
                 sha256.update(chunk)
         return sha256.hexdigest()
 
     def _write_build_manifest(self, config: BuildConfiguration, output_dir: Path,
-                              produced: Optional[List[str]] = None) -> Dict[str, Any]:
+                              produced: Optional[List[str]] = None,
+                              progress: Optional[BuildProgress] = None) -> Dict[str, Any]:
         """Completes build_info.json (written by the container) with the artifact list and hashes.
         Deployment finds builds through this manifest and installs its primary model file.
         `produced`: the files this build extracted; older files in the same folder (e.g. a build for
@@ -1072,7 +1202,7 @@ class BuildEngine:
                 info = {}
         own = {Path(p).resolve() for p in produced} if produced is not None else None
         artifacts = [
-            {"file": f.name, "bytes": f.stat().st_size, "sha256": self._sha256_file(f)}
+            {"file": f.name, "bytes": f.stat().st_size, "sha256": self._sha256_file(f, progress)}
             for f in sorted(output_dir.iterdir())
             if f.is_file() and f.name.lower().endswith(MODEL_FILE_SUFFIXES) and (own is None or f.resolve() in own)
         ]
@@ -1134,31 +1264,45 @@ class BuildEngine:
         except Exception as e:
             self.logger.error(f"Failed to write Model Card: {e}")
 
+    def _zip_folder(self, folder: Path, archive: Path, progress: BuildProgress):
+        """The folder as <name>/... in a ZIP (like shutil.make_archive), stopping after a cancel."""
+        with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+            zf.write(folder, folder.name)
+            for path in sorted(folder.rglob("*")):
+                arcname = str(Path(folder.name) / path.relative_to(folder))
+                if path.is_dir():
+                    zf.write(path, arcname)
+                    continue
+                info = zipfile.ZipInfo.from_file(path, arcname)
+                info.compress_type = zipfile.ZIP_DEFLATED
+                with open(path, "rb") as src, zf.open(info, "w") as dst:
+                    for chunk in iter(lambda: src.read(COPY_CHUNK), b""):
+                        self._check_cancelled(progress)
+                        dst.write(chunk)
+
     def _create_golden_artifact(self, config: BuildConfiguration, progress: BuildProgress):
         progress.current_stage = "Archiving"
         progress.progress_percent = 95
+        self._check_cancelled(progress)
         
         output_dir = Path(config.output_dir)
+        staged = self._staged_output(config)
+        ensure_directory(staged)
         
         progress.add_log("Writing build manifest and Model Card...")
-        manifest = self._write_build_manifest(config, output_dir, progress.artifacts)
+        # Only this build's files are staged, so every model file there is its own.
+        manifest = self._write_build_manifest(config, staged, progress=progress)
         if not manifest.get("primary"):
             progress.add_warning("The build produced no model file.")
-        self._generate_model_card(config, output_dir, manifest)
+        self._generate_model_card(config, staged, manifest)
         
-        archive_name = output_dir.name 
-        root_dir = output_dir.parent
-        base_dir = output_dir.name
-        
+        archive = self._staging_root(config) / f"{output_dir.name}.zip"
         try:
-            progress.add_log(f"Creating Golden Artifact ZIP...")
-            zip_path = shutil.make_archive(
-                str(root_dir / archive_name), 
-                'zip', 
-                root_dir, 
-                base_dir
-            )
-            progress.add_log(f"✅ Golden Artifact created: {zip_path}")
-            progress.artifacts.append(zip_path)
+            progress.add_log("Creating Golden Artifact ZIP...")
+            self._zip_folder(staged, archive, progress)
+            progress.artifacts.append(str(output_dir.parent / archive.name))
+        except BuildCancelled:
+            raise
         except Exception as e:
+            archive.unlink(missing_ok=True)
             progress.add_error(f"Failed to create Golden Artifact: {e}")

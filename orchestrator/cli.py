@@ -542,6 +542,16 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         
         # Validate against the target's declared capabilities and fill its defaults.
         tm = getattr(ctx.framework_manager, "target_manager", None)
+        if tm:
+            # The registered spelling, so `-t rockchip` is checked like `-t Rockchip`; an unknown target
+            # would otherwise "complete" with nothing built.
+            known = [str(t.get("id")) for t in tm.list_targets() if t.get("id")]
+            match = next((tid for tid in known if tid == target), None) or \
+                next((tid for tid in known if tid.casefold() == target.strip().casefold()), None)
+            if match is None:
+                console.print(f"[red]Unknown target '{escape(target)}' (targets: {escape(', '.join(known) or 'none')}).[/red]")
+                sys.exit(2)
+            target = target_arch_str = match
         caps = tm.get_capabilities(target) if tm else None
         if caps:
             # The values the build really runs with (canonical spellings, the scripts' default board).
