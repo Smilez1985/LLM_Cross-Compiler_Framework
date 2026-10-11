@@ -114,8 +114,11 @@ The installer:
    mirror; behind a proxy start it with `sudo -E` so `https_proxy` is kept) and Python (installs it with `apt` if
    it is missing, then requires 3.11 to 3.14),
 2. installs Docker via `get.docker.com` if it is missing and adds your user to the `docker` group,
-3. copies the framework to `/opt/llm-conversion-framework` (owned by your user); running it again updates the
-   program and keeps your builds, cache, models and `configs/config.yml` there,
+3. copies the files the repository ships to `/opt/llm-conversion-framework` (owned by your user) and lists them
+   in `.lcf-installed-files`. Running it again updates those files and removes only files that an earlier run
+   copied and the repository no longer ships; everything else there stays: your own targets (module wizard,
+   `llm-cli module create`), installed community packs, `configs/config.yml`, builds, cache and models. Start
+   updates in the repository folder: the copy of `install.sh` in `/opt` copies and removes nothing,
 4. creates a virtual environment (`.venv`) there and installs the pinned packages from `requirements.txt`,
 5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI.
 

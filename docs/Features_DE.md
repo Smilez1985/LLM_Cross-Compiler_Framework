@@ -691,8 +691,8 @@ Beispiel mit einem neuen Deep Ingest derselben URL), damit es wirkt.
 
 Die Embedding-Modelle und der Reranker werden nach `rag_model_idle_minutes` (Standard 10) ohne Nutzung entladen und
 bei der nächsten Suche wieder geladen, was einige Sekunden dauert. Die Zeit zählt ab dem Ende der letzten Suche oder
-Aufnahme, nie währenddessen. `0` hält sie geladen. Der eingebettete Speicher wird davon getrennt nach 30 Sekunden
-ohne Zugriff freigegeben (siehe **Speicher** oben).
+Aufnahme, nie währenddessen. `0` hält sie geladen; eine längere Zeit als 7 Tage (10080 Minuten) gilt als 7 Tage.
+Der eingebettete Speicher wird davon getrennt nach 30 Sekunden ohne Zugriff freigegeben (siehe **Speicher** oben).
 
 ---
 
@@ -753,15 +753,21 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   den Sprachen aus `crawler_languages` (Standard Englisch und Deutsch; eine leere Liste behält alle). Ein Crawl hört
   außerdem nach fünfmal so vielen Anfragen auf, wie seine Seitengrenze erlaubt (Weiterleitungen und gescheiterte
   Abrufe zählen mit).
+- Jede Antwort wird bis zu einer Grenze gelesen (HTML-Seiten 8 MiB, PDFs 64 MiB, robots.txt 500 KiB,
+  `tdmrep.json` 1 MiB) und muss innerhalb von 60 s vollständig ankommen (PDFs 180 s), sodass eine Site mit einer
+  endlosen oder tröpfelnden Antwort weder den Speicher füllen noch den Crawl festhalten kann. Eine größere Seite
+  wird übersprungen, eine langsamere scheitert. Von einer größeren robots.txt zählen die ersten 500 KiB (RFC 9309
+  erlaubt diese Grenze); eine robots.txt, die nicht rechtzeitig ankommt, bedeutet „alles verboten“, und eine
+  größere `tdmrep.json` wird nicht verwendet.
 
 ### Fortschritt, Stopp und Ergebnis
 
 - Der Assistent zeigt vor jeder Anfrage „Seite N von M: <Adresse>“ (M ist die Seitengrenze) mit einem
   Fortschrittsbalken.
 - Seiten werden gespeichert, sobald sie gelesen sind. **Stoppen** beendet den Crawl nach der aktuellen Seite (eine
-  laufende Pause zwischen Anfragen wird abgekürzt); was gespeichert ist, bleibt. Wer den Assistenten während eines
-  Crawls schließt, stoppt ihn genauso: Das Fenster reagiert weiter und schließt sich, sobald die aktuelle Seite
-  gespeichert ist.
+  laufende Pause zwischen Anfragen wird abgekürzt, ebenso eine Seite, die noch ankommt); was gespeichert ist, bleibt.
+  Wer den Assistenten während eines Crawls schließt, stoppt ihn genauso: Das Fenster reagiert weiter und schließt
+  sich, sobald die aktuelle Seite gespeichert ist.
 - Das Ergebnis über alle eingegebenen URLs wird erst gemeldet, wenn der letzte Schreibvorgang zurückgekehrt ist:
 
   | Ergebnis | Wann | Meldungsfenster |
@@ -773,8 +779,9 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 - Das Crawl-Protokoll im Assistenten (und das Log des Frameworks) nennt jede Seite, die nicht gespeichert wurde, mit
   ihrem Grund, zum Beispiel „disallowed by robots.txt“, „X-Robots-Tag: noai“, „TDM reservation (...)“, „redirect
   from ... leaves the crawled site“, „language 'fr' is not one of de, en“, „PDF downloads are switched off“,
-  „neither HTML nor PDF (image/png)“, „no text“ oder „PDF support (pypdf) is not installed“, und jede Seite, die sich
-  nicht abrufen oder lesen ließ (HTTP-Status, unlesbares PDF, zu viele Weiterleitungen). Jede Seite, die ankommt
+  „neither HTML nor PDF (image/png)“, „no text“, „response larger than 8 MiB (the limit for HTML pages)“ oder „PDF
+  support (pypdf) is not installed“, und jede Seite, die sich nicht abrufen oder lesen ließ (HTTP-Status, „no
+  complete response within 60 s“, unlesbares PDF, zu viele Weiterleitungen). Jede Seite, die ankommt
   (HTTP 200), zählt zur Seitengrenze, ob gespeichert oder nicht. Vorbehalte von Sites und Fehler machen das
   Ergebnis zu „teilweise“, die übrigen Gründe nicht.
 

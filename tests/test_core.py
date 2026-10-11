@@ -103,6 +103,26 @@ class TestConfigManager:
         assert cfg.log_level == "INFO"
         assert cfg.max_concurrent_builds == 2
 
+    def test_a_number_too_large_for_its_type_costs_only_its_own_setting(self, tmp_path):
+        # int(.inf) raises OverflowError; it used to abort the file, so every setting after it was ignored.
+        (tmp_path / "config.yml").write_text("log_level: DEBUG\nrag_model_idle_minutes: .inf\ncrawler_max_depth: 4\n"
+                                             "crawler_rate_limit: .inf\nmax_concurrent_builds: 3\n")
+
+        cfg = ConfigManager(tmp_path)
+
+        assert cfg.get("rag_model_idle_minutes") == 10 and cfg.get("crawler_rate_limit") == 1.0  # the defaults
+        assert (cfg.log_level, cfg.get("crawler_max_depth"), cfg.get("max_concurrent_builds")) == ("DEBUG", 4, 3)
+        assert cfg.set("rag_model_idle_minutes", float("inf")) is False
+        assert cfg.set("crawler_rate_limit", float("nan")) is False and cfg.set("crawler_rate_limit", 2.5)
+
+    def test_revision_counts_every_change_of_a_setting(self, tmp_path):
+        cfg = ConfigManager(tmp_path)
+        assert cfg.revision("rag_reranker") == 0
+        cfg.set("rag_reranker", "off")
+        cfg.set("rag_reranker", "auto")  # back to the value it had: still a change
+        assert cfg.revision("rag_reranker") == 2 and cfg.get("rag_reranker") == "auto"
+        assert cfg.set("log_level", "LOUD") is False and cfg.revision("log_level") == 0
+
     def test_environment_overrides_file(self, tmp_path, monkeypatch):
         (tmp_path / "config.yml").write_text("log_level: DEBUG\n")
         monkeypatch.setenv("LLM_FRAMEWORK_LOG_LEVEL", "WARNING")

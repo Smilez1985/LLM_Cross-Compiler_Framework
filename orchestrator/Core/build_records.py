@@ -42,17 +42,34 @@ def this_process() -> Dict[str, Any]:
     return {"pid": pid, "process_started": _process_started(pid)}
 
 
+def _private_folder(folder: Path) -> None:
+    """The records folder, readable only by its owner where the OS has POSIX permissions (a record names the model,
+    the output folder and errors); a folder of an earlier version is made private too. On Windows the folder
+    inherits the permissions of the per-user cache folder."""
+    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if os.name == "posix":
+        try:
+            if folder.stat().st_mode & 0o077:
+                folder.chmod(0o700)
+        except OSError:  # another user's folder in a shared cache: their records stay theirs
+            pass
+
+
 def write_record(folder: Path, record: Dict[str, Any]) -> None:
-    """Writes the record atomically (readers never see half a file). Errors and stages are redacted."""
+    """Writes the record atomically (readers never see half a file), readable only by its owner (0600 in a 0700
+    folder). Errors and stages are redacted."""
     data = dict(record)
     for key in ("error", "stage"):
         if isinstance(data.get(key), str):
             data[key] = redact_secrets(data[key])[:MAX_ERROR]
     data["updated"] = datetime.now().isoformat(timespec="seconds")
-    folder.mkdir(parents=True, exist_ok=True)
+    text = json.dumps(data, indent=2, default=str)
+    _private_folder(folder)
     path = folder / f"{data['build_id']}.json"
     tmp = folder / f".{data['build_id']}.{os.getpid()}.{threading.get_ident()}.tmp"  # one per writing thread
-    tmp.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    tmp.unlink(missing_ok=True)  # left behind by a crash, possibly with wider permissions
+    with os.fdopen(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), "w", encoding="utf-8") as f:
+        f.write(text)
     os.replace(tmp, path)
 
 

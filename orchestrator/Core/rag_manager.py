@@ -13,6 +13,7 @@ A cross-encoder can rerank them and drop the irrelevant ones; it is quality on t
 
 import functools
 import ipaddress
+import math
 import os
 import re
 import threading
@@ -47,6 +48,9 @@ _IDENTIFIER = re.compile(r"\d|_|[A-Z]{2,}|\w[.-]\w")  # E2041, GGML_CUDA, RKNN, 
 RERANK_POOL = 20  # most candidates a search reranks (about 1-2.5 s on one free CPU core)
 RERANK_INPUT_CHARS = 1500  # of each candidate; about what fits next to the query into 512 tokens
 MAX_SNAPSHOTS = 5
+# Longest idle time before the models are released (7 days); threading.Timer overflows on huge timeouts (on
+# Windows above about 49 days).
+MAX_MODEL_IDLE_SECONDS = 7 * 24 * 3600.0
 MAX_CODE_FILE_BYTES = 512 * 1024
 _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
                      "fused_score", "reranker"}
@@ -158,7 +162,8 @@ class RAGManager:
         self._idle_timer: Optional[threading.Timer] = None
         # Reranker: chosen from rag_reranker on first use (or provided); scores(query, texts) -> 0..1 each.
         self._reranker = reranker
-        self._reranker_setting: Optional[str] = None if reranker is None else "provided"
+        self._reranker_setting: Any = None if reranker is None else "provided"  # (setting, revision) last seen
+        self._reranker_pending = False  # the setting changed since the last attempt to create the reranker
         self.reranker_reason = ""  # why reranker() returns None
         self._model_lock = threading.Lock()
         self._model_timer: Optional[threading.Timer] = None
@@ -368,11 +373,18 @@ class RAGManager:
     # --- model memory ---
 
     def _model_idle(self) -> float:
-        """Seconds after the last use until the models are released (rag_model_idle_minutes; 0 = never)."""
+        """Seconds after the last use until the models are released (rag_model_idle_minutes; 0 = never), at most
+        MAX_MODEL_IDLE_SECONDS: threading.Timer fails in its own thread on a huge timeout, and the models would
+        then never be released."""
         try:
-            return float(self._cfg("rag_model_idle_minutes", 10)) * 60
+            seconds = float(self._cfg("rag_model_idle_minutes", 10)) * 60
+        except OverflowError:  # an integer too large for a float
+            return MAX_MODEL_IDLE_SECONDS
         except (TypeError, ValueError):
             return 600.0
+        if math.isnan(seconds):
+            return 600.0
+        return min(seconds, MAX_MODEL_IDLE_SECONDS)
 
     def _release_if_idle(self) -> None:
         with self._model_lock:  # a use that starts now waits until the models are released
@@ -692,20 +704,35 @@ class RAGManager:
         if rerank is None:
             rerank = bool(self._cfg("rag_rerank_default", False))
         setting = str(self._cfg("rag_reranker", "auto") or "auto").strip()
+        # Any change of rag_reranker allows a new attempt, also one back to a value that failed: the revision
+        # counts every change, and changes are noted before a search that does not rerank returns.
+        current = (setting, self._setting_revision("rag_reranker"))
+        if self._reranker_setting not in (current, "provided"):
+            with self._lock:
+                if self._reranker_setting not in (current, "provided"):
+                    self._reranker_setting, self._reranker_pending = current, True
         if not rerank:
             return None
         if setting.lower() == "off":
             self.reranker_reason = "turned off (rag_reranker: off)"
             return None
         with self._lock:
-            if self._reranker_setting not in (setting, "provided"):
-                self._reranker_setting = setting
+            if self._reranker_pending:
+                self._reranker_pending = False
                 try:
                     spec, self.reranker_reason = select_reranker(setting)
                     self._reranker = create_reranker(spec, self.models_cache_dir, self._offline) if spec else None
                 except KnowledgeBaseError as e:  # e.g. an unknown model id in rag_reranker
                     self._rerank_failed(e)
             return self._reranker
+
+    def _setting_revision(self, key: str) -> Optional[int]:
+        """ConfigManager.revision(key); None for settings objects without one (the value alone then counts)."""
+        revision = getattr(self.config, "revision", None)
+        try:
+            return revision(key) if callable(revision) else None
+        except Exception:
+            return None
 
     def rerank_floor(self, reranker) -> float:
         """rag_rerank_min_score (0: no floor), or the reranker's calibrated floor when it is not set."""

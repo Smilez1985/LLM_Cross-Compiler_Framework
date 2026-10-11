@@ -19,12 +19,21 @@ crawler stays on the cautious side). Every page left out (opt-out, address check
 neither HTML nor PDF, no text) is logged and listed in `skipped` with the reason, every page that could not be
 fetched or read in `failed`.
 
+Hostile sites cannot fill the memory or hold the crawl: each response body is read up to a limit for its type
+(BODY_LIMITS: HTML pages 8 MiB, PDFs 64 MiB, robots.txt 500 KiB as RFC 9309 allows, tdmrep.json 1 MiB) and each
+request has a deadline for headers and body together (REQUEST_DEADLINE 60 s, PDFs PDF_DEADLINE 180 s); requests'
+timeout only bounds each socket read. A page over its limit is skipped, one over its deadline failed, each named
+with the reason. A robots.txt over its limit counts up to the limit (its last, cut line left out); one that does not
+arrive in time counts as unreachable (nothing is crawled); a tdmrep.json over its limit is not used.
+
 iter_crawl() yields each page as soon as it is extracted, so the caller can store it right away; a stop event
-ends the crawl cleanly between two pages, and a progress callback gets "page N of M" before each request.
+ends the crawl cleanly between two pages, also while a slow response is still arriving, and a progress callback
+gets "page N of M" before each request.
 """
 
 import json
 import threading
+import time
 from dataclasses import dataclass, field
 import logging
 import requests
@@ -47,6 +56,7 @@ except ImportError:
 
 from requests.adapters import HTTPAdapter
 from requests.utils import requote_uri
+from urllib3.exceptions import HTTPError as Urllib3Error, ReadTimeoutError
 from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 
@@ -67,7 +77,84 @@ NOFOLLOW_DIRECTIVES = frozenset({"nofollow", "none"})
 _VALUED_DIRECTIVES = frozenset({"unavailable_after", "max-snippet", "max-image-preview", "max-video-preview"})
 TDMREP_PATH = "/.well-known/tdmrep.json"
 MAX_TDM_RULES = 1000
+_KIB, _MIB = 1024, 1024 * 1024
+_BODY_LABELS = {"html": "HTML pages", "pdf": "PDFs", "robots": "robots.txt", "tdmrep": "tdmrep.json"}
+_READ_SIZE = 64 * 1024
 _PDF_TDM_RESERVATION = re.compile(rb"tdm:reservation\s*(?:=\s*[\"']\s*1\s*[\"']|>\s*1\s*<)")
+
+
+class ResponseRefused(Exception):
+    """A response the crawler does not read to the end: larger than the limit for its type, or not complete within
+    its deadline. The message is the reason named in the crawl log."""
+
+
+class ResponseTooLarge(ResponseRefused):
+    pass
+
+
+class ResponseTooSlow(ResponseRefused, requests.exceptions.Timeout):
+    """Also a requests timeout: a robots.txt that does not arrive counts as unreachable."""
+
+
+class _CrawlStopped(Exception):
+    """The stop event was set while a request was running."""
+
+
+def _size_text(size: int) -> str:
+    if size % _MIB == 0:
+        return f"{size // _MIB} MiB"
+    return f"{size // _KIB} KiB" if size % _KIB == 0 else f"{size} bytes"
+
+
+def _close(response, read_to_the_end: bool) -> None:
+    """Releases a streamed response. A body not read to its end closes the connection: its rest must never be read
+    as the start of the next response on a reused connection."""
+    try:
+        raw = getattr(response, "raw", None)
+        if not read_to_the_end and raw is not None and callable(getattr(raw, "close", None)):
+            raw.close()
+        if callable(getattr(response, "close", None)):
+            response.close()
+    except Exception:
+        pass
+
+
+def _read_body(response, limit: int, label: str, cut: bool, abandoned: threading.Event) -> None:
+    """Reads the body into response.content: at most `limit` bytes. Over the limit, cut=True keeps the first
+    `limit` bytes (response.body_cut = True); otherwise ResponseTooLarge. Reads return as soon as data arrives
+    (read1), so an abandoned request ends with the next piece of data or the next read timeout."""
+    too_large = ResponseTooLarge(f"response larger than {_size_text(limit)} (the limit for {label})")
+    read1 = getattr(getattr(response, "raw", None), "read1", None)
+    if not callable(read1):  # a response without a stream (prepared responses in tests)
+        body = response.content or b""
+        if len(body) > limit and not cut:
+            raise too_large
+        response.content, response.body_cut = body[:limit], len(body) > limit
+        return
+    declared = str(response.headers.get("Content-Length") or "").strip()
+    if not cut and declared.isdigit() and int(declared) > limit:
+        _close(response, False)
+        raise too_large
+    body, complete = bytearray(), False
+    try:
+        while len(body) <= limit and not abandoned.is_set():
+            data = read1(_READ_SIZE, decode_content=True)  # decoded: a compressed bomb counts at its real size
+            if not data:
+                complete = True
+                break
+            body += data
+    except ReadTimeoutError as e:
+        raise requests.exceptions.ReadTimeout(str(e)) from None
+    except (Urllib3Error, OSError) as e:
+        raise requests.exceptions.ConnectionError(f"reading the response failed: {e}") from None
+    finally:
+        _close(response, complete)
+    if abandoned.is_set():
+        raise _CrawlStopped()
+    if len(body) > limit and not cut:
+        raise too_large
+    response._content, response._content_consumed = bytes(body[:limit]), True
+    response.body_cut = len(body) > limit
 
 
 @dataclass(frozen=True)
@@ -252,6 +339,10 @@ class CrawlerManager:
     """
 
     MAX_REDIRECTS = 5
+    # Body limits per response type and deadlines per request (headers and body); see the module docstring.
+    BODY_LIMITS = {"html": 8 * _MIB, "pdf": 64 * _MIB, "robots": 500 * _KIB, "tdmrep": 1 * _MIB}
+    REQUEST_DEADLINE = 60.0
+    PDF_DEADLINE = 180.0
 
     def __init__(self, framework_manager, options: Optional[Dict[str, Any]] = None):
         self.logger = get_logger(__name__)
@@ -277,6 +368,7 @@ class CrawlerManager:
         self.skipped: List[SkippedPage] = []
         self.failed: List[SkippedPage] = []
         self.stopped = False
+        self._stop = threading.Event()  # iter_crawl's stop event; a running request ends when it is set
         self.robot_rules: Dict[str, List[Tuple[bool, str]]] = {}   # per origin, from robots.txt
         self.tdm_rules: Dict[str, List[TdmRule]] = {}   # per origin, from /.well-known/tdmrep.json
         self.session = requests.Session()
@@ -285,15 +377,62 @@ class CrawlerManager:
         self.session.mount("https://", adapter)
         self.session.headers.update({"User-Agent": USER_AGENT})
 
-    def _guarded_get(self, url: str, timeout: int = 10) -> requests.Response:
-        """Fetches exactly the URL that passed the SSRF check, without following redirects."""
+    def _guarded_get(self, url: str, kind: str = "page", timeout: int = 10) -> requests.Response:
+        """Fetches exactly the URL that passed the SSRF check, without following redirects. kind is "page",
+        "robots" or "tdmrep". The body of a 200 response that the crawl reads (robots.txt, tdmrep.json, an HTML
+        page, a PDF when PDFs are on) is read here, up to BODY_LIMITS for its type; other responses keep no body.
+        Headers and body must arrive within the deadline (ResponseTooSlow); a set stop event ends the wait at once.
+        The request runs in a worker thread, so neither a slow server nor a stop has to wait for a socket read."""
         prepared = self.session.prepare_request(requests.Request("GET", url))
         check = validate_public_url(prepared.url)
         if not check:
             raise PermissionError(check.message)
-        # send() alone skips what get() does: env proxies and REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE.
-        settings = self.session.merge_environment_settings(prepared.url, {}, None, None, None)
-        return self.session.send(prepared, timeout=timeout, allow_redirects=False, **settings)
+        # send() alone skips what get() does: env proxies and REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE. Streamed: the
+        # body is read below, within its limit.
+        settings = self.session.merge_environment_settings(prepared.url, {}, True, None, None)
+        start = time.monotonic()
+        deadline = [self.REQUEST_DEADLINE]  # seconds; the worker extends it for a PDF
+        result: Dict[str, Any] = {}
+        done, abandoned = threading.Event(), threading.Event()
+
+        def fetch():
+            try:
+                response = self.session.send(prepared, timeout=timeout, allow_redirects=False, **settings)
+                body = self._body_type(kind, response, url)
+                if body is None:
+                    _close(response, False)
+                    response._content, response._content_consumed = b"", True
+                else:
+                    if body == "pdf":
+                        deadline[0] = max(deadline[0], self.PDF_DEADLINE)
+                    _read_body(response, self.BODY_LIMITS[body], _BODY_LABELS[body], body == "robots", abandoned)
+                result["response"] = response
+            except BaseException as e:  # handed to the caller
+                result["error"] = e
+            finally:
+                done.set()
+
+        threading.Thread(target=fetch, name="crawler-request", daemon=True).start()
+        while not done.wait(0.1):
+            if self._stop.is_set() or time.monotonic() - start > deadline[0]:
+                abandoned.set()  # the worker closes the response with its next read
+                if self._stop.is_set():
+                    raise _CrawlStopped()
+                raise ResponseTooSlow(f"no complete response within {deadline[0]:g} s")
+        if "error" in result:
+            raise result["error"]
+        return result["response"]
+
+    def _body_type(self, kind: str, response, url: str) -> Optional[str]:
+        """Which limit applies to the body of this response, or None when the crawl does not read its body."""
+        if response.status_code != 200 or response.is_redirect:
+            return None
+        if kind in ("robots", "tdmrep"):
+            return kind
+        content_type = str(response.headers.get("Content-Type", "")).lower()
+        if "application/pdf" in content_type or url.endswith(".pdf"):
+            return "pdf" if self.download_pdfs else None
+        return "html" if "text/html" in content_type else None
 
     def crawl(self, root_url: str) -> List[Document]:
         """
@@ -312,7 +451,7 @@ class CrawlerManager:
         self.logger.info(f"Starting Deep Ingest for: {root_url}")
         self.visited.clear()
         self.skipped, self.failed, self.stopped = [], [], False
-        stop = stop or threading.Event()
+        stop = self._stop = stop or threading.Event()
         collected = 0
 
         # Queue für BFS: (url, current_depth, redirect_hops)
@@ -348,10 +487,15 @@ class CrawlerManager:
                 continue
 
             # 2. Opt-outs known before the request: robots.txt, then the origin's TDMRep file.
-            if not self._can_fetch(url):
+            try:
+                allowed = self._can_fetch(url)
+                reserved = self._tdm_file_reservation(url) if allowed else None
+            except _CrawlStopped:
+                self.stopped = True
+                break
+            if not allowed:
                 self._skip(url, "disallowed by robots.txt", opt_out=True)
                 continue
-            reserved = self._tdm_file_reservation(url)
             if reserved:
                 self._skip(url, reserved, opt_out=True)
                 continue
@@ -434,6 +578,14 @@ class CrawlerManager:
                         if link not in self.visited:
                             queue.append((link, depth + 1, 0))
 
+            except _CrawlStopped:
+                self.stopped = True
+                break
+            except ResponseTooLarge as e:  # left out by a limit, like a type the crawl does not read
+                pages_crawled += 1  # it arrived (only 200 responses are read): it counts like any other page
+                self._skip(url, str(e), level=logging.WARNING)
+            except ResponseTooSlow as e:  # could not be read
+                self._fail(url, str(e))
             except Exception as e:
                 self._fail(url, _remote_text(e), level=logging.ERROR)
 
@@ -494,10 +646,15 @@ class CrawlerManager:
         """TDMRep rules of one origin, fetched through the SSRF guard. A missing or unreadable file means the
         origin does not use the protocol (TDMRep 1.0); a page header or meta tag can still reserve a page."""
         try:
-            response = self._get_following_redirects(file_url)
+            response = self._get_following_redirects(file_url, "tdmrep")
             if response.status_code != 200:
                 return []
             data = json.loads(_utf8(response))
+        except _CrawlStopped:
+            raise
+        except ResponseRefused as e:
+            self.logger.warning(f"Not using {file_url}: {e}.")
+            return []
         except Exception as e:
             self.logger.info(f"No usable {file_url} ({_remote_text(e)}).")
             return []
@@ -512,10 +669,10 @@ class CrawlerManager:
                                      policy if isinstance(policy, str) else None))
         return rules
 
-    def _get_following_redirects(self, url: str) -> requests.Response:
+    def _get_following_redirects(self, url: str, kind: str) -> requests.Response:
         """GET that follows up to MAX_REDIRECTS redirects, each hop through the SSRF guard again."""
         for _ in range(self.MAX_REDIRECTS + 1):
-            response = self._guarded_get(url)
+            response = self._guarded_get(url, kind)
             if not response.is_redirect:
                 return response
             url = urljoin(url, response.headers.get('Location', ''))
@@ -534,16 +691,25 @@ class CrawlerManager:
         """robots.txt rules through the SSRF guard, every redirect hop checked again."""
         disallow_all = [(False, "/")]
         try:
-            response = self._get_following_redirects(robots_url)
+            response = self._get_following_redirects(robots_url, "robots")
             if response.status_code == 200:
-                return robots_rules(_utf8(response))
+                text = _utf8(response)
+                if getattr(response, "body_cut", False):
+                    # RFC 9309 2.5: a parsing limit of at least 500 KiB; the last line may be cut in the middle.
+                    # Lines end with LF, CR or CRLF (RFC 9309 2.2).
+                    text = text[:max(text.rfind("\n"), text.rfind("\r")) + 1]
+                    limit = _size_text(self.BODY_LIMITS["robots"])
+                    self.logger.warning(f"{robots_url} is larger than {limit}; only its first {limit} are used.")
+                return robots_rules(text)
             if response.status_code in (401, 403) or response.status_code >= 500:
                 # A server error means complete disallow (RFC 9309 2.3.1.4). 401 and 403 deviate on purpose:
                 # RFC 9309 2.3.1.3 allows crawling on a 4xx, but a robots.txt locked away may hold a reservation
                 # we cannot read, and when in doubt the crawler does not crawl.
                 return disallow_all
             return []
-        except requests.RequestException as e:
+        except _CrawlStopped:
+            raise
+        except requests.RequestException as e:  # also ResponseTooSlow
             self.logger.warning(f"Could not reach {robots_url} ({e}). Treating the site as disallowed.")
             return disallow_all
         except Exception as e:

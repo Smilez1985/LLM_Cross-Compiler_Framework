@@ -47,8 +47,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   found at all (answers deep inside such blocks: hit@1 50 % to 100 %). Smaller blocks stay whole. Re-import a
   document to apply it.
 - Knowledge-base models are unloaded after 10 minutes without use and loaded again on the next search
-  (setting `rag_model_idle_minutes`, 0 keeps them loaded). The time counts from the end of the last search or
-  import, never during one.
+  (setting `rag_model_idle_minutes`, 0 keeps them loaded, at most 7 days). The time counts from the end of the
+  last search or import, never during one.
 - **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
   pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, Metal or CPU;
   ROCm on request; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
@@ -318,7 +318,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - `llm-cli build status` lists builds that the GUI, the MCP server or another CLI call started: every build engine
   writes one record per build into `<cache_dir>/build_records/` (status, stage, progress, the error redacted), and
   a build whose program ended before it finished is shown as interrupted. The command needs neither the credential
-  vault nor Docker; `--all` lists every kept build instead of the 20 newest.
+  vault nor Docker; `--all` lists every kept build instead of the 20 newest. On Linux and macOS the records are
+  readable only by the user who built (folder 0700, files 0600).
 - Ctrl+C in `llm-cli build start` cancels the build through the build service: its container is stopped, the CLI
   waits until the build has stopped, says so and exits with code 130. Before, the build and its container kept
   running.
@@ -355,6 +356,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Saving a setting (for example the first-run language or the AI settings) no longer overwrites a `config.yml`
   that cannot be read (a YAML error, or no `key: value` settings) with only the changed values; the file stays as
   it is and the error is logged.
+- A number in `config.yml` that does not fit its setting (`.inf` for a whole number, or `.inf`/`.nan` for a decimal
+  one) is ignored with a warning and the default applies; before, `.inf` for a whole number stopped reading the
+  file, so every setting after it was ignored too.
 - Windows: with the framework in `C:\Program Files`, which standard users cannot write to, the settings and the
   data folders `output/`, `cache/` and `models/` are in the per-user folder (`%USERPROFILE%\.llm-framework`).
   The writability check no longer trusts `os.access`, which ignores folder permissions on Windows. The installer
@@ -362,9 +366,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - `install.sh` checks the connection over HTTPS to the package index (`pypi.org` or `PIP_INDEX_URL`) instead of
   pinging 8.8.8.8, which many networks block. It loads one small project page, not the whole index, does not show
   credentials contained in `PIP_INDEX_URL`, and stops with a clear message when started with `sh` instead of bash.
-  It no longer creates an unused data folder in root's home folder,
-  and running it again keeps the builds, cache, models and `configs/config.yml` in `/opt` instead of deleting
-  them.
+  It no longer creates an unused data folder in root's home folder. Running it again removes only files that an
+  earlier run copied (listed in `.lcf-installed-files`) and the repository no longer ships; before, its
+  `rsync --delete` deleted everything in `/opt` the repository does not ship: targets made with the module wizard
+  or `llm-cli module create`, installed community packs, and the builds, cache, models and `configs/config.yml`.
+  A list that cannot be made stops it before anything is copied or removed, a stale link is removed itself, never
+  the file it points to, and the copy of `install.sh` in `/opt` copies and removes nothing.
 - Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
   `config/` folder in the working directory.
 - The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).
@@ -397,6 +404,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   for `bot` no longer overrides `*`, and each scheme, host and port has its own robots.txt. The deviation: a
   robots.txt that answers 401 or 403 means "disallow everything", where RFC 9309 would allow crawling; a
   reservation the crawler cannot read still counts.
+- Deep Ingest reads every response up to a limit (HTML pages 8 MiB, PDFs 64 MiB, robots.txt 500 KiB,
+  `tdmrep.json` 1 MiB) and within a deadline for the whole request (60 s, PDFs 180 s). Before, a site could send an
+  endless or dripping response that filled the memory or held the crawl, and Stop or closing the wizard, forever:
+  the HTTP timeout only bounds each socket read. A larger page is skipped and a slower one fails, each named in the
+  crawl log; Stop no longer waits for a page that is still arriving.
 - Community packs are installed only through a quarantine folder after their checks: an id without paths, exactly
   the listed files with their hashes, no links, special or binary files, every image a Dockerfile pulls (`FROM`,
   `COPY --from`, `RUN --mount=...,from=`, also in a lowercase `dockerfile`) pinned by digest unless it is an

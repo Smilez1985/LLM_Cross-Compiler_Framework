@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QDialog, QDialogButtonBo
                                QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMessageBox, QPushButton, QRadioButton,
                                QStackedWidget, QVBoxLayout, QWidget)
 
+from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.llm.auth.signin import STORAGE, SignIn, method_infos, plain_http_to_remote, status_line
 from orchestrator.llm.auth.spec import KEY_TYPES, TYPE_LABELS
 from orchestrator.llm.auth.store import display_origin
@@ -46,32 +47,25 @@ def _translate(key: str, default: str) -> str:
     return _t(key, default)
 
 
-class _TaskSignals(QObject):
-    done = Signal(int, object, object)  # task number, result, error
-
-
 class Worker(QObject):
     """Runs blocking calls off the GUI thread and hands the result to a callback on it. The work function must
-    not reference a widget: a widget released in a worker thread would be destroyed there."""
+    not reference a widget: a widget released in a worker thread would be destroyed there. The thread holds no Qt
+    object of its own either: it answers on the relay, which lives as long as the application (worker_relay.py)."""
 
     def __init__(self, on_busy: Callable[[bool], None], parent=None):
         super().__init__(parent)
         self._on_busy = on_busy
-        self._number = 0
-        self._pending: Dict[int, Callable[[Any, Optional[BaseException]], None]] = {}
+        self._pending: Dict[object, Callable[[Any, Optional[BaseException]], None]] = {}  # by task token
         self.threads = []
+        worker_relay().done.connect(self._finish, Qt.QueuedConnection)
 
     @property
     def busy(self) -> bool:
         return bool(self._pending)
 
     def run(self, name: str, work: Callable[[], Any], done: Callable[[Any, Optional[BaseException]], None]) -> None:
-        self._number += 1
-        number = self._number
-        self._pending[number] = done
-        # No parent: it must outlive a closed dialog while the worker still emits on it.
-        signals = _TaskSignals()
-        signals.done.connect(self._finish)
+        token, relay = object(), worker_relay()
+        self._pending[token] = done
         self._on_busy(True)
 
         def target():
@@ -79,21 +73,20 @@ class Worker(QObject):
                 result, error = work(), None
             except Exception as e:  # shown to the user; LLM errors are already redacted
                 result, error = None, e
-            try:
-                signals.done.emit(number, result, error)
-            except RuntimeError:
-                pass  # the window was closed meanwhile
+            relay.done.emit(token, (result, error))
 
         thread = threading.Thread(target=target, name=f"sign-in-{name}", daemon=True)
         self.threads = [t for t in self.threads if t.is_alive()] + [thread]
         thread.start()
 
-    def _finish(self, number: int, result: Any, error: Optional[BaseException]) -> None:
-        done = self._pending.pop(number, None)
+    def _finish(self, token: object, outcome) -> None:
+        if token not in self._pending:
+            return  # another worker's task
+        done = self._pending.pop(token)
         if not self._pending:
             self._on_busy(False)
-        if done is not None:
-            done(result, error)
+        result, error = outcome
+        done(result, error)
 
 
 def error_text(error: BaseException) -> str:

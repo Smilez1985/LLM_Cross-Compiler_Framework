@@ -53,8 +53,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ihre hinteren Teile überhaupt gefunden werden (Antworten tief in solchen Blöcken: hit@1 von 50 % auf 100 %).
   Kleinere Blöcke bleiben ganz. Importiere ein Dokument erneut, damit es wirkt.
 - Modelle der Wissensbasis werden nach 10 Minuten ohne Nutzung entladen und bei der nächsten Suche wieder geladen
-  (Einstellung `rag_model_idle_minutes`, 0 hält sie geladen). Die Zeit läuft ab dem Ende der letzten Suche oder
-  des letzten Imports, nie währenddessen.
+  (Einstellung `rag_model_idle_minutes`, 0 hält sie geladen, höchstens 7 Tage). Die Zeit läuft ab dem Ende der
+  letzten Suche oder des letzten Imports, nie währenddessen.
 - **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install|start|stop|status`
   betreibt einen gepinnten llama.cpp-`llama-server` auf 127.0.0.1 (Build passend zur Hardware: CUDA, Vulkan,
   Metal oder CPU, ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei), und `llm-cli ditto models list|download`
@@ -366,7 +366,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Build-Engine schreibt je Build einen Eintrag nach `<cache_dir>/build_records/` (Status, Stufe, Fortschritt, der
   Fehler geschwärzt), und ein Build, dessen Programm endete, bevor er fertig war, erscheint als unterbrochen. Der
   Befehl braucht weder den Tresor für Zugangsdaten noch Docker; `--all` listet jeden aufbewahrten Build statt der
-  20 neuesten.
+  20 neuesten. Unter Linux und macOS sind die Einträge nur für den Benutzer lesbar, der gebaut hat (Ordner 0700,
+  Dateien 0600).
 - Strg+C in `llm-cli build start` bricht den Build über den Build-Service ab: Sein Container wird gestoppt, die CLI
   wartet, bis der Build angehalten hat, sagt das und endet mit Exit-Code 130. Vorher liefen Build und Container
   weiter.
@@ -406,6 +407,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   überschreibt eine `config.yml`, die sich nicht lesen lässt (ein YAML-Fehler oder keine Einstellungen der Form
   `schlüssel: wert`), nicht mehr mit den geänderten Werten allein; die Datei bleibt, wie sie ist, und der Fehler
   wird protokolliert.
+- Eine Zahl in `config.yml`, die nicht zu ihrer Einstellung passt (`.inf` für eine ganze Zahl oder `.inf`/`.nan`
+  für eine Dezimalzahl), wird mit einer Warnung übergangen, und der Standardwert gilt; vorher brach `.inf` für eine
+  ganze Zahl das Lesen der Datei ab, sodass auch jede Einstellung danach übergangen wurde.
 - Windows: Liegt das Framework in `C:\Program Files`, wo normale Benutzer nicht schreiben dürfen, liegen die
   Einstellungen und die Datenordner `output/`, `cache/` und `models/` im Benutzerordner
   (`%USERPROFILE%\.llm-framework`). Die Prüfung auf Schreibrechte verlässt sich nicht mehr auf `os.access`, das
@@ -414,8 +418,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - `install.sh` prüft die Verbindung per HTTPS zum Paketindex (`pypi.org` oder `PIP_INDEX_URL`) statt mit einem Ping
   an 8.8.8.8, den viele Netze sperren. Er lädt dazu eine kleine Projektseite statt des ganzen Index, zeigt
   Zugangsdaten in `PIP_INDEX_URL` nicht an und bricht mit einer klaren Meldung ab, wenn er mit `sh` statt bash
-  gestartet wird. Er legt keinen ungenutzten Datenordner im Home-Ordner von root mehr an, und
-  ein erneuter Aufruf behält Builds, Cache, Modelle und `configs/config.yml` in `/opt`, statt sie zu löschen.
+  gestartet wird. Er legt keinen ungenutzten Datenordner im Home-Ordner von root mehr an. Ein erneuter Aufruf
+  entfernt nur Dateien, die ein früherer Aufruf kopiert hat (aufgeführt in `.lcf-installed-files`) und die das
+  Repository nicht mehr ausliefert; vorher löschte sein `rsync --delete` alles in `/opt`, was das Repository nicht
+  ausliefert: mit dem Modul-Assistenten oder `llm-cli module create` erstellte Targets, installierte Community-Packs
+  sowie Builds, Cache, Modelle und `configs/config.yml`. Lässt sich die Liste nicht erstellen, bricht er ab, bevor
+  etwas kopiert oder entfernt wird; ein veralteter Link wird selbst entfernt, nie die Datei, auf die er zeigt; und
+  die Kopie von `install.sh` in `/opt` kopiert und entfernt nichts.
 - Deployment-Pakete übernehmen Benutzerprofile, Sprachvorlagen und Prompts nur aus dem Einstellungsordner, nie aus
   einem Ordner `config/` im Arbeitsverzeichnis.
 - Der Hugging-Face-Modellbrowser lässt sich wieder öffnen: **Tools > Hugging Face Model Browser...** (kein Menü
@@ -452,6 +461,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   über `*` siegt, und jedes Schema, jeder Host und jeder Port hat eine eigene robots.txt. Die Abweichung: Eine
   robots.txt, die mit 401 oder 403 antwortet, heißt „alles verboten“, wo RFC 9309 das Crawlen erlauben würde; ein
   Vorbehalt, den der Crawler nicht lesen kann, zählt trotzdem.
+- Deep Ingest liest jede Antwort bis zu einer Grenze (HTML-Seiten 8 MiB, PDFs 64 MiB, robots.txt 500 KiB,
+  `tdmrep.json` 1 MiB) und innerhalb einer Frist für die ganze Anfrage (60 s, PDFs 180 s). Vorher konnte eine Site
+  eine endlose oder tröpfelnde Antwort schicken, die den Speicher füllte oder den Crawl, und damit Stoppen oder das
+  Schließen des Assistenten, für immer festhielt: Der HTTP-Timeout begrenzt nur jeden einzelnen Lesevorgang am
+  Socket. Eine größere Seite wird übersprungen, eine langsamere scheitert, beide mit Grund im Crawl-Protokoll;
+  Stoppen wartet nicht mehr auf eine Seite, die noch ankommt.
 - Community-Packs werden nur über einen Quarantäne-Ordner und nach ihren Prüfungen installiert: eine ID ohne
   Pfade, genau die aufgeführten Dateien mit ihren Hashes, keine Links, Sonder- oder Binärdateien, jedes Image, das
   ein Dockerfile bezieht (`FROM`, `COPY --from`, `RUN --mount=...,from=`, auch in einem kleingeschriebenen
