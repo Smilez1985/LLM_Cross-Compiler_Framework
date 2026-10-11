@@ -533,6 +533,11 @@ dieser Version.
 | **Entfernung des Anbieters `claude_code`.** Anthropic erlaubt Drittanbieter-Apps die Anmeldung mit einem Claude-Abo nicht. Wer ein Claude-Abo hat, nutzt das Framework aus Claude Code oder Claude Desktop über den MCP-Server (`llm-cli mcp config` zeigt die Einrichtung) oder gibt Ditto einen Anthropic-API-Schlüssel; die Tarife Max und Team enthalten monatliches API-Guthaben. | in Arbeit |
 | **Gehärtetes Docker-Image ohne Oberfläche** für die CLI und den MCP-Server, mit funktionierender Compose-Datei und Makefile-Zielen; ersetzt das kaputte `Docker Setup/`. | in Arbeit |
 | **Dokumentation auf Englisch und Deutsch** für jedes Dokument. | in Arbeit |
+| **Crawler, der die eigenen Signale der Seite prüft.** Ob eine Seite ausgewertet werden darf, kann ein Nutzer nicht wissen. Deshalb prüft der Crawler die maschinenlesbaren Widersprüche selbst (robots.txt, den Header `X-Robots-Tag`, Robots-Meta-Tags einschließlich „noai“, das TDM Reservation Protocol) und überspringt vorbehaltene Seiten mit Nennung im Log. Statt einer rechtlichen Bestätigung erklärt ein einmaliger Hinweis, was gelesen und behalten wird, mit Sprachansage (die Technik des USB-Watchers aus rag4ll); ein Stopp-Knopf behält das Gesammelte, der Fortschritt zeigt „Seite N von M“, das Ergebnis nennt ehrlich Erfolg, Teilerfolg oder Fehler, und der Crawler meldet seine echte Version. | in Arbeit |
+| **Eingabe-Historie**: zuletzt verwendete Modelle, Targets, URLs, Geräte und Datensätze als Auswahl in den GUI-Feldern, pro Nutzer, ohne Geheimnisse. | in Arbeit |
+| **Bessere Antworten aus der Wissensbasis**, aus rag4ll übernommen und klein gehalten: Reranking mit einem Cross-Encoder auf der CPU, eine Relevanzschwelle, die unpassende Auszüge aus Dittos Prompt heraushält, ein Größenbudget für die Auszüge, das Aufteilen übergroßer Code- und Tabellenblöcke und eine Stichwortsuche, die Bezeichner wie `-DGGML_CUDA=ON` versteht; gemessen mit Abruf-Fällen in der Ditto-Evaluierung. | in Arbeit |
+| **Community-Pakete mit echter Kryptografie**: öffentliche Pakete mit Ed25519 signiert, private Pakete an die Schlüssel der Empfänger (X25519 mit ChaCha20-Poly1305) oder mit einer Passphrase verschlüsselt. Der Upload mit der XOR-„SwarmCipher“ und seine Abfrage eines GitHub-Tokens entfallen; das Framework fragt nie nach einem Token. | in Arbeit |
+| **Model-Zoo aus der Community**: Rezepte (Modell, Target, Format, Quantisierung, Toolchain-Image und geprüfte Hashes), erstellt mit dem Template-Wizard und per Pull-Request beigetragen; ein signierter Index, Installation mit Quarantäne und Vertrauensstufen, `llm-cli zoo` und der Community-Hub. | in Arbeit |
 
 Anmeldung je Zugangsart, wie entworfen:
 
@@ -581,7 +586,6 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 
 | Punkt | Status |
 |---|---|
-| **Signierte Community-Wissenspakete** (Ed25519) mit Prüfung in Pull-Requests und Quarantäne, als Ersatz für die XOR-„SwarmCipher“. | geplant |
 | **Trivy** per Digest festgelegt, ohne Docker-Socket. | geplant |
 | **Festlegungen in den Images**: Basis-Images per Digest, Lock-Dateien mit Hashes je venv, llama.cpp per Commit. | geplant |
 | **CycloneDX-SBOM** und Herkunftsnachweise für Artefakte. | geplant |
@@ -594,6 +598,9 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 ### Später (geplant)
 
 - **Mehr Hardware** über ein Beitragspaket: Hailo, Qualcomm, Intel NPU, NVIDIA Jetson.
+- **Builds auf einer GPU-Maschine, die du stellst** (gemietet oder eigene): Das Framework bietet die Anbindungen
+  (SSH zu deinem Rechner, Anbieter-APIs mit deinem eigenen Schlüssel); es mietet, startet und bezahlt keine Maschinen.
+- **Crawls großer Doku-Seiten mit Fortsetzen**: einen gestoppten Crawl später fortsetzen statt nur eines Seitenlimits.
 - **Anmeldewege, die Registrierungen brauchen**: AWS IAM Identity Center mit eigenem registriertem Client, GitHub
   Copilot über eine eigene GitHub-App, Gemini mit dem eigenen OAuth-Client des Benutzers.
 - **MCP-Apps-Oberfläche.**
