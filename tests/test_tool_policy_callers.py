@@ -181,6 +181,17 @@ class TestCallers:
         assert decision(registry, "start_build", "mcp:laptop") == Decision.DENY
         assert set(listed(registry, "mcp:laptop")) == {"read_thing"}
 
+    def test_a_new_token_never_reads_what_a_default_or_the_shared_setting_denies(self, registry):
+        """Review fix: a token without permissions of its own read every read tool by the shared read tier,
+        ignoring an optional read tool's own default ("deny", hidden) and your shared setting for a single tool."""
+        registry.register(spec("optional_read", ToolTier.READ, default_decision=Decision.DENY))
+        registry.register(spec("private_read", ToolTier.READ))
+        save(registry, overrides={"private_read": Decision.DENY})
+        assert decision(registry, "optional_read", "mcp:laptop") == Decision.DENY
+        assert decision(registry, "private_read", "mcp:laptop") == Decision.DENY
+        assert decision(registry, "read_thing", "mcp:laptop") == Decision.ALLOW
+        assert set(listed(registry, "mcp:laptop")) == {"read_thing"}
+
     @pytest.mark.parametrize("bad", ["root", "mcp:", "mcp:Laptop!", "ditto:x"])
     def test_unknown_callers_make_the_file_invalid(self, registry, bad):
         with pytest.raises(ValueError):
@@ -298,6 +309,15 @@ class TestCli:
         assert set(registry.policy().reviewed) == {s.name for s in registry.list()}
         assert decision(registry, "export_pack") == Decision.ALLOW
 
+    def test_the_setup_shows_default_cap_new_and_standing_approval_per_tool(self, registry):
+        """Review fix: `tools permissions` (and `ditto setup`) only named the new tools; design S3 and the changelog
+        say the setup shows each tool's default, cap, whether it is new and whether a standing approval may be
+        offered, before the person decides."""
+        save(registry, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW}, reviewed=["start_build"])
+        out = " ".join(invoke(registry, "tools", "permissions", input="allow\nallow\nask\n").output.split())
+        assert "delete_artifact (external): default deny, at most ask, new, no standing approval" in out
+        assert "start_build (local_write): default tier setting, at most allow, no standing approval" in out
+
     def test_list_shows_default_cap_and_new(self, registry):
         save(registry, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW}, reviewed=["start_build"])
         out = " ".join(invoke(registry, "tools", "list").output.split())
@@ -311,6 +331,9 @@ def test_gui_dialog_keeps_caller_permissions_and_marks_tools_reviewed(registry):
     save(registry, reviewed=[], callers={"mcp": CallerPolicy(tiers={ToolTier.LOCAL_WRITE: Decision.DENY})})
     dialog = ToolPermissionsDialog(registry)
     assert dialog.table.item(registry.list().index(registry.get("export_pack")), 3).text() == "new"
+    # Review fix: the dialog also says whether a confirmation may offer a standing approval (design S3).
+    facts = dialog.table.item(registry.list().index(registry.get("delete_artifact")), 2).text()
+    assert facts == "deny / ask / no standing approval"
     dialog.save()
     policy = registry.policy()
     assert policy.callers["mcp"].tiers[ToolTier.LOCAL_WRITE] == Decision.DENY

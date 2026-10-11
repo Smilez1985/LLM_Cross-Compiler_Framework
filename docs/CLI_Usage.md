@@ -738,8 +738,9 @@ llm-cli tools permissions [--caller ditto|mcp] [--reset]
 ```
 
 Asks the same three questions as [`ditto setup`](#ditto-setup) and saves the answers. Permissions for single tools
-set in the GUI are kept. It first names the tools that are new since the last review; saving counts every listed
-tool as reviewed.
+set in the GUI are kept. It first lists every tool with its own default, the highest decision any setting can give
+it (`at most`), whether it is new since the last review and whether a confirmation may offer a standing approval;
+saving counts every listed tool as reviewed. The GUI dialog shows the same facts.
 
 | Option | Meaning |
 |---|---|

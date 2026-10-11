@@ -942,7 +942,8 @@ class ToolPermissionsDialog(QDialog):
         tools = registry.list()
         facts = {row["tool"]: row for row in registry.permissions("")}
         self.table = QTableWidget(len(tools), 5)
-        self.table.setHorizontalHeaderLabels(["Tool", "Category", "Default / max", "New", "Permission"])
+        self.table.setHorizontalHeaderLabels(["Tool", "Category", "Default / max / standing approval", "New",
+                                              "Permission"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.override_combos = {}
         for row, spec in enumerate(tools):
@@ -951,7 +952,8 @@ class ToolPermissionsDialog(QDialog):
             self.table.setItem(row, 0, name_item)
             self.table.setItem(row, 1, QTableWidgetItem(spec.tier.value))
             fact = facts.get(spec.name, {})
-            self.table.setItem(row, 2, QTableWidgetItem(f"{fact.get('default', '')} / {fact.get('max', '')}"))
+            grant = "standing approval possible" if fact.get("standing_approval") else "no standing approval"
+            self.table.setItem(row, 2, QTableWidgetItem(f"{fact.get('default', '')} / {fact.get('max', '')} / {grant}"))
             self.table.setItem(row, 3, QTableWidgetItem("new" if fact.get("new") else ""))
             combo = QComboBox()
             combo.addItem("Category default", "")

@@ -909,7 +909,8 @@ Verfügung.
 - **Pro Aufrufer:** Ditto (`ditto`) und lokale MCP-Clients über stdio (`mcp`) können eigene Berechtigungen haben
   (`llm-cli tools permissions --caller ditto` oder `--caller mcp`); ein Aufrufer ohne eigene nutzt die gemeinsamen.
   Die Berechtigungen eines neuen Aufrufers beginnen mit den gemeinsamen, samt deinen Einstellungen für einzelne
-  Tools. Ein benanntes Token für einen HTTP-Client (geplant) ohne eigene Berechtigungen darf nur lesen.
+  Tools. Ein benanntes Token für einen HTTP-Client (geplant) ohne eigene Berechtigungen darf nur lesen, und nie ein
+  Tool, das deine gemeinsame Einstellung für dieses Tool oder die eigene Voreinstellung des Tools verbietet.
 - **Eigene Vorgabe und Obergrenze eines Tools:** Ein Tool kann eine eigene Vorgabe mitbringen (ein optionales Tool
   beginnt mit `deny` und ist ausgeblendet) und eine höchste Entscheidung, die keine Einstellung anhebt (ein Tool, das
   andere Geräte erreicht oder Daten löscht, fragt höchstens). Die Reihenfolge ist: deine Einstellung für das Tool,

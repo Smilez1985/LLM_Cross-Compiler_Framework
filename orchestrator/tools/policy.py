@@ -179,10 +179,17 @@ class ToolPolicy(BaseModel):
             return Decision.DENY, "tools in the forbidden tier never run"
         section = self.section(caller)
         if section is None:
-            if tier == ToolTier.READ:
-                decision, why = self.tiers.get(ToolTier.READ, Decision.ALLOW), "a new token may read"
-            else:
+            if tier != ToolTier.READ:
                 return Decision.DENY, "a new token may only read until you set its permissions"
+            # Never looser than the shared setting for this tool or the tool's own default (an optional read tool
+            # that starts as "deny" stays denied for a token too).
+            shared = self.overrides.get(name, self.tiers.get(ToolTier.READ, Decision.ALLOW))
+            default = _rule(getattr(spec, "default_decision", None), inp, caller)
+            decision, why = stricter(shared, default) if default is not None else shared, "a new token may read"
+            if decision != shared:
+                why += "; the tool's own default"
+            elif name in self.overrides:
+                why += "; your shared setting for this tool"
         else:
             tiers, overrides, _ = section
             tier_decision = tiers.get(tier, Decision.ASK)

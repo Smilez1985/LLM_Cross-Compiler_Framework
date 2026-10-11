@@ -846,7 +846,8 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
 - **Per caller:** Ditto (`ditto`) and local MCP clients over stdio (`mcp`) can have permissions of their own
   (`llm-cli tools permissions --caller ditto` or `--caller mcp`); a caller without them uses the shared ones. A new
   caller's permissions start from the shared ones, including your settings for single tools. A named token for an
-  HTTP client (planned) that has no permissions of its own may only read.
+  HTTP client (planned) that has no permissions of its own may only read, and never a tool that your shared
+  setting for that tool or the tool's own default denies.
 - **A tool's own default and cap:** a tool can bring its own default (an optional tool starts as `deny` and is
   hidden) and a highest decision that no setting lifts (a tool that reaches other devices or deletes data always
   asks at most). The order is: your setting for the tool, else the tool's default, else your setting for its tier;
