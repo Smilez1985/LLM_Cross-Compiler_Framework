@@ -221,6 +221,11 @@ class BuildService:
             raise BuildServiceError(f"Build request '{request_id}' is not running.")
         return self.get_status(request_id)
 
+    # A build id is added to the request just before the engine registers it (build_model runs in a worker thread,
+    # or retries while every build slot is taken). A cancel in between does not reach the engine; the orchestrator
+    # cancels the build as soon as it is registered. Until then, for at most this many seconds, it counts as running.
+    UNREGISTERED_GRACE = 5.0
+
     def wait_stopped(self, request_id: str, timeout: float, poll: float = 0.2) -> str:
         """After cancel(): waits until no build of the request runs in the engine any more (its container is
         stopped and removed, staged files are discarded). Returns "cancelled" when every build that ran ended
@@ -228,10 +233,15 @@ class BuildService:
         "running" when it has not stopped within `timeout` seconds."""
         engine = self._orchestrator.build_engine
         active = getattr(engine, "is_active", None)
-        deadline = time.monotonic() + max(float(timeout), 0.0)
+        known = getattr(engine, "get_build_status", None)
+        start = time.monotonic()
+        deadline = start + max(float(timeout), 0.0)
         while True:
             build_ids = list(self._state(request_id).build_ids)
-            if not callable(active) or not any(active(bid) for bid in build_ids):
+            running = callable(active) and any(active(bid) for bid in build_ids)
+            unregistered = (callable(known) and time.monotonic() - start < self.UNREGISTERED_GRACE
+                            and any(known(bid) is None for bid in build_ids))
+            if not running and not unregistered:
                 break
             if time.monotonic() >= deadline:
                 return "running"

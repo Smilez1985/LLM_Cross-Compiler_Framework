@@ -230,7 +230,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   das `ant`-Profil), damit er nicht ungenutzt bleibt.
 - `llm-cli secrets set --with-token` liest den Wert von stdin.
 - **Cancel Build** im Builder-Tab: bricht den laufenden Build nach einer Bestätigung über den Build-Service ab
-  (nur aktiv, solange der Build läuft, den der Tab gestartet hat); das Log meldet, wenn er angehalten hat.
+  (nur aktiv, solange der Build läuft, den der Tab gestartet hat); das Log meldet, wenn er angehalten hat, auch
+  nach einem Abbruch, während der Build noch an die Build-Engine übergeben wurde.
 
 ### Geändert
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
@@ -368,8 +369,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Befehl braucht weder den Tresor für Zugangsdaten noch Docker; `--all` listet jeden aufbewahrten Build statt der
   20 neuesten.
 - Strg+C in `llm-cli build start` bricht den Build über den Build-Service ab: Sein Container wird gestoppt, die CLI
-  wartet, bis der Build angehalten hat, sagt das und endet mit Exit-Code 130. Vorher liefen Build und Container
-  weiter.
+  wartet, bis der Build angehalten hat (auch wenn er gerade noch an die Build-Engine übergeben wurde), sagt das
+  und endet mit Exit-Code 130. Vorher liefen Build und Container weiter.
 - `llm-cli scan --output DATEI` erreicht die Hardware-Probe (`hardware_probe.sh --output`,
   `hardware_probe.ps1 -OutputFile`), die immer `target_hardware_config.txt` in den aktuellen Ordner schrieb. Unter
   Windows ohne Administratorrechte wartet die CLI auf den Neustart der Probe mit erhöhten Rechten, statt sofort zu

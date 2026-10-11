@@ -2,6 +2,7 @@
 
 1 one source of settings in the CLI (ConfigManager), an unreadable -c file is reported
 3 the local hardware probe writes into the probe folder
+4 wait_stopped after a cancel that came before the engine registered the build
 8 FrameworkManager.shutdown ends the background event loop
 """
 
@@ -9,12 +10,16 @@ import asyncio
 import os
 import subprocess
 import sys
+import threading
+import time
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from conftest import REPO_ROOT
+from orchestrator.Core.builder import BuildStatus
 from test_review_capabilities_paths import make_cli
 
 
@@ -133,6 +138,66 @@ class TestLocalProbe:
             assert wizard.name_edit.text()
         finally:
             wizard.deleteLater()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# 4. wait_stopped: a cancel before the engine registered the build
+# ---------------------------------------------------------------------------------------------------------------
+
+class LateEngine:
+    """build_model still runs in a worker thread: the request knows the build id, the engine does not yet."""
+
+    def __init__(self):
+        self._status = {}
+        self.stopped_at = None
+
+    def get_build_status(self, build_id):
+        status = self._status.get(build_id)
+        return None if status is None else SimpleNamespace(status=status, errors=[], logs=[])
+
+    def is_active(self, build_id):
+        return self._status.get(build_id) == BuildStatus.BUILDING
+
+    def register(self, build_id):
+        self._status[build_id] = BuildStatus.BUILDING
+
+    def stop(self, build_id):
+        self.stopped_at = time.monotonic()
+        self._status[build_id] = BuildStatus.CANCELLED
+
+
+def late_service(engine):
+    from orchestrator.Core.build_service import BuildService
+    from orchestrator.Core.orchestrator import OrchestrationStatus, WorkflowState
+    state = WorkflowState("r1", OrchestrationStatus.CANCELLED, datetime.now(), build_ids=["b1"])
+    return BuildService(SimpleNamespace(orchestrator=SimpleNamespace(build_engine=engine, _workflows={"r1": state})))
+
+
+class TestWaitStoppedBeforeRegistration:
+
+    def test_waits_until_the_late_build_was_registered_and_stopped(self):
+        engine = LateEngine()
+        service = late_service(engine)
+        timers = [threading.Timer(0.2, engine.register, args=("b1",)), threading.Timer(0.5, engine.stop, args=("b1",))]
+        for timer in timers:
+            timer.start()
+        try:
+            assert service.wait_stopped("r1", 5, poll=0.01) == "cancelled"
+            assert engine.stopped_at is not None, "reported cancelled while the build was still starting"
+            assert time.monotonic() >= engine.stopped_at
+        finally:
+            for timer in timers:
+                timer.cancel()
+                timer.join()
+
+    def test_a_build_that_never_reaches_the_engine_counts_as_running_only_briefly(self, monkeypatch):
+        from orchestrator.Core.build_service import BuildService
+        monkeypatch.setattr(BuildService, "UNREGISTERED_GRACE", 0.3)
+        service = late_service(LateEngine())  # e.g. cancelled while it waited for a free build slot
+        assert service.wait_stopped("r1", 0.05, poll=0.01) == "running"
+        start = time.monotonic()
+        assert service.wait_stopped("r1", 5, poll=0.01) == "cancelled"
+        assert 0.3 <= time.monotonic() - start < 3
 
 
 # ---------------------------------------------------------------------------------------------------------------
