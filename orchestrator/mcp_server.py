@@ -144,8 +144,17 @@ def _refusal(message: str) -> Exception:
 
 
 def _client_text(value: Any, limit: int = 64) -> str:
-    """A client-supplied value as one short line: cut, control and non-ASCII characters escaped, secrets redacted."""
-    return redact_secrets(json.dumps(str(value)[:limit], ensure_ascii=True)[1:-1])
+    """A client-supplied value as one short line: secrets redacted first (a cut must never leave the start of one
+    that is then too short for its redaction rule), control and non-ASCII characters escaped, and cut to `limit`
+    characters without splitting an escape."""
+    parts, size = [], 0
+    for char in redact_secrets(str(value)[:16 * limit]):
+        escaped = json.dumps(char, ensure_ascii=True)[1:-1]
+        if size + len(escaped) > limit:
+            break
+        parts.append(escaped)
+        size += len(escaped)
+    return "".join(parts)
 
 
 def elicitation_modes(capabilities: Any) -> str:

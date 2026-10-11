@@ -800,7 +800,8 @@ framework never sees it.
   token's `mcp:<name>`, never the token itself) and the capabilities it declared, for example
   `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
   capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask" is
-  refused there. Client text is cut to 64 characters and escaped; it is a label, never a permission.
+  refused there. Client text is cleared of anything that looks like a key or token first, then escaped and cut
+  to 64 characters; it is a label, never a permission.
 
 What the clients support, from their vendors' documentation (2026-10-11). "Not documented" means the vendor does
 not say; the stderr line above shows what a client really declares.

@@ -107,6 +107,26 @@ class TestClientLine:
         assert token not in err, "secret-looking values in client text are redacted"
         assert len(lines[0]) < 300, "client text is cut"
 
+    @pytest.mark.parametrize("padding", [0, 30, 50, 60])
+    def test_cutting_client_text_never_leaves_part_of_a_secret(self, server, capsys, padding):
+        # Redacted before it is cut: a token that the 64-character cut would have shortened below the length
+        # the redaction rule needs must not leak its first characters.
+        token = "hf_" + "abcdefghijklmnopqrstuvwxyzABCDEFGH"
+        info = Implementation(name="a" * padding + " " + token, version="1")
+
+        async def go():
+            async with Client(server, client_info=info) as client:
+                await client.list_tools()
+        run(go())
+        line = client_lines(capsys.readouterr().err)[0]
+        assert "hf_abc" not in line and "abcdefghijk" not in line, line
+        name = line.split('"')[1]
+        assert len(name) <= 64 and not name.endswith("\\"), "cut to 64 characters, never inside an escape"
+
+    def test_a_cut_never_splits_an_escape(self):
+        text = mcp_server._client_text("\x01" * 20)
+        assert len(text) <= 64 and text == "\\u0001" * 10
+
     def test_elicitation_modes_follow_the_sdk_rule(self):
         def caps(**elicitation):
             return SimpleNamespace(elicitation=SimpleNamespace(**elicitation))
