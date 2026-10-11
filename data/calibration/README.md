@@ -26,7 +26,7 @@ Text used to compute importance matrices (llama.cpp `--imatrix`) when a build ha
 - **Only for GGUF.** A GGUF build with the importance matrix switched on (`llm-cli build start --imatrix`, or
   the box "Importance matrix (IMatrix, GGUF)" in the GUI) uses this text when you give no dataset of your own
   (`--dataset`). RKLLM and RKNN builds never use it; they only get your own dataset, if you give one.
-- **Checked before use.** The framework compares the text sha256 of every set with the values above
+- **Checked before use.** Before a build uses a set, the framework compares its text sha256 with the value above
   (`orchestrator/utils/calibration.py`). A missing or modified file is refused. The build then runs without an
   importance matrix and shows a warning, or it stops before the image build if a chosen quantization type needs
   the matrix (`IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`).
