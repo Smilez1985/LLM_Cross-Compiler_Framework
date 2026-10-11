@@ -2,6 +2,7 @@
 which could not work (no such DockerManager attribute, an image that does not exist, a placeholder model path),
 was removed."""
 
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -80,6 +81,106 @@ class TestHuggingFaceBrowser:
             assert len(win.findChildren(HuggingFaceWindow)) == 1
         finally:
             win.close()
+
+
+class BlockingSearch(FakeModels):
+    """Network calls that wait until the test releases them, and remember the thread they ran on."""
+
+    def __init__(self, licence=None):
+        super().__init__()
+        self.release = threading.Event()
+        self.licence = licence or {"license": "apache-2.0", "is_restrictive": False, "message": "ok"}
+        self.licence_threads = []
+
+    def search_huggingface_models(self, query, limit=20):
+        self.release.wait(10)
+        return super().search_huggingface_models(query, limit)
+
+    def check_license(self, model_id):
+        self.licence_threads.append(threading.current_thread() is threading.main_thread())
+        return self.licence
+
+
+def wait_for(*workers):
+    for worker in workers:
+        if worker is not None:
+            assert worker.wait(10000), "worker did not finish"
+
+
+@pytest.mark.usefixtures("qapp")
+class TestHuggingFaceBrowserThreads:
+    """The browser's network calls run in worker threads, and a running thread is never replaced: PySide6 aborts
+    the whole GUI when a QThread object is destroyed while its thread still runs."""
+
+    def window(self, models):
+        from orchestrator.gui import huggingface_window as hf
+        win = hf.HuggingFaceWindow(SimpleNamespace(model_manager=models, secrets_manager=None))
+        win.populate_table(FakeModels().search_huggingface_models("x"))
+        return win
+
+    def test_the_licence_check_does_not_block_the_gui_thread(self, qapp, monkeypatch):
+        models = BlockingSearch()
+        win = self.window(models)
+        opened = []
+        monkeypatch.setattr(win, "show_file_selection", lambda *args: opened.append(args))
+        win.on_download_request(0, 0)
+        wait_for(getattr(win, "list_worker", None))
+        qapp.processEvents()
+        assert models.licence_threads == [False], "check_license ran on the GUI thread"
+        assert opened and opened[0][:2] == ("Qwen/Qwen3.5-0.8B", ["config.json", "model-Q4_K_M.gguf"])
+
+    def test_enter_during_a_search_keeps_the_running_thread(self, qapp):
+        models = BlockingSearch()
+        win = self.window(models)
+        win.search_edit.setText("qwen")
+        win.start_search()
+        first = win.worker
+        win.start_search()  # Enter in the search field: the button is disabled, the field is not
+        second = win.worker
+        models.release.set()
+        wait_for(first, second)
+        qapp.processEvents()
+        assert second is first
+
+    def test_a_second_download_request_waits_for_the_running_one(self, qapp, monkeypatch):
+        from PySide6.QtCore import QThread
+        models = BlockingSearch()
+        win = self.window(models)
+        release = threading.Event()
+
+        class Running(QThread):
+            def run(self):
+                release.wait(10)
+
+        monkeypatch.setattr(win, "show_file_selection", lambda *args: None)
+        busy = Running()
+        win.dl_worker = busy
+        busy.start()
+        try:
+            win.on_download_request(0, 0)
+            assert getattr(win, "list_worker", None) is None and models.licence_threads == []
+            assert win.dl_worker is busy
+        finally:
+            release.set()
+            wait_for(busy, getattr(win, "list_worker", None))
+            qapp.processEvents()
+
+    def test_the_licence_warning_is_plain_text(self, qapp, monkeypatch):
+        from PySide6.QtCore import Qt
+        from orchestrator.gui import huggingface_window as hf
+        models = BlockingSearch({"license": "cc-by-nc", "is_restrictive": True,
+                                 "message": "<a href='https://example.invalid'>cc-by-nc</a> is restrictive"})
+        win = self.window(models)
+        shown, dialogs = [], []
+        monkeypatch.setattr(hf.QMessageBox, "exec", lambda box: shown.append(box.textFormat()) or hf.QMessageBox.No)
+        monkeypatch.setattr(hf.QMessageBox, "warning", staticmethod(
+            lambda *args, **kwargs: shown.append("rich text allowed") or hf.QMessageBox.No))
+        monkeypatch.setattr(hf, "FileSelectionDialog", lambda *args, **kwargs: dialogs.append(args))
+        win.on_download_request(0, 0)
+        wait_for(getattr(win, "list_worker", None))
+        qapp.processEvents()
+        assert shown == [Qt.PlainText], "the licence name comes from the model card"
+        assert dialogs == [], "declined: no file selection"
 
 
 @pytest.mark.usefixtures("qapp")

@@ -9,6 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Optional
 
 import pytest
 import yaml
@@ -149,6 +150,18 @@ class TestFirstRunLanguage:
         assert saved["language"] == "de" and saved["gui_note"] == "kept"
         assert not (install / "configs" / "config.yml").exists(), "never the installation's configs/"
 
+    @pytest.mark.parametrize("content", ["ai_provider: openai\nai_model: [unclosed\n", "- a list\n- not settings\n"])
+    def test_a_config_file_that_cannot_be_read_is_not_overwritten(self, tmp_path, content):
+        # Its settings were not loaded, so the language would be asked again; saving it must not replace the file
+        # with nothing but the language (the old first-run code refused to write such a file, too).
+        pytest.importorskip("PySide6")
+        from orchestrator.main import save_language
+        config_file = tmp_path / "configs" / "config.yml"
+        config_file.parent.mkdir()
+        config_file.write_text(content)
+        assert save_language(ConfigManager(), "de") is False
+        assert config_file.read_text() == content
+
 
 class TestDeploymentBundle:
 
@@ -192,16 +205,18 @@ needs_bash = pytest.mark.skipif(os.name == "nt" or not Path("/bin/bash").exists(
 
 
 def stub(folder: Path, name: str, exit_code: int):
+    """A fake command that logs its arguments ("ARGV: ...") and what it read on stdin ("STDIN: ...")."""
     folder.mkdir(exist_ok=True)
     path = folder / name
-    path.write_text(f'#!/bin/sh\necho "$0 $*" >> "{folder}/calls.log"\nexit {exit_code}\n')
+    path.write_text(f'#!/bin/sh\necho "ARGV: $0 $*" >> "{folder}/calls.log"\n'
+                    f'sed "s/^/STDIN: /" >> "{folder}/calls.log"\nexit {exit_code}\n')
     path.chmod(0o755)
 
 
-def wait_for_internet(stubs: Path, **env):
+def wait_for_internet(stubs: Path, path: Optional[str] = None, **env):
     return subprocess.run(["/bin/bash", "-c", 'source "$1"; wait_for_internet', "test", str(INSTALL_SH)],
-                          env={"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(stubs), **env},
-                          capture_output=True, text=True, timeout=60)
+                          env={"PATH": path or f"{stubs}:/usr/bin:/bin", "HOME": str(stubs), **env},
+                          stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
 
 
 @needs_bash
@@ -228,6 +243,46 @@ class TestInstallSh:
         run = wait_for_internet(stubs, PIP_INDEX_URL="https://mirror.example/simple/")
         assert run.returncode == 1
         assert "https://mirror.example/simple/" in run.stdout and "sudo -E" in run.stdout
+
+    @pytest.mark.parametrize("index, probe", [
+        (None, "https://pypi.org/simple/pip/"),
+        ("https://mirror.example/simple", "https://mirror.example/simple/pip/"),
+    ])
+    def test_the_check_loads_one_small_project_page_not_the_whole_index(self, tmp_path, index, probe):
+        # https://pypi.org/simple/ is over 40 MB: with a 10 s limit a connection below ~40 Mbit/s counted as offline.
+        stubs = tmp_path / "bin"
+        stub(stubs, "curl", 0)
+        run = wait_for_internet(stubs, **({"PIP_INDEX_URL": index} if index else {}))
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert f'STDIN: url = "{probe}"' in (stubs / "calls.log").read_text()
+
+    def test_credentials_in_the_index_url_are_never_shown_or_put_on_a_command_line(self, tmp_path):
+        stubs = tmp_path / "bin"
+        stub(stubs, "curl", 22)
+        run = wait_for_internet(stubs, PIP_INDEX_URL="https://alice:s3cr3t@mirror.example/simple/")
+        assert run.returncode == 1
+        assert "s3cr3t" not in run.stdout + run.stderr and "mirror.example/simple/" in run.stdout
+        calls = (stubs / "calls.log").read_text().splitlines()
+        assert not any("s3cr3t" in line for line in calls if line.startswith("ARGV:")), "visible in ps"
+        assert 'STDIN: url = "https://alice:s3cr3t@mirror.example/simple/pip/"' in calls, "curl still gets them"
+
+    def test_wget_when_there_is_no_curl(self, tmp_path):
+        stubs = tmp_path / "bin"
+        stub(stubs, "wget", 0)
+        for tool in ("sed", "cat"):  # nothing else from the system, so no real curl is found
+            (stubs / tool).symlink_to(next(Path(d) / tool for d in ("/usr/bin", "/bin") if (Path(d) / tool).exists()))
+        run = wait_for_internet(stubs, path=str(stubs))
+        assert run.returncode == 0, run.stdout + run.stderr
+        calls = (stubs / "calls.log").read_text()
+        assert "STDIN: https://pypi.org/simple/pip/" in calls and "--timeout=10" in calls
+
+    @pytest.mark.skipif(not Path("/usr/bin/dash").exists() and not Path("/bin/dash").exists(), reason="needs dash")
+    def test_sh_or_dash_stops_with_a_clear_message(self, tmp_path):
+        dash = next(p for p in ("/usr/bin/dash", "/bin/dash") if Path(p).exists())
+        run = subprocess.run([dash, str(INSTALL_SH)], env={"PATH": "/usr/bin:/bin", "HOME": str(tmp_path)},
+                             stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+        assert run.returncode == 1
+        assert "bash" in run.stderr and "Bad substitution" not in run.stderr and "parameter not set" not in run.stderr
 
     def test_no_unused_data_folder_and_user_data_survives_a_reinstall(self):
         text = INSTALL_SH.read_text(encoding="utf-8")

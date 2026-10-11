@@ -313,17 +313,24 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The language chosen at the first start of the GUI is saved in the effective config folder
   (`LLM_FRAMEWORK_CONFIG_DIR`, the installation's `configs/` if writable, otherwise the per-user folder) instead
   of always in the installation's `configs/`.
+- Saving a setting (for example the first-run language or the AI settings) no longer overwrites a `config.yml`
+  that cannot be read (a YAML error, or no `key: value` settings) with only the changed values; the file stays as
+  it is and the error is logged.
 - Windows: with the framework in `C:\Program Files`, which standard users cannot write to, the settings and the
   data folders `output/`, `cache/` and `models/` are in the per-user folder (`%USERPROFILE%\.llm-framework`).
   The writability check no longer trusts `os.access`, which ignores folder permissions on Windows. The installer
   no longer creates an unused data folder in the public documents folder with a desktop shortcut to it.
 - `install.sh` checks the connection over HTTPS to the package index (`pypi.org` or `PIP_INDEX_URL`) instead of
-  pinging 8.8.8.8, which many networks block; it no longer creates an unused data folder in root's home folder,
+  pinging 8.8.8.8, which many networks block. It loads one small project page, not the whole index, does not show
+  credentials contained in `PIP_INDEX_URL`, and stops with a clear message when started with `sh` instead of bash.
+  It no longer creates an unused data folder in root's home folder,
   and running it again keeps the builds, cache, models and `configs/config.yml` in `/opt` instead of deleting
   them.
 - Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
   `config/` folder in the working directory.
 - The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).
+  Its licence check no longer freezes the window, and pressing Enter during a search or double-clicking another
+  model during a download no longer crashes the GUI.
 - `scripts/sync_ssot.py` uses the real file `configs/detailed_project_sources.yml` (it created a copy named
   `detailed_project.sources.yml` instead) and works from any folder. It lists the differences, and with `--write`
   it changes only those values; comments and layout stay (it rewrote the whole file with `yaml.dump`).
