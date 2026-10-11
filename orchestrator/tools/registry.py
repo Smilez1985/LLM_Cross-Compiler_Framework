@@ -7,18 +7,20 @@ ToolRegistry.call(): input validation, the user's stored permission policy, an o
 the handler with an output check, and an audit entry - the same path for every caller.
 """
 
+import contextvars
 import hashlib
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Type
 
 from pydantic import BaseModel, ValidationError
 
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.confirmation import CallTooLong, describe_call
 from orchestrator.tools.output import ResultTooLarge, check_size, filtered_result
-from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier
+from orchestrator.tools.policy import TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier
+from orchestrator.tools.spec import CHANNELS, FieldMeta, GrantRule, ToolLimits, example_problems
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
@@ -68,19 +70,54 @@ class ToolSpec:
     # The one-sentence summary of a result for the MCP text block; built from framework facts only (output.fact).
     summary: Optional[Callable[[BaseModel], str]] = None
     paging_hint: str = ""  # how to ask for less when a result is too large
+    destructive: bool = False  # deletes or overwrites something (destructiveHint), whatever the tier
+    # The tool's own default decision, used instead of the caller's tier decision; a Decision or a function of
+    # (input, caller). None: the tier decision. A default never opens a tier the person denied.
+    default_decision: DecisionRule = None
+    # The highest decision any setting may give this tool; a Decision or a function of (input, caller).
+    # None: the tier's cap (TIER_CAPS: tools that reach other devices or delete data always ask).
+    max_decision: DecisionRule = None
+    channels: Tuple[str, ...] = CHANNELS  # confirmation channels the tool accepts, strongest first
+    grant: Optional[GrantRule] = None     # None: a confirmation never offers "do not ask again"
+    limits: ToolLimits = field(default_factory=ToolLimits)
+    arg_aliases: Mapping[str, str] = field(default_factory=dict)  # declared argument aliases (alias -> field)
+    examples: Tuple[Dict[str, Any], ...] = ()                     # valid example calls, shown after input errors
+    fields: Mapping[str, FieldMeta] = field(default_factory=dict)  # how the fool-proof layer treats each field
 
     def annotations(self) -> Dict[str, Any]:
         """MCP tool annotations (hints for clients; the registry enforces the policy itself)."""
         return {
             "title": self.title,
             "readOnlyHint": self.tier == ToolTier.READ,
-            "destructiveHint": self.tier == ToolTier.EXTERNAL,
+            "destructiveHint": self.destructive,
             "idempotentHint": self.idempotent,
             "openWorldHint": self.open_world,
         }
 
+    def meta(self) -> Optional[Dict[str, Any]]:
+        """MCP `_meta` of the tool: a tool that reaches another device or deletes data asks the client to show
+        its own prompt on every call too (Claude Code honours this)."""
+        if self.tier == ToolTier.EXTERNAL:
+            return {"anthropic/requiresUserInteraction": True}
+        return None
+
+    def cap(self, inp: Any = None, caller: str = "") -> Decision:
+        rule = self.max_decision(inp, caller) if callable(self.max_decision) else self.max_decision
+        return rule or TIER_CAPS.get(self.tier, Decision.ASK)
+
 
 Confirm = Callable[[ToolSpec, BaseModel], bool]
+
+# The registry and actor of the call a handler runs for (handlers do not get the context; get_status reads it).
+_CALL: contextvars.ContextVar = contextvars.ContextVar("lcf_tool_call", default=(None, ""))
+
+
+def current_actor() -> str:
+    return _CALL.get()[1]
+
+
+def current_registry() -> Optional["ToolRegistry"]:
+    return _CALL.get()[0]
 
 
 @dataclass
@@ -110,6 +147,19 @@ class ToolRegistry:
             raise ValueError(f"Tool '{spec.name}' is already registered.")
         if spec.tier == ToolTier.FORBIDDEN:
             raise ValueError(f"Tool '{spec.name}' is in the forbidden tier and cannot be registered.")
+        names = set(spec.input_model.model_fields)
+        unknown = sorted((set(spec.fields) - names) | {f for f in spec.arg_aliases.values() if f not in names})
+        if unknown:
+            raise ValueError(f"Tool '{spec.name}' declares metadata or aliases for unknown fields {unknown}.")
+        clash = sorted(a for a in spec.arg_aliases if a in names)
+        if clash:
+            raise ValueError(f"Tool '{spec.name}': aliases {clash} are names of its own fields.")
+        bad = [c for c in spec.channels if c not in CHANNELS]
+        if bad or not spec.channels:
+            raise ValueError(f"Tool '{spec.name}': unknown confirmation channels {bad}.")
+        problems = example_problems(list(spec.examples), spec.input_model.model_validate)
+        if problems:
+            raise ValueError(f"Tool '{spec.name}' has invalid example calls: {problems}")
         self._tools[spec.name] = spec
         return spec
 
@@ -125,8 +175,34 @@ class ToolRegistry:
     def policy(self) -> ToolPolicy:
         return self.policy_store.load()
 
-    def decide(self, spec: ToolSpec) -> Decision:
-        return self.policy().decide(spec.name, spec.tier)
+    def decide(self, spec: ToolSpec, inp: Any = None, caller: str = "") -> Decision:
+        """The decision for a call of `spec` by `caller` (ditto, mcp, mcp:<token>): the caller's own permissions
+        (or the shared ones), the tool's default for tools the person has not reviewed, and the tool's cap."""
+        return self.policy().decide_tool(spec, inp, caller)
+
+    def visible(self, caller: str) -> List[ToolSpec]:
+        """The tools a caller is offered: every tool its permissions do not deny (MCP tools/list, Ditto's tool
+        definitions). Denied tools stay registered; a call to one is refused and audited."""
+        policy = self.policy()
+        return [s for s in self._tools.values() if policy.decide_tool(s, None, caller) != Decision.DENY]
+
+    def permissions(self, caller: str) -> List[Dict[str, Any]]:
+        """Per tool, for one caller: decision and why, default, cap, listed or hidden, new (not reviewed yet), and
+        whether a confirmation may offer a standing approval."""
+        policy = self.policy()
+        rows = []
+        for spec in self._tools.values():
+            decision, why = policy.explain_tool(spec, None, caller)
+            default = spec.default_decision
+            rows.append({
+                "tool": spec.name, "title": spec.title, "tier": spec.tier.value, "decision": decision.value,
+                "why": why, "default": ("depends on the call" if callable(default) else
+                                        default.value if default is not None else "tier setting"),
+                "max": ("depends on the call" if callable(spec.max_decision) else spec.cap().value),
+                "listed": decision != Decision.DENY, "new": not policy.reviewed_tool(caller, spec.name),
+                "standing_approval": spec.grant is not None,
+            })
+        return rows
 
     def _audit(self, ctx: ToolContext, spec: ToolSpec, decision: Decision, outcome: str,
                arguments: Any, approved: Optional[bool] = None, detail: str = "", required: bool = False,
@@ -162,7 +238,7 @@ class ToolRegistry:
         """Audits a call that was refused, cancelled or left unanswered outside call() (e.g. because it could
         not be confirmed). Nobody approved it, so `approved` stays NULL."""
         spec = self.get(name)
-        self._audit(ctx, spec, self.decide(spec), outcome, arguments, detail=detail, **extra)
+        self._audit(ctx, spec, self.decide(spec, caller=ctx.actor), outcome, arguments, detail=detail, **extra)
 
     def record_question(self, name: str, arguments: Optional[Dict[str, Any]], ctx: ToolContext,
                         question: str) -> str:
@@ -171,7 +247,7 @@ class ToolRegistry:
         (AuditUnavailable)."""
         spec = self.get(name)
         digest = text_sha256(question)
-        self._audit(ctx, spec, self.decide(spec), "confirmation_requested", arguments,
+        self._audit(ctx, spec, self.decide(spec, caller=ctx.actor), "confirmation_requested", arguments,
                     required=spec.tier != ToolTier.READ, confirm_channel=ctx.confirm_channel or "elicitation",
                     question_sha256=digest)
         return digest
@@ -198,12 +274,14 @@ class ToolRegistry:
         to. Reads stay available when the audit log cannot be written (the failure is logged)."""
         began = time.monotonic()
         spec = self.get(name)
-        decision = self.decide(spec)
+        decision = self.decide(spec, caller=ctx.actor)
         try:
             inp = self.validate_input(spec, arguments)
         except ToolInputError as e:
             self._audit(ctx, spec, decision, "invalid_input", arguments, detail=str(e))
             raise
+        if callable(spec.default_decision) or callable(spec.max_decision):
+            decision = self.decide(spec, inp, ctx.actor)  # the rule depends on the call's input
 
         if decision == Decision.DENY:
             self._audit(ctx, spec, decision, "denied", arguments)
@@ -246,6 +324,7 @@ class ToolRegistry:
                         duration_ms=int((time.monotonic() - began) * 1000), links=links, result=result,
                         **confirmation)
 
+        token = _CALL.set((self, ctx.actor))
         try:
             result = self._output(spec, spec.handler(inp))
         except ResultTooLarge as e:
@@ -271,6 +350,8 @@ class ToolRegistry:
         except BaseException:  # interrupted in the calling thread (KeyboardInterrupt, shutdown): still recorded
             end("cancelled", "Interrupted while it ran.")
             raise
+        finally:
+            _CALL.reset(token)
         serialized = result.model_dump_json()
         end("ok", result={"sha256": text_sha256(serialized), "bytes": len(serialized.encode("utf-8"))})
         return result
@@ -288,5 +369,5 @@ class ToolRegistry:
             raise TypeError(f"handler returned {type(result).__name__}, expected {model.__name__}")
         notes = list(spec.notes(result)) if spec.notes is not None else []
         result = filtered_result(result, notes)
-        check_size(result, spec.paging_hint)
+        check_size(result, spec.paging_hint, spec.limits.max_result_bytes)
         return result

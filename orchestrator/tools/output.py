@@ -56,10 +56,10 @@ class ToolOutput(BaseModel):
 
 
 class ResultTooLarge(ValueError):
-    def __init__(self, size: int, hint: str = ""):
+    def __init__(self, size: int, hint: str = "", limit: int = MAX_RESULT_BYTES):
         self.size = size
-        message = (f"The result is {size // 1024} KiB, more than the {MAX_RESULT_BYTES // 1024} KiB a tool may "
-                   "return, so it was not sent.")
+        message = (f"The result is {size // 1024} KiB, more than the {limit // 1024} KiB this tool may return, "
+                   "so it was not sent.")
         super().__init__(message + (f" {hint}" if hint else " Ask for less."))
 
 
@@ -160,12 +160,13 @@ def filtered_result(result: BaseModel, notes: List[str]) -> BaseModel:
     return type(result).model_validate(data)
 
 
-def check_size(result: BaseModel, hint: str = "") -> str:
-    """The serialized result; ResultTooLarge when it exceeds MAX_RESULT_BYTES."""
+def check_size(result: BaseModel, hint: str = "", limit: int = MAX_RESULT_BYTES) -> str:
+    """The serialized result; ResultTooLarge when it exceeds `limit` bytes (at most MAX_RESULT_BYTES)."""
     serialized = result.model_dump_json()
     size = len(serialized.encode("utf-8"))
-    if size > MAX_RESULT_BYTES:
-        raise ResultTooLarge(size, hint)
+    limit = min(int(limit), MAX_RESULT_BYTES)
+    if size > limit:
+        raise ResultTooLarge(size, hint, limit)
     return serialized
 
 

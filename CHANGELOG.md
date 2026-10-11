@@ -206,6 +206,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   SHA-256 and size of the result (never the result itself) and a link from the end entry to the call's write-ahead
   entry. The fields are part of the hash chain; logs written before them, also by a 3.0.0 process that is still
   running, stay verifiable.
+- **Tool permissions per caller**: Ditto and local MCP clients over stdio can have permissions of their own
+  (`llm-cli tools permissions --caller ditto|mcp`, `--reset --caller` returns to the shared ones); a caller's first
+  permissions start from the shared ones, including settings for single tools. `llm-cli tools list --caller`, the
+  CLI setup and the GUI dialog show each tool's own default, the highest decision any setting can give it, whether
+  it is new (not reviewed yet) and whether a standing approval may be offered.
+- **`get_status` tool** (Ditto and MCP clients): the caller's tool permissions, with every tool's decision and why,
+  also the tools that are not listed because they are denied, and the actions no tool does with where the person
+  does them, so an AI can name the real reason when it cannot do something.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -276,6 +284,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   reachable; no excerpt matched" or that only the builds of this process are listed); a pending self-healing
   proposal's `suggested_step` is now `manual_step_text`, text for the person to read. The server instructions say
   how to treat marked fields and that a task the client cannot do is reported with its specific reason.
+- **MCP clients see only the tools they may use**: tools your permissions deny are left out of the tool list (the
+  same tools Ditto gets for the same permissions); a call to one is still refused and audited. `destructiveHint`
+  follows each tool's own flag instead of its tier (`resolve_healing` is destructive, because one of its fixes
+  deletes the Docker build cache), and tools that reach other devices ask the client to show its own prompt on
+  every call (`anthropic/requiresUserInteraction`).
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -495,6 +508,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   messages) is cleaned of invisible and bidirectional control characters and capped, other strings are capped at
   16 KiB, and a result over 256 KiB is refused with a hint how to ask for less. Before, only errors, warnings and
   log lines were redacted, only knowledge excerpts were cleaned, and log lines and results had no size limit.
+- **New tools never inherit a loosened tier setting, and a tool's cap holds**: the permission file records the
+  tools you have reviewed, and a tool added later uses its own default (or the recommended tier setting) until you
+  review it, so allowing a tier once no longer allows every tool added to it later. A tool's own default (for
+  example `deny` for an optional tool) holds even when its tier is allowed, but never opens a tier you denied, and a
+  tool that reaches other devices or deletes data always asks at most. Before, a per-tool setting could allow such a
+  tool without a question. A permission file from 3.0.0 counts its eleven tools as reviewed; 3.0.0 itself reads a
+  file saved by this version as damaged and denies every tool.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
