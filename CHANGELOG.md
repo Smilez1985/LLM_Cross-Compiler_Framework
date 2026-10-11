@@ -216,7 +216,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   also the tools that are not listed because they are denied, and the actions no tool does with where the person
   does them, so an AI can name the real reason when it cannot do something.
 - **Fool-proof tool calls** (Ditto and MCP clients, every model size): spelling variants of tool names
-  (`StartBuild` runs `start_build`) and declared argument aliases (`quant` for `quantization`) run with a note;
+  (`StartBuild` runs `start_build`) and declared argument aliases (`quant` for `quantization`) run with a note,
+  while any other unknown argument name, also one in other letter case, is refused with a suggestion;
   values are coerced the same way on both paths and matched against the target's formats, boards and quantization
   types exactly, by canonical form if unique or by the target's aliases, never by guessing a near miss; every
   refusal carries a reason code and the next step; the same failing call is flagged the second time and refused

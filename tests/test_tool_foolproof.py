@@ -74,7 +74,7 @@ def ditto_error(env, name, arguments, session="s1") -> ToolError:
 
 class TestParity:
 
-    RAW = {**BUILD, "quant": "q4_k_m", "Board": "RK3588"}
+    RAW = {**BUILD, "quant": "q4_k_m", "board": "RK3588"}
 
     def test_the_same_raw_call_runs_the_same_on_both_paths(self, env):
         out = ditto(env, "StartBuild", self.RAW)
@@ -167,9 +167,17 @@ class TestArgumentNames:
         ditto(env, "start_build", {**BUILD, "quant": "Q4_K_M", "quantization": "Q4_K_M"})
         assert built(env)[0]["quantization"] == "Q4_K_M"
 
-    def test_two_spellings_of_one_key_with_different_values_conflict(self, env):
-        error = ditto_error(env, "start_build", {**BUILD, "Model": "other/model"})
-        assert "different values" in error.message
+    @pytest.mark.parametrize("key", ["Board", "BOARD", "bo-ard"])
+    def test_an_undeclared_spelling_of_a_key_is_refused_with_a_suggestion(self, env, key):
+        """Review fix (maintainer decision, fourth round: declared aliases are the only mapping). Keys in other
+        letter case or with other separators were mapped onto the field by themselves; they are refused with a
+        suggestion on both paths, and nothing runs. (This replaces the builder's test that two spellings of one key
+        conflict: an undeclared spelling is refused on its own now.)"""
+        raw = {**BUILD, key: "rk3588"}
+        error = ditto_error(env, "start_build", raw, session="k")
+        assert error.code == "unknown_argument" and "Did you mean 'board'?" in error.message
+        result = mcp(env, "start_build", raw)
+        assert result.is_error and text_of(result) == str(error) and built(env) == []
 
     def test_a_key_is_never_mapped_onto_a_credential_field(self):
         class In(BaseModel):
@@ -237,7 +245,7 @@ class TestValues:
 
     def test_the_normalizer_is_idempotent(self, env):
         spec = env.registry.get("start_build")
-        once = normalize_arguments(spec, {**BUILD, "quant": "q4", "Board": "RK3588", "use_gpu": "no"})
+        once = normalize_arguments(spec, {**BUILD, "quant": "q4", "board": "RK3588", "use_gpu": "no"})
         twice = normalize_arguments(spec, once.arguments)
         assert twice.arguments == once.arguments and twice.repairs == []
 
@@ -408,6 +416,93 @@ class TestDittoPath:
         metrics = tool_use_metrics([report])
         assert metrics["tool_calls"] == 3 and metrics["unknown_name_rate"] == round(1 / 3, 4)
         assert metrics["malformed_rate"] == round(1 / 3, 4)
+
+
+# --- review fixes: the repeat guard over MCP, closed models, every tool refuses unknown arguments ---------------
+
+def mcp_session(env, calls, callback=None, mode="auto"):
+    """Several calls by one MCP client (one connection in the classic era, one server in the 2026-07-28 era)."""
+    server = mcp_server.build_mcp_server(SimpleNamespace(info=SimpleNamespace(version="t"),
+                                                         tool_registry=env.registry))
+
+    async def go():
+        async with Client(server, elicitation_callback=callback, mode=mode) as client:
+            return [await client.call_tool(name, arguments) for name, arguments in calls]
+    return asyncio.run(go())
+
+
+class TestRepeatGuardOverMcp:
+    """Review fix: the MCP session key hashed the SDK's per-request session object, so every call of a client was
+    a session of its own: the repeat guard, "do not guess ids" and the example calls never worked over MCP. And
+    the guard keyed a failed call on the SDK's parsed arguments, not the raw ones the server checks before the
+    question, so a write that had failed twice was put to the person a third time before it was refused."""
+
+    @pytest.mark.parametrize("mode", ["auto", "legacy"])
+    def test_the_same_failing_call_is_flagged_then_refused(self, env, mode):
+        texts = [text_of(r) for r in mcp_session(env, [("get_build_status", {"request_id": "req-9"})] * 3,
+                                                  mode=mode)]
+        assert "already failed" not in texts[0] and "This exact call already failed." in texts[1]
+        assert "Stop retrying this call" in texts[2]
+
+    @pytest.mark.parametrize("mode", ["auto", "legacy"])
+    def test_guessed_ids_and_repeated_input_errors_get_guidance(self, env, mode):
+        texts = [text_of(r) for r in mcp_session(env, [("get_build_status", {"request_id": f"req-{i}"})
+                                                       for i in range(2)], mode=mode)]
+        assert "Do not guess ids." in texts[1]
+        texts = [text_of(r) for r in mcp_session(env, [("start_build", {**BUILD, "format": f"x{i}"})
+                                                       for i in range(3)], mode=mode)]
+        assert "A valid call looks like: start_build" in texts[2]
+
+    @pytest.mark.parametrize("approve", [True, False])
+    def test_a_write_that_failed_twice_is_not_put_to_the_person_again(self, env, approve):
+        env.registry.policy_store.save(ToolPolicy(configured=True, reviewed=[s.name for s in env.registry.list()]))
+        asked = []
+        raw = {**BUILD, "format": "rkllm", "board": "rk3566"}  # refused by the build service: not_supported
+        results = mcp_session(env, [("start_build", raw)] * 3, answering("accept", approve=approve, asked=asked))
+        assert len(asked) == 2 and "Stop retrying this call" in text_of(results[2])
+        dittos = []
+        for _ in range(3):
+            with pytest.raises(ToolError):
+                ditto(env, "start_build", raw, session="d", confirm=lambda s, i: dittos.append(1) or approve)
+        assert len(dittos) == 2, "the same on Ditto's path"
+
+
+class TestEveryToolRefusesUnknownArguments:
+    """Review fix (maintainer decision, fourth round): every registered tool, present and future, refuses an argument
+    it does not know, with a suggestion, on every path; its input model forbids extra fields."""
+
+    @staticmethod
+    def valid_call(spec):
+        if spec.examples:
+            return dict(spec.examples[0])
+        values = {str: "req-1", bool: True, int: 1}
+        return {name: values.get(info.annotation, "req-1") for name, info in spec.input_model.model_fields.items()
+                if info.is_required()}
+
+    def test_every_registered_tool(self, env):
+        assert len(env.registry.list()) >= 12
+        for spec in env.registry.list():
+            assert spec.input_model.model_config.get("extra") == "forbid", spec.name
+            fields = list(spec.input_model.model_fields)
+            raw = {**self.valid_call(spec), (fields[0].upper() if fields else "verbose"): "x"}
+            calls = list(env.calls)
+            error = ditto_error(env, spec.name, raw, session=f"guard-{spec.name}")
+            assert error.code == "unknown_argument", (spec.name, str(error))
+            assert (f"Did you mean '{fields[0]}'?" in error.message if fields else "takes no arguments" in str(error))
+            result = mcp(env, spec.name, raw)
+            assert result.is_error and text_of(result) == str(error), spec.name
+            assert env.calls == calls, f"{spec.name} ran"
+
+    def test_an_input_model_without_forbid_is_closed_at_registration(self, tmp_path):
+        class Open(BaseModel):
+            text: str = ""
+        reg = ToolRegistry(PolicyStore(tmp_path), AuditLog(tmp_path / "audit.db"))
+        spec = reg.register(ToolSpec("t", "T", "", ToolTier.READ, Open, ToolOutput, lambda i: ToolOutput()))
+        assert spec.input_model.model_config["extra"] == "forbid"
+        assert spec.input_model.model_json_schema()["additionalProperties"] is False
+        with pytest.raises(ToolInputError):
+            reg.validate_input(spec, {"text": "a", "other": 1})
+        assert reg.call("t", {"text": "a"}, ToolContext("mcp")).notes == []
 
 
 def test_input_errors_keep_their_type_for_callers(tmp_path):

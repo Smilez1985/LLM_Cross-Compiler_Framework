@@ -8,9 +8,9 @@ without ever widening a call:
 - Tool names: an exact name, or the same name after lowercasing and ignoring `_`, `-`, space and `.`
   (`StartBuild`, `start-build`) runs that tool, with a note. Anything else is refused with up to three suggestions
   from the tools the caller can see; edit distance only suggests, it never picks a tool.
-- Argument names: declared aliases (`quant` -> `quantization`) and keys that differ only in letter case or in `-`
-  versus `_` are renamed, with a note. Any other unknown key is refused (nothing is dropped). Two keys for one
-  field with different values are a conflict.
+- Argument names: declared aliases (`quant` -> `quantization`) are the only mapping and are renamed, with a note.
+  Any other unknown key, also a field name in other letter case (`Board`), is refused with a suggestion (nothing
+  is dropped, nothing undeclared is mapped). An alias and its field with different values are a conflict.
 - Values: the same coercion on both paths (text to number, "yes" to true, JSON text for lists), units only where a
   field declares one, closed value lists matched exactly, by canonical form if unique, or by a declared alias.
   Never by edit distance: Q4_K_M and Q5_K_M, or rk3566 and rk3568, differ by one character.
@@ -43,7 +43,6 @@ _KEY_SEPARATORS = re.compile(r"[-_]")
 _EMPTY = ("", "null", "none", "default")
 _TRUE = ("true", "yes", "on", "1")
 _FALSE = ("false", "no", "off", "0")
-_CREDENTIAL = re.compile(r"(password|passphrase|secret|token|api_?key|private_?key|credential)", re.IGNORECASE)
 _DURATION = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hour|hours)?\s*$",
                        re.IGNORECASE)
 _SIZE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(b|kb|kib|mb|mib|gb|gib|tb|tib)?\s*$", re.IGNORECASE)
@@ -314,8 +313,6 @@ def normalize_arguments(spec, raw: Any) -> Normalized:
         raise NormalizeError(f"The arguments for {spec.name} must be an object with named fields.",
                              next=f"Call {spec.name} with named arguments ({_field_list(spec)}).")
     fields = spec.input_model.model_fields
-    by_key = {canonical_key(name): name for name in fields}
-    aliases = {canonical_key(a): f for a, f in spec.arg_aliases.items()}
     renamed: Dict[str, Tuple[str, Any]] = {}  # field -> (key written, value)
     repairs: List[Repair] = []
     unknown: List[str] = []
@@ -323,14 +320,12 @@ def normalize_arguments(spec, raw: Any) -> Normalized:
         if not isinstance(key, str):
             unknown.append(repr(key))
             continue
+        # Declared aliases are the only mapping (maintainer decision): a key in other letter case or with other
+        # separators is refused with a suggestion, never mapped by itself.
         if key in fields:
             target, kind = key, None
         elif key in spec.arg_aliases:
             target, kind = spec.arg_aliases[key], "alias"
-        elif canonical_key(key) in by_key and not _CREDENTIAL.search(by_key[canonical_key(key)]):
-            target, kind = by_key[canonical_key(key)], "key"
-        elif canonical_key(key) in aliases:
-            target, kind = aliases[canonical_key(key)], "alias"
         else:
             unknown.append(key)
             continue
@@ -352,6 +347,10 @@ def normalize_arguments(spec, raw: Any) -> Normalized:
             if close:
                 hints.append(f"Did you mean '{spec.arg_aliases.get(close[0], close[0])}'?")
         names = ", ".join(f"'{_short(k, 40)}'" for k in unknown)
+        if not valid:
+            raise NormalizeError(f"Unknown argument{'s' if len(unknown) > 1 else ''} {names} for {spec.name}. "
+                                 f"{spec.name} takes no arguments.", code="unknown_argument",
+                                 next=f"Call {spec.name} without arguments.")
         raise NormalizeError(f"Unknown argument{'s' if len(unknown) > 1 else ''} {names} for {spec.name}. "
                              f"Valid arguments: {', '.join(valid)}." + (f" {' '.join(hints)}" if hints else ""),
                              code="unknown_argument", allowed=valid,
