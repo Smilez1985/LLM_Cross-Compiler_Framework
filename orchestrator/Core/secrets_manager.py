@@ -69,6 +69,7 @@ for _old, _new in LEGACY_NAMES.items():
     _ALIASES[_new] = _ALIASES.get(_new, ()) + (_old,)
 
 CRED_NAME = re.compile(r"^cred/[a-z0-9][a-z0-9_.-]{0,63}/[a-z0-9][a-z0-9_.-]{0,63}(@[0-9a-f]{16})?$")
+_VAULT_ID = re.compile(r"^[0-9a-f]{16}$")
 RECORD_KINDS = ("api_key", "oauth", "local_key", "aws_static", "google_sa")
 MAX_RECORD_BYTES = 64 * 1024
 LOCK_TIMEOUT = 30.0
@@ -84,13 +85,28 @@ def canonical_name(name: str) -> str:
 
 
 def normalize_origin(url: str) -> str:
-    """`scheme://host:port` of a URL, lower case, with the default port filled in."""
-    parts = urlsplit(url.strip())
+    """`scheme://host:port` of a URL, lower case, with the default port filled in. Refuses user info,
+    backslashes, spaces and control characters: urllib and HTTP clients may read such a URL as different
+    hosts (http://evil\\@127.0.0.1 is 127.0.0.1 to urllib), and a key bound to one must never reach the other.
+    The URL is never part of the error (it may carry a password)."""
+    text = url.strip() if isinstance(url, str) else ""
+    if not text.isprintable() or "\\" in text or any(c.isspace() for c in text):
+        raise ValueError("not a plain http(s) URL (spaces, backslashes or control characters)")
+    parts = urlsplit(text)
+    if "@" in parts.netloc:
+        raise ValueError("an origin URL must not contain user info")
     scheme = (parts.scheme or "").lower()
     host = (parts.hostname or "").lower()
+    try:
+        port = parts.port
+        if not host.isascii():
+            host = host.encode("idna").decode("ascii")  # the same host as its xn-- form
+    except (ValueError, UnicodeError):
+        raise ValueError("not a valid http(s) URL (host or port)") from None
+    host = host[:-1] if host.endswith(".") else host  # example.com. is example.com
     if scheme not in ("http", "https") or not host:
-        raise ValueError(f"not an http(s) URL: {url!r}")
-    port = parts.port or (443 if scheme == "https" else 80)
+        raise ValueError("not an http(s) URL with a host")
+    port = port or (443 if scheme == "https" else 80)
     if ":" in host:
         host = f"[{host}]"
     return f"{scheme}://{host}:{port}"
@@ -134,6 +150,16 @@ def _same_path(a: Path, b: Path) -> bool:
         return False
 
 
+def _log_safe(text: Any) -> str:
+    text = str(text)
+    return text if text.isprintable() else text.encode("unicode_escape").decode("ascii")
+
+
+def _valid_name(name: Any) -> bool:
+    """A secret name is printable text (no line breaks or control characters) of reasonable length."""
+    return isinstance(name, str) and 0 < len(name) <= 256 and name.isprintable()
+
+
 def _file_signature(path: Optional[Path]):
     """Identifies the current version of a file (a new one is written with a new inode)."""
     if path is None:
@@ -159,11 +185,13 @@ class SecretsManager:
         self._config = None
 
         state_dir = None
+        known_config_dir = None
         if isinstance(framework_manager, Path):
             self.config_dir = framework_manager
         else:
             self._config = getattr(framework_manager, "config", None)
-            self.config_dir = Path(getattr(self._config, 'config_dir', None) or "config")
+            known_config_dir = getattr(self._config, 'config_dir', None)
+            self.config_dir = Path(known_config_dir or "config")
             try:
                 state_dir = getattr(self._config, "user_state_dir", None)
             except OSError:
@@ -180,7 +208,8 @@ class SecretsManager:
                 state_dir = Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
             self.secrets_file = Path(state_dir) / "secrets.store"
             legacy = self.config_dir / "secrets.store"
-            if not _same_path(legacy, self.secrets_file):
+            # Without a known config folder there is no old location (never a store relative to the working directory).
+            if known_config_dir and not _same_path(legacy, self.secrets_file):
                 self._legacy_file = legacy
         # Lists the old stores already taken over, so a secret deleted later never comes back.
         self._migrated_file = self.secrets_file.with_name("secrets.store.migrated")
@@ -194,7 +223,8 @@ class SecretsManager:
         self._helper: Optional[str] = None
         self._provider: Optional[vault_key.KeyProvider] = None
         self._keys: List[VaultKey] = []  # current first, then previous ones still needed
-        self._key_header: Dict[str, Any] = {}  # what the vault records about the current key (scrypt params)
+        self._key_header: Dict[str, Any] = {}  # what the vault records about the current key (vault id, scrypt)
+        self._created_key = False  # the last load created the key of a new vault
         self._version = 0  # of the file last read; 0 = no file
         self._header: Dict[str, Any] = {}
         self._entries: Dict[str, Dict[str, str]] = {}
@@ -286,16 +316,31 @@ class SecretsManager:
             return
         if mode == "insecure":
             self.logger.warning(f"The vault key is stored unencrypted in {self._key_file} (secret_storage: insecure).")
+        self._preload_keys()
         with self._vault_lock():
             self._load_store(strict=True)
             if self._load_failed:
                 return  # never written; reported by doctor
-            needs_header = mode in ("helper", "passphrase") and self._version == 0
+            needs_header = self._created_key and self._version == 0
             if needs_header or len(self._keys) > 1:
-                # A new vault records its scrypt parameters at once; an interrupted rotation is completed.
+                # A new vault records its key id (and scrypt parameters) at once, so another process starting
+                # now uses the same key; an interrupted rotation is completed.
                 if not self._save_store() and needs_header:
+                    self._provider.forget(self._key_header)
                     raise StorageUnavailable("storage.unavailable",
                                              f"The credential vault {self.secrets_file} cannot be written.")
+
+    def _preload_keys(self) -> None:
+        """Asks for the passphrase (or runs the credential helper) before the vault lock is taken: a prompt
+        left open must never hold up the writes of other processes (a token refresh in the MCP server)."""
+        if not isinstance(self._provider, vault_key.DerivedKeyProvider):
+            return
+        try:
+            _, header, _ = self._read_vault(self.secrets_file)
+        except Exception:
+            return  # a new or unreadable vault: handled under the lock
+        if header.get("protection") == self._mode and "kdf" in header:
+            self._provider.load(header)  # cached for this process; nothing is written
 
     @contextmanager
     def _vault_lock(self):
@@ -329,8 +374,13 @@ class SecretsManager:
         if self._provider is not None and not self._provider.persistent:
             return
         timestamp = datetime.now().isoformat()
-        user = getpass.getuser()
-        entry = f"[{timestamp}] USER={user} ACTION={action} KEY={key_name} STATUS={status}\n"
+        try:
+            user = getpass.getuser()
+        except Exception:  # no USER variable and no passwd entry (a container with an arbitrary uid)
+            user = f"uid-{os.getuid()}" if hasattr(os, "getuid") else "unknown"
+        # One line per event: a name (or USER) with a line break must not forge entries.
+        entry = (f"[{timestamp}] USER={_log_safe(user)} ACTION={action} KEY={_log_safe(key_name)} "
+                 f"STATUS={status}\n")
         try:
             self.audit_log_file.parent.mkdir(parents=True, exist_ok=True)
             # O_BINARY: on Windows a descriptor is text mode otherwise, and lines would end in \r\r\n
@@ -358,8 +408,8 @@ class SecretsManager:
     @_locked
     def set_secret(self, key: str, value: str) -> bool:
         """Encrypts and stores a secret (a provider key name stores a cred/ record)."""
-        if not isinstance(key, str) or not key or not isinstance(value, str):
-            self.logger.error("A secret needs a name and a text value.")
+        if not _valid_name(key) or not isinstance(value, str):
+            self.logger.error("A secret needs a name (printable text, no line breaks) and a text value.")
             return False
         try:
             value.encode("utf-8")
@@ -478,7 +528,11 @@ class SecretsManager:
             self._keys = self._provider.rotate({}).keys
             self._entries = {name: self._encrypt(value) for name, value in plain.items()}
             return True
+        derived = isinstance(self._provider, vault_key.DerivedKeyProvider)
         try:
+            self._preload_keys()
+            # A new passphrase is asked (or the helper run) before the lock is taken.
+            fresh = self._provider.rotate({}) if derived else None
             with self._vault_lock():
                 if not self._reload_for_write():
                     return False
@@ -486,20 +540,26 @@ class SecretsManager:
                 if plain is None:
                     return False
                 old_keys, old_header = self._keys, self._key_header
-                material = self._provider.rotate(self._header)
+                material = fresh or self._provider.rotate(self._header)
                 self._keys, self._key_header = material.keys, material.header
                 self._entries = {name: self._encrypt(value) for name, value in plain.items()}
                 if not self._save_store():
                     self._signature = None
-                    if isinstance(self._provider, vault_key.DerivedKeyProvider):
-                        self._keys, self._key_header = old_keys, old_header  # the file still uses them
-                    # A stored key keeps the old one as 'previous': the next start completes the rotation.
+                    if derived or material.header.get("vault_id") != old_header.get("vault_id"):
+                        # The file still uses the old key; a keyring entry made for the new one is removed.
+                        if not derived:
+                            self._provider.forget(material.header)
+                        self._keys, self._key_header = old_keys, old_header
+                    # Otherwise the keyring keeps the old key as 'previous': the next start completes the rotation.
                     return False
         except LockTimeout as e:
             self.logger.error(str(e))
             return False
         except StorageError as e:
             self.logger.error(f"Key rotation failed [{e.code}]: {e.message}")
+            return False
+        except Exception as e:  # e.g. the keyring refused the write: the vault file is unchanged
+            self.logger.error(f"Key rotation failed ({type(e).__name__}); the vault was not changed.")
             return False
         self._audit_log("ROTATE", "*", "SUCCESS")
         self.logger.info("Vault key rotated; every entry re-encrypted and the old key removed.")
@@ -522,6 +582,16 @@ class SecretsManager:
             return self.rotate_key()
         new_provider = vault_key.make_provider(mode, helper=helper, key_file=self._key_file,
                                                cache_id=os.path.realpath(self.secrets_file))
+        # The new key first, outside the lock: it may ask for a passphrase or run the helper.
+        try:
+            self._preload_keys()
+            material = new_provider.create({}, fresh=True)
+        except StorageError:
+            raise
+        except Exception as e:
+            raise StorageUnavailable("storage.unavailable",
+                                     f"The {mode} storage cannot be used ({type(e).__name__}).") from None
+        moved = False
         try:
             with self._vault_lock():
                 if not self._reload_for_write():
@@ -529,7 +599,6 @@ class SecretsManager:
                 plain = self._decrypt_all()
                 if plain is None:
                     return False
-                material = new_provider.create({}, fresh=True)
                 old = (self._provider, self._mode, self._helper, self._keys, self._key_header)
                 self._provider, self._mode, self._helper = new_provider, mode, helper
                 self._keys, self._key_header = material.keys, material.header
@@ -537,15 +606,21 @@ class SecretsManager:
                 if not self._save_store():
                     self._provider, self._mode, self._helper, self._keys, self._key_header = old
                     self._signature = None
-                    new_provider.forget()
                     return False
+                moved = True
                 try:
-                    old[0].forget()
+                    old[0].forget(old[4])
                 except Exception as e:
                     self.logger.warning(f"The old vault key ({old[1]}) could not be removed: {type(e).__name__}")
         except LockTimeout as e:
             self.logger.error(str(e))
             return False
+        finally:
+            if not moved:
+                try:
+                    new_provider.forget(material.header)
+                except Exception as e:
+                    self.logger.warning(f"The unused {mode} key could not be removed: {type(e).__name__}")
         self._storage_arg, self._helper_arg = mode, helper
         self._remember_storage(mode, helper)
         self._audit_log("STORAGE", mode, "SUCCESS")
@@ -560,10 +635,13 @@ class SecretsManager:
             if helper:
                 config.set("secret_helper", helper)
             save = getattr(config, "save_user_config", None)
-            if callable(save):
-                save()
+            if callable(save) and save() is False:
+                raise OSError("the user config was not written")
         except Exception as e:
-            self.logger.warning(f"Could not save secret_storage={mode} in the user config: {e}")
+            # The vault is already protected the new way: without the setting the next start stops with
+            # storage.mode_mismatch, so say what to set.
+            self.logger.error(f"Could not save secret_storage={mode} in the user config ({e}); set it yourself "
+                              f"(config.yml: secret_storage: {mode}) before the next start.")
 
     # ------------------------------------------------------------------------------------------------------
     # Entries
@@ -647,6 +725,11 @@ class SecretsManager:
         if not self._provider.persistent:
             return bool(change())
         try:
+            self._preload_keys()  # after a rotation elsewhere the passphrase is asked before the lock is taken
+        except StorageError as e:
+            self.logger.error(f"Secrets store not changed [{e.code}]: {e.message}")
+            return False
+        try:
             with self._vault_lock():
                 if not self._reload_for_write():
                     return False
@@ -723,7 +806,7 @@ class SecretsManager:
         self._version, self._header, self._entries = 2, header, entries
         if len(self._keys) > 1 and all_current:
             try:
-                self._provider.drop_previous()
+                self._provider.drop_previous(self._key_header)
                 self._keys = self._keys[:1]
             except Exception as e:
                 self.logger.warning(f"The previous vault key could not be removed yet: {type(e).__name__}")
@@ -743,7 +826,7 @@ class SecretsManager:
                 os.fsync(f.fileno())
             if platform.system() != "Windows":
                 os.chmod(tmp, 0o600)
-            os.replace(tmp, path)
+            vault_key.replace_file(tmp, path)
         except BaseException:
             if tmp:
                 try:
@@ -784,6 +867,10 @@ class SecretsManager:
             header = {k: data[k] for k in ("protection", "kid", "check") if isinstance(data.get(k), str)}
             if isinstance(data.get("kdf"), dict):
                 header["kdf"] = data["kdf"]
+            if "vault_id" in data:
+                if not (isinstance(data["vault_id"], str) and _VAULT_ID.match(data["vault_id"])):
+                    raise ValueError("damaged vault id")
+                header["vault_id"] = data["vault_id"]
             return 2, header, {name: {"kid": e["kid"], "ct": e["ct"]} for name, e in entries.items()}
         for name, token in data.items():
             if not isinstance(token, str):
@@ -801,6 +888,7 @@ class SecretsManager:
         that cannot be obtained (keyring, passphrase, helper) raises instead of counting as a load failure."""
         # Taken before reading: a change made meanwhile is read on the next access.
         self._signature = self._current_signature()
+        self._created_key = False
         try:
             version, header, entries = self._read_vault(self.secrets_file)
         except FileNotFoundError as e:
@@ -833,7 +921,12 @@ class SecretsManager:
         self._load_failed = False
         self._failed_file = None
         self._load_error = None
+        created = self._created_key
         self._take_over_legacy()
+        if self._load_failed and created and not os.path.lexists(self.secrets_file):
+            # No vault records the new key (the old store failed): it is made again once it can be used.
+            self._provider.forget(self._key_header)
+            self._keys, self._key_header, self._created_key = [], {}, False
 
     def _sync_keys(self, version: int, header: Dict[str, Any], entries: Dict[str, Dict[str, str]]) -> None:
         """Makes sure the keys open this store: loads them (again, after a rotation by another process) or
@@ -845,10 +938,20 @@ class SecretsManager:
                 f"The credential vault {self.secrets_file} is protected with '{protection}', but secret_storage "
                 f"is '{self._mode}'. Set secret_storage back to '{protection}' (and change it with the CLI), or "
                 "move the file aside to start a new vault (you will need to sign in again).")
-        keys = self._keys
+        if version == 0:
+            # No file: a new vault gets its own key (written with its header by _open), or the file was moved
+            # aside while this process runs and the next write starts it again with the same key.
+            if not self._keys:
+                with self._vault_lock():
+                    material = self._provider.create(header)
+                self._keys, self._key_header, self._created_key = material.keys, material.header, True
+            return
+        keys, key_header = self._keys, self._key_header
         kids = {key.kid for key in keys}
         stale = (not keys or (header.get("kid") and header["kid"] not in kids)
+                 or header.get("vault_id") != key_header.get("vault_id")
                  or ("check" in header and not vault_key.check_matches(keys, header["check"])))
+        created = False
         if stale:
             material = self._provider.load(header)
             if material is None:
@@ -858,10 +961,10 @@ class SecretsManager:
                         f"The key of the credential vault {self.secrets_file} is missing from the {self._mode} "
                         "storage, so the vault cannot be read; it was not changed. Restore the key, or move the "
                         "file aside and sign in again.")
-                with self._vault_lock():  # the first key of a new vault: one process creates it
-                    material = self._provider.load(header) or self._provider.create(header)
-            keys = material.keys
-            self._key_header = material.header
+                with self._vault_lock():  # an empty vault whose key is gone gets a new one
+                    material = self._provider.create(header)
+                created = True
+            keys, key_header = material.keys, material.header
         if entries and "check" in header and not vault_key.check_matches(keys, header["check"]):
             raise StorageError(
                 "storage.vault_unreadable",
@@ -872,7 +975,8 @@ class SecretsManager:
                 "storage.vault_unreadable",
                 f"The secrets store {self.secrets_file} cannot be decrypted with the key in the keyring; it was "
                 "not changed. Restore the key, or move the file aside and set the secrets again.")
-        self._keys = keys
+        self._keys, self._key_header = keys, key_header
+        self._created_key = self._created_key or created
 
     @staticmethod
     def _any_decrypts(keys: List[VaultKey], entries: Dict[str, Dict[str, str]]) -> bool:
@@ -884,6 +988,27 @@ class SecretsManager:
             except (InvalidToken, ValueError, UnicodeError):
                 continue
         return False
+
+    def _reencrypt(self, header: Dict[str, Any], entries: Dict[str, Dict[str, str]]
+                   ) -> Tuple[Dict[str, Dict[str, str]], List[str]]:
+        """Entries of another store (described by `header`) encrypted with this vault's key, and the names
+        of those that cannot be decrypted."""
+        if not entries:
+            return {}, []
+        try:
+            material = self._provider.load(header)
+        except StorageError:
+            material = None
+        fernet = MultiFernet([key.fernet() for key in (material.keys if material else []) + self._keys])
+        added, unreadable = {}, []
+        for name, entry in entries.items():
+            try:
+                plain = fernet.decrypt(entry["ct"].encode("ascii")).decode("utf-8")
+            except (InvalidToken, ValueError, UnicodeError):
+                unreadable.append(name)
+                continue
+            added[name] = self._encrypt(plain)
+        return added, unreadable
 
     def _migrated_stores(self) -> Optional[Dict[str, list]]:
         """The old stores already taken over, by path and by content. None when the record cannot be read:
@@ -928,7 +1053,7 @@ class SecretsManager:
             return
         try:
             raw = legacy.read_bytes()
-            _, _, data = self._vault_data(self._parse_store(raw))
+            _, legacy_header, data = self._vault_data(self._parse_store(raw))
         except FileNotFoundError:
             return
         except Exception as e:
@@ -939,7 +1064,19 @@ class SecretsManager:
         # The same file under another path (installation folder moved, other mount point) was taken over already.
         seen = digest in done["sha256"]
         present = {canonical_name(name) for name in self._entries}
-        added = {} if seen else {k: v for k, v in data.items() if canonical_name(k) not in present}
+        candidates = {} if seen else {k: v for k, v in data.items() if canonical_name(k) not in present}
+        # Re-encrypted with this vault's key: the old store's key (the shared keyring entry of earlier
+        # versions) is not this vault's.
+        added, unreadable = self._reencrypt(legacy_header, candidates)
+        if unreadable and not added:
+            # Restoring its key would make them readable: refuse changes until then, or until it is moved aside.
+            self._fail(legacy, StorageError("storage.vault_unreadable",
+                                            f"{len(unreadable)} entries cannot be decrypted with the key in the "
+                                            "keyring."))
+            return
+        if unreadable:
+            self.logger.warning(f"Not taken over from {legacy} (cannot be decrypted): "
+                                f"{', '.join(_log_safe(n) for n in sorted(unreadable))}")
         if added:
             self._entries.update(added)
             self._move_legacy_names()

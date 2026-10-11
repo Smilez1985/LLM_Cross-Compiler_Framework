@@ -136,7 +136,7 @@ class FrameworkContext:
             
         except Exception as e:
             self.init_error = e
-            Console(stderr=True).print(f"[red]Failed to initialize framework: {e}[/red]")
+            Console(stderr=True).print(f"[red]Failed to initialize framework: {escape(str(e))}[/red]")
 
     def require_framework(self) -> "FrameworkContext":
         """Boots the framework on first use; commands that do not need it work without a keyring or Docker."""

@@ -95,6 +95,12 @@ def store_json(sm) -> dict:
     return json.loads(sm.secrets_file.read_text(encoding="utf-8"))
 
 
+def key_slot(sm, previous=False) -> tuple:
+    """(service, user) of the vault's key in the keyring: each vault has its own service."""
+    service = vault_key.vault_service(store_json(sm).get("vault_id"))
+    return service, vault_key.KEY_ENTRY + (vault_key.PREVIOUS_SUFFIX if previous else "")
+
+
 def all_bytes(folder: Path) -> bytes:
     return b"".join(p.read_bytes() for p in sorted(folder.rglob("*")) if p.is_file())
 
@@ -113,8 +119,9 @@ class TestKeyring:
         sm = vault(tmp_path)
         assert sm.set_secret("hf_token", HF)
 
-        value = memory_keyring.store[(SERVICE, vault_key.KEY_ENTRY)]
+        value = memory_keyring.store[key_slot(sm)]
         assert value.startswith("v2:") and len(value) < 100
+        assert (SERVICE, vault_key.KEY_ENTRY) not in memory_keyring.store, "a new vault has its own entry"
         data = store_json(sm)
         assert data["version"] == 2 and data["protection"] == "keyring"
         kid = value.split(":")[1]
@@ -247,7 +254,8 @@ class TestKeyring:
         assert fresh.get_secret("hf_token") is None
         assert fresh.set_secret("openai_api_key", KEY) is False
         assert fresh.secrets_file.read_bytes() == before
-        assert (SERVICE, vault_key.KEY_ENTRY) not in memory_keyring.store, "no new key for a vault with entries"
+        assert not any(user == vault_key.KEY_ENTRY for _, user in memory_keyring.store), \
+            "no new key for a vault with entries"
         finding = check_secrets(SimpleNamespace(secrets_manager=fresh))[0]
         assert finding.severity == Severity.ERROR and "missing" in finding.message
 
@@ -270,14 +278,15 @@ class TestRotation:
     def test_rotation_replaces_the_key_and_leaves_no_old_one(self, memory_keyring, tmp_path):
         sm = vault(tmp_path)
         assert sm.set_secret("hf_token", HF) and sm.set_secret("openai_api_key", KEY)
-        old_value = memory_keyring.store[(SERVICE, vault_key.KEY_ENTRY)]
+        old_value = memory_keyring.store[key_slot(sm)]
         old_key = vault_key.parse_key(old_value)
 
         assert sm.rotate_key()
 
-        new_value = memory_keyring.store[(SERVICE, vault_key.KEY_ENTRY)]
+        new_value = memory_keyring.store[key_slot(sm)]
         assert new_value != old_value
-        assert (SERVICE, vault_key.KEY_ENTRY + vault_key.PREVIOUS_SUFFIX) not in memory_keyring.store
+        assert key_slot(sm, previous=True) not in memory_keyring.store
+        assert old_value not in memory_keyring.store.values()
         data = store_json(sm)
         new_kid = vault_key.parse_key(new_value).kid
         assert data["kid"] == new_kid and {e["kid"] for e in data["entries"].values()} == {new_kid}
@@ -298,7 +307,7 @@ class TestRotation:
         with monkeypatch.context() as m:
             m.setattr(SecretsManager, "_write_atomic", staticmethod(crash))
             assert sm.rotate_key() is False
-        previous = (SERVICE, vault_key.KEY_ENTRY + vault_key.PREVIOUS_SUFFIX)
+        previous = key_slot(sm, previous=True)
         assert previous in memory_keyring.store, "the old key is kept until every entry is re-encrypted"
         assert sm.get_secret("hf_token") == HF
 
@@ -306,7 +315,7 @@ class TestRotation:
 
         assert fresh.get_secret("hf_token") == HF
         assert previous not in memory_keyring.store
-        current = vault_key.parse_key(memory_keyring.store[(SERVICE, vault_key.KEY_ENTRY)])
+        current = vault_key.parse_key(memory_keyring.store[key_slot(fresh)])
         assert {e["kid"] for e in store_json(fresh)["entries"].values()} == {current.kid}
 
     def test_a_long_running_process_follows_a_rotation_by_another_one(self, memory_keyring, tmp_path):
@@ -614,10 +623,11 @@ class TestStorageChoices:
                                  save_user_config=lambda: saved.__setitem__("saved", True))
         sm = SecretsManager(SimpleNamespace(config=config))
         assert sm.initialize() and sm.set_secret("hf_token", HF)
+        slot = key_slot(sm)
 
         assert sm.change_storage("insecure")
 
-        assert (SERVICE, vault_key.KEY_ENTRY) not in memory_keyring.store
+        assert slot not in memory_keyring.store
         assert saved == {"secret_storage": "insecure", "saved": True}
         assert store_json(sm)["protection"] == "insecure"
         assert vault(tmp_path, storage="insecure").get_secret("hf_token") == HF
@@ -707,3 +717,280 @@ class TestRecordsAndMigration:
         assert log.count("ACTION=READ KEY=hf_token") == 1
         assert log.count("ACTION=WRITE KEY=hf_token") == 1
         assert HF not in log
+
+
+# ======================================================================================================
+# Review findings (adversarial pass)
+# ======================================================================================================
+
+def lock_is_free(sm) -> bool:
+    """True when another process could take the vault lock right now."""
+    from orchestrator.utils.file_lock import LockTimeout
+    try:
+        with file_lock(sm.secrets_file.with_name("secrets.store.lock"), timeout=0.2):
+            return True
+    except LockTimeout:
+        return False
+
+
+class TestReviewFindings:
+
+    @pytest.mark.parametrize("action", ["rotate", "change_storage"])
+    def test_rotating_one_vault_never_removes_the_key_of_another(self, memory_keyring, tmp_path, action):
+        """Two LLM_FRAMEWORK_HOME folders of one user: rotating (or moving) one used to delete the keyring
+        entry both shared, so the other vault could never be read again."""
+        profile_a, profile_b = vault(tmp_path / "a"), vault(tmp_path / "b")
+        assert profile_a.set_secret("hf_token", "token-of-a") and profile_b.set_secret("hf_token", "token-of-b")
+        assert key_slot(profile_a) != key_slot(profile_b)
+
+        assert profile_a.rotate_key() if action == "rotate" else profile_a.change_storage("insecure")
+
+        other = vault(tmp_path / "b")
+        assert not other._load_failed, other.load_error
+        assert other.get_secret("hf_token") == "token-of-b"
+
+    def test_a_store_of_an_earlier_version_moves_off_the_shared_entry_at_rotation(self, memory_keyring, tmp_path):
+        legacy_key = Fernet.generate_key()
+        memory_keyring.store[(SERVICE, vault_key.KEY_ENTRY)] = legacy_key.decode()
+        for folder in ("state", "other-home"):  # e.g. two LLM_FRAMEWORK_HOME folders of version 3.0
+            (tmp_path / folder).mkdir()
+            (tmp_path / folder / "secrets.store").write_text(json.dumps(
+                {"hf_token": Fernet(legacy_key).encrypt(f"{folder}-token".encode()).decode()}))
+
+        sm = vault(tmp_path)
+        assert sm.get_secret("hf_token") == "state-token"
+        assert sm.rotate_key()
+
+        assert "vault_id" in store_json(sm) and key_slot(sm)[0] != SERVICE
+        assert memory_keyring.store[(SERVICE, vault_key.KEY_ENTRY)] == legacy_key.decode(), \
+            "the shared key stays for the other stores"
+        assert vault(tmp_path).get_secret("hf_token") == "state-token"
+        other = SecretsManager(tmp_path / "other-home")
+        assert other.initialize() and other.get_secret("hf_token") == "other-home-token"
+
+    def test_a_passphrase_prompt_never_holds_the_vault_lock(self, memory_keyring, tmp_path):
+        """A passphrase prompt left open (or a slow helper) must not make the writes of the GUI or the MCP
+        server time out: a lost write of a rotated refresh token signs the user out."""
+        passphrase = "a long enough passphrase"
+        vault_key.set_passphrase_prompt(lambda new: passphrase)
+        assert vault(tmp_path, storage="passphrase").set_secret("hf_token", HF)
+        vault_key.clear_derived_keys()
+
+        free_while_asked = []
+
+        def prompt(new):
+            free_while_asked.append((new, lock_is_free(sm)))
+            return passphrase
+
+        vault_key.set_passphrase_prompt(prompt)
+        sm = SecretsManager(tmp_path / "state", storage="passphrase")
+        assert sm.initialize()  # opening an existing vault
+        assert sm.rotate_key()  # the new passphrase of a rotation
+        vault_key.clear_derived_keys()  # as in another process after this rotation
+        other = vault(tmp_path, storage="passphrase")
+        assert sm.rotate_key()
+        assert other.set_secret("github_token", "gh-placeholder-token")  # a write after a rotation elsewhere
+
+        assert len(free_while_asked) >= 4
+        assert all(free for _, free in free_while_asked), free_while_asked
+        assert vault(tmp_path, storage="passphrase").get_secret("github_token") == "gh-placeholder-token"
+
+    def test_secrets_work_without_a_user_name(self, memory_keyring, tmp_path, monkeypatch):
+        """A container with an arbitrary uid has no USER variable and no passwd entry: getpass.getuser()
+        raises, and that broke every read and write (the audit log was written outside its try)."""
+        import getpass
+
+        def no_user():
+            raise OSError("No username set in the environment")
+
+        monkeypatch.setattr(getpass, "getuser", no_user)
+        sm = vault(tmp_path)
+        assert sm.set_secret("hf_token", HF) and sm.get_secret("hf_token") == HF
+        assert "ACTION=WRITE KEY=hf_token" in sm.audit_log_file.read_text()
+
+    def test_names_and_user_names_never_forge_audit_lines(self, memory_keyring, tmp_path, monkeypatch):
+        forged = "hf_token\n[2026-01-01T00:00:00] USER=root ACTION=DELETE KEY=github_token STATUS=SUCCESS"
+        monkeypatch.setenv("USER", "alice\nUSER=root")
+        monkeypatch.setenv("LOGNAME", "alice\nUSER=root")
+        sm = vault(tmp_path)
+        assert sm.set_secret(forged, "x") is False, "a name with a line break is refused"
+        assert sm.set_secret("hf_token", HF)
+
+        lines = sm.audit_log_file.read_text().splitlines()
+        assert len(lines) == 1 and "USER=alice\\nUSER=root" in lines[0]
+        assert not any(line.startswith("USER=") or "ACTION=DELETE" in line for line in lines)
+
+    @pytest.mark.parametrize("url", ["http://evil.example\\@127.0.0.1:1234/v1", "http://user:" + "pw-123" + "@127.0.0.1:1234",
+                                     "http://127.0.0.1:1234 /v1", "http://127.0.0.1:1234\n/v1", "http://[::1"])
+    def test_origins_that_parsers_disagree_on_are_refused(self, url):
+        """urllib reads http://evil\\@127.0.0.1 as 127.0.0.1; a client may send it to evil. The key of the
+        local engine must never be looked up for it. The error never repeats the URL (it may hold a password)."""
+        with pytest.raises(ValueError) as error:
+            origin_hash(url)
+        assert "pw-123" not in str(error.value) and "evil" not in str(error.value)
+
+    def test_the_same_origin_written_differently_has_one_hash(self):
+        assert origin_hash("http://bücher.example") == origin_hash("http://xn--bcher-kva.example:80")
+        assert origin_hash("https://Example.COM./v1") == origin_hash("https://example.com:443")
+
+    def test_a_keyring_error_during_rotation_returns_false_and_keeps_the_vault(self, use_backend, tmp_path):
+        failing = {"on": False}
+
+        def set_password(self, service, username, password):
+            if failing["on"] and username == vault_key.KEY_ENTRY:
+                raise RuntimeError("the keyring refused the write")
+            self.store[(service, username)] = password
+
+        use_backend(backend_class(set_=set_password)())
+        sm = vault(tmp_path)
+        assert sm.set_secret("hf_token", HF)
+        before = sm.secrets_file.read_bytes()
+        failing["on"] = True
+
+        assert sm.rotate_key() is False
+
+        failing["on"] = False
+        assert sm.secrets_file.read_bytes() == before
+        assert vault(tmp_path).get_secret("hf_token") == HF
+
+    def test_replacing_the_vault_is_retried_while_windows_holds_it_open(self, memory_keyring, tmp_path,
+                                                                          monkeypatch):
+        """On Windows os.replace fails while a reader (another process, a virus scanner) has the file open."""
+        sm = vault(tmp_path)
+        assert sm.set_secret("hf_token", HF)
+        real_replace, busy = os.replace, {"left": 2}
+
+        def sharing_violation(src, dst):
+            if busy["left"]:
+                busy["left"] -= 1
+                raise PermissionError(13, "The process cannot access the file")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(vault_key, "REPLACE_RETRIES", 3)
+        monkeypatch.setattr(os, "replace", sharing_violation)
+        assert sm.set_secret("github_token", "gh-placeholder-token")
+        busy["left"] = 10
+        before = sm.secrets_file.read_bytes()
+        assert sm.set_secret("github_token", "another-placeholder") is False
+        assert sm.secrets_file.read_bytes() == before
+        assert list(sm.secrets_file.parent.glob(".*.tmp")) == []
+
+    def test_a_hung_keyring_backend_lookup_times_out(self, tmp_path, monkeypatch):
+        """Choosing the backend asks D-Bus (Secret Service) on Linux, which can hang outside the probe."""
+        import keyring
+        release = threading.Event()
+        monkeypatch.setattr(keyring, "get_keyring", lambda: release.wait(30))
+        try:
+            start = time.monotonic()
+            sm = SecretsManager(tmp_path / "state")
+            assert sm.initialize() is False
+            assert time.monotonic() - start <= vault_key.PROBE_TIMEOUT + 1.0
+            assert sm.storage_error.code == "storage.keyring_unavailable"
+            start = time.monotonic()
+            assert vault_key.keyring_usable() is False and time.monotonic() - start < 1.0, "cached"
+        finally:
+            release.set()
+
+    def test_the_audit_key_stays_on_the_local_machine(self, use_backend):
+        """The keyring probe sets persist on the backend that _audit_key then writes with."""
+        from orchestrator.tools import framework_tools
+        seen = []
+
+        def record_set(self, service, username, password):
+            seen.append((username, getattr(self, "persist", None)))
+            self.store[(service, username)] = password
+
+        cls = backend_class(set_=record_set, name="WinVaultKeyring", module="keyring.backends.Windows")
+        cls.persist = "enterprise"
+        use_backend(cls())
+        assert framework_tools._audit_key(SimpleNamespace(secrets_manager=None))
+        assert (framework_tools.AUDIT_KEY_ID, "local machine") in seen, seen
+
+    def test_a_decomposed_passphrase_opens_the_vault(self, memory_keyring, tmp_path):
+        import unicodedata
+        typed = "Grüße aus Köln, Passphrase"
+        vault_key.set_passphrase_prompt(lambda new: unicodedata.normalize("NFC", typed))
+        assert vault(tmp_path, storage="passphrase").set_secret("hf_token", HF)
+        vault_key.clear_derived_keys()
+        vault_key.set_passphrase_prompt(lambda new: unicodedata.normalize("NFD", typed))
+        assert vault(tmp_path, storage="passphrase").get_secret("hf_token") == HF
+
+    def test_old_stores_are_re_encrypted_with_the_vault_key(self, memory_keyring, tmp_path):
+        legacy_key = Fernet.generate_key()
+        memory_keyring.store[(SERVICE, vault_key.KEY_ENTRY)] = legacy_key.decode()
+        old = tmp_path / "configs" / "secrets.store"
+        old.parent.mkdir()
+        old.write_text(json.dumps({"openai_api_key": Fernet(legacy_key).encrypt(KEY.encode()).decode()}))
+        config = SimpleNamespace(user_state_dir=tmp_path / "state", config_dir=tmp_path / "configs")
+
+        sm = SecretsManager(SimpleNamespace(config=config))
+        assert sm.initialize()
+
+        data = store_json(sm)
+        assert set(data["entries"]) == {"cred/openai/api_key"}
+        assert {e["kid"] for e in data["entries"].values()} == {data["kid"]} != {"v1"}
+        assert sm.rotate_key() and SecretsManager(SimpleNamespace(config=config)).get_secret("openai_api_key") == KEY
+
+    def test_an_old_store_that_cannot_be_decrypted_is_reported_not_merged(self, memory_keyring, tmp_path):
+        old = tmp_path / "configs" / "secrets.store"
+        old.parent.mkdir()
+        old.write_text(json.dumps({"hf_token": Fernet(Fernet.generate_key()).encrypt(HF.encode()).decode()}))
+        config = SimpleNamespace(user_state_dir=tmp_path / "state", config_dir=tmp_path / "configs")
+
+        sm = SecretsManager(SimpleNamespace(config=config))
+        assert sm.initialize()
+
+        assert sm.failed_file == old and "cannot be decrypted" in sm.load_error
+        assert sm.set_secret("github_token", "gh-placeholder-token") is False
+        assert not memory_keyring.store and not sm.secrets_file.exists(), "no key left behind for an unwritten vault"
+        finding = check_secrets(SimpleNamespace(secrets_manager=sm))[0]
+        assert finding.severity == Severity.ERROR and str(old) in finding.message
+
+    def test_no_old_store_relative_to_the_working_directory(self, memory_keyring, tmp_path):
+        """Without a known config folder there is no old location; config/secrets.store in the working
+        directory (a foreign checkout) is never merged into the vault."""
+        legacy_key = Fernet.generate_key()
+        memory_keyring.store[(SERVICE, vault_key.KEY_ENTRY)] = legacy_key.decode()
+        stray = tmp_path / "config" / "secrets.store"  # the tests run in tmp_path
+        stray.parent.mkdir()
+        stray.write_text(json.dumps({"openai_api_key": Fernet(legacy_key).encrypt(KEY.encode()).decode()}))
+
+        sm = SecretsManager(SimpleNamespace(config=SimpleNamespace(user_state_dir=tmp_path / "state")))
+        assert sm.initialize()
+        assert sm.get_secret("openai_api_key") is None and sm.list_secrets() == []
+
+    def test_a_storage_change_that_cannot_be_saved_says_what_to_set(self, memory_keyring, tmp_path, caplog):
+        config = SimpleNamespace(user_state_dir=tmp_path / "state", config_dir=tmp_path / "configs",
+                                 set=lambda k, v: True, save_user_config=lambda: False)
+        sm = SecretsManager(SimpleNamespace(config=config))
+        assert sm.initialize() and sm.set_secret("hf_token", HF)
+        assert sm.change_storage("insecure")
+        assert "secret_storage: insecure" in caplog.text
+
+    def test_the_gui_shows_why_the_start_failed(self, qapp, monkeypatch):
+        from orchestrator.gui import main_window
+        shown = []
+
+        class FailingFramework:
+            init_error = vault_key.keyring_unavailable("it did not answer within 3 s")
+
+            def initialize(self):
+                return False
+
+        monkeypatch.setattr(main_window, "FrameworkManager", FailingFramework)
+        monkeypatch.setattr(main_window.QMessageBox, "critical", lambda parent, title, text: shown.append(text))
+        with pytest.raises(SystemExit):
+            main_window.MainOrchestrator(REPO_ROOT)
+        assert shown and "secret_storage" in shown[0] and "passphrase" in shown[0]
+
+    def test_the_cli_prints_paths_in_the_storage_error_literally(self, tmp_path):
+        repo = tmp_path / "[bold]project"
+        (repo / ".git").mkdir(parents=True)
+        env = {k: v for k, v in os.environ.items() if not k.startswith(("LLM_", "FRAMEWORK_"))}
+        env.update(PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
+                   LLM_FRAMEWORK_HOME=str(repo / "state"), LLM_FRAMEWORK_CONFIG_DIR=str(tmp_path / "cfg"))
+        result = subprocess.run([sys.executable, "-m", "orchestrator.cli", "-q", "secrets", "list"], cwd=tmp_path,
+                                env=env, capture_output=True, text=True, timeout=120)
+        assert result.returncode == 1 and "Traceback" not in result.stderr
+        shown = result.stderr.replace("\n", "").split("Failed to initialize framework:", 1)[1]
+        assert "[bold]project" in shown, "rich markup ate part of the path"

@@ -82,7 +82,10 @@ class MainOrchestrator(QMainWindow):
         # Init Framework
         self.framework = FrameworkManager()
         if not self.framework.initialize():
-            QMessageBox.critical(self, "Fatal Error", "Framework initialization failed. Check logs.")
+            # The cause (e.g. no usable keyring, with the storage choices), not only "failed".
+            cause = getattr(self.framework, "init_error", None)
+            QMessageBox.critical(self, "Fatal Error", f"Framework initialization failed: {cause}" if cause
+                                 else "Framework initialization failed. Check logs.")
             sys.exit(1)
             
         self.setWindowTitle(f"LLM Cross-Compiler Framework v{self.framework.info.version} (Enterprise)")

@@ -4,7 +4,7 @@
 Every secret sits encrypted in the vault file (`secrets.store` in the per-user folder); only the vault key
 needs protection. The user picks how (setting `secret_storage`), and nothing falls back on its own:
 
-  keyring     the OS keyring holds the key (default; about 50 bytes, fits every backend)
+  keyring     the OS keyring holds the key (default; about 50 bytes, fits every backend), one entry per vault
   helper      the output of a credential helper command (setting `secret_helper`, e.g.
               `pass show llmcc/vault-key`), run without a shell and stretched with scrypt
   passphrase  a passphrase asked once per process (terminal or GUI dialog), stretched with scrypt; never
@@ -25,6 +25,8 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
+import unicodedata
 import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,6 +50,8 @@ PREVIOUS_SUFFIX = ".prev"
 PROBE_SERVICE = KEYRING_SERVICE + "-probe"
 PROBE_TIMEOUT = 3.0
 HELPER_TIMEOUT = 30.0
+# Windows: a reader or a virus scanner holding the target open makes os.replace fail for a moment.
+REPLACE_RETRIES = 10 if os.name == "nt" else 0
 
 STORAGE_MODES = ("keyring", "helper", "passphrase", "insecure", "ephemeral")
 STORAGE_CHOICES = {
@@ -147,6 +151,18 @@ def check_matches(keys: List[VaultKey], token: str) -> bool:
     return False
 
 
+def replace_file(src, dst) -> None:
+    """os.replace, tried again for a moment on Windows while another process has the target open."""
+    for attempt in range(REPLACE_RETRIES + 1):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt >= REPLACE_RETRIES:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+
+
 def write_private(path: Path, text: str) -> None:
     """Atomic write with mode 0600 (temp file in the same folder, then rename)."""
     path = Path(os.path.realpath(path))
@@ -159,7 +175,7 @@ def write_private(path: Path, text: str) -> None:
             os.fsync(f.fileno())
         if platform.system() != "Windows":
             os.chmod(tmp, 0o600)
-        os.replace(tmp, path)
+        replace_file(tmp, path)
     except BaseException:
         try:
             os.unlink(tmp)
@@ -175,6 +191,7 @@ def write_private(path: Path, text: str) -> None:
 _MISSING = object()
 _probe_results: "weakref.WeakKeyDictionary[Any, Optional[str]]" = weakref.WeakKeyDictionary()
 _probe_lock = threading.Lock()
+_backend_problem: Optional[str] = None  # finding the backend itself did not answer (cached like a probe)
 
 
 def _call_with_timeout(fn: Callable[[], Any], timeout: float, name: str) -> Any:
@@ -233,9 +250,16 @@ def _probe(backend: Any) -> Optional[str]:
 def keyring_problem() -> Optional[str]:
     """None when the OS keyring stores, returns and deletes a value within PROBE_TIMEOUT, else why not.
     Probed once per process (and keyring backend)."""
+    global _backend_problem
+    if _backend_problem is not None:
+        return _backend_problem
     try:
         import keyring
-        backend = keyring.get_keyring()
+        # Choosing the backend asks D-Bus on Linux (Secret Service), which can hang like the keyring itself.
+        backend = _call_with_timeout(keyring.get_keyring, PROBE_TIMEOUT, "keyring-backend")
+    except TimeoutError:
+        _backend_problem = f"it did not answer within {PROBE_TIMEOUT:g} s"
+        return _backend_problem
     except Exception as e:
         return f"no keyring backend ({type(e).__name__})"
     with _probe_lock:
@@ -260,34 +284,48 @@ def keyring_usable() -> bool:
 
 def reset_probe() -> None:
     """Probe again on the next use (e.g. after the user unlocked the keyring)."""
+    global _backend_problem
     with _probe_lock:
         _probe_results.clear()
+        _backend_problem = None
+
+
+def new_vault_id() -> str:
+    return secrets.token_hex(8)
+
+
+def vault_service(vault_id: Optional[str]) -> str:
+    """The keyring service holding a vault's key. Each vault has its own (a rotation or a change of storage
+    must never remove the key of another vault, e.g. of another LLM_FRAMEWORK_HOME folder); stores of
+    earlier versions (no vault id) share the plain service."""
+    return f"{KEYRING_SERVICE}/vault-{vault_id}" if vault_id else KEYRING_SERVICE
 
 
 class KeyringHolder:
     """The vault key (and, during a rotation, the previous one) as entries of the OS keyring."""
 
-    def __init__(self):
+    def __init__(self, service: str = KEYRING_SERVICE):
         problem = keyring_problem()
         if problem:
             raise keyring_unavailable(problem)
         import keyring
         self._backend = keyring.get_keyring()
+        self.service = service
 
     @staticmethod
     def _entry(previous: bool) -> str:
         return KEY_ENTRY + (PREVIOUS_SUFFIX if previous else "")
 
     def get(self, previous: bool = False) -> Optional[str]:
-        return self._backend.get_password(KEYRING_SERVICE, self._entry(previous))
+        return self._backend.get_password(self.service, self._entry(previous))
 
     def set(self, value: str, previous: bool = False) -> None:
         prefer_local_machine(self._backend)
-        self._backend.set_password(KEYRING_SERVICE, self._entry(previous), value)
+        self._backend.set_password(self.service, self._entry(previous), value)
 
     def delete(self, previous: bool = False) -> None:
         try:
-            self._backend.delete_password(KEYRING_SERVICE, self._entry(previous))
+            self._backend.delete_password(self.service, self._entry(previous))
         except Exception:  # not there (keyring raises PasswordDeleteError)
             pass
 
@@ -356,30 +394,48 @@ class KeyProvider:
         """A new current key; the old one stays readable until drop_previous()."""
         raise NotImplementedError
 
-    def drop_previous(self) -> None:
-        pass
+    def drop_previous(self, header: Dict[str, Any]) -> None:
+        """Removes the previous key once every entry of the vault (described by `header`) uses the current one."""
 
-    def forget(self) -> None:
-        """Removes what this mode stored (after the vault moved to another mode)."""
+    def forget(self, header: Dict[str, Any]) -> None:
+        """Removes what this mode stored for the vault (after it moved to another mode)."""
 
 
 class StoredKeyProvider(KeyProvider):
     """keyring and insecure: a random key kept by a holder; a rotation keeps the old key as 'previous'
-    until every entry is re-encrypted, so a crash in between loses nothing."""
+    until every entry is re-encrypted, so a crash in between loses nothing.
 
-    def __init__(self, mode: str, holder):
+    `holder_for(vault_id)` returns where a vault's key is kept. With `vault_ids` (keyring) every new vault
+    gets its own id, recorded in the vault header; a vault without one (made by an earlier version) uses
+    the shared entry, moves to its own at the first rotation, and leaves the shared entry for the other
+    stores that may still need it (the old configs/secrets.store, other LLM_FRAMEWORK_HOME folders)."""
+
+    def __init__(self, mode: str, holder_for: Callable[[Optional[str]], Any], vault_ids: bool = False):
         self.mode = mode
-        self.holder = holder
+        self._holder_for = holder_for
+        self._vault_ids = vault_ids
+
+    def _id(self, header: Dict[str, Any]) -> Optional[str]:
+        vault_id = header.get("vault_id") if self._vault_ids else None
+        return vault_id if isinstance(vault_id, str) and vault_id else None
+
+    def _holder(self, header: Dict[str, Any]):
+        return self._holder_for(self._id(header))
+
+    def _id_header(self, header: Dict[str, Any]) -> Dict[str, Any]:
+        vault_id = self._id(header)
+        return {"vault_id": vault_id} if vault_id else {}
 
     def load(self, header):
-        current = self.holder.get()
+        holder = self._holder(header)
+        current = holder.get()
         if not current:
             return None
         keys = [self._parse(current)]
-        previous = self.holder.get(previous=True)
+        previous = holder.get(previous=True)
         if previous:
             keys.append(self._parse(previous))
-        return KeyMaterial(keys)
+        return KeyMaterial(keys, self._id_header(header))
 
     def _parse(self, value: str) -> VaultKey:
         try:
@@ -388,39 +444,52 @@ class StoredKeyProvider(KeyProvider):
             raise StorageError("storage.vault_unreadable",
                                f"The vault key kept by the {self.mode} storage is damaged.") from None
 
-    def _store(self, key: VaultKey) -> None:
+    def _store(self, holder, key: VaultKey) -> None:
         value = format_key(key)
-        self.holder.set(value)
-        if self.holder.get() != value:
+        holder.set(value)
+        if holder.get() != value:
             raise StorageUnavailable("storage.keyring_unavailable",
                                      f"The {self.mode} storage does not keep the vault key.")
 
     def create(self, header, fresh=False):
-        if not fresh:
+        if self._vault_ids:
+            header = {"vault_id": new_vault_id()}  # a new vault never takes over another vault's key
+        elif not fresh:
             existing = self.load(header)
             if existing:
                 return existing
+        holder = self._holder(header)
         key = new_key()
-        self._store(key)
+        self._store(holder, key)
         if fresh:
-            self.holder.delete(previous=True)
-        return KeyMaterial([key])
+            holder.delete(previous=True)
+        return KeyMaterial([key], self._id_header(header))
 
     def rotate(self, header):
-        current = self.holder.get()
+        old_holder = self._holder(header)
+        current = old_holder.get()
         old = [self._parse(current)] if current else []
-        if current:
-            self.holder.set(current, previous=True)
+        if self._vault_ids and not self._id(header):
+            # Off the shared entry: the old key stays there for the other stores (and for a crash meanwhile).
+            header = {"vault_id": new_vault_id()}
+            holder = self._holder(header)
+        else:
+            holder = old_holder
+            if current:
+                holder.set(current, previous=True)
         key = new_key()
-        self._store(key)
-        return KeyMaterial([key, *old])
+        self._store(holder, key)
+        return KeyMaterial([key, *old], self._id_header(header))
 
-    def drop_previous(self):
-        self.holder.delete(previous=True)
+    def drop_previous(self, header):
+        self._holder(header).delete(previous=True)
 
-    def forget(self):
-        self.holder.delete(previous=True)
-        self.holder.delete()
+    def forget(self, header):
+        if self._vault_ids and not self._id(header):
+            return  # the shared entry of earlier versions may still protect other stores
+        holder = self._holder(header)
+        holder.delete(previous=True)
+        holder.delete()
 
 
 _derived_cache: Dict[tuple, bytes] = {}
@@ -553,6 +622,9 @@ def _terminal_prompt(new: bool) -> Optional[str]:
 def ask_passphrase(new: bool) -> str:
     prompt = _passphrase_prompt or _terminal_prompt
     passphrase = prompt(new)
+    if passphrase:
+        # The same characters typed in another terminal, keyboard layout or the GUI may arrive decomposed.
+        passphrase = unicodedata.normalize("NFC", passphrase)
     if not passphrase:
         raise StorageUnavailable(
             "storage.passphrase_needed",
@@ -610,9 +682,10 @@ def run_helper(command: str) -> str:
 def make_provider(mode: str, *, helper: Optional[str], key_file: Path, cache_id: str) -> KeyProvider:
     """The provider of `mode`. Raises StorageUnavailable when it cannot be used (e.g. no keyring)."""
     if mode == "keyring":
-        return StoredKeyProvider("keyring", KeyringHolder())
+        KeyringHolder()  # probes the keyring: raises when it cannot be used
+        return StoredKeyProvider("keyring", lambda vault_id: KeyringHolder(vault_service(vault_id)), vault_ids=True)
     if mode == "insecure":
-        return StoredKeyProvider("insecure", KeyFileHolder(key_file))
+        return StoredKeyProvider("insecure", lambda vault_id: KeyFileHolder(key_file))
     if mode == "passphrase":
         return DerivedKeyProvider("passphrase", ask_passphrase, cache_id)
     if mode == "helper":
