@@ -89,26 +89,36 @@ class DittoError(RuntimeError):
 # --- error messages ---------------------------------------------------------------------------------------------
 
 SETTINGS_HINT = "the AI settings (GUI: Tools > Configure AI Agent; CLI: llm-cli secrets set <key name>)"
-CONSOLE_WORKSPACE_HINT = (
-    "An Anthropic API key must belong to a workspace in the Claude Console (console.anthropic.com, Settings > "
-    "Workspaces); a key that is linked only to the organization is rejected. Create the key inside a workspace "
-    "and store it again.")
+WORKSPACE_SETTING_HINT = ("the AI settings (GUI: Tools > Configure AI Agent > Workspace ID; otherwise the setting "
+                          "ai_anthropic_workspace_id or the variable LLM_FRAMEWORK_AI_ANTHROPIC_WORKSPACE_ID)")
+CONSOLE_WORKSPACE_HINT = ("Claude needs the workspace ID for this API key (Claude Console > Settings > Workspaces). "
+                          f"Enter it in {WORKSPACE_SETTING_HINT}.")
+# Errors with a known cause (LLMError.code): what to change. The plain-language cause follows as the details.
+CODE_HINTS = {
+    "anthropic.workspace_required": CONSOLE_WORKSPACE_HINT,
+    "anthropic.workspace_invalid": f"Correct the Claude workspace ID in {WORKSPACE_SETTING_HINT}.",
+    "anthropic.workspace_not_found": f"Correct the Claude workspace ID in {WORKSPACE_SETTING_HINT}, or use a key "
+                                     "of that workspace.",
+    "anthropic.admin_key": f"Store a normal Claude API key in {SETTINGS_HINT}.",
+    "anthropic.profile": "Sign in again with `ant auth login`, or remove the setting ai_auth_anthropic to use the "
+                         "stored Claude API key.",
+    "provider.removed": f"Choose another AI provider in {SETTINGS_HINT}.",
+}
 
 
-def describe_llm_error(err: BaseException, *, anthropic: bool = False) -> str:
+def describe_llm_error(err: BaseException) -> str:
     """A message for the user: what happened and what to do. The provider's own (redacted) text follows."""
     detail = str(err).strip()
-    if isinstance(err, BillingError):  # a PermissionDenied subclass: check it first
+    code = getattr(err, "code", None)
+    if code in CODE_HINTS:
+        head = CODE_HINTS[code]
+    elif isinstance(err, BillingError):  # a PermissionDenied subclass: check it first
         head = ("The AI provider reports no credit or quota left on this account. Add credit or raise the limit "
                 "in the provider's console, or choose another provider.")
     elif isinstance(err, AuthFailed):
         head = f"The AI provider rejected the credentials. Check the API key or sign-in in {SETTINGS_HINT}."
-        if anthropic:
-            head += " " + CONSOLE_WORKSPACE_HINT
     elif isinstance(err, PermissionDenied):
         head = "The AI provider does not allow this request for your account or key."
-        if anthropic:
-            head += " " + CONSOLE_WORKSPACE_HINT
     elif isinstance(err, RateLimited):
         retry_after = getattr(err, "retry_after", None)
         wait = f" Try again in about {int(retry_after) + 1} s." if retry_after else " Wait a moment and try again."
@@ -546,14 +556,8 @@ class DittoCoder:
             return False
 
     def _error(self, err: LLMError) -> DittoError:
-        anthropic = False
-        try:
-            preset = self.client.catalog.get(err.provider) if getattr(err, "provider", "") else None
-            anthropic = preset is not None and preset.adapter == "anthropic"
-        except Exception:
-            pass
         self.logger.warning(f"AI request failed: {type(err).__name__}: {err}")
-        return DittoError(describe_llm_error(err, anthropic=anthropic), cause=err)
+        return DittoError(describe_llm_error(err), cause=err)
 
     # --- knowledge base -----------------------------------------------------------------------------------
     def _knowledge(self, query: str, limit: int = 5) -> str:
