@@ -66,7 +66,7 @@ targets/Rockchip/
 | File | Needed | What it is for |
 |---|---|---|
 | `target.yml` with a `metadata:` block | yes | Without it the folder is not a target. |
-| `capabilities:` block in `target.yml` | strongly recommended | Without it the GUI and CLI cannot check settings, the MCP tools and Ditto cannot start builds for the target, and `llm-cli doctor` warns. |
+| `capabilities:` block in `target.yml` | strongly recommended; required to share the target | Without it the GUI and CLI cannot check settings, the MCP tools and Ditto cannot start builds for the target, `llm-cli doctor` warns, and the target cannot be exported or installed as a community pack. |
 | `Dockerfile` or `dockerfile` | yes | The image all stages run in. |
 | `Dockerfile.gpu` | optional | Used for builds with GPU passthrough (`llm-cli build start --gpu`, or "Use Host GPU for Build Process" in the GUI, which is checked by default on Linux); without it the normal Dockerfile is used. |
 | `modules/build.sh` | yes | Runs in every stage as `/app/modules/build.sh`. |
@@ -97,7 +97,10 @@ There are three ways; all of them end in the same module generator (`orchestrato
 - **GUI wizard:** **Tools > Create Hardware Module...** Import the probe file with the standard import (fixed
   parsing) or let Ditto analyse it, optionally add documentation pages to the knowledge base with "Deep Ingest",
   then check the pages for hardware, Docker and flags and confirm the summary. For `aarch64`, `armv7l` and
-  `riscv64`, the wizard adds the matching cross-compiler packages.
+  `riscv64`, the wizard adds the matching cross-compiler packages. The last page ("Summary & Generation") has two
+  check boxes, both off by default: the knowledge snapshot
+  ([section 3.4](#34-what-the-generator-writes-and-what-you-add)) and "Export for community after creating"
+  ([section 9.2](#92-exporting-a-target-for-the-community)).
 - **CLI, interactive:** `llm-cli module create` asks for name, architecture (`aarch64`, `x86_64`, `armv7l`,
   `riscv64`), SDK, base image, description, packages and CPU flags. Run it from the installation folder: unlike the
   other commands, it resolves a relative `targets_dir` against the current folder.
@@ -123,27 +126,67 @@ Every value ends up in a Dockerfile, YAML or a shell script, so it is checked be
   control characters. Every generated script must pass `bash -n`.
 - **Place:** the target is created only directly below `targets/`, never over an existing target (also not with
   different case), and it is removed again if generation fails.
+- **The finished folder:** before the generator reports success, the new target must pass the same validators as a
+  community pack ([section 9.1](#91-what-the-validators-check)), including that no template placeholder is left
+  anywhere. If anything fails, the folder is removed and the error lists the problems.
 
 ### 3.4 What the generator writes, and what you add
 
 The generator writes `target.yml` (metadata, `supported_boards`, `docker`, `modules`, `optimization_profiles`,
-`requirements`), a `Dockerfile` (from `Dockerfile.gpu` of the template if the SDK contains "cuda" or the base image
-contains "nvidia"), `modules/build.sh`, `modules/config_module.sh`, `modules/source_module.sh`,
-`modules/rkllm_module.sh`, `modules/rknn_module.sh`, `modules/benchmark_module.sh`, placeholders for
-`convert_module.sh` and `target_module.sh`, `generate_profile.sh`, the template's `scripts/` and an empty
-`knowledge/` folder. If the target is created in the GUI wizard or with `generate-ai` and the knowledge base is
-enabled, the generator also exports the knowledge base to `knowledge/initial_knowledge.json`. The framework does not
-import that file again by itself (whatever the `README.md` written next to it says), so check it for private data
-before you share it.
+`requirements` and a `capabilities:` block), a `Dockerfile` (from `Dockerfile.gpu` of the template if the SDK
+contains "cuda" or the base image contains "nvidia"), `modules/build.sh`, `modules/config_module.sh`,
+`modules/source_module.sh`, `modules/rkllm_module.sh`, `modules/rknn_module.sh`, `modules/benchmark_module.sh`,
+placeholders for `convert_module.sh` and `target_module.sh`, `generate_profile.sh` and the template's `scripts/`.
+
+**The capabilities block.** Every generated target gets one, with support level `community`, so the Builder, the
+CLI and AI clients check its build settings from the start. For a module named "My Board" it looks like this:
+
+```yaml
+capabilities:
+  schema_version: 1
+  support_level: community
+  default_board: my_board
+  boards:
+    my_board:
+      label: My Board
+  formats:
+    gguf:
+      label: GGUF (llama.cpp)
+      input: [hf]
+      quantizations: [Q4_K_M, Q4_0, Q5_K_M, Q6_K, Q8_0, F16]
+      default_quantization: Q4_K_M
+      imatrix: true
+      dataset: optional
+```
+
+- **Boards:** the boards given to the generator; the id is the name in lower case with underscores, the label is
+  the name. The GUI wizard and `llm-cli module create` give none and `generate-ai` gives the module name, so in
+  practice the module name is the only board.
+- **Quantizations:** the labels of the `case` branches in the quantization logic of the wizard or of Ditto's
+  proposal (for example `Q4_K_M)` or `Q4_K_M|Q5_K_M)`; only names of letters, digits and `_`). Without such
+  branches: `Q4_K_M`, `Q4_0`, `Q5_K_M`, `Q6_K`, `Q8_0` and `F16`. The first one is the default. Labels are taken as
+  written, so `Q4_K_M|q4_k_m)` lists both spellings; write one spelling and declare others as `aliases`.
+
+**Knowledge snapshot (opt-in).** On the wizard's last page, the check box "Attach the knowledge crawled for this
+target (Deep Ingest, privacy scrub applied)" is off by default and can only be switched on after Deep Ingest ran in
+this wizard. Then the generator exports only the pages crawled from the URLs you entered in this wizard,
+privacy-scrubbed (home folders, addresses, host and user names, keys), to `knowledge/initial_knowledge.json`, with a
+`README.md` next to it. Nothing else from your knowledge base goes into the module, and without the check box there
+is no `knowledge/` folder. `llm-cli module create` and `generate-ai` never attach knowledge. The framework does not
+import that file again by itself (whatever the `README.md` says). The pages remain under their owners' terms; the
+licence of a pack does not cover them.
 
 The result is a **skeleton**, not a working target yet:
 
-- **No `capabilities:` block.** Add it yourself ([section 4](#4-targetyml-and-the-capabilities-block)).
+- **The capabilities block is a starting point.** Add your real boards, other formats, per-board quantizations and
+  calibration needs ([section 4](#4-targetyml-and-the-capabilities-block)), and keep the block in sync with
+  `build.sh`.
 - **The template `build.sh` does not match the current pipeline.** It looks for `convert-hf-to-gguf.py` and the
   llama.cpp tools in places where current llama.cpp builds do not put them, writes the F16 intermediate to `/tmp`
   (a 1 GB tmpfs in the sandbox) and falls back to copying the model unchanged. The template Dockerfile does not build
   llama.cpp. For GGUF, take `targets/Rockchip/dockerfile` and `targets/Rockchip/modules/build.sh` as the starting
-  point, or the example in [section 6](#6-the-build-script).
+  point, or the example in [section 6](#6-the-build-script). The generated block declares GGUF all the same, so a
+  build of the unchanged skeleton is accepted and then fails or copies the model.
 
 An updated template is planned for 3.4.0 (see the [roadmap](BLUEPRINT.md#roadmap)).
 
@@ -280,8 +323,9 @@ What the image must provide (see `targets/Rockchip/dockerfile`):
   root (legacy mode without sandbox), the entrypoint maps it to the host user and drops to `llmbuilder`.
 - `ENV BUILD_CACHE_DIR=/build-cache` and every tool the conversion needs. Everything must be installed while the
   image is built, because the stages have no network.
-- **Pinned versions:** a base image tag or digest, git tags or commits, exact pip versions, and SHA256 checks for
-  downloaded files (like `RKLLM_WHEEL_SHA256` for the RKLLM wheel).
+- **Pinned versions:** a base image pinned by digest (official base images such as `debian:bookworm-slim` may use a
+  tag, see [section 9.1](#91-what-the-validators-check)), git tags or commits, exact pip versions, and SHA256 checks
+  for downloaded files (like `RKLLM_WHEEL_SHA256` for the RKLLM wheel).
 - **One venv per toolchain** if their dependencies conflict (Rockchip: `/opt/venv`, `/opt/venv-rkllm`,
   `/opt/venv-rknn`).
 - No binaries in the repository: download wheels and libraries in the Dockerfile and check their hashes.
@@ -451,13 +495,83 @@ find out whether a failure is caused by the sandbox.
    [section 6.3](#63-rules)).
 6. **On the device:** deploy the build (deployment window, or `llm-cli deploy package` and `llm-cli deploy run`)
    and start the model there.
+7. **Ready to share?** Run the validators of [section 9.1](#91-what-the-validators-check) on the folder; `ok` means
+   no problem:
+
+   ```bash
+   python -c "from pathlib import Path; from orchestrator.Core.module_generator import validate_target_folder as v; \
+   print('\n'.join(v(Path('targets/my_board'))) or 'ok')"
+   ```
 
 ## 9. Sharing a target
 
-Open a pull request with the target folder. Set `support_level: community` unless the maintainers take over the
-target. Describe in the pull request which boards and models you tested. Follow the
-[contribution rules](../CONTRIBUTING.md): no binaries, no secrets, pinned versions, and documentation in English and
-German. Knowledge packs are not signed yet; please open an issue before you contribute one.
+There are two ways:
+
+- **As a community pack**, for a target you maintain yourself: export it as a signed pack and submit it to the
+  community repository; users install it with `llm-cli zoo install` or the Community Hub. Keep
+  `support_level: community`.
+- **In this repository**, if the maintainers take the target over: open a pull request with the target folder and
+  describe which boards and models you tested. Follow the [contribution rules](../CONTRIBUTING.md): no binaries, no
+  secrets, pinned versions, and documentation in English and German.
+
+Either way the target has to pass the validators below. Copying target folders by hand into `community/` is no
+longer a way to install them.
+
+### 9.1 What the validators check
+
+`validate_target_folder` in `orchestrator/Core/module_generator.py` checks a target folder that others will build.
+It runs when the module generator finishes a target, when you export a target (`llm-cli zoo export target` or the
+export dialog), when a target pack is installed (in the quarantine folder) and in
+`llm-cli zoo verify <pack file>`, which the community repository's CI runs. Each problem is reported with its file
+and, for scripts, its line.
+
+| Check | Rule |
+|---|---|
+| Capabilities | `target.yml` exists and has a `capabilities:` block the schema accepts ([section 4.2](#42-capabilities)). |
+| Pinned images | In every file whose name starts with `dockerfile` in any case (`Dockerfile`, `dockerfile`, `Dockerfile.gpu`), every image that `FROM`, `COPY --from=` or `RUN --mount=...,from=` uses must be pinned by digest (`name@sha256:` and 64 hex digits). Exempt are official base images with a tag (names starting with `debian:`, `ubuntu:`, `nvidia/cuda:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` or `python:`), an earlier build stage (`FROM ... AS builder`, then `COPY --from=builder`) and a stage number (`--from=0`). Comment lines are skipped. A variable such as `FROM ${BASE_IMAGE}` is refused, because it is not an image reference. |
+| Shell deny-list | Every line of every `*.sh` file, comments included, unless the same line is in the template's file with the same path (for `modules/build.sh`: `targets/_template/modules/build.sh`). Refused: downloads (`curl`, `wget`, `aria2c`, and `fetch` as a word, which includes `git fetch`), deleting `/` (`rm -rf /`), `chmod 777`, `sudo`, `mkfs` and `dd if=`, the Docker socket or `docker run`, `eval`, `source` or `.` of a `$(...)` result, `sh -c "$(...)"`, and process substitution `<(...)` except as plain input (`done < <(grep ...)`). Downloads belong in the Dockerfile, pinned. |
+| Shell syntax | Every `*.sh` file passes `bash -n` (skipped where bash is not installed). |
+| Text only | No file contains a NUL byte: binary files are refused. On export every file must also be UTF-8 text. |
+| Placeholders | No file contains a template placeholder (`[MODULE_NAME]`, `[Hardware-Familie]`, `[IHRE_ARCHITEKTUR]`, `[Hersteller]`, `[QUANTIZATION_LOGIC]`, `[CPU_FLAGS]`, `[CMAKE_FLAGS]`, `[SDK_SETUP_COMMANDS]`, `[PACKAGING_COMMANDS]`, `[ihr-target-name]`, `{packages_str}` or `YYYY-MM-DD`), and no value in `target.yml` holds text in square brackets, such as `[Board Name 1]`. |
+
+The pack format adds its own rules when a target is exported or installed:
+
+- No symbolic links, junctions or special files anywhere in the folder.
+- Paths are relative and `/`-separated, without `..`, backslashes, drive letters, the characters `: * ? " < > |`,
+  control characters or a trailing dot or space, and they are unique regardless of case.
+- At most 10,000 files and 512 MB. Files keep only the modes 0644 or 0755 (executable or not).
+- `pack.json`, `pack.sig` and `.lcf-provenance.json` are reserved names at the top of the folder.
+- The community repository's CI accepts packs of at most 5 MB, and `llm-cli zoo verify` refuses a pack in which the
+  privacy scrub would still change something.
+
+The shipped Rockchip target passes all of these checks.
+
+### 9.2 Exporting a target for the community
+
+1. **Finish the target:** test it with a real build ([section 8](#8-testing-a-target)), keep
+   `support_level: community` and set `metadata.version` in the form `1.2.3` (otherwise the pack gets `1.0.0`).
+2. **Export it.**
+   - In the GUI, for a new target: the check box "Export for community after creating (a scrubbed, signed pack for
+     a pull request)" on the wizard's last page opens the dialog "Export target for the community" after the
+     target was created. Enter an author name (a pseudonym is fine) and a licence (MIT unless you choose another),
+     then click "Create pack". "Show folder" opens the folder with the pack.
+   - On the command line, for any target of your own: `llm-cli zoo export target my_board --author "<your name>"`.
+
+   The pack is written to `community/contributions/contribution-target-my_board-1.0.0.zip` and signed with your
+   key, which is created in the secrets store on first use.
+3. **Read the summary.** It shows every change of the privacy scrub as a diff (home folders, IP and MAC addresses,
+   e-mail addresses, host and user names, keys) and notes, for example that `knowledge/` holds pages from the web
+   whose terms the pack licence does not cover. If a change breaks a script, fix the file in your target and export
+   again.
+4. **Check it the way the community repository will:**
+   `llm-cli zoo verify community/contributions/contribution-target-my_board-1.0.0.zip`.
+5. **Submit it:** "Open pull request" in the dialog, or the export command with `--pr` added. What happens then,
+   and the current state of the community repository, is described in
+   [CONTRIBUTING](../CONTRIBUTING.md#contributing-to-the-community-zoo).
+
+To share a target only with your own machines or a team, encrypt it instead: `--to <key file>` or `--passphrase`
+([CLI guide](CLI_Usage.md#zoo-export)). The recipient installs it with `llm-cli zoo install --file`. A target you
+installed from the zoo cannot be exported as your own: it remains its author's pack.
 
 ## 10. Legacy files
 
