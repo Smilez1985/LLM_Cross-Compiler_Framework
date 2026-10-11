@@ -334,6 +334,7 @@ class LocalLLMRuntime:
         self.lock_file = self.root / ".lock"
         self.log_file = self.data_dir / "logs" / "llama-server.log"
         self._hardware = hardware
+        self._hardware_given = hardware is not None  # a caller's HardwareInfo is used as given, never re-probed
         self._runner = runner
         self._session = session
         self._sleep = sleep
@@ -713,7 +714,8 @@ class LocalLLMRuntime:
 
     def _launch(self, installed: InstalledRuntime, model: ModelEntry, model_path: Path, ctx: Optional[int],
                 sleep_idle_seconds: Optional[int], timeout: Optional[float], tie_to_process: bool) -> LocalEndpoint:
-        hw = self.hardware()
+        # Free RAM and VRAM are volatile: every start probes them again for the context size.
+        hw = self.hardware(refresh=not self._hardware_given)
         choice = select_backend(hw, self.catalog, installed.backend)
         if ctx is None:
             ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)

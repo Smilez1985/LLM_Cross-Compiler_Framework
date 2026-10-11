@@ -123,12 +123,13 @@ stays below the given share.
 | `ditto ask` | Ask Ditto one question |
 | `ditto eval` | Grade Ditto on fixed test cases, or the knowledge-base search |
 | `ditto runtime install/start/status/stop` | The managed local model server (llama.cpp) for offline mode |
+| `ditto runtime export-source/import-source` | Carry the pinned llama.cpp source to an air-gapped machine as a git bundle (checked by its commit) |
 | `ditto models list/download` | The model tiers for offline mode |
 | `tools list` / `tools permissions` / `tools audit` | The framework tools, their permissions and the audit log |
 | `mcp serve` / `mcp config` | Run the MCP server / show how to connect AI clients |
 | `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
 | `module create` / `module generate-ai` | Create a new hardware target, by questions or from a probe file with Ditto |
-| `scan` | Run the hardware probe on this computer |
+| `scan` | Run the hardware probe on this computer or, with `--device`, on a board over SSH, and store the profile |
 | `config show` / `config repos` | Show the effective settings and where each comes from / manage source repository overrides |
 | `zoo list` / `zoo show` | List the community zoo and the installed packs / show one entry |
 | `zoo install` / `zoo verify` | Install a community pack after checks and your confirmation / check installed packs or a pack file |
@@ -682,6 +683,45 @@ llm-cli ditto runtime start --model small --sleep-idle 0
 llm-cli ditto runtime stop
 ```
 
+#### ditto runtime export-source
+
+```
+llm-cli ditto runtime export-source FILE [--mirror URL] [-y]
+```
+
+Writes the pinned llama.cpp source (the commit in `configs/llama_runtime.yml`, `llama_cpp.source`) as a git bundle
+to `FILE`, plus `FILE.json` with the commit, the tag, the size and SHA256 of the bundle and the framework version.
+Carry both files to a machine without internet access and import them there. If the source is not cached yet, it
+is fetched first (about 40 MB to download, 215 MB on disk): by commit (by its tag only when the server refuses a
+fetch by commit), and either way `git rev-parse HEAD` must give the pinned commit back. The verified tree is kept
+read-only in `~/.llm-framework/runtime/llama.cpp/src/<commit>/`; later runs check that nothing in it was changed or
+added (files git ignores included) and need no network. A relative `FILE` is relative to the current folder. Needs
+`git`.
+
+| Option | Meaning |
+|---|---|
+| `--mirror URL` | Fetch from this mirror instead of the pinned repository. The commit is checked the same way. |
+| `-y, --yes` | Fetch without asking when the source is not cached yet. |
+
+#### ditto runtime import-source
+
+```
+llm-cli ditto runtime import-source FILE
+```
+
+Imports the pinned llama.cpp source from a bundle of `export-source` into
+`~/.llm-framework/runtime/llama.cpp/src/<commit>/`. Git checks every object by its hash, and the checked-out commit
+must be the pinned one, whoever made the bundle and with whichever git version. A bundle of another commit, a
+bundle that does not match its `FILE.json` (size or SHA256) and a damaged bundle are refused. Needs `git` on the
+air-gapped machine too.
+
+```bash
+# Online machine
+llm-cli ditto runtime export-source llama.cpp-source.bundle -y
+# Air-gapped machine (copy llama.cpp-source.bundle and llama.cpp-source.bundle.json first)
+llm-cli ditto runtime import-source llama.cpp-source.bundle
+```
+
 ### ditto models
 
 #### ditto models list
@@ -929,21 +969,52 @@ llm-cli module generate-ai target_hardware_config.txt --provider local
 ## scan
 
 ```
-llm-cli scan [--output TEXT]
+llm-cli scan [--output TEXT] [--json] [--script]
+llm-cli scan --device HOST --user TEXT [--port N] [--password TEXT] [--trust-fingerprint TEXT] [--label TEXT]
+             [--output TEXT] [--json]
 ```
 
-Runs the hardware probe on this computer (`scripts/hardware_probe.sh` on Linux, `scripts/hardware_probe.ps1` on
-Windows). The probe writes the file given with `--output` (its folder is created). It may ask whether to install
-missing helper tools (`pciutils`, `usbutils`, `dmidecode`) with your package manager; answer `n` to skip them. On
-Windows without administrator rights the probe restarts itself elevated (Windows asks for permission) and the CLI
-waits for it. Exit code 1 if the probe fails or writes no file.
+Runs the hardware probe and keeps its result, the hardware profile (schema 2, described in the
+[Module Developer Guide](Module_Developer_Guide.md#11-the-hardware-probe-file)). A build is planned for the machine
+that runs the model, so the probe runs on that machine.
+
+- **This computer** (default): the Python probe `scripts/hardware_probe.py` runs inside the CLI. The profile is
+  written to the file given with `--output` and stored as this computer's profile
+  (`~/.llm-framework/hardware/local.txt`, without volatile values such as free RAM). If the Python probe cannot run,
+  the CLI says why and runs the fallback script instead; `--script` uses the script directly
+  (`scripts/hardware_probe.sh` on Linux, `scripts/hardware_probe.ps1` on Windows).
+- **A board over SSH** (`--device`): the first connection shows the board's SSH host key fingerprint and asks you to
+  confirm it, as `deploy run` does (`--trust-fingerprint` confirms it without asking); a password is used once to
+  install the framework's SSH key and is not stored. The CLI then sends `hardware_probe.py` to `python3 -I` when the
+  board has Python 3.8 or newer, otherwise `hardware_probe.sh` to `sh` (any POSIX shell, also BusyBox). The script
+  travels over the SSH channel, so nothing is installed on the board and nothing is left there. The result is checked
+  like any probe file from outside, written to `--output` and stored under the board's ID
+  (`~/.llm-framework/hardware/devices/<id>.txt`; the ID comes from the board's host key) with your label and its
+  address.
+
+The probes never ask, install or ask for administrator rights. Exit code 1 if the probe fails or its file cannot be
+read, 2 for wrong options.
 
 | Option | Meaning |
 |---|---|
-| `--output TEXT` | File the probe writes, relative to the current folder (default `target_hardware_config.txt`). The CLI passes it to the probe (`hardware_probe.sh --output FILE`, `hardware_probe.ps1 -OutputFile FILE`). |
+| `--output TEXT` | File the profile is written to, relative to the current folder (default `target_hardware_config.txt`); its folder is created. With `--script` the CLI passes it to the script (`hardware_probe.sh --output FILE`, `hardware_probe.ps1 -OutputFile FILE`). |
+| `--json` | Write the JSON view (the same keys and values as one object) instead of `KEY=VALUE` lines. |
+| `--script` | Use the fallback script instead of the Python probe (this computer only). |
+| `--device HOST` | Probe this board over SSH (host name or IP address) instead of this computer. |
+| `--user TEXT` | SSH user on the board (needed with `--device`). |
+| `--port N` | SSH port of the board (default 22). |
+| `--password TEXT` | Only for the first connection: used once to install the framework's SSH key, never stored (asked interactively when omitted). |
+| `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has this SHA256 fingerprint. |
+| `--label TEXT` | Your name for the board in the profile store. |
 
-To probe a board instead of this computer, run `scripts/hardware_probe.sh` on the board, or use **Scan / Import...
-> Remote Scan via SSH** in the GUI.
+A machine without network access runs a probe by hand, and you import its file
+([README](../README.md#probing-the-boards-hardware)). In the GUI, **Scan / Import...** imports a probe file, scans a
+board over SSH or scans this PC.
+
+```bash
+llm-cli scan                                        # this computer, stored as "local"
+llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W" --output zero3w.txt
+```
 
 ---
 

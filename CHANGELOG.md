@@ -50,11 +50,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (setting `rag_model_idle_minutes`, 0 keeps them loaded, at most 7 days). The time counts from the end of the
   last search or import, never during one.
 - **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
-  pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware: CUDA, Vulkan, Metal or CPU;
-  ROCm on request; per-start API key in a private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models
-  at pinned revisions into the `ditto/` folder of the configured models folder (`models_dir`, the one Ditto uses;
-  the runtime also takes it when it is given no folder), checked by size and sha256. Model tiers go down to 2-bit
-  models for weak hardware (3 GB RAM). The "local" provider follows the running server without configuration.
+  pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware the hardware probe finds, with free
+  RAM and VRAM read again at every start: CUDA, Vulkan, Metal or CPU; ROCm on request; per-start API key in a
+  private file), and `llm-cli ditto models list|download` fetches Qwen3.5 models at pinned revisions into the
+  `ditto/` folder of the configured models folder (`models_dir`, the one Ditto uses; the runtime also takes it
+  when it is given no folder), checked by size and sha256. Model tiers go down to 2-bit models for weak hardware
+  (3 GB RAM). The "local" provider follows the running server without configuration.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`; the servers the run starts are stopped afterwards, one you started
@@ -68,6 +69,53 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   latency; it works offline once the embedding model is downloaded. A manual and nightly CI workflow runs it with
   cached models. Baseline with the default CPU embedding model on the 34 questions: hit@1 83 %, hit@3 97 %, MRR
   0.91; all 4 unrelated questions still get excerpts.
+- **Hardware profile format, schema 2** (`configs/hardware_probe_schema.yml`, parser
+  `orchestrator/runtime/profile.py`): one list of the keys a hardware probe writes, each with its source and
+  normalisation per operating system and its validation. It covers the operating system (ID, version, family,
+  variant such as DietPi, kernel, init system), the architecture of the userland, the C library and its version
+  (glibc, musl, ...), ARM dot product, FP16 arithmetic and CPU clusters, the 14 x86 features ggml builds for, GPU
+  compute capability and gfx target, Vulkan, Rockchip NPU runtime versions and toolchain versions. The parser rejects
+  a schema 2 file with a duplicate key, an empty value, a value longer than 4096 characters or outside the schema,
+  or values that do not fit together (an x86 feature on ARM, a compute capability on an AMD GPU). Files of the
+  older probe scripts (schema 1) are converted: the host name, RAM part numbers and other identifying values are
+  dropped, every CPU feature of a `hardware_probe.ps1` file becomes `UNKNOWN` (that script asked Windows with wrong
+  constants), and the result asks for a new probe before a build. With it come a
+  performance key for benchmark results that ignores volatile and recorded-only values, and a per-user profile store
+  (`~/.llm-framework/hardware/`, private files).
+- **Hardware probe for boards and PCs** (`scripts/hardware_probe.py`, standard library only, Python 3.8 or newer):
+  writes the hardware profile in schema 2 on Linux, Windows and macOS, with the operating system, the C library and
+  its version, ARM core clusters, ARM dot product and FP16 arithmetic, the x86 features ggml builds for, the SoC, the
+  NPU node and every GPU (NVIDIA compute capability, AMD gfx target, Vulkan). `llm-cli scan` runs it in-process and
+  stores the result as this computer's profile (`--script` keeps the fallback script, `--json` writes the JSON
+  view); `llm-cli scan --device HOST --user USER` runs it on a board over SSH with `python3 -I` and falls back to
+  `hardware_probe.sh` when the board has no Python 3.8. The script travels over the SSH channel, so nothing is left
+  on the board, and the profile is stored under the board's ID. For machines without network access the README
+  explains the probe by hand.
+- **Build recipe for self-built llama.cpp** (`orchestrator/runtime/build/recipe.py`): the hardware profile of the
+  machine that will run the binaries becomes a build plan (CMake options, targets, toolchain file, builder, checks)
+  with a build ID that changes with every option and toolchain version but not with volatile values such as free
+  memory. Every plan builds the pinned commit, sets every download-capable option of llama.cpp to off or leaves it
+  unset (`FETCHCONTENT_FULLY_DISCONNECTED=ON`), and builds the server without subprocess support. A build on the
+  machine itself uses `-march=native`; a build for another machine uses the probe's CPU features (all 14 x86 options,
+  or `GGML_CPU_ARM_ARCH` such as `armv8.2-a+dotprod+fp16` for the RK3566), or all CPU variants when the probe could
+  not tell. NVIDIA GPUs get real code for exactly their compute capabilities (every NVIDIA GPU must report one) with
+  a CUDA toolkit no newer than the driver supports, on glibc systems; AMD GPUs their gfx target (ROCm on Linux, on
+  request); Vulkan and Metal are switches; Windows builds use Clang. The plan follows the target's OS and C library:
+  a builder base whose C library (glibc, or musl on Alpine) is not newer than the device's, so a build for another
+  machine needs the `LIBC_VERSION` its probe reports, and a statically linked C++ runtime for device builds. Plans are
+  not run yet.
+- **llama.cpp pinned by commit**: `llama_cpp.source` in `configs/llama_runtime.yml` (commit
+  `d81235049384534c167caea52b85a694f6103d14`, tag `b11429`) is the one place. With it come the CUDA toolkits for
+  self-built CUDA builds (NVIDIA's redist manifests pinned by size and SHA256, with the driver, compute capability,
+  host compiler and CMake limits of each toolkit; NVIDIA's prebuilt development images only as an explicit opt-in
+  entry) and the builder bases, pinned by digest. A test fails when any other place that names the llama.cpp version
+  disagrees, and `python scripts/llama_cpp_pin.py check` checks with `git ls-remote` that upstream's tag points at
+  the pinned commit.
+- **Pinned llama.cpp source for air-gapped machines**: `llm-cli ditto runtime export-source FILE` writes the pinned
+  commit as a git bundle plus a manifest, and `llm-cli ditto runtime import-source FILE` installs it on a machine
+  without internet access. The source is fetched by commit (by its tag only where a server refuses that), must give
+  the pinned commit back and is cached read-only in `~/.llm-framework/runtime/llama.cpp/src/`; later runs check that
+  nothing in it was changed or added, files git ignores included, and need no network.
 - **Deep Ingest honours machine-readable opt-outs.** Text and data mining of public pages is allowed unless
   the rightsholder reserved it in machine-readable form (EU DSM Directive Art. 4, German UrhG § 44b), so
   besides robots.txt the crawler skips pages marked `noindex`, `none`, `noai` or `noimageai` in an
@@ -266,6 +314,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli ditto auth storage --use ...`.
 - Error messages and hints name `llm-cli ditto login <provider>` instead of `llm-cli secrets set <key name>`;
   `llm-cli module generate-ai` uses the stored sign-in and never asks for a key itself.
+- `scripts/hardware_probe.sh` and `scripts/hardware_probe.ps1` write schema 2, the same keys as the Python probe
+  (tests run the `.sh` and the `.py` on the same fixture machines). Both are non-interactive by default: the package
+  install prompt of the `.sh` needs `--install-tools` (it now offers `vulkan-tools`, the only helper the probe uses),
+  and the `.ps1` restarts elevated only with `-Elevate`. The `.sh` runs in any POSIX shell (dash, BusyBox ash), reads
+  `/proc` and `/sys` directly instead of `lspci` and `lsusb`, and writes all GPUs; the `.ps1` reads the usable memory
+  instead of the sum of the memory slots.
+- The setting `llama_cpp_version` (the llama.cpp tag target images clone) defaults to the tag of the llama.cpp pin in
+  `configs/llama_runtime.yml`, now `b11429`, instead of a written `v0.6.0`; both name the same commit, so images build
+  the same source. The Rockchip Dockerfile, the `target.yml` build arguments and `configs/project_sources.yml`
+  (which still said `b4009`) name the same tag.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -412,6 +470,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   reads the pushed commit from `PRE_COMMIT_TO_REF`) like `.githooks/pre-push`, instead of the whole history. The
   pre-commit check (`--staged`) also scans a file that replaced a symlink and files whose names contain a line
   break or start like `0:`, which it skipped before.
+- `hardware_probe.ps1` asked Windows for the wrong CPU features: constant 40 (AVX2) as AVX-512 and 37 (SSE4.1) as
+  NEON, so nearly every PC claimed AVX-512 and NEON. It now asks the documented constants (AVX 39, AVX2 40, AVX-512 F
+  41, BMI2 60; on ARM NEON 29, dot product 43, i8mm 66, FP16 67, SVE 46, SME 70) and writes `UNKNOWN` where Windows
+  cannot tell. It also no longer assigns the read-only `$PID`, which aborted the probe when a Rockchip board was
+  attached over USB.
+- `hardware_probe.sh` saw neither the ARM dot product nor FP16 arithmetic, wrote the x86 `f16c` flag as FP16 support
+  on ARM, recognised only RK3588 and RK3566 and kept only the first GPU; it now writes the ARM features, the core
+  clusters, every SoC of the device tree and all GPUs.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -511,6 +577,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   key with a space, a line break or an invisible character inside is refused before anything is sent or stored.
 - The Builder log shows every message as plain text, so names from community recipes, Ditto's answers or build
   output cannot render as HTML (links, images, formatting).
+- Hardware profiles carry no identifying values: the probe scripts no longer write the host name, the RAM part
+  numbers or the CPU id, the serial line of `/proc/cpuinfo` and the serial attribute of USB devices are never read,
+  and free text is reduced to printable ASCII. Values read on a board are validated before they are written, and the
+  SSH scan treats the board's answer as untrusted (size limit, strict parser).
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

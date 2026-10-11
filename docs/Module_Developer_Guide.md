@@ -24,6 +24,7 @@ hardware (or its specifications).
 8. [Testing a target](#8-testing-a-target)
 9. [Sharing a target](#9-sharing-a-target)
 10. [Legacy files](#10-legacy-files)
+11. [The hardware probe file](#11-the-hardware-probe-file)
 
 ## 1. How the framework uses a target
 
@@ -75,19 +76,32 @@ targets/Rockchip/
 
 ### 3.1 Probe the board
 
-Copy `scripts/hardware_probe.sh` to the device and run it there (on Windows devices: `scripts/hardware_probe.ps1`):
+The probe runs on the device, because the build is planned from its result. Over SSH:
 
 ```bash
-bash hardware_probe.sh
+llm-cli scan --device 192.0.2.10 --user dietpi
 ```
 
-It writes `target_hardware_config.txt` into the current folder: CPU model, cores and flags, memory, GPU and NPU
-vendor ids, and more. It also contains the device's host name; remove it before you share the file. If a helper
-tool is missing, the script offers to install it; set `NON_INTERACTIVE=true` to skip that.
+The CLI checks the device's host key the first time (as deployment does), sends `hardware_probe.py` to `python3 -I`
+when the device has Python 3.8 or newer and `hardware_probe.sh` otherwise, writes `target_hardware_config.txt` and
+keeps the profile under the device's ID ([section 11.5](#115-where-profiles-are-kept)). Nothing is installed on the
+device. Without SSH, copy a probe to the device, run it there and bring the file back:
 
-In the GUI build tab, **Scan / Import... > Remote Scan via SSH...** runs the probe on a device over SSH (with the
-same trust-on-first-use check as deployment) and fetches the result. `llm-cli scan` runs the probe on the computer
-you are working on, which helps only if that computer is the target hardware.
+```bash
+python3 -I hardware_probe.py                                 # Python 3.8 or newer
+sh hardware_probe.sh                                         # Linux without Python, any POSIX shell
+powershell -ExecutionPolicy Bypass -File hardware_probe.ps1  # Windows without Python
+```
+
+The file holds the operating system (ID, version, family, kernel, init system), the architecture, the C library and
+its version, CPU model, cores, clusters and features, memory, SoC, NPU and GPUs; no host name, serial number or MAC
+address. The probes ask nothing and install nothing; `hardware_probe.sh --install-tools` offers to install
+`vulkan-tools` first and `hardware_probe.ps1 -Elevate` restarts with administrator rights. The format is described
+in [section 11](#11-the-hardware-probe-file).
+
+In the GUI build tab, **Scan / Import... > Remote Scan via SSH...** runs the shell probe on a device over SSH (with
+the same trust-on-first-use check) and fetches the result. `llm-cli scan` without `--device` probes the computer you
+are working on.
 
 ### 3.2 Generate the skeleton
 
@@ -317,7 +331,7 @@ Build arguments the engine passes:
 
 | Argument | Value |
 |---|---|
-| `LLAMA_CPP_TAG` | the setting `llama_cpp_version` (default `v0.6.0`) |
+| `LLAMA_CPP_TAG` | the setting `llama_cpp_version` (default: the tag of the llama.cpp pin in `configs/llama_runtime.yml`, `b11429`) |
 | `BUILD_JOBS` | the setting `build_jobs`, only if it is greater than 0; self-healing lowers it to 1 after a compiler ran out of memory |
 | `USER_ID`, `GROUP_ID` | the host user's ids (Linux and macOS, when the host user is not root) |
 
@@ -585,3 +599,143 @@ Version 1.x used a chain of four scripts per target (`source_module.sh`, `config
 `target_module.sh`) driven by the hardware probe. The current pipeline calls only `build.sh`; the Rockchip
 `build.sh` does not use these scripts, and the module generator still writes them. Their removal and an updated
 template are planned for 3.4.0.
+
+## 11. The hardware probe file
+
+The probe writes `target_hardware_config.txt` on the machine that will run the binaries (a board or a PC). One
+parser reads it, `orchestrator/runtime/profile.py`, and the complete list of keys with the source, normalisation and
+validation of each key is [`configs/hardware_probe_schema.yml`](../configs/hardware_probe_schema.yml). This section
+is for anyone who writes a probe, reads a profile, or carries one in from an air-gapped machine.
+
+Three probes write it with the same keys and rules: `scripts/hardware_probe.py` (the main path; standard library
+only, Python 3.8 or newer) and the fallbacks `scripts/hardware_probe.sh` (any POSIX shell on Linux) and
+`scripts/hardware_probe.ps1` (Windows). Each carries a copy of the schema's validation and tables, and
+`tests/test_hardware_probe.py` compares the copies with the schema and runs the `.py` and the `.sh` on the same
+fixture machines. Files of the older scripts (schema 1) are converted
+([section 11.3](#113-how-the-framework-checks-a-profile)).
+
+### 11.1 Format (schema 2)
+
+- UTF-8 (a byte order mark is accepted), LF line ends (CRLF is accepted); lines starting with `#` are comments.
+- The first line that is not a comment is `PROBE_SCHEMA=2`.
+- One `KEY=VALUE` per line. Keys are upper case (`A-Z`, digits, `_`) and appear at most once.
+- Values are one line, unquoted, at most 4096 characters; lists are comma-separated without spaces.
+- Every `ON`/`OFF` key is always written: `ON`, `OFF` or `UNKNOWN`. `UNKNOWN` means "this method cannot tell"
+  (for example AVX-VNNI on Windows); it is never guessed from a model name.
+- Any other fact the probe cannot determine is left out, never written empty, and a code goes into `PROBE_WARNINGS`
+  (for example `not_determined:LIBC_VERSION` or `needs_root:RKNPU_DRIVER_VERSION`).
+- Per-GPU keys are numbered: `GPU0_VENDOR`, `GPU1_VENDOR`, ... below `GPU_COUNT`.
+- The JSON view has the same keys with the same string values, `PROBE_SCHEMA` included.
+
+Example: an RK3566 board running DietPi, shortened (the full file is
+`tests/fixtures/hardware_probe/schema2_rk3566_dietpi.txt`):
+
+```text
+PROBE_SCHEMA=2
+PROBE_TOOL=sh
+PROBE_TOOL_VERSION=3.0.0
+GENERATED_AT=2026-10-11T08:15:00Z
+OS=linux
+OS_ID=debian
+OS_FAMILY=debian
+OS_VARIANT_ID=dietpi
+OS_VERSION_ID=12
+KERNEL=6.1.99-vendor-rk35xx
+ARCH=arm64
+LIBC=glibc
+LIBC_VERSION=2.36
+INIT_SYSTEM=systemd
+CPU_MODEL=Cortex-A55
+CPU_CLUSTERS=0-3:0x41:0xd05:1800
+SUPPORTS_AVX2=OFF
+SUPPORTS_NEON=ON
+SUPPORTS_DOTPROD=ON
+SUPPORTS_FP16_ARITH=ON
+SUPPORTS_I8MM=OFF
+RAM_TOTAL_MB=3912
+SOC_VENDOR=rockchip
+SOC_MODEL=rk3566
+NPU_DEVICE=/dev/rknpu
+SUPPORTS_RKNN=ON
+GPU_COUNT=1
+GPU0_VENDOR=arm
+GPU0_DISCRETE=OFF
+GPU0_UNIFIED=ON
+PROBE_WARNINGS=needs_root:RKNPU_DRIVER_VERSION
+```
+
+### 11.2 Keys
+
+| Group | Keys |
+|---|---|
+| Meta | `PROBE_SCHEMA`, `PROBE_TOOL` (`python`, `sh`, `ps1`), `PROBE_TOOL_VERSION`, `GENERATED_AT` (UTC), `PROBE_WARNINGS` |
+| Operating system | `OS` (`linux`, `windows`, `macos`, `freebsd`, `android`), `OS_ID`, `OS_ID_LIKE`, `OS_FAMILY` (`debian`, `rhel`, `alpine`, ...), `OS_VARIANT_ID` (`dietpi`, `armbian`, ...), `OS_VERSION_ID`, `OS_VERSION_CODENAME`, `OS_PRETTY_NAME`, `KERNEL`, `KERNEL_ARCH`, `INIT_SYSTEM` (`systemd`, `openrc`, `sysvinit`, ...) |
+| Binary compatibility | `ARCH` (`x86_64`, `arm64`, `armv7`, ...; the architecture of the userland, so a 32-bit system on a 64-bit kernel is `armv7`), `LIBC` (`glibc`, `musl`, `ucrt`, ...), `LIBC_VERSION` |
+| CPU | `CPU_MODEL`, `CPU_VENDOR`, `CPU_CORES_LOGICAL`, `CPU_CORES_PHYSICAL`, `CPU_CLUSTERS` (ARM only: CPUs, implementer, part and maximum MHz per cluster), `CPU_FLAGS_ALL`, `CPU_FLAGS_SOURCE` |
+| x86 features | the 14 x86 options of ggml: `SUPPORTS_SSE42`, `SUPPORTS_AVX`, `SUPPORTS_AVX2`, `SUPPORTS_BMI2`, `SUPPORTS_F16C`, `SUPPORTS_FMA`, `SUPPORTS_AVX512` (AVX-512 F), `SUPPORTS_AVX512_VBMI`, `SUPPORTS_AVX512_VNNI`, `SUPPORTS_AVX512_BF16`, `SUPPORTS_AVX_VNNI`, `SUPPORTS_AMX_TILE`, `SUPPORTS_AMX_INT8`, `SUPPORTS_AMX_BF16` |
+| ARM features | `SUPPORTS_NEON`, `SUPPORTS_DOTPROD`, `SUPPORTS_FP16_ARITH`, `SUPPORTS_I8MM`, `SUPPORTS_SVE`, `SUPPORTS_SVE2`, `SUPPORTS_SME`, `SUPPORTS_BF16_ARM` |
+| Memory, disk | `RAM_TOTAL_MB` (usable memory, never the sum of the memory slots), `SWAP_TOTAL_MB`, `RAM_AVAILABLE_MB`, `DISK_FREE_MB`, `RAM_TYPE`, `RAM_SPEED_MTS` |
+| SoC, NPU | `SOC_VENDOR`, `SOC_MODEL` (`rk3566`, ...), `BOARD_MODEL`, `NPU_VENDOR`, `NPU_MODEL`, `NPU_DEVICE`, `RKNPU_DRIVER_VERSION`, `RKLLM_RUNTIME_VERSION`, `RKNN_RUNTIME_VERSION`, `USB_ROCKCHIP_PID`, `USB_ROCKCHIP_MODE` (a board attached over USB), `SUPPORTS_RKNN`, `SUPPORTS_HAILO`, `SUPPORTS_METIS`, `SUPPORTS_MX3`, `SUPPORTS_CORAL`, `SUPPORTS_INTEL_NPU` |
+| GPU | `GPU_COUNT`; per GPU `_VENDOR`, `_NAME`, `_PCI_ID`, `_DISCRETE`, `_UNIFIED`, `_VRAM_MB`, `_VRAM_FREE_MB`, `_DRIVER_VERSION`, `_COMPUTE_CAP` (NVIDIA), `_GFX_TARGET` (AMD), `_SOURCE`; `NVIDIA_DRIVER_CUDA_MAX`, `SUPPORTS_CUDA`, `SUPPORTS_INTEL_XPU`, `VULKAN`, `VULKAN_DEVICES`, `HIP_RUNTIME`, `ROCM_VERSION`, `METAL` |
+| Toolchain | `TOOL_CC`, `TOOL_CXX` (`gcc-12.2.0`, `clang-18.1.3`), `TOOL_CLANG`, `TOOL_MSVC`, `TOOL_CMAKE`, `TOOL_NINJA`, `TOOL_MAKE`, `TOOL_GIT`, `TOOL_CCACHE`, `TOOL_NVCC`, `TOOL_GLSLC`, `TOOL_HIPCONFIG`, `TOOL_DOCKER`, `TOOL_PYTHON`: versions only, never paths |
+
+Not in a profile: the host name, serial or part numbers (also not the per-slot RAM part numbers the old Windows probe
+wrote), network or cloud data. Derived values such as CMake options are not in the probe either: the framework
+computes them from the profile, so a profile carried in from an air-gapped machine stays valid.
+
+### 11.3 How the framework checks a profile
+
+Profiles come from devices or are carried in by hand, so the parser treats them as untrusted:
+
+- A schema 2 file is rejected as a whole when a key appears twice, a value is empty, longer than 4096 characters,
+  contains a control character or does not match the key's validation (a fixed list, a number range or a pattern),
+  or when a required key or an `ON`/`OFF` key is missing.
+- Values must fit together: an x86 feature cannot be `ON` on `arm64` (nor an ARM feature on `x86_64`),
+  `CPU_CLUSTERS` exists only on ARM, `GPU<n>_COMPUTE_CAP` only for NVIDIA and `GPU<n>_GFX_TARGET` only for AMD GPUs,
+  `LIBC=ucrt` only on Windows, `METAL=ON` only on macOS.
+- `NPU_DEVICE` names only an accelerator node (`/dev/rknpu`, `/dev/dri/renderD<N>` or `/dev/dri/card<N>`,
+  `/dev/accel/accel<N>`, `/dev/hailo<N>`, `/dev/apex_<N>`), never a disk, memory or other device node, because a
+  deploy step may pass it to `docker run --device`.
+- A key the schema does not list is dropped; its value is never kept.
+- Free text (`CPU_MODEL`, GPU names, `BOARD_MODEL`) is for display only and never reaches a command line or a file
+  name.
+
+**Schema 1** files (the output of `hardware_probe.sh` 2.4 and `.ps1` 2.5, which the framework shipped up to and
+including release 3.0.0, without a `PROBE_SCHEMA` line) are still read:
+
+- The known keys are converted: `CPU_ARCH_TYPE` to `ARCH`, `TRUE`/`FALSE` to `ON`/`OFF`, `RAM_SWAP_MB` to
+  `SWAP_TOTAL_MB`, the first GPU to `GPU0_*`, `DOCKER_VERSION` to `TOOL_DOCKER`. The CPU features of a `.sh` file
+  are derived from its flag list, not taken from its own `SUPPORTS_*` lines; without a flag list they are
+  `UNKNOWN`.
+- Every CPU feature of a `.ps1` file becomes `UNKNOWN`, because that script asked Windows with wrong constants. Its
+  `RAM_TOTAL_MB` (the sum of the memory slots) is dropped.
+- The host name, the RAM part numbers and every other key without a schema 2 meaning are dropped without keeping
+  the value. A key written twice with different values is dropped, and so is a value that fails validation.
+- `ON`/`OFF` keys the file does not have become `UNKNOWN` (`OFF` where they cannot exist, such as NEON on x86).
+
+The result carries `PROBE_CONVERTED_FROM=1` and the warnings `converted_from_schema_1` and `reprobe_before_build`:
+run the probe again before a build.
+
+### 11.4 The performance key
+
+`HardwareProfile.perf_key()` is a sha256 over the values that change speed or the binary: `OS`, `ARCH`, `LIBC`,
+`CPU_VENDOR`, `CPU_MODEL`, `CPU_CLUSTERS`, every `SUPPORTS_*` key, `SOC_MODEL`, `NPU_MODEL`, and per GPU its vendor,
+PCI id, compute capability and gfx target. It is the same whichever probe wrote the file and in whichever order the
+GPUs are listed. It does not change with volatile values (free RAM, free VRAM, free disk space), the time of the
+probe, the kernel, tool versions, or the values that are only recorded with a benchmark (OS version, C library
+version, total RAM, VRAM size, driver versions); `recorded()` returns those.
+
+### 11.5 Where profiles are kept
+
+`ProfileStore` keeps profiles in the per-user folder (`~/.llm-framework`, or `LLM_FRAMEWORK_HOME`):
+
+- `hardware/local.txt` for this machine;
+- `hardware/devices/<device id>.txt` for other machines, with `<device id>.json` next to it for the label and the
+  SSH address.
+
+A device ID is the first 16 hex characters of the sha256 of the device's SSH host key fingerprint: it stays the
+same when the IP address changes and contains no host name. A profile imported without SSH gets a random ID. Files
+are private to the user (mode 0600 in folders with mode 0700), volatile values are not stored, and stored files are
+checked like probe files when they are read back. `llm-cli scan` stores this computer's profile as `local`, and
+`llm-cli scan --device` stores a device's profile under its ID. The scans of the GUI build tab do not use the store
+yet; they write the probe file as described in [section 3.1](#31-probe-the-board).

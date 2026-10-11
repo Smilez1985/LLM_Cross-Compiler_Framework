@@ -1057,6 +1057,61 @@ def runtime_stop(ctx: FrameworkContext):
     console.print(f"Stopped ({stopped} process{'es' if stopped > 1 else ''})." if stopped else "Not running.")
 
 
+def _pinned_llama_source():
+    """The llama.cpp pin of configs/llama_runtime.yml (exits with 1 when the catalog has none)."""
+    from orchestrator.runtime.catalog import load_catalog
+    source = load_catalog().llama_cpp.source
+    if source is None:
+        console.print("[red]configs/llama_runtime.yml has no llama_cpp.source (the pinned commit).[/red]")
+        sys.exit(1)
+    return source
+
+
+@ditto_runtime.command('export-source')
+@click.argument('file', type=click.Path(dir_okay=False, path_type=Path))
+@click.option('--mirror', default=None, metavar='URL',
+              help='Fetch from this mirror instead of the pinned repository (the commit is verified the same way)')
+@click.option('--yes', '-y', is_flag=True, help='Fetch without asking when the source is not cached yet')
+@pass_context
+def runtime_export_source(ctx: FrameworkContext, file: Path, mirror: Optional[str], yes: bool):
+    """Write the pinned llama.cpp source as a git bundle (FILE, plus FILE.json) for an air-gapped machine"""
+    from orchestrator.runtime.build.source import SourceError, cached_source, export_source
+    source = _pinned_llama_source()
+    state_dir = _settings(ctx)[0].user_state_dir
+    try:
+        if cached_source(source, state_dir) is None and not yes and not click.confirm(
+                f"The pinned llama.cpp source ({source.tag}, commit {source.commit[:12]}, about 215 MB) is not "
+                "cached yet. Fetch it now?", default=True):
+            return
+        with console.status("Preparing the llama.cpp source ..."):
+            manifest = export_source(source, state_dir, file, url=mirror,
+                                     log=lambda msg: console.print(escape(msg)))
+    except SourceError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Wrote {escape(str(file))}[/green] ({_gib(int(manifest['bundle_size']))}, llama.cpp "
+                  f"{escape(source.tag)}, commit {escape(source.commit[:12])}) and {escape(file.name)}.json.")
+    console.print("On the air-gapped machine: llm-cli ditto runtime import-source " + escape(file.name))
+
+
+@ditto_runtime.command('import-source')
+@click.argument('file', type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@pass_context
+def runtime_import_source(ctx: FrameworkContext, file: Path):
+    """Import the pinned llama.cpp source from a bundle of export-source (checked by its commit)"""
+    from orchestrator.runtime.build.source import SourceError, import_source
+    source = _pinned_llama_source()
+    try:
+        with console.status("Importing and verifying the llama.cpp source ..."):
+            path = import_source(source, _settings(ctx)[0].user_state_dir, file,
+                                 log=lambda msg: console.print(escape(msg)))
+    except SourceError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[green]Verified llama.cpp {escape(source.tag)} (commit {escape(source.commit[:12])})[/green] "
+                  f"in {escape(str(path))}")
+
+
 @ditto.group('models')
 def ditto_models():
     """Models for Ditto's local mode"""
@@ -2210,25 +2265,42 @@ def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, tr
         sys.exit(1)
 
 # ============================================================================
-# SCAN COMMAND (NEU V2.0)
+# SCAN COMMAND
 # ============================================================================
 
-@cli.command('scan')
-@click.option('--output', default="target_hardware_config.txt", show_default=True,
-              help="File the probe writes (relative to the current folder)")
-@pass_context
-def run_scan(ctx: FrameworkContext, output):
-    """Run the hardware probe on this computer (exit code 1 if it fails or writes no file)."""
-    script_dir = Path(__file__).resolve().parents[1] / "scripts"
-    output_file = Path(output).expanduser().resolve()
+def _profile_summary(profile) -> list:
+    """Lines for the console: what the probe found (values from a device are untrusted: escaped)."""
+    def value(key, default="unknown"):
+        return escape(profile.get(key) or default)
 
+    lines = [f"System: {value('OS')}/{value('ARCH')}, {value('OS_PRETTY_NAME', profile.get('OS_ID') or 'unknown')}, "
+             f"C library {value('LIBC')} {value('LIBC_VERSION', '')}".rstrip(),
+             f"CPU: {value('CPU_MODEL')} ({value('CPU_CORES_LOGICAL')} logical cores), RAM {value('RAM_TOTAL_MB')} MiB"]
+    gpus = [escape(g.get("NAME") or g.get("VENDOR", "GPU")) for g in profile.gpus()]
+    lines.append("GPU: " + ("; ".join(gpus) if gpus else "none found"))
+    if profile.get("NPU_VENDOR"):
+        lines.append(f"NPU: {value('NPU_VENDOR')} {value('NPU_MODEL', '')}".rstrip())
+    if profile.warnings:
+        lines.append("Notes: " + escape(", ".join(profile.warnings)))
+    return lines
+
+
+def _write_profile_file(profile, output_file: Path, as_json: bool) -> None:
+    from orchestrator.Core.vault_key import write_private
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    write_private(output_file, profile.to_json() + "\n" if as_json else profile.to_text())
+
+
+def _scan_with_script(output_file: Path):
+    """The fallback: scripts/hardware_probe.sh (Linux) or hardware_probe.ps1 (Windows) writes the file; it is read
+    back with the probe file parser. Exit code 1 if the script fails, writes nothing or writes an unusable file."""
+    from orchestrator.runtime.profile import ProfileError, read_profile
+    script_dir = Path(__file__).resolve().parents[1] / "scripts"
     is_windows = platform.system() == "Windows"
     script = script_dir / ("hardware_probe.ps1" if is_windows else "hardware_probe.sh")
-
     if not script.exists():
         console.print(f"[red]Probe script not found at {escape(str(script))}[/red]")
         sys.exit(1)
-
     if is_windows:
         cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script), "-OutputFile", str(output_file)]
     else:
@@ -2236,7 +2308,7 @@ def run_scan(ctx: FrameworkContext, output):
     try:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.unlink(missing_ok=True)  # a file of an earlier run must not count as this run's result
-        with console.status("Running Hardware Probe...", spinner="dots"):
+        with console.status("Running the hardware probe script...", spinner="dots"):
             subprocess.run(cmd, check=True, cwd=os.getcwd())
     except (subprocess.CalledProcessError, OSError) as e:
         console.print(f"[red]Probe execution failed: {escape(str(e))}[/red]")
@@ -2244,7 +2316,149 @@ def run_scan(ctx: FrameworkContext, output):
     if not output_file.exists():
         console.print(f"[red]Probe script ran, but {escape(str(output_file))} was not created.[/red]")
         sys.exit(1)
-    console.print(f"[bold green]✅ Probe successful. Config generated: {escape(str(output_file))}[/bold green]")
+    try:
+        return read_profile(output_file)
+    except ProfileError as e:
+        console.print(f"[red]The probe wrote a file the framework cannot read: {escape(str(e))}[/red]")
+        sys.exit(1)
+
+
+def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Optional[str]):
+    """The device's host key, trusted on first use but never silently (as for deploy run). Exits when refused."""
+    from orchestrator.utils import ssh_trust
+    try:
+        key = ssh_trust.fetch_host_key(host, port)
+        status = ssh_trust.check_host_key(state_dir, host, port, key)
+    except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
+        console.print(f"[red]Could not reach {escape(host)}:{port}: {escape(str(e))}[/red]")
+        sys.exit(1)
+    if status == "changed":
+        console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
+        sys.exit(1)
+    if status == "unknown":
+        fp = ssh_trust.fingerprint(key)
+        console.print(f"New device {escape(host)}:{port} - {escape(key.get_name())} {fp}")
+        if trust_fingerprint:
+            if trust_fingerprint != fp:
+                console.print("[red]The fingerprint does not match --trust-fingerprint.[/red]")
+                sys.exit(1)
+        elif not (sys.stdin.isatty() and click.confirm(
+                "Compare with 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on the device. Trust it?",
+                default=False)):
+            console.print("[red]Device not trusted; nothing was probed.[/red]")
+            sys.exit(1)
+        ssh_trust.trust_host_key(state_dir, host, port, key)
+    return key
+
+
+def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
+                 password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str]) -> None:
+    from orchestrator.runtime.profile import device_id_for_host_key
+    from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh, store_address, valid_host
+    from orchestrator.utils import ssh_trust
+    if not user:
+        raise click.UsageError("--device needs --user")
+    if not valid_host(host):
+        raise click.UsageError("--device takes a host name or an IP address")
+    if not 1 <= port <= 65535:
+        raise click.UsageError("--port must be between 1 and 65535")
+    if label is not None and not (1 <= len(" ".join(label.split())) <= 64 and label.isprintable()):
+        raise click.UsageError("--label takes 1 to 64 printable characters")
+    if ssh_trust.paramiko is None:
+        console.print("[red]Probing a device needs the 'paramiko' package.[/red]")
+        sys.exit(1)
+    key = _trust_device(state_dir, host, port, trust_fingerprint)
+    if password is None and sys.stdin.isatty():
+        password = click.prompt("Password (Enter if the framework key is already installed)",
+                                default="", hide_input=True, show_default=False) or None
+    try:
+        client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
+    except Exception as e:  # authentication, network, a host key that changed meanwhile
+        console.print(f"[red]SSH login to {escape(user)}@{escape(host)} failed: {escape(str(e))}[/red]")
+        sys.exit(1)
+    try:
+        if password:
+            ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
+        with console.status(f"Running the hardware probe on {escape(host)}...", spinner="dots"):
+            result = probe_over_ssh(client)
+    except (RemoteProbeError, ssh_trust.HostKeyError) as e:
+        console.print(f"[red]The probe on {escape(host)} failed: {escape(str(e))}[/red]")
+        sys.exit(1)
+    finally:
+        client.close()
+    device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+    try:
+        _write_profile_file(result.profile, output_file, as_json)
+        stored = store.save_device(device_id, result.profile, label=label, address=store_address(host, port))
+    except (OSError, ValueError) as e:
+        console.print(f"[red]Could not save the profile: {escape(str(e))}[/red]")
+        sys.exit(1)
+    tool = "Python probe" if result.tool == "python" else "shell probe"
+    console.print(f"[bold green]Probe of {escape(host)} successful ({tool}). Config generated: "
+                  f"{escape(str(output_file))}[/bold green]")
+    for note in result.notes:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
+    for line in _profile_summary(result.profile):
+        console.print(line)
+    console.print(f"Stored as device {device_id}: {escape(str(stored))}")
+
+
+@cli.command('scan')
+@click.option('--output', default="target_hardware_config.txt", show_default=True,
+              help="File the profile is written to (relative to the current folder)")
+@click.option('--json', 'as_json', is_flag=True, help="Write the JSON view instead of KEY=VALUE lines")
+@click.option('--script', 'use_script', is_flag=True,
+              help="Use the fallback script (hardware_probe.sh, on Windows hardware_probe.ps1) instead of the "
+                   "Python probe")
+@click.option('--device', default=None, help="Probe this device over SSH instead of this computer (host or IP)")
+@click.option('--user', default=None, help="SSH user on the device (with --device)")
+@click.option('--port', default=22, show_default=True, type=int, help="SSH port of the device (with --device)")
+@click.option('--password', default=None, help="Only for the first connection: used once to install the "
+              "framework's SSH key, never stored (asked interactively when omitted)")
+@click.option('--trust-fingerprint', default=None,
+              help="Trust a new device non-interactively if its host key has this SHA256 fingerprint")
+@click.option('--label', default=None, help="Your name for the device in the profile store (with --device)")
+@pass_context
+def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, port, password, trust_fingerprint,
+             label):
+    """Run the hardware probe on this computer, or with --device on a board over SSH, and store the profile
+    (exit code 1 if the probe fails or writes no file)."""
+    from orchestrator.runtime.profile import ProfileStore, default_state_dir
+    config, _ = _settings(ctx)
+    state_dir = Path(getattr(config, "user_state_dir", None) or default_state_dir())
+    store = ProfileStore(state_dir)
+    output_file = Path(output).expanduser().resolve()
+    if device:
+        _scan_device(store, state_dir, output_file, as_json, device, user, port, password, trust_fingerprint, label)
+        return
+
+    profile, how = None, "Python probe"
+    if not use_script:
+        try:
+            from orchestrator.runtime.hardware import local_profile
+            with console.status("Running the hardware probe...", spinner="dots"):
+                profile = local_profile(disk_path=str(state_dir) if state_dir.is_dir() else None)
+            _write_profile_file(profile, output_file, as_json)
+        except Exception as e:  # a missing or failing Python probe: the script fallback still works
+            console.print(f"[yellow]The Python probe failed ({escape(str(e))}); using the fallback script.[/yellow]")
+            profile = None
+    if profile is None:
+        how = "fallback script"
+        profile = _scan_with_script(output_file)
+        if as_json:
+            _write_profile_file(profile, output_file, True)
+    try:
+        stored = store.save_local(profile)
+    except (OSError, ValueError) as e:
+        console.print(f"[red]The profile was written, but storing it as this computer's profile failed: "
+                      f"{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"[bold green]Probe successful ({how}). Config generated: {escape(str(output_file))}[/bold green]")
+    for line in _profile_summary(profile):
+        console.print(line)
+    if profile.needs_reprobe:
+        console.print("[yellow]This profile lacks facts a build needs; run the probe again before a build.[/yellow]")
+    console.print(f"Stored as this computer's profile: {escape(str(stored))}")
 
 
 # ============================================================================
