@@ -1325,7 +1325,7 @@ class TestMainWindowWiring:
 def test_a_failed_save_of_the_ai_settings_is_reported(qapp, framework, tmp_path, message_boxes):
     dlg = AIConfigurationDialog(framework)
     select_provider(dlg, "anthropic")
-    dlg.cb_model.setCurrentText("claude-opus-5-5")
+    dlg.cb_model.setCurrentText("my-pinned-model")
     dlg.txt_api_key.setText("sk-ant-test-key-0123456789abcdef")
     (tmp_path / "config.yml").write_text("ai_provider: [unclosed\n")  # unreadable: the save leaves it alone
 

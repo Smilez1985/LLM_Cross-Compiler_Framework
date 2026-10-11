@@ -1000,10 +1000,10 @@ Ohne Optionen listet es die Überschreibungen für Quell-Repositorys auf (Einste
 und `--remove` ändern sie und speichern die `config.yml`; lässt sie sich nicht speichern, sagt der Befehl das und
 endet mit Code 1. `--add` speichert einen Eintrag `{url: ...}`; die Build-Engine reicht jeden Eintrag, auch
 einfache URLs aus früheren Versionen, als `<NAME>_REPO_OVERRIDE` an die Stufen-Container weiter (`NAME`: der ganze
-Name in Großbuchstaben, jedes Zeichen außer Buchstaben und Ziffern als `_`, also ergeben `llama.cpp`, `llama_cpp`
-und `llama-cpp` alle `LLAMA_CPP_REPO_OVERRIDE`). Ein Name mit Punkt wird zusätzlich unter dem Namen früherer
-Versionen weitergereicht, seinem Teil nach dem letzten Punkt (`sources.llama_cpp` ergibt auch
-`LLAMA_CPP_REPO_OVERRIDE`).
+Name in Großbuchstaben, jedes Zeichen außer ASCII-Buchstaben und Ziffern als `_`, also ergeben `llama.cpp`,
+`llama_cpp` und `llama-cpp` alle `LLAMA_CPP_REPO_OVERRIDE`). Ein Name mit Punkt wird zusätzlich unter dem Namen
+früherer Versionen weitergereicht, seinem Teil nach dem letzten Punkt (`sources.llama_cpp` ergibt auch
+`LLAMA_CPP_REPO_OVERRIDE`). `--add` lehnt einen Namen ohne ASCII-Buchstaben und Ziffern ab (Exit-Code 2).
 
 | Option | Bedeutung |
 |---|---|
