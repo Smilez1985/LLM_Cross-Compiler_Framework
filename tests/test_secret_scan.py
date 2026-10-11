@@ -10,6 +10,7 @@ import shutil
 import string
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -198,6 +199,170 @@ def test_a_lower_case_key_with_digits_is_still_an_assignment():
     hits = secret_scan.scan_text("f.py", 'client_secret = "' + value + '"')
     assert [h.kind for h in hits] == ["secret assignment"]
     assert value not in helpers.redact_secrets('client_secret = "' + value + '"')
+
+
+# --- Exact formats that GitHub push protection blocks ----------------------------------------------------------
+
+LETTERS = string.ascii_lowercase
+# Values that look fake (the placeholder heuristic skips every one of them) but have a provider's exact token
+# format, which GitHub's push protection blocks anyway. Built at runtime, so this file holds no such literal.
+EXACT_SAMPLES = [
+    ("Hugging Face token", "hf" + "_" + LETTERS + LETTERS.upper()[:8]),  # the value push protection blocked
+    ("Hugging Face token", "api" + "_org_" + LETTERS + LETTERS[:8]),
+    ("GitHub token", "gh" + "p_" + LETTERS + "0123456789"),  # was in tests/test_security.py
+    ("GitHub token", "gh" + "s_" + "x" * 36),
+    ("GitHub token", "github" + "_pat_" + "EXAMPLE" + "x" * 75),
+    ("AWS access key id", "AK" + "IA" + "EXAMPLE" + "X" * 9),
+    ("AWS access key id", "AS" + "IA" + "0" * 16),
+    ("Slack token", "xo" + "xb-" + "1234567890-1234567890-" + LETTERS[:24]),
+    ("Slack token", "xo" + "xp-" + "1234567890-" * 3 + "x" * 32),
+    ("GitLab token", "glp" + "at-" + "x" * 20),
+    ("GitLab token", "glp" + "at-" + "EXAMPLE" + "x" * 20 + "." + "01" + "abcdefg"),  # routable
+    ("Stripe key", "sk" + "_live_" + "EXAMPLE" + "x" * 17),
+    ("Stripe key", "rk" + "_test_" + "1234567890" * 3),
+    ("PyPI token", "pypi" + "-AgEIcHlwaS5vcmc" + "EXAMPLE" + "x" * 70),
+    ("OpenAI key", "sk-" + "proj-" + "x" * 74 + "T3Blbk" + "FJ" + "x" * 74),
+    ("OpenAI key", "sk-" + "svcacct-" + "x" * 58 + "T3Blbk" + "FJ" + "x" * 58),
+    ("OpenAI key", "sk-" + "x" * 20 + "T3Blbk" + "FJ" + "x" * 20),
+    ("Anthropic key", "sk-ant-" + "api03-" + "EXAMPLE" + "x" * 86 + "AA"),
+    ("Anthropic key", "sk-ant-" + "admin01-" + "x" * 93 + "AA"),
+    ("OpenRouter key", "sk-or-" + "v1-" + "0" * 64),
+    ("Groq key", "gs" + "k_" + "x" * 52),
+    ("xAI key", "xa" + "i-" + "EXAMPLE" + "x" * 73),
+    ("Perplexity key", "pp" + "lx-" + "abcdefghij" * 4 + "abcdefgh"),
+    ("Replicate token", "r8" + "_" + "EXAMPLE" + "x" * 30),
+]
+# One character too few or too many, or one the format does not allow: these behave as before the exact formats.
+NEAR_MISSES = [
+    "hf" + "_" + LETTERS + LETTERS.upper()[:7],  # 33 letters
+    "hf" + "_" + LETTERS + LETTERS.upper()[:9],  # 35 letters
+    "hf" + "_" + LETTERS + "ABCD1234",  # digits in a Hugging Face token
+    "hf" + "_" + body(34),  # digits, and no placeholder: reported by the Hugging Face rule
+    "gh" + "p_" + LETTERS + "012345678",
+    "gh" + "p_" + LETTERS + "0123456789a",
+    "gh" + "p_" + body(37),  # reported by the GitHub rule
+    "AK" + "IA" + "0" * 15,
+    "AK" + "IA" + "0" * 17,
+    "xo" + "xb-" + "123456789-1234567890-" + "x" * 24,  # a team id of 9 digits
+    "xo" + "xb-" + body(40),  # reported by the Slack rule
+    "glp" + "at-" + "x" * 21,
+    "sk" + "_live_" + "x" * 19,
+    "pypi" + "-AgEIcHlwaS5vcmc" + "x" * 69,
+    "sk-" + "proj-" + "x" * 74 + "T3Blbk" + "FJ" + "x" * 73,
+    "sk-ant-" + "api03-" + "x" * 92 + "AA",
+    "sk-ant-" + "api03-" + "x" * 93 + "AB",
+    "sk-ant-" + "api03-" + body(95),  # reported by the Anthropic rule
+    "sk-or-" + "v1-" + "0" * 63,
+    "gs" + "k_" + "x" * 53,
+    "pp" + "lx-" + "x" * 47,
+]
+
+
+def test_every_exact_format_has_samples():
+    assert {kind for kind, _ in EXACT_SAMPLES} == {f.name for f in secret_patterns.EXACT_FORMATS}
+    assert secret_scan.EXACT_FORMATS is secret_patterns.EXACT_FORMATS
+
+
+@pytest.mark.parametrize("kind, value", EXACT_SAMPLES)
+def test_an_exact_format_is_reported_although_it_looks_fake(kind, value):
+    line = f'value = "{value}"'
+    assert secret_patterns.find_secrets(line) == [], "the placeholder heuristic alone lets it through"
+    findings = secret_scan.scan_text("f.py", line)
+    assert [(f.kind, f.exact) for f in findings] == [(kind, True)]
+    assert value[8:] not in str(findings[0]) and "GitHub will block the push" in str(findings[0])
+
+
+@pytest.mark.parametrize("kind, value", EXACT_SAMPLES)
+def test_the_marker_does_not_silence_an_exact_format(kind, value):
+    # GitHub does not know the marker, so it cannot excuse such a value.
+    findings = secret_scan.scan_text("f.py", f'value = "{value}"  # {secret_scan.ALLOW_PRAGMA}')
+    assert [(f.kind, f.exact) for f in findings] == [(kind, True)]
+
+
+@pytest.mark.parametrize("kind, value", EXACT_SAMPLES)
+def test_an_exact_format_is_no_redaction_gap(kind, value):
+    # Scan only, but never something runtime redaction misses: the rule of the same name blanks the whole value.
+    rule = next(p for p in secret_patterns.PATTERNS if p.name == kind)
+    assert rule.redact and rule.regex.search(value).group(0) == value
+    assert value not in helpers.redact_secrets(f"request failed: {value}\n")
+
+
+@pytest.mark.parametrize("kind, value", EXACT_SAMPLES)
+def test_a_value_split_into_literals_is_not_reported(kind, value):
+    # How tests write such a value: the same string at runtime, but no exact-format text in the file.
+    adjacent = f'"{value[:3]}" "{value[3:]}"'
+    assert ast.literal_eval(adjacent) == value
+    for source in (f"TOKEN = {adjacent}", f'TOKEN = "{value[:3]}" + "{value[3:]}"'):
+        assert secret_scan.scan_text("f.py", source) == []
+
+
+def test_a_real_looking_value_in_an_exact_format_is_reported_once():
+    value = "gh" + "p_" + body(36)
+    findings = secret_scan.scan_text("f.py", f'token = "{value}"  # Authorization: Bearer {value}')
+    assert [(f.kind, f.exact) for f in findings] == [("GitHub token", True), ("GitHub token", True)]
+    findings = secret_scan.scan_text("f.py", f'token = "{value}"')  # the GitHub rule and the assignment rule match
+    assert [(f.kind, f.exact) for f in findings] == [("GitHub token", True)]
+
+
+@pytest.mark.parametrize("value", NEAR_MISSES)
+def test_near_misses_of_an_exact_format_behave_as_before(value):
+    line = f'value = "{value}"'
+    assert secret_patterns.find_exact_formats(line) == []
+    findings = secret_scan.scan_text("f.py", line)
+    assert [(f.kind, f.exact) for f in findings] == [(kind, False) for kind, _ in secret_patterns.find_secrets(line)]
+    assert secret_scan.scan_text("f.py", f"{line}  # {secret_scan.ALLOW_PRAGMA}") == []
+
+
+@pytest.mark.parametrize("text", ["glp" + "at-" * 20000, "sk-" + "proj-sk-" * 15000, "xo" + "xb-1234567890-" * 8000,
+                                  "sk-ant-" + "api03-sk-ant-" * 8000, "pypi" + "-pypi" * 20000, "AK" + "IA" * 30000])
+def test_exact_formats_stay_fast_on_adversarial_text(text):
+    # The scan reads every line of every commit in CI: never quadratic.
+    start = time.perf_counter()
+    secret_patterns.find_exact_formats(text)
+    assert time.perf_counter() - start < 1.0
+
+
+def test_near_misses_include_values_the_ordinary_rules_report():
+    reported = [v for v in NEAR_MISSES if secret_patterns.find_secrets(f'value = "{v}"')]
+    assert len(reported) == 4 and len(NEAR_MISSES) - len(reported) > 10
+
+
+def test_exact_formats_are_reported_in_staged_tracked_and_push_mode(repo, capsys, monkeypatch):
+    marked = "".join(f'FAKE_{i} = "{value}"  # {secret_scan.ALLOW_PRAGMA}\n'
+                     for i, (_, value) in enumerate(EXACT_SAMPLES))
+    (repo / "test_fakes.py").write_text(marked)
+    git(repo, "add", "test_fakes.py")
+    expected = [(number, kind, True) for number, (kind, _) in enumerate(EXACT_SAMPLES, 1)]
+    assert [(f.line, f.kind, f.exact) for f in secret_scan.scan_staged(repo, [])] == expected
+    assert [(f.line, f.kind, f.exact) for f in secret_scan.scan_tracked(repo, [])] == expected
+
+    assert secret_scan.main(["--repo", str(repo), "--staged"]) == 1
+    err = " ".join(capsys.readouterr().err.split())
+    assert "GitHub push protection will block a push" in err
+    assert f"it ignores the marker '{secret_scan.ALLOW_PRAGMA}': that marker does not silence" in err
+    assert '"hf_" "abc..."' in err and '"hf_" + "abc..."' in err and "does not match the exact format" in err
+    assert "Documented fake values may carry the marker" not in err, "the marker is no way out here"
+    assert secret_scan.main(["--repo", str(repo)]) == 1
+
+    git(repo, "commit", "-qm", "fakes", "--no-verify")
+    head = git(repo, "rev-parse", "HEAD").stdout.strip()
+    monkeypatch.setattr(sys, "stdin", io.StringIO(f"refs/heads/main {head} refs/heads/main {'0' * 40}\n"))
+    assert secret_scan.main(["--repo", str(repo), "--push"]) == 1
+
+    # Split into adjacent literals, the same values pass.
+    split = "".join(f'FAKE_{i} = "{value[:3]}" "{value[3:]}"\n' for i, (_, value) in enumerate(EXACT_SAMPLES))
+    (repo / "test_fakes.py").write_text(split)
+    git(repo, "add", "test_fakes.py")
+    assert secret_scan.main(["--repo", str(repo), "--staged"]) == 0
+    assert secret_scan.main(["--repo", str(repo)]) == 0
+
+
+def test_mixed_findings_show_both_hints(capsys, tmp_path):
+    leak = tmp_path / "mixed.py"
+    leak.write_text(f'A = "{EXACT_SAMPLES[0][1]}"\nB = "{SAMPLES["LocalAI key"]}"\n')
+    assert secret_scan.main(["--repo", str(tmp_path), str(leak)]) == 1
+    err = " ".join(capsys.readouterr().err.split())
+    assert "Documented fake values may carry the marker" in err and "GitHub push protection will block" in err
 
 
 @pytest.mark.parametrize("path,hit", [

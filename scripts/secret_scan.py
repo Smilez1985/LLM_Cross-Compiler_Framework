@@ -17,7 +17,11 @@ Personal strings (your e-mail address, user name, host names) belong in a patter
 committed: .git/info/secret-patterns (one literal per line, or "re:<regex>"; "#" starts a comment), or the
 file named by SECRET_SCAN_PATTERNS_FILE. Findings are printed redacted; local patterns are never echoed.
 
-A line containing "secret-scan: allow" is skipped (use it for documented fake values only).
+A line containing "secret-scan: allow" is skipped (use it for documented fake values only), and so are obvious
+placeholders - except values in the exact format of a token that GitHub push protection blocks (hf_ and 34
+letters, ghp_ and 36 characters, ...; EXACT_FORMATS in the table): GitHub refuses the push however fake such a value
+looks and ignores the marker, so the scan reports them in every mode. Build such a test value at runtime
+("hf_" "abc..." or "hf_" + "abc...") or give it a shape the format does not allow.
 Exit code: 0 clean, 1 findings, 2 usage or git error. Standard library only.
 """
 
@@ -27,6 +31,7 @@ import os
 import re
 import subprocess
 import sys
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Iterator, List, Optional, Sequence, Tuple
@@ -51,7 +56,9 @@ try:
     _patterns = _load_patterns()
     PATTERNS = _patterns.PATTERNS        # the same objects runtime redaction uses
     PLACEHOLDER = _patterns.PLACEHOLDER
+    EXACT_FORMATS = _patterns.EXACT_FORMATS
     find_secrets = _patterns.find_secrets
+    find_exact_formats = _patterns.find_exact_formats
 except Exception as e:  # never scan without the table (missing, mid-merge, broken): the commit would pass unchecked
     print(f"secret-scan: cannot load the pattern table {PATTERN_TABLE}: {type(e).__name__}: {e}", file=sys.stderr)
     sys.exit(2)
@@ -66,16 +73,26 @@ FORBIDDEN_SUFFIXES = (".pem", ".p12", ".pfx", ".jks", ".keystore", ".kdbx", ".pp
 FORBIDDEN_PATH_ALLOW = ("tests/fixtures/",)
 
 
+EXACT_FORMAT_HELP = (
+    "GitHub push protection will block a push that contains a value in a provider's exact token format, even a "
+    "fake one, and it ignores the marker '{pragma}': that marker does not silence these findings either. Build "
+    "such a test value at runtime instead, from adjacent string literals (\"hf_\" \"abc...\") or by concatenation "
+    "(\"hf_\" + \"abc...\"), or use a value that does not match the exact format (another length, or a character "
+    "the format does not allow).").format(pragma=ALLOW_PRAGMA)
+
+
 @dataclass
 class Finding:
     where: str
     line: int
     kind: str
     sample: str
+    exact: bool = False  # in the exact format of a token that GitHub push protection blocks
 
     def __str__(self) -> str:
         loc = f"{self.where}:{self.line}" if self.line else self.where
-        return f"{loc}: {self.kind}" + (f" ({self.sample})" if self.sample else "")
+        what = f"{self.kind} in its exact format: GitHub will block the push" if self.exact else self.kind
+        return f"{loc}: {what}" + (f" ({self.sample})" if self.sample else "")
 
 
 def redact(value: str) -> str:
@@ -111,10 +128,14 @@ def load_local_patterns(repo: Path) -> List["re.Pattern[str]"]:
 def scan_text(where: str, text: str, local: Sequence["re.Pattern[str]"] = ()) -> List[Finding]:
     findings = []
     for number, line in enumerate(text.splitlines(), 1):
+        # Before the marker: GitHub blocks these values whatever the line says.
+        exact = find_exact_formats(line)
+        findings += [Finding(where, number, kind, redact(match), exact=True) for kind, match in exact]
         if ALLOW_PRAGMA in line:
             continue
         for kind, match in find_secrets(line):
-            findings.append(Finding(where, number, kind, redact(match)))
+            if not any(value in match or match in value for _, value in exact):  # each value reported once
+                findings.append(Finding(where, number, kind, redact(match)))
         for i, rx in enumerate(local, 1):
             if rx.search(line):
                 findings.append(Finding(where, number, f"local pattern #{i}", ""))
@@ -274,7 +295,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
           file=sys.stderr)
     for f in findings:
         print(f"  {f}", file=sys.stderr)
-    print(f"Documented fake values may carry the marker '{ALLOW_PRAGMA}' on the same line.", file=sys.stderr)
+    if not all(f.exact for f in findings):
+        print(f"Documented fake values may carry the marker '{ALLOW_PRAGMA}' on the same line.", file=sys.stderr)
+    if any(f.exact for f in findings):
+        print(textwrap.fill(EXACT_FORMAT_HELP, 110), file=sys.stderr)
     return 1
 
 

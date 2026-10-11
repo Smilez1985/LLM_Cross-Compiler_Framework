@@ -283,7 +283,27 @@ GitHub, GitLab, AWS, Google, Groq, xAI und andere), JSON Web Tokens, private Sch
 Passwort. Manche Dateien werden schon am Namen abgelehnt, egal was drinsteht, etwa `.env`, `credentials.json`,
 `secrets.store`, `audit.db`, `known_hosts`, `id_ed25519`, `chat_history.json`, `tool_policy.json` und `*.pem`.
 Offensichtliche Platzhalter (`EXAMPLE`, `REDACTED`, `xxxxxxxx`, `<...>`, Beispiel-Domains) werden ignoriert. Eine
-Zeile mit `secret-scan: allow` wird übersprungen; nutze das nur für dokumentierte Fantasiewerte.
+Zeile mit `secret-scan: allow` wird übersprungen; nutze das nur für dokumentierte Fantasiewerte. Beides gilt nicht
+für die exakten Token-Formate unten.
+
+**Unechte Tokens in Tests und Dokumentation:** Der Push-Schutz von GitHub lehnt einen Push ab, der einen Wert im
+exakten Token-Format eines Anbieters enthält, so unecht der Wert auch aussieht: `hf_` gefolgt von 34 Buchstaben
+(auch das Alphabet), `ghp_` gefolgt von 36 Buchstaben und Ziffern, ein vollständiger Schlüssel
+`sk-ant-api03-...AA` und so weiter. Die Markierung `secret-scan: allow` kennt GitHub nicht. Deshalb meldet der Scan
+solche Werte auch dann, wenn sie wie Platzhalter aussehen, und die Markierung unterdrückt diese Funde nicht; die
+Meldung sagt, dass GitHub den Push blockieren wird. Das gilt in jedem Modus: Auch `--push` und `--history` melden
+ältere Commits, die einen solchen Wert noch enthalten, denn ein Push dieser Commits würde ebenfalls abgelehnt. Die
+Formate stehen in `EXACT_FORMATS` in `orchestrator/security/secret_patterns.py` (Hugging Face, GitHub, AWS, Slack,
+GitLab, Stripe, PyPI, OpenAI, Anthropic, OpenRouter, Groq, xAI, Perplexity, Replicate). Baue einen solchen Testwert
+stattdessen zur Laufzeit zusammen, damit die Datei ihn nie am Stück enthält:
+
+```python
+TOKEN = "hf_" "abcdefghijklmnopqrstuvwxyzABCDEFGH"  # benachbarte String-Literale: zur Laufzeit ein String
+TOKEN = "hf_" + "x" * 34                            # oder Verkettung
+```
+
+Oder nimm einen Wert, der nicht zum exakten Format passt: eine andere Länge oder ein Zeichen, das das Format nicht
+erlaubt (eine Ziffer in einem Hugging-Face-Token). In der Dokumentation kürze den Wert (`hf_...`).
 
 **Persönliche Zeichenfolgen** wie deine E-Mail-Adresse, dein Benutzername oder Hostnamen gehören ebenfalls nicht ins
 Repository, können aber nicht in einer öffentlichen Musterliste stehen. Trage sie in `.git/info/secret-patterns`

@@ -289,7 +289,7 @@ class TestSecretRedaction:
         ("sk-" + "a1B2c3D4e5F6g7H8i9J0" * 2 + "k1L2m3N4", "sk-REDACTED"),   # legacy 48-char OpenAI key
         ("hf_aBcDeFgHiJkLmNoPqRsTuVwXyZ123456", "hf_REDACTED"),
         ("AIzaSyA1234567890abcdefghijklmnopqrstuv", "AIza-REDACTED"),
-        ("ghp_abcdefghijklmnopqrstuvwxyz0123456789", "gh-REDACTED"),
+        ("ghp_" "abcdefghijklmnopqrstuvwxyz0123456789", "gh-REDACTED"),  # split: GitHub blocks the exact format
     ])
     def test_known_key_formats_are_redacted(self, secret, marker):
         text = f"Traceback ... api_key={secret} failed"

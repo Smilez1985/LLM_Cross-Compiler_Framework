@@ -1130,8 +1130,9 @@ For the community repository, not for users:
 The repository protects itself against committed credentials. `scripts/secret_scan.py` (standard library only)
 recognizes provider API keys, tokens, private keys, certificates and credential files. It runs as a pre-commit and
 pre-push hook (`make hooks`) and as a CI job over the whole history. Personal strings such as your e-mail address
-or user name go into `.git/info/secret-patterns`, which is never committed. Findings are printed redacted. Details:
-[CONTRIBUTING.md](../CONTRIBUTING.md).
+or user name go into `.git/info/secret-patterns`, which is never committed. Findings are printed redacted. A value
+in a provider's exact token format is reported even when it looks fake, because GitHub's push protection would
+refuse the push anyway. Details: [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ---
 
