@@ -148,7 +148,8 @@ class CrawlWorker(QThread):
                     chunks += result.get("count", 0)
                     self.progress.emit(f"  -> {result.get('message')}")
         except Exception as e:
-            self._announce(ui_text("crawl.done.failure", self.lang))
+            # Pages of earlier sites are stored: say so instead of "nothing was stored".
+            self._announce(self.summary(outcomes + ["failure"], pages, chunks, stopped)[1])
             self.error.emit(str(e))
             return
         outcome, message = self.summary(outcomes, pages, chunks, stopped)
