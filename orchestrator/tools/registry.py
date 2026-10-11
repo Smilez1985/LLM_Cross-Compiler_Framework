@@ -17,6 +17,7 @@ from pydantic import BaseModel, ValidationError
 
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.confirmation import CallTooLong, describe_call
+from orchestrator.tools.output import ResultTooLarge, check_size, filtered_result
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -62,6 +63,11 @@ class ToolSpec:
     handler: Callable[[BaseModel], BaseModel]
     idempotent: bool = False
     open_world: bool = False  # talks to services outside this computer
+    # Framework notes for a result (e.g. "nothing found, the source is reachable"); built from framework facts only.
+    notes: Optional[Callable[[BaseModel], List[str]]] = None
+    # The one-sentence summary of a result for the MCP text block; built from framework facts only (output.fact).
+    summary: Optional[Callable[[BaseModel], str]] = None
+    paging_hint: str = ""  # how to ask for less when a result is too large
 
     def annotations(self) -> Dict[str, Any]:
         """MCP tool annotations (hints for clients; the registry enforces the policy itself)."""
@@ -241,11 +247,10 @@ class ToolRegistry:
                         **confirmation)
 
         try:
-            result = spec.handler(inp)
-            if isinstance(result, dict):
-                result = spec.output_model.model_validate(result)
-            if not isinstance(result, spec.output_model):
-                raise TypeError(f"handler returned {type(result).__name__}, expected {spec.output_model.__name__}")
+            result = self._output(spec, spec.handler(inp))
+        except ResultTooLarge as e:
+            end("error", str(e))
+            raise ToolError(f"{spec.title}: {e}") from None
         except ToolError as e:
             message = redact_secrets(str(e))
             end("error", message)
@@ -268,4 +273,20 @@ class ToolRegistry:
             raise
         serialized = result.model_dump_json()
         end("ok", result={"sha256": text_sha256(serialized), "bytes": len(serialized.encode("utf-8"))})
+        return result
+
+    def _output(self, spec: ToolSpec, result: Any) -> BaseModel:
+        """The handler's result as the tool's output model, filtered (secrets redacted, external text cleaned
+        and capped), with the framework's notes, within the size limit (ResultTooLarge)."""
+        model = spec.output_model
+        if isinstance(result, dict):
+            result = model.model_validate(result)
+        elif (isinstance(result, BaseModel) and not isinstance(result, model)
+              and issubclass(model, type(result))):  # e.g. BuildStatusOut for its tool model with notes
+            result = model.model_validate(result.model_dump())
+        if not isinstance(result, model):
+            raise TypeError(f"handler returned {type(result).__name__}, expected {model.__name__}")
+        notes = list(spec.notes(result)) if spec.notes is not None else []
+        result = filtered_result(result, notes)
+        check_size(result, spec.paging_hint)
         return result
