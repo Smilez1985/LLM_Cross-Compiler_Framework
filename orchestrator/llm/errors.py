@@ -173,8 +173,9 @@ status_error = _status_error  # the generic class and message for an HTTP status
 
 def _known_cause(err: Any, detail: str, label: str, kw: dict, generic: LLMError, *, preset: Any, base_url: Any,
                  profile: Optional[str] = None, error_type: Optional[str] = None, error_code: Optional[str] = None,
-                 retry_after: Optional[float] = None) -> LLMError:
-    """The generic error, or an AuthError with code and actions when the answer has a known cause."""
+                 retry_after: Optional[float] = None, during: str = "request") -> LLMError:
+    """The generic error, or an AuthError with code and actions when the answer has a known cause. `during` is
+    "models" for a model list (a 403 there means the key works but may not list models)."""
     if preset is None:
         return generic
     from orchestrator.llm.auth.errors import auth_error, classify, engine_name
@@ -182,8 +183,8 @@ def _known_cause(err: Any, detail: str, label: str, kw: dict, generic: LLMError,
         body = err.response.json()  # the whole answer: the SDKs keep only its "error" part as err.body
     except Exception:
         body = getattr(err, "body", None)
-    found = classify(preset, err.status_code, detail, body, headers=err.response.headers,
-                     base_url=base_url, profile=profile is not None, error_type=error_type, error_code=error_code)
+    found = classify(preset, err.status_code, detail, body, headers=err.response.headers, base_url=base_url,
+                     profile=profile is not None, error_type=error_type, error_code=error_code, during=during)
     if found is None:
         return generic
     code, values = found
@@ -243,9 +244,10 @@ _CLAUDE = _ClaudeAPI()
 
 
 def map_openai_error(err: BaseException, label: str = "OpenAI-compatible server", provider: str = "", *,
-                     preset: Any = None, base_url: Optional[str] = None) -> LLMError:
+                     preset: Any = None, base_url: Optional[str] = None, during: str = "request") -> LLMError:
     """Maps openai SDK exceptions, most specific class first. With `preset`, answers with a known cause become
-    AuthErrors (code, plain message, actions), and a local server that is not running says so."""
+    AuthErrors (code, plain message, actions), and a local server that is not running says so. `during` is
+    "models" for the model list."""
     import openai
 
     if isinstance(err, LLMError):
@@ -267,5 +269,5 @@ def map_openai_error(err: BaseException, label: str = "OpenAI-compatible server"
         detail = _detail(err)
         generic = _status_error(err.status_code, detail, label, retry_after=retry_after, code=code, kw=kw)
         return _known_cause(err, detail, label, kw, generic, preset=preset, base_url=base_url, error_code=code,
-                            retry_after=retry_after)
+                            retry_after=retry_after, during=during)
     return LLMError(f"{label} request failed: {redact_secrets(str(err))[:300]}", **kw)

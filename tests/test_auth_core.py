@@ -873,3 +873,160 @@ def test_validate_spec_defaults():
     assert ValidateSpec(path="/models").models_field == "data"
     assert AuthMethodSpec(id="k", type="api_key").label == "API key"
     assert AuthMethodSpec(id="k", type="none", label="Own").label == "Own"
+
+
+# ======================================================================================================
+# Attacks on the auth core: reads without side effects, no silent switch to another key, origin binding
+# ======================================================================================================
+
+def studio_with_env(**extra):
+    """A local engine with a documented key variable (a user catalog may declare one)."""
+    return ProviderPreset(id="studio", label="Studio (local)", adapter="openai_compat", location="local",
+                          base_url="http://127.0.0.1:1234/v1", base_url_configurable=True, auth=[
+                              {"id": "token", "type": "bearer_optional", "env": ["STUDIO_API_TOKEN"], **extra}])
+
+
+def locked_keyring(monkeypatch, memory_keyring):
+    def locked(*args):
+        raise RuntimeError("locked")
+
+    monkeypatch.setattr(memory_keyring, "get_password", locked)
+    monkeypatch.setattr(memory_keyring, "set_password", locked)
+    from orchestrator.Core import vault_key
+    vault_key.reset_probe()
+
+
+class TestAttacks:
+
+    def test_asking_where_a_key_comes_from_never_moves_it(self, store, vault, catalog):
+        # The AI dialog asks for the address typed so far; a key of an earlier version must not be bound to it.
+        custom = catalog.get("custom")
+        spec = custom.method("api_key")
+        assert vault.set_secret("custom_api_key", LOCAL_KEY)
+        assert store.key_source(custom, spec, "http://192.168.1.2/v1") == "vault"
+        assert vault.list_secrets() == ["cred/custom/api_key"] and store.all_metadata() == {}
+        found = store.find_secret(custom, spec, "http://192.168.1.20:8000/v1")  # the first real use binds it
+        assert found.value.get_secret_value() == LOCAL_KEY
+        assert vault.list_secrets() == [credential_name("custom", "api_key", "http://192.168.1.20:8000")]
+
+    def test_an_unusable_vault_is_reported_and_never_replaced_by_the_environment(self, tmp_path, memory_keyring,
+                                                                               catalog, monkeypatch):
+        anthropic = catalog.get("anthropic")
+        first = SecretsManager(tmp_path / "state")
+        assert first.initialize()
+        CredentialStore(first).save_api_key(anthropic, anthropic.method("api_key"), CLAUDE_KEY)
+        other_account = "sk-ant-" + "api03-" + "E" * 40
+        locked_keyring(monkeypatch, memory_keyring)
+        store = CredentialStore(SecretsManager(tmp_path / "state"), environ={"ANTHROPIC_API_KEY": other_account})
+        resolver = CredentialResolver(store)
+        assert store.find_secret(anthropic, anthropic.method("api_key")) is None
+        for attempt in (lambda: resolver.select(anthropic), lambda: resolver.resolve(anthropic, "api_key")):
+            with pytest.raises(AuthError) as info:
+                attempt()
+            assert info.value.code == "storage.keyring_unavailable" and info.value.exit_code == 5
+            assert isinstance(info.value, NotConfigured) and other_account not in str(info.value)
+        # The chat path sends nothing.
+        http = FakeHTTP()
+        client = client_for(tmp_path, http, store.secrets, ai_provider="anthropic")
+        client.credentials.environ = {"ANTHROPIC_API_KEY": other_account}
+        with pytest.raises(AuthError) as info:
+            client.chat(ask())
+        assert info.value.code == "storage.keyring_unavailable" and http.requests == []
+        # A provider that also works without a key keeps working.
+        assert resolver.select(catalog.get("custom"), base_url="http://127.0.0.1:1/v1").id == "none"
+
+    def test_a_damaged_vault_is_reported_too(self, tmp_path, memory_keyring, catalog):
+        damaged = tmp_path / "damaged"
+        damaged.mkdir()
+        (damaged / "secrets.store").write_text("{not json", encoding="utf-8")
+        anthropic = catalog.get("anthropic")
+        store = CredentialStore(SecretsManager(damaged), environ={"ANTHROPIC_API_KEY": CLAUDE_KEY})
+        with pytest.raises(AuthError) as info:
+            CredentialResolver(store).resolve(anthropic, "api_key")
+        assert info.value.code == "storage.vault_unreadable"
+
+    def test_an_environment_key_of_a_bound_method_goes_only_to_the_presets_own_address(self, vault):
+        studio = studio_with_env()
+        spec = studio.method("token")
+        store = CredentialStore(vault, environ={"STUDIO_API_TOKEN": LOCAL_KEY})
+        assert store.find_secret(studio, spec, "http://127.0.0.1:1234/other").source == "env:STUDIO_API_TOKEN"
+        for other in ("http://203.0.113.7:1234/v1", "http://127.0.0.1:4321/v1", None):
+            assert store.find_secret(studio, spec, other) is None, other
+        assert CredentialResolver(store).resolve(studio, "token", "http://203.0.113.7:1234/v1").kind == "none"
+
+    def test_fields_of_a_key_bound_to_an_address_are_used(self, store):
+        preset = ProviderPreset(id="gateway", label="Gateway", adapter="openai_compat", base_url_configurable=True,
+                                location="auto", auth=[{
+                                    "id": "api_key", "type": "api_key",
+                                    "fields": [{"id": "project", "label": "project", "pattern": "^[a-z0-9-]+$",
+                                                "header": "X-Project", "required": True}]}])
+        url = "http://10.1.1.1:8000/v1"
+        store.save_api_key(preset, preset.method("api_key"), LOCAL_KEY, base_url=url, fields={"project": "team-1"})
+        cred = CredentialResolver(store).resolve(preset, "api_key", url)
+        assert cred.headers == {"X-Project": "team-1"} and cred.project == "team-1"
+
+    def test_signing_out_also_removes_a_key_of_an_earlier_version(self, store, vault, catalog):
+        custom = catalog.get("custom")
+        spec = custom.method("api_key")
+        assert vault.set_secret("custom_api_key", LOCAL_KEY)
+        assert store.delete_key(custom, spec, "http://127.0.0.1:8080/v1") is True
+        assert store.find_secret(custom, spec, "http://127.0.0.1:8080/v1") is None and vault.list_secrets() == []
+
+    def test_a_failing_refresh_never_shows_the_vendors_text(self, store, vault):
+        seed_oauth(store, expires_at=int(time.time()) - 10)
+        leaked = "refresh-1 " + OPENAI_KEY
+
+        def refresher(record):
+            raise RuntimeError(f"token endpoint said: {leaked}")
+
+        with pytest.raises(AuthError) as info:
+            TokenProvider(store, "demo", "oauth", refresher).get()
+        assert info.value.code == "auth.refresh_failed" and info.value.__cause__ is None
+        assert OPENAI_KEY not in str(info.value) and "refresh-1" not in str(info.value)
+        assert "RuntimeError" in str(info.value) and info.value.exit_code == 4
+        assert vault.get_record("cred/demo/oauth")["refresh_token"] == "refresh-1"  # left as it was
+        assert not store.is_signed_out("demo", "oauth")
+        # A refused refresh token quoted by the vendor is not shown either (no common key format to redact).
+        opaque = "rt" + "9" * 30
+        seed_oauth(store, expires_at=int(time.time()) - 10, refresh_token=opaque)
+
+        def rejecting(record):
+            raise RefreshRejected("invalid_grant", detail=f"Refresh token {opaque} was already used")
+
+        with pytest.raises(AuthError) as info:
+            TokenProvider(store, "demo", "oauth", rejecting).get()
+        assert info.value.code == "auth.signed_out" and opaque not in str(info.value)
+        assert "already used" in str(info.value)
+
+    @pytest.mark.parametrize("header", ["Authorization", "x-api-key", "Api-Key", "x-goog-api-key", "Cookie",
+                                        "Proxy-Authorization"])
+    def test_a_field_cannot_take_the_place_of_the_key(self, header):
+        with pytest.raises(ValueError, match="credential header"):
+            ProviderPreset(id="x", label="X", adapter="anthropic", base_url="https://gw.example", auth=[
+                {"id": "api_key", "type": "api_key", "fields": [{"id": "w", "label": "W", "header": header}]}])
+
+    def test_the_check_never_sends_a_bound_key_to_another_address(self):
+        studio = studio_with_env(validate={"url": "https://collector.example/check"})
+        cred = ResolvedCredential(kind="api_key", method="token", type="bearer_optional", api_key=LOCAL_KEY,
+                                  source="vault", origin="http://127.0.0.1:1234")
+        http = FakeHTTP().add(MODELS)
+        result = validate_credential(studio, studio.method("token"), cred, studio.base_url, http_client=http.client())
+        assert not result.ok and http.requests == [] and result.error.code == "auth.origin_mismatch"
+        plain = studio_with_env()
+        result = validate_credential(plain, plain.method("token"), cred, "http://198.51.100.4:1234/v1",
+                                     http_client=http.client())
+        assert not result.ok and http.requests == [] and "127.0.0.1:1234" in result.message
+        assert LOCAL_KEY not in result.message
+
+    def test_the_live_model_list_says_when_a_key_may_not_list_models(self, tmp_path, vault, catalog):
+        openai = catalog.get("openai")
+        CredentialStore(vault).save_api_key(openai, openai.method("api_key"), OPENAI_KEY)
+        http = FakeHTTP().add({"error": {"message": "Missing scopes: api.model.read"}}, status=403)
+        with pytest.raises(PermissionDenied) as info:
+            client_for(tmp_path, http, vault, ai_provider="openai").list_models()
+        assert info.value.code == "openai.no_model_list" and "Type a model id" in str(info.value)
+
+    def test_a_user_catalog_of_an_unknown_schema_version_is_refused(self, tmp_path):
+        (tmp_path / "llm_providers.yml").write_text("version: 3\nproviders: {}\n", encoding="utf-8")
+        with pytest.raises(ValueError, match="schema version"):
+            load_catalog(user_dir=tmp_path)

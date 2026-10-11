@@ -298,6 +298,25 @@ class TestAIConfigurationDialog:
         dlg2._apply_enabled_state()
         assert "Stored" not in dlg2.txt_api_key.placeholderText()
 
+    def test_the_key_hint_never_moves_a_key_to_an_address_being_typed(self, qapp, tmp_path, memory_keyring,
+                                                                       message_boxes):
+        from orchestrator.Core.secrets_manager import SecretsManager
+        vault = SecretsManager(tmp_path / "state")
+        assert vault.initialize(), vault.storage_error
+        assert vault.set_secret("custom_api_key", "custom-" + "secret-0123456789")  # saved by an earlier version
+        dlg = AIConfigurationDialog(FakeFramework(ConfigManager(tmp_path), vault))
+        select_provider(dlg, "custom")
+        dlg.txt_base_url.setText("http://192.168.1.2")  # half typed
+        dlg.chk_offline.setChecked(True)  # updates the hint for the address typed so far
+        assert "Stored" in dlg.txt_api_key.placeholderText()
+        dlg.reject()
+        assert vault.list_secrets() == ["cred/custom/api_key"]  # still waiting for the address it is used with
+
+    def test_the_unsaved_key_overlay_reports_an_unusable_vault(self):
+        broken = SimpleNamespace(storage_error=RuntimeError("locked"), load_error=None, get_secret=lambda key: None)
+        overlay = dialogs._SecretsOverlay(broken, "anthropic_api_key", "")
+        assert overlay.storage_error is broken.storage_error and overlay.load_error is None
+
     def test_invalid_base_url_is_rejected(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "ollama")

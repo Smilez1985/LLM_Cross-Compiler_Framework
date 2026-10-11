@@ -25,15 +25,16 @@
 #   key_page        where the user creates and revokes the key
 #   env             documented environment variables used when no key is stored (shown as the key's source)
 #   reject_prefixes key kinds refused before any request (admin keys cannot be used for chat)
-#   fields          non-secret values: id, label, pattern (full match), header (sent with the key), setting
-#                   (a setting that holds the value too and wins while set), invalid_code (error code)
+#   fields          non-secret values: id, label, pattern (full match), header (sent with the key; never a
+#                   credential header such as Authorization or x-api-key), setting (a setting that holds the
+#                   value too and wins while set), invalid_code (error code)
 #   validate        the zero-cost GET behind "Check": path (below base_url) or url, account_field or
 #                   account_header (names the account), models_field (counted), public (answers without a key)
 #   opt_in          never picked automatically (an `ant auth login` profile always is opt-in)
 #   cli             install (URL) and login/logout (argv) of the vendor CLI
 #   sources         primary sources of the method's facts
 # Keys of presets whose base URL can be changed (and of bearer_optional methods) are bound to that address:
-# changing the base URL never carries a key over.
+# changing the base URL never carries a key over, and their env variables apply only at the preset's base_url.
 
 version: 2
 

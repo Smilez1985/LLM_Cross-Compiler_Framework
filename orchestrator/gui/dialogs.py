@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QDialogButtonBox, QMessageBox, QComboBox, QPushButton, QSizePolicy,
-    QWidget, QFormLayout, QTextEdit, QSpinBox,
+    QFormLayout, QTextEdit, QSpinBox,
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PySide6.QtCore import QObject, Qt, Signal
@@ -210,6 +210,15 @@ class _SecretsOverlay:
         if self._value and key == self._name:
             return self._value
         return self._base.get_secret(key) if self._base is not None else None
+
+    # A vault that cannot be read is reported, never replaced by an environment variable (CredentialStore).
+    @property
+    def storage_error(self):
+        return getattr(self._base, "storage_error", None)
+
+    @property
+    def load_error(self):
+        return getattr(self._base, "load_error", None)
 
 
 def list_provider_models(config: Any, secrets: Any, provider: str) -> List[str]:

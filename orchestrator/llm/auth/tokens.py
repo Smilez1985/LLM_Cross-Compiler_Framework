@@ -15,14 +15,15 @@ get():
 
 A refresher raises RefreshRejected when the token endpoint refuses the refresh token (invalid_grant and the
 vendor's codes for a dead grant): the credential is marked signed out, without a retry loop. Any other error
-(network) leaves the record as it is. The vendor modules (later packages) provide the refreshers.
+(network) leaves the record as it is and becomes auth.refresh_failed, which names only the kind of failure. The
+vendor modules (later packages) provide the refreshers.
 """
 
 import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Optional
 
-from orchestrator.llm.auth.errors import auth_error
+from orchestrator.llm.auth.errors import AuthError, auth_error
 from orchestrator.utils.file_lock import LockTimeout
 
 REFRESH_SKEW = 300.0  # refresh when less than 5 minutes remain
@@ -52,6 +53,15 @@ def _number(value: Any) -> Optional[float]:
 
 def _iso(epoch: Optional[float]) -> Optional[str]:
     return datetime.fromtimestamp(epoch, timezone.utc).isoformat(timespec="seconds") if epoch is not None else None
+
+
+def _scrub(text: str, record: Dict[str, Any]) -> str:
+    """The vendor's text without the record's own tokens (redact_secrets knows only the common key formats)."""
+    for name in ("access_token", "refresh_token", "id_token"):
+        value = record.get(name)
+        if isinstance(value, str) and len(value) >= 8:
+            text = text.replace(value, "<redacted>")
+    return text
 
 
 def needs_refresh(record: Dict[str, Any], now: float, skew: float = REFRESH_SKEW) -> bool:
@@ -127,9 +137,15 @@ class TokenProvider:
             fresh = self.refresher(dict(record))
         except RefreshRejected as e:
             self.store.mark_signed_out(self.provider, self.method, self.origin, reason=e.error)
-            raise self._error(e.code or "auth.signed_out", detail=e.detail or None) from None
+            raise self._error(e.code or "auth.signed_out", detail=_scrub(e.detail, record) or None) from None
+        except AuthError:
+            raise
+        except Exception as e:
+            # A network or vendor failure: the record stays as it is. Its text may quote the request (tokens), so
+            # only the kind of failure is shown.
+            raise self._error("auth.refresh_failed", reason=f" ({type(e).__name__})") from None
         if not isinstance(fresh, dict) or not isinstance(fresh.get("access_token"), str) or not fresh["access_token"]:
-            raise self._error("auth.refresh_failed")
+            raise self._error("auth.refresh_failed", reason=" (the answer had no token)")
         new = {**record, **{k: v for k, v in fresh.items() if v is not None and k != "expires_in"}, "kind": "oauth"}
         if not fresh.get("refresh_token"):
             new["refresh_token"] = record["refresh_token"]  # not rotated: the old one stays valid

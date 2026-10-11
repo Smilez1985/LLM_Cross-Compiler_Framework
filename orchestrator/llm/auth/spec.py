@@ -36,7 +36,11 @@ CLAUDE_ADMIN_PREFIX = "sk-ant-admin01-"  # Admin API keys never work for chat (R
 # Metadata keys the store writes itself; a field must not use one of them as its id.
 RESERVED_METADATA = frozenset({
     "origin", "account_label", "last4", "scopes", "created_at", "validated_at", "expires_at", "issued_client_id",
-    "source", "state", "signed_out_at", "signed_out_reason", "method", "type", "kind"})
+    "source", "state", "signed_out_at", "signed_out_reason", "refreshed_at", "method", "type", "kind"})
+
+# Headers that carry the credential itself: a non-secret field (stored in plain text) must never replace the key.
+CREDENTIAL_HEADERS = frozenset({"authorization", "proxy-authorization", "x-api-key", "api-key", "x-goog-api-key",
+                                "cookie"})
 
 _METHOD_ID = r"^[a-z0-9][a-z0-9_.-]{0,63}$"  # one segment of cred/<provider>/<method>
 _ENV_NAME = re.compile(r"^[A-Z][A-Z0-9_]{1,63}$")
@@ -84,6 +88,8 @@ class FieldSpec(BaseModel):
     def _header_name(cls, value: Optional[str]) -> Optional[str]:
         if value is not None and not _HEADER_NAME.match(value):
             raise ValueError(f"not a header name: {value!r}")
+        if value is not None and value.lower() in CREDENTIAL_HEADERS:
+            raise ValueError(f"{value!r} is a credential header: a non-secret field must not replace the key")
         return value
 
     def matches(self, value: str) -> bool:

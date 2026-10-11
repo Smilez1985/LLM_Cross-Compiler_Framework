@@ -136,6 +136,11 @@ def validate_credential(preset: Any, spec: AuthMethodSpec, credential: Any, base
         result.error = NotConfigured(f"{preset.label}: no server URL is set.", provider=preset.id)
         return result
     result.checked = f"GET {display_origin(url)}{urlsplit(url).path}"
+    if key and credential.origin and display_origin(url) != credential.origin:
+        # A key bound to one server (R6) is checked there only: never at an absolute validate URL or another base.
+        result.error = auth_error("auth.origin_mismatch", provider=preset.id, provider_label=preset.label,
+                                  origin=credential.origin, url=display_origin(url) or "another address")
+        return result
     headers = {"Accept": "application/json", **preset.headers}
     if preset.adapter == "anthropic":
         headers["anthropic-version"] = ANTHROPIC_VERSION

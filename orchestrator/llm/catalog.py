@@ -5,7 +5,7 @@ of a preset are AuthMethodSpecs (orchestrator/llm/auth/spec.py)."""
 import ipaddress
 import re
 from pathlib import Path
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
 import yaml
@@ -218,18 +218,22 @@ def _read(path: Path) -> dict:
     return data
 
 
+def _check_version(data: dict, path: Any) -> dict:
+    if data.get("version", 1) not in SCHEMA_VERSIONS:
+        raise ValueError(f"{path}: schema version {data.get('version')!r} is not supported "
+                         f"(known: {', '.join(map(str, SCHEMA_VERSIONS))})")
+    return data
+
+
 def load_catalog(path: Optional[Path] = None, user_dir: Optional[Path] = None) -> Catalog:
     """Loads the bundled presets; a llm_providers.yml in `user_dir` adds or replaces presets by id."""
-    data = _read(Path(path) if path else DEFAULT_CATALOG)
-    if data.get("version", 1) not in SCHEMA_VERSIONS:
-        raise ValueError(f"llm_providers.yml: schema version {data.get('version')!r} is not supported "
-                         f"(known: {', '.join(map(str, SCHEMA_VERSIONS))})")
+    data = _check_version(_read(Path(path) if path else DEFAULT_CATALOG), path or DEFAULT_CATALOG)
     providers = dict(data.get("providers") or {})
     aliases = dict(data.get("aliases") or {})
     if user_dir is not None:
         override = Path(user_dir) / CATALOG_FILENAME
         if override.is_file() and override.resolve() != (Path(path) if path else DEFAULT_CATALOG).resolve():
-            extra = _read(override)
+            extra = _check_version(_read(override), override)  # a newer framework's file is not guessed at
             providers.update(extra.get("providers") or {})
             aliases.update(extra.get("aliases") or {})
     presets: Dict[str, ProviderPreset] = {}

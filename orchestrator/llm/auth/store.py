@@ -11,8 +11,10 @@ CredentialStore: the providers' credentials on top of the credential vault (Secr
   for (R6): cred/<provider>/<method>@<origin-hash>. Changing the base URL never carries it over. A key stored
   without an origin (earlier versions, `llm-cli secrets set custom_api_key`) is bound to the origin it is first
   used with, and is not used when it cannot be bound.
-- Environment variables are a source only as the catalog lists them (method `env`), only when nothing is stored,
-  and always reported as their source (R8). Nothing here writes them to the vault.
+- Environment variables are a source only as the catalog lists them (method `env`), only when nothing is stored
+  and the vault can be read (a variable never stands in for a key the vault cannot show), for a method that binds
+  keys only at the preset's own address, and always reported as their source (R8). Nothing here writes them to
+  the vault.
 """
 
 import json
@@ -127,15 +129,21 @@ class CredentialStore:
             return None
         return value.strip() if isinstance(value, str) and value.strip() else None
 
-    def _failure(self, provider: str) -> AuthError:
+    def storage_problem(self, provider: str = "") -> Optional[AuthError]:
+        """Why the vault cannot be used (no usable keyring, a damaged file), None while it works. A key may be
+        stored there, so nothing else (an environment variable) stands in for it."""
         error = getattr(self.secrets, "storage_error", None)
         if error is not None:
             return storage_error(error, provider)
         unreadable = getattr(self.secrets, "load_error", None)
         if isinstance(unreadable, str) and unreadable:
             return auth_error("storage.vault_unreadable", detail=unreadable, provider=provider)
-        return auth_error("storage.write_failed", provider=provider,
-                          message="The credential could not be stored in the vault (the log says why).")
+        return None
+
+    def _failure(self, provider: str) -> AuthError:
+        return self.storage_problem(provider) or auth_error(
+            "storage.write_failed", provider=provider,
+            message="The credential could not be stored in the vault (the log says why).")
 
     # --- metadata (auth.json) -------------------------------------------------------------------------------
     def metadata_path(self) -> Optional[Path]:
@@ -342,25 +350,42 @@ class CredentialStore:
         self.logger.info(f"{preset.label}: the stored key now belongs to {origin} only.")
         return True
 
-    def find_secret(self, preset: Any, spec: AuthMethodSpec, base_url: Optional[str] = None) -> Optional[FoundSecret]:
+    def find_secret(self, preset: Any, spec: AuthMethodSpec, base_url: Optional[str] = None, *,
+                    adopt: bool = True) -> Optional[FoundSecret]:
         """The key for `spec`: from the vault (bound to the origin of `base_url` where the method binds keys),
-        else from the first variable of the method's `env` list that is set. None when there is none."""
+        else from the first variable of the method's `env` list that is set. None when there is none.
+        `adopt=False` only looks: a key stored without an origin is not bound to `base_url` yet."""
         if spec.type not in KEY_TYPES:
             return None
         try:
-            found = self._stored(preset, spec, base_url)
+            found = self._stored(preset, spec, base_url, adopt)
         except AuthError as e:
             self._warn_once(f"name:{preset.id}", str(e))
             found = None
         if found is not None:
             return found
+        if not spec.env:
+            return None
+        if self.storage_problem(preset.id) is not None:
+            # The stored key cannot be read: a variable (perhaps another account's key) never replaces it.
+            self._warn_once(f"env:{preset.id}", f"{preset.label}: the credential vault cannot be read, so "
+                                                f"{' and '.join(spec.env)} are not used instead.")
+            return None
+        if spec.binds_origin(preset) and not self._own_origin(preset, base_url):
+            return None  # a variable belongs to the preset's own address, never to one typed later (R6)
         for variable in spec.env:
             value = (self.environ.get(variable) or "").strip()
             if value:
                 return FoundSecret(SecretStr(value), f"env:{variable}", variable)
         return None
 
-    def _stored(self, preset: Any, spec: AuthMethodSpec, base_url: Optional[str]) -> Optional[FoundSecret]:
+    @staticmethod
+    def _own_origin(preset: Any, base_url: Optional[str]) -> bool:
+        own = display_origin(getattr(preset, "base_url", None))
+        return bool(own) and display_origin(base_url) == own
+
+    def _stored(self, preset: Any, spec: AuthMethodSpec, base_url: Optional[str],
+                adopt: bool = True) -> Optional[FoundSecret]:
         if spec.binds_origin(preset):
             origin = self._origin(preset, base_url)
             if origin:
@@ -368,6 +393,8 @@ class CredentialStore:
                     value = self._read_secret(name)
                     if not value:
                         continue
+                    if not adopt:  # it would be bound to this origin when it is used
+                        return FoundSecret(SecretStr(value), "vault", name)
                     if self._adopt(preset, spec, value, origin):
                         return FoundSecret(SecretStr(value), "vault", vault_name(preset.id, spec.id, origin))
                     if not self.records_supported:  # a read-only stand-in cannot bind it: used as it is
@@ -439,19 +466,21 @@ class CredentialStore:
         return self.metadata(preset.id, spec.id, origin)
 
     def key_source(self, preset: Any, spec: AuthMethodSpec, base_url: Optional[str] = None) -> Optional[str]:
-        """Where the key of `spec` would come from ("vault", "env:NAME") without revealing it; None for none."""
-        found = self.find_secret(preset, spec, base_url)
+        """Where the key of `spec` would come from ("vault", "env:NAME") without revealing it; None for none.
+        Only looks: nothing is moved or written (the AI dialog asks for the address typed so far)."""
+        found = self.find_secret(preset, spec, base_url, adopt=False)
         return found.source if found else None
 
     def delete_key(self, preset: Any, spec: AuthMethodSpec, base_url: Optional[str] = None) -> bool:
-        """Signs out locally: deletes the stored key (for the origin of `base_url` where keys are bound) and its
-        metadata. True when something was deleted. A key in an environment variable stays where it is."""
+        """Signs out locally: deletes the stored key (for the origin of `base_url` where keys are bound, and a key
+        of an earlier version that would be bound to it on its next use) and its metadata. True when something
+        was deleted. A key in an environment variable stays where it is."""
         deleter = getattr(self.secrets, "delete_secret", None)
         if not callable(deleter):
             return False
         if spec.binds_origin(preset):
             origin = self._origin(preset, base_url or preset.base_url)
-            names = [vault_name(preset.id, spec.id, origin)] if origin else []
+            names = [vault_name(preset.id, spec.id, origin), *self._unbound_names(preset, spec)] if origin else []
         else:
             origin, names = None, self._unbound_names(preset, spec)
         deleted = False

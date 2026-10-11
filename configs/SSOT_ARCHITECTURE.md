@@ -80,10 +80,10 @@ Fields of a sign-in method (`auth` entry):
 |---|---|
 | `id`, `type`, `label` | Id (lower case; the setting `ai_auth_<provider>` names it), type and the name on its card. Types: `none`, `bearer_optional` (a local engine whose key is optional), `api_key`, `cli_session` (an official vendor CLI owns the session, such as `ant auth login`), and `oauth_pkce_loopback`, `oauth_other`, `oauth_device_code`, `cloud_credential_chain`, `short_lived_token`, which are refused until their sign-in flows exist. |
 | `key_page`, `where` | Where the user creates and revokes the key (https), or for a local engine where its settings show it. |
-| `env` | Environment variables used as the key when none is stored. The AI settings name the variable; it is never copied into the vault. |
+| `env` | Environment variables used as the key when none is stored and the vault can be read. The AI settings name the variable; it is never copied into the vault. For a key bound to an address (a changeable base URL, `bearer_optional`) only at the preset's own `base_url`. |
 | `reject_prefixes` | Key kinds refused before any request, for example `sk-ant-admin01-` (Admin API keys). |
-| `fields` | Values that are not secret: `id`, `label`, `pattern` (must match in full), `header` (sent with the key), `setting` (a setting that holds the value too and wins while it is set) and `invalid_code` (the error for a value that does not match). |
-| `validate` | The free check behind "Check": a GET with `path` (below `base_url`) or `url`, `account_field` or `account_header` (names the account), `models_field` (counted as models), `public: true` for an endpoint that answers without a key. |
+| `fields` | Values that are not secret: `id`, `label`, `pattern` (must match in full), `header` (sent with the key; never a credential header such as `Authorization`, `x-api-key`, `api-key` or `Cookie`), `setting` (a setting that holds the value too and wins while it is set) and `invalid_code` (the error for a value that does not match). |
+| `validate` | The free check behind "Check": a GET with `path` (below `base_url`) or `url`, `account_field` or `account_header` (names the account), `models_field` (counted as models), `public: true` for an endpoint that answers without a key. A key bound to an address is checked at that address only. |
 | `opt_in` | Never picked automatically, only when `ai_auth_<provider>` names it. An `ant auth login` profile is always opt-in. |
 | `cli`, `oauth`, `sources` | The vendor CLI's install page and login/logout commands, the endpoints of a later sign-in flow, and the primary sources of the method's facts. |
 
