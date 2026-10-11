@@ -774,6 +774,7 @@ These are real limitations of the current state. Most are scheduled in the [road
 | **Spoken announcements through the operating system's speech engine** | No audio files, no new dependency and nothing that can fail a crawl: the engines ship with Windows, macOS and most Linux desktops, and an announcement is always also shown and logged. |
 | **Rerank only build recommendations by default** | In the retrieval evaluation the reranker improved the order and kept unrelated excerpts out for questions, but for the chat the gain did not justify about 1 to 2.5 seconds per search on a CPU, and on build-log lines and the module proposal's keyword string it lost or dropped relevant excerpts. |
 | **No excerpt rather than an unrelated one** | Unrelated excerpts take room in a small context and mislead small local models. A relevance floor, calibrated with the retrieval evaluation, lets a reranked search return nothing. |
+| **The mMARCO cross-encoder is the default CPU reranker** | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` is multilingual (German and English questions), small (about 0.12 GB) and fast enough on a CPU; its model card names the Apache-2.0 licence. It was trained on mMARCO, a translation of MS MARCO, which has its own terms of use; the maintainer accepted it as the default that `rag_reranker: auto` downloads on first use. `rag_reranker: off` or another model id replaces it. |
 | **The retrieval evaluation is the gate for search defaults** | Retrieval changes can help one kind of question and hurt another. A fixed corpus with fixed cases, graded by rules and without an AI judge, shows that before a change becomes a default. |
 | **Identifiers are split for the keyword index only** | Flags and names such as `-DGGML_CUDA=ON` were one token for BM25 and could not be found by their parts. Adding the parts only to the BM25 input leaves the dense vectors and the stored text unchanged; the stamped encoding rebuilds older keyword indexes once. |
 | **Public packs signed, private packs encrypted, with standard primitives** | For public data, authenticity and integrity matter; for private sharing, confidentiality too. The XOR "SwarmCipher" could be undone by anyone. Ed25519, X25519, HKDF-SHA256, scrypt and ChaCha20-Poly1305 composed in the style of age are well studied; one signing prefix per purpose keeps a signature for one thing from verifying another. |
@@ -917,14 +918,6 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
   Copilot through an own GitHub App, Gemini with the user's own OAuth client.
 - **MCP Apps UI.**
 - **An MCP server on edge devices.**
-
-### Open decisions for the maintainer
-
-- **The default CPU reranker.** `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` is the model `rag_reranker: auto`
-  downloads on first use from 6 GB RAM. Its model card names the Apache-2.0 licence, but it was trained on mMARCO,
-  a translation of the MS MARCO dataset, which comes with its own terms of use. Whether it is acceptable as the
-  default that is downloaded automatically is not decided; the alternatives are another cross-encoder or no
-  reranker unless one is chosen.
 
 ## History
 
