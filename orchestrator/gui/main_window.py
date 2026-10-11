@@ -16,20 +16,20 @@ Updates v2.4.0:
 """
 
 import sys
-import asyncio
 from pathlib import Path
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QPushButton, QLabel, QTabWidget, QStatusBar,
-    QMenu, QMenuBar, QMessageBox, QToolBar,
-    QSpacerItem, QSizePolicy
+    QMainWindow, QWidget, QVBoxLayout, QLabel, QTabWidget, QStatusBar,
+    QMessageBox, QToolBar,
+    QSizePolicy
 )
-from PySide6.QtGui import QAction, QIcon, QPixmap
+from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtCore import Qt, QSize, QTimer
 
 # Core Framework
 from orchestrator.Core.framework import FrameworkManager
 from orchestrator.Core.orchestrator import OrchestrationStatus
+from orchestrator.utils import input_history
+from orchestrator.utils.announce import SETTING as AUDIO_SETTING
 from orchestrator.utils.localization import get_instance as get_i18n
 
 # GUI Components
@@ -131,6 +131,18 @@ class MainOrchestrator(QMainWindow):
         act_perms = QAction("Tool Permissions (Ditto / MCP)...", self)
         act_perms.triggered.connect(self._open_tool_permissions)
         tools_menu.addAction(act_perms)
+
+        # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
+        self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
+        self.act_audio.setCheckable(True)
+        self.act_audio.setChecked(bool(self.framework.config.get(AUDIO_SETTING, True)))
+        self.act_audio.toggled.connect(self._set_audio_announcements)
+        tools_menu.addAction(self.act_audio)
+
+        # Recent models, targets, boards, URLs, devices and datasets offered in the input fields (per user)
+        self.act_clear_history = QAction(self.i18n.t("menu.clear_history", "Clear Input History..."), self)
+        self.act_clear_history.triggered.connect(self._clear_input_history)
+        tools_menu.addAction(self.act_clear_history)
 
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About", self)
@@ -280,6 +292,25 @@ class MainOrchestrator(QMainWindow):
             return
         if ToolPermissionsDialog(registry, self, first_run=first_run).exec():
             self.status.showMessage("Tool permissions saved.", 5000)
+
+    def _set_audio_announcements(self, enabled: bool):
+        cfg = self.framework.config
+        cfg.set(AUDIO_SETTING, bool(enabled))
+        cfg.save_user_config()
+
+    def _clear_input_history(self):
+        t = self.i18n.t
+        answer = QMessageBox.question(self, t("history.clear.title"), t("history.clear.question"),
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        history = input_history.for_config(self.framework.config)
+        if history is None or not history.clear():
+            QMessageBox.warning(self, t("history.clear.title"), t("history.clear.failed"))
+            return
+        self.builder_tab.reload_history()
+        self.deployment_window.reload_history()
+        self.status.showMessage(t("history.cleared"), 5000)
 
     def _open_module_wizard(self):
         targets_dir = self.app_root / self.framework.config.get("targets_dir", "targets")

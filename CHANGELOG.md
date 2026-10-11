@@ -32,6 +32,34 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
+- **Deep Ingest honours machine-readable opt-outs.** Text and data mining of public pages is allowed unless
+  the rightsholder reserved it in machine-readable form (EU DSM Directive Art. 4, German UrhG § 44b), so
+  besides robots.txt the crawler skips pages marked `noindex`, `none`, `noai` or `noimageai` in an
+  `X-Robots-Tag` header or in `<meta name="robots">` / `<meta name="llm-conversion-framework-bot">`, does not
+  follow the links of `nofollow` pages, and honours the W3C TDM Reservation Protocol (`/.well-known/tdmrep.json`
+  per site, the `tdm-reservation` header and meta tag, PDF metadata). Redirect targets on other hosts are
+  checked the same way. Every skipped page is named in the crawl log with its reason. None of these checks can
+  be switched off.
+- **Notice before the first Deep Ingest** (English and German): what is read (only publicly reachable pages),
+  which opt-outs are honoured, that the knowledge stays on this computer, and that sharing it keeps source and
+  licence and needs your explicit release. It is information, not a legal confirmation: one "Understood"
+  button. It is shown once per user and again when its text changes.
+- **Spoken announcements** of the notice and of the Deep Ingest outcome through the speech engine built into
+  the operating system (Windows System.Speech, macOS `say`, Linux `spd-say` or `espeak-ng`), in the interface
+  language. Best effort and never in the way: no audio files, the system volume is never touched, and it is
+  silent in CI, over SSH without a display, on headless systems, with `LLM_FRAMEWORK_NO_AUDIO=1` or when
+  *Tools > Spoken Announcements* (setting `audio_announcements`) is off. Every announcement is also logged.
+- **Deep Ingest progress and Stop**: the wizard shows "Page N of M: <url>" instead of an endless spinner, and a
+  Stop button ends the crawl after the current page. Closing the wizard stops a running crawl the same way and
+  closes once the current page is stored, without freezing the window.
+- **Input history**: the input fields offer what you used recently, newest first. Model, calibration dataset,
+  Deep Ingest URL and device (Deployment, remote hardware scan) are editable lists; the most recent model and
+  device are filled in, datasets and URLs are only offered. Targets and boards come from the target
+  definitions, so the most recently built one that is still offered is preselected (a target without declared
+  boards offers recent boards as suggestions). The history is per user (`input_history.json` in the per-user
+  state directory), at most 20 entries per field, and never holds secrets: values that look like an API key or
+  token, URLs with a user name or password and URLs with a credential or session parameter (such as `?token=`
+  or `;jsessionid=`) are not remembered. *Tools > Clear Input History...* forgets it.
 
 - **Documentation in English and German** for every document (README, blueprint with design and roadmap, CLI
   usage, features, contributing, module developer guide, SSOT, changelog), checked by `tests/test_docs.py`:
@@ -39,6 +67,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   roadmap names only what comes.
 
 ### Changed
+- **Deep Ingest outcome**: it said "Deep Ingest complete" even when every URL failed. It now reports success
+  (everything stored), partial (some pages stored; others failed, were reserved by the site or the crawl was
+  stopped) or failure (nothing stored), each with its own message, only after the last write has returned.
+  Pages are stored as soon as they are read, so a stopped or interrupted crawl keeps what it already stored,
+  and pages that could not be fetched are listed in the crawl log.
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
   built-in Transformers model for offline mode is gone (offline mode uses local providers: Ollama, the
   managed llama-server, a server on your network). Healing analyses, module proposals and build
@@ -55,12 +88,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   takes minutes on a CPU); "medium" and up keep it.
 - Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0) and `fastembed` 0.8.1 (local embeddings,
   ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
+- The crawler's User-Agent reports the real framework version (it said 1.6.0).
+- Deep Ingest: a link that redirects to another host is skipped like any other external link; only a
+  redirect of the start URL can move the crawl to another host.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
+- The unused setting `input_history` (the input history is personal and lives in the per-user state directory,
+  not in the shared `configs/config.yml`).
+- The *Respect robots.txt* option of the Deep Ingest dialog and the setting `crawler_respect_robots`: robots.txt
+  is a machine-readable opt-out like the others, so it is always honoured.
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
 
 ### Security
+- Deep Ingest reads robots.txt as RFC 9309 describes it. Rules with `*` or `$` (such as `Disallow: /*.pdf$`), an
+  `Allow` listed before a longer `Disallow`, every `User-agent: *` group after the first and a file that starts
+  with a byte order mark used to be ignored, so the crawler fetched pages the site had excluded.
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
   into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
   build log or a model name told the model.

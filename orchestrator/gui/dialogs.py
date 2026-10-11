@@ -9,19 +9,21 @@ Updates:
 - LanguageSelectionDialog for first-run setup.
 """
 
+import logging
 import threading
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Sequence
 from urllib.parse import urlparse
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
     QDialogButtonBox, QMessageBox, QComboBox, QPushButton, QSizePolicy,
-    QWidget, QFormLayout, QTextEdit, QSpinBox,
-    QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView
+    QFormLayout, QTextEdit, QSpinBox,
+    QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QWidget
 )
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from orchestrator.utils.crawl_notice import CrawlNotice, notice_text
 from orchestrator.utils.helpers import redact_secrets
-from orchestrator.utils.localization import get_instance as get_i18n
+from orchestrator.utils.localization import current_language, get_instance as get_i18n, ui_text
 
 class LanguageSelectionDialog(QDialog):
     """
@@ -566,12 +568,44 @@ class AIConfigurationDialog(QDialog):
         """Selected settings after the dialog was accepted (empty otherwise); never contains a key."""
         return dict(self._result_config)
 
+
+def fill_recent(combo: QComboBox, values: Sequence[str], text: Optional[str] = None) -> None:
+    """Refills an editable combo with values (recent inputs first, duplicates dropped). The edit text becomes
+    text, or the first value when text is None."""
+    values = list(dict.fromkeys(v for v in values if v))
+    if text is None:
+        text = values[0] if values else ""
+    combo.blockSignals(True)
+    try:
+        combo.clear()
+        combo.addItems(values)
+        idx = combo.findText(text)
+        combo.setCurrentIndex(idx)
+        if idx < 0:
+            combo.setEditText(text)
+    finally:
+        combo.blockSignals(False)
+
+
+def select_recent(combo: QComboBox, recent: Sequence[str]) -> bool:
+    """Selects the most recent value a fixed list still offers (by item data, else by text)."""
+    for value in recent:
+        idx = combo.findData(value)
+        idx = idx if idx >= 0 else combo.findText(value)
+        if idx >= 0:
+            combo.setCurrentIndex(idx)
+            return True
+    return False
+
+
 class URLInputDialog(QDialog):
     """
     Dialog for inputting multiple URLs for RAG crawling.
-    Supports Deep Ingest options (depth, robots.txt, etc.)
+    Supports Deep Ingest options (depth, PDFs, delay). There is no switch for robots.txt or the other opt-outs:
+    the site's machine-readable reservations decide, not the user.
+    recent: URLs crawled before (newest first), offered in an editable list.
     """
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, recent: Sequence[str] = ()):
         super().__init__(parent)
         self.setWindowTitle("Deep Ingest: Add Documentation URLs")
         self.resize(600, 400)
@@ -591,6 +625,27 @@ class URLInputDialog(QDialog):
         self.txt_urls.setMinimumHeight(150)
         layout.addWidget(self.txt_urls)
 
+        # Recent URLs: pick (or edit) one and add it to the list
+        row_recent = QHBoxLayout()
+        self.lbl_recent = QLabel("&Recent:")
+        self.cb_recent = QComboBox()
+        self.cb_recent.setEditable(True)
+        self.cb_recent.setInsertPolicy(QComboBox.NoInsert)
+        self.cb_recent.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.cb_recent.setAccessibleName("Recent URLs")
+        fill_recent(self.cb_recent, recent, text="")
+        self.lbl_recent.setBuddy(self.cb_recent)
+        self.btn_add_recent = QPushButton("&Add")
+        self.btn_add_recent.setAutoDefault(False)
+        self.btn_add_recent.clicked.connect(self.add_recent_url)
+        row_recent.addWidget(self.lbl_recent)
+        row_recent.addWidget(self.cb_recent)
+        row_recent.addWidget(self.btn_add_recent)
+        self.recent_row = QWidget()
+        self.recent_row.setLayout(row_recent)
+        self.recent_row.setVisible(bool(recent))
+        layout.addWidget(self.recent_row)
+
         # Options Group
         grp_options = QGroupBox("Crawl Options")
         opt_layout = QFormLayout()
@@ -601,11 +656,6 @@ class URLInputDialog(QDialog):
         self.spin_depth.setValue(2)
         self.spin_depth.setToolTip("How many levels deep to follow links")
         opt_layout.addRow("Max Depth:", self.spin_depth)
-
-        # Respect robots.txt
-        self.chk_robots = QCheckBox("Respect robots.txt (Recommended)")
-        self.chk_robots.setChecked(True)
-        opt_layout.addRow("", self.chk_robots)
 
         # Download PDFs
         self.chk_pdfs = QCheckBox("Download and parse PDF files")
@@ -649,6 +699,13 @@ class URLInputDialog(QDialog):
 
         self.accept()
 
+    def add_recent_url(self):
+        """Adds the URL picked (or edited) in the recent list, once."""
+        url = self.cb_recent.currentText().strip()
+        urls = self.get_urls()
+        if url and url not in urls:
+            self.txt_urls.setPlainText("\n".join(urls + [url]))
+
     def get_urls(self):
         """Get list of URLs (one per line)."""
         text = self.txt_urls.toPlainText().strip()
@@ -662,10 +719,58 @@ class URLInputDialog(QDialog):
         """Get crawl options as dict."""
         return {
             "max_depth": self.spin_depth.value(),
-            "respect_robots": self.chk_robots.isChecked(),
             "download_pdfs": self.chk_pdfs.isChecked(),
             "request_delay": self.spin_delay.value()
         }
+
+
+class CrawlNoticeDialog(QMessageBox):
+    """
+    The notice before the first Deep Ingest. It is information, not a legal confirmation (the site's
+    machine-readable opt-outs decide what may be mined), so it has one "Understood" button and no checkbox.
+    The spoken hint starts only once the notice is on screen.
+    """
+
+    def __init__(self, parent=None, announcer: Optional[Callable[[str], Any]] = None, lang: Optional[str] = None):
+        super().__init__(parent)
+        lang = lang or current_language()
+        title, text = notice_text(lang)
+        self.setIcon(QMessageBox.Information)
+        self.setWindowTitle(title)
+        self.setTextFormat(Qt.PlainText)
+        self.setText(text)
+        self.setAccessibleName(title)
+        self.setAccessibleDescription(text)
+        self.understood = self.addButton(ui_text("crawl.notice.ok", lang), QMessageBox.AcceptRole)
+        self.setDefaultButton(self.understood)
+        self.setEscapeButton(self.understood)
+        self._announcer = announcer
+        self._spoken = ui_text("crawl.notice.spoken", lang)
+        self.announced = False
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self._announcer and not self.announced:
+            self.announced = True
+            QTimer.singleShot(0, lambda: self._announcer(self._spoken))
+
+
+def show_crawl_notice_once(parent, config, announcer: Optional[Callable[[str], Any]] = None) -> None:
+    """Shows the notice before the user's first crawl, and again after its text changed (every time when the
+    per-user state directory cannot be used)."""
+    try:
+        notice = CrawlNotice(config.user_state_dir)
+        if not notice.needed():
+            return
+    except OSError as e:
+        notice = None
+        logging.getLogger(__name__).warning(f"No per-user state directory for the Deep Ingest notice ({e}).")
+    CrawlNoticeDialog(parent, announcer).exec()
+    try:
+        if notice is not None:
+            notice.acknowledge("gui")
+    except OSError as e:
+        logging.getLogger(__name__).warning(f"Could not remember the Deep Ingest notice ({e}); it is shown again.")
 
 
 class ToolPermissionsDialog(QDialog):

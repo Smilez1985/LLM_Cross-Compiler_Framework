@@ -16,24 +16,18 @@ Updates v2.4.0:
 """
 
 import os
-import sys
 import json
-import logging
-import shutil
-import tempfile
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union, Callable, Set, Tuple
-from dataclasses import dataclass, field, asdict
+from typing import Dict, List, Optional, Any, Callable, Set, Tuple
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 import threading
-import copy
 import re
 import yaml
 
 from orchestrator.utils.logging import get_logger
-from orchestrator.utils.validation import ValidationError, validate_path, validate_config
-from orchestrator.utils.helpers import ensure_directory, safe_json_load
+from orchestrator.utils.helpers import ensure_directory
 
 
 # ============================================================================
@@ -328,13 +322,15 @@ class ConfigManager:
                          ["regex:^(https?://[^\\s/?#@]+([/?#]\\S*)?)?$"]),
             
             # Deep Crawler Settings (v1.6.0)
-            ConfigSchema("crawler_respect_robots", bool, False, True, "Respect robots.txt rules"),
             ConfigSchema("crawler_max_depth", int, False, 2, "Max recursion depth for crawler"),
             ConfigSchema("crawler_max_pages", int, False, 50, "Max pages to crawl per session"),
             ConfigSchema("crawler_rate_limit", float, False, 1.0, "Delay between crawler requests (seconds)", ["min:0"]),
             ConfigSchema("crawler_download_pdfs", bool, False, True, "Download and parse PDF files while crawling"),
             ConfigSchema("crawler_languages", list, False, ["en", "de"],
                          "Languages (ISO 639-1) of the pages the crawler keeps; empty = all languages"),
+            ConfigSchema("audio_announcements", bool, False, True,
+                         "Spoken announcements (Deep Ingest notice and outcome) through the speech engine of the "
+                         "OS; never in CI, over SSH without a display or with LLM_FRAMEWORK_NO_AUDIO=1"),
 
             # AI Agent (Ditto) Selection
             ConfigSchema("ai_provider", str, False, "OpenAI",
@@ -348,9 +344,6 @@ class ConfigManager:
                          "Providers tried when the model declines or the provider is unavailable, as provider or "
                          "provider:model, e.g. local, ollama:qwen3.5:4b"),
 
-            # UX History
-            ConfigSchema("input_history", list, False, [], "History of user inputs"),
-            
             # v2.0.0: Chat & Brain Settings
             ConfigSchema("chat_context_limit", int, False, 4096, "Max tokens for chat context history"),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
@@ -537,10 +530,9 @@ class ConfigManager:
             persist_keys = [
                 "language", "ai_security_level", "gui_theme", "docker_registry",
                 "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
-                "crawler_respect_robots", "crawler_max_depth", "crawler_max_pages",
-                "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages",
+                "crawler_max_depth", "crawler_max_pages",
+                "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages", "audio_announcements",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
-                "input_history",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",
                 # v2.3

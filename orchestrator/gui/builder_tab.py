@@ -11,31 +11,25 @@ Updates v2.4.0:
 - Updated BuildRequest handling for IMatrix parameters.
 """
 
-import os
+import importlib.util
 import platform
 import subprocess
-import asyncio
 import shlex
-import shutil
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QComboBox, QPushButton, QGroupBox, QCheckBox, 
     QMessageBox, QFileDialog, QStackedWidget,
-    QTextEdit, QFormLayout, QMenu, QDialog, QLineEdit, QDialogButtonBox,
-    QToolTip
+    QTextEdit, QFormLayout, QMenu, QDialog, QLineEdit, QDialogButtonBox
 )
 from PySide6.QtCore import Qt, QThread, Signal, QTimer, QRect
 from PySide6.QtGui import QPixmap, QAction
 
-from orchestrator.gui.dialogs import confirm_host_key
+from orchestrator.gui.dialogs import confirm_host_key, fill_recent, select_recent
+from orchestrator.utils import input_history
 
-# Optional: Paramiko for SSH
-try:
-    import paramiko
-    PARAMIKO_AVAILABLE = True
-except ImportError:
-    PARAMIKO_AVAILABLE = False
+# Optional: Paramiko for SSH (used through orchestrator.utils.ssh_trust)
+PARAMIKO_AVAILABLE = importlib.util.find_spec("paramiko") is not None
 
 # Core Imports fallback
 try:
@@ -61,17 +55,22 @@ QUANT_SUGGESTIONS = {
     "rkllm": ["w4a16", "w4a16_g128", "w8a8", "w8a8_g256"],
     "rknn": ["fp16", "i8"],
 }
+# Ungated models that build without a Hugging Face token (offered after the user's recent models)
+MODEL_SUGGESTIONS = ["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3.5-2B", "Qwen/Qwen3.5-4B", "HuggingFaceTB/SmolLM2-135M-Instruct"]
 
 class SSHConnectDialog(QDialog):
-    """Simple Dialog to get SSH Credentials."""
-    def __init__(self, parent=None):
+    """Simple Dialog to get SSH Credentials. recent: devices used before (newest first)."""
+    def __init__(self, parent=None, recent=()):
         super().__init__(parent)
         self.setWindowTitle("Remote Hardware Probe (SSH)")
         self.setFixedWidth(300)
         
         layout = QFormLayout(self)
-        self.ip_input = QLineEdit()
-        self.ip_input.setPlaceholderText("192.168.1.X")
+        self.ip_input = QComboBox()
+        self.ip_input.setEditable(True)
+        self.ip_input.setInsertPolicy(QComboBox.NoInsert)
+        fill_recent(self.ip_input, recent)
+        self.ip_input.lineEdit().setPlaceholderText("192.168.1.X")
         self.user_input = QLineEdit()
         self.user_input.setPlaceholderText("root / pi / rock")
         self.pass_input = QLineEdit()
@@ -88,7 +87,7 @@ class SSHConnectDialog(QDialog):
         layout.addWidget(buttons)
         
     def get_data(self):
-        return self.ip_input.text(), self.user_input.text(), self.pass_input.text()
+        return self.ip_input.currentText().strip(), self.user_input.text(), self.pass_input.text()
 
 # --- WORKERS ---
 
@@ -154,7 +153,8 @@ class SSHProbeWorker(QThread):
             # A private folder on the device; a fixed /tmp path could be pre-created by another user.
             _, out, _ = ssh.exec_command("mktemp -d /tmp/llm_probe.XXXXXXXX")
             remote_dir = out.read().decode().strip()
-            if not remote_dir.startswith("/tmp/llm_probe."):
+            # Checks mktemp's answer on the device; no local temp file is involved.
+            if not remote_dir.startswith("/tmp/llm_probe."):  # nosec B108
                 self.finished.emit(False, "Could not create a folder on the device.", "")
                 return
             sftp = ssh.open_sftp()
@@ -242,6 +242,7 @@ class BuilderTab(QWidget):
     def __init__(self, framework_manager, parent=None):
         super().__init__(parent)
         self.framework = framework_manager
+        self.history = input_history.for_config(getattr(framework_manager, "config", None))
         
         if hasattr(framework_manager, 'info') and hasattr(framework_manager.info, 'installation_path'):
              self.app_root = Path(framework_manager.info.installation_path)
@@ -263,10 +264,11 @@ class BuilderTab(QWidget):
         
         self.model_input = QComboBox()
         self.model_input.setEditable(True)
+        self.model_input.setInsertPolicy(QComboBox.NoInsert)
         self.model_input.setPlaceholderText("HuggingFace ID or Path")
-        # Ungated models that build without a Hugging Face token
-        self.model_input.addItems(["Qwen/Qwen3.5-0.8B", "Qwen/Qwen3.5-2B", "Qwen/Qwen3.5-4B",
-                                   "HuggingFaceTB/SmolLM2-135M-Instruct"])
+        self.model_input.lineEdit().setPlaceholderText("HuggingFace ID or Path")
+        recent = self._recent("model")
+        fill_recent(self.model_input, recent + MODEL_SUGGESTIONS, text=recent[0] if recent else "")
         
         browse_btn = QPushButton("📂")
         browse_btn.setFixedWidth(40)
@@ -366,12 +368,21 @@ class BuilderTab(QWidget):
         self.chk_imatrix = QCheckBox("Importance matrix (IMatrix, GGUF)")
         self.chk_imatrix.setToolTip("Computes an importance matrix from the calibration dataset to improve "
                                     "low-bit GGUF quantization (required for IQ1/IQ2 types).")
-        self.dataset_path = None
-        self.btn_dataset = QPushButton("Calibration dataset...")
+        # Recent datasets are offered, never preselected: a dataset changes the quantization.
+        self.dataset_combo = QComboBox()
+        self.dataset_combo.setEditable(True)
+        self.dataset_combo.setInsertPolicy(QComboBox.NoInsert)
+        self.dataset_combo.lineEdit().setPlaceholderText("Calibration dataset (none)")
+        self.dataset_combo.setAccessibleName("Calibration dataset")
+        fill_recent(self.dataset_combo, self._recent("dataset"), text="")
+        self.btn_dataset = QPushButton("...")
+        self.btn_dataset.setFixedWidth(40)
+        self.btn_dataset.setAccessibleName("Browse for a calibration dataset")
         self.btn_dataset.clicked.connect(self._browse_dataset)
         
         row_dataset = QHBoxLayout()
         row_dataset.addWidget(self.chk_imatrix)
+        row_dataset.addWidget(self.dataset_combo, 1)
         row_dataset.addWidget(self.btn_dataset)
 
         build_layout.addRow("Format:", self.format_combo)
@@ -387,6 +398,7 @@ class BuilderTab(QWidget):
         
         build_group.setLayout(build_layout)
         left_col.addWidget(build_group)
+        self._select_recent_target()
         
         # START BUTTON
         self.btn_start = QPushButton("🚀 Start Build Pipeline")
@@ -461,12 +473,14 @@ class BuilderTab(QWidget):
 
     def _open_ssh_dialog(self):
         """Option 2: Remote SSH Scan"""
-        dlg = SSHConnectDialog(self)
+        dlg = SSHConnectDialog(self, recent=self._recent("device"))
         if dlg.exec():
             ip, user, password = dlg.get_data()
             if not ip or not user: return
             if not confirm_host_key(self, self.framework, ip):
                 return
+            if self.history:
+                self.history.add("device", ip)  # a trusted, reachable device
             
             self._set_state("read")
             self._log(f"Connecting to {user}@{ip}...")
@@ -575,10 +589,17 @@ class BuilderTab(QWidget):
         else:
             # A target without capabilities (e.g. from the module wizard): no board, or one the user types.
             self.board_combo.setEditable(True)
+            self.board_combo.setInsertPolicy(QComboBox.NoInsert)
             self.board_combo.addItem("(none)", None)
+            for board in self._recent("board"):
+                self.board_combo.addItem(board, board)
             self.board_combo.setCurrentIndex(0)
             if keep_typed and current and current != "(none)":
-                self.board_combo.setEditText(current)
+                idx = self.board_combo.findText(current)
+                if idx > 0:
+                    self.board_combo.setCurrentIndex(idx)
+                else:
+                    self.board_combo.setEditText(current)
         self.board_combo.blockSignals(False)
         self._update_quant_options()
 
@@ -635,8 +656,44 @@ class BuilderTab(QWidget):
         self.chk_imatrix.setEnabled(uses_imatrix)
         if not uses_imatrix:
             self.chk_imatrix.setChecked(False)
-        self.btn_dataset.setEnabled(cap is None or cap.dataset != "none" or cap.imatrix)
-        self.btn_dataset.setToolTip(self.DATASET_HINTS.get(fmt, cap.notes if cap and cap.notes else ""))
+        uses_dataset = cap is None or cap.dataset != "none" or cap.imatrix
+        hint = self.DATASET_HINTS.get(fmt, cap.notes if cap and cap.notes else "")
+        for widget in (self.dataset_combo, self.btn_dataset):
+            widget.setEnabled(uses_dataset)
+            widget.setToolTip(hint)
+
+    @property
+    def dataset_path(self):
+        """The calibration dataset typed, picked or browsed (None when the field is empty)."""
+        return self.dataset_combo.currentText().strip() or None
+
+    @dataset_path.setter
+    def dataset_path(self, path):
+        self.dataset_combo.setEditText(path or "")
+
+    # --- RECENT INPUTS (per user, see orchestrator/utils/input_history.py) ---
+
+    def _recent(self, field):
+        return self.history.get(field) if self.history else []
+
+    def _select_recent_target(self):
+        """At startup: the most recently built target and board that are still offered."""
+        if select_recent(self.target_combo, self._recent("target")) and not self.board_combo.isEditable():
+            select_recent(self.board_combo, self._recent("board"))
+
+    def _remember_build(self, model, target, board, dataset):
+        if not self.history:
+            return
+        for field, value in (("model", model), ("target", target), ("board", board), ("dataset", dataset)):
+            self.history.add(field, value)
+        self.reload_history()
+
+    def reload_history(self):
+        """Refills the recent lists (after a build or after the history was cleared), keeping what is typed."""
+        fill_recent(self.model_input, self._recent("model") + MODEL_SUGGESTIONS, text=self.model_input.currentText())
+        fill_recent(self.dataset_combo, self._recent("dataset"), text=self.dataset_combo.currentText())
+        if self.board_combo.isEditable():
+            self._update_boards()
 
     def _refresh_targets(self):
         previous = self.target_combo.currentData()
@@ -661,7 +718,7 @@ class BuilderTab(QWidget):
 
     def _browse_model(self):
         path, _ = QFileDialog.getOpenFileName(self, "Select Model", "", "Models (*.bin *.gguf *.safetensors);;All Files (*)")
-        if path: self.model_input.setCurrentText(path)
+        if path: self.model_input.setEditText(path)
 
     def _browse_dataset(self):
         """NEW: Browse for custom calibration dataset"""
@@ -748,11 +805,13 @@ class BuilderTab(QWidget):
              self._log("Error: Invalid enum selection.")
              return
 
+        model = self.model_input.currentText().strip()
+        dataset = self.dataset_path
         req = BuildRequest(
             request_id="",
             workflow_type=WorkflowType.SIMPLE_CONVERSION,
             priority=PriorityLevel.NORMAL,
-            models=[self.model_input.currentText()],
+            models=[model],
             targets=[self.target_combo.currentData()],
             target_formats=[target_fmt],
             optimization_level=opt_lvl,
@@ -763,7 +822,7 @@ class BuilderTab(QWidget):
             use_gpu=self.chk_gpu.isChecked(),
             # NEW v2.4.0: Pass IMatrix config
             use_imatrix=self.chk_imatrix.isChecked(),
-            dataset_path=self.dataset_path,
+            dataset_path=dataset,
             target_board=board
         )
         
@@ -772,6 +831,7 @@ class BuilderTab(QWidget):
             rid = self.framework.run_coroutine(self.framework.orchestrator.submit_build_request(req), timeout=30)
             self._set_state("success")
             self._log(f"Job Submitted! ID: {rid}")
+            self._remember_build(model, self.target_combo.currentData(), board, dataset)
             QMessageBox.information(self, "Success", f"Job {rid} started.")
         except Exception as e:
             self._set_state("fail")

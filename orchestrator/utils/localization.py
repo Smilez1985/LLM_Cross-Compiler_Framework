@@ -13,6 +13,8 @@ Updates v2.3.0:
 - Enhanced fallback mechanism.
 """
 
+from typing import Any, Optional
+
 from PySide6.QtCore import QObject, Signal
 
 class LocalizationManager(QObject):
@@ -129,7 +131,49 @@ class LocalizationManager(QObject):
             "msg.ai_ready": "AI Ready",
             "msg.ai_thinking": "🤖 Ditto is thinking...",
             "msg.ai_complete": "✅ Analysis complete!",
-            "msg.module_created": "Module created at:"
+            "msg.module_created": "Module created at:",
+
+            # Deep Ingest: one-time notice (information, not a legal confirmation), progress and outcomes
+            "menu.audio": "Spoken Announcements",
+            "crawl.notice.title": "Before your first Deep Ingest",
+            "crawl.notice.text": (
+                "Deep Ingest reads web pages into your knowledge base so that Ditto can use them.\n\n"
+                "• What is read: only publicly reachable pages (no logins), starting from the addresses you "
+                "enter, within the page and depth limits.\n"
+                "• Opt-outs are honoured: robots.txt, the X-Robots-Tag header and robots meta tags (noindex, "
+                "none, noai, noimageai; nofollow stops following links) and the TDM Reservation Protocol (TDMRep). "
+                "Pages whose owner reserved text and data mining are skipped and named in the crawl log.\n"
+                "• The knowledge stays on this computer: pages are stored as text in your local knowledge base "
+                "(or on your own Qdrant server, if you set one). When Ditto answers, matching excerpts go to the "
+                "AI provider you selected; with a local provider nothing leaves this computer.\n"
+                "• Sharing needs your release: a knowledge snapshot in a target or a community pack keeps the "
+                "source and licence of every page and is only shared after you release it explicitly.\n\n"
+                "Text and data mining of publicly accessible content is permitted unless the rightsholder reserved "
+                "it in machine-readable form (EU Directive 2019/790, Art. 4; German UrhG § 44b). That is why "
+                "these signals decide. This notice is information, not a legal confirmation."),
+            "crawl.notice.ok": "&Understood",
+            "crawl.notice.spoken": "Please read the notice before your first Deep Ingest.",
+            "crawl.btn.stop": "⏹ Stop",
+            "crawl.stopping": "Stopping after the current page...",
+            "crawl.progress.start": "Starting Deep Ingest...",
+            "crawl.progress.page": "Page {n} of {m}: {url}",
+            "crawl.done.success": "Deep Ingest finished: {pages} pages ({chunks} chunks) are now searchable.",
+            "crawl.done.partial": ("Deep Ingest partly finished: {pages} pages ({chunks} chunks) are searchable; "
+                                   "other pages were left out or failed. See the log."),
+            "crawl.done.stopped": "Deep Ingest stopped: {pages} pages ({chunks} chunks) are kept and searchable.",
+            "crawl.done.stopped_empty": "Deep Ingest stopped: nothing was stored.",
+            "crawl.done.failure": "Deep Ingest failed: nothing was stored. See the log.",
+            "crawl.title.success": "Deep Ingest Complete",
+            "crawl.title.partial": "Deep Ingest Partly Complete",
+            "crawl.title.failure": "Deep Ingest Failed",
+
+            # Input history (recent values in the input fields, per user)
+            "menu.clear_history": "Clear Input History...",
+            "history.clear.title": "Input History",
+            "history.clear.question": ("Forget the recently used models, targets, boards, URLs, devices and "
+                                       "datasets that the input fields offer?"),
+            "history.clear.failed": "The input history could not be cleared. See the log.",
+            "history.cleared": "Input history cleared."
         },
         "de": {
             # General
@@ -235,7 +279,53 @@ class LocalizationManager(QObject):
             "msg.ai_ready": "AI Bereit",
             "msg.ai_thinking": "🤖 Ditto denkt nach...",
             "msg.ai_complete": "✅ Analyse abgeschlossen!",
-            "msg.module_created": "Modul erstellt in:"
+            "msg.module_created": "Modul erstellt in:",
+
+            # Deep Ingest: einmaliger Hinweis (Information, keine rechtliche Bestätigung), Fortschritt, Ergebnis
+            "menu.audio": "Gesprochene Ansagen",
+            "crawl.notice.title": "Vor Ihrem ersten Deep Ingest",
+            "crawl.notice.text": (
+                "Deep Ingest liest Webseiten in Ihre Wissensdatenbank ein, damit Ditto sie nutzen kann.\n\n"
+                "• Was gelesen wird: nur öffentlich erreichbare Seiten (ohne Anmeldung), ausgehend von den "
+                "Adressen, die Sie eingeben, innerhalb der Seiten- und Tiefengrenzen.\n"
+                "• Opt-outs werden beachtet: robots.txt, der X-Robots-Tag-Header und robots-Meta-Tags (noindex, "
+                "none, noai, noimageai; bei nofollow werden Links nicht verfolgt) sowie das TDM Reservation "
+                "Protocol (TDMRep). Seiten, deren Inhaber sich Text- und Data-Mining vorbehalten hat, werden "
+                "übersprungen und im Crawl-Protokoll genannt.\n"
+                "• Das Wissen bleibt auf diesem Computer: Seiten werden als Text in Ihrer lokalen "
+                "Wissensdatenbank gespeichert (oder auf Ihrem eigenen Qdrant-Server, falls Sie einen eingetragen "
+                "haben). Wenn Ditto antwortet, gehen passende Auszüge an den gewählten KI-Anbieter; mit einem "
+                "lokalen Anbieter verlässt nichts diesen Computer.\n"
+                "• Teilen nur mit Ihrer Freigabe: Ein Wissens-Snapshot in einem Target oder ein Community-Pack "
+                "behält Quelle und Lizenz jeder Seite und wird erst geteilt, wenn Sie es ausdrücklich freigeben.\n\n"
+                "Text- und Data-Mining öffentlich zugänglicher Inhalte ist erlaubt, solange der Rechteinhaber es "
+                "sich nicht maschinenlesbar vorbehalten hat (EU-Richtlinie 2019/790, Art. 4; § 44b UrhG). "
+                "Deshalb entscheiden diese Signale. Dieser Hinweis ist eine Information, keine rechtliche "
+                "Bestätigung."),
+            "crawl.notice.ok": "&Verstanden",
+            "crawl.notice.spoken": "Bitte lesen Sie den Hinweis vor Ihrem ersten Deep Ingest.",
+            "crawl.btn.stop": "⏹ Stoppen",
+            "crawl.stopping": "Wird nach der aktuellen Seite gestoppt...",
+            "crawl.progress.start": "Deep Ingest startet...",
+            "crawl.progress.page": "Seite {n} von {m}: {url}",
+            "crawl.done.success": "Deep Ingest abgeschlossen: {pages} Seiten ({chunks} Abschnitte) sind jetzt durchsuchbar.",
+            "crawl.done.partial": ("Deep Ingest teilweise abgeschlossen: {pages} Seiten ({chunks} Abschnitte) sind "
+                                   "durchsuchbar; andere Seiten wurden ausgelassen oder schlugen fehl. Siehe Protokoll."),
+            "crawl.done.stopped": ("Deep Ingest gestoppt: {pages} Seiten ({chunks} Abschnitte) bleiben erhalten und "
+                                   "sind durchsuchbar."),
+            "crawl.done.stopped_empty": "Deep Ingest gestoppt: Es wurde nichts gespeichert.",
+            "crawl.done.failure": "Deep Ingest fehlgeschlagen: Es wurde nichts gespeichert. Siehe Protokoll.",
+            "crawl.title.success": "Deep Ingest abgeschlossen",
+            "crawl.title.partial": "Deep Ingest teilweise abgeschlossen",
+            "crawl.title.failure": "Deep Ingest fehlgeschlagen",
+
+            # Eingabeverlauf (zuletzt verwendete Werte in den Eingabefeldern, je Benutzer)
+            "menu.clear_history": "Eingabeverlauf löschen...",
+            "history.clear.title": "Eingabeverlauf",
+            "history.clear.question": ("Die zuletzt verwendeten Modelle, Targets, Boards, URLs, Geräte und "
+                                       "Datensätze vergessen, die die Eingabefelder anbieten?"),
+            "history.clear.failed": "Der Eingabeverlauf konnte nicht gelöscht werden. Siehe Protokoll.",
+            "history.cleared": "Eingabeverlauf gelöscht."
         }
     }
 
@@ -280,3 +370,16 @@ def tr(key: str, default: str = None) -> str:
     if _instance:
         return _instance.get_text(key, default)
     return default if default else key
+
+
+def current_language() -> str:
+    """The UI language; English before the GUI set one up."""
+    return _instance.current_lang if _instance else "en"
+
+
+def ui_text(key: str, lang: Optional[str] = None, **values: Any) -> str:
+    """The text of key in lang (default: the UI language; English when missing) with {placeholders} filled.
+    Unlike tr() it also works before the GUI created the LocalizationManager, e.g. in worker threads."""
+    table = LocalizationManager.TRANSLATIONS
+    text = table.get(lang or current_language(), {}).get(key) or table["en"].get(key, key)
+    return text.format(**values) if values else text
