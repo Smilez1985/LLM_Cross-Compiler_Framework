@@ -22,6 +22,7 @@ Rules:
 """
 
 import json
+import secrets
 import os
 import re
 import tempfile
@@ -743,7 +744,9 @@ class DittoCoder:
 
     def _executor(self, registry, confirm: Optional[Confirm], uses: List[ToolUse],
                   on_tool: Optional[Callable[[ToolUse], None]]):
-        run = make_registry_executor(registry, ToolContext(actor="ditto", confirm=confirm))  # output: untrusted block
+        # One session per question, for the repeat guard and the example calls after repeated input errors.
+        run = make_registry_executor(registry, ToolContext(actor="ditto", confirm=confirm,  # output: untrusted block
+                                                           session=f"ditto-{secrets.token_hex(6)}"))
 
         def title_of(name: str) -> str:
             try:

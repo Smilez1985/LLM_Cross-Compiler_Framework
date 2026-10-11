@@ -313,8 +313,13 @@ sequenceDiagram
     S-->>C: structured result
 ```
 
-1. **Schema.** Every tool has a pydantic input and output model. The MCP SDK publishes them as JSON schemas;
-   invalid arguments are refused before anything runs, and the refusal is audited as `invalid_input`.
+1. **Names, arguments, schema.** The tool name and the raw arguments first go through the fool-proof layer
+   (`orchestrator/tools/normalize.py`), the same one Ditto's calls use: spelling variants of a tool name, declared
+   argument aliases, values coerced and matched against closed lists without ever guessing a near miss, and every
+   repair recorded. Every tool has a pydantic input and output model; clients get the input model's closed JSON
+   schema. Unknown names and invalid arguments are refused before anything runs, with a reason code and the next
+   step, and the refusal is audited (`unknown_tool`, `invalid_input`); the same failing call a third time is
+   refused without running (`repeat_refused`).
 2. **Policy.** The registry looks up your stored permission for this tool (per-tool override first, then its
    tier). Defaults: `read` allowed, `local_write` ask, `external` ask. Tools in the `forbidden` tier cannot even
    be registered. If the permission file is damaged, every tool is denied until you set the permissions up
