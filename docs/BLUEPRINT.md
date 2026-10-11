@@ -61,7 +61,7 @@ guide every design choice.
 
 | Principle | What it means in practice |
 |---|---|
-| **Local-first** | Conversions run on your computer in Docker. Models are downloaded on the host, and the conversion containers have no network. The knowledge base computes its embeddings locally, and Ditto can run completely offline on a local model. Apart from downloads, nothing leaves your computer unless you choose a cloud AI provider for Ditto (then the privacy filter applies, see [Security model](#security-model)) or share a knowledge pack yourself. |
+| **Local-first** | Conversions run on your computer in Docker. Models are downloaded on the host, and the conversion containers have no network. The knowledge base computes its embeddings locally, and Ditto can run completely offline on a local model. Apart from downloads, nothing leaves your computer unless you choose a cloud AI provider for Ditto (then the privacy filter applies, see [Security model](#security-model)), turn on the anonymous error reports (`enable_telemetry`, off by default) or share a knowledge pack yourself. |
 | **Laypeople-friendly** | The GUI offers only what the selected target supports, the CLI refuses anything else, and both fill in sensible defaults per board (for example Q4_0 on the RK3566). `llm-cli doctor` explains problems with fix hints. AI errors are explained in plain words (for example that an Anthropic API key must belong to a workspace). Self-healing proposals wait for your decision. |
 | **Safe by default** | The conversion sandbox is on (`build_sandbox: true`). AI clients and Ditto may read freely but must ask before changing anything. New SSH devices are trusted only after you confirm their fingerprint. Passwords are never stored. Text suggested by an AI is never executed. |
 | **Data over code** | What a target can build is declared in its `target.yml` (`capabilities:` block, checked by a schema). AI providers are presets in `configs/llm_providers.yml`, the local model server and its models are pinned in `configs/llama_runtime.yml`, and Ditto's evaluation cases live in `evals/ditto/cases.yml`. A new board, model or OpenAI-compatible server is an edit of data, as long as the code behind it supports it. |
@@ -152,7 +152,7 @@ flowchart TB
 | Component | Where | Role |
 |---|---|---|
 | GUI | `orchestrator/gui/` (start: `llm-gui`) | Main window, build tab, deployment window, Ditto chat, module wizard, Hugging Face browser, dialogs for AI settings, tool permissions, tool confirmations, healing proposals and SSH trust. |
-| CLI | `orchestrator/cli.py` (`llm-cli`) | Command groups `build`, `config`, `deploy`, `ditto`, `doctor`, `mcp`, `module`, `scan`, `secrets`, `swarm`, `targets`, `tools`. |
+| CLI | `orchestrator/cli.py` (`llm-cli`) | Top-level commands `build`, `config`, `deploy`, `ditto`, `doctor`, `mcp`, `module`, `scan`, `secrets`, `swarm`, `targets`, `tools` (`doctor` and `scan` are single commands, the others are groups). |
 | FrameworkManager | `orchestrator/Core/framework.py` | Starts all managers in four phases (security and infrastructure, core logic, AI and knowledge, guardians and operations), connects them, keeps one long-lived asyncio loop for builds and resolves relative data paths against the installation folder, not the working directory. |
 | ConfigManager | `orchestrator/Core/config_manager.py` | Settings with a schema (type, default, validation rule). The config folder is `LLM_FRAMEWORK_CONFIG_DIR` if set, otherwise the installation's `configs/` if it is writable, otherwise the per-user folder; never the working directory. User settings are saved to `config.yml` there. Environment variables with the prefix `LLM_FRAMEWORK_`, `FRAMEWORK_` or `LLM_` override known settings. Personal state lives in `~/.llm-framework` (override with `LLM_FRAMEWORK_HOME`), mode 0700 on Linux and macOS. |
 | SecretsManager | `orchestrator/Core/secrets_manager.py` | Encrypted store (`secrets.store` in the per-user folder, Fernet) whose master key is kept in the operating system's keyring. Holds API keys and the Hugging Face token (`hf_token`). A store in the old location (config folder) is copied over once. |
@@ -166,8 +166,8 @@ flowchart TB
 | Tool registry, permissions, audit | `orchestrator/tools/` (`registry.py`, `policy.py`, `audit.py`, `confirmation.py`, `framework_tools.py`) | Eleven typed tools with risk tiers, the user's stored permissions, the confirmation text (shared by MCP and Ditto) and a hash-chained audit log. |
 | MCP server | `orchestrator/mcp_server.py` | Exposes the tool registry over MCP (official SDK `mcp` 2.3.0) via stdio or local Streamable HTTP. |
 | Provider layer (unreleased) | `orchestrator/llm/` | One client (`LLMClient`) for every AI provider, built on the official `anthropic` and `openai` SDKs; OpenAI-compatible servers go through `openai`. Picks provider, model and effort per task from the settings and the presets in `configs/llm_providers.yml` (a file of the same name in the config folder adds or replaces presets). Retries (two, the SDKs' own retries are off), a fallback chain for refusals and outages (`ai_fallback_chain`), structured answers validated against schemas with one repair attempt, typed errors, the privacy filter for cloud providers, and a tool loop. |
-| Ditto (rebuilt, unreleased) | `orchestrator/Core/ditto_manager.py` | The assistant: chat with the framework tools (at most 8 model turns per question, tool calls as actor `ditto` through the registry), analysis of failed builds, module proposals from a hardware probe and build recommendations. The last three are validated structured answers; an invalid answer is an error and is never applied, and an answer with a dangerous command is discarded. The chat history is append-only (`chat_history.json`); a long conversation is summarized into a new one. |
-| Managed local model (unreleased) | `orchestrator/runtime/`, `configs/llama_runtime.yml` | Downloads a pinned llama.cpp build (b11429, the same commit as v0.6.0) for the hardware (CPU, Vulkan, CUDA, Metal; ROCm only when chosen) and pinned Qwen3.5 GGUF models in tiers (9B, 4B, 2B, and 2-bit variants for weak hardware), each checked by size and SHA256. Runs `llama-server` on 127.0.0.1 with a free port and a per-start API key. The `local` provider finds the running server by itself. |
+| Ditto (rebuilt, unreleased) | `orchestrator/Core/ditto_manager.py` | The assistant: chat with the framework tools (at most 8 model turns per question, tool calls as actor `ditto` through the registry), analysis of failed builds, module proposals from a hardware probe and build recommendations. The last three are validated structured answers; an invalid answer is an error and is never applied. A healing analysis or build recommendation with a dangerous command is discarded; a module proposal is checked again by the module generator. The chat history is append-only (`chat_history.json`); a long conversation is summarized into a new one. |
+| Managed local model (unreleased) | `orchestrator/runtime/`, `configs/llama_runtime.yml` | Downloads a pinned llama.cpp build (b11429, the same commit as v0.6.0) for the hardware (CPU, Vulkan, CUDA, Metal; ROCm only when chosen) and pinned GGUF models in tiers (Qwen3.5 9B, 4B and 2B, 2-bit variants for weak hardware, and an IBM Granite 4.2 3B model on request), each checked by size and SHA256. Runs `llama-server` on 127.0.0.1 with a free port and a per-start API key. The `local` provider finds the running server by itself. |
 | Ditto evaluation (unreleased) | `orchestrator/evals/ditto_eval.py`, `evals/ditto/cases.yml` | `llm-cli ditto eval`: 19 fixed cases (build-log analysis, build recommendations, module proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local model tier. Nothing is built: chat cases use the real tool definitions over a stand-in build service. |
 | Self-healing | `orchestrator/Core/self_healing_manager.py` | Recognizes known failures with fixed patterns first and asks Ditto only for unknown ones. Applies only framework-defined fixes, and only after your approval. |
 | Knowledge base and crawler | `orchestrator/Core/rag_manager.py`, `orchestrator/rag/`, `orchestrator/Core/crawler_manager.py`, `orchestrator/Core/community_manager.py` | Optional (`enable_rag_knowledge`). Web pages, PDFs, community packs and the framework's own code are split into chunks and stored with a local dense embedding (FastEmbed on ONNX Runtime, CPU; model chosen by hardware unless `rag_embedding_model` is set) and a BM25 vector. Searches combine both rankings with Reciprocal Rank Fusion. Qdrant runs embedded in the process with its storage in the per-user folder (unreleased); a Qdrant server is used only when `qdrant_url` is set. Knowledge packs can be shared as JSON in `community/knowledge/`. |
@@ -363,7 +363,8 @@ run them on your computer only. Ditto then needs no internet.
 3. **Download a model.** `llm-cli ditto models list` shows the tiers; `llm-cli ditto models download [TIER]`
    fetches one at its pinned Hugging Face revision and checks size and SHA256. The recommendation follows memory:
    the 9B model with at least 7.5 GiB of GPU memory, 2B at 2-bit for 3 GiB of RAM or less, 2B at 4-bit up to
-   4.5 GiB, otherwise 4B. Further tiers are downloaded only on request.
+   4.5 GiB, otherwise 4B, in each case only if the model fits next to the system. The other tiers (4B and 9B at
+   2-bit, IBM Granite 4.2 3B) are never recommended; you download them by name.
 4. **Start.** `llm-cli ditto runtime start` (`--model`, `--ctx`, `--sleep-idle`) starts `llama-server` on
    127.0.0.1 with a free port. A new random API key is written to a private file for every start; the framework
    checks that the server refuses requests without it. The context length follows free memory (at most 32768
@@ -401,12 +402,14 @@ threat, the protection and where it is implemented.
 These are real limitations of the current state. Most are scheduled in the [roadmap](#roadmap).
 
 - **Docker setup for the framework itself is broken.** `Docker Setup/docker-compose.yml` builds from
-  `orchestrator/Dockerfile`, which has never existed, and the Makefile targets `build`, `up`, `gui`,
-  `test-container` and `audit` depend on that file and on a missing `scripts/setup_linux.sh`. Install the
-  framework on the host instead. A hardened headless image (CLI and MCP server) is planned for 3.1.0.
-- **Sign-in is limited to API keys.** Ditto reads API keys from the secrets store. If a profile from
-  `ant auth login` exists on disk, the Anthropic preset currently prefers it over a stored API key. Sign-in per
-  access type (API key first, the profile only when chosen) is being built for 3.1.0.
+  `orchestrator/Dockerfile`, which has never existed, so the Makefile targets `build`, `up`, `gui`,
+  `test-container` and `audit` fail; `build`, `up` and `gui` also call the missing `scripts/setup_linux.sh`.
+  Install the framework on the host instead. A hardened headless image (CLI and MCP server) is being built for
+  3.1.0.
+- **No sign-in per access type yet.** Ditto reads API keys from the secrets store; there is no browser sign-in.
+  For Anthropic it also accepts a profile from `ant auth login`, and if such a profile exists on disk, the
+  Anthropic preset currently prefers it over a stored API key, which can switch the billed account without notice.
+  Sign-in per access type (API key first, the profile only when you choose it) is being built for 3.1.0.
 - **A provider preset that uses a Claude subscription** (`claude_code`, through `claude -p`) is still in the code
   on this branch. Anthropic does not allow third-party apps to use subscription logins, so it is not a supported
   feature and is being removed. Claude subscribers use the framework from Claude Code or Claude Desktop through
@@ -504,7 +507,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 | **Ditto evaluation.** `llm-cli ditto eval` with fixed cases graded by rules, per provider or local model tier. The first measurement found gaps in Ditto's prompts; they are fixed, and a new measurement is running. | done |
 | **Sign-in per access type** for all common cloud and API providers and for local engines (details below). | in progress |
 | **Removal of the `claude_code` provider.** Anthropic does not allow third-party apps to use Claude subscription logins. Claude subscribers use the framework from Claude Code or Claude Desktop through the MCP server (`llm-cli mcp config` prints the setup), or give Ditto an Anthropic API key; Max and Team plans include monthly API credits. | in progress |
-| **Hardened headless Docker image** for the CLI and the MCP server, with a working compose file and Makefile targets; replaces the broken `Docker Setup/`. | planned |
+| **Hardened headless Docker image** for the CLI and the MCP server, with a working compose file and Makefile targets; replaces the broken `Docker Setup/`. | in progress |
 | **Documentation in English and German** for every document. | in progress |
 
 Sign-in per access type, as designed:
