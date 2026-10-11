@@ -200,6 +200,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - `llm-cli secrets set --with-token` reads the value from stdin.
 - **Cancel Build** in the Builder tab: cancels the running build through the build service after a confirmation
   (enabled only while the build the tab started runs); the log says when it has stopped.
+- **More context in audit entries**: the confirmation channel (`elicitation`, `framework-gui`, `framework-cli`),
+  the SHA-256 of the question text, the person's answer (accepted, declined, cancelled, unavailable, unanswered,
+  timeout), the client's self-reported name and version (a label only), a hash of the connection, the duration, the
+  SHA-256 and size of the result (never the result itself) and a link from the end entry to the call's write-ahead
+  entry. The fields are part of the hash chain; logs written before them, also by a 3.0.0 process that is still
+  running, stay verifiable.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -382,6 +388,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   a `build/` folder that does not exist, which made every build of a generated module fail at the end.
 - Secret scan with the pre-commit tool: its pre-push stage scans the commits being pushed (`--push`, which now
   reads the pushed commit from `PRE_COMMIT_TO_REF`) like `.githooks/pre-push`, instead of the whole history.
+- **Unanswered, timed-out and cancelled confirmations are audited** (MCP server): a question asked during the call
+  (classic protocol) waits at most 5 minutes and is then recorded as `confirmation_timeout`, a question of the
+  2026-07-28 protocol that is never answered is recorded as `unanswered` after 15 minutes, and a call the client
+  cancels, also while its question is open, is recorded as `cancelled`. Before, these ended without an audit entry,
+  and a question could stay open without limit.
+- **A client's cancel reaches a running call at once** (MCP server): the call is recorded as cancelled and the
+  running handler is told immediately; what already runs finishes and its end entry follows. Before, the
+  cancellation arrived only after the handler had finished, and nothing was recorded.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -466,6 +480,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   key with a space, a line break or an invisible character inside is refused before anything is sent or stored.
 - The Builder log shows every message as plain text, so names from community recipes, Ditto's answers or build
   output cannot render as HTML (links, images, formatting).
+- **Calls that change something run only when they are recorded** (Ditto and MCP clients): before such a call
+  runs, a `started` entry is written to the audit log; if it cannot be written, the call is refused, and a question
+  about it is not asked. Read-only calls stay available. Before, a failed audit write was only logged and the call
+  ran anyway, and the only entry was written after the handler, so a crash in the middle of a change left no trace.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

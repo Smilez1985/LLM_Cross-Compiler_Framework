@@ -413,6 +413,9 @@ def _ditto_confirm(spec, inp) -> bool:
     return click.confirm("Allow this?", default=False, err=True)
 
 
+_ditto_confirm.confirm_channel = "framework-cli"  # recorded in the audit log
+
+
 @module.command('generate-ai')
 @click.argument('probe_file', type=click.Path(exists=True))
 @click.option('--provider', help='AI provider for this run (e.g. anthropic, openai, ollama); default: AI settings')

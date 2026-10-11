@@ -86,3 +86,7 @@ class ToolConfirmation(QObject):
     def close(self) -> None:
         """Answers open and later questions with "no" (e.g. when the window closes)."""
         self._closed.set()
+
+
+# The audit log records which channel a confirmation came from (ToolRegistry reads this attribute).
+ToolConfirmation.confirm.confirm_channel = "framework-gui"

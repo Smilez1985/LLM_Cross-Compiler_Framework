@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import threading
@@ -43,16 +44,38 @@ _SCHEMA = (
         detail TEXT NOT NULL,
         prev_hash TEXT NOT NULL,
         hash TEXT NOT NULL,
-        key_id TEXT
+        key_id TEXT,
+        extra TEXT
     )
     """,
     "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
 )
 _FIELDS = ("ts", "actor", "tool", "tier", "decision", "approved", "args_sha256", "args_preview", "outcome", "detail")
 _INSERT = ("INSERT INTO events (ts, actor, tool, tier, decision, approved, args_sha256, args_preview, outcome, detail, "
-           "prev_hash, hash, key_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+           "prev_hash, hash, key_id, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 GENESIS = "0" * 64
 UNKEYED = "unkeyed"
+
+# What an entry can record. `started` is the write-ahead entry of a call that changes something (written before
+# the handler runs; the call is refused when it cannot be written), `confirmation_requested` the record of a
+# question put to a person; the other outcomes are end states.
+OUTCOMES = frozenset({
+    "ok", "error", "denied", "not_confirmed", "invalid_input",
+    "started", "confirmation_requested", "cancelled", "rate_limited", "confirmation_timeout",
+    "audit_unavailable", "unknown_tool", "repeat_refused", "cannot_reported",
+})
+# How a person answered (or did not answer) a question.
+ANSWERS = frozenset({"accepted", "declined", "cancelled", "timeout", "client_disconnected", "unavailable",
+                     "unanswered"})
+# Where a confirmation came from: none, an MCP form elicitation, the framework's own windows, a pending approval
+# decided in the framework, or a standing approval.
+_CHANNEL = re.compile(r"^(none|elicitation|framework|framework-gui|framework-cli|approval:[\w-]{1,64}|"
+                      r"grant:[\w-]{1,64})$")
+# Fields kept in an entry's `extra` column. They are part of the chained hash once written; entries without them
+# (older entries, older writers) are hashed exactly as before.
+EXTRA_FIELDS = frozenset({"client", "session", "confirm_channel", "question_sha256", "answer", "name_requested",
+                          "repairs", "reason_code", "duration_ms", "result", "links"})
+_EXTRA_MAX = 2000
 _BREAKS = ("removed", "modified", "anchor_missing")
 _ANCHOR_MAX = 4096  # a real anchor has about 170 bytes
 
@@ -103,6 +126,18 @@ class AuditCheck:
 def _text(value: str) -> str:
     """Text SQLite can store: lone surrogates (valid in Python's JSON, e.g. from model output) become escapes."""
     return value.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def extra_fields(row: Dict[str, Any]) -> Dict[str, Any]:
+    """The parsed extra fields of an entry ({} when it has none or they cannot be read)."""
+    raw = row.get("extra")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError, RecursionError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _same(expected: str, stored: Any) -> bool:
@@ -176,12 +211,15 @@ class AuditLog:
             # On every connect: the file may have been moved aside since the last one (a new log starts).
             for statement in _SCHEMA:
                 db.execute(statement)
-            if "key_id" not in {r[1] for r in db.execute("PRAGMA table_info(events)")}:
-                try:  # logs from before per-entry key ids
-                    db.execute("ALTER TABLE events ADD COLUMN key_id TEXT")
-                except sqlite3.OperationalError as e:
-                    if "duplicate column" not in str(e):  # another process was first
-                        raise
+            columns = {r[1] for r in db.execute("PRAGMA table_info(events)")}
+            # Logs from before per-entry key ids, and from before the extra fields.
+            for column in ("key_id", "extra"):
+                if column not in columns:
+                    try:
+                        db.execute(f"ALTER TABLE events ADD COLUMN {column} TEXT")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" not in str(e):  # another process was first
+                            raise
         except BaseException:
             db.close()
             raise
@@ -192,6 +230,8 @@ class AuditLog:
         values = [row[f] for f in _FIELDS]
         if key_id is not None:  # entries from before per-entry key ids are hashed without it
             values.append(key_id)
+        if row.get("extra") is not None:  # entries without extra fields are hashed as before
+            values.append(row["extra"])
         payload = (prev_hash + json.dumps(values, ensure_ascii=False, default=repr)).encode("utf-8")
         if key:
             return hmac.new(key, payload, hashlib.sha256).hexdigest()
@@ -306,9 +346,42 @@ class AuditLog:
             return "removed", head + 1
         return None
 
+    @staticmethod
+    def _extra(outcome: str, extra: Optional[Dict[str, Any]]) -> Optional[str]:
+        """The extra fields as canonical JSON (redacted), None when there are none. Unknown fields and values
+        outside the documented sets are refused: they are a bug in the caller, and an audit entry must not carry
+        text nobody can interpret."""
+        if outcome not in OUTCOMES:
+            raise ValueError(f"unknown audit outcome {outcome!r}")
+        fields = {k: v for k, v in (extra or {}).items() if v not in (None, "", [], {})}
+        if not fields:
+            return None
+        unknown = set(fields) - EXTRA_FIELDS
+        if unknown:
+            raise ValueError(f"unknown audit fields {sorted(unknown)}")
+        if "answer" in fields and fields["answer"] not in ANSWERS:
+            raise ValueError(f"unknown answer {fields['answer']!r}")
+        if "confirm_channel" in fields and not _CHANNEL.match(str(fields["confirm_channel"])):
+            raise ValueError(f"unknown confirmation channel {fields['confirm_channel']!r}")
+        text = json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        text = _text(redact_secrets(text))
+        if len(text) > _EXTRA_MAX:  # never cut JSON in the middle: keep the fields that fit, say what was cut
+            kept: Dict[str, Any] = {"truncated": sorted(fields)}
+            for key in ("reason_code", "answer", "confirm_channel", "question_sha256", "duration_ms", "links"):
+                if key in fields:
+                    kept[key] = fields[key]
+            text = _text(redact_secrets(json.dumps(kept, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                                                   default=str)))[:_EXTRA_MAX]
+        return text
+
     def record(self, actor: str, tool: str, tier: str, decision: str, outcome: str,
-               arguments: Any = None, approved: Optional[bool] = None, detail: str = "") -> None:
+               arguments: Any = None, approved: Optional[bool] = None, detail: str = "",
+               extra: Optional[Dict[str, Any]] = None) -> int:
+        """Appends one entry and returns its id. `extra`: fields of EXTRA_FIELDS (client, session, confirmation
+        channel, question hash, answer, repaired names and arguments, reason code, duration, result hash, links to
+        earlier entries)."""
         text = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str) if arguments is not None else ""
+        extra_text = self._extra(outcome, extra)
         row = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "actor": _text(actor), "tool": _text(tool), "tier": _text(tier), "decision": _text(decision),
@@ -317,6 +390,7 @@ class AuditLog:
             "args_preview": _text(redact_secrets(text))[:500],
             "outcome": _text(outcome),
             "detail": _text(redact_secrets(detail or ""))[:1000],
+            "extra": extra_text,
         }
         with self._lock:
             db = self._connect()
@@ -351,6 +425,7 @@ class AuditLog:
                         self._warn(f"Audit anchor not updated: {e}")
             finally:
                 db.close()
+        return entry_id
 
     def _append(self, db, row: Dict[str, Any]) -> Tuple[int, str, bool, bool]:
         """Appends row; returns (entry id, hash, whether the anchor could be read, whether a new log started)."""
@@ -377,7 +452,7 @@ class AuditLog:
             db.execute("INSERT INTO meta (k, v) VALUES ('key_id', ?)", (own,))
         prev = str(last["hash"]) if last else GENESIS  # an edited head may hold a BLOB; check() reports it
         digest = self._digest(prev, row, own, self._key)
-        cur = db.execute(_INSERT, [row[f] for f in _FIELDS] + [prev, digest, own])
+        cur = db.execute(_INSERT, [row[f] for f in _FIELDS] + [prev, digest, own, row.get("extra")])
         entry_id = cur.lastrowid
         if problem:
             db.execute("INSERT INTO meta (k, v) VALUES ('break', ?)",
@@ -390,11 +465,17 @@ class AuditLog:
         get_logger("AuditLog").warning(message)
 
     def entries(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """The newest entries, newest first. The extra fields are also given as keys of their own (they never
+        replace a column)."""
         db = self._connect()
         try:
-            return _dicts(db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(limit),)))
+            rows = _dicts(db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(limit),)))
         finally:
             db.close()
+        for row in rows:
+            for key, value in extra_fields(row).items():
+                row.setdefault(key, value)
+        return rows
 
     def check(self) -> AuditCheck:
         """Walks the whole chain and compares its head with the anchor file. Writers wait meanwhile, so the

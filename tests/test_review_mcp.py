@@ -101,8 +101,20 @@ def call(server, tool, arguments, callback=None, mode="auto"):
     return run(go())
 
 
+# Entries written before the end state: the write-ahead entry of a call that changes something, and the record of a
+# question put to the person. rows() leaves them out so the tests below still pin each call's end state exactly;
+# all_rows() and TestWriteAheadAudit (test_mcp_server.py) check them.
+BOOKKEEPING = ("started", "confirmation_requested")
+
+
 def rows(registry):
-    """Audit entries, newest first, as (tool, decision, approved, outcome)."""
+    """Audit end entries, newest first, as (tool, decision, approved, outcome)."""
+    return [(e["tool"], e["decision"], e["approved"], e["outcome"]) for e in registry.audit.entries(50)
+            if e["outcome"] not in BOOKKEEPING]
+
+
+def all_rows(registry):
+    """Every audit entry, newest first, as (tool, decision, approved, outcome)."""
     return [(e["tool"], e["decision"], e["approved"], e["outcome"]) for e in registry.audit.entries(50)]
 
 

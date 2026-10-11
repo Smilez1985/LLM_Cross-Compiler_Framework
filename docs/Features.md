@@ -811,6 +811,21 @@ chain and tells a changed entry apart from a wrong key. Each entry is written in
 processes cannot fork the chain. `llm-cli tools audit --archive` moves the log and its anchor aside (kept with a
 timestamp) and starts a new chain, for example after `llm-cli doctor` has reported a problem with the log.
 
+**Recorded before it runs.** A call that changes something (every tier except `read`) gets a `started` entry before
+it runs. If that entry cannot be written, the call is refused and nothing runs: calls that change something run only
+when they are recorded. Read-only calls stay available, and the failed write is logged. A question to you is recorded
+as `confirmation_requested` with the SHA-256 of the question text before it is asked; a question about a change that
+cannot be recorded is not asked. Every end is recorded: `ok`, `error`, `denied`, `not_confirmed` with the answer
+(`accepted`, `declined`, `cancelled`, `unavailable` when nobody could be asked, `unanswered`), `confirmation_timeout`
+(an MCP question asked during the call waits at most 5 minutes) and `cancelled` (the client gave up on the call). A
+question of the 2026-07-28 protocol that is returned to the client and never answered is recorded as `unanswered`
+after 15 minutes while the server runs; the `confirmation_requested` entry is the lasting record. When a client
+cancels a running call, the cancellation is recorded at once and passed to the running call; what already runs
+finishes, and its end entry follows. Entries also carry the client's self-reported name and version (a label, not
+proof of who it is), a hash of the connection, the confirmation channel (`elicitation`, `framework-gui`,
+`framework-cli`), the duration, the SHA-256 and size of the result (never the result itself) and a link to the call's
+`started` entry. These fields are part of the hash chain; logs written before them stay verifiable.
+
 ---
 
 ## Secrets and personal state
