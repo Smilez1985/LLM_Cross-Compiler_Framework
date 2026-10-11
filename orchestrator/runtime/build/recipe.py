@@ -16,8 +16,8 @@ Every plan
   router child processes in llama-server;
 - follows the OS, architecture and C library of the machine that runs the binaries (decision 8): a build on that
   machine uses GGML_NATIVE, a build for another machine uses the probe's CPU features (or all CPU variants when the
-  probe could not tell), a glibc target gets a builder base whose glibc is not newer than its own, a musl target the
-  Alpine base;
+  probe could not tell), a container or cross build gets a builder base whose C library (glibc, or musl on Alpine)
+  is not newer than the machine's LIBC_VERSION, and none without that value;
 - has a build ID, the sha256 of everything that changes the binaries. Volatile probe values cannot enter it, because
   only derived options do.
 
@@ -533,8 +533,8 @@ def choose_cuda_toolkit(profile: HardwareProfile, catalog: RuntimeCatalog, toolc
 # --- builder base ------------------------------------------------------------------------------------------------
 
 def choose_build_base(catalog: RuntimeCatalog, libc: Optional[str], libc_version: Optional[str]) -> BuildBase:
-    """The builder base for a Linux target: glibc -> the newest base whose glibc is not newer than the target's,
-    musl -> the newest musl base (a target with an older musl than the base is refused)."""
+    """The builder base for a Linux target: the newest base whose C library (glibc or musl) is not newer than the
+    target's. A target without LIBC_VERSION, or with an older C library than every base, is refused."""
     if libc is None:
         raise PlanError("the profile has no LIBC: probe the machine again before a build for it")
     bases = [b for b in catalog.build_bases if b.libc == libc]
@@ -542,10 +542,10 @@ def choose_build_base(catalog: RuntimeCatalog, libc: Optional[str], libc_version
         raise PlanError(f"the catalog has no builder base for {libc}")
     bases.sort(key=lambda b: version_tuple(b.libc_version), reverse=True)
     if libc_version is None:
-        if libc == "glibc":
-            raise PlanError("the profile has no LIBC_VERSION; the builder base must not have a newer glibc than the "
-                            "machine: probe it again before a build for it")
-        return bases[0]
+        # Required for glibc and musl alike (design 2.4, 3.10): a binary linked against a newer musl can need symbols
+        # an older one lacks, so the newest base is no safe guess.
+        raise PlanError(f"the profile has no LIBC_VERSION; the builder base must not have a newer {libc} than the "
+                        "machine: probe it again before a build for it")
     fitting = [b for b in bases if version_tuple(b.libc_version) <= version_tuple(libc_version)]
     if not fitting:
         oldest = bases[-1]

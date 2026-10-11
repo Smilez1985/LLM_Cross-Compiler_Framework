@@ -101,8 +101,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   not tell. NVIDIA GPUs get real code for exactly their compute capabilities (every NVIDIA GPU must report one) with
   a CUDA toolkit no newer than the driver supports, on glibc systems; AMD GPUs their gfx target (ROCm on Linux, on
   request); Vulkan and Metal are switches; Windows builds use Clang. The plan follows the target's OS and C library:
-  a builder base whose glibc is not newer than the device's, Alpine for musl, and a statically linked C++ runtime
-  for device builds. Plans are not run yet.
+  a builder base whose C library (glibc, or musl on Alpine) is not newer than the device's, so a build for another
+  machine needs the `LIBC_VERSION` its probe reports, and a statically linked C++ runtime for device builds. Plans are
+  not run yet.
 - **llama.cpp pinned by commit**: `llama_cpp.source` in `configs/llama_runtime.yml` (commit
   `d81235049384534c167caea52b85a694f6103d14`, tag `b11429`) is the one place. With it come the CUDA toolkits for
   self-built CUDA builds (NVIDIA's redist manifests pinned by size and SHA256, with the driver, compute capability,

@@ -238,7 +238,8 @@ cuda:
 
 # Builder container bases for container and cross builds of llama.cpp. The base follows the C library of the
 # machine that runs the binaries (decision 8): for glibc the newest base whose glibc is not newer than that machine's
-# LIBC_VERSION (a binary needs the same or a newer glibc to start), for musl the Alpine base. Compilers, CMake and
+# LIBC_VERSION (a binary needs the same or a newer glibc to start), for musl the Alpine base if its musl is not newer
+# either; a profile without LIBC_VERSION gets no container or cross build. Compilers, CMake and
 # the cross compilers come from the base's own signed package archive. gcc is the release's default compiler. Image
 # digests: the manifest lists on Docker Hub, checked 2026-10-11.
 build_bases:
