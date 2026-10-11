@@ -2,6 +2,7 @@
 text, degrading when it cannot run), the relevance floor, the excerpt budget, oversized code blocks and tables,
 identifier-aware BM25, and idle unloading of models. Fake models only, no download."""
 
+import logging
 import math
 import re
 import socket
@@ -311,6 +312,20 @@ def test_unset_floor_is_the_models_and_zero_turns_it_off(knowledge, tmp_path):
     assert [h.score for h in rag.search("model memory", limit=4, rerank=True)] == [0.9, 0.5, 0.05, 0.05]
 
 
+def test_a_floor_without_a_value_is_unset_not_invalid(knowledge, tmp_path, caplog):
+    """`rag_rerank_min_score:` without a value (YAML null) is the documented unset state: no "invalid value"
+    warning, and setting None at run time goes back to the model's floor."""
+    (tmp_path / "configs").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "configs" / "config.yml").write_text("rag_rerank_min_score:\n")
+    with caplog.at_level(logging.WARNING):
+        rag = knowledge(reranker=FakeReranker(LICENSE_FIRST), rag_rerank_min_score=0)
+    assert "rag_rerank_min_score" not in caplog.text
+    ingest_all(rag)
+    assert len(rag.search("model memory", limit=4, rerank=True)) == 4  # 0: no floor
+    assert rag.config.set("rag_rerank_min_score", None)
+    assert [h.score for h in rag.search("model memory", limit=4, rerank=True)] == [0.9, 0.5]  # the model's floor
+
+
 def test_default_and_off_switch(knowledge):
     reranker = FakeReranker(LICENSE_FIRST)
     rag = knowledge(reranker=reranker)
@@ -530,6 +545,7 @@ def test_ingest_splits_blocks_beyond_the_model_context(knowledge):
     ("CMAKE_CUDA_ARCHITECTURES=87 and CMAKE_CUDA_ARCHITECTURES", "CMAKE CUDA ARCHITECTURES"),
     ("-DNDEBUG=1", "NDEBUG"),
     ("-DBUILD_SHARED_LIBS", "BUILD_SHARED_LIBS BUILD SHARED LIBS"),
+    ("-D_FORTIFY_SOURCE=2 -D_GNU_SOURCE", "_FORTIFY_SOURCE FORTIFY SOURCE _GNU_SOURCE GNU"),  # no stray "D"
     # Version numbers are no search words: no fragments of one or two digits (the identifier itself stays).
     ("x86_64 wheels for manylinux_2_17", "x86 manylinux"),
     ("manylinux2014_x86_64 and gcc_12", "manylinux2014 x86 gcc"),
