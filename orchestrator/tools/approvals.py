@@ -28,6 +28,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from orchestrator.tools.confirmation import MAX_FRAMEWORK_DESCRIPTION, describe_call, visible
+from orchestrator.tools.grants import DECLINED_COOLDOWN, DURATION_LABELS, GrantOffer
 from orchestrator.tools.signing import SIGNATURE_FIELD, SignatureError, sign, verify
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -96,11 +97,17 @@ class ApprovalRecord(BaseModel):
     created: str
     expires: str
     state: Literal["pending", "approved", "declined", "running", "done", "failed", "expired", "withdrawn"]
-    job_id: str = Field(pattern=r"^job_[a-z0-9]{16}$")
+    # "call": a call waits for the person; "grant_request": an elicitation asked the framework to stop asking for such
+    # calls (the call itself already ran), which only the person can turn into a standing approval here.
+    kind: Literal["call", "grant_request"] = "call"
+    job_id: Optional[str] = Field(default=None, pattern=r"^job_[a-z0-9]{16}$")
     pid: int = Field(ge=0)                          # the process that holds the call and runs it
+    owner: str = Field(default="", max_length=120)  # the client's session (its requests end with it)
     decided_by: Optional[Literal["cli", "gui"]] = None
     decided_at: Optional[str] = None
     note: str = Field(default="", max_length=500)
+    grant: Optional[GrantOffer] = None              # "do not ask again" the window may offer, from framework facts
+    choice: Optional[Dict[str, str]] = None         # the width and duration the person chose for it
 
     @property
     def caller_class(self) -> str:
@@ -249,10 +256,13 @@ class ApprovalStore:
             return None
 
     def decide(self, approval_id: str, approve: bool, actor: str, expected_question: str = "",
-               record_decision: Optional[Callable[[ApprovalRecord], None]] = None) -> ApprovalRecord:
+               record_decision: Optional[Callable[[ApprovalRecord], None]] = None,
+               choice: Optional[Tuple[str, str]] = None) -> ApprovalRecord:
         """The person's answer from the framework's own window (`actor`: cli or gui). `expected_question`: the hash of
-        the question the person was shown (a question that changed meanwhile is not decided). `record_decision` is
-        called (to audit it) before the decision is stored; if it raises, nothing is stored."""
+        the question the person was shown (a question that changed meanwhile is not decided). `choice`: "approve and
+        do not ask again" with this width and duration (only within the record's offer). `record_decision` is called
+        (to audit it and to save a standing approval) before the decision is stored; if it raises, nothing is
+        stored."""
         if actor not in ("cli", "gui"):
             raise ApprovalStoreError("Only the framework's own windows decide an approval.")
 
@@ -270,14 +280,39 @@ class ApprovalStore:
                 if expected_question and expected_question != record.question_sha256:
                     raise ApprovalStoreError(f"The question of approval {approval_id} changed while you read it; "
                                              "look at it again.")
-                decided = record.model_copy(update={"state": "approved" if approve else "declined",
-                                                    "decided_by": actor, "decided_at": _iso(_now())})
+                if approve and record.kind == "grant_request" and choice is None:
+                    raise ApprovalStoreError(f"{approval_id} asks to stop asking: approve it as a standing approval "
+                                             "(--always) or decline it.")
+                if approve and choice is not None:
+                    offer = record.grant
+                    if offer is None or choice[0] not in offer.scopes or choice[1] not in offer.durations:
+                        raise ApprovalStoreError(f"'Do not ask again' with that width and duration is not offered for "
+                                                 f"{approval_id}.")
+                decided = record.model_copy(update={
+                    "state": "approved" if approve else "declined", "decided_by": actor, "decided_at": _iso(_now()),
+                    "choice": {"width": choice[0], "duration": choice[1]} if approve and choice else None})
                 if record_decision is not None:
                     record_decision(decided)
                 records[i] = decided
                 return decided
             raise ApprovalStoreError(f"There is no approval '{approval_id}' ('llm-cli tools approvals' lists them).")
         return self._change(change)
+
+
+def apply_decision(registry: Any, record: ApprovalRecord, actor: str) -> None:
+    """Everything a person's decision does before it is stored: the audit entry, and for "approve and do not ask
+    again" the standing approval itself, saved with the policy (`actor`: cli or gui). Raises when either cannot be
+    written; then nothing is decided."""
+    audit_decision(registry, record, actor)
+    if record.state == "approved" and record.choice and record.grant is not None:
+        registry.create_grant(record.grant, record.choice["width"], record.choice["duration"], actor, actor)
+
+
+def offer_text(offer: GrantOffer) -> str:
+    """The scopes and durations an offer allows, and its warning, as the window shows them."""
+    lines = ["Do not ask again for:"] + [f"  - {summary}" for summary in offer.summaries.values()]
+    lines.append("For how long: " + "; ".join(DURATION_LABELS[d] for d in offer.durations))
+    return "\n".join(lines) + "\n\n" + offer.warning
 
 
 def audit_decision(registry: Any, record: ApprovalRecord, actor: str) -> None:
@@ -291,7 +326,8 @@ def audit_decision(registry: Any, record: ApprovalRecord, actor: str) -> None:
         tier = "unknown"
     approved = record.state == "approved"
     registry.audit.record(actor, record.tool, tier, "person", "approval_decided",
-                          arguments={"approval": record.id, "caller": record.caller}, approved=approved,
+                          arguments={"approval": record.id, "caller": record.caller, "kind": record.kind,
+                                     "always": record.choice or None}, approved=approved,
                           extra={"confirm_channel": f"approval:{record.id}", "question_sha256": record.question_sha256,
                                  "answer": "accepted" if approved else "declined"})
 
@@ -359,6 +395,7 @@ class ApprovalService:
                                  "get_job_status), or withdraw one with cancel_job.")
         question = self.question(spec, inp, ctx)
         digest = question_sha256(question)
+        offer = self.registry.grant_offer(spec, inp, ctx) if spec.grant is not None else None
         approval_id = f"ap_{secrets.token_hex(8)}"
         job = self.jobs.create("approval", ctx.owner, state="waiting_for_approval",
                                on_cancel=lambda: self.withdraw(approval_id, "cancelled",
@@ -374,7 +411,7 @@ class ApprovalService:
                                           tool=spec.name, title=spec.title[:200], args_sha256=key[2],
                                           question=question, question_sha256=digest, created=_iso(now),
                                           expires=_iso(expires), state="pending", job_id=job.job_id,
-                                          pid=os.getpid()))
+                                          pid=os.getpid(), owner=str(ctx.owner)[:120], grant=offer))
         except BaseException:
             self.jobs.update(job.job_id, state="failed", error={"code": "failed",
                                                                 "message": "The approval could not be recorded."})
@@ -385,6 +422,48 @@ class ApprovalService:
                                                   digest, expires)
         self._start()
         return job
+
+    def request_grant(self, spec: Any, inp: Any, ctx: Any) -> Optional[ApprovalRecord]:
+        """An elicitation was accepted with "ask the framework to stop asking for this": a request the person confirms
+        (or not) in the framework's window. Never a standing approval by itself. At most one open request per caller
+        and tool; a scope the person declined is not requested again for 24 hours. None when nothing is requested."""
+        offer = self.registry.grant_offer(spec, inp, ctx)
+        if offer is None:
+            return None
+        scope_key = json.dumps(offer.scopes, sort_keys=True)
+        now = _now()
+        for record in self.store.list():
+            if record.kind != "grant_request" or record.caller != ctx.actor or record.tool != spec.name:
+                continue
+            if record.state == "pending" and not record.expired(now) and record.holder_alive():
+                return record  # one open request per caller and tool
+            if (record.state == "declined" and record.grant is not None
+                    and json.dumps(record.grant.scopes, sort_keys=True) == scope_key
+                    and now - _parse(record.decided_at or record.created) < DECLINED_COOLDOWN):
+                return None  # the person said no to this scope less than 24 hours ago
+        client = visible(ctx.client) if getattr(ctx, "client", "") else "unnamed client"
+        shared = " (they share one set of permissions)" if ctx.actor == "mcp" else ""
+        question = (f"Caller: {caller_label(ctx.actor)}{shared}\nClient: {client} (self-reported)\n"
+                    f"This AI client asks the framework to stop asking you before '{spec.title}' calls like the one "
+                    "you just confirmed in it.\n\n" + offer_text(offer))
+        approval_id = f"ap_{secrets.token_hex(8)}"
+        digest = question_sha256(question)
+        self.registry._audit(ctx, spec, self.registry.decide(spec, inp, ctx), "confirmation_requested", {},
+                             confirm_channel=f"approval:{approval_id}", question_sha256=digest,
+                             detail="The client asked to stop asking for such calls (a standing approval request).")
+        record = ApprovalRecord(id=approval_id, caller=ctx.actor, client=str(ctx.client or "")[:400], tool=spec.name,
+                                title=spec.title[:200], args_sha256=arguments_sha256({}), question=question,
+                                question_sha256=digest, created=_iso(now),
+                                expires=_iso(now + timedelta(seconds=self.ttl)), state="pending",
+                                kind="grant_request", pid=os.getpid(), owner=str(ctx.owner)[:120], grant=offer)
+        self.store.add(record)
+        return record
+
+    def end_owner(self, owner: str) -> None:
+        """A client's session ended: its open requests to stop asking can no longer be confirmed."""
+        for record in self.store.list():
+            if record.kind == "grant_request" and record.owner == owner and record.state == "pending":
+                self.store.update(record.id, state="withdrawn", note="The client's session ended.")
 
     def withdraw(self, approval_id: str, answer: str = "cancelled", detail: str = "") -> None:
         """The client gave up (cancel_job) or its session ended: the approval can no longer be decided."""

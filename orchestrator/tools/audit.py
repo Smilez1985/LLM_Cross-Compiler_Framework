@@ -65,7 +65,7 @@ OUTCOMES = frozenset({
     "ok", "error", "denied", "not_confirmed", "invalid_input",
     "started", "confirmation_requested", "cancelled", "rate_limited", "confirmation_timeout",
     "audit_unavailable", "unknown_tool", "repeat_refused", "cannot_reported",
-    "folder_added", "folder_removed", "policy_changed", "approval_decided",
+    "folder_added", "folder_removed", "policy_changed", "approval_decided", "grant_lapsed",
 })
 # How a person answered (or did not answer) a question.
 ANSWERS = frozenset({"accepted", "declined", "cancelled", "timeout", "client_disconnected", "unavailable",
@@ -574,6 +574,21 @@ class AuditLog:
             return result("modified", anchor[0])
         # The newest entry the log had is gone (or was rewritten together with everything before it).
         return result("removed", anchor[0])
+
+    def grant_uses(self, grant_id: str) -> Tuple[int, Optional[str]]:
+        """(how often a standing approval was used, the time of its last use or of its lapse record), read from the
+        entries whose confirmation channel names it; the policy file never counts uses. (0, None) without a log."""
+        if not re.fullmatch(r"g_[0-9a-f]{16}", grant_id or "") or not os.path.lexists(self.path):
+            return 0, None
+        needle = f'"confirm_channel":"grant:{grant_id}"'
+        db = self._connect()
+        try:
+            row = db.execute("SELECT COUNT(*), MAX(ts) FROM events WHERE instr(extra, ?) > 0 AND outcome IN "
+                             "('ok', 'error', 'cancelled')", (needle,)).fetchone()
+            last = db.execute("SELECT MAX(ts) FROM events WHERE instr(extra, ?) > 0", (needle,)).fetchone()
+        finally:
+            db.close()
+        return int(row[0] or 0), (last[0] if last else None)
 
     def kept_with_key(self) -> bool:
         """Whether this log is kept with a key (its newest entry, or the key it started with, names one): then a

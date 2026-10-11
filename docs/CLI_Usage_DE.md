@@ -867,10 +867,19 @@ einem Rechner ohne Bildschirm, etwa im Docker-Image, führst du es dort in einem
 (`docker exec -it <container> llm-cli tools approvals`). Die GUI zeigt dieselben Aufrufe unter
 **Tools > Pending Approvals...**.
 
+`approve ID --always [--width this|any] [--duration revoke|30d|24h]` gibt den Aufruf frei und speichert eine
+dauerhafte Freigabe („nicht mehr fragen“) im Rahmen, den das Framework dafür angeboten hat, nachdem Rahmen und
+Warnung gezeigt wurden; `list` kennzeichnet die Aufrufe, bei denen sie angeboten wird, und die Anfragen, die der
+Dialog eines Clients geschickt hat („asks to stop asking“), die nur mit einem Rahmen freigegeben werden. `--always`
+wird abgelehnt, solange eine GUI-Sitzung des Frameworks läuft: Nutze ihr Freigabefenster. Für alle lokalen
+stdio-Clients zusammen gibt es nur `--width this` und `--duration 30d` oder `24h`.
+
 | Option von `tools permissions` | Bedeutung |
 |---|---|
 | `--confirm-in-framework TOOL` | Fragen zu diesem Tool immer im Framework stellen (im Freigabefenster oder mit diesem Befehl), nie im eigenen Dialog des KI-Clients. Wiederholbar; mit `--caller` für einen Aufrufer. Braucht ein Terminal; wird festgehalten. |
 | `--confirm-anywhere TOOL` | `--confirm-in-framework` für dieses Tool zurücknehmen. |
+| `--grants` | Die dauerhaften Freigaben jedes Aufrufers auflisten: was jede abdeckt, ihren Zustand (active, expired, lapsed, outdated), wann und wie sie angelegt wurde, ihre Nutzungen und letzte Nutzung (aus dem Audit-Log) und ihren Ablauf. |
+| `--revoke-grant ID` | Eine dauerhafte Freigabe sofort widerrufen (braucht ein Terminal; wird festgehalten). `--reset` löscht alle, `--reset --caller` die dieses Aufrufers; das Widerrufen eines Tokens entfernt seine eigenen. |
 
 ### tools folders
 

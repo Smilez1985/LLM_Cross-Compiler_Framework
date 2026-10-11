@@ -364,6 +364,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   die Frage zeigt zuerst die Aufruferklasse und den Namen des Clients als selbst angegeben, bis zu 16.000 Zeichen.
   Entscheidungen werden festgehalten, bevor sie gespeichert werden, und die Datei der Freigaben ist signiert wie die
   Berechtigungen.
+- **Dauerhafte Freigaben: „ja, und nicht mehr fragen“** (MCP-Server, Ditto). Nur von dir im eigenen Fenster des
+  Frameworks angelegt (das Freigabefenster, `llm-cli tools approvals approve ID --always`, Dittos Dialog und
+  Rückfrage), nach einer Warnung, die nennt, wer dann ohne Nachfrage handeln darf, was in einfachen Worten abgedeckt
+  ist, wie weit und wie lange. Das Formular eines MCP-Clients kann das Framework nur darum bitten, was du in dessen
+  Fenster bestätigst (eine offene Anfrage je Aufrufer und Tool; ein abgelehnter Rahmen wird 24 Stunden lang nicht
+  erneut angefragt). Rahmen kommen aus Fakten, die das Framework nachgeschlagen hat: Zoo-Pakete nur für Wissens- und
+  Rezept-Pakete (Vertrauensstufe verified oder community) und verifizierte Target-Pakete, gebunden an Art,
+  Vertrauensstufe und Index-Schlüssel; Builds und Downloads nur für safetensors oder GGUF, ohne Zugangsbeschränkung,
+  freizügige Lizenz, bis zu einer Größenklasse; nie für Deployment, Einstellungen, Crawlen, das Anlegen von Modulen,
+  `export_pack`, Healing, Löschen oder Wiederherstellen und das Stoppen der Arbeit eines anderen Clients. Alle lokalen
+  stdio-Clients zusammen bekommen nur den engsten Rahmen, eine Warnung und höchstens 30 Tage. Gespeichert in der
+  signierten Berechtigungsdatei und nur auf deine Handlung hin geschrieben; Nutzungen kommen aus dem Audit-Log
+  (`grant:<id>`), jede Nutzung zeigt in der GUI einen Hinweis mit **Revoke**; sie verfallen nach 90 Tagen ohne
+  Nutzung. `llm-cli tools permissions --grants`, `--revoke-grant ID` und der Dialog Tool Permissions führen sie auf
+  und widerrufen sie; solange die GUI läuft, kann die Kommandozeile keine anlegen. Noch bietet kein aktuelles Tool
+  eine an: Die Regeln kommen mit den Tools, deren Fakten das Framework nachschlägt.
 
 ### Geändert
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das

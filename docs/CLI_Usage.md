@@ -840,10 +840,19 @@ its client's session has ended, its question changed meanwhile, or the audit log
 headless machine, such as the Docker image, run it in a terminal there (`docker exec -it <container> llm-cli tools
 approvals`). The GUI shows the same calls under **Tools > Pending Approvals...**.
 
+`approve ID --always [--width this|any] [--duration revoke|30d|24h]` approves the call and saves a standing
+approval ("do not ask again") within the scope the framework offered for it, after showing the scope and the
+warning; `list` marks the calls where it is offered and the requests a client's dialog sent ("asks to stop
+asking"), which are approved only with a scope. `--always` is refused while a GUI session of the framework runs:
+use its approval window. For all local stdio clients together only `--width this` and `--duration 30d` or `24h`
+exist.
+
 | Option of `tools permissions` | Meaning |
 |---|---|
 | `--confirm-in-framework TOOL` | Always put this tool's questions to you in the framework (the approval window or this command), never in the AI client's own dialog. Repeatable; with `--caller` for one caller. Needs a terminal; audited. |
 | `--confirm-anywhere TOOL` | Undo `--confirm-in-framework` for this tool. |
+| `--grants` | List the standing approvals of every caller: what each covers, its state (active, expired, lapsed, outdated), when and how it was created, its uses and last use (from the audit log) and its expiry. |
+| `--revoke-grant ID` | Revoke one standing approval at once (needs a terminal; audited). `--reset` clears them all, `--reset --caller` those of that caller; revoking a token removes its own. |
 
 ### tools folders
 

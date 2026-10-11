@@ -144,6 +144,18 @@ class ToolPermission(BaseModel):
     standing_approval: bool = Field(description="Whether a confirmation may offer 'yes, and do not ask again'")
 
 
+class StandingApprovalOut(BaseModel):
+    id: str
+    tool: str
+    scope: str = Field(description="What it covers, in plain words")
+    state: Literal["active", "expired", "lapsed", "outdated"]
+    created: str
+    created_via: str
+    expires: Optional[str] = None
+    uses: int
+    last_use: Optional[str] = None
+
+
 class NoToolAction(BaseModel):
     action: str
     where: str
@@ -155,6 +167,8 @@ class PermissionsStatus(BaseModel):
     damaged: bool = Field(description="The permission file is damaged or unreadable: every tool is denied")
     listed: int
     tools: List[ToolPermission]
+    # This caller's own standing approvals, read-only (only the person creates or revokes them, in the framework).
+    standing_approvals: List[StandingApprovalOut] = Field(default_factory=list)
     no_tool_actions: List[NoToolAction]
     warning: str = ""
 
@@ -343,11 +357,17 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         # loaded after permissions(): the damage flag below belongs to this load; a token's own permissions for it
         policy = running.policy(caller) if caller else running.policy()
         listed = sum(1 for r in rows if r["listed"])
+        grant_caller = running._grant_caller(caller)[0] if caller else ""
+        standing = [StandingApprovalOut(id=g["grant"].id, tool=g["grant"].tool, scope=g["grant"].summary,
+                                        state=g["state"], created=g["grant"].created,
+                                        created_via=g["grant"].created_via, expires=g["grant"].expires,
+                                        uses=g["uses"], last_use=g["last_use"])
+                    for g in (running.grant_rows(grant_caller) if grant_caller else [])]
         return StatusOut(permissions=PermissionsStatus(
             caller=caller or "framework", configured=policy.configured,
             damaged=bool(getattr(running.policy_store, "problem", None)), listed=listed,
             tools=[ToolPermission(**{k: r[k] for k in ToolPermission.model_fields}) for r in rows],
-            no_tool_actions=[NoToolAction(action=a, where=w) for a, w in NO_TOOL_ACTIONS],
+            standing_approvals=standing, no_tool_actions=[NoToolAction(action=a, where=w) for a, w in NO_TOOL_ACTIONS],
             warning=(f"{listed} tools are listed; some clients take at most {MAX_LISTED_TOOLS}."
                      if listed > MAX_LISTED_TOOLS else "")))
 

@@ -24,6 +24,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from orchestrator.tools.grants import Grant
 from orchestrator.tools.signing import SIGNATURE_FIELD, SignatureError, sign, verify
 
 
@@ -138,19 +139,36 @@ class ToolPolicy(BaseModel):
     # Tools whose question always appears in the framework (approval window), never in the client's own dialog.
     framework_only: List[str] = Field(default_factory=list)
     callers: Dict[str, CallerPolicy] = Field(default_factory=dict)
+    # Standing approvals per caller (ditto, mcp, mcp:<token>), whatever permissions section that caller uses: one never
+    # covers another caller. Written only on a person's action; their uses come from the audit log.
+    grants: Dict[str, List[Grant]] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _limits(self):
         _check_tiers(self.tiers)
         return self
 
-    @field_validator("callers")
+    @field_validator("callers", "grants")
     @classmethod
-    def _caller_names(cls, value: Dict[str, CallerPolicy]) -> Dict[str, CallerPolicy]:
+    def _caller_names(cls, value: Dict[str, Any]) -> Dict[str, Any]:
         bad = [name for name in value if not _CALLER.match(name)]
         if bad:
             raise ValueError(f"unknown callers {bad} (ditto, mcp or mcp:<token name>)")
         return value
+
+    @model_validator(mode="after")
+    def _unique_grants(self):
+        ids = [g.id for grants in self.grants.values() for g in grants]
+        if len(ids) != len(set(ids)):
+            raise ValueError("standing approval ids must be unique")
+        return self
+
+    def grant_by_id(self, grant_id: str) -> Optional[Tuple[str, Grant]]:
+        for caller, grants in self.grants.items():
+            for grant in grants:
+                if grant.id == grant_id:
+                    return caller, grant
+        return None
 
     def decide(self, tool_name: str, tier: ToolTier) -> Decision:
         """The stored decision for a tool name in the shared permissions (override, else tier), without the
@@ -296,6 +314,19 @@ def policy_changes(before: Optional[ToolPolicy], after: ToolPolicy) -> List[str]
         if old["reviewed"] != new["reviewed"]:
             lines.append(f"{name}: reviewed tools {'-' if old['reviewed'] is None else old['reviewed']} -> "
                          f"{'-' if new['reviewed'] is None else new['reviewed']}")
+    old_grants = {g.id: (caller, g) for caller, gs in (before.grants if before else {}).items() for g in gs}
+    new_grants = {g.id: (caller, g) for caller, gs in after.grants.items() for g in gs}
+    for gid in sorted(set(new_grants) - set(old_grants)):
+        caller, g = new_grants[gid]
+        until = f"until {g.expires}" if g.expires else "until revoked"
+        lines.append(f"{caller}: standing approval {gid} for {g.tool} created ({g.summary}; {until}; via "
+                     f"{g.created_via})")
+    for gid in sorted(set(old_grants) - set(new_grants)):
+        caller, g = old_grants[gid]
+        lines.append(f"{caller}: standing approval {gid} for {g.tool} revoked")
+    for gid in sorted(set(old_grants) & set(new_grants)):
+        if new_grants[gid][1].announced and not old_grants[gid][1].announced:
+            lines.append(f"{new_grants[gid][0]}: standing approval {gid} shown to you in the GUI")
     return lines or ["saved without changes"]
 
 

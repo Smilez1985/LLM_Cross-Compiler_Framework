@@ -262,6 +262,60 @@ class MainOrchestrator(QMainWindow):
         self.approval_notifier = ApprovalNotifier(approvals.store, self)
         self.approval_notifier.changed.connect(self._approvals_changed)
         self.approval_notifier.check()
+        # While this window runs, "do not ask again" is refused on the command line (this window is the stronger
+        # channel); a standing approval made there before is shown once now, and every use shows a notice.
+        from orchestrator.gui.approvals_window import GrantUseWatcher
+        from orchestrator.tools.grants import hold_gui_lock
+        self._gui_lock = hold_gui_lock(registry.policy_store.path.parent)
+        self.btn_revoke_grant = QPushButton("Revoke")
+        self.btn_revoke_grant.hide()
+        self.btn_revoke_grant.clicked.connect(self._revoke_used_grant)
+        self.status.addPermanentWidget(self.btn_revoke_grant)
+        self._used_grant = ""
+        if registry.audit is not None:
+            self.grant_watcher = GrantUseWatcher(registry.audit, self)
+            self.grant_watcher.used.connect(self._grant_used)
+        QTimer.singleShot(0, self._announce_cli_grants)
+
+    def _grant_used(self, tool: str, grant_id: str, actor: str, detail: str):
+        self._used_grant = grant_id
+        self.status.showMessage(f"{actor} ran {tool} under your standing approval {grant_id}{detail}.", 30000)
+        self.btn_revoke_grant.show()
+        QTimer.singleShot(30000, self.btn_revoke_grant.hide)
+
+    def _revoke_used_grant(self):
+        registry = getattr(self.framework, "tool_registry", None)
+        if registry is None or not self._used_grant:
+            return
+        try:
+            registry.revoke_grant(self._used_grant, "gui")
+        except Exception as e:
+            QMessageBox.critical(self, "Standing approval", f"Could not revoke it: {e}")
+            return
+        self.btn_revoke_grant.hide()
+        self.status.showMessage(f"Standing approval {self._used_grant} revoked; those calls ask again.", 8000)
+
+    def _announce_cli_grants(self):
+        """Standing approvals created from a command line are shown here once (and then marked as shown)."""
+        registry = getattr(self.framework, "tool_registry", None)
+        try:
+            rows = [r for r in registry.grant_rows() if not r["grant"].announced]
+        except Exception:
+            return
+        if not rows:
+            return
+        listing = "\n".join(f"- {r['grant'].id}: {r['grant'].tool} for {r['caller']}: {r['grant'].summary} (created "
+                             f"{r['grant'].created} via {r['grant'].created_via})" for r in rows)
+        QMessageBox.information(self, "Standing approvals created on the command line",
+                                "These standing approvals were created on a command line. Revoke any you do not want "
+                                f"in Tools > Tool Permissions.\n\n{listing}")
+        shown = {r["grant"].id for r in rows}
+        try:
+            registry.policy_store.update(lambda p: p.model_copy(update={"grants": {
+                c: [g.model_copy(update={"announced": True}) if g.id in shown else g for g in gs]
+                for c, gs in p.grants.items()}}), actor="gui")
+        except Exception as e:
+            self.status.showMessage(f"Could not mark the standing approvals as shown: {e}", 8000)
 
     def _approvals_changed(self, count: int):
         self.btn_approvals.setText(f"{count} call(s) wait for your approval" if count else "")
@@ -466,6 +520,9 @@ class MainOrchestrator(QMainWindow):
         chat = getattr(self, "chat_window", None)
         if chat is not None:
             chat.confirmation.close()  # a tool call waiting for a confirmation is answered "no"
+        lock = getattr(self, "_gui_lock", None)
+        if lock is not None:  # the command line may offer "do not ask again" again
+            lock.release()
         if self.framework:
             self.framework.shutdown()
         event.accept()

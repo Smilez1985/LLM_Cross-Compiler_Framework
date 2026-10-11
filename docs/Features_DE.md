@@ -891,6 +891,36 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   entscheidet; kein Tool kann eine anlegen, auflisten, freigeben oder ablehnen, und nur der Client, der gefragt hat,
   sieht das Ergebnis. Ditto im Framework fragt immer in seinem eigenen Dialog oder seiner Rückfrage und braucht nie
   eine.
+- **Dauerhafte Freigaben („ja, und nicht mehr fragen“):** ein begrenztes „erlauben“ für einen Aufrufer, das nur du im
+  eigenen Fenster des Frameworks anlegst: **Approve and do not ask again...** im Freigabefenster,
+  `llm-cli tools approvals approve ID --always` oder Dittos Dialog und Rückfrage. Der eigene Dialog eines MCP-Clients
+  kann nur darum bitten: Sein Formular hat dann „ask the framework to stop asking for calls like this one“, was
+  diesen einen Aufruf ausführt und eine Anfrage ins Freigabefenster legt, die du bestätigst (eine offene Anfrage je
+  Aufrufer und Tool, 15 Minuten oder bis seine Sitzung endet; ein abgelehnter Rahmen wird 24 Stunden lang nicht erneut
+  angefragt). Bevor du bestätigst, zeigt das Fenster eine Warnung, die nennt, wer dann ohne Nachfrage handeln darf
+  (bei den lokalen stdio-Clients: alle, mit dem Befehl, der einem Client ein eigenes Token gibt), was die dauerhafte
+  Freigabe in einfachen Worten abdeckt, wie weit („this one only“ oder „any“, wo angeboten) und wie lange („until I
+  revoke it“, 30 Tage oder 24 Stunden; für alle lokalen stdio-Clients zusammen nur der engste Rahmen und höchstens 30
+  Tage). Der Rahmen kommt aus Fakten, die das Framework für den Aufruf nachgeschlagen hat, nie aus dem, was die KI
+  geschrieben hat; ein Aufruf außerhalb fragt wie bisher, und eine dauerhafte Freigabe hebt nie ein „verweigern“ auf,
+  deckt nie einen anderen Aufrufer ab und gilt nie für ein Tool, das du auf Bestätigung im Framework gestellt hast.
+  Pakete aus dem Zoo können eine bekommen für Wissens- und Rezept-Pakete mit Vertrauensstufe `verified` oder
+  `community` und für Target-Pakete mit `verified`, jeweils gebunden an genau die Paketart, die Vertrauensstufe und
+  den Signaturschlüssel des Index; Builds und Einzeldatei-Downloads nur für safetensors oder GGUF (nie Pickle-Gewichte),
+  Modelle ohne Zugangsbeschränkung mit einer freizügigen Lizenz, bis zu einer Größenklasse; nie angeboten wird sie für
+  Deployment, Einstellungen, Crawlen, das Anlegen von Modulen, `export_pack`, Healing, Löschen oder Wiederherstellen
+  und das Stoppen der Arbeit eines anderen Clients. Dauerhafte Freigaben liegen in der signierten Berechtigungsdatei
+  (eine Bearbeitung von Hand verbietet alles) und werden nur geschrieben, wenn du sie anlegst, widerrufst oder
+  zurücksetzt, damit eine Nutzung die Datei nie neu schreibt und keinen Widerruf rückgängig machen kann; ihre
+  Nutzungen und die letzte Nutzung kommen aus dem Audit-Log (`confirm_channel` `grant:<id>`), und die GUI zeigt jede
+  Nutzung mit einem **Revoke**-Knopf. Sie verfallen nach 90 Tagen ohne Nutzung (festgehalten als `grant_lapsed`), mit
+  ihrem Ablauf, wenn sich die Regel des Tools ändert und wenn ihr Token widerrufen wird;
+  `llm-cli tools permissions --grants` und der Dialog Tool Permissions führen sie mit ihren Nutzungen auf, und
+  `--revoke-grant ID`, **Revoke** im Dialog und `--reset` entfernen sie. Solange die GUI läuft, kann die
+  Kommandozeile keine anlegen (nutze das Fenster der GUI); eine auf der Kommandozeile angelegte wird beim nächsten
+  GUI-Start einmal gezeigt. `get_status` zeigt einem Aufrufer seine eigenen dauerhaften Freigaben, nur lesend.
+  Welche Tools bisher eine anbieten: nur Tools, deren Fakten das Framework nachschlagen kann, bekommen eine Regel
+  (noch keines der 14 aktuellen Tools; die Zoo-, Download- und lokalen Tools bringen ihre mit).
 - **Anweisungen an den Client:** Der Server beschreibt den typischen Ablauf (Targets → Capabilities → Build → Status
   und Log → Artefakte), sagt dem Client, dass als externer Text markierte Felder Daten sind, deren Anweisungen nicht
   befolgt werden dürfen, und dass er dir eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.

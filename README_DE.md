@@ -366,7 +366,9 @@ du Claude Desktop neu.
   hast es erlaubt. Kann ein Client dich nicht fragen (zum Beispiel Claude-Desktop-Chat und Cowork), wartet die Frage
   stattdessen im Framework auf dich: ein Hinweis in der GUI (**Tools > Pending Approvals...**) und
   `llm-cli tools approvals` in einem Terminal. Gibst du sie dort frei, führt das Framework den Aufruf für den Client
-  aus. Jeder Aufruf landet in einem manipulationssicheren Audit-Log (`llm-cli tools audit`).
+  aus. Wo das Framework es anbieten kann, hat das Fenster auch „Approve and do not ask again“, eine dauerhafte
+  Freigabe für Aufrufe in einem engen Rahmen, die du in Tool Permissions widerrufen kannst. Jeder Aufruf landet in
+  einem manipulationssicheren Audit-Log (`llm-cli tools audit`).
 - **Transporte:** stdio (Standard, vom Client gestartet) oder lokales Streamable HTTP
   (`llm-cli mcp serve --transport http`, nur Loopback, Standardadresse `http://127.0.0.1:8765/mcp`). Über HTTP
   braucht jeder Client sein eigenes benanntes Token: `llm-cli mcp token add NAME` zeigt es einmal, und der Client
