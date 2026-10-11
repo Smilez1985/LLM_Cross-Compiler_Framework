@@ -333,6 +333,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `build/bin/llama-quantize`, writes the F16 intermediate into the work folder instead of `/tmp` (a 1 GB tmpfs in
   the sandbox), and stops with an error instead of copying the model unchanged. Its packaging step no longer copies
   a `build/` folder that does not exist, which made every build of a generated module fail at the end.
+- Secret scan with the pre-commit tool: its pre-push stage scans the commits being pushed (`--push`, which now
+  reads the pushed commit from `PRE_COMMIT_TO_REF`) like `.githooks/pre-push`, instead of the whole history.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped

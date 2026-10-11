@@ -262,8 +262,9 @@ make hooks          # dasselbe wie: git config core.hooksPath .githooks
 - Der Hook **pre-push** durchsucht die Commits, die ein Push veröffentlichen würde (`--push`); er fängt also auch
   Commits ab, die mit `git commit --no-verify` entstanden sind.
 - Wer stattdessen das Werkzeug pre-commit nutzt (https://pre-commit.com):
-  `pre-commit install -t pre-commit -t pre-push` (`.pre-commit-config.yaml`; seine pre-push-Stufe durchsucht die
-  ganze Historie).
+  `pre-commit install -t pre-commit -t pre-push` (`.pre-commit-config.yaml`). Seine pre-push-Stufe führt dieselbe
+  Prüfung `--push` aus; pre-commit übergibt bei einem Push mehrerer Branches nur den ersten, pushe sie also einzeln
+  oder nutze die Git-Hooks oben.
 - Der CI-Job `secret-scan` in `security.yml` durchsucht jeden Commit der ganzen Historie.
 
 **Von Hand ausführen:**
