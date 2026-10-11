@@ -606,7 +606,9 @@ Build, und der vorgefertigte Download bleibt dann nur als ausdrückliche Wahl, a
   Debian-, Ubuntu- oder Alpine-Basis gebaut, deren C-Bibliothek nicht neuer ist als die des Rechners, der die
   Programme ausführt. Konfigurieren und Bauen laufen in Containern dieses Images ohne Netz, mit schreibgeschützt
   eingehängter Quelle, ohne Capabilities, mit schreibgeschütztem Wurzeldateisystem und deinem Benutzer, so wie die
-  Konvertierungsschritte laufen. Das Framework teilt dieses Rezept, nie ein fertig gebautes Image.
+  Konvertierungsschritte laufen. Beschreibbar sind nur die eigenen Ordner des Builds, und wenn das Framework danach
+  die Programme einsammelt oder aufräumt, folgt es nie einem Link aus ihnen hinaus. Das Framework teilt dieses Rezept,
+  nie ein fertig gebautes Image.
 - **Keine Downloads:** Neben den Optionen wird die Ausgabe des Konfigurierens geprüft: Eine Zeile, die sagt, dass
   llama.cpp etwas geholt oder heruntergeladen hat, lässt den Build scheitern. Ebenso ein Konfigurieren, das für einen
   mit OpenMP geplanten Build keine OpenMP-Laufzeit gefunden hat (ggml würde nur warnen und ohne OpenMP bauen, sodass

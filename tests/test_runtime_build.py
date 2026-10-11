@@ -3,7 +3,8 @@ verify.py, store.py), the shared launch policy (orchestrator/runtime/server_poli
 
 No real compiler run and no network: the executor is driven with a fake `cmake` (a small script that records its
 arguments and environment) and a fake container engine; the verifier with a fake program runner and copies of
-system ELF files. A real build at the pin is a CI job (design 10.2), not part of this suite.
+system ELF files. A real build at the pin belongs in a nightly CI job (design 10.2, not set up yet), not in this
+suite.
 """
 
 import hashlib
@@ -369,9 +370,10 @@ class TestNativeExecutor:
 # --- the executor: builder container ---------------------------------------------------------------------------------
 
 class FakeEngine(ContainerEngine):
-    def __init__(self, gcc="12.2.0", reason=None, have_image=False, configure_lines=(), fail=None):
+    def __init__(self, gcc="12.2.0", reason=None, have_image=False, configure_lines=(), fail=None, tamper=None):
         self.gcc, self.reason, self.have_image = gcc, reason, have_image
         self.configure_lines, self.fail = configure_lines, fail
+        self.tamper = tamper  # what a hostile build does with the folders it may write (mounts by target)
         self.built: List[dict] = []
         self.runs: List[dict] = []
 
@@ -388,7 +390,7 @@ class FakeEngine(ContainerEngine):
     def run(self, image, command, *, mounts, env, options, log, timeout):
         self.runs.append({"image": image, "command": list(command), "mounts": list(mounts), "env": dict(env),
                           "options": dict(options)})
-        work = next(m.source for m in mounts if m.target == "/work")
+        build = next(m.source for m in mounts if m.target == "/work/build")
         if command[-1] == "-dumpfullversion":
             Path(log).write_text(self.gcc + "\n")
             return 0
@@ -396,10 +398,12 @@ class FakeEngine(ContainerEngine):
             Path(log).write_text("error: boom\n")
             return 2
         if "--build" in command:
-            out = Path(work) / "build" / "bin"
+            out = Path(build) / "bin"
             out.mkdir(parents=True, exist_ok=True)
             for name in command[command.index("--target") + 1:]:
                 (out / name).write_bytes(b"\x7fELF fake")
+            if self.tamper:
+                self.tamper({m.target: Path(m.source) for m in mounts if not m.read_only})
             return 0
         Path(log).write_text("\n".join(["-- configured", *self.configure_lines]) + "\n")
         return 0
@@ -429,12 +433,52 @@ class TestContainerExecutor:
             src = next(m for m in run["mounts"] if m.target == "/src")
             assert src.read_only and src.source == source.resolve()
             assert licence_flags(run["command"]) == []
+            # Only the folders the build writes are writable; bin/ and logs/ of the work folder are not mounted.
+            writable = {m.target: m.source for m in run["mounts"] if not m.read_only}
+            assert writable == {"/work/build": tmp_path / "w" / "build", "/work/home": tmp_path / "w" / "home",
+                                "/work/tmp": tmp_path / "w" / "tmp"}
+            assert {m.target for m in run["mounts"] if m.read_only} == {"/src", "/work/config"}
         configure = engine.runs[1]["command"]
         assert configure[:7] == ["cmake", "-S", "/src", "-B", "/work/build", "-G", "Ninja"]
-        assert configure[-1] == "-DCMAKE_TOOLCHAIN_FILE=/work/toolchain.cmake"
-        assert (tmp_path / "w" / "toolchain.cmake").read_text() == plan.steps[0].toolchain_file
+        assert configure[-1] == "-DCMAKE_TOOLCHAIN_FILE=/work/config/toolchain.cmake"
+        assert (tmp_path / "w" / "config" / "toolchain.cmake").read_text() == plan.steps[0].toolchain_file
         assert engine.runs[2]["command"][-len(plan.targets):] == list(plan.targets)
         assert result.builder_image == image["tag"] and sorted(result.files) == sorted(plan.targets)
+
+    @pytest.mark.skipif(os.name != "posix", reason="symlinks")
+    def test_a_hostile_build_cannot_hand_the_host_files_from_outside_its_folder(self, tmp_path, source):
+        """The build runs upstream's code; after it, the host reads only what lies inside the build folder."""
+        outside = tmp_path / "outside"  # for example a folder on PATH with llama.cpp programs
+        outside.mkdir()
+        for name in self.cross_plan().targets:
+            (outside / name).write_text("a program found elsewhere")
+
+        def swap_bin(writable):
+            shutil.rmtree(writable["/work/build"] / "bin")
+            (writable["/work/build"] / "bin").symlink_to(outside)
+
+        with pytest.raises(BuildError, match="outside"):
+            BuildExecutor(engine=FakeEngine(tamper=swap_bin)).build(self.cross_plan(), source=source,
+                                                                    work=tmp_path / "w", jobs=1)
+        assert list((tmp_path / "w" / "bin").iterdir()) == []
+
+    @pytest.mark.skipif(os.name != "posix", reason="symlinks")
+    def test_cleaning_up_after_a_hostile_build_never_follows_its_links(self, tmp_path, source):
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "keep.txt").write_text("mine")
+        outside.chmod(0o755)
+
+        def link_home(writable):
+            shutil.rmtree(writable["/work/home"])
+            writable["/work/home"].symlink_to(outside)
+
+        store = BuildStore(tmp_path / "state")
+        executor = BuildExecutor(engine=FakeEngine(tamper=link_home))
+        build = store.build(self.cross_plan(), source=source, executor=executor, verifier=FakeVerifier(ran=False),
+                            jobs=1, host=("linux", "x86_64"))
+        assert not (build.path / "home").exists() and not (build.path / "home").is_symlink()
+        assert (outside / "keep.txt").read_text() == "mine" and stat.S_IMODE(outside.stat().st_mode) == 0o755
 
     def test_an_existing_builder_image_is_reused(self, tmp_path, source):
         engine = FakeEngine(have_image=True)
@@ -1133,6 +1177,27 @@ class TestLauncherEnvironment:
             assert name not in env, name
         assert env["PATH"] == server_policy.CLEARED_PATH and env["HOME"] == "/home/u"
         assert set(env) <= set(server_policy.cleared_env(Path("/home/u"))) | server_policy.SERVER_ENV_PASS
+
+
+@pytest.mark.skipif(os.name != "posix", reason="symlinks")
+def test_removing_a_tree_never_follows_a_link(tmp_path):
+    from orchestrator.runtime.build.source import remove_tree
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "keep.txt").write_text("mine")
+    outside.chmod(0o755)
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    (staging / "home").symlink_to(outside)
+    remove_tree(staging / "home")
+    assert not (staging / "home").is_symlink() and not (staging / "home").exists()
+    assert (outside / "keep.txt").read_text() == "mine" and stat.S_IMODE(outside.stat().st_mode) == 0o755
+    ro = staging / "ro"
+    (ro / "sub").mkdir(parents=True)
+    (ro / "sub" / "link").symlink_to(outside)
+    (ro / "sub").chmod(0o500)
+    remove_tree(ro)  # read-only folders are still removed, the link inside them without following it
+    assert not ro.exists() and stat.S_IMODE(outside.stat().st_mode) == 0o755
 
 
 @POSIX

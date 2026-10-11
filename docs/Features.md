@@ -569,8 +569,9 @@ download then stays only as an explicit choice, shown as "not self-built".
   image is built on your machine from `orchestrator/runtime/build/builder.Dockerfile` and a Debian, Ubuntu or Alpine
   base pinned by digest whose C library is not newer than the one of the machine that runs the binaries. Configure
   and build run in containers of that image without network, with the source mounted read-only, no capabilities, a
-  read-only root file system and your user, as the conversion stages run. The framework shares this recipe, never a
-  compiled image.
+  read-only root file system and your user, as the conversion stages run. Only the build's own folders are writable,
+  and when the framework collects the programs or cleans up afterwards it never follows a link out of them. The
+  framework shares this recipe, never a compiled image.
 - **No downloads:** besides the options, the configure output is checked: a line that says llama.cpp fetched or
   downloaded anything fails the build. So does a configure that found no OpenMP runtime for a build planned with
   OpenMP (ggml would only warn and build without it, so the build ID would no longer be right).

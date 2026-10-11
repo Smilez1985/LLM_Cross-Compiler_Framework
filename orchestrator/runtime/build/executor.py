@@ -14,7 +14,9 @@ Two placements on Linux:
   which the catalog pins by digest; the image build itself has network, as every image build of the framework). The
   configure and build steps then run in containers of that image with --network none and the sandbox of the
   conversion stages (orchestrator/utils/sandbox.py: no capabilities, no privilege escalation, read-only root, host
-  user, process and memory limits). The verified source is mounted read-only.
+  user, process and memory limits). The verified source and the toolchain file are mounted read-only; only the
+  build, home and tmp folders are writable, and what the host reads back afterwards never follows a link out of
+  them (cross builds are never run on the host, so this sandbox is all that stands between their build and it).
 
 No command carries a licence-accept flag, and nothing is installed on the host. Windows, macOS, CUDA and ROCm builds
 follow in later work packages; the executor refuses them with a message instead of guessing.
@@ -402,19 +404,26 @@ class BuildExecutor:
                 args = {"BASE": base_image, "LIBC": str(plan.builder.get("libc") or "glibc"),
                         "CROSS_TRIPLE": str(plan.target.get("triple") or "") if plan.steps[0].toolchain_file else ""}
                 engine.build_image(Path(ctx), tag, args, {BUILDER_LABEL: "llama.cpp"}, dirs["logs"] / "image.log")
+        step = plan.steps[0]
+        config = dirs["build"].parent / "config"
+        config.mkdir(exist_ok=True)
+        if step.toolchain_file:
+            (config / "toolchain.cmake").write_text(step.toolchain_file, encoding="utf-8")
         user = sandbox_user()
         hand_over(dirs["build"].parent, user)
         options = container_sandbox(user, working_dir="/work", pids_limit=self.pids_limit, mem_limit=self.mem_limit)
         if options.get("network_mode") != "none":  # pragma: no cover - guarded by the sandbox module's tests
             raise BuildError("the build container must have no network")
-        mounts = [Mount(source, "/src", True), Mount(dirs["build"].parent, "/work", False)]
+        # Only the folders the build writes are writable (each one a mount point the container cannot replace with a
+        # link); bin/ and logs/ of the work folder, which the host fills, are not in the container at all.
+        mounts = [Mount(source, "/src", True), Mount(config, "/work/config", True),
+                  Mount(dirs["build"], "/work/build", False), Mount(dirs["home"], "/work/home", False),
+                  Mount(dirs["tmp"], "/work/tmp", False)]
         env = {"HOME": "/work/home", "TMPDIR": "/work/tmp", "LANG": "C", "LC_ALL": "C"}
         self._check_container_compiler(plan, engine, tag, mounts, env, options, dirs)
-        step = plan.steps[0]
         configure = ["cmake", "-S", "/src", "-B", "/work/build", "-G", step.generator, *step.cmake_args()]
         if step.toolchain_file:
-            (dirs["build"].parent / "toolchain.cmake").write_text(step.toolchain_file, encoding="utf-8")
-            configure.append("-DCMAKE_TOOLCHAIN_FILE=/work/toolchain.cmake")
+            configure.append("-DCMAKE_TOOLCHAIN_FILE=/work/config/toolchain.cmake")
         self._container_step("configure", engine, tag, configure, mounts, env, options, dirs, self.configure_timeout)
         self._finish_configure(dirs["logs"] / "configure.log", plan, dirs["build"])
         build = ["cmake", "--build", "/work/build", "--parallel", str(jobs), "--target", *step.targets]
@@ -461,6 +470,14 @@ class BuildExecutor:
         """Copies the planned programs and the shared libraries next to them into <work>/bin."""
         files: Dict[str, str] = {}
         links: Dict[str, str] = {}
+        # The build ran upstream's code (in a container: with write access to its build folder): a bin folder that is
+        # a link would hand the host files from outside the build, for example programs from a folder on PATH.
+        root = built.parent
+        if root.is_symlink() or built.is_symlink() or (built.exists() and built.resolve().parent != root.resolve()):
+            raise BuildError("the build's bin folder is a link that leads outside the build folder; nothing was "
+                             "collected", log)
+        if out.is_symlink() or not out.is_dir():
+            raise BuildError(f"{out} is not a plain folder", log)
         if not built.is_dir():
             raise BuildError("the build produced no bin folder", log)
         for name in plan.targets:
