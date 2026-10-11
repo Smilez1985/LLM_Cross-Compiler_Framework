@@ -980,7 +980,8 @@ def _check_address(address: str) -> str:
 
 class ProfileStore:
     """Hardware profiles of this user: <state dir>/hardware/local.txt (this machine) and
-    <state dir>/hardware/devices/<device id>.txt plus .json (label and SSH address) for other machines.
+    <state dir>/hardware/devices/<device id>.txt plus .json (label and SSH address) for other machines, and
+    <device id>.deploy.json with the device's deploy settings (orchestrator/runtime/device/settings.py).
 
     Files are written atomically with mode 0600 in folders with mode 0700. Volatile keys are never stored, and stored
     files are parsed with the same validation as probe files when they are read back."""
@@ -1088,9 +1089,43 @@ class ProfileStore:
             return []
         return sorted(p.stem for p in self.devices_dir.glob("*.txt") if DEVICE_ID.fullmatch(p.stem))
 
+    # --- deploy settings of a device (decision D7; checked by orchestrator/runtime/device/settings.py) ---
+
+    def _deploy_path(self, device_id: str) -> Path:
+        return self.devices_dir / f"{_check_device_id(device_id)}.deploy.json"
+
+    def load_deploy_settings(self, device_id: str) -> Dict[str, Any]:
+        """The device's deploy settings as stored ({} when there are none). ValueError when the file is damaged:
+        settings decide what a deployment does, so a damaged file is never read as the defaults."""
+        path = self._deploy_path(device_id)
+        try:
+            with open(path, "rb") as f:
+                raw = f.read(_META_MAX_BYTES + 1)
+        except FileNotFoundError:
+            return {}
+        except OSError as e:
+            raise ValueError(f"the deploy settings of device {device_id} cannot be read: {e.strerror or e}") from None
+        try:
+            data = json.loads(raw) if len(raw) <= _META_MAX_BYTES else None
+        except (ValueError, RecursionError):
+            data = None
+        if not isinstance(data, dict):
+            raise ValueError(f"the deploy settings of device {device_id} are damaged ({path}); set them again")
+        return data
+
+    def save_deploy_settings(self, device_id: str, settings: Mapping[str, Any]) -> Path:
+        """Stores the device's deploy settings (a private file next to its profile)."""
+        path = self._deploy_path(device_id)
+        text = json.dumps(dict(settings), indent=2, sort_keys=True, ensure_ascii=True) + "\n"
+        if len(text.encode("ascii")) > _META_MAX_BYTES:
+            raise ValueError("the deploy settings are too large")
+        self._prepare(path.parent)
+        write_private(path, text)
+        return path
+
     def remove_device(self, device_id: str) -> bool:
         removed = False
-        for path in (self.device_path(device_id), self._meta_path(device_id)):
+        for path in (self.device_path(device_id), self._meta_path(device_id), self._deploy_path(device_id)):
             try:
                 path.unlink()
                 removed = True

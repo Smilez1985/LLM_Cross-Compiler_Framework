@@ -137,7 +137,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `--tools` ablehnen. Rauchtest und kurzer Benchmark auf einem winzigen festgelegten Modell werden mit einem Hinweis
   übersprungen, bis der Katalog eines festlegt; ein anderes Modell wird dort nie geladen. Programme kommen nur aus
   dem eigenen Ordner des Builds, nie aus `PATH`, und jedes Programm, das das Framework startet, bekommt dieselbe
-  Liste verbotener Optionen und eine geleerte Umgebung ohne `LLAMA_*`-Variablen. Builds liegen unter
+  Liste verbotener Optionen (auch in der Schreibweise `--a_b`, die llama.cpp als `--a-b` liest) und eine geleerte
+  Umgebung ohne `LLAMA_*`-Variablen. Builds liegen unter
   `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` mit `build.json` und `manifest.json` (sha256 jeder Datei,
   Dauer, Prüfung) und werden wiederverwendet, nie neu gestempelt; nur ein auf diesem Rechner geprüfter Build kann
   aktiv werden, und die Aufbewahrung entfernt nie den aktiven Build, den CPU-Ersatz oder den Build, aus dem ein
@@ -164,6 +165,28 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ablehnt), muss den festgelegten Commit zurückgeben und liegt schreibgeschützt in
   `~/.llm-framework/runtime/llama.cpp/src/`; spätere Läufe prüfen, dass darin nichts geändert oder hinzugefügt wurde,
   auch keine Dateien, die Git ignoriert, und brauchen kein Netz.
+- **Selbst gebautes llama.cpp auf dem Board** (`llm-cli device runtime plan|build|deploy|verify|status`,
+  `llm-cli device list|settings`): Das eigene Probe-Profil des Boards (`llm-cli scan --device`) wird zu einem
+  Cross-Build im Builder-Container, ohne Netz, auf einer Basis, deren C-Bibliothek nicht neuer ist als die des Boards
+  (glibc, oder musl unter Alpine; ein Board, das älter ist als jede Basis, bekommt eine klare Meldung), mit statisch
+  gelinkter C++-Laufzeit und bei OpenMP-Builds der `libgomp.so.1` des Boards aus der Cross-Toolchain. Das Ergebnis
+  ist ein Tarball (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`, `lib/libgomp.so.1`, ein
+  Startskript, die Stempel des Builds, die MIT-Lizenz von llama.cpp und `SHA256SUMS`), den das Deployment per SSH
+  nach `~/.local/share/llm-framework/llama.cpp/` auf dem Board hochlädt, dort Datei für Datei prüft und über einen
+  Link `current` aktiviert; der vorige Build bleibt. Das Startskript startet den Server auf 127.0.0.1 mit einem
+  Schlüssel, der auf dem Board unter umask 077 erzeugt wird, einer geleerten Umgebung und festen Optionen; es reicht
+  nur wenige Tuning-Optionen mit geprüften Werten weiter (Kontextgröße, Threads, CPU-Maske, ...). Wie die Laufzeit
+  startet, wird vorher in den Deploy-Einstellungen festgelegt und während eines Deployments nie gefragt: das
+  Startskript in deinem Home (die Vorgabe) oder eine systemd-Unit, die nur für Boards mit systemd wählbar ist und
+  erst, nachdem du bestätigst, dass Deployments dort `sudo -n` ausführen dürfen. Nach dem Deployment werden die
+  Programme auf dem Board als dein unprivilegierter Benutzer geprüft: `--version` gegen den Pin, `--list-devices`,
+  die Ablehnung von `--tools` durch den Server und mit `--bench-model` ein kurzer `llama-bench`-Lauf (ein Modell,
+  das kein Katalogmodell ist, erst nach deiner Zustimmung, die ins Audit-Log geschrieben wird). Getestet mit einem
+  nachgebildeten SSH-Kanal und Testprofilen (ein RK3566 unter DietPi, ein Alpine-Board, ein Board ohne systemd) und
+  mit echten Programmen: `llama-server` und `llama-bench`, nativ mit den Optionen des Geräte-Bauplans für einen
+  x86-64-Rechner gebaut (30 MB, ein Tarball von 11,6 MB), bestanden die Formatprüfung, das Deployment auf ein lokal
+  nachgebildetes Board und die Prüfungen dort. Noch nicht auf einem echten Board, und hier lief kein Cross-Build
+  (kein Docker-Dienst).
 - **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in
@@ -404,6 +427,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   llama.cpp-Pins in `configs/llama_runtime.yml`, jetzt `b11429`, statt eines fest geschriebenen `v0.6.0`; beide nennen
   denselben Commit, die Images bauen also denselben Quelltext. Das Rockchip-Dockerfile, die Build-Argumente in
   `target.yml` und `configs/project_sources.yml` (dort stand noch `b4009`) nennen denselben Tag.
+- `deploy.sh` eines GGUF-Pakets schlägt keinen `llama-server` mehr vor, der im `PATH` des Boards gefunden wird: Es
+  nennt das Startskript der selbst gebauten Geräte-Laufzeit, wenn sie installiert ist, und sonst, wie man sie
+  deployt (`llm-cli device runtime build` und `deploy`). `llm-cli scan --device` merkt sich den SSH-Benutzer als
+  Deploy-Benutzer des Boards (nie root).
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -490,6 +517,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `LLM_FRAMEWORK_*`: Sie wird auf stderr genannt und übergangen, und die übrigen Einstellungen gelten.
 - Der Hardware-Scan dieses PCs in der GUI (**Scan / Import...**) schreibt sein Ergebnis nach `<cache_dir>/probes/`
   statt in den Arbeitsordner der GUI, und *Auto-fill from Probe Result* im Modul-Assistenten liest es dort.
+- Der SSH-Scan eines Boards in der GUI (**Scan / Import...**) scheiterte auf Boards, die `/tmp` mit `noexec`
+  einhängen: Er kopierte `hardware_probe.sh` dorthin und führte es dort aus. Jetzt schickt er die Probe über den
+  SSH-Kanal wie `llm-cli scan --device` (die Python-Probe ab Python 3.8, sonst die Shell-Probe), schreibt nichts auf
+  das Board und legt das Profil unter der ID des Boards ab.
 - Das Deployment aus der GUI schreibt das Paket in den eingestellten Ausgabeordner (`output_dir`, relativ zur
   Installation) statt nach `output/` im Arbeitsordner.
 - Der Dialog der KI-Einstellungen warnt, wenn sich die Einstellungen nicht in der `config.yml` speichern ließen
@@ -692,6 +723,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   werden nie gelesen, und freier Text wird auf druckbares ASCII reduziert. Werte, die auf einem Board gelesen werden,
   werden vor dem Schreiben geprüft, und der SSH-Scan behandelt die Antwort des Boards als nicht vertrauenswürdig
   (Größengrenze, strenger Parser).
+- Der llama.cpp-Server auf einem Board lauscht nur auf 127.0.0.1 und braucht einen Schlüssel, der auf dem Board
+  erzeugt wird und es nie verlässt. Ein Deployment erreicht nur das Board, mit dessen Host-Schlüssel das Profil
+  erstellt wurde, läuft als unprivilegierter Benutzer (root wird abgelehnt) und nutzt sudo nur für eine systemd-Unit,
+  die du in den Deploy-Einstellungen erlaubt hast, nie mit einer Passwortabfrage. Jeder Wert, der vom Board gelesen
+  wird (Home-Ordner, Benutzer-ID, Architektur), wird geprüft, bevor er einen Befehl erreicht.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit
