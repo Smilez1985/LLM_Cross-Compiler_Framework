@@ -711,10 +711,12 @@ llm-cli ditto runtime export-source DATEI [--mirror URL] [-y]
 Schreibt den festgelegten llama.cpp-Quelltext (den Commit in `configs/llama_runtime.yml`, `llama_cpp.source`) als
 Git-Bundle nach `DATEI`, dazu `DATEI.json` mit dem Commit, dem Tag, Größe und SHA256 des Bundles und der
 Framework-Version. Beide Dateien werden auf einen Rechner ohne Internetzugang getragen und dort importiert. Liegt der
-Quelltext noch nicht im Zwischenspeicher, wird er zuerst geholt (etwa 215 MB): per Commit, nie über einen
-verschiebbaren Tag, und `git rev-parse HEAD` muss den festgelegten Commit zurückgeben. Der geprüfte Baum bleibt
-schreibgeschützt in `~/.llm-framework/runtime/llama.cpp/src/<commit>/`, spätere Läufe brauchen also kein Netz.
-Braucht `git`.
+Quelltext noch nicht im Zwischenspeicher, wird er zuerst geholt (etwa 40 MB Download, 215 MB auf der Platte): per
+Commit (über seinen Tag nur, wenn der Server das Holen per Commit ablehnt), und in jedem Fall muss
+`git rev-parse HEAD` den festgelegten Commit zurückgeben. Der geprüfte Baum bleibt schreibgeschützt in
+`~/.llm-framework/runtime/llama.cpp/src/<commit>/`; spätere Läufe prüfen, dass darin nichts geändert oder
+hinzugefügt wurde (auch keine Dateien, die Git ignoriert), und brauchen kein Netz. Eine relative `DATEI` gilt relativ
+zum aktuellen Ordner. Braucht `git`.
 
 | Option | Bedeutung |
 |---|---|

@@ -88,10 +88,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   unset (`FETCHCONTENT_FULLY_DISCONNECTED=ON`), and builds the server without subprocess support. A build on the
   machine itself uses `-march=native`; a build for another machine uses the probe's CPU features (all 14 x86 options,
   or `GGML_CPU_ARM_ARCH` such as `armv8.2-a+dotprod+fp16` for the RK3566), or all CPU variants when the probe could
-  not tell. NVIDIA GPUs get real code for exactly their compute capabilities with a CUDA toolkit no newer than the
-  driver supports; AMD GPUs their gfx target (ROCm on Linux, on request); Vulkan and Metal are switches; Windows
-  builds use Clang. The plan follows the target's OS and C library: a builder base whose glibc is not newer than the
-  device's, Alpine for musl, and a statically linked C++ runtime for device builds. Plans are not run yet.
+  not tell. NVIDIA GPUs get real code for exactly their compute capabilities (every NVIDIA GPU must report one) with
+  a CUDA toolkit no newer than the driver supports, on glibc systems; AMD GPUs their gfx target (ROCm on Linux, on
+  request); Vulkan and Metal are switches; Windows builds use Clang. The plan follows the target's OS and C library:
+  a builder base whose glibc is not newer than the device's, Alpine for musl, and a statically linked C++ runtime
+  for device builds. Plans are not run yet.
 - **llama.cpp pinned by commit**: `llama_cpp.source` in `configs/llama_runtime.yml` (commit
   `d81235049384534c167caea52b85a694f6103d14`, tag `b11429`) is the one place. With it come the CUDA toolkits for
   self-built CUDA builds (NVIDIA's redist manifests pinned by size and SHA256, with the driver, compute capability,
@@ -101,8 +102,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the pinned commit.
 - **Pinned llama.cpp source for air-gapped machines**: `llm-cli ditto runtime export-source FILE` writes the pinned
   commit as a git bundle plus a manifest, and `llm-cli ditto runtime import-source FILE` installs it on a machine
-  without internet access. The source is fetched by commit (never by a moving tag), must give the pinned commit back
-  and is cached read-only in `~/.llm-framework/runtime/llama.cpp/src/`, so later runs need no network.
+  without internet access. The source is fetched by commit (by its tag only where a server refuses that), must give
+  the pinned commit back and is cached read-only in `~/.llm-framework/runtime/llama.cpp/src/`; later runs check that
+  nothing in it was changed or added, files git ignores included, and need no network.
 - **Deep Ingest honours machine-readable opt-outs.** Text and data mining of public pages is allowed unless
   the rightsholder reserved it in machine-readable form (EU DSM Directive Art. 4, German UrhG § 44b), so
   besides robots.txt the crawler skips pages marked `noindex`, `none`, `noai` or `noimageai` in an

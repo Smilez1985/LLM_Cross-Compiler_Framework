@@ -64,14 +64,16 @@ def pin_places(source: LlamaCppSource, root: Path = REPO_ROOT) -> List[PinPlace]
                            "derived", m.group(1) if m else base_url, tag))
 
     for target_dir in sorted(p for p in (root / "targets").iterdir() if p.is_dir()):
-        for name in ("dockerfile", "Dockerfile"):
-            dockerfile = target_dir / name
-            if dockerfile.is_file():
-                text = dockerfile.read_text(encoding="utf-8")
-                found = _DOCKER_ARG.findall(text)
-                if found or _LLAMA_REPO.search(text):  # the ARG, or a llama.cpp clone without it
-                    places.append(PinPlace(rel(dockerfile), "ARG LLAMA_CPP_TAG", "derived",
-                                           found[0] if found else None, tag))
+        # dockerfile, Dockerfile and variants such as Dockerfile.gpu (listed by their real names, so a
+        # case-insensitive file system does not report one file twice)
+        dockerfiles = sorted(p for p in target_dir.iterdir() if p.is_file() and (
+            p.name.lower() == "dockerfile" or p.name.lower().startswith("dockerfile.")))
+        for dockerfile in dockerfiles:
+            text = dockerfile.read_text(encoding="utf-8")
+            found = _DOCKER_ARG.findall(text)
+            if found or _LLAMA_REPO.search(text):  # the ARG, or a llama.cpp clone without it
+                places.append(PinPlace(rel(dockerfile), "ARG LLAMA_CPP_TAG", "derived",
+                                       found[0] if found else None, tag))
         target_yml = target_dir / "target.yml"
         if target_yml.is_file():
             data = _yaml(target_yml) or {}

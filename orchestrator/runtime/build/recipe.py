@@ -380,6 +380,18 @@ def _nvidia_caps(profile: HardwareProfile) -> List[str]:
     return sorted(set(caps), key=version_tuple)
 
 
+def _missing_caps(profile: HardwareProfile) -> List[str]:
+    """GPU<n>_COMPUTE_CAP keys an NVIDIA GPU lacks. A -real build has no kernel for a GPU it was not built for, so a
+    CUDA build needs the capability of every NVIDIA GPU, not just of some."""
+    return [f"GPU{n}_COMPUTE_CAP" for n, gpu in enumerate(profile.gpus())
+            if gpu.get("VENDOR") == "nvidia" and gpu.get("COMPUTE_CAP") is None]
+
+
+def _missing_caps_message(missing: Sequence[str]) -> str:
+    return (f"CUDA needs the compute capability of every NVIDIA GPU, and {', '.join(missing)} is missing: probe the "
+            "machine again with the NVIDIA driver loaded")
+
+
 def _vulkan_worthy(gpu: Mapping[str, str]) -> bool:
     """GPUs on which llama.cpp's Vulkan build beats the CPU (as hardware.vulkan_worthy): dedicated GPUs, AMD Radeon
     APUs, Intel Arc. Mali on boards only after measurement (decision D8). The name is used for this decision only."""
@@ -402,9 +414,12 @@ def choose_backend(profile: HardwareProfile, *, purpose: str, placement: str, ca
     if target.os == "macos" and target.arch == "arm64" and profile.flag("METAL") != "OFF":
         return "metal", "Apple Silicon: Metal"
     notes = []
-    if _nvidia_caps(profile):
+    if any(g.get("VENDOR") == "nvidia" for g in profile.gpus()):
+        missing = _missing_caps(profile)
         if placement == "cross":
             notes.append("CUDA cross builds are not offered")
+        elif missing:
+            notes.append(_missing_caps_message(missing))
         else:
             try:
                 base = _base_for(target, purpose, placement, catalog, toolchain)
@@ -445,6 +460,13 @@ def cuda_toolkit_problems(toolkit: CudaToolkit, profile: HardwareProfile, catalo
     arch = profile.arch or ""
     if _cuda_platform(target_os, arch) not in toolkit.platforms:
         problems.append(f"CUDA {toolkit.version} has no {target_os}/{arch} archives")
+    if target_os == "linux" and profile.libc not in (None, "glibc"):
+        other = "musl" if profile.libc == "musl" else "this machine's C library"  # no raw probe text in messages
+        problems.append(f"NVIDIA's CUDA toolkit is built for glibc, not {other} (decision 8: the build follows the "
+                        "machine's C library)")
+    missing = _missing_caps(profile)
+    if missing:
+        problems.append(_missing_caps_message(missing))
     cuda_max = profile.get("NVIDIA_DRIVER_CUDA_MAX")
     if cuda_max is None:
         problems.append("the driver's CUDA version is unknown (NVIDIA_DRIVER_CUDA_MAX): probe again with the NVIDIA "
@@ -718,7 +740,15 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
         builder = {"kind": "native"}
         if placement == "cross":
             builder["host"] = "another Windows PC"
+        cid = toolchain.compiler_id()
+        if target.os == "windows" and cid is not None and cid[0] != "clang":
+            raise PlanError(f"Windows builds compile the CPU part with Clang (decision D9; MSVC only hosts nvcc), but "
+                            f"the build machine reports {cid[0]} {cid[1]}: install the Visual Studio component "
+                            "'C++ Clang tools for Windows' and probe again")
     elif purpose == "host-tools":
+        if not toolchain.base_image:
+            raise PlanError("conversion tools are built in the target's toolchain image: ToolchainInfo.base_image "
+                            "must name it")
         builder = {"kind": "container", "base": "target-image", "image": toolchain.base_image,
                    "libc": toolchain.base_libc}
     elif backend == "cuda" and toolchain.cuda_image:
@@ -813,6 +843,9 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
     cuda_toolkit: Optional[CudaToolkit] = None
     if backend == "cuda":
         caps = _nvidia_caps(profile)
+        missing = _missing_caps(profile)
+        if missing:
+            raise PlanError(_missing_caps_message(missing))
         if not caps:
             raise PlanError("CUDA needs the compute capability of every NVIDIA GPU (GPU<n>_COMPUTE_CAP)")
         if placement == "cross":
@@ -848,6 +881,8 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
         if not gfx:
             raise PlanError("ROCm needs an AMD GPU with a gfx target")
         rocm = toolchain.rocm or profile.get("ROCM_VERSION")
+        if rocm is not None and not _RE_VERSION.fullmatch(rocm):
+            raise PlanError("ROCM_VERSION is not a version number")
         if rocm is not None and version_tuple(rocm) < (6, 1):
             raise PlanError(f"llama.cpp's HIP backend needs ROCm 6.1 or newer, not {rocm}")
         options["GGML_HIP"] = "ON"

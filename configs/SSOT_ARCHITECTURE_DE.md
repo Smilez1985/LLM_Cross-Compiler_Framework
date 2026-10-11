@@ -160,7 +160,7 @@ sowohl `b<build_number>` als auch `build` entspricht. Alles andere folgt aus die
 |---|---|
 | Das Build-Rezept (`orchestrator/runtime/build/recipe.py`) | liest ihn: Jeder Plan baut diesen Commit und setzt `LLAMA_BUILD_NUMBER` und `LLAMA_BUILD_COMMIT` daraus |
 | Die Einstellung `llama_cpp_version` (der Tag, den Target-Images klonen) | ihre Vorgabe wird aus `tag` abgeleitet (`orchestrator/utils/llama_pin.py`) |
-| `ARG LLAMA_CPP_TAG` in `targets/Rockchip/dockerfile`, `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml` | Rückfallwerte für Image-Builds außerhalb des Frameworks; müssen `tag` entsprechen |
+| `ARG LLAMA_CPP_TAG` in `targets/Rockchip/dockerfile` (geprüft wird jedes `Dockerfile*` eines Targets, das es setzt oder llama.cpp klont), `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml` | Rückfallwerte für Image-Builds außerhalb des Frameworks; müssen `tag` entsprechen |
 | `inference_backends.llama_cpp.commit` in `project_sources.yml` und `detailed_project_sources.yml` | Nachschlagekatalog; muss `tag` entsprechen |
 | Vorgaben für `LLAMA_CPP_COMMIT` in `targets/*/modules/source_module.sh` | alte Vier-Modul-Kette, unverändert gelassen (Entscheidung D20); gemeldet, nicht geprüft |
 

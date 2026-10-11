@@ -99,9 +99,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   baut den Server ohne Unterprozesse. Ein Build auf dem Rechner selbst nutzt `-march=native`; ein Build für einen
   anderen Rechner nutzt die CPU-Merkmale der Probe (alle 14 x86-Optionen oder `GGML_CPU_ARM_ARCH`, etwa
   `armv8.2-a+dotprod+fp16` für den RK3566) oder alle CPU-Varianten, wenn die Probe es nicht sagen konnte.
-  NVIDIA-GPUs bekommen echten Code für genau ihre Compute Capabilities mit einem CUDA-Toolkit, das nicht neuer ist,
-  als der Treiber unterstützt; AMD-GPUs ihr gfx-Target (ROCm unter Linux, auf Wunsch); Vulkan und Metal sind
-  Schalter; Windows-Builds nutzen Clang. Der Plan folgt Betriebssystem und C-Bibliothek des Ziels: eine Builder-Basis,
+  NVIDIA-GPUs bekommen echten Code für genau ihre Compute Capabilities (jede NVIDIA-GPU muss ihre melden) mit einem
+  CUDA-Toolkit, das nicht neuer ist, als der Treiber unterstützt, auf Systemen mit glibc; AMD-GPUs ihr gfx-Target
+  (ROCm unter Linux, auf Wunsch); Vulkan und Metal sind Schalter; Windows-Builds nutzen Clang. Der Plan folgt Betriebssystem und C-Bibliothek des Ziels: eine Builder-Basis,
   deren glibc nicht neuer ist als die des Geräts, Alpine für musl und eine statisch gelinkte C++-Laufzeit für
   Geräte-Builds. Ausgeführt werden die Pläne noch nicht.
 - **llama.cpp per Commit festgelegt**: `llama_cpp.source` in `configs/llama_runtime.yml` (Commit
@@ -113,9 +113,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `git ls-remote`, dass der Tag bei Upstream auf den festgelegten Commit zeigt.
 - **Festgelegter llama.cpp-Quelltext für Rechner ohne Netz**: `llm-cli ditto runtime export-source DATEI` schreibt
   den festgelegten Commit als Git-Bundle mit Manifest, und `llm-cli ditto runtime import-source DATEI` installiert ihn
-  auf einem Rechner ohne Internetzugang. Der Quelltext wird per Commit geholt (nie über einen verschiebbaren Tag),
-  muss den festgelegten Commit zurückgeben und liegt schreibgeschützt in `~/.llm-framework/runtime/llama.cpp/src/`,
-  spätere Läufe brauchen also kein Netz.
+  auf einem Rechner ohne Internetzugang. Der Quelltext wird per Commit geholt (über seinen Tag nur, wo ein Server das
+  ablehnt), muss den festgelegten Commit zurückgeben und liegt schreibgeschützt in
+  `~/.llm-framework/runtime/llama.cpp/src/`; spätere Läufe prüfen, dass darin nichts geändert oder hinzugefügt wurde,
+  auch keine Dateien, die Git ignoriert, und brauchen kein Netz.
 - **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in

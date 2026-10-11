@@ -139,6 +139,28 @@ class TestFetch:
         (path / "planted.cmake").write_text("message(planted)\n")
         assert cached_source(source, state) is None
 
+    def test_an_added_ignored_file_counts_as_damage(self, upstream, tmp_path):
+        # llama.cpp ignores tools/ui/dist/, and its CMake embeds a dist/index.html found there into llama-server
+        # (scripts/ui-assets.cmake, priority 1): a file git ignores still changes the build.
+        up = upstream["path"]
+        (up / ".gitignore").write_text("dist\n")
+        run_git("add", ".gitignore", cwd=up)
+        run_git("commit", "-q", "-m", "ignore dist", cwd=up)
+        source = pin(run_git("rev-parse", "HEAD", cwd=up))
+        state = tmp_path / "state"
+        path = fetch_source(source, state, url=upstream["url"])
+        assert cached_source(source, state) == path
+        os.chmod(path, 0o755)
+        (path / "dist").mkdir()
+        (path / "dist" / "index.html").write_text("<script>planted</script>\n")
+        assert cached_source(source, state) is None
+
+    def test_a_relative_mirror_path_is_relative_to_the_user(self, upstream, tmp_path, monkeypatch):
+        # git fetches inside a staging folder; `--mirror ../llama.cpp` means the folder next to the user's.
+        monkeypatch.chdir(upstream["path"].parent)
+        path = fetch_source(pin(upstream["second"]), tmp_path / "state", url="upstream")
+        assert (path / "ggml" / "ggml.c").is_file()
+
     def test_repository_url_cannot_be_an_option(self, tmp_path):
         with pytest.raises(SourceError, match="must not start"):
             fetch_source(pin("2" * 40), tmp_path / "state", url="--upload-pack=touch x")
@@ -195,6 +217,22 @@ class TestBundle:
         assert import_source(source, tmp_path / "offline", bundle, git=Git(rec2)) == path
         assert "fetch" not in rec2.commands(), "an imported source is not imported twice"
 
+    def test_a_relative_bundle_path_is_written_where_the_user_is(self, upstream, tmp_path, monkeypatch):
+        # git runs inside the source cache; a relative output path must not end up there (the documented example
+        # `export-source llama.cpp-source.bundle` is relative).
+        source = pin(upstream["second"])
+        work = tmp_path / "work"
+        work.mkdir()
+        monkeypatch.chdir(work)
+        manifest = export_source(source, tmp_path / "online", Path("llama.bundle"), url=upstream["url"])
+        assert (work / "llama.bundle").is_file() and (work / "llama.bundle.json").is_file()
+        assert manifest["bundle_size"] == (work / "llama.bundle").stat().st_size
+        cache = source_dir(tmp_path / "online", upstream["second"])
+        assert cached_source(source, tmp_path / "online") == cache, "nothing was written into the source cache"
+        assert sorted(p.name for p in cache.iterdir()) == [".git", "CMakeLists.txt", "ggml", "run.sh"]
+        path = import_source(source, tmp_path / "offline", Path("llama.bundle"))
+        assert (path / "ggml" / "ggml.c").is_file()
+
     def test_a_bundle_of_another_commit_is_refused(self, upstream, tmp_path):
         bundle = tmp_path / "b.bundle"
         export_source(pin(upstream["second"]), tmp_path / "online", bundle, url=upstream["url"])
@@ -247,6 +285,23 @@ class TestPinBumpCheck:
     def test_ls_remote_gives_the_commit_of_a_lightweight_and_an_annotated_tag(self, upstream):
         assert upstream_tag_commit("b42", repo=upstream["url"]) == upstream["second"]
         assert check_pin_upstream(pin(upstream["second"]), repo=upstream["url"]) == upstream["second"]
+
+    def test_the_configuration_of_the_current_repository_is_not_used(self, upstream, tmp_path, monkeypatch):
+        # Run from inside some checkout, git would read that repository's config: url.<x>.insteadOf could send the
+        # check to another repository whose tag says what the pin says.
+        decoy = tmp_path / "decoy"
+        decoy.mkdir()
+        run_git("init", "-q", cwd=decoy)
+        (decoy / "x").write_text("x\n")
+        run_git("add", "x", cwd=decoy)
+        run_git("commit", "-q", "-m", "decoy", cwd=decoy)
+        run_git("tag", "b42", cwd=decoy)
+        here = tmp_path / "checkout"
+        here.mkdir()
+        run_git("init", "-q", cwd=here)
+        run_git("config", f"url.{decoy.as_uri()}.insteadOf", upstream["url"], cwd=here)
+        monkeypatch.chdir(here)
+        assert upstream_tag_commit("b42", repo=upstream["url"]) == upstream["second"]
 
     def test_annotated_tags_are_peeled(self, upstream):
         run_git("tag", "-a", "-m", "release", "b43", upstream["first"], cwd=upstream["path"])
