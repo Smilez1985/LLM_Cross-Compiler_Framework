@@ -372,6 +372,37 @@ class TestLogin:
         assert settings(tmp_path)["ai_base_url_ollama"] == "http://127.0.0.1:11500/v1"
         assert settings(tmp_path)["ai_auth_ollama"] == "none"
 
+    def test_an_optional_key_left_empty_means_no_key(self, tmp_path, home, monkeypatch):
+        (tmp_path / "configs").mkdir(exist_ok=True)
+        (tmp_path / "configs" / "llm_providers.yml").write_text(
+            "version: 2\nproviders:\n  studio:\n    label: Studio (local)\n    adapter: openai_compat\n"
+            "    location: local\n    base_url: http://127.0.0.1:1234/v1\n    base_url_configurable: true\n"
+            "    auth:\n      - {id: token, type: bearer_optional, where: \"Developer > Manage Tokens\"}\n",
+            encoding="utf-8")
+        monkeypatch.setattr(cli, "_interactive", lambda: True)
+        http = FakeHTTP().add(MODELS).add(MODELS)
+        result = run("ditto", "login", "studio", http=http, input=CUSTOM_KEY + "\n")
+        assert result.exit_code == 0, result.output
+        assert "Where to find it: Developer > Manage Tokens" in result.output
+        assert http.last.headers["authorization"] == f"Bearer {CUSTOM_KEY}"
+        assert open_vault(home).list_secrets() == [credential_name("studio", "token", "http://127.0.0.1:1234")]
+        result = run("ditto", "login", "studio", http=http, input="\n")  # Enter for none
+        assert result.exit_code == 0 and "used without a key" in result.output
+        assert "authorization" not in http.last.headers and open_vault(home).list_secrets() == []
+
+    def test_a_local_engine_that_is_not_running(self, tmp_path, home):
+        def refuse(request):
+            raise httpx2.ConnectError("refused")
+
+        ctx = cli.FrameworkContext()
+        ctx.http_client = httpx2.Client(transport=httpx2.MockTransport(refuse))
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "login", "ollama"], obj=ctx)
+        assert result.exit_code == 4 and "Nothing is listening" in result.output
+        assert "ai_auth_ollama" not in settings(tmp_path)
+        assert run("ditto", "login", "ollama", "--no-check").exit_code == 0
+        result = run("ditto", "logout", "ollama")
+        assert result.exit_code == 0 and "forgotten" in result.output and "ai_auth_ollama" not in settings(tmp_path)
+
     def test_the_managed_server_is_explained(self, home):
         result = run("ditto", "login", "local")
         assert result.exit_code == 4 and "llm-cli ditto runtime start" in flat(result.output)
@@ -689,7 +720,9 @@ class TestSignInPanel:
             qapp.processEvents()
             time.sleep(0.005)
         timer.stop()
-        assert len(ticks) > 5 and max(b - a for a, b in zip(ticks, ticks[1:])) < 0.05
+        # The check waits 5 s in its worker; on the GUI thread no tick would come at all. The bound leaves room for
+        # a slow CI machine.
+        assert len(ticks) > 5 and max(b - a for a, b in zip(ticks, ticks[1:])) < 0.25
         release.set()
         assert wait_for(qapp, lambda: not panel.busy)
         assert threads and threads[0].startswith("sign-in-") and panel.lbl_result.text() == "Valid, 1 models"

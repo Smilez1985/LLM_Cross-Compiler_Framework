@@ -124,7 +124,7 @@ class MethodCard(QFrame):
         self.radio = QRadioButton(info.spec.label)
         self.radio.setEnabled(info.built)
         layout.addWidget(self.radio)
-        badges = [TYPE_LABELS.get(info.spec.type, info.spec.type)]
+        badges = [_t(f"signin.type.{info.spec.type}", TYPE_LABELS.get(info.spec.type, info.spec.type))]
         if info.recommended:
             badges.append(_t("signin.recommended", "Recommended"))
         if info.spec.opt_in:
@@ -679,6 +679,7 @@ class SignInDialog(QDialog):
         self.panel = SignInPanel(framework, preset, base_url=base_url, parent=self)
         layout.addWidget(self.panel)
         buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.button(QDialogButtonBox.Close).setText(_t("signin.close", "Close"))
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
