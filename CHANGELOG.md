@@ -57,9 +57,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0) and `fastembed` 0.8.1 (local embeddings,
   ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
 - **Credential vault format v2**: every entry carries a key id and the vault key can be rotated (every entry
-  is re-encrypted, the old key is removed; an interrupted rotation is completed at the next start). Provider
-  keys are stored as credential records under `cred/<provider>/api_key`; stores and key names of earlier
-  versions are read as before and converted on the next change.
+  is re-encrypted, the old key is removed; an interrupted rotation is completed at the next start). Each
+  vault keeps its key in its own keyring entry, so rotating it or changing its storage never touches another
+  vault (for example of another `LLM_FRAMEWORK_HOME` folder); a store of an earlier version moves to its own
+  entry at its first rotation. Provider keys are stored as credential records under
+  `cred/<provider>/api_key`; stores and key names of earlier versions are read as before and converted on
+  the next change.
 - Reading a secret is written to the secrets audit log once per process and name, not on every access.
 
 ### Removed
@@ -70,7 +73,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Secrets store: the secrets audit log lives next to the per-user store; the store of the old location is
   taken over exactly once (secrets deleted later never come back); a damaged store or a link to a missing
   file is reported by `llm-cli doctor` and never overwritten; a long-running GUI or MCP server sees secrets
-  changed by another process.
+  changed by another process; an old store that cannot be decrypted is reported instead of being merged
+  unreadable.
+- Reading or storing a secret no longer fails in a container whose user has no name (no `USER` variable and
+  no passwd entry).
+- On Windows, saving a secret no longer fails when another process or a virus scanner has the store open for
+  a moment.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -85,6 +93,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   longer used; before, secrets stored with it were unreadable after the next start.
 - On Windows the vault key stays on the local machine instead of roaming with the user profile.
 - The secrets store refuses a location inside a git work tree (set `LLM_FRAMEWORK_HOME` elsewhere).
+- Secret names with line breaks or control characters are refused, and the secrets audit log escapes them,
+  so a name (or a user name) cannot forge audit entries.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
