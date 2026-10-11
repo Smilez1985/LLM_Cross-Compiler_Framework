@@ -217,7 +217,9 @@ is for.
 | Config folder (usually `configs/`) | `config.yml` (user settings); optionally an own `llm_providers.yml` that adds or replaces provider presets. |
 
 `cache/`, `output/` and `models/` are relative to the installation folder unless the settings `cache_dir`,
-`output_dir` and `models_dir` say otherwise.
+`output_dir` and `models_dir` say otherwise. If the user may not write to the installation folder (for example
+`C:\Program Files`), their defaults are in the per-user folder instead (`ConfigManager.default_data_root`). None of
+them is created at startup; a build, a download or the knowledge base creates what it uses.
 
 ## Data flows
 

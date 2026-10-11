@@ -215,16 +215,18 @@ configs/compliance/
 configs/backups/
 configs/environments/
 configs/chat_history.json
-cache/chat_history.json
 configs/known_hosts
 
 # Agent worktrees and local tool state
 .claude/worktrees/
 
-# Embedding models the knowledge base downloads (FastEmbed cache under models_dir; several hundred MB)
-/models/embeddings/
-# Ditto's local GGUF models (llm-cli ditto models download; up to several GB each)
-/models/ditto/
+# Data folders the framework writes into the installation when started from the repo (settings output_dir,
+# cache_dir, models_dir): build results, downloaded models (Hugging Face, Ditto's GGUF models, the knowledge
+# base's embedding models), build caches and logs. Never commit them.
+/output/
+/cache/
+/models/
+/logs/
 
 # Credentials and keys (never commit; scripts/secret_scan.py refuses them as well)
 .env.*
