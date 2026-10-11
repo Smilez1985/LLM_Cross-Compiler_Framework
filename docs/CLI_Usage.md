@@ -58,6 +58,9 @@ The examples below use `llm-cli`.
 | `LLM_FRAMEWORK_HOME` | Personal state folder. Default: `~/.llm-framework`. |
 | `LLM_FRAMEWORK_MODELS_DIR` | Models folder; Ditto's local models are in its `ditto/` subfolder. Default: `models/` in the installation. |
 | `LLM_FRAMEWORK_<KEY>` | Overrides one setting for this run, e.g. `LLM_FRAMEWORK_AI_PROVIDER=local` or `LLM_FRAMEWORK_BUILD_MEMORY_LIMIT=24g`. Only known setting names count. |
+| `LLM_SECRET_STORAGE` | How the secrets vault is protected for this run, e.g. `ephemeral` in CI (see [secrets](#secrets)). |
+| `OPENAI_CUSTOM_HEADERS`, `ANTHROPIC_CUSTOM_HEADERS` | Removed at startup with a warning, so they cannot replace the stored key; the setting `ai_allow_sdk_env_headers: true` keeps them. |
+| `ANTHROPIC_LOG`, `OPENAI_LOG` | `debug` is lowered to `info` unless `--debug-http` is given. |
 
 ---
 
@@ -74,9 +77,13 @@ llm-cli [OPTIONS] COMMAND [ARGS]...
 | `-v, --verbose` | Log level `DEBUG`. |
 | `-q, --quiet` | Log level `ERROR` and no start banner. |
 | `--log-level [DEBUG\|INFO\|WARNING\|ERROR]` | Log level (default `INFO`). |
+| `--debug-http` | Show the debug output of the HTTP libraries and the AI provider SDKs on stderr, and keep `ANTHROPIC_LOG=debug` / `OPENAI_LOG=debug`. Without it these loggers stay at `INFO` even with `--verbose`, and the two variables are lowered to `info`. |
 | `--help` | Help for the CLI, a group or a command, e.g. `llm-cli ditto runtime start --help`. |
 
 Global options go before the command: `llm-cli -q doctor`, not `llm-cli doctor -q`.
+
+Credentials (API keys, tokens, `Authorization`, `x-api-key` and cookie headers, sign-in codes and tokens in
+URLs) are redacted in every log line and traceback, also with `--debug-http`.
 
 **Output:** the start banner and log messages go to stderr; results go to stdout, and so do most messages a
 command prints itself, including its error messages. For `llm-cli ditto ask` only the answer goes to stdout, and for
@@ -617,8 +624,19 @@ You sign in to these clients with your own account or key; the framework never s
 
 ## secrets
 
-API keys and tokens are stored encrypted in `~/.llm-framework/secrets.store`; the key for that file is in your
-operating system's keyring.
+API keys and tokens are stored encrypted in the credential vault `secrets.store` in your personal state folder
+(`~/.llm-framework`, or `LLM_FRAMEWORK_HOME`). The vault is never placed inside a git working copy. Its key is in
+your operating system's keyring by default. Without a usable keyring, commands that need the framework stop with
+exit code 1 and list the choices; choose another protection with the setting `secret_storage` in `config.yml`, or
+with the environment variable `LLM_SECRET_STORAGE` for one run:
+
+| `secret_storage` | Where the vault key comes from |
+|---|---|
+| `keyring` | The operating system's keyring (default). |
+| `helper` | The command in the setting `secret_helper`, e.g. `pass show llmcc/vault-key`, run without a shell. |
+| `passphrase` | A passphrase asked once per start (at least 8 characters), never read from a file or a variable. |
+| `insecure` | A key file next to the vault: **not encrypted at rest**. |
+| `ephemeral` | Memory only, nothing is saved (for CI). |
 
 ### secrets set
 
@@ -653,7 +671,8 @@ llm-cli secrets set hf_token
 llm-cli secrets list
 ```
 
-Lists the stored names, never the values.
+Lists the stored names, never the values. Ditto's provider keys are listed under their vault names, for example
+`cred/anthropic/api_key` for `anthropic_api_key`; `secrets set` accepts both forms.
 
 ---
 

@@ -307,6 +307,14 @@ class ConfigManager:
             ConfigSchema("language", str, False, "en", "Interface Language (en/de)"),
             ConfigSchema("ai_security_level", str, False, "STRICT", "AI Data Leakage Protection Level",
                          ["regex:^(STRICT|BALANCED|OFF)$"]),
+            ConfigSchema("secret_storage", str, False, "keyring",
+                         "Protection of the credential vault key: keyring (OS keyring), helper (secret_helper "
+                         "command), passphrase (asked once per start), insecure (key file, not encrypted at rest) "
+                         "or ephemeral (memory only, nothing stored). Never changed automatically.",
+                         ["regex:^(keyring|helper|passphrase|insecure|ephemeral)$"]),
+            ConfigSchema("secret_helper", str, False, "",
+                         "Command whose output protects the vault key when secret_storage is 'helper', e.g. "
+                         "'pass show llmcc/vault-key'; run without a shell"),
             
             # Local RAG / Vector Database (v1.5.0)
             ConfigSchema("enable_rag_knowledge", bool, False, False, "Enable local Qdrant Vector DB for AI"),
@@ -347,8 +355,18 @@ class ConfigManager:
 
             # AI Agent (Ditto) Selection
             ConfigSchema("ai_provider", str, False, "OpenAI",
-                         "AI provider id from configs/llm_providers.yml (anthropic, claude_code, openai, google, "
-                         "openrouter, ollama, local, custom); older names such as OpenAI still work"),
+                         "AI provider id from configs/llm_providers.yml (anthropic, openai, google, openrouter, "
+                         "ollama, local, custom); older names such as OpenAI still work"),
+            ConfigSchema("ai_auth_anthropic", str, False, None,
+                         "Claude sign-in: empty or api_key = the stored API key; ant_profile = an `ant auth login` "
+                         "profile (never picked automatically)"),
+            ConfigSchema("ai_anthropic_workspace_id", str, False, None,
+                         "Claude workspace ID (wrkspc_...) for API keys that are valid in every workspace of the "
+                         "organization; sent as the anthropic-workspace-id header with the API key (an `ant` "
+                         "profile keeps its own workspace)"),
+            ConfigSchema("ai_allow_sdk_env_headers", bool, False, False,
+                         "Keep OPENAI_CUSTOM_HEADERS / ANTHROPIC_CUSTOM_HEADERS from the environment (dropped at "
+                         "startup by default: they could replace the API key or reach other servers)"),
             ConfigSchema("ai_model", str, False, "gpt-6.1-sol", "AI model name"),
             ConfigSchema("ai_base_url", str, False, "", "Base URL for Ollama/Custom endpoints"),
             ConfigSchema("ai_effort", str, False, "", "Reasoning effort: low, medium, high, xhigh, max; "
@@ -550,12 +568,13 @@ class ConfigManager:
             
         with self._lock:
             persist_keys = [
-                "language", "ai_security_level", "gui_theme", "docker_registry",
+                "language", "ai_security_level", "secret_storage", "secret_helper", "gui_theme", "docker_registry",
                 "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
                 "rag_reranker", "rag_rerank_default", "rag_rerank_min_score", "rag_model_idle_minutes",
                 "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages", "audio_announcements",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
+                "ai_anthropic_workspace_id",
                 # v2.0
                 "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",
                 # v2.3

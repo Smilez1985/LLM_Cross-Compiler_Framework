@@ -10,6 +10,8 @@ The current models (gpt-6.1-sol, gpt-6-luna, gpt-6-astra) call tools only there:
 - store=false: nothing is kept on OpenAI's side; the output items (reasoning items carry encrypted_content in
   stateless mode) are replayed unchanged as the next request's input.
 - prompt_cache_key is a random per-install id, never derived from the user's identity.
+- key and base_url are explicit, Authorization is set explicitly (OPENAI_CUSTOM_HEADERS cannot replace it), and
+  organization and project are cleared (no OPENAI_ORG_ID / OPENAI_PROJECT_ID from the environment).
 """
 
 from typing import Any, Dict, List, Optional
@@ -33,12 +35,15 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         if self._client is None:
             if not self._api_key:
                 raise NotConfigured("No OpenAI API key is stored. Add one in the AI settings.", provider=self.provider)
+            self.check_credential_kind()
             import openai
-            kwargs = dict(api_key=self._api_key, base_url=self.base_url, max_retries=0, timeout=self.timeout)
+            kwargs = dict(api_key=self._api_key, base_url=self.base_url, max_retries=0, timeout=self.timeout,
+                          default_headers={**self.preset.headers, **self.credential_headers("Authorization"),
+                                           "Authorization": f"Bearer {self._api_key}"})
             if self.http_client is not None:
                 kwargs["http_client"] = self.http_client
             self._client = openai.OpenAI(**kwargs)
-            self._client.organization = None  # no implicit OPENAI_ORG_ID / OPENAI_PROJECT_ID from the environment
+            self._client.organization = None
             self._client.project = None
         return self._client
 
@@ -78,7 +83,8 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         try:
             response = client.responses.create(**params)
         except Exception as e:
-            raise map_openai_error(e, label="OpenAI", provider=self.provider) from None
+            raise map_openai_error(e, label="OpenAI", provider=self.provider, preset=self.preset,
+                                   base_url=self.base_url) from None
         return self.to_result(response, model)
 
     def to_result(self, response: Any, requested_model: str) -> ChatResult:
@@ -129,7 +135,8 @@ class OpenAIResponsesAdapter(ProviderAdapter):
         try:
             return [ModelInfo(id=m.id, display_name=m.id) for m in self.client().models.list()]
         except Exception as e:
-            raise map_openai_error(e, label="OpenAI", provider=self.provider) from None
+            raise map_openai_error(e, label="OpenAI", provider=self.provider, preset=self.preset,
+                                   base_url=self.base_url, during="models") from None
 
 
 def _leading_system(messages: List[Message]) -> List[Message]:

@@ -21,6 +21,10 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QWidget
 )
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
+from orchestrator.llm.auth.spec import KEY_TYPES
+from orchestrator.llm.auth.store import CredentialStore
+from orchestrator.llm.errors import ANTHROPIC_WORKSPACE_INVALID, LLMError, rejected_key_error
+from orchestrator.llm.providers.anthropic import WORKSPACE_ID, takes_workspace_id
 from orchestrator.utils.crawl_notice import CrawlNotice, notice_text
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.localization import current_language, get_instance as get_i18n, ui_text
@@ -209,6 +213,15 @@ class _SecretsOverlay:
             return self._value
         return self._base.get_secret(key) if self._base is not None else None
 
+    # A vault that cannot be read is reported, never replaced by an environment variable (CredentialStore).
+    @property
+    def storage_error(self):
+        return getattr(self._base, "storage_error", None)
+
+    @property
+    def load_error(self):
+        return getattr(self._base, "load_error", None)
+
 
 def list_provider_models(config: Any, secrets: Any, provider: str) -> List[str]:
     """Model ids from the provider's live list (raises an LLMError with a readable message on failure)."""
@@ -294,6 +307,12 @@ class AIConfigurationDialog(QDialog):
         key_row.addWidget(self.btn_sign_in)
         form.addRow("API Key:", key_row)
 
+        self.txt_workspace = QLineEdit()
+        self.txt_workspace.setPlaceholderText("wrkspc_... (only for keys valid in every workspace)")
+        self.txt_workspace.setToolTip("Claude Console > Settings > Workspaces. Needed when the API key belongs to "
+                                      "the whole organization instead of one workspace.")
+        form.addRow("Workspace ID:", self.txt_workspace)
+
         self.txt_base_url = QLineEdit()
         form.addRow("Base URL:", self.txt_base_url)
 
@@ -354,32 +373,50 @@ class AIConfigurationDialog(QDialog):
     def _secrets(self):
         return getattr(self.framework, 'secrets_manager', None)
 
-    def _stored_key(self) -> Optional[str]:
-        preset, sm = self._preset(), self._secrets()
-        if preset is not None and preset.secret and sm:
-            return sm.get_secret(preset.secret)
-        return None
+    def _key_method(self, preset):
+        return next((m for m in preset.methods if m.type in KEY_TYPES), None) if preset is not None else None
 
-    @staticmethod
-    def _key_required(preset) -> bool:
-        # Presets that also work without a key (local servers) or with another sign-in (OAuth) do not need one.
-        return bool(preset.secret) and preset.auth == ["api_key"]
+    def _stored_key(self) -> Optional[str]:
+        """Where the provider's key comes from ("vault", "env:<VARIABLE>"), None without one. A key bound to a
+        server address counts only for the address in the dialog."""
+        preset, sm = self._preset(), self._secrets()
+        spec = self._key_method(preset)
+        if preset is None or not preset.secret or not sm or spec is None:
+            return None
+        return CredentialStore(sm).key_source(preset, spec, self._base_url(preset) or preset.base_url)
+
+    def _key_required(self, preset) -> bool:
+        # Presets that also work without a key (local servers) do not need one, nor does a provider whose other
+        # sign-in method the user chose (ai_auth_<provider>); opt-in methods never stand in for the key on their own.
+        if not preset.secret:
+            return False
+        chosen = self._user_value(f"ai_auth_{preset.id}")
+        if chosen and chosen != "api_key":
+            return False
+        return all(method == "api_key" or method in preset.opt_in_auth for method in preset.auth)
 
     def _base_url(self, preset) -> str:
         return self.txt_base_url.text().strip() if preset is not None and preset.base_url_configurable else ""
+
+    def _workspace_id(self, preset) -> str:
+        return self.txt_workspace.text().strip() if preset is not None and takes_workspace_id(preset) else ""
 
     def _apply_enabled_state(self):
         preset = self._preset()
         if preset is None:
             return
         self.txt_api_key.setEnabled(bool(preset.secret))
+        self.txt_workspace.setEnabled(takes_workspace_id(preset))
         self.txt_base_url.setEnabled(preset.base_url_configurable)
         self.txt_base_url.setPlaceholderText(preset.base_url or "https://.../v1")
         self.btn_sign_in.setEnabled(self._sign_in_available(preset))
         self.btn_refresh_models.setEnabled(preset.live_models)
+        source = self._stored_key() if preset.secret else None
         if not preset.secret:
             self.txt_api_key.setPlaceholderText("Not needed for this provider")
-        elif self._stored_key():
+        elif source and source.startswith("env:"):
+            self.txt_api_key.setPlaceholderText(f"Using the key from the variable {source[4:]}")
+        elif source:
             self.txt_api_key.setPlaceholderText("******** (Stored in Keyring)")
         else:
             self.txt_api_key.setPlaceholderText("Paste API key" if self._key_required(preset) else "Optional API key")
@@ -421,10 +458,14 @@ class AIConfigurationDialog(QDialog):
                      "offline_mode": self.chk_offline.isChecked()}
         if self._base_url(preset):
             overrides["ai_base_url"] = self._base_url(preset)
+        if takes_workspace_id(preset):
+            overrides["ai_anthropic_workspace_id"] = self._workspace_id(preset)  # also when cleared
         config = SettingsOverlay(self._config(), overrides)
         secrets = _SecretsOverlay(self._secrets(), preset.secret, self.txt_api_key.text().strip())
         lister = self.model_lister
-        signals = _ModelListSignals(self)
+        # No parent: the worker emits on this object, so it must not die with the dialog (closing the dialog while
+        # the list loads would free it under the worker). The connection ends when the dialog is destroyed.
+        signals = _ModelListSignals()
         signals.done.connect(self._on_models_listed)
         self.lbl_models.setText("Loading the provider's models...")
 
@@ -465,6 +506,8 @@ class AIConfigurationDialog(QDialog):
         self._fill_models(suggestions, keep=keep)
         self.txt_base_url.setText((self._user_value("ai_base_url") or "") if saved and preset.base_url_configurable
                                   else "")
+        self.txt_workspace.setText((self._user_value("ai_anthropic_workspace_id") or "")
+                                   if takes_workspace_id(preset) else "")
         self.txt_api_key.clear()
         self.lbl_models.setText("")
         self._apply_enabled_state()
@@ -474,7 +517,8 @@ class AIConfigurationDialog(QDialog):
         self._apply_enabled_state()
 
     def _load_current_config(self):
-        pid = self.catalog.resolve_id(self._config_get("ai_provider", "OpenAI")) or "openai"
+        saved_provider = self._config_get("ai_provider", "OpenAI")
+        pid = self.catalog.resolve_id(saved_provider) or "openai"
         self.chk_offline.setChecked(bool(self._config_get("offline_mode", False)))
         self.cb_provider.blockSignals(True)
         self.cb_provider.setCurrentIndex(max(self.cb_provider.findData(pid), 0))
@@ -486,6 +530,17 @@ class AIConfigurationDialog(QDialog):
         chain = self._user_value("ai_fallback_chain") or []
         self.txt_fallback.setText(", ".join(chain) if isinstance(chain, list) else str(chain))
         self._on_provider_changed()
+        removed = self._removed_message([saved_provider, *self._parse_fallback(self.txt_fallback.text())])
+        if removed:  # a saved provider no longer exists: say why and what to use instead, once per load
+            QMessageBox.information(self, "AI Provider Removed", removed)
+
+    def _removed_message(self, entries: List[str]) -> Optional[str]:
+        """The migration text for the first removed provider among `entries` (provider or provider:model)."""
+        for entry in entries:
+            removed = self.catalog.removed_message(str(entry).partition(":")[0])
+            if removed:
+                return removed
+        return None
 
     def _save_config(self):
         preset = self._preset()
@@ -501,9 +556,11 @@ class AIConfigurationDialog(QDialog):
 
         unknown = [entry for entry in fallback if self.catalog.get(entry.partition(":")[0]) is None]
         if unknown:
+            removed = self._removed_message(unknown)
             QMessageBox.warning(self, "Invalid Fallback Chain",
                                 f"Unknown provider in the fallback chain: {', '.join(unknown)}.\n"
-                                f"Known providers: {', '.join(self.catalog.ids())}.")
+                                f"Known providers: {', '.join(self.catalog.ids())}."
+                                + (f"\n\n{removed}" if removed else ""))
             return
         if offline and preset.location == "cloud":
             QMessageBox.warning(self, "Offline Mode",
@@ -512,6 +569,13 @@ class AIConfigurationDialog(QDialog):
             return
         if self._key_required(preset) and not api_key and not self._stored_key():
             QMessageBox.warning(self, "Missing API Key", "Please provide an API key for this provider.")
+            return
+        if preset.rejected_key(api_key):
+            QMessageBox.warning(self, "Unsuitable API Key", str(rejected_key_error(preset)))
+            return
+        workspace = self._workspace_id(preset)
+        if workspace and not WORKSPACE_ID.match(workspace):
+            QMessageBox.warning(self, "Invalid Workspace ID", ANTHROPIC_WORKSPACE_INVALID)
             return
         if preset.base_url_configurable and not preset.base_url and not base_url:
             QMessageBox.warning(self, "Missing Base URL", "A custom endpoint requires a Base URL.")
@@ -523,7 +587,16 @@ class AIConfigurationDialog(QDialog):
             QMessageBox.warning(self, "Missing Model", "Please select or enter a model.")
             return
 
-        if api_key and preset.secret:
+        spec = self._key_method(preset)
+        if api_key and preset.secret and spec is not None:
+            # A key of a server whose address can be changed is stored for that address only.
+            try:
+                CredentialStore(self._secrets()).save_api_key(preset, spec, api_key,
+                                                              base_url=base_url or preset.base_url)
+            except (LLMError, ValueError) as e:
+                QMessageBox.critical(self, "Error", f"Failed to store the API key: {e}")
+                return
+        elif api_key and preset.secret:  # a user preset with a key name but no key method
             sm = self._secrets()
             if not sm or not sm.set_secret(preset.secret, api_key):
                 QMessageBox.critical(self, "Error", "Failed to store API key in the OS keyring.")
@@ -536,6 +609,8 @@ class AIConfigurationDialog(QDialog):
             cfg.set("ai_provider", preset.id)
             cfg.set("ai_model", model)
             cfg.set("ai_base_url", base_url)
+            if takes_workspace_id(preset):
+                cfg.set("ai_anthropic_workspace_id", workspace)
             cfg.set("ai_effort", effort)
             cfg.set("ai_security_level", security)
             cfg.set("ai_fallback_chain", fallback)

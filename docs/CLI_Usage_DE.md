@@ -59,6 +59,9 @@ Die Beispiele unten verwenden `llm-cli`.
 | `LLM_FRAMEWORK_HOME` | Ordner für den persönlichen Zustand. Standard: `~/.llm-framework`. |
 | `LLM_FRAMEWORK_MODELS_DIR` | Modellordner; Dittos lokale Modelle liegen im Unterordner `ditto/`. Standard: `models/` in der Installation. |
 | `LLM_FRAMEWORK_<SCHLÜSSEL>` | Überschreibt eine Einstellung für diesen Aufruf, z. B. `LLM_FRAMEWORK_AI_PROVIDER=local` oder `LLM_FRAMEWORK_BUILD_MEMORY_LIMIT=24g`. Es zählen nur bekannte Einstellungsnamen. |
+| `LLM_SECRET_STORAGE` | Wie der Secrets-Tresor für diesen Aufruf geschützt wird, z. B. `ephemeral` in der CI (siehe [secrets](#secrets)). |
+| `OPENAI_CUSTOM_HEADERS`, `ANTHROPIC_CUSTOM_HEADERS` | Werden beim Start mit einer Warnung entfernt, damit sie den gespeicherten Schlüssel nicht ersetzen können; die Einstellung `ai_allow_sdk_env_headers: true` behält sie. |
+| `ANTHROPIC_LOG`, `OPENAI_LOG` | `debug` wird auf `info` gesenkt, außer `--debug-http` ist angegeben. |
 
 ---
 
@@ -75,9 +78,13 @@ llm-cli [OPTIONEN] BEFEHL [ARGUMENTE]...
 | `-v, --verbose` | Log-Level `DEBUG`. |
 | `-q, --quiet` | Log-Level `ERROR` und kein Start-Banner. |
 | `--log-level [DEBUG\|INFO\|WARNING\|ERROR]` | Log-Level (Standard `INFO`). |
+| `--debug-http` | Die Debug-Ausgabe der HTTP-Bibliotheken und der SDKs der KI-Anbieter auf stderr zeigen und `ANTHROPIC_LOG=debug` / `OPENAI_LOG=debug` beibehalten. Ohne die Option bleiben diese Logger auch mit `--verbose` auf `INFO`, und die beiden Variablen werden auf `info` gesenkt. |
 | `--help` | Hilfe für die CLI, eine Gruppe oder einen Befehl, z. B. `llm-cli ditto runtime start --help`. |
 
 Globale Optionen stehen vor dem Befehl: `llm-cli -q doctor`, nicht `llm-cli doctor -q`.
+
+Zugangsdaten (API-Schlüssel, Tokens, `Authorization`-, `x-api-key`- und Cookie-Header, Anmeldecodes und Tokens in
+URLs) werden in jeder Logzeile und jedem Traceback geschwärzt, auch mit `--debug-http`.
 
 **Ausgabe:** Das Start-Banner und Log-Meldungen gehen nach stderr, Ergebnisse nach stdout, ebenso die meisten
 Meldungen, die ein Befehl selbst ausgibt, auch seine Fehlermeldungen. Bei `llm-cli ditto ask` geht nur die Antwort
@@ -626,8 +633,20 @@ An diesen Clients meldest du dich mit deinem eigenen Konto oder Schlüssel an; d
 
 ## secrets
 
-API-Schlüssel und Tokens werden verschlüsselt in `~/.llm-framework/secrets.store` gespeichert; der Schlüssel für
-diese Datei liegt im Schlüsselbund deines Betriebssystems.
+API-Schlüssel und Tokens werden verschlüsselt im Tresor für Zugangsdaten `secrets.store` in deinem persönlichen
+Statusordner gespeichert (`~/.llm-framework` oder `LLM_FRAMEWORK_HOME`). Der Tresor liegt nie in einer
+Git-Arbeitskopie. Sein Schlüssel liegt standardmäßig im Schlüsselbund deines Betriebssystems. Ohne nutzbaren
+Schlüsselbund brechen Befehle, die das Framework brauchen, mit Exit-Code 1 ab und nennen die Möglichkeiten; einen
+anderen Schutz wählst du mit der Einstellung `secret_storage` in `config.yml` oder für einen einzelnen Lauf mit der
+Umgebungsvariable `LLM_SECRET_STORAGE`:
+
+| `secret_storage` | Woher der Schlüssel des Tresors kommt |
+|---|---|
+| `keyring` | Aus dem Schlüsselbund des Betriebssystems (Standard). |
+| `helper` | Vom Befehl in der Einstellung `secret_helper`, z. B. `pass show llmcc/vault-key`, ohne Shell ausgeführt. |
+| `passphrase` | Aus einer Passphrase, die einmal je Start abgefragt wird (mindestens 8 Zeichen), nie aus einer Datei oder Variable. |
+| `insecure` | Aus einer Schlüsseldatei neben dem Tresor: **im Ruhezustand nicht verschlüsselt**. |
+| `ephemeral` | Nur im Arbeitsspeicher, nichts wird gespeichert (für CI). |
 
 ### secrets set
 
@@ -662,7 +681,8 @@ llm-cli secrets set hf_token
 llm-cli secrets list
 ```
 
-Listet die gespeicherten Namen auf, nie die Werte.
+Listet die gespeicherten Namen auf, nie die Werte. Die Schlüssel für Dittos Anbieter erscheinen unter ihren
+Namen im Tresor, z. B. `cred/anthropic/api_key` für `anthropic_api_key`; `secrets set` nimmt beide Formen an.
 
 ---
 

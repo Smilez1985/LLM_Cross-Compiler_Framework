@@ -164,7 +164,7 @@ In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm
 | Builds, logs, cache | `output/`, `logs/` and `cache/` in the installation folder (settings `output_dir`, `logs_dir`, `cache_dir`) |
 | Settings (`config.yml`) | `configs/` in the installation folder if your user may write there, otherwise the personal folder below; `LLM_FRAMEWORK_CONFIG_DIR` sets another folder |
 | Personal state: tool permissions, audit log, SSH key and known devices, MCP token, chat history, knowledge base, local model server | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` sets another folder |
-| API keys and tokens | encrypted in `~/.llm-framework/secrets.store`; the key for it is kept in your operating system's keyring |
+| API keys and tokens | encrypted in `~/.llm-framework/secrets.store`; the key for it is kept in your operating system's keyring, or as you choose with the setting `secret_storage` |
 | Models for Ditto's offline mode | `models/ditto/` in the installation folder (`LLM_FRAMEWORK_MODELS_DIR` sets another folder) |
 
 The installers also copy `targets/`, `models/` and `configs/` to a separate data folder (on Windows in the public
@@ -337,8 +337,9 @@ uses the framework's tools within your tool permissions:
   Create Hardware Module...**. You see the whole proposal before anything is written.
 
 **Set up Ditto** under **Tools > Configure AI Agent (Ditto)...**: provider, model (the list is loaded live from
-the provider; you can also type a model name), API key, base URL (Ollama and custom servers), effort, privacy
-level for cloud providers, a fallback chain, the knowledge base and offline mode. On a headless machine, store
+the provider; you can also type a model name), API key, workspace ID (only for Claude API keys that are valid in
+every workspace of the organization), base URL (Ollama and custom servers), effort, privacy level for cloud
+providers, a fallback chain, the knowledge base and offline mode. On a headless machine, store
 the key with `llm-cli secrets set <key name>` and set `ai_provider` in `config.yml` (or the environment variable
 `LLM_FRAMEWORK_AI_PROVIDER`).
 
@@ -364,12 +365,16 @@ the key with `llm-cli secrets set <key name>` and set `ai_provider` in `config.y
   are checked; an invalid answer is an error and is never applied. A proposal that contains a
   dangerous command (for example a download piped into a shell) is discarded.
 - **Sign-in per provider** (the **Sign in...** button) is not available yet; it is being built. Until then
-  Ditto uses API keys. One exception today: if an `ant auth login` profile exists on this computer, the
-  `anthropic` provider uses it before a stored API key. The sign-in work changes this so that the API key comes
-  first.
-- The provider list on this development branch still shows an entry for a Claude subscription through Claude
-  Code. It is being removed, because Anthropic does not allow third-party apps to use subscription limits. Do not
-  rely on it; use MCP or an API key as described [above](#quick-start-ai-clients-over-mcp-claude-code-claude-desktop-vs-code).
+  Ditto uses API keys. For `anthropic` the stored API key always comes first; an `ant auth login` profile is used
+  only when you choose it (setting `ai_auth_anthropic: ant_profile`). Claude Admin API keys (`sk-ant-admin01-`)
+  are refused. Without a stored key, a key in `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY` or
+  `OPENROUTER_API_KEY` is used, and the AI settings name the variable. A key of a `custom` server belongs to the
+  address it was saved for and is not sent after the base URL changes.
+- There is no provider for a Claude subscription: Anthropic does not allow third-party apps to use subscription
+  limits. A saved `claude_code` provider stops with a message that names the alternatives; use MCP or an API key
+  as described [above](#quick-start-ai-clients-over-mcp-claude-code-claude-desktop-vs-code).
+- `OPENAI_CUSTOM_HEADERS` and `ANTHROPIC_CUSTOM_HEADERS` from the environment are ignored (with a warning), so they
+  cannot replace your key; the setting `ai_allow_sdk_env_headers: true` keeps them.
 
 `llm-cli ditto eval` grades Ditto on fixed test cases, for example to check whether a small local model is good
 enough. Details and a first measurement: [docs/Features.md](docs/Features.md#ditto-evaluation).
@@ -447,8 +452,11 @@ treated as external text, never as instructions. More: [docs/Features.md](docs/F
 - **SSH trust on first use:** an unknown board's host key is shown with its SHA256 fingerprint and stored only
   after you confirm. A changed key is always refused. The SSH password is used once to install the framework's
   own key and is never stored.
-- **Secrets:** API keys and tokens are stored encrypted; the key for them is in your operating system's keyring.
-  `llm-cli doctor` warns when the keyring does not protect them.
+- **Secrets:** API keys and tokens are stored encrypted in a vault in your personal folder; its key is in your
+  operating system's keyring. Without a usable keyring nothing is chosen for you: the framework stops and names
+  the choices (setting `secret_storage`: a credential helper command, a passphrase, an unencrypted key file or
+  memory only). Credentials are redacted in every log, also with `--debug-http`. `llm-cli doctor` warns when the
+  vault key is not protected.
 - **Untrusted text:** web pages, knowledge-base text, build logs, tool results and probe files are cleaned of
   hidden characters and passed to the AI as marked data, never as instructions. Chat output is escaped, and links
   open only after you confirm.
@@ -472,6 +480,7 @@ language: en                  # en or de
 ai_provider: OpenAI           # a provider ID from the table above, e.g. local; older names such as OpenAI still work
 ai_security_level: STRICT     # STRICT, BALANCED or OFF (cloud providers only)
 offline_mode: false           # true: only local providers
+secret_storage: keyring       # keyring, helper, passphrase, insecure or ephemeral (protection of the secrets vault)
 enable_rag_knowledge: false   # the local knowledge base
 calibration_language: mixed   # shipped calibration text: mixed, de or en
 build_sandbox: true           # sandbox for conversion containers
@@ -507,9 +516,9 @@ crawler_max_depth: 2
 
 The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGELOG.md) at release. In short:
 
-- **In progress:** sign-in per provider and access type; removal of the Claude-subscription provider (Claude
-  subscribers use MCP or an API key); a hardened headless Docker image for the CLI and the MCP server; a new Ditto
-  evaluation run with the improved prompts.
+- **In progress:** sign-in per provider and access type (the Claude-subscription provider is already removed;
+  Claude subscribers use MCP or an API key); a hardened headless Docker image for the CLI and the MCP server; a new
+  Ditto evaluation run with the improved prompts.
 - **Planned:** a runtime that the deploy step installs on the board, targets for NVIDIA GPUs and AMD (Ryzen Z1
   Extreme), more formats, LoRA and large models, and supply-chain hardening.
 

@@ -4,13 +4,14 @@
 import copy
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 from pydantic import BaseModel, ValidationError
 
 from orchestrator.llm.catalog import ProviderPreset
-from orchestrator.llm.errors import InvalidOutput, Truncated
+from orchestrator.llm.errors import InvalidOutput, NotConfigured, Truncated
 from orchestrator.llm.types import ChatRequest, ChatResult, Message, ModelInfo
+from orchestrator.security.redaction import SecretStr, reveal
 
 DEFAULT_MAX_TOKENS = 16000  # non-streaming; room for adaptive thinking plus the answer
 REPAIR_PROMPT = ("Your previous reply did not match the required JSON schema: {errors}\n"
@@ -84,14 +85,37 @@ class ProviderAdapter:
 
     family = ""
 
-    def __init__(self, preset: ProviderPreset, *, base_url: Optional[str] = None, api_key: Optional[str] = None,
-                 http_client: Any = None, timeout: float = 600.0, **options: Any):
+    # Credential kinds (orchestrator/llm/auth/resolver.py) this adapter can build a client from.
+    credential_kinds: Tuple[str, ...] = ("none", "api_key")
+
+    def __init__(self, preset: ProviderPreset, *, base_url: Optional[str] = None,
+                 api_key: Union[str, SecretStr, None] = None, credential: Any = None, http_client: Any = None,
+                 timeout: float = 600.0, **options: Any):
         self.preset = preset
         self.base_url = base_url
-        self._api_key = api_key
+        self._key = SecretStr.wrap(api_key)
+        self.credential = credential  # the ResolvedCredential (its repr shows no value), None in direct use
         self.http_client = http_client
         self.timeout = timeout
         self.options = options
+
+    def credential_headers(self, *skip: str) -> Dict[str, str]:
+        """The credential's non-secret headers (catalog fields such as the OpenAI project), minus `skip`."""
+        headers = getattr(self.credential, "headers", None) or {}
+        lowered = {name.lower() for name in skip}
+        return {k: v for k, v in headers.items() if k.lower() not in lowered}
+
+    def check_credential_kind(self) -> None:
+        """Refuses a credential this adapter cannot use yet (a token provider before its adapter exists)."""
+        kind = getattr(self.credential, "kind", None)
+        if kind is not None and kind not in self.credential_kinds:
+            raise NotConfigured(f"{self.preset.label}: this adapter cannot use a '{kind}' credential yet.",
+                                provider=self.provider, code="auth.not_built")
+
+    @property
+    def _api_key(self) -> Optional[str]:
+        """The plain key, only for building the SDK client; the adapter holds it as a SecretStr."""
+        return reveal(self._key)
 
     @property
     def provider(self) -> str:

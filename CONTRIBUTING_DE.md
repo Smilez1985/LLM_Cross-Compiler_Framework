@@ -64,9 +64,10 @@ poetry run llm-gui
   `environments/`, `templates/`, `backups/`).
 - `LLM_FRAMEWORK_HOME=~/.llm-framework-dev` trennt Secrets, Tool-Berechtigungen, Audit-Log, SSH-Schlüssel, bekannte
   Hosts, Chatverlauf und den lokalen Modellserver deiner Entwicklungsumgebung von deinem echten `~/.llm-framework`.
-- `PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring` lässt die CLI auch auf Rechnern ohne Schlüsselbund des
-  Systems starten (etwa in Containern). Dieser Schlüsselbund behält keine Secrets; nutze ihn nur zum Entwickeln.
-  `llm-cli doctor` warnt davor.
+- `LLM_SECRET_STORAGE=ephemeral` lässt die CLI auch auf Rechnern ohne Schlüsselbund des Systems starten (etwa in
+  Containern oder in der CI): Secrets bleiben nur für diesen Lauf im Arbeitsspeicher. Ein Schlüsselbund-Backend, das
+  nichts behält, etwa `keyring.backends.null`, wird abgelehnt. `LLM_FRAMEWORK_HOME` darf nicht in eine
+  Git-Arbeitskopie zeigen, weil der Secrets-Tresor einen Ort darin ablehnt.
 
 ---
 
@@ -113,7 +114,8 @@ python -m pytest
 
 - `tests/conftest.py` schottet jeden Test ab: ein temporäres Home- und Arbeitsverzeichnis,
   `LLM_FRAMEWORK_CONFIG_DIR` zeigt auf einen temporären Ordner, alle Variablen `LLM_*` und `FRAMEWORK_*` sowie die
-  Anbieterschlüssel `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` und `GEMINI_API_KEY` werden entfernt. Tests dürfen nicht
+  Anbieterschlüssel werden entfernt (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` und jede weitere
+  Variable, die ein Verfahren in `configs/llm_providers.yml` unter `env` nennt). Tests dürfen nicht
   von deinem echten `~/.llm-framework`, deinem Schlüsselbund, echten API-Schlüsseln oder dem Netzwerk abhängen;
   nutze die Fixture `memory_keyring` und nachgebaute Server.
 - `tests/test_versioning.py` prüft, dass `orchestrator/__init__.py`, `pyproject.toml` und der neueste

@@ -1,6 +1,8 @@
 """GUI dialog tests (offscreen Qt) against a real ConfigManager."""
 
+import gc
 import json
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -43,6 +45,18 @@ class FakeFramework:
         self.rag_requests += 1
 
 
+@pytest.fixture(autouse=True)
+def collect_widgets_on_the_main_thread():
+    """Dialogs without a parent belong to Python. If the garbage collector ran inside a model-list worker thread,
+    it would destroy their widgets off the GUI thread and crash the process; collect them here instead."""
+    gc.collect()
+    yield
+    for thread in threading.enumerate():
+        if thread.name == "ai-model-list":
+            thread.join(timeout=5)
+    gc.collect()
+
+
 @pytest.fixture
 def message_boxes(monkeypatch):
     shown = []
@@ -72,7 +86,8 @@ def model_lists(monkeypatch):
     def lister(config, secrets, provider):
         calls.append(SimpleNamespace(provider=provider, model=config.get("ai_model"),
                                      base_url=config.get("ai_base_url"), offline=config.get("offline_mode"),
-                                     key=secrets.get_secret("anthropic_api_key")))
+                                     key=secrets.get_secret("anthropic_api_key"),
+                                     workspace=config.get("ai_anthropic_workspace_id")))
         result = answers.get(provider, RuntimeError("no network in tests"))
         if isinstance(result, Exception):
             raise result
@@ -262,6 +277,47 @@ class TestAIConfigurationDialog:
         dlg2._save_config()
         assert framework.secrets_manager.store == {"custom_api_key": "custom-secret"}
 
+    def test_custom_key_belongs_to_the_address_it_was_saved_for(self, qapp, tmp_path, memory_keyring,
+                                                                 message_boxes):
+        from orchestrator.Core.secrets_manager import SecretsManager, credential_name
+        vault = SecretsManager(tmp_path / "state")
+        assert vault.initialize(), vault.storage_error
+        fw = FakeFramework(ConfigManager(tmp_path), vault)
+        key = "custom-" + "secret-0123456789"
+        dlg = AIConfigurationDialog(fw)
+        select_provider(dlg, "custom")
+        dlg.cb_model.setCurrentText("my-model")
+        dlg.txt_base_url.setText("http://192.168.1.20:8000/v1")
+        dlg.txt_api_key.setText(key)
+        dlg._save_config()
+        assert message_boxes == [] and dlg.result() == dialogs.QDialog.Accepted
+        assert vault.list_secrets() == [credential_name("custom", "api_key", "http://192.168.1.20:8000")]
+
+        dlg2 = AIConfigurationDialog(fw)
+        assert "Stored" in dlg2.txt_api_key.placeholderText()
+        dlg2.txt_base_url.setText("http://192.168.1.21:8000/v1")  # another server: its key is not this one
+        dlg2._apply_enabled_state()
+        assert "Stored" not in dlg2.txt_api_key.placeholderText()
+
+    def test_the_key_hint_never_moves_a_key_to_an_address_being_typed(self, qapp, tmp_path, memory_keyring,
+                                                                       message_boxes):
+        from orchestrator.Core.secrets_manager import SecretsManager
+        vault = SecretsManager(tmp_path / "state")
+        assert vault.initialize(), vault.storage_error
+        assert vault.set_secret("custom_api_key", "custom-" + "secret-0123456789")  # saved by an earlier version
+        dlg = AIConfigurationDialog(FakeFramework(ConfigManager(tmp_path), vault))
+        select_provider(dlg, "custom")
+        dlg.txt_base_url.setText("http://192.168.1.2")  # half typed
+        dlg.chk_offline.setChecked(True)  # updates the hint for the address typed so far
+        assert "Stored" in dlg.txt_api_key.placeholderText()
+        dlg.reject()
+        assert vault.list_secrets() == ["cred/custom/api_key"]  # still waiting for the address it is used with
+
+    def test_the_unsaved_key_overlay_reports_an_unusable_vault(self):
+        broken = SimpleNamespace(storage_error=RuntimeError("locked"), load_error=None, get_secret=lambda key: None)
+        overlay = dialogs._SecretsOverlay(broken, "anthropic_api_key", "")
+        assert overlay.storage_error is broken.storage_error and overlay.load_error is None
+
     def test_invalid_base_url_is_rejected(self, qapp, framework, message_boxes):
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "ollama")
@@ -318,6 +374,110 @@ class TestAIConfigurationDialog:
         assert (model_lists.calls[-1].base_url, model_lists.calls[-1].offline) == ("http://192.168.1.20:11434/v1",
                                                                                      True)
         assert framework.config.get("ai_base_url") == "", "nothing is saved before Save"
+
+    def test_removed_provider_is_explained_once(self, qapp, framework, monkeypatch):
+        shown = []
+
+        class Boxes:
+            @staticmethod
+            def information(parent, title, text, *args):
+                shown.append((title, text))
+
+        monkeypatch.setattr(dialogs, "QMessageBox", Boxes)
+        framework.config.set("ai_provider", "claude_code")
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "ollama")
+        select_provider(dlg, "anthropic")
+
+        assert len(shown) == 1 and shown[0][0] == "AI Provider Removed"
+        for alternative in ("Claude API key", "Max and Team", "Bedrock, Vertex or Foundry", "llm-cli mcp config"):
+            assert alternative in shown[0][1]
+        assert dlg.cb_provider.findData("claude_code") < 0
+
+    def test_claude_needs_a_key_unless_the_profile_was_chosen(self, qapp, framework, message_boxes):
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "anthropic")
+        assert dlg.txt_api_key.placeholderText() == "Paste API key"
+        dlg._save_config()
+        assert message_boxes == [("warning", "Missing API Key")]
+
+        framework.config.set("ai_auth_anthropic", "ant_profile")
+        message_boxes.clear()
+        dlg._save_config()
+        assert message_boxes == [] and dlg.result() == dialogs.QDialog.Accepted
+
+    def test_workspace_id_is_validated_and_saved(self, qapp, framework, tmp_path, message_boxes):
+        workspace = "wrkspc_" + "01Abc"
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "openai")
+        assert not dlg.txt_workspace.isEnabled()
+        select_provider(dlg, "anthropic")
+        assert dlg.txt_workspace.isEnabled()
+        dlg.txt_api_key.setText("sk-ant-" + "test-key-0123456789abcdef")
+
+        dlg.txt_workspace.setText("workspace-1")
+        dlg._save_config()
+        assert message_boxes == [("warning", "Invalid Workspace ID")] and dlg.result() == 0
+        assert framework.secrets_manager.store == {}
+
+        message_boxes.clear()
+        dlg.txt_workspace.setText(f" {workspace} ")
+        dlg._save_config()
+        assert message_boxes == [] and dlg.result() == dialogs.QDialog.Accepted
+        assert ConfigManager(tmp_path).get("ai_anthropic_workspace_id") == workspace
+        assert AIConfigurationDialog(framework).txt_workspace.text() == workspace
+
+    def test_unsaved_workspace_id_is_used_for_the_model_list(self, qapp, framework, model_lists):
+        workspace = "wrkspc_" + "01Abc"
+        model_lists.answers["anthropic"] = ["claude-opus-5-5"]
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "anthropic")
+        dlg.txt_workspace.setText(workspace)
+        dlg._refresh_models()
+        assert wait_for(qapp, lambda: "1 models" in dlg.lbl_models.text())
+        assert model_lists.calls[-1].workspace == workspace
+
+    def test_admin_key_is_refused(self, qapp, framework, message_boxes):
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "anthropic")
+        dlg.txt_api_key.setText("sk-ant-" + "admin01-" + "Z" * 32)
+        dlg._save_config()
+        assert message_boxes == [("warning", "Unsuitable API Key")]
+        assert framework.secrets_manager.store == {} and dlg.result() == 0
+
+    def test_removed_provider_in_the_fallback_chain_is_explained(self, qapp, framework, monkeypatch):
+        shown = []
+
+        class Boxes:
+            @staticmethod
+            def information(parent, title, text, *args):
+                shown.append(("information", title, text))
+
+            @staticmethod
+            def warning(parent, title, text, *args):
+                shown.append(("warning", title, text))
+
+        monkeypatch.setattr(dialogs, "QMessageBox", Boxes)
+        framework.config.set("ai_provider", "ollama")
+        framework.config.set("ai_fallback_chain", ["claude_code"])
+        dlg = AIConfigurationDialog(framework)
+        assert [entry[:2] for entry in shown] == [("information", "AI Provider Removed")]
+        assert "llm-cli mcp config" in shown[0][2]
+
+        dlg._save_config()
+        assert shown[-1][:2] == ("warning", "Invalid Fallback Chain") and "llm-cli mcp config" in shown[-1][2]
+        assert dlg.result() == 0 and framework.config.get("ai_fallback_chain") == ["claude_code"]
+
+    def test_workspace_id_only_for_the_claude_api(self, qapp, framework, tmp_path):
+        (tmp_path / "llm_providers.yml").write_text(
+            "providers:\n  gateway:\n    label: Gateway\n    adapter: anthropic\n"
+            "    base_url: https://gateway.example.com\n    secret: anthropic_api_key\n", encoding="utf-8")
+        framework.config.set("ai_anthropic_workspace_id", "wrkspc_" + "01Abc")
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "gateway")
+        assert not dlg.txt_workspace.isEnabled() and dlg.txt_workspace.text() == ""
+        select_provider(dlg, "anthropic")
+        assert dlg.txt_workspace.isEnabled() and dlg.txt_workspace.text() == "wrkspc_" + "01Abc"
 
     def test_sign_in_placeholder(self, qapp, framework):
         dlg = AIConfigurationDialog(framework)

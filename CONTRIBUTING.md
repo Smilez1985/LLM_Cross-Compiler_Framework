@@ -62,9 +62,10 @@ poetry run llm-gui
   `templates/`, `backups/`).
 - `LLM_FRAMEWORK_HOME=~/.llm-framework-dev` keeps secrets, tool permissions, audit log, SSH key, known hosts, chat
   history and the local model server of your development setup apart from your real `~/.llm-framework`.
-- `PYTHON_KEYRING_BACKEND=keyring.backends.null.Keyring` lets the CLI start on machines without a system keyring
-  (for example in containers). This keyring keeps no secrets; use it only for development. `llm-cli doctor` warns
-  about it.
+- `LLM_SECRET_STORAGE=ephemeral` lets the CLI start on machines without a system keyring (for example in
+  containers or CI): secrets are kept in memory for that run only. A keyring backend that keeps nothing, such as
+  `keyring.backends.null`, is refused. `LLM_FRAMEWORK_HOME` must not point into a git working copy, because the
+  secrets vault refuses to live there.
 
 ---
 
@@ -110,8 +111,9 @@ python -m pytest
 ```
 
 - `tests/conftest.py` isolates every test: a temporary home and working directory, `LLM_FRAMEWORK_CONFIG_DIR`
-  pointing to a temporary folder, all `LLM_*` and `FRAMEWORK_*` variables and the provider keys `OPENAI_API_KEY`,
-  `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` removed. Tests must not depend on your real `~/.llm-framework`, your
+  pointing to a temporary folder, all `LLM_*` and `FRAMEWORK_*` variables and the provider keys removed
+  (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` and every other variable a method in
+  `configs/llm_providers.yml` lists under `env`). Tests must not depend on your real `~/.llm-framework`, your
   keyring, real API keys or the network; use the `memory_keyring` fixture and fake servers.
 - `tests/test_versioning.py` checks that `orchestrator/__init__.py`, `pyproject.toml` and the newest released
   changelog entry carry the same version.

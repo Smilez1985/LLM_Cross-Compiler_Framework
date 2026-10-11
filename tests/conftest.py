@@ -1,3 +1,4 @@
+import logging
 import os
 import sys
 from pathlib import Path
@@ -7,6 +8,21 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+def _catalog_key_variables():
+    """Every environment variable the provider catalog reads as a key source (method `env` lists)."""
+    import yaml
+    data = yaml.safe_load((REPO_ROOT / "configs" / "llm_providers.yml").read_text(encoding="utf-8")) or {}
+    names = set()
+    for preset in (data.get("providers") or {}).values():
+        for method in (preset or {}).get("auth") or []:
+            if isinstance(method, dict):
+                names.update(method.get("env") or [])
+    return sorted(names)
+
+
+CATALOG_KEY_VARIABLES = _catalog_key_variables()
 
 
 @pytest.fixture(autouse=True)
@@ -25,9 +41,24 @@ def isolated_environment(tmp_path, monkeypatch):
     monkeypatch.setenv("LLM_FRAMEWORK_CONFIG_DIR", str(tmp_path / "configs"))
     # Spoken announcements stay off; audio tests switch them on explicitly.
     monkeypatch.setenv("LLM_FRAMEWORK_NO_AUDIO", "1")
-    # Real provider keys from the developer's shell must not reach the tests.
-    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+    # Real provider keys from the developer's shell must not reach the tests, nor SDK switches (headers, endpoints,
+    # profiles, debug logs) that change what the SDKs send; the CLI's startup guard would also edit them for good.
+    # The catalog's key variables are a credential source of the provider layer itself.
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+                "OPENAI_CUSTOM_HEADERS", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL",
+                "OPENAI_ORG_ID", "OPENAI_PROJECT_ID", "ANTHROPIC_PROFILE", "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_LOG",
+                "OPENAI_LOG", *CATALOG_KEY_VARIABLES):
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def sdk_debug_logging_off():
+    """A CLI or GUI test with --debug-http must not leave the SDK loggers at DEBUG, with a stderr handler, for
+    the tests after it (the choice is process-wide and kept by later setup_logging() calls)."""
+    yield
+    from orchestrator.security import redaction
+    if getattr(redaction, "_debug_http", False):
+        redaction.configure_sdk_loggers(logging.INFO, debug_http=False)
 
 
 @pytest.fixture
