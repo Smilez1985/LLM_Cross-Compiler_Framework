@@ -787,8 +787,15 @@ class UserKeys:
 # Extended: Windows and macOS home folders, IPv6, MAC and e-mail addresses (LCF's privacy detectors), the host
 # name and the user name, and LCF's secret patterns.
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\b")
-_HOME_DIRS = re.compile(r"(?:(?<![\w.])/home/|(?<![\w.])/Users/|\b[A-Za-z]:\\Users\\|\b[A-Za-z]:/Users/)"
-                        r"[^/\\\s\"'<>|:]+")
+_HOME_DIRS = re.compile(r"((?:(?<![\w.])/home|(?<![\w.])/Users|\b[A-Za-z]:\\Users|\b[A-Za-z]:/Users)([/\\]))"
+                        r"([^/\\\s\"'<>|:]+)")
+# Text the detectors must not touch is shielded with private-use characters while they run: image digests
+# (name@sha256:..., which the validators require) are no user@host logins, and default accounts are no persons.
+# A scrubbed git@ remote or digest would break the script it is in.
+_SHIELD = {"/": "", "\\": "", "@": ""}
+_UNSHIELD = str.maketrans({v: k for k, v in _SHIELD.items()})
+# The '@' of image digests and of git@<forge>: SSH remotes (a service account, not a person).
+_KEEP_AT = re.compile(r"@(?=sha(?:256|384|512):[0-9a-f]{32})|(?<=\bgit)@(?=[\w.-]+\.[A-Za-z]{2,}:)")
 _GENERIC_PLACEHOLDER = re.compile(r"<(IP|MAC|EMAIL|USER|HOST)_[0-9a-f]{8}>")
 # Account and machine names that are ordinary words in documentation; replacing them would damage the text.
 _COMMON_NAMES = {"root", "user", "admin", "administrator", "ubuntu", "debian", "pi", "runner", "docker", "build",
@@ -813,12 +820,15 @@ def scrub(text: str) -> str:
     if not text:
         return ""
     text = _JWT.sub("<jwt>", text)
-    home = str(Path.home())
-    if len(home) > 3:
-        text = re.sub(re.escape(home) + r"(?![\w.-])", "~", text)
-    text = _HOME_DIRS.sub("~", text)
+    home = Path.home()
+    if len(str(home)) > 3 and home.name.casefold() not in _COMMON_NAMES:  # /root is a path of every container
+        text = re.sub(re.escape(str(home)) + r"(?![\w.-])", "~", text)
+    text = _HOME_DIRS.sub(lambda m: m.group(1)[:-1] + _SHIELD[m.group(2)] + m.group(3)
+                          if m.group(3).casefold() in _COMMON_NAMES else "~", text)
+    text = _KEEP_AT.sub(_SHIELD["@"], text)
     # Secrets, IPv4/IPv6, MAC and e-mail addresses and user@host logins (the mapping back is dropped).
     text, _ = PrivacyFilter("BALANCED").sanitize(text)
+    text = text.translate(_UNSHIELD)
     text = _GENERIC_PLACEHOLDER.sub(lambda m: f"<{m.group(1).lower()}>", text)
     try:
         host = socket.gethostname()

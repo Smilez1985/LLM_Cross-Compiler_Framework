@@ -549,12 +549,27 @@ class TestScrub:
         monkeypatch.setattr("socket.gethostname", lambda: "build-box-17.lan")
         monkeypatch.setattr("getpass.getuser", lambda: "jenny")
 
-    def test_home_paths_become_tilde(self):
-        home = str(Path.home())
-        text = (f"{home}/models/x.gguf /home/john/.cache C:\\Users\\Bob\\Downloads\\probe.txt "
+    def test_home_paths_become_tilde(self, monkeypatch):
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: cls("/data/jenny")))
+        text = (f"{Path.home()}/models/x.gguf /home/john/.cache C:\\Users\\Bob\\Downloads\\probe.txt "
                 f"/Users/carol/work")
         out = scrub(text)
         assert out == "~/models/x.gguf ~/.cache ~\\Downloads\\probe.txt ~/work"
+
+    def test_system_and_default_account_homes_stay(self, monkeypatch):
+        # Not personal, and part of the content: Dockerfiles run as root, CI runs as runner.
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: cls("/root")))
+        text = 'ENV PATH="/root/.local/bin:$PATH"\ncd /home/runner/work && ls /home/pi/models'
+        assert scrub(text) == text
+        assert scrub("/home/john/.cache") == "~/.cache"
+
+    def test_image_digests_are_not_logins(self):
+        pinned = "FROM ghcr.io/acme/rk-sdk@sha256:" + "ab" * 32 + " AS builder"
+        assert scrub(pinned) == pinned, "a digest pin must survive the scrub (the validators require it)"
+        remote = "git clone git" + "@" + "github.com:airockchip/rknn-llm.git"  # no addresses in the repository
+        assert scrub(remote) == remote, "the git service account is no person"
+        assert scrub("ssh jenny@devbox") == "ssh <user>@<host>"
+        assert scrub("legit" + "@" + "example.org") == "<email>"
 
     def test_addresses_are_removed_but_loopback_stays(self):
         mail = "ops" + "@" + "example.org"  # built at runtime: no addresses in the repository

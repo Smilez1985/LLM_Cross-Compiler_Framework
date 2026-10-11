@@ -49,14 +49,16 @@ SHELL_DENY_PATTERNS = [
     (re.compile(r"\b(?:mkfs(?:\.\w+)?|dd\s+if=)"), "writes raw devices"),
     (re.compile(r"/var/run/docker\.sock|\bdocker\s+run\b"), "controls the Docker host"),
     (re.compile(r"(?:^|[;&|]\s*)\s*(?:eval|source|\.)\s+[\"']?\$\(", re.MULTILINE), "evaluates generated code"),
-    (re.compile(r"\b(?:ba|z|da)?sh\s+-c\s+[\"']?\$\(|<\(\s*\S"), "runs generated code"),
+    # Process substitution runs code, except as plain input ('done < <(grep ...)'), unless a shell reads it.
+    (re.compile(r"\b(?:ba|z|da)?sh\s+-c\s+[\"']?\$\(|(?<!<\s)(?<!<)<\(\s*\S|\b(?:ba|z|da)?sh\s*<\s*<\("),
+     "runs generated code"),
 ]
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
 SHIPPED_TEMPLATE = Path(__file__).resolve().parents[2] / "targets" / "_template"
 # Template placeholders that must never survive into a generated module (target.yml is also checked
 # for any bracketed placeholder text, see _leftover_placeholders).
-TEMPLATE_PLACEHOLDERS = re.compile(
-    r"\[(?:MODULE_NAME|Hardware-Familie|IHRE_ARCHITEKTUR|Hersteller|QUANTIZATION_LOGIC|CPU_FLAGS|CMAKE_FLAGS"
+TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_FLAGS] is a bash array entry
+    r"(?<![\w$])\[(?:MODULE_NAME|Hardware-Familie|IHRE_ARCHITEKTUR|Hersteller|QUANTIZATION_LOGIC|CPU_FLAGS|CMAKE_FLAGS"
     r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name)\]|\{packages_str\}|YYYY-MM-DD")
 GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
 
@@ -221,17 +223,18 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
             problems.append(f"{rel}: binary file (packs carry text only)")
             continue
         lines = data.decode("utf-8", errors="replace").splitlines()
-        if path.name.startswith("Dockerfile"):
+        if path.name.lower().startswith("dockerfile"):  # the builder also takes a lowercase 'dockerfile'
             stages = set()
-            for line in lines:
+            for line in (x for x in lines if not x.lstrip().startswith("#")):
                 m = re.match(r"\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?", line, re.IGNORECASE)
-                if not m:
-                    continue
-                image = m.group(1)
-                if image.lower() not in stages and (not IMAGE_RE.fullmatch(image) or (
-                        "@sha256:" not in image and not image.startswith(TRUSTED_IMAGE_PREFIXES))):
-                    problems.append(f"{rel}: FROM {image} must be pinned by digest (image@sha256:...)")
-                if m.group(2):
+                # COPY --from=<image> and RUN --mount=...,from=<image> pull images as well
+                refs = [("FROM ", m.group(1))] if m else []
+                refs += [("from=", ref) for ref in re.findall(r"(?:--|,)from=([^\s,]+)", line, re.IGNORECASE)]
+                for label, image in refs:
+                    if image.lower() not in stages and not image.isdigit() and (not IMAGE_RE.fullmatch(image) or (
+                            "@sha256:" not in image and not image.startswith(TRUSTED_IMAGE_PREFIXES))):
+                        problems.append(f"{rel}: {label}{image} must be pinned by digest (image@sha256:...)")
+                if m and m.group(2):
                     stages.add(m.group(2).lower())
         elif path.suffix == ".sh":
             template = template_dir / rel
