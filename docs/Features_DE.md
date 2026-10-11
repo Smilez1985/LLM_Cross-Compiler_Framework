@@ -608,15 +608,17 @@ Build, und der vorgefertigte Download bleibt dann nur als ausdrückliche Wahl, a
   eingehängter Quelle, ohne Capabilities, mit schreibgeschütztem Wurzeldateisystem und deinem Benutzer, so wie die
   Konvertierungsschritte laufen. Das Framework teilt dieses Rezept, nie ein fertig gebautes Image.
 - **Keine Downloads:** Neben den Optionen wird die Ausgabe des Konfigurierens geprüft: Eine Zeile, die sagt, dass
-  llama.cpp etwas geholt oder heruntergeladen hat, lässt den Build scheitern.
+  llama.cpp etwas geholt oder heruntergeladen hat, lässt den Build scheitern. Ebenso ein Konfigurieren, das für einen
+  mit OpenMP geplanten Build keine OpenMP-Laufzeit gefunden hat (ggml würde nur warnen und ohne OpenMP bauen, sodass
+  die Build-ID nicht mehr stimmt).
 - **Prüfungen vor der Nutzung:** Jedes Programm muss eine ELF-Datei für die geplante Architektur sein, deren
   Bibliotheken im Build liegen oder Systembibliotheken sind; Geräte-Builds dürfen keine neuere glibc-Symbolversion
   brauchen, als das Gerät hat, und keine geteilte C++-Laufzeit. `llama-bench --version` und `llama-server --version`
   müssen den festgelegten Build und Commit melden, `llama-bench --list-devices` muss die geplante GPU zeigen, und
   `llama-server --tools all` muss abgelehnt werden. Ein Rauchtest und ein kurzer `llama-bench`-Lauf auf einem
   winzigen festgelegten Modell folgen, sobald der Katalog eines festlegt; bis dahin werden sie mit einem Hinweis
-  übersprungen. Programme werden nur aus dem eigenen Ordner des Builds genommen, nie aus `PATH`, und laufen mit
-  geleerter Umgebung.
+  übersprungen. Ein anderes Modell wird dort nie geladen. Programme werden nur aus dem eigenen Ordner des Builds
+  genommen, nie aus `PATH`, und laufen mit geleerter Umgebung.
 - **Ablage:** `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` enthält die Programme mit `build.json` (der
   Bauplan) und `manifest.json` (sha256 jeder Datei, Dauer, Bau-Rechner, Prüfergebnisse). Die Build-ID ist der Hash
   von allem, was die Programme verändert, also wird ein abgelegter Build wiederverwendet und nie neu gestempelt. Nur

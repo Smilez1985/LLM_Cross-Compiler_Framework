@@ -114,11 +114,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   container, an image built on your machine from `builder.Dockerfile` and a base pinned by digest, whose configure
   and build steps run without network, with the source read-only and the sandbox of the conversion stages. The
   framework shares this recipe, never a compiled image. Parallel jobs follow the available memory. A configure
-  output that says something was fetched or downloaded fails the build. Before a build is stored it is checked: ELF
-  architecture and libraries (device builds: no newer glibc symbol version than the device, no shared C++ runtime),
-  the pinned build and commit in `--version`, the planned GPU in `llama-bench --list-devices`, and `llama-server`
-  must refuse `--tools`. The smoke run and short benchmark on a tiny pinned model are skipped with a note until the
-  catalog pins one. Binaries come only from the build's own folder, never from `PATH`, and every program the
+  output that says something was fetched or downloaded fails the build, and so does one that found no OpenMP runtime
+  for a build planned with OpenMP. Before a build is stored it is checked: ELF architecture and libraries (device
+  builds: no newer glibc symbol version than the device, no shared C++ runtime), the pinned build and commit in
+  `--version`, the planned GPU in `llama-bench --list-devices`, and `llama-server` must refuse `--tools`. The smoke
+  run and short benchmark on a tiny pinned model are skipped with a note until the catalog pins one; no other model
+  is loaded there. Binaries come only from the build's own folder, never from `PATH`, and every program the
   framework starts takes the same forbidden-option list and a cleared environment without `LLAMA_*` variables.
   Builds are stored under `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` with `build.json` and
   `manifest.json` (sha256 of every file, duration, verification) and reused, never stamped again; only a build

@@ -128,13 +128,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   festgelegten Basis gebaut wird und dessen Schritte Konfigurieren und Bauen ohne Netz laufen, mit schreibgeschützter
   Quelle und der Sandbox der Konvertierungsschritte. Das Framework teilt dieses Rezept, nie ein fertig gebautes Image.
   Die parallelen Jobs richten sich nach dem verfügbaren Speicher. Sagt die Ausgabe des Konfigurierens, dass etwas
-  geholt oder heruntergeladen wurde, scheitert der Build. Bevor ein Build abgelegt wird, wird er geprüft:
-  ELF-Architektur und Bibliotheken (Geräte-Builds: keine neuere glibc-Symbolversion als auf dem Gerät, keine geteilte
-  C++-Laufzeit), der festgelegte Build und Commit in `--version`, die geplante GPU in `llama-bench --list-devices`,
-  und `llama-server` muss `--tools` ablehnen. Rauchtest und kurzer Benchmark auf einem winzigen festgelegten Modell
-  werden mit einem Hinweis übersprungen, bis der Katalog eines festlegt. Programme kommen nur aus dem eigenen Ordner
-  des Builds, nie aus `PATH`, und jedes Programm, das das Framework startet, bekommt dieselbe Liste verbotener
-  Optionen und eine geleerte Umgebung ohne `LLAMA_*`-Variablen. Builds liegen unter
+  geholt oder heruntergeladen wurde, scheitert der Build, ebenso wenn sie für einen mit OpenMP geplanten Build keine
+  OpenMP-Laufzeit gefunden hat. Bevor ein Build abgelegt wird, wird er geprüft: ELF-Architektur und Bibliotheken
+  (Geräte-Builds: keine neuere glibc-Symbolversion als auf dem Gerät, keine geteilte C++-Laufzeit), der festgelegte
+  Build und Commit in `--version`, die geplante GPU in `llama-bench --list-devices`, und `llama-server` muss
+  `--tools` ablehnen. Rauchtest und kurzer Benchmark auf einem winzigen festgelegten Modell werden mit einem Hinweis
+  übersprungen, bis der Katalog eines festlegt; ein anderes Modell wird dort nie geladen. Programme kommen nur aus
+  dem eigenen Ordner des Builds, nie aus `PATH`, und jedes Programm, das das Framework startet, bekommt dieselbe
+  Liste verbotener Optionen und eine geleerte Umgebung ohne `LLAMA_*`-Variablen. Builds liegen unter
   `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` mit `build.json` und `manifest.json` (sha256 jeder Datei,
   Dauer, Prüfung) und werden wiederverwendet, nie neu gestempelt; nur ein auf diesem Rechner geprüfter Build kann
   aktiv werden, und die Aufbewahrung entfernt nie den aktiven Build, den CPU-Ersatz oder den Build, aus dem ein
