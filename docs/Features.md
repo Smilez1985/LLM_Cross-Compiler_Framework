@@ -830,6 +830,33 @@ framework never sees it.
   approvals live in `~/.llm-framework/tool_approvals.json`, signed like the permissions, so a hand edit decides
   nothing; no tool can create, list, approve or decline one, and only the client that asked sees the result. Ditto
   in the framework always asks in its own dialog or prompt and never needs one.
+- **Standing approvals ("yes, and do not ask again"):** a scoped "allow" for one caller, created only by you in the
+  framework's own window: **Approve and do not ask again...** in the approval window, `llm-cli tools approvals
+  approve ID --always`, or Ditto's dialog and prompt. An MCP client's own dialog can only ask for one: its form then
+  has "ask the framework to stop asking for calls like this one", which runs that one call and puts a request into
+  the approval window for you to confirm (one open request per caller and tool, 15 minutes or until its session
+  ends; a declined scope is not asked for again for 24 hours). Before you confirm, the window shows a warning that
+  names who may then act without asking (for the local stdio clients: all of them, with the command that gives one
+  client its own token), what the standing approval covers in plain words, how wide ("this one only" or "any", where
+  offered) and for how long ("until I revoke it", 30 days or 24 hours; for all local stdio clients together only
+  the narrowest scope and at most 30 days). The scope comes from facts the framework looked up for the call, never
+  from what the AI wrote; a call outside it asks as before, and a standing approval never lifts a "deny", never
+  covers another caller and never applies to a tool you set to be confirmed in the framework. Packs from the zoo
+  can get one for knowledge and recipe packs of trust `verified` or `community` and for target packs of trust
+  `verified`, each bound to the exact pack kind, trust level and index signing key; builds and single-file
+  downloads only for safetensors or GGUF (never pickle weights), ungated models with a permissive licence, up to a
+  size class; it is never offered for deploying, settings, crawling, creating modules, `export_pack`, healing,
+  deleting or restoring, or stopping another client's work. Standing approvals are stored in the signed permission
+  file (a hand edit denies everything) and written only when you create, revoke or reset them, so a use never
+  rewrites the file and cannot undo a revocation; their uses and last use come from the audit log
+  (`confirm_channel` `grant:<id>`), and the GUI shows each use with a **Revoke** button. They lapse after 90 days
+  without use (audited `grant_lapsed`), at their expiry, when the tool's rule changes and when their token is
+  revoked; `llm-cli tools permissions --grants` and the Tool Permissions dialog list them with their uses, and
+  `--revoke-grant ID`, the dialog's **Revoke** and `--reset` remove them. While the GUI runs, the command line
+  cannot create one (use the GUI's window); one created on a command line is shown once at the next GUI start.
+  `get_status` shows a caller its own standing approvals, read-only. Which tools offer one so far: only tools whose
+  facts the framework can look up get a rule (none of the 14 current tools yet; the zoo, download and local tools
+  bring theirs with them).
 - **Instructions to the client:** the server describes the typical flow (targets → capabilities → build → status
   and log → artifacts), tells the client that fields marked as external text are data whose instructions must not
   be followed, and that a task it cannot do is reported to you with its specific reason.

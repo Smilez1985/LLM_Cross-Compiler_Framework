@@ -318,6 +318,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   runs once, expires after 15 minutes and ends with the client's session or `cancel_job`; a client has at most 5
   open; the question shows the caller class first and the client's name as self-reported, up to 16,000 characters.
   Decisions are audited before they are stored, and the approval file is signed like the permissions.
+- **Standing approvals: "yes, and do not ask again"** (MCP server, Ditto). Created only by you in the framework's own
+  window (the approval window, `llm-cli tools approvals approve ID --always`, Ditto's dialog and prompt), after a
+  warning that names who may then act without asking, what is covered in plain words, how wide and for how long.
+  An MCP client's form can only ask the framework for one, which you confirm in its window (one open request per
+  caller and tool; a declined scope is not asked for again for 24 hours). Scopes come from facts the framework
+  looked up: zoo packs only for knowledge and recipe packs (trust verified or community) and verified target packs,
+  bound to kind, trust level and index key; builds and downloads only for safetensors or GGUF, ungated, permissive
+  licence, up to a size class; never for deploying, settings, crawling, module creation, `export_pack`, healing,
+  deleting or restoring, or stopping another client's work. All local stdio clients together get only the narrowest
+  scope, a warning and at most 30 days. Stored in the signed permission file and written only on your action; uses
+  come from the audit log (`grant:<id>`), each use shows a notice with **Revoke** in the GUI; they lapse after 90
+  days without use. `llm-cli tools permissions --grants`, `--revoke-grant ID` and the Tool Permissions dialog list
+  and revoke them; while the GUI runs the command line cannot create one. No current tool offers one yet: the
+  rules come with the tools whose facts the framework looks up.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the

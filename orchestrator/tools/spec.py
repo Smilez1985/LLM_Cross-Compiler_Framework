@@ -53,11 +53,15 @@ class FieldMeta:
 
 @dataclass(frozen=True)
 class GrantRule:
-    """Whether a confirmation may offer "yes, and do not ask again" for a tool, and for which scope. The scope key
-    is computed from the facts the person was shown; None means "outside every scope, ask". Standing approvals
-    themselves come with the framework's approval window; until then no tool declares one."""
-    scope: Callable[[Any], Optional[str]]
+    """Whether a confirmation may offer "yes, and do not ask again" for a tool, and for which scope (design 6.10).
+    `rule` (orchestrator.tools.grants.ScopeRule) computes the scope from the facts the framework looked up for the
+    call: `facts(input, ToolContext)` returns them (never what the AI described). Without facts no scope exists, and
+    the tool asks. `warning` completes "<caller> may then ... whenever it decides to, without asking you", for example
+    "install knowledge packs from the signed index with trust verified or community". A new `version` lets every
+    standing approval made under the old rule lapse."""
+    rule: Any
     warning: str
+    facts: Optional[Callable[[Any, Any], Dict[str, Any]]] = None
     version: int = 1
 
 

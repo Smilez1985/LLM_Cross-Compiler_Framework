@@ -65,6 +65,8 @@ class TokenRecord(BaseModel):
     rotated: Optional[str] = None
     link: Optional[Literal["ditto"]] = None  # uses that caller's policy by reference
     policy: Optional[ToolPolicy] = None      # its own policy (None when linked)
+    # Tells this token apart from an earlier one of the same name (its standing approvals name it); kept on rotation.
+    uid: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{16}$")
 
     @model_validator(mode="after")
     def _one_policy(self):
@@ -266,7 +268,8 @@ class TokenStore:
             if name in records:
                 raise TokenStoreError(f"A token named '{name}' exists already; rotate or revoke it.")
             records[name] = TokenRecord(name=name, sha256=token_digest(token), created=_now(), link=link,
-                                        policy=None if link else (policy or read_only_policy()))
+                                        policy=None if link else (policy or read_only_policy()),
+                                        uid=secrets.token_hex(8))
         self._change(change)
         return token
 

@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.confirmation import CallTooLong, describe_call
+from orchestrator.tools.grants import NEVER_GRANT
 from orchestrator.tools.normalize import (NormalizeError, Repair, check_names_distinct, list_item_literal,
                                           normalize_arguments, resolve_name)
 from orchestrator.tools.output import UNTRUSTED_CHARS, ResultTooLarge, check_size, filtered_result
@@ -33,6 +34,11 @@ from orchestrator.tools.spec import CHANNELS, FieldMeta, GrantRule, ToolLimits, 
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.untrusted import sanitize_untrusted
+
+
+def datetime_now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def text_sha256(text: str) -> str:
@@ -182,10 +188,17 @@ Confirm = Callable[[ToolSpec, BaseModel], bool]
 _CALL: contextvars.ContextVar = contextvars.ContextVar("lcf_tool_call", default=(None, ""))
 # The question the registry asks through a framework channel (Ditto's dialog or prompt shows exactly this text).
 _QUESTION: contextvars.ContextVar = contextvars.ContextVar("lcf_tool_question", default="")
+# What that question may offer as "yes, and do not ask again" (grants.GrantOffer), None when nothing.
+_OFFER: contextvars.ContextVar = contextvars.ContextVar("lcf_tool_grant_offer", default=None)
 
 
 def current_question() -> str:
     return _QUESTION.get()
+
+
+def current_grant_offer():
+    """The standing approval the framework's own dialog or prompt may offer for the question it shows (Ditto)."""
+    return _OFFER.get()
 
 
 def current_actor() -> str:
@@ -297,6 +310,8 @@ class ToolRegistry:
         self._sessions: "OrderedDict[tuple, Dict[str, int]]" = OrderedDict()
 
     def register(self, spec: ToolSpec) -> ToolSpec:
+        if spec.grant is not None and spec.name in NEVER_GRANT:
+            raise ValueError(f"Tool '{spec.name}' never gets a standing approval (design 6.10).")
         if spec.name in self._tools:
             raise ValueError(f"Tool '{spec.name}' is already registered.")
         if spec.tier == ToolTier.FORBIDDEN:
@@ -333,6 +348,170 @@ class ToolRegistry:
             return True
         policy, section = self._policy_of(caller)
         return spec.name in policy.framework_only_for(section)
+
+    # --- standing approvals (design 6.10) ------------------------------------------------------------------------
+
+    def _grant_caller(self, actor: str) -> Tuple[str, Optional[str]]:
+        """(the caller whose standing approvals apply to `actor`, the creation time of its named token). A token linked
+        to Ditto uses Ditto's; an unknown or revoked token has none ("")."""
+        if not actor.startswith(ACTOR_PREFIX):
+            return actor, None
+        if self.tokens is None:
+            return "", None
+        try:
+            record = self.tokens.get(actor[len(ACTOR_PREFIX):])
+        except TokenStoreError:
+            return "", None
+        if record is None:
+            return "", None
+        if record.link is not None:
+            return record.link, None
+        return actor, record.uid or record.created
+
+    def _grant_facts(self, spec: ToolSpec, inp: Any, ctx: "ToolContext") -> Optional[Dict[str, Any]]:
+        if spec.grant is None or spec.grant.facts is None or spec.name in NEVER_GRANT:
+            return None
+        try:
+            facts = spec.grant.facts(inp, ctx)
+        except Exception as e:  # no facts: no standing approval (the tool asks)
+            self.logger.info(f"No facts for a standing approval of {spec.name}: {redact_secrets(str(e))}")
+            return None
+        return facts if isinstance(facts, dict) else None
+
+    def grant_offer(self, spec: ToolSpec, inp: Any, ctx: "ToolContext"):
+        """What a question about this call may offer as "yes, and do not ask again" (grants.GrantOffer), or None: no
+        GrantRule, a tool that never gets one, a tool the person wants confirmed in the framework, or facts outside
+        every scope. The shared stdio caller gets only the narrowest scope and the shorter durations."""
+        from orchestrator.tools.grants import GrantOffer, durations_for, warning_text
+        caller, _ = self._grant_caller(ctx.actor)
+        if not caller or self.framework_channel_required(spec, ctx.actor):
+            return None
+        facts = self._grant_facts(spec, inp, ctx)
+        if facts is None:
+            return None
+        rule, scopes, summaries = spec.grant.rule, {}, {}
+        widths = [w for w in rule.widths if w == "this" or ctx.actor != "mcp"]  # narrowest scope for stdio clients
+        for width in widths:
+            try:
+                scope = rule.scope(facts, width)
+            except Exception:
+                scope = None
+            if scope is not None:
+                scopes[width], summaries[width] = scope, rule.summary(scope)
+        if not scopes:
+            return None
+        linked = []
+        if caller == "ditto" and self.tokens is not None:
+            try:
+                linked = [t.name for t in self.tokens.list() if t.link == "ditto"]
+            except TokenStoreError:
+                linked = []
+        return GrantOffer(tool=spec.name, caller=caller, rule_version=spec.grant.version, scopes=scopes,
+                          summaries=summaries, durations=durations_for(caller),
+                          warning=warning_text(spec.grant.warning, caller, ctx.client, linked,
+                                               external=spec.tier == ToolTier.EXTERNAL))
+
+    def matching_grant(self, spec: ToolSpec, inp: Any, ctx: "ToolContext"):
+        """The standing approval that covers this call, or None. Read anew for every call (a revocation stops calls
+        that were accepted but have not started). An expired, lapsed or outdated one never covers a call; a lapse is
+        recorded once in the audit log."""
+        if spec.grant is None or spec.name in NEVER_GRANT:
+            return None
+        caller, token_created = self._grant_caller(ctx.actor)
+        if not caller or self.framework_channel_required(spec, ctx.actor):
+            return None
+        policy = self.policy_store.load()
+        if self.policy_store.problem:
+            return None
+        candidates = [g for g in policy.grants.get(caller, []) if g.tool == spec.name]
+        if not candidates:
+            return None
+        facts = self._grant_facts(spec, inp, ctx)
+        if facts is None:
+            return None
+        for grant in candidates:
+            if grant.rule_version != spec.grant.version or grant.expired() or grant.token_created != token_created:
+                continue
+            _, last = self.audit.grant_uses(grant.id) if self.audit is not None else (0, None)
+            if grant.lapsed(last):
+                self._record_lapse(spec, ctx, grant)
+                continue
+            try:
+                if spec.grant.rule.covers(grant.scope, facts):
+                    return grant
+            except Exception:
+                continue
+        return None
+
+    def _record_lapse(self, spec: ToolSpec, ctx: "ToolContext", grant) -> None:
+        if self.audit is None:
+            return
+        try:
+            for entry in self.audit.entries(500):
+                if entry.get("outcome") == "grant_lapsed" and entry.get("confirm_channel") == f"grant:{grant.id}":
+                    return
+            self.audit.record(ctx.actor, spec.name, spec.tier.value, Decision.ASK.value, "grant_lapsed",
+                              detail="Unused for 90 days; the tool asks again.",
+                              extra={"confirm_channel": f"grant:{grant.id}"})
+        except Exception as e:
+            self.logger.warning(f"Could not record the lapse of {grant.id}: {redact_secrets(str(e))}")
+
+    def create_grant(self, offer, width: str, duration: str, created_via: str, actor: str):
+        """A standing approval a person just chose in the framework's own window (`actor`: cli or gui), from an offer
+        the framework computed. Saved with the policy (audited, revision checked under the lock); ValueError when the
+        choice lies outside the offer."""
+        import secrets as _secrets
+        from orchestrator.tools.grants import CREATED_VIA, Grant, expiry_for
+        if width not in offer.scopes or duration not in offer.durations or created_via not in CREATED_VIA:
+            raise ValueError("That choice is not offered for this call.")
+        caller, token_created = self._grant_caller(offer.caller)
+        if not caller:
+            raise ValueError("The caller of this request no longer exists (its token was revoked).")
+        now = datetime_now_iso()
+        grant = Grant(id=f"g_{_secrets.token_hex(8)}", tool=offer.tool, scope=offer.scopes[width],
+                      summary=offer.summaries[width][:500], width=width, rule_version=offer.rule_version,
+                      created=now, created_via=created_via, expires=expiry_for(duration),
+                      token_created=token_created, announced=created_via not in ("cli", "ditto-cli"))
+
+        def change(policy):
+            grants = dict(policy.grants)
+            grants[caller] = list(grants.get(caller, [])) + [grant]
+            return policy.model_copy(update={"grants": grants})
+        self.policy_store.update(change, actor=actor)
+        return grant
+
+    def revoke_grant(self, grant_id: str, actor: str) -> bool:
+        """Removes a standing approval (a person's action, audited with the policy save)."""
+        found = []
+
+        def change(policy):
+            grants = {}
+            for caller, items in policy.grants.items():
+                kept = [g for g in items if g.id != grant_id]
+                found.extend(g for g in items if g.id == grant_id)
+                if kept:
+                    grants[caller] = kept
+            return policy.model_copy(update={"grants": grants})
+        if self.policy_store.load().grant_by_id(grant_id) is None:
+            return False
+        self.policy_store.update(change, actor=actor)
+        return bool(found)
+
+    def grant_rows(self, caller: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Each stored standing approval (of one caller, or all) with its uses and last use from the audit log and its
+        state: active, expired, lapsed or outdated (the tool's rule changed)."""
+        policy = self.policy_store.load()
+        rows = []
+        for owner, grants in sorted(policy.grants.items()):
+            if caller is not None and owner != caller:
+                continue
+            for grant in grants:
+                uses, last = self.audit.grant_uses(grant.id) if self.audit is not None else (0, None)
+                spec = self._tools.get(grant.tool)
+                state = ("outdated" if spec is None or spec.grant is None or spec.grant.version != grant.rule_version
+                         else "expired" if grant.expired() else "lapsed" if grant.lapsed(last) else "active")
+                rows.append({"caller": owner, "grant": grant, "uses": uses, "last_use": last, "state": state})
+        return rows
 
     def get(self, name: str) -> ToolSpec:
         try:
@@ -701,6 +880,10 @@ class ToolRegistry:
             raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
         writes = spec.tier != ToolTier.READ
         channel, answer, question = ctx.confirm_channel, ctx.answer, ctx.question_sha256
+        if decision == Decision.ASK and approved is None:
+            grant = self.matching_grant(spec, inp, ctx)  # read anew right before the handler
+            if grant is not None:
+                approved, channel, answer, question = True, f"grant:{grant.id}", "accepted", ""
         # A person's "no" is final, even if the policy was loosened to "allow" while they were asked.
         if decision == Decision.ASK or approved is False:
             if approved is None and ctx.confirm is not None:
@@ -710,12 +893,25 @@ class ToolRegistry:
                 # Recorded before it is asked; a question about a change that cannot be recorded is not asked.
                 self._audit(ctx, spec, decision, "confirmation_requested", arguments, required=writes,
                             confirm_channel=channel, question_sha256=question)
-                token = _QUESTION.set(text)
+                offer = self.grant_offer(spec, inp, ctx) if spec.grant is not None else None
+                token, offered, calling = _QUESTION.set(text), _OFFER.set(offer), _CALL.set((self, ctx.actor))
                 try:
-                    approved = bool(ctx.confirm(spec, inp))
+                    reply = ctx.confirm(spec, inp)
                 finally:
+                    _CALL.reset(calling)
+                    _OFFER.reset(offered)
                     _QUESTION.reset(token)
+                approved = bool(reply)
                 answer = "accepted" if approved else "declined"
+                choice = getattr(reply, "grant_choice", None)
+                if approved and offer is not None and choice is not None:
+                    # "Yes, and do not ask again" in Ditto's own dialog or prompt: the framework's window.
+                    via = "ditto-gui" if channel == "framework-gui" else "ditto-cli"
+                    try:
+                        self.create_grant(offer, choice[0], choice[1], via, "gui" if via == "ditto-gui" else "cli")
+                    except Exception as e:  # the call still runs once; the standing approval is reported missing
+                        self.logger.warning(f"The standing approval for {spec.name} was not saved: "
+                                            f"{redact_secrets(str(e))}")
             if (not approved and approved is None and ctx.pending_approvals and self.approvals is not None
                     and "framework" in spec.channels):
                 # Nobody could be asked through the client: the question appears in the framework instead, and the

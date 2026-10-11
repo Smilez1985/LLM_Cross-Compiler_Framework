@@ -982,10 +982,50 @@ class ToolPermissionsDialog(QDialog):
             self.framework_checks[spec.name] = check
         layout.addWidget(self.table)
 
+        # Standing approvals ("do not ask again"): only created in the framework's approval windows, revoked here.
+        layout.addWidget(QLabel("Standing approvals (\"do not ask again\"), with their uses from the audit log:"))
+        self.grant_table = QTableWidget(0, 5)
+        self.grant_table.setHorizontalHeaderLabels(["Id", "Caller", "Covers", "State", "Uses / last use"])
+        self.grant_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.grant_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.grant_table.setSelectionBehavior(QTableWidget.SelectRows)
+        layout.addWidget(self.grant_table)
+        revoke = QPushButton("Revoke selected standing approval")
+        revoke.clicked.connect(lambda: self.revoke_grant(self._selected_grant()))
+        layout.addWidget(revoke)
+        self.refresh_grants()
+
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def refresh_grants(self):
+        rows = self.registry.grant_rows()
+        self.grant_table.setRowCount(len(rows))
+        for i, row in enumerate(rows):
+            grant = row["grant"]
+            uses = f"{row['uses']}" + (f", last {row['last_use']}" if row["last_use"] else "")
+            for col, text in enumerate((grant.id, row["caller"], f"{grant.tool}: {grant.summary}", row["state"], uses)):
+                self.grant_table.setItem(i, col, QTableWidgetItem(text))
+
+    def _selected_grant(self):
+        row = self.grant_table.currentRow()
+        item = self.grant_table.item(row, 0) if row >= 0 else None
+        return item.text() if item is not None else ""
+
+    def revoke_grant(self, grant_id: str) -> bool:
+        """Revokes at once (audited); the window's other settings are then saved on top of the new state."""
+        if not grant_id:
+            return False
+        try:
+            revoked = self.registry.revoke_grant(grant_id, "gui")
+        except Exception as e:
+            QMessageBox.critical(self, "Tool permissions", f"Could not revoke the standing approval:\n{e}")
+            return False
+        self.loaded = self.registry.policy()
+        self.refresh_grants()
+        return revoked
 
     def build_policy(self):
         """The shared permissions as set here; every listed tool counts as reviewed, and callers with permissions

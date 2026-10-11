@@ -349,8 +349,9 @@ Python (see [Calling `llm-cli`](#calling-llm-cli)). After `--write claude-deskto
   self-healing proposals ask for your confirmation, which the client shows as a question, unless you allowed
   them. When a client cannot ask you (Claude Desktop chat and Cowork, for example), the question waits for you in
   the framework instead: a notice in the GUI (**Tools > Pending Approvals...**) and `llm-cli tools approvals` in a
-  terminal. Approve it there and the framework runs the call for the client. Every call is written to a
-  tamper-evident audit log (`llm-cli tools audit`).
+  terminal. Approve it there and the framework runs the call for the client. Where the framework can offer it, the
+  window also has "Approve and do not ask again", a standing approval for calls within a narrow scope that you can
+  revoke in Tool Permissions. Every call is written to a tamper-evident audit log (`llm-cli tools audit`).
 - **Transports:** stdio (default, started by the client) or local Streamable HTTP
   (`llm-cli mcp serve --transport http`, loopback only, default address `http://127.0.0.1:8765/mcp`). Over HTTP
   every client needs its own named token: `llm-cli mcp token add NAME` shows it once, and the client sends it as
