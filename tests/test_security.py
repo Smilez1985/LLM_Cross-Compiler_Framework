@@ -642,6 +642,7 @@ class TestCrawlerOptOuts:
         ('<meta name="LLM-Conversion-Framework-Bot" content="none">',
          '<meta name="llm-conversion-framework-bot">: none', False),
         ('<meta name="tdm-reservation" content="1">', 'TDM reservation (<meta name="tdm-reservation">)', True),
+        ('<meta name="robots" content="noindex nofollow">', '<meta name="robots">: noindex', False),   # spaces only
     ])
     def test_meta_tags_keep_the_page_out(self, make_crawler, meta, reason, followed):
         crawler, web = make_crawler({f"{SITE}/": page_with(meta), f"{SITE}/guide": page_with(body="Guide.")})
@@ -656,6 +657,7 @@ class TestCrawlerOptOuts:
         ('<meta name="robots" content="nofollow">', False),
         ('<meta name="googlebot" content="noindex, nofollow">', True),   # another crawler's rules
         ('<meta name="tdm-reservation" content="0">', True),
+        ('<meta name="robots" content="max-image-preview: none">', True),   # "none" is a value here
     ])
     def test_meta_tags_that_keep_the_page(self, make_crawler, meta, followed):
         crawler, web = make_crawler({f"{SITE}/": page_with(meta), f"{SITE}/guide": page_with(body="Guide.")})
@@ -681,6 +683,79 @@ class TestCrawlerOptOuts:
                 f"{SITE}/": f"TDM reservation (tdm-reservation header, policy {SITE}/policy.json)"}
         else:
             assert crawler.skipped == []  # "yes" is a protocol error, which TDMRep treats as unset
+
+    @pytest.mark.parametrize("value", ["1, 1", "0, 1"])
+    def test_repeated_tdm_reservation_headers(self, make_crawler, value):
+        """requests joins repeated headers with commas; a reservation in any of them counts."""
+        from urllib3 import HTTPHeaderDict
+
+        joined = page_with(headers={"tdm-reservation": value})
+        separate = page_with(headers={"tdm-reservation": value})
+        raw = HTTPHeaderDict()
+        for item in value.split(", "):
+            raw.add("tdm-reservation", item)
+        separate.raw = SimpleNamespace(headers=raw)
+        crawler, _ = make_crawler({f"{SITE}/": joined, f"{SITE}/b": separate})
+
+        assert crawler.crawl(f"{SITE}/") == [] and crawler.crawl(f"{SITE}/b") == []
+        assert self.reasons(crawler) == {f"{SITE}/b": "TDM reservation (tdm-reservation header)"}
+
+    def test_tdmrep_file_with_a_byte_order_mark(self, make_crawler):
+        raw = b"\xef\xbb\xbf" + json.dumps([{"location": "/", "tdm-reservation": 1}]).encode()
+        crawler, web = make_crawler({
+            f"{SITE}{TDM_FILE}": response(html=raw.decode("utf-8"), content=raw, content_type="application/json"),
+            f"{SITE}/": page_with(),
+        })
+
+        assert crawler.crawl(f"{SITE}/") == []
+        assert web.urls == [f"{SITE}{TDM_FILE}"]
+
+    @pytest.mark.parametrize("location", ["private/*", f"{SITE}/private/*"])
+    def test_tdmrep_location_written_relative_or_as_url(self, make_crawler, location):
+        crawler, web = make_crawler({
+            f"{SITE}{TDM_FILE}": tdm_file((location, 1)),
+            f"{SITE}/": page_with(body='<a href="/private/a">a</a>'),
+            f"{SITE}/private/a": page_with(body="Private."),
+        })
+
+        assert self.sources(crawler.crawl(f"{SITE}/")) == [f"{SITE}/"]
+        assert f"{SITE}/private/a" not in web.urls
+
+    @pytest.mark.parametrize("rules, path", [
+        ("User-agent: *\nDisallow: /*.pdf$\n", "/files/manual.pdf"),       # '*' and '$' patterns
+        ("User-agent: *\nDisallow: /*/private\n", "/docs/private"),
+        ("User-agent: *\nDisallow: *\n", "/docs"),
+        ("User-agent: *\nAllow: /\nDisallow: /private\n", "/private"),      # the longest rule wins, not the first
+        ("User-agent: *\nDisallow: /x\n\nUser-agent: *\nDisallow: /private\n", "/private"),   # groups merged
+        ("\ufeffUser-agent: *\nDisallow: /\n", "/docs"),                     # byte order mark
+        ("User-agent: LLM-Conversion-Framework-Bot/3.1\nDisallow: /\n", "/docs"),   # our token with a version
+        ("User-agent: otherbot\nUser-agent: *\nDisallow: /docs # comment\n", "/docs"),
+    ])
+    def test_robots_txt_as_in_rfc_9309(self, make_crawler, rules, path):
+        raw = rules.encode()   # requests decodes text/plain without a charset as ISO-8859-1
+        crawler, web = make_crawler({
+            f"{SITE}/robots.txt": response(html=raw.decode("latin-1"), content=raw, content_type="text/plain"),
+            f"{SITE}{path}": page_with(body="P."),
+        }, respect_robots=True)
+
+        assert crawler.crawl(f"{SITE}{path}") == []
+        assert f"{SITE}{path}" not in web.urls
+        assert self.reasons(crawler) == {f"{SITE}{path}": "disallowed by robots.txt"}
+
+    @pytest.mark.parametrize("rules", [
+        "User-agent: *\nDisallow: /private\nAllow: /private/public\n",          # the longer allow wins
+        "User-agent: *\nAllow: /private/public\nDisallow: /private/public\n",   # a tie goes to allow
+        "User-agent: llm-conversion-framework-bot\nDisallow:\n\nUser-agent: *\nDisallow: /\n",   # our group
+        "User-agent: otherbot\nDisallow: /\n",
+        "User-agent: *\nDisallow: /private/public/x\n",
+    ])
+    def test_robots_txt_rules_that_allow(self, make_crawler, rules):
+        crawler, _ = make_crawler({
+            f"{SITE}/robots.txt": response(html=rules, content_type="text/plain"),
+            f"{SITE}/private/public": page_with(body="P."),
+        }, respect_robots=True)
+
+        assert self.sources(crawler.crawl(f"{SITE}/private/public")) == [f"{SITE}/private/public"]
 
     def test_tdmrep_file_alone_reserves_paths_before_they_are_fetched(self, make_crawler):
         crawler, web = make_crawler({
@@ -815,6 +890,9 @@ class TestCrawlerOptOuts:
         ("/Docs", "/docs", False),               # case-sensitive
         ("/User Guide", "/User%20Guide", True),  # compared percent-encoded
         ("/*$", "/", True),
+        ("docs/*", "/docs/a", True),                      # written relative: from the root
+        ("https://example.org/docs/*", "/docs/a", True),  # written as a URL: its path
+        ("https://example.org/docs/*", "/other", False),
     ])
     def test_tdm_location_patterns(self, location, path, expected):
         from orchestrator.Core.crawler_manager import tdm_location_matches
@@ -856,7 +934,7 @@ class TestCrawlsStayWithTheUser:
                 elif isinstance(node, (ast.Import, ast.ImportFrom)):
                     names += [getattr(node, "module", None) or ""] + [a.name for a in node.names]
                 for name in names:
-                    if name in ("ingest_url", "crawl", "CrawlerManager") or "crawler_manager" in name:
+                    if name in ("ingest_url", "crawl", "iter_crawl", "CrawlerManager") or "crawler_manager" in name:
                         offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}: {name}")
         assert len(files) > 5 and offenders == []
 

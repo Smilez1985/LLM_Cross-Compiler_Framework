@@ -322,7 +322,6 @@ class ConfigManager:
                          ["regex:^(https?://[^\\s/?#@]+([/?#]\\S*)?)?$"]),
             
             # Deep Crawler Settings (v1.6.0)
-            ConfigSchema("crawler_respect_robots", bool, False, True, "Respect robots.txt rules"),
             ConfigSchema("crawler_max_depth", int, False, 2, "Max recursion depth for crawler"),
             ConfigSchema("crawler_max_pages", int, False, 50, "Max pages to crawl per session"),
             ConfigSchema("crawler_rate_limit", float, False, 1.0, "Delay between crawler requests (seconds)", ["min:0"]),
@@ -531,7 +530,7 @@ class ConfigManager:
             persist_keys = [
                 "language", "ai_security_level", "gui_theme", "docker_registry",
                 "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
-                "crawler_respect_robots", "crawler_max_depth", "crawler_max_pages",
+                "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages", "audio_announcements",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
                 # v2.0

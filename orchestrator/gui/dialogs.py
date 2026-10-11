@@ -601,7 +601,8 @@ def select_recent(combo: QComboBox, recent: Sequence[str]) -> bool:
 class URLInputDialog(QDialog):
     """
     Dialog for inputting multiple URLs for RAG crawling.
-    Supports Deep Ingest options (depth, robots.txt, etc.)
+    Supports Deep Ingest options (depth, PDFs, delay). There is no switch for robots.txt or the other opt-outs:
+    the site's machine-readable reservations decide, not the user.
     recent: URLs crawled before (newest first), offered in an editable list.
     """
     def __init__(self, parent=None, recent: Sequence[str] = ()):
@@ -655,11 +656,6 @@ class URLInputDialog(QDialog):
         self.spin_depth.setValue(2)
         self.spin_depth.setToolTip("How many levels deep to follow links")
         opt_layout.addRow("Max Depth:", self.spin_depth)
-
-        # Respect robots.txt
-        self.chk_robots = QCheckBox("Respect robots.txt (Recommended)")
-        self.chk_robots.setChecked(True)
-        opt_layout.addRow("", self.chk_robots)
 
         # Download PDFs
         self.chk_pdfs = QCheckBox("Download and parse PDF files")
@@ -723,7 +719,6 @@ class URLInputDialog(QDialog):
         """Get crawl options as dict."""
         return {
             "max_depth": self.spin_depth.value(),
-            "respect_robots": self.chk_robots.isChecked(),
             "download_pdfs": self.chk_pdfs.isChecked(),
             "request_delay": self.spin_delay.value()
         }
@@ -761,13 +756,19 @@ class CrawlNoticeDialog(QMessageBox):
 
 
 def show_crawl_notice_once(parent, config, announcer: Optional[Callable[[str], Any]] = None) -> None:
-    """Shows the notice before the user's first crawl, and again after its text changed."""
-    notice = CrawlNotice(config.user_state_dir)
-    if not notice.needed():
-        return
+    """Shows the notice before the user's first crawl, and again after its text changed (every time when the
+    per-user state directory cannot be used)."""
+    try:
+        notice = CrawlNotice(config.user_state_dir)
+        if not notice.needed():
+            return
+    except OSError as e:
+        notice = None
+        logging.getLogger(__name__).warning(f"No per-user state directory for the Deep Ingest notice ({e}).")
     CrawlNoticeDialog(parent, announcer).exec()
     try:
-        notice.acknowledge("gui")
+        if notice is not None:
+            notice.acknowledge("gui")
     except OSError as e:
         logging.getLogger(__name__).warning(f"Could not remember the Deep Ingest notice ({e}); it is shown again.")
 
