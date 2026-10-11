@@ -86,6 +86,19 @@ Model Context Protocol, and conversion containers run in a sandbox.
 - Cancelling a build can no longer be undone by a later stage (security scan, image build and stage
   containers are stopped); only real read timeouts count as timeouts; a retry after a healing fix keeps its own
   build id and log; a damaged audit database or per-user folder no longer stops the framework from starting.
+- Audit log: removed newest entries stay detectable after later calls; no false tamper alarms after a failed
+  commit, a failed anchor write or a write with another key; auditing goes on after the database was moved
+  aside; `llm-cli tools audit --archive` starts a new chain and keeps the old one checkable.
+- Secrets: the store of an earlier version is taken over exactly once (also into an existing per-user store),
+  and a damaged one is reported; a running MCP server sees secrets that another process added or deleted;
+  nothing is written into the working directory any more (secrets audit log, model folder).
+- Tool permissions: a deeply nested or dangling permission file denies every tool like other damage.
+- MCP: an explicit "no" stays final even if the permissions change meanwhile; every refusal is audited; errors
+  while writing the Claude Desktop config are reported without a traceback; `XDG_CONFIG_HOME` is honoured on
+  Linux; `-v` no longer puts log lines on the protocol channel.
+- Builds: a cancelled build leaves no manifest or archive behind; a finished build frees its slot before its end
+  state is visible; links in the output folder are never followed; the GUI sends no board for a target without
+  capabilities unless one was typed.
 
 ### Security
 - **Sandboxed conversion containers**: host user instead of root, no network, no capabilities,
@@ -106,6 +119,9 @@ Model Context Protocol, and conversion containers run in a sandbox.
 - MCP: confirmations show every argument in full (too long: refused), only a real answer of the user counts as
   approval, declined and cancelled calls are audited, client snippets are quoted, and the Claude Desktop config
   backup is private.
+- The MCP launch command written into client configs never imports code from the folder the client starts it
+  in (`python -P`); Windows snippets are quoted for cmd and PowerShell; invisible and combining characters in
+  confirmation texts are shown escaped; tool error messages are redacted before they reach a client.
 - **Secret scan** (`scripts/secret_scan.py`, standard library only): provider API keys, tokens, private keys,
   certificates and credential files are refused by a pre-commit and a pre-push hook (`make hooks`) and by a CI
   job over the whole history. Personal strings (e-mail address, user name) go into the never-committed
