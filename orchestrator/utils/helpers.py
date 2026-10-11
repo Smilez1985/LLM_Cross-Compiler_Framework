@@ -9,19 +9,19 @@ Vermeidet zirkuläre Abhängigkeiten durch strikte Trennung von Business-Logik.
 """
 
 import os
-import sys
 import json
 import shutil
 import subprocess
 import platform
-import tempfile
 import hashlib
 import zipfile
 import tarfile
 import re
 import ctypes
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
+from typing import List, Union
+
+from orchestrator.security import secret_patterns
 
 def ensure_directory(path: Union[str, Path], mode: int = 0o755) -> Path:
     """Creates directory if not exists."""
@@ -119,23 +119,15 @@ def is_admin() -> bool:
     except:
         return False
 
-_SECRET_PATTERNS = [
-    # The digit lookahead keeps words like "disk-usage-monitoring-service" from matching,
-    # without a lookbehind that would miss keys after escapes such as "\nsk-...".
-    (re.compile(r'sk-(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{20,}'), 'sk-REDACTED'),   # OpenAI (incl. sk-proj-), Anthropic (sk-ant-)
-    (re.compile(r'hf_[A-Za-z0-9]{20,}'), 'hf_REDACTED'),                         # HuggingFace
-    (re.compile(r'AIza[0-9A-Za-z_-]{35}'), 'AIza-REDACTED'),        # Google / Gemini
-    (re.compile(r'(?:ghp|gho|ghs|ghu|ghr)_[A-Za-z0-9]{36,}'), 'gh-REDACTED'),
-    (re.compile(r'github_pat_[A-Za-z0-9_]{22,}'), 'gh-REDACTED'),
-]
+# The one table of secret formats, shared with scripts/secret_scan.py.
+SECRET_PATTERNS = secret_patterns.PATTERNS
 
 def redact_secrets(text: str) -> str:
-    """Replaces known API key/token formats before text leaves the machine."""
+    """Replaces known API key/token formats, credential headers and query parameters before text leaves the
+    machine or reaches a log."""
     if not text:
         return ""
-    for pattern, replacement in _SECRET_PATTERNS:
-        text = pattern.sub(replacement, text)
-    return text
+    return secret_patterns.redact(text)
 
 def sanitize_filename(name: str) -> str:
     """Removes illegal characters for filenames."""

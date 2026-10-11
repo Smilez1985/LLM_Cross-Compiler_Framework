@@ -4,6 +4,11 @@ The Command Line Interface (CLI) is the power tool for headless servers, CI/CD p
 
 **Entry Point:** `python3 orchestrator/cli.py [COMMAND] [OPTIONS]`
 
+**Global options** (before the command): `-c/--config FILE`, `-v/--verbose`, `-q/--quiet`,
+`--log-level DEBUG|INFO|WARNING|ERROR`, and `--debug-http`, which shows the debug output of the HTTP libraries
+and the AI provider SDKs on stderr. Credentials (API keys, tokens, `Authorization` and cookie headers, sign-in
+codes in URLs) are redacted in every log, also with `--debug-http`.
+
 ---
 
 ## 1. Hardware Analysis (`scan`)

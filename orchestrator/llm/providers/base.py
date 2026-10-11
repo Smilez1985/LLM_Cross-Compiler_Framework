@@ -4,13 +4,14 @@
 import copy
 import json
 import re
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Optional, Tuple, Type, Union
 
 from pydantic import BaseModel, ValidationError
 
 from orchestrator.llm.catalog import ProviderPreset
 from orchestrator.llm.errors import InvalidOutput, Truncated
 from orchestrator.llm.types import ChatRequest, ChatResult, Message, ModelInfo
+from orchestrator.security.redaction import SecretStr, reveal
 
 DEFAULT_MAX_TOKENS = 16000  # non-streaming; room for adaptive thinking plus the answer
 REPAIR_PROMPT = ("Your previous reply did not match the required JSON schema: {errors}\n"
@@ -84,14 +85,20 @@ class ProviderAdapter:
 
     family = ""
 
-    def __init__(self, preset: ProviderPreset, *, base_url: Optional[str] = None, api_key: Optional[str] = None,
-                 http_client: Any = None, timeout: float = 600.0, **options: Any):
+    def __init__(self, preset: ProviderPreset, *, base_url: Optional[str] = None,
+                 api_key: Union[str, SecretStr, None] = None, http_client: Any = None, timeout: float = 600.0,
+                 **options: Any):
         self.preset = preset
         self.base_url = base_url
-        self._api_key = api_key
+        self._key = SecretStr.wrap(api_key)
         self.http_client = http_client
         self.timeout = timeout
         self.options = options
+
+    @property
+    def _api_key(self) -> Optional[str]:
+        """The plain key, only for building the SDK client; the adapter holds it as a SecretStr."""
+        return reveal(self._key)
 
     @property
     def provider(self) -> str:
