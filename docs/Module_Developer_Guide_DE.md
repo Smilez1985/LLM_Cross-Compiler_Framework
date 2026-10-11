@@ -24,6 +24,7 @@ Hardware (oder ihre technischen Daten).
 8. [Ein Target testen](#8-ein-target-testen)
 9. [Ein Target teilen](#9-ein-target-teilen)
 10. [Altlasten](#10-altlasten)
+11. [Die Datei der Hardware-Probe](#11-die-datei-der-hardware-probe)
 
 ## 1. Wie das Framework ein Target nutzt
 
@@ -76,21 +77,33 @@ targets/Rockchip/
 
 ### 3.1 Das Board untersuchen
 
-Kopiere `scripts/hardware_probe.sh` auf das Gerät und führe es dort aus (auf Windows-Geräten:
-`scripts/hardware_probe.ps1`):
+Die Probe läuft auf dem Gerät, weil der Build aus ihrem Ergebnis geplant wird. Per SSH:
 
 ```bash
-bash hardware_probe.sh
+llm-cli scan --device 192.0.2.10 --user dietpi
 ```
 
-Es schreibt `target_hardware_config.txt` in den aktuellen Ordner: CPU-Modell, Kerne und Flags, Speicher, Hersteller-
-IDs von GPU und NPU und mehr. Die Datei enthält auch den Hostnamen des Geräts; entferne ihn, bevor du die Datei
-teilst. Fehlt ein Hilfswerkzeug, bietet das Skript an, es zu installieren; mit `NON_INTERACTIVE=true` wird das
-übersprungen.
+Die CLI prüft beim ersten Mal den Hostschlüssel des Geräts (wie das Deployment), schickt `hardware_probe.py` an
+`python3 -I`, wenn das Gerät Python 3.8 oder neuer hat, sonst `hardware_probe.sh`, schreibt
+`target_hardware_config.txt` und behält das Profil unter der ID des Geräts
+([Abschnitt 11.5](#115-wo-profile-liegen)). Auf dem Gerät wird nichts installiert. Ohne SSH kopierst du eine Probe auf
+das Gerät, führst sie dort aus und bringst die Datei zurück:
 
-Im Build-Reiter der GUI führt **Scan / Import... > Remote Scan via SSH...** die Probe per SSH auf einem Gerät aus (mit
-derselben Prüfung beim ersten Kontakt wie das Deployment) und holt das Ergebnis ab. `llm-cli scan` führt die Probe auf
-dem Rechner aus, an dem du arbeitest; das hilft nur, wenn dieser Rechner die Ziel-Hardware ist.
+```bash
+python3 -I hardware_probe.py                                 # Python 3.8 oder neuer
+sh hardware_probe.sh                                         # Linux ohne Python, jede POSIX-Shell
+powershell -ExecutionPolicy Bypass -File hardware_probe.ps1  # Windows ohne Python
+```
+
+Die Datei enthält das Betriebssystem (ID, Version, Familie, Kernel, Init-System), die Architektur, die C-Bibliothek
+und ihre Version, CPU-Modell, Kerne, Cluster und Merkmale, Speicher, SoC, NPU und GPUs; keinen Hostnamen, keine
+Seriennummer und keine MAC-Adresse. Die Probes fragen nichts und installieren nichts; `hardware_probe.sh
+--install-tools` bietet zuerst an, `vulkan-tools` zu installieren, und `hardware_probe.ps1 -Elevate` startet sich mit
+Administratorrechten neu. Das Format beschreibt [Abschnitt 11](#11-die-datei-der-hardware-probe).
+
+Im Build-Reiter der GUI führt **Scan / Import... > Remote Scan via SSH...** die Shell-Probe per SSH auf einem Gerät
+aus (mit derselben Prüfung beim ersten Kontakt) und holt das Ergebnis ab. `llm-cli scan` ohne `--device` untersucht
+den Rechner, an dem du arbeitest.
 
 ### 3.2 Das Gerüst erzeugen
 
@@ -327,7 +340,7 @@ Build-Argumente, die die Engine übergibt:
 
 | Argument | Wert |
 |---|---|
-| `LLAMA_CPP_TAG` | die Einstellung `llama_cpp_version` (Vorgabe `v0.6.0`) |
+| `LLAMA_CPP_TAG` | die Einstellung `llama_cpp_version` (Vorgabe: der Tag des llama.cpp-Pins in `configs/llama_runtime.yml`, `b11429`) |
 | `BUILD_JOBS` | die Einstellung `build_jobs`, nur wenn sie größer als 0 ist; das Self-Healing senkt sie auf 1, wenn einem Compiler der Speicher ausging |
 | `USER_ID`, `GROUP_ID` | die IDs des Host-Benutzers (Linux und macOS, wenn der Host-Benutzer nicht root ist) |
 
@@ -604,3 +617,151 @@ Version 1.x nutzte je Target eine Kette aus vier Skripten (`source_module.sh`, `
 `convert_module.sh`, `target_module.sh`), gesteuert von der Hardware-Probe. Die aktuelle Pipeline ruft nur `build.sh`
 auf; das Rockchip-`build.sh` nutzt diese Skripte nicht, und der Modulgenerator schreibt sie noch. Ihre Entfernung und
 eine überarbeitete Vorlage sind für 3.4.0 geplant.
+
+## 11. Die Datei der Hardware-Probe
+
+Die Probe schreibt `target_hardware_config.txt` auf dem Rechner, der die Programme ausführen wird (ein Board oder ein
+PC). Ein einziger Parser liest sie, `orchestrator/runtime/profile.py`, und die vollständige Liste der Schlüssel mit
+Quelle, Normalisierung und Prüfung jedes Schlüssels ist
+[`configs/hardware_probe_schema.yml`](../configs/hardware_probe_schema.yml). Dieser Abschnitt richtet sich an alle,
+die eine Probe schreiben, ein Profil lesen oder eines von einem Rechner ohne Netz mitbringen.
+
+Drei Probes schreiben sie mit denselben Schlüsseln und Regeln: `scripts/hardware_probe.py` (der Hauptweg; nur
+Standardbibliothek, Python 3.8 oder neuer) und die Ersatzwege `scripts/hardware_probe.sh` (jede POSIX-Shell unter
+Linux) und `scripts/hardware_probe.ps1` (Windows). Jede trägt eine Kopie der Prüfungen und Tabellen des Schemas, und
+`tests/test_hardware_probe.py` vergleicht die Kopien mit dem Schema und führt die `.py` und die `.sh` auf denselben
+Testrechnern aus. Dateien der älteren Skripte (Schema 1) werden umgewandelt
+([Abschnitt 11.3](#113-wie-das-framework-ein-profil-prüft)).
+
+### 11.1 Format (Schema 2)
+
+- UTF-8 (eine Byte-Order-Mark wird akzeptiert), LF-Zeilenenden (CRLF wird akzeptiert); Zeilen, die mit `#` beginnen,
+  sind Kommentare.
+- Die erste Zeile, die kein Kommentar ist, lautet `PROBE_SCHEMA=2`.
+- Ein `KEY=VALUE` je Zeile. Schlüssel sind großgeschrieben (`A-Z`, Ziffern, `_`) und kommen höchstens einmal vor.
+- Werte stehen in einer Zeile, ohne Anführungszeichen, mit höchstens 4096 Zeichen; Listen sind durch Kommas ohne
+  Leerzeichen getrennt.
+- Jeder `ON`/`OFF`-Schlüssel wird immer geschrieben: `ON`, `OFF` oder `UNKNOWN`. `UNKNOWN` heißt „diese Methode kann
+  es nicht feststellen“ (etwa AVX-VNNI unter Windows); es wird nie aus einem Modellnamen geraten.
+- Jede andere Angabe, die die Probe nicht ermitteln kann, wird weggelassen, nie leer geschrieben, und ein Code kommt
+  in `PROBE_WARNINGS` (etwa `not_determined:LIBC_VERSION` oder `needs_root:RKNPU_DRIVER_VERSION`).
+- Schlüssel je GPU sind nummeriert: `GPU0_VENDOR`, `GPU1_VENDOR`, ... unterhalb von `GPU_COUNT`.
+- Die JSON-Ansicht hat dieselben Schlüssel mit denselben Zeichenketten als Werten, `PROBE_SCHEMA` eingeschlossen.
+
+Beispiel: ein RK3566-Board mit DietPi, gekürzt (die vollständige Datei ist
+`tests/fixtures/hardware_probe/schema2_rk3566_dietpi.txt`):
+
+```text
+PROBE_SCHEMA=2
+PROBE_TOOL=sh
+PROBE_TOOL_VERSION=3.0.0
+GENERATED_AT=2026-10-11T08:15:00Z
+OS=linux
+OS_ID=debian
+OS_FAMILY=debian
+OS_VARIANT_ID=dietpi
+OS_VERSION_ID=12
+KERNEL=6.1.99-vendor-rk35xx
+ARCH=arm64
+LIBC=glibc
+LIBC_VERSION=2.36
+INIT_SYSTEM=systemd
+CPU_MODEL=Cortex-A55
+CPU_CLUSTERS=0-3:0x41:0xd05:1800
+SUPPORTS_AVX2=OFF
+SUPPORTS_NEON=ON
+SUPPORTS_DOTPROD=ON
+SUPPORTS_FP16_ARITH=ON
+SUPPORTS_I8MM=OFF
+RAM_TOTAL_MB=3912
+SOC_VENDOR=rockchip
+SOC_MODEL=rk3566
+NPU_DEVICE=/dev/rknpu
+SUPPORTS_RKNN=ON
+GPU_COUNT=1
+GPU0_VENDOR=arm
+GPU0_DISCRETE=OFF
+GPU0_UNIFIED=ON
+PROBE_WARNINGS=needs_root:RKNPU_DRIVER_VERSION
+```
+
+### 11.2 Schlüssel
+
+| Gruppe | Schlüssel |
+|---|---|
+| Meta | `PROBE_SCHEMA`, `PROBE_TOOL` (`python`, `sh`, `ps1`), `PROBE_TOOL_VERSION`, `GENERATED_AT` (UTC), `PROBE_WARNINGS` |
+| Betriebssystem | `OS` (`linux`, `windows`, `macos`, `freebsd`, `android`), `OS_ID`, `OS_ID_LIKE`, `OS_FAMILY` (`debian`, `rhel`, `alpine`, ...), `OS_VARIANT_ID` (`dietpi`, `armbian`, ...), `OS_VERSION_ID`, `OS_VERSION_CODENAME`, `OS_PRETTY_NAME`, `KERNEL`, `KERNEL_ARCH`, `INIT_SYSTEM` (`systemd`, `openrc`, `sysvinit`, ...) |
+| Binärkompatibilität | `ARCH` (`x86_64`, `arm64`, `armv7`, ...; die Architektur des Userlands, ein 32-Bit-System auf einem 64-Bit-Kernel ist also `armv7`), `LIBC` (`glibc`, `musl`, `ucrt`, ...), `LIBC_VERSION` |
+| CPU | `CPU_MODEL`, `CPU_VENDOR`, `CPU_CORES_LOGICAL`, `CPU_CORES_PHYSICAL`, `CPU_CLUSTERS` (nur ARM: CPUs, Implementer, Part und höchste MHz je Cluster), `CPU_FLAGS_ALL`, `CPU_FLAGS_SOURCE` |
+| x86-Merkmale | die 14 x86-Optionen von ggml: `SUPPORTS_SSE42`, `SUPPORTS_AVX`, `SUPPORTS_AVX2`, `SUPPORTS_BMI2`, `SUPPORTS_F16C`, `SUPPORTS_FMA`, `SUPPORTS_AVX512` (AVX-512 F), `SUPPORTS_AVX512_VBMI`, `SUPPORTS_AVX512_VNNI`, `SUPPORTS_AVX512_BF16`, `SUPPORTS_AVX_VNNI`, `SUPPORTS_AMX_TILE`, `SUPPORTS_AMX_INT8`, `SUPPORTS_AMX_BF16` |
+| ARM-Merkmale | `SUPPORTS_NEON`, `SUPPORTS_DOTPROD`, `SUPPORTS_FP16_ARITH`, `SUPPORTS_I8MM`, `SUPPORTS_SVE`, `SUPPORTS_SVE2`, `SUPPORTS_SME`, `SUPPORTS_BF16_ARM` |
+| Speicher, Platte | `RAM_TOTAL_MB` (nutzbarer Speicher, nie die Summe der Speicherplätze), `SWAP_TOTAL_MB`, `RAM_AVAILABLE_MB`, `DISK_FREE_MB`, `RAM_TYPE`, `RAM_SPEED_MTS` |
+| SoC, NPU | `SOC_VENDOR`, `SOC_MODEL` (`rk3566`, ...), `BOARD_MODEL`, `NPU_VENDOR`, `NPU_MODEL`, `NPU_DEVICE`, `RKNPU_DRIVER_VERSION`, `RKLLM_RUNTIME_VERSION`, `RKNN_RUNTIME_VERSION`, `USB_ROCKCHIP_PID`, `USB_ROCKCHIP_MODE` (ein per USB angeschlossenes Board), `SUPPORTS_RKNN`, `SUPPORTS_HAILO`, `SUPPORTS_METIS`, `SUPPORTS_MX3`, `SUPPORTS_CORAL`, `SUPPORTS_INTEL_NPU` |
+| GPU | `GPU_COUNT`; je GPU `_VENDOR`, `_NAME`, `_PCI_ID`, `_DISCRETE`, `_UNIFIED`, `_VRAM_MB`, `_VRAM_FREE_MB`, `_DRIVER_VERSION`, `_COMPUTE_CAP` (NVIDIA), `_GFX_TARGET` (AMD), `_SOURCE`; `NVIDIA_DRIVER_CUDA_MAX`, `SUPPORTS_CUDA`, `SUPPORTS_INTEL_XPU`, `VULKAN`, `VULKAN_DEVICES`, `HIP_RUNTIME`, `ROCM_VERSION`, `METAL` |
+| Werkzeuge | `TOOL_CC`, `TOOL_CXX` (`gcc-12.2.0`, `clang-18.1.3`), `TOOL_CLANG`, `TOOL_MSVC`, `TOOL_CMAKE`, `TOOL_NINJA`, `TOOL_MAKE`, `TOOL_GIT`, `TOOL_CCACHE`, `TOOL_NVCC`, `TOOL_GLSLC`, `TOOL_HIPCONFIG`, `TOOL_DOCKER`, `TOOL_PYTHON`: nur Versionen, nie Pfade |
+
+Nicht in einem Profil: der Hostname, Serien- oder Teilenummern (auch nicht die RAM-Teilenummern je Steckplatz der
+heutigen Windows-Probe), Netz- oder Cloud-Daten. Abgeleitete Werte wie CMake-Optionen stehen auch nicht in der Probe:
+Das Framework berechnet sie aus dem Profil, sodass ein Profil von einem Rechner ohne Netz gültig bleibt.
+
+### 11.3 Wie das Framework ein Profil prüft
+
+Profile kommen von Geräten oder werden von Hand mitgebracht, darum behandelt der Parser sie als nicht
+vertrauenswürdig:
+
+- Eine Datei in Schema 2 wird als Ganzes abgelehnt, wenn ein Schlüssel doppelt vorkommt, ein Wert leer ist, länger als
+  4096 Zeichen ist, ein Steuerzeichen enthält oder nicht zur Prüfung des Schlüssels passt (eine feste Liste, ein
+  Zahlenbereich oder ein Muster), oder wenn ein Pflichtschlüssel oder ein `ON`/`OFF`-Schlüssel fehlt.
+- Werte müssen zusammenpassen: Ein x86-Merkmal kann auf `arm64` nicht `ON` sein (ein ARM-Merkmal nicht auf `x86_64`),
+  `CPU_CLUSTERS` gibt es nur auf ARM, `GPU<n>_COMPUTE_CAP` nur bei NVIDIA- und `GPU<n>_GFX_TARGET` nur bei AMD-GPUs,
+  `LIBC=ucrt` nur unter Windows, `METAL=ON` nur unter macOS.
+- `NPU_DEVICE` nennt nur einen Beschleuniger-Knoten (`/dev/rknpu`, `/dev/dri/renderD<N>` oder `/dev/dri/card<N>`,
+  `/dev/accel/accel<N>`, `/dev/hailo<N>`, `/dev/apex_<N>`), nie eine Platte, den Speicher oder ein anderes Gerät,
+  weil ein Deploy-Schritt den Wert an `docker run --device` übergeben kann.
+- Ein Schlüssel, den das Schema nicht kennt, wird verworfen; sein Wert wird nie behalten.
+- Freier Text (`CPU_MODEL`, GPU-Namen, `BOARD_MODEL`) dient nur der Anzeige und erreicht nie eine Befehlszeile oder
+  einen Dateinamen.
+
+Dateien in **Schema 1** (die Ausgabe von `hardware_probe.sh` 2.4 und `.ps1` 2.5, die das Framework bis einschließlich
+Release 3.0.0 mitbrachte, ohne `PROBE_SCHEMA`-Zeile) werden weiter gelesen:
+
+- Die bekannten Schlüssel werden umgewandelt: `CPU_ARCH_TYPE` zu `ARCH`, `TRUE`/`FALSE` zu `ON`/`OFF`, `RAM_SWAP_MB`
+  zu `SWAP_TOTAL_MB`, die erste GPU zu `GPU0_*`, `DOCKER_VERSION` zu `TOOL_DOCKER`. Die CPU-Merkmale einer `.sh`-Datei
+  werden aus ihrer Flag-Liste abgeleitet, nicht aus ihren eigenen `SUPPORTS_*`-Zeilen übernommen; ohne Flag-Liste
+  sind sie `UNKNOWN`.
+- Jedes CPU-Merkmal einer `.ps1`-Datei wird `UNKNOWN`, weil dieses Skript Windows mit falschen Konstanten fragte. Ihr
+  `RAM_TOTAL_MB` (die Summe der Speicherplätze) wird verworfen.
+- Der Hostname, die RAM-Teilenummern und jeder andere Schlüssel ohne Bedeutung in Schema 2 werden verworfen, ohne den
+  Wert zu behalten. Ein Schlüssel, der zweimal mit verschiedenen Werten vorkommt, wird verworfen, ebenso ein Wert, der
+  die Prüfung nicht besteht.
+- `ON`/`OFF`-Schlüssel, die die Datei nicht hat, werden `UNKNOWN` (`OFF`, wo es sie nicht geben kann, etwa NEON auf
+  x86).
+
+Das Ergebnis trägt `PROBE_CONVERTED_FROM=1` und die Warnungen `converted_from_schema_1` und `reprobe_before_build`:
+Führe die Probe vor einem Build erneut aus.
+
+### 11.4 Der Leistungsschlüssel
+
+`HardwareProfile.perf_key()` ist ein sha256 über die Werte, die Geschwindigkeit oder Programm ändern: `OS`, `ARCH`,
+`LIBC`, `CPU_VENDOR`, `CPU_MODEL`, `CPU_CLUSTERS`, jeder `SUPPORTS_*`-Schlüssel, `SOC_MODEL`, `NPU_MODEL` und je GPU
+Hersteller, PCI-ID, Compute Capability und gfx-Target. Er ist derselbe, egal welche Probe die Datei geschrieben hat und
+in welcher Reihenfolge die GPUs stehen. Er ändert sich nicht mit flüchtigen Werten (freier RAM, freier VRAM, freier
+Plattenplatz), dem Zeitpunkt der Probe, dem Kernel, Werkzeugversionen oder den Werten, die nur mit einem Benchmark
+festgehalten werden (Betriebssystemversion, Version der C-Bibliothek, gesamter RAM, VRAM-Größe, Treiberversionen);
+`recorded()` liefert diese.
+
+### 11.5 Wo Profile liegen
+
+`ProfileStore` hält Profile im Benutzerordner (`~/.llm-framework` oder `LLM_FRAMEWORK_HOME`):
+
+- `hardware/local.txt` für diesen Rechner;
+- `hardware/devices/<Geräte-ID>.txt` für andere Rechner, daneben `<Geräte-ID>.json` für die Bezeichnung und die
+  SSH-Adresse.
+
+Eine Geräte-ID sind die ersten 16 Hex-Zeichen des sha256 über den Fingerabdruck des SSH-Hostschlüssels des Geräts:
+Sie bleibt gleich, wenn sich die IP-Adresse ändert, und enthält keinen Hostnamen. Ein Profil, das ohne SSH importiert
+wird, bekommt eine zufällige ID. Die Dateien gehören nur dem Benutzer (Modus 0600 in Ordnern mit Modus 0700),
+flüchtige Werte werden nicht gespeichert, und gespeicherte Dateien werden beim Zurücklesen wie Probe-Dateien geprüft.
+`llm-cli scan` speichert das Profil dieses Rechners als `local`, und `llm-cli scan --device` speichert das Profil
+eines Geräts unter seiner ID. Die Scans des Build-Reiters der GUI nutzen den Speicher noch nicht; sie schreiben die
+Probe-Datei wie in [Abschnitt 3.1](#31-das-board-untersuchen) beschrieben.

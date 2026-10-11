@@ -171,6 +171,36 @@ Die Fälle stehen in `evals/ditto/cases.yml` und werden nach Regeln bewertet; ge
 berechnen jede Anfrage (etwa 20 je Lauf und Wiederholung). Neue Fälle sind Daten: Ergänze sie in der Falldatei,
 nicht im Code.
 
+### Den llama.cpp-Pin anheben
+
+Jedes selbst gebaute llama.cpp stammt aus einem Commit: `llama_cpp.source` in `configs/llama_runtime.yml` (wo er
+steht und was aus ihm folgt: [SSOT_ARCHITECTURE_DE.md](configs/SSOT_ARCHITECTURE_DE.md#llama_runtimeyml)). Ein
+Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läuft so:
+
+1. Den Commit des neuen Upstream-Tags nachschlagen: `python scripts/llama_cpp_pin.py show b<N>`.
+2. In `configs/llama_runtime.yml` `llama_cpp.source.commit`, `.tag` und `.build_number` ändern, dazu
+   `llama_cpp.build` (dieselbe Bezeichnung). Die offiziellen vorgebauten Archive dieses Releases tragen die
+   Bezeichnung aus `build`: Ihre Namen, Größen und SHA256-Werte neu festlegen, wie es der Kommentar am Anfang der
+   Datei beschreibt.
+3. Die Stellen ändern, die den Katalog nicht lesen können: das `ARG LLAMA_CPP_TAG` in `targets/Rockchip/dockerfile`,
+   `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml` und `inference_backends.llama_cpp.commit` in
+   `configs/project_sources.yml` (danach `python ../scripts/sync_ssot.py --write` in `configs/`). Die Einstellung
+   `llama_cpp_version` folgt dem Katalog von selbst.
+4. Prüfen, dass der Commit von Upstream stammt: `python scripts/llama_cpp_pin.py check`. Es ruft
+   `git ls-remote https://github.com/ggml-org/llama.cpp.git refs/tags/b<N>` auf, das genau den neuen Commit ausgeben
+   muss (GitHub liefert Commits, die in irgendeinen Fork gepusht wurden, auch über die Upstream-URL aus, der Commit
+   allein beweist also nicht seine Herkunft), und listet jede Stelle auf, die die Version nennt: abgeleitete und
+   Referenz-Stellen müssen übereinstimmen, die Legacy-Vorgaben in `modules/source_module.sh` werden nur gemeldet.
+5. Die Optionen, die etwas herunterladen können, gegen den neuen Baum prüfen. `DOWNLOAD_OPTIONS_OFF` und `NEVER_SET`
+   in `orchestrator/runtime/build/recipe.py` nennen jede Option mit Datei und Zeilen; den neuen Baum nach
+   `FetchContent_Declare`, `ExternalProject_Add` und `file(DOWNLOAD` durchsuchen und jede neue ergänzen. Ebenso die
+   Regeln für CUDA-Architekturen (`ggml/src/ggml-cuda/CMakeLists.txt`) und welche Ziele `tools/CMakeLists.txt` baut.
+6. Die Golden-Pläne neu erzeugen und den Unterschied durchsehen:
+   `LLM_FRAMEWORK_UPDATE_GOLDEN=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_build_recipe.py`. Ohne
+   Änderung am Rezept ändern sich nur der Commit, die Build-Nummer und die Build-IDs.
+7. Die ganze Testsuite ausführen, einen Changelog-Eintrag in beiden Sprachen ergänzen und erst mergen, wenn alle
+   Prüfungen grün sind.
+
 ---
 
 ## 5. Lint- und Sicherheitsprüfungen
@@ -354,8 +384,9 @@ Schlüssel, behandle ihn trotzdem als offengelegt und folge [Abschnitt 12](#12-w
 
 Der vollständige Leitfaden ist der [Leitfaden für Modulentwickler](docs/Module_Developer_Guide_DE.md). Kurz:
 
-1. **Das Board untersuchen:** Führe `scripts/hardware_probe.sh` auf dem Gerät aus; es schreibt
-   `target_hardware_config.txt`.
+1. **Das Board untersuchen:** `llm-cli scan --device <Adresse> --user <Benutzer>` führt die Probe per SSH auf dem
+   Gerät aus (oder du führst `scripts/hardware_probe.py` oder `scripts/hardware_probe.sh` von Hand auf dem Gerät aus);
+   sie schreibt `target_hardware_config.txt`.
 2. **Das Target anlegen:** in der GUI unter **Tools > Create Hardware Module...**, mit `llm-cli module create` oder
    mit Ditto: `llm-cli module generate-ai target_hardware_config.txt`. Der Generator prüft Namen, Images, Pakete,
    Flags und Shell-Code, schreibt nur unterhalb von `targets/` und überschreibt nie ein bestehendes Target, und der

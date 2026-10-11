@@ -25,6 +25,20 @@ schema_version: 1
 llama_cpp:
   build: b11429
   version: "0.6.0"
+  # The one llama.cpp pin. Every self-built llama.cpp (Ditto's server, the conversion tools, device runtimes; the
+  # recipe in orchestrator/runtime/build/) is built from exactly this commit: a tag can be moved, a commit cannot,
+  # so the source is checked out by commit and `git rev-parse HEAD` must give it back. The tag (always the same as
+  # `build`) is the label: the pin-bump check compares `git ls-remote <repo> refs/tags/<tag>` with the commit, and
+  # the target images clone this tag until they verify the commit themselves (setting llama_cpp_version, the ARG
+  # LLAMA_CPP_TAG of targets/Rockchip/dockerfile; tests/test_build_recipe.py checks every place against this one).
+  # Checked with git ls-remote on 2026-10-11: refs/tags/b11429 = refs/tags/v0.6.0^{} = the commit below.
+  source:
+    repo: https://github.com/ggml-org/llama.cpp.git
+    commit: d81235049384534c167caea52b85a694f6103d14
+    tag: b11429
+    build_number: 11429
+  # The official prebuilt archives below are what `llm-cli ditto runtime install` downloads until the self-built
+  # runtime replaces it; afterwards they are only used on explicit request, labelled "not self-built" (decision D1).
   base_url: https://github.com/ggml-org/llama.cpp/releases/download/b11429/
   # Server options that exist in this build (checked in tools/server and common/arg.cpp at the tag).
   features:
@@ -175,6 +189,66 @@ llama_cpp:
       backend: cpu
       files:
         - {name: llama-b11429-bin-macos-x64.tar.gz, size: 11487431, sha256: 29ac3ea02be6bd143e824973f2cc5fa74bc4094393a9eaab0ff6814f19dd8522}
+
+# CUDA toolkits for self-built CUDA builds (decision D6): NVIDIA's redist archives, pinned through the
+# redistrib_<version>.json manifest of each release (its size and sha256 below; the manifest in turn gives the
+# sha256 of every component archive). A toolkit fits a machine when all four constraints hold
+# (orchestrator/runtime/build/recipe.py, cuda_toolkit_problems): it is not newer than the CUDA version the driver
+# supports (NVIDIA_DRIVER_CUDA_MAX of the probe, the clamp of D6), every NVIDIA GPU's compute capability lies within
+# compute_caps, the host compiler's major version lies within host_compilers, and CMake is at least cmake_min.
+# Sources (checked 2026-10-11): the manifests under redist_base_url (size and sha256 of the downloaded file); the
+# host compiler tables of NVIDIA's installation guides for Linux and Windows of each release
+# (docs.nvidia.com/cuda/archive/<version>/, 13.4 from the current guide); compute capabilities from the CUDA
+# release notes (13.x dropped compute capability below 7.5). Not verified by a build here.
+cuda:
+  redist_base_url: https://developer.download.nvidia.com/compute/cuda/redist/
+  cmake_min: "3.18"          # ggml/src/ggml-cuda/CMakeLists.txt (CMAKE_CUDA_ARCHITECTURES)
+  toolkits:
+    - version: "13.4.2"
+      manifest: {name: redistrib_13.4.2.json, size: 52032, sha256: a6a1dbdfbecb190a55712da723c2a69b4fb55a37cc2da2a5dd65f614c6384a51}
+      components: [cuda_nvcc, cuda_crt, libnvvm, cuda_cudart, cccl, libcublas]
+      platforms: [linux-x86_64, linux-sbsa, windows-x86_64, windows-arm64]
+      compute_caps: {min: "7.5", max: "12.1"}
+      host_compilers: {gcc: ["6", "16"], clang: ["7", "22"], msvc: ["19.20", "19.59"]}
+    - version: "13.0.2"
+      manifest: {name: redistrib_13.0.2.json, size: 47788, sha256: fce66717a81c510ffeb89ecc3e79849ab34af3b80139f750876d9033e31d71c2}
+      components: [cuda_nvcc, cuda_crt, libnvvm, cuda_cudart, cuda_cccl, libcublas]
+      platforms: [linux-x86_64, linux-sbsa, windows-x86_64]
+      compute_caps: {min: "7.5", max: "12.1"}
+      host_compilers: {gcc: ["6", "15"], clang: ["7", "20"], msvc: ["19.20", "19.49"]}
+    - version: "12.9.1"
+      manifest: {name: redistrib_12.9.1.json, size: 54256, sha256: 8335301010b0023ee1ff61eb11e2600ca62002d76780de4089011ad77e0c7630}
+      components: [cuda_nvcc, cuda_cudart, cuda_cccl, libcublas]
+      platforms: [linux-x86_64, linux-sbsa, windows-x86_64]
+      compute_caps: {min: "5.0", max: "12.1"}
+      host_compilers: {gcc: ["6", "14"], clang: ["7", "19"], msvc: ["19.20", "19.49"]}
+    - version: "12.8.1"
+      manifest: {name: redistrib_12.8.1.json, size: 50197, sha256: 249e28a83008d711d5f72880541c8be6253f6d61608461de4fcb715554a6cf17}
+      components: [cuda_nvcc, cuda_cudart, cuda_cccl, libcublas]
+      platforms: [linux-x86_64, linux-sbsa, windows-x86_64]
+      compute_caps: {min: "5.0", max: "12.0"}
+      host_compilers: {gcc: ["6", "14"], clang: ["7", "19"], msvc: ["19.20", "19.49"]}
+  # NVIDIA's prebuilt development images: only on explicit request (D6), never chosen automatically, and shown as a
+  # prebuilt toolchain image rather than a toolkit provisioned from the manifest. Pinned by the digest of the
+  # manifest list on Docker Hub (2026-10-11).
+  prebuilt_images:
+    - {id: cuda-13.4.2-devel-ubuntu24.04, cuda: "13.4.2", opt_in: true, image: "nvidia/cuda:13.4.2-devel-ubuntu24.04@sha256:7005688f5eaa5a9aaa9e555f546107c4454446a543347fd48b0bdb63ea027ad2"}
+    - {id: cuda-13.0.2-devel-ubuntu24.04, cuda: "13.0.2", opt_in: true, image: "nvidia/cuda:13.0.2-devel-ubuntu24.04@sha256:5dc1bca23d05bd37b011be68ec470c03b403a5da07ec3a86e41af9470e9d0cc6"}
+    - {id: cuda-12.9.1-devel-ubuntu22.04, cuda: "12.9.1", opt_in: true, image: "nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8"}
+
+# Builder container bases for container and cross builds of llama.cpp. The base follows the C library of the
+# machine that runs the binaries (decision 8): for glibc the newest base whose glibc is not newer than that machine's
+# LIBC_VERSION (a binary needs the same or a newer glibc to start), for musl the Alpine base if its musl is not newer
+# either; a profile without LIBC_VERSION gets no container or cross build. Compilers, CMake and
+# the cross compilers come from the base's own signed package archive. gcc is the release's default compiler. Image
+# digests: the manifest lists on Docker Hub, checked 2026-10-11.
+build_bases:
+  - {id: debian-11, libc: glibc, libc_version: "2.31", gcc: "10.2", image: "debian:11-slim@sha256:e5b6442dd2e9684cf5e87d8338b5968f3b348636fc0be6d7850a381e3731a2bd"}
+  - {id: ubuntu-22.04, libc: glibc, libc_version: "2.35", gcc: "11.4", image: "ubuntu:22.04@sha256:5ec03bb3441e8b0bf3b4f9cd4629a1ae763010dc3035bb8da3ae6cf026486401"}
+  - {id: debian-12, libc: glibc, libc_version: "2.36", gcc: "12.2", image: "debian:12-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587"}
+  - {id: ubuntu-24.04, libc: glibc, libc_version: "2.39", gcc: "13.3", image: "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55"}
+  - {id: debian-13, libc: glibc, libc_version: "2.41", gcc: "14.2", image: "debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"}
+  - {id: alpine-3.22, libc: musl, libc_version: "1.2.5", gcc: "14.2", image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"}
 
 # Models are downloaded from <model_base_url><repo>/resolve/<revision>/<file> (resumable, verified).
 model_base_url: https://huggingface.co/

@@ -40,6 +40,7 @@ from orchestrator import __version__
 from orchestrator.Core import build_records
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
+from orchestrator.utils.llama_pin import pinned_tag
 
 # Files a build may produce that are models (data to install), never programs to execute.
 MODEL_FILE_SUFFIXES = (".gguf", ".rkllm", ".rknn", ".onnx", ".safetensors", ".bin")
@@ -727,7 +728,11 @@ class BuildEngine:
         progress.add_log(f"Building Docker Image: {tag}")
         
         try:
-            buildargs = {"LLAMA_CPP_TAG": str(self._get_conf("llama_cpp_version", "v0.6.0"))}
+            llama_tag = str(self._get_conf("llama_cpp_version", "") or pinned_tag())
+            if not llama_tag:
+                raise RuntimeError("No llama.cpp tag: llama_cpp.source in configs/llama_runtime.yml is missing or "
+                                   "broken, and the setting llama_cpp_version is empty")
+            buildargs = {"LLAMA_CPP_TAG": llama_tag}
             build_jobs = int(self._get_conf("build_jobs", 0) or 0)
             if build_jobs > 0:
                 buildargs["BUILD_JOBS"] = str(build_jobs)  # lowered by self-healing after an OOM

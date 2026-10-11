@@ -1,0 +1,89 @@
+{
+  "backend": "cpu",
+  "build_id": "4928bc536941e2dc1a52513e938728a0ff3c3577de4a38b84a20fc69c0e33c46",
+  "builder": {
+    "host": "another Windows PC",
+    "kind": "native"
+  },
+  "notes": [
+    "CPU features the probe could not tell: all CPU variants are built and the best one is chosen at run time"
+  ],
+  "placement": "cross",
+  "purpose": "device-runtime",
+  "recipe_version": 1,
+  "source": {
+    "build_number": 11429,
+    "commit": "d81235049384534c167caea52b85a694f6103d14",
+    "repo": "https://github.com/ggml-org/llama.cpp.git",
+    "tag": "b11429"
+  },
+  "steps": [
+    {
+      "compiler": "clang",
+      "generator": "Ninja",
+      "name": "main",
+      "options": {
+        "BUILD_SHARED_LIBS": "ON",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "clang",
+        "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "GGML_BACKEND_DL": "ON",
+        "GGML_CCACHE": "OFF",
+        "GGML_CPU_ALL_VARIANTS": "ON",
+        "GGML_CPU_KLEIDIAI": "OFF",
+        "GGML_CUDA": "OFF",
+        "GGML_HIP": "OFF",
+        "GGML_METAL": "OFF",
+        "GGML_NATIVE": "OFF",
+        "GGML_OPENMP": "OFF",
+        "GGML_OPENMP_FETCH": "OFF",
+        "GGML_VULKAN": "OFF",
+        "LLAMA_BUILD_APP": "OFF",
+        "LLAMA_BUILD_COMMIT": "d8123504",
+        "LLAMA_BUILD_COMMON": "ON",
+        "LLAMA_BUILD_EXAMPLES": "OFF",
+        "LLAMA_BUILD_NUMBER": "11429",
+        "LLAMA_BUILD_SERVER": "ON",
+        "LLAMA_BUILD_TESTS": "OFF",
+        "LLAMA_BUILD_TOOLS": "ON",
+        "LLAMA_BUILD_UI": "OFF",
+        "LLAMA_LLGUIDANCE": "OFF",
+        "LLAMA_OPENSSL": "OFF",
+        "LLAMA_SUBPROCESS": "OFF",
+        "LLAMA_USE_PREBUILT_UI": "OFF"
+      },
+      "targets": [
+        "llama-server",
+        "llama-cli",
+        "llama-bench",
+        "llama-perplexity"
+      ],
+      "toolchain_file": null
+    }
+  ],
+  "target": {
+    "arch": "x86_64",
+    "libc": "ucrt",
+    "libc_version": null,
+    "os": "windows",
+    "triple": null
+  },
+  "toolchain": {
+    "cmake": "3.31.6",
+    "compiler": "clang-19.1.5"
+  },
+  "verify": {
+    "binaries": [
+      "llama-server",
+      "llama-cli",
+      "llama-bench",
+      "llama-perplexity"
+    ],
+    "devices": [],
+    "version": {
+      "build_number": 11429,
+      "commit": "d8123504"
+    }
+  }
+}

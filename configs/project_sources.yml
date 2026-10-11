@@ -71,7 +71,7 @@ build_tools:
 inference_backends:
   llama_cpp:
     repo_url: "https://github.com/ggml-org/llama.cpp"
-    commit: "b4009"
+    commit: "b11429"            # the llama.cpp pin of llama_runtime.yml (llama_cpp.source.tag)
     docs_workflow: "https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md"
     docs_quantization: "https://github.com/ggml-org/llama.cpp/blob/master/examples/quantize/README.md"
     docs_backends: "https://github.com/ggml-org/llama.cpp/blob/master/docs/backend.md"

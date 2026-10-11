@@ -1,0 +1,109 @@
+{
+  "backend": "vulkan",
+  "build_id": "3319397f619ee99c61ba2794f3a8fcb686aa74d62fd0451ac752b8782c62c1b8",
+  "builder": {
+    "kind": "native"
+  },
+  "notes": [
+    "backend vulkan: a GPU on which the Vulkan build beats the CPU",
+    "what -march/-mcpu=native expands to is recorded by the executor"
+  ],
+  "placement": "native",
+  "purpose": "host-runtime",
+  "recipe_version": 1,
+  "source": {
+    "build_number": 11429,
+    "commit": "d81235049384534c167caea52b85a694f6103d14",
+    "repo": "https://github.com/ggml-org/llama.cpp.git",
+    "tag": "b11429"
+  },
+  "steps": [
+    {
+      "compiler": "gcc",
+      "generator": "Ninja",
+      "name": "main",
+      "options": {
+        "BUILD_SHARED_LIBS": "OFF",
+        "CMAKE_BUILD_TYPE": "Release",
+        "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "GGML_CCACHE": "OFF",
+        "GGML_CPU_KLEIDIAI": "OFF",
+        "GGML_CUDA": "OFF",
+        "GGML_HIP": "OFF",
+        "GGML_METAL": "OFF",
+        "GGML_NATIVE": "ON",
+        "GGML_OPENMP": "ON",
+        "GGML_OPENMP_FETCH": "OFF",
+        "GGML_VULKAN": "ON",
+        "LLAMA_BUILD_APP": "OFF",
+        "LLAMA_BUILD_COMMIT": "d8123504",
+        "LLAMA_BUILD_COMMON": "ON",
+        "LLAMA_BUILD_EXAMPLES": "OFF",
+        "LLAMA_BUILD_NUMBER": "11429",
+        "LLAMA_BUILD_SERVER": "ON",
+        "LLAMA_BUILD_TESTS": "OFF",
+        "LLAMA_BUILD_TOOLS": "ON",
+        "LLAMA_BUILD_UI": "OFF",
+        "LLAMA_LLGUIDANCE": "OFF",
+        "LLAMA_OPENSSL": "OFF",
+        "LLAMA_SUBPROCESS": "OFF",
+        "LLAMA_USE_PREBUILT_UI": "OFF"
+      },
+      "targets": [
+        "llama-server",
+        "llama-cli",
+        "llama-bench",
+        "llama-perplexity"
+      ],
+      "toolchain_file": null
+    }
+  ],
+  "target": {
+    "arch": "x86_64",
+    "libc": "glibc",
+    "libc_version": "2.41",
+    "os": "linux",
+    "triple": null
+  },
+  "toolchain": {
+    "cmake": "3.31.6",
+    "compiler": "gcc-15.2.1",
+    "glslc": "2025.3",
+    "native": {
+      "ARCH": "x86_64",
+      "CPU_MODEL": "AMD Ryzen Z1 Extreme",
+      "CPU_VENDOR": "amd",
+      "features": {
+        "SUPPORTS_AMX_BF16": "OFF",
+        "SUPPORTS_AMX_INT8": "OFF",
+        "SUPPORTS_AMX_TILE": "OFF",
+        "SUPPORTS_AVX": "ON",
+        "SUPPORTS_AVX2": "ON",
+        "SUPPORTS_AVX512": "ON",
+        "SUPPORTS_AVX512_BF16": "ON",
+        "SUPPORTS_AVX512_VBMI": "ON",
+        "SUPPORTS_AVX512_VNNI": "ON",
+        "SUPPORTS_AVX_VNNI": "OFF",
+        "SUPPORTS_BMI2": "ON",
+        "SUPPORTS_F16C": "ON",
+        "SUPPORTS_FMA": "ON",
+        "SUPPORTS_SSE42": "ON"
+      }
+    }
+  },
+  "verify": {
+    "binaries": [
+      "llama-server",
+      "llama-cli",
+      "llama-bench",
+      "llama-perplexity"
+    ],
+    "devices": [
+      "Vulkan0"
+    ],
+    "version": {
+      "build_number": 11429,
+      "commit": "d8123504"
+    }
+  }
+}

@@ -166,6 +166,34 @@ llm-cli ditto eval --provider ollama --model qwen3.5:4b --kind chat
 Cases live in `evals/ditto/cases.yml` and are graded by rules; nothing is built. Cloud providers bill every
 request (about 20 per run and repeat). New cases are data: add them to the cases file, not to the code.
 
+### Bumping the llama.cpp pin
+
+Every self-built llama.cpp comes from one commit: `llama_cpp.source` in `configs/llama_runtime.yml` (where it lives
+and what follows from it: [SSOT_ARCHITECTURE.md](configs/SSOT_ARCHITECTURE.md#llama_runtimeyml)). A commit fixes the
+content; a tag can be moved. A bump goes like this:
+
+1. Look up the commit of the new upstream tag: `python scripts/llama_cpp_pin.py show b<N>`.
+2. In `configs/llama_runtime.yml` change `llama_cpp.source.commit`, `.tag` and `.build_number`, and
+   `llama_cpp.build` (the same label). The official prebuilt archives of that release are labelled by `build`: pin
+   their names, sizes and SHA256 values again, as the comment at the top of the file describes.
+3. Change the places that cannot read the catalog: the `ARG LLAMA_CPP_TAG` of `targets/Rockchip/dockerfile`,
+   `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml`, and `inference_backends.llama_cpp.commit` in
+   `configs/project_sources.yml` (then `python ../scripts/sync_ssot.py --write` inside `configs/`). The setting
+   `llama_cpp_version` follows the catalog by itself.
+4. Check that the commit is upstream's: `python scripts/llama_cpp_pin.py check`. It runs
+   `git ls-remote https://github.com/ggml-org/llama.cpp.git refs/tags/b<N>`, which must print exactly the new commit
+   (GitHub serves commits pushed to any fork through the upstream URL, so the commit alone does not prove its
+   origin), and lists every place that names the version: derived and reference places must agree, the legacy
+   `modules/source_module.sh` defaults are only reported.
+5. Re-check the download-capable options against the new tree. `DOWNLOAD_OPTIONS_OFF` and `NEVER_SET` in
+   `orchestrator/runtime/build/recipe.py` name each option with its file and lines; search the new tree for
+   `FetchContent_Declare`, `ExternalProject_Add` and `file(DOWNLOAD` and add any new one. Check the CUDA architecture
+   rules (`ggml/src/ggml-cuda/CMakeLists.txt`) and which targets `tools/CMakeLists.txt` builds as well.
+6. Regenerate the golden plans and review the diff:
+   `LLM_FRAMEWORK_UPDATE_GOLDEN=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_build_recipe.py`. Without a
+   recipe change only the commit, the build number and the build IDs change.
+7. Run the whole test suite, add a changelog entry in both languages, and merge only when every check is green.
+
 ---
 
 ## 5. Lint and security checks
@@ -343,7 +371,9 @@ and follow [section 12](#12-if-a-secret-leaked).
 
 The full guide is the [Module Developer Guide](docs/Module_Developer_Guide.md). In short:
 
-1. **Probe the board:** run `scripts/hardware_probe.sh` on the device; it writes `target_hardware_config.txt`.
+1. **Probe the board:** `llm-cli scan --device <address> --user <user>` runs the probe on the device over SSH (or
+   run `scripts/hardware_probe.py` or `scripts/hardware_probe.sh` on the device by hand); it writes
+   `target_hardware_config.txt`.
 2. **Create the target:** in the GUI under **Tools > Create Hardware Module...**, with `llm-cli module create`, or
    with Ditto: `llm-cli module generate-ai target_hardware_config.txt`. The generator checks names, images,
    packages, flags and shell code, writes only below `targets/` and never overwrites an existing target, and the
