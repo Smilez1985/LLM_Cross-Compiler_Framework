@@ -40,6 +40,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   question gets no excerpt, figures per tag and the search latency; it works offline once the embedding model
   is downloaded. A manual and nightly CI workflow runs it with cached models. Baseline with the default CPU
   embedding model: hit@1 83 %, hit@3 97 %, MRR 0.91; all 4 unrelated questions still get excerpts.
+- **Reranking of knowledge-base results**: a local multilingual cross-encoder (FastEmbed/ONNX, about 120 MB,
+  downloaded on first use, never in offline mode) reads the question together with each candidate and drops
+  the ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build-log analysis,
+  module proposals and build recommendations use it. Settings: `rag_reranker` (`auto`: from 6 GB RAM, the
+  larger bge-reranker-v2-m3 with CUDA and 16 GB; `off`; or a model id), `rag_rerank_min_score` and
+  `rag_rerank_default` (also rerank chat and MCP searches; off). A reranker that cannot run is logged and the
+  search keeps its order. `llm-cli ditto eval --kind retrieval --rag-variant rerank` grades it: on the
+  retrieval set hit@1 93 % and MRR 0.97 (hybrid search: 87 % and 0.93), and all 4 unrelated questions get no
+  excerpt (floor 0.2: relevant excerpts scored 0.80 or more, unrelated ones 0.009 or less). It takes about
+  1 s for 12 candidates and 2-2.6 s for 20 on a shared 4-core CPU and gained less than the 0.05 MRR required
+  for chat, so chat stays without it by default.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -58,6 +69,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   takes minutes on a CPU); "medium" and up keep it.
 - Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0) and `fastembed` 0.8.1 (local embeddings,
   ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
+- **Keyword search understands identifiers**: `-DGGML_CUDA=ON`, `rknn_toolkit2` or `rknnToolkitLite` are also
+  found by their parts (`GGML_CUDA`, `rknn toolkit2`), and one- and two-word searches such as `E2041` or
+  `GGML_CUDA` use the keyword index. Identifier questions of the retrieval set: hit@3 83 % to 100 %, the rest
+  unchanged. Existing knowledge bases get their keyword index rebuilt from the stored text once, on first use
+  (documents and vectors are kept); older snapshots are rebuilt the same way when restored.
+- **Large code blocks and tables** beyond the embedding model's context (512 tokens for the default model) are
+  split at line boundaries, each piece with the table header or the code fence, so their later parts can be
+  found at all (answers deep inside such blocks: hit@1 50 % to 100 %). Smaller blocks stay whole. Re-import a
+  document to apply it.
+- **Ditto's knowledge excerpts fit the context**: they take at most a third of `chat_context_limit`; an excerpt
+  that does not fit is skipped and a too long first one is shortened at a line.
+- Knowledge-base models are unloaded after 10 minutes without use and loaded again on the next search
+  (setting `rag_model_idle_minutes`, 0 keeps them loaded).
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).

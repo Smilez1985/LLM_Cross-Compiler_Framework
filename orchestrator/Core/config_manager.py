@@ -326,7 +326,20 @@ class ConfigManager:
                          "directory. Remote servers need https and the secret 'qdrant_api_key' (never "
                          "credentials in the URL).",
                          ["regex:^(https?://[^\\s/?#@]+([/?#]\\S*)?)?$"]),
-            
+            ConfigSchema("rag_reranker", str, False, "auto",
+                         "Cross-encoder that reranks knowledge-base results and drops irrelevant ones: 'auto' "
+                         "(multilingual MiniLM from 6 GB RAM, bge-reranker-v2-m3 with CUDA and 16 GB), 'off', or "
+                         "a model id. Used by build-log analysis, module proposals and build recommendations.",
+                         ["non_empty"]),
+            ConfigSchema("rag_rerank_default", bool, False, False,
+                         "Also rerank the other knowledge-base searches (Ditto chat, MCP search_knowledge)"),
+            ConfigSchema("rag_rerank_min_score", float, False, 0.0,
+                         "Relevance floor (0..1) for reranked results; 0 = the reranker's calibrated floor",
+                         ["min:0", "max:1"]),
+            ConfigSchema("rag_model_idle_minutes", int, False, 10,
+                         "Minutes after which unused knowledge-base models are unloaded (0 = keep them loaded)",
+                         ["min:0"]),
+
             # Deep Crawler Settings (v1.6.0)
             ConfigSchema("crawler_respect_robots", bool, False, True, "Respect robots.txt rules"),
             ConfigSchema("crawler_max_depth", int, False, 2, "Max recursion depth for crawler"),
@@ -537,6 +550,7 @@ class ConfigManager:
             persist_keys = [
                 "language", "ai_security_level", "gui_theme", "docker_registry",
                 "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
+                "rag_reranker", "rag_rerank_default", "rag_rerank_min_score", "rag_model_idle_minutes",
                 "crawler_respect_robots", "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",

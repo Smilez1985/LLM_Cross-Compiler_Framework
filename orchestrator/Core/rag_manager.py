@@ -8,6 +8,7 @@ embedded in the process with its storage in the user state directory (no Docker,
 server is used only when the configuration sets qdrant_url.
 
 Search results are plain data from external sources; callers wrap them as untrusted before a model sees them.
+A cross-encoder can rerank them and drop the irrelevant ones; it is quality on top and never a reason to fail.
 """
 
 import ipaddress
@@ -21,11 +22,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-from orchestrator.rag.chunking import build_preamble, chunk_document, point_id
+from orchestrator.rag.chunking import PREAMBLE_RESERVE_TOKENS, chunk_document, passage_text, point_id
 from orchestrator.rag.embeddings import (DenseEmbedder, EmbeddingModelSpec, FastEmbedDenseEmbedder,
                                          FastEmbedSparseEmbedder, SparseEmbedder, check_vectors, recommend_model,
                                          resolve_spec, spec_for_slug)
 from orchestrator.rag.errors import EmbeddingError, KnowledgeBaseError
+from orchestrator.rag.retrieval import FastEmbedReranker, RerankerSpec, select_reranker
 from orchestrator.utils.helpers import redact_secrets, sanitize_filename
 from orchestrator.utils.logging import get_logger
 
@@ -39,10 +41,15 @@ except ImportError:
     CrawlerManager = None
 
 COLLECTION_NAME = "framework_knowledge"  # alias of the active collection (one collection per embedding model)
-MIN_SPARSE_QUERY_TOKENS = 3  # shorter queries use the dense ranking only
+MIN_SPARSE_QUERY_TOKENS = 3  # shorter queries use the dense ranking only, unless they hold an identifier
+_IDENTIFIER = re.compile(r"\d|_|[A-Z]{2,}|\w[.-]\w")  # E2041, GGML_CUDA, RKNN, librkllmrt.so
+RERANK_POOL = 20  # most candidates a search reranks (about 1-2.5 s on one free CPU core)
+RERANK_INPUT_CHARS = 1500  # of each candidate; about what fits next to the query into 512 tokens
+RERANK_RETRY_SECONDS = 300.0  # after a reranker failure, searches keep the fused order this long
 MAX_SNAPSHOTS = 5
 MAX_CODE_FILE_BYTES = 512 * 1024
-_RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at"}
+_RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
+                     "fused_score", "reranker"}
 
 
 @dataclass
@@ -59,6 +66,10 @@ def create_dense_embedder(spec: EmbeddingModelSpec, cache_dir: Path, offline: Ca
 
 def create_sparse_embedder(cache_dir: Path, offline: Callable[[], bool]) -> SparseEmbedder:
     return FastEmbedSparseEmbedder(cache_dir, offline)
+
+
+def create_reranker(spec: RerankerSpec, cache_dir: Path, offline: Callable[[], bool]):
+    return FastEmbedReranker(spec, cache_dir, offline)
 
 
 def _clean_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -90,13 +101,14 @@ def _kind_of(meta: Dict[str, Any]) -> str:
 class RAGManager:
     """
     The framework's semantic memory. Storage is opened and models are loaded on first use; the embedded
-    storage is released again after a short idle time, so the GUI and the MCP server can take turns.
+    storage is released again after a short idle time, so the GUI and the MCP server can take turns, and the
+    models after rag_model_idle_minutes (reloading them takes seconds, so not with the storage).
     """
 
     IDLE_CLOSE_SECONDS = 30.0
 
     def __init__(self, framework_manager, embedder: Optional[DenseEmbedder] = None,
-                 sparse_embedder: Optional[SparseEmbedder] = None):
+                 sparse_embedder: Optional[SparseEmbedder] = None, reranker=None):
         self.logger = get_logger("RAGManager")
         self.framework = framework_manager
         self.config = getattr(framework_manager, "config", None)
@@ -115,6 +127,15 @@ class RAGManager:
         self._lock = threading.RLock()
         self._idle_timer: Optional[threading.Timer] = None
         self._generation = 0
+        # Reranker: chosen from rag_reranker on first use (or provided); scores(query, texts) -> 0..1 each.
+        self._reranker = reranker
+        self._reranker_setting: Optional[str] = None if reranker is None else "provided"
+        self.reranker_reason = "provided by the caller" if reranker is not None else ""
+        self._rerank_failed_at: Optional[float] = None
+        self.model_idle_seconds: Optional[float] = None  # None: rag_model_idle_minutes of the configuration
+        self._model_timer_lock = threading.Lock()
+        self._model_timer: Optional[threading.Timer] = None
+        self._model_generation = 0
 
     # --- configuration ---
 
@@ -262,7 +283,10 @@ class RAGManager:
                     self._sparse = create_sparse_embedder(self.models_cache_dir, self._offline)
                 store = KnowledgeStore(client, COLLECTION_NAME, self._embedder.model_id, self._embedder.dim,
                                        self._sparse.model_id, server_mode=server)
-                store.ensure()
+                rebuilt = store.ensure(reencode=self._sparse.embed_passages)
+                if rebuilt:
+                    self.logger.warning(f"Knowledge base: rebuilt the keyword index of {rebuilt} chunks for the "
+                                        f"encoding {store.sparse_model}; the documents and their vectors are kept.")
             except Exception as e:
                 try:
                     client.close()
@@ -314,13 +338,59 @@ class RAGManager:
         self.client, self._store, self._connected = None, None, False
 
     def close(self) -> None:
-        """Releases the storage (the embedded one is locked by this process while open). Models stay loaded."""
+        """Releases the storage (the embedded one is locked by this process while open). Models stay loaded
+        (release_models() frees them); their idle release starts again with the next use."""
         with self._lock:
             if self._idle_timer is not None:
                 self._idle_timer.cancel()
                 self._idle_timer = None
             self._generation += 1
             self._close_client()
+        with self._model_timer_lock:
+            self._model_generation += 1
+            if self._model_timer is not None:
+                self._model_timer.cancel()
+                self._model_timer = None
+
+    # --- model memory ---
+
+    def _model_idle(self) -> float:
+        if self.model_idle_seconds is not None:
+            return self.model_idle_seconds
+        try:
+            return max(0.0, float(self._cfg("rag_model_idle_minutes", 10))) * 60
+        except (TypeError, ValueError):
+            return 600.0
+
+    def _schedule_model_release(self) -> None:
+        seconds = self._model_idle()
+        if seconds <= 0:
+            return
+        with self._model_timer_lock:
+            self._model_generation += 1
+            if self._model_timer is not None:
+                self._model_timer.cancel()
+            self._model_timer = threading.Timer(seconds, self._release_if_idle, args=(self._model_generation,))
+            self._model_timer.daemon = True
+            self._model_timer.start()
+
+    def _release_if_idle(self, generation: int) -> None:
+        with self._model_timer_lock:
+            if generation != self._model_generation:
+                return
+            self._model_timer = None
+        self.release_models()
+
+    def release_models(self) -> List[str]:
+        """Frees the memory of the loaded models (embeddings, reranker); the next search loads them again."""
+        released = []
+        for model in (self._embedder, self._sparse, self._reranker):
+            release = getattr(model, "release", None)
+            if callable(release) and release():
+                released.append(str(model.model_id))
+        if released:
+            self.logger.info(f"Knowledge base: released the idle models {', '.join(released)}.")
+        return released
 
     def _connect(self) -> bool:
         try:
@@ -335,12 +405,19 @@ class RAGManager:
         self.logger.warning(f"Knowledge base: {self.last_error}")
 
     def _models(self) -> Tuple[DenseEmbedder, SparseEmbedder]:
-        return self._with_store(lambda store: (self._embedder, self._sparse))
+        models = self._with_store(lambda store: (self._embedder, self._sparse))
+        self._schedule_model_release()
+        return models
 
     def prepare_models(self) -> bool:
-        """Downloads (unless offline) and loads the embedding models now instead of on first use."""
+        """Downloads (unless offline) and loads the embedding models, and the reranker unless rag_reranker
+        rules it out, now instead of on first use."""
         try:
-            for model in self._models():
+            models = list(self._models())
+            reranker = self._reranker_for(True)
+            if reranker is not None:
+                models.append(reranker)
+            for model in models:
                 prepare = getattr(model, "prepare", None)
                 if callable(prepare):
                     prepare()
@@ -373,9 +450,13 @@ class RAGManager:
         base_section = str(metadata.get("section") or "")
         meta = _clean_metadata(metadata)
         embedder, sparse = self._models()
-        budget = int(getattr(getattr(embedder, "spec", None), "chunk_tokens", 384))
+        spec = getattr(embedder, "spec", None)
+        budget = int(getattr(spec, "chunk_tokens", 384))
+        context = getattr(spec, "max_tokens", None)  # code blocks and tables beyond it are split
+        hard = max(int(context) - PREAMBLE_RESERVE_TOKENS, budget // 2) if context else None
         chunks = chunk_document(content, count_tokens=embedder.count_tokens, max_tokens=budget,
-                                overlap_tokens=budget // 8, kind=_kind_of(meta), base_section=base_section)
+                                overlap_tokens=budget // 8, kind=_kind_of(meta), base_section=base_section,
+                                hard_tokens=hard)
         unique = {}
         for chunk in chunks:  # identical chunks of one document collapse into one point
             unique.setdefault(point_id(source, chunk.hash), chunk)
@@ -383,7 +464,7 @@ class RAGManager:
             return 0
         ids, items = list(unique), list(unique.values())
         title = str(meta.get("title") or "")
-        texts = [build_preamble(source, title, c.section) + "\n\n" + c.text for c in items]
+        texts = [passage_text(source, title, c.section, c.text) for c in items]
         dense = check_vectors(embedder.embed_passages(texts), len(texts), embedder.dim, embedder.model_id)
         sparse_vectors = list(sparse.embed_passages(texts))
         if len(sparse_vectors) != len(texts):
@@ -526,7 +607,7 @@ class RAGManager:
             self.logger.error(f"Snapshot {snapshot_name} not found.")
             return False
         try:
-            count = self._with_store(lambda store: store.restore_file(path))
+            count = self._with_store(lambda store: store.restore_file(path, reencode=self._sparse.embed_passages))
         except (KnowledgeBaseError, OSError, ValueError) as e:
             self._fail(e)
             return False
@@ -536,24 +617,38 @@ class RAGManager:
     # --- SEARCH ---
 
     def search(self, query: str, limit: int = 3, score_threshold: Optional[float] = None,
-               strict: bool = False) -> List[SearchResult]:
+               strict: bool = False, rerank: Optional[bool] = None) -> List[SearchResult]:
         """
         Hybrid search (dense + BM25, fused with RRF). score is the fused rank score, comparable within one
         result list only. score_threshold optionally drops dense candidates below that cosine similarity;
         there is no default because similarities are model-specific (E5 rates unrelated text 0.7-0.8).
-        strict=True raises KnowledgeBaseError instead of returning an empty list.
+
+        rerank (None: the setting rag_rerank_default) lets a cross-encoder score each candidate: score is then
+        its 0..1 relevance, metadata["fused_score"] keeps the rank score, and results below the reranker's floor
+        are dropped, so the list may be empty (no excerpt is better than an irrelevant one). A reranker that
+        cannot run is logged and the fused order is kept.
+
+        strict=True raises KnowledgeBaseError for storage and embedding errors instead of returning [].
         """
         query = (query or "").strip()
         if not query:
             return []
         try:
+            reranker = self._reranker_for(rerank)
+        except KnowledgeBaseError as e:  # e.g. an unknown model id in rag_reranker
+            self._rerank_failed(e)
+            reranker = None
+        if reranker is not None and self._rerank_failed_at is not None \
+                and time.monotonic() - self._rerank_failed_at < RERANK_RETRY_SECONDS:
+            reranker = None
+        pool = max(limit, min(max(limit * 3, 12), RERANK_POOL)) if reranker is not None else max(limit * 2, limit + 4)
+        try:
             embedder, sparse = self._models()
             dense = check_vectors([embedder.embed_query(query)], 1, embedder.dim, embedder.model_id)[0]
             keyword = None
-            if len(re.findall(r"\w+", query)) >= MIN_SPARSE_QUERY_TOKENS:
+            if len(re.findall(r"\w+", query)) >= MIN_SPARSE_QUERY_TOKENS or _IDENTIFIER.search(query):
                 keyword = sparse.embed_query(query)
-            hits = self._with_store(lambda store: store.query(dense, keyword, max(limit * 2, limit + 4),
-                                                              score_threshold))
+            hits = self._with_store(lambda store: store.query(dense, keyword, pool, score_threshold))
         except KnowledgeBaseError as e:
             if strict:
                 raise
@@ -562,7 +657,7 @@ class RAGManager:
 
         results: List[SearchResult] = []
         seen = set()
-        for hit in hits:
+        for hit in hits:  # deduplicated before reranking: the cross-encoder scores each text once
             payload = hit.payload or {}
             key = payload.get("chunk_hash") or str(hit.id)
             if key in seen:
@@ -570,9 +665,76 @@ class RAGManager:
             seen.add(key)
             results.append(SearchResult(score=float(hit.score), content=str(payload.get("content", "")),
                                         source=str(payload.get("source", "unknown")), metadata=payload))
-            if len(results) >= limit:
+        if reranker is not None and results:
+            results = self._rerank(reranker, query, results)
+        return results[:limit]
+
+    # --- reranking ---
+
+    def _reranker_for(self, rerank: Optional[bool]):
+        """The reranker for a search, or None: not asked for, turned off, or none suits this machine."""
+        if rerank is None:
+            rerank = bool(self._cfg("rag_rerank_default", False))
+        setting = str(self._cfg("rag_reranker", "auto") or "auto").strip()
+        if not rerank or setting.lower() == "off":
+            return None
+        with self._lock:
+            if self._reranker_setting not in (setting, "provided"):
+                spec, reason = select_reranker(setting)
+                self._reranker = create_reranker(spec, self.models_cache_dir, self._offline) if spec else None
+                self._reranker_setting, self.reranker_reason, self._rerank_failed_at = setting, reason, None
+            return self._reranker
+
+    def _rerank_floor(self, reranker) -> float:
+        try:
+            configured = float(self._cfg("rag_rerank_min_score", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            configured = 0.0
+        return configured or float(getattr(getattr(reranker, "spec", None), "min_score", 0.0))
+
+    def _rerank(self, reranker, query: str, results: List[SearchResult]) -> List[SearchResult]:
+        def text(result: SearchResult) -> str:
+            title, section = str(result.metadata.get("title") or ""), str(result.metadata.get("section") or "")
+            head = section if title and section.startswith(title) else " > ".join(p for p in (title, section) if p)
+            return (head + "\n" if head else "") + result.content[:RERANK_INPUT_CHARS]
+
+        try:
+            scores = reranker.scores(query, [text(r) for r in results])
+        except KnowledgeBaseError as e:
+            self._rerank_failed(e)
+            return results
+        self._rerank_failed_at = None
+        floor = self._rerank_floor(reranker)
+        ranked = []
+        for result, score in sorted(zip(results, scores), key=lambda pair: -pair[1]):
+            if score < floor:
                 break
-        return results
+            result.metadata = {**result.metadata, "fused_score": result.score, "reranker": reranker.model_id}
+            result.score = float(score)
+            ranked.append(result)
+        return ranked
+
+    def _rerank_failed(self, error: Exception) -> None:
+        """The reranker is quality on top, never a gate: the search keeps the fused order (logged once)."""
+        first = self._rerank_failed_at is None
+        self._rerank_failed_at = time.monotonic()
+        self.last_error = redact_secrets(str(error))
+        (self.logger.warning if first else self.logger.debug)(
+            f"Knowledge base: reranking skipped, keeping the search order: {self.last_error}")
+
+    def reranker_info(self) -> Dict[str, Any]:
+        """The reranker searches use when asked to rerank (no model when none), why, and its floor."""
+        default = bool(self._cfg("rag_rerank_default", False))
+        try:
+            reranker = self._reranker_for(True)
+        except KnowledgeBaseError as e:
+            return {"model": "", "reason": redact_secrets(str(e)), "min_score": None, "default": default}
+        if reranker is None:
+            off = str(self._cfg("rag_reranker", "auto") or "auto").strip().lower() == "off"
+            return {"model": "", "reason": "turned off (rag_reranker: off)" if off else self.reranker_reason,
+                    "min_score": None, "default": default}
+        return {"model": str(reranker.model_id), "reason": self.reranker_reason,
+                "min_score": self._rerank_floor(reranker), "default": default}
 
     def export_records(self) -> Iterator[Dict[str, Any]]:
         """All stored chunks as plain records (source, content, metadata), e.g. for a community export."""
@@ -621,4 +783,5 @@ class RAGManager:
         except KnowledgeBaseError as e:
             status["error"] = redact_secrets(str(e))
         status["model_reason"] = self.model_reason
+        status["reranker"] = self.reranker_info()
         return status

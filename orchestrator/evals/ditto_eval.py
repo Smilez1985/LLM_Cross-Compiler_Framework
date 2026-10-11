@@ -50,7 +50,7 @@ DEFAULT_CASES = Path(__file__).resolve().parents[2] / "evals" / "ditto" / "cases
 RETRIEVAL_CASES = Path(__file__).resolve().parents[2] / "evals" / "retrieval" / "cases.yml"
 RETRIEVAL_DEPTH = 10  # results per search; MRR is computed over them
 # Search options per retrieval variant; every variant is graded on the same temporary knowledge base.
-RAG_VARIANTS: Dict[str, Dict[str, Any]] = {"fused": {}}
+RAG_VARIANTS: Dict[str, Dict[str, Any]] = {"fused": {"rerank": False}, "rerank": {"rerank": True}}
 
 
 # --- cases ------------------------------------------------------------------------------------------------------
@@ -627,6 +627,10 @@ class RetrievalEval:
         except KnowledgeBaseError as e:
             return Attempt(False, time.monotonic() - start, error=f"Knowledge base error: {e}"[:500], retrieved=[])
         seconds = time.monotonic() - start
+        if RAG_VARIANTS[variant].get("rerank") and any("reranker" not in (h.metadata or {}) for h in hits):
+            # The search keeps the fused order when the reranker cannot run; graded as reranked it would mislead.
+            reason = getattr(self.knowledge, "last_error", "") or "no reranker"
+            return Attempt(False, seconds, error=f"The reranker did not run: {reason}"[:500], retrieved=[])
         retrieved = [{"doc": self._doc_id(h), "score": round(float(h.score), 4)} for h in hits]
         problems = grade_retrieval(case.expect, [r["doc"] for r in retrieved])
         answer = "; ".join(f"{i}. {r['doc']} ({r['score']:.4f})" for i, r in enumerate(retrieved[:5], 1))
