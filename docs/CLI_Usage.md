@@ -404,7 +404,7 @@ and repeat). How it works: [Features.md](Features.md#ditto-evaluation).
 | `--provider TEXT` | Provider for the run. Default: AI settings. |
 | `--model TEXT` | Model for the run. Default: AI settings. |
 | `--tier TEXT` | Run against the managed local model of this tier; repeatable (`--tier small --tier small-q2`). Cannot be combined with `--provider`/`--model` (exit code 2). |
-| `--kind [healing\|optimizer\|module\|chat\|retrieval]` | Only cases of this kind; repeatable. `retrieval` runs only when it is chosen here (or when `--case` is given without `--kind`). |
+| `--kind [healing\|optimizer\|module\|chat\|retrieval]` | Only cases of this kind; repeatable. `retrieval` runs only when it is chosen here, when `--case` is given without `--kind`, or when the `--cases` file holds retrieval cases. |
 | `--rag-variant [fused\|rerank]` | Retrieval only: the search variant to grade; repeatable, one run per variant. `fused` (default): the hybrid search. `rerank`: the hybrid search plus the reranker of `rag_reranker` and its relevance floor. |
 | `--case TEXT` | Only this case ID; repeatable. |
 | `--repeat INTEGER RANGE` | Runs per case, 1 to 20 (default 1). |
@@ -445,16 +445,16 @@ in `evals/retrieval/corpus/` (a cases file names its corpus folder with `corpus:
   offline mode); after that the evaluation works offline.
 - Each search returns up to 10 excerpts. A case passes when the first relevant excerpt is within its limit (the
   case's `within`, default 3); an unrelated question passes only when no excerpt comes back.
-- Besides the run table there is a "Retrieval" table per variant: hit@1, hit@3, hit@k (k = each case's limit),
-  MRR over the 10 results, "Unrelated: no excerpt" (the share of unrelated questions that got nothing) and the
+- Besides the run table there is a "Retrieval" table with one row per variant: hit@1, hit@3, hit@k (k = each
+  case's limit), MRR over the 10 results, "Unrelated: no excerpt" (the share of unrelated questions that got nothing) and the
   median search time ("p50 ms"). `--json` adds the retrieved documents and scores of every case, the digests of
   cases and corpus, the indexing time and the memory in use.
 - `rerank` needs a reranker. With `rag_reranker: off`, or `auto` on a computer with less than 6 GB RAM, there is
   none, and the command stops with exit code 2 and the reason; set `rag_reranker` to a model id to grade one
   anyway. A reranker that cannot be loaded stops the run with exit code 1, and a search in which the reranker did
   not run counts as failed. The floor is `rag_rerank_min_score` (default 0: the reranker's calibrated floor).
-- A corpus that cannot be read, or a case that expects a document the corpus does not have, stops with exit code
-  2. If the corpus cannot be indexed (for example in offline mode before the embedding model was downloaded), the
+- A corpus that cannot be read, or a case that expects a document the corpus does not have, stops with exit
+  code 2. If the corpus cannot be indexed (for example in offline mode before the embedding model was downloaded), the
   command exits with code 1.
 
 Outside the evaluation, only build recommendations use the reranker. Ditto's chat and the MCP tool
@@ -706,7 +706,7 @@ Names the framework uses:
 | `anthropic_api_key`, `openai_api_key`, `gemini_api_key`, `openrouter_api_key`, `custom_api_key` | Ditto's providers |
 | `hf_token` | Gated Hugging Face models in builds |
 | `qdrant_api_key` | A remote Qdrant server for the knowledge base (setting `qdrant_url`) |
-| `community_signing_key`, `community_encryption_key` | Your key pairs for community packs, created by [`llm-cli zoo`](#zoo-keys) on first use; do not set them by hand |
+| `community_signing_key`, `community_encryption_key` | Your key pairs for community packs, created on first use by [`llm-cli zoo`](#zoo-keys) or the GUI's community export and import; do not set them by hand |
 
 ```bash
 llm-cli secrets set anthropic_api_key
@@ -838,9 +838,10 @@ are shared as files (`zoo install --file`).
 
 How packs are protected:
 
-- A pack is a zip file with a manifest (`pack.json`: sha256, size and mode of every file) and an Ed25519
-  signature of its author (`pack.sig`; packs exported with this framework always have one). It carries scripts,
-  recipes and text, never model weights or other binary files.
+- A pack is a zip file with a manifest (`pack.json`: sha256, size and mode of every file) and usually an Ed25519
+  signature of its author (`pack.sig`). Packs exported with this framework always have one; for a pack without
+  one, the summary says "not signed by its author". A pack carries scripts, recipes and text, never model weights
+  or other binary files.
 - The list of packs comes from a signed index: `index.json` at `community_index_url` and `index.json.sig` next to
   it, checked with the keys in `configs/community_keys.yml`, each accepted until its expiry date. An index that does
   not verify is not used. The last good index is cached in `~/.llm-framework/community/`, fetched again when it is
@@ -861,7 +862,7 @@ Trust levels:
 | `verified` | In the signed index: reviewed and reproduced independently. |
 | `community` | In the signed index: reviewed. |
 | `local` | A file the signed index does not list. Nobody reviewed it: installing it always asks, and every build of such a target shows a warning. |
-| `revoked` | In the index's list of revoked packs. It is not installed; installed copies are flagged by `zoo verify`, `llm-cli doctor` and the Community Hub and are not built, also after the key that signed the revocation has expired. |
+| `revoked` | In the index's list of revoked packs. It is not installed; installed copies are flagged by `zoo verify`, `llm-cli doctor` and the Community Hub and are not built. `zoo verify`, `llm-cli doctor` and builds keep applying the cached revocation after the key that signed it has expired; `zoo list` and the Community Hub then no longer use that index. |
 
 Targets that ship with the framework, such as Rockchip, have no provenance file and do not appear in the zoo.
 
@@ -929,7 +930,7 @@ Note: signed by author key 0123456789abcdef (first pack seen from this author)
 | `PACK_ID` | An ID from the index (`zoo list`). The newest version is installed. |
 | `--kind [target\|recipe\|knowledge]` | Kind of `PACK_ID` (default `target`). A pack file names its own kind. |
 | `--file FILE` | Install a pack file someone gave you, or an encrypted pack (`.lcfpack`). Its trust is `local` unless the signed index lists its sha256. Works without network. |
-| `--from FILE` | Encrypted packs: accept them only from these senders. The file holds the senders' public keys as `llm-cli zoo keys` prints them; repeatable. Without it, the summary names the sender's key ID. |
+| `--from FILE` | Encrypted packs: accept them only from these senders. The file holds the senders' public keys as `llm-cli zoo keys` prints them; repeatable. Without it, any sender is accepted; the summary always names the sender's key ID. |
 | `--passphrase` | Encrypted packs: ask for the passphrase instead of opening the pack with your own key. |
 | `--yes` | Do not ask for a pack whose trust comes from the signed index. A `local` pack always asks. |
 
@@ -953,8 +954,9 @@ llm-cli zoo install --file target-my-board-1.0.0.lcfpack --from colleague.keys
 llm-cli zoo install --file target-my-board-1.0.0.lcfpack --passphrase
 ```
 
-A recipe needs its target: install the target first. "Build" on an installed recipe in the Community Hub fills in
-the Builder, including the model's pinned commit.
+A recipe needs its target: install the target first, so the recipe is also checked against the target's
+capabilities (without the target, the summary only notes that it is missing). "Build" on an installed recipe in
+the Community Hub fills in the Builder, including the model's pinned commit.
 
 ### zoo verify
 
@@ -985,7 +987,8 @@ llm-cli zoo export target|recipe|knowledge [SOURCE] --author NAME [options]
 Makes a pack of your own work: a target (`SOURCE`: the target's folder name), a recipe (`SOURCE`: the folder of a
 finished build or its `build_info.json`) or your knowledge base (no `SOURCE`). The pack is privacy-scrubbed, checked
 the way an installation would check it, signed with your key and written to a folder; nothing is sent. The summary
-on stdout shows the file, the key it was signed with, every change of the privacy scrub as a diff, and notes.
+on stdout shows the file, the key it was signed with, a diff for every file the privacy scrub changed (at most 40
+lines per file) and notes.
 
 | Argument / option | Meaning |
 |---|---|
@@ -1005,8 +1008,8 @@ What goes into the pack:
 
 - **target:** every file of the target folder. Links, special files and binary files are refused, and the target
   validators must pass, which includes a valid `capabilities:` block. The version is `metadata.version` from
-  `target.yml` if it has the form `1.2.3`, otherwise `1.0.0`. A target you installed from the zoo is refused: it
-  remains its author's pack.
+  `target.yml` if it has the form `1.2.3` (a suffix such as `-rc1` is allowed), otherwise `1.0.0`. A target you
+  installed from the zoo is refused: it remains its author's pack.
 - **recipe:** only a finished build of a Hugging Face model whose `build_info.json` records the model's commit and
   the target's fingerprint (builds of this version). If the target is your own, the summary reminds you to export
   it too, or others cannot build the recipe.
@@ -1022,11 +1025,11 @@ Loopback addresses, image digests (`name@sha256:...`) and default accounts such 
 script whose address was replaced may no longer work.
 
 **Pull request (`--pr`).** After the summary the command asks "Submit this pack to the public community
-repository?". Without a terminal and without `--yes` nothing is submitted (exit code 1). Then:
+repository?". If you answer no, or there is no terminal and no `--yes`, nothing is submitted (exit code 1). Then:
 
-- With the GitHub CLI installed and logged in (`gh auth login`), it forks the repository named in the setting
-  `community_repo` (`owner/name`), commits the pack to `contributions/<kind>/` on a new branch of your fork and
-  opens the pull request with `gh pr create`.
+- With the GitHub CLI and git installed and `gh` logged in (`gh auth login`), it forks the repository named in the
+  setting `community_repo` (`owner/name`), commits the pack to `contributions/<kind>/` on a new branch of your fork
+  and opens the pull request with `gh pr create`.
 - Otherwise, or if that fails, it opens the repository's upload page
   (`https://github.com/<owner>/<name>/upload/main/contributions/<kind>`) in your browser. Drop the file there;
   GitHub creates the fork for you.
@@ -1098,7 +1101,7 @@ x25519:<base64>
 - The community repository and its signed index are not published yet (`community_index_url` and
   `community_repo` are empty, `configs/community_keys.yml` lists no key): `zoo list` shows only installed packs,
   and `zoo install <id>` and `zoo export --pr` stop with a message. Packs can be shared as files.
-- `build start` has no option for a model commit: the pinned commit of a recipe is used only when the Builder is
-  filled from the Community Hub.
+- `build start` has no option for a model commit: the pinned commit of a recipe is used when the Builder is filled
+  from the Community Hub, or when an AI client passes `revision` to the MCP tool `start_build`.
 - There is no CLI command for Deep Ingest (adding documentation pages to the knowledge base); it runs in the GUI's
   module wizard (**Tools > Create Hardware Module...**).

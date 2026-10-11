@@ -169,8 +169,9 @@ capabilities:
 - **Quantisierungen:** die Bezeichnungen der `case`-Zweige in der Quantisierungslogik des Assistenten oder des
   Vorschlags von Ditto (zum Beispiel `Q4_K_M)` oder `Q4_K_M|Q5_K_M)`; nur Namen aus Buchstaben, Ziffern und `_`).
   Ohne solche Zweige: `Q4_K_M`, `Q4_0`, `Q5_K_M`, `Q6_K`, `Q8_0` und `F16`. Die erste ist der Standard. Die
-  Bezeichnungen werden übernommen, wie sie dastehen, `Q4_K_M|q4_k_m)` führt also beide Schreibweisen auf; schreib
-  eine Schreibweise und gib die anderen als `aliases` an.
+  Bezeichnungen werden übernommen, wie sie dastehen, `Q4_K_M|q4_k_m)` führt also beide Schreibweisen auf. Behalte
+  eine Schreibweise im Block: Anfragen werden ohne Beachtung der Groß- und Kleinschreibung zugeordnet, und andere
+  Namen gehören in `aliases` (zum Beispiel `INT8: Q8_0`).
 
 **Wissens-Schnappschuss (nur auf Wunsch).** Auf der letzten Seite des Assistenten ist das Kästchen „Attach the
 knowledge crawled for this target (Deep Ingest, privacy scrub applied)“ standardmäßig aus und lässt sich erst
@@ -574,9 +575,10 @@ Das mitgelieferte Rockchip-Target besteht alle diese Prüfungen.
 
    Das Paket wird nach `community/contributions/contribution-target-my_board-1.0.0.zip` geschrieben und mit deinem
    Schlüssel signiert, der beim ersten Mal im Secrets-Speicher angelegt wird.
-3. **Die Zusammenfassung lesen.** Sie zeigt jede Änderung der Datenschutz-Bereinigung als Diff (Home-Ordner, IP- und
-   MAC-Adressen, E-Mail-Adressen, Host- und Benutzernamen, Schlüssel) und Hinweise, zum Beispiel dass `knowledge/`
-   Seiten aus dem Web enthält, deren Bedingungen die Lizenz des Pakets nicht abdeckt. Macht eine Änderung ein Skript
+3. **Die Zusammenfassung lesen.** Sie zeigt einen Diff für jede Datei, die die Datenschutz-Bereinigung geändert hat
+   (Home-Ordner, IP- und MAC-Adressen, E-Mail-Adressen, Host- und Benutzernamen, Schlüssel; höchstens 40 Zeilen je
+   Datei), und Hinweise, zum Beispiel dass `knowledge/` Seiten aus dem Web enthält, deren Bedingungen die Lizenz des
+   Pakets nicht abdeckt. Macht eine Änderung ein Skript
    kaputt, korrigiere die Datei in deinem Target und exportiere erneut.
 4. **So prüfen, wie das Community-Repository prüfen wird:**
    `llm-cli zoo verify community/contributions/contribution-target-my_board-1.0.0.zip`.
