@@ -1,3 +1,4 @@
+import gc
 import logging
 import os
 import sys
@@ -8,6 +9,19 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+# Exported by a git command that runs the tests (a hook, `git rebase --exec`, `git bisect run`): with them, the
+# tests' own git commands (`git init` and `git commit` in a temporary folder) would act on this repository instead.
+GIT_REPOSITORY_VARIABLES = ("GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+                            "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE")
+
+
+def scrub_git_environment(environ) -> None:
+    for name in GIT_REPOSITORY_VARIABLES:
+        environ.pop(name, None)
+
+
+scrub_git_environment(os.environ)
 
 
 def _catalog_key_variables():
@@ -125,3 +139,36 @@ def qapp():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
     return QApplication.instance() or QApplication([])
+
+
+def frameworks_left_running(framework_cls):
+    """FrameworkManager objects whose background event loop was never stopped. type() instead of isinstance():
+    isinstance() reads __class__, which raises ReferenceError for a weakref.proxy whose object is gone."""
+    return [obj for obj in gc.get_objects()
+            if issubclass(type(obj), framework_cls) and getattr(obj, "_loop", None) is not None]
+
+
+def pytest_unconfigure(config):
+    """Ends what the tests left running while Python is still fully alive.
+
+    Background event loops of frameworks that were never shut down (CLI tests boot their own) are stopped. The
+    widgets left by GUI tests and the QApplication are deleted here: otherwise PySide deletes them in its exit
+    handler during interpreter finalization, which now and then crashed the process with SIGSEGV
+    (QObject::~QObject called from PySide::destroyQCoreApplication) after every test had passed."""
+    framework = sys.modules.get("orchestrator.Core.framework")
+    if framework is not None:
+        for obj in frameworks_left_running(framework.FrameworkManager):
+            try:
+                obj._stop_loop(timeout=5)
+            except Exception as e:  # e.g. a half-built stand-in: the widgets below must still be deleted
+                print(f"conftest: event loop of {obj!r} not stopped: {e!r}", file=sys.stderr)
+    widgets = sys.modules.get("PySide6.QtWidgets")
+    app = widgets.QApplication.instance() if widgets is not None else None
+    if app is None:
+        return
+    from PySide6.QtCore import QCoreApplication, QEvent
+    for widget in app.topLevelWidgets():
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    gc.collect()
+    app.shutdown()

@@ -74,7 +74,7 @@ llm-cli [OPTIONEN] BEFEHL [ARGUMENTE]...
 | Option | Bedeutung |
 |---|---|
 | `--version` | Version ausgeben und beenden. |
-| `-c, --config PATH` | Diese Einstellungsdatei verwenden (YAML oder JSON, muss existieren). Ihr Ordner wird für diesen Aufruf zum Einstellungsordner (eine `config.yml` dort wird ebenfalls gelesen), und die Werte der Datei haben Vorrang davor. Der übliche Einstellungsordner wird dann nicht gelesen. |
+| `-c, --config PATH` | Diese Einstellungsdatei verwenden (YAML oder JSON, muss existieren). Ihr Ordner wird für diesen Aufruf zum Einstellungsordner (eine `config.yml` dort wird ebenfalls gelesen), und die Werte der Datei haben Vorrang davor. Der übliche Einstellungsordner wird dann nicht gelesen. Eine Datei, die sich nicht lesen lässt, wird auf stderr genannt und übergangen; die übrigen Einstellungen (jene `config.yml`, `LLM_FRAMEWORK_*`-Variablen, Standardwerte) gelten weiter. |
 | `-v, --verbose` | Log-Level `DEBUG`. |
 | `-q, --quiet` | Log-Level `ERROR` und kein Start-Banner. |
 | `--log-level [DEBUG\|INFO\|WARNING\|ERROR]` | Log-Level (Standard `INFO`). |
@@ -921,8 +921,9 @@ Target wird nie überschrieben.
 
 Das Target wird in den eingestellten Targets-Ordner geschrieben (Einstellung `targets_dir`; ein relativer Pfad
 gilt relativ zur Installation, nicht zum aktuellen Ordner). Seine `target.yml` hat einen Block `capabilities:` (Unterstützungsstufe `community`) mit dem Modulnamen als einzigem
-Board und GGUF als einzigem Format; trag dort deine echten Boards und Formate ein. Der Hinweis des Befehls,
-`modules/config_module.sh` anzupassen, betrifft ein Altlast-Skript, das die Build-Pipeline nicht aufruft
+Board und GGUF als einzigem Format; trag dort deine echten Boards und Formate ein. Die nächsten Schritte des
+Befehls nennen `modules/build.sh`, den Dispatcher, den die Build-Engine ausführt; die erzeugte
+`config_module.sh` und die übrigen `*_module.sh`-Skripte sind Altlasten, die die Build-Pipeline nicht aufruft
 ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#10-altlasten)).
 
 ### module generate-ai
@@ -998,10 +999,13 @@ llm-cli config repos [--add NAME URL] [--remove NAME]
 ```
 
 Ohne Optionen listet es die Überschreibungen für Quell-Repositorys auf (Einstellung `source_repositories`). `--add`
-und `--remove` ändern sie und speichern die `config.yml`. `--add` speichert einen Eintrag `{url: ...}`; die
-Build-Engine reicht jeden Eintrag, auch einfache URLs aus früheren Versionen, als `<NAME>_REPO_OVERRIDE` an die
-Stufen-Container weiter (`NAME`: der Teil nach dem letzten Punkt, in Großbuchstaben, zum Beispiel `llama_cpp` ->
-`LLAMA_CPP_REPO_OVERRIDE`).
+und `--remove` ändern sie und speichern die `config.yml`; lässt sie sich nicht speichern, sagt der Befehl das und
+endet mit Code 1. `--add` speichert einen Eintrag `{url: ...}`; die Build-Engine reicht jeden Eintrag, auch
+einfache URLs aus früheren Versionen, als `<NAME>_REPO_OVERRIDE` an die Stufen-Container weiter (`NAME`: der ganze
+Name in Großbuchstaben, jedes Zeichen außer ASCII-Buchstaben und Ziffern als `_`, also ergeben `llama.cpp`,
+`llama_cpp` und `llama-cpp` alle `LLAMA_CPP_REPO_OVERRIDE`). Ein Name mit Punkt wird zusätzlich unter dem Namen
+früherer Versionen weitergereicht, seinem Teil nach dem letzten Punkt (`sources.llama_cpp` ergibt auch
+`LLAMA_CPP_REPO_OVERRIDE`). `--add` lehnt einen Namen ohne ASCII-Buchstaben und Ziffern ab (Exit-Code 2).
 
 | Option | Bedeutung |
 |---|---|

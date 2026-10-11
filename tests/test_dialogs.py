@@ -1320,3 +1320,17 @@ class TestMainWindowWiring:
         finally:
             win.update_timer.stop()
             win.close()
+
+
+def test_a_failed_save_of_the_ai_settings_is_reported(qapp, framework, tmp_path, message_boxes):
+    dlg = AIConfigurationDialog(framework)
+    select_provider(dlg, "anthropic")
+    dlg.cb_model.setCurrentText("my-pinned-model")
+    dlg.txt_api_key.setText("sk-ant-test-key-0123456789abcdef")
+    (tmp_path / "config.yml").write_text("ai_provider: [unclosed\n")  # unreadable: the save leaves it alone
+
+    dlg._save_config()
+
+    assert ("warning", "Settings Not Saved") in message_boxes
+    assert framework.config.get("ai_provider") == "anthropic"  # they apply until the program ends
+    assert dlg.result() == dlg.DialogCode.Accepted

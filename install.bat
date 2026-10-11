@@ -34,7 +34,9 @@ goto :EOF
 # --- INSTALLER LOGIC (PowerShell Teil) ---
 
 $ErrorActionPreference = "Stop"
-$ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Run through Invoke-Expression (see above), this part has no script path of its own; the batch part has
+# changed into the folder of install.bat before, so that folder is the current one.
+$ScriptPath = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 
 # 1. KONFIGURATION
 $AppName = "LLM-Conversion-Framework"
@@ -139,6 +141,13 @@ $Shortcut.Description = "Startet das Framework"
 $IconPath = Join-Path $InstallDir "assets\LLM-Builder.ico"
 if (Test-Path $IconPath) { $Shortcut.IconLocation = $IconPath }
 $Shortcut.Save()
+
+# Marker for scripts\Uninstall-LLM-Conversion-Framework.bat: the installation folder, kept next to this script
+try {
+    Set-Content -Path (Join-Path $ScriptPath ".install_complete") -Value $InstallDir -Encoding ASCII
+} catch {
+    Write-Warning "Marker fuer den Uninstaller nicht geschrieben ($_); er findet die Installation dann nicht."
+}
 
 Write-Host "Installation Erfolgreich!" -ForegroundColor Green
 Write-Host "Builds, Cache und Modelle: $UserDataHint (je Benutzer)"

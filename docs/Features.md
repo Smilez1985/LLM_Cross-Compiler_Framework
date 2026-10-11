@@ -884,7 +884,7 @@ The GUI's input fields offer what you used recently, newest first.
 - **Probe:** `scripts/hardware_probe.sh` (Linux) and `scripts/hardware_probe.ps1` (Windows) write
   `target_hardware_config.txt` with CPU, flags, memory, GPU and NPU information. Run them on the board, use
   `llm-cli scan` on this computer, or **Scan / Import...** in the GUI (file import, remote scan over SSH with the same
-  trust-on-first-use rules as deployment, or this PC).
+  trust-on-first-use rules as deployment, or this PC; the GUI keeps scan results in `<cache_dir>/probes/`).
 - **New target by questions:** `llm-cli module create` or the wizard under **Tools > Create Hardware Module...**.
 - **New target from a probe:** `llm-cli module generate-ai <probe file>` or the wizard's AI analysis. Ditto proposes
   architecture, SDK, base image, packages, CPU and CMake flags, setup commands and the quantization block of

@@ -320,7 +320,8 @@ class MainOrchestrator(QMainWindow):
     def _set_audio_announcements(self, enabled: bool):
         cfg = self.framework.config
         cfg.set(AUDIO_SETTING, bool(enabled))
-        cfg.save_user_config()
+        if not cfg.save_user_config():
+            QMessageBox.warning(self, self.i18n.t("settings.not_saved.title"), self.i18n.t("settings.not_saved"))
 
     def _clear_input_history(self):
         t = self.i18n.t

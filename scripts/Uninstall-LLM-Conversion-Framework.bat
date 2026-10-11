@@ -15,7 +15,10 @@ echo ========================================================
 echo.
 
 :: --- 1. PFAD-ERKENNUNG ---
+:: Der Quellordner mit install.bat: install.bat schreibt dort den Marker mit dem Installationspfad.
+:: Dieses Skript liegt in scripts\, also eine Ebene tiefer.
 cd /d "%~dp0"
+IF NOT EXIST "install.bat" IF EXIST "..\install.bat" cd ..
 SET "SOURCE_REPO=%CD%"
 
 IF NOT EXIST "%MARKER_FILE%" (

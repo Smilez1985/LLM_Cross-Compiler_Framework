@@ -6,9 +6,12 @@ setlocal EnableDelayedExpansion
 :: DIREKTIVE: Goldstandard, Robustheit, Pfad-Unabhängigkeit.
 :: ============================================================
 
-:: Sicherstellen, dass wir im Verzeichnis des Skripts arbeiten
-:: (Wichtig bei "Als Administrator ausführen" oder Verknüpfungen)
+:: Sicherstellen, dass wir im Framework-Ordner arbeiten (dort liegen orchestrator\ und .venv\)
+:: (Wichtig bei "Als Administrator ausführen" oder Verknüpfungen). Das Skript liegt in scripts\;
+:: eine Kopie im Framework-Ordner selbst funktioniert ebenso.
 cd /d "%~dp0"
+if not exist "orchestrator\main.py" if exist "..\orchestrator\main.py" cd ..
+set "FRAMEWORK_ROOT=%CD%"
 
 title LLM Conversion Framework Orchestrator
 
@@ -20,7 +23,8 @@ echo ========================================================
 echo.
 
 :: --- 1. UPDATE CHECK ---
-:: Prüft auf Updates vor dem Start
+:: Prüft auf Updates vor dem Start. Optionaler Einstieg für den geplanten Self-Update: updater.bat und
+:: updater.sh werden noch nicht ausgeliefert, ohne sie startet die GUI direkt.
 if exist "updater.bat" (
     echo [INFO] Suche nach Updates...
     call updater.bat
@@ -37,7 +41,7 @@ echo [INFO] Initialisiere Umgebung...
 
 set "PYTHON_EXE="
 
-:: Priorität 1: Embedded Python (Portable)
+:: Priorität 1: Embedded Python (Portable; optional, die Installer legen python_embed\ nicht an)
 if exist "python_embed\python.exe" (
     set "PYTHON_EXE=python_embed\python.exe"
     echo [INFO] Nutze Embedded Python.
@@ -67,7 +71,7 @@ if not defined PYTHON_EXE (
 )
 
 :: Setze PYTHONPATH, damit Imports wie 'from orchestrator...' funktionieren
-set "PYTHONPATH=%~dp0"
+set "PYTHONPATH=%FRAMEWORK_ROOT%"
 
 :: --- 3. GUI START ---
 echo [INFO] Starte Orchestrator GUI...

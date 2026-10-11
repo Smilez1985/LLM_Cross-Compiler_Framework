@@ -219,6 +219,9 @@ class LocalizationManager(QObject):
 
             # Deep Ingest: one-time notice (information, not a legal confirmation), progress and outcomes
             "menu.audio": "Spoken Announcements",
+            "settings.not_saved.title": "Setting Not Saved",
+            "settings.not_saved": ("The change applies until the program ends, but it could not be saved to "
+                                   "config.yml. See the log."),
             "crawl.notice.title": "Before your first Deep Ingest",
             "crawl.notice.text": (
                 "Deep Ingest reads web pages into your knowledge base so that Ditto can use them.\n\n"
@@ -452,6 +455,9 @@ class LocalizationManager(QObject):
 
             # Deep Ingest: einmaliger Hinweis (Information, keine rechtliche Bestätigung), Fortschritt, Ergebnis
             "menu.audio": "Gesprochene Ansagen",
+            "settings.not_saved.title": "Einstellung nicht gespeichert",
+            "settings.not_saved": ("Die Änderung gilt bis zum Programmende, konnte aber nicht in config.yml "
+                                   "gespeichert werden. Siehe Protokoll."),
             "crawl.notice.title": "Vor Ihrem ersten Deep Ingest",
             "crawl.notice.text": (
                 "Deep Ingest liest Webseiten in Ihre Wissensdatenbank ein, damit Ditto sie nutzen kann.\n\n"

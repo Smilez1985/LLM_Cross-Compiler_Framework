@@ -31,7 +31,7 @@ from rich.prompt import Confirm
 
 from orchestrator.Core.framework import FrameworkManager
 from orchestrator.Core.orchestrator import LLMOrchestrator, BuildRequest, WorkflowType, PriorityLevel, OrchestrationStatus
-from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel
+from orchestrator.Core.builder import BuildEngine, ModelFormat, OptimizationLevel, repo_override_names
 from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.Core.deployment_manager import DeploymentManager
 from orchestrator.llm.sdk_env import guard_sdk_environment
@@ -45,17 +45,6 @@ from orchestrator.utils.logging import get_logger, setup_logging
 console = Console()
 from orchestrator import __version__  # noqa: E402
 
-DEFAULT_CONFIG = {
-    "targets_dir": "targets",
-    "models_dir": "models", 
-    "output_dir": "output",
-    "configs_dir": "configs",
-    "cache_dir": "cache",
-    "log_level": "INFO",
-    "max_concurrent_builds": 2
-}
-
-
 # ============================================================================
 # CLICK CONTEXT UND MANAGER INITIALISIERUNG
 # ============================================================================
@@ -64,7 +53,7 @@ class FrameworkContext:
     """Shared context for CLI commands, hält Instanzen der Core-Manager"""
     
     def __init__(self):
-        self.config: Dict[str, Any] = DEFAULT_CONFIG.copy()
+        # The settings themselves are read by ConfigManager (see _settings and FrameworkManager), never copied here.
         self.config_path: Optional[str] = None
         self.log_level: Optional[str] = None
         self.init_error: Optional[Exception] = None
@@ -132,24 +121,6 @@ pass_context = click.make_pass_decorator(FrameworkContext, ensure=True)
 # UTILITY FUNCTIONS
 # ============================================================================
 
-def load_config_file(config_path: Optional[str] = None) -> Dict[str, Any]:
-    """Load configuration from file"""
-    config = DEFAULT_CONFIG.copy()
-    if config_path and Path(config_path).exists():
-        try:
-            with open(Path(config_path), 'r') as f:
-                if Path(config_path).suffix in ['.yml', '.yaml']:
-                    file_config = yaml.safe_load(f)
-                else:
-                    file_config = json.load(f)
-            if file_config:
-                config.update(file_config)
-        except Exception as e:
-            # stderr: stdout may carry a protocol (llm-cli mcp serve)
-            Console(stderr=True).print(f"[yellow]Warning: Failed to load config file: {escape(str(e))}[/yellow]")
-    return config
-
-
 def _settings(ctx: "FrameworkContext"):
     """The framework's settings (config.yml, a -c file, LLM_FRAMEWORK_* variables) and its path rule (relative to
     the installation), as Ditto, builds and the GUI use them. A booted framework's own settings when there is
@@ -215,8 +186,7 @@ CLI_HELP = f"""
 def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str,
         debug_http: bool):
     """The help text is CLI_HELP (its version comes from orchestrator.__version__)."""
-    # Load configuration
-    ctx.config.update(load_config_file(config))
+    # ConfigManager reads this file (and reports it on stderr if it cannot be read) wherever settings are needed.
     ctx.config_path = config
     ctx.log_level = "DEBUG" if verbose else ("ERROR" if quiet else log_level)
     ctx.verbose = verbose
@@ -371,7 +341,9 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
         console.print(f"Location: {output_path}")
         console.print("\nNext steps:")
         console.print(f"1. Edit {output_path}/target.yml to add supported boards")
-        console.print(f"2. Customize {output_path}/modules/config_module.sh")
+        # The build engine runs only this dispatcher (config_module.sh and the other *_module.sh are legacy).
+        console.print(f"2. Customize {output_path}/modules/build.sh (the build steps; the Dockerfile installs "
+                      f"the tools they use)")
         
     except Exception as e:
         console.print(f"[bold red]Error creating module: {e}[/bold red]")
@@ -2335,19 +2307,28 @@ def config_repos(ctx: FrameworkContext, add, remove):
     cm = ctx.framework_manager.config
     current_repos = dict(cm.get("source_repositories", {}) or {})
     
+    def save():
+        if not (cm.set("source_repositories", current_repos) and cm.save_user_config()):
+            console.print(f"[red]Not saved: {escape(str(Path(cm.config_dir) / 'config.yml'))} could not be updated "
+                          f"(see the log); the repository overrides are unchanged.[/red]")
+            sys.exit(1)
+
     if add:
         name, url = add
+        variables = repo_override_names(name)
+        if not variables:  # the build engine could not pass it on under any name
+            console.print(f"[red]Invalid name {escape(repr(name))}: it needs ASCII letters or digits (it becomes "
+                          f"<NAME>_REPO_OVERRIDE, e.g. llama.cpp -> LLAMA_CPP_REPO_OVERRIDE).[/red]")
+            sys.exit(2)
         # The shape the build engine passes on as <NAME>_REPO_OVERRIDE (plain URLs of earlier versions still work).
         current_repos[name.lower()] = {"url": url}
-        cm.set("source_repositories", current_repos)
-        cm.save_user_config()
+        save()
         console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(redact_secrets(url))} (passed to "
-                      f"builds as {escape(name.split('.')[-1].upper())}_REPO_OVERRIDE)[/green]")
+                      f"builds as {escape(variables[0])})[/green]")
     elif remove:
         if remove.lower() in current_repos:
             del current_repos[remove.lower()]
-            cm.set("source_repositories", current_repos)
-            cm.save_user_config()
+            save()
             console.print(f"[green]Removed repo override: {escape(remove)}[/green]")
         else:
             console.print(f"[yellow]Repo {escape(remove)} not found.[/yellow]")
