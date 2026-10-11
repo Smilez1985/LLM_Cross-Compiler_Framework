@@ -60,6 +60,30 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   state directory), at most 20 entries per field, and never holds secrets: values that look like an API key or
   token, URLs with a user name or password and URLs with a credential or session parameter (such as `?token=`
   or `;jsessionid=`) are not remembered. *Tools > Clear Input History...* forgets it.
+- **Retrieval evaluation** (`llm-cli ditto eval --kind retrieval`): 42 German and English searches
+  (cross-lingual questions, identifiers such as `GGML_CUDA`, answers deep inside a large table or script, the
+  last lines of failed builds and Ditto's own search strings, unrelated questions) against a corpus of 30
+  framework and SDK documentation excerpts (`evals/retrieval/`). The corpus is indexed into a temporary
+  knowledge base with the configured local embedding model: no AI model is needed and your own knowledge base
+  is not touched. The report gives hit@1, hit@3, MRR, how often an unrelated
+  question gets no excerpt, figures per tag and the search latency; it works offline once the embedding model
+  is downloaded. A manual and nightly CI workflow runs it with cached models. Baseline with the default CPU
+  embedding model on the 34 questions: hit@1 83 %, hit@3 97 %, MRR 0.91; all 4 unrelated questions still get
+  excerpts.
+- **Reranking of knowledge-base results**: a local multilingual cross-encoder (FastEmbed/ONNX, about 120 MB,
+  downloaded on first use, never in offline mode) reads the question together with each candidate and drops
+  the ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build recommendations
+  use it. Settings: `rag_reranker` (`auto`: from 6 GB RAM, the larger bge-reranker-v2-m3 with CUDA and 16 GB;
+  `off`; or a model id), `rag_rerank_min_score` and
+  `rag_rerank_default` (also rerank chat and MCP searches; off). A reranker that cannot run is logged and the
+  search keeps its order. `llm-cli ditto eval --kind retrieval --rag-variant rerank` grades it: on the 34
+  questions hit@1 93 % and MRR 0.97 (hybrid search: 87 % and 0.93), and all 4 unrelated questions get no
+  excerpt (floor 0.2: relevant excerpts scored 0.80 or more, unrelated ones 0.009 or less). It takes about
+  1 s for 12 candidates and 2-2.6 s for 20 on a shared 4-core CPU and gained less than the 0.05 MRR required
+  for chat, so chat stays without it by default. Build-log analysis and module proposals keep the hybrid order:
+  on the last lines of failed builds the reranker found the relevant excerpt within 3 in 2 of 6 cases (hybrid
+  search: 5 of 6) and dropped it below the floor in one, and for the module search string it dropped every
+  excerpt.
 
 - **Documentation in English and German** for every document (README, blueprint with design and roadmap, CLI
   usage, features, contributing, module developer guide, SSOT, changelog), checked by `tests/test_docs.py`:
@@ -91,6 +115,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The crawler's User-Agent reports the real framework version (it said 1.6.0).
 - Deep Ingest: a link that redirects to another host is skipped like any other external link; only a
   redirect of the start URL can move the crawl to another host.
+- **Keyword search understands identifiers**: `-DGGML_CUDA=ON`, `rknn_toolkit2` or `rknnToolkitLite` are also
+  found by their parts (`GGML_CUDA`, `rknn toolkit2`), and one- and two-word searches such as `E2041` or
+  `GGML_CUDA` use the keyword index. Identifier questions of the retrieval set: hit@3 83 % to 100 %, the rest
+  unchanged. Existing knowledge bases get their keyword index rebuilt from the stored text once, on first use
+  (documents and vectors are kept); older snapshots are rebuilt the same way when restored.
+- **Large code blocks and tables** beyond the embedding model's context (512 tokens for the default model) are
+  split at line boundaries, each piece with the table header or the code fence, so their later parts can be
+  found at all (answers deep inside such blocks: hit@1 50 % to 100 %). Smaller blocks stay whole. Re-import a
+  document to apply it.
+- **Ditto's knowledge excerpts fit the context**: they take at most a third of `chat_context_limit`; an excerpt
+  that does not fit is skipped and a too long first one is shortened at a line (an open code block is closed).
+- Knowledge-base models are unloaded after 10 minutes without use and loaded again on the next search
+  (setting `rag_model_idle_minutes`, 0 keeps them loaded). The time counts from the end of the last search or
+  import, never during one.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
@@ -99,6 +137,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The *Respect robots.txt* option of the Deep Ingest dialog and the setting `crawler_respect_robots`: robots.txt
   is a machine-readable opt-out like the others, so it is always honoured.
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
+
+### Fixed
+- The knowledge base works in offline mode once its models are downloaded: the downloaded BM25 keyword model
+  was never found while offline, so every import and search failed with "not in ... and offline mode is on".
 
 ### Security
 - Deep Ingest reads robots.txt as RFC 9309 describes it. Rules with `*` or `$` (such as `Disallow: /*.pdf$`), an

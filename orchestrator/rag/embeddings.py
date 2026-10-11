@@ -4,7 +4,8 @@ Local text embeddings for the knowledge base (FastEmbed on ONNX Runtime, no clou
 
 A small registry describes the dense models: dimension, context length, the prefixes the model was trained
 with and, for models FastEmbed does not ship, where the ONNX export lives. BM25 sparse vectors (FastEmbed
-"Qdrant/bm25"; Qdrant applies the IDF) complement them for exact keywords such as error codes and flags.
+"Qdrant/bm25"; Qdrant applies the IDF) complement them for exact keywords such as error codes and flags;
+identifiers such as -DGGML_CUDA=ON or rknn_toolkit2 also count by their parts.
 Models are cached under the framework's models directory. In offline mode nothing is downloaded.
 """
 
@@ -14,7 +15,7 @@ import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Iterable, List, Literal, Optional, Protocol, Sequence, Tuple, runtime_checkable
+from typing import Callable, Dict, Iterable, List, Literal, Optional, Protocol, Sequence, Tuple, runtime_checkable
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict
@@ -26,6 +27,9 @@ from orchestrator.utils.helpers import redact_secrets
 # so chunks sized with it stay below the model's context.
 CHARS_PER_TOKEN = 3.0
 SPARSE_MODEL = "Qdrant/bm25"
+# The keyword encoding stored with each collection: FastEmbed's BM25 over the text plus the split forms of its
+# identifiers. A collection of another encoding is re-encoded, never mixed.
+SPARSE_ENCODING = "Qdrant/bm25+ids1"
 # One stemmer for every document keeps query and document tokens consistent; German words are stemmed
 # imperfectly but identically on both sides, and German stop words get a low IDF anyway.
 BM25_LANGUAGE = "english"
@@ -145,9 +149,9 @@ def resolve_spec(model_id: str) -> EmbeddingModelSpec:
                          "or a model listed by fastembed.TextEmbedding.list_supported_models().")
 
 
-def recommend_model(providers: Optional[Sequence[str]] = None,
-                    total_ram_gb: Optional[float] = None) -> Tuple[str, str]:
-    """Picks a model for this machine and says why."""
+def machine_resources(providers: Optional[Sequence[str]] = None,
+                      total_ram_gb: Optional[float] = None) -> Tuple[Sequence[str], float]:
+    """ONNX Runtime execution providers and total RAM in GB, unless the caller knows them."""
     if providers is None:
         try:
             import onnxruntime
@@ -160,6 +164,13 @@ def recommend_model(providers: Optional[Sequence[str]] = None,
             total_ram_gb = psutil.virtual_memory().total / 2 ** 30
         except Exception:
             total_ram_gb = 0.0
+    return providers, total_ram_gb
+
+
+def recommend_model(providers: Optional[Sequence[str]] = None,
+                    total_ram_gb: Optional[float] = None) -> Tuple[str, str]:
+    """Picks a model for this machine and says why."""
+    providers, total_ram_gb = machine_resources(providers, total_ram_gb)
     cuda = "CUDAExecutionProvider" in providers
     if cuda and total_ram_gb >= 8:
         return DEFAULT_GPU_MODEL, (f"CUDA is available to ONNX Runtime and {total_ram_gb:.0f} GB RAM: "
@@ -213,6 +224,8 @@ def _quiet_fastembed() -> None:
 
 
 class _FastEmbedBase:
+    kind = "embedding model"  # for messages
+
     def __init__(self, cache_dir: Path, offline: Callable[[], bool], size_gb: float):
         self.cache_dir = Path(cache_dir)
         self._offline = offline
@@ -242,15 +255,31 @@ class _FastEmbedBase:
             except Exception as e:
                 if offline:
                     raise EmbeddingModelNotCached(
-                        f"The embedding model {self.model_id} is not in {self.cache_dir} and offline mode is on. "
+                        f"The {self.kind} {self.model_name} is not in {self.cache_dir} and offline mode is on. "
                         f"Turn offline mode off once to download it (about {self._size_gb:.2f} GB).") from e
-                raise EmbeddingError(f"Could not load the embedding model {self.model_id}: "
+                raise EmbeddingError(f"Could not load the {self.kind} {self.model_name}: "
                                      f"{redact_secrets(str(e))}") from e
             return self._model
+
+    @property
+    def model_name(self) -> str:
+        """The model's FastEmbed name."""
+        return self.model_id
 
     def prepare(self) -> None:
         """Downloads (unless offline) and loads the model now instead of on first use."""
         self._load()
+
+    def release(self) -> bool:
+        """Frees the model's memory; the next use loads it again (a call in progress keeps its reference).
+        True if a model was loaded."""
+        with self._lock:
+            loaded, self._model = self._model is not None, None
+            self._released()
+        return loaded
+
+    def _released(self) -> None:
+        """Drops what belongs to the released model (called under the lock)."""
 
 
 class FastEmbedDenseEmbedder(_FastEmbedBase):
@@ -277,6 +306,9 @@ class FastEmbedDenseEmbedder(_FastEmbedBase):
         self._tokenizer = _untruncated_tokenizer(model)
         return model
 
+    def _released(self) -> None:
+        self._tokenizer = None
+
     @property
     def _prefixed(self) -> bool:
         return bool(self.spec.query_prefix or self.spec.passage_prefix)
@@ -285,9 +317,10 @@ class FastEmbedDenseEmbedder(_FastEmbedBase):
         if not text:
             return 0
         self._load()
-        if self._tokenizer is None:
+        tokenizer = self._tokenizer  # read once: release() may drop it at any time
+        if tokenizer is None:
             return approx_tokens(text)
-        return len(self._tokenizer.encode(text, add_special_tokens=False).ids)
+        return len(tokenizer.encode(text, add_special_tokens=False).ids)
 
     def embed_passages(self, texts: Sequence[str]) -> List[List[float]]:
         texts = list(texts)
@@ -316,31 +349,73 @@ class FastEmbedDenseEmbedder(_FastEmbedBase):
 
 
 class FastEmbedSparseEmbedder(_FastEmbedBase):
-    """BM25 term weights with FastEmbed; the collection's sparse vector must use Modifier.IDF."""
+    """BM25 term weights with FastEmbed over the text plus its split identifiers (expand_identifiers); the
+    collection's sparse vector must use Modifier.IDF. model_id names the encoding (SPARSE_ENCODING)."""
 
     BATCH_SIZE = 64
 
     def __init__(self, cache_dir: Path, offline: Callable[[], bool] = lambda: False, language: str = BM25_LANGUAGE,
                  model_dir: Optional[Path] = None):
         super().__init__(cache_dir, offline, 0.01)
-        self.model_id = SPARSE_MODEL
+        self.model_id = SPARSE_ENCODING
         self.language = language
         self._model_dir = model_dir  # a local copy of the stop word files, used instead of the cache
 
     def _create(self, offline: bool):
         from fastembed import SparseTextEmbedding
-        extra = {"specific_model_path": str(self._model_dir)} if self._model_dir else {}
+        model_dir = self._model_dir or (self._cached_copy() if offline else None)
+        extra = {"specific_model_path": str(model_dir)} if model_dir else {}
         return SparseTextEmbedding(model_name=SPARSE_MODEL, cache_dir=str(self.cache_dir),
                                    local_files_only=offline, language=self.language, **extra)
 
+    def _cached_copy(self) -> Optional[Path]:
+        """The folder of the downloaded stop word file. FastEmbed 0.8.1 checks its cache for a model file that
+        BM25 does not have, so offline it never finds a downloaded copy by itself (and the copy is a partial
+        snapshot, which huggingface_hub's offline snapshot lookup refuses)."""
+        try:
+            from huggingface_hub import try_to_load_from_cache
+            found = try_to_load_from_cache(SPARSE_MODEL, f"{self.language}.txt", cache_dir=str(self.cache_dir))
+        except Exception:
+            return None
+        return Path(found).parent if isinstance(found, str) else None  # else not downloaded: FastEmbed reports it
+
+    @property
+    def model_name(self) -> str:
+        return SPARSE_MODEL
+
     def embed_passages(self, texts: Sequence[str]) -> List[SparseVec]:
-        texts = list(texts)
+        texts = [expand_identifiers(t) for t in texts]
         if not texts:
             return []
         return [_sparse(e) for e in self._load().embed(texts, batch_size=self.BATCH_SIZE)]
 
     def embed_query(self, text: str) -> SparseVec:
-        return _sparse(next(iter(self._load().query_embed(text))))
+        return _sparse(next(iter(self._load().query_embed(expand_identifiers(text)))))
+
+
+# FastEmbed's BM25 tokenizer keeps \w runs whole: "-DGGML_CUDA=ON" becomes "dggml_cuda", so a search for
+# GGML_CUDA or "ggml cuda" misses it; snake_case and camelCase names stay one token. Their parts are added.
+_WORD = re.compile(r"\w+")
+_CMAKE_DEFINE = re.compile(r"D(?=[A-Z][A-Z0-9]*(?:_|$))")
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z]{2})")  # not plurals such as GPUs
+
+
+def expand_identifiers(text: str) -> str:
+    """The text plus the split forms of its identifiers, for the BM25 input only (the dense input and the
+    stored content stay as they are): -DGGML_CUDA=ON adds GGML_CUDA GGML CUDA, rknn_toolkit2 adds rknn toolkit2,
+    rknnToolkitLite adds rknn Toolkit Lite. Each form is added once."""
+    added: Dict[str, None] = {}
+    for match in _WORD.finditer(text or ""):
+        word = match.group()
+        start = match.start()
+        if start and text[start - 1] == "-" and _CMAKE_DEFINE.match(word):
+            word = word[1:]  # a CMake definition: -DNAME=VALUE
+            added.setdefault(word, None)
+        parts = [p for p in _CAMEL.sub("_", word).split("_") if p]
+        if len(parts) > 1:
+            for part in parts:
+                added.setdefault(part, None)
+    return f"{text}\n{' '.join(added)}" if added else text
 
 
 def _sparse(embedding) -> SparseVec:

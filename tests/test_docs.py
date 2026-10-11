@@ -58,6 +58,12 @@ RETIRED_DOCUMENTS: Dict[str, str] = {
 EXCEPTIONS: Dict[str, str] = {
     # The license is legally binding in its original wording; a translation would be a second license text.
     "LICENSE*": "license text, English original only",
+    # Notices for adapted third-party code carry those projects' license texts, which bind in their original
+    # wording for the same reason.
+    "THIRD_PARTY_NOTICES*": "third-party license notices, English original only",
+    # The retrieval evaluation searches a fixed corpus of documentation excerpts (llm-cli ditto eval --kind
+    # retrieval); each excerpt is test data in the language it was written in, and its cases depend on that.
+    "evals/retrieval/corpus/*": "fixture corpus of the retrieval evaluation (test data)",
     # Dated working notes for the next session (German only by design, see the note at their top); they record
     # a state of work and are not product documentation.
     "handover/*": "internal handover notes, not product documentation",

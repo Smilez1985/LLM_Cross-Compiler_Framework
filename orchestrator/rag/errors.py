@@ -12,3 +12,7 @@ class EmbeddingError(KnowledgeBaseError):
 
 class EmbeddingModelNotCached(EmbeddingError):
     """Offline mode is on and the embedding model has not been downloaded yet."""
+
+
+class SparseEncodingMismatch(KnowledgeBaseError):
+    """The collection's keyword vectors use another encoding; they must be re-encoded, never mixed."""
