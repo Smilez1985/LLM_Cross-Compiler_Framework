@@ -513,6 +513,11 @@ When a version is released, its done items leave the roadmap and appear in the c
 | **Removal of the `claude_code` provider.** Anthropic does not allow third-party apps to use Claude subscription logins. Claude subscribers use the framework from Claude Code or Claude Desktop through the MCP server (`llm-cli mcp config` prints the setup), or give Ditto an Anthropic API key; Max and Team plans include monthly API credits. | in progress |
 | **Hardened headless Docker image** for the CLI and the MCP server, with a working compose file and Makefile targets; replaces the broken `Docker Setup/`. | in progress |
 | **Documentation in English and German** for every document. | in progress |
+| **Crawler that checks the site's own signals.** A user cannot know whether a site may be evaluated, so the crawler checks the machine-readable opt-outs itself (robots.txt, the `X-Robots-Tag` header, robots meta tags including "noai", the TDM Reservation Protocol) and skips reserved pages, naming them in the log. Instead of a legal confirmation, a one-time notice explains what is read and kept, with a spoken announcement (the technique of the rag4ll USB watcher); a Stop button keeps what was collected, the progress shows "page N of M", the result says success, partial or failure honestly, and the crawler reports its real version. | in progress |
+| **Input history**: recent models, targets, URLs, devices and datasets offered in the GUI fields, per user, without secrets. | in progress |
+| **Better answers from the knowledge base**, taken from rag4ll and kept small: reranking with a cross-encoder on the CPU, a relevance floor that keeps unrelated excerpts out of Ditto's prompt, a size budget for the excerpts, splitting of oversized code and table blocks, and keyword search that understands identifiers such as `-DGGML_CUDA=ON`; measured with retrieval cases in the Ditto evaluation. | in progress |
+| **Community packs with real cryptography**: public packs signed with Ed25519, private packs encrypted to the recipients' keys (X25519 with ChaCha20-Poly1305) or a passphrase. The XOR "SwarmCipher" upload and its GitHub token prompt are removed; the framework never asks for a token. | in progress |
+| **Model zoo from the community**: recipes (model, target, format, quantization, toolchain image and verified hashes) made with the template wizard and contributed by pull request; a signed index, installation with quarantine and trust levels, `llm-cli zoo` and the Community Hub. | in progress |
 
 Sign-in per access type, as designed:
 
@@ -560,7 +565,6 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 
 | Item | Status |
 |---|---|
-| **Signed community knowledge packs** (Ed25519) with review in pull requests and quarantine, replacing the XOR "SwarmCipher". | planned |
 | **Trivy** pinned by digest, without the Docker socket. | planned |
 | **Pinning inside images**: base images by digest, hashed lock files per venv, llama.cpp by commit. | planned |
 | **CycloneDX SBOM** and artifact provenance. | planned |
@@ -573,6 +577,9 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 ### Later (planned)
 
 - **More hardware** through a contribution kit: Hailo, Qualcomm, Intel NPU, NVIDIA Jetson.
+- **Builds on a GPU machine you provide** (rented or your own): the framework offers the connections (SSH to
+  your host, provider APIs with your own key); it does not rent, start or bill machines.
+- **Crawls of large documentation sites with resume**: continue a stopped crawl later instead of only a page limit.
 - **Sign-in methods that need registrations**: AWS IAM Identity Center with an own registered client, GitHub
   Copilot through an own GitHub App, Gemini with the user's own OAuth client.
 - **MCP Apps UI.**
