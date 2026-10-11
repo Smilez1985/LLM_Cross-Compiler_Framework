@@ -103,12 +103,14 @@ A build runs these steps; each one is logged:
 
 Further behaviour:
 
-- **Cancel:** cancelling (Ctrl+C in the CLI, the GUI, or the `cancel_build` tool) stops the running container,
-  including a running security scan or image build, and a later step can never undo it.
+- **Cancel:** the `cancel_build` tool (Ditto in the GUI chat, or an MCP client, for builds of its own process)
+  stops the running container, including a running security scan or image build, and a later step can never undo
+  it. The GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not cancel (see
+  [Known gaps](#known-gaps)).
 - **Timeouts:** each container step has a time limit (setting `build_timeout`, default 3600 s); only a real time-out
   counts as one.
 - **Output folder:** CLI builds go to `output/build_<date>_<time>/<target>/<model>/<quantization>/` in the
-  installation (or the folder given with `-o`), builds started by Ditto or MCP clients to
+  installation (or the folder given with `-o`), builds started in the GUI, by Ditto or by MCP clients to
   `output/<target>/<model>/<quantization>/`.
 
 ---
@@ -173,8 +175,9 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   build with several weight files is refused.
 - **On the board:** the package goes into a private temporary folder (`mktemp -d`), `deploy.sh` checks every
   checksum with `sha256sum -c`, copies the model to `~/models` (or `$MODEL_DIR`) and the temporary folder is
-  removed. For GGUF it prints a `llama-server` command line that listens on 127.0.0.1 and warns never to expose the
-  server without a key.
+  removed. For GGUF, if `llama-server` is installed on the board, it prints a `llama-server` command line that
+  listens on 127.0.0.1 and warns never to expose the server without a key; otherwise it says to install llama.cpp.
+  For RKLLM it names the RKLLM runtime.
 - **Docker mode** (`--docker`, GUI option): also packs container images and starts them on the board. This mode
   is experimental and not verified in this version.
 
@@ -213,7 +216,7 @@ are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what 
 | `openrouter` | OpenRouter | cloud | API key (`openrouter_api_key`) |
 | `ollama` | Ollama | local (base URL configurable) | none |
 | `local` | managed llama-server | local | per-start key, handled for you |
-| `custom` | any OpenAI-compatible server | decided from the address: loopback, private networks and `.local`/`.lan` names count as local | API key (`custom_api_key`) or none |
+| `custom` | any OpenAI-compatible server | decided from the address: loopback, private and link-local addresses and names ending in `.local`, `.lan`, `.localhost` or `.home.arpa` count as local | API key (`custom_api_key`) or none |
 
 - Cloud providers have fixed addresses; a base URL left over from Ollama or a custom server never receives their key.
 - The model list in the settings is loaded live from the provider; any model name can also be typed.
@@ -343,10 +346,10 @@ llm-cli ditto eval --tier small --tier small-q2 --effort low --json eval.json
 llm-cli ditto eval --kind chat --repeat 3 --min-pass 0.8
 ```
 
-With `--tier` the CLI starts the managed local server with each tier in turn and stops it at the end. The report
-shows the passed share per run, per kind and the average time per case; `--json` adds the setup (provider, model per
-task, effort, framework version, sha256 of the cases file) and every answer. Cloud providers bill about 20 requests
-per run and repeat. All options: [CLI_Usage.md](CLI_Usage.md#ditto-eval).
+With `--tier` the CLI starts the managed local server with each tier in turn and stops it after each tier. The
+report shows the passed share per run, per kind and the average time per case; `--json` adds the setup (provider,
+model per task, effort, framework version, sha256 of the cases file) and every answer. Cloud providers bill about 20
+requests per run and repeat. All options: [CLI_Usage.md](CLI_Usage.md#ditto-eval).
 
 **First measurement** (for context, not a benchmark): on a CPU-only machine with Qwen3.5 2B, effort `low` (thinking
 off) and the prompts of that time, the 2-bit tier `small-q2` passed 42% of the 19 cases and the 4-bit tier `small`
@@ -550,7 +553,7 @@ processes cannot fork the chain.
   SSH key and `known_hosts`, MCP token, chat history, secrets, knowledge base and snapshots, local runtime, and two
   random values per installation (one for the privacy placeholders, one as an anonymous cache ID for OpenAI).
 - **Settings** are never read from the working directory: `LLM_FRAMEWORK_CONFIG_DIR`, then `configs/` in the
-  installation, then the personal folder.
+  installation if you may write there, then the personal folder.
 
 ---
 
@@ -588,8 +591,9 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key) |
 | Data | shipped calibration data intact (checksums) |
 
-`--fix` applies the automatic fixes up to `--tier` (1: permissions and folders; 2: also dangling framework images and
-the Docker build cache) and checks again. Exit codes: 0 OK, 1 warnings, 2 errors; `--json` for scripts.
+`--fix` applies the automatic fixes up to `--tier` (1: makes the personal folder private; 2: also removes dangling
+framework images and the Docker build cache) and checks again. Exit codes: 0 OK, 1 warnings, 2 errors; `--json`
+for scripts.
 
 ---
 
@@ -622,12 +626,14 @@ or user name go into `.git/info/secret-patterns`, which is never committed. Find
 
 What does not work yet, so you are not surprised:
 
-- **Docker setup of the framework itself:** `Docker Setup/` and `make build`, `make up`, `make gui`,
-  `make test-container` do not work (`orchestrator/Dockerfile` does not exist). A hardened headless image for the
-  CLI and the MCP server is being built. Conversions are not affected.
+- **Docker setup of the framework itself:** `Docker Setup/` and `make setup`, `make build`, `make up`, `make gui`,
+  `make test-container` do not work (`scripts/setup_linux.sh` and `orchestrator/Dockerfile` do not exist). A
+  hardened headless image for the CLI and the MCP server is being built. Conversions are not affected.
 - **Windows hosts:** conversions on a Windows host are not verified.
 - **Build status across processes:** builds live in the process that started them; `llm-cli build status` in
   another process does not see them.
+- **Cancelling:** the GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not stop the build (the
+  CLI waits until it has ended); only the `cancel_build` tool cancels.
 - **Sign-in per provider:** not available yet; Ditto uses API keys.
 - **Device runtime:** the framework does not install a runtime on the board.
 - **GUI:** the Auto-Tuning and Models tabs are placeholders; the local runtime is controlled from the CLI only.

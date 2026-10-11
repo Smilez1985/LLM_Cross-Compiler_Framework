@@ -70,7 +70,7 @@ llm-cli [OPTIONS] COMMAND [ARGS]...
 | Option | Meaning |
 |---|---|
 | `--version` | Print the version and exit. |
-| `-c, --config PATH` | Use this settings file (YAML or JSON, must exist). Its values override the saved settings, and its folder is used as the settings folder for this run. |
+| `-c, --config PATH` | Use this settings file (YAML or JSON, must exist). Its folder becomes the settings folder for this run (a `config.yml` there is read as well), and the file's own values win over it. The usual settings folder is not read then. |
 | `-v, --verbose` | Log level `DEBUG`. |
 | `-q, --quiet` | Log level `ERROR` and no start banner. |
 | `--log-level [DEBUG\|INFO\|WARNING\|ERROR]` | Log level (default `INFO`). |
@@ -78,8 +78,9 @@ llm-cli [OPTIONS] COMMAND [ARGS]...
 
 Global options go before the command: `llm-cli -q doctor`, not `llm-cli doctor -q`.
 
-**Output:** the start banner and log messages go to stderr; results go to stdout. For `llm-cli ditto ask` only the
-answer goes to stdout, and for `llm-cli mcp serve` stdout carries the MCP protocol.
+**Output:** the start banner and log messages go to stderr; results go to stdout, and so do most messages a
+command prints itself, including its error messages. For `llm-cli ditto ask` only the answer goes to stdout, and for
+`llm-cli mcp serve` stdout carries the MCP protocol.
 
 **Exit codes:**
 
@@ -87,11 +88,12 @@ answer goes to stdout, and for `llm-cli mcp serve` stdout carries the MCP protoc
 |---|---|
 | 0 | Success |
 | 1 | The command failed (for example a failed build, a failed deployment, a damaged audit log, an AI error) |
-| 2 | Invalid input: unknown option, an unsupported format/board/quantization combination, an unknown provider or model tier |
-| 130 | `build start` was interrupted with Ctrl+C |
+| 2 | Invalid input: unknown option, an unsupported format/board/quantization combination, an unknown provider (`--provider`), an unknown model tier (`ditto models download`) |
+| 130 | `build start` was interrupted with Ctrl+C (the CLI exits only after the build has ended) |
 
 `llm-cli doctor` uses 0 (OK), 1 (warnings) and 2 (errors); `llm-cli ditto eval --min-pass` returns 1 when a run
-stays below the given share.
+stays below the given share. A few commands report a failure but still exit with 0 (see
+[Known limitations](#known-limitations)).
 
 ---
 
@@ -103,7 +105,7 @@ stays below the given share.
 | `targets list` / `targets validate` | List hardware targets / check that a target can be loaded |
 | `build start` / `build status` | Convert and quantize a model / show the builds of this process |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
-| `ditto setup` | Set the tool permissions (the same dialog as on the GUI's first start) |
+| `ditto setup` | Set the tool permissions (the same choices as the GUI's first-start dialog) |
 | `ditto ask` | Ask Ditto one question |
 | `ditto eval` | Grade Ditto on fixed test cases |
 | `ditto runtime install/start/status/stop` | The managed local model server (llama.cpp) for offline mode |
@@ -132,7 +134,7 @@ permissions, the audit log and the shipped calibration data. Each finding comes 
 |---|---|
 | `--json` | Machine-readable output (findings, fixes, exit code). |
 | `--fix` | Apply the automatic fixes up to `--tier`, then check again. |
-| `--tier INTEGER RANGE` | `1` (default): harmless fixes (permissions, folders). `2`: also removes caches (dangling framework images and the Docker build cache). |
+| `--tier INTEGER RANGE` | `1` (default): harmless fixes (the help says "permissions, folders"; in this version that is making the personal folder private). `2`: also removes caches (dangling framework images and the Docker build cache). |
 
 Disk space: below 20 GB free is a warning, below 5 GB an error.
 
@@ -189,7 +191,7 @@ quantization are filled with the target's defaults.
 | Option | Meaning |
 |---|---|
 | `-m, --model TEXT` | **Required.** Hugging Face ID (e.g. `HuggingFaceTB/SmolLM2-135M-Instruct`) or a local folder or file. |
-| `-t, --target TEXT` | **Required.** Target folder name in `targets/`, e.g. `Rockchip`. |
+| `-t, --target TEXT` | **Required.** Target folder name in `targets/`, e.g. `Rockchip` (case-sensitive; check it with `targets validate`). |
 | `-f, --format [gguf\|rkllm\|onnx\|tflite\|pytorch_mobile\|rknn\|tensorrt\|openvino\|coreml\|ncnn\|mnn]` | Output format (default `gguf`). The list is longer than what any target supports; Rockchip accepts `gguf`, `rkllm` and `rknn`. |
 | `-b, --board TEXT` | Board of the target family, e.g. `rk3588`, `rk3576`, `rk3566`. Default: the target's default board (Rockchip: `rk3588`). Not case-sensitive. |
 | `-q, --quantization TEXT` | Quantization, e.g. `Q4_K_M`, `IQ4_XS`, `F16` (GGUF), `w8a8`, `w4a16` (RKLLM), `fp16`, `i8` (RKNN). Default: the format's default for the board. Common spellings such as `INT8` are translated. |
@@ -198,13 +200,14 @@ quantization are filled with the target's defaults.
 | `--priority [low\|normal\|high\|urgent\|critical]` | Position in this process's build queue (default `normal`). |
 | `--parallel` | Has no effect in this version (it is always on, and one call runs one build). |
 | `-F, --follow` | Print each stage while the build runs. |
-| `--gpu / --no-gpu` | Pass the host's NVIDIA GPU into the container (default off; needs `nvidia-smi` on the host). Rockchip conversions do not need it. |
+| `--gpu / --no-gpu` | Pass the host's GPU into the container (default off): an NVIDIA GPU when `nvidia-smi` is found, otherwise `/dev/dri` if it exists. Rockchip conversions do not need it. |
 | `--imatrix / --no-imatrix` | Importance matrix for GGUF (default off). Required for `IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`. |
 | `--dataset PATH` | Your own calibration file (must exist): a text file for the GGUF importance matrix or for RKLLM, a list of sample inputs for RKNN `i8`. Without it, the importance matrix uses the shipped calibration text. |
 
 Behaviour:
 
-- The command stays in the foreground until the build has finished. Ctrl+C cancels the build (exit code 130).
+- The command stays in the foreground until the build has finished. Ctrl+C does not cancel the build in this
+  version: the CLI stops showing progress but waits until the build has ended, then exits with code 130.
 - If the build fails with a known problem and a fix the framework can apply itself, the CLI shows the cause and
   asks "Apply this fix and retry the build?". Without a terminal the proposal is dismissed. Manual steps are only
   shown.
@@ -298,11 +301,11 @@ llm-cli deploy run PACKAGE_PATH --ip IP --user USER [--port 22] [--password TEXT
 
 Uploads a package over SSH to a private temporary folder on the board, runs `deploy.sh` there and removes the
 folder. `deploy.sh` checks the checksums and copies the model to `~/models` (or `$MODEL_DIR`); for GGUF it prints
-a matching `llama-server` command.
+a matching `llama-server` command if `llama-server` is installed on the board.
 
 | Argument / option | Meaning |
 |---|---|
-| `PACKAGE_PATH` | The ZIP file from `deploy package` (must exist). |
+| `PACKAGE_PATH` | The ZIP file from `deploy package`, which prints its full path (must exist). |
 | `--ip TEXT` | **Required.** The board's IP address. |
 | `--user TEXT` | **Required.** User on the board. |
 | `--port INTEGER` | SSH port (default 22). |
@@ -396,7 +399,8 @@ How it works: [Features.md](Features.md#ditto-evaluation).
 | `--effort [low\|medium\|high]` | Effort for this run (local models: `low` = no thinking). Default: AI settings. |
 
 With `--tier`, the local runtime must be installed and the tier's model downloaded. The CLI starts `llama-server`
-with each tier in turn and **stops the local server at the end**, also one that was running before.
+with each tier in turn and **stops the local server after each tier**, so a server that was running before is
+stopped as well.
 
 ```bash
 # Compare the 2B model at 4 and 2 bits on this machine, without thinking
@@ -766,7 +770,12 @@ Needs a GitHub token: `llm-cli secrets set github_token` (the value is asked).
 ## Known limitations
 
 - `build status` only sees builds of its own process (see [build status](#build-status)).
+- Ctrl+C in `build start` does not cancel the build; the CLI waits until it has ended.
+- `build start` with an unknown target name (or the wrong case, such as `rockchip`) is not rejected: it prints
+  "Target '...' not found. Skipping.", builds nothing and exits with code 0.
 - `build start --parallel` and `--optimization` have no effect on Rockchip builds.
+- `deploy package`, `secrets set` and `scan` print a failure ("Package generation failed", "Failed to store
+  secret", "output file was not created") but exit with code 0; check the output in scripts.
 - `scan --output` does not change where the probe writes.
 - `module create` writes to `targets/` of the current folder.
 - `config show` shows only the CLI's base settings; `config repos --add` does not reach builds.
