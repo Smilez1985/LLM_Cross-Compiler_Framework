@@ -406,6 +406,38 @@ So läuft eine Frage mit Tools ab:
    Aufruf wird dem Modell gemeldet, das angewiesen ist, denselben Aufruf nicht zu wiederholen.
 4. Nach höchstens 8 Modell-Turns pro Frage hört Ditto auf und sagt das.
 
+**Wie Namen und Werte abgeglichen werden** (gleich für Ditto und jeden MCP-Client, egal wie groß das Modell ist):
+
+- Ein Tool-Name läuft, wenn er genau stimmt oder derselbe Name in anderer Groß- und Kleinschreibung oder mit `_`,
+  `-`, `.` oder Leerzeichen an anderer Stelle ist (`StartBuild` startet `start_build`, mit einem Hinweis). Jeder
+  andere Name wird abgelehnt, mit bis zu drei Vorschlägen aus den Tools, die deine Berechtigungen erlauben; ein
+  Vorschlag läuft nie von selbst.
+- Argumentnamen: Aliasse, die ein Tool angibt (`quant` und `quantization_type` für `quantization`, `repo` und
+  `repo_id` für `model`), und Schlüssel, die sich nur in Groß- und Kleinschreibung oder in `-` statt `_`
+  unterscheiden, werden umbenannt, mit einem Hinweis. Jedes andere unbekannte Argument wird mit der Liste der
+  gültigen abgelehnt; nichts wird stillschweigend weggelassen. Zwei Schlüssel für ein Feld mit verschiedenen Werten
+  werden abgelehnt.
+- Werte: Zahlen und Ja/Nein als Text sowie Listen als JSON-Text werden als solche gelesen. Targets, Formate, Boards
+  und Quantisierungstypen passen genau, über Groß- und Kleinschreibung und Trennzeichen, wenn das genau einen Wert
+  meint (`q4-k-m` ist `Q4_K_M`; ein Target-Name, der zwei Targets meinen könnte, wird mit beiden abgelehnt), oder
+  über einen Alias, den das Target angibt (`Q4` für GGUF). Ein knapp danebenliegender Wert (`rk3567`) wird mit
+  Vorschlägen abgelehnt, nie korrigiert. Eine Anzahl von Zeilen oder Ergebnissen über dem Höchstwert wird gekürzt,
+  mit einem Hinweis.
+- Nie geändert: IDs (nur Leerzeichen um sie herum werden entfernt), Modellnamen und Pfade, Commits und Hashes sowie
+  `approve`, das ein echtes `true` oder `false` sein muss.
+- Jede Ablehnung und jeder Fehler trägt einen Grundcode (zum Beispiel `unknown_argument`, `unknown_id`,
+  `not_supported`, `permission_denied`, `needs_person`, `declined`) und den nächsten Schritt. Derselbe
+  fehlschlagende Aufruf sagt beim zweiten Mal in einer Sitzung, dass er schon gescheitert ist; beim dritten Mal wird
+  er abgelehnt, ohne zu laufen („versuche diesen Aufruf nicht mehr, sag dem Benutzer warum“), und nach drei
+  Eingabefehlern in einer Sitzung zeigt ein Fehler zusätzlich einen gültigen Beispielaufruf.
+- Was repariert wurde, ist in der Bestätigungsfrage markiert, in den `notes` des Ergebnisses aufgeführt und im
+  Audit-Log festgehalten (`name_requested`, `repairs`). Dittos Bestätigung zeigt genau die Frage des Frameworks.
+- MCP-Clients bekommen das eigene geschlossene Eingabeschema jedes Tools (`additionalProperties: false`), dasselbe,
+  das Dittos Modell sieht.
+- Tool-Argumente, die ein lokales Modell mit Codeblock-Zäunen oder in Python-Schreibweise schickt (einfache
+  Anführungszeichen, `True`, `None`, ein Komma am Ende), werden einmal als solche gelesen; alles andere bleibt ein
+  Fehler.
+
 Dittos Prompts weisen es an, vor einem Build die Capabilities des Targets zu prüfen, Builds nur zu starten oder
 abzubrechen, wenn du im Gespräch darum gebeten hast, über Self-Healing nur mit deiner ausdrücklichen Entscheidung zu
 entscheiden, Fragen zu Targets und Builds aus den Tools statt aus dem Gedächtnis zu beantworten und nur zu berichten,
@@ -446,7 +478,10 @@ llm-cli ditto eval --kind chat --repeat 3 --min-pass 0.8
 Mit `--tier` startet die CLI den verwalteten lokalen Server nacheinander mit jeder Stufe und stoppt ihn nach jeder
 Stufe. Der Bericht zeigt den bestandenen Anteil pro Lauf, pro Art und die durchschnittliche Zeit pro Fall; `--json`
 ergänzt die Einrichtung (Anbieter, Modell pro Aufgabe, Aufwand, Framework-Version, sha256 der Fall-Datei) und jede
-Antwort. Cloud-Anbieter berechnen etwa 20 Anfragen pro Lauf und Wiederholung. Alle Optionen:
+Antwort, und bei Chat-Fällen jeden Tool-Aufruf, den das Modell versucht hat (auch abgelehnte: unbekannte Namen,
+ungültige Argumente, Verweigerungen, Ablehnungen wiederholter Aufrufe), mit einer Zusammenfassung `tool_use`:
+Tool-Aufrufe pro Aufgabe, der Anteil fehlerhafter Aufrufe und unbekannter Tool-Namen, die Reparaturen des Frameworks
+und die Ablehnungen wiederholter Aufrufe. Cloud-Anbieter berechnen etwa 20 Anfragen pro Lauf und Wiederholung. Alle Optionen:
 [CLI_Usage_DE.md](CLI_Usage_DE.md#ditto-eval).
 
 **Erste Messung** (zur Einordnung, kein Benchmark): Auf einem Rechner nur mit CPU, mit Qwen3.5 2B, Aufwand `low`
@@ -806,8 +841,9 @@ bereit (offizielles Python-SDK `mcp` 2.3.0, Spezifikation 2026-07-28). KI-Client
 VS Code können dann [dieselben Tools wie Ditto](#dittos-tools) nutzen. Am Client meldest du dich mit deinem eigenen
 Konto oder Schlüssel an; das Framework sieht das nie.
 
-- **Jeder Aufruf läuft durch die Tool-Registry:** Eingabeschema, deine Berechtigungen, Bestätigung, Audit-Log
-  (Akteur `mcp`). Tool-Annotationen (nur lesend, idempotent) sind nur Hinweise für den Client.
+- **Jeder Aufruf läuft durch die Tool-Registry:** Abgleich von Namen und Argumenten, Eingabeschema, deine
+  Berechtigungen, Bestätigung, Audit-Log (Akteur `mcp`), genau wie für Ditto ([wie Namen und Werte abgeglichen
+  werden](#dittos-tools)). Tool-Annotationen (nur lesend, idempotent) sind nur Hinweise für den Client.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine

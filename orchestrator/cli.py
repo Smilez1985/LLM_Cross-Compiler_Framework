@@ -401,8 +401,9 @@ def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional
 def _ditto_confirm(spec, inp) -> bool:
     """Asks before a tool call that needs confirmation; without a terminal the answer is no."""
     from orchestrator.tools.confirmation import CallTooLong, describe_call
+    from orchestrator.tools.registry import current_question
     try:
-        text = describe_call(spec, inp.model_dump(mode="json"), actor="Ditto")
+        text = current_question() or describe_call(spec, inp.model_dump(mode="json"), actor="Ditto")
     except CallTooLong as e:
         click.echo(str(e), err=True)
         return False

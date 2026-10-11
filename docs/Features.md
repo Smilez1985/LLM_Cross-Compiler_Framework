@@ -383,6 +383,32 @@ How a question with tools runs:
    told not to retry the same call.
 4. After at most 8 model turns per question Ditto stops and says so.
 
+**How names and values are matched** (the same for Ditto and every MCP client, whatever the model's size):
+
+- A tool name runs when it is exact, or the same name in other letter case or with `_`, `-`, `.` or spaces in
+  other places (`StartBuild` runs `start_build`, with a note). Any other name is refused with up to three
+  suggestions from the tools your permissions allow; a suggestion never runs by itself.
+- Argument names: aliases a tool declares (`quant` and `quantization_type` for `quantization`, `repo` and
+  `repo_id` for `model`) and keys that differ only in letter case or in `-` versus `_` are renamed, with a note.
+  Any other unknown argument is refused with the list of valid ones; nothing is dropped silently. Two keys for one
+  field with different values are refused.
+- Values: numbers and yes/no given as text, and lists given as JSON text, are read as such. Targets, formats,
+  boards and quantization types match exactly, by letter case and separators when that names exactly one value
+  (`q4-k-m` is `Q4_K_M`; a target name that could mean two targets is refused with both), or by an alias the
+  target declares (`Q4` for GGUF). A near miss (`rk3567`) is refused with suggestions, never corrected. A number of
+  lines or results above the maximum is reduced, with a note.
+- Never changed: ids (only spaces around them are removed), model names and paths, commits and hashes, and
+  `approve`, which must be a real `true` or `false`.
+- Every refusal and error carries a reason code (for example `unknown_argument`, `unknown_id`, `not_supported`,
+  `permission_denied`, `needs_person`, `declined`) and the next step. The same failing call a second time in a
+  session says so; a third time it is refused without running ("stop retrying this call, tell the user why"), and
+  after three input errors in a session an error also shows a valid example call.
+- What was repaired is marked in the confirmation question, listed in the result's `notes` and recorded in the
+  audit log (`name_requested`, `repairs`). Ditto's confirmation shows exactly the framework's question.
+- MCP clients get each tool's own closed input schema (`additionalProperties: false`), the one Ditto's model sees.
+- Tool arguments a local model sends with a code fence or in Python notation (single quotes, `True`, `None`, a
+  trailing comma) are read once more as such; anything else stays an error.
+
 Ditto's prompts tell it to check a target's capabilities before starting a build, to start or cancel builds only
 when you asked for it in the conversation, to decide on self-healing only with your explicit decision, to answer
 questions about targets and builds from the tools rather than from memory, and to report only what tools returned.
@@ -420,8 +446,10 @@ llm-cli ditto eval --kind chat --repeat 3 --min-pass 0.8
 
 With `--tier` the CLI starts the managed local server with each tier in turn and stops it after each tier. The
 report shows the passed share per run, per kind and the average time per case; `--json` adds the setup (provider,
-model per task, effort, framework version, sha256 of the cases file) and every answer. Cloud providers bill about 20
-requests per run and repeat. All options: [CLI_Usage.md](CLI_Usage.md#ditto-eval).
+model per task, effort, framework version, sha256 of the cases file) and every answer, and for chat cases every
+tool call the model attempted (also refused ones: unknown names, invalid arguments, denials, repeat refusals) with a
+`tool_use` summary: tool calls per task, the share of malformed calls and of unknown tool names, the repairs the
+framework applied and the repeat refusals. Cloud providers bill about 20 requests per run and repeat. All options: [CLI_Usage.md](CLI_Usage.md#ditto-eval).
 
 **First measurement** (for context, not a benchmark): on a CPU-only machine with Qwen3.5 2B, effort `low` (thinking
 off) and the prompts of that time, the 2-bit tier `small-q2` passed 42% of the 19 cases and the 4-bit tier `small`
@@ -756,8 +784,9 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
 can then use the [same tools as Ditto](#dittos-tools). You sign in to the client with your own account or key; the
 framework never sees it.
 
-- **Every call goes through the tool registry:** input schema, your permissions, confirmation, audit log (actor
-  `mcp`). Tool annotations (read-only, idempotent) are only hints for the client.
+- **Every call goes through the tool registry:** name and argument matching, input schema, your permissions,
+  confirmation, audit log (actor `mcp`), exactly as for Ditto ([how names and values are
+  matched](#dittos-tools)). Tool annotations (read-only, idempotent) are only hints for the client.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
   elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
   and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be

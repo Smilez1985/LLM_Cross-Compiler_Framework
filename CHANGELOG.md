@@ -214,6 +214,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **`get_status` tool** (Ditto and MCP clients): the caller's tool permissions, with every tool's decision and why,
   also the tools that are not listed because they are denied, and the actions no tool does with where the person
   does them, so an AI can name the real reason when it cannot do something.
+- **Fool-proof tool calls** (Ditto and MCP clients, every model size): spelling variants of tool names
+  (`StartBuild` runs `start_build`) and declared argument aliases (`quant` for `quantization`) run with a note;
+  values are coerced the same way on both paths and matched against the target's formats, boards and quantization
+  types exactly, by canonical form if unique or by the target's aliases, never by guessing a near miss; every
+  refusal carries a reason code and the next step; the same failing call is flagged the second time and refused
+  without running the third time; after three input errors an error shows a valid example call. What was repaired
+  is marked in the question, listed in the result's `notes` and recorded in the audit log. Tool arguments a local
+  model sends with a code fence or in Python notation are read once more.
+- **`llm-cli ditto eval` records every tool call attempt**, not only those that reached a tool: the report's
+  `tool_use` block gives tool calls per task, the share of malformed calls and of unknown tool names, repairs and
+  repeat refusals.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -415,6 +426,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **A client's cancel reaches a running call at once** (MCP server): the call is recorded as cancelled and the
   running handler is told immediately; what already runs finishes and its end entry follows. Before, the
   cancellation arrived only after the handler had finished, and nothing was recorded.
+- **Unknown arguments are no longer dropped over MCP**: `quant` instead of `quantization` built the target's
+  default quantization and reported success, while Ditto's path refused the same call. Both paths now run the same
+  normalizer on the raw arguments, MCP clients get the tools' closed input schemas (`additionalProperties: false`)
+  instead of open ones, JSON text in a list field is accepted on both paths, and unknown tool names are audited
+  (before: on neither path).
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped

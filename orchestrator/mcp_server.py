@@ -40,7 +40,7 @@ import tempfile
 import threading
 import time
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Dict, Optional
 
@@ -50,7 +50,7 @@ from orchestrator.tools.confirmation import CallTooLong, describe_call
 from orchestrator.tools.output import has_untrusted
 from orchestrator.tools.policy import Decision
 from orchestrator.tools.registry import (AuditUnavailable, ToolContext, ToolError, ToolRegistry, ToolSpec,
-                                         text_sha256)
+                                         repair_marks, text_sha256)
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.untrusted import wrap_untrusted
 
@@ -101,6 +101,7 @@ class _CallState:
     audited: bool = False         # an audit entry for the call's outcome exists
     asking: bool = False          # a question is open
     question_sha256: str = ""
+    repairs: list = field(default_factory=list)  # what the fool-proof layer changed (normalize.Repair)
 
 
 _CALL: contextvars.ContextVar = contextvars.ContextVar("lcf_mcp_call", default=None)
@@ -130,8 +131,11 @@ def _tool_context(ctx, caller: str = "mcp") -> ToolContext:
         if ctx.protocol_version:
             client = (client + f" (protocol {_label(ctx.protocol_version, 16)})").strip()
         seed = f"{os.getpid()}:{id(connection)}".encode("ascii")
-        session = hashlib.sha256(seed).hexdigest()[:16] + ":" + _label(ctx.request_id, 40)
-    return ToolContext(caller, client=client, session=session)
+        session = hashlib.sha256(seed).hexdigest()[:16]
+    request_id = ""
+    with contextlib.suppress(Exception):
+        request_id = _label(ctx.request_id, 40)
+    return ToolContext(caller, client=client, session=session, request_id=request_id)
 
 
 class _OpenQuestions:
@@ -227,11 +231,12 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         if elicitation is None or (getattr(elicitation, "form", None) is None
                                    and getattr(elicitation, "url", None) is not None):
             return NotAsked(approve=False, can_ask=False, answer="unavailable")
+        state = _call_state()
+        marks, renamed = repair_marks(state.repairs)
         try:
-            message = describe_call(spec, arguments)
+            message = describe_call(spec, arguments, marks=marks, renamed=renamed)
         except CallTooLong as e:
             return NotAsked(approve=False, refused=str(e))
-        state = _call_state()
         tool_ctx = _tool_context(ctx, caller)
         tool_ctx.confirm_channel = "elicitation"
         await anyio.to_thread.run_sync(questions.expire)
@@ -278,6 +283,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         data = outcome.data if isinstance(outcome, AcceptedElicitation) else None
         state = _call_state()
         tool_ctx = _tool_context(ctx, caller)
+        tool_ctx.repairs = list(state.repairs)
         if isinstance(data, NotAsked) and data.refused:
             await anyio.to_thread.run_sync(functools.partial(
                 registry.refuse, spec.name, kwargs, tool_ctx, outcome=data.outcome, detail=data.refused,
@@ -318,8 +324,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             if asked and not approved:
                 message = f"The user declined '{spec.title}'. Do not retry it unless they ask for it."
             elif "needs your confirmation" in message and not can_ask:
-                message += (" This client cannot ask you; allow the tool with "
-                            "'llm-cli tools permissions' or in the GUI (Tools > Tool Permissions).")
+                message += " This client cannot ask you."
             raise _audited(MCPToolError(message)) from None
 
     approval_param = inspect.Parameter("approval", inspect.Parameter.KEYWORD_ONLY,
@@ -390,12 +395,20 @@ def _audit_rejection(registry: ToolRegistry, name: str, arguments: Any, error: B
     registry.refuse(name, arguments, ctx, outcome=outcome, detail=detail)
 
 
+def closed_schema(model: type) -> Dict[str, Any]:
+    """A tool's input schema as clients get it: the input model's own schema, closed to unknown keys."""
+    schema = model.model_json_schema()
+    schema.setdefault("additionalProperties", False)
+    return schema
+
+
 def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None, caller: str = "mcp"):
     """The MCP server for one caller's permissions (`mcp`: local stdio clients). Tools the caller's permissions
     deny are not listed; a call to one is still refused and audited."""
     import anyio
     import anyio.to_thread
     from mcp.server.mcpserver import MCPServer
+    from mcp.server.mcpserver.exceptions import ToolError as MCPToolError
     from mcp_types import ToolAnnotations
 
     registry = registry or framework.tool_registry
@@ -405,14 +418,26 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
 
     class AuditedServer(MCPServer):
         async def list_tools(self):
-            listed = {spec.name for spec in await anyio.to_thread.run_sync(registry.visible, caller)}
-            return [tool for tool in await super().list_tools() if tool.name in listed]
+            """The tools this caller may use, each with its tool's own closed input schema (the schema Ditto's
+            model sees too), not the looser one the SDK derives from the function signature."""
+            listed = {spec.name: spec for spec in await anyio.to_thread.run_sync(registry.visible, caller)}
+            return [tool.model_copy(update={"input_schema": closed_schema(listed[tool.name].input_model)})
+                    for tool in await super().list_tools() if tool.name in listed]
 
         async def call_tool(self, name, arguments, context=None):
             state = _CallState()
             token = _CALL.set(state)
             try:
-                return await super().call_tool(name, arguments, context)
+                # The fool-proof layer runs on the raw arguments, before the SDK's argument model could drop an
+                # unknown key: the same name resolution, normalization and checks as Ditto's path.
+                ctx = _tool_context(context, caller) if context is not None else ToolContext(caller)
+                try:
+                    prepared = await anyio.to_thread.run_sync(registry.prepare, name, arguments, ctx)
+                except ToolError as e:
+                    state.audited = True
+                    raise _audited(MCPToolError(str(e))) from None
+                state.repairs = prepared.repairs
+                return await super().call_tool(prepared.spec.name, prepared.arguments, context)
             except BaseException as e:
                 if not state.audited:
                     ctx = _tool_context(context, caller) if context is not None else ToolContext(caller)
