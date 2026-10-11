@@ -122,7 +122,8 @@ Der Installer:
    Benutzer) und führt sie in `.lcf-installed-files` auf. Ein erneuter Aufruf aktualisiert diese Dateien und
    entfernt nur Dateien, die ein früherer Aufruf kopiert hat und die das Repository nicht mehr ausliefert; alles
    andere dort bleibt: deine eigenen Targets (Modul-Assistent, `llm-cli module create`), installierte
-   Community-Packs, `configs/config.yml`, Builds, Cache und Modelle,
+   Community-Packs, `configs/config.yml`, Builds, Cache und Modelle. Starte Updates im Repository-Ordner: Die
+   Kopie von `install.sh` in `/opt` kopiert und entfernt nichts,
 4. legt dort eine virtuelle Umgebung (`.venv`) an und installiert die festgelegten Pakete aus `requirements.txt`,
 5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet.
 

@@ -354,6 +354,67 @@ class TestInstallSh:
         listed = (install / ".lcf-installed-files").read_bytes().split(b"\0")
         assert b"orchestrator/new.py" in listed and b"orchestrator/old.py" not in listed
 
+    @pytest.mark.skipif(not shutil.which("rsync") or not shutil.which("git"), reason="needs rsync and git")
+    def test_the_installed_copy_a_failed_listing_and_a_stale_link_delete_nothing_else(self, tmp_path):
+        """Three ways the reinstall could still lose files: the copy of install.sh in /opt listed every file there
+        as shipped (own targets and packs included), so the next update from the repository deleted them; a listing
+        that failed or came back empty removed the whole installed program; and a stale entry that is a link
+        deleted the file it points to instead of the link."""
+        repo, install, bin_dir = tmp_path / "repo", tmp_path / "opt" / "llm-conversion-framework", tmp_path / "bin"
+        shipped = {"README.md": "v1", "install.sh": INSTALL_SH.read_text(encoding="utf-8"),
+                   "orchestrator/main.py": "v1", "orchestrator/old.md": "old", "targets/Rockchip/target.yml": "v1"}
+        for rel, text in shipped.items():
+            (repo / rel).parent.mkdir(parents=True, exist_ok=True)
+            (repo / rel).write_text(text)
+        git = ["git", "-C", str(repo), "-c", "safe.directory=*"]
+        subprocess.run(git[:3] + ["init", "-q"], check=True)
+        subprocess.run(git + ["add", *shipped], check=True)
+        # A git whose ls-files fails halfway (a damaged index, no read access) after rev-parse found the work tree.
+        bin_dir.mkdir()
+        (bin_dir / "git").write_text(f'#!/bin/sh\ncase "$*" in *ls-files*) printf "README.md\\0"; exit 128 ;; esac\n'
+                                     f'exec "{shutil.which("git")}" "$@"\n')
+        (bin_dir / "git").chmod(0o755)
+
+        def deploy(script, root, path=os.environ["PATH"]):
+            code = ('source "$1"; REPO_ROOT="$2"; INSTALL_DIR="$3"; '
+                    'apt-get() { echo "apt-get must not run" >&2; return 1; }; deploy_files')
+            return subprocess.run(["/bin/bash", "-c", code, "test", str(script), str(root), str(install)],
+                                  env={"PATH": path, "HOME": str(tmp_path),
+                                       "USER": os.environ.get("USER") or getpass.getuser()},
+                                  capture_output=True, text=True, timeout=120)
+
+        def files():
+            return {p.relative_to(install).as_posix(): p.read_text() for p in install.rglob("*")
+                    if p.is_file() and p.name != ".lcf-installed-files"}
+
+        assert deploy(INSTALL_SH, repo).returncode == 0
+        own = {"targets/my-board/target.yml": "module wizard", "community/recipes/r/recipe.yml": "pack"}
+        for rel, text in own.items():
+            (install / rel).parent.mkdir(parents=True, exist_ok=True)
+            (install / rel).write_text(text)
+        manifest, before = (install / ".lcf-installed-files").read_bytes(), files()
+
+        run = deploy(install / "install.sh", install)  # sudo /opt/llm-conversion-framework/install.sh
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert (install / ".lcf-installed-files").read_bytes() == manifest and files() == before
+
+        empty = tmp_path / "empty"
+        empty.mkdir()
+        for script, root, path in ((INSTALL_SH, empty, os.environ["PATH"]),
+                                   (INSTALL_SH, repo, f"{bin_dir}{os.pathsep}{os.environ['PATH']}")):
+            run = deploy(script, root, path)
+            assert run.returncode != 0 and "nichts kopiert oder entfernt" in run.stdout, run.stdout + run.stderr
+            assert (install / ".lcf-installed-files").read_bytes() == manifest and files() == before
+
+        (install / "orchestrator" / "old.md").unlink()
+        (install / "orchestrator" / "old.md").symlink_to("../README.md")  # e.g. a link the user put there
+        subprocess.run(git + ["rm", "-q", "--cached", "orchestrator/old.md"], check=True)
+        run = deploy(INSTALL_SH, repo)
+        assert run.returncode == 0, run.stdout + run.stderr
+        assert not (install / "orchestrator" / "old.md").is_symlink(), "the stale link itself is removed"
+        assert (install / "README.md").read_text() == "v1", "never the file it points to"
+        assert {rel: (install / rel).read_text() for rel in own} == own
+
 
 class TestInstallBat:
 
