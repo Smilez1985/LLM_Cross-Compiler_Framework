@@ -657,8 +657,9 @@ class AIConfigurationDialog(QDialog):
             cfg.set("ai_fallback_chain", fallback)
             cfg.set("offline_mode", offline)
             cfg.set("enable_rag_knowledge", enable_rag)
-            if hasattr(cfg, 'save_user_config'):
-                cfg.save_user_config()
+            if hasattr(cfg, 'save_user_config') and not cfg.save_user_config():
+                QMessageBox.warning(self, "Settings Not Saved", "The AI settings apply until the program ends, but "
+                                    "they could not be saved to config.yml. See the log.")
 
         if enable_rag and hasattr(self.framework, 'ensure_rag_manager'):
             self.framework.ensure_rag_manager()

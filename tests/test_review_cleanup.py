@@ -3,11 +3,14 @@
 1 one source of settings in the CLI (ConfigManager), an unreadable -c file is reported
 3 the local hardware probe writes into the probe folder
 4 wait_stopped after a cancel that came before the engine registered the build
+5 `module create` hint and <NAME>_REPO_OVERRIDE names
+6 failed saves of the settings are reported
 8 FrameworkManager.shutdown ends the background event loop
 """
 
 import asyncio
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -20,7 +23,8 @@ import pytest
 
 from conftest import REPO_ROOT
 from orchestrator.Core.builder import BuildStatus
-from test_review_capabilities_paths import make_cli
+from test_cli_builds import invoke_plain, quiet_console, write_user_config
+from test_review_capabilities_paths import make_cli, no_docker
 
 
 @pytest.fixture
@@ -198,6 +202,102 @@ class TestWaitStoppedBeforeRegistration:
         start = time.monotonic()
         assert service.wait_stopped("r1", 5, poll=0.01) == "cancelled"
         assert 0.3 <= time.monotonic() - start < 3
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# 5. module create hint, <NAME>_REPO_OVERRIDE
+# ---------------------------------------------------------------------------------------------------------------
+
+class TestRepoOverrideNames:
+
+    @pytest.mark.parametrize("name", ["llama.cpp", "llama_cpp", "LLAMA_CPP", "llama-cpp", "llama cpp"])
+    def test_spellings_of_llama_cpp(self, name):
+        from orchestrator.Core.builder import repo_override_names
+        assert repo_override_names(name)[0] == "LLAMA_CPP_REPO_OVERRIDE"
+
+    def test_a_dotted_prefix_keeps_the_name_of_earlier_versions(self):
+        from orchestrator.Core.builder import repo_override_names
+        assert repo_override_names("sources.llama_cpp") == ["SOURCES_LLAMA_CPP_REPO_OVERRIDE",
+                                                            "LLAMA_CPP_REPO_OVERRIDE"]
+
+    def test_the_variables_the_target_scripts_read_come_from_their_natural_names(self):
+        from orchestrator.Core.builder import repo_override_names
+        read = set()
+        for script in (REPO_ROOT / "targets").glob("*/modules/*.sh"):
+            read |= set(re.findall(r"\$\{(\w+)_REPO_OVERRIDE", script.read_text(encoding="utf-8")))
+        assert {"LLAMA_CPP", "RKLLM_TOOLKIT"} <= read
+        for base in read:
+            for name in (base.lower(), base.lower().replace("_", "."), base.lower().replace("_", "-")):
+                assert repo_override_names(name)[0] == f"{base}_REPO_OVERRIDE", name
+
+    def test_the_engine_passes_llama_dot_cpp_under_the_name_the_scripts_read(self, tmp_path, monkeypatch):
+        from orchestrator.Core.builder import BuildEngine
+        from orchestrator.Core.config_manager import ConfigManager
+        no_docker(monkeypatch)
+        cfg = ConfigManager(tmp_path / "configs")
+        cfg.set("source_repositories", {"llama.cpp": {"url": "https://a.example/l.git"},
+                                        "repos.rkllm_toolkit": "https://b.example/r.git",
+                                        "rkllm_toolkit": {"url": "https://c.example/r.git"}})
+        env = BuildEngine(cfg, base_dir=tmp_path)._repo_overrides()
+        assert env["LLAMA_CPP_REPO_OVERRIDE"] == "https://a.example/l.git"
+        assert env["CPP_REPO_OVERRIDE"] == "https://a.example/l.git"  # the name of earlier versions
+        assert env["REPOS_RKLLM_TOOLKIT_REPO_OVERRIDE"] == "https://b.example/r.git"
+        # The whole name of an entry wins over the same name derived from another entry's last part.
+        assert env["RKLLM_TOOLKIT_REPO_OVERRIDE"] == "https://c.example/r.git"
+
+    def test_config_repos_names_the_variable(self, cli):
+        result = cli.invoke("config", "repos", "--add", "llama.cpp", "https://git.example.com/llama.cpp.git")
+        assert result.code == 0, result.out
+        assert "LLAMA_CPP_REPO_OVERRIDE" in result.out
+
+
+def test_module_create_names_the_file_the_build_runs(tmp_path, monkeypatch):
+    write_user_config(tmp_path, targets_dir=str(tmp_path / "targets"))
+    printed = quiet_console(monkeypatch)
+    result = invoke_plain("module", "create", "--name", "MyBoard", "--arch", "aarch64", "--sdk", "None",
+                          input="\n\n\n\n")
+    out = printed.getvalue() + result.out
+    assert result.code == 0, out
+    assert "config_module.sh" not in out
+    hint = re.search(r"2\. Customize (\S+)", out).group(1)
+    assert hint.endswith("modules/build.sh") and Path(hint).is_file()
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# 6. A failed save of the settings is reported
+# ---------------------------------------------------------------------------------------------------------------
+
+class TestFailedSaves:
+
+    def test_config_repos_add_exits_1_when_nothing_was_saved(self, cli, monkeypatch):
+        monkeypatch.setattr(cli.framework.config, "save_user_config", lambda: False)
+        result = cli.invoke("config", "repos", "--add", "llama_cpp", "https://git.example.com/l.git")
+        assert result.code == 1, result.out
+        assert "Not saved" in result.out and "Added" not in result.out
+
+    def test_config_repos_remove_exits_1_when_nothing_was_saved(self, cli, monkeypatch):
+        cli.framework.config.set("source_repositories", {"old": {"url": "https://old.example/x.git"}})
+        monkeypatch.setattr(cli.framework.config, "save_user_config", lambda: False)
+        result = cli.invoke("config", "repos", "--remove", "old")
+        assert result.code == 1, result.out
+        assert "Not saved" in result.out and "Removed" not in result.out
+
+    @pytest.mark.parametrize("saved", [True, False])
+    def test_the_audio_switch_warns_when_the_setting_was_not_saved(self, monkeypatch, saved):
+        from orchestrator.gui import main_window
+        from orchestrator.utils.localization import get_instance
+        shown, values = [], {}
+        monkeypatch.setattr(main_window.QMessageBox, "warning",
+                            lambda parent, title, text: shown.append((title, text)))
+        config = SimpleNamespace(set=lambda key, value: values.__setitem__(key, value) or True,
+                                 save_user_config=lambda: saved)
+        window = SimpleNamespace(framework=SimpleNamespace(config=config), i18n=get_instance())
+        main_window.MainOrchestrator._set_audio_announcements(window, False)
+        assert values == {"audio_announcements": False}
+        if saved:
+            assert shown == []
+        else:
+            assert len(shown) == 1 and "config.yml" in shown[0][1]
 
 
 # ---------------------------------------------------------------------------------------------------------------

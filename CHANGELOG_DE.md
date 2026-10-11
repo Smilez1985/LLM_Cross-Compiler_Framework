@@ -95,7 +95,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Oberfläche. Nach bestem Bemühen und nie im Weg: keine Audiodateien, die Systemlautstärke wird nie verändert, und
   still in CI, über SSH ohne Bildschirm, auf Systemen ohne Bildschirm, mit `LLM_FRAMEWORK_NO_AUDIO=1` oder wenn
   *Werkzeuge > Gesprochene Ansagen* (Einstellung `audio_announcements`) aus ist. Jede Ansage wird auch
-  protokolliert.
+  protokolliert. Der Schalter warnt, wenn er die Einstellung nicht speichern kann.
 - **Fortschritt und Stopp bei Deep Ingest**: Der Assistent zeigt „Seite N von M: <url>“ statt eines endlosen
   Drehsymbols, und ein Stopp-Knopf beendet den Crawl nach der aktuellen Seite. Das Schließen des Assistenten
   stoppt einen laufenden Crawl genauso und schließt, sobald die aktuelle Seite gespeichert ist, ohne dass das
@@ -376,16 +376,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Windows ohne Administratorrechte wartet die CLI auf den Neustart der Probe mit erhöhten Rechten, statt sofort zu
   melden, dass keine Datei geschrieben wurde.
 - `llm-cli module create` schreibt in den eingestellten Targets-Ordner (`targets_dir`, relativ zur Installation)
-  statt nach `targets/` im aktuellen Ordner.
+  statt nach `targets/` im aktuellen Ordner; seine nächsten Schritte nennen `modules/build.sh`, das Skript, das
+  Builds ausführen, statt der Altlast `config_module.sh`.
 - `llm-cli config show` gibt die wirksamen Einstellungen aus (`config.yml`, eine Datei aus `-c`, Variablen
   `LLM_FRAMEWORK_*`, Vorgaben), jeweils mit ihrer Herkunft und mit geschwärzten Zugangsdaten, statt der
   eingebauten Vorgaben der CLI.
 - `llm-cli config repos --add` speichert den Eintrag `{url: ...}`, den die Build-Engine als `<NAME>_REPO_OVERRIDE`
-  weiterreicht; reine URLs aus früheren Versionen werden ebenfalls weitergereicht.
+  weiterreicht; reine URLs aus früheren Versionen werden ebenfalls weitergereicht. Der Name kommt aus dem ganzen
+  Eintragsnamen (`llama.cpp` und `llama_cpp` ergeben beide `LLAMA_CPP_REPO_OVERRIDE`, den Namen, den die
+  Target-Skripte lesen; `llama.cpp` ergab `CPP_REPO_OVERRIDE`). `--add` und `--remove` enden mit Exit-Code 1,
+  wenn sich die `config.yml` nicht speichern lässt, statt Erfolg zu melden.
 - Eine mit `-c` angegebene Einstellungsdatei, die sich nicht lesen lässt, verwirft nicht mehr auch die Variablen
   `LLM_FRAMEWORK_*`: Sie wird auf stderr genannt und übergangen, und die übrigen Einstellungen gelten.
 - Der Hardware-Scan dieses PCs in der GUI (**Scan / Import...**) schreibt sein Ergebnis nach `<cache_dir>/probes/`
   statt in den Arbeitsordner der GUI, und *Auto-fill from Probe Result* im Modul-Assistenten liest es dort.
+- Der Dialog der KI-Einstellungen warnt, wenn sich die Einstellungen nicht in der `config.yml` speichern ließen
+  (sie gelten bis zum Programmende); vorher stand das nur im Protokoll.
 - `llm-cli targets list` zeigt für jedes Target die ID (den Wert für `--target`), den Namen sowie Boards und
   Formate aus seinen Capabilities statt Platzhaltern; `llm-cli targets validate` prüft den Block `capabilities:`
   gegen das Schema und gibt jeden Fehler aus (Exit-Code 1).
