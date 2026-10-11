@@ -888,7 +888,12 @@ def _ask_tool_policy(registry, current, caller: Optional[str] = None):
     base_tiers = section.tiers if section is not None else current.tiers
     # A caller's new section starts from the shared settings, so creating it never loosens a per-tool setting.
     overrides = dict((section if section is not None else current).overrides)
-    new = [row["tool"] for row in registry.permissions(caller or "") if row["new"]]
+    rows = registry.permissions(caller or "")
+    for row in rows:  # what each tool brings, shown before the person decides
+        facts = [f"default {row['default']}", f"at most {row['max']}"] + (["new"] if row["new"] else []) + [
+            "standing approval possible" if row["standing_approval"] else "no standing approval"]
+        console.print(escape(f"  {row['tool']} ({row['tier']}): {', '.join(facts)}"))
+    new = [row["tool"] for row in rows if row["new"]]
     if new:
         console.print(f"New tools since the last review (they use their own default until you save): "
                       f"{escape(', '.join(new))}")
