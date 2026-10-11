@@ -514,8 +514,9 @@ wird so geteilt, wenn es erneut eingelesen wird. Jeder Abschnitt bekommt einen d
 `intfloat/multilingual-e5-small` auf einer CPU, `BAAI/bge-m3` mit CUDA und mindestens 8 GB RAM, oder das Modell in
 `rag_embedding_model`) und einen BM25-Vektor. Nur für den BM25-Vektor werden Bezeichner zusätzlich in ihre Teile
 zerlegt: `-DGGML_CUDA=ON` ergänzt `GGML_CUDA`, `GGML` und `CUDA`, `rknn_toolkit2` ergänzt `rknn` und `toolkit2`,
-`rknnToolkitLite` ergänzt `rknn`, `Toolkit` und `Lite`. Die dichte Eingabe und der gespeicherte Text bleiben, wie
-sie sind. Die Sammlung hält diese Stichwort-Kodierung fest (`Qdrant/bm25+ids1`); eine Wissensbasis oder ein
+`rknnToolkitLite` ergänzt `rknn`, `Toolkit` und `Lite`. Ein führendes `-D` fällt nur bei Definitionen weg
+(`-DNAME=WERT`, `-DNAME_MIT_UNTERSTRICH`, nicht bei `-DEBUG`), und Teile aus einer oder zwei Ziffern werden
+ausgelassen (`x86_64` ergänzt nur `x86`). Die dichte Eingabe und der gespeicherte Text bleiben, wie sie sind. Die Sammlung hält diese Stichwort-Kodierung fest (`Qdrant/bm25+ids1`); eine Wissensbasis oder ein
 Snapshot mit älterer Kodierung bekommt ihre Stichwortvektoren einmal aus dem gespeicherten Text neu berechnet,
 Dokumente und dichte Vektoren bleiben erhalten.
 
@@ -530,8 +531,8 @@ Dokumente und dichte Vektoren bleiben erhalten.
 3. **Reranking (optional).** Ein Cross-Encoder liest die Anfrage zusammen mit jedem Kandidaten (seine Überschrift
    und die ersten 1500 Zeichen; bis zu 20 Kandidaten, mindestens 12) und bewertet ihn zwischen 0 und 1. Kandidaten
    unter der Relevanzschwelle werden verworfen, die Liste kann also leer sein: Kein Auszug ist besser als ein
-   unpassender. Die Schwelle ist `rag_rerank_min_score` oder, bei 0 (Vorgabe), die eigene Schwelle des Modells,
-   0,2 für beide eingetragenen Modelle. Das Modell kommt aus `rag_reranker`: `auto` nimmt
+   unpassender. Die Schwelle ist `rag_rerank_min_score` (0 schaltet sie ab) oder, wenn es nicht gesetzt ist
+   (Vorgabe), die eigene Schwelle des Modells, 0,2 für beide eingetragenen Modelle. Das Modell kommt aus `rag_reranker`: `auto` nimmt
    `onnx-community/bge-reranker-v2-m3-ONNX` mit CUDA und mindestens 16 GB RAM,
    `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (ein Download von etwa 0,12 GB) ab 6 GB RAM und darunter keines;
    `off` schaltet das Reranking aus; eine Modell-ID wählt eines. Das Modell wird bei der ersten Nutzung
@@ -551,11 +552,11 @@ Wo Reranking genutzt wird:
 |---|---|---|
 | Build-Empfehlung mit Auszügen aus der Wissensbasis | ja, außer `rag_reranker` ist `off` oder kein Reranker passt zum Rechner | Ihre Anfrage ist Fließtext über Modell, Target und Quantisierung; dort hat der Reranker die Reihenfolge verbessert und seine Schwelle unpassende Auszüge herausgehalten. |
 | Ditto-Chat, MCP-Tool `search_knowledge` | nur mit `rag_rerank_default` (standardmäßig aus) | In der Abruf-Evaluation war der Gewinn zu klein für etwa 1 bis 2,5 Sekunden je Suche auf einem freien CPU-Kern. |
-| Build-Log-Analyse des Self-Healing | nicht angefordert (folgt `rag_rerank_default`) | Der Cross-Encoder bewertet Logzeilen gegen Fließtext schlecht: Er hat passende Auszüge verloren, die die hybride Suche gefunden hatte. |
-| Modulvorschlag | nicht angefordert (folgt `rag_rerank_default`) | Bei seiner Suchanfrage aus Stichwörtern hat die Schwelle jeden Auszug verworfen, auch die passenden. |
+| Build-Log-Analyse des Self-Healing | nein | Der Cross-Encoder bewertet Logzeilen gegen Fließtext schlecht: Er hat passende Auszüge verloren, die die hybride Suche gefunden hatte. |
+| Modulvorschlag | nein | Bei seiner Suchanfrage aus Stichwörtern hat die Schwelle jeden Auszug verworfen, auch die passenden. |
 
-`rag_rerank_default` gilt für jede Suche, die das Reranking nicht selbst anfordert; Build-Log-Analyse und
-Modulvorschlag fordern es nicht an, mit eingeschalteter Einstellung werden also auch sie neu geordnet.
+`rag_rerank_default` gilt nur für den Chat und `search_knowledge`; Build-Log-Analyse und Modulvorschlag behalten
+auch mit eingeschalteter Einstellung die hybride Reihenfolge.
 
 **Speicher der Modelle.** Embedding-, Stichwort- und Reranking-Modell werden nach `rag_model_idle_minutes`
 (Vorgabe 10; 0 hält sie geladen) ohne Nutzung entladen und bei der nächsten Suche neu geladen. Die Zeit läuft ab

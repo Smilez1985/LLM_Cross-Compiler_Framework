@@ -297,6 +297,20 @@ def test_the_floor_may_leave_nothing_and_can_be_configured(knowledge):
     assert rag.search("model memory", limit=4, rerank=True) == []  # no excerpt beats an irrelevant one
 
 
+def test_unset_floor_is_the_models_and_zero_turns_it_off(knowledge, tmp_path):
+    """0 used to mean "the model's floor", so the floor could not be switched off at all."""
+    rag = knowledge(reranker=FakeReranker(LICENSE_FIRST))
+    ingest_all(rag)
+    assert rag.config.get("rag_rerank_min_score") is None
+    assert [h.score for h in rag.search("model memory", limit=4, rerank=True)] == [0.9, 0.5]  # floor 0.2
+    rag.close()
+
+    (tmp_path / "configs" / "config.yml").write_text("rag_rerank_min_score: 0\n")  # a config file still loads
+    rag = knowledge(reranker=FakeReranker(LICENSE_FIRST))
+    assert rag.config.get("rag_rerank_min_score") == 0
+    assert [h.score for h in rag.search("model memory", limit=4, rerank=True)] == [0.9, 0.5, 0.05, 0.05]
+
+
 def test_default_and_off_switch(knowledge):
     reranker = FakeReranker(LICENSE_FIRST)
     rag = knowledge(reranker=reranker)
@@ -416,13 +430,14 @@ def test_ditto_packs_excerpts_into_a_third_of_the_context(tmp_path):
 
 def test_ditto_reranks_only_build_recommendations(tmp_path, monkeypatch):
     """Build-log tails and the module search lost relevant excerpts to the reranker in the retrieval evaluation
-    (tags log and callsite), so those follow rag_rerank_default (None); recommendations gained."""
+    (tags log and callsite), so those keep the hybrid order even with rag_rerank_default (it covers chat and MCP
+    searches only); recommendations gained."""
     from test_ditto import make_ditto
 
     class Stop(Exception):
         pass
 
-    ditto = make_ditto(tmp_path)
+    ditto = make_ditto(tmp_path, rag_rerank_default=True)
     seen = []
     monkeypatch.setattr(ditto, "_knowledge", lambda query, limit=5, rerank=None: seen.append(rerank) or "")
     monkeypatch.setattr(ditto, "_structured", lambda *a, **k: (_ for _ in ()).throw(Stop()))
@@ -433,7 +448,7 @@ def test_ditto_reranks_only_build_recommendations(tmp_path, monkeypatch):
                                                         notes={})):
         with pytest.raises(Stop):
             call()
-    assert seen == [None, None, True]
+    assert seen == [False, False, True]
 
 
 # --- oversized code blocks and tables -----------------------------------------------------------------------------
@@ -512,13 +527,19 @@ def test_ingest_splits_blocks_beyond_the_model_context(knowledge):
     ("pip install rknn_toolkit2", "rknn toolkit2"),
     ("rknnToolkitLite and XMLParser", "rknn Toolkit Lite XML Parser"),
     ("CMAKE_CUDA_ARCHITECTURES=87 and CMAKE_CUDA_ARCHITECTURES", "CMAKE CUDA ARCHITECTURES"),
-    ("-DNDEBUG", "NDEBUG"),
+    ("-DNDEBUG=1", "NDEBUG"),
+    ("-DBUILD_SHARED_LIBS", "BUILD_SHARED_LIBS BUILD SHARED LIBS"),
+    # Version numbers are no search words: no fragments of one or two digits (the identifier itself stays).
+    ("x86_64 wheels for manylinux_2_17", "x86 manylinux"),
+    ("manylinux2014_x86_64 and gcc_12", "manylinux2014 x86 gcc"),
 ])
 def test_identifiers_get_their_parts(text, added):
     assert expand_identifiers(text) == f"{text}\n{added}"
 
 
-@pytest.mark.parametrize("text", ["plain words", "E2041 on the RK3588", "GPUs and PDFs", "Build-Container", ""])
+# Only a CMake-style definition loses its -D: -DEBUG is not "EBUG", -DNS not "NS" (nor is -DNDEBUG told apart).
+@pytest.mark.parametrize("text", ["plain words", "E2041 on the RK3588", "GPUs and PDFs", "Build-Container", "",
+                                  "link with -DEBUG", "resolver -DNS", "-DNDEBUG"])
 def test_plain_text_is_unchanged(text):
     assert expand_identifiers(text) == text
 

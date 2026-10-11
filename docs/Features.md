@@ -591,11 +591,11 @@ and 1. Candidates below a relevance floor are dropped, so Ditto gets no excerpt 
   | less than 6 GB RAM | none |
 
   `off` turns reranking off. A model id chooses another cross-encoder that FastEmbed lists.
-- **Relevance floor** (setting `rag_rerank_min_score`, 0 to 1, default 0): 0 means the floor calibrated for the
-  model, 0.2 for both models above. In the retrieval evaluation, relevant excerpts scored 0.80 or more and
-  unrelated ones 0.009 or less.
+- **Relevance floor** (setting `rag_rerank_min_score`, 0 to 1, not set by default): unset means the floor
+  calibrated for the model, 0.2 for both models above; 0 turns the floor off. In the retrieval evaluation, relevant
+  excerpts scored 0.80 or more and unrelated ones 0.009 or less.
 - **Which searches rerank:** by default only build recommendations. The setting `rag_rerank_default: true` reranks
-  every other search too: the chat, the MCP tool `search_knowledge`, healing analyses and module proposals.
+  the chat and the MCP tool `search_knowledge` too. Healing analyses and module proposals never rerank.
 - **Why only build recommendations:** measured with the [retrieval evaluation](#retrieval-evaluation) on a shared
   4-core CPU. On the 34 cases that are not `log` or `callsite` searches, reranking raised hit@1 from 87 % to 93 %
   and MRR from 0.93 to 0.97, and all 4 unrelated questions got no excerpt. It costs about 1 s for 12 candidates and
@@ -619,8 +619,9 @@ marked `[…]`; a code block that is open at the cut is closed, so the rest of t
 ### Keyword search for identifiers
 
 The keyword index (BM25) also knows the parts of identifiers: `-DGGML_CUDA=ON` is found by `GGML_CUDA`, `GGML` or
-`CUDA`, `rknn_toolkit2` by `rknn toolkit2`, and `rknnToolkitLite` by `rknn Toolkit Lite`. Only the keyword index
-gets the split forms; the stored text and the vectors stay as they are. Searches of one or two words use the
+`CUDA`, `rknn_toolkit2` by `rknn toolkit2`, and `rknnToolkitLite` by `rknn Toolkit Lite`. A leading `-D` is
+dropped only from definitions such as `-DNAME=VALUE` or `-DNAME_WITH_UNDERSCORE` (`-DEBUG` keeps it), and parts of
+one or two digits are left out (`x86_64` adds `x86`, not `64`). Only the keyword index gets the split forms; the stored text and the vectors stay as they are. Searches of one or two words use the
 keyword index when they contain an identifier (a digit, an underscore, two capital letters in a row, or a dot or
 hyphen inside a word, such as `E2041`, `GGML_CUDA`, `RKNN` or `librkllmrt.so`); other short searches use meaning
 only. In the retrieval evaluation this raised hit@3 of the identifier questions from 83 % to 100 %; the other
@@ -1133,7 +1134,8 @@ What does not work yet, so you are not surprised:
   passes its own depth, PDF choice and request delay (whole seconds), so `crawler_max_depth`,
   `crawler_download_pdfs` and `crawler_rate_limit` do not apply there. Restoring a knowledge-base snapshot is not
   available from the GUI or the CLI.
-- **Reranking** runs only for build recommendations unless `rag_rerank_default` is turned on.
+- **Reranking** runs only for build recommendations; `rag_rerank_default` adds the chat and the MCP tool
+  `search_knowledge`.
 - **Spoken announcements** are tested with simulated speech engines only, not with the real voices of Windows,
   macOS or Linux.
 - **Community zoo:** no community repository, index or maintainer key is published yet (`configs/community_keys.yml`

@@ -490,7 +490,9 @@ at all; a document is split this way when it is imported again. Every chunk gets
 `intfloat/multilingual-e5-small` on a CPU, `BAAI/bge-m3` with CUDA and at least 8 GB RAM, or the model in
 `rag_embedding_model`) and a BM25 vector. For the BM25 vector only, identifiers are added split into their parts:
 `-DGGML_CUDA=ON` adds `GGML_CUDA`, `GGML` and `CUDA`, `rknn_toolkit2` adds `rknn` and `toolkit2`,
-`rknnToolkitLite` adds `rknn`, `Toolkit` and `Lite`. The dense input and the stored text stay as they are. The
+`rknnToolkitLite` adds `rknn`, `Toolkit` and `Lite`. A leading `-D` is dropped only from definitions
+(`-DNAME=VALUE`, `-DNAME_WITH_UNDERSCORE`, not `-DEBUG`), and parts of one or two digits are left out (`x86_64`
+adds only `x86`). The dense input and the stored text stay as they are. The
 collection records this keyword encoding (`Qdrant/bm25+ids1`); a knowledge base or a snapshot of an older encoding
 gets its keyword vectors rebuilt once from the stored text, and its documents and dense vectors are kept.
 
@@ -504,7 +506,8 @@ gets its keyword vectors rebuilt once from the stored text, and its documents an
 3. **Reranking (optional).** A cross-encoder reads the query together with each candidate (its heading and the
    first 1500 characters; up to 20 candidates, at least 12) and rates it between 0 and 1. Candidates below the
    relevance floor are dropped, so the list may be empty: no excerpt is better than an unrelated one. The floor is
-   `rag_rerank_min_score`, or, with 0 (the default), the model's own floor, 0.2 for both registered models. The
+   `rag_rerank_min_score` (0 turns it off) or, when it is not set (the default), the model's own floor, 0.2 for
+   both registered models. The
    model comes from `rag_reranker`: `auto` takes `onnx-community/bge-reranker-v2-m3-ONNX` with CUDA and at least
    16 GB RAM, `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (a download of about 0.12 GB) from 6 GB RAM, and none
    below that; `off` turns reranking off; a model id picks one. The model is downloaded on first use, never in
@@ -522,11 +525,11 @@ Where reranking is used:
 |---|---|---|
 | Build recommendation with knowledge-base excerpts | yes, unless `rag_reranker` is `off` or no reranker suits the machine | Its query is prose about model, target and quantization; there the reranker improved the order and its floor kept unrelated excerpts out. |
 | Ditto chat, MCP tool `search_knowledge` | only with `rag_rerank_default` (off by default) | In the retrieval evaluation the gain was too small for the cost of about 1 to 2.5 seconds per search on one free CPU core. |
-| Build-log analysis of self-healing | not asked for (follows `rag_rerank_default`) | The cross-encoder rates log lines against prose poorly: it lost relevant excerpts that the hybrid search found. |
-| Module proposal | not asked for (follows `rag_rerank_default`) | For its keyword search string the floor dropped every excerpt, the relevant ones too. |
+| Build-log analysis of self-healing | no | The cross-encoder rates log lines against prose poorly: it lost relevant excerpts that the hybrid search found. |
+| Module proposal | no | For its keyword search string the floor dropped every excerpt, the relevant ones too. |
 
-`rag_rerank_default` applies to every search that does not ask for reranking itself; the build-log analysis and
-the module proposal do not ask, so with the setting on they are reranked as well.
+`rag_rerank_default` covers the chat and `search_knowledge` only; the build-log analysis and the module proposal
+keep the hybrid order with the setting on as well.
 
 **Model memory.** The embedding, keyword and reranking models are unloaded after `rag_model_idle_minutes`
 (default 10; 0 keeps them loaded) without use and loaded again on the next search. The time counts from the end

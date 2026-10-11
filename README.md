@@ -517,8 +517,8 @@ build_pids_limit: 4096        # process limit in the container
 build_jobs: 0                 # parallel compile jobs for image builds; 0 = all cores
 crawler_max_depth: 2          # not used by the Deep Ingest dialog, which sets its own depth
 rag_reranker: auto            # auto (chosen by hardware), off, or a cross-encoder model id
-rag_rerank_default: false     # true: rerank every search (default: build recommendations only)
-rag_rerank_min_score: 0.0     # relevance floor 0..1; 0 = the model's calibrated floor (0.2)
+rag_rerank_default: false     # true: also rerank chat and MCP searches (default: build recommendations only)
+# rag_rerank_min_score: 0.3   # relevance floor 0..1; unset = the model's calibrated floor (0.2), 0 = no floor
 rag_model_idle_minutes: 10    # unload the knowledge-base models after this idle time; 0 = keep them loaded
 audio_announcements: true     # spoken Deep Ingest notice and outcome (Tools > Spoken Announcements)
 community_index_url: ""       # https address of the signed community index; empty until one is published

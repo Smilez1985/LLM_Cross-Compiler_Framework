@@ -32,8 +32,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   120 MB, beim ersten Gebrauch heruntergeladen, nie im Offline-Modus) liest die Frage zusammen mit jedem
   Kandidaten und verwirft die unter einer Relevanzschwelle, sodass Ditto lieber keinen Auszug bekommt als
   unpassende. Build-Empfehlungen nutzen ihn. Einstellungen: `rag_reranker` (`auto`: ab 6 GB RAM, das größere
-  bge-reranker-v2-m3 mit CUDA und 16 GB; `off`; oder eine Modell-ID), `rag_rerank_min_score` und
-  `rag_rerank_default` (auch Chat- und MCP-Suchen reranken; aus). Ein Reranker, der nicht laufen kann, wird
+  bge-reranker-v2-m3 mit CUDA und 16 GB; `off`; oder eine Modell-ID), `rag_rerank_min_score` (ohne Wert: die
+  kalibrierte Schwelle des Modells; 0: keine) und `rag_rerank_default` (auch Chat- und MCP-Suchen reranken; aus). Ein Reranker, der nicht laufen kann, wird
   protokolliert, und die Suche behält ihre Reihenfolge. `llm-cli ditto eval --kind retrieval --rag-variant rerank`
   bewertet ihn: bei den 34 Fragen hit@1 93 % und MRR 0,97 (hybride Suche: 87 % und 0,93), und alle 4 themenfremden
   Fragen bekommen keinen Auszug (Schwelle 0,2: relevante Auszüge erreichten 0,80 oder mehr, themenfremde 0,009

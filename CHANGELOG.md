@@ -28,8 +28,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   downloaded on first use, never in offline mode) reads the question together with each candidate and drops the
   ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build recommendations use
   it. Settings: `rag_reranker` (`auto`: from 6 GB RAM, the larger bge-reranker-v2-m3 with CUDA and 16 GB; `off`;
-  or a model id), `rag_rerank_min_score` and `rag_rerank_default` (also rerank chat and MCP searches; off). A
-  reranker that cannot run is logged and the search keeps its order.
+  or a model id), `rag_rerank_min_score` (unset: the model's calibrated floor; 0: none) and `rag_rerank_default`
+  (also rerank chat and MCP searches; off). A reranker that cannot run is logged and the search keeps its order.
   `llm-cli ditto eval --kind retrieval --rag-variant rerank` grades it: on the 34 questions hit@1 93 % and MRR
   0.97 (hybrid search: 87 % and 0.93), and all 4 unrelated questions get no excerpt (floor 0.2: relevant excerpts
   scored 0.80 or more, unrelated ones 0.009 or less). It takes about 1 s for 12 candidates and 2-2.6 s for 20 on

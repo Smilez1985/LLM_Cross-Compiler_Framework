@@ -541,8 +541,8 @@ build_pids_limit: 4096        # Prozesslimit im Container
 build_jobs: 0                 # parallele Compile-Jobs beim Image-Build; 0 = alle Kerne
 crawler_max_depth: 2          # gilt nicht im Deep-Ingest-Dialog, der eine eigene Tiefe setzt
 rag_reranker: auto            # auto (nach Hardware gewählt), off oder die ID eines Cross-Encoder-Modells
-rag_rerank_default: false     # true: jede Suche neu bewerten (Standard: nur Build-Empfehlungen)
-rag_rerank_min_score: 0.0     # Relevanzschwelle 0..1; 0 = die kalibrierte Schwelle des Modells (0,2)
+rag_rerank_default: false     # true: auch Chat- und MCP-Suchen neu bewerten (Standard: nur Build-Empfehlungen)
+# rag_rerank_min_score: 0.3   # Relevanzschwelle 0..1; ohne Wert = kalibrierte Schwelle des Modells (0,2), 0 = keine
 rag_model_idle_minutes: 10    # Modelle der Wissensbasis nach dieser Leerlaufzeit entladen; 0 = geladen lassen
 audio_announcements: true     # gesprochener Deep-Ingest-Hinweis und gesprochenes Ergebnis (Tools > Gesprochene Ansagen)
 community_index_url: ""       # https-Adresse des signierten Community-Index; leer, bis einer veröffentlicht ist
