@@ -975,6 +975,178 @@ class TestCrawlerOptOuts:
         assert time_module.monotonic() - start < 1.0
 
 
+class TestCrawlerLimits:
+    """A hostile site cannot fill the memory or hold the crawl: every response body has a size limit per type and
+    every request a deadline (requests' timeout bounds each socket read only). A page over its limit is skipped, one
+    over its deadline failed, each named with the reason, and Stop does not wait for a slow response."""
+
+    @pytest.fixture
+    def make_crawler(self, tmp_path, monkeypatch):
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.crawler_manager import CrawlerManager
+
+        def factory(pages, **options):
+            options.setdefault("respect_robots", False)
+            options.setdefault("request_delay", 0)
+            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)), options)
+            web = FakeWeb(pages)
+            monkeypatch.setattr(crawler.session, "send", web)
+            return crawler, web
+
+        return factory
+
+    @staticmethod
+    def hanging(release):
+        def page(url):
+            release.wait(30)  # a server that sends nothing: no socket read ever times out for long
+            return response(html="late")
+        return page
+
+    def test_an_oversized_page_is_skipped_and_named(self, make_crawler, monkeypatch):
+        from orchestrator.Core.crawler_manager import CrawlerManager
+        monkeypatch.setitem(CrawlerManager.BODY_LIMITS, "html", 4096)
+        crawler, _ = make_crawler({f"{SITE}/": page_with(body='<a href="/big">b</a>'),
+                                   f"{SITE}/big": page_with(body="x" * 5000)})
+
+        assert [d.metadata["source"] for d in crawler.crawl(f"{SITE}/")] == [f"{SITE}/"]
+        assert [(p.url, p.reason) for p in crawler.skipped] == [
+            (f"{SITE}/big", "response larger than 4 KiB (the limit for HTML pages)")]
+
+    def test_a_response_that_never_completes_fails_after_the_deadline(self, make_crawler, monkeypatch):
+        import threading
+        import time as time_module
+        from orchestrator.Core.crawler_manager import CrawlerManager
+        monkeypatch.setattr(CrawlerManager, "REQUEST_DEADLINE", 0.3)
+        release = threading.Event()
+        crawler, _ = make_crawler({f"{SITE}/": page_with(body='<a href="/slow">s</a>'),
+                                   f"{SITE}/slow": self.hanging(release)})
+        try:
+            start = time_module.monotonic()
+            assert [d.metadata["source"] for d in crawler.crawl(f"{SITE}/")] == [f"{SITE}/"]
+            assert time_module.monotonic() - start < 10
+        finally:
+            release.set()
+        assert [(p.url, p.reason) for p in crawler.failed] == [(f"{SITE}/slow", "no complete response within 0.3 s")]
+        assert crawler.skipped == []
+
+    def test_stop_does_not_wait_for_a_slow_response(self, make_crawler):
+        import threading
+        import time as time_module
+        release, stop = threading.Event(), threading.Event()
+        crawler, web = make_crawler({f"{SITE}/": self.hanging(release)})
+        try:
+            threading.Timer(0.3, stop.set).start()
+            start = time_module.monotonic()
+            assert list(crawler.iter_crawl(f"{SITE}/", stop=stop)) == []
+            assert time_module.monotonic() - start < 10  # the deadline (60 s) is not waited for
+        finally:
+            release.set()
+        assert crawler.stopped and crawler.failed == [] and crawler.skipped == []
+
+    def test_an_oversized_robots_txt_counts_up_to_the_limit(self, make_crawler, monkeypatch, caplog):
+        from orchestrator.Core.crawler_manager import CrawlerManager
+        monkeypatch.setitem(CrawlerManager.BODY_LIMITS, "robots", 2048)
+        head = "User-agent: *\nDisallow: /private\n"
+        head += "#" * (2048 - len("Allow: /private") - len(head) - 1) + "\n"
+        # The limit cuts "Allow: /private-docs" to "Allow: /private", which would win against the Disallow.
+        robots = head + "Allow: /private-docs\nDisallow: /late\n"
+        crawler, _ = make_crawler({f"{SITE}/robots.txt": response(html=robots, content_type="text/plain")},
+                                  respect_robots=True)
+
+        assert not crawler._can_fetch(f"{SITE}/private/a") and crawler._can_fetch(f"{SITE}/late/a")
+        assert "only its first 2 KiB are used" in caplog.text
+
+    def test_a_robots_txt_that_never_completes_disallows_the_site(self, make_crawler, monkeypatch):
+        import threading
+        from orchestrator.Core.crawler_manager import CrawlerManager
+        monkeypatch.setattr(CrawlerManager, "REQUEST_DEADLINE", 0.3)
+        release = threading.Event()
+        crawler, web = make_crawler({f"{SITE}/robots.txt": self.hanging(release), f"{SITE}/": page_with()},
+                                    respect_robots=True)
+        try:
+            assert crawler.crawl(f"{SITE}/") == []
+        finally:
+            release.set()
+        assert [(p.url, p.reason) for p in crawler.skipped] == [(f"{SITE}/", "disallowed by robots.txt")]
+        assert f"{SITE}/" not in web.urls
+
+    def test_an_oversized_tdmrep_file_is_not_used(self, make_crawler, monkeypatch, caplog):
+        from orchestrator.Core.crawler_manager import CrawlerManager
+        monkeypatch.setitem(CrawlerManager.BODY_LIMITS, "tdmrep", 1024)
+        rules = [{"location": f"/p{i}", "tdm-reservation": 1} for i in range(100)]
+        crawler, _ = make_crawler({f"{SITE}{TDM_FILE}": response(html=json.dumps(rules),
+                                                                  content_type="application/json"),
+                                   f"{SITE}/": page_with(body="")})
+
+        assert len(crawler.crawl(f"{SITE}/")) == 1
+        assert f"{SITE}{TDM_FILE}" in caplog.text and "larger than 1 KiB" in caplog.text
+
+    def test_a_real_server_dripping_or_flooding_cannot_hold_the_crawl(self, tmp_path, monkeypatch):
+        import http.server
+        import threading
+        import time as time_module
+        from orchestrator.Core import crawler_manager
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.crawler_manager import CrawlerManager
+
+        done = threading.Event()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                pages = {"/": b'<html><body><a href="/drip">d</a> <a href="/flood">f</a> <a href="/huge">h</a>'
+                              + EN.encode() + b"</body></html>"}
+                if self.path not in ("/", "/drip", "/flood", "/huge"):
+                    self.send_error(404)
+                    return
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html")
+                if self.path == "/huge":
+                    self.send_header("Content-Length", str(10 ** 12))
+                elif self.path == "/":
+                    self.send_header("Content-Length", str(len(pages["/"])))
+                self.end_headers()
+                try:
+                    if self.path == "/":
+                        self.wfile.write(pages["/"])
+                    while self.path != "/" and not done.is_set():
+                        self.wfile.write(b"<p>" + b"x" * 16384 if self.path == "/flood" else b"x")
+                        self.wfile.flush()
+                        if self.path != "/flood":
+                            time_module.sleep(0.05)
+                except OSError:
+                    pass  # the crawler gave up on this response
+
+            def log_message(self, *args):
+                pass
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        server.daemon_threads = True
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        for name in ("HTTP_PROXY", "http_proxy", "ALL_PROXY", "all_proxy"):
+            monkeypatch.delenv(name, raising=False)
+        # The test server is on the loopback address, which the SSRF guard refuses on purpose.
+        monkeypatch.setattr(crawler_manager, "validate_public_url", lambda url: SimpleNamespace(message=""))
+        monkeypatch.setattr(crawler_manager, "resolve_public_addresses", lambda host, port: ["127.0.0.1"])
+        monkeypatch.setattr(CrawlerManager, "REQUEST_DEADLINE", 1.5)
+        monkeypatch.setitem(CrawlerManager.BODY_LIMITS, "html", 256 * 1024)
+        site = f"http://docs.test:{server.server_address[1]}"
+        try:
+            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)),
+                                     {"respect_robots": False, "request_delay": 0})
+            start = time_module.monotonic()
+            docs = crawler.crawl(f"{site}/")
+            elapsed = time_module.monotonic() - start
+        finally:
+            done.set()
+            server.shutdown()
+        assert [d.metadata["source"] for d in docs] == [f"{site}/"]
+        assert [(p.url, p.reason) for p in crawler.failed] == [(f"{site}/drip", "no complete response within 1.5 s")]
+        assert sorted((p.url, p.reason) for p in crawler.skipped) == [
+            (f"{site}/flood", "response larger than 256 KiB (the limit for HTML pages)"),
+            (f"{site}/huge", "response larger than 256 KiB (the limit for HTML pages)")]  # refused by its header
+        assert elapsed < 15, elapsed
+
+
 class TestCrawlsStayWithTheUser:
     """Crawls start only from the GUI's Deep Ingest: MCP clients and Ditto have no way to start one, nor to
     acknowledge the notice before the first crawl in the user's place."""
