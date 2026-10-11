@@ -1,9 +1,10 @@
 """LLM provider layer: exact request bodies for both SDKs (mocked HTTP), errors, retries, refusals, JSON repair,
-privacy filter, cloud vs. local filtering, the append-only tool loop, Claude Code subscription runs, catalog."""
+privacy filter, cloud vs. local filtering, the append-only tool loop, catalog, sign-in method selection, the
+Claude workspace header and the SDK environment guard."""
 
 import json
 import os
-import subprocess
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Literal, Optional
 
@@ -15,9 +16,10 @@ pytest.importorskip("anthropic")
 pytest.importorskip("openai")
 
 from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest, InvalidOutput, LLMClient,  # noqa: E402
-                              Message, NotConfigured, PermissionDenied, ProviderUnavailable, RateLimited, Refused,
+                              LLMError, Message, NotConfigured, PermissionDenied, ProviderUnavailable, RateLimited, Refused,
                               ToolSpecLLM, Truncated, load_catalog, run_tool_loop, sanitize_for_cloud)
-from orchestrator.llm.catalog import is_local_url  # noqa: E402
+from orchestrator.llm.catalog import ProviderPreset, is_local_url  # noqa: E402
+from orchestrator.llm.providers import adapter_class  # noqa: E402
 from orchestrator.llm.privacy import PrivacyFilter, restore  # noqa: E402
 from orchestrator.llm.tool_loop import make_registry_executor, tool_specs_from_registry  # noqa: E402
 
@@ -77,12 +79,10 @@ def make_client(tmp_path, monkeypatch):
                 "OPENAI_BASE_URL", "OPENAI_ORG_ID", "OPENAI_PROJECT_ID"):
         monkeypatch.delenv(var, raising=False)
 
-    def factory(http=None, secrets=None, runner=None, **settings):
+    def factory(http=None, secrets=None, **settings):
         sleeps = []
-        options = {"claude_code": {"runner": runner, "binary": "/usr/bin/claude"}} if runner else None
         client = LLMClient(FakeConfig(**settings), FakeSecrets(secrets), state_dir=tmp_path / "state",
-                           http_client=http.client() if http else None, sleep=sleeps.append,
-                           adapter_options=options)
+                           http_client=http.client() if http else None, sleep=sleeps.append)
         client.sleeps = sleeps
         return client
     return factory
@@ -161,8 +161,7 @@ class TestCatalog:
 
     def test_presets_load(self):
         cat = load_catalog()
-        assert set(cat.ids()) >= {"anthropic", "claude_code", "openai", "google", "openrouter", "ollama", "local",
-                                  "custom"}
+        assert set(cat.ids()) >= {"anthropic", "openai", "google", "openrouter", "ollama", "local", "custom"}
         anthropic = cat.get("anthropic")
         assert anthropic.model_for("chat") == "claude-opus-5-5"
         assert set(anthropic.suggested_models) >= {"claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5",
@@ -175,7 +174,7 @@ class TestCatalog:
         assert cat.get("ollama").base_url == "http://localhost:11434/v1"
         assert cat.get("ollama").model_for("json") == "qwen3.5:4b"
         assert cat.get("local").runtime_endpoint and cat.get("local").no_tools_with_response_format
-        assert cat.get("claude_code").adapter == "claude_code" and cat.get("claude_code").auth == ["oauth"]
+        assert anthropic.auth == ["api_key", "ant_profile"] and anthropic.opt_in_auth == ["ant_profile"]
 
     def test_old_provider_names_still_resolve(self):
         cat = load_catalog()
@@ -312,25 +311,11 @@ class TestAnthropic:
         make_client(http, SECRETS, ai_base_url="https://evil.example.com", **ANTHROPIC).chat(ask())
         assert http.last.url.startswith("https://api.anthropic.com/")
 
-    def test_oauth_profile_from_ant_auth_login(self, make_client, tmp_path, monkeypatch):
-        config_dir = tmp_path / "anthropic"
-        (config_dir / "configs").mkdir(parents=True)
-        (config_dir / "credentials").mkdir()
-        cfg = config_dir / "configs" / "default.json"
-        cfg.write_text(json.dumps({"authentication": {"type": "user_oauth"}}))
-        creds = config_dir / "credentials" / "default.json"
-        creds.write_text(json.dumps({"type": "oauth_token", "access_token": "oauth-token-123",
-                                     "expires_at": 4102444800}))
-        os.chmod(cfg, 0o600)
-        os.chmod(creds, 0o600)
-        monkeypatch.setenv("ANTHROPIC_CONFIG_DIR", str(config_dir))
+    def test_env_base_url_is_ignored(self, make_client, monkeypatch):
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://evil.example.com")
         http = FakeHTTP().add(claude_message([text_block("ok")]))
-        client = make_client(http, {}, **ANTHROPIC)  # no API key: the profile is picked automatically
-        assert client.describe()["auth"] == "oauth"
-        client.chat(ask())
-        headers = http.last.headers
-        assert headers["authorization"] == "Bearer oauth-token-123" and "x-api-key" not in headers
-        assert "oauth-2025-04-20" in headers["anthropic-beta"]
+        make_client(http, SECRETS, **ANTHROPIC).chat(ask())
+        assert http.last.url.startswith("https://api.anthropic.com/")
 
     def test_list_models(self, make_client):
         http = FakeHTTP().add({"data": [{"id": "claude-opus-5-5", "type": "model", "display_name": "Claude Opus 5.5",
@@ -760,120 +745,284 @@ class TestPrivacy:
         assert len(http.requests) == 1
 
 
-# --- Claude subscription through Claude Code ------------------------------------------------------------------
+# --- sign-in method, removed providers, Claude workspaces -------------------------------------------------------
 
-class FakeClaude:
-    """Stands in for the `claude` binary."""
-
-    def __init__(self, result=None, returncode=0, stdout=None):
-        self.calls = []
-        self.result = result or {"type": "result", "subtype": "success", "is_error": False, "result": "",
-                                 "structured_output": {"text": "Hello from Claude", "tool_calls": []},
-                                 "stop_reason": "end_turn", "session_id": "s",
-                                 "usage": {"input_tokens": 3, "output_tokens": 4, "cache_read_input_tokens": 5,
-                                           "cache_creation_input_tokens": 6},
-                                 "modelUsage": {"claude-opus-5-5": {}}}
-        self.returncode = returncode
-        self.stdout = stdout
-
-    def __call__(self, cmd, **kw):
-        system = None
-        if "--system-prompt-file" in cmd:
-            with open(cmd[cmd.index("--system-prompt-file") + 1], encoding="utf-8") as f:
-                system = f.read()
-        self.calls.append(SimpleNamespace(cmd=cmd, kw=kw, system=system))
-        stdout = self.stdout if self.stdout is not None else json.dumps(self.result)
-        return subprocess.CompletedProcess(cmd, self.returncode, stdout=stdout, stderr="")
+MODELS_PAGE = {"data": [{"id": "claude-opus-5-5", "type": "model", "display_name": "Claude Opus 5.5",
+                         "created_at": "2026-09-01T00:00:00Z", "lifecycle": "active"}],
+               "has_more": False, "first_id": "claude-opus-5-5", "last_id": "claude-opus-5-5"}
+WORKSPACE = "wrkspc_" + "01TestWorkspace"
 
 
-class TestClaudeCode:
+@pytest.fixture
+def ant_profile(tmp_path, monkeypatch):
+    """A signed-in `ant auth login` profile in a private config directory, read only through the SDK."""
+    config_dir = tmp_path / "anthropic"
+    (config_dir / "configs").mkdir(parents=True)
+    (config_dir / "credentials").mkdir()
+    cfg = config_dir / "configs" / "default.json"
+    cfg.write_text(json.dumps({"authentication": {"type": "user_oauth"}}))
+    token = "profile-" + "token-123"
+    creds = config_dir / "credentials" / "default.json"
+    creds.write_text(json.dumps({"type": "oauth_token", "access_token": token, "expires_at": 4102444800}))
+    os.chmod(cfg, 0o600)
+    os.chmod(creds, 0o600)
+    monkeypatch.setenv("ANTHROPIC_CONFIG_DIR", str(config_dir))
+    return token
 
-    def test_runs_unmodified_claude_in_print_mode(self, make_client, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-api03-SHOULDNOTPASS0123456789abcdef")
-        fake = FakeClaude()
-        client = make_client(None, runner=fake, ai_provider="claude_code")
-        result = client.chat(ask("Server is at 10.0.0.7", tools=TOOLS, effort="high"))
-        call = fake.calls[0]
-        cmd = call.cmd
-        assert cmd[0] == "/usr/bin/claude" and cmd[1] == "-p"
-        for flag in ("--strict-mcp-config", "--safe-mode", "--disable-slash-commands", "--no-session-persistence"):
-            assert flag in cmd
-        assert "--bare" not in cmd  # bare mode would ignore the subscription login
-        assert cmd[cmd.index("--output-format") + 1] == "json" and cmd[cmd.index("--tools") + 1] == ""
-        assert cmd[cmd.index("--model") + 1] == "claude-opus-5-5" and cmd[cmd.index("--effort") + 1] == "high"
-        schema = json.loads(cmd[cmd.index("--json-schema") + 1])
-        names = [v["properties"]["name"]["const"] for v in schema["properties"]["tool_calls"]["items"]["anyOf"]]
-        assert names == ["start_build", "read_log"]
-        assert "ANTHROPIC_API_KEY" not in call.kw["env"]  # the subscription login is used, not an exported key
-        assert "You are Ditto." in call.system and "start_build" in call.system
-        transcript = call.kw["input"]
-        assert "10.0.0.7" not in transcript  # cloud: filtered like every cloud provider
-        assert json.loads(transcript[transcript.index("["):])[0]["role"] == "user"
-        assert call.kw["cwd"] != os.getcwd()
-        assert result.text == "Hello from Claude" and result.usage.cache_read_tokens == 5
-        assert result.model == "claude-opus-5-5" and result.provider == "claude_code"
 
-    def test_tool_calls_come_back_through_the_framework_loop(self, make_client):
-        fake = FakeClaude()
-        fake.result["structured_output"] = {"text": "", "tool_calls": [
-            {"name": "start_build", "arguments": {"target": "Rockchip", "board": None}}]}
-        client = make_client(None, runner=fake, ai_provider="claude_code")
-        result = client.chat(ask(tools=TOOLS))
-        assert result.stop == "tool_use" and result.tool_calls[0].name == "start_build"
-        assert result.tool_calls[0].arguments == {"target": "Rockchip", "board": None}
+@pytest.fixture
+def anthropic_clients(monkeypatch):
+    """The keyword arguments of every anthropic.Anthropic the adapter builds."""
+    import anthropic
+    built, real = [], anthropic.Anthropic
 
-    @pytest.mark.parametrize("payload, expected", [
-        ({"is_error": True, "result": "Not logged in · Please run /login"}, AuthFailed),
-        ({"is_error": True, "api_error_status": 429, "result": "Claude AI usage limit reached"}, RateLimited),
-        ({"is_error": True, "api_error_status": 529, "result": "Overloaded"}, ProviderUnavailable),
-    ])
-    def test_errors(self, make_client, payload, expected):
-        fake = FakeClaude(result={"type": "result", "subtype": "success", **payload})
-        with pytest.raises(expected):
-            make_client(None, runner=fake, ai_provider="claude_code").chat(ask())
+    def spy(**kwargs):
+        built.append(kwargs)
+        return real(**kwargs)
 
-    def test_old_claude_code_asks_for_an_update(self, make_client):
-        def old_version(cmd, **kw):
-            return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="error: unknown option '--safe-mode'")
+    monkeypatch.setattr(anthropic, "Anthropic", spy)
+    return built
+
+
+class TestSignInMethod:
+
+    def test_stored_key_wins_over_an_ant_profile(self, make_client, ant_profile, anthropic_clients):
+        http = FakeHTTP().add(claude_message([text_block("ok")]))
+        client = make_client(http, SECRETS, **ANTHROPIC)
+        assert client.describe()["auth"] == "api_key"
+        client.chat(ask())
+        assert http.last.headers["x-api-key"] == KEY and "authorization" not in http.last.headers
+        assert anthropic_clients and all("profile" not in kw for kw in anthropic_clients)
+        assert all(kw["base_url"] == "https://api.anthropic.com" for kw in anthropic_clients)
+
+    def test_ant_profile_is_never_picked_automatically(self, make_client, ant_profile, anthropic_clients):
+        http = FakeHTTP()
         with pytest.raises(NotConfigured) as info:
-            make_client(None, runner=old_version, ai_provider="claude_code").chat(ask())
-        assert "claude update" in str(info.value)
+            make_client(http, {}, **ANTHROPIC).chat(ask())
+        assert "ai_auth_anthropic" in str(info.value) and "Claude Code" not in str(info.value)
+        assert http.requests == [] and anthropic_clients == []
 
-    def test_missing_binary(self, make_client, monkeypatch):
-        monkeypatch.setenv("PATH", "")
-        client = LLMClient(FakeConfig(ai_provider="claude_code"), FakeSecrets(), sleep=lambda s: None)
-        with pytest.raises(NotConfigured):
+    @pytest.mark.parametrize("method", ["ant_profile", "oauth"])  # "oauth": the earlier name of the method
+    def test_ant_profile_when_the_user_chose_it(self, make_client, ant_profile, anthropic_clients, method):
+        http = FakeHTTP().add(claude_message([text_block("ok")]))
+        client = make_client(http, SECRETS, ai_auth_anthropic=method, **ANTHROPIC)
+        assert client.describe()["auth"] == "ant_profile"
+        client.chat(ask())
+        headers = http.last.headers
+        assert headers["authorization"] == f"Bearer {ant_profile}" and "x-api-key" not in headers
+        assert "oauth-2025-04-20" in headers["anthropic-beta"]
+        assert len(anthropic_clients) == 1 and anthropic_clients[0]["profile"] == "default"
+        assert anthropic_clients[0]["base_url"] == "https://api.anthropic.com"
+
+    def test_global_ai_auth_cannot_pick_an_opt_in_method(self, make_client, ant_profile):
+        with pytest.raises(NotConfigured, match="ai_auth_anthropic"):
+            make_client(FakeHTTP(), SECRETS, ai_auth="ant_profile", **ANTHROPIC).resolve()
+
+    def test_opt_in_methods_must_be_offered(self):
+        with pytest.raises(ValueError):
+            ProviderPreset(id="x", label="X", adapter="anthropic", auth=["api_key"], opt_in_auth=["ant_profile"])
+
+    def test_ant_profile_is_opt_in_even_when_a_catalog_forgets_to_say_so(self):
+        preset = ProviderPreset(id="x", label="X", adapter="anthropic", auth=["ant_profile", "api_key"])
+        assert preset.opt_in_auth == ["ant_profile"]
+
+    def test_ant_profile_keeps_its_own_workspace(self, make_client, ant_profile):
+        # The setting is for API keys; it must not move the profile's requests into another workspace.
+        profile_workspace = "wrkspc_" + "01FromTheProfile"
+        cfg = Path(os.environ["ANTHROPIC_CONFIG_DIR"]) / "configs" / "default.json"
+        cfg.write_text(json.dumps({"authentication": {"type": "user_oauth"}, "workspace_id": profile_workspace}))
+        http = FakeHTTP().add(claude_message([text_block("ok")]))
+        make_client(http, SECRETS, ai_auth_anthropic="ant_profile", ai_anthropic_workspace_id=WORKSPACE,
+                    **ANTHROPIC).chat(ask())
+        assert http.last.headers["anthropic-workspace-id"] == profile_workspace
+
+    def test_rejected_profile_sign_in_is_not_called_a_key(self, make_client, ant_profile):
+        http = FakeHTTP()
+        http.queue.append(anthropic_error(401, "authentication_error", "invalid bearer token"))
+        with pytest.raises(AuthFailed) as info:
+            make_client(http, SECRETS, ai_auth_anthropic="ant_profile", **ANTHROPIC).chat(ask())
+        text = str(info.value)
+        assert info.value.code == "anthropic.profile" and "'default'" in text and "ant auth login" in text
+        assert "rejected the key" not in text and ant_profile not in text
+
+
+class TestRemovedProviders:
+
+    def test_claude_code_is_gone_from_catalog_and_registry(self):
+        cat = load_catalog()
+        assert "claude_code" not in cat.ids() and cat.get("ClaudeCode") is None
+        with pytest.raises(ValueError):
+            adapter_class("claude_code")
+        with pytest.raises(ValueError):
+            ProviderPreset(id="x", label="X", adapter="claude_code")
+        root = Path(__file__).resolve().parents[1]
+        assert not (root / "orchestrator" / "llm" / "providers" / "claude_code.py").exists()
+        assert "claude_code" not in (root / "configs" / "llm_providers.yml").read_text(encoding="utf-8").lower()
+
+    @pytest.mark.parametrize("value", ["claude_code", "ClaudeCode"])
+    def test_old_setting_names_the_alternatives(self, make_client, value):
+        http = FakeHTTP()
+        with pytest.raises(NotConfigured) as info:
+            make_client(http, SECRETS, ai_provider=value).chat(ask())
+        text = str(info.value)
+        assert info.value.code == "provider.removed" and http.requests == []
+        for alternative in ("Claude API key", "Max and Team", "Bedrock, Vertex or Foundry", "llm-cli mcp config"):
+            assert alternative in text
+
+    @pytest.mark.parametrize("value", ["Claude Code", "claude-code", "CLAUDE_CODE", "Claude Code (Pro/Max)",
+                                       "ClaudeCode (subscription)"])
+    def test_other_spellings_never_turn_into_the_claude_api(self, make_client, value):
+        # "Claude Code" must not resolve through its first word ("Claude") to the API key and its billing.
+        cat = load_catalog()
+        assert cat.get(value) is None and cat.removed_message(value) is not None
+        assert cat.resolve_id("Claude") == "anthropic" and cat.resolve_id("Claude API") == "anthropic"
+        http = FakeHTTP()
+        with pytest.raises(NotConfigured) as info:
+            make_client(http, SECRETS, ai_provider=value).chat(ask())
+        assert info.value.code == "provider.removed" and http.requests == []
+
+    def test_user_catalog_of_an_earlier_version_still_loads(self, tmp_path):
+        # A copied catalog with the old method name and the removed preset must not break every provider.
+        (tmp_path / "llm_providers.yml").write_text(
+            "providers:\n"
+            "  anthropic:\n    label: Claude\n    adapter: anthropic\n    base_url: https://api.anthropic.com\n"
+            "    auth: [oauth, api_key]\n    secret: anthropic_api_key\n    models: {default: model-a}\n"
+            "  claude_code:\n    label: Claude subscription\n    adapter: claude_code\n    auth: [oauth]\n"
+            "  my_claude:\n    label: Mine\n    adapter: claude_code\n"
+            "aliases:\n  ClaudeCode: claude_code\n", encoding="utf-8")
+        cat = load_catalog(user_dir=tmp_path)
+        anthropic = cat.get("anthropic")
+        assert anthropic.auth == ["ant_profile", "api_key"] and anthropic.opt_in_auth == ["ant_profile"]
+        assert "claude_code" not in cat.ids() and "my_claude" not in cat.ids() and "openai" in cat.ids()
+        for name in ("claude_code", "ClaudeCode", "my_claude"):
+            assert "llm-cli mcp config" in cat.removed_message(name)
+        client = LLMClient(FakeConfig(**ANTHROPIC), FakeSecrets(SECRETS), catalog=cat, state_dir=tmp_path / "s")
+        assert client.resolve().auth == "api_key"  # the profile listed first is still never picked on its own
+        with pytest.raises(NotConfigured) as info:
+            client.resolve(provider="my_claude")
+        assert info.value.code == "provider.removed"
+
+    def test_removed_provider_in_the_fallback_chain_is_skipped(self, make_client):
+        http = FakeHTTP().add(claude_message([text_block("")], stop="refusal"))
+        client = make_client(http, SECRETS, ai_fallback_chain=["claude_code"], **ANTHROPIC)
+        with pytest.raises(NotConfigured) as info:
+            client.resolve(provider="claude_code")
+        assert info.value.code == "provider.removed"
+        with pytest.raises(Refused):
             client.chat(ask())
+        assert len(http.requests) == 1
 
-    def test_json_answer(self, make_client):
-        fake = FakeClaude()
-        fake.result["structured_output"] = {"text": "", "result": {"status": "ok", "score": 4}}
-        result = make_client(None, runner=fake, ai_provider="claude_code").chat(ask(output_model=Verdict))
-        assert result.parsed == Verdict(status="ok", score=4)
 
-    def test_auth_status(self, make_client):
-        fake = FakeClaude(stdout=json.dumps({"loggedIn": True, "authMethod": "claude.ai"}))
-        client = make_client(None, runner=fake, ai_provider="claude_code")
-        adapter = client.adapter(client.resolve())
-        assert adapter.auth_status() == {"logged_in": True, "auth_method": "claude.ai"}
-        assert fake.calls[0].cmd[1:] == ["auth", "status"]
-        assert adapter.login_command()[1:] == ["auth", "login"]
+class TestClaudeWorkspace:
 
-    def test_nested_definitions_move_to_the_schema_root(self, make_client):
-        class Board(BaseModel):
-            name: str
+    def test_header_on_messages_and_model_listing(self, make_client):
+        http = FakeHTTP().add(claude_message([text_block("ok")])).add(MODELS_PAGE)
+        client = make_client(http, SECRETS, ai_anthropic_workspace_id=WORKSPACE, **ANTHROPIC)
+        client.chat(ask())
+        client.list_models()
+        assert [r.path for r in http.requests] == ["/v1/messages", "/v1/models"]
+        assert all(r.headers["anthropic-workspace-id"] == WORKSPACE for r in http.requests)
 
-        class DeployIn(BaseModel):
-            board: Board
+    def test_no_header_without_the_setting(self, make_client):
+        http = FakeHTTP().add(claude_message([text_block("ok")]))
+        make_client(http, SECRETS, **ANTHROPIC).chat(ask())
+        assert "anthropic-workspace-id" not in http.last.headers
 
-        fake = FakeClaude()
-        tools = [ToolSpecLLM.from_model("deploy", "Deploys", DeployIn)]
-        make_client(None, runner=fake, ai_provider="claude_code").chat(ask(tools=tools))
-        cmd = fake.calls[0].cmd
-        schema = json.loads(cmd[cmd.index("--json-schema") + 1])
-        args = schema["properties"]["tool_calls"]["items"]["anyOf"][0]["properties"]["arguments"]
-        assert "$defs" not in args and args["properties"]["board"] == {"$ref": "#/$defs/Board"}
-        assert "Board" in schema["$defs"]
+    def test_malformed_setting_is_refused_before_any_request(self, make_client):
+        http = FakeHTTP()
+        with pytest.raises(NotConfigured) as info:
+            make_client(http, SECRETS, ai_anthropic_workspace_id="workspace-1", **ANTHROPIC).chat(ask())
+        assert info.value.code == "anthropic.workspace_invalid" and "wrkspc_" in str(info.value)
+        assert http.requests == []
+
+    @pytest.mark.parametrize("status, kind, message, code, phrase", [
+        (400, "invalid_request_error", "anthropic-workspace-id is required for this API key.",
+         "anthropic.workspace_required", "belongs to your account, not to one workspace"),
+        (400, "invalid_request_error", "anthropic-workspace-id header must be a valid workspace ID.",
+         "anthropic.workspace_invalid", "It looks like wrkspc_"),
+        (404, "not_found_error", "Workspace `wrkspc_gone42` not found.",
+         "anthropic.workspace_not_found", "no access to workspace wrkspc_gone42"),
+        (401, "authentication_error", "invalid x-api-key", "anthropic.auth", "wrong, was revoked, or has expired"),
+    ])
+    def test_errors_in_plain_language(self, make_client, status, kind, message, code, phrase):
+        http = FakeHTTP()
+        http.queue.append(anthropic_error(status, kind, message))
+        with pytest.raises(LLMError) as info:
+            make_client(http, SECRETS, ai_anthropic_workspace_id=WORKSPACE, **ANTHROPIC).chat(ask())
+        assert info.value.code == code and phrase in str(info.value) and info.value.status == status
+        assert len(http.requests) == 1  # not retried
+
+    def test_other_hosts_never_get_the_workspace_id(self, tmp_path):
+        # An Anthropic-protocol gateway or router is not the Claude API: the organization's workspace stays private.
+        (tmp_path / "llm_providers.yml").write_text(
+            "providers:\n  gateway:\n    label: Gateway\n    adapter: anthropic\n"
+            "    base_url: https://gateway.example.com\n    secret: anthropic_api_key\n"
+            "    models: {default: model-a}\n", encoding="utf-8")
+        http = FakeHTTP().add(claude_message([text_block("ok")]))
+        client = LLMClient(FakeConfig(ai_provider="gateway", ai_anthropic_workspace_id=WORKSPACE),
+                           FakeSecrets(SECRETS), catalog=load_catalog(user_dir=tmp_path), state_dir=tmp_path / "s",
+                           http_client=http.client(), sleep=lambda s: None)
+        client.chat(ask())
+        assert http.last.url.startswith("https://gateway.example.com/")
+        assert "anthropic-workspace-id" not in http.last.headers
+
+    @pytest.mark.parametrize("value", [" wrkspc_abc\n", "wrkspc_" + "ab c", "wrkspc_" + "\u00e4bc", "wrkspc_",
+                                       "wrkspc_abc\x00"])
+    def test_odd_workspace_ids(self, make_client, value):
+        http = FakeHTTP().add(claude_message([text_block("ok")]))
+        client = make_client(http, SECRETS, ai_anthropic_workspace_id=value, **ANTHROPIC)
+        if value.strip() == "wrkspc_abc":  # surrounding whitespace is trimmed
+            client.chat(ask())
+            assert http.last.headers["anthropic-workspace-id"] == "wrkspc_abc"
+            return
+        with pytest.raises(NotConfigured) as info:
+            client.chat(ask())
+        assert info.value.code == "anthropic.workspace_invalid" and http.requests == []
+
+    def test_admin_key_with_surrounding_whitespace_is_refused(self, make_client):
+        admin_key = " " + "sk-ant-" + "admin01-" + "Z" * 32 + "\n"  # pasted into `llm-cli secrets set`
+        http = FakeHTTP()
+        with pytest.raises(NotConfigured) as info:
+            make_client(http, {"anthropic_api_key": admin_key}, **ANTHROPIC).chat(ask())
+        assert info.value.code == "anthropic.admin_key" and http.requests == []
+
+    def test_admin_key_is_refused_before_any_request(self, make_client):
+        admin_key = "sk-ant-" + "admin01-" + "Z" * 32
+        http = FakeHTTP()
+        client = make_client(http, {"anthropic_api_key": admin_key}, **ANTHROPIC)
+        for attempt in (lambda: client.chat(ask()), client.list_models):
+            with pytest.raises(NotConfigured) as info:
+                attempt()
+            assert info.value.code == "anthropic.admin_key" and "Admin API key" in str(info.value)
+            assert admin_key not in str(info.value)
+        assert http.requests == []
+
+
+class TestEnvironmentHeaders:
+    """Without the startup guard: the adapters themselves keep OPENAI_CUSTOM_HEADERS' Authorization out."""
+
+    def test_env_authorization_never_reaches_a_local_server(self, make_client, monkeypatch):
+        monkeypatch.setenv("OPENAI_CUSTOM_HEADERS", "Authorization: Bearer ENV")
+        monkeypatch.setenv("OPENAI_ORG_ID", "org-from-env")
+        local_key = "local-" + "key-0123456789"
+        for secrets, expected in (({"custom_api_key": local_key}, local_key), ({}, "not-needed")):
+            http = FakeHTTP().add(completion("ok")).add({"object": "list", "data": []})
+            client = make_client(http, secrets, ai_provider="custom", ai_base_url="http://127.0.0.1:8080/v1",
+                                 ai_model="m")
+            client.chat(ask())
+            client.list_models()
+            for request in http.requests:
+                assert request.headers["authorization"] == f"Bearer {expected}"
+                assert "openai-organization" not in request.headers
+                assert not any("ENV" in value for value in request.headers.values())
+
+    def test_env_authorization_never_replaces_the_openai_key(self, make_client, monkeypatch):
+        monkeypatch.setenv("OPENAI_CUSTOM_HEADERS", "Authorization: Bearer ENV")
+        final = {"type": "message", "id": "msg_1", "role": "assistant", "status": "completed",
+                 "content": [{"type": "output_text", "text": "ok", "annotations": []}]}
+        http = FakeHTTP().add(responses_body([final]))
+        make_client(http, SECRETS, ai_provider="openai").chat(ask())
+        assert http.last.headers["authorization"] == f"Bearer {SECRETS['openai_api_key']}"
 
 
 def test_with_the_real_config_and_secrets_managers(tmp_path, memory_keyring):

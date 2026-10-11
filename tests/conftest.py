@@ -23,8 +23,12 @@ def isolated_environment(tmp_path, monkeypatch):
             monkeypatch.delenv(var)
     # Without it the installation's configs/ folder (the repository) would be used and written to.
     monkeypatch.setenv("LLM_FRAMEWORK_CONFIG_DIR", str(tmp_path / "configs"))
-    # Real provider keys from the developer's shell must not reach the tests.
-    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
+    # Real provider keys from the developer's shell must not reach the tests, nor SDK switches (headers, endpoints,
+    # profiles, debug logs) that change what the SDKs send; the CLI's startup guard would also edit them for good.
+    for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "ANTHROPIC_AUTH_TOKEN",
+                "OPENAI_CUSTOM_HEADERS", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL",
+                "OPENAI_ORG_ID", "OPENAI_PROJECT_ID", "ANTHROPIC_PROFILE", "ANTHROPIC_CONFIG_DIR", "ANTHROPIC_LOG",
+                "OPENAI_LOG"):
         monkeypatch.delenv(var, raising=False)
 
 
