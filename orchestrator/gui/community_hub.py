@@ -14,6 +14,7 @@ from typing import Callable, Optional
 import yaml
 from PySide6.QtCore import Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices
+from PySide6.QtGui import Qt as QtText
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QFileDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel, QLineEdit, QMainWindow,
     QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
@@ -146,7 +147,7 @@ class CommunityHubWindow(QMainWindow):
 
     def on_error(self, err):
         self.status_label.setText(f"Error: {err}")
-        QMessageBox.warning(self, "Community Hub", str(err))
+        QMessageBox.warning(self, "Community Hub", QtText.convertFromPlainText(str(err)))  # quotes pack names
 
     def filter_list(self, *_):
         text = self.search_edit.text().lower()

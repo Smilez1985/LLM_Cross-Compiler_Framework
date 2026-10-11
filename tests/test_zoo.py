@@ -562,6 +562,16 @@ class TestExport:
         make_target(world.root / "targets" / "own-board")
         assert world.cm.export_pack("target", "own-board", author="a").manifest.license == "MIT"
 
+    def test_a_target_with_a_pinned_image_survives_export_and_ci(self, world):
+        folder = make_target(world.root / "targets" / "sdk-board")
+        dockerfile = "FROM ghcr.io/acme/rk-sdk@sha256:" + "ab" * 32 + "\nRUN echo ok\n"
+        (folder / "Dockerfile").write_text(dockerfile)
+        result = world.cm.export_pack("target", "sdk-board", author="a")
+        assert not [name for name, _ in result.changes]
+        with zipfile.ZipFile(result.path) as zf:
+            assert zf.read("Dockerfile").decode() == dockerfile
+        assert CommunityManager(None).verify_file(result.path)[1] == []
+
     def test_an_installed_community_pack_is_not_re_signed_as_your_own(self, world):
         world.add(world.target_pack())
         world.publish()
@@ -690,6 +700,30 @@ class TestGenerator:
         with pytest.raises(ValueError, match="placeholder"):
             generator.generate_module(self.data())
         assert not (generator.targets_dir / "my_board").exists()
+
+    def test_the_official_target_passes_the_community_validators(self, tmp_path):
+        # A board variant made from the shipped target must be shareable (bash arrays, 'done < <(grep ...)').
+        from conftest import REPO_ROOT
+        from orchestrator.Core.module_generator import validate_target_folder
+        shutil.copytree(REPO_ROOT / "targets" / "Rockchip", tmp_path / "rk-variant")
+        assert validate_target_folder(tmp_path / "rk-variant") == []
+
+    def test_every_image_a_dockerfile_pulls_must_be_pinned(self, tmp_path):
+        from orchestrator.Core.module_generator import validate_target_folder
+        lower = make_target(tmp_path / "lower")
+        (lower / "Dockerfile").unlink()
+        (lower / "dockerfile").write_text("FROM attacker/tools:latest\n")  # the builder builds this name too
+        assert any("FROM attacker/tools:latest must be pinned" in p for p in validate_target_folder(lower))
+        copy = make_target(tmp_path / "copy")
+        (copy / "Dockerfile").write_text("FROM debian:bookworm-slim AS builder\n# COPY --from=example/ignored\n"
+                                         "COPY --from=builder /a /b\nCOPY --from=0 /c /d\n"
+                                         "RUN --mount=type=bind,from=attacker/tools:1,target=/t true\n"
+                                         "COPY --from=attacker/tools:latest /x /y\n")
+        assert [p.split(": ", 1)[1] for p in validate_target_folder(copy)] == [
+            "from=attacker/tools:1 must be pinned by digest (image@sha256:...)",
+            "from=attacker/tools:latest must be pinned by digest (image@sha256:...)"]
+        assert any("runs generated code" in p for p in validate_target_folder(
+            make_target(tmp_path / "sub", script="bash < <(echo 'echo hi')\n")))
 
     def test_knowledge_snapshot_is_opt_in_and_target_scoped(self, generator, world):
         world.rag.records = [{"source": "a", "content": "board doc", "metadata": {"root_url": "https://b.invalid"}},
@@ -865,6 +899,11 @@ def test_hub_never_renders_pack_text_as_html(qapp, world, tmp_path, monkeypatch)
         hub.confirm_install(prepared)
         assert shown[0][0] == Qt.PlainText and "WARNING" in shown[0][1]
         assert hub.status_label.textFormat() == Qt.PlainText
+        warned = []
+        monkeypatch.setattr(community_hub.QMessageBox, "warning", lambda parent, title, text: warned.append(text))
+        hub.on_error("<b>x</b>: not in the manifest<!--")  # errors quote zip member names
+        html.setHtml(warned[0])
+        assert html.toPlainText() == "<b>x</b>: not in the manifest<!--"
     finally:
         world.cm.discard(prepared)
         hub.close()

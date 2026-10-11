@@ -96,6 +96,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
 - Knowledge exports, and with them the knowledge snapshot of new target modules, are scrubbed: home folders,
   IP and MAC addresses, e-mail addresses, JWTs, the host name and the user name are removed, besides API keys.
+  Image digests (`name@sha256:...`) and the paths of default accounts such as `/root` or `/home/runner` stay
+  as they are, so a scrubbed target still builds.
 - The knowledge snapshot of a new target module is opt-in (a check box on the wizard's last page) and holds only
   the pages crawled for that target in the wizard; before, the whole local knowledge base went into every module.
 - Target modules created with the wizard, `llm-cli module create` or Ditto get a `capabilities:` block (support
@@ -121,9 +123,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
   the same way and installed atomically.
 - Community packs are installed only through a quarantine folder after their checks: an id without paths,
-  exactly the listed files with their hashes, no links, special or binary files, Dockerfile images pinned by
-  digest unless they are official base images, the shell deny-list on every script line that is not from the
-  shipped template, and `bash -n`. A pack appears under its final name only when it is complete, never over an
+  exactly the listed files with their hashes, no links, special or binary files, every image a Dockerfile pulls
+  (`FROM`, `COPY --from`, `RUN --mount=...,from=`, also in a lowercase `dockerfile`) pinned by digest unless it
+  is an official base image, the shell deny-list on every script line that is not from the shipped template,
+  and `bash -n`. A copy of the shipped Rockchip target passes these checks. A pack appears under its final name only when it is complete, never over an
   existing target (also when only the case differs). Before, a link in a community module could copy any file
   of the user into `targets/`.
 - The Docker build context never follows symbolic links or special files of a target, a linked Dockerfile is
