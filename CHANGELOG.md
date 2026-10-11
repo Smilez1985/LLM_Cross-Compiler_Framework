@@ -32,6 +32,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
+- **How credentials are protected is your choice** (setting `secret_storage`, or `LLM_SECRET_STORAGE` for
+  one run): the OS keyring (default), a credential helper command (`secret_helper`, e.g.
+  `pass show llmcc/vault-key`, run without a shell), a passphrase asked once per start (scrypt), a key file
+  next to the vault (`insecure`, not encrypted at rest) or memory only (`ephemeral`, for CI). Nothing is
+  picked automatically: without a usable keyring and without a choice, the framework stops and names the
+  options. `llm-cli doctor` warns about the key file and reports memory-only storage.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -50,10 +56,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   takes minutes on a CPU); "medium" and up keep it.
 - Dependencies: `anthropic` 1.13.0, `openai` 3.28.0 (was 2.54.0) and `fastembed` 0.8.1 (local embeddings,
   ONNX on the CPU) are pinned exactly; pip-audit reports no known vulnerabilities.
+- **Credential vault format v2**: every entry carries a key id and the vault key can be rotated (every entry
+  is re-encrypted, the old key is removed; an interrupted rotation is completed at the next start). Provider
+  keys are stored as credential records under `cred/<provider>/api_key`; stores and key names of earlier
+  versions are read as before and converted on the next change.
+- Reading a secret is written to the secrets audit log once per process and name, not on every access.
 
 ### Removed
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
+
+### Fixed
+- Secrets store: the secrets audit log lives next to the per-user store; the store of the old location is
+  taken over exactly once (secrets deleted later never come back); a damaged store or a link to a missing
+  file is reported by `llm-cli doctor` and never overwritten; a long-running GUI or MCP server sees secrets
+  changed by another process.
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -62,6 +79,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Requests to local model servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment.
 - Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
   the same way and installed atomically.
+- The credential vault is changed under a cross-process lock: the GUI, the CLI and an MCP server writing at
+  the same time no longer lose each other's changes.
+- A keyring that keeps nothing (such as `keyring.backends.null`) or does not answer within 3 seconds is no
+  longer used; before, secrets stored with it were unreadable after the next start.
+- On Windows the vault key stays on the local machine instead of roaming with the user profile.
+- The secrets store refuses a location inside a git work tree (set `LLM_FRAMEWORK_HOME` elsewhere).
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

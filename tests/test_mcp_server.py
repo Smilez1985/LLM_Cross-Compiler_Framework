@@ -196,6 +196,7 @@ def test_real_stdio_server_with_framework_tools(tmp_path):
     """`llm-cli mcp serve` started like a client does it: from another directory, over stdin/stdout."""
     from mcp import StdioServerParameters
     env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
+               LLM_SECRET_STORAGE="ephemeral",
                LLM_FRAMEWORK_HOME=str(tmp_path / "state"), LLM_FRAMEWORK_OUTPUT_DIR=str(tmp_path / "out"),
                LLM_FRAMEWORK_CACHE_DIR=str(tmp_path / "cache"), LLM_FRAMEWORK_MODELS_DIR=str(tmp_path / "models"))
     params = StdioServerParameters(command=sys.executable, args=["-m", "orchestrator.cli", "-q", "mcp", "serve"],

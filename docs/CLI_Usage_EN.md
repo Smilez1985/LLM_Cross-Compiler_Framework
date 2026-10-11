@@ -68,7 +68,9 @@ Security: The file is encrypted using SwarmCipher (XOR+Obfuscation) before uploa
 Requirement: A GitHub token must be stored in the Secrets Manager.
 
 4. Secrets Management (secrets)
-Manage sensitive data (API keys, passwords) in the secure OS Keyring.
+Manage sensitive data (API keys, tokens) in the encrypted credential vault in your user folder. Its key sits
+in the OS keyring by default; without a usable keyring, choose another protection with the setting
+`secret_storage` (`helper`, `passphrase`, `insecure` or, for CI, `ephemeral`; `LLM_SECRET_STORAGE` for one run).
 
 ```bash
 # Set a secret (Interactive password prompt)

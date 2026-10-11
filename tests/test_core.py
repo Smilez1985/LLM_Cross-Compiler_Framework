@@ -206,10 +206,13 @@ class TestTargets:
 
 class TestCLI:
 
-    def run_cli(self, tmp_path, *args, keyring_backend="keyring.backends.null.Keyring"):
+    def run_cli(self, tmp_path, *args, keyring_backend="keyring.backends.null.Keyring", storage="ephemeral"):
+        # No keyring in a test process: the credential storage is chosen explicitly (as in CI), never guessed.
         env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND=keyring_backend,
                    LLM_FRAMEWORK_HOME=str(tmp_path / "state"), LLM_FRAMEWORK_OUTPUT_DIR=str(tmp_path / "output"),
                    LLM_FRAMEWORK_CACHE_DIR=str(tmp_path / "cache"), LLM_FRAMEWORK_MODELS_DIR=str(tmp_path / "models"))
+        if storage:
+            env["LLM_SECRET_STORAGE"] = storage
         return subprocess.run([sys.executable, "-m", "orchestrator.cli", *args],
                               cwd=tmp_path, env=env, capture_output=True, text=True, timeout=120)
 
@@ -218,11 +221,15 @@ class TestCLI:
         assert result.returncode == 0, result.stderr
         assert "targets_dir" in result.stdout
 
-    def test_framework_commands_fail_cleanly_without_a_keyring(self, tmp_path):
-        result = self.run_cli(tmp_path, "-q", "secrets", "list", keyring_backend="keyring.backends.fail.Keyring")
+    @pytest.mark.parametrize("backend", ["keyring.backends.fail.Keyring", "keyring.backends.null.Keyring"])
+    def test_framework_commands_fail_cleanly_without_a_keyring(self, tmp_path, backend):
+        # The null backend keeps nothing: it used to lose every secret silently on the next start.
+        result = self.run_cli(tmp_path, "-q", "secrets", "list", keyring_backend=backend, storage=None)
         assert result.returncode == 1
         assert "Traceback" not in result.stderr
         assert "Failed to initialize framework" in result.stderr
+        assert "secret_storage" in result.stderr and "passphrase" in result.stderr, "the choices are named"
+        assert not (tmp_path / "state" / "secrets.store").exists()
 
     def test_quiet_suppresses_info_logs(self, tmp_path):
         result = self.run_cli(tmp_path, "-q", "targets", "list", "-f", "json")

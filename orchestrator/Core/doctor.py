@@ -178,23 +178,36 @@ def check_secrets(framework) -> List[Finding]:
         refresh()  # a long-running GUI or MCP server: another process may have changed the store
     if getattr(sm, "_load_failed", False):
         failed = getattr(sm, "failed_file", None) or sm.secrets_file
+        reason = getattr(sm, "load_error", None)
+        reason = f" ({reason})" if isinstance(reason, str) and reason else ""
         if failed != sm.secrets_file:
             return [Finding("security", "secrets.store", Severity.ERROR,
                             f"The old secrets store {failed} cannot be read, so its secrets were not taken over "
-                            f"into {sm.secrets_file}; secrets cannot be changed.",
+                            f"into {sm.secrets_file}; secrets cannot be changed.{reason}",
                             "Repair the file (its secrets are then taken over) or move it aside.")]
         return [Finding("security", "secrets.store", Severity.ERROR,
-                        f"The secrets store {sm.secrets_file} cannot be read; secrets cannot be changed.",
+                        f"The secrets store {sm.secrets_file} cannot be read; secrets cannot be changed.{reason}",
                         "Repair the file or move it aside and set the secrets again (llm-cli secrets set).")]
     findings = [_ok("security", "secrets.store", "Secrets store ready")]
+    mode = getattr(sm, "storage_mode", None)
+    if mode == "insecure":
+        findings.append(Finding("security", "secrets.storage", Severity.WARN,
+                                "The vault key is stored in a file next to the vault (secret_storage: insecure): "
+                                "credentials are not encrypted at rest.",
+                                "Use the OS keyring, a credential helper or a passphrase (setting secret_storage)."))
+    elif mode == "ephemeral":
+        findings.append(Finding("security", "secrets.storage", Severity.INFO,
+                                "Credentials are kept in memory only (secret_storage: ephemeral); nothing is stored."))
+    if mode not in (None, "keyring"):
+        return findings
     try:
         import keyring
         backend = type(keyring.get_keyring()).__module__ + "." + type(keyring.get_keyring()).__name__
         if any(name in backend.lower() for name in ("null", "fail", "plaintext")):
             findings.append(Finding("security", "secrets.keyring", Severity.WARN,
                                     f"The keyring backend ({backend}) does not protect secrets.",
-                                    "Install a system keyring (e.g. gnome-keyring or KWallet) or use the "
-                                    "encrypted file backend of 'keyrings.alt' with a passphrase."))
+                                    "Install a system keyring (e.g. gnome-keyring or KWallet), or choose a "
+                                    "credential helper or a passphrase (setting secret_storage)."))
     except Exception:
         pass
     return findings

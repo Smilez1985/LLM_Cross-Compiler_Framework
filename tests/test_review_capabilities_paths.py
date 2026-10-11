@@ -644,6 +644,7 @@ class TestCliBuildStartSubprocess:
 
     def test_rkllm_w4a16_without_board_exits_2(self, tmp_path):
         env = dict(os.environ, PYTHONPATH=str(REPO_ROOT), PYTHON_KEYRING_BACKEND="keyring.backends.null.Keyring",
+                   LLM_SECRET_STORAGE="ephemeral",
                    LLM_FRAMEWORK_HOME=str(tmp_path / "state"), LLM_FRAMEWORK_OUTPUT_DIR=str(tmp_path / "output"),
                    LLM_FRAMEWORK_CACHE_DIR=str(tmp_path / "cache"), LLM_FRAMEWORK_MODELS_DIR=str(tmp_path / "models"),
                    COLUMNS="300")
