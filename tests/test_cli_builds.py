@@ -154,6 +154,24 @@ class TestBuildRecords:
         build_records.prune(folder, keep=2)
         assert sorted(p.stem for p in folder.glob("*.json")) == ["done3", "done4", "running"]
 
+    def test_prune_counts_interrupted_builds_as_finished(self, tmp_path):
+        # A program that crashed or was killed never finishes its records; they must not pile up forever.
+        from orchestrator.Core import build_records
+        folder = tmp_path / "records"
+        for i in range(3):
+            build_records.write_record(folder, record(build_id=f"crashed{i}", pid=dead_pid(),
+                                                      started=f"2026-10-0{i + 1}T00:00:00"))
+        build_records.write_record(folder, record(build_id="running", started="2026-01-01T00:00:00",
+                                                  **build_records.this_process()))
+        build_records.prune(folder, keep=1)
+        assert sorted(p.stem for p in folder.glob("*.json")) == ["crashed2", "running"]
+
+    def test_records_in_the_installation_stay_out_of_git(self):
+        # The default cache_dir is cache/ in the installation, usually a git clone: records hold model names,
+        # local paths and errors and must not show up as files to commit.
+        lines = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
+        assert "/cache/build_records/" in lines
+
 
 class TestCliBuildStatus:
 
@@ -318,6 +336,35 @@ class TestCtrlC:
         assert "cancelled: its container was stopped" in out
         assert "when the CLI exits" not in out
 
+    def test_ctrl_c_right_after_the_submission_cancels_too(self, setup, monkeypatch):
+        # Ctrl+C while the CLI still prints the build's summary: the request exists, so it must be cancelled
+        # (otherwise the CLI ends with "Aborted!" and waits at exit for the build to finish).
+        from rich.console import Console
+
+        from orchestrator import cli as cli_module
+
+        class InterruptedConsole(Console):
+            def print(self, *objects, **kwargs):
+                if any("Following build progress" in str(o) for o in objects):
+                    raise KeyboardInterrupt
+                super().print(*objects, **kwargs)
+
+        class Ctx(cli_module.FrameworkContext):
+            def require_framework(self):
+                self.framework_manager = setup.cli.framework
+                self.orchestrator = setup.orch
+                return self
+
+        printed = io.StringIO()
+        monkeypatch.setattr(cli_module, "console", InterruptedConsole(file=printed, width=500, color_system=None))
+        result = invoke_plain("build", "start", "-m", HF_MODEL, "-t", "Rockchip", "-f", "gguf", "-b", "rk3588",
+                              "--follow", ctx=Ctx())
+        out = printed.getvalue() + result.out
+        assert result.code == 130, out
+        (state,) = setup.orch._workflows.values()
+        assert state.status.value == "cancelled", out
+        assert "Aborted" not in out
+
     def test_ctrl_c_after_the_build_ended_says_so(self, booted_framework, tmp_path, monkeypatch):
         from orchestrator import cli as cli_module
         make_cli(booted_framework, tmp_path, monkeypatch)  # working directory and console
@@ -379,7 +426,12 @@ class TestBuilderTabCancel:
         tab = builder_tab.BuilderTab(booted_framework)
         tab.target_combo.setCurrentIndex(tab.target_combo.findData("Rockchip"))
         tab.model_input.setEditText(HF_MODEL)
-        return tab
+        yield tab
+        # No polling timer or worker thread of this tab may outlive the test (and its framework).
+        tab._build_timer.stop()
+        worker = getattr(tab, "cancel_worker", None)
+        if worker is not None:
+            worker.wait(10000)
 
     @staticmethod
     def answer(monkeypatch, button):
@@ -491,10 +543,27 @@ class TestScan:
         assert result.returncode == 2 and "Unknown option" in result.stderr
         assert not (tmp_path / "target_hardware_config.txt").exists()
 
+    @pytest.mark.parametrize("args", [["--output="], ["--output", ""], ["-o"]])
+    def test_the_probe_script_refuses_an_empty_output(self, tmp_path, args):
+        work = tmp_path / "work"
+        work.mkdir()
+        result = subprocess.run(["bash", str(REPO_ROOT / "scripts" / "hardware_probe.sh"), *args], cwd=work,
+                                capture_output=True, text=True, timeout=30, check=False)
+        assert result.returncode == 2 and "Usage" in result.stderr, result.stderr
+        assert list(work.iterdir()) == []
+
     def test_windows_probe_takes_an_output_file(self):
         text = (REPO_ROOT / "scripts" / "hardware_probe.ps1").read_text(encoding="utf-8")
         assert re.search(r"param\(\s*#[^\n]*\n\s*\[string\]\$OutputFile", text)
         assert '-OutputFile `"$OutputFile`"' in text, "the elevated restart must keep the output file"
+
+    def test_windows_probe_waits_for_the_elevated_scan(self):
+        # `llm-cli scan` checks the file as soon as the script returns (exit code 1 without it): the
+        # non-elevated script must wait for the elevated one and pass on its exit code.
+        text = (REPO_ROOT / "scripts" / "hardware_probe.ps1").read_text(encoding="utf-8")
+        (line,) = [ln for ln in text.splitlines() if "Start-Process PowerShell -Verb RunAs" in ln]
+        assert " -Wait " in line and " -PassThru " in line, line
+        assert "Exit $elevated.ExitCode" in line, line
 
 
 class TestExitCodes:
@@ -585,6 +654,17 @@ class TestConfigShow:
         assert data["hf_token"]["value"] == "REDACTED"
         assert "FAKEpassword123" not in result.out and token not in result.out
         assert data["source_repositories"]["value"]["llama_cpp"]["url"].startswith("https://user:REDACTED@")
+
+    def test_credential_names_inside_a_setting_are_redacted(self, tmp_path):
+        # A value no secret pattern recognizes, below a key that names a credential, at any depth.
+        write_user_config(tmp_path, my_service={"user": "bob", "password": "hunter2-plain",
+                                                "nested": [{"api_key": "plainkey-123"}]})
+        result = invoke_plain("config", "show")
+        assert result.code == 0, result.out
+        data = json.loads(result.stdout)
+        assert data["my_service"]["value"] == {"user": "bob", "password": "REDACTED",
+                                               "nested": [{"api_key": "REDACTED"}]}
+        assert "hunter2-plain" not in result.out and "plainkey-123" not in result.out
 
     def test_the_c_file_wins_and_is_named(self, tmp_path):
         other = tmp_path / "elsewhere" / "custom.yml"
@@ -691,6 +771,8 @@ def test_doctor_tier_help_names_only_existing_fixes():
     text = " ".join(result.out.split())
     assert "folders" not in text
     assert "makes your personal folder private" in text and "Docker build cache" in text
+    from orchestrator.Core import doctor
+    assert "create a folder" not in doctor.__doc__  # the module's description of the tiers is true as well
 
 
 # ---------------------------------------------------------------------------------------------------------------

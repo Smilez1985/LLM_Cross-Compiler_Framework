@@ -281,7 +281,7 @@ Exit code 1 if the ID is not found. The command needs neither the credential vau
 
 | Option | Meaning |
 |---|---|
-| `-a, --all` | Show every kept build instead of the 20 newest (the 200 newest finished builds are kept). |
+| `-a, --all` | Show every kept build instead of the 20 newest (the 200 newest finished or interrupted builds are kept). |
 
 A request that waits for a self-healing decision shows its failed first attempt; decide in the program that runs it.
 
@@ -930,8 +930,9 @@ llm-cli scan [--output TEXT]
 
 Runs the hardware probe on this computer (`scripts/hardware_probe.sh` on Linux, `scripts/hardware_probe.ps1` on
 Windows). The probe writes the file given with `--output` (its folder is created). It may ask whether to install
-missing helper tools (`pciutils`, `usbutils`, `dmidecode`) with your package manager; answer `n` to skip them. Exit
-code 1 if the probe fails or writes no file.
+missing helper tools (`pciutils`, `usbutils`, `dmidecode`) with your package manager; answer `n` to skip them. On
+Windows without administrator rights the probe restarts itself elevated (Windows asks for permission) and the CLI
+waits for it. Exit code 1 if the probe fails or writes no file.
 
 | Option | Meaning |
 |---|---|
@@ -953,8 +954,8 @@ llm-cli config show
 Prints the effective settings as JSON, as the framework reads them: every setting with its `value` and its
 `source` (`default`, `file <path>` for `config.yml` or a file given with `-c`, `environment` for an
 `LLM_FRAMEWORK_<KEY>` variable). Credentials are redacted: tokens, keys and passwords inside values (for example in
-a URL), and the values of unknown settings whose name looks like a credential (`hf_token`, `..._password`). The
-command needs neither the credential vault nor Docker.
+a URL), and every value under a name that looks like a credential, whether an unknown setting (`hf_token`) or a key
+inside a setting (`password`, `api_key`). The command needs neither the credential vault nor Docker.
 
 ```bash
 llm-cli -q config show | jq '.models_dir'

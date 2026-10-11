@@ -19,7 +19,9 @@ while [ $# -gt 0 ]; do
             [ $# -ge 2 ] && [ -n "$2" ] || { echo "Usage: $0 [--output FILE]" >&2; exit 2; }
             OUTPUT_FILE="$2"; shift 2 ;;
         --output=*)
-            OUTPUT_FILE="${1#--output=}"; shift ;;
+            OUTPUT_FILE="${1#--output=}"
+            [ -n "$OUTPUT_FILE" ] || { echo "Usage: $0 [--output FILE]" >&2; exit 2; }
+            shift ;;
         -h|--help)
             echo "Usage: $0 [--output FILE]"; exit 0 ;;
         *)

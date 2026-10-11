@@ -577,24 +577,23 @@ def start_build(ctx: FrameworkContext, model: str, target: str, format: str, boa
         fm = ctx.framework_manager
         request_id = fm.run_coroutine(ctx.orchestrator.submit_build_request(build_request), timeout=30)
 
-        if not ctx.quiet:
-            console.print(Panel(
-                f"[bold]Model:[/bold] {escape(model)}\n"
-                f"[bold]Target:[/bold] {escape(target)}\n"
-                f"[bold]Format:[/bold] {format}\n"
-                f"[bold]Quantization:[/bold] {escape(quantization or 'None')}\n"
-                f"[bold]Output:[/bold] {escape(output_dir)}\n"
-                f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"
-                f"[bold]Smart Calibration (IMatrix):[/bold] {'✅ Enabled' if imatrix else '❌ Disabled'}",
-                title=f"🚀 Starting Build: {request_id}"
-            ))
-
-        # The CLI stays until the build has ended; Ctrl+C cancels it.
-        if follow:
-            console.print("[blue]Following build progress (Ctrl+C cancels the build)...[/blue]")
+        # The CLI stays until the build has ended; from here on Ctrl+C cancels it.
         last = None
         workflow_status = None
         try:
+            if not ctx.quiet:
+                console.print(Panel(
+                    f"[bold]Model:[/bold] {escape(model)}\n"
+                    f"[bold]Target:[/bold] {escape(target)}\n"
+                    f"[bold]Format:[/bold] {format}\n"
+                    f"[bold]Quantization:[/bold] {escape(quantization or 'None')}\n"
+                    f"[bold]Output:[/bold] {escape(output_dir)}\n"
+                    f"[bold]GPU:[/bold] {'✅ Enabled' if gpu else '❌ Disabled'}\n"
+                    f"[bold]Smart Calibration (IMatrix):[/bold] {'✅ Enabled' if imatrix else '❌ Disabled'}",
+                    title=f"🚀 Starting Build: {request_id}"
+                ))
+            if follow:
+                console.print("[blue]Following build progress (Ctrl+C cancels the build)...[/blue]")
             while True:
                 workflow_status = fm.run_coroutine(ctx.orchestrator.get_workflow_status(request_id), timeout=30)
                 if workflow_status:
@@ -2306,8 +2305,8 @@ SECRET_NAME = re.compile(r"(?i)(^|[_.-])(token|password|passwd|secret|api_?key|a
 def _redacted(value: Any) -> Any:
     if isinstance(value, str):
         return redact_secrets(value)
-    if isinstance(value, dict):
-        return {k: _redacted(v) for k, v in value.items()}
+    if isinstance(value, dict):  # below a key that names a credential, even a value no pattern recognizes
+        return {k: "REDACTED" if v and SECRET_NAME.search(str(k)) else _redacted(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):
         return [_redacted(v) for v in value]
     return value

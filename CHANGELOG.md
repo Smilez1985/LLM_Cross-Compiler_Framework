@@ -306,7 +306,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   waits until the build has stopped, says so and exits with code 130. Before, the build and its container kept
   running.
 - `llm-cli scan --output FILE` reaches the hardware probe (`hardware_probe.sh --output`,
-  `hardware_probe.ps1 -OutputFile`), which always wrote `target_hardware_config.txt` into the current folder.
+  `hardware_probe.ps1 -OutputFile`), which always wrote `target_hardware_config.txt` into the current folder. On
+  Windows without administrator rights the CLI waits for the probe's elevated restart instead of reporting at once
+  that no file was written.
 - `llm-cli module create` writes into the configured targets folder (`targets_dir`, relative to the installation)
   instead of `targets/` in the current folder.
 - `llm-cli config show` prints the effective settings (`config.yml`, a `-c` file, `LLM_FRAMEWORK_*` variables,

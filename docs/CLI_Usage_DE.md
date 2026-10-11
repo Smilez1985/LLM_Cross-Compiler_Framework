@@ -285,7 +285,7 @@ braucht weder den Tresor für Zugangsdaten noch Docker.
 
 | Option | Bedeutung |
 |---|---|
-| `-a, --all` | Jeden aufbewahrten Build statt der 20 neuesten zeigen (aufbewahrt werden die 200 neuesten fertigen Builds). |
+| `-a, --all` | Jeden aufbewahrten Build statt der 20 neuesten zeigen (aufbewahrt werden die 200 neuesten fertigen oder unterbrochenen Builds). |
 
 Ein Request, der auf eine Self-Healing-Entscheidung wartet, zeigt seinen gescheiterten ersten Versuch; entscheide in
 dem Programm, das ihn ausführt.
@@ -957,8 +957,9 @@ llm-cli scan [--output TEXT]
 Führt die Hardware-Probe auf diesem Rechner aus (`scripts/hardware_probe.sh` unter Linux,
 `scripts/hardware_probe.ps1` unter Windows). Die Probe schreibt die mit `--output` angegebene Datei (ihr Ordner
 wird angelegt). Sie fragt eventuell, ob fehlende Hilfsprogramme (`pciutils`, `usbutils`, `dmidecode`) mit deinem
-Paketmanager installiert werden sollen; mit `n` überspringst du das. Exit-Code 1, wenn die Probe scheitert oder
-keine Datei schreibt.
+Paketmanager installiert werden sollen; mit `n` überspringst du das. Unter Windows ohne Administratorrechte startet
+sich die Probe mit erhöhten Rechten neu (Windows fragt nach der Erlaubnis), und die CLI wartet auf sie. Exit-Code 1,
+wenn die Probe scheitert oder keine Datei schreibt.
 
 | Option | Bedeutung |
 |---|---|
@@ -980,8 +981,9 @@ llm-cli config show
 Gibt die wirksamen Einstellungen als JSON aus, so wie das Framework sie liest: jede Einstellung mit ihrem Wert
 (`value`) und ihrer Herkunft (`source`: `default`, `file <Pfad>` für die `config.yml` oder eine mit `-c` angegebene
 Datei, `environment` für eine Variable `LLM_FRAMEWORK_<KEY>`). Zugangsdaten werden geschwärzt: Tokens, Schlüssel und
-Passwörter in Werten (zum Beispiel in einer URL) und die Werte unbekannter Einstellungen, deren Name nach
-Zugangsdaten aussieht (`hf_token`, `..._password`). Der Befehl braucht weder den Tresor für Zugangsdaten noch Docker.
+Passwörter in Werten (zum Beispiel in einer URL) und jeder Wert unter einem Namen, der nach Zugangsdaten aussieht,
+ob eine unbekannte Einstellung (`hf_token`) oder ein Schlüssel innerhalb einer Einstellung (`password`, `api_key`).
+Der Befehl braucht weder den Tresor für Zugangsdaten noch Docker.
 
 ```bash
 llm-cli -q config show | jq '.models_dir'

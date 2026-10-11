@@ -22,7 +22,8 @@ $OutputFile = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromP
 $currentPrincipal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent())
 if (-not $currentPrincipal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
     Write-Warning "Deep Scan requires Administrator privileges for SoC/RAM timings."
-    try { Start-Process PowerShell -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -OutputFile `"$OutputFile`""; Exit }
+    # -Wait: the caller (llm-cli scan) reads the output file as soon as this script returns.
+    try { $elevated = Start-Process PowerShell -Verb RunAs -Wait -PassThru -ArgumentList "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -OutputFile `"$OutputFile`""; Exit $elevated.ExitCode }
     catch { Write-Error "Failed to elevate."; Exit 1 }
 }
 

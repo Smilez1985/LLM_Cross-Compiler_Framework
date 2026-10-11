@@ -350,7 +350,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wartet, bis der Build angehalten hat, sagt das und endet mit Exit-Code 130. Vorher liefen Build und Container
   weiter.
 - `llm-cli scan --output DATEI` erreicht die Hardware-Probe (`hardware_probe.sh --output`,
-  `hardware_probe.ps1 -OutputFile`), die immer `target_hardware_config.txt` in den aktuellen Ordner schrieb.
+  `hardware_probe.ps1 -OutputFile`), die immer `target_hardware_config.txt` in den aktuellen Ordner schrieb. Unter
+  Windows ohne Administratorrechte wartet die CLI auf den Neustart der Probe mit erhöhten Rechten, statt sofort zu
+  melden, dass keine Datei geschrieben wurde.
 - `llm-cli module create` schreibt in den eingestellten Targets-Ordner (`targets_dir`, relativ zur Installation)
   statt nach `targets/` im aktuellen Ordner.
 - `llm-cli config show` gibt die wirksamen Einstellungen aus (`config.yml`, eine Datei aus `-c`, Variablen
