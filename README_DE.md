@@ -336,8 +336,13 @@ du Claude Desktop neu.
   hast es erlaubt. Ein Client, der nicht fragen kann, wird abgewiesen, mit einem Hinweis, wie du das Tool
   erlaubst. Jeder Aufruf landet in einem manipulationssicheren Audit-Log (`llm-cli tools audit`).
 - **Transporte:** stdio (Standard, vom Client gestartet) oder lokales Streamable HTTP
-  (`llm-cli mcp serve --transport http`, nur Loopback, Standardadresse `http://127.0.0.1:8765/mcp`, Bearer-Token
-  in `~/.llm-framework/mcp_http_token`).
+  (`llm-cli mcp serve --transport http`, nur Loopback, Standardadresse `http://127.0.0.1:8765/mcp`). Über HTTP
+  braucht jeder Client sein eigenes benanntes Token: `llm-cli mcp token add NAME` zeigt es einmal, und der Client
+  schickt es als `Authorization: Bearer <Token>`. Webseiten (Anfragen mit `Origin`-Header) werden abgewiesen.
+- **Ein Token pro Client:** Ein benanntes Token ist der Aufrufer im Audit-Log (`mcp:<Name>`) und hat eigene
+  Berechtigungen; ein neues darf nur lesen, bis du mehr erlaubst (`llm-cli tools permissions --token NAME`). Ein
+  stdio-Client bekommt sein eigenes Token mit `LCF_MCP_TOKEN` in seinem Server-Eintrag; ohne es teilen sich alle
+  lokalen stdio-Clients deine eigenen Berechtigungen.
 - Ein Tool zum Übertragen auf Boards gibt es über MCP nicht.
 
 **Ein Claude-Abo nutzen:** Anthropic erlaubt Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines

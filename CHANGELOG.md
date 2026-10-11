@@ -206,6 +206,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the client) with the name and version the client reports, the protocol version, the transport and the declared
   capabilities, including whether it can ask you (elicitation). The tools see the same label. Docs: a table of
   what Claude Code, Claude Desktop, Cowork and VS Code support.
+- **Named MCP tokens, one per client** (`llm-cli mcp token add|list|rotate|revoke`): a token is shown once and
+  stored only as its SHA-256 (`mcp_tokens.json`, mode 0600). Its name is the caller in the audit log
+  (`mcp:<name>`) and it has its own permissions: a new token can only read until you allow more with
+  `llm-cli tools permissions --token NAME`; `--policy-from mcp|ditto|<token>` starts with a copy, `--link ditto`
+  uses Ditto's permissions by reference (for Ditto on another computer). Over stdio the client's server entry sets
+  `LCF_MCP_TOKEN`; the server reads it once, removes it from its environment and does not start with an invalid
+  value. Rotating or revoking takes effect at once, also for a running server; a revoked token loses its
+  permissions. Only a person at a terminal manages tokens (audited with actor `cli`, never the token itself).
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -270,6 +278,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli ditto auth storage --use ...`.
 - Error messages and hints name `llm-cli ditto login <provider>` instead of `llm-cli secrets set <key name>`;
   `llm-cli module generate-ai` uses the stored sign-in and never asks for a key itself.
+- **MCP over HTTP needs a named token per client.** The one shared per-user token of 3.0.0
+  (`~/.llm-framework/mcp_http_token`) is no longer accepted: create a token per client with
+  `llm-cli mcp token add NAME`, give it to the client, and delete the old file. `llm-cli mcp serve --transport http`
+  does not start before a named token exists.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -515,6 +527,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   key with a space, a line break or an invisible character inside is refused before anything is sent or stored.
 - The Builder log shows every message as plain text, so names from community recipes, Ditto's answers or build
   output cannot render as HTML (links, images, formatting).
+- **MCP over HTTP is closed to web pages and DNS rebinding.** In 3.0.0 a page served from any port on localhost
+  passed the Origin check (only the token stopped it), the Host check accepted a loopback name with any port, and
+  all HTTP clients shared one token and one audit actor. Now every request with an `Origin` header (also a CORS
+  preflight) is refused before the token is checked, the `Host` header must be a loopback name with the server's
+  own port (in the framework and again in the SDK), the server keeps at most 8 sessions (was 10,000) and takes at
+  most 1 MiB per request (was 4 MiB), a session only answers the token that opened it, and the server does not start
+  when other users can read the token file.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

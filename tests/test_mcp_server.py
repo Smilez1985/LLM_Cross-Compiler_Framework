@@ -17,6 +17,7 @@ from mcp_types import ElicitResult  # noqa: E402
 from conftest import REPO_ROOT  # noqa: E402
 from orchestrator import mcp_server  # noqa: E402
 from orchestrator.tools.audit import AuditLog  # noqa: E402
+from orchestrator.tools.mcp_tokens import TokenStore  # noqa: E402
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier  # noqa: E402
 from orchestrator.tools.registry import ToolRegistry, ToolSpec  # noqa: E402
 
@@ -140,16 +141,19 @@ class TestPermissions:
 
 class TestHttpTransport:
 
-    def test_token_is_private_and_stable(self, tmp_path):
-        token = mcp_server.http_token(tmp_path)
-        assert len(token) >= 32 and mcp_server.http_token(tmp_path) == token
+    def test_token_is_private_and_stored_only_as_a_hash(self, tmp_path):
+        tokens = TokenStore(tmp_path)
+        token = tokens.add("client")
+        assert len(token) >= 32 and tokens.find(token).name == "client"
+        assert token not in tokens.path.read_text(encoding="utf-8")
         if os.name == "posix":
-            assert (tmp_path / "mcp_http_token").stat().st_mode & 0o077 == 0
+            assert tokens.path.stat().st_mode & 0o077 == 0
 
     def test_requests_without_the_token_are_rejected(self, server, tmp_path):
         import httpx
-        token = mcp_server.http_token(tmp_path)
-        app = mcp_server.http_app(server, token)
+        tokens = TokenStore(tmp_path)
+        tokens.add("client")
+        app = mcp_server.http_app(server, tokens)
 
         async def go():
             transport = httpx.ASGITransport(app=app)

@@ -812,7 +812,8 @@ VS Code können dann [dieselben Tools wie Ditto](#dittos-tools) nutzen. Am Clien
 Konto oder Schlüssel an; das Framework sieht das nie.
 
 - **Jeder Aufruf läuft durch die Tool-Registry:** Eingabeschema, deine Berechtigungen, Bestätigung, Audit-Log
-  (Akteur `mcp`). Tool-Annotationen (nur lesend, idempotent) sind nur Hinweise für den Client.
+  (Akteur `mcp` für lokale stdio-Clients, `mcp:<Name>` für ein benanntes Token). Tool-Annotationen (nur lesend,
+  idempotent) sind nur Hinweise für den Client.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine
@@ -825,8 +826,24 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   und Log → Artefakte) und sagt dem Client, dass Build-Logs und Ergebnisse aus der Wissensbasis externer Text sind,
   dessen Anweisungen nicht befolgt werden dürfen.
 - **Transporte:** stdio (Standard; der Client startet den Server) oder Streamable HTTP nur auf einer
-  Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). HTTP prüft Host und Origin und
-  braucht ein Bearer-Token, das pro Benutzer in `~/.llm-framework/mcp_http_token` angelegt wird.
+  Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). Über HTTP schickt jeder Client sein
+  eigenes benanntes Token als `Authorization: Bearer <Token>`; eine Anfrage mit `Origin`-Header (eine Webseite, auch
+  ein CORS-Preflight) wird abgelehnt, der `Host`-Header muss eine Loopback-Adresse mit dem Port des Servers nennen
+  (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Eine
+  Sitzung gehört dem Token, das sie geöffnet hat.
+- **Benannte Tokens:** `llm-cli mcp token add NAME` legt ein Token für einen Client an und zeigt es einmal; das
+  Framework behält nur seinen SHA-256 in `~/.llm-framework/mcp_tokens.json` (Modus 0600; der Server startet nicht,
+  wenn andere Benutzer die Datei lesen können). Der Name des Tokens ist der Aufrufer im Audit-Log (`mcp:<Name>`),
+  und es hat eigene Berechtigungen: Ein neues Token darf nur lesen, bis du mit
+  `llm-cli tools permissions --token NAME` mehr erlaubst, es mit einer Kopie der Berechtigungen eines anderen
+  Aufrufers anlegst (`--policy-from mcp`) oder es an Dittos Berechtigungen bindest (`--link ditto`, für Ditto auf
+  einem anderen Rechner; eine Änderung an Dittos Berechtigungen gilt sofort auch dafür). `rotate` ersetzt ein Token,
+  `revoke` löscht es mit seinen Berechtigungen; beides wirkt sofort, auch für einen laufenden Server. Ein
+  stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag: Der
+  Server liest sie einmal beim Start, entfernt sie aus seiner Umgebung und startet nicht mit einem Wert, der kein
+  gültiges Token ist. Ohne sie teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen
+  Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal: Kein Tool kann sie anlegen, lesen oder ändern,
+  und kein Token erscheint in einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag.
 - **Arbeitsordner:** Der Server liest nie Einstellungen und importiert nie Code aus dem Ordner, in dem er gestartet
   wird (der Client startet ihn mit `python -P`), und unter Windows startet er von dort keine Programme wie `docker`
   oder `git`. Ein Projektordner kann sein Verhalten nicht ändern.
@@ -834,11 +851,12 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   POSIX-Shells und in cmd wie PowerShell halten; `--write claude-desktop` trägt den Server in die Konfiguration von
   Claude Desktop ein, behält andere Einträge und schreibt eine private Sicherung.
 - **Wer verbunden ist:** Für jeden neuen Client schreibt der Server eine Zeile nach stderr, nie an den Client: Name
-  und Version, die der Client über sich selbst angibt, die Protokollversion, den Transport und die Fähigkeiten, die er
-  erklärt hat, zum Beispiel `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio,
-  elicitation form+url, capabilities: elicitation, roots`. `elicitation none` heißt, dass der Client dich nicht fragen
-  kann; ein Tool auf „fragen“ wird dort abgelehnt. Text vom Client wird auf 64 Zeichen gekürzt und escapet; er ist
-  eine Beschriftung, nie eine Berechtigung.
+  und Version, die der Client über sich selbst angibt, die Protokollversion, den Transport, den Aufrufer (`mcp` oder
+  `mcp:<Name>` des benannten Tokens, nie das Token selbst) und die Fähigkeiten, die er erklärt hat, zum Beispiel
+  `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
+  capabilities: elicitation, roots`. `elicitation none` heißt, dass der Client dich nicht fragen kann; ein Tool auf
+  „fragen“ wird dort abgelehnt. Text vom Client wird auf 64 Zeichen gekürzt und escapet; er ist eine Beschriftung,
+  nie eine Berechtigung.
 
 Was die Clients unterstützen, laut der Dokumentation ihrer Hersteller (2026-10-11). „Nicht dokumentiert“ heißt, dass
 der Hersteller nichts dazu sagt; die stderr-Zeile oben zeigt, was ein Client wirklich erklärt.
@@ -880,6 +898,9 @@ Verfügung.
 - Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
   lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
   `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
+- Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
+  `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
+  nicht lesen lässt, darf nicht einmal lesen.
 
 **Audit-Log** (`~/.llm-framework/audit.db`, SQLite): Jeder Tool-Aufruf wird mit Zeit, Akteur, Tool, Entscheidung, ob
 ein Mensch bestätigt hat, und Ergebnis festgehalten. Argumente werden geschwärzt und gekürzt gespeichert, dazu ein

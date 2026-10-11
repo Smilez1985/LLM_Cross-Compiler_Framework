@@ -24,7 +24,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
 - [ditto](#ditto): `login`, `logout`, `auth`, `setup`, `ask`, `eval`, `runtime`, `models`
 - [tools](#tools): `list`, `permissions`, `audit`
-- [mcp](#mcp): `serve`, `config`
+- [mcp](#mcp): `serve`, `config`, `token add|list|rotate|revoke`
 - [secrets](#secrets): `set`, `list`
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): hardware probe
@@ -733,7 +733,7 @@ description. The title says when the permissions are not set up yet.
 ### tools permissions
 
 ```
-llm-cli tools permissions [--reset]
+llm-cli tools permissions [--reset] [--token NAME]
 ```
 
 Asks the same three questions as [`ditto setup`](#ditto-setup) and saves the answers. Permissions for single tools
@@ -741,7 +741,8 @@ set in the GUI are kept.
 
 | Option | Meaning |
 |---|---|
-| `--reset` | Back to the recommended defaults (the setup asks again next time). |
+| `--reset` | Back to the recommended defaults (the setup asks again next time). With `--token`: back to read only. |
+| `--token TEXT` | Set the permissions of this [named MCP token](#mcp-token) instead of your own (Ditto and local stdio clients). Needs a terminal; a token linked to Ditto is asked first whether it should get its own. Audited with actor `cli`. |
 
 ### tools audit
 
@@ -749,8 +750,8 @@ set in the GUI are kept.
 llm-cli tools audit [--limit N] [--verify] [--archive]
 ```
 
-Shows the most recent tool calls: time, actor (`ditto` or `mcp`), tool, decision, whether a person confirmed it,
-and the outcome.
+Shows the most recent tool calls: time, actor (`ditto`, `mcp`, `mcp:<token name>`, or `cli` for a change to the
+named tokens), tool, decision, whether a person confirmed it, and the outcome.
 
 | Option | Meaning |
 |---|---|
@@ -780,12 +781,20 @@ denied when the client cannot ask).
 
 | Option | Meaning |
 |---|---|
-| `--transport [stdio\|http]` | `stdio` (default): started by the client. `http`: local Streamable HTTP with a bearer token. |
+| `--transport [stdio\|http]` | `stdio` (default): started by the client. `http`: local Streamable HTTP with a named token per client. |
 | `--host TEXT` | HTTP only; loopback addresses only (default `127.0.0.1`; also `::1`, `localhost`). |
 | `--port INTEGER` | HTTP only (default 8765). |
 
-With `--transport http` the server listens on `http://<host>:<port>/mcp` and every request needs
-`Authorization: Bearer <token>`; the token is in `~/.llm-framework/mcp_http_token` (created on first use).
+With `--transport http` the server listens on `http://<host>:<port>/mcp`, and every request needs
+`Authorization: Bearer <token>` with a [named token](#mcp-token); the server does not start before one exists, or
+when other users can read the token file. Requests with an `Origin` header (web pages, CORS preflights) are refused,
+the `Host` header must be `127.0.0.1`, `localhost` or `[::1]` with the server's port, and the server keeps at most
+8 sessions and takes at most 1 MiB per request. The old shared token file `mcp_http_token` is no longer accepted.
+
+Over stdio, the environment variable `LCF_MCP_TOKEN` in the client's server entry makes the client the caller of
+that named token (`mcp:<name>`, with the token's permissions) instead of the shared caller `mcp`. The server reads
+it once, removes it from its environment (child processes do not inherit it) and exits with code 2 if the value is
+not a valid token; a running server stops answering when its token is revoked or rotated.
 
 ```bash
 llm-cli mcp serve --transport http --port 8765
@@ -813,6 +822,37 @@ llm-cli mcp config --write claude-desktop
 ```
 
 You sign in to these clients with your own account or key; the framework never sees it.
+
+### mcp token
+
+```
+llm-cli mcp token add NAME [--policy-from CALLER | --link ditto]
+llm-cli mcp token list
+llm-cli mcp token rotate NAME
+llm-cli mcp token revoke NAME
+```
+
+Named tokens, one per client that connects over HTTP or over stdio with `LCF_MCP_TOKEN`. A token is shown once,
+when it is created or rotated; the framework keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode
+0600). Its name (1-32 lower-case letters, digits and hyphens) is the caller `mcp:<name>` in the audit log, and it has
+its own permissions. `add`, `rotate` and `revoke` need a person at a terminal (`add` and `rotate` also print only to
+a terminal) and are audited with actor `cli`, without the token. No tool can create, list, change or read tokens.
+
+| Command / option | Meaning |
+|---|---|
+| `add NAME` | Creates a token that can only read, until you allow more with `tools permissions --token NAME`. |
+| `--policy-from CALLER` | Starts with a copy of another caller's permissions: `mcp` (local stdio clients), `ditto`, or a token name. Later changes of the source do not apply. |
+| `--link ditto` | Uses Ditto's permissions by reference, for Ditto running on another computer: a change to Ditto's permissions applies at once. |
+| `list` | Names, audit actors, permissions, creation and rotation time; never a token or its hash. |
+| `rotate NAME` | A new token for the same name and permissions; the old one stops working at once. |
+| `revoke NAME` | Deletes the token and its permissions after a question; its client loses access at once. |
+
+```bash
+llm-cli mcp token add laptop                          # read only
+llm-cli tools permissions --token laptop              # allow more
+llm-cli mcp token add ditto-laptop --link ditto       # Ditto on another computer
+claude mcp add --transport http llm-cross-compiler http://127.0.0.1:8765/mcp --header "Authorization: Bearer <token>"
+```
 
 ---
 

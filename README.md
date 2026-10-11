@@ -322,8 +322,13 @@ Python (see [Calling `llm-cli`](#calling-llm-cli)). After `--write claude-deskto
   them. A client that cannot ask is refused, with a hint how to allow the tool. Every call is written to a
   tamper-evident audit log (`llm-cli tools audit`).
 - **Transports:** stdio (default, started by the client) or local Streamable HTTP
-  (`llm-cli mcp serve --transport http`, loopback only, default address `http://127.0.0.1:8765/mcp`, bearer token
-  in `~/.llm-framework/mcp_http_token`).
+  (`llm-cli mcp serve --transport http`, loopback only, default address `http://127.0.0.1:8765/mcp`). Over HTTP
+  every client needs its own named token: `llm-cli mcp token add NAME` shows it once, and the client sends it as
+  `Authorization: Bearer <token>`. Web pages (requests with an `Origin` header) are refused.
+- **One token per client:** a named token is the caller in the audit log (`mcp:<name>`) and has its own
+  permissions; a new one can only read until you allow more (`llm-cli tools permissions --token NAME`). A stdio
+  client gets its own token with `LCF_MCP_TOKEN` in its server entry; without it, all local stdio clients share your
+  own permissions.
 - There is no deployment tool over MCP.
 
 **Using a Claude subscription:** Anthropic does not allow third-party apps to use a Claude subscription's sign-in
