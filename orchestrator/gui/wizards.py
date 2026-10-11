@@ -16,18 +16,17 @@ Updates v2.3.0:
 
 import threading
 import re
-import os
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 
 from PySide6.QtWidgets import (
     QWizard, QWizardPage, QVBoxLayout, QLabel, QFormLayout, 
     QLineEdit, QComboBox, QRadioButton, QButtonGroup, QTextEdit, 
     QMessageBox, QGroupBox, QPushButton, QFileDialog, QProgressBar,
-    QDialog, QHBoxLayout, QWidget, QPlainTextEdit, QStackedWidget, QCheckBox
+    QDialog, QHBoxLayout, QPlainTextEdit, QStackedWidget, QCheckBox
 )
-from PySide6.QtCore import Qt, Signal, QObject, QThread, QSize, QTimer, QRect
-from PySide6.QtGui import QPixmap, QPainter
+from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QRect
+from PySide6.QtGui import QPixmap
 
 from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog
@@ -123,7 +122,9 @@ class CrawlWorker(QThread):
                 self.progress.emit(f"Crawling root: {url}...")
 
                 result = self.rag_manager.ingest_url(url, self.options)
-                
+                for page in result.get("skipped", []):
+                    self.progress.emit(f"  -> Skipped {page['url']}: {page['reason']}")
+
                 if result.get("success"):
                     count = result.get("count", 0)
                     total_docs += count

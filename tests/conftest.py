@@ -23,6 +23,8 @@ def isolated_environment(tmp_path, monkeypatch):
             monkeypatch.delenv(var)
     # Without it the installation's configs/ folder (the repository) would be used and written to.
     monkeypatch.setenv("LLM_FRAMEWORK_CONFIG_DIR", str(tmp_path / "configs"))
+    # Spoken announcements stay off; audio tests switch them on explicitly.
+    monkeypatch.setenv("LLM_FRAMEWORK_NO_AUDIO", "1")
     # Real provider keys from the developer's shell must not reach the tests.
     for var in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"):
         monkeypatch.delenv(var, raising=False)

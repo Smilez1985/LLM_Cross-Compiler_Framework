@@ -15,7 +15,7 @@ import os
 import re
 import threading
 import time
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
@@ -408,7 +408,8 @@ class RAGManager:
     def ingest_url(self, url: str, crawler_options: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         Crawls a URL and indexes the pages. A snapshot is taken first, so a bad crawl can be rolled back.
-        crawler_options apply to this crawl only (see CrawlerManager).
+        crawler_options apply to this crawl only (see CrawlerManager). "skipped" lists the pages the crawl
+        left out ({"url", "reason", "opt_out"}), e.g. because the site reserved them.
         """
         if not CrawlerManager:
             return {"success": False, "message": "Crawler module missing"}
@@ -423,8 +424,10 @@ class RAGManager:
         except Exception as e:
             self.logger.error(f"Deep Ingest failed: {redact_secrets(str(e))}")
             return {"success": False, "message": redact_secrets(str(e))}
+        skipped = [asdict(page) for page in crawler.skipped]
+        note = f", {len(skipped)} pages skipped (see the log)" if skipped else ""
         if not documents:
-            return {"success": False, "message": "No documents found", "count": 0}
+            return {"success": False, "message": f"No documents found{note}", "count": 0, "skipped": skipped}
 
         pages = chunks = 0
         for doc in documents:
@@ -434,12 +437,13 @@ class RAGManager:
                 added = self._ingest(meta.get("source", url), doc.page_content, meta, replace=True)
             except KnowledgeBaseError as e:
                 self._fail(e)
-                return {"success": False, "message": str(e), "count": chunks, "documents": pages}
+                return {"success": False, "message": str(e), "count": chunks, "documents": pages,
+                        "skipped": skipped}
             if added:
                 pages += 1
                 chunks += added
-        return {"success": True, "message": f"Ingested {pages} pages ({chunks} chunks)", "count": chunks,
-                "documents": pages}
+        return {"success": True, "message": f"Ingested {pages} pages ({chunks} chunks){note}", "count": chunks,
+                "documents": pages, "skipped": skipped}
 
     # --- CODEBASE INGEST (SELF-AWARENESS) ---
     def ingest_codebase(self, root_path: Union[str, Path, None] = None) -> Dict[str, Any]:

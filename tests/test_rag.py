@@ -655,6 +655,51 @@ class TestCrawlerLanguages:
         assert "Menu" not in doc.page_content
 
 
+class TestDeepIngestOptOuts:
+    """Pages a site reserved never reach the knowledge base; ingest_url reports them with the reason."""
+
+    PAGES = {
+        "http://93.184.215.14/": ('<a href="/open">o</a><a href="/reserved">r</a>', {}),
+        "http://93.184.215.14/open": ("Open guide.", {}),
+        "http://93.184.215.14/reserved": ("Secret guide about quantization.", {"X-Robots-Tag": "noai"}),
+    }
+
+    @pytest.fixture
+    def web(self, monkeypatch):
+        import requests
+        from requests.structures import CaseInsensitiveDict
+
+        def send(session, prepared, **kwargs):
+            body, headers = self.PAGES.get(prepared.url, (None, {}))
+            html = f"<html><body>{body}<p>{EN * 3}</p></body></html>" if body is not None else ""
+            return SimpleNamespace(status_code=200 if body is not None else 404, text=html, content=html.encode(),
+                                   headers=CaseInsensitiveDict({"Content-Type": "text/html", **headers}),
+                                   is_redirect=False)
+
+        monkeypatch.setattr(requests.Session, "send", send)
+
+    def test_reserved_pages_are_reported_and_not_stored(self, make_rag, web):
+        rag = make_rag()
+
+        result = rag.ingest_url("http://93.184.215.14/", {"request_delay": 0})
+
+        assert result["success"] and result["documents"] == 2
+        assert result["skipped"] == [{"url": "http://93.184.215.14/reserved", "reason": "X-Robots-Tag: noai",
+                                      "opt_out": True}]
+        assert "1 pages skipped" in result["message"]
+        assert all(hit.source != "http://93.184.215.14/reserved" for hit in rag.search("secret quantization", limit=5))
+
+    def test_a_fully_reserved_crawl_fails_with_the_reasons(self, make_rag, web, monkeypatch):
+        monkeypatch.setitem(self.PAGES, "http://93.184.215.14/",
+                            ('<a href="/open">o</a>', {"X-Robots-Tag": "none"}))  # nofollow: /open is never seen
+
+        result = make_rag().ingest_url("http://93.184.215.14/", {"request_delay": 0})
+
+        assert not result["success"]
+        assert result["message"] == "No documents found, 1 pages skipped (see the log)"
+        assert [page["reason"] for page in result["skipped"]] == ["X-Robots-Tag: none"]
+
+
 class TestOfflineMode:
 
     @pytest.fixture
