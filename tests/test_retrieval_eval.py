@@ -481,8 +481,7 @@ def test_cli_rerank_variant_reports_the_reranker(tmp_path, monkeypatch, fake_mod
     assert fused["setup"]["variant"] == "fused" and fused["setup"]["reranker"] is None
     assert reranked["setup"]["label"] == "retrieval rerank"
     assert reranked["setup"]["model"] == f"{HashedEmbedder.model_id} + fake/word-reranker"
-    assert reranked["setup"]["reranker"] == {"model": "fake/word-reranker", "reason": "set in the configuration "
-                                             "(rag_reranker)", "min_score": 0.5, "default": False}
+    assert reranked["setup"]["reranker"] == {"model": "fake/word-reranker", "min_score": 0.5}
     assert created == ["cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"]
     # The floor gives unrelated questions no excerpt; reranked scores are relevances.
     assert reranked["retrieval"]["empty_when_irrelevant"] == 1.0

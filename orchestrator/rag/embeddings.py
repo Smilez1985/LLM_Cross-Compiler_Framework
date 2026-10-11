@@ -26,10 +26,9 @@ from orchestrator.utils.helpers import redact_secrets
 # Conservative for multilingual subword tokenizers (EN/DE text averages closer to 4 characters per token),
 # so chunks sized with it stay below the model's context.
 CHARS_PER_TOKEN = 3.0
+# FastEmbed's BM25 over the text plus the split forms of its identifiers. The forms only add tokens of the same
+# hashed vocabulary, so chunks imported before the splitting stay valid in the same index.
 SPARSE_MODEL = "Qdrant/bm25"
-# The keyword encoding stored with each collection: FastEmbed's BM25 over the text plus the split forms of its
-# identifiers. A collection of another encoding is re-encoded, never mixed.
-SPARSE_ENCODING = "Qdrant/bm25+ids1"
 # One stemmer for every document keeps query and document tokens consistent; German words are stemmed
 # imperfectly but identically on both sides, and German stop words get a low IDF anyway.
 BM25_LANGUAGE = "english"
@@ -197,21 +196,25 @@ def check_vectors(vectors: Iterable, expected: int, dim: int, model_id: str) -> 
 _REGISTER_LOCK = threading.Lock()
 
 
+def register_model(model_class, model_id: str, **description) -> None:
+    """Registers a model FastEmbed does not ship with its model class (TextEmbedding, TextCrossEncoder); a model
+    registered earlier in this process, or shipped by a newer FastEmbed, is left as it is."""
+    with _REGISTER_LOCK:
+        if not any(m["model"].lower() == model_id.lower() for m in model_class.list_supported_models()):
+            model_class.add_custom_model(model=model_id, **description)
+
+
 def _register_custom(spec: EmbeddingModelSpec) -> None:
     if spec.custom is None:
         return
     from fastembed import TextEmbedding
     from fastembed.common.model_description import ModelSource, PoolingType
 
-    with _REGISTER_LOCK:
-        if any(m["model"].lower() == spec.model_id.lower() for m in TextEmbedding.list_supported_models()):
-            return  # registered earlier in this process, or shipped by a newer FastEmbed
-        TextEmbedding.add_custom_model(
-            model=spec.model_id, pooling=PoolingType(spec.custom.pooling),
-            normalization=spec.custom.normalization, sources=ModelSource(hf=spec.custom.hf_repo),
-            dim=spec.dim, model_file=spec.custom.model_file, additional_files=list(spec.custom.additional_files),
-            license=spec.license, size_in_gb=spec.size_gb,
-            description=f"Registered by the LLM Cross-Compiler Framework ({spec.max_tokens} tokens).")
+    register_model(TextEmbedding, spec.model_id, pooling=PoolingType(spec.custom.pooling),
+                   normalization=spec.custom.normalization, sources=ModelSource(hf=spec.custom.hf_repo),
+                   dim=spec.dim, model_file=spec.custom.model_file, additional_files=list(spec.custom.additional_files),
+                   license=spec.license, size_in_gb=spec.size_gb,
+                   description=f"Registered by the LLM Cross-Compiler Framework ({spec.max_tokens} tokens).")
 
 
 def _quiet_fastembed() -> None:
@@ -255,16 +258,11 @@ class _FastEmbedBase:
             except Exception as e:
                 if offline:
                     raise EmbeddingModelNotCached(
-                        f"The {self.kind} {self.model_name} is not in {self.cache_dir} and offline mode is on. "
+                        f"The {self.kind} {self.model_id} is not in {self.cache_dir} and offline mode is on. "
                         f"Turn offline mode off once to download it (about {self._size_gb:.2f} GB).") from e
-                raise EmbeddingError(f"Could not load the {self.kind} {self.model_name}: "
+                raise EmbeddingError(f"Could not load the {self.kind} {self.model_id}: "
                                      f"{redact_secrets(str(e))}") from e
             return self._model
-
-    @property
-    def model_name(self) -> str:
-        """The model's FastEmbed name."""
-        return self.model_id
 
     def prepare(self) -> None:
         """Downloads (unless offline) and loads the model now instead of on first use."""
@@ -350,14 +348,14 @@ class FastEmbedDenseEmbedder(_FastEmbedBase):
 
 class FastEmbedSparseEmbedder(_FastEmbedBase):
     """BM25 term weights with FastEmbed over the text plus its split identifiers (expand_identifiers); the
-    collection's sparse vector must use Modifier.IDF. model_id names the encoding (SPARSE_ENCODING)."""
+    collection's sparse vector must use Modifier.IDF."""
 
     BATCH_SIZE = 64
 
     def __init__(self, cache_dir: Path, offline: Callable[[], bool] = lambda: False, language: str = BM25_LANGUAGE,
                  model_dir: Optional[Path] = None):
         super().__init__(cache_dir, offline, 0.01)
-        self.model_id = SPARSE_ENCODING
+        self.model_id = SPARSE_MODEL
         self.language = language
         self._model_dir = model_dir  # a local copy of the stop word files, used instead of the cache
 
@@ -379,10 +377,6 @@ class FastEmbedSparseEmbedder(_FastEmbedBase):
             return None
         return Path(found).parent if isinstance(found, str) else None  # else not downloaded: FastEmbed reports it
 
-    @property
-    def model_name(self) -> str:
-        return SPARSE_MODEL
-
     def embed_passages(self, texts: Sequence[str]) -> List[SparseVec]:
         texts = [expand_identifiers(t) for t in texts]
         if not texts:
@@ -396,25 +390,27 @@ class FastEmbedSparseEmbedder(_FastEmbedBase):
 # FastEmbed's BM25 tokenizer keeps \w runs whole: "-DGGML_CUDA=ON" becomes "dggml_cuda", so a search for
 # GGML_CUDA or "ggml cuda" misses it; snake_case and camelCase names stay one token. Their parts are added.
 _WORD = re.compile(r"\w+")
-_CMAKE_DEFINE = re.compile(r"D(?=[A-Z][A-Z0-9]*(?:_|$))")
+_CMAKE_DEFINE = re.compile(r"D_?[A-Z][A-Z0-9]*(?:_|$)")
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z]{2})")  # not plurals such as GPUs
+_VERSION_PART = re.compile(r"\d{1,2}")  # the 64 of x86_64, the 2 and 17 of manylinux_2_17
 
 
 def expand_identifiers(text: str) -> str:
     """The text plus the split forms of its identifiers, for the BM25 input only (the dense input and the
     stored content stay as they are): -DGGML_CUDA=ON adds GGML_CUDA GGML CUDA, rknn_toolkit2 adds rknn toolkit2,
-    rknnToolkitLite adds rknn Toolkit Lite. Each form is added once."""
+    rknnToolkitLite adds rknn Toolkit Lite, x86_64 adds x86. Each form is added once."""
     added: Dict[str, None] = {}
     for match in _WORD.finditer(text or ""):
-        word = match.group()
-        start = match.start()
-        if start and text[start - 1] == "-" and _CMAKE_DEFINE.match(word):
-            word = word[1:]  # a CMake definition: -DNAME=VALUE
+        word, start, end = match.group(), match.start(), match.end()
+        define = _CMAKE_DEFINE.match(word) if start and text[start - 1] == "-" else None
+        if define and ("_" in define.group() or text[end:end + 1] == "="):  # -DNAME=VALUE, -DNAME_X, not -DEBUG
+            word = word[1:]
             added.setdefault(word, None)
         parts = [p for p in _CAMEL.sub("_", word).split("_") if p]
         if len(parts) > 1:
             for part in parts:
-                added.setdefault(part, None)
+                if not _VERSION_PART.fullmatch(part):
+                    added.setdefault(part, None)
     return f"{text}\n{' '.join(added)}" if added else text
 
 

@@ -28,8 +28,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   downloaded on first use, never in offline mode) reads the question together with each candidate and drops the
   ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build recommendations use
   it. Settings: `rag_reranker` (`auto`: from 6 GB RAM, the larger bge-reranker-v2-m3 with CUDA and 16 GB; `off`;
-  or a model id), `rag_rerank_min_score` and `rag_rerank_default` (also rerank chat and MCP searches; off). A
-  reranker that cannot run is logged and the search keeps its order.
+  or a model id), `rag_rerank_min_score` (unset: the model's calibrated floor; 0: none) and `rag_rerank_default`
+  (also rerank chat and MCP searches; off). A reranker that cannot run is logged, and searches keep their order
+  until the next start or a change of `rag_reranker`.
   `llm-cli ditto eval --kind retrieval --rag-variant rerank` grades it: on the 34 questions hit@1 93 % and MRR
   0.97 (hybrid search: 87 % and 0.93), and all 4 unrelated questions get no excerpt (floor 0.2: relevant excerpts
   scored 0.80 or more, unrelated ones 0.009 or less). It takes about 1 s for 12 candidates and 2-2.6 s for 20 on
@@ -40,8 +41,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Keyword search understands identifiers**: `-DGGML_CUDA=ON`, `rknn_toolkit2` or `rknnToolkitLite` are also
   found by their parts (`GGML_CUDA`, `rknn toolkit2`), and one- and two-word searches such as `E2041` or
   `GGML_CUDA` use the keyword index. Identifier questions of the retrieval set: hit@3 83 % to 100 %, the rest
-  unchanged. Existing knowledge bases get their keyword index rebuilt from the stored text once, on first use
-  (documents and vectors are kept); older snapshots are rebuilt the same way when restored.
+  unchanged.
 - **Large code blocks and tables** beyond the embedding model's context (512 tokens for the default model) are
   split at line boundaries, each piece with the table header or the code fence, so their later parts can be
   found at all (answers deep inside such blocks: hit@1 50 % to 100 %). Smaller blocks stay whole. Re-import a

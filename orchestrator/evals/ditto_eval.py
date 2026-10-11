@@ -503,6 +503,14 @@ class EvalReport:
         return data
 
 
+def run_setup(label: str, provider: str, model: str, cases_path: Optional[Path], cases: Sequence[Case], repeat: int,
+              **details: Any) -> Dict[str, Any]:
+    """The setup block of a report: what ran with which framework version, on which cases (and their digest)."""
+    from orchestrator import __version__
+    return {"label": label, "provider": provider, "model": model, **details, "framework": __version__,
+            "cases_sha256": cases_digest(cases_path), "repeat": repeat, "cases": [c.id for c in cases]}
+
+
 def run_cases(run_case: Callable[[Case], Attempt], cases: Sequence[Case], repeat: int = 1,
               on_result: Optional[Callable[[CaseResult], None]] = None) -> EvalReport:
     results = []

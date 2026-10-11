@@ -32,9 +32,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   120 MB, beim ersten Gebrauch heruntergeladen, nie im Offline-Modus) liest die Frage zusammen mit jedem
   Kandidaten und verwirft die unter einer Relevanzschwelle, sodass Ditto lieber keinen Auszug bekommt als
   unpassende. Build-Empfehlungen nutzen ihn. Einstellungen: `rag_reranker` (`auto`: ab 6 GB RAM, das größere
-  bge-reranker-v2-m3 mit CUDA und 16 GB; `off`; oder eine Modell-ID), `rag_rerank_min_score` und
-  `rag_rerank_default` (auch Chat- und MCP-Suchen reranken; aus). Ein Reranker, der nicht laufen kann, wird
-  protokolliert, und die Suche behält ihre Reihenfolge. `llm-cli ditto eval --kind retrieval --rag-variant rerank`
+  bge-reranker-v2-m3 mit CUDA und 16 GB; `off`; oder eine Modell-ID), `rag_rerank_min_score` (ohne Wert: die
+  kalibrierte Schwelle des Modells; 0: keine) und `rag_rerank_default` (auch Chat- und MCP-Suchen reranken; aus).
+  Ein Reranker, der nicht laufen kann, wird protokolliert, und Suchen behalten ihre Reihenfolge bis zum nächsten
+  Start oder einer Änderung von `rag_reranker`. `llm-cli ditto eval --kind retrieval --rag-variant rerank`
   bewertet ihn: bei den 34 Fragen hit@1 93 % und MRR 0,97 (hybride Suche: 87 % und 0,93), und alle 4 themenfremden
   Fragen bekommen keinen Auszug (Schwelle 0,2: relevante Auszüge erreichten 0,80 oder mehr, themenfremde 0,009
   oder weniger). Er braucht etwa 1 s für 12 Kandidaten und 2–2,6 s für 20 auf einer geteilten CPU mit 4 Kernen und
@@ -46,9 +47,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Die Stichwortsuche versteht Bezeichner**: `-DGGML_CUDA=ON`, `rknn_toolkit2` oder `rknnToolkitLite` werden
   auch über ihre Teile gefunden (`GGML_CUDA`, `rknn toolkit2`), und Suchen aus einem oder zwei Wörtern wie `E2041`
   oder `GGML_CUDA` nutzen den Stichwortindex. Bezeichner-Fragen des Retrieval-Satzes: hit@3 von 83 % auf 100 %,
-  der Rest unverändert. Bestehende Wissensbasen bekommen ihren Stichwortindex einmalig beim ersten Gebrauch aus
-  dem gespeicherten Text neu aufgebaut (Dokumente und Vektoren bleiben erhalten); ältere Snapshots werden beim
-  Wiederherstellen genauso neu aufgebaut.
+  der Rest unverändert.
 - **Große Codeblöcke und Tabellen**, die über den Kontext des Embedding-Modells hinausgehen (512 Tokens beim
   Standardmodell), werden an Zeilengrenzen geteilt, jedes Stück mit dem Tabellenkopf oder dem Code-Zaun, sodass
   ihre hinteren Teile überhaupt gefunden werden (Antworten tief in solchen Blöcken: hit@1 von 50 % auf 100 %).

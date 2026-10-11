@@ -563,7 +563,7 @@ class DittoCoder:
     # --- knowledge base -----------------------------------------------------------------------------------
     def _knowledge(self, query: str, limit: int = 5, rerank: Optional[bool] = None) -> str:
         """Matching knowledge-base excerpts as one untrusted block ("" when disabled or nothing matches), within
-        a third of the context limit. rerank: see RAGManager.search (None: the configured default)."""
+        a third of the context limit. rerank: see RAGManager.search (None: rag_rerank_default)."""
         query = (query or "").strip()[:500]
         if not query:
             return ""
@@ -596,9 +596,9 @@ class DittoCoder:
         log_content = log_content or ""
         parts = ["Build context:\n" + wrap_untrusted(context_info or "(none)", "build context", max_len=2000),
                  "Build log (last part):\n" + wrap_untrusted(log_content[-6000:], "build log")]
-        # Not reranked by default: the cross-encoder scores log lines against prose poorly and lost relevant
-        # excerpts in the retrieval evaluation (cases tagged log).
-        known = self._knowledge("\n".join(log_content.strip().splitlines()[-3:]), limit=3)
+        # Never reranked: the cross-encoder scores log lines against prose poorly and lost relevant excerpts in
+        # the retrieval evaluation (cases tagged log).
+        known = self._knowledge("\n".join(log_content.strip().splitlines()[-3:]), limit=3, rerank=False)
         if known:
             parts.append("Possibly related knowledge-base excerpts:\n" + known)
         parts.append("Analyze why the build failed and propose one fix.")
@@ -618,8 +618,9 @@ class DittoCoder:
         lowered = probe.lower()
         sdk_hint = next((sdk for marker, sdk in SDK_HINTS if marker in lowered), "generic")
         parts = ["Hardware probe (target_hardware_config.txt):\n" + wrap_untrusted(probe[:8000], "hardware probe")]
-        # Not reranked by default either: for this keyword string the floor dropped the relevant excerpts too.
-        docs = self._knowledge(f"{sdk_hint} SDK compilation flags build configuration optimization parameters")
+        # Never reranked either: for this keyword string the floor dropped the relevant excerpts too.
+        docs = self._knowledge(f"{sdk_hint} SDK compilation flags build configuration optimization parameters",
+                               rerank=False)
         if docs:
             parts.append("Documentation excerpts:\n" + docs)
         parts.append("Propose the module definition for this hardware.")
