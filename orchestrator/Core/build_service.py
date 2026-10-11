@@ -17,8 +17,8 @@ from orchestrator.Core import job_service
 from orchestrator.Core.builder import HF_REPO_ID, MODEL_FILE_SUFFIXES, ModelFormat, OptimizationLevel
 from orchestrator.Core.job_service import owner_actor
 from orchestrator.Core.deployment_manager import list_builds
-from orchestrator.Core.orchestrator import (BuildRequest, OrchestrationStatus, PriorityLevel, WorkflowState,
-                                            WorkflowType)
+from orchestrator.Core.orchestrator import (BuildQueueFull, BuildRequest, OrchestrationStatus, PriorityLevel,
+                                            WorkflowState, WorkflowType)
 from orchestrator.schemas.build import (ArtifactList, ArtifactOut, BuildHandle, BuildList, BuildRequestIn,
                                         BuildStatusOut, FormatSummary, LogTail, PendingHealing, TargetList,
                                         TargetOut)
@@ -384,7 +384,13 @@ class BuildService:
             local_inputs=inputs,
             owner=owner,
         )
-        request_id = self.framework.run_coroutine(self._orchestrator.submit_build_request(build_request), timeout=30)
+        try:
+            request_id = self.framework.run_coroutine(self._orchestrator.submit_build_request(build_request),
+                                                      timeout=30)
+        except BuildQueueFull as e:
+            raise BuildServiceError(str(e), code="limit_reached",
+                                    next="Wait until a build finishes (get_build_status with wait_seconds) or cancel "
+                                         "one of your builds, then call start_build again.") from None
         self.logger.info(f"Build request {request_id} submitted ({req.model} -> {req.target}/{req.format}/{req.quantization})")
         return BuildHandle(request_id=request_id, status=OrchestrationStatus.QUEUED.value)
 

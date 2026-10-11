@@ -978,6 +978,19 @@ question between 4,000 and 16,000 characters until pending approvals in the fram
 "do not ask again" gets one more box in the MCP form, which only asks the framework: it never creates a standing
 approval, and the call's notes say so.
 
+**Limits** (per client: Ditto, the local stdio clients, each named token; counted while the process runs): the
+read tools together at most 20 calls per 10 seconds (40 at once); `start_build` at most 3 unfinished builds and 20
+starts in 24 hours per client, and one framework process queues at most 20 unfinished build requests from every
+caller, the GUI and the CLI included; at most 30 questions to you per hour. After you say no, the same call (the same
+tool with the same arguments after repair, so a respelled call is the same call) is refused without asking for 10
+minutes, and three "no" to one tool within 30 minutes pause the questions about it for 30 minutes; a dismissed dialog
+is not a "no". A call the repeat guard refused (the same failing call a third time) may run again 10 minutes after
+its last failure. Each limit is an audited refusal (`rate_limited`, reason `limit_reached`, or `declined` after your
+"no") that says when to try again, and it never counts as a failed call. Ditto's chat stops calling tools after
+three failed calls in a row without progress (the same tool, reason and field each time) or a refused repeat, and
+answers with what it tried, what failed and why; fixing one input error after another is progress, and while Ditto
+fixes one it gets up to 4 steps more than its 8.
+
 **Audit log** (`~/.llm-framework/audit.db`, SQLite): every tool call is recorded with time, actor, tool, decision,
 whether a person confirmed it, and the outcome. Arguments are stored redacted and shortened, plus a hash of the full
 text. Each entry contains the hash of the previous one; with the key from your operating system's keyring this is an

@@ -109,6 +109,7 @@ class NotAsked(Confirmation):
     refused: str = ""
     outcome: str = "not_confirmed"
     answer: str = ""
+    code: str = ""  # the refusal's reason code for the audit log
 
 
 INPUT_REQUIRED_VERSION = "2026-07-28"  # elicitation as input_required rounds instead of a request mid-call
@@ -128,6 +129,7 @@ class _CallState:
     question_sha256: str = ""
     repairs: list = field(default_factory=list)  # what the fool-proof layer changed (normalize.Repair)
     facts: Optional[CallFacts] = None  # what the tool's prepare looked up (the handler is bound to it)
+    limits_checked: bool = False  # counted against the rate and quotas before the question
 
 
 _CALL: contextvars.ContextVar = contextvars.ContextVar("lcf_mcp_call", default=None)
@@ -590,6 +592,10 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
                                    and getattr(elicitation, "url", None) is not None):
             return NotAsked(approve=False, can_ask=False, answer="unavailable")
         tool_ctx.confirm_channel = "elicitation"
+        if not retry:  # a recent "no" to this call, a paused tool, too many questions: not asked again
+            refusal = await anyio.to_thread.run_sync(registry.question_refusal, spec, parsed, tool_ctx)
+            if refusal is not None:
+                return NotAsked(approve=False, refused=str(refusal), outcome="rate_limited", code=refusal.code)
         try:  # speaking names may look something up: off the event loop
             message = await anyio.to_thread.run_sync(functools.partial(
                 registry.question_text, spec, arguments, tool_ctx, state.facts, MAX_ELICITATION))
@@ -641,13 +647,14 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         tool_ctx = _tool_context(ctx, caller, instance)
         tool_ctx.repairs = list(state.repairs)
         tool_ctx.facts = state.facts  # what the question showed: the handler is bound to exactly these
+        tool_ctx.limits_checked = state.limits_checked
         kept.drop(spec, kwargs, tool_ctx)
         if isinstance(data, ConfirmationWithGrant) and data.stop_asking and data.approve:
             tool_ctx.metadata["grant_requested"] = True
         if isinstance(data, NotAsked) and data.refused:
             await anyio.to_thread.run_sync(functools.partial(
                 registry.refuse, spec.name, kwargs, tool_ctx, outcome=data.outcome, detail=data.refused,
-                answer=data.answer, question_sha256=state.question_sha256,
+                answer=data.answer, question_sha256=state.question_sha256, reason_code=data.code or None,
                 confirm_channel="elicitation" if data.answer == "timeout" else "none"))
             state.audited = True
             raise _audited(MCPToolError(data.refused))
@@ -901,6 +908,14 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                     raise _audited(MCPToolError(error_text(str(name), e))) from None
                 state.repairs = prepared.repairs
                 audit_name, audit_arguments = prepared.spec.name, prepared.arguments
+                # The rate and quotas before the policy and the question (an audited refusal that says when).
+                ctx.repairs = list(prepared.repairs)
+                try:
+                    await anyio.to_thread.run_sync(registry.enforce_limits, prepared, ctx)
+                except ToolError as e:
+                    state.audited = True
+                    raise _audited(MCPToolError(error_text(prepared.spec.name, e))) from None
+                state.limits_checked = True
                 return await super().call_tool(prepared.spec.name, prepared.arguments, context)
             except BaseException as e:
                 if not state.audited:

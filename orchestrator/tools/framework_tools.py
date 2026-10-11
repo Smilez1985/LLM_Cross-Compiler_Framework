@@ -25,7 +25,7 @@ from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, un
 from orchestrator.tools.policy import Decision, PolicyStore, ToolTier
 from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, ToolSpec, current_actor,
                                          current_registry)
-from orchestrator.tools.spec import CallFacts, Choices, Fact, FieldMeta
+from orchestrator.tools.spec import BUILD_QUOTA, CallFacts, Choices, Fact, FieldMeta, ToolLimits
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.untrusted import sanitize_untrusted
 
@@ -474,6 +474,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  lambda i, ctx: service.start_build(i, owner=ctx.owner), takes_context=True,
                  summary=lambda o: f"Build request {fact(o.request_id)} is {fact(o.status)}.",
                  arg_aliases=BUILD_ALIASES, fields=fields, examples=(BUILD_EXAMPLE,),
+                 # 3 unfinished builds and 20 starts a day per client (the limits table, spec.BUILD_QUOTA)
+                 limits=ToolLimits(running=lambda ctx: len(service.active_requests(ctx.owner)), **BUILD_QUOTA),
                  consequence="Converts and quantizes a model in a Docker build on this computer; it may download "
                              "the model first and take a long time."),
         ToolSpec("cancel_build", "Cancel a build",

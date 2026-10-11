@@ -282,6 +282,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the framework's own state, refuses a proposal that changed after the question, and always asks before a
   destructive fix (`docker_prune`), also when it is allowed. Ditto's GUI dialog and CLI prompt show questions up to
   16,000 characters (a scrollable dialog, the pager); an MCP form stays at 4,000.
+- **Limits per client for tool calls** (Ditto and MCP clients): read tools 20 calls per 10 seconds, `start_build`
+  3 unfinished builds and 20 starts a day, 30 questions per hour, and a build queue of at most 20 unfinished requests
+  per framework process (every caller); after a "no" the same call is not asked again for 10 minutes, and three "no"
+  to one tool pause its questions for 30 minutes. A limit hit is an audited `rate_limited` refusal that says when to
+  try again. The repeat guard lets a refused call run again 10 minutes after its last failure (it was refused until
+  the process ended), and Ditto stops calling tools early only after failures without progress, with up to 4 more
+  steps while it fixes an input error.
 - **`llm-cli ditto eval` records every tool call attempt**, not only those that reached a tool: the report's
   `tool_use` block gives tool calls per task, the share of malformed calls and of unknown tool names, repairs and
   repeat refusals.

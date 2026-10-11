@@ -96,9 +96,44 @@ class CallFacts:
 
 
 @dataclass(frozen=True)
+class Rate:
+    """`count` calls per `per` seconds for one client, at most `burst` at once (default `count`)."""
+    count: int
+    per: float
+    burst: int = 0
+
+
+@dataclass(frozen=True)
 class ToolLimits:
-    """A tool's limits. The registry enforces the result size; rates and quotas come with the limiter."""
+    """A tool's limits (design 6.5): the result size, a rate and quotas per client. The registry enforces them
+    before the policy and the question; a limit hit is an audited refusal (`rate_limited`, reason code
+    `limit_reached`) that says when to try again."""
     max_result_bytes: int = MAX_RESULT_BYTES
+    rate: Optional[Rate] = None      # None: the class default (read tools: CallerLimits.read_rate; others: none)
+    per_day: int = 0                 # runs per client in 24 hours (0: no quota)
+    concurrent: int = 0              # unfinished runs per client at a time (0: no quota), counted by `running`
+    running: Optional[Callable[[Any], int]] = None  # running(ctx) -> how many of its runs the caller has unfinished
+    what: str = "calls"              # the plural noun of a refusal ("builds")
+
+
+@dataclass(frozen=True)
+class CallerLimits:
+    """The registry-wide rows of the limits table (design 6.5), per client (an MCP caller, Ditto)."""
+    read_rate: Rate = Rate(20, 10.0, burst=40)  # the read tools together
+    questions_per_hour: int = 30                # questions to the person (pending approvals will count too, S9)
+    decline_cooldown: float = 600.0             # after a "no", the same call is refused without asking this long
+    declines_to_pause: int = 3                  # this many "no" to one tool ...
+    decline_window: float = 1800.0              # ... within this time ...
+    decline_pause: float = 1800.0               # ... pause the questions for that tool this long
+    repeat_cooldown: float = 600.0              # a call the repeat guard refuses may run again after this long
+
+
+# The limits table: the registry-wide rows, and the quota of start_build (3 unfinished, 20 starts a day per client).
+# The global queue cap (20 unfinished build requests in one framework process, every caller) is the orchestrator's
+# own: orchestrator.Core.orchestrator.MAX_UNFINISHED_REQUESTS.
+LIMITS = CallerLimits()
+BUILD_QUOTA = {"per_day": 20, "concurrent": 3, "what": "builds"}
+DAY = 86400.0
 
 
 CHANNELS = ("framework", "elicitation")  # confirmation channels, strongest first
