@@ -220,6 +220,35 @@ class TestSchema2:
         p = parse_profile(edit(fixture("schema2_pc_two_nvidia.txt"), "CPU_MODEL", "AMD  Ryzen 9   5900X "))
         assert p.get("CPU_MODEL") == "AMD Ryzen 9 5900X"
 
+    def test_other_operating_systems(self):
+        """Decision 8: any OS the device runs. musl on Alpine, a Fedora kernel string, macOS on Apple Silicon."""
+        alpine = fixture("schema2_rk3566_dietpi.txt")
+        for key, value in (("OS_ID", "alpine"), ("OS_FAMILY", "alpine"), ("OS_VARIANT_ID", None),
+                           ("OS_VERSION_ID", "3.20.3"), ("OS_VERSION_CODENAME", None), ("LIBC", "musl"),
+                           ("LIBC_VERSION", "1.2.5"), ("INIT_SYSTEM", "openrc"), ("KERNEL", "6.6.54-0-lts")):
+            alpine = edit(alpine, key, value)
+        p = parse_profile(alpine)
+        assert (p.libc, p.libc_version, p.get("INIT_SYSTEM")) == ("musl", "1.2.5", "openrc")
+        assert p.perf_key() != board().perf_key()  # glibc and musl binaries differ
+        fedora = fixture("schema2_pc_two_nvidia.txt")
+        for key, value in (("OS_ID", "fedora"), ("OS_ID_LIKE", None), ("OS_FAMILY", "fedora"),
+                           ("OS_VERSION_ID", "40"), ("OS_VERSION_CODENAME", None),
+                           ("KERNEL", "6.11.3-200.fc40.x86_64")):
+            fedora = edit(fedora, key, value)
+        assert parse_profile(fedora).get("KERNEL") == "6.11.3-200.fc40.x86_64"
+        mac = fixture("schema2_rk3566_dietpi.txt")
+        for key, value in (("OS", "macos"), ("OS_ID", "macos"), ("OS_FAMILY", "macos"), ("OS_VARIANT_ID", None),
+                           ("OS_VERSION_ID", "15.1"), ("OS_VERSION_CODENAME", None), ("KERNEL", "24.1.0"),
+                           ("LIBC", "libsystem"), ("LIBC_VERSION", None), ("INIT_SYSTEM", "launchd"),
+                           ("CPU_MODEL", "Apple M3"), ("CPU_VENDOR", "apple"), ("CPU_CLUSTERS", None),
+                           ("SOC_VENDOR", None), ("SOC_MODEL", None), ("BOARD_MODEL", None), ("NPU_VENDOR", None),
+                           ("NPU_MODEL", None), ("NPU_DEVICE", None), ("SUPPORTS_RKNN", "OFF"),
+                           ("GPU0_VENDOR", "apple"), ("GPU0_NAME", "Apple M3"), ("GPU0_SOURCE", "system-profiler"),
+                           ("METAL", "ON")):
+            mac = edit(mac, key, value)
+        p = parse_profile(mac)
+        assert (p.os, p.arch, p.libc, p.is_on("METAL")) == ("macos", "arm64", "libsystem", True)
+
     def test_unknown_key_is_dropped_without_its_value(self):
         p = parse_profile(edit(fixture("schema2_rk3566_dietpi.txt"), "HOSTNAME", "fixture-host-0000"))
         assert "HOSTNAME" not in p and "unknown_key:HOSTNAME" in p.notes
@@ -390,6 +419,29 @@ class TestSchema2Rejections:
             parse_profile_json("[]")
         with pytest.raises(ProfileError, match="not valid JSON"):
             parse_profile_json("{")
+
+    def test_deeply_nested_json_is_a_profile_error(self, tmp_path):
+        """A hostile file far below the size limit must not escape as RecursionError (callers catch ProfileError)."""
+        nested = '{"PROBE_SCHEMA": "2", "X": ' + "[" * 60000 + "]" * 60000 + "}"
+        assert len(nested) < SCHEMA.max_bytes
+        with pytest.raises(ProfileError, match="not valid JSON"):
+            parse_profile_json(nested)
+        (tmp_path / "deep.json").write_text(nested, encoding="utf-8")
+        with pytest.raises(ProfileError, match="deep.json: not valid JSON"):
+            read_profile(tmp_path / "deep.json")
+
+    @pytest.mark.parametrize("node", ["/dev/rknpu", "/dev/dri/renderD129", "/dev/dri/card1", "/dev/accel/accel0",
+                                      "/dev/hailo0", "/dev/apex_0"])
+    def test_npu_device_accelerator_nodes(self, node):
+        assert parse_profile(edit(fixture("schema2_rk3566_dietpi.txt"), "NPU_DEVICE", node)).get("NPU_DEVICE") == node
+
+    @pytest.mark.parametrize("node", ["/dev/sda", "/dev/mem", "/dev/kmem", "/dev/nvme0n1", "/dev/dri/../sda",
+                                      "/dev/accel/sda", "/dev/rknpu0x", "/dev/-x"])
+    def test_npu_device_is_never_another_device_node(self, node):
+        """NPU_DEVICE may reach `docker run --device` of a deploy step: an untrusted profile must not name a disk or
+        memory device."""
+        with pytest.raises(ProfileError, match="NPU_DEVICE"):
+            parse_profile(edit(fixture("schema2_rk3566_dietpi.txt"), "NPU_DEVICE", node))
 
 
 # --- perf_key ----------------------------------------------------------------------------------------------------
@@ -629,6 +681,20 @@ class TestProfileStore:
         assert store.device_info("0123456789abcdef") == {}
         meta.write_text("[1, 2]")
         assert store.device_info("0123456789abcdef") == {}
+        meta.write_text("[" * 15000)  # below the size limit, deeper than the JSON decoder's recursion limit
+        assert store.device_info("0123456789abcdef") == {}
+
+    def test_refuses_a_profile_that_changes_through_its_file(self, tmp_path):
+        """A HardwareProfile built in code with a line break in a value must not smuggle another key into the store."""
+        values = dict(board().values, CPU_MODEL="Cortex-A55\nRKNPU_DRIVER_VERSION=1.2.3")
+        smuggled = HardwareProfile(values, schema=SCHEMA)
+        store = ProfileStore(tmp_path)
+        with pytest.raises(ProfileError, match="round trip"):
+            store.save_local(smuggled)
+        with pytest.raises(ProfileError, match="round trip"):
+            store.save_device("0123456789abcdef", smuggled, label="board")
+        assert not store.local_path().exists() and store.list_devices() == []
+        assert not (tmp_path / "hardware" / "devices" / "0123456789abcdef.json").exists()
 
     def test_damaged_store_file(self, tmp_path):
         store = ProfileStore(tmp_path)

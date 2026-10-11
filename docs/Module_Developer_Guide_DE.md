@@ -700,6 +700,9 @@ vertrauenswürdig:
 - Werte müssen zusammenpassen: Ein x86-Merkmal kann auf `arm64` nicht `ON` sein (ein ARM-Merkmal nicht auf `x86_64`),
   `CPU_CLUSTERS` gibt es nur auf ARM, `GPU<n>_COMPUTE_CAP` nur bei NVIDIA- und `GPU<n>_GFX_TARGET` nur bei AMD-GPUs,
   `LIBC=ucrt` nur unter Windows, `METAL=ON` nur unter macOS.
+- `NPU_DEVICE` nennt nur einen Beschleuniger-Knoten (`/dev/rknpu`, `/dev/dri/renderD<N>` oder `/dev/dri/card<N>`,
+  `/dev/accel/accel<N>`, `/dev/hailo<N>`, `/dev/apex_<N>`), nie eine Platte, den Speicher oder ein anderes Gerät,
+  weil ein Deploy-Schritt den Wert an `docker run --device` übergeben kann.
 - Ein Schlüssel, den das Schema nicht kennt, wird verworfen; sein Wert wird nie behalten.
 - Freier Text (`CPU_MODEL`, GPU-Namen, `BOARD_MODEL`) dient nur der Anzeige und erreicht nie eine Befehlszeile oder
   einen Dateinamen.
@@ -709,7 +712,8 @@ weiter gelesen:
 
 - Die bekannten Schlüssel werden umgewandelt: `CPU_ARCH_TYPE` zu `ARCH`, `TRUE`/`FALSE` zu `ON`/`OFF`, `RAM_SWAP_MB`
   zu `SWAP_TOTAL_MB`, die erste GPU zu `GPU0_*`, `DOCKER_VERSION` zu `TOOL_DOCKER`. Die CPU-Merkmale einer `.sh`-Datei
-  werden aus ihrer Flag-Liste abgeleitet.
+  werden aus ihrer Flag-Liste abgeleitet, nicht aus ihren eigenen `SUPPORTS_*`-Zeilen übernommen; ohne Flag-Liste
+  sind sie `UNKNOWN`.
 - Jedes CPU-Merkmal einer `.ps1`-Datei wird `UNKNOWN`, weil dieses Skript Windows mit falschen Konstanten fragt. Ihr
   `RAM_TOTAL_MB` (die Summe der Speicherplätze) wird verworfen.
 - Der Hostname, die RAM-Teilenummern und jeder andere Schlüssel ohne Bedeutung in Schema 2 werden verworfen, ohne den

@@ -678,6 +678,9 @@ Profiles come from devices or are carried in by hand, so the parser treats them 
 - Values must fit together: an x86 feature cannot be `ON` on `arm64` (nor an ARM feature on `x86_64`),
   `CPU_CLUSTERS` exists only on ARM, `GPU<n>_COMPUTE_CAP` only for NVIDIA and `GPU<n>_GFX_TARGET` only for AMD GPUs,
   `LIBC=ucrt` only on Windows, `METAL=ON` only on macOS.
+- `NPU_DEVICE` names only an accelerator node (`/dev/rknpu`, `/dev/dri/renderD<N>` or `/dev/dri/card<N>`,
+  `/dev/accel/accel<N>`, `/dev/hailo<N>`, `/dev/apex_<N>`), never a disk, memory or other device node, because a
+  deploy step may pass it to `docker run --device`.
 - A key the schema does not list is dropped; its value is never kept.
 - Free text (`CPU_MODEL`, GPU names, `BOARD_MODEL`) is for display only and never reaches a command line or a file
   name.
@@ -686,7 +689,8 @@ Profiles come from devices or are carried in by hand, so the parser treats them 
 
 - The known keys are converted: `CPU_ARCH_TYPE` to `ARCH`, `TRUE`/`FALSE` to `ON`/`OFF`, `RAM_SWAP_MB` to
   `SWAP_TOTAL_MB`, the first GPU to `GPU0_*`, `DOCKER_VERSION` to `TOOL_DOCKER`. The CPU features of a `.sh` file
-  are derived from its flag list.
+  are derived from its flag list, not taken from its own `SUPPORTS_*` lines; without a flag list they are
+  `UNKNOWN`.
 - Every CPU feature of a `.ps1` file becomes `UNKNOWN`, because that script asks Windows with wrong constants. Its
   `RAM_TOTAL_MB` (the sum of the memory slots) is dropped.
 - The host name, the RAM part numbers and every other key without a schema 2 meaning are dropped without keeping
