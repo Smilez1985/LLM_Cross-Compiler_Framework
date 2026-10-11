@@ -82,6 +82,36 @@ class TestHuggingFaceBrowser:
             win.close()
 
 
+@pytest.mark.usefixtures("qapp")
+class TestVaultWording:
+    """Secrets go to the encrypted credential vault (its key may be in the keyring); the GUI said 'Keyring'."""
+
+    @pytest.mark.parametrize("language, expected", [
+        ("en", "This value is stored in the encrypted credential vault."),
+        ("de", "Dieser Wert wird im verschlüsselten Tresor für Zugangsdaten gespeichert."),
+    ])
+    def test_secret_dialog_names_the_vault(self, monkeypatch, language, expected):
+        from PySide6.QtWidgets import QLabel
+        from orchestrator.gui import dialogs
+        from orchestrator.utils import localization
+        monkeypatch.setattr(dialogs, "get_i18n", lambda: localization.LocalizationManager(language))
+        sm = SimpleNamespace(get_secret=lambda key: None, set_secret=lambda key, value: True)
+        dlg = dialogs.SecretInputDialog(SimpleNamespace(secrets_manager=sm), "openai_api_key", "OpenAI API Key")
+        texts = [label.text() for label in dlg.findChildren(QLabel)]
+        assert expected in texts and not any("Keyring" in t for t in texts)
+
+    def test_no_gui_message_says_the_value_is_in_the_keyring(self):
+        sources = [REPO_ROOT / "orchestrator" / "gui" / name for name in ("dialogs.py", "huggingface_window.py")]
+        sources.append(REPO_ROOT / "orchestrator" / "utils" / "localization.py")
+        for path in sources:
+            for line in path.read_text(encoding="utf-8").splitlines():
+                stripped = line.strip()
+                if stripped.startswith("#") or '"' not in stripped:
+                    continue
+                assert not ("eyring" in stripped and any(w in stripped.lower() for w in ("stored", "store ", "save"))), \
+                    f"{path.name}: {stripped}"
+
+
 def test_the_benchmark_window_is_gone():
     assert not (REPO_ROOT / "orchestrator" / "gui" / "benchmark_window.py").exists()
     from orchestrator.Core.docker_manager import DockerManager

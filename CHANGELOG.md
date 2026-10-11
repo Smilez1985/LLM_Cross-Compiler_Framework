@@ -298,7 +298,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - On Windows, saving a secret no longer fails when another process or a virus scanner has the store open for
   a moment.
 - `llm-cli secrets set` says where the secret went (the encrypted vault, or memory only with `ephemeral`)
-  instead of always "Keyring".
+  instead of always "Keyring". The GUI names the encrypted credential vault as well (the secret dialog, the API key
+  field and its error message in the AI settings, the token check box of the Hugging Face browser).
 - The CLI and the CLI guides no longer tell you to put the GitHub token on the command line, where the shell
   history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
   hidden prompt.
