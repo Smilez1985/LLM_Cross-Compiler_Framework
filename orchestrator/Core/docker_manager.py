@@ -16,11 +16,8 @@ import logging
 import threading
 import time
 from datetime import datetime
-from typing import Dict, Optional, Any
+from typing import Dict, Any
 from pathlib import Path
-
-import docker
-from docker.errors import NotFound, APIError
 
 from PySide6.QtCore import QObject, Signal
 
@@ -51,7 +48,6 @@ class DockerManager(QObject):
     build_completed = Signal(str, bool, str)
     build_output = Signal(str, str)
     build_stats = Signal(str, float, float, float)
-    sidecar_status = Signal(str, str)
     
     # Signal when AI finds a fix for an error
     healing_requested = Signal(object) # Payload: HealingProposal
@@ -110,56 +106,6 @@ class DockerManager(QObject):
             return False
             
         return True
-
-    def ensure_qdrant_service(self) -> Optional[str]:
-        """DYNAMIC SIDECAR LOGIC: Checks if Qdrant is required and running."""
-        # Use config_manager directly for robustness
-        rag_enabled = self.config_manager.get("enable_rag_knowledge", False)
-
-        if not rag_enabled:
-            return None
-
-        self.sidecar_status.emit("Qdrant", "Starting...")
-        
-        if not self.builder or not self.builder.docker_client:
-            self.sidecar_status.emit("Qdrant", "No Docker")
-            return None
-
-        client = self.builder.docker_client
-        container_name = "llm-qdrant"
-        
-        # v2.3.0: Load Image from Config (No Hardcoding)
-        image_tag = self.config_manager.get("image_qdrant", "qdrant/qdrant:latest")
-
-        try:
-            # Check if running
-            try:
-                container = client.containers.get(container_name)
-                if container.status != "running":
-                    container.start()
-                self.sidecar_status.emit("Qdrant", "Running")
-                return f"http://{container_name}:6333"
-            except NotFound:
-                # Create new
-                self.logger.info(f"Pulling Qdrant image: {image_tag}")
-                try: client.images.get(image_tag)
-                except NotFound: client.images.pull(image_tag)
-
-                client.containers.run(
-                    image_tag, 
-                    name=container_name, 
-                    ports={'6333/tcp': ('127.0.0.1', 6333)},  # no API key: never reachable from other hosts
-                    volumes={'llm_qdrant_data': {'bind': '/qdrant/storage', 'mode': 'rw'}},
-                    network="llm-framework", 
-                    detach=True, 
-                    restart_policy={"Name": "on-failure"}
-                )
-                self.sidecar_status.emit("Qdrant", "Running")
-                return f"http://{container_name}:6333"
-        except Exception as e:
-            self.logger.error(f"Failed to start Qdrant: {e}")
-            self.sidecar_status.emit("Qdrant", "Error")
-            return None
 
     def start_build(self, gui_config: Dict[str, Any]):
         """Starts a build process based on GUI input dictionary."""

@@ -113,15 +113,20 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
 
 Weiteres Verhalten:
 
-- **Abbrechen:** Das Tool `cancel_build` (Ditto im GUI-Chat oder ein MCP-Client, für Builds des eigenen Prozesses)
-  stoppt den laufenden Container, auch einen laufenden Sicherheits-Scan oder Image-Build, und kein späterer Schritt
-  kann den Abbruch rückgängig machen. Ist ein Build gescheitert oder verschiebt er gerade seine Dateien in den
-  Ausgabeordner, lässt er sich nicht mehr abbrechen und läuft von selbst zu Ende. Die GUI hat keine
-  Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start` bricht nicht ab (siehe
-  [Bekannte Lücken](#bekannte-lücken)).
-- **Build-Slots:** In einem Programm laufen höchstens zwei Builds gleichzeitig; ein weiterer Build wartet auf einen
-  freien Slot (seine Stufe zeigt „Waiting for a free build slot“), statt zu scheitern. Ein abgebrochener Build
-  behält seinen Slot, bis sein Container gestoppt ist.
+- **Abbrechen:** Die Schaltfläche **Cancel Build** im Builder-Tab (aktiv, solange der Build läuft, den der Tab
+  gestartet hat; sie fragt nach einer Bestätigung), Strg+C in `llm-cli build start` und das Tool `cancel_build`
+  (Ditto im GUI-Chat oder ein MCP-Client, für Builds des eigenen Prozesses) brechen alle über den Build-Service ab.
+  Der laufende Container wird gestoppt, auch ein laufender Sicherheits-Scan oder Image-Build, und kein späterer
+  Schritt kann den Abbruch rückgängig machen; Schaltfläche und Strg+C warten, bis der Build angehalten hat, und
+  sagen das. Ist ein Build gescheitert oder verschiebt er gerade seine Dateien in den Ausgabeordner, lässt er sich
+  nicht mehr abbrechen und läuft von selbst zu Ende.
+- **Build-Status über Programme hinweg:** Jedes Programm, das baut, schreibt je Build einen Eintrag nach
+  `<cache_dir>/build_records/`, deshalb listet `llm-cli build status` auch Builds, die die GUI, der MCP-Server oder
+  ein anderer CLI-Aufruf gestartet hat; ein Build, dessen Programm endete, bevor er fertig war, erscheint als
+  unterbrochen.
+- **Build-Slots:** In einem Programm laufen höchstens `max_concurrent_builds` Builds gleichzeitig (Einstellung, 1
+  bis 10, Vorgabe 2); ein weiterer Build wartet auf einen freien Slot (seine Stufe zeigt „Waiting for a free build
+  slot“), statt zu scheitern. Ein abgebrochener Build behält seinen Slot, bis sein Container gestoppt ist.
 - **Unbekanntes Target:** CLI, Ditto und MCP-Clients lehnen ein unbekanntes Target ab, bevor etwas läuft (die CLI
   mit Exit-Code 2). Eine Anfrage, bei der trotzdem nichts zu bauen bleibt, scheitert mit „Nothing to build“, statt
   Erfolg zu melden.
@@ -893,6 +898,9 @@ aufbewahrt) und beginnt eine neue Kette, zum Beispiel nachdem `llm-cli doctor` e
   für [Community-Packs](#verschlüsselte-packs-zum-privaten-teilen) liegen im verschlüsselten Secrets-Speicher.
 - **Einstellungen** werden nie aus dem Arbeitsverzeichnis gelesen: `LLM_FRAMEWORK_CONFIG_DIR`, dann `configs/` in der
   Installation, wenn du dort schreiben darfst, dann der persönliche Ordner.
+- **Datenordner** (`output/`, `cache/`, `models/`) liegen in der Installation, wenn du dort schreiben darfst, sonst im
+  persönlichen Ordner (unter Windows ist `C:\Program Files` für normale Benutzer schreibgeschützt). Sie entstehen,
+  wenn ein Build oder ein Download sie zum ersten Mal braucht, nicht bei jedem Start.
 
 ---
 
@@ -1213,10 +1221,6 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
   nicht). Ein gehärtetes Image ohne Oberfläche für CLI und MCP-Server wird gerade gebaut. Die Konvertierungen sind
   nicht betroffen.
 - **Windows-Hosts:** Konvertierungen auf einem Windows-Host sind nicht geprüft.
-- **Build-Status über Prozesse hinweg:** Builds leben in dem Prozess, der sie gestartet hat; `llm-cli build status`
-  in einem anderen Prozess sieht sie nicht.
-- **Abbrechen:** Die GUI hat keine Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start` stoppt den Build
-  nicht (die CLI wartet, bis er zu Ende ist); abbrechen kann nur das Tool `cancel_build`.
 - **Anmeldung im Browser und bei Cloud-Plattformen:** OAuth-Abläufe und die Anmeldeketten von AWS, Google Cloud
   und Azure gibt es noch nicht; Ditto meldet sich mit API-Schlüsseln an, und lokale Engines brauchen keine
   Anmeldung.

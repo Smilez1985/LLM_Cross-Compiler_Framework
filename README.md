@@ -110,10 +110,12 @@ sudo ./install.sh
 
 The installer:
 
-1. checks the internet connection and Python (installs it with `apt` if it is missing, then requires 3.11 to
-   3.14),
+1. checks the internet connection (HTTPS to the package index `pypi.org`, or `PIP_INDEX_URL` if you set a
+   mirror; behind a proxy start it with `sudo -E` so `https_proxy` is kept) and Python (installs it with `apt` if
+   it is missing, then requires 3.11 to 3.14),
 2. installs Docker via `get.docker.com` if it is missing and adds your user to the `docker` group,
-3. copies the framework to `/opt/llm-conversion-framework` (owned by your user),
+3. copies the framework to `/opt/llm-conversion-framework` (owned by your user); running it again updates the
+   program and keeps your builds, cache, models and `configs/config.yml` there,
 4. creates a virtual environment (`.venv`) there and installs the pinned packages from `requirements.txt`,
 5. creates the launcher `/usr/local/bin/llm-framework`, which starts the GUI.
 
@@ -161,15 +163,13 @@ In a development setup (see [CONTRIBUTING.md](CONTRIBUTING.md)) the command `llm
 | What | Where |
 |---|---|
 | Program and Python environment | Linux: `/opt/llm-conversion-framework` · Windows: `C:\Program Files\LLM-Conversion-Framework` |
-| Builds, logs, cache | `output/`, `logs/` and `cache/` in the installation folder (settings `output_dir`, `logs_dir`, `cache_dir`) |
+| Builds, cache, downloaded models | `output/`, `cache/` and `models/` in the installation folder if your user may write there (Linux), otherwise in the personal folder below (Windows: `%USERPROFILE%\.llm-framework\output` and so on); created when they are first needed. The settings `output_dir`, `cache_dir` and `models_dir` set other folders |
 | Settings (`config.yml`) | `configs/` in the installation folder if your user may write there, otherwise the personal folder below; `LLM_FRAMEWORK_CONFIG_DIR` sets another folder |
 | Personal state: tool permissions, audit log, SSH key and known devices, MCP token, chat history, input history, knowledge base, local model server, community index cache | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` sets another folder |
 | API keys and tokens | encrypted in `~/.llm-framework/secrets.store`; the key for it is kept in your operating system's keyring, or as you choose with the setting `secret_storage` |
-| Models for Ditto's offline mode | `models/ditto/` in the installation folder (`LLM_FRAMEWORK_MODELS_DIR` sets another folder) |
+| Models for Ditto's offline mode | `ditto/` in the models folder above (`LLM_FRAMEWORK_MODELS_DIR` sets another folder) |
 
-The installers also copy `targets/`, `models/` and `configs/` to a separate data folder (on Windows in the public
-documents folder, with a desktop shortcut **LLM-Conversion-Framework Data**). The framework does not use that
-folder.
+The installers create no data folders of their own.
 
 ---
 
@@ -202,7 +202,8 @@ folder.
    are offered. **Calibration:** importance matrix (GGUF) and a calibration file. **Use Host GPU for Build
    Process** passes a GPU into the container; Rockchip conversions do not need it.
 5. **Start Build Pipeline:** the log appears on the right. The first build takes much longer because the Docker
-   image with all toolkits is built first; later builds reuse Docker's build cache.
+   image with all toolkits is built first; later builds reuse Docker's build cache. **Cancel Build** stops the
+   running build after a confirmation; nothing is written to the output folder then.
 
 If a build fails because of a known problem, a **self-healing** dialog shows the cause and a proposed fix.
 Nothing changes until you agree. The framework only applies a few fixed steps itself (fewer parallel compile
@@ -214,6 +215,8 @@ build to a board. The **Auto-Tuning** and **Models** tabs are placeholders.
 
 Menus: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (wizard for a new target, including "Deep Ingest" to add documentation to the knowledge base),
+**Tools > Hugging Face Model Browser...** (search models, see whether they are gated and their licence, download
+single files such as a GGUF into the models folder; a gated model asks for your Hugging Face token),
 **Tools > Open Community Hub** (see [Community zoo](#community-zoo)), **Tools > Tool Permissions (Ditto / MCP)...**,
 **Tools > Spoken Announcements** (on or off) and **Tools > Clear Input History...**
 
@@ -253,7 +256,7 @@ board is on the [roadmap](docs/BLUEPRINT.md#roadmap).
 llm-cli --version
 llm-cli doctor                 # health check; exit code 0 = OK, 1 = warnings, 2 = errors
 llm-cli doctor --fix           # harmless automatic fixes (makes the personal folder private); --tier 2 also clears the Docker build cache
-llm-cli targets list           # available targets; the --target value is the folder name in targets/ (Rockchip)
+llm-cli targets list           # available targets with boards and formats; the --target value is the id (Rockchip)
 ```
 
 **Converting a model** (`--target Rockchip`; format, board and quantization as in the tables above):
@@ -278,8 +281,9 @@ llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
   example "Format 'rkllm' does not run on rk3566").
 - Gated Hugging Face models need a token: `llm-cli secrets set hf_token` (asks for the value).
 - The command stays in the foreground until the build has finished; `--follow` prints each stage. If the build
-  waits for a self-healing decision, the CLI asks in the terminal. Ctrl+C does not cancel the build in this
-  version: the CLI keeps waiting until the build has ended (see [Known gaps](#known-gaps)).
+  waits for a self-healing decision, the CLI asks in the terminal. Ctrl+C cancels the build (its container is
+  stopped), waits until it has stopped and exits with code 130. `llm-cli build status` also lists builds that the
+  GUI, the MCP server or another CLI call started.
 
 **Deploying** (the same steps as in the GUI):
 
@@ -536,14 +540,7 @@ The knowledge-base, Deep Ingest and community settings are explained in [docs/Fe
   `orchestrator/Dockerfile` do not exist). A hardened headless image for the CLI and the MCP server is being built
   ([roadmap](docs/BLUEPRINT.md#roadmap)). Conversions themselves run in Docker and are not affected.
 - **Windows hosts:** the test suite runs on Windows in CI, but conversions on a Windows host have not been
-  verified. The installation folder under `C:\Program Files` is usually not writable for your user; set
-  `output_dir`, `cache_dir` and `logs_dir` to folders you own if builds cannot write their results.
-- **`llm-cli build status`** only knows builds started in the same process. Builds started by the GUI, the MCP
-  server or another CLI call are not listed; use `build start --follow`, the GUI log or
-  `llm-cli deploy list-artifacts`.
-- **Cancelling a build:** the GUI has no cancel button, and Ctrl+C in `llm-cli build start` does not stop the
-  build (the CLI waits until it has ended). A build can be cancelled with the `cancel_build` tool, through Ditto in
-  the GUI chat or an MCP client, in the process that started it.
+  verified.
 - **Browser and cloud sign-in** (OAuth, AWS, Google Cloud, Azure) are not available yet; Ditto signs in with API
   keys, local engines need none, and an `ant auth login` profile is an advanced option.
 - **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it.

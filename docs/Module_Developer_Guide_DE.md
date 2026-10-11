@@ -29,10 +29,10 @@ Hardware (oder ihre technischen Daten).
 
 1. **Laden.** Beim Start liest der `TargetManager` die `target.yml` in jedem Ordner unterhalb von `targets/`.
    Ordner, deren Name mit `_` oder `.` beginnt (etwa `_template`), werden übersprungen, ebenso eine `target.yml`
-   ohne Block `metadata:`. Die Target-ID ist `metadata.id`, wenn gesetzt, sonst der Ordnername. Die Capabilities
-   werden über die ID gesucht, die Build-Engine findet das Target aber über seinen Ordnernamen
-   (`llm-cli build start -t <Ordner>`). Lass `metadata.id` also weg (oder setze es gleich dem Ordnernamen); sonst
-   werden entweder die Capabilities nicht gefunden oder der Build findet den Target-Ordner nicht.
+   ohne Block `metadata:`. Die Target-ID ist `metadata.id`, wenn gesetzt, sonst der Ordnername. CLI,
+   Build-Service, Orchestrator und Build-Engine lösen ein Target über eine einzige Zuordnung von ID zu Ordner auf;
+   `llm-cli build start -t` nimmt daher die ID oder den Ordnernamen (in beliebiger Groß- und Kleinschreibung), und
+   der Build nutzt in beiden Fällen den richtigen Ordner.
 2. **Capabilities.** Der Block `capabilities:` wird gegen das Schema in `orchestrator/schemas/targets.py` geprüft.
    Die GUI bietet genau die dort aufgeführten Formate, Boards und Quantisierungen an, die CLI lehnt alles andere ab,
    und die Tools des MCP-Servers und Dittos starten Builds nur für Targets mit gültigem Block. Ein ungültiger Block
@@ -191,14 +191,17 @@ Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
 - **Der Capabilities-Block ist ein Ausgangspunkt.** Ergänze deine echten Boards, weitere Formate, Quantisierungen je
   Board und den Bedarf an Kalibrierdaten ([Abschnitt 4](#4-targetyml-und-der-capabilities-block)), und halte den
   Block im Einklang mit `build.sh`.
-- **Das Vorlagen-`build.sh` passt nicht zur aktuellen Pipeline.** Es sucht `convert-hf-to-gguf.py` und die
-  llama.cpp-Werkzeuge an Stellen, an denen aktuelle llama.cpp-Builds sie nicht ablegen, schreibt die F16-Zwischendatei
-  nach `/tmp` (in der Sandbox ein 1-GB-tmpfs) und kopiert im Zweifel das Modell unverändert. Das Vorlagen-Dockerfile
-  baut llama.cpp nicht. Für GGUF nimm `targets/Rockchip/dockerfile` und `targets/Rockchip/modules/build.sh` als
-  Ausgangspunkt oder das Beispiel in [Abschnitt 6](#6-das-build-skript). Der erzeugte Block gibt trotzdem GGUF an;
-  ein Build des unveränderten Gerüsts wird also angenommen und scheitert dann oder kopiert das Modell.
-
-Eine überarbeitete Vorlage ist für 3.4.0 geplant (siehe [Roadmap](BLUEPRINT_DE.md#roadmap)).
+- **Das Vorlagen-`build.sh` folgt dem Rockchip-Dispatcher** (`targets/Rockchip/modules/build.sh`):
+  `convert_hf_to_gguf.py` und `build/bin/llama-quantize` / `llama-imatrix` von llama.cpp unter `LLAMA_CPP_PATH`
+  (`/usr/src/llama.cpp`), die F16-Zwischendatei im Arbeitsordner (`BUILD_SCRATCH_DIR`, nie `/tmp`), dieselben
+  GGUF-Typlisten und Regeln für die Importance-Matrix sowie der Auftrag `imatrix`. Die Zweige deines
+  Quantisierungsblocks laufen zuerst; ein Zweig kann `build_gguf <TYP>` aufrufen, und jeder andere Typ läuft über
+  `build_gguf`, das Typen ablehnt, die llama-quantize nicht kennt. Nichts wird unverändert durchkopiert, und ein
+  Build, der kein Artefakt schreibt, scheitert.
+- **Das Vorlagen-Dockerfile baut llama.cpp noch nicht**, ein Build des unveränderten Gerüsts bricht also mit
+  „llama.cpp converter not found“ oder „llama-quantize not found“ ab. Übernimm den llama.cpp-Build aus
+  `targets/Rockchip/dockerfile` (den festgelegten Tag nach `/usr/src/llama.cpp` klonen, `llama-quantize` und
+  `llama-imatrix` bauen, die Abhängigkeiten des Konverters installieren).
 
 ## 4. target.yml und der Capabilities-Block
 
@@ -212,7 +215,7 @@ metadata:
   version: "1.0.0"
   architecture_family: "aarch64"
   vendor: "community"
-  # id: weglassen; die Target-ID muss dem Ordnernamen entsprechen (siehe Abschnitt 1)
+  # id: optional; ohne sie ist der Ordnername die Target-ID (siehe Abschnitt 1)
 ```
 
 ### 4.2 capabilities
@@ -362,7 +365,7 @@ Umgebungsvariablen, die die Engine setzt:
 | `TARGET_BOARD` | Board-ID oder leer (dann dieselbe Vorgabe wie `default_board` nutzen) |
 | `QUANTIZATION` | Quantisierungstyp, bereits vereinheitlicht; leer nur bei Targets ohne Capabilities |
 | `TARGET_ARCH` | die Target-ID |
-| `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | Aufgabe (Vorgabe `LLM`), Optimierungsstufe, Build-ID |
+| `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | Aufgabe (Vorgabe `LLM`), Optimierungsstufe (`fast`, `balanced`, `size`, `speed`, `aggressive`; die Rockchip-Skripte werten sie nicht aus), Build-ID |
 | `MAX_CONTEXT_LENGTH` | nur, wenn für den Build gesetzt |
 | `USE_IMATRIX`, `IMATRIX_PATH` | Build-Stufe: `1` und der Pfad von `imatrix.dat`, wenn eine Importance-Matrix berechnet wurde |
 | `DATASET_PATH` | Kalibrierdatensatz, wenn der Build einen nutzt |
@@ -489,7 +492,8 @@ nur, um herauszufinden, ob ein Fehler an der Sandbox liegt.
    T.model_validate(yaml.safe_load(open('targets/my_board/target.yml', encoding='utf-8'))['capabilities']); print('ok')"
    ```
 
-   `llm-cli targets validate <ID>` bestätigt nur, dass `target.yml` geladen wurde; die Capabilities prüft es nicht.
+   `llm-cli targets validate <ID>` macht dieselbe Prüfung über das Framework und gibt jeden Schemafehler aus
+   (Exit-Code 1, wenn der Block ungültig ist).
 2. **Baut das Image?** Stell den Kontext so zusammen wie die Engine und bau ihn:
 
    ```bash

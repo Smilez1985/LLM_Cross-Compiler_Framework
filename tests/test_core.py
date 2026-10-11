@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -113,6 +114,37 @@ class TestConfigManager:
         cfg = ConfigManager(tmp_path)
         assert not hasattr(cfg, "config")
         assert cfg.get("something_else") is None
+
+
+class TestRemovedSettingsAndCode:
+    """Settings and code nothing used any more; old config files that still name them keep loading."""
+
+    REMOVED = {"preferred_tiny_model": "tinyllama_1b", "default_calibration_dataset": "wiki.train.raw",
+               "default_enable_imatrix": True, "gui_theme": "dark", "gui_auto_refresh": True,
+               "gui_refresh_interval": 30, "api_enabled": False, "api_port": 8000, "api_host": "127.0.0.1",
+               "auto_cleanup": True, "docker_namespace": "llm-framework", "logs_dir": "logs"}
+
+    def test_removed_settings_have_no_schema_and_old_files_still_load(self, tmp_path):
+        (tmp_path / "config.yml").write_text(yaml.safe_dump({**self.REMOVED, "log_level": "DEBUG"}))
+        cfg = ConfigManager(tmp_path)
+        assert not set(self.REMOVED) & set(cfg.config_schemas)
+        assert cfg.log_level == "DEBUG", "the rest of the file still applies"
+        cfg.set("language", "de")
+        assert cfg.save_user_config()
+        saved = yaml.safe_load((tmp_path / "config.yml").read_text())
+        assert saved["language"] == "de" and saved["preferred_tiny_model"] == "tinyllama_1b", "kept, not lost"
+
+    def test_removed_code_is_gone(self):
+        from orchestrator.Core.docker_manager import DockerManager
+        from orchestrator.Core.framework import FrameworkManager
+        from orchestrator.Core.model_manager import ModelManager
+        assert not (REPO_ROOT / "orchestrator" / "utils" / "updater.py").exists()
+        assert not hasattr(DockerManager, "ensure_qdrant_service")
+        assert not hasattr(FrameworkManager(None), "updater")
+        for name in ("get_available_tiny_models", "is_tiny_model_installed", "download_tiny_model"):
+            assert not hasattr(ModelManager, name), name
+        # image_qdrant stays: deployment packages ship Qdrant to the device (deployment_manager).
+        assert "image_qdrant" in ConfigManager().config_schemas
 
 
 class TestFrameworkBoot:
@@ -259,25 +291,23 @@ class TestDependencyApiRegressions:
     # The Qdrant query API (query_points with prefetch + RRF) is exercised against real local Qdrant
     # in tests/test_rag.py, the FastEmbed API in TestFastEmbedApi there.
 
-    def test_tiny_model_download_uses_current_hub_api(self, tmp_path, monkeypatch):
+    def test_hub_file_download_uses_current_hub_api(self, tmp_path, monkeypatch):
+        # The Hugging Face browser's download (the tiny-model snapshot download it replaced was removed).
         import inspect
         import huggingface_hub
         from orchestrator.Core.model_manager import ModelManager
 
         seen = {}
 
-        def fake_snapshot_download(**kwargs):
-            inspect.signature(huggingface_hub.snapshot_download).bind(**kwargs)
+        def fake_hf_hub_download(**kwargs):
+            inspect.signature(huggingface_hub.hf_hub_download).bind(**kwargs)
             seen.update(kwargs)
-            return kwargs["local_dir"]
+            return str(Path(kwargs["cache_dir"]) / kwargs["filename"])
 
-        monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_snapshot_download)
-        cfg = ConfigManager(tmp_path)
-        cfg.set("source_repositories", {"tiny_models": {"qwen": {"url": "https://huggingface.co/Qwen/Qwen3.5-0.8B"}}})
-        mm = ModelManager(cfg)
-        monkeypatch.setattr(mm, "get_available_tiny_models", lambda: {"qwen": {"url": "https://huggingface.co/Qwen/Qwen3.5-0.8B"}}, raising=False)
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_hf_hub_download)
+        mm = ModelManager(ConfigManager(tmp_path / "configs"), base_dir=tmp_path)
 
-        path = mm.download_tiny_model("qwen")
+        path = mm.download_file("Qwen/Qwen3.5-0.8B", "config.json", token=None)
 
-        assert path is not None, "download_tiny_model swallowed an exception"
-        assert seen["repo_id"] == "Qwen/Qwen3.5-0.8B"
+        assert path is not None, "download_file swallowed an exception"
+        assert seen["repo_id"] == "Qwen/Qwen3.5-0.8B" and seen["cache_dir"] == str(tmp_path / "models")

@@ -24,8 +24,8 @@ des Projekts liegen.
 |---|---|---|---|
 | `llm_providers.yml` | Vorlagen der KI-Anbieter, die Ditto nutzen kann | ja | `orchestrator/llm/catalog.py` |
 | `llama_runtime.yml` | Festgelegter llama.cpp-Build, festgelegte GGUF-Modelle, Servervorgaben, Regeln für das empfohlene Modell | ja | `orchestrator/runtime/catalog.py` |
-| `project_sources.yml` | Katalog vorgelagerter Projekte: Repositorys, Versionen, Dokumentationslinks, Notizen | nein | Menschen; `scripts/validate_ssot.py` |
-| `detailed_project_sources.yml` | Ausführliche Entwicklerreferenz: Anleitungen, Entscheidungsbäume, weitere Herstellerabschnitte | nein | Menschen |
+| `project_sources.yml` | Katalog vorgelagerter Projekte: Repositorys, Versionen, Dokumentationslinks, Notizen | nein | Menschen; `scripts/validate_ssot.py`, `scripts/sync_ssot.py` |
+| `detailed_project_sources.yml` | Ausführliche Entwicklerreferenz: Anleitungen, Entscheidungsbäume, weitere Herstellerabschnitte | nein | Menschen; `scripts/sync_ssot.py` |
 | `config.yml` (nicht in git) | Deine Einstellungen | ja | `orchestrator/Core/config_manager.py` |
 | `SSOT_ARCHITECTURE.md`, `SSOT_ARCHITECTURE_DE.md` | Dieses Dokument | nein | Menschen |
 
@@ -150,7 +150,7 @@ Ein Katalog vorgelagerter Projekte, die das Framework nutzt, von denen es lernt 
 Abschnitte: `metadata`, `build_tools`, `inference_backends`, `optimization_frameworks`, `model_formats`,
 `fine_tuning_tools`, `core`, `vector_database`, `knowledge_ingestion`, `hardware_targets`, `mobile_platforms`,
 `voice_tts` und mehrere Einträge für Sprachmodelle (`glados_tts_*`, `turret_tts_*`, `thorsten_tts_*`), `models`,
-`tiny_models`, `deployment_tools`, `quality_tools`, `roadmap`, `notes`.
+`tiny_models`, `deployment_tools`, `quality_tools`, `notes`.
 
 Ein typischer Eintrag:
 
@@ -166,15 +166,14 @@ inference_backends:
     note: "Universal CPU/GPU inference. GGUF format standard. Primary fallback backend."
 ```
 
-Was die Datei **nicht** ist, egal was ihr Kopfkommentar sagt:
+Was die Datei **nicht** ist (ihr Kopfkommentar sagt dasselbe):
 
 - Kein Teil des Frameworks liest sie im Betrieb. Sie wird nicht in Umgebungsvariablen für die Build-Container
   übersetzt, der Crawler folgt ihren Links nicht, und Ditto nutzt `docs_workflow` nicht.
 - Ihre Versionen sind nicht die Versionen, mit denen gebaut wird. Builds nutzen, was das Dockerfile des Targets
   festlegt, und die Einstellung `llama_cpp_version` (Vorgabe `v0.6.0`); der lokale Modellserver nutzt
   `llama_runtime.yml`.
-- Ihr Abschnitt `roadmap` (v2.2 bis v2.4) ist veraltet. Die Roadmap des Projekts steht in
-  [docs/BLUEPRINT_DE.md](../docs/BLUEPRINT_DE.md#roadmap).
+- Sie hat keine Roadmap. Die Roadmap des Projekts steht in [docs/BLUEPRINT_DE.md](../docs/BLUEPRINT_DE.md#roadmap).
 
 Nutze sie als Liste von Links und Notizen. Halte Notizen kurz, verwende vollständige URLs und führe nach einer
 Änderung das Prüfskript aus.
@@ -212,30 +211,31 @@ unter `models` und `tiny_models`), 4 Inferenz-Backends und 8 Hardware-Targets.
 
 ### scripts/sync_ssot.py
 
-Soll die Werte `commit`, `version`, `pypi_package` und `docker_tag` (in jeder Tiefe) und die Metadatenfelder
-`ssot_version` und `last_updated` (als `last_synced`) aus `project_sources.yml` in die ausführliche Datei übernehmen
-und alles andere behalten. **Nutze es in der jetzigen Form nicht:**
+Vergleicht die Werte `commit`, `version`, `pypi_package` und `docker_tag` (in jeder Tiefe) und die Metadatenfelder
+`ssot_version` und `last_updated` (als `last_synced`) von `project_sources.yml` mit
+`detailed_project_sources.yml`. Es findet beide Dateien im `configs/` des Repositorys aus jedem Ordner (`--configs`
+wählt einen anderen Ordner).
 
-1. Es sucht `detailed_project.sources.yml` (mit Punkt), die Datei heißt aber `detailed_project_sources.yml`. In
-   `configs/` ausgeführt, legt es deshalb eine neue Datei `detailed_project.sources.yml` als reine Kopie von
-   `project_sources.yml` an, und die echte ausführliche Datei bleibt unverändert.
-2. Selbst mit dem richtigen Namen würde es die ganze Datei mit `yaml.dump` neu schreiben: Alle Kommentare gingen
-   verloren, und das Layout ändert sich. Außerdem würde es für jeden Abschnitt aus `project_sources.yml`, der in der
-   ausführlichen Datei fehlt, ein Gerüst (nur mit den übernommenen Werten) anlegen.
-3. Wie das Prüfskript funktioniert es nur in `configs/`.
+```bash
+python scripts/sync_ssot.py            # die Unterschiede auflisten; Exit-Code 1, wenn es welche gibt
+python scripts/sync_ssot.py --write    # die Werte in die ausführliche Datei übernehmen
+```
 
-Bis es behoben ist (geplant für 3.4.0, siehe [Roadmap](../docs/BLUEPRINT_DE.md#roadmap)), pflegst du die
-ausführliche Datei von Hand.
+Mit `--write` ändert es nur den Text der Werte, die sich unterscheiden; Kommentare, Reihenfolge, Anführungszeichen
+und Layout bleiben, wie sie sind. Einen Wert, den die ausführliche Datei nicht hat, nennt es als Hinweis und legt
+ihn nie an (die ausführliche Datei ist anders gegliedert; ein solcher Eintrag gehört nur hinein, wenn du ihn von Hand
+ergänzt). Eine fehlende Datei ist ein Fehler (Exit-Code 2); das Skript legt nie eine an. Mit den aktuellen Dateien
+stimmen die gemeinsamen Werte überein, und es nennt elf Einträge, die nur `project_sources.yml` hat.
 
 ## Nicht verwandt: llm-cli config repos
 
 `llm-cli config repos` (Hilfetext: „Manage SSOT Source Repositories“) hat mit `project_sources.yml` nichts zu tun.
 Der Befehl bearbeitet die Einstellung `source_repositories` in `config.yml`: `--add <Name> <URL>` speichert einen
 Eintrag, `--remove <Name>` entfernt ihn, und ohne Optionen listet er die Einträge auf. Die Build-Engine macht aus
-Einträgen der Form `{name: {url: ...}}` Variablen `<NAME>_REPO_OVERRIDE` für die Stufen-Container. Mit `--add`
-angelegte Einträge werden als reine URL gespeichert und deshalb nicht weitergegeben, und nur das alte
-`source_module.sh` liest `LLAMA_CPP_REPO_OVERRIDE`, das das aktuelle Rockchip-`build.sh` nicht aufruft. Praktisch hat
-die Einstellung derzeit keine Wirkung auf Builds.
+Einträgen der Form `{name: {url: ...}}`, wie `--add` sie speichert, und aus reinen URLs früherer Versionen
+Variablen `<NAME>_REPO_OVERRIDE` für die Stufen-Container. Nur das alte `source_module.sh` liest
+`LLAMA_CPP_REPO_OVERRIDE`, und das aktuelle Rockchip-`build.sh` ruft es nicht auf. Praktisch hat die Einstellung
+derzeit keine Wirkung auf Builds.
 
 ## Weitere einzige Quellen des Projekts
 
@@ -259,4 +259,4 @@ die Einstellung derzeit keine Wirkung auf Builds.
 | einen neuen KI-Anbieter oder ein neues Modell anbieten | `llm_providers.yml` (oder deine eigene Kopie im Einstellungsordner) | die Prüfung oben und `tests/test_llm.py` ausführen; Changelog-Eintrag |
 | ein lokales Modell oder einen neueren llama.cpp-Build ergänzen | `llama_runtime.yml`, mit Größe, SHA256 und Commit | die Prüfung oben und `tests/test_runtime.py` ausführen; Changelog-Eintrag |
 | ein Target ein neues Board, Format oder einen neuen Typ bauen lassen | `target.yml` und `build.sh` des Targets | Tests; siehe [Leitfaden für Modulentwickler](../docs/Module_Developer_Guide_DE.md) |
-| ein vorgelagertes Projekt oder einen Dokumentationslink festhalten | `project_sources.yml` (und von Hand die ausführliche Datei, wenn sie den Eintrag hat) | `python ../scripts/validate_ssot.py` in `configs/` |
+| ein vorgelagertes Projekt oder einen Dokumentationslink festhalten | `project_sources.yml` (neue Einträge in der ausführlichen Datei von Hand) | `python ../scripts/validate_ssot.py` in `configs/`, danach `python ../scripts/sync_ssot.py --write` für geänderte Versionen |

@@ -29,10 +29,9 @@ hardware (or its specifications).
 
 1. **Loading.** At start, the `TargetManager` reads `target.yml` in every folder below `targets/`. Folders whose
    name starts with `_` or `.` (such as `_template`) are skipped, and so is a `target.yml` without a `metadata:`
-   block. The target id is `metadata.id` if set, otherwise the folder name. Capabilities are looked up by the id,
-   but the build engine finds the target by its folder name (`llm-cli build start -t <folder>`). Leave
-   `metadata.id` unset (or equal to the folder name); otherwise either the capabilities are not found or the build
-   does not find the target folder.
+   block. The target id is `metadata.id` if set, otherwise the folder name. The CLI, the build service, the
+   orchestrator and the build engine resolve a target through one id -> folder map, so `llm-cli build start -t`
+   takes the id or the folder name (in any letter case) and the build uses the right folder either way.
 2. **Capabilities.** The `capabilities:` block is validated against the schema in `orchestrator/schemas/targets.py`.
    The GUI offers exactly the formats, boards and quantizations listed there, the CLI refuses anything else, and the
    tools of the MCP server and Ditto start builds only for targets that have a valid block. An invalid block is
@@ -185,14 +184,16 @@ The result is a **skeleton**, not a working target yet:
 - **The capabilities block is a starting point.** Add your real boards, other formats, per-board quantizations and
   calibration needs ([section 4](#4-targetyml-and-the-capabilities-block)), and keep the block in sync with
   `build.sh`.
-- **The template `build.sh` does not match the current pipeline.** It looks for `convert-hf-to-gguf.py` and the
-  llama.cpp tools in places where current llama.cpp builds do not put them, writes the F16 intermediate to `/tmp`
-  (a 1 GB tmpfs in the sandbox) and falls back to copying the model unchanged. The template Dockerfile does not build
-  llama.cpp. For GGUF, take `targets/Rockchip/dockerfile` and `targets/Rockchip/modules/build.sh` as the starting
-  point, or the example in [section 6](#6-the-build-script). The generated block declares GGUF all the same, so a
-  build of the unchanged skeleton is accepted and then fails or copies the model.
-
-An updated template is planned for 3.4.0 (see the [roadmap](BLUEPRINT.md#roadmap)).
+- **The template `build.sh` follows the Rockchip dispatcher** (`targets/Rockchip/modules/build.sh`): llama.cpp's
+  `convert_hf_to_gguf.py` and `build/bin/llama-quantize` / `llama-imatrix` below `LLAMA_CPP_PATH`
+  (`/usr/src/llama.cpp`), the F16 intermediate in the work folder (`BUILD_SCRATCH_DIR`, never `/tmp`), the same GGUF
+  type lists and importance-matrix rules, and the `imatrix` job. The branches of your quantization block run first;
+  a branch can call `build_gguf <TYPE>`, and every other type goes through `build_gguf`, which refuses types
+  llama-quantize does not know. Nothing is copied through unchanged, and a build that writes no artifact fails.
+- **The template Dockerfile does not build llama.cpp yet**, so a build of the unchanged skeleton stops with
+  "llama.cpp converter not found" or "llama-quantize not found". Add the llama.cpp build from
+  `targets/Rockchip/dockerfile` (clone the pinned tag to `/usr/src/llama.cpp`, build `llama-quantize` and
+  `llama-imatrix`, install the converter's requirements).
 
 ## 4. target.yml and the capabilities block
 
@@ -206,7 +207,7 @@ metadata:
   version: "1.0.0"
   architecture_family: "aarch64"
   vendor: "community"
-  # id: leave it out; the target id must match the folder name (see section 1)
+  # id: optional; without it the folder name is the target id (see section 1)
 ```
 
 ### 4.2 capabilities
@@ -352,7 +353,7 @@ Environment variables set by the engine:
 | `TARGET_BOARD` | board id, or empty (then use the same fallback as `default_board`) |
 | `QUANTIZATION` | quantization type, already normalized; empty only for targets without capabilities |
 | `TARGET_ARCH` | the target id |
-| `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | task (default `LLM`), optimization level, build id |
+| `MODEL_TASK`, `OPTIMIZATION_LEVEL`, `BUILD_ID` | task (default `LLM`), optimization level (`fast`, `balanced`, `size`, `speed`, `aggressive`; the Rockchip scripts ignore it), build id |
 | `MAX_CONTEXT_LENGTH` | only if set for the build |
 | `USE_IMATRIX`, `IMATRIX_PATH` | build stage: `1` and the path of `imatrix.dat` if an importance matrix was computed |
 | `DATASET_PATH` | calibration dataset, if the build uses one |
@@ -477,7 +478,8 @@ find out whether a failure is caused by the sandbox.
    T.model_validate(yaml.safe_load(open('targets/my_board/target.yml', encoding='utf-8'))['capabilities']); print('ok')"
    ```
 
-   `llm-cli targets validate <id>` only confirms that `target.yml` was loaded; it does not check the capabilities.
+   `llm-cli targets validate <id>` does the same check through the framework and prints every schema error
+   (exit code 1 if the block is invalid).
 2. **Does the image build?** Stage the context the same way the engine does and build it:
 
    ```bash

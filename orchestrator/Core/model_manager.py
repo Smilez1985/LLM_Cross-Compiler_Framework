@@ -5,7 +5,6 @@ DIREKTIVE: Goldstandard, Modular & Data-Driven.
 
 Zweck:
 Verwaltet Downloads, Suche und Metadaten von KI-Modellen (Hugging Face).
-Stellt sicher, dass Offline-Modelle (Tiny Models) verfügbar sind.
 Fungiert als 'Ethics Gate' durch Prüfung von Lizenzen.
 
 Updates v2.3.0:
@@ -26,11 +25,6 @@ import time
 
 import requests
 from orchestrator.utils.logging import get_logger
-
-# Fallback Helper, falls utils.helpers noch nicht existiert
-def ensure_directory(path: Path):
-    if not path.exists():
-        path.mkdir(parents=True, exist_ok=True)
 
 @dataclass
 class ModelMetadata:
@@ -71,11 +65,8 @@ class ModelManager:
             self.models_dir = framework.resolve_path(models_dir_name)
         else:
             self.models_dir = self.root_path / Path(str(models_dir_name)).expanduser()
-        self.tiny_models_dir = self.models_dir / "tiny_models"
-        
-        ensure_directory(self.models_dir)
-        ensure_directory(self.tiny_models_dir)
-        
+        # Created by the downloads that use it, not at startup.
+
     def initialize(self) -> bool:
         self.logger.info(f"Model Manager initialized. Storage: {self.models_dir}")
         return True
@@ -200,65 +191,6 @@ class ModelManager:
             return path
         except Exception as e:
             self.logger.error(f"Download failed: {e}")
-            return None
-
-    # --- TINY MODELS / OFFLINE INTELLIGENCE ---
-
-    def get_available_tiny_models(self) -> Dict[str, Dict[str, Any]]:
-        """Returns the list of tiny models defined in SSOT."""
-        # Use .get() method if available (ConfigManager), else dictionary access
-        if hasattr(self.config, 'get'):
-            sources = self.config.get("source_repositories", {})
-        else:
-            sources = getattr(self.config, "source_repositories", {})
-            
-        return sources.get("tiny_models", {})
-
-    def is_tiny_model_installed(self, model_key: str) -> bool:
-        """Checks if the specific tiny model is already downloaded."""
-        tiny_defs = self.get_available_tiny_models()
-        if model_key not in tiny_defs: return False
-        
-        repo_url = tiny_defs[model_key].get("url", "")
-        repo_id = repo_url.replace("https://huggingface.co/", "")
-        
-        # Check if local directory exists in tiny_models_dir
-        local_dir = self.tiny_models_dir / model_key
-        # Simple check: Does folder exist and have content?
-        if local_dir.exists() and (local_dir / "config.json").exists():
-            return True
-            
-        return False
-
-    def download_tiny_model(self, model_key: str) -> Optional[str]:
-        """
-        Downloads a full Tiny Model (Repo Snapshot) for offline usage.
-        Used by AI Setup Wizard.
-        """
-        tiny_defs = self.get_available_tiny_models()
-        if model_key not in tiny_defs:
-            self.logger.error(f"Unknown tiny model key: {model_key}")
-            return None
-
-        repo_url = tiny_defs[model_key].get("url", "")
-        repo_id = repo_url.replace("https://huggingface.co/", "")
-        
-        self.logger.info(f"Starting download for Offline Brain: {repo_id}...")
-        
-        try:
-            from huggingface_hub import snapshot_download
-            
-            # Download into a specific subfolder
-            local_dir = self.tiny_models_dir / model_key
-            
-            # With local_dir, huggingface-hub >= 1.0 writes real files and resumes partial downloads by itself.
-            path = snapshot_download(repo_id=repo_id, local_dir=str(local_dir))
-            
-            self.logger.info(f"Tiny Model installed to: {path}")
-            return str(path)
-            
-        except Exception as e:
-            self.logger.error(f"Tiny Model download failed: {e}")
             return None
 
     def _detect_model_format(self, model_path: Path) -> str:

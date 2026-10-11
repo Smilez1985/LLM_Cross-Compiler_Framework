@@ -114,10 +114,12 @@ sudo ./install.sh
 
 Der Installer:
 
-1. prüft die Internetverbindung und Python (installiert es mit `apt`, falls es fehlt, und verlangt dann 3.11 bis
-   3.14),
+1. prüft die Internetverbindung (HTTPS zum Paketindex `pypi.org` oder zu `PIP_INDEX_URL`, wenn du einen Spiegel
+   setzt; hinter einem Proxy startest du ihn mit `sudo -E`, damit `https_proxy` erhalten bleibt) und Python
+   (installiert es mit `apt`, falls es fehlt, und verlangt dann 3.11 bis 3.14),
 2. installiert Docker über `get.docker.com`, falls es fehlt, und nimmt deinen Benutzer in die Gruppe `docker` auf,
-3. kopiert das Framework nach `/opt/llm-conversion-framework` (Eigentümer ist dein Benutzer),
+3. kopiert das Framework nach `/opt/llm-conversion-framework` (Eigentümer ist dein Benutzer); ein erneuter Aufruf
+   aktualisiert das Programm und behält deine Builds, den Cache, die Modelle und `configs/config.yml` dort,
 4. legt dort eine virtuelle Umgebung (`.venv`) an und installiert die festgelegten Pakete aus `requirements.txt`,
 5. legt den Starter `/usr/local/bin/llm-framework` an, der die GUI startet.
 
@@ -166,15 +168,13 @@ Befehl `llm-cli`. Die Beispiele in dieser README verwenden `llm-cli`.
 | Was | Wo |
 |---|---|
 | Programm und Python-Umgebung | Linux: `/opt/llm-conversion-framework` · Windows: `C:\Program Files\LLM-Conversion-Framework` |
-| Builds, Logs, Cache | `output/`, `logs/` und `cache/` im Installationsordner (Einstellungen `output_dir`, `logs_dir`, `cache_dir`) |
+| Builds, Cache, heruntergeladene Modelle | `output/`, `cache/` und `models/` im Installationsordner, wenn dein Benutzer dort schreiben darf (Linux), sonst im persönlichen Ordner unten (Windows: `%USERPROFILE%\.llm-framework\output` und so weiter); sie entstehen, wenn sie zum ersten Mal gebraucht werden. Die Einstellungen `output_dir`, `cache_dir` und `models_dir` legen andere Ordner fest |
 | Einstellungen (`config.yml`) | `configs/` im Installationsordner, wenn dein Benutzer dort schreiben darf, sonst der persönliche Ordner unten; `LLM_FRAMEWORK_CONFIG_DIR` legt einen anderen Ordner fest |
 | Persönlicher Zustand: Tool-Berechtigungen, Audit-Log, SSH-Schlüssel und bekannte Geräte, MCP-Token, Chatverlauf, Eingabeverlauf, Wissensbasis, lokaler Modellserver, zwischengespeicherter Community-Index | `~/.llm-framework` (Windows: `%USERPROFILE%\.llm-framework`); `LLM_FRAMEWORK_HOME` legt einen anderen Ordner fest |
 | API-Schlüssel und Tokens | verschlüsselt in `~/.llm-framework/secrets.store`; der Schlüssel dafür liegt im Schlüsselbund deines Betriebssystems oder dort, wo du es mit der Einstellung `secret_storage` festlegst |
-| Modelle für Dittos Offline-Modus | `models/ditto/` im Installationsordner (`LLM_FRAMEWORK_MODELS_DIR` legt einen anderen Ordner fest) |
+| Modelle für Dittos Offline-Modus | `ditto/` im Modellordner oben (`LLM_FRAMEWORK_MODELS_DIR` legt einen anderen Ordner fest) |
 
-Die Installer kopieren außerdem `targets/`, `models/` und `configs/` in einen eigenen Datenordner (unter Windows
-in den öffentlichen Dokumente-Ordner, mit einer Desktop-Verknüpfung **LLM-Conversion-Framework Data**). Das
-Framework nutzt diesen Ordner nicht.
+Die Installer legen keine eigenen Datenordner an.
 
 ---
 
@@ -209,7 +209,8 @@ Framework nutzt diesen Ordner nicht.
    das Target unterstützt. **Calibration:** Importance Matrix (GGUF) und eine Kalibrierungsdatei. **Use Host GPU
    for Build Process** reicht eine GPU in den Container durch; Rockchip-Konvertierungen brauchen das nicht.
 5. **Start Build Pipeline:** Das Log erscheint rechts. Der erste Build dauert deutlich länger, weil zuerst das
-   Docker-Image mit allen Toolkits gebaut wird; spätere Builds nutzen Dockers Build-Cache.
+   Docker-Image mit allen Toolkits gebaut wird; spätere Builds nutzen Dockers Build-Cache. **Cancel Build** stoppt
+   den laufenden Build nach einer Bestätigung; in den Ausgabeordner wird dann nichts geschrieben.
 
 Scheitert ein Build an einem bekannten Problem, zeigt ein **Self-Healing**-Dialog die Ursache und einen
 Lösungsvorschlag. Nichts ändert sich, bevor du zustimmst. Selbst ausführen kann das Framework nur wenige feste
@@ -222,7 +223,9 @@ Platzhalter.
 
 Menüs: **Security > Set OpenAI API Key**, **Tools > Configure AI Agent (Ditto)...**, **Tools > Create Hardware
 Module...** (Assistent für ein neues Target, mit „Deep Ingest“, um Dokumentation in die Wissensbasis aufzunehmen),
-**Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
+**Tools > Hugging Face Model Browser...** (Modelle suchen, sehen, ob sie zugangsbeschränkt sind und welche Lizenz sie
+haben, einzelne Dateien wie ein GGUF in den Modellordner laden; ein zugangsbeschränktes Modell fragt nach deinem
+Hugging-Face-Token), **Tools > Community Hub öffnen** (siehe [Community-Zoo](#community-zoo)), **Tools > Tool Permissions (Ditto /
 MCP)...**, **Tools > Gesprochene Ansagen** (ein oder aus) und **Tools > Eingabeverlauf löschen...** (in der
 englischen Oberfläche *Open Community Hub*, *Spoken Announcements* und *Clear Input History...*)
 
@@ -263,7 +266,7 @@ Laufzeitumgebung, die der Deploy-Schritt auf dem Board installiert, steht in der
 llm-cli --version
 llm-cli doctor                 # Gesundheitscheck; Exit-Code 0 = OK, 1 = Warnungen, 2 = Fehler
 llm-cli doctor --fix           # harmlose automatische Korrekturen (macht den persönlichen Ordner privat); --tier 2 leert auch den Docker-Build-Cache
-llm-cli targets list           # verfügbare Targets; der Wert für --target ist der Ordnername in targets/ (Rockchip)
+llm-cli targets list           # verfügbare Targets mit Boards und Formaten; der Wert für --target ist die ID (Rockchip)
 ```
 
 **Ein Modell konvertieren** (`--target Rockchip`; Format, Board und Quantisierung wie in den Tabellen oben):
@@ -289,8 +292,9 @@ llm-cli build start -m ./my_model.onnx -t Rockchip -f rknn -b rk3566 -q fp16 -F
 - Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token` (fragt nach dem
   Wert).
 - Der Befehl bleibt im Vordergrund, bis der Build fertig ist; `--follow` zeigt jede Stufe. Wartet der Build auf
-  eine Self-Healing-Entscheidung, fragt die CLI im Terminal. Strg+C bricht den Build in dieser Version nicht ab:
-  Die CLI wartet weiter, bis der Build zu Ende ist (siehe [Bekannte Lücken](#bekannte-lücken)).
+  eine Self-Healing-Entscheidung, fragt die CLI im Terminal. Strg+C bricht den Build ab (sein Container wird
+  gestoppt), wartet, bis er angehalten hat, und endet mit Exit-Code 130. `llm-cli build status` listet auch Builds,
+  die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat.
 
 **Übertragen** (dieselben Schritte wie in der GUI):
 
@@ -562,15 +566,7 @@ Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Feat
   CLI und MCP-Server wird gerade gebaut ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)). Die Konvertierungen selbst
   laufen in Docker und sind nicht betroffen.
 - **Windows-Hosts:** Die Testsuite läuft in der CI unter Windows, Konvertierungen auf einem Windows-Host sind aber
-  nicht geprüft. Der Installationsordner unter `C:\Program Files` ist für deinen Benutzer meist nicht beschreibbar;
-  setze `output_dir`, `cache_dir` und `logs_dir` auf eigene Ordner, wenn Builds ihre Ergebnisse nicht schreiben
-  können.
-- **`llm-cli build status`** kennt nur Builds, die im selben Prozess gestartet wurden. Builds aus der GUI, dem
-  MCP-Server oder einem anderen CLI-Aufruf erscheinen nicht; nutze `build start --follow`, das Log in der GUI oder
-  `llm-cli deploy list-artifacts`.
-- **Einen Build abbrechen:** Die GUI hat keine Abbrechen-Schaltfläche, und Strg+C in `llm-cli build start` stoppt
-  den Build nicht (die CLI wartet, bis er zu Ende ist). Abbrechen lässt sich ein Build mit dem Tool `cancel_build`,
-  über Ditto im GUI-Chat oder einen MCP-Client, in dem Prozess, der ihn gestartet hat.
+  nicht geprüft.
 - **Anmeldung im Browser und bei Cloud-Plattformen** (OAuth, AWS, Google Cloud, Azure) gibt es noch nicht; Ditto
   meldet sich mit API-Schlüsseln an, lokale Engines brauchen keine Anmeldung, und ein Profil aus `ant auth login`
   ist eine erweiterte Möglichkeit.

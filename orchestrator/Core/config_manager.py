@@ -11,12 +11,15 @@ Updates v2.0.0:
 Updates v2.3.0:
 - Added Centralized Docker Image Definitions.
 Updates v2.4.0:
-- Added defaults for IMatrix/Smart Calibration.
 - Added SSOT for Source Repositories.
+
+Settings that are no longer used were removed from the schema; a config.yml that still contains one loads as
+before (keys without a schema are kept and ignored).
 """
 
 import os
 import json
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable, Set, Tuple
 from dataclasses import dataclass, field
@@ -221,6 +224,20 @@ class ConfigManager:
     def installation_config_dir() -> Path:
         return Path(__file__).resolve().parents[2] / "configs"
 
+    @staticmethod
+    def writable_dir(path: Path) -> bool:
+        """Whether this user can create files in path. os.access alone is not enough on Windows: it ignores the
+        folder's permissions, so C:\\Program Files looks writable to every user. A temporary file is created
+        there and removed at once."""
+        path = Path(path)
+        if not path.is_dir() or not os.access(path, os.W_OK):
+            return False
+        try:
+            with tempfile.TemporaryFile(dir=path):
+                return True
+        except OSError:
+            return False
+
     def _detect_config_directory(self) -> Path:
         """LLM_FRAMEWORK_CONFIG_DIR, else the installation's configs/ folder, else the per-user folder.
         Never the working directory: AI clients start the MCP server inside arbitrary projects, and a
@@ -229,15 +246,29 @@ class ConfigManager:
         if override:
             return Path(override).expanduser()
         install = self.installation_config_dir()
-        if install.is_dir() and os.access(install, os.W_OK):
+        if self.writable_dir(install):
             return install
         return self.user_state_dir
-    
+
+    @classmethod
+    def default_data_root(cls) -> Optional[Path]:
+        """Where the data folders (models_dir, output_dir, cache_dir) are by default: None for the installation
+        folder (relative paths resolve against it), or the per-user folder when this user cannot write to the
+        installation (e.g. C:\\Program Files). Nothing is created here; folders are made when they are used."""
+        if cls.writable_dir(cls.installation_config_dir().parent):
+            return None
+        return cls.user_state_path()
+
+    @staticmethod
+    def user_state_path() -> Path:
+        """The per-user folder (LLM_FRAMEWORK_HOME, default ~/.llm-framework), without creating it."""
+        return Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
+
     @property
     def user_state_dir(self) -> Path:
         """Per-user directory for personal state (chat history, later consent and known hosts), outside the repo.
         LLM_FRAMEWORK_HOME overrides the default ~/.llm-framework."""
-        state = Path(os.environ.get("LLM_FRAMEWORK_HOME") or Path.home() / ".llm-framework")
+        state = self.user_state_path()
         state.mkdir(parents=True, exist_ok=True)
         if os.name == "posix":
             try:
@@ -263,21 +294,24 @@ class ConfigManager:
             ensure_directory(directory)
 
     def _initialize_core_schemas(self):
+        # Data folders: relative to the installation, or in the per-user folder if the installation is read-only.
+        data_root = self.default_data_root()
+
+        def data_dir(name: str) -> str:
+            return name if data_root is None else str(data_root / name)
+
         core_schemas = [
             # Core Paths & Settings
             ConfigSchema("targets_dir", str, True, "targets", "Directory for target definitions"),
-            ConfigSchema("models_dir", str, True, "models", "Directory for model storage"),
-            ConfigSchema("output_dir", str, True, "output", "Directory for build outputs"),
-            ConfigSchema("cache_dir", str, True, "cache", "Directory for cache files"),
-            ConfigSchema("logs_dir", str, True, "logs", "Directory for log files"),
+            ConfigSchema("models_dir", str, True, data_dir("models"), "Directory for model storage"),
+            ConfigSchema("output_dir", str, True, data_dir("output"), "Directory for build outputs"),
+            ConfigSchema("cache_dir", str, True, data_dir("cache"), "Directory for cache files"),
             ConfigSchema("log_level", str, False, "INFO", "Logging level", ["regex:^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$"]),
             
             # Build Settings
             ConfigSchema("max_concurrent_builds", int, False, 2, "Maximum concurrent builds", ["min:1", "max:10"]),
             ConfigSchema("build_timeout", int, False, 3600, "Build timeout in seconds", ["min:60"]),
-            ConfigSchema("auto_cleanup", bool, False, True, "Enable automatic cleanup"),
             ConfigSchema("docker_registry", str, False, "ghcr.io", "Docker registry URL"),
-            ConfigSchema("docker_namespace", str, False, "llm-framework", "Docker namespace"),
             
             # --- SSOT: Centralized Image Definitions (v2.3) ---
             ConfigSchema("image_trivy", str, False, "aquasec/trivy:0.75.0", "Security Scanner Image (pinned: 'latest' was compromised in 2026-03)"),
@@ -290,25 +324,15 @@ class ConfigManager:
             ConfigSchema("build_pids_limit", int, False, 4096, "Process limit for conversion containers", ["min:64"]),
             ConfigSchema("build_jobs", int, False, 0, "Parallel compile jobs in image builds (0 = all cores)", ["min:0", "max:256"]),
             ConfigSchema("healing_approval_timeout", int, False, 900, "Seconds to wait for a decision on a healing proposal", ["min:10", "max:86400"]),
-            ConfigSchema("image_qdrant", str, False, "qdrant/qdrant:v1.16.0", "Vector DB Image"),
+            ConfigSchema("image_qdrant", str, False, "qdrant/qdrant:v1.16.0",
+                         "Qdrant image that deployment packages ship to the device when enable_rag_knowledge is on "
+                         "(the knowledge base on this computer uses embedded Qdrant)"),
             ConfigSchema("image_base_debian", str, False, "debian:bookworm-slim", "Base Build Image"),
             ConfigSchema("image_inference_runtime", str, False, "ghcr.io/smilez1985/llm-runtime:latest", "Inference Image"),
             
             # --- SSOT: Repositories (v2.3) ---
             ConfigSchema("source_repositories", dict, False, {}, "Map of Git Repositories (llama.cpp, etc.)"),
 
-            # --- IMatrix & Smart Calibration Defaults (v2.4) ---
-            ConfigSchema("default_enable_imatrix", bool, False, False, "Enable IMatrix generation by default"),
-            ConfigSchema("default_calibration_dataset", str, False, "wiki.train.raw", "Default dataset filename"),
-
-            # GUI & API
-            ConfigSchema("gui_theme", str, False, "dark", "GUI theme"),
-            ConfigSchema("gui_auto_refresh", bool, False, True, "GUI auto-refresh"),
-            ConfigSchema("gui_refresh_interval", int, False, 30, "GUI refresh interval"),
-            ConfigSchema("api_enabled", bool, False, False, "Enable API server"),
-            ConfigSchema("api_port", int, False, 8000, "API server port"),
-            ConfigSchema("api_host", str, False, "127.0.0.1", "API server host"),
-            
             # I18N & Security
             ConfigSchema("language", str, False, "en", "Interface Language (en/de)"),
             ConfigSchema("ai_security_level", str, False, "STRICT", "AI Data Leakage Protection Level",
@@ -387,7 +411,6 @@ class ConfigManager:
             ConfigSchema("chat_context_limit", int, False, 4096, "Max tokens for chat context history"),
             ConfigSchema("enable_telemetry", bool, False, False, "Allow anonymous error reporting (GitHub Issues)"),
             ConfigSchema("offline_mode", bool, False, False, "Force offline mode (no external APIs)"),
-            ConfigSchema("preferred_tiny_model", str, False, "tinyllama_1b", "Preferred local model for offline intelligence"),
 
             # Community zoo (3.1): the signed index (verified with configs/community_keys.yml) and the repository
             # that receives contributions as pull requests. Empty until the community repository is published.
@@ -568,15 +591,22 @@ class ConfigManager:
         data = {}
         
         if config_file.exists():
+            # A file that cannot be read was not loaded either: overwriting it would replace all its settings with
+            # the few changed at runtime (e.g. the first-run language), so it is left alone.
             try:
                 with open(config_file, 'r') as f:
                     loaded = yaml.safe_load(f)
-                    if loaded: data = loaded
-            except: pass
-            
+            except (OSError, ValueError, yaml.YAMLError) as e:
+                self.logger.error(f"Configuration not saved: {config_file} cannot be read ({e}); fix or move it.")
+                return False
+            if loaded is not None and not isinstance(loaded, dict):
+                self.logger.error(f"Configuration not saved: {config_file} does not contain settings (key: value).")
+                return False
+            data = loaded or {}
+
         with self._lock:
             persist_keys = [
-                "language", "ai_security_level", "secret_storage", "secret_helper", "gui_theme", "docker_registry",
+                "language", "ai_security_level", "secret_storage", "secret_helper", "docker_registry",
                 "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
                 "rag_reranker", "rag_rerank_default", "rag_rerank_min_score", "rag_model_idle_minutes",
                 "crawler_max_depth", "crawler_max_pages",
@@ -584,13 +614,13 @@ class ConfigManager:
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
                 "ai_anthropic_workspace_id",
                 # v2.0
-                "chat_context_limit", "enable_telemetry", "offline_mode", "preferred_tiny_model",
+                "chat_context_limit", "enable_telemetry", "offline_mode",
                 # v2.3
                 "image_trivy", "image_qdrant", "image_base_debian", "image_inference_runtime",
                 "enable_security_scan", "llama_cpp_version", "build_jobs", "healing_approval_timeout",
                 "calibration_language", "build_sandbox", "build_memory_limit", "build_pids_limit",
-                # v2.4 (SSOT & IMatrix)
-                "source_repositories", "default_enable_imatrix", "default_calibration_dataset"
+                # v2.4 (SSOT)
+                "source_repositories",
             ]
             
             # Only values changed at runtime via set(); defaults and env overrides must not

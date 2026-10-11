@@ -78,9 +78,9 @@ EXCEPTIONS: Dict[str, str] = {
     # Issue and pull request templates are shown by GitHub in one language.
     ".github/*": "GitHub templates",
     # Runtime folders of a local installation (relative data paths resolve against the installation): downloaded
-    # models bring their own model cards, every build writes a Model_Card.md. Not part of the repository, but
-    # .gitignore covers none of these folders completely (only cache/chat_history.json, models/embeddings/,
-    # models/ditto/ and *.log files), so a local test run would see them.
+    # models bring their own model cards, every build writes a Model_Card.md. Not part of the repository:
+    # .gitignore ignores these folders (/cache/, /models/, /output/, /logs/), and they stay listed here so that a
+    # checkout whose .gitignore differs, or a run without git, does not check them either.
     "cache/*": "runtime data (cache folder)",
     "models/*": "runtime data (downloaded models and their model cards)",
     "output/*": "runtime data (build results with Model_Card.md)",

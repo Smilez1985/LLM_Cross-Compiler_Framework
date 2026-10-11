@@ -78,7 +78,7 @@ class SecretInputDialog(QDialog):
         
         layout = QVBoxLayout(self)
         
-        info_text = "This value will be encrypted and stored in your OS Keyring."
+        info_text = "This value is stored in the encrypted credential vault."
         if self.i18n:
              info_text = self.i18n.t("secrets.dialog_info", info_text)
              
@@ -116,7 +116,7 @@ class SecretInputDialog(QDialog):
         if sm:
             success = sm.set_secret(self.secret_key, val)
             if success:
-                QMessageBox.information(self, "Success", "Secret stored securely in Keyring.")
+                QMessageBox.information(self, "Success", "Secret stored in the encrypted credential vault.")
                 self.accept()
             else:
                 QMessageBox.critical(self, "Error", "Failed to store secret via SecretsManager.")
@@ -434,7 +434,7 @@ class AIConfigurationDialog(QDialog):
         elif source and source.startswith("env:"):
             self.txt_api_key.setPlaceholderText(f"Using the key from the variable {source[4:]}")
         elif source:
-            self.txt_api_key.setPlaceholderText("******** (Stored in Keyring)")
+            self.txt_api_key.setPlaceholderText("******** (Stored in the vault)")
         else:
             self.txt_api_key.setPlaceholderText("Paste API key" if self._key_required(preset) else "Optional API key")
 
@@ -633,7 +633,7 @@ class AIConfigurationDialog(QDialog):
         elif api_key and preset.secret:  # a user preset with a key name but no key method
             sm = self._secrets()
             if not sm or not sm.set_secret(preset.secret, api_key):
-                QMessageBox.critical(self, "Error", "Failed to store API key in the OS keyring.")
+                QMessageBox.critical(self, "Error", "Failed to store the API key in the encrypted credential vault.")
                 return
 
         effort = self.cb_effort.currentData() or ""
