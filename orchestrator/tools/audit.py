@@ -137,7 +137,9 @@ def _parse_anchor(raw: Optional[bytes]) -> Optional[Tuple[int, str, str]]:
     try:
         data = json.loads(raw.decode("ascii"))
         anchor = int(data["id"]), str(data["hash"]), str(data["mac"])
-    except (ValueError, KeyError, TypeError, RecursionError):
+    except (ValueError, KeyError, TypeError, RecursionError, OverflowError):
+        return None
+    if not 0 < anchor[0] < 2 ** 63:  # beyond SQLite's integers record() could not even look the entry up
         return None
     return anchor if anchor[1].isascii() and anchor[2].isascii() else None  # JSON escapes allow any text
 
@@ -358,7 +360,7 @@ class AuditLog:
             problem = self._anchor_break(db, last, meta, raw)
         if "key_id" not in meta:
             db.execute("INSERT INTO meta (k, v) VALUES ('key_id', ?)", (own,))
-        prev = last["hash"] if last else GENESIS
+        prev = str(last["hash"]) if last else GENESIS  # an edited head may hold a BLOB; check() reports it
         digest = self._digest(prev, row, own, self._key)
         cur = db.execute(_INSERT, [row[f] for f in _FIELDS] + [prev, digest, own])
         entry_id = cur.lastrowid
@@ -395,7 +397,7 @@ class AuditLog:
     def _check(self, db) -> AuditCheck:
         meta = dict(db.execute("SELECT k, v FROM meta").fetchall())
         prev, head, count, seen = GENESIS, 0, 0, {}
-        first_foreign, own_seen, keyed_seen, new_format = None, False, False, False
+        first_foreign, own_seen, keyed_seen = None, False, False
 
         def result(problem: str = "", entry: Optional[int] = None) -> AuditCheck:
             return AuditCheck(not problem, problem, entry, self.keyed and (own_seen or not count), count, self.keyed)
@@ -406,12 +408,12 @@ class AuditLog:
             if row["prev_hash"] != prev:
                 return result("modified", row["id"])
             kind = self._classify(row, meta.get("key_id"))
-            # Entries from before per-entry key ids only come first, unkeyed ones only before keyed ones.
-            if kind == _BAD or (row["key_id"] is None and new_format) or (kind == _PLAIN and keyed_seen):
+            # Unkeyed entries only before keyed ones. Entries without a key id may follow newer ones (a process
+            # still running the previous version), but only if they verify like any other entry.
+            if kind == _BAD or (kind == _PLAIN and keyed_seen):
                 return result("modified", row["id"])
             if kind == _FOREIGN and first_foreign is None:
                 first_foreign = row["id"]
-            new_format = new_format or row["key_id"] is not None
             keyed_seen = keyed_seen or kind in (_OWN, _FOREIGN)
             own_seen = own_seen or kind == _OWN
             prev, head = row["hash"], row["id"]
@@ -460,29 +462,72 @@ class AuditLog:
         return result.entry or 0
 
     def archive(self) -> Optional[Path]:
-        """Moves the log and its anchor aside (audit.db.<UTC time> and audit.db.<UTC time>.anchor); the next
-        entry starts a new chain. Returns the new path of the old log, None if there was none."""
+        """Puts the log and its anchor aside (audit.db.<UTC time> and audit.db.<UTC time>.anchor); the next
+        entry starts a new chain. Returns the path of the old log, None if there was nothing to archive.
+
+        The log is copied and emptied in one write transaction instead of being renamed: the GUI and MCP
+        servers may write at the same time, and a writer that opened the file before a rename would append to
+        the old log and move the new log's anchor (a false alarm in both). A damaged file is moved as it is."""
         with self._lock:
-            if not self.path.exists() and not self.anchor_path.exists():
+            if not self.path.exists() and not os.path.lexists(self.anchor_path):
                 return None
-            stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-            target, n = self.path.with_name(f"{self.path.name}.{stamp}"), 1
-            while any(Path(str(target) + s).exists() for s in ("", "-wal", "-shm", ".anchor")):
-                target, n = self.path.with_name(f"{self.path.name}.{stamp}-{n}"), n + 1
-            if self.path.exists():
-                try:  # every committed entry into the main file, so it can be moved on its own
-                    db = sqlite3.connect(self.path, timeout=15, isolation_level=None)
-                    try:
-                        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                    finally:
-                        db.close()
-                except sqlite3.DatabaseError:
-                    pass  # a damaged file is moved as it is
-            # The database first: an anchor without its log is harmless, a log without its anchor is reported.
-            for suffix in ("", "-wal", "-shm"):
-                source = Path(str(self.path) + suffix)
-                if source.exists():
-                    os.replace(source, Path(str(target) + suffix))
-            if self.anchor_path.exists():
+            try:
+                return self._archive_in_place()
+            except sqlite3.OperationalError:
+                raise  # busy, read-only, disk full: nothing was changed
+            except sqlite3.DatabaseError:  # not a database or malformed: nobody can write to it anyway
+                target = self._archive_target()
+                for suffix in ("", "-wal", "-shm"):
+                    source = Path(str(self.path) + suffix)
+                    if source.exists():
+                        os.replace(source, Path(str(target) + suffix))
+                if os.path.lexists(self.anchor_path):
+                    os.replace(self.anchor_path, Path(str(target) + ".anchor"))
+                return target
+
+    def _archive_target(self) -> Path:
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        target, n = self.path.with_name(f"{self.path.name}.{stamp}"), 1
+        while any(os.path.lexists(str(target) + s) for s in ("", "-journal", "-wal", "-shm", ".anchor")):
+            target, n = self.path.with_name(f"{self.path.name}.{stamp}-{n}"), n + 1
+        return target
+
+    def _archive_in_place(self) -> Optional[Path]:
+        db = self._connect()
+        target, anchor_moved, committed = None, False, False
+        try:
+            db.execute("BEGIN IMMEDIATE")  # writers wait; anchors only move under this lock
+            if (db.execute("SELECT 1 FROM events LIMIT 1").fetchone() is None and _sequence(db) == 0
+                    and db.execute("SELECT 1 FROM meta LIMIT 1").fetchone() is None
+                    and not os.path.lexists(self.anchor_path)):
+                return None  # a new, empty log
+            target = self._archive_target()  # chosen under the lock, so two archives never pick the same name
+            # A second connection can read while this one holds the write lock (it could not copy itself).
+            source, copy = sqlite3.connect(self.path, timeout=15), sqlite3.connect(target)
+            try:
+                source.backup(copy)
+                copy.execute("PRAGMA journal_mode=DELETE")  # one self-contained file
+            finally:
+                copy.close()
+                source.close()
+            if os.path.lexists(self.anchor_path):
                 os.replace(self.anchor_path, Path(str(target) + ".anchor"))
+                anchor_moved = True
+            db.execute("DELETE FROM events")
+            db.execute("DELETE FROM meta")
+            db.execute("DELETE FROM sqlite_sequence WHERE name = 'events'")
+            db.execute("COMMIT")
+            committed = True
             return target
+        finally:
+            if not committed:
+                _rollback(db)
+                try:  # back to how it was; the original error is the one to report
+                    if anchor_moved and not os.path.lexists(self.anchor_path):
+                        os.replace(Path(str(target) + ".anchor"), self.anchor_path)
+                    for suffix in ("", "-journal", "-wal", "-shm") if target is not None else ():
+                        if os.path.lexists(str(target) + suffix):
+                            os.unlink(str(target) + suffix)
+                except OSError:
+                    pass
+            db.close()
