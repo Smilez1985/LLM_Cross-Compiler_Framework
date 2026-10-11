@@ -8,7 +8,8 @@ targets/, data/ and wherever else one is added), except the commented EXCEPTIONS
   (GitHub anchor rules).
 - CHANGELOG.md and CHANGELOG_DE.md (Keep a Changelog 1.1.0) say what was done: the same versions in the same
   order with the same dates and the same sections. The roadmap (docs/BLUEPRINT.md#roadmap and its German twin)
-  says what comes: the changelogs link to it, and it names no version that is already released.
+  says what comes: the changelogs link to it, it names no version that is already released, both languages give
+  every item the same status, and items marked "done" have entries under [Unreleased] in the changelog.
 - The newest released version in both changelogs is orchestrator.__version__, and the version line at the top
   of every other document names that version.
 """
@@ -72,7 +73,8 @@ EXCEPTIONS: Dict[str, str] = {
     ".github/*": "GitHub templates",
     # Runtime folders of a local installation (relative data paths resolve against the installation): downloaded
     # models bring their own model cards, every build writes a Model_Card.md. Not part of the repository, but
-    # output/ and models/ are not fully covered by .gitignore, so a local test run would see them.
+    # .gitignore covers none of these folders completely (only cache/chat_history.json, models/embeddings/,
+    # models/ditto/ and *.log files), so a local test run would see them.
     "cache/*": "runtime data (cache folder)",
     "models/*": "runtime data (downloaded models and their model cards)",
     "output/*": "runtime data (build results with Model_Card.md)",
@@ -81,7 +83,9 @@ EXCEPTIONS: Dict[str, str] = {
 
 GERMAN_SUFFIX = "_DE.md"
 
-# Keep a Changelog section types and their names in CHANGELOG_DE.md, in the order the spec lists them.
+# Keep a Changelog section types and their names in CHANGELOG_DE.md, in the order the spec lists them. The German
+# page of Keep a Changelog keeps the English type names; this repository translates them, because the German
+# changelog is written for German readers (CHANGELOG.md keeps the English names for tools).
 CHANGELOG_SECTIONS_DE: Dict[str, str] = {
     "Added": "Hinzugefügt",
     "Changed": "Geändert",
@@ -95,6 +99,14 @@ CHANGELOG_SECTIONS_DE: Dict[str, str] = {
 ROADMAP_LINKS: Dict[str, str] = {
     "CHANGELOG.md": "docs/BLUEPRINT.md#roadmap",
     "CHANGELOG_DE.md": "docs/BLUEPRINT_DE.md#roadmap",
+}
+
+# The status in the last column of every roadmap table row, and its German name. "done" means built and listed
+# under [Unreleased] in the changelog; at release such items leave the roadmap.
+ROADMAP_STATUS_DE: Dict[str, str] = {
+    "done": "fertig",
+    "in progress": "in Arbeit",
+    "planned": "geplant",
 }
 
 # --- Finding the documents ------------------------------------------------------------------------------
@@ -237,12 +249,11 @@ def header(text: str) -> str:
     return "\n".join(out)
 
 
-def link_problem(doc: str, target: str) -> Optional[str]:
-    """Why a link in document `doc` (relative to the repository) is broken, or None if it works."""
+def link_destination(doc: str, target: str) -> Optional[Path]:
+    """The file a relative link in document `doc` points to (normalized), or None for an external link."""
     if _SCHEME.match(target):
-        return None  # external (https:, mailto:, ...): not checked offline
-    path_part, _, anchor = target.partition("#")
-    path_part = unquote(path_part.split("?", 1)[0])
+        return None
+    path_part = unquote(target.partition("#")[0].split("?", 1)[0])
     base = REPO_ROOT / doc
     if not path_part:
         dest = base
@@ -250,7 +261,15 @@ def link_problem(doc: str, target: str) -> Optional[str]:
         dest = REPO_ROOT / path_part.lstrip("/")
     else:
         dest = base.parent / path_part
-    dest = Path(os.path.normpath(dest))
+    return Path(os.path.normpath(dest))
+
+
+def link_problem(doc: str, target: str) -> Optional[str]:
+    """Why a link in document `doc` (relative to the repository) is broken, or None if it works."""
+    dest = link_destination(doc, target)
+    if dest is None:
+        return None  # external (https:, mailto:, ...): not checked offline
+    anchor = target.partition("#")[2]
     try:
         rel = dest.relative_to(REPO_ROOT).as_posix()
     except ValueError:
@@ -315,10 +334,9 @@ def test_every_document_links_to_its_twin():
     """The language switch at the top: X.md links to X_DE.md and back."""
     missing = []
     for rel in DOCUMENTS:
-        twin_name = Path(_twin(rel)).name
-        targets = {unquote(t.partition("#")[0]) for t in links(header(_read(rel)))}
-        if twin_name not in targets:
-            missing.append(f"{rel} (expected a link to {twin_name} before the first '## ' heading)")
+        twin = Path(os.path.normpath(REPO_ROOT / _twin(rel)))
+        if not any(link_destination(rel, t) == twin for t in links(header(_read(rel)))):
+            missing.append(f"{rel} (expected a link to {Path(_twin(rel)).name} before the first '## ' heading)")
     assert not missing, "documents without a link to their twin:\n  " + "\n  ".join(missing)
 
 
@@ -413,6 +431,35 @@ def test_roadmap_lists_only_what_comes():
                               f"they belong in the changelog (newest release: {newest})")
     english, german = found.values()
     assert english == german, f"the English and German roadmaps name different versions: {found}"
+
+
+def roadmap_statuses(rel: str, known: Set[str]) -> List[str]:
+    """The status (last table cell) of every roadmap table row whose last cell is a known status, in order."""
+    statuses, inside = [], False
+    for line in _prose_lines(_read(rel)):
+        if line.startswith("## "):
+            inside = github_slug(line[3:]) == "roadmap"
+            continue
+        if inside and line.lstrip().startswith("|"):
+            last = line.strip().strip("|").split("|")[-1].strip()
+            if last in known:
+                statuses.append(last)
+    return statuses
+
+
+def test_roadmap_statuses_match_and_done_items_are_unreleased():
+    """Both roadmaps give every item the same status; "done" items must be in the changelog under [Unreleased]."""
+    english_doc, german_doc = (target.partition("#")[0] for target in ROADMAP_LINKS.values())
+    for rel in (english_doc, german_doc):
+        assert (REPO_ROOT / rel).is_file(), f"{rel}, the document with the roadmap, is missing"
+    english = roadmap_statuses(english_doc, set(ROADMAP_STATUS_DE))
+    german = roadmap_statuses(german_doc, set(ROADMAP_STATUS_DE.values()))
+    assert [ROADMAP_STATUS_DE[s] for s in english] == german, \
+        f"the English and German roadmaps differ in their item statuses: {english} / {german}"
+    if "done" in english:
+        version, _, sections = changelog_entries("CHANGELOG.md")[0]
+        assert version == "Unreleased" and sum(count for _, count in sections) > 0, \
+            "the roadmap marks items as done, but the changelog has no [Unreleased] entries for them"
 
 
 @pytest.mark.parametrize("changelog", sorted(ROADMAP_LINKS))

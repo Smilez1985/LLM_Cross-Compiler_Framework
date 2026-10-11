@@ -28,10 +28,10 @@ Datensatz hat.
   das Kästchen „Importance matrix (IMatrix, GGUF)“ in der GUI) nutzt diesen Text, wenn du keinen eigenen
   Datensatz angibst (`--dataset`). RKLLM- und RKNN-Builds nutzen ihn nie; sie bekommen nur deinen eigenen
   Datensatz, falls du einen angibst.
-- **Vor der Nutzung geprüft.** Das Framework vergleicht den sha256 des Texts jedes Satzes mit den Werten oben
-  (`orchestrator/utils/calibration.py`). Eine fehlende oder veränderte Datei wird abgelehnt. Der Build läuft dann
-  ohne Importance Matrix weiter und zeigt eine Warnung, oder er bricht vor dem Image-Build ab, wenn ein gewählter
-  Quantisierungstyp die Matrix braucht (`IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`).
+- **Vor der Nutzung geprüft.** Bevor ein Build einen Satz nutzt, vergleicht das Framework den sha256 seines Texts
+  mit dem Wert oben (`orchestrator/utils/calibration.py`). Eine fehlende oder veränderte Datei wird abgelehnt.
+  Der Build läuft dann ohne Importance Matrix weiter und zeigt eine Warnung, oder er bricht vor dem Image-Build
+  ab, wenn ein gewählter Quantisierungstyp die Matrix braucht (`IQ1_S`, `IQ1_M`, `IQ2_XXS`, `IQ2_XS`, `IQ2_S`).
 - **Sprachmischung.** Die Einstellung `calibration_language` (in `framework.yml` im Konfigurationsordner) wählt
   die Sätze: `mixed` (Standard: Deutsch, Englisch und Tool-Nutzung), `de` (Deutsch und Tool-Nutzung) oder `en`
   (Englisch und Tool-Nutzung). Die Sätze werden in Blöcken von etwa 2.000 Zeichen abwechselnd aneinandergereiht,
