@@ -25,14 +25,15 @@ from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.confirmation import CallTooLong, describe_call
 from orchestrator.tools.normalize import (NormalizeError, Repair, check_names_distinct, list_item_literal,
                                           normalize_arguments, resolve_name)
-from orchestrator.tools.output import UNTRUSTED_CHARS, ResultTooLarge, check_size, filtered_result
+from orchestrator.tools.output import (MAX_RESULT_BYTES, UNTRUSTED_CHARS, ResultTooLarge, check_size, filtered_result,
+                                       has_untrusted)
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStore, TokenStoreError
 from orchestrator.tools.policy import (TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier,
                                        restrictive_policy)
 from orchestrator.tools.spec import CHANNELS, FieldMeta, GrantRule, ToolLimits, example_problems
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
-from orchestrator.utils.untrusted import sanitize_untrusted
+from orchestrator.utils.untrusted import sanitize_untrusted, wrap_untrusted
 
 
 def text_sha256(text: str) -> str:
@@ -176,6 +177,46 @@ class ToolSpec:
         return rule or TIER_CAPS.get(self.tier, Decision.ASK)
 
 
+@dataclass(frozen=True)
+class ResourceSpec:
+    """An MCP resource or resource template read through the registry like a read tool (design 4.4): the caller's
+    permission decides, the result is filtered, the read is audited as the pseudo-tool `read_resource:<uri>`.
+
+    `tool` names the read tool the resource mirrors: that tool's permission decides (a resource never shows what the
+    tool may not), its input model checks the parameters (`arguments` maps them to the tool's arguments) and its
+    output model filters the result. Without a tool, `read(params)` returns framework text (capped, secrets
+    redacted) and the caller's read permission decides. `listed()` gives the parameters of the concrete resources
+    to list (e.g. the documents that exist)."""
+    uri: str
+    name: str
+    title: str
+    description: str
+    mime_type: str
+    tool: str = ""
+    arguments: Callable[[Dict[str, str]], Dict[str, Any]] = field(default=lambda params: dict(params))
+    read: Optional[Callable[[Dict[str, str]], str]] = None
+    listed: Optional[Callable[[], List[Dict[str, str]]]] = None
+
+    @property
+    def audit_name(self) -> str:
+        return f"read_resource:{self.uri}"
+
+
+@dataclass(frozen=True)
+class _Surface:
+    """A resource or prompt as the policy and the audit log see it: a read-tier pseudo-tool."""
+    name: str
+    title: str
+    tier: ToolTier = ToolTier.READ
+    default_decision: DecisionRule = None
+    max_decision: DecisionRule = None
+
+
+class ResourceUnknown(ToolInputError):
+    """No such resource, an unknown id or invalid parameters (MCP: invalid params, -32602)."""
+    code = "unknown_id"
+
+
 Confirm = Callable[[ToolSpec, BaseModel], bool]
 
 # The registry and actor of the call a handler runs for (handlers do not get the context; get_status reads it).
@@ -286,6 +327,7 @@ class ToolRegistry:
         self.audit = audit
         self.tokens = tokens  # named MCP tokens, each with its own policy
         self._tools: Dict[str, ToolSpec] = {}
+        self._resources: Dict[str, ResourceSpec] = {}  # by URI (template)
         # Repeat guard and per-session counters (in memory; per caller and session).
         self._guard_lock = threading.Lock()
         self._failures: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
@@ -780,3 +822,117 @@ class ToolRegistry:
         result = filtered_result(result, notes)
         check_size(result, spec.paging_hint, spec.limits.max_result_bytes)
         return result
+
+    # --- resources (design 4.4): read like the read tools, filtered and audited ------------------------------------
+
+    def register_resource(self, spec: ResourceSpec) -> ResourceSpec:
+        if spec.uri in self._resources:
+            raise ValueError(f"Resource '{spec.uri}' is already registered.")
+        if spec.tool:
+            if self.get(spec.tool).tier != ToolTier.READ:
+                raise ValueError(f"Resource '{spec.uri}' may only mirror a read tool, not '{spec.tool}'.")
+        elif spec.read is None:
+            raise ValueError(f"Resource '{spec.uri}' needs a read tool or a read function.")
+        self._resources[spec.uri] = spec
+        return spec
+
+    def _decider(self, spec: ResourceSpec) -> Any:
+        """What the policy decides a resource as: the read tool it mirrors, or a read-tier pseudo-tool."""
+        return self._tools[spec.tool] if spec.tool else _Surface(spec.audit_name, spec.title)
+
+    def resources(self, caller: Optional[str] = None) -> List[ResourceSpec]:
+        """Every resource, or the ones `caller` may read (MCP lists only those, as it hides denied tools)."""
+        if caller is None:
+            return list(self._resources.values())
+        policy, section = self._policy_of(caller)
+        return [r for r in self._resources.values()
+                if policy.decide_tool(self._decider(r), None, section, owner=caller) != Decision.DENY]
+
+    def read_resource(self, uri: str, params: Optional[Dict[str, str]], ctx: ToolContext) -> Tuple[str, bool]:
+        """Reads the resource `uri` (a registered URI or template) with its parameters for `ctx.actor`. Returns
+        (text, external): `external` means the text is wrapped as untrusted data. The caller's permission for the
+        mirrored read tool decides (a resource cannot ask, so "ask" refuses with the tool to call instead); the
+        result goes through the tool's output filter; every read is audited as `read_resource:<uri>` (fail-open,
+        like every read). ResourceUnknown: no such resource, an unknown id or invalid parameters."""
+        spec = self._resources.get(uri)
+        if spec is None:
+            raise ResourceUnknown(f"Unknown resource '{uri}'.", next="List the resources (resources/list).")
+        began, params = time.monotonic(), dict(params or {})
+        surface, mirrored = _Surface(spec.audit_name, spec.title), self._tools.get(spec.tool)
+        decider: Any = mirrored or surface
+        inp: Optional[BaseModel] = None
+        if mirrored is not None:
+            try:
+                normalized = normalize_arguments(mirrored, spec.arguments(params))
+                ctx = dataclasses.replace(ctx, repairs=list(normalized.repairs), notes=[])
+                inp = self.validate_input(mirrored, normalized.arguments)
+            except (NormalizeError, ToolInputError) as e:
+                self._audit(ctx, surface, self.decide(decider, None, ctx), "invalid_input", params, detail=str(e),
+                            reason_code=e.code)
+                raise ResourceUnknown(str(e), code=e.code) from None
+        decision = self.decide(decider, inp, ctx)
+        if decision != Decision.ALLOW:
+            asks = decision == Decision.ASK
+            self._audit(ctx, surface, decision, "not_confirmed" if asks else "denied", params,
+                        reason_code="needs_person" if asks else "permission_denied",
+                        answer="unavailable" if asks else "")
+            if not asks:
+                raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
+            raise ToolDenied(f"Reading '{spec.title}' needs the person's confirmation, which reading a resource "
+                             "cannot ask for.", code="needs_person",
+                             next=(f"Call the tool {spec.tool} instead; it asks the person." if spec.tool
+                                   else UNASKED_HINT))
+
+        def end(outcome: str, detail: str = "", reason_code: str = "", text: str = "") -> None:
+            extra = {"result": {"sha256": text_sha256(text), "bytes": len(text.encode("utf-8"))}} if text else {}
+            self._audit(ctx, surface, decision, outcome, params, detail=detail, reason_code=reason_code,
+                        duration_ms=int((time.monotonic() - began) * 1000), **extra)
+
+        token = _CALL.set((self, ctx.actor))
+        try:
+            if mirrored is not None:
+                raw = mirrored.handler(inp, ctx) if mirrored.takes_context else mirrored.handler(inp)
+                result = self._output(mirrored, raw)
+                body = json.dumps(result.model_dump(mode="json")).replace("<", "\\u003c")
+                external = has_untrusted(mirrored.output_model)
+                try:
+                    source = spec.uri.format(**params)
+                except (KeyError, IndexError, ValueError):
+                    source = spec.uri
+                text = (wrap_untrusted(body, source=f"resource:{source}", max_len=len(body) + 1) if external
+                        else body)
+            else:
+                text, external = framework_text(spec.read(params)), False
+        except ResultTooLarge as e:
+            end("error", str(e), "limit_reached")
+            raise ToolError(f"{spec.title}: {e}", code="limit_reached") from None
+        except ValidationError as e:  # a schema or handler bug, as in _run
+            self.logger.error(f"Resource {spec.uri} produced invalid data: {e}", exc_info=True)
+            end("error", repr(e), "failed")
+            raise ToolError(f"{spec.title} failed (internal error; details are in the framework log).") from None
+        except (ToolError, ValueError, LookupError) as e:  # an unknown id, or a refusal with its own code
+            code = getattr(e, "code", None) or "failed"
+            message = external_error_text(getattr(e, "message", None) or str(e))
+            next_step = redact_secrets(getattr(e, "next", "") or "")
+            end("error", message, code)
+            if code in ("unknown_id", "invalid_value") or isinstance(e, LookupError):
+                raise ResourceUnknown(message, code="unknown_id", next=next_step) from None
+            raise ToolError(message, code=code, next=next_step, quoted=message) from None
+        except Exception as e:
+            self.logger.error(f"Resource {spec.uri} failed: {e}", exc_info=True)
+            end("error", repr(e), "failed")
+            message = external_error_text(str(e))
+            raise ToolError(f"{spec.title} failed: {message}", quoted=message) from None
+        finally:
+            _CALL.reset(token)
+        end("ok", text=text)
+        return text, external
+
+
+def framework_text(text: Any, limit: int = MAX_RESULT_BYTES) -> str:
+    """Text the framework wrote itself (its documents): secrets redacted, cut at `limit` bytes with a note."""
+    text = redact_secrets(str(text or ""))
+    data = text.encode("utf-8")
+    if len(data) <= limit:
+        return text
+    return data[:limit].decode("utf-8", "ignore") + "\n[... truncated ...]"

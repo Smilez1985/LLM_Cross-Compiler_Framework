@@ -351,6 +351,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   widerrufenes Token verliert seine Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal (protokolliert
   mit dem Akteur `cli`, nie das Token selbst), und ein Token, das in ein Tool-Argument, eine Logzeile oder das
   Audit-Log gerät, wird wie andere Schlüssel geschwärzt.
+- **MCP-Ressourcen**: `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<ID>/status`,
+  `lcf://builds/<ID>/log`, `lcf://permissions` und die Dokumente der Installation `lcf://docs/<Name>` (CLI_Usage,
+  Features, Module_Developer_Guide, BLUEPRINT und ihre `_DE`-Zwillinge, aus einer festen Liste). Eine Ressource wird
+  über die Tool-Registry gelesen wie das Lese-Tool, das sie spiegelt: Die Berechtigung dieses Tools entscheidet (ein
+  verbotenes Tool verbirgt seine Ressourcen, „fragen“ lehnt mit dem aufzurufenden Tool ab), derselbe Ausgabefilter
+  bereinigt das Ergebnis und packt externen Text als nicht vertrauenswürdige Daten ein, und jedes Lesen landet als
+  `read_resource:<URI>` im Audit-Log. Unbekannte IDs, Dokumente außerhalb der Liste und Parameter mit `..`, einem
+  absoluten Pfad oder einem NUL-Byte sind ungültige Parameter (-32602). Clients mit Protokoll 2026-07-28 können auf
+  Änderungen hören: Die Listen der Tools, Prompts und Ressourcen ändern sich mit den Berechtigungen, und die Status-
+  und Log-Ressourcen eines Builds melden jede Änderung an den Aufrufer, der den Build gestartet hat, über den eigenen
+  Ereignisbus des Servers.
 
 ### Geändert
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
@@ -500,6 +511,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- MCP-Server: Auf Protokoll 2026-07-28 kündigte er Änderungsmeldungen für Tools, Prompts und Ressourcen sowie
+  Ressourcen-Abonnements an, schickte aber nie eine. Jetzt kündigt er sie nur zusammen mit den Ereignissen an, die er
+  veröffentlicht, und ohne Ereignisse wird er mit abgeschalteten Abonnements gebaut.
 - MCP-Server: Ein Client, der die Verbindung trennt, lässt seine Builds nicht mehr ohne jemanden laufen, der
   aufräumt. Die Builds und Jobs, die seine Sitzung gestartet hat, werden abgebrochen, jeweils mit einem Audit-Eintrag
   („client disconnected“), der Server wartet bis zu 30 Sekunden, bis ihre Container gestoppt sind, und

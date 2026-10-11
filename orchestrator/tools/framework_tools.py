@@ -522,4 +522,5 @@ def build_tool_registry(framework) -> ToolRegistry:
     state_dir = Path(framework.config.user_state_dir)
     audit = AuditLog(state_dir / "audit.db", key=_audit_key(framework, state_dir))
     registry = ToolRegistry(PolicyStore(state_dir), audit, tokens=TokenStore(state_dir))
-    return register_framework_tools(registry, framework)
+    from orchestrator.tools.framework_resources import register_framework_resources
+    return register_framework_resources(register_framework_tools(registry, framework), framework)

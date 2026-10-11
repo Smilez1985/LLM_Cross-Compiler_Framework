@@ -827,6 +827,21 @@ framework never sees it.
   quote a server reply, a log line or a name from a pack: it is cleaned the same way before secrets are redacted,
   and the client gets that part wrapped as untrusted data, while the framework's own refusals and the next step
   stay plain (Ditto's model gets such errors in an untrusted block too).
+- **Resources:** besides the tools, the server offers resources a client can attach or read:
+  `lcf://targets`, `lcf://targets/<target>/capabilities`, `lcf://builds/<request id>/status`,
+  `lcf://builds/<request id>/log` (the last 200 lines), `lcf://permissions`, and the installation's documents
+  `lcf://docs/<name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` and their German `_DE` twins;
+  only the ones that exist are listed). A resource returns what its read tool returns and is read through the tool
+  registry: your permission for that tool decides (a resource of a denied tool is neither listed nor readable, and
+  one whose tool is set to "ask" is refused with the tool to call instead, because reading a resource cannot ask
+  you), the same output filter cleans it (external text wrapped as untrusted data, so these resources come as
+  text), and every read is audited as `read_resource:<uri>`. An unknown id, a document outside the list or a
+  parameter with `..`, an absolute path or a NUL byte is an invalid-params error (-32602).
+- **Change events:** a client on protocol 2026-07-28 can listen for changes (`subscriptions/listen`): the tool,
+  prompt and resource lists change when your permissions or a token's permissions change, and the status and log
+  resources of a build report each change, only to the caller that started the build. The server publishes them on
+  its own event bus; it checks for changes every second. On the older handshake revisions it advertises no change
+  notifications, so those clients see a permission change at their next session.
 - **Local files for AI clients:** MCP clients and Ditto never name a path. A local model or calibration dataset is
   named as `<label>:<relative path>` inside a folder the AI may use, for example `models:qwen2.5-0.5b-instruct` or
   `datasets:calib/de.txt`, or by the file id (`lf_` and 16 hex characters) the framework recorded for it. The
