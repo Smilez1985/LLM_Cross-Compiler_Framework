@@ -345,7 +345,8 @@ class ConfigManager:
                          "profile (never picked automatically)"),
             ConfigSchema("ai_anthropic_workspace_id", str, False, None,
                          "Claude workspace ID (wrkspc_...) for API keys that are valid in every workspace of the "
-                         "organization; sent as the anthropic-workspace-id header"),
+                         "organization; sent as the anthropic-workspace-id header with the API key (an `ant` "
+                         "profile keeps its own workspace)"),
             ConfigSchema("ai_allow_sdk_env_headers", bool, False, False,
                          "Keep OPENAI_CUSTOM_HEADERS / ANTHROPIC_CUSTOM_HEADERS from the environment (dropped at "
                          "startup by default: they could replace the API key or reach other servers)"),

@@ -403,6 +403,40 @@ class TestAIConfigurationDialog:
         assert message_boxes == [("warning", "Unsuitable API Key")]
         assert framework.secrets_manager.store == {} and dlg.result() == 0
 
+    def test_removed_provider_in_the_fallback_chain_is_explained(self, qapp, framework, monkeypatch):
+        shown = []
+
+        class Boxes:
+            @staticmethod
+            def information(parent, title, text, *args):
+                shown.append(("information", title, text))
+
+            @staticmethod
+            def warning(parent, title, text, *args):
+                shown.append(("warning", title, text))
+
+        monkeypatch.setattr(dialogs, "QMessageBox", Boxes)
+        framework.config.set("ai_provider", "ollama")
+        framework.config.set("ai_fallback_chain", ["claude_code"])
+        dlg = AIConfigurationDialog(framework)
+        assert [entry[:2] for entry in shown] == [("information", "AI Provider Removed")]
+        assert "llm-cli mcp config" in shown[0][2]
+
+        dlg._save_config()
+        assert shown[-1][:2] == ("warning", "Invalid Fallback Chain") and "llm-cli mcp config" in shown[-1][2]
+        assert dlg.result() == 0 and framework.config.get("ai_fallback_chain") == ["claude_code"]
+
+    def test_workspace_id_only_for_the_claude_api(self, qapp, framework, tmp_path):
+        (tmp_path / "llm_providers.yml").write_text(
+            "providers:\n  gateway:\n    label: Gateway\n    adapter: anthropic\n"
+            "    base_url: https://gateway.example.com\n    secret: anthropic_api_key\n", encoding="utf-8")
+        framework.config.set("ai_anthropic_workspace_id", "wrkspc_" + "01Abc")
+        dlg = AIConfigurationDialog(framework)
+        select_provider(dlg, "gateway")
+        assert not dlg.txt_workspace.isEnabled() and dlg.txt_workspace.text() == ""
+        select_provider(dlg, "anthropic")
+        assert dlg.txt_workspace.isEnabled() and dlg.txt_workspace.text() == "wrkspc_" + "01Abc"
+
     def test_sign_in_placeholder(self, qapp, framework):
         dlg = AIConfigurationDialog(framework)
         select_provider(dlg, "anthropic")
