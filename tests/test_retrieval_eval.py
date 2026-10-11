@@ -245,6 +245,29 @@ def test_reports_without_retrieval_cases_stay_as_before():
     assert "retrieval" not in data and "retrieved" not in data["cases"][0]["attempts"][0]
 
 
+def test_variants_choose_the_rerank_stage_and_a_silent_fallback_is_an_error():
+    assert ditto_eval.RAG_VARIANTS == {"fused": {"rerank": False}, "rerank": {"rerank": True}}
+
+    class Reranked(ScriptedKnowledge):
+        def search(self, query, limit=3, score_threshold=None, strict=False, **options):
+            hits = super().search(query, limit, score_threshold, strict, **options)
+            for hit in hits[:1 if query == "fallback" else None]:
+                hit.metadata["reranker"] = "fake/reranker"
+            return hits
+
+    knowledge = Reranked({"good": [("a", 0.9)], "fallback": [("a", 0.9), ("b", 0.5)]})
+    knowledge.last_error = "The reranking model x is not in /cache"
+    ev = RetrievalEval(knowledge, DOCS)
+    good = ev.run_case(retrieval_case("g", "good", relevant=["a"]), variant="rerank")
+    fallback = ev.run_case(retrieval_case("f", "fallback", relevant=["a"]), variant="rerank")
+    fused = ev.run_case(retrieval_case("f", "fallback", relevant=["a"]), variant="fused")
+
+    assert [s["rerank"] for s in knowledge.searches] == [True, True, False]
+    assert good.passed and fused.passed
+    # The search kept the fused order because the reranker could not run: never graded as a reranked result.
+    assert not fallback.passed and fallback.error == "The reranker did not run: The reranking model x is not in /cache"
+
+
 def test_unknown_variant_and_wrong_kind_are_refused():
     ev = RetrievalEval(ScriptedKnowledge(), DOCS)
     with pytest.raises(ValueError, match="variant"):
@@ -427,6 +450,50 @@ def test_cli_refuses_a_corpus_that_misses_expected_documents(tmp_path, monkeypat
     write_doc(tmp_path / "corpus", "other.md", "---\ntitle: T\nlang: en\n---\ntext\n")
     result = run_cli(monkeypatch, framework_stand_in(tmp_path), "--cases", str(cases))
     assert result.exit_code == 2 and "missing-doc" in result.output
+
+
+class WordReranker:
+    """Relevance = share of the query's words in the text (no model)."""
+    model_id = "fake/word-reranker"
+    spec = SimpleNamespace(min_score=0.5)
+
+    def scores(self, query, documents):
+        words = set(re.findall(r"\w{4,}", query.lower()))
+        return [len(words & set(re.findall(r"\w+", d.lower()))) / max(len(words), 1) for d in documents]
+
+
+def test_cli_rerank_variant_reports_the_reranker(tmp_path, monkeypatch, fake_models, no_network):
+    import orchestrator.Core.rag_manager as rm
+
+    created = []
+    monkeypatch.setattr(rm, "create_reranker", lambda spec, cache_dir, offline: created.append(spec.model_id)
+                        or WordReranker())
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+    out = tmp_path / "report.json"
+    framework = framework_stand_in(tmp_path, rag_reranker="cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
+    result = run_cli(monkeypatch, framework, "--kind", "retrieval", "--rag-variant", "fused", "--rag-variant",
+                     "rerank", "--json", str(out))
+
+    assert result.exit_code == 0, result.output
+    fused, reranked = json.loads(out.read_text())["runs"]
+    assert fused["setup"]["variant"] == "fused" and fused["setup"]["reranker"] is None
+    assert reranked["setup"]["label"] == "retrieval rerank"
+    assert reranked["setup"]["model"] == f"{HashedEmbedder.model_id} + fake/word-reranker"
+    assert reranked["setup"]["reranker"] == {"model": "fake/word-reranker", "reason": "set in the configuration "
+                                             "(rag_reranker)", "min_score": 0.5, "default": False}
+    assert created == ["cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"]
+    # The floor gives unrelated questions no excerpt; reranked scores are relevances.
+    assert reranked["retrieval"]["empty_when_irrelevant"] == 1.0
+    scores = [h["score"] for c in reranked["cases"] for h in c["attempts"][0].get("retrieved", [])]
+    assert scores and all(0.5 <= x <= 1 for x in scores)
+    assert no_network == []
+
+
+def test_cli_rerank_variant_without_a_reranker_is_refused(tmp_path, monkeypatch, fake_models):
+    monkeypatch.setenv("LLM_FRAMEWORK_HOME", str(tmp_path / "state"))
+    result = run_cli(monkeypatch, framework_stand_in(tmp_path, rag_reranker="off"), "--kind", "retrieval",
+                     "--rag-variant", "rerank")
+    assert result.exit_code == 2 and "needs a reranker" in result.output and "turned off" in result.output
 
 
 def test_cli_variant_choices_match_the_runner():

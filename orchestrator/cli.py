@@ -1124,8 +1124,9 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
               type=click.Choice(["healing", "optimizer", "module", "chat", "retrieval"]),
               help='Only cases of this kind (repeatable). retrieval grades knowledge-base searches on a fixture '
                    'corpus with the local embedding model (no AI model) and runs only when chosen')
-@click.option('--rag-variant', 'rag_variants', multiple=True, type=click.Choice(["fused"]),
-              help='Retrieval only: search variant to grade (repeatable); default: fused')
+@click.option('--rag-variant', 'rag_variants', multiple=True, type=click.Choice(["fused", "rerank"]),
+              help='Retrieval only: search variant to grade (repeatable): fused (hybrid search) or rerank (plus '
+                   'the cross-encoder of rag_reranker and its relevance floor); default: fused')
 @click.option('--case', 'case_ids', multiple=True, help='Only this case id (repeatable)')
 @click.option('--repeat', type=click.IntRange(1, 20), default=1, show_default=True, help='Runs per case')
 @click.option('--json', 'json_out', type=click.Path(dir_okay=False, path_type=Path), default=None,
@@ -1282,17 +1283,30 @@ def _eval_retrieval(fm, cases, source: Path, variants, repeat: int, progress) ->
             sys.exit(1)
         index_seconds = round(time.monotonic() - start, 1)
         embedding = str(knowledge.get_status().get("embedding_model", ""))
+        reranker = knowledge.reranker_info()
+        if "rerank" in variants:
+            if not reranker["model"]:
+                console.print(f"[red]The rerank variant needs a reranker: {escape(reranker['reason'])}. Set "
+                              "rag_reranker to a model id to grade one anyway.[/red]")
+                sys.exit(2)
+            with console.status(f"Loading the reranker {reranker['model']} (downloaded on first use) ..."):
+                ready = knowledge.prepare_models()
+            if not ready:
+                console.print(f"[red]{escape(knowledge.last_error)}[/red]")
+                sys.exit(1)
         for variant in dict.fromkeys(variants):
             label = f"retrieval {variant}"
-            console.print(f"[bold]{escape(label)}[/bold]: {escape(embedding)}, {len(cases)} cases x {repeat}")
+            model = f"{embedding} + {reranker['model']}" if variant == "rerank" else embedding
+            console.print(f"[bold]{escape(label)}[/bold]: {escape(model)}, {len(cases)} cases x {repeat}")
             report = ev.run(cases, variant=variant, repeat=repeat, on_result=progress)
             try:
                 import psutil
                 rss_mb = round(psutil.Process().memory_info().rss / 2 ** 20)  # models loaded
             except Exception:
                 rss_mb = None
-            report.setup = {"label": label, "provider": "knowledge base", "model": embedding, "variant": variant,
+            report.setup = {"label": label, "provider": "knowledge base", "model": model, "variant": variant,
                             "model_reason": knowledge.model_reason, "framework": __version__,
+                            "reranker": reranker if variant == "rerank" else None,
                             "cases_sha256": cases_digest(source), "corpus_sha256": corpus_digest(folder),
                             "corpus_documents": len(docs), "index_seconds": index_seconds, "rss_mb": rss_mb,
                             "repeat": repeat, "cases": [c.id for c in cases]}

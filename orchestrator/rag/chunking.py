@@ -3,10 +3,11 @@
 Structure-aware, token-aware chunking for the knowledge base.
 
 Markdown (also crawled HTML, which the crawler converts to Markdown) is split into blocks: headings,
-paragraphs, lists, fenced code and tables. Code blocks and tables are never split, so retrieval returns
-them whole; headings start new chunks and give each chunk its section path. Sizes are measured with the
-embedding model's tokenizer when it is available. Source files are split at blank lines instead, and
-plain text (PDFs) at paragraphs and sentences.
+paragraphs, lists, fenced code and tables. Code blocks and tables stay whole as long as the embedding model
+sees them whole (hard_tokens); larger ones are split at line boundaries, each piece repeating the table
+header or reopening the code fence. Headings start new chunks and give each chunk its section path. Sizes
+are measured with the embedding model's tokenizer when it is available. Source files are split at blank
+lines instead, and plain text (PDFs) at paragraphs and sentences.
 """
 
 import hashlib
@@ -22,6 +23,8 @@ Kind = Literal["markdown", "code", "text"]
 
 # Fixed namespace so point ids are stable across machines and versions.
 CHUNK_NAMESPACE = uuid.UUID("6f1c2b8e-3d4a-5b6c-8d7e-9f0a1b2c3d4e")
+# Tokens of the model's context kept for the preamble line and the passage prefix.
+PREAMBLE_RESERVE_TOKENS = 96
 
 _FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _ATX = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$")
@@ -72,6 +75,11 @@ def build_preamble(source: str, title: str = "", section: str = "") -> str:
     if section and clean(section, 120) != clean(title, 120):
         parts.append(f"Section: {clean(section, 120)}")
     return " | ".join(parts)
+
+
+def passage_text(source: str, title: str, section: str, text: str) -> str:
+    """What is embedded for a chunk: its preamble line, a blank line and the chunk."""
+    return build_preamble(source, title, section) + "\n\n" + text
 
 
 # --- parsing ---------------------------------------------------------------------------------------------
@@ -160,6 +168,46 @@ def _hard_split(text: str, max_tokens: int, count: TokenCounter) -> List[str]:
     return pieces
 
 
+def _split_block(block: Block, limit: int, count: TokenCounter) -> List[str]:
+    """An oversized code block or table as pieces of at most `limit` tokens, cut at line boundaries. Every
+    piece repeats the table's header and separator rows, or reopens and closes the code fence."""
+    lines = block.text.split("\n")
+    head: List[str] = []
+    body: List[str] = lines
+    tail: List[str] = []
+    fence = _FENCE_OPEN.match(lines[0]) if block.kind == "code" else None
+    if block.kind == "table" and len(lines) > 2 and _TABLE_SEP.match(lines[1]):
+        head, body = lines[:2], lines[2:]
+    elif fence:
+        marker = fence.group(1)
+        close = re.compile(rf"^ {{0,3}}{re.escape(marker[0])}{{{len(marker)},}}\s*$")
+        closed = len(lines) > 1 and close.match(lines[-1])
+        # An unclosed fence (it runs to the end of the document) is closed in every piece.
+        head, body, tail = [lines[0]], lines[1:-1] if closed else lines[1:], [lines[-1] if closed else marker]
+    frame = count("\n".join(head + tail))
+    if frame > limit // 2:  # a giant header is not worth repeating
+        head, body, tail, frame = [], lines, [], 0
+    room = max(limit - frame, 1)
+    groups: List[List[str]] = [[]]
+    used = 0
+    for line in body:
+        tokens = count(line)
+        for part in (_hard_split(line, room, count) if tokens > room else [line]):
+            part_tokens = tokens if part is line else count(part)
+            if groups[-1] and used + part_tokens > room:
+                groups.append([])
+                used = 0
+            groups[-1].append(part)
+            used += part_tokens
+    pieces: List[str] = []
+    while groups:  # summed line counts can miss tokens at the joins: halve a group that does not fit
+        rows = groups.pop(0)
+        piece = "\n".join(head + rows + tail)
+        if len(rows) > 1 and count(piece) > limit:
+            groups[:0] = [rows[:len(rows) // 2], rows[len(rows) // 2:]]
+        elif rows:
+            pieces.append(piece)
+    return pieces
 
 
 def _parts(text: str, kind: str) -> List[str]:
@@ -195,11 +243,17 @@ class _Unit:
     title: str = ""
 
 
-def _to_units(blocks: List[Block], max_tokens: int, count: TokenCounter) -> List[_Unit]:
-    """Whole blocks where they fit; oversized prose, lists and source become sentences, items or lines."""
+def _to_units(blocks: List[Block], max_tokens: int, count: TokenCounter,
+              hard_tokens: Optional[int] = None) -> List[_Unit]:
+    """Whole blocks where they fit; oversized prose, lists and source become sentences, items or lines, and
+    code blocks and tables beyond hard_tokens (the model's context) become pieces of at most max_tokens."""
     units: List[_Unit] = []
     for block in blocks:
         tokens = count(block.text)
+        if block.kind in ("code", "table") and hard_tokens and tokens > hard_tokens:
+            for piece in _split_block(block, min(max_tokens, hard_tokens), count):
+                units.append(_Unit(piece, block.kind, "\n\n", count(piece)))
+            continue
         if block.kind in ("heading", "code", "table") or tokens <= max_tokens:
             units.append(_Unit(block.text, block.kind, "\n\n", tokens, block.level, block.title))
             continue
@@ -255,8 +309,9 @@ def _overlap_tail(units: List[_Unit], budget: int, count: TokenCounter) -> List[
 # --- packing ---------------------------------------------------------------------------------------------
 
 def chunk_document(text: str, *, count_tokens: TokenCounter, max_tokens: int, overlap_tokens: int = 0,
-                   kind: Kind = "markdown", base_section: str = "") -> List[Chunk]:
-    """Splits a document into chunks of at most max_tokens (code blocks and tables may exceed it, whole)."""
+                   kind: Kind = "markdown", base_section: str = "", hard_tokens: Optional[int] = None) -> List[Chunk]:
+    """Splits a document into chunks of at most max_tokens. Code blocks and tables may exceed it whole up to
+    hard_tokens (no limit when None); larger ones are split at lines."""
     if not text or not text.strip():
         return []
     max_tokens = max(int(max_tokens), 16)
@@ -295,7 +350,7 @@ def chunk_document(text: str, *, count_tokens: TokenCounter, max_tokens: int, ov
         current_tokens = sum(u.tokens for u in tail)
         current_section = section_path()
 
-    queue = deque(_to_units(blocks, max_tokens, count_tokens))
+    queue = deque(_to_units(blocks, max_tokens, count_tokens, hard_tokens))
     while queue:
         unit = queue.popleft()
         if unit.kind == "heading":

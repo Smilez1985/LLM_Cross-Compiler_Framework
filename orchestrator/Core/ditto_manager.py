@@ -36,6 +36,7 @@ from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest,
                               Message, NotConfigured, PermissionDenied, ProviderTimeout, ProviderUnavailable,
                               RateLimited, Refused, Truncated, Usage, make_registry_executor, run_tool_loop,
                               tool_specs_from_registry)
+from orchestrator.rag.retrieval import pack_excerpts
 from orchestrator.tools.policy import Decision
 from orchestrator.tools.registry import ToolContext, ToolDenied, ToolError, ToolInputError
 from orchestrator.utils.helpers import redact_secrets
@@ -556,8 +557,9 @@ class DittoCoder:
         return DittoError(describe_llm_error(err, anthropic=anthropic), cause=err)
 
     # --- knowledge base -----------------------------------------------------------------------------------
-    def _knowledge(self, query: str, limit: int = 5) -> str:
-        """Matching knowledge-base excerpts as one untrusted block ("" when disabled or nothing matches)."""
+    def _knowledge(self, query: str, limit: int = 5, rerank: Optional[bool] = None) -> str:
+        """Matching knowledge-base excerpts as one untrusted block ("" when disabled or nothing matches), within
+        a third of the context limit. rerank: see RAGManager.search (None: the configured default)."""
         query = (query or "").strip()[:500]
         if not query:
             return ""
@@ -565,11 +567,12 @@ class DittoCoder:
         if rag is None:
             return ""
         try:
-            hits = rag.search(query, limit=limit)
+            hits = rag.search(query, limit=limit, rerank=rerank)
         except Exception as e:  # the knowledge base is optional context
             self.logger.warning(f"Knowledge base search failed: {e}")
             return ""
-        text = "\n\n".join(f"[Source: {h.source}]\n{h.content}" for h in hits)
+        excerpts = pack_excerpts([f"[Source: {h.source}]\n{h.content}" for h in hits], self._context_limit() // 3)
+        text = "\n\n".join(excerpts)
         return wrap_untrusted(text, "knowledge base") if text else ""
 
     # --- structured answers -------------------------------------------------------------------------------
@@ -589,7 +592,7 @@ class DittoCoder:
         log_content = log_content or ""
         parts = ["Build context:\n" + wrap_untrusted(context_info or "(none)", "build context", max_len=2000),
                  "Build log (last part):\n" + wrap_untrusted(log_content[-6000:], "build log")]
-        known = self._knowledge("\n".join(log_content.strip().splitlines()[-3:]), limit=3)
+        known = self._knowledge("\n".join(log_content.strip().splitlines()[-3:]), limit=3, rerank=True)
         if known:
             parts.append("Possibly related knowledge-base excerpts:\n" + known)
         parts.append("Analyze why the build failed and propose one fix.")
@@ -609,7 +612,8 @@ class DittoCoder:
         lowered = probe.lower()
         sdk_hint = next((sdk for marker, sdk in SDK_HINTS if marker in lowered), "generic")
         parts = ["Hardware probe (target_hardware_config.txt):\n" + wrap_untrusted(probe[:8000], "hardware probe")]
-        docs = self._knowledge(f"{sdk_hint} SDK compilation flags build configuration optimization parameters")
+        docs = self._knowledge(f"{sdk_hint} SDK compilation flags build configuration optimization parameters",
+                               rerank=True)
         if docs:
             parts.append("Documentation excerpts:\n" + docs)
         parts.append("Propose the module definition for this hardware.")
@@ -651,7 +655,7 @@ class DittoCoder:
                                               max_len=500),
                  f"Offered formats and their quantization types:\n{listing}"]
         if use_knowledge:
-            known = self._knowledge(f"{target} {board or ''} {model} quantization performance")
+            known = self._knowledge(f"{target} {board or ''} {model} quantization performance", rerank=True)
             if known:
                 parts.append("Knowledge-base excerpts:\n" + known)
         parts.append("Recommend the build settings.")
