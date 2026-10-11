@@ -1114,13 +1114,19 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
 
 @ditto.command('eval')
 @click.option('--cases', 'cases_file', type=click.Path(exists=True, dir_okay=False, path_type=Path), default=None,
-              help='Cases file (default: evals/ditto/cases.yml of the installation)')
+              help='Cases file (default: evals/ditto/cases.yml of the installation, for --kind retrieval '
+                   'evals/retrieval/cases.yml)')
 @click.option('--provider', help='AI provider for the run; default: AI settings')
 @click.option('--model', help='Model for the run; default: AI settings')
 @click.option('--tier', 'tiers', multiple=True,
               help='Run against the managed local model of this tier (repeatable, e.g. --tier small --tier small-q2)')
-@click.option('--kind', 'kinds', multiple=True, type=click.Choice(["healing", "optimizer", "module", "chat"]),
-              help='Only cases of this kind (repeatable)')
+@click.option('--kind', 'kinds', multiple=True,
+              type=click.Choice(["healing", "optimizer", "module", "chat", "retrieval"]),
+              help='Only cases of this kind (repeatable). retrieval grades knowledge-base searches on a fixture '
+                   'corpus with the local embedding model (no AI model) and runs only when chosen')
+@click.option('--rag-variant', 'rag_variants', multiple=True, type=click.Choice(["fused", "rerank"]),
+              help='Retrieval only: search variant to grade (repeatable): fused (hybrid search) or rerank (plus '
+                   'the cross-encoder of rag_reranker and its relevance floor); default: fused')
 @click.option('--case', 'case_ids', multiple=True, help='Only this case id (repeatable)')
 @click.option('--repeat', type=click.IntRange(1, 20), default=1, show_default=True, help='Runs per case')
 @click.option('--json', 'json_out', type=click.Path(dir_okay=False, path_type=Path), default=None,
@@ -1131,18 +1137,26 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
               help='Reasoning effort for the run (local models: low = no thinking); default: AI settings')
 @pass_context
 def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Optional[str], model: Optional[str],
-               tiers: Tuple[str, ...], kinds: Tuple[str, ...], case_ids: Tuple[str, ...], repeat: int,
-               json_out: Optional[Path], min_pass: Optional[float], effort: Optional[str]):
+               tiers: Tuple[str, ...], kinds: Tuple[str, ...], rag_variants: Tuple[str, ...],
+               case_ids: Tuple[str, ...], repeat: int, json_out: Optional[Path], min_pass: Optional[float],
+               effort: Optional[str]):
     """Grade Ditto on fixed cases with the chosen provider/model, e.g. to check whether a 2-bit local model is
-    good enough. Nothing is built or changed. Cloud providers bill every request (about 20 per run and repeat)."""
+    good enough, or the knowledge-base search (--kind retrieval, works offline once the embedding model is
+    downloaded). Nothing is built or changed. Cloud providers bill every request (about 20 per run and repeat)."""
     from orchestrator import __version__
-    from orchestrator.evals.ditto_eval import DittoEval, cases_digest, load_cases
+    from orchestrator.evals.ditto_eval import DEFAULT_CASES, RETRIEVAL_CASES, DittoEval, cases_digest, load_cases
     ctx.require_framework()
     if tiers and (provider or model):
         console.print("[red]--tier runs the managed local model; it cannot be combined with --provider/--model.[/red]")
         sys.exit(2)
+    if cases_file:
+        files = [cases_file]
+    else:  # retrieval cases need the embedding model, not an AI model: only when asked for
+        files = [] if set(kinds) == {"retrieval"} else [DEFAULT_CASES]
+        if "retrieval" in kinds or (case_ids and not kinds):
+            files.append(RETRIEVAL_CASES)
     try:
-        cases = load_cases(cases_file)
+        cases = [c for path in files for c in load_cases(path)]
     except (OSError, ValueError) as e:
         console.print(f"[red]Cannot read the cases: {escape(str(e))}[/red]")
         sys.exit(2)
@@ -1150,73 +1164,154 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
     if not cases:
         console.print("[red]No case matches the filters.[/red]")
         sys.exit(2)
+    ai_cases = [c for c in cases if c.kind != "retrieval"]
+    retrieval_cases = [c for c in cases if c.kind == "retrieval"]
     fm = ctx.framework_manager
-    ditto = _ai_override(ctx, "local" if tiers else provider, model)
-    if effort:
-        for key in ("ai_effort", "ai_effort_chat", "ai_effort_tools", "ai_effort_json", "ai_effort_healing"):
-            fm.config.set(key, effort)  # this run only; the saved settings stay unchanged
-    targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
     runs = []
 
-    def run_once(label: str):
-        from orchestrator.Core.ditto_manager import DittoError
-        ditto.reload()
-        try:
-            setup = ditto.describe("chat")
-        except DittoError as e:
-            console.print(f"[red]{escape(str(e))}[/red]")
-            sys.exit(1)
-        console.print(f"[bold]{escape(label)}[/bold]: {escape(setup['label'])} / {escape(setup['model'])}, "
-                      f"{len(cases)} cases x {repeat}")
+    def progress(result):
+        mark = "[green]pass[/green]" if result.pass_rate == 1 else (
+            "[red]fail[/red]" if result.pass_rate == 0 else f"[yellow]{result.pass_rate:.0%}[/yellow]")
+        note = f"  [dim]{escape(result.first_problem()[:160])}[/dim]" if result.pass_rate < 1 else ""
+        console.print(f"  {mark} {escape(result.case.id)} ({result.seconds:.1f}s){note}")
 
-        def progress(result):
-            mark = "[green]pass[/green]" if result.pass_rate == 1 else (
-                "[red]fail[/red]" if result.pass_rate == 0 else f"[yellow]{result.pass_rate:.0%}[/yellow]")
-            note = f"  [dim]{escape(result.first_problem()[:160])}[/dim]" if result.pass_rate < 1 else ""
-            console.print(f"  {mark} {escape(result.case.id)} ({result.seconds:.1f}s){note}")
+    if ai_cases:
+        ditto = _ai_override(ctx, "local" if tiers else provider, model)
+        if effort:
+            for key in ("ai_effort", "ai_effort_chat", "ai_effort_tools", "ai_effort_json", "ai_effort_healing"):
+                fm.config.set(key, effort)  # this run only; the saved settings stay unchanged
+        targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
 
-        report = DittoEval(ditto, targets_dir).run(cases, repeat=repeat, on_result=progress)
-        models = {}
-        for task in ("chat", "json", "healing"):  # each task may use its own model
+        def run_once(label: str):
+            from orchestrator.Core.ditto_manager import DittoError
+            ditto.reload()
             try:
-                models[task] = ditto.describe(task).get("model", "")
-            except DittoError:
-                models[task] = ""
-        report.setup = {"label": label, "provider": setup.get("provider", ""), "model": setup.get("model", ""),
-                        "task_models": models, "effort": effort or "settings", "framework": __version__,
-                        "cases_sha256": cases_digest(cases_file), "repeat": repeat, "cases": [c.id for c in cases]}
-        runs.append(report)
+                setup = ditto.describe("chat")
+            except DittoError as e:
+                console.print(f"[red]{escape(str(e))}[/red]")
+                sys.exit(1)
+            console.print(f"[bold]{escape(label)}[/bold]: {escape(setup['label'])} / {escape(setup['model'])}, "
+                          f"{len(ai_cases)} cases x {repeat}")
+            report = DittoEval(ditto, targets_dir).run(ai_cases, repeat=repeat, on_result=progress)
+            models = {}
+            for task in ("chat", "json", "healing"):  # each task may use its own model
+                try:
+                    models[task] = ditto.describe(task).get("model", "")
+                except DittoError:
+                    models[task] = ""
+            report.setup = {"label": label, "provider": setup.get("provider", ""), "model": setup.get("model", ""),
+                            "task_models": models, "effort": effort or "settings", "framework": __version__,
+                            "cases_sha256": cases_digest(cases_file), "repeat": repeat,
+                            "cases": [c.id for c in ai_cases]}
+            runs.append(report)
 
-    if tiers:
-        from orchestrator.runtime.llama_server import LocalRuntimeError
-        rt = _local_runtime(ctx)
-        for tier in tiers:
-            try:
-                with console.status(f"Starting llama-server with {tier} ..."):
-                    rt.start(tier=tier, remember=False)
-                run_once(f"tier {tier}")
-            except LocalRuntimeError as e:
-                _runtime_failure(e)
-            finally:
-                rt.stop()
-    else:
-        run_once("configured model" if not (provider or model) else f"{provider or ''} {model or ''}".strip())
+        if tiers:
+            from orchestrator.runtime.llama_server import LocalRuntimeError
+            rt = _local_runtime(ctx)
+            for tier in tiers:
+                try:
+                    with console.status(f"Starting llama-server with {tier} ..."):
+                        rt.start(tier=tier, remember=False)
+                    run_once(f"tier {tier}")
+                except LocalRuntimeError as e:
+                    _runtime_failure(e)
+                finally:
+                    rt.stop()
+        else:
+            run_once("configured model" if not (provider or model) else f"{provider or ''} {model or ''}".strip())
+    elif tiers or provider or model or effort:
+        console.print("[dim]--tier, --provider, --model and --effort apply to AI cases; retrieval needs none.[/dim]")
+    if retrieval_cases:
+        runs += _eval_retrieval(fm, retrieval_cases, cases_file or RETRIEVAL_CASES, rag_variants or ("fused",),
+                                repeat, progress)
 
+    all_kinds = sorted({c.kind for c in cases})
     table = Table(title="Ditto evaluation")
-    for column in ("Run", "Model", "Passed", *sorted({c.kind for c in cases}), "Avg s/case"):
+    for column in ("Run", "Model", "Passed", *all_kinds, "Avg s/case"):
         table.add_column(column)
     for report in runs:
         kinds_rate = report.by_kind()
         avg = sum(r.seconds for r in report.results) / len(report.results)
         table.add_row(escape(report.setup["label"]), escape(report.setup["model"]), f"{report.pass_rate:.0%}",
-                      *[f"{kinds_rate[k]:.0%}" for k in sorted(kinds_rate)], f"{avg:.1f}")
+                      *[f"{kinds_rate[k]:.0%}" if k in kinds_rate else "-" for k in all_kinds], f"{avg:.1f}")
     console.print(table)
+    metrics = [(report, report.retrieval()) for report in runs if report.retrieval() is not None]
+    if metrics:
+        def share(value):
+            return "-" if value is None else f"{value:.0%}"
+
+        table = Table(title="Retrieval")
+        for column in ("Run", "hit@1", "hit@3", "hit@k", "MRR", "Unrelated: no excerpt", "p50 ms"):
+            table.add_column(column)
+        for report, m in metrics:
+            table.add_row(escape(report.setup["label"]), share(m["hit@1"]), share(m["hit@3"]), share(m["hit@k"]),
+                          "-" if m["mrr"] is None else f"{m['mrr']:.3f}", share(m["empty_when_irrelevant"]),
+                          f"{m['latency_p50_ms']:.0f}")
+        console.print(table)
     if json_out:
         json_out.write_text(json.dumps({"runs": [r.to_dict() for r in runs]}, indent=2, ensure_ascii=False),
                             encoding="utf-8")
         console.print(f"Report written to {escape(str(json_out))}")
     if min_pass is not None and any(r.pass_rate < min_pass for r in runs):
         sys.exit(1)
+
+
+def _eval_retrieval(fm, cases, source: Path, variants, repeat: int, progress) -> list:
+    """Retrieval cases: the corpus is indexed once into a temporary knowledge base, one report per variant."""
+    import time
+    from orchestrator import __version__
+    from orchestrator.evals.ditto_eval import (RetrievalEval, RetrievalEvalError, cases_digest,
+                                               check_retrieval_cases, corpus_digest, corpus_dir, load_corpus,
+                                               temporary_knowledge_base)
+    try:
+        folder = corpus_dir(source)
+        docs = load_corpus(folder)
+        check_retrieval_cases(cases, docs)
+    except (OSError, ValueError) as e:
+        console.print(f"[red]Cannot read the retrieval corpus: {escape(str(e))}[/red]")
+        sys.exit(2)
+    reports = []
+    with temporary_knowledge_base(fm) as knowledge:
+        ev = RetrievalEval(knowledge, docs)
+        start = time.monotonic()
+        try:
+            with console.status(f"Indexing {len(docs)} corpus documents into a temporary knowledge base "
+                                "(the embedding model is downloaded on first use) ..."):
+                ev.ingest()
+        except RetrievalEvalError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+        index_seconds = round(time.monotonic() - start, 1)
+        embedding = str(knowledge.get_status().get("embedding_model", ""))
+        reranker = knowledge.reranker_info()
+        if "rerank" in variants:
+            if not reranker["model"]:
+                console.print(f"[red]The rerank variant needs a reranker: {escape(reranker['reason'])}. Set "
+                              "rag_reranker to a model id to grade one anyway.[/red]")
+                sys.exit(2)
+            with console.status(f"Loading the reranker {reranker['model']} (downloaded on first use) ..."):
+                ready = knowledge.prepare_models()
+            if not ready:
+                console.print(f"[red]{escape(knowledge.last_error)}[/red]")
+                sys.exit(1)
+        for variant in dict.fromkeys(variants):
+            label = f"retrieval {variant}"
+            model = f"{embedding} + {reranker['model']}" if variant == "rerank" else embedding
+            console.print(f"[bold]{escape(label)}[/bold]: {escape(model)}, {len(cases)} cases x {repeat}")
+            report = ev.run(cases, variant=variant, repeat=repeat, on_result=progress)
+            try:
+                import psutil
+                rss_mb = round(psutil.Process().memory_info().rss / 2 ** 20)  # models loaded
+            except Exception:
+                rss_mb = None
+            report.setup = {"label": label, "provider": "knowledge base", "model": model, "variant": variant,
+                            "model_reason": knowledge.model_reason, "framework": __version__,
+                            "reranker": reranker if variant == "rerank" else None,
+                            "cases_sha256": cases_digest(source), "corpus_sha256": corpus_digest(folder),
+                            "corpus_documents": len(docs), "index_seconds": index_seconds, "rss_mb": rss_mb,
+                            "repeat": repeat, "cases": [c.id for c in cases]}
+            reports.append(report)
+    return reports
 
 
 # ============================================================================
