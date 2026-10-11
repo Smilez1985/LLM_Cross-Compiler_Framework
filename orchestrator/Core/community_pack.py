@@ -7,43 +7,38 @@ A pack is a zip file:
               and files [{path, sha256, size, mode}]
   pack.sig    optional author signature: {"v": 1, "alg": "Ed25519", "key_id": "...", "sig": "<base64url>",
               "pubkey": "<base64>"} (the public key is optional; it lets anyone check the signature, and the
-              author's key id is pinned on first use when the pack is installed)
+              author's public key is pinned on first use when the pack is installed)
   <files>     exactly the files the manifest lists, nothing else
 
 Public packs are signed, not encrypted: for public data, authenticity and integrity are what matter. A pack
-shared privately (with your own machines or a team) is encrypted to X25519 public keys and/or a passphrase and
-signed by the sender, so recipients know who sent it (format: see encrypt_pack). Only standard primitives of the
-`cryptography` package are composed: Ed25519, X25519, HKDF-SHA256, HMAC-SHA256, scrypt and ChaCha20-Poly1305.
+shared privately (with your own machines or a team) is encrypted in the age format with rage, the Rust
+implementation of age (through pyrage), and signed by the sender, so recipients know who sent it (see
+encrypt_pack).
 
-Each user has one Ed25519 key pair (signing) and one X25519 key pair (receiving encrypted packs), kept in the
-encrypted secrets store (UserKeys); the private keys are never written to disk unencrypted.
+Each user has an Ed25519 key (signing) and an age identity (receiving encrypted packs), kept in the encrypted
+secrets store (UserKeys); the private keys are never written to disk unencrypted.
 """
 
 import base64
 import binascii
+import contextlib
 import hashlib
-import hmac
 import io
 import json
 import os
 import re
 import shutil
 import stat
-import unicodedata
 import zipfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import Iterable, List, Literal, Optional, Sequence, Tuple, Union
+from typing import Iterable, List, Literal, Optional, Sequence, Tuple, Union, get_args
 
+import pyrage
 import yaml
-from cryptography.exceptions import InvalidSignature, InvalidTag
-from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
-from cryptography.hazmat.primitives.ciphers.aead import ChaCha20Poly1305
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives.kdf.scrypt import Scrypt
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from orchestrator import __version__
@@ -54,24 +49,26 @@ SIGNATURE_NAME = "pack.sig"
 # Written next to an installed pack (source, trust level, digests); never part of a pack or its fingerprint.
 PROVENANCE_NAME = ".lcf-provenance.json"
 RESERVED_NAMES = frozenset({MANIFEST_NAME, SIGNATURE_NAME, PROVENANCE_NAME})
-PACK_KINDS = ("target", "recipe", "knowledge")
+Kind = Literal["target", "recipe", "knowledge"]
+PACK_KINDS = get_args(Kind)
 # Packs carry scripts, recipes and text, never model weights.
 MAX_PACK_BYTES = 512 * 1024 * 1024
 MAX_FILES = 10_000
 KEYS_FILE = Path(__file__).resolve().parents[2] / "configs" / "community_keys.yml"
 
-_SHA256 = r"^[0-9a-f]{64}$"
+# Field patterns, shared with the community index (community_manager.py).
+SHA256_PATTERN = r"^[0-9a-f]{64}$"
+ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+VERSION_PATTERN = r"^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,32})?$"
+LICENSE_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$"
+UTC_TIME_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
 _KEY_ID = r"^[0-9a-f]{16}$"
-_PACK_ID = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
-_VERSION = r"^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,32})?$"
-_LICENSE = r"^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$"
-_UTC_TIME = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$"
 # Characters Windows cannot store or treats specially, control characters and the backslash.
 _BAD_PATH_CHARS = re.compile(r'[\x00-\x1f\x7f\\:*?"<>|]')
 
 # Domain separation: a signature made for one purpose never verifies for another.
 _MANIFEST_CONTEXT = b"lcf-pack-manifest/v1\n"
-_ENCRYPTED_CONTEXT = b"lcf-encrypted-pack/v1 signature\n"
+_ENCRYPTED_CONTEXT = b"lcf-encrypted-pack/v2 signature\n"
 _INDEX_CONTEXT = b"lcf-community-index/v1\n"
 
 
@@ -79,7 +76,7 @@ class PackError(Exception):
     """A pack, key or signature problem; the message is meant for the user."""
 
 
-class _Strict(BaseModel):
+class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
@@ -103,9 +100,9 @@ def check_relpath(path: str) -> str:
     return path
 
 
-class PackFile(_Strict):
+class PackFile(Strict):
     path: str
-    sha256: str = Field(pattern=_SHA256)
+    sha256: str = Field(pattern=SHA256_PATTERN)
     size: int = Field(ge=0, le=MAX_PACK_BYTES)
     # Masked on creation: no setuid/setgid/sticky bits and no group/world write ever travel with a pack.
     mode: Literal[0o644, 0o755] = 0o644
@@ -116,15 +113,15 @@ class PackFile(_Strict):
         return check_relpath(value)
 
 
-class PackManifest(_Strict):
+class PackManifest(Strict):
     schema_version: Literal[1] = 1
-    kind: Literal["target", "recipe", "knowledge"]
-    id: str = Field(pattern=_PACK_ID)
-    version: str = Field(pattern=_VERSION)
+    kind: Kind
+    id: str = Field(pattern=ID_PATTERN)
+    version: str = Field(pattern=VERSION_PATTERN)
     author: str = Field(min_length=1, max_length=100, pattern=r"^[^\x00-\x1f\x7f]+$")
-    license: str = Field(pattern=_LICENSE)
-    lcf_min_version: str = Field(default=__version__, pattern=_VERSION)
-    created: str = Field(pattern=_UTC_TIME)
+    license: str = Field(pattern=LICENSE_PATTERN)
+    lcf_min_version: str = Field(default=__version__, pattern=VERSION_PATTERN)
+    created: str = Field(pattern=UTC_TIME_PATTERN)
     files: List[PackFile] = Field(default_factory=list, max_length=MAX_FILES)
 
     @model_validator(mode="after")
@@ -256,18 +253,6 @@ def verify_tree(root: Path, manifest: PackManifest) -> None:
 
 # --- Keys and signatures ---------------------------------------------------------------------------------
 
-PublicKey = Union[Ed25519PublicKey, X25519PublicKey]
-
-
-def _raw_public(key: PublicKey) -> bytes:
-    return key.public_bytes(serialization.Encoding.Raw, serialization.PublicFormat.Raw)
-
-
-def _raw_private(key: Union[Ed25519PrivateKey, X25519PrivateKey]) -> bytes:
-    return key.private_bytes(serialization.Encoding.Raw, serialization.PrivateFormat.Raw,
-                             serialization.NoEncryption())
-
-
 def _b64e(data: bytes) -> str:
     return base64.b64encode(data).decode("ascii")
 
@@ -282,35 +267,34 @@ def _b64d(text: str, length: Optional[int] = None) -> bytes:
     return data
 
 
-def key_id(key: PublicKey) -> str:
+def key_id(key: Ed25519PublicKey) -> str:
     """Short identifier of a public key: the first 16 hex characters of the sha256 of its raw bytes."""
-    return hashlib.sha256(_raw_public(key)).hexdigest()[:16]
+    return hashlib.sha256(key.public_bytes_raw()).hexdigest()[:16]
 
 
-def public_key_text(key: PublicKey) -> str:
-    """'ed25519:<base64>' (verifies signatures) or 'x25519:<base64>' (encrypts to its owner)."""
-    kind = "ed25519" if isinstance(key, Ed25519PublicKey) else "x25519"
-    return f"{kind}:{_b64e(_raw_public(key))}"
+def public_key_text(key: Ed25519PublicKey) -> str:
+    """'ed25519:<base64>': the text form of a signing key."""
+    return f"ed25519:{_b64e(key.public_bytes_raw())}"
 
 
-_PUBLIC_KEY_TOKEN = re.compile(r"\b(ed25519|x25519):([A-Za-z0-9+/]{43}=)")
+# Signing keys as public_key_text() writes them, and age recipients (bech32: no 1, b, i or o after "age1").
+_PUBLIC_KEY_TOKEN = re.compile(r"\bed25519:([A-Za-z0-9+/]{43}=)|\b(age1[02-9ac-hj-np-z]{58})\b")
 
 
-def load_public_key(text: str) -> PublicKey:
-    """Parses public_key_text() output."""
-    m = _PUBLIC_KEY_TOKEN.fullmatch(str(text).strip())
-    if not m:
-        raise PackError("Not a public key (expected 'ed25519:<base64>' or 'x25519:<base64>').")
-    raw = _b64d(m.group(2), 32)
-    return Ed25519PublicKey.from_public_bytes(raw) if m.group(1) == "ed25519" else X25519PublicKey.from_public_bytes(raw)
+def parse_public_keys(text: str) -> List[Union[Ed25519PublicKey, "pyrage.x25519.Recipient"]]:
+    """Every public key in a text block: 'ed25519:' signing keys and 'age1...' recipients, as
+    UserKeys.export_public() prints them on another machine (or age-keygen and rage-keygen do)."""
+    keys = []
+    for m in _PUBLIC_KEY_TOKEN.finditer(str(text)):
+        try:
+            keys.append(Ed25519PublicKey.from_public_bytes(_b64d(m.group(1), 32)) if m.group(1)
+                        else pyrage.x25519.Recipient.from_str(m.group(2)))
+        except (ValueError, pyrage.RecipientError):
+            raise PackError(f"Not a valid public key: {m.group(0)[:24]}...") from None
+    return keys
 
 
-def parse_public_keys(text: str) -> List[PublicKey]:
-    """Every public key in a text block, e.g. what UserKeys.export_public() printed on another machine."""
-    return [load_public_key(m.group(0)) for m in _PUBLIC_KEY_TOKEN.finditer(str(text))]
-
-
-class PackSignature(_Strict):
+class PackSignature(Strict):
     v: Literal[1] = 1
     alg: Literal["Ed25519"] = "Ed25519"
     key_id: str = Field(pattern=_KEY_ID)
@@ -323,11 +307,11 @@ class PackSignature(_Strict):
             return None
         key = Ed25519PublicKey.from_public_bytes(_b64d(self.pubkey, 32))
         if key_id(key) != self.key_id:
-            raise PackError(f"pack.sig names key {self.key_id} but carries another public key.")
+            raise PackError(f"The signature names key {self.key_id} but carries another public key.")
         return key
 
 
-class TrustedKey(_Strict):
+class TrustedKey(Strict):
     """A publisher key from configs/community_keys.yml."""
     key_id: str = Field(pattern=_KEY_ID)
     pubkey_b64: str
@@ -347,7 +331,7 @@ class TrustedKey(_Strict):
         return when.astimezone(timezone.utc).date() <= self.valid_until
 
 
-class _KeysFile(_Strict):
+class _KeysFile(Strict):
     keys: List[TrustedKey] = Field(default_factory=list)
 
 
@@ -368,9 +352,9 @@ def load_trusted_keys(path: Optional[Path] = None) -> List[TrustedKey]:
 
 
 def _sign(payload: bytes, private_key: Ed25519PrivateKey) -> PackSignature:
-    sig = private_key.sign(payload)
-    return PackSignature(key_id=key_id(private_key.public_key()), pubkey=_b64e(_raw_public(private_key.public_key())),
-                         sig=base64.urlsafe_b64encode(sig).decode("ascii").rstrip("="))
+    public = private_key.public_key()
+    return PackSignature(key_id=key_id(public), pubkey=_b64e(public.public_bytes_raw()),
+                         sig=base64.urlsafe_b64encode(private_key.sign(payload)).decode("ascii").rstrip("="))
 
 
 def _verify(payload: bytes, signature: PackSignature, keys: Iterable[Union[TrustedKey, Ed25519PublicKey]],
@@ -414,10 +398,10 @@ def verify_index(index_bytes: bytes, signature: PackSignature,
 
 # --- Zip files -------------------------------------------------------------------------------------------
 
-def _zip_info(name: str, mode: int) -> zipfile.ZipInfo:
+def _zip_info(name: str, mode: int = 0o644, compress_type: int = zipfile.ZIP_DEFLATED) -> zipfile.ZipInfo:
     info = zipfile.ZipInfo(name, date_time=(1980, 1, 1, 0, 0, 0))  # same content, same zip bytes
     info.external_attr = (stat.S_IFREG | mode) << 16
-    info.compress_type = zipfile.ZIP_DEFLATED
+    info.compress_type = compress_type
     return info
 
 
@@ -462,7 +446,10 @@ def read_pack(source: Union[Path, bytes], dest: Path, *,
         infos = {i.filename: i for i in zf.infolist()}
         if len(infos) != len(zf.infolist()):
             raise PackError("The pack lists a file twice.")
-        manifest, signature = _read_meta(zf, infos)
+        manifest = _load_member(zf, infos, MANIFEST_NAME, PackManifest)
+        if manifest is None:
+            raise PackError(f"The pack has no {MANIFEST_NAME}.")
+        signature = _load_member(zf, infos, SIGNATURE_NAME, PackSignature)
         listed = {f.path: f for f in manifest.files}
         problems = [f"{n}: not in the manifest" for n in sorted(set(infos) - set(listed) - RESERVED_NAMES)]
         problems += [f"{n}: missing" for n in sorted(set(listed) - set(infos))]
@@ -509,276 +496,216 @@ def read_pack(source: Union[Path, bytes], dest: Path, *,
     return PackContents(manifest, signature, signer)
 
 
-def _read_meta(zf: zipfile.ZipFile, infos) -> Tuple[PackManifest, Optional[PackSignature]]:
-    def load(name: str, model):
-        info = infos.get(name)
-        if info is None:
-            return None
-        if info.file_size > 16 * 1024 * 1024:
-            raise PackError(f"{name} is too large.")
-        try:
-            return model.model_validate_json(zf.read(name))
-        except ValidationError as e:
-            raise PackError(f"{name} is invalid: {e}") from None
-        except Exception as e:  # damaged, encrypted or unsupported zip member
-            raise PackError(f"{name} cannot be read: {e}") from None
+def _load_member(zf: zipfile.ZipFile, infos, name: str, model):
+    """A JSON member of a zip as a model, None if absent; PackError if it is too large or invalid."""
+    info = infos.get(name)
+    if info is None:
+        return None
+    if info.file_size > 16 * 1024 * 1024:
+        raise PackError(f"{name} is too large.")
+    try:
+        return model.model_validate_json(zf.read(name))
+    except ValidationError as e:
+        raise PackError(f"{name} is invalid: {e}") from None
+    except Exception as e:  # damaged, encrypted or unsupported zip member
+        raise PackError(f"{name} cannot be read: {e}") from None
 
-    manifest = load(MANIFEST_NAME, PackManifest)
+
+def read_manifest(data: bytes) -> PackManifest:
+    """The manifest of pack bytes, for routing a file before it is checked in quarantine."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            manifest = _load_member(zf, {i.filename: i for i in zf.infolist()}, MANIFEST_NAME, PackManifest)
+    except (OSError, zipfile.BadZipFile) as e:
+        raise PackError(f"Not a community pack: {e}") from None
     if manifest is None:
-        raise PackError(f"The pack has no {MANIFEST_NAME}.")
-    return manifest, load(SIGNATURE_NAME, PackSignature)
+        raise PackError(f"Not a community pack: it has no {MANIFEST_NAME}.")
+    return manifest
 
 
 # --- Encryption for private sharing -----------------------------------------------------------------------
 #
-# Format v1 (in the style of age, https://age-encryption.org/v1):
+# An encrypted pack (.lcfpack) is a zip file with two members:
+#   pack.zip.age      the pack in the age format (https://age-encryption.org/v1), written by rage (the Rust
+#                     implementation of age) through pyrage: to X25519 recipients ("age1...") or to one passphrase
+#                     (scrypt), never both (age keeps a passphrase stanza alone)
+#   pack.zip.age.sig  the sender's Ed25519 signature (the pack.sig format, with the public key) of
+#                     "lcf-encrypted-pack/v2 signature\n" followed by the bytes of pack.zip.age
+# The age and rage tools open it too, with the passphrase or an identity file of their own (the identity UserKeys
+# creates never leaves the secrets store): unzip it, then `age -d -i key.txt -o pack.zip pack.zip.age`.
 #
-#   line 1  b"lcf-encrypted-pack/v1\n"
-#   line 2  header, canonical JSON (sorted keys, no whitespace) + b"\n":
-#           {"v": 1, "sender": "ed25519:<b64>", "payload_salt": "<b64, 16 bytes>",
-#            "recipients": [{"type": "x25519", "epk": "<b64, 32 bytes>", "body": "<b64, 48 bytes>"},
-#                           {"type": "scrypt", "salt": "<b64, 16 bytes>", "log_n": 17, "body": "<b64, 48 bytes>"}]}
-#   line 3  b"mac " + b64(HMAC-SHA256(HKDF(file_key, info="lcf-pack/v1 header"), line 1 + line 2)) + b"\n"
-#   body    ChaCha20-Poly1305(HKDF(file_key, salt=payload_salt, info="lcf-pack/v1 payload"), nonce=0,
-#                             plaintext=pack, aad=line 1 + line 2 + line 3)
-#   tail    64 bytes: the sender's Ed25519 signature of "lcf-encrypted-pack/v1 signature\n" + everything before
-#
-#   file_key       32 random bytes per file; every key derived from it is used once, so the zero nonce is safe.
-#   x25519 stanza  ephemeral key pair e per recipient R; wrap key = HKDF-SHA256(X25519(e, R), salt=e.pub || R.pub,
-#                  info="lcf-pack/v1 x25519"); body = ChaCha20-Poly1305(wrap key, nonce=0, file_key). The
-#                  stanza does not name the recipient; a recipient tries every stanza.
-#   scrypt stanza  wrap key = scrypt(NFC passphrase, salt="lcf-pack/v1 scrypt" || salt, n=2**log_n, r=8, p=1);
-#                  body = ChaCha20-Poly1305(wrap key, nonce=0, file_key).
-#
-# Reading checks, in this order, before any plaintext is returned: the signature (any change to the header, the
-# recipient list or the body fails it), the sender (when trusted senders are given), the wrapped file key, the
-# header MAC and the payload tag. The sender's public key is visible in the header.
+# Reading checks, before anything is decrypted: the zip layout and sizes, the age header (at most _MAX_STANZAS
+# stanzas, because rage's header processing grows with the square of their number; a scrypt stanza must be alone
+# and its work factor at most 2^MAX_SCRYPT_LOG_N: pyrage's own limit follows the machine's speed and lets through
+# factors that need more memory than the machine has, which aborts the process), the signature, and the sender
+# when trusted senders are given.
 
-ENCRYPTED_MAGIC = b"lcf-encrypted-pack/v1\n"
-SCRYPT_LOG_N = 17
+AGE_NAME = "pack.zip.age"
+AGE_SIG_NAME = AGE_NAME + ".sig"
 MIN_PASSPHRASE = 12
 MAX_RECIPIENTS = 64
-_INFO_X25519 = b"lcf-pack/v1 x25519"
-_INFO_HEADER = b"lcf-pack/v1 header"
-_INFO_PAYLOAD = b"lcf-pack/v1 payload"
-_SCRYPT_LABEL = b"lcf-pack/v1 scrypt"
-_ZERO_NONCE = bytes(12)
-_MAX_HEADER = 64 * 1024
+MAX_SCRYPT_LOG_N = 20  # 1 GiB of memory (scrypt with r = 8 needs 2^log_n KiB)
+_MAX_STANZAS = MAX_RECIPIENTS + 4  # rage adds a grease stanza to every file
+_OLD_ENCRYPTED_MAGIC = b"lcf-encrypted-pack/v1\n"  # the format of development versions, no longer read
+_AGE_MAGIC = b"age-encryption.org/v1\n"
+_MAX_AGE_HEADER = 64 * 1024
+_MAX_ENCRYPTED = MAX_PACK_BYTES + 1024 * 1024  # age adds its header and 16 bytes per 64 KiB
 
 
-class _X25519Stanza(_Strict):
-    type: Literal["x25519"]
-    epk: str
-    body: str
+def is_encrypted_pack(source: Union[Path, bytes]) -> bool:
+    """True for an encrypted pack, also one in the old development format (decrypt_pack says why it is
+    refused)."""
+    try:
+        with io.BytesIO(source) if isinstance(source, bytes) else open(source, "rb") as f:
+            if f.read(len(_OLD_ENCRYPTED_MAGIC)) == _OLD_ENCRYPTED_MAGIC:
+                return True
+            with zipfile.ZipFile(f) as zf:
+                names = zf.namelist()
+                return AGE_NAME in names and MANIFEST_NAME not in names  # a pack with a manifest is a plain pack
+    except (OSError, ValueError, EOFError, zipfile.BadZipFile):
+        return False
 
 
-class _ScryptStanza(_Strict):
-    type: Literal["scrypt"]
-    salt: str
-    # Bounded on reading too: a crafted file must not make the reader allocate gigabytes.
-    log_n: int = Field(ge=SCRYPT_LOG_N, le=20)
-    body: str
+def _age_header(blob: bytes) -> bool:
+    """Checks the text header of an age file without decrypting anything; True for a passphrase file."""
+    end = blob.find(b"\n--- ", 0, _MAX_AGE_HEADER)
+    if not blob.startswith(_AGE_MAGIC) or end < 0:
+        raise PackError("The encrypted pack is damaged (no age header).")
+    stanzas = [line.split(b" ")[1:] for line in blob[:end].split(b"\n") if line.startswith(b"-> ")]
+    if len(stanzas) > _MAX_STANZAS:
+        raise PackError(f"The encrypted pack is damaged (too many recipient stanzas; at most {MAX_RECIPIENTS} "
+                        "recipients).")
+    scrypt = [args for args in stanzas if args[0] == b"scrypt"]
+    if not scrypt:
+        return False
+    if len(stanzas) > 1 or len(scrypt[0]) != 3 or not re.fullmatch(rb"[1-9][0-9]?", scrypt[0][2]):
+        raise PackError("The encrypted pack is damaged (a passphrase stanza must be the only one).")
+    if int(scrypt[0][2]) > MAX_SCRYPT_LOG_N:
+        raise PackError(f"The passphrase of this pack uses the scrypt work factor 2^{int(scrypt[0][2])}; at most "
+                        f"2^{MAX_SCRYPT_LOG_N} (1 GiB of memory) is accepted.")
+    return True
 
 
-class _EncryptedHeader(_Strict):
-    v: Literal[1]
-    sender: str
-    payload_salt: str
-    recipients: List[Union[_X25519Stanza, _ScryptStanza]] = Field(min_length=1, max_length=MAX_RECIPIENTS)
-
-    @model_validator(mode="after")
-    def _one_passphrase(self):
-        # As in age: at most one passphrase stanza, so a crafted file cannot make the reader run scrypt 64 times.
-        if sum(isinstance(s, _ScryptStanza) for s in self.recipients) > 1:
-            raise ValueError("more than one passphrase stanza")
-        return self
-
-
-@dataclass(frozen=True)
-class DecryptedPack:
-    data: bytes
-    sender: str           # public_key_text() of the sender's Ed25519 key
-    sender_id: str        # its key_id()
-    sender_trusted: bool  # True only when it was one of the trusted senders the caller passed
-
-
-def _hkdf(ikm: bytes, salt: bytes, info: bytes) -> bytes:
-    return HKDF(algorithm=hashes.SHA256(), length=32, salt=salt, info=info).derive(ikm)
-
-
-def _scrypt_key(passphrase: str, salt: bytes, log_n: int) -> bytes:
-    secret = unicodedata.normalize("NFC", passphrase).encode("utf-8")
-    return Scrypt(salt=_SCRYPT_LABEL + salt, length=32, n=2 ** log_n, r=8, p=1).derive(secret)
-
-
-def _x25519_wrap_key(shared: bytes, epk: bytes, recipient: bytes) -> bytes:
-    return _hkdf(shared, epk + recipient, _INFO_X25519)
-
-
-def _header_mac(file_key: bytes, signed_header: bytes) -> bytes:
-    return hmac.new(_hkdf(file_key, b"", _INFO_HEADER), signed_header, hashlib.sha256).digest()
-
-
-def encrypt_pack(data: bytes, *, sender: Ed25519PrivateKey, recipients: Sequence[X25519PublicKey] = (),
+def encrypt_pack(data: bytes, *, sender: Ed25519PrivateKey, recipients: Sequence["pyrage.x25519.Recipient"] = (),
                  passphrase: Optional[str] = None) -> bytes:
-    """Encrypts pack bytes to X25519 recipients and/or a passphrase and signs the result with the sender's key."""
+    """Encrypts pack bytes in the age format to recipients' age keys or to a passphrase (one of the two) and signs
+    the result with the sender's key."""
     recipients = list(recipients)
-    if not recipients and passphrase is None:
-        raise ValueError("Encrypt to at least one recipient key or a passphrase.")
-    if len(recipients) + (passphrase is not None) > MAX_RECIPIENTS:
+    if bool(recipients) == (passphrase is not None):
+        raise ValueError("Encrypt to recipient keys or to a passphrase (one of the two; age does not mix them).")
+    if len(recipients) > MAX_RECIPIENTS:
         raise ValueError(f"At most {MAX_RECIPIENTS} recipients.")
     if passphrase is not None and len(passphrase) < MIN_PASSPHRASE:
         raise ValueError(f"The passphrase needs at least {MIN_PASSPHRASE} characters.")
     if len(data) > MAX_PACK_BYTES:
         raise PackError("The pack is larger than a pack may be.")
-    file_key = os.urandom(32)
-    stanzas = []
-    for recipient in recipients:
-        ephemeral = X25519PrivateKey.generate()
-        epk, rpk = _raw_public(ephemeral.public_key()), _raw_public(recipient)
-        try:
-            shared = ephemeral.exchange(recipient)
-        except ValueError:  # a low-order point, never a real key
-            raise PackError(f"The recipient key {key_id(recipient)} is not usable.") from None
-        wrap = _x25519_wrap_key(shared, epk, rpk)
-        stanzas.append({"type": "x25519", "epk": _b64e(epk),
-                        "body": _b64e(ChaCha20Poly1305(wrap).encrypt(_ZERO_NONCE, file_key, None))})
-    if passphrase is not None:
-        salt = os.urandom(16)
-        wrap = _scrypt_key(passphrase, salt, SCRYPT_LOG_N)
-        stanzas.append({"type": "scrypt", "salt": _b64e(salt), "log_n": SCRYPT_LOG_N,
-                        "body": _b64e(ChaCha20Poly1305(wrap).encrypt(_ZERO_NONCE, file_key, None))})
-    payload_salt = os.urandom(16)
-    header = {"v": 1, "sender": public_key_text(sender.public_key()), "payload_salt": _b64e(payload_salt),
-              "recipients": stanzas}
-    head = ENCRYPTED_MAGIC + _canonical(header) + b"\n"
-    head += b"mac " + _b64e(_header_mac(file_key, head)).encode("ascii") + b"\n"
-    body = ChaCha20Poly1305(_hkdf(file_key, payload_salt, _INFO_PAYLOAD)).encrypt(_ZERO_NONCE, data, head)
-    return head + body + sender.sign(_ENCRYPTED_CONTEXT + head + body)
-
-
-def _parse_encrypted(blob: bytes) -> Tuple[_EncryptedHeader, bytes, bytes, bytes, bytes, bytes]:
-    """(header, lines 1-2, lines 1-3, mac, body, signature) of an encrypted pack."""
-    if not blob.startswith(ENCRYPTED_MAGIC):
-        raise PackError("Not an encrypted pack.")
-    if len(blob) > MAX_PACK_BYTES + _MAX_HEADER + 1024:
-        raise PackError("The encrypted pack is larger than a pack may be.")
-    start = len(ENCRYPTED_MAGIC)
-    end = blob.find(b"\n", start, start + _MAX_HEADER)
-    mac_end = blob.find(b"\n", end + 1, end + 64) if end > 0 else -1
-    if end < 0 or mac_end < 0 or blob[end + 1:end + 5] != b"mac ":
-        raise PackError("The encrypted pack is damaged (header).")
-    line = blob[start:end]
     try:
-        header = _EncryptedHeader.model_validate_json(line)
-        mac = _b64d(blob[end + 5:mac_end].decode("ascii"), 32)
-    except (ValidationError, ValueError, UnicodeDecodeError):
-        raise PackError("The encrypted pack is damaged (header).") from None
-    # One encoding only: a re-encoded header is a changed header.
-    if _canonical(header.model_dump(mode="json")) != line:
-        raise PackError("The encrypted pack is damaged (header not canonical).")
-    body, signature = blob[mac_end + 1:-64], blob[-64:]
-    if len(body) < 16:
-        raise PackError("The encrypted pack is damaged (too short).")
-    return header, blob[:end + 1], blob[:mac_end + 1], mac, body, signature
+        blob = pyrage.passphrase.encrypt(data, passphrase) if passphrase is not None else \
+            pyrage.encrypt(data, recipients)
+    except (pyrage.EncryptError, TypeError) as e:  # TypeError: something that is not an age recipient
+        raise PackError(f"The pack cannot be encrypted: {e}") from None
+    _age_header(blob)  # scrypt picks its work factor by this computer's speed; readers accept it up to the limit
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr(_zip_info(AGE_NAME, compress_type=zipfile.ZIP_STORED), blob)  # encrypted data does not shrink
+        zf.writestr(_zip_info(AGE_SIG_NAME), _sign(_ENCRYPTED_CONTEXT + blob, sender).model_dump_json())
+    return buffer.getvalue()
 
 
-def _unwrap_file_key(header: _EncryptedHeader, identity: Optional[X25519PrivateKey],
-                     passphrase: Optional[str]) -> Optional[bytes]:
-    for stanza in header.recipients:
-        try:
-            if isinstance(stanza, _X25519Stanza) and identity is not None:
-                epk = _b64d(stanza.epk, 32)
-                shared = identity.exchange(X25519PublicKey.from_public_bytes(epk))
-                wrap = _x25519_wrap_key(shared, epk, _raw_public(identity.public_key()))
-            elif isinstance(stanza, _ScryptStanza) and passphrase is not None:
-                wrap = _scrypt_key(passphrase, _b64d(stanza.salt, 16), stanza.log_n)
-            else:
-                continue
-            return ChaCha20Poly1305(wrap).decrypt(_ZERO_NONCE, _b64d(stanza.body, 48), None)
-        except (InvalidTag, ValueError):
-            continue  # another recipient's stanza
-    return None
-
-
-def decrypt_pack(blob: bytes, *, identity: Optional[X25519PrivateKey] = None, passphrase: Optional[str] = None,
-                 trusted_senders: Optional[Iterable[Union[TrustedKey, Ed25519PublicKey]]] = None) -> DecryptedPack:
-    """Checks and decrypts an encrypted pack. With trusted_senders, a pack from any other sender is refused;
-    without, the caller must show sender_id to the user (never silently trusted)."""
-    header, signed_header, head, mac, body, signature = _parse_encrypted(blob)
+def decrypt_pack(blob: bytes, *, identity: Optional["pyrage.x25519.Identity"] = None,
+                 passphrase: Optional[str] = None,
+                 trusted_senders: Optional[Iterable[Union[TrustedKey, Ed25519PublicKey]]] = None) -> Tuple[bytes, str]:
+    """Checks and decrypts an encrypted pack: (pack bytes, the sender's key id). With trusted_senders, a pack from
+    any other sender is refused; without, the caller must show the sender's key id (never silently trusted)."""
+    if blob.startswith(_OLD_ENCRYPTED_MAGIC):
+        raise PackError("This encrypted pack was made by a development version in a format that is no longer read; "
+                        "ask the sender to export it again.")
     try:
-        sender = load_public_key(header.sender)
-    except (PackError, ValueError):
-        raise PackError("The encrypted pack is damaged (sender key).") from None
-    if not isinstance(sender, Ed25519PublicKey):
-        raise PackError("The encrypted pack is damaged (sender key).")
+        with zipfile.ZipFile(io.BytesIO(blob)) as zf:
+            infos = {i.filename: i for i in zf.infolist()}
+            if len(zf.infolist()) != 2 or set(infos) != {AGE_NAME, AGE_SIG_NAME} \
+                    or infos[AGE_NAME].file_size > _MAX_ENCRYPTED:
+                raise PackError("Not an encrypted pack.")
+            signature, age = _load_member(zf, infos, AGE_SIG_NAME, PackSignature), zf.read(AGE_NAME)
+    except PackError:
+        raise
+    except Exception as e:  # not a zip, a damaged or an unsupported zip member
+        raise PackError(f"The encrypted pack cannot be read: {e}") from None
+    sender = signature.embedded_key()
+    if sender is None:
+        raise PackError("The encrypted pack does not include its sender's public key.")
+    scrypt = _age_header(age)
+    _verify(_ENCRYPTED_CONTEXT + age, signature, [sender], None, "encrypted pack")
+    if trusted_senders is not None and sender.public_bytes_raw() not in {
+            (k.public_key() if isinstance(k, TrustedKey) else k).public_bytes_raw() for k in trusted_senders}:
+        raise PackError(f"The pack was sent by key {signature.key_id}, which is not one of the trusted senders.")
+    if scrypt and passphrase is None:
+        raise PackError("This pack is protected with a passphrase (llm-cli zoo install --file FILE --passphrase).")
+    if not scrypt and identity is None:
+        raise PackError("This pack is encrypted to keys, not to a passphrase.")
     try:
-        sender.verify(signature, _ENCRYPTED_CONTEXT + blob[:-64])
-    except InvalidSignature:
-        raise PackError(f"The signature of sender {key_id(sender)} does not match: the pack was changed.") from None
-    trusted = False
-    if trusted_senders is not None:
-        known = {_raw_public(k.public_key() if isinstance(k, TrustedKey) else k) for k in trusted_senders}
-        if _raw_public(sender) not in known:
-            raise PackError(f"The pack was sent by key {key_id(sender)}, which is not one of the trusted senders.")
-        trusted = True
-    file_key = _unwrap_file_key(header, identity, passphrase)
-    if file_key is None:
-        raise PackError("This pack is not encrypted to your key, or the passphrase is wrong.")
-    if not hmac.compare_digest(_header_mac(file_key, signed_header), mac):
-        raise PackError("The header of the encrypted pack was changed.")
-    try:
-        data = ChaCha20Poly1305(_hkdf(file_key, _b64d(header.payload_salt, 16), _INFO_PAYLOAD)).decrypt(
-            _ZERO_NONCE, body, head)
-    except (InvalidTag, ValueError):
-        raise PackError("The content of the encrypted pack was changed.") from None
-    return DecryptedPack(data, header.sender, key_id(sender), trusted)
+        data = pyrage.passphrase.decrypt(age, passphrase) if scrypt else pyrage.decrypt(age, [identity])
+    except pyrage.DecryptError as e:
+        if "Excessive work" in str(e):  # rage's own limit: 2^4 above what this computer does in a second
+            raise PackError("This computer is too slow for the scrypt work factor of the passphrase; ask the sender "
+                            "to encrypt the pack to your key (llm-cli zoo keys) instead.") from None
+        raise PackError("This pack is not encrypted to your key, or the passphrase is wrong.") from None
+    return data, signature.key_id
 
 
 # --- The user's own keys ----------------------------------------------------------------------------------
 
 class UserKeys:
-    """The user's key pairs for packs: Ed25519 signs, X25519 receives encrypted packs. Created on first use and
-    kept only in the encrypted secrets store (master key in the OS keyring)."""
+    """The user's keys for packs: an Ed25519 key signs, an age identity (X25519) receives encrypted packs.
+    Created on first use and kept only in the encrypted secrets store (master key in the OS keyring)."""
 
     SIGNING_SECRET = "community_signing_key"
-    ENCRYPTION_SECRET = "community_encryption_key"
+    AGE_SECRET = "community_age_identity"
 
     def __init__(self, secrets_manager):
         self._secrets = secrets_manager
 
     def signing_key(self) -> Ed25519PrivateKey:
-        return self._load_or_create(self.SIGNING_SECRET, Ed25519PrivateKey)
+        return self._key(self.SIGNING_SECRET, lambda: _b64e(os.urandom(32)),
+                         lambda text: Ed25519PrivateKey.from_private_bytes(_b64d(text, 32)),
+                         "import base64, os; print(base64.b64encode(os.urandom(32)).decode())")
 
-    def encryption_key(self) -> X25519PrivateKey:
-        return self._load_or_create(self.ENCRYPTION_SECRET, X25519PrivateKey)
+    def age_identity(self) -> "pyrage.x25519.Identity":
+        return self._key(self.AGE_SECRET, lambda: str(pyrage.x25519.Identity.generate()),
+                         pyrage.x25519.Identity.from_str, "import pyrage; print(pyrage.x25519.Identity.generate())")
 
     def export_public(self) -> str:
         """The public keys as text to give to others (they are not secret)."""
         signing = self.signing_key().public_key()
         return (f"# LCF public keys, key id {key_id(signing)}. Not secret: give them to people who send you\n"
-                f"# encrypted packs or verify your signed packs.\n"
-                f"{public_key_text(signing)}\n{public_key_text(self.encryption_key().public_key())}\n")
+                f"# encrypted packs (llm-cli zoo export --to) or check your signed packs.\n"
+                f"{self.age_identity().to_public()}\n{public_key_text(signing)}\n")
 
-    def _load_or_create(self, name: str, cls):
+    def _key(self, name: str, new, parse, by_hand: str):
+        """The stored key `name`, created with new() on first use; by_hand is Python code that prints a new one."""
         if self._secrets is None:
             raise PackError("The secrets store is not available, so keys cannot be kept safely.")
         stored = self._secrets.get_secret(name)
-        if not stored and name in self._secrets.list_secrets():
-            # Stored but unreadable (another master key, a damaged entry): never overwritten by a new key.
-            raise PackError(f"The stored key '{name}' cannot be decrypted; it is not replaced automatically.")
         if not stored:
-            if not self._secrets.set_secret(name, _b64e(_raw_private(cls.generate()))):
-                raise PackError("The new key could not be saved in the secrets store.")
-            stored = self._secrets.get_secret(name)  # another process may have saved one first
-            if not stored:
-                raise PackError("The new key could not be read back from the secrets store.")
+            # Read again under the store's lock for this entry: two processes must never both create a key.
+            lock = getattr(self._secrets, "credential_lock", None)
+            with lock(name) if callable(lock) else contextlib.nullcontext():
+                stored = self._secrets.get_secret(name)
+                if not stored and name in self._secrets.list_secrets():
+                    # Stored but unreadable (another master key, a damaged entry): never overwritten by a new key.
+                    raise PackError(f"The stored key '{name}' cannot be decrypted; it is not replaced automatically.")
+                if not stored and not self._secrets.set_secret(name, new()):
+                    raise PackError("The new key could not be saved in the secrets store.")
+                stored = stored or self._secrets.get_secret(name)
+                if not stored:
+                    raise PackError("The new key could not be read back from the secrets store.")
         try:
-            return cls.from_private_bytes(_b64d(stored, 32))
-        except ValueError:
+            return parse(str(stored).strip())
+        except (ValueError, pyrage.IdentityError):
             # Never replaced silently: packs signed or encrypted for the old key depend on it.
-            raise PackError(f"The stored key '{name}' is damaged. Restore the secrets store from a backup, or "
-                            f"delete the key with 'llm-cli secrets' to create a new identity.") from None
+            raise PackError(f"The stored key '{name}' is damaged. Restore the secrets store from a backup, or start "
+                            f"over with a new key (packs signed or encrypted for the old one then no longer match): "
+                            f'python -c "{by_hand}" | llm-cli secrets set {name} --with-token') from None
 
 
 # --- Privacy scrub ----------------------------------------------------------------------------------------

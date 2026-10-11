@@ -346,7 +346,9 @@ and options are in the [CLI guide](docs/CLI_Usage.md#zoo-export); for targets, s
    accepts only pack files (`contributions/target/*.zip`, `contributions/recipe/*.zip`,
    `contributions/knowledge/*.zip`) of at most 5 MB, runs `llm-cli zoo verify` on each of them (manifest and hashes,
    no links, extra or binary files, the target validators, the recipe and knowledge formats, an included author
-   signature, the privacy scrub) and runs the secret scan over the changed files.
+   signature, the privacy scrub). The privacy scrub also covers the framework's table of secret formats, so a pack
+   with a key in any of its files is rejected; the repository's secret scan is not run on the zips, because it skips
+   binary files and would check nothing inside a pack.
 5. **Review and index:** a maintainer reviews the pack, merges it, adds its entry to the signed index and signs the
    index offline. Then it appears in `llm-cli zoo list` and in the Community Hub.
 
@@ -369,8 +371,8 @@ not use them.
 
 - `scripts/community_repo/validate-contribution.yml` is the CI workflow template of the community repository. Copy
   it to `.github/workflows/` there (this repository does not run it) and set `LCF_REF` to the framework release the
-  packs are checked with. It runs the checks of step 4 above with the framework at that tag. The signing key never
-  reaches the CI.
+  packs are checked with: the template holds a placeholder, so the job fails until a published release tag is set.
+  It runs the checks of step 4 above with the framework at that tag. The signing key never reaches the CI.
 - `scripts/zoo_sign_index.py` signs the index. Its signing key lives only in the operating system's keyring
   (service `lcf-community-index`):
 

@@ -20,14 +20,9 @@ from PySide6.QtWidgets import (
     QMessageBox, QPlainTextEdit, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout, QWidget
 )
 
-# Localization Import
-try:
-    from orchestrator.utils.localization import tr
-except ImportError:
-    def tr(key, default=None): return default or key
+from orchestrator.utils.localization import tr
 
-TRUST_COLORS = {"official": "#9E9E9E", "verified": "#4CAF50", "community": "#2196F3", "local": "#FF9800",
-                "revoked": "#F44336"}
+TRUST_COLORS = {"verified": "#4CAF50", "community": "#2196F3", "local": "#FF9800", "revoked": "#F44336"}
 
 
 class _Task(QThread):
@@ -132,13 +127,7 @@ class CommunityHubWindow(QMainWindow):
         self._run(self._load, self.on_load_finished, refresh)
 
     def _load(self, refresh: bool):
-        from orchestrator.Core.community_pack import PackError
-        try:
-            state = self.comm_manager.load_index(refresh)
-            index, note = state.index, state.note or f"Signed index version {state.index.version} ({state.source})."
-        except PackError as e:
-            index, note = None, f"No community index: {e}"
-        return self.comm_manager.list_items(index), note
+        return self.comm_manager.listing(refresh)
 
     def on_load_finished(self, result):
         self.all_items, note = result
@@ -192,23 +181,12 @@ class CommunityHubWindow(QMainWindow):
         self._run(self.comm_manager.prepare_install, self.confirm_install, item.kind, item.id)
 
     def import_file(self):
-        from orchestrator.Core.community_pack import ENCRYPTED_MAGIC, UserKeys
+        # A pack encrypted to your age key opens here; a passphrase pack: llm-cli zoo install --file ... --passphrase
         path, _ = QFileDialog.getOpenFileName(self, "Import community pack", "",
                                               "Community packs (*.zip *.lcfpack);;All files (*)")
-        if not path:
-            return
-        options = {}
-        try:
-            with open(path, "rb") as f:
-                if f.read(len(ENCRYPTED_MAGIC)) == ENCRYPTED_MAGIC:
-                    # Packs encrypted to your key; a passphrase pack: llm-cli zoo install --file ... --passphrase
-                    options["identity"] = UserKeys(getattr(self.framework_manager, "secrets_manager", None)
-                                                   ).encryption_key()
-        except Exception as e:
-            self.on_error(str(e))
-            return
-        self.status_label.setText(f"Checking {Path(path).name}...")
-        self._run(self.comm_manager.prepare_install_file, self.confirm_install, Path(path), **options)
+        if path:
+            self.status_label.setText(f"Checking {Path(path).name}...")
+            self._run(self.comm_manager.prepare_install_file, self.confirm_install, Path(path))
 
     def confirm_install(self, prepared):
         from orchestrator.Core.community_manager import TrustLevel

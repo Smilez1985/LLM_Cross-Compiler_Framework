@@ -8,16 +8,17 @@ installed through a quarantine and exported from your own work for a pull reques
 Trust root: index.json plus index.json.sig, signed by a key from configs/community_keys.yml. An index whose
 signature does not verify is not used (fail closed). The last verified index is cached in the per-user folder
 and is never replaced by an older one (rollback). Author signatures in packs are provenance only: the author's
-key id is pinned on first use and a change is shown.
+public key is pinned on first use and a change is shown.
 
 Install: download pinned by the index (size and sha256), extract into <install folder>/.quarantine/ (exactly the
 listed files, every hash checked), validators (target: validate_target_folder; recipe: schema and the target's
 capabilities; knowledge: shape), a summary with the trust level for the user to confirm, then an atomic rename
 into place with .lcf-provenance.json. Anything that fails is removed.
 
-Trust levels, on top of SupportLevel: official (shipped with the framework), verified and community (signed index),
-local (a file without a signed index entry: explicit confirmation, a warning on every build) and revoked (the
-signed revoked list: install blocked; installed copies are flagged by doctor and the hub, and never built).
+Trust levels: verified and community (signed index), local (a file without a signed index entry: always
+confirmed, a warning on every build) and revoked (the signed revoked list: install blocked; installed copies are
+flagged by zoo list and verify, doctor and the hub, and never built). Shipped targets carry no provenance and are
+not packs.
 
 The framework never uploads anything and never asks for or reads a repository token: a contribution is handed to
 the browser or to an installed GitHub CLI, which keeps its own credentials.
@@ -25,7 +26,6 @@ the browser or to an installed GitHub CLI, which keeps its own credentials.
 
 import difflib
 import hashlib
-import io
 import json
 import os
 import re
@@ -35,7 +35,6 @@ import subprocess
 import tempfile
 import time
 import webbrowser
-import zipfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -44,20 +43,20 @@ from typing import Any, Callable, Dict, Iterable, List, Literal, Optional, Seque
 
 import yaml
 from packaging.version import InvalidVersion, Version
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import Field, ValidationError, model_validator
 
-from orchestrator.Core.community_pack import (ENCRYPTED_MAGIC, MAX_PACK_BYTES, PROVENANCE_NAME, PackError,
-                                              PackManifest, PackSignature, UserKeys, build_manifest,
-                                              decrypt_pack, encrypt_pack, list_files, load_trusted_keys,
-                                              read_pack, scrub, sign_manifest, tree_sha256, utc_now,
-                                              verify_index, verify_manifest, write_pack)
-from orchestrator.utils.download import DownloadError, PinnedDownloader, sha256_file
-from orchestrator.utils.helpers import redact_secrets
+from orchestrator.Core.community_pack import (ID_PATTERN, LICENSE_PATTERN, MAX_PACK_BYTES, PACK_KINDS,
+                                              PROVENANCE_NAME, SHA256_PATTERN, UTC_TIME_PATTERN, VERSION_PATTERN,
+                                              Kind, PackError, PackManifest, PackSignature, Strict, UserKeys,
+                                              build_manifest, decrypt_pack, encrypt_pack, is_encrypted_pack,
+                                              list_files, load_trusted_keys, read_manifest, read_pack, scrub,
+                                              sign_manifest, tree_sha256, utc_now, verify_index, verify_manifest,
+                                              write_pack)
+from orchestrator.utils.download import DownloadError, PinnedDownloader
+from orchestrator.utils.helpers import ensure_directory, redact_secrets
 from orchestrator.utils.logging import get_logger
 
-KINDS = ("target", "recipe", "knowledge")
-_ID = r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
-_VERSION = r"^\d{1,4}\.\d{1,4}\.\d{1,4}(?:[-+][0-9A-Za-z.-]{1,32})?$"
+KINDS = PACK_KINDS
 REPO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}$")
 INDEX_MAX_BYTES = 8 * 1024 * 1024
 # A cached index older than this is fetched again when it is used, so revocations reach every user.
@@ -66,43 +65,33 @@ KNOWLEDGE_FILE = "knowledge.json"
 RECIPE_FILE = "recipe.yml"
 
 
-def ensure_directory(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    return path
-
-
 class TrustLevel(str, Enum):
-    OFFICIAL = "official"    # shipped with the framework
     VERIFIED = "verified"    # signed index: reviewed, reproduced independently
     COMMUNITY = "community"  # signed index: reviewed
     LOCAL = "local"          # a file without a signed index entry
     REVOKED = "revoked"      # in the signed revoked list
 
 
-class _Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class IndexEntry(_Strict):
-    kind: Literal["target", "recipe", "knowledge"]
-    id: str = Field(pattern=_ID)
-    version: str = Field(pattern=_VERSION)
+class IndexEntry(Strict):
+    kind: Kind
+    id: str = Field(pattern=ID_PATTERN)
+    version: str = Field(pattern=VERSION_PATTERN)
     title: str = Field(default="", max_length=120)
     description: str = Field(default="", max_length=1000)
     author: str = Field(min_length=1, max_length=100)
-    license: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9.+-]{0,63}$")
+    license: str = Field(pattern=LICENSE_PATTERN)
     trust: Literal["verified", "community"] = "community"
     url: str = Field(pattern=r"^https://\S+$", max_length=1000)
     size: int = Field(gt=0, le=MAX_PACK_BYTES)
-    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    sha256: str = Field(pattern=SHA256_PATTERN)
 
 
-class Revocation(_Strict):
+class Revocation(Strict):
     """A revoked pack: by its sha256, or by kind and id (one version, or every version)."""
-    kind: Literal["target", "recipe", "knowledge"]
-    id: str = Field(pattern=_ID)
-    version: Optional[str] = Field(default=None, pattern=_VERSION)
-    sha256: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    kind: Kind
+    id: str = Field(pattern=ID_PATTERN)
+    version: Optional[str] = Field(default=None, pattern=VERSION_PATTERN)
+    sha256: Optional[str] = Field(default=None, pattern=SHA256_PATTERN)
     reason: str = Field(min_length=1, max_length=300)
 
     def matches(self, kind: str, pack_id: str, version: Optional[str], sha256: Optional[str]) -> bool:
@@ -119,10 +108,10 @@ def _version_key(version: str):
         return Version("0")
 
 
-class CommunityIndex(_Strict):
+class CommunityIndex(Strict):
     schema_version: Literal[1] = 1
     version: int = Field(ge=1)  # grows with every signed index
-    generated: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+    generated: str = Field(pattern=UTC_TIME_PATTERN)
     entries: List[IndexEntry] = Field(default_factory=list, max_length=20_000)
     revoked: List[Revocation] = Field(default_factory=list, max_length=20_000)
 
@@ -144,15 +133,15 @@ class CommunityIndex(_Strict):
         return next((e for e in self.entries if e.sha256 == sha256), None)
 
 
-class Provenance(_Strict):
+class Provenance(Strict):
     """.lcf-provenance.json next to an installed pack."""
-    kind: Literal["target", "recipe", "knowledge"]
-    id: str = Field(pattern=_ID)
-    version: str = Field(pattern=_VERSION)
+    kind: Kind
+    id: str = Field(pattern=ID_PATTERN)
+    version: str = Field(pattern=VERSION_PATTERN)
     trust: Literal["verified", "community", "local"]
     source: str = Field(max_length=1000)
-    pack_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    pack_sha256: str = Field(pattern=SHA256_PATTERN)
+    content_sha256: str = Field(pattern=SHA256_PATTERN)
     index_version: Optional[int] = None
     author: str = Field(max_length=100)
     signer: Optional[str] = None   # author key id (provenance only)
@@ -192,6 +181,7 @@ class PreparedInstall:
     destination: Path
     provenance: Provenance
     notes: List[str] = field(default_factory=list)
+    author_key: Optional[str] = None  # the checked author signature's public key (base64), pinned on first use
 
     def summary(self) -> str:
         m = self.manifest
@@ -380,8 +370,18 @@ class CommunityManager:
                     found.append((folder, prov))
         return found
 
+    def listing(self, refresh: bool = False) -> Tuple[List[ZooItem], str]:
+        """list_items() of the current index, and a note on which index was used (or why there is none)."""
+        try:
+            state = self.load_index(refresh)
+        except PackError as e:
+            return self.list_items(None), f"No community index: {e}"
+        return self.list_items(state.index), state.note or f"Signed index version {state.index.version} " \
+                                                           f"({state.source})."
+
     def list_items(self, index: Optional[CommunityIndex] = None) -> List[ZooItem]:
-        """Index entries (latest version each) and installed packs, with their trust level."""
+        """Index entries (latest version each) and installed packs, with their trust level. Installed packs are
+        checked against the cached revocations when no index is given (also after its key expired)."""
         items: Dict[Tuple[str, str], ZooItem] = {}
         for entry in index.entries if index else []:
             key = (entry.kind, entry.id.casefold())
@@ -392,8 +392,9 @@ class CommunityManager:
                                  entry.license, TrustLevel.REVOKED if revoked else TrustLevel(entry.trust),
                                  revoked=revoked.reason if revoked else None, entry=entry,
                                  description=entry.description)
+        revocations = index if index is not None else self.cached_index(revocations=True)
         for folder, prov in self.installed():
-            trust, reason = trust_of_folder(folder, index)
+            trust, reason = trust_of_folder(folder, revocations)
             item = items.setdefault((prov.kind, prov.id.casefold()), ZooItem(
                 prov.kind, prov.id, prov.version, prov.id, prov.author, "", trust))
             item.installed_version, item.path = prov.version, folder
@@ -409,7 +410,7 @@ class CommunityManager:
 
     def prepare_install(self, kind: str, pack_id: str, progress=None) -> PreparedInstall:
         """Downloads the pack the index pins and checks it in quarantine."""
-        if kind not in KINDS or not re.fullmatch(_ID, str(pack_id)):
+        if kind not in KINDS or not re.fullmatch(ID_PATTERN, str(pack_id)):
             raise PackError(f"Invalid {kind} id {pack_id!r}.")
         # The download needs the network anyway: always the current index, so a revocation is never missed.
         state = self.load_index(refresh=True)
@@ -432,27 +433,29 @@ class CommunityManager:
                 raise PackError(str(e)) from None
             raise
 
-    def prepare_install_file(self, path: Path, kind: Optional[str] = None, *, identity=None,
-                             passphrase: Optional[str] = None, trusted_senders=None) -> PreparedInstall:
-        """A pack from a file (or an encrypted pack shared privately). Its trust comes from the cached index when
-        the index lists its sha256; otherwise it is local."""
+    def prepare_install_file(self, path: Path, *, identity=None, passphrase: Optional[str] = None,
+                             trusted_senders=None) -> PreparedInstall:
+        """A pack from a file, or an encrypted pack shared privately (opened with the passphrase if one is given,
+        otherwise with identity or your own age identity). Its trust comes from the cached index when the index
+        lists its sha256; otherwise it is local."""
         path = Path(path)
-        if path.stat().st_size > MAX_PACK_BYTES + 1024 * 1024:
+        if path.stat().st_size > MAX_PACK_BYTES + 2 * 1024 * 1024:
             raise PackError(f"{path.name} is larger than a pack may be.")
         data = path.read_bytes()
         sender = None
-        if data.startswith(ENCRYPTED_MAGIC):
-            decrypted = decrypt_pack(data, identity=identity, passphrase=passphrase, trusted_senders=trusted_senders)
-            data, sender = decrypted.data, decrypted.sender_id
+        if is_encrypted_pack(data):
+            if passphrase is None and identity is None:
+                identity = UserKeys(self._secrets()).age_identity()
+            data, sender = decrypt_pack(data, identity=identity, passphrase=passphrase,
+                                        trusted_senders=trusted_senders)
         try:
             index = self.load_index().index  # updated when older than a day, for the latest revocations
         except PackError:  # offline, no index configured, or a download that does not verify
             index = self.cached_index()
-        entry = index.by_sha256(sha256_bytes(data)) if index else None
-        probe = read_pack_manifest(data)
-        if kind and probe.kind != kind:
-            raise PackError(f"{path.name} is a {probe.kind} pack, not a {kind} pack.")
-        revoked = index.revocation(probe.kind, probe.id, probe.version, sha256_bytes(data)) if index else None
+        digest = hashlib.sha256(data).hexdigest()
+        entry = index.by_sha256(digest) if index else None
+        probe = read_manifest(data)
+        revoked = index.revocation(probe.kind, probe.id, probe.version, digest) if index else None
         if revoked is not None:
             raise PackError(f"{probe.kind} {probe.id} {probe.version} was revoked: {revoked.reason}")
         quarantine = self._new_quarantine(probe.kind, probe.id)
@@ -485,13 +488,15 @@ class CommunityManager:
         signature = contents.signature
         checked = signature is not None and signature.pubkey is not None  # verified in _author_note
         prov = Provenance(kind=m.kind, id=m.id, version=m.version, trust=trust.value, source=source[:1000],
-                          pack_sha256=sha256_file(archive), content_sha256=m.content_sha256(),
-                          index_version=index.version if index else None, author=m.author,
-                          signer=signature.key_id if checked else None, sender=sender, installed_at=utc_now())
-        return PreparedInstall(m, trust, quarantine, root / m.id, prov, notes)
+                          pack_sha256=hashlib.sha256(archive.read_bytes()).hexdigest(),
+                          content_sha256=m.content_sha256(), index_version=index.version if index else None,
+                          author=m.author, signer=signature.key_id if checked else None, sender=sender,
+                          installed_at=utc_now())
+        return PreparedInstall(m, trust, quarantine, root / m.id, prov, notes,
+                               signature.pubkey if checked else None)
 
     def _author_note(self, manifest: PackManifest, signature: Optional[PackSignature]) -> Optional[str]:
-        """Author signatures are provenance: checked when the public key is included, the key id pinned per
+        """Author signatures are provenance: checked when the public key is included, the public key pinned per
         author on first use (finish_install) and a different key reported."""
         if signature is None:
             return "not signed by its author"
@@ -500,8 +505,8 @@ class CommunityManager:
             return f"signed by author key {signature.key_id} (public key not included, not checked)"
         verify_manifest(manifest, signature, [key])  # a broken signature means a changed pack: refused
         pinned = self._authors().get(manifest.author)
-        if pinned and pinned != signature.key_id:
-            return (f"WARNING: signed by key {signature.key_id}, but '{manifest.author}' signed with key {pinned} "
+        if pinned and pinned != signature.pubkey:  # the whole key: a 64-bit key id can be matched on purpose
+            return (f"WARNING: signed by key {signature.key_id}, but '{manifest.author}' signed with another key "
                     "before")
         return f"signed by author key {signature.key_id}" + ("" if pinned else " (first pack seen from this author)")
 
@@ -582,8 +587,8 @@ class CommunityManager:
             os.rename(pack, dest)  # never merges into an existing folder
         finally:
             shutil.rmtree(prepared.quarantine, ignore_errors=True)
-        if prepared.provenance.signer and prepared.manifest.author not in self._authors():
-            authors = {**self._authors(), prepared.manifest.author: prepared.provenance.signer}
+        if prepared.author_key and prepared.manifest.author not in self._authors():
+            authors = {**self._authors(), prepared.manifest.author: prepared.author_key}
             ensure_directory(self.cache_dir)
             (self.cache_dir / "authors.json").write_text(json.dumps(authors, indent=2), encoding="utf-8")
         if prepared.manifest.kind == "knowledge":
@@ -660,10 +665,13 @@ class CommunityManager:
                 pack_id = self._stage_recipe(Path(str(source or "")), root, author, model_license, notes)
             else:
                 pack_id = pack_id or f"knowledge-{datetime.now():%Y%m%d}"
-                exported = self.export_knowledge_base("knowledge", root_urls=root_urls)
-                if not exported:
+                pages, left_out = self._knowledge_pages(root_urls)
+                if left_out:
+                    notes.append(f"{left_out} page(s) imported from installed community knowledge packs were left "
+                                 "out; they are shared by their authors already")
+                if not pages:
                     raise PackError("The knowledge base has nothing to export.")
-                shutil.move(exported, root / KNOWLEDGE_FILE)
+                (root / KNOWLEDGE_FILE).write_text(json.dumps(pages, indent=2), encoding="utf-8")
                 notes.append("every page keeps its source address; the pages stay under their owners' terms")
             changes = self._scrub_tree(root)
             manifest = build_manifest(root, kind=kind, id=pack_id, version=version, author=author, license=license)
@@ -686,7 +694,7 @@ class CommunityManager:
             shutil.rmtree(staging, ignore_errors=True)
 
     def _stage_target(self, target_id: str, root: Path, notes: List[str]) -> Tuple[str, str]:
-        folder = self._target_folder(target_id) if re.fullmatch(_ID, target_id) else None
+        folder = self._target_folder(target_id) if re.fullmatch(ID_PATTERN, target_id) else None
         if folder is None:
             raise PackError(f"Target '{target_id}' not found in {self.targets_dir}.")
         prov = read_provenance(folder)
@@ -705,7 +713,7 @@ class CommunityManager:
         except (OSError, yaml.YAMLError, AttributeError):
             meta = {}
         version = str(meta.get("version", ""))
-        return folder.name, version if re.fullmatch(_VERSION, version) else "1.0.0"
+        return folder.name, version if re.fullmatch(VERSION_PATTERN, version) else "1.0.0"
 
     def _stage_recipe(self, build_info: Path, root: Path, author: str, model_license: str,
                       notes: List[str]) -> str:
@@ -749,11 +757,11 @@ class CommunityManager:
         return changes
 
     # --- knowledge base ---------------------------------------------------------------------------------------
-    def sync_knowledge_base(self) -> int:
-        if not self.framework or not hasattr(self.framework, 'get_component'):
-            return 0
-
-        rag_manager = self.framework.get_component("rag_manager")
+    def sync_knowledge_base(self, rag_manager=None) -> int:
+        """Imports the knowledge packs not imported yet (also those installed while the knowledge base was off;
+        the framework calls this when the knowledge base starts). Returns the number of pages imported."""
+        if rag_manager is None and hasattr(self.framework, "get_component"):
+            rag_manager = self.framework.get_component("rag_manager")
         if not rag_manager:
             return 0
 
@@ -777,12 +785,19 @@ class CommunityManager:
                     continue
 
                 if isinstance(data, list):
+                    failed = 0
                     for entry in data:
                         meta = entry.get("metadata", {})
                         meta["origin_pack"] = json_file.name if json_file.parent == self.knowledge_dir else \
                             json_file.parent.name
                         if rag_manager.ingest_document(entry.get("source", ""), entry.get("content", ""), meta):
                             imported_count += 1
+                        elif str(entry.get("content") or "").strip():
+                            failed += 1  # refused, e.g. offline without the embedding model
+                    if failed:  # importing again updates the pages already stored in place
+                        self.logger.warning(f"{json_file.name}: {failed} page(s) not imported; trying again when "
+                                            "the knowledge base starts next time.")
+                        continue
 
                 with open(marker, 'w') as f:
                     f.write(datetime.now().isoformat())
@@ -790,62 +805,40 @@ class CommunityManager:
                 self.logger.error(f"Sync failed {json_file.name}: {e}")
         return imported_count
 
-    def export_knowledge_base(self, output_name_prefix: str = "knowledge_export",
-                              root_urls: Optional[Iterable[str]] = None) -> Optional[str]:
-        """Writes the local knowledge base as JSON with the privacy scrub applied (home folders, addresses,
-        host and user names, secrets). With root_urls only the pages crawled from those URLs. It stays on this
-        computer; sharing it is a separate, explicit step."""
-        if not self.framework or not hasattr(self.framework, 'get_component'):
-            return None
-
-        rag_manager = self.framework.get_component("rag_manager")
-        if not rag_manager:
-            return None
-
+    def _knowledge_pages(self, root_urls: Optional[Iterable[str]] = None) -> Tuple[List[dict], int]:
+        """Your pages of the knowledge base, privacy-scrubbed (home folders, addresses, host and user names,
+        secrets), with root_urls only those crawled from these URLs; and how many pages imported from installed
+        community knowledge packs were left out (re-sharing them would sign them under your name)."""
+        rag_manager = self.framework.get_component("rag_manager") if hasattr(self.framework, "get_component") \
+            else None
         try:
-            records = list(rag_manager.export_records())
+            records = list(rag_manager.export_records()) if rag_manager else []
         except Exception as e:
             self.logger.error(f"Knowledge export failed: {e}")
-            return None
+            records = []
         if root_urls is not None:
             roots = {str(u) for u in root_urls}
             records = [r for r in records if (r.get("metadata") or {}).get("root_url") in roots]
-
-        export_data = []
-        for record in records:
-            c = self._sanitize_content(record.get("content", ""))
-            s = self._sanitize_content(record.get("source", ""))
-            meta = {k: self._sanitize_content(v) if isinstance(v, str) else v
+        own = [r for r in records if not (r.get("metadata") or {}).get("origin_pack")]
+        pages = []
+        for record in own:
+            content, source = scrub(record.get("content", "")), scrub(record.get("source", ""))
+            meta = {k: scrub(v) if isinstance(v, str) else v
                     for k, v in (record.get("metadata") or {}).items()}  # e.g. URLs with tokens in the query
-            if c and s:  # a page without its source is never shared
-                export_data.append({"source": s, "content": c, "metadata": meta})
-        if not export_data:
+            if content and source:  # a page without its source is never shared
+                pages.append({"source": source, "content": content, "metadata": meta})
+        return pages, len(records) - len(own)
+
+    def export_knowledge_base(self, output_name_prefix: str = "knowledge_export",
+                              root_urls: Optional[Iterable[str]] = None) -> Optional[str]:
+        """Writes your pages of the knowledge base (_knowledge_pages) as JSON into the knowledge folder and returns
+        its path, or None when there is nothing. It stays on this computer; sharing it is a separate step."""
+        pages, _ = self._knowledge_pages(root_urls)
+        if not pages:
             return None
-
-        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        export_path = ensure_directory(self.knowledge_dir) / f"{output_name_prefix}_{ts}.json"
-        with open(export_path, 'w', encoding='utf-8') as f:
-            json.dump(export_data, f, indent=2)
+        export_path = ensure_directory(self.knowledge_dir) / f"{output_name_prefix}_{datetime.now():%Y%m%d_%H%M%S}.json"
+        export_path.write_text(json.dumps(pages, indent=2), encoding="utf-8")
         return str(export_path)
-
-    def _sanitize_content(self, text: str) -> str:
-        return scrub(text)
-
-
-def sha256_bytes(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def read_pack_manifest(data: bytes) -> PackManifest:
-    """The manifest of pack bytes, for routing a file before it is checked in quarantine."""
-    try:
-        with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            info = zf.getinfo("pack.json")
-            if info.file_size > 16 * 1024 * 1024:
-                raise PackError("pack.json is too large.")
-            return PackManifest.model_validate_json(zf.read(info))
-    except (KeyError, zipfile.BadZipFile, ValidationError, OSError) as e:
-        raise PackError(f"Not a community pack: {e}") from None
 
 
 # --- Pull request handoff -------------------------------------------------------------------------------------

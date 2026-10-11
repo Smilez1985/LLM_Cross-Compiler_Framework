@@ -997,30 +997,39 @@ sich nur Pack-Dateien (Vertrauensstufe `local`), und ein Pull Request hat kein R
   Schlüsselwechsel enthält ein Release den alten und den neuen Schlüssel. Eine beschädigte Datei ist ein Fehler und
   wird nie als „keine Schlüssel“ gelesen.
 - **Signaturen der Autoren** zeigen, woher ein Pack kommt; vertrauenswürdig machen sie es nicht. Eine Signatur wird
-  geprüft, wenn das Pack den öffentlichen Schlüssel enthält (eine kaputte Signatur weist das Pack ab), und die
-  Schlüssel-ID des Autors wird bei der ersten Installation eines Packs dieses Autors festgehalten. Ein späteres Pack
-  mit demselben Autorennamen und einem anderen Schlüssel bekommt in der Zusammenfassung eine Warnung.
+  geprüft, wenn das Pack den öffentlichen Schlüssel enthält (eine kaputte Signatur weist das Pack ab), und der
+  öffentliche Schlüssel des Autors (der ganze Schlüssel, nicht seine kurze Schlüssel-ID) wird bei der ersten
+  Installation eines Packs dieses Autors festgehalten. Ein späteres Pack mit demselben Autorennamen und einem anderen
+  Schlüssel bekommt in der Zusammenfassung eine Warnung.
 
 ### Verschlüsselte Packs zum privaten Teilen
 
 Für deine eigenen Rechner oder ein Team lässt sich ein Pack verschlüsseln, statt es zu veröffentlichen
 (`llm-cli zoo export ... --to <Schlüsseldatei>` oder `--passphrase`):
 
-- Es wird für die öffentlichen X25519-Schlüssel eines oder mehrerer Empfänger und/oder eine Passphrase (mindestens
-  12 Zeichen, scrypt) verschlüsselt, nach dem Vorbild von age: ein zufälliger Dateischlüssel, für jeden Empfänger
-  verpackt, ChaCha20-Poly1305 für den Inhalt (HKDF-SHA256), ein authentifizierter Kopf und die Ed25519-Signatur des
-  Absenders über die ganze Datei. Empfänger sehen, wer es geschickt hat, und jede Änderung, auch ein hinzugefügter
-  oder entfernter Empfänger, fällt auf. Wie bei age enthält eine Datei höchstens einen Passphrasen-Eintrag;
-  höchstens 64 Empfänger.
-- **Deine Schlüssel:** Bei der ersten Nutzung bekommt jeder Benutzer ein Ed25519-Schlüsselpaar (signiert Packs) und
-  ein X25519-Schlüsselpaar (empfängt verschlüsselte Packs). Sie liegen nur im verschlüsselten Secrets-Speicher.
-  `llm-cli zoo keys` gibt die öffentlichen Schlüssel als Text aus (eine Zeile `ed25519:` und eine Zeile `x25519:`),
-  die du anderen gibst. Ein gespeicherter Schlüssel, der sich nicht lesen lässt, wird nie automatisch ersetzt.
+- Es wird im Format [age](https://age-encryption.org/v1) von rage verschlüsselt, der Rust-Implementierung von age
+  (über `pyrage`): für die age-Schlüssel eines oder mehrerer Empfänger (`age1...`, höchstens 64) oder für eine
+  Passphrase (mindestens 12 Zeichen, scrypt), nie für beides, wie age es verlangt. Der Absender signiert die
+  verschlüsselte Datei mit Ed25519; so sehen Empfänger, wer sie geschickt hat, und jede Änderung, auch ein
+  hinzugefügter oder entfernter Empfänger, fällt auf.
+- Die Datei `.lcfpack` ist eine ZIP-Datei mit der age-Datei `pack.zip.age` und der Signatur des Absenders
+  `pack.zip.age.sig`. Die üblichen Werkzeuge `age` und `rage` öffnen sie ebenfalls, wenn sie für eine Passphrase
+  oder für einen Empfänger aus `age-keygen` oder `rage-keygen` verschlüsselt ist: entpacken, dann
+  `age -d -i key.txt -o pack.zip pack.zip.age`, wobei `key.txt` diese Identitätsdatei ist (bei einem Pack mit
+  Passphrase ohne `-i key.txt`). Die age-Identität, die das Framework für dich anlegt, verlässt den
+  Secrets-Speicher nie; ein Pack, das für sie verschlüsselt ist, öffnet also nur `llm-cli zoo install`. Die
+  Signatur des Absenders prüfen die age-Werkzeuge nicht; das Framework schon.
+- **Deine Schlüssel:** Bei der ersten Nutzung bekommt jeder Benutzer einen Ed25519-Schlüssel (signiert Packs) und
+  eine age-Identität (empfängt verschlüsselte Packs). Sie liegen nur im verschlüsselten Secrets-Speicher.
+  `llm-cli zoo keys` gibt die öffentlichen Schlüssel als Text aus (einen Empfänger `age1...` und eine Zeile
+  `ed25519:`), die du anderen gibst; ein Empfänger aus `age-keygen` oder `rage-keygen` funktioniert mit `--to`
+  ebenso. Ein gespeicherter Schlüssel, der sich nicht lesen lässt, wird nie automatisch ersetzt.
 - **Empfangen:** `llm-cli zoo install --file <Pack>.lcfpack` entschlüsselt mit deinem Schlüssel oder mit
   `--passphrase`. `--from <Schlüsseldatei>` (mehrfach möglich) nimmt nur diese Absender an; sonst nennt die
-  Zusammenfassung die Schlüssel-ID des Absenders. **Import file...** im Hub öffnet Packs, die für deinen Schlüssel
-  verschlüsselt sind; ein Pack mit Passphrase braucht die CLI. Ein verschlüsseltes Pack wird nie an die Community
-  übergeben.
+  Zusammenfassung die Schlüssel-ID des Absenders. Ein Pack mit Passphrase, dessen scrypt-Arbeitsfaktor über 2^20
+  liegt (1 GiB Speicher), wird abgelehnt, bevor irgendetwas entschlüsselt wird. **Import file...** im Hub öffnet
+  Packs, die für deinen Schlüssel verschlüsselt sind; ein Pack mit Passphrase braucht die CLI. Ein verschlüsseltes
+  Pack wird nie an die Community übergeben.
 
 ### Rezepte
 
@@ -1080,18 +1089,20 @@ und **Import file...** im Hub:
    Vertrauensstufe, Hashes, Signierer, Zeit). Alles, was scheitert, wird entfernt.
 
 Targets kommen nach `targets/`, Rezepte nach `community/recipes/`, Wissen nach `community/knowledge/`. Ein
-Wissens-Pack wird direkt nach seiner Installation in die Wissensbasis aufgenommen; schalte die Wissensbasis also
-vorher ein.
+Wissens-Pack wird direkt nach seiner Installation in die Wissensbasis aufgenommen oder, wenn die Wissensbasis
+ausgeschaltet ist, sobald sie eingeschaltet wird.
 
 ### Vertrauensstufen
 
 | Stufe | Bedeutung |
 |---|---|
-| `official` | mit dem Framework ausgeliefert (das Rockchip-Target); ausgelieferte Targets haben keine Herkunftsdatei und erscheinen nicht als Packs |
 | `verified` | im signierten Index: geprüft und unabhängig nachgebaut |
 | `community` | im signierten Index: geprüft |
 | `local` | eine Datei ohne Eintrag im signierten Index: niemand hat sie geprüft. Die Installation fragt immer, und jeder Build eines solchen Targets zeigt eine Warnung. |
-| `revoked` | in der Sperrliste des signierten Index: Die Installation ist blockiert. Installierte Kopien werden von `llm-cli doctor` und dem Hub markiert und nicht gebaut, auch nachdem der Schlüssel abgelaufen ist, der die Sperre signiert hat. |
+| `revoked` | in der Sperrliste des signierten Index: Die Installation ist blockiert. Installierte Kopien werden von `llm-cli zoo list`, `zoo verify`, `llm-cli doctor` und dem Hub markiert und nicht gebaut, auch nachdem der Schlüssel abgelaufen ist, der die Sperre signiert hat. |
+
+Targets, die mit dem Framework ausgeliefert werden, etwa Rockchip, haben keine Herkunftsdatei; sie sind keine Packs
+und haben keine Vertrauensstufe.
 
 ### Installierte Packs prüfen
 
@@ -1131,8 +1142,9 @@ gesperrtes Pack zeigt eine abgeschaltete Schaltfläche **Revoked**.
   und eine Seite ohne Quelle wird nie exportiert.
 - Ein Target, das du aus einem Community-Pack installiert hast, wird nicht als deins exportiert: Es neu zu
   signieren, würde Autor und Lizenz durch deine ersetzen. Ist das Target eines Rezepts dein eigenes, erinnert ein
-  Hinweis daran, das Target ebenfalls zu exportieren. Ein Wissens-Export nimmt jede Seite deiner Wissensbasis mit,
-  auch die Seiten aus installierten Wissens-Packs; jede behält ihre Quelladresse.
+  Hinweis daran, das Target ebenfalls zu exportieren. Ein Wissens-Export nimmt die Seiten deiner Wissensbasis mit,
+  jede mit ihrer Quelladresse; Seiten aus installierten Community-Wissens-Packs bleiben draußen (ihre Autoren teilen
+  sie bereits), und ein Hinweis sagt, wie viele.
 - Mit `--to` oder `--passphrase` wird das Pack stattdessen zum privaten Teilen
   [verschlüsselt](#verschlüsselte-packs-zum-privaten-teilen).
 
@@ -1160,9 +1172,11 @@ Für das Community-Repository, nicht für Benutzer:
   Version und signierst erneut.
 - `scripts/community_repo/validate-contribution.yml` ist eine Vorlage für einen CI-Workflow des
   Community-Repositorys. Bei jedem Pull Request unter `contributions/` nimmt sie nur `.zip`-Pack-Dateien bis 5 MB an
-  und führt `llm-cli zoo verify` für jede aus sowie den Secret-Scan über die geänderten Dateien. Ein Maintainer prüft
-  und übernimmt das Pack, trägt es in `index.json` ein und signiert den Index offline; der Signaturschlüssel kommt nie
-  in die CI. Die Vorlage pinnt das Framework-Release `v3.1.0`, das noch nicht veröffentlicht ist.
+  und führt `llm-cli zoo verify` für jede aus, dessen Datenschutz-Bereinigung auch ein Pack mit einem Schlüssel in
+  einer seiner Dateien abweist (der Secret-Scan des Repositorys überspringt Binärdateien und läuft deshalb nicht über
+  die ZIP-Dateien). Ein Maintainer prüft und übernimmt das Pack, trägt es in `index.json` ein und signiert den Index
+  offline; der Signaturschlüssel kommt nie in die CI. Der Maintainer trägt das Framework-Release ein, mit dem die
+  Packs geprüft werden (`LCF_REF`); bis dahin steht in der Vorlage ein Platzhalter, und der Job schlägt fehl.
 
 ### Was entfernt wurde
 
@@ -1212,8 +1226,7 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
   Windows, macOS oder Linux.
 - **Community-Zoo:** Ein Community-Repository, ein Index oder ein Maintainer-Schlüssel ist noch nicht veröffentlicht
   (`configs/community_keys.yml` ist leer, `community_index_url` und `community_repo` sind leer); installieren lassen
-  sich deshalb nur Pack-Dateien, und ein Pull Request hat kein Repository, an das er gehen kann. Ein Wissens-Pack, das
-  bei ausgeschalteter Wissensbasis installiert wurde, wird später nicht von selbst aufgenommen.
+  sich deshalb nur Pack-Dateien, und ein Pull Request hat kein Repository, an das er gehen kann.
 - **Sicherheits-Scan:** Der Trivy-Container bekommt den Docker-Socket, um das Image zu lesen; ein Scan ohne Socket ist
   geplant.
 - Kleinere Lücken der CLI stehen in [CLI_Usage_DE.md](CLI_Usage_DE.md#bekannte-einschränkungen).
