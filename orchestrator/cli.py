@@ -75,7 +75,6 @@ DEFAULT_CONFIG = {
     "output_dir": "output",
     "configs_dir": "configs",
     "cache_dir": "cache",
-    "logs_dir": "logs",
     "log_level": "INFO",
     "max_concurrent_builds": 2
 }

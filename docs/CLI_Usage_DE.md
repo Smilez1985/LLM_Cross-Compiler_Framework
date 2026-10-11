@@ -965,8 +965,8 @@ llm-cli config show
 ```
 
 Gibt die Grundeinstellungen der CLI als JSON aus: die Ordner (`targets_dir`, `models_dir`, `output_dir`,
-`configs_dir`, `cache_dir`, `logs_dir`), `log_level` und `max_concurrent_builds`, ergänzt um eine mit `-c`
-angegebene Datei. Die Einstellungen in der `config.yml` (KI-Anbieter, Sandbox, Crawler und so weiter) zeigt es
+`configs_dir`, `cache_dir`), `log_level` und `max_concurrent_builds`, ergänzt um eine mit `-c` angegebene
+Datei. Die Einstellungen in der `config.yml` (KI-Anbieter, Sandbox, Crawler und so weiter) zeigt es
 nicht; sieh dafür direkt in diese Datei.
 
 ### config repos
