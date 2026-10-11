@@ -31,6 +31,7 @@ from PySide6.QtGui import QPixmap
 from orchestrator.Core.module_generator import ModuleGenerator
 from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog, show_crawl_notice_once
 from orchestrator.tools.confirmation import visible
+from orchestrator.utils import input_history
 from orchestrator.utils.announce import announce
 from orchestrator.utils.localization import current_language, tr, ui_text
 
@@ -552,13 +553,16 @@ Setup commands:
             announce(text, lang=lang, config=cfg)
 
         show_crawl_notice_once(self, cfg, announcer=speak)  # before the first crawl, again when its text changes
-        dlg = URLInputDialog(self)
+        history = input_history.for_config(cfg)
+        dlg = URLInputDialog(self, recent=history.get("url") if history else ())
         if dlg.exec() == QDialog.Accepted:
             urls = dlg.get_urls()
             options = dlg.get_options()
 
             if not urls:
                 return
+            if history:
+                history.add("url", *urls)
 
             self._set_avatar_state("read")
             self.crawl_log.setVisible(True)

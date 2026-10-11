@@ -372,6 +372,26 @@ class TestURLInputDialog:
             "max_depth": 2, "respect_robots": True, "download_pdfs": True, "request_delay": 1,
         }
 
+    def test_no_recent_list_without_history(self, qapp):
+        dlg = URLInputDialog()
+        assert dlg.recent_row.isHidden() and dlg.cb_recent.count() == 0
+
+    def test_recent_urls_are_offered_and_added_once(self, qapp):
+        dlg = URLInputDialog(recent=["https://docs.radxa.com/", "https://wiki.example.org/"])
+        assert not dlg.recent_row.isHidden() and dlg.cb_recent.isEditable()
+        assert [dlg.cb_recent.itemText(i) for i in range(dlg.cb_recent.count())] == [
+            "https://docs.radxa.com/", "https://wiki.example.org/"]
+        assert dlg.cb_recent.currentText() == "" and dlg.get_urls() == []   # offered, not filled in
+        assert not dlg.btn_add_recent.autoDefault()   # Enter still means OK
+
+        dlg.cb_recent.setCurrentIndex(1)
+        dlg.add_recent_url()
+        dlg.add_recent_url()
+        assert dlg.get_urls() == ["https://wiki.example.org/"]
+        dlg.cb_recent.setEditText(" https://docs.radxa.com/rock5/ ")   # editable: a recent URL can be changed
+        dlg.add_recent_url()
+        assert dlg.get_urls() == ["https://wiki.example.org/", "https://docs.radxa.com/rock5/"]
+
 
 class TestCrawlOptionWiring:
     """Options chosen in URLInputDialog apply to that crawl only."""
@@ -643,9 +663,11 @@ class TestDeepIngestControls:
         monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: notices.append(self.windowTitle()))
         monkeypatch.setattr(wizards, "announce", lambda text, lang=None, config=None: spoken.append((text, config)))
 
+        offered = []
+
         class FakeURLDialog:
-            def __init__(self, parent=None):
-                pass
+            def __init__(self, parent=None, recent=()):
+                offered.append(list(recent))
 
             def exec(self):
                 return wizards.QDialog.Accepted
@@ -669,6 +691,50 @@ class TestDeepIngestControls:
         assert spoken == [("Deep Ingest finished: 1 pages (2 chunks) are now searchable.", cfg)] * 2
         assert wizard.ai_progress.maximum() == 50   # the "page 1 of 50" progress reached the GUI
         assert wizard.status_label.text() == "Deep Ingest finished: 1 pages (2 chunks) are now searchable."
+        assert offered == [[], ["https://docs.example/"]]   # crawled URLs are offered the next time
+
+    def test_crawled_urls_are_remembered_without_secrets(self, wizard, tmp_path, monkeypatch):
+        from orchestrator.gui import wizards
+        from orchestrator.utils.input_history import InputHistory
+
+        cfg = ConfigManager(tmp_path / "configs")
+        wizard.framework_manager = SimpleNamespace(config=cfg, get_component=lambda name: object())
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
+        urls = ["https://docs.example/a", "https://docs.example/b?access_token=abc", "https://u:pw@docs.example/c"]
+        crawled = []
+
+        class Worker:
+            progress = page = done = error = SimpleNamespace(connect=lambda slot: None)
+
+            def __init__(self, rag, urls, options, **kwargs):
+                crawled.append(urls)
+
+            def start(self):
+                pass
+
+            def isRunning(self):
+                return False
+
+        class URLDialog:
+            def __init__(self, parent=None, recent=()):
+                pass
+
+            def exec(self):
+                return wizards.QDialog.Accepted
+
+            def get_urls(self):
+                return urls
+
+            def get_options(self):
+                return {}
+
+        monkeypatch.setattr(wizards, "CrawlWorker", Worker)
+        monkeypatch.setattr(wizards, "URLInputDialog", URLDialog)
+        wizard.run_deep_ingest()
+        assert crawled == [urls]   # the crawl gets every URL; only the history leaves some out
+        history = InputHistory(cfg.user_state_dir)
+        assert history.get("url") == ["https://docs.example/a"]
+        assert "abc" not in history.path.read_text() and "pw@" not in history.path.read_text()
 
 
 class TestCrawlNotice:
@@ -794,7 +860,8 @@ class TestMainWindowWiring:
             assert opened == [True], "the permissions are asked once at the first start"
             menus = {m.title(): [a.text() for a in m.actions()] for m in win.findChildren(QMenu) if m.title()}
             assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module...",
-                                      "Tool Permissions (Ditto / MCP)...", "Spoken Announcements"]
+                                      "Tool Permissions (Ditto / MCP)...", "Spoken Announcements",
+                                      "Clear Input History..."]
             # The audio switch is a persisted setting, on by default.
             assert win.act_audio.isCheckable() and win.act_audio.isChecked()
             win.act_audio.setChecked(False)
@@ -814,6 +881,28 @@ class TestMainWindowWiring:
             assert win.deployment_window.cb_profiles.itemText(0) == "Rockchip"
 
             win._update_system_state()
+
+            # Clear Input History: asks first, then forgets everything and empties the recent lists.
+            from orchestrator.utils.input_history import InputHistory
+            history = InputHistory(win.framework.config.user_state_dir)
+            history.add("model", "org/recent-model")
+            history.add("device", "10.0.0.7")
+            win.builder_tab.reload_history()
+            win.deployment_window.reload_history()
+            assert win.builder_tab.model_input.itemText(0) == "org/recent-model"
+            questions = []
+            answer = main_window.QMessageBox.No
+            monkeypatch.setattr(main_window.QMessageBox, "question",
+                                lambda *a: questions.append(a[2]) or answer)
+            win.act_clear_history.trigger()
+            assert history.get("model") == ["org/recent-model"], "No keeps the history"
+            answer = main_window.QMessageBox.Yes
+            win.act_clear_history.trigger()
+            assert len(questions) == 2 and "URLs" in questions[0]
+            assert not history.path.exists()
+            models = [win.builder_tab.model_input.itemText(i) for i in range(win.builder_tab.model_input.count())]
+            assert "org/recent-model" not in models and win.deployment_window.cb_device.count() == 0
+            assert win.status.currentMessage() == "Input history cleared."
         finally:
             win.update_timer.stop()
             win.close()

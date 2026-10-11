@@ -28,6 +28,7 @@ from PySide6.QtCore import Qt, QSize, QTimer
 # Core Framework
 from orchestrator.Core.framework import FrameworkManager
 from orchestrator.Core.orchestrator import OrchestrationStatus
+from orchestrator.utils import input_history
 from orchestrator.utils.announce import SETTING as AUDIO_SETTING
 from orchestrator.utils.localization import get_instance as get_i18n
 
@@ -137,6 +138,11 @@ class MainOrchestrator(QMainWindow):
         self.act_audio.setChecked(bool(self.framework.config.get(AUDIO_SETTING, True)))
         self.act_audio.toggled.connect(self._set_audio_announcements)
         tools_menu.addAction(self.act_audio)
+
+        # Recent models, targets, boards, URLs, devices and datasets offered in the input fields (per user)
+        self.act_clear_history = QAction(self.i18n.t("menu.clear_history", "Clear Input History..."), self)
+        self.act_clear_history.triggered.connect(self._clear_input_history)
+        tools_menu.addAction(self.act_clear_history)
 
         help_menu = menubar.addMenu("Help")
         about_action = QAction("About", self)
@@ -291,6 +297,20 @@ class MainOrchestrator(QMainWindow):
         cfg = self.framework.config
         cfg.set(AUDIO_SETTING, bool(enabled))
         cfg.save_user_config()
+
+    def _clear_input_history(self):
+        t = self.i18n.t
+        answer = QMessageBox.question(self, t("history.clear.title"), t("history.clear.question"),
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return
+        history = input_history.for_config(self.framework.config)
+        if history is None or not history.clear():
+            QMessageBox.warning(self, t("history.clear.title"), t("history.clear.failed"))
+            return
+        self.builder_tab.reload_history()
+        self.deployment_window.reload_history()
+        self.status.showMessage(t("history.cleared"), 5000)
 
     def _open_module_wizard(self):
         targets_dir = self.app_root / self.framework.config.get("targets_dir", "targets")
