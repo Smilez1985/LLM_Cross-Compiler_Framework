@@ -115,6 +115,11 @@ class TokenStore:
             return {}
         except OSError as e:
             raise TokenStoreError(f"{self.path} cannot be read ({e}); no MCP token is accepted.") from None
+        # On every read, before the cache answers (chmod keeps size and mtime): a running server must stop accepting
+        # tokens as soon as someone else could have written the file.
+        problem = self._problem_of(st)
+        if problem:
+            raise TokenStoreError(problem)
         key = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
         with self._cache_lock:
             if self._cache is not None and self._cache[0] == key:
@@ -175,17 +180,24 @@ class TokenStore:
         return record.policy
 
     def private_problem(self) -> Optional[str]:
-        """On POSIX: a message when other users could read the store (group or other permission bits)."""
-        if os.name != "posix":
-            return None
+        """On POSIX: a message when other users could read or change the store (group or other permission bits, or
+        another owner). No token is accepted then (every read checks it), and the MCP server does not start."""
         try:
-            mode = os.stat(self.path).st_mode
+            return self._problem_of(os.stat(self.path))
         except OSError:
             return None
-        if mode & (stat.S_IRWXG | stat.S_IRWXO):
-            return (f"{self.path} is open to other users (mode {stat.S_IMODE(mode):o}), so the MCP server does not "
-                    f"start. Run 'chmod 600 {self.path}' and check 'llm-cli mcp token list': another user could "
-                    "have added a token or changed its permissions.")
+
+    def _problem_of(self, st: os.stat_result) -> Optional[str]:
+        if os.name != "posix":
+            return None
+        check = (" No MCP token is accepted and the MCP server does not start until it is fixed; check "
+                 "'llm-cli mcp token list' afterwards: another user could have added a token or changed its "
+                 "permissions.")
+        if st.st_mode & (stat.S_IRWXG | stat.S_IRWXO):
+            return (f"{self.path} is open to other users (mode {stat.S_IMODE(st.st_mode):o}). Run "
+                    f"'chmod 600 {self.path}'.{check}")
+        if hasattr(os, "getuid") and st.st_uid != os.getuid():
+            return f"{self.path} belongs to another user (uid {st.st_uid}).{check}"
         return None
 
     # --- changing (a person, through the CLI or the GUI) ---------------------------------------------

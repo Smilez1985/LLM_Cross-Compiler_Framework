@@ -17,7 +17,7 @@ from pydantic import BaseModel
 
 pytest.importorskip("mcp")
 from mcp import Client  # noqa: E402
-from mcp_types import ElicitResult  # noqa: E402
+from mcp_types import ElicitResult, Implementation  # noqa: E402
 
 from conftest import REPO_ROOT  # noqa: E402
 from orchestrator import mcp_server  # noqa: E402
@@ -62,6 +62,13 @@ def run(coro):
 
 async def accept(ctx, params):
     return ElicitResult(action="accept", content={"approve": True})
+
+
+def error_text(error: BaseException) -> str:
+    """The messages of an error, also inside the exception groups that the SDK's task groups raise."""
+    if isinstance(error, BaseExceptionGroup):
+        return " | ".join(error_text(inner) for inner in error.exceptions)
+    return str(error)
 
 
 # --- the store ------------------------------------------------------------------------------------------------
@@ -125,7 +132,8 @@ class TestTokenStore:
         tokens.path.write_text("{broken", encoding="utf-8")
         assert tokens.find(token) is None
         assert registry.decide(registry.get("echo"), "mcp:ok") == Decision.DENY
-        with pytest.raises(TokenStoreError, match="damaged"):
+        # "is damaged (": the test's own folder name contains "damaged" as well.
+        with pytest.raises(TokenStoreError, match=r"is damaged \("):
             tokens.add("another")
 
     @pytest.mark.parametrize("name", ["", "UPPER", "with space", "a" * 33, "-lead", "trail-", "ünï", "mcp:x", "a/b"])
@@ -145,6 +153,34 @@ class TestTokenStore:
         tokens.add("x")
         os.chmod(tokens.path, 0o644)
         assert "chmod 600" in tokens.private_problem()
+
+    @pytest.mark.skipif(os.name != "posix", reason="POSIX owners and permission bits")
+    def test_a_store_others_can_change_accepts_no_token_while_the_server_runs(self, tokens, registry, monkeypatch):
+        # Checked on every read, not only at the start: a store that becomes writable for others (or is replaced by
+        # another user's file) while a server runs could hold a token and a policy someone else wrote.
+        token = tokens.add("box")
+        tokens.set_policy("box", ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        write = registry.get("write")
+        assert tokens.find(token) and registry.decide(write, "mcp:box") == Decision.ALLOW
+        os.chmod(tokens.path, 0o666)  # the file's size, inode and mtime stay the same: the cache must not answer
+        assert tokens.find(token) is None and registry.decide(write, "mcp:box") == Decision.DENY
+        with pytest.raises(TokenStoreError, match="chmod 600"):
+            tokens.list()
+        os.chmod(tokens.path, 0o600)
+        assert tokens.find(token).name == "box"
+        owner = tokens.path.stat().st_uid
+        monkeypatch.setattr(os, "getuid", lambda: owner + 1)
+        assert tokens.find(token) is None and registry.decide(write, "mcp:box") == Decision.DENY
+        with pytest.raises(TokenStoreError, match="belongs to another user"):
+            tokens.list()
+
+    def test_a_bare_token_is_redacted_wherever_it_is_written(self, tokens):
+        from orchestrator.utils.helpers import redact_secrets
+        token = tokens.add("leaky")
+        secret = token[len(TOKEN_PREFIX):]
+        for text in (token, f"model {token}", json.dumps({"model": token}), json.dumps("line\n" + token),
+                     f"{token}.", f"'{token}'"):
+            assert secret not in redact_secrets(text), text
 
 
 # --- the registry: the token's actor and policy -----------------------------------------------------------------
@@ -297,6 +333,32 @@ class TestHttp:
         session_headers = {"mcp-session-id": session, "mcp-protocol-version": "2025-11-25"}
         assert post(live_http, listing, second, headers=session_headers).status_code == 404
 
+    def test_a_pending_question_of_one_token_is_refused_for_another(self, live_http, tokens, registry):
+        # 2026-07-28 has no sessions: an answer round carries the server's sealed requestState. It must be bound to
+        # the token that got the question, as the SDK binds it to the authenticated principal.
+        from mcp.client.streamable_http import streamable_http_client
+        from mcp.shared._httpx_utils import create_mcp_http_client
+        alice, bob = tokens.add("alice"), tokens.add("bob")
+        for name in ("alice", "bob"):
+            tokens.set_policy(name, ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
+        yes = ElicitResult(action="accept", content={"approve": True})
+
+        async def as_token(token, **call):
+            async with create_mcp_http_client(headers={"Authorization": f"Bearer {token}"}) as http:
+                async with Client(streamable_http_client(live_http.url, http_client=http), mode="2026-07-28",
+                                  elicitation_callback=accept) as client:
+                    return await client.session.call_tool("write", {"text": "a"}, **call)
+
+        asked = run(as_token(alice, allow_input_required=True))
+        answer = {key: yes for key in asked.input_requests}
+        with pytest.raises(BaseException) as refused:
+            run(as_token(bob, input_responses=answer, request_state=asked.request_state))
+        assert "Invalid or expired requestState" in error_text(refused.value)
+        assert registry.writes == []
+        done = run(as_token(alice, input_responses=answer, request_state=asked.request_state))
+        assert not done.is_error and registry.writes == ["a"]
+        assert registry.audit.entries(1)[0]["actor"] == "mcp:alice"
+
     def test_no_token_in_results_audit_or_logs(self, live_http, tokens, registry, capfd, tmp_path):
         token = tokens.add("quiet")
         results = run(session_calls(live_http, token, ("echo", {"text": "hello"}), ("write", {"text": "x"})))
@@ -306,6 +368,36 @@ class TestHttp:
         texts += [p.read_bytes().decode("utf-8", "replace") for p in tmp_path.rglob("*") if p.is_file()]
         assert not [t for t in texts if token in t or token[len(TOKEN_PREFIX):] in t]
         assert "caller mcp:quiet" in captured.err, "the client line names the token, never its value"
+
+
+def test_a_token_pasted_into_an_argument_or_client_name_reaches_no_audit_entry_or_log(registry, tokens, tmp_path,
+                                                                                      capsys):
+    token = tokens.add("pasted")
+    server = mcp_server.build_mcp_server(framework_for(registry, tmp_path))
+
+    async def go():
+        async with Client(server, client_info=Implementation(name=f"client {token}", version="1")) as client:
+            await client.call_tool("echo", {"text": f"use {token}"})
+            await client.call_tool("write", {"text": token})
+    run(go())
+    secret = token[len(TOKEN_PREFIX):]
+    assert secret not in capsys.readouterr().err
+    assert secret not in json.dumps(registry.audit.entries(5))
+
+
+def test_an_http_server_never_falls_back_to_the_shared_caller(registry, tmp_path):
+    # Your own permissions allow the write. A server built for HTTP that gets a request without a checked token
+    # (here: served in-process, no HTTP request at all) refuses it instead of running it as the shared caller "mcp".
+    registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+    server = mcp_server.build_mcp_server(framework_for(registry, tmp_path), transport="http")
+
+    async def go():
+        async with Client(server) as client:
+            return await client.call_tool("write", {"text": "x"})
+    with pytest.raises(BaseException) as refused:
+        run(go())
+    assert "no checked MCP token" in error_text(refused.value)
+    assert registry.writes == [] and not [e for e in registry.audit.entries(5) if e["actor"] == "mcp"]
 
 
 class TestEachLayerOnItsOwn:
@@ -370,7 +462,8 @@ class TestServeHttp:
 
     def test_a_damaged_store_refuses_to_start(self, registry, tokens, tmp_path):
         tokens.path.write_text("[]")
-        with pytest.raises(ValueError, match="damaged"):
+        os.chmod(tokens.path, 0o600)  # damaged, not open to others (that is refused first, as it must be)
+        with pytest.raises(ValueError, match=r"is damaged \("):
             mcp_server.serve(framework_for(registry, tmp_path), transport="http")
 
 
@@ -405,6 +498,23 @@ class TestStdioToken:
         assert not run(go()).is_error and registry.writes == ["ok"]
         assert registry.audit.entries(1)[0]["actor"] == "mcp:desk"
         assert "caller mcp:desk" in capsys.readouterr().err
+
+    def test_calls_after_a_revoke_are_refused_and_audited(self, tokens, registry, tmp_path):
+        token = tokens.add("desk2")
+        caller, still_valid = mcp_server.stdio_caller(tokens, token)
+        server = mcp_server.build_mcp_server(framework_for(registry, tmp_path), caller=caller, still_valid=still_valid)
+
+        async def go():
+            async with Client(server) as client:
+                await client.call_tool("echo", {"text": "before"})
+                tokens.revoke("desk2")
+                with pytest.raises(Exception, match="revoked or rotated"):
+                    await client.call_tool("echo", {"text": "after"})
+        run(go())
+        latest = registry.audit.entries(1)[0]
+        assert (latest["actor"], latest["tool"], latest["decision"], latest["outcome"]) == \
+            ("mcp:desk2", "echo", "deny", "denied")
+        assert "revoked or rotated" in latest["detail"] and token[len(TOKEN_PREFIX):] not in json.dumps(latest)
 
     def test_a_revoked_stdio_token_gets_nothing(self, tokens, registry, tmp_path):
         token = tokens.add("gone")
@@ -519,6 +629,20 @@ class TestTokenCommands:
         assert tokens.get("remote-ditto").link == "ditto"
         assert cli_run("mcp", "token", "add", "x", "--policy-from", "nobody").exit_code == 2
         assert cli_run("mcp", "token", "add", "y", "--policy-from", "mcp", "--link", "ditto").exit_code == 2
+
+    def test_policy_from_with_the_mcp_prefix_names_only_a_token(self, cli_run, tokens, registry):
+        # "mcp:<name>" is the audit actor of a token. A token may be named like a caller ("mcp", "ditto"); its actor
+        # must then copy that token's permissions, never the wider ones of the caller with the same name.
+        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW}))
+        tokens.add("mcp")
+        tokens.add("ditto")
+        assert cli_run("mcp", "token", "add", "from-mcp", "--policy-from", "mcp:mcp").exit_code == 0
+        assert cli_run("mcp", "token", "add", "from-ditto", "--policy-from", "mcp:ditto").exit_code == 0
+        assert tokens.get("from-mcp").policy == tokens.get("from-ditto").policy == read_only_policy()
+        assert cli_run("mcp", "token", "add", "shared", "--policy-from", "mcp").exit_code == 0
+        assert tokens.get("shared").policy.tiers[ToolTier.LOCAL_WRITE] == Decision.ALLOW, "the caller mcp"
+        missing = cli_run("mcp", "token", "add", "x", "--policy-from", "mcp:nobody")
+        assert missing.exit_code == 2 and tokens.get("x") is None
 
     def test_rotate_and_revoke(self, cli_run, tokens, registry):
         first = printed_token(cli_run("mcp", "token", "add", "box").output)

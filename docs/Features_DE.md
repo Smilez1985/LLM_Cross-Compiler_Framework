@@ -830,15 +830,17 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   eigenes benanntes Token als `Authorization: Bearer <Token>`; eine Anfrage mit `Origin`-Header (eine Webseite, auch
   ein CORS-Preflight) wird abgelehnt, der `Host`-Header muss eine Loopback-Adresse mit dem Port des Servers nennen
   (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Eine
-  Sitzung gehört dem Token, das sie geöffnet hat.
+  Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet hat.
 - **Benannte Tokens:** `llm-cli mcp token add NAME` legt ein Token für einen Client an und zeigt es einmal; das
-  Framework behält nur seinen SHA-256 in `~/.llm-framework/mcp_tokens.json` (Modus 0600; der Server startet nicht,
-  wenn andere Benutzer die Datei lesen können). Der Name des Tokens ist der Aufrufer im Audit-Log (`mcp:<Name>`),
+  Framework behält nur seinen SHA-256 in `~/.llm-framework/mcp_tokens.json` (Modus 0600; solange andere Benutzer
+  die Datei lesen oder ändern können oder sie einem anderen Benutzer gehört, wird kein Token angenommen und der
+  Server startet nicht). Der Name des Tokens ist der Aufrufer im Audit-Log (`mcp:<Name>`),
   und es hat eigene Berechtigungen: Ein neues Token darf nur lesen, bis du mit
   `llm-cli tools permissions --token NAME` mehr erlaubst, es mit einer Kopie der Berechtigungen eines anderen
   Aufrufers anlegst (`--policy-from mcp`) oder es an Dittos Berechtigungen bindest (`--link ditto`, für Ditto auf
   einem anderen Rechner; eine Änderung an Dittos Berechtigungen gilt sofort auch dafür). `rotate` ersetzt ein Token,
-  `revoke` löscht es mit seinen Berechtigungen; beides wirkt sofort, auch für einen laufenden Server. Ein
+  `revoke` löscht es mit seinen Berechtigungen; beides wirkt sofort, auch für einen laufenden Server, und die
+  Aufrufe, die ein widerrufener stdio-Client noch schickt, werden abgelehnt und protokolliert. Ein
   stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag: Der
   Server liest sie einmal beim Start, entfernt sie aus seiner Umgebung und startet nicht mit einem Wert, der kein
   gültiges Token ist. Ohne sie teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen

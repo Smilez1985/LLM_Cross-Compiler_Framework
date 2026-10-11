@@ -212,8 +212,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli tools permissions --token NAME`; `--policy-from mcp|ditto|<token>` starts with a copy, `--link ditto`
   uses Ditto's permissions by reference (for Ditto on another computer). Over stdio the client's server entry sets
   `LCF_MCP_TOKEN`; the server reads it once, removes it from its environment and does not start with an invalid
-  value. Rotating or revoking takes effect at once, also for a running server; a revoked token loses its
-  permissions. Only a person at a terminal manages tokens (audited with actor `cli`, never the token itself).
+  value. Rotating or revoking takes effect at once, also for a running server (the calls a revoked stdio client
+  still sends are refused and audited); a revoked token loses its permissions. Only a person at a terminal manages
+  tokens (audited with actor `cli`, never the token itself), and a token that ends up in a tool argument, a log line
+  or the audit log is redacted like other keys.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -532,8 +534,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   all HTTP clients shared one token and one audit actor. Now every request with an `Origin` header (also a CORS
   preflight) is refused before the token is checked, the `Host` header must be a loopback name with the server's
   own port (in the framework and again in the SDK), the server keeps at most 8 sessions (was 10,000) and takes at
-  most 1 MiB per request (was 4 MiB), a session only answers the token that opened it, and the server does not start
-  when other users can read the token file.
+  most 1 MiB per request (was 4 MiB), a session and a pending question round of the 2026-07-28 protocol only answer
+  the token that opened them, and no token is accepted (and the server does not start) while other users can read or
+  change the token file or it belongs to another user.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

@@ -243,8 +243,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Kopie, `--link ditto` nutzt Dittos Berechtigungen per Verweis (für Ditto auf einem anderen Rechner). Über stdio
   setzt der Server-Eintrag des Clients `LCF_MCP_TOKEN`; der Server liest es einmal, entfernt es aus seiner Umgebung
   und startet nicht mit einem ungültigen Wert. Rotieren oder Widerrufen wirkt sofort, auch für einen laufenden
-  Server; ein widerrufenes Token verliert seine Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal
-  (protokolliert mit dem Akteur `cli`, nie das Token selbst).
+  Server (die Aufrufe, die ein widerrufener stdio-Client noch schickt, werden abgelehnt und protokolliert); ein
+  widerrufenes Token verliert seine Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal (protokolliert
+  mit dem Akteur `cli`, nie das Token selbst), und ein Token, das in ein Tool-Argument, eine Logzeile oder das
+  Audit-Log gerät, wird wie andere Schlüssel geschwärzt.
 
 ### Geändert
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
@@ -604,8 +606,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   jede Anfrage mit `Origin`-Header (auch ein CORS-Preflight) abgelehnt, bevor das Token geprüft wird, der
   `Host`-Header muss ein Loopback-Name mit dem eigenen Port des Servers sein (im Framework und noch einmal im SDK),
   der Server hält höchstens 8 Sitzungen (vorher 10.000) und nimmt höchstens 1 MiB pro Anfrage an (vorher 4 MiB),
-  eine Sitzung antwortet nur dem Token, das sie geöffnet hat, und der Server startet nicht, wenn andere Benutzer die
-  Token-Datei lesen können.
+  eine Sitzung und eine offene Fragerunde des Protokolls 2026-07-28 antworten nur dem Token, das sie geöffnet hat,
+  und kein Token wird angenommen (und der Server startet nicht), solange andere Benutzer die Token-Datei lesen oder
+  ändern können oder sie einem anderen Benutzer gehört.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

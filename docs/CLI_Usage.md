@@ -786,8 +786,9 @@ denied when the client cannot ask).
 | `--port INTEGER` | HTTP only (default 8765). |
 
 With `--transport http` the server listens on `http://<host>:<port>/mcp`, and every request needs
-`Authorization: Bearer <token>` with a [named token](#mcp-token); the server does not start before one exists, or
-when other users can read the token file. Requests with an `Origin` header (web pages, CORS preflights) are refused,
+`Authorization: Bearer <token>` with a [named token](#mcp-token); the server does not start before one exists, and
+no token is accepted (nor does the server start) while other users can read or change the token file or it belongs
+to another user. Requests with an `Origin` header (web pages, CORS preflights) are refused,
 the `Host` header must be `127.0.0.1`, `localhost` or `[::1]` with the server's port, and the server keeps at most
 8 sessions and takes at most 1 MiB per request. The old shared token file `mcp_http_token` is no longer accepted.
 
@@ -841,7 +842,7 @@ a terminal) and are audited with actor `cli`, without the token. No tool can cre
 | Command / option | Meaning |
 |---|---|
 | `add NAME` | Creates a token that can only read, until you allow more with `tools permissions --token NAME`. |
-| `--policy-from CALLER` | Starts with a copy of another caller's permissions: `mcp` (local stdio clients), `ditto`, or a token name. Later changes of the source do not apply. |
+| `--policy-from CALLER` | Starts with a copy of another caller's permissions: `mcp` (local stdio clients), `ditto`, or a token name; `mcp:NAME` always names a token, also one called `mcp` or `ditto`. Later changes of the source do not apply. |
 | `--link ditto` | Uses Ditto's permissions by reference, for Ditto running on another computer: a change to Ditto's permissions applies at once. |
 | `list` | Names, audit actors, permissions, creation and rotation time; never a token or its hash. |
 | `rotate NAME` | A new token for the same name and permissions; the old one stops working at once. |
