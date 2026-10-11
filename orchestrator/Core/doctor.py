@@ -4,7 +4,7 @@ LLM Cross-Compiler Framework - Doctor
 
 Deterministic health checks, like `flutter doctor` (the idea comes from "Mojo" in the rag4ll project):
 every check returns findings with a stable code and a fix hint; nothing asks a model what is wrong.
-Fixes are tiered - 1: harmless (create a folder, tighten permissions), 2: removes data (caches) - and
+Fixes are tiered - 1: harmless (make the personal folder private), 2: removes data (caches) - and
 run only when the user asks for that tier. After fixing, everything is checked again; a finding that is
 still there is reported as not fixable automatically.
 """

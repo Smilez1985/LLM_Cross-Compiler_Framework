@@ -91,7 +91,8 @@ def read_records(folder: Path) -> List[Dict[str, Any]]:
 
 
 def prune(folder: Path, keep: int = KEEP_FINISHED) -> None:
-    """Removes the oldest finished records beyond `keep`; unfinished ones stay."""
+    """Removes the oldest finished records beyond `keep`; records of builds that still run stay. An interrupted
+    build (its process has ended) counts as finished, so records of crashed programs do not pile up."""
     if not folder.is_dir():
         return
     finished = []
@@ -100,7 +101,7 @@ def prune(folder: Path, keep: int = KEEP_FINISHED) -> None:
             data = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             continue
-        if isinstance(data, dict) and data.get("status") in FINISHED:
+        if isinstance(data, dict) and (data.get("status") in FINISHED or not is_alive(data)):
             finished.append((str(data.get("started") or ""), path))
     finished.sort(reverse=True)
     for _, path in finished[keep:]:
