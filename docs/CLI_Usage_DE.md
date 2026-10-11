@@ -123,6 +123,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `ditto ask` | Ditto eine Frage stellen |
 | `ditto eval` | Ditto anhand fester Testfälle bewerten, oder die Suche der Wissensbasis |
 | `ditto runtime install/start/status/stop` | Der verwaltete lokale Modellserver (llama.cpp) für den Offline-Modus |
+| `ditto runtime export-source/import-source` | Den festgelegten llama.cpp-Quelltext als Git-Bundle auf einen Rechner ohne Netz tragen (am Commit geprüft) |
 | `ditto models list/download` | Die Modellstufen für den Offline-Modus |
 | `tools list` / `tools permissions` / `tools audit` | Die Tools des Frameworks, ihre Berechtigungen und das Audit-Log |
 | `mcp serve` / `mcp config` | Den MCP-Server betreiben / zeigen, wie man KI-Clients verbindet |
@@ -699,6 +700,46 @@ llm-cli ditto runtime install -y
 llm-cli ditto models download -y
 llm-cli ditto runtime start --model small --sleep-idle 0
 llm-cli ditto runtime stop
+```
+
+#### ditto runtime export-source
+
+```
+llm-cli ditto runtime export-source DATEI [--mirror URL] [-y]
+```
+
+Schreibt den festgelegten llama.cpp-Quelltext (den Commit in `configs/llama_runtime.yml`, `llama_cpp.source`) als
+Git-Bundle nach `DATEI`, dazu `DATEI.json` mit dem Commit, dem Tag, Größe und SHA256 des Bundles und der
+Framework-Version. Beide Dateien werden auf einen Rechner ohne Internetzugang getragen und dort importiert. Liegt der
+Quelltext noch nicht im Zwischenspeicher, wird er zuerst geholt (etwa 40 MB Download, 215 MB auf der Platte): per
+Commit (über seinen Tag nur, wenn der Server das Holen per Commit ablehnt), und in jedem Fall muss
+`git rev-parse HEAD` den festgelegten Commit zurückgeben. Der geprüfte Baum bleibt schreibgeschützt in
+`~/.llm-framework/runtime/llama.cpp/src/<commit>/`; spätere Läufe prüfen, dass darin nichts geändert oder
+hinzugefügt wurde (auch keine Dateien, die Git ignoriert), und brauchen kein Netz. Eine relative `DATEI` gilt relativ
+zum aktuellen Ordner. Braucht `git`.
+
+| Option | Bedeutung |
+|---|---|
+| `--mirror URL` | Von diesem Spiegel holen statt aus dem festgelegten Repository. Der Commit wird genauso geprüft. |
+| `-y, --yes` | Ohne Nachfrage holen, wenn der Quelltext noch nicht im Zwischenspeicher liegt. |
+
+#### ditto runtime import-source
+
+```
+llm-cli ditto runtime import-source DATEI
+```
+
+Importiert den festgelegten llama.cpp-Quelltext aus einem Bundle von `export-source` nach
+`~/.llm-framework/runtime/llama.cpp/src/<commit>/`. Git prüft jedes Objekt an seinem Hash, und der ausgecheckte
+Commit muss der festgelegte sein, egal wer das Bundle mit welcher Git-Version erstellt hat. Ein Bundle mit einem
+anderen Commit, ein Bundle, das nicht zu seiner `DATEI.json` passt (Größe oder SHA256), und ein beschädigtes Bundle
+werden abgelehnt. Braucht `git` auch auf dem Rechner ohne Netz.
+
+```bash
+# Rechner mit Internet
+llm-cli ditto runtime export-source llama.cpp-source.bundle -y
+# Rechner ohne Netz (vorher llama.cpp-source.bundle und llama.cpp-source.bundle.json kopieren)
+llm-cli ditto runtime import-source llama.cpp-source.bundle
 ```
 
 ### ditto models

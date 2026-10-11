@@ -1,0 +1,116 @@
+{
+  "backend": "cpu",
+  "build_id": "bc718aeb046c6d658361d8bdf9789cc5920100eba005388dbdf7259ae52dfb0d",
+  "builder": {
+    "base": "debian-11",
+    "gcc": "10.2",
+    "image": "debian:11-slim@sha256:e5b6442dd2e9684cf5e87d8338b5968f3b348636fc0be6d7850a381e3731a2bd",
+    "kind": "container",
+    "libc": "glibc",
+    "libc_version": "2.31"
+  },
+  "notes": [
+    "backend cpu: CPU build",
+    "debian-11 has GCC 10.2, below upstream's oldest tested compiler (GCC 11); whether the pin builds with it is unverified"
+  ],
+  "placement": "cross",
+  "purpose": "device-runtime",
+  "recipe_version": 1,
+  "source": {
+    "build_number": 11429,
+    "commit": "d81235049384534c167caea52b85a694f6103d14",
+    "repo": "https://github.com/ggml-org/llama.cpp.git",
+    "tag": "b11429"
+  },
+  "steps": [
+    {
+      "compiler": "gcc",
+      "generator": "Ninja",
+      "name": "main",
+      "options": {
+        "BUILD_SHARED_LIBS": "OFF",
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_BUILD_WITH_INSTALL_RPATH": "ON",
+        "CMAKE_EXE_LINKER_FLAGS": "-static-libstdc++ -static-libgcc",
+        "CMAKE_INSTALL_RPATH": "$ORIGIN;$ORIGIN/../lib",
+        "FETCHCONTENT_FULLY_DISCONNECTED": "ON",
+        "GGML_AMX_BF16": "OFF",
+        "GGML_AMX_INT8": "OFF",
+        "GGML_AMX_TILE": "OFF",
+        "GGML_AVX": "ON",
+        "GGML_AVX2": "OFF",
+        "GGML_AVX512": "OFF",
+        "GGML_AVX512_BF16": "OFF",
+        "GGML_AVX512_VBMI": "OFF",
+        "GGML_AVX512_VNNI": "OFF",
+        "GGML_AVX_VNNI": "OFF",
+        "GGML_BMI2": "OFF",
+        "GGML_CCACHE": "OFF",
+        "GGML_CPU_KLEIDIAI": "OFF",
+        "GGML_CUDA": "OFF",
+        "GGML_F16C": "ON",
+        "GGML_FMA": "OFF",
+        "GGML_HIP": "OFF",
+        "GGML_METAL": "OFF",
+        "GGML_NATIVE": "OFF",
+        "GGML_OPENMP": "ON",
+        "GGML_OPENMP_FETCH": "OFF",
+        "GGML_SSE42": "ON",
+        "GGML_VULKAN": "OFF",
+        "LLAMA_BUILD_APP": "OFF",
+        "LLAMA_BUILD_COMMIT": "d8123504",
+        "LLAMA_BUILD_COMMON": "ON",
+        "LLAMA_BUILD_EXAMPLES": "OFF",
+        "LLAMA_BUILD_NUMBER": "11429",
+        "LLAMA_BUILD_SERVER": "ON",
+        "LLAMA_BUILD_TESTS": "OFF",
+        "LLAMA_BUILD_TOOLS": "ON",
+        "LLAMA_BUILD_UI": "OFF",
+        "LLAMA_LLGUIDANCE": "OFF",
+        "LLAMA_OPENSSL": "OFF",
+        "LLAMA_SUBPROCESS": "OFF",
+        "LLAMA_USE_PREBUILT_UI": "OFF"
+      },
+      "targets": [
+        "llama-server",
+        "llama-cli",
+        "llama-bench",
+        "llama-perplexity"
+      ],
+      "toolchain_file": null
+    }
+  ],
+  "target": {
+    "arch": "x86_64",
+    "libc": "glibc",
+    "libc_version": "2.31",
+    "os": "linux",
+    "triple": "x86_64-linux-gnu"
+  },
+  "toolchain": {
+    "cmake": "3.25.1"
+  },
+  "verify": {
+    "binaries": [
+      "llama-server",
+      "llama-cli",
+      "llama-bench",
+      "llama-perplexity"
+    ],
+    "compile_check_flags": [
+      "-msse4.2",
+      "-mf16c",
+      "-mavx"
+    ],
+    "devices": [],
+    "glibc_max": "2.31",
+    "runtime_libs": [
+      "libgomp.so.1"
+    ],
+    "static_libstdcxx": true,
+    "version": {
+      "build_number": 11429,
+      "commit": "d8123504"
+    }
+  }
+}

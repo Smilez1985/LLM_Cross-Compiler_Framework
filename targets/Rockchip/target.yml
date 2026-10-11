@@ -79,7 +79,7 @@ docker:
   
   # Build arguments
   build_args:
-    LLAMA_CPP_TAG: "v0.6.0"
+    LLAMA_CPP_TAG: "b11429"   # the llama.cpp pin of configs/llama_runtime.yml (llama_cpp.source.tag)
     BUILD_JOBS: "4"
     PYTHON_VERSION: "3.11"
     

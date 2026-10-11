@@ -93,7 +93,7 @@ inference_backends:
   # --- CPU-Optimized (Universal) ---
   llama_cpp:
     repo_url: "https://github.com/ggerganov/llama.cpp"
-    commit: "b4009"
+    commit: "b11429"
     docs_workflow: "https://github.com/ggerganov/llama.cpp/blob/master/docs/build.md"
     docs_quantization: "https://github.com/ggerganov/llama.cpp/blob/master/examples/quantize/README.md"
     docs_backend_guide: "https://github.com/ggerganov/llama.cpp/blob/master/docs/backend.md"

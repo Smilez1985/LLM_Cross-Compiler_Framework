@@ -340,7 +340,7 @@ Build-Argumente, die die Engine übergibt:
 
 | Argument | Wert |
 |---|---|
-| `LLAMA_CPP_TAG` | die Einstellung `llama_cpp_version` (Vorgabe `v0.6.0`) |
+| `LLAMA_CPP_TAG` | die Einstellung `llama_cpp_version` (Vorgabe: der Tag des llama.cpp-Pins in `configs/llama_runtime.yml`, `b11429`) |
 | `BUILD_JOBS` | die Einstellung `build_jobs`, nur wenn sie größer als 0 ist; das Self-Healing senkt sie auf 1, wenn einem Compiler der Speicher ausging |
 | `USER_ID`, `GROUP_ID` | die IDs des Host-Benutzers (Linux und macOS, wenn der Host-Benutzer nicht root ist) |
 
