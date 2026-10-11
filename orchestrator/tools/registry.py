@@ -24,6 +24,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tupl
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from orchestrator.tools.audit import AuditLog
+from orchestrator.tools.limits import Limiter, wait_text
 from orchestrator.tools.confirmation import MAX_FRAMEWORK, CallTooLong, describe_call
 from orchestrator.tools.normalize import (NormalizeError, Repair, check_names_distinct, list_item_literal,
                                           normalize_arguments, resolve_name)
@@ -31,7 +32,8 @@ from orchestrator.tools.output import UNTRUSTED_CHARS, ResultTooLarge, check_siz
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStore, TokenStoreError
 from orchestrator.tools.policy import (TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier,
                                        restrictive_policy, stricter)
-from orchestrator.tools.spec import CHANNELS, CallFacts, FieldMeta, GrantRule, ToolLimits, example_problems
+from orchestrator.tools.spec import (CHANNELS, DAY, LIMITS, CallerLimits, CallFacts, FieldMeta, GrantRule,
+                                     ToolLimits, example_problems)
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.untrusted import sanitize_untrusted
@@ -242,6 +244,8 @@ class ToolContext:
     facts: Optional[CallFacts] = None
     # Progress for the caller while the handler runs: report_progress(done, total, message); None: nobody listens.
     report_progress: Optional[Callable[..., Any]] = None
+    # The MCP server counted this call against the limits already (before its question); call() does not again.
+    limits_checked: bool = False
 
     @property
     def owner(self) -> str:
@@ -334,13 +338,22 @@ def repair_marks(repairs: List[Repair]) -> Tuple[Dict[str, str], str]:
     return marks, renamed
 
 
+def _minutes(seconds: float) -> str:
+    minutes = max(1, int(round(seconds / 60)))
+    return f"{minutes} minute{'s' if minutes != 1 else ''}"
+
+
 class ToolRegistry:
     def __init__(self, policy_store: PolicyStore, audit: Optional[AuditLog] = None,
-                 tokens: Optional[TokenStore] = None):
+                 tokens: Optional[TokenStore] = None, limits: CallerLimits = LIMITS,
+                 clock: Optional[Callable[[], float]] = None):
         self.logger = get_logger("ToolRegistry")
         self.policy_store = policy_store
         self.audit = audit
         self.tokens = tokens  # named MCP tokens, each with its own policy
+        # The registry-wide rows of the limits table and the per-client counters (rates, quotas, questions, "no").
+        self.limits = limits
+        self.limiter = Limiter(clock or time.monotonic)
         self._tools: Dict[str, ToolSpec] = {}
         # Repeat guard and per-session counters (in memory; per caller and session).
         self._guard_lock = threading.Lock()
@@ -605,6 +618,84 @@ class ToolRegistry:
         refuse_repeat(key)  # a call that already failed twice after validation: refused before any question
         return Prepared(spec, args, inp, work.repairs, key)
 
+    def enforce_limits(self, prepared: Prepared, ctx: ToolContext) -> None:
+        """The rate and quotas of the limits table for this caller (design 6.5), checked after validation and before
+        the policy and any question: the read rate (read tools together) or the tool's own rate, its unfinished runs
+        (start_build: 3 builds per client) and its runs per day (start_build: 20). A limit hit is audited
+        (`rate_limited`, reason code `limit_reached`) and says when to try again; it never counts as a failed call
+        for the repeat guard."""
+        spec, limits = prepared.spec, prepared.spec.limits
+        problem: Optional[Tuple[str, Optional[float]]] = None
+        rate = limits.rate or (self.limits.read_rate if spec.tier == ToolTier.READ else None)
+        if rate is not None:
+            wait = self.limiter.take(("rate", ctx.actor, spec.name if limits.rate else "read"), rate.count,
+                                     rate.per, rate.burst)
+            if wait is not None:
+                noun = f"calls of '{spec.title}'" if limits.rate else "read tool calls"
+                problem = (f"This client made too many {noun} (at most {rate.count} per {rate.per:g} seconds).", wait)
+        if problem is None and limits.concurrent and limits.running is not None:
+            try:
+                running = int(limits.running(ctx))
+            except Exception as e:  # noqa: BLE001 - nothing to count is no reason to refuse
+                self.logger.warning(f"Counting the unfinished {limits.what} of {ctx.actor} failed: {e}")
+                running = 0
+            if running >= limits.concurrent:
+                problem = (f"This client already has {running} unfinished {limits.what} (at most "
+                           f"{limits.concurrent} at a time).", None)
+        if problem is None and limits.per_day:
+            wait = self.limiter.full(("day", ctx.actor, spec.name), limits.per_day, DAY)
+            if wait is not None:
+                problem = (f"This client started {limits.per_day} {limits.what} in the last 24 hours, the most a day "
+                           "allows.", wait)
+        if problem is None:
+            return
+        message, wait = problem
+        message += f" Try again {wait_text(wait)}." if wait is not None else " Try again when one of them has ended."
+        error = ToolError(message, code="limit_reached",
+                          next="Wait, then call it again; tell the person if they are waiting for it.")
+        self._audit(ctx, spec, self.decide(spec, caller=ctx.actor), "rate_limited", prepared.arguments,
+                    detail=message, reason_code="limit_reached")
+        raise error
+
+    def question_refusal(self, spec: ToolSpec, inp: Optional[BaseModel], ctx: ToolContext) -> Optional[ToolError]:
+        """Why a question about this call must not be put to the person now (design 6.5, U8), or None: they said no
+        to this exact call (same tool, same normalized arguments, so a respelled call counts as the same) less than
+        10 minutes ago; they said no to this tool three times within 30 minutes (its questions pause for 30
+        minutes); or this client already asked 30 questions in the last hour."""
+        limits = self.limits
+        key = _args_key(inp.model_dump(mode="json")) if inp is not None else ""
+        number, since, _ = self.limiter.count(("no", ctx.actor, spec.name, key), limits.decline_cooldown)
+        if number:
+            return ToolError(f"The person declined this exact call of '{spec.title}' {_minutes(since)} ago; it is not "
+                             f"asked again for another {_minutes(limits.decline_cooldown - since)}.", code="declined",
+                             next="Do not retry it unless the person asks for it; tell them what you wanted to do.")
+        number, since, _ = self.limiter.count(("pause", ctx.actor, spec.name), limits.decline_pause)
+        if number:
+            return ToolError(f"The person declined '{spec.title}' {limits.declines_to_pause} times within "
+                             f"{_minutes(limits.decline_window)}; questions about it are paused for another "
+                             f"{_minutes(limits.decline_pause - since)}.", code="declined",
+                             next="Do not call it again now; ask the person in your answer what they want instead.")
+        wait = self.limiter.full(("questions", ctx.actor), limits.questions_per_hour, 3600.0)
+        if wait is not None:
+            return ToolError(f"This client already asked the person {limits.questions_per_hour} questions in the last "
+                             f"hour, the most allowed. Try again {wait_text(wait)}.", code="limit_reached",
+                             next="Tell the person what you would like to do instead of asking again now.")
+        return None
+
+    def asked(self, ctx: ToolContext) -> None:
+        """Counts a question put to the person (questions per hour per client)."""
+        self.limiter.add(("questions", ctx.actor), 3600.0)
+
+    def declined(self, spec: ToolSpec, inp: BaseModel, ctx: ToolContext) -> None:
+        """Records a person's "no" for the cooldown of this exact call and the pause of the tool."""
+        limits = self.limits
+        self.limiter.add(("no", ctx.actor, spec.name, _args_key(inp.model_dump(mode="json"))),
+                         limits.decline_cooldown)
+        self.limiter.add(("no", ctx.actor, spec.name), limits.decline_window)
+        if self.limiter.count(("no", ctx.actor, spec.name), limits.decline_window)[0] >= limits.declines_to_pause:
+            self.limiter.clear(("no", ctx.actor, spec.name))  # the pause starts now; later "no" count anew
+            self.limiter.add(("pause", ctx.actor, spec.name), limits.decline_pause)
+
     def _session(self, ctx: ToolContext) -> Dict[str, int]:
         key = (ctx.actor, ctx.session)
         counts = self._sessions.pop(key, None) or {"input_errors": 0, "unknown_ids": 0}
@@ -632,11 +723,14 @@ class ToolRegistry:
         if error.code == "waiting_for_approval":
             return error
         key = (ctx.actor, ctx.session, tool, _args_key(arguments))
+        now = self.limiter.clock()
         with self._guard_lock:
             record = self._failures.pop(key, None)
-            if record is None or record["code"] != error.code:
+            if (record is None or record["code"] != error.code
+                    or now - record["at"] >= self.limits.repeat_cooldown):  # long ago: a new first failure
                 record = {"code": error.code, "count": 0, "message": error.message, "quoted": error.quoted}
             record["count"] += 1
+            record["at"] = now
             self._failures[key] = record
             while len(self._failures) > GUARD_SIZE:
                 self._failures.popitem(last=False)
@@ -655,16 +749,24 @@ class ToolRegistry:
         return error.with_text(message, next_step)
 
     def _repeat_refusal(self, ctx: ToolContext, tool: str, arguments: Any) -> Optional[ToolError]:
-        """The refusal for a call that already failed twice in this session, None otherwise."""
+        """The refusal for a call that already failed twice in this session, None otherwise. Time-based: once the
+        last failure is `repeat_cooldown` old (10 minutes), the call may run again (the build it waited for may have
+        ended); the refusal itself never extends the time."""
         key = (ctx.actor, ctx.session, tool, _args_key(arguments))
+        now = self.limiter.clock()
         with self._guard_lock:
             record = self._failures.get(key)
+            if record is not None and now - record["at"] >= self.limits.repeat_cooldown:
+                del self._failures[key]
+                record = None
         if record is None or record["count"] < 2:
             return None
         reason = record["message"][len(REPEAT_WARN):] if record["message"].startswith(REPEAT_WARN) else \
             record["message"]
+        left = self.limits.repeat_cooldown - (now - record["at"])
         return ToolError(f"Stop retrying this call. Tell the user why it failed: {reason}", code="repeat_refused",
-                         quoted=record.get("quoted", ""))
+                         next=f"This exact call is refused for another {_minutes(left)}; until then answer the user "
+                              "instead of calling it again.", quoted=record.get("quoted", ""))
 
     def _succeeded(self, ctx: ToolContext, tool: str, arguments: Any) -> None:
         with self._guard_lock:
@@ -692,6 +794,7 @@ class ToolRegistry:
         self._audit(ctx, spec, self.decide(spec, caller=ctx.actor), "confirmation_requested", arguments,
                     required=spec.tier != ToolTier.READ, confirm_channel=ctx.confirm_channel or "elicitation",
                     question_sha256=digest)
+        self.asked(ctx)
         return digest
 
     @staticmethod
@@ -778,6 +881,8 @@ class ToolRegistry:
         to. Reads stay available when the audit log cannot be written (the failure is logged)."""
         began = time.monotonic()
         prepared = self.prepare(name, arguments, ctx)
+        if not ctx.limits_checked:  # the MCP server counts a call before its question
+            self.enforce_limits(prepared, dataclasses.replace(ctx, repairs=prepared.repairs))
         spec, inp, arguments = prepared.spec, prepared.input, prepared.arguments
         # per call: Ditto reuses one context
         ctx = dataclasses.replace(ctx, repairs=prepared.repairs, notes=[])
@@ -815,6 +920,11 @@ class ToolRegistry:
         if decision == Decision.ASK or approved is False:
             if approved is None and ctx.confirm is not None:
                 channel = getattr(ctx.confirm, "confirm_channel", "framework")
+                refusal = self.question_refusal(spec, inp, ctx)  # a recent "no", a paused tool, too many questions
+                if refusal is not None:
+                    self._audit(ctx, spec, decision, "rate_limited", arguments, detail=refusal.message,
+                                reason_code=refusal.code)
+                    raise refusal
                 try:
                     text = self.question_text(spec, inp.model_dump(mode="json"), ctx, ctx.facts, MAX_FRAMEWORK)
                 except CallTooLong as e:  # nobody could be shown it: not a person's "no"
@@ -827,6 +937,7 @@ class ToolRegistry:
                 # Recorded before it is asked; a question about a change that cannot be recorded is not asked.
                 self._audit(ctx, spec, decision, "confirmation_requested", arguments, required=writes,
                             confirm_channel=channel, question_sha256=question)
+                self.asked(ctx)
                 token = _QUESTION.set(text)
                 try:
                     approved = bool(ctx.confirm(spec, inp))
@@ -836,6 +947,8 @@ class ToolRegistry:
             if not approved:
                 # approved stays None when nobody could be asked; False is a person's "no"
                 code = "declined" if approved is False else "needs_person"
+                if approved is False and (answer or "declined") == "declined":  # not a dismissed dialog
+                    self.declined(spec, inp, ctx)
                 self._audit(ctx, spec, decision, "not_confirmed", arguments, approved=approved,
                             confirm_channel=channel or "none", question_sha256=question,
                             answer=answer or ("declined" if approved is False else "unavailable"), reason_code=code)
@@ -853,6 +966,8 @@ class ToolRegistry:
             self._audit(ctx, spec, decision, "cancelled", arguments, approved=approved, links=links,
                         detail="Cancelled before it started.", reason_code="failed", **confirmation)
             raise ToolError(f"'{spec.title}' was cancelled before it started.")
+        if spec.limits.per_day:  # a run counts toward the tool's quota per day once it really starts
+            self.limiter.add(("day", ctx.actor, spec.name), DAY)
 
         def end(outcome: str, detail: str = "", result: Any = None, reason_code: str = "") -> None:
             if ctx.cancel.is_set():
