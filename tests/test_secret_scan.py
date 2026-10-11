@@ -555,6 +555,96 @@ def test_the_allowlist_never_silences_the_other_rules(repo):
     assert secret_scan.main(["--repo", str(repo), "--history"]) == 1
 
 
+GH_MOCK, HF_MOCK = HISTORY_MOCKS["GitHub token"], HISTORY_MOCKS["Hugging Face token"]
+# A value of another exact format that holds a listed mock: GitHub blocks it as that format, so it is no mock.
+AROUND_A_MOCK = [
+    ("PyPI token", "pypi" + "-" * 51 + GH_MOCK + "-" * 5),
+    ("PyPI token", "pypi" + "-" * 51 + HF_MOCK + "-" * 5),
+    ("Anthropic key", "sk-ant-" + "api03-" + "-" * 52 + GH_MOCK + "-" + "AA"),
+    ("xAI key", "xa" + "i-" + GH_MOCK + "_" + "x" * 39),
+    ("OpenAI key", "sk-" + "proj-" + "-" * 33 + GH_MOCK + "-" + "T3Blbk" + "FJ" + "x" * 74),
+    ("GitLab token", "glp" + "at-" + "-" + GH_MOCK + "-" + "." + "0" * 9),
+    ("Slack token", "xo" + "xb-" + "1234567890-1234567890-" + GH_MOCK),  # ends inside the mock
+]
+
+
+@pytest.mark.parametrize("kind, value", AROUND_A_MOCK)
+def test_a_listed_mock_hides_no_longer_value_of_another_format_around_it(repo, kind, value):
+    regex = next(f.regex for f in secret_patterns.EXACT_FORMATS if f.name == kind)
+    match = regex.search(value)
+    mock = GH_MOCK if GH_MOCK in value else HF_MOCK
+    start = value.index(mock)
+    assert match and match.start() < start + len(mock) and start < match.end(), "the value overlaps the mock"
+    allowed = frozenset(secret_scan.digest(v) for v in HISTORY_MOCKS.values())
+    findings = secret_scan.scan_text("f.py", f'V = "{value}"', allowed=allowed)
+    assert (kind, True) in [(f.kind, f.exact) for f in findings if not f.allowed]
+    allow(repo, *HISTORY_MOCKS.values())
+    commit(repo, "test_old.py", f'V = "{value}"\n')
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 1
+
+
+NEXT_TO_A_MOCK = [  # a real-looking value in one match of an ordinary rule with a mock, which makes it a placeholder
+    ("URL with password", "https://deploy:" + GH_MOCK + "-" + body(16, seed=11) + "@registry.internal.corp"),
+    ("URL with password", "https://deploy:" + HF_MOCK + "-" + body(16, seed=12) + "@registry.internal.corp"),
+    ("Anthropic key", "sk-ant-" + "api03-" + GH_MOCK + "-" + body(40, seed=13)),
+    ("secret assignment", 'client_secret = "' + GH_MOCK + "-" + body(30, seed=14) + '"'),
+]
+
+
+@pytest.mark.parametrize("kind, line", NEXT_TO_A_MOCK)
+def test_a_listed_mock_does_not_make_a_value_next_to_it_a_placeholder(repo, kind, line):
+    assert [f.kind for f in secret_scan.scan_text("f.py", line) if not f.exact] == [], "only the mock is reported"
+    allowed = frozenset(secret_scan.digest(v) for v in HISTORY_MOCKS.values())
+    findings = secret_scan.scan_text("f.py", line, allowed=allowed)
+    assert [(f.kind, f.exact) for f in findings if not f.allowed] == [(kind, False)]
+    allow(repo, *HISTORY_MOCKS.values())
+    commit(repo, "test_old.py", line + "\n")
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 1
+
+
+def test_a_listed_value_hides_no_value_of_its_own_format_inside_it():
+    # Not so for the two mocks (no format can start inside them), but for any value the list may name.
+    inner = "xo" + "xp-" + "1234567890-1234567890-" + "z" * 8
+    outer = "xo" + "xb-" + "1234567890-1234567890-" + inner
+    assert secret_patterns.find_exact_formats(outer) == [("Slack token", outer)]
+    findings = secret_scan.scan_text("f.py", outer, allowed={secret_scan.digest(outer)})
+    assert [(f.kind, f.sample, f.allowed) for f in findings] == [
+        ("Slack token", secret_scan.redact(outer), True), ("Slack token", secret_scan.redact(inner), False)]
+
+
+def test_the_old_lines_with_the_mocks_hold_nothing_else():
+    # The lines the history holds (old tests/test_security.py and tests/test_cli_builds.py): reading them without
+    # the mock finds nothing, so --history passes on them.
+    allowed = frozenset(secret_scan.digest(v) for v in HISTORY_MOCKS.values())
+    for line in (f'        ("{GH_MOCK}", "gh-REDACTED"),', f'            RuntimeError("token {HF_MOCK} broke it")))'):
+        assert [f.allowed for f in secret_scan.scan_text("f.py", line, allowed=allowed)] == [True]
+
+
+@pytest.mark.parametrize("text", ["pypi" + "-pypi" * 20000, "glp" + "at-" * 20000, "xo" + "xb-1234567890-" * 8000,
+                                  "sk-ant-" + "api03-sk-ant-" * 8000, "sk-" + "proj-sk-" * 15000])
+def test_a_line_with_a_listed_mock_stays_fast(text):
+    allowed = frozenset(secret_scan.digest(v) for v in HISTORY_MOCKS.values())
+    line = f"{GH_MOCK} {text}-{GH_MOCK}-{HF_MOCK} {text}"
+    start = time.perf_counter()
+    secret_scan.scan_text("f.py", line, allowed=allowed)
+    assert time.perf_counter() - start < 2.0
+
+
+def test_a_digest_of_a_part_or_a_framing_of_a_value_allows_nothing(repo):
+    # Only the digest of exactly the value counts: not of a prefix, a suffix, the value in quotes or with a line
+    # break, in upper case, or in another encoding.
+    values = list(HISTORY_MOCKS.values()) + ["gh" + "s_" + "x" * 36]
+    near = [v for value in values for v in (value[:-1], value[1:], f'"{value}"', value + "\n", " " + value,
+                                             value.upper(), value + "_")]
+    lines = ["# documented test mocks"] + [f"{secret_scan.digest(v)}  near the value, not the value" for v in near]
+    lines += [hashlib.sha256(value.encode("utf-16")).hexdigest() + "  other encoding" for value in values]
+    (repo / secret_scan.ALLOWLIST).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    commit(repo, "test_old.py", "".join(f'V{i} = "{value}"\n' for i, value in enumerate(values)))
+    findings = secret_scan.scan_revs(repo, ["--all"], [], secret_scan.load_allowlist(repo))
+    assert [(f.line, f.exact, f.allowed) for f in findings] == [(n, True, False) for n in (1, 2, 3)]
+    assert secret_scan.main(["--repo", str(repo), "--history"]) == 1
+
+
 DIGEST = secret_scan.digest("not a token")
 MALFORMED_LINES = [
     DIGEST.upper() + "  upper-case digits",
@@ -571,6 +661,13 @@ MALFORMED_LINES = [
     " # an indented comment",
     HISTORY_MOCKS["GitHub token"] + "  the value instead of its digest",
     secret_scan.digest(HISTORY_MOCKS["GitHub token"]) + "  " + "x" * 4 + "\n" + "*",  # a valid entry, then junk
+    # A character a viewer may show as nothing or that other tools take as a line break: what looks like one comment
+    # line to a reviewer must never hold an entry for the scan.
+    *("# removed:" + sep + secret_scan.digest(HISTORY_MOCKS["GitHub token"]) + "  hidden entry"
+      for sep in ("\r", "\x0b", "\x0c", "\x1c", "\x1d", "\x1e", "\x85", " ", " ")),
+    DIGEST + "  a note\x00 with a control character",
+    "﻿# a byte order mark",
+    DIGEST + "  zero​width space",
 ]
 
 
@@ -597,6 +694,14 @@ def test_the_allowlist_takes_comments_blank_lines_and_crlf(repo, capsys):
     (repo / secret_scan.ALLOWLIST).write_bytes(first.encode() + b"  note \xff\n")  # not UTF-8
     assert secret_scan.main(["--repo", str(repo), "--history"]) == 2
     assert "cannot read" in capsys.readouterr().err
+
+
+def test_an_allowlist_with_a_byte_order_mark_or_old_mac_line_ends_is_malformed(repo, capsys):
+    entry = f"{secret_scan.digest(GH_MOCK)}  {hint(GH_MOCK)}: a test mock"
+    for text in ("﻿" + entry + "\n", "# comment\r" + entry + "\r"):
+        (repo / secret_scan.ALLOWLIST).write_bytes(text.encode("utf-8"))
+        assert secret_scan.main(["--repo", str(repo), "--history"]) == 2
+        assert f"{secret_scan.ALLOWLIST}:1: malformed line" in capsys.readouterr().err
 
 
 def test_the_repository_allowlist_names_exactly_the_two_history_mocks():

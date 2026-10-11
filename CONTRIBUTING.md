@@ -310,11 +310,14 @@ leaving the value in your shell history:
 python3 -c "import getpass, hashlib; print(hashlib.sha256(getpass.getpass('value: ').encode()).hexdigest())"
 ```
 
-The list applies to `--history` only, and only to exact-format findings: every other mode still reports the value,
-so a new commit that contains it fails, and the other rules (provider keys, local patterns, file names) never look
-at the list, so a real-looking key is reported even if its digest is listed. A malformed line stops the scan in
-every mode (exit code 2), so a typo cannot allow more. Never list a real credential, however old: rotate it and
-rewrite the history ([section 12](#12-if-a-secret-leaked)).
+The list applies to `--history` only, and only to the listed value itself: every other mode still reports it, so
+the git hooks stop a new commit that contains it. A listed value hides nothing else: a longer value of another
+format around it is still reported, and the other rules (provider keys, local patterns, file names) never drop a
+finding because of the list, so a real-looking key is reported even if its digest is listed. They also read the line
+without the listed value, so a value next to a mock cannot pass as a placeholder. A malformed line stops the scan in
+every mode (exit code 2), so a typo cannot allow more; a control, format or line separator character (a lone carriage
+return, a byte order mark, a zero-width space) makes a line malformed too, so a comment cannot hide an entry. Never
+list a real credential, however old: rotate it and rewrite the history ([section 12](#12-if-a-secret-leaked)).
 
 **Personal strings** such as your e-mail address, your user name or host names must not be in the repository
 either, but they cannot be in a public pattern list. Put them into `.git/info/secret-patterns`, which git never
