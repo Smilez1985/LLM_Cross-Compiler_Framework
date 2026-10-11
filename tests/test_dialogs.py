@@ -1275,6 +1275,7 @@ class TestMainWindowWiring:
             assert menus["Tools"] == ["Configure AI Agent (Ditto)...", "Create Hardware Module...",
                                       "Hugging Face Model Browser...",
                                       "Open Community Hub", "Tool Permissions (Ditto / MCP)...",
+                                      "Folders the AI May Use...",
                                       "Spoken Announcements", "Clear Input History..."]
             # The audio switch is a persisted setting, on by default.
             assert win.act_audio.isCheckable() and win.act_audio.isChecked()

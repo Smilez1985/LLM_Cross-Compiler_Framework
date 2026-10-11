@@ -932,6 +932,106 @@ def tools_audit(ctx: FrameworkContext, limit: int, verify: bool, archive: bool):
     console.print(table)
 
 
+@tools.group('folders')
+def tools_folders():
+    """Folders the AI may use for local model and dataset files"""
+    pass
+
+
+def _local_files(ctx: FrameworkContext):
+    from orchestrator.tools.local_files import LocalFiles
+    registry = _tool_registry(ctx)
+    return registry, LocalFiles.for_framework(ctx.framework_manager)
+
+
+def _require_terminal(command: str) -> None:
+    """Changes to what an AI may do are a person's decision: no piped answers (an AI client with a shell)."""
+    if not (sys.stdin is not None and sys.stdin.isatty()):
+        console.print(f"[red]'{escape(command)}' needs a terminal: run it yourself, not through a pipe or an AI "
+                      "client.[/red]")
+        sys.exit(2)
+
+
+@tools_folders.command('list')
+@pass_context
+def tools_folders_list(ctx: FrameworkContext):
+    """The folders AI clients and Ditto may use, with their labels"""
+    _, files = _local_files(ctx)
+    table = Table(title="Folders the AI may use (local files are named <label>:<relative path>)")
+    for column in ("Label", "Kind", "Folder", "Status"):
+        table.add_column(column)
+    for folder in files.folders():
+        status = ("built-in" if folder.builtin else "added") if not folder.problem else \
+            f"[red]not usable: {escape(folder.problem)}[/red]"
+        table.add_row(escape(folder.label), folder.kind, escape(str(folder.path)), status)
+    console.print(table)
+    if files.store is not None and files.store.problem:
+        console.print(f"[red]{escape(files.store.problem)}[/red]")
+
+
+@tools_folders.command('add')
+@click.argument('path', type=click.Path(file_okay=False))
+@click.option('--label', required=True, help="Short name AI clients use for it (lowercase, e.g. 'mymodels')")
+@click.option('--kind', type=click.Choice(['model', 'dataset', 'any']), default='any', show_default=True,
+              help='What the folder holds (shown to AI clients)')
+@pass_context
+def tools_folders_add(ctx: FrameworkContext, path: str, label: str, kind: str):
+    """Let AI clients and Ditto use the model or dataset files in PATH (asks first; needs a terminal). Adding a
+    label again confirms its folder again, for example after a link was changed."""
+    from orchestrator.tools.local_files import FOLDER_WARNING, LocalFileError, record_folder_change
+    _require_terminal("llm-cli tools folders add")
+    registry, files = _local_files(ctx)
+    try:
+        real = files.store.check_new(Path(path), files.data_folders())
+    except LocalFileError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"Folder: {escape(str(real))}\nLabel: {escape(label)} (files are named {escape(label)}:<path>)")
+    console.print(f"[yellow]{escape(FOLDER_WARNING)}[/yellow]")
+    if not click.confirm("Let AI clients and Ditto use the files in this folder?", default=False):
+        console.print("Nothing changed.")
+        sys.exit(1)
+    try:
+        entry = files.store.add(Path(path), label, kind, files.data_folders())
+    except LocalFileError as e:
+        console.print(f"[red]{escape(str(e))}[/red] The folder was not added.")
+        sys.exit(1)
+    try:
+        record_folder_change(registry.audit, "cli", "added", entry)
+    except Exception as e:  # what widens an AI's reach is recorded, or it does not happen
+        files.store.remove(label)
+        console.print(f"[red]The audit log could not record the change ({escape(str(e))}); the folder was not "
+                      "added.[/red]")
+        sys.exit(1)
+    console.print(f"[green]AI clients and Ditto may now use files in {escape(str(real))} as "
+                  f"{escape(label)}:<relative path>.[/green]")
+
+
+@tools_folders.command('remove')
+@click.argument('label')
+@pass_context
+def tools_folders_remove(ctx: FrameworkContext, label: str):
+    """Stop AI clients and Ditto from using the folder LABEL (needs a terminal)"""
+    from orchestrator.tools.local_files import LocalFileError, record_folder_change
+    _require_terminal("llm-cli tools folders remove")
+    registry, files = _local_files(ctx)
+    try:
+        removed = files.store.remove(label)
+    except LocalFileError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if not removed:
+        console.print(f"[red]No added folder is labelled '{escape(label)}'.[/red] The models and datasets folders "
+                      "are settings (models_dir, datasets_dir).")
+        sys.exit(1)
+    try:
+        record_folder_change(registry.audit, "cli", "removed", {"label": label})
+    except Exception as e:
+        console.print(f"[yellow]The folder was removed, but the audit log could not record it: {escape(str(e))}"
+                      "[/yellow]")
+    console.print(f"[green]'{escape(label)}' removed.[/green]")
+
+
 @cli.group()
 def ditto():
     """Ditto, the AI assistant: sign-in (login, logout, auth), questions, evaluation and the local model"""

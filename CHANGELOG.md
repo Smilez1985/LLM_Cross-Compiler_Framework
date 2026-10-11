@@ -200,6 +200,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - `llm-cli secrets set --with-token` reads the value from stdin.
 - **Cancel Build** in the Builder tab: cancels the running build through the build service after a confirmation
   (enabled only while the build the tab started runs); the log says when it has stopped.
+- **Folders the AI may use**: Ditto and MCP clients name a local model or calibration dataset as
+  `<label>:<relative path>` (for example `models:qwen2.5-0.5b-instruct`, `datasets:calib/de.txt`) or by its file id
+  inside the models folder, the new datasets folder (setting `datasets_dir`, next to the models folder by default)
+  or a folder you add with `llm-cli tools folders add|list|remove` (terminal required) or in the GUI (Tools >
+  Folders the AI May Use...). Adding one shows what sharing it means and is audited; `/`, your home folder, a
+  folder containing the per-user folder or a denied folder cannot be added. The Hugging Face cache's `hub` folder
+  may be added; its token files stay denied.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -264,6 +271,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli ditto auth storage --use ...`.
 - Error messages and hints name `llm-cli ditto login <provider>` instead of `llm-cli secrets set <key name>`;
   `llm-cli module generate-ai` uses the stored sign-in and never asks for a key itself.
+- A local model file is mounted into the build containers alone, no longer together with the folder it lies in
+  (a model that needs files next to it, such as ONNX external data, is given as its folder). An RKNN sample list
+  next to a model file now gets its own folder mount.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -466,6 +476,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   key with a space, a line break or an invisible character inside is refused before anything is sent or stored.
 - The Builder log shows every message as plain text, so names from community recipes, Ditto's answers or build
   output cannot render as HTML (links, images, formatting).
+- MCP and Ditto: `start_build` no longer accepts a path for `model` or `dataset_path` (an MCP client could mount
+  any readable file, such as `~/.ssh/id_ed25519`, into a build and read it back through the log). Only references
+  inside the folders the AI may use are accepted; the resolved file must lie inside its folder and outside every
+  denied folder (keys, credentials, the Hugging Face token, the framework's per-user folder, system folders),
+  decided by file identity so a case-insensitive file system cannot hide one. Hard-linked files are refused, a
+  folder is used only strictly below its label folder and without a denied folder or hard-linked file inside, and
+  the file is checked again right before each build container starts. A Hugging Face repo id is no longer looked
+  up as a local path for AI callers.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

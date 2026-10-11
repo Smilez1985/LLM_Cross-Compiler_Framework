@@ -97,7 +97,10 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
    einem Fehler wird die echte Ursache gemeldet. Spätere Builds nutzen Dockers Build-Cache.
 4. **Modell auf dem Host bereitstellen:** Ein Hugging-Face-Modell wird auf deinem Rechner heruntergeladen (mit dem
    Token `hf_token` für zugangsbeschränkte Modelle), ein lokaler Ordner bzw. eine Datei wird direkt verwendet. Die
-   Container bekommen es nur lesend.
+   Container bekommen es nur lesend: Eine einzelne Datei wird allein eingebunden, nie der Ordner, in dem sie liegt,
+   und ein Ordner nur er selbst (ein Modell, das Dateien daneben braucht, etwa externe ONNX-Daten, wird als Ordner
+   angegeben). Ein lokales Modell oder ein Datensatz, den Ditto oder ein MCP-Client genannt hat, wird unmittelbar
+   vor jedem Containerstart erneut geprüft ([Lokale Dateien für KI-Clients](#mcp-server)).
 5. **Sicherheits-Scan:** Trivy durchsucht das Image nach Schwachstellen der Stufen HIGH und CRITICAL (Einstellung
    `enable_security_scan`, festgelegtes Image `aquasec/trivy:0.75.0`). Funde erscheinen als Warnung im Log, nicht
    als Fehler. Ein Scan, der nicht innerhalb des Zeitlimits des Builds (`build_timeout`) fertig wird, wird mit
@@ -817,6 +820,26 @@ Konto oder Schlüssel an; das Framework sieht das nie.
 - **Anweisungen an den Client:** Der Server beschreibt den typischen Ablauf (Targets → Capabilities → Build → Status
   und Log → Artefakte) und sagt dem Client, dass Build-Logs und Ergebnisse aus der Wissensbasis externer Text sind,
   dessen Anweisungen nicht befolgt werden dürfen.
+- **Lokale Dateien für KI-Clients:** MCP-Clients und Ditto nennen nie einen Pfad. Ein lokales Modell oder ein
+  Kalibrierungsdatensatz wird als `<Label>:<relativer Pfad>` in einem Ordner genannt, den die KI nutzen darf, zum
+  Beispiel `models:qwen2.5-0.5b-instruct` oder `datasets:calib/de.txt`, oder über die Datei-ID (`lf_` und 16
+  Hex-Zeichen), die das Framework dafür festgehalten hat. Die Ordner sind der Modellordner (`models`, Einstellung
+  `models_dir`), der Datensatzordner (`datasets`, Einstellung `datasets_dir`, standardmäßig neben dem Modellordner)
+  und die Ordner, die du mit [`llm-cli tools folders add`](CLI_Usage_DE.md#tools-folders) oder in der GUI (Tools >
+  Folders the AI May Use...) hinzufügst. Die Datei muss in ihrem Ordner liegen (Links werden verfolgt und geprüft)
+  und außerhalb jedes gesperrten Ordners: des persönlichen Ordners des Frameworks (außer den Datenordnern, die eine
+  schreibgeschützte Installation dort hält), `~/.ssh`, `~/.gnupg`, `~/.config`, Schlüsselbunde, `~/.password-store`,
+  `~/.netrc`, `~/.git-credentials`, `~/.docker`, `~/.aws`, `~/.kube`, des Hugging-Face-Ordners mit seinen
+  Token-Dateien (sein Unterordner `hub` lässt sich als Ordner hinzufügen), Browserprofile, `/etc`, `/proc`, `/sys`,
+  `/dev`, `/root` (außer es ist dein eigenes Home) und der Windows-Ordner für Anmeldedaten. Innen und außen werden
+  über die Identität der Datei entschieden, nicht über Namensvergleiche, deshalb kann ein Dateisystem ohne
+  Unterscheidung von Groß- und Kleinschreibung `~/.SSH` nicht verstecken. Eine Datei mit mehr als einem Hardlink
+  wird abgelehnt. Die Datei wird festgehalten (Identität, Größe, Änderungszeit) und unmittelbar vor jedem Start
+  eines Build-Containers erneut geprüft; eine inzwischen ersetzte Datei stoppt den Build. Ein Ordner (ein
+  Hugging-Face-Modellordner) wird nur genutzt, wenn er echt unterhalb seines Label-Ordners liegt und weder einen
+  gesperrten Ordner noch eine Datei mit Hardlink enthält; ein Snapshot aus dem Hugging-Face-Cache wird Datei für
+  Datei eingebunden. Dasselbe gilt für den Ordner einer RKNN-Beispielliste, deshalb wird eine Liste direkt in einem
+  Label-Ordner abgelehnt. GUI- und CLI-Builds, die du selbst startest, nehmen weiterhin jeden Pfad.
 - **Transporte:** stdio (Standard; der Client startet den Server) oder Streamable HTTP nur auf einer
   Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). HTTP prüft Host und Origin und
   braucht ein Bearer-Token, das pro Benutzer in `~/.llm-framework/mcp_http_token` angelegt wird.

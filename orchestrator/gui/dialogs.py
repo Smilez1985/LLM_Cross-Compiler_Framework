@@ -979,6 +979,119 @@ class ToolPermissionsDialog(QDialog):
         self.accept()
 
 
+class AIFoldersDialog(QDialog):
+    """
+    "Folders the AI may use": besides the models and datasets folders, the folders whose model and dataset files
+    Ditto and MCP clients may name as <label>:<relative path>. Only a person adds or removes them, here or with
+    `llm-cli tools folders`; every change is audited with actor `gui`.
+    """
+    def __init__(self, framework, registry=None, parent=None):
+        super().__init__(parent)
+        from orchestrator.tools.local_files import LocalFiles
+        self.registry = registry
+        self.files = LocalFiles.for_framework(framework)
+        self.setWindowTitle("Folders the AI may use")
+        self.resize(760, 420)
+        layout = QVBoxLayout(self)
+        intro = QLabel("Ditto and AI clients connected over MCP never name a path: they use a model or dataset file "
+                       "as <label>:<relative path> inside one of these folders. Keys, credentials and the "
+                       "framework's own folder are refused even inside them.")
+        intro.setWordWrap(True)
+        layout.addWidget(intro)
+        self.table = QTableWidget(0, 4)
+        self.table.setHorizontalHeaderLabels(["Label", "Kind", "Folder", "Status"])
+        self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        layout.addWidget(self.table)
+        row = QHBoxLayout()
+        self.add_button = QPushButton("Add folder...")
+        self.add_button.clicked.connect(self._choose_folder)
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.clicked.connect(self._remove_selected)
+        row.addWidget(self.add_button)
+        row.addWidget(self.remove_button)
+        row.addStretch()
+        close = QDialogButtonBox(QDialogButtonBox.Close)
+        close.rejected.connect(self.reject)
+        row.addWidget(close)
+        layout.addLayout(row)
+        self.refresh()
+
+    def refresh(self) -> None:
+        folders = self.files.folders()
+        self.table.setRowCount(len(folders))
+        for i, folder in enumerate(folders):
+            status = folder.problem or ("built-in (setting)" if folder.builtin else "added")
+            for col, text in enumerate((folder.label, folder.kind, str(folder.path), status)):
+                self.table.setItem(i, col, QTableWidgetItem(text))
+
+    def _choose_folder(self) -> None:
+        from PySide6.QtWidgets import QFileDialog, QInputDialog
+        path = QFileDialog.getExistingDirectory(self, "Folder the AI may use")
+        if not path:
+            return
+        label, ok = QInputDialog.getText(self, "Label", "Short name AI clients use for this folder (lowercase):")
+        if ok and label:
+            self.add_folder(path, label.strip())
+
+    def add_folder(self, path: str, label: str, kind: str = "any") -> bool:
+        """Checks the folder, shows what sharing it means, and adds it on "Yes" (audited)."""
+        from pathlib import Path
+        from orchestrator.tools.local_files import FOLDER_WARNING, LocalFileError, record_folder_change
+        store = self.files.store
+        try:
+            real = store.check_new(Path(path), self.files.data_folders())
+        except LocalFileError as e:
+            QMessageBox.warning(self, "Folders the AI may use", str(e))
+            return False
+        answer = QMessageBox.question(
+            self, "Folders the AI may use",
+            f"Folder: {real}\nLabel: {label}\n\n{FOLDER_WARNING}\n\nLet AI clients and Ditto use the files in this "
+            "folder?", QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if answer != QMessageBox.Yes:
+            return False
+        try:
+            entry = store.add(Path(path), label, kind, self.files.data_folders())
+        except LocalFileError as e:
+            QMessageBox.warning(self, "Folders the AI may use", str(e))
+            return False
+        try:
+            record_folder_change(getattr(self.registry, "audit", None), "gui", "added", entry)
+        except Exception as e:  # what widens an AI's reach is recorded, or it does not happen
+            store.remove(label)
+            QMessageBox.critical(self, "Folders the AI may use",
+                                 f"The audit log could not record the change ({e}); the folder was not added.")
+            return False
+        self.refresh()
+        return True
+
+    def _remove_selected(self) -> None:
+        row = self.table.currentRow()
+        item = self.table.item(row, 0) if row >= 0 else None
+        if item is not None:
+            self.remove_folder(item.text())
+
+    def remove_folder(self, label: str) -> bool:
+        from orchestrator.tools.local_files import LocalFileError, record_folder_change
+        try:
+            removed = self.files.store.remove(label)
+        except LocalFileError as e:
+            QMessageBox.warning(self, "Folders the AI may use", str(e))
+            return False
+        if not removed:
+            QMessageBox.information(self, "Folders the AI may use",
+                                    f"'{label}' is a built-in folder; change it in the settings (models_dir, "
+                                    "datasets_dir).")
+            return False
+        try:
+            record_folder_change(getattr(self.registry, "audit", None), "gui", "removed", {"label": label})
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Removing the AI folder '{label}' was not audited: {e}")
+        self.refresh()
+        return True
+
+
 def confirm_host_key(parent, framework, host: str, port: int = 22) -> bool:
     """Trust on first use, never silently: shows an unknown device's host key fingerprint and stores it
     only if the user confirms; a changed key is refused."""
