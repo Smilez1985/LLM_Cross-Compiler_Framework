@@ -121,6 +121,7 @@ class WorkflowState:
     healing_decision: Optional[bool] = None
     build_ids: List[str] = field(default_factory=list)
     owner: str = ""  # BuildRequest.owner
+    label: str = ""  # the request's speaking name: model (a local model by its label), target, format, quantization
 
     @property
     def progress_percent(self) -> int:
@@ -138,6 +139,25 @@ class BuildJob:
     output_path: str
     status: BuildStatus
     error_log: str = ""
+    model_label: str = ""  # how the model is named in stage texts and healing context (never a host path)
+
+
+def model_label(model: str, local_inputs: Any = None) -> str:
+    """The model as it may be shown to people and AI models: a local model an AI caller pinned by its
+    `<label>:<relative path>`, another local path by its file name, a Hugging Face repo id as it is."""
+    pin = getattr(local_inputs, "model", None)
+    if pin is not None:
+        return pin.ref
+    return Path(model).name if Path(str(model)).is_absolute() else str(model)
+
+
+def request_label(request: "BuildRequest") -> str:
+    """A build request's speaking name: "<model> for <target> (<format> <quantization>)"."""
+    models = ", ".join(model_label(m, request.local_inputs) for m in request.models) or "?"
+    formats = ", ".join(getattr(f, "value", str(f)) for f in request.target_formats)
+    quants = ", ".join(str(q) for q in request.quantization_options if q)
+    detail = " ".join(part for part in (formats, quants) if part)
+    return f"{models} for {', '.join(request.targets) or '?'}" + (f" ({detail})" if detail else "")
 
 # ============================================================================
 # ORCHESTRATOR KLASSE
@@ -189,6 +209,7 @@ class LLMOrchestrator:
                 status=OrchestrationStatus.QUEUED,
                 start_time=datetime.now(),
                 owner=getattr(request, "owner", "") or "",
+                label=request_label(request),
             )
             self._workflows[request.request_id] = state
             
@@ -397,7 +418,7 @@ class LLMOrchestrator:
         self.logger.warning(f"Build failed for {job.job_id}. Activating Self-Healing...")
         state.status = OrchestrationStatus.HEALING
         state.current_stage = f"Diagnosing {job.job_id}"
-        context = f"Target: {job.target_architecture}, Model: {job.source_model}"
+        context = f"Target: {job.target_architecture}, Model: {getattr(job, 'model_label', '') or job.source_model}"
         # The analysis may call an LLM; keep the event loop free meanwhile.
         proposal = await loop.run_in_executor(None, self.self_healing.analyze_error,
                                               job.error_log or "Unknown Error", context)
@@ -438,11 +459,14 @@ class LLMOrchestrator:
         self.logger.info(f"Fix applied; retrying {job.job_id}.")
         return await self._run_job(job, req, attempt=2)
 
-    def resolve_healing(self, request_id: str, approved: bool) -> bool:
-        """Records the user's decision on a pending healing proposal. Safe to call from any thread."""
+    def resolve_healing(self, request_id: str, approved: bool, expected: Any = None) -> bool:
+        """Records the user's decision on a pending healing proposal. Safe to call from any thread. `expected`: the
+        proposal the decision is about; a different pending one is not decided."""
         state = self._workflows.get(request_id)
         event = self._healing_events.get(request_id)
         if not state or not event or state.status != OrchestrationStatus.AWAITING_APPROVAL:
+            return False
+        if expected is not None and state.healing_proposal is not expected:
             return False
         state.healing_decision = bool(approved)
         loop = self._loop
@@ -523,7 +547,8 @@ class LLMOrchestrator:
                             optimization=req.optimization_level,
                             quantization=q,
                             output_path=str(out_dir),
-                            status=BuildStatus.QUEUED
+                            status=BuildStatus.QUEUED,
+                            model_label=model_label(model, req.local_inputs),
                         )
                         build_jobs.append(job)
 
@@ -541,7 +566,7 @@ class LLMOrchestrator:
         
         # 2. Execution Loop
         for job in build_jobs:
-            state.current_stage = f"Building {job.source_model} for {job.target_architecture}"
+            state.current_stage = f"Building {job.model_label or job.source_model} for {job.target_architecture}"
             success = await self._run_job(job, req)
             if state.status == OrchestrationStatus.CANCELLED:
                 return

@@ -849,7 +849,11 @@ framework never sees it.
   socket, device or pipe); a Hugging Face cache snapshot is mounted file by file. The same holds for the folder of
   an RKNN sample list, so a list directly in a label folder is refused. A Hugging Face repo id from an AI client is
   always downloaded, never looked up as a folder on this computer. Refusals name the label, never the real path.
-  GUI and CLI builds you start yourself still take any path.
+  GUI and CLI builds you start yourself still take any path. What an AI client reads back names such a model by its
+  label too, never by the folders on this computer: the build's stage text ("Building models:qwen/model.gguf for
+  Rockchip"), the self-healing context, the build manifest's `model_source` and `list_artifacts` (a host path an
+  older manifest recorded is shown as `<label>:<relative path>` when it lies in a folder the AI may use, else as
+  the file name only).
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
   server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification
@@ -955,6 +959,24 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   `llm-cli mcp serve` say so.
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
   unknown or revoked token, or a token file that cannot be read, may not even read.
+
+**What a question shows** (Ditto's GUI dialog and CLI prompt, an MCP client's form), in this order: the
+consequence in plain words, from what the framework looked up (for example "Deletes the Docker build cache and the
+dangling framework images on this computer, then retries build request req_1a2b3c4d once."); who asks (Ditto, or the
+MCP client with the name, version and transport it reports, and whose permissions apply: all local stdio clients or
+a named token); the facts the framework checked, where text from outside the framework (a build log, an AI's
+proposal) is labelled "not checked" and escaped; then every argument, complete, repaired values marked, and an id
+followed by its speaking name (a build request's model and target, a local file's `<label>:<relative path>`, a
+target's name). Some tools look facts up before the question (two-phase confirmation), and the call is then bound
+to exactly what you were shown: approving a self-healing proposal applies the proposal in the question, and one that
+changed meanwhile is refused with nothing applied; a destructive fix (`docker_prune`, which deletes the Docker build
+cache) is asked even when `resolve_healing` is allowed; a lookup that fails (no pending proposal) refuses the call
+before anything is asked. A 2026-07-28 client that answers in a second round gets the facts of the question it
+answered. An MCP form shows at most 4,000 characters, the framework's own windows up to 16,000 (Ditto's GUI shows a
+long question in a scrollable dialog, the CLI through the pager); a longer question is refused, and over MCP so is a
+question between 4,000 and 16,000 characters until pending approvals in the framework exist. A tool that may offer
+"do not ask again" gets one more box in the MCP form, which only asks the framework: it never creates a standing
+approval, and the call's notes say so.
 
 **Audit log** (`~/.llm-framework/audit.db`, SQLite): every tool call is recorded with time, actor, tool, decision,
 whether a person confirmed it, and the outcome. Arguments are stored redacted and shortened, plus a hash of the full

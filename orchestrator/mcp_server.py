@@ -18,6 +18,10 @@ Security model
 - "Ask" permissions become an MCP elicitation (the client shows the question to the user). A client
   without elicitation support cannot confirm, so such calls are denied with a hint on how to allow them.
   A person's "no" is final for that call, even if the policy is loosened while the dialog is open.
+- Two-phase confirmation: a tool's `prepare` looks up the facts only the server knows before the question (in a
+  worker thread); the question shows them with the consequence first, who asks and every argument, and the
+  handler is bound to exactly those facts. A 2026-07-28 retry that carries the answer gets the same facts (kept for
+  the question's lifetime), so the question it answers is the one it was asked.
 - stdio is the default transport. Streamable HTTP binds to loopback only, refuses requests from web
   pages (any Origin header) and Host names other than loopback with its port, and requires a named
   token per client (`llm-cli mcp token`). The token's name is the caller (`mcp:<name>`) for the
@@ -54,12 +58,13 @@ from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError
 
-from orchestrator.tools.confirmation import CallTooLong, describe_call
+from orchestrator.tools.confirmation import MAX_ELICITATION, CallTooLong
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, ENV_VAR, TokenStore, TokenStoreError, token_digest
 from orchestrator.tools.output import has_untrusted
 from orchestrator.tools.policy import Decision
 from orchestrator.tools.registry import (AuditUnavailable, ToolContext, ToolDenied, ToolError, ToolRegistry, ToolSpec,
-                                         repair_marks, text_sha256)
+                                         arguments_key, text_sha256)
+from orchestrator.tools.spec import CallFacts
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.untrusted import wrap_untrusted
@@ -86,6 +91,13 @@ logger = get_logger("MCPServer")
 
 class Confirmation(BaseModel):
     approve: bool = Field(description="Allow this action?")
+
+
+class ConfirmationWithGrant(Confirmation):
+    """The form for a tool that declares a GrantRule: one more box, which only asks the framework; a standing
+    approval is never created from an elicitation (only the person can give one, in the framework's window)."""
+    stop_asking: bool = Field(default=False, description="Ask the framework to stop asking for this (the person "
+                                                         "decides in the framework; nothing changes until then)")
 
 
 class NotAsked(Confirmation):
@@ -115,6 +127,7 @@ class _CallState:
     asking: bool = False          # a question is open
     question_sha256: str = ""
     repairs: list = field(default_factory=list)  # what the fool-proof layer changed (normalize.Repair)
+    facts: Optional[CallFacts] = None  # what the tool's prepare looked up (the handler is bound to it)
 
 
 _CALL: contextvars.ContextVar = contextvars.ContextVar("lcf_mcp_call", default=None)
@@ -218,6 +231,46 @@ class _OpenQuestions:
                 self.registry.refuse(name, arguments, ctx, detail="The question was not answered within 15 minutes.",
                                      confirm_channel="elicitation", question_sha256=digest, answer="unanswered")
         return len(gone)
+
+
+class _QuestionFacts:
+    """The facts a question showed, kept for the question's lifetime (QUESTION_EXPIRY): the 2026-07-28 retry that
+    carries the answer must show the same question, or the SDK discards the answer and asks again; a prepare that
+    reads changing values (free space, a clock) would otherwise never get an answer through. Keyed per tool,
+    caller, session and arguments; dropped when the call runs, so the next call looks the facts up again."""
+
+    MAX_ENTRIES = 256
+
+    def __init__(self, registry: ToolRegistry):
+        self.registry = registry
+        self._items: Dict[tuple, Tuple[float, CallFacts]] = {}
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _key(spec: ToolSpec, arguments: Dict[str, Any], ctx: ToolContext) -> tuple:
+        return spec.name, ctx.actor, ctx.session, arguments_key(arguments)
+
+    def get(self, spec: ToolSpec, inp: BaseModel, arguments: Dict[str, Any], ctx: ToolContext,
+            retry: bool) -> Optional[CallFacts]:
+        """The facts for this call: the kept ones on a retry that answers a question, else looked up anew."""
+        key, now = self._key(spec, arguments, ctx), time.monotonic()
+        with self._lock:
+            for old in [k for k, (at, _) in self._items.items() if now - at >= QUESTION_EXPIRY]:
+                del self._items[old]
+            kept = self._items.get(key)
+        if retry and kept is not None:
+            return kept[1]
+        facts = self.registry.look_up(spec, inp, ctx)
+        if facts is not None:
+            with self._lock:
+                self._items[key] = (now, facts)
+                while len(self._items) > self.MAX_ENTRIES:
+                    del self._items[min(self._items, key=lambda k: self._items[k][0])]
+        return facts
+
+    def drop(self, spec: ToolSpec, arguments: Dict[str, Any], ctx: ToolContext) -> None:
+        with self._lock:
+            self._items.pop(self._key(spec, arguments, ctx), None)
 
 
 @dataclass
@@ -490,10 +543,11 @@ class ClientTracker:
 
 
 def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Optional["_OpenQuestions"] = None,
-                       caller: str = "mcp", instance: str = ""):
+                       caller: str = "mcp", instance: str = "", kept: Optional[_QuestionFacts] = None):
     """An MCPServer tool function for a registry tool: same input schema, typed structured output,
-    confirmation through elicitation when the user's policy says "ask". `instance` names the server (the same
-    for every tool of one server, see _session_seed)."""
+    confirmation through elicitation when the user's policy says "ask", the tool's looked-up facts in the
+    question and bound to the handler. `instance` names the server (the same for every tool of one server, see
+    _session_seed); `kept` holds the facts of open questions (one per server)."""
     import anyio
     import anyio.to_thread
     from mcp.server.elicitation import (AcceptedElicitation, CancelledElicitation, DeclinedElicitation,
@@ -505,15 +559,28 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
     field_params = _model_parameters(spec.input_model)
     outcomes = (AcceptedElicitation, DeclinedElicitation, CancelledElicitation)
     questions = questions or _OpenQuestions(registry)
+    kept = kept or _QuestionFacts(registry)
+    form = ConfirmationWithGrant if spec.grant is not None else Confirmation
 
     async def confirm(ctx: Context, **arguments):
+        state = _call_state()
+        tool_ctx = _tool_context(ctx, caller, instance)
+        tool_ctx.repairs = list(state.repairs)  # marked in the question and recorded with it
+        parsed = _parsed(spec, arguments)
         # With the caller's context: cancelling its own build or job needs no question (the tool's default).
-        decision = await anyio.to_thread.run_sync(
-            functools.partial(registry.decide, spec, _parsed(spec, arguments), _tool_context(ctx, caller, instance)))
+        decision = await anyio.to_thread.run_sync(functools.partial(registry.decide, spec, parsed, tool_ctx))
         rounds = _uses_input_required(ctx)
+        retry = rounds and bool(ctx.input_responses)
+        if decision != Decision.DENY and spec.prepare is not None and parsed is not None:
+            # Two-phase: the facts only the server knows, before the question; they may make an allowed call ask.
+            try:
+                state.facts = await anyio.to_thread.run_sync(kept.get, spec, parsed, arguments, tool_ctx, retry)
+            except (ToolError, ValueError):
+                return NotAsked(approve=False)  # the registry call looks them up again and refuses with the reason
+            decision = registry.capped(decision, state.facts)
         # The person already answered in an earlier round: their answer decides, even if the policy was
         # loosened to "allow" meanwhile (the SDK checks that it answers exactly this question).
-        answered = rounds and decision == Decision.ALLOW and bool(ctx.input_responses)
+        answered = retry and decision == Decision.ALLOW
         if decision != Decision.ASK and not answered:
             return NotAsked(approve=False)  # the registry applies allow/deny itself
         capabilities = ctx.client_capabilities
@@ -522,19 +589,17 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         if elicitation is None or (getattr(elicitation, "form", None) is None
                                    and getattr(elicitation, "url", None) is not None):
             return NotAsked(approve=False, can_ask=False, answer="unavailable")
-        state = _call_state()
-        marks, renamed = repair_marks(state.repairs)
-        try:
-            message = describe_call(spec, arguments, marks=marks, renamed=renamed)
+        tool_ctx.confirm_channel = "elicitation"
+        try:  # speaking names may look something up: off the event loop
+            message = await anyio.to_thread.run_sync(functools.partial(
+                registry.question_text, spec, arguments, tool_ctx, state.facts, MAX_ELICITATION))
         except CallTooLong as e:
             return NotAsked(approve=False, refused=str(e))
-        tool_ctx = _tool_context(ctx, caller, instance)
-        tool_ctx.confirm_channel = "elicitation"
         await anyio.to_thread.run_sync(questions.expire)
-        if rounds and ctx.input_responses:
+        if retry:
             state.question_sha256 = text_sha256(message)
             questions.answered(spec.name, state.question_sha256)
-            return Elicit(message, Confirmation)
+            return Elicit(message, form)
         # The question is recorded before it is asked; for a change that cannot be recorded it is not asked.
         try:
             state.question_sha256 = await anyio.to_thread.run_sync(registry.record_question, spec.name,
@@ -543,12 +608,12 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             return NotAsked(approve=False, refused=str(e), outcome="audit_unavailable")
         if rounds:
             questions.asked(spec.name, state.question_sha256, arguments, tool_ctx)
-            return Elicit(message, Confirmation)
+            return Elicit(message, form)
         # Classic transport: ask here, so a failed request is an audited refusal, not a protocol error.
         state.asking = True
         try:
             with anyio.fail_after(ELICITATION_TIMEOUT):
-                return await ctx.elicit(message, Confirmation)
+                return await ctx.elicit(message, form)
         except TimeoutError:
             minutes = max(1, round(ELICITATION_TIMEOUT / 60))
             return NotAsked(approve=False, outcome="confirmation_timeout", answer="timeout",
@@ -575,6 +640,10 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         state = _call_state()
         tool_ctx = _tool_context(ctx, caller, instance)
         tool_ctx.repairs = list(state.repairs)
+        tool_ctx.facts = state.facts  # what the question showed: the handler is bound to exactly these
+        kept.drop(spec, kwargs, tool_ctx)
+        if isinstance(data, ConfirmationWithGrant) and data.stop_asking and data.approve:
+            tool_ctx.metadata["grant_requested"] = True
         if isinstance(data, NotAsked) and data.refused:
             await anyio.to_thread.run_sync(functools.partial(
                 registry.refuse, spec.name, kwargs, tool_ctx, outcome=data.outcome, detail=data.refused,
@@ -804,6 +873,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
     if registry is None:
         raise RuntimeError("The framework has no tool registry (not initialized).")
     questions = _OpenQuestions(registry)
+    kept = _QuestionFacts(registry)
     instance = secrets.token_hex(8)  # this server, for the calls of clients without a connection (_session_seed)
 
     class AuditedServer(MCPServer):
@@ -854,7 +924,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                                                      refused=lambda *args: _audit_refused_call(registry, *args))])
     server.open_questions = questions
     for spec in registry.list():
-        server.add_tool(make_tool_function(spec, registry, questions, caller, instance), name=spec.name,
+        server.add_tool(make_tool_function(spec, registry, questions, caller, instance, kept), name=spec.name,
                         title=spec.title,
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
                         structured_output=True, meta=spec.meta())

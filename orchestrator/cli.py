@@ -370,19 +370,29 @@ def _ai_override(ctx: FrameworkContext, provider: Optional[str], model: Optional
     return ditto
 
 
+PAGED_QUESTION_LINES = 30  # a longer question (up to 16,000 characters) is shown through the pager first
+
+
 def _ditto_confirm(spec, inp) -> bool:
-    """Asks before a tool call that needs confirmation; without a terminal the answer is no."""
-    from orchestrator.tools.confirmation import CallTooLong, describe_call
+    """Asks before a tool call that needs confirmation; without a terminal the answer is no. A long question (a
+    module definition) is shown whole, through the pager when it does not fit the screen."""
+    from orchestrator.tools.confirmation import MAX_ELICITATION, MAX_FRAMEWORK, CallTooLong, describe_call
     from orchestrator.tools.registry import current_question
     try:
-        text = current_question() or describe_call(spec, inp.model_dump(mode="json"), actor="Ditto")
+        text = current_question() or describe_call(spec, inp.model_dump(mode="json"), actor="Ditto",
+                                                   limit=MAX_FRAMEWORK)
     except CallTooLong as e:
         click.echo(str(e), err=True)
         return False
-    click.echo(text, err=True)
     if not sys.stdin.isatty():
+        click.echo(text, err=True)
         click.echo("No terminal to confirm in: denied. Allow the tool with 'llm-cli tools permissions'.", err=True)
         return False
+    long = len(text) > MAX_ELICITATION or len(text.splitlines()) > PAGED_QUESTION_LINES
+    if long and sys.stdout.isatty():
+        click.echo_via_pager(text + "\n")
+    else:
+        click.echo(text, err=True)
     return click.confirm("Allow this?", default=False, err=True)
 
 

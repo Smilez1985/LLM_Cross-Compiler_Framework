@@ -914,7 +914,11 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Datei für Datei eingebunden. Dasselbe gilt für den Ordner einer RKNN-Beispielliste, deshalb wird eine Liste direkt
   in einem Label-Ordner abgelehnt. Eine Hugging-Face-Repo-ID von einem KI-Client wird immer heruntergeladen, nie als
   Ordner auf diesem Rechner nachgeschlagen. Ablehnungen nennen das Label, nie den echten Pfad. GUI- und CLI-Builds,
-  die du selbst startest, nehmen weiterhin jeden Pfad.
+  die du selbst startest, nehmen weiterhin jeden Pfad. Was ein KI-Client zurückliest, nennt ein solches Modell
+  ebenfalls beim Label, nie bei den Ordnern auf diesem Rechner: der Stufentext des Builds ("Building
+  models:qwen/model.gguf for Rockchip"), der Kontext der Selbstheilung, `model_source` im Build-Manifest und
+  `list_artifacts` (ein Host-Pfad, den ein älteres Manifest festhielt, erscheint als `<label>:<relativer Pfad>`, wenn
+  er in einem Ordner liegt, den die KI nutzen darf, sonst nur als Dateiname).
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je
@@ -1031,6 +1035,26 @@ Verfügung.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
   nicht lesen lässt, darf nicht einmal lesen.
+
+**Was eine Rückfrage zeigt** (Dittos GUI-Dialog und CLI-Abfrage, das Formular eines MCP-Clients), in dieser
+Reihenfolge: die Folge in einfachen Worten, aus dem, was das Framework nachgeschlagen hat (zum Beispiel "Deletes the
+Docker build cache and the dangling framework images on this computer, then retries build request req_1a2b3c4d
+once."); wer fragt (Ditto oder der MCP-Client mit dem Namen, der Version und dem Transport, die er angibt, und wessen
+Berechtigungen gelten: alle lokalen stdio-Clients oder ein benanntes Token); die Fakten, die das Framework geprüft
+hat, wobei Text von außerhalb des Frameworks (ein Build-Log, der Vorschlag einer KI) als "not checked" gekennzeichnet
+und maskiert ist; dann jedes Argument vollständig, reparierte Werte markiert und eine ID mit ihrem sprechenden Namen
+dahinter (Modell und Ziel einer Build-Anfrage, `<label>:<relativer Pfad>` einer lokalen Datei, der Name eines
+Ziels). Manche Tools schlagen Fakten vor der Rückfrage nach (zweistufige Bestätigung), und der Aufruf ist dann
+genau an das gebunden, was dir gezeigt wurde: Wer einen Selbstheilungs-Vorschlag genehmigt, wendet den Vorschlag aus
+der Rückfrage an, und einer, der sich inzwischen geändert hat, wird abgelehnt, ohne dass etwas angewendet wird; ein
+zerstörender Fix (`docker_prune`, der den Docker-Build-Cache löscht) wird auch dann erfragt, wenn `resolve_healing`
+erlaubt ist; ein Nachschlagen, das scheitert (kein offener Vorschlag), lehnt den Aufruf ab, bevor etwas gefragt
+wird. Ein 2026-07-28-Client, der in einer zweiten Runde antwortet, bekommt die Fakten der Rückfrage, die er
+beantwortet hat. Ein MCP-Formular zeigt höchstens 4.000 Zeichen, die eigenen Fenster des Frameworks bis zu 16.000
+(Dittos GUI zeigt eine lange Rückfrage in einem scrollbaren Dialog, die CLI über den Pager); eine längere Rückfrage
+wird abgelehnt, und über MCP auch eine zwischen 4.000 und 16.000 Zeichen, bis es ausstehende Freigaben im Framework
+gibt. Ein Tool, das "nicht mehr fragen" anbieten kann, bekommt im MCP-Formular ein weiteres Kästchen, das nur das
+Framework fragt: Es legt nie eine Dauerfreigabe an, und die Hinweise des Aufrufs sagen das.
 
 **Audit-Log** (`~/.llm-framework/audit.db`, SQLite): Jeder Tool-Aufruf wird mit Zeit, Akteur, Tool, Entscheidung, ob
 ein Mensch bestätigt hat, und Ergebnis festgehalten. Argumente werden geschwärzt und gekürzt gespeichert, dazu ein

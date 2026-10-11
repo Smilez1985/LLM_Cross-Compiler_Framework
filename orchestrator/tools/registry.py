@@ -4,9 +4,11 @@ One tool registry for Ditto and the MCP server.
 
 A tool has typed input and output (pydantic), a risk tier and a handler. Every call goes through
 ToolRegistry.call(): name resolution and argument normalization (the fool-proof layer, normalize.py), input
-validation, the repeat guard, the user's stored permission policy, an optional confirmation, the handler with an
-output check, and an audit entry - the same path for every caller. Every refusal and error carries a reason code
-and, where there is one, the next step.
+validation, the repeat guard, the user's stored permission policy, the tool's look-up of the facts only the server
+knows (`prepare`, two-phase confirmation), an optional confirmation, the handler with an output check, and an
+audit entry - the same path for every caller. The handler gets the looked-up facts in its CallContext and must use
+exactly those (what the person approved is what runs). Every refusal and error carries a reason code and, where
+there is one, the next step.
 """
 
 import contextvars
@@ -22,14 +24,14 @@ from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tupl
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from orchestrator.tools.audit import AuditLog
-from orchestrator.tools.confirmation import CallTooLong, describe_call
+from orchestrator.tools.confirmation import MAX_FRAMEWORK, CallTooLong, describe_call
 from orchestrator.tools.normalize import (NormalizeError, Repair, check_names_distinct, list_item_literal,
                                           normalize_arguments, resolve_name)
 from orchestrator.tools.output import UNTRUSTED_CHARS, ResultTooLarge, check_size, filtered_result
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStore, TokenStoreError
 from orchestrator.tools.policy import (TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier,
-                                       restrictive_policy)
-from orchestrator.tools.spec import CHANNELS, FieldMeta, GrantRule, ToolLimits, example_problems
+                                       restrictive_policy, stricter)
+from orchestrator.tools.spec import CHANNELS, CallFacts, FieldMeta, GrantRule, ToolLimits, example_problems
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.untrusted import sanitize_untrusted
@@ -46,12 +48,15 @@ class ToolError(Exception):
     `code` is a reason code (normalize.CODES: unknown_tool, invalid_value, permission_denied, declined, failed,
     ...), `next` the next step; the text a model sees is "<message> Next: <next>". `quoted` is the end of the
     message that quotes external text (a handler's error can carry a server reply, a log line or a name from a
-    pack): it is cleaned like external text, and an MCP client gets it marked as untrusted data."""
+    pack): it is cleaned like external text, and an MCP client gets it marked as untrusted data. `field` names the
+    argument an input error is about (Ditto's loop tells a fix from a repeat by it)."""
     code = "failed"
     quoted = ""
+    field = ""
 
     def __init__(self, message: str = "", code: Optional[str] = None, next: str = "",
-                 allowed: Optional[List[str]] = None, suggestions: Optional[List[str]] = None, quoted: str = ""):
+                 allowed: Optional[List[str]] = None, suggestions: Optional[List[str]] = None, quoted: str = "",
+                 field: str = ""):
         super().__init__(message)
         self.message = message
         if code:
@@ -60,6 +65,8 @@ class ToolError(Exception):
         self.allowed = list(allowed or [])
         self.suggestions = list(suggestions or [])
         self.quoted = quoted if quoted and message.endswith(quoted) else ""
+        if field:
+            self.field = field
 
     def __str__(self) -> str:
         return f"{self.message} Next: {self.next}" if self.next else self.message
@@ -72,6 +79,7 @@ class ToolError(Exception):
             copy = ToolError(message)
         copy.code, copy.next = self.code, self.next if next is None else next
         copy.allowed, copy.suggestions = list(self.allowed), list(self.suggestions)
+        copy.field = self.field
         copy.quoted = self.quoted if self.quoted and message.endswith(self.quoted) else ""
         return copy
 
@@ -113,6 +121,9 @@ DENIED_HINT = ("Tell the person it is not allowed by their tool permissions; onl
 UNASKED_HINT = ("The person can allow it with 'llm-cli tools permissions' or in the GUI (Tools > Tool Permissions "
                 "(Ditto / MCP)), or use a client that can ask them.")
 REPEAT_WARN = "This exact call already failed. "
+# The next step of a failure nobody can fix by changing the call (the framework's or a service's own problem).
+FAILED_NEXT = ("Tell the person what failed and why; 'llm-cli doctor' and the framework log show the cause. Do not "
+               "retry the same call unchanged.")
 GUARD_SIZE = 512  # failing calls remembered per registry for the repeat guard
 EXAMPLE_AFTER = 3  # input errors in a session before every input error shows an example call
 
@@ -153,6 +164,13 @@ class ToolSpec:
     # An async wait the MCP server runs on its event loop before the call, holding no worker thread (long-poll):
     # long_poll(input, seconds, report_progress). The handler then sees ctx.metadata["waited"].
     long_poll: Optional[Callable[..., Awaitable[Any]]] = None
+    # Two-phase confirmation: prepare(input, ctx) looks up the facts only the server knows (a pending proposal, a
+    # commit, a hash) before the question and returns CallFacts; the question shows them, their `cap` can make an
+    # allowed call ask, and the handler (takes_context) gets them as ctx.facts and must use exactly those. A
+    # prepare that fails refuses the call before anything is asked (with the error's reason code).
+    prepare: Optional[Callable[[BaseModel, "ToolContext"], CallFacts]] = None
+    # The question's first line in plain words, for a tool without a prepare (a prepare gives its own).
+    consequence: str = ""
 
     def annotations(self) -> Dict[str, Any]:
         """MCP tool annotations (hints for clients; the registry enforces the policy itself)."""
@@ -219,11 +237,46 @@ class ToolContext:
     # Notes a handler that takes the context adds for this call's result (framework text only, e.g. "the wait was
     # shortened"); the registry puts them into the result's `notes` after the repairs. New for every call.
     notes: List[str] = field(default_factory=list)
+    # The facts the tool's prepare looked up for this call (the MCP server hands in the ones its question showed);
+    # the handler must use exactly these. New for every call.
+    facts: Optional[CallFacts] = None
+    # Progress for the caller while the handler runs: report_progress(done, total, message); None: nobody listens.
+    report_progress: Optional[Callable[..., Any]] = None
 
     @property
     def owner(self) -> str:
         """Who owns the builds and jobs this caller starts: the actor and, for MCP, its connection."""
         return f"{self.actor}#{self.connection}" if self.connection else self.actor
+
+
+# What a handler that takes the context gets: the caller, its client label and session, the cancel event, progress
+# and the facts its question showed (design 2.0, `CallContext`). One per call.
+CallContext = ToolContext
+
+# Who a caller is, in words a person reads (questions, the audit view).
+CALLER_WORDS = {"ditto": "Ditto", "mcp": "all local stdio clients", "cli": "you, in the CLI", "gui": "you, in the GUI"}
+GRANT_REQUEST_NOTE = ("The answer asked the framework to stop asking for this. Only the person can give a standing "
+                      "approval, in the framework's own approval window; this answer approved this one call.")
+
+
+def caller_label(actor: str) -> str:
+    """A caller as a person reads it: Ditto, all local stdio clients, the MCP token 'laptop', you in the CLI."""
+    if actor.startswith(ACTOR_PREFIX):
+        return f"the MCP token '{actor[len(ACTOR_PREFIX):]}'"
+    return CALLER_WORDS.get(actor, actor or "an unnamed caller")
+
+
+def requester_of(ctx: "ToolContext") -> str:
+    """Who asks, for the question: Ditto, or the MCP client as it reports itself, with the transport and whose
+    permissions apply ("Claude Code 2.1.295 (self-reported) over stdio, with the permissions of all local stdio
+    clients"). The client's own words were escaped and shortened when they arrived (mcp_server._client_text)."""
+    if ctx.actor == "ditto":
+        return "Ditto, the framework's assistant in this program"
+    label = ctx.metadata.get("client") if isinstance(ctx.metadata, dict) else None
+    describe = getattr(label, "describe", None)
+    who = describe() if callable(describe) else (f"{ctx.client} (self-reported)" if ctx.client else
+                                                 "an AI client that did not name itself")
+    return f"{who}, with the permissions of {caller_label(ctx.actor)}"
 
 
 @dataclass
@@ -262,6 +315,9 @@ def _args_key(arguments: Any) -> str:
     except (TypeError, ValueError):
         text = repr(arguments)
     return text_sha256(text)
+
+
+arguments_key = _args_key  # the hash that identifies a call's arguments (repeat guard, question rounds)
 
 
 def repair_marks(repairs: List[Repair]) -> Tuple[Dict[str, str], str]:
@@ -639,16 +695,76 @@ class ToolRegistry:
         return digest
 
     @staticmethod
-    def question_for(spec: ToolSpec, inp: BaseModel, ctx: ToolContext) -> str:
-        """The question the framework's own channel shows (Ditto's dialog or prompt), with the values the fool-proof
-        layer repaired marked; "" when it is too long to show, in which case that channel refuses the call."""
+    def speaking_names(spec: ToolSpec, arguments: Dict[str, Any]) -> Dict[str, str]:
+        """Speaking names of id values for a person (FieldMeta.describe: a build's model and target for its request
+        id, a local file's label for its file id). A lookup that fails shows no name; it never stops a question."""
+        names = {}
+        for name, meta in spec.fields.items():
+            value = arguments.get(name)
+            if meta.describe is None or value in (None, ""):
+                continue
+            try:
+                described = meta.describe(value)
+            except Exception:  # noqa: BLE001 - a name is a help for the person, never a reason to fail
+                described = None
+            if described and str(described) != str(value):
+                names[name] = " ".join(str(described).split())[:200]
+        return names
+
+    def question_text(self, spec: ToolSpec, arguments: Dict[str, Any], ctx: ToolContext,
+                      facts: Optional[CallFacts] = None, limit: int = MAX_FRAMEWORK) -> str:
+        """The question for one call (confirmation text v2): the consequence and the facts the tool looked up, who
+        asks, every argument with its speaking name and the repaired values marked. CallTooLong above `limit`
+        (4,000 characters for an MCP elicitation, 16,000 for the framework's own windows)."""
         marks, renamed = repair_marks(ctx.repairs)
+        return describe_call(spec, arguments, actor="Ditto" if ctx.actor == "ditto" else "The AI client",
+                             marks=marks, renamed=renamed, requester=requester_of(ctx), facts=facts,
+                             names=self.speaking_names(spec, arguments), limit=limit)
+
+    def question_for(self, spec: ToolSpec, inp: BaseModel, ctx: ToolContext,
+                     facts: Optional[CallFacts] = None) -> str:
+        """The question the framework's own channel shows (Ditto's dialog or prompt, up to 16,000 characters);
+        "" when it is too long to show, in which case that channel refuses the call."""
         try:
-            return describe_call(spec, inp.model_dump(mode="json"),
-                                 actor="Ditto" if ctx.actor == "ditto" else "The AI client", marks=marks,
-                                 renamed=renamed)
+            return self.question_text(spec, inp.model_dump(mode="json"), ctx, facts, MAX_FRAMEWORK)
         except CallTooLong:
             return ""
+
+    def look_up(self, spec: ToolSpec, inp: BaseModel, ctx: ToolContext) -> Optional[CallFacts]:
+        """The facts the tool's prepare looks up for this call (None for a tool without one). A failure is a
+        ToolError with the reason code of the service's error (e.g. no pending proposal), cleaned like a handler's
+        error: it can quote external text."""
+        if spec.prepare is None:
+            return None
+        try:
+            facts = spec.prepare(inp, ctx)
+        except ToolError as e:
+            message = external_error_text(e.message)
+            error = e.with_text(message, redact_secrets(e.next))
+            error.quoted = message
+            raise error from None
+        except ValueError as e:  # a service's refusal (BuildServiceError carries code and next)
+            message = external_error_text(str(e))
+            raise ToolError(message, code=getattr(e, "code", None) or "failed",
+                            next=redact_secrets(getattr(e, "next", "") or "") or FAILED_NEXT, quoted=message) from e
+        except Exception as e:
+            self.logger.error(f"Looking up the facts for {spec.name} failed: {e}", exc_info=True)
+            message = external_error_text(str(e))
+            raise ToolError(f"{spec.title} could not be prepared: {message}", next=FAILED_NEXT, quoted=message) from e
+        if not isinstance(facts, CallFacts):
+            raise ToolError(f"{spec.title} could not be prepared (internal error; details are in the framework log).",
+                            next=FAILED_NEXT)
+        return facts
+
+    @staticmethod
+    def capped(decision: Decision, facts: Optional[CallFacts]) -> Decision:
+        """The decision after the cap the looked-up facts call for (e.g. ask before a destructive strategy)."""
+        if facts is None or not facts.cap:
+            return decision
+        try:
+            return stricter(decision, Decision(facts.cap))
+        except ValueError:
+            return Decision.DENY  # a cap nobody can read never loosens anything
 
     def call(self, name: str, arguments: Optional[Dict[str, Any]], ctx: ToolContext,
              approved: Optional[bool] = None) -> BaseModel:
@@ -681,14 +797,33 @@ class ToolRegistry:
         if decision == Decision.DENY:
             self._audit(ctx, spec, decision, "denied", arguments, reason_code="permission_denied")
             raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
+        # Two-phase: the facts only the server knows, looked up before the question (the MCP server hands in the
+        # ones its question showed). They can make an allowed call ask, and the handler is bound to them.
+        if ctx.facts is None and spec.prepare is not None:
+            try:
+                ctx.facts = self.look_up(spec, inp, ctx)
+            except ToolError as e:
+                self._audit(ctx, spec, decision, "error", arguments, detail=f"{e.message} {e.next}".strip(),
+                            reason_code=e.code)
+                raise
+        decision = self.capped(decision, ctx.facts)
+        if ctx.metadata.get("grant_requested"):
+            ctx.notes.append(GRANT_REQUEST_NOTE)
         writes = spec.tier != ToolTier.READ
         channel, answer, question = ctx.confirm_channel, ctx.answer, ctx.question_sha256
         # A person's "no" is final, even if the policy was loosened to "allow" while they were asked.
         if decision == Decision.ASK or approved is False:
             if approved is None and ctx.confirm is not None:
                 channel = getattr(ctx.confirm, "confirm_channel", "framework")
-                text = self.question_for(spec, inp, ctx)
-                question = text_sha256(text) if text else ""
+                try:
+                    text = self.question_text(spec, inp.model_dump(mode="json"), ctx, ctx.facts, MAX_FRAMEWORK)
+                except CallTooLong as e:  # nobody could be shown it: not a person's "no"
+                    self._audit(ctx, spec, decision, "not_confirmed", arguments, detail=str(e),
+                                confirm_channel=channel, answer="unavailable", reason_code="limit_reached")
+                    raise ToolDenied(str(e), code="limit_reached",
+                                     next="Make the call smaller (fewer or shorter values), or tell the person why "
+                                          "it cannot be confirmed.") from None
+                question = text_sha256(text)
                 # Recorded before it is asked; a question about a change that cannot be recorded is not asked.
                 self._audit(ctx, spec, decision, "confirmation_requested", arguments, required=writes,
                             confirm_channel=channel, question_sha256=question)

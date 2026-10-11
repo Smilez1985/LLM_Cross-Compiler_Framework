@@ -312,6 +312,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   zu laufen; nach drei Eingabefehlern zeigt ein Fehler einen gültigen Beispielaufruf. Was repariert wurde, ist in
   der Frage markiert, in den `notes` des Ergebnisses aufgeführt und im Audit-Log festgehalten. Tool-Argumente, die
   ein lokales Modell mit Codeblock-Zäunen oder in Python-Schreibweise schickt, werden einmal erneut gelesen.
+- **Zweistufige Bestätigung und Rückfragetext v2** (Ditto und MCP-Clients): Eine Rückfrage beginnt mit der Folge in
+  einfachen Worten aus Fakten, die das Framework nachgeschlagen hat, dann wer fragt (Name, Version und Transport, die
+  ein MCP-Client selbst angibt, und wessen Berechtigungen gelten), die Fakten, die das Framework geprüft hat (externer
+  Text als "not checked" gekennzeichnet), und jedes Argument mit dem sprechenden Namen einer ID (Modell und Ziel eines
+  Builds, das Label einer lokalen Datei). Ein Tool kann Fakten vor der Rückfrage nachschlagen, und der Aufruf ist an
+  sie gebunden: `resolve_healing` zeigt den offenen Vorschlag aus dem eigenen Zustand des Frameworks, lehnt einen
+  Vorschlag ab, der sich nach der Rückfrage geändert hat, und fragt vor einem zerstörenden Fix (`docker_prune`) immer,
+  auch wenn das Tool erlaubt ist. Dittos GUI-Dialog und CLI-Abfrage zeigen Rückfragen bis zu 16.000 Zeichen (ein
+  scrollbarer Dialog, der Pager); ein MCP-Formular bleibt bei 4.000.
 - **`llm-cli ditto eval` hält jeden Versuch eines Tool-Aufrufs fest**, nicht nur die, die ein Tool erreicht haben:
   Der Block `tool_use` des Berichts nennt Tool-Aufrufe pro Aufgabe, den Anteil fehlerhafter Aufrufe und unbekannter
   Tool-Namen, Reparaturen und Ablehnungen wiederholter Aufrufe.
@@ -651,6 +660,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   beiden Wegen angenommen, und unbekannte Tool-Namen werden im Audit-Log festgehalten (bisher auf keinem Weg).
 
 ### Sicherheit
+- **KI-Clients sehen nie den Host-Pfad eines lokalen Modells, das sie benannt haben** (MCP-Clients und Ditto): Der
+  Stufentext des Builds, der Kontext der Selbstheilung, `model_source` im Build-Manifest und `list_artifacts` nennen
+  es bei seinem `<label>:<relativer Pfad>` (den Host-Pfad eines älteren Manifests beim Label, sonst nur beim
+  Dateinamen).
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
   Download, der direkt in eine Shell geleitet wird, das Löschen des Wurzel- oder Home-Ordners, Schreibrechte für
   alle, das Überschreiben eines Datenträgers), ganz gleich, welche Anweisungen ein Build-Log oder ein
