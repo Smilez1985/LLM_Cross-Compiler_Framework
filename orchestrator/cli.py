@@ -111,7 +111,9 @@ class FrameworkContext:
             self.framework_manager = FrameworkManager(self.config_path, log_level=self.log_level)
             
             if not self.framework_manager.initialize():
-                raise RuntimeError("Framework Manager initialization failed")
+                # The cause itself (e.g. the credential storage error with its choices), not just "failed".
+                raise (getattr(self.framework_manager, "init_error", None)
+                       or RuntimeError("Framework Manager initialization failed"))
             
             # Orchestrator initialisieren  
             self.orchestrator = self.framework_manager.orchestrator # Hole vom Kernel

@@ -143,6 +143,9 @@ def _audit_key(framework) -> Optional[bytes]:
     """The audit HMAC key: its own entry in the OS keyring, per user like the audit database itself, and
     never in a file an editor of the database could also read. None (an unkeyed chain, reported by
     `llm-cli doctor`) when no keyring is available."""
+    from orchestrator.Core.vault_key import keyring_usable
+    if not keyring_usable():  # probed once per process; a hung keyring must not stop the boot
+        return None
     try:
         import keyring
         from orchestrator.Core.secrets_manager import SecretsManager

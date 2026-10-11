@@ -313,6 +313,14 @@ class ConfigManager:
             ConfigSchema("language", str, False, "en", "Interface Language (en/de)"),
             ConfigSchema("ai_security_level", str, False, "STRICT", "AI Data Leakage Protection Level",
                          ["regex:^(STRICT|BALANCED|OFF)$"]),
+            ConfigSchema("secret_storage", str, False, "keyring",
+                         "Protection of the credential vault key: keyring (OS keyring), helper (secret_helper "
+                         "command), passphrase (asked once per start), insecure (key file, not encrypted at rest) "
+                         "or ephemeral (memory only, nothing stored). Never changed automatically.",
+                         ["regex:^(keyring|helper|passphrase|insecure|ephemeral)$"]),
+            ConfigSchema("secret_helper", str, False, "",
+                         "Command whose output protects the vault key when secret_storage is 'helper', e.g. "
+                         "'pass show llmcc/vault-key'; run without a shell"),
             
             # Local RAG / Vector Database (v1.5.0)
             ConfigSchema("enable_rag_knowledge", bool, False, False, "Enable local Qdrant Vector DB for AI"),
@@ -535,7 +543,7 @@ class ConfigManager:
             
         with self._lock:
             persist_keys = [
-                "language", "ai_security_level", "gui_theme", "docker_registry",
+                "language", "ai_security_level", "secret_storage", "secret_helper", "gui_theme", "docker_registry",
                 "enable_rag_knowledge", "rag_embedding_model", "qdrant_url",
                 "crawler_respect_robots", "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages",

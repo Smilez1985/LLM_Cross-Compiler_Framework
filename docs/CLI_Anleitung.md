@@ -70,7 +70,10 @@ Voraussetzung: Ein GitHub-Token muss im Secrets Manager hinterlegt sein.
 
 4. Secrets Management (secrets)
 
-Verwaltung sensibler Daten (API-Keys, Passwörter) im sicheren OS-Keyring.
+Verwaltung sensibler Daten (API-Keys, Tokens) im verschlüsselten Zugangsdaten-Tresor in Ihrem Benutzerordner.
+Sein Schlüssel liegt standardmäßig im OS-Keyring; ohne nutzbaren Keyring wählen Sie mit der Einstellung
+`secret_storage` einen anderen Schutz (`helper`, `passphrase`, `insecure` oder, für CI, `ephemeral`;
+`LLM_SECRET_STORAGE` für einen einzelnen Lauf).
 
 ```bash
 # Secret setzen (Interaktive Passworteingabe)
