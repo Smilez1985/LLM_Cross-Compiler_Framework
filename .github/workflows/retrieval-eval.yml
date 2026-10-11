@@ -1,7 +1,8 @@
 name: Retrieval evaluation
 
-# Grades the knowledge-base search on the fixture corpus (evals/retrieval) with the real local embedding model;
-# no AI model is involved. Manual and nightly only: the models (about 0.5 GB) are downloaded once and cached.
+# Grades the knowledge-base search on the fixture corpus (evals/retrieval) with the real local embedding and
+# reranking models; no AI model is involved. Manual and nightly only: the models (about 0.6 GB) are downloaded
+# once and cached.
 on:
   workflow_dispatch:
   schedule:
@@ -37,11 +38,11 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
 
-      - name: Cache the embedding models
+      - name: Cache the embedding and reranking models
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/models/embeddings
-          key: retrieval-models-${{ hashFiles('orchestrator/rag/embeddings.py') }}
+          key: retrieval-models-${{ hashFiles('orchestrator/rag/embeddings.py', 'orchestrator/rag/retrieval.py') }}
           restore-keys: retrieval-models-
 
       - name: Run the retrieval cases
@@ -49,9 +50,13 @@ jobs:
           LLM_FRAMEWORK_HOME: ${{ runner.temp }}/llm-home
           LLM_FRAMEWORK_CONFIG_DIR: ${{ runner.temp }}/llm-config
           LLM_FRAMEWORK_MODELS_DIR: ${{ runner.temp }}/models
-        # Without a relevance floor every unrelated question gets excerpts, so 100 % is not reachable yet;
-        # the threshold catches a broken search, not small changes (compare the reports for those).
-        run: python -m orchestrator.cli -q ditto eval --kind retrieval --json retrieval-report.json --min-pass 0.7
+          LLM_FRAMEWORK_RAG_RERANKER: cross-encoder/mmarco-mMiniLMv2-L12-H384-v1
+        # fused (hybrid search) has no relevance floor, so unrelated questions get excerpts and 100 % is out of
+        # reach; rerank adds the cross-encoder and its floor. The threshold catches a broken search, not small
+        # changes (compare the reports for those).
+        run: >-
+          python -m orchestrator.cli -q ditto eval --kind retrieval --rag-variant fused --rag-variant rerank
+          --json retrieval-report.json --min-pass 0.7
 
       - name: Upload the report
         if: always()
