@@ -32,6 +32,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Ditto evaluation** (`llm-cli ditto eval`): fixed cases (build-log analysis, build recommendations, module
   proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local
   model tier (`--tier small --tier small-q2`). Nothing is built; `--json` writes the report.
+- **`llm-cli --debug-http`** shows the debug output of the HTTP libraries and the AI provider SDKs on stderr,
+  with credentials redacted. Without it these loggers never go below INFO, even with `--log-level DEBUG`: their
+  debug output contains request options, prompts and headers.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -62,6 +65,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Requests to local model servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment.
 - Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
   the same way and installed atomically.
+- **Credentials are redacted in every log**: the framework's own, those of the provider SDKs and HTTP libraries
+  (anthropic, openai, httpx, httpcore, urllib3, botocore, google.auth, azure, msal), and tracebacks. Redacted
+  are the values of credential headers (`Authorization`, `x-api-key`, `api-key`, `x-goog-api-key`, `Cookie`,
+  `Set-Cookie`), sign-in and key parameters in URLs (`code`, `state`, `key`, `access_token`, `token`, ...) and
+  every known key format.
+- **One table of secret formats** (`orchestrator/security/secret_patterns.py`) for the secret scan and for
+  runtime redaction, which knew only five formats before. New: Unsloth Studio keys (`sk-unsloth-`), Bedrock
+  short-term keys (`bedrock-api-key-`), LocalAI keys (`lai-`), `Authorization: Bearer` lines and quoted values
+  assigned to `api_key`, `secret` or `token`. Runtime redaction now also covers JWTs, private key blocks and
+  passwords in URLs.
+- API keys held in memory by Ditto's provider layer show as `<redacted>` in `str()` and `repr()` and cannot be
+  pickled.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

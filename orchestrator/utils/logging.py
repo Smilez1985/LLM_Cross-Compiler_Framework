@@ -16,7 +16,6 @@ Key Responsibilities:
 - Debug trace collection
 """
 
-import os
 import sys
 import json
 import logging
@@ -25,14 +24,16 @@ import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union, Callable
+from typing import Dict, List, Optional, Any, Union
 from dataclasses import dataclass, field, asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import Enum
 import queue
-import inspect
 
 import yaml
+
+from orchestrator.security.redaction import configure_sdk_loggers, install_log_redaction
+from orchestrator.security.secret_patterns import redact
 
 
 # ============================================================================
@@ -211,8 +212,8 @@ class StructuredFormatter(logging.Formatter):
         # Add exception information if present
         if record.exc_info:
             log_entry.exception_type = record.exc_info[0].__name__
-            log_entry.exception_message = str(record.exc_info[1])
-            log_entry.stack_trace = "".join(traceback.format_exception(*record.exc_info))
+            log_entry.exception_message = redact(str(record.exc_info[1]))
+            log_entry.stack_trace = record.exc_text or redact("".join(traceback.format_exception(*record.exc_info)))
         
         # Add extra fields
         for key, value in record.__dict__.items():
@@ -765,17 +766,19 @@ class LoggingManager:
 _logging_manager: Optional[LoggingManager] = None
 
 
-def setup_logging(config_file: Optional[Path] = None, 
+def setup_logging(config_file: Optional[Path] = None,
                  level: Union[str, LogLevel] = LogLevel.INFO,
-                 enable_memory_handler: bool = True) -> LoggingManager:
+                 enable_memory_handler: bool = True,
+                 debug_http: Optional[bool] = None) -> LoggingManager:
     """
     Setup framework logging system.
-    
+
     Args:
         config_file: Optional configuration file
         level: Default logging level
         enable_memory_handler: Enable in-memory handler for GUI
-        
+        debug_http: Let the HTTP and provider SDK loggers log DEBUG (--debug-http); None keeps the last choice
+
     Returns:
         LoggingManager: Configured logging manager
     """
@@ -797,7 +800,10 @@ def setup_logging(config_file: Optional[Path] = None,
             default_level=level,
             enable_memory_handler=enable_memory_handler
         )
-    
+
+    # Credentials never reach a log; set_global_level() above also reset the SDK loggers.
+    install_log_redaction()
+    configure_sdk_loggers(level.value, debug_http)
     return _logging_manager
 
 

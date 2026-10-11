@@ -4,6 +4,11 @@ Die Kommandozeile (CLI) ist das mächtige Werkzeug für Headless-Server, CI/CD-P
 
 **Einstiegspunkt:** `python3 orchestrator/cli.py [BEFEHL] [OPTIONEN]`
 
+**Globale Optionen** (vor dem Befehl): `-c/--config DATEI`, `-v/--verbose`, `-q/--quiet`,
+`--log-level DEBUG|INFO|WARNING|ERROR` und `--debug-http`, das die Debug-Ausgabe der HTTP-Bibliotheken und der
+SDKs der KI-Anbieter auf stderr zeigt. Zugangsdaten (API-Keys, Tokens, `Authorization`- und Cookie-Header,
+Anmeldecodes in URLs) werden in jedem Log geschwärzt, auch mit `--debug-http`.
+
 ---
 
 ## 1. Hardware-Analyse (`scan`)

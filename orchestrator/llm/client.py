@@ -32,7 +32,7 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
 from orchestrator.llm.catalog import Catalog, ProviderPreset, load_catalog
@@ -40,13 +40,14 @@ from orchestrator.llm.errors import (LLMError, NotConfigured, ProviderUnavailabl
 from orchestrator.llm.privacy import PrivacyFilter, normalize_level, restore, restore_obj
 from orchestrator.llm.providers import adapter_class
 from orchestrator.llm.types import EFFORTS, TASKS, ChatRequest, ChatResult, Message, ModelInfo
+from orchestrator.security.redaction import SecretStr, reveal
 from orchestrator.utils.logging import get_logger
 
 MAX_RETRIES = 2  # the SDKs' own retries are switched off (max_retries=0), so attempts never multiply
 MANAGED_RUNTIME_PROVIDER = "local"  # preset served by the managed llama-server
 
 # (base_url, api_key, model) of a running local server
-RuntimeEndpoint = Tuple[str, Optional[str], Optional[str]]
+RuntimeEndpoint = Tuple[str, Union[str, SecretStr, None], Optional[str]]
 
 
 def is_loopback_url(url: Optional[str]) -> bool:
@@ -91,7 +92,7 @@ class LLMClient:
         self.runtime_resolver = runtime_resolver or self._managed_runtime_endpoint
         self._loopback_http = None
         self._adapters: Dict[tuple, Any] = {}
-        self._state_cache: Dict[str, str] = {}
+        self._state_cache: Dict[str, SecretStr] = {}
         self._lock = threading.Lock()
 
     # --- settings ---------------------------------------------------------------------------------------------
@@ -132,11 +133,11 @@ class LLMClient:
     def set_runtime_endpoint(self, provider: str, base_url: Optional[str], api_key: Optional[str] = None,
                              model: Optional[str] = None) -> None:
         """Endpoint (and loaded model) of a running local server, e.g. the managed llama-server; base_url None
-        removes it. Kept in memory only."""
+        removes it. Kept in memory only, the key as a SecretStr."""
         pid = self.catalog.resolve_id(provider) or provider
         with self._lock:
             if base_url:
-                self._runtime[pid] = (base_url, api_key, model)
+                self._runtime[pid] = (base_url, SecretStr.wrap(api_key), model)
             else:
                 self._runtime.pop(pid, None)
 
@@ -174,7 +175,7 @@ class LLMClient:
 
     def _api_key(self, preset: ProviderPreset) -> Optional[str]:
         if preset.runtime_endpoint:
-            return (self._runtime_endpoint(preset) or (None, None, None))[1]
+            return reveal((self._runtime_endpoint(preset) or (None, None, None))[1])
         if not preset.secret or self.secrets is None:
             return None
         try:
@@ -313,7 +314,7 @@ class LLMClient:
         """A random value created on first use and kept in the per-user state directory (mode 0600)."""
         cached = self._state_cache.get(name)
         if cached:
-            return cached
+            return cached.get_secret_value()
         path = self._state_path(name)
         try:
             value = path.read_text(encoding="utf-8").strip()
@@ -326,7 +327,7 @@ class LLMClient:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(value)
             os.replace(tmp, path)
-        self._state_cache[name] = value
+        self._state_cache[name] = SecretStr(value)  # the privacy key is an HMAC key
         return value
 
     def install_id(self) -> str:

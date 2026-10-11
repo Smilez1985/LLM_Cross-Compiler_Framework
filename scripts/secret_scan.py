@@ -9,6 +9,9 @@ hold credentials must never be committed.
     python scripts/secret_scan.py --history    # every blob of every commit (CI)
     python scripts/secret_scan.py FILE...      # the given files
 
+The key formats live in orchestrator/security/secret_patterns.py, the table runtime redaction uses too; add new
+formats there. This script loads it by path, so it needs nothing but the checkout.
+
 Personal strings (your e-mail address, user name, host names) belong in a pattern file that is never
 committed: .git/info/secret-patterns (one literal per line, or "re:<regex>"; "#" starts a comment), or the
 file named by SECRET_SCAN_PATTERNS_FILE. Findings are printed redacted; local patterns are never echoed.
@@ -18,6 +21,7 @@ Exit code: 0 clean, 1 findings, 2 usage or git error. Standard library only.
 """
 
 import argparse
+import importlib.util
 import os
 import re
 import subprocess
@@ -28,40 +32,27 @@ from typing import Iterable, Iterator, List, Optional, Sequence, Tuple
 
 MAX_BYTES = 5_000_000
 ALLOW_PRAGMA = "secret-scan: allow"
-# Obvious placeholders in documentation and tests: marker words, runs a random key never has
-# (sequential digits or letters), and reserved example hosts (RFC 2606).
-PLACEHOLDER = re.compile(
-    r"EXAMPLE|PLACEHOLDER|REDACTED|DUMMY|FAKE|TESTKEY|x{8,}|X{8,}|0{12,}|\.\.\.|<[^>]*>"
-    r"|0123456789|abcdefghij|ABCDEFGHIJ|AbCdEf|aBcDeF"
-    r"|@(?:[A-Za-z0-9\-]+\.)*(?:example|test|invalid|localhost)\b|@(?:[A-Za-z0-9\-]+\.)*example\.(?:com|org|net)\b")
+PATTERN_TABLE = Path(__file__).resolve().parent.parent / "orchestrator" / "security" / "secret_patterns.py"
 
-PATTERNS: Tuple[Tuple[str, "re.Pattern[str]"], ...] = tuple((name, re.compile(rx)) for name, rx in (
-    ("Anthropic key", r"sk-ant-(?:api|admin|oat|ort)\d{2}-[A-Za-z0-9_\-]{20,}"),
-    ("OpenAI key", r"sk-(?:proj|svcacct|admin)-[A-Za-z0-9_\-]{20,}|\bsk-[A-Za-z0-9]{48}\b"),
-    ("OpenRouter key", r"sk-or-v1-[a-f0-9]{40,}"),
-    ("Hugging Face token", r"\bhf_[A-Za-z0-9]{30,}"),
-    ("GitHub token", r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}\b|github_pat_[A-Za-z0-9_]{50,}"),
-    ("GitLab token", r"\bglpat-[A-Za-z0-9_\-]{20,}"),
-    ("AWS access key id", r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b"),
-    ("AWS secret key", r"(?i)aws_secret_access_key\s*[:=]\s*['\"]?[A-Za-z0-9/+]{40}\b"),
-    ("Bedrock API key", r"\bABSK[A-Za-z0-9+/=]{60,}"),
-    ("Google API key", r"\bAIza[0-9A-Za-z_\-]{35}\b"),
-    ("Google OAuth secret", r"\bGOCSPX-[A-Za-z0-9_\-]{20,}"),
-    ("Groq key", r"\bgsk_[A-Za-z0-9]{40,}"),
-    ("xAI key", r"\bxai-[A-Za-z0-9]{40,}"),
-    ("Perplexity key", r"\bpplx-[A-Za-z0-9]{40,}"),
-    ("NVIDIA key", r"\bnvapi-[A-Za-z0-9_\-]{40,}"),
-    ("Cerebras key", r"\bcsk-[a-z0-9]{40,}"),
-    ("Replicate token", r"\br8_[A-Za-z0-9]{30,}"),
-    ("Fireworks key", r"\bfw_[A-Za-z0-9]{20,}"),
-    ("Slack token", r"\bxox[abprs]-[A-Za-z0-9\-]{10,}"),
-    ("Stripe key", r"\b[rs]k_live_[A-Za-z0-9]{20,}"),
-    ("PyPI token", r"\bpypi-AgE[A-Za-z0-9_\-]{50,}"),
-    ("JSON web token", r"\beyJ[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}"),
-    ("private key", r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----"),
-    ("certificate", r"-{5}BEGIN CERTIFICATE-{5}"),
-    ("URL with password", r"\b[a-z][a-z0-9+.\-]*://[^\s:/@'\"\\]+:[^\s/@'\"\\]{6,}@[A-Za-z0-9.\-]+"),
-))
+
+def _load_patterns():
+    """The pattern table shared with runtime redaction, loaded by path: the scan runs from a bare checkout and in
+    git hooks, without the framework's dependencies. A process that imported it already uses that module."""
+    module = sys.modules.get("orchestrator.security.secret_patterns")
+    if module is None:
+        spec = importlib.util.spec_from_file_location("_secret_patterns", PATTERN_TABLE)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    return module
+
+
+try:
+    _patterns = _load_patterns()
+except OSError as e:  # never scan without the table: the commit would pass unchecked
+    print(f"secret-scan: cannot load the pattern table {PATTERN_TABLE}: {e}", file=sys.stderr)
+    sys.exit(2)
+PATTERNS = _patterns.PATTERNS        # the same objects runtime redaction uses
+PLACEHOLDER = _patterns.PLACEHOLDER
 
 # Files that hold credentials or per-user state, whatever their content.
 FORBIDDEN_NAMES = {
@@ -120,10 +111,8 @@ def scan_text(where: str, text: str, local: Sequence["re.Pattern[str]"] = ()) ->
     for number, line in enumerate(text.splitlines(), 1):
         if ALLOW_PRAGMA in line:
             continue
-        for kind, rx in PATTERNS:
-            for m in rx.finditer(line):
-                if not PLACEHOLDER.search(m.group(0)):
-                    findings.append(Finding(where, number, kind, redact(m.group(0))))
+        for kind, match in _patterns.find_secrets(line):
+            findings.append(Finding(where, number, kind, redact(match)))
         for i, rx in enumerate(local, 1):
             if rx.search(line):
                 findings.append(Finding(where, number, f"local pattern #{i}", ""))

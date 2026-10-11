@@ -209,8 +209,11 @@ def model_format_from_string(format_str: str) -> ModelFormat:
 @click.option('--verbose', '-v', is_flag=True, help='Verbose output')
 @click.option('--quiet', '-q', is_flag=True, help='Quiet output')
 @click.option('--log-level', default='INFO', type=click.Choice(['DEBUG', 'INFO', 'WARNING', 'ERROR']))
+@click.option('--debug-http', is_flag=True,
+              help='Log HTTP and provider SDK debug output to stderr (credentials stay redacted)')
 @pass_context
-def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str):
+def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str,
+        debug_http: bool):
     """
     🚀 LLM Cross-Compiler Framework CLI v2.4.0
     
@@ -227,7 +230,7 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     ctx.quiet = quiet
 
     # Applies to framework loggers too; they are created before FrameworkManager configures logging.
-    setup_logging(level=ctx.log_level)
+    setup_logging(level=ctx.log_level, debug_http=debug_http)
     
     if not quiet:
         Console(stderr=True).print(Panel(
