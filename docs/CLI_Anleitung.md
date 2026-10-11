@@ -78,11 +78,10 @@ Voraussetzung: Ein GitHub-Token muss im Secrets Manager hinterlegt sein.
 Verwaltung sensibler Daten (API-Keys, Passwörter) im sicheren OS-Keyring.
 
 ```bash
-# Secret setzen (Interaktive Passworteingabe)
+# Secret setzen: der Wert wird verdeckt abgefragt. Nie auf der Kommandozeile übergeben,
+# dort zeigen ihn die Shell-History und die Prozessliste.
 python3 orchestrator/cli.py secrets set openai_api_key
-
-# Wert direkt übergeben (Vorsicht in der History!)
-python3 orchestrator/cli.py secrets set github_token "ghp_..."
+python3 orchestrator/cli.py secrets set github_token
 
 # Secret lesen (entschlüsselt)
 python3 orchestrator/cli.py secrets get openai_api_key

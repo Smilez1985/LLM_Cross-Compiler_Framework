@@ -76,11 +76,10 @@ Requirement: A GitHub token must be stored in the Secrets Manager.
 Manage sensitive data (API keys, passwords) in the secure OS Keyring.
 
 ```bash
-# Set a secret (Interactive password prompt)
+# Set a secret: the value is asked with a hidden prompt. Never put it on the command line,
+# where the shell history and the process list would show it.
 python3 orchestrator/cli.py secrets set openai_api_key
-
-# Pass value directly (Caution: shows in history!)
-python3 orchestrator/cli.py secrets set github_token "ghp_..."
+python3 orchestrator/cli.py secrets set github_token
 
 # Read a secret (decrypted)
 python3 orchestrator/cli.py secrets get openai_api_key

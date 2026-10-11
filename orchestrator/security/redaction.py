@@ -51,7 +51,9 @@ class SecretStr:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, SecretStr):
             return NotImplemented
-        return hmac.compare_digest(self._value.encode(), other._value.encode())
+        # surrogatepass: values from os.environ may hold undecodable bytes as lone surrogates
+        return hmac.compare_digest(self._value.encode("utf-8", "surrogatepass"),
+                                   other._value.encode("utf-8", "surrogatepass"))
 
     def __hash__(self) -> int:
         return hash(self._value)
@@ -76,16 +78,30 @@ def reveal(value: Union[str, SecretStr, None]) -> Optional[str]:
 _exception_formatter = logging.Formatter()
 
 
+def _printable(value: object) -> str:
+    try:
+        return repr(value)
+    except Exception:
+        return f"<unprintable {type(value).__name__}>"
+
+
 def redact_record(record: logging.LogRecord) -> None:
     """Redacts a record in place: the message with its arguments (merged, so no handler formats the raw
-    arguments again), the traceback text and the stack."""
+    arguments again), the traceback text and the stack. Never raises: it runs inside logger.info() and the
+    like, in the code that logs."""
     try:
         message = record.getMessage()
-    except Exception:  # arguments that do not fit the format: keep both readable, never raise from logging
-        message = f"{record.msg} {record.args!r}"
+    except Exception:  # arguments that do not fit the format, or an object without str(): keep it readable
+        try:
+            message = f"{record.msg} {record.args!r}"
+        except Exception:
+            message = f"{_printable(record.msg)} {_printable(record.args)}"
     record.msg, record.args = redact(message), ()
     if record.exc_info and not record.exc_text:
-        record.exc_text = _exception_formatter.formatException(record.exc_info)  # formatters use it as is
+        try:
+            record.exc_text = _exception_formatter.formatException(record.exc_info)  # formatters use it as is
+        except Exception:
+            record.exc_text = f"<traceback not available: {_printable(record.exc_info)}>"
     if record.exc_text:
         record.exc_text = redact(record.exc_text)
     if record.stack_info:

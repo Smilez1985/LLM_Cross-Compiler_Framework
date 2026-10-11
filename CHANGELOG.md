@@ -58,6 +58,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
 
+### Fixed
+- The CLI and the CLI guides no longer tell you to put the GitHub token on the command line, where the shell
+  history keeps it (that form did not work either). `llm-cli secrets set <name>` asks for the value with a
+  hidden prompt.
+
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
   into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
@@ -66,10 +71,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
   the same way and installed atomically.
 - **Credentials are redacted in every log**: the framework's own, those of the provider SDKs and HTTP libraries
-  (anthropic, openai, httpx, httpcore, urllib3, botocore, google.auth, azure, msal), and tracebacks. Redacted
-  are the values of credential headers (`Authorization`, `x-api-key`, `api-key`, `x-goog-api-key`, `Cookie`,
-  `Set-Cookie`), sign-in and key parameters in URLs (`code`, `state`, `key`, `access_token`, `token`, ...) and
-  every known key format.
+  (anthropic, openai, httpx, httpcore, urllib3, botocore, google.auth, azure, msal), tracebacks and the extra
+  fields of the JSON log format. Redacted are the values of credential headers (`Authorization`, `x-api-key`,
+  `api-key`, `x-goog-api-key`, `Cookie`, `Set-Cookie`, also in JSON with escaped quotes), sign-in and key
+  parameters in URLs and form-encoded token requests (`code`, `state`, `key`, `access_token`, `token`, ...)
+  and every known key format.
+- Redaction also finds credentials by their context, whatever their format: a bearer token quoted in a server's
+  error message, token-shaped values of `api_key`, `secret`, `token` or `password` fields, and environment
+  lines such as `HF_TOKEN=...` or `export OPENAI_API_KEY=...`. Tokenizer settings in build logs (for example
+  `"pad_token": "<|...|>"`) stay readable.
+- Redaction can no longer be slowed down by crafted text: an error message or build log with a long run of
+  `sk-` took minutes to redact before.
 - **One table of secret formats** (`orchestrator/security/secret_patterns.py`) for the secret scan and for
   runtime redaction, which knew only five formats before. New: Unsloth Studio keys (`sk-unsloth-`), Bedrock
   short-term keys (`bedrock-api-key-`), LocalAI keys (`lai-`), `Authorization: Bearer` lines and quoted values

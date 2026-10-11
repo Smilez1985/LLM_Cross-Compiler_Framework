@@ -3,10 +3,13 @@
 LLM client and their errors show."""
 
 import copy
+import io
 import json
 import logging
 import pickle
+import re
 import sys
+import time
 
 import pytest
 
@@ -50,13 +53,49 @@ def test_redaction_keeps_what_is_not_secret():
     redacted = redact_secrets("https://deploy:" + "pw" + body(10) + "@registry.internal.corp/v2 and client_secret: '"
                               + body(30) + "'")
     assert redacted == "https://deploy:REDACTED@registry.internal.corp/v2 and client_secret: 'REDACTED'"
+    # Build logs and model settings that only look like credentials stay readable.
+    for text in ("MAX_TOKENS=16000", "TOKENIZER_PATH=/models/qwen/tokenizer.json", "NUM_TOKENS_LIMIT=4096",
+                 "eos_token = '<|im_end|>'", '"pad_token": "<|finetune_right_pad_id|>"',
+                 "EOS_TOKEN=<|reserved_special_token_250|>", "Bearer authentication is required",
+                 "max_tokens: 16000"):
+        assert redact_secrets(text) == text
+
+
+@pytest.mark.parametrize("text, secret", [
+    ("ANTHROPIC_" + "API_KEY='" + TOKEN + "'", TOKEN),
+    ("docker run -e HF_" + "TOKEN=" + TOKEN + " image", TOKEN),
+    ("AWS_SECRET_" + "ACCESS_KEY: " + TOKEN, TOKEN),
+    ('$env:OPENAI_' + 'API_KEY="' + TOKEN + '"', TOKEN),
+    ("401 from server: invalid Bearer " + TOKEN + "." + body(20), TOKEN),
+    ('{"access_' + 'token": "ya29.' + TOKEN + '", "expires_in": 3599}', TOKEN),
+    ("code=" + TOKEN + "&grant_type=authorization_code", TOKEN),  # form-encoded token request bodies
+    ("body:\nrefresh_" + "token=" + TOKEN + "&grant_type=refresh_token", TOKEN),
+])
+def test_credentials_in_unknown_formats_are_redacted_by_context(text, secret):
+    assert secret not in redact_secrets(text) and "REDACTED" in redact_secrets(text)
+
+
+@pytest.mark.parametrize("text", [
+    "sk-" * 30000,                                    # a run of key prefixes without a digit
+    "id_token_hint " + "a." * 30000,                  # many scheme-like starts
+    "id_token_hint " + "a://" * 15000,                # many URLs without a query
+    "id_token_hint=" * 8000,
+    "TOKEN_" * 20000 + "x",
+    "Authorization: '" * 8000,
+])
+def test_redaction_stays_fast_on_adversarial_text(text):
+    # Redaction runs on every log record and on text from servers and build logs: never quadratic.
+    start = time.perf_counter()
+    redact_secrets(text)
+    assert time.perf_counter() - start < 1.0
 
 
 # --- logging ----------------------------------------------------------------------------------------------------
 
 @pytest.mark.parametrize("header", secret_patterns.SENSITIVE_HEADERS)
 @pytest.mark.parametrize("shape", ["{h}: {v}", "{{'{h}': '{v}', 'accept': 'json'}}", '{{"{h}": "{v}"}}',
-                                   "[(b'{h}', b'{v}'), (b'host', b'api')]"])
+                                   "[(b'{h}', b'{v}'), (b'host', b'api')]",
+                                   '"{{\\"{h}\\": \\"{v}\\", \\"accept\\": \\"json\\"}}"'])  # JSON in JSON
 def test_credential_headers_are_redacted(redacted_logging, caplog, header, shape):
     caplog.set_level(logging.DEBUG, logger="httpx2")
     logging.getLogger("httpx2").debug("request headers %s", shape.format(h=header.title(), v="Bearer " + TOKEN))
@@ -113,6 +152,45 @@ def test_a_record_with_broken_arguments_is_logged_redacted(redacted_logging, cap
     caplog.set_level(logging.INFO, logger="orchestrator.test")
     logging.getLogger("orchestrator.test").info("two values %s %s", SAMPLES["xAI key"])
     assert SAMPLES["xAI key"] not in caplog.text and "two values" in caplog.text
+
+
+class Unprintable:
+    def __str__(self):
+        raise ValueError("no str")
+
+    __repr__ = __str__
+
+
+@pytest.mark.parametrize("msg, args", [(Unprintable(), ()), ("value %s", (Unprintable(),)),
+                                       ("%(a)s", {"a": Unprintable()}), (b"bytes " + SAMPLES["Groq key"].encode(), ())])
+def test_logging_never_raises_into_the_caller(redacted_logging, caplog, msg, args):
+    # A message that cannot be turned into text must not make logger.info() raise in the code that logs.
+    caplog.set_level(logging.INFO, logger="orchestrator.test")
+    logging.getLogger("orchestrator.test").info(msg, *([args] if isinstance(args, dict) else args))
+    assert caplog.records and SAMPLES["Groq key"] not in caplog.text
+
+
+def test_extra_fields_are_redacted_in_the_json_log_format(redacted_logging):
+    from orchestrator.utils.logging import LogFormat, StructuredFormatter
+
+    key = SAMPLES["Anthropic key"]
+    buffer = io.StringIO()
+    handler = logging.StreamHandler(buffer)
+    handler.setFormatter(StructuredFormatter(LogFormat.JSON))
+    log = logging.getLogger("orchestrator.test.json_extras")
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)  # other tests' setup_logging(level=...) leaves levels on existing loggers
+    try:
+        log.warning("request sent", extra={"api_key": key, "headers": {"Authorization": "Bearer " + TOKEN},
+                                           "attempt": 2})
+        logging.LoggerAdapter(log, {"session": "Bearer " + TOKEN}).warning("adapter")
+    finally:
+        log.removeHandler(handler)
+    out = buffer.getvalue()
+    entries = [json.loads(line) for line in out.splitlines()]
+    assert len(entries) == 2 and key not in out and TOKEN not in out
+    assert entries[0]["extra_fields"]["attempt"] == 2 and entries[1]["message"] == "adapter"
+    assert entries[0]["extra_fields"]["api_key"] == "sk-REDACTED"
 
 
 def test_the_filter_redacts_records_built_elsewhere(redacted_logging):
@@ -204,6 +282,24 @@ def test_secret_str_never_shows_its_value():
         json.dumps({"key": secret})
     with pytest.raises(AttributeError):
         secret.value = key
+
+
+def test_no_hint_or_doc_puts_a_secret_on_the_command_line():
+    # Secrets never go into argv: the shell history and the process list would show them.
+    from conftest import REPO_ROOT
+
+    argv_secret = re.compile(r"secrets set \w+ +(?:[\"<$]|--password)")
+    files = [*REPO_ROOT.glob("*.md"), *(REPO_ROOT / "docs").rglob("*.md"), *(REPO_ROOT / "orchestrator").rglob("*.py")]
+    offenders = [f"{f.relative_to(REPO_ROOT)}:{n}" for f in files
+                 for n, line in enumerate(f.read_text(encoding="utf-8", errors="replace").splitlines(), 1)
+                 if argv_secret.search(line)]
+    assert offenders == []
+
+
+def test_secret_str_compares_values_that_are_not_valid_utf8():
+    # os.environ keeps undecodable bytes as lone surrogates (POSIX); comparing must not raise.
+    odd = "key-\udcff" + body(20)
+    assert SecretStr(odd) == SecretStr(odd) and SecretStr(odd) != SecretStr(odd + "x")
 
 
 # --- adapters, the client and their errors ----------------------------------------------------------------------
