@@ -71,11 +71,14 @@ ANSWERS = frozenset({"accepted", "declined", "cancelled", "timeout", "client_dis
 # decided in the framework, or a standing approval.
 _CHANNEL = re.compile(r"^(none|elicitation|framework|framework-gui|framework-cli|approval:[\w-]{1,64}|"
                       r"grant:[\w-]{1,64})$")
-# Fields kept in an entry's `extra` column. They are part of the chained hash once written; entries without them
-# (older entries, older writers) are hashed exactly as before.
+# Fields kept in an entry's `extra` column. The entry's hash stays the 3.0.0 one (so a 3.0.0 process that still
+# runs next to this version verifies and appends to the same log); the extra fields are bound to it by their
+# SHA-256 at the end of the chained `detail` column, so adding, removing or editing them is detected.
 EXTRA_FIELDS = frozenset({"client", "session", "confirm_channel", "question_sha256", "answer", "name_requested",
                           "repairs", "reason_code", "duration_ms", "result", "links"})
 _EXTRA_MAX = 2000
+_EXTRA_REF = re.compile(r"\n\[extra sha256:([0-9a-f]{64})\]\Z")
+_EXTRA_TAG = "[extra sha256:"
 _BREAKS = ("removed", "modified", "anchor_missing")
 _ANCHOR_MAX = 4096  # a real anchor has about 170 bytes
 
@@ -138,6 +141,21 @@ def extra_fields(row: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError, RecursionError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _extra_ref(extra: str) -> str:
+    """The binding of an entry's extra fields, appended to its detail (which the 3.0.0 hash covers)."""
+    return f"\n{_EXTRA_TAG}{hashlib.sha256(extra.encode('utf-8', 'surrogatepass')).hexdigest()}]"
+
+
+def _extra_bound(row: Dict[str, Any]) -> bool:
+    """Whether the extra fields are exactly the ones the entry's detail names (none named: none stored)."""
+    extra, found = row.get("extra"), _EXTRA_REF.search(str(row.get("detail") or ""))
+    if extra is None:
+        return found is None
+    if found is None or not isinstance(extra, str):
+        return False
+    return hmac.compare_digest(_extra_ref(extra), found.group(0))
 
 
 def _same(expected: str, stored: Any) -> bool:
@@ -230,15 +248,13 @@ class AuditLog:
         values = [row[f] for f in _FIELDS]
         if key_id is not None:  # entries from before per-entry key ids are hashed without it
             values.append(key_id)
-        if row.get("extra") is not None:  # entries without extra fields are hashed as before
-            values.append(row["extra"])
         payload = (prev_hash + json.dumps(values, ensure_ascii=False, default=repr)).encode("utf-8")
         if key:
             return hmac.new(key, payload, hashlib.sha256).hexdigest()
         return hashlib.sha256(payload).hexdigest()
 
     def _matches(self, row: Dict[str, Any], key_id: Optional[str], key: Optional[bytes]) -> bool:
-        return _same(self._digest(str(row["prev_hash"]), row, key_id, key), row["hash"])
+        return _same(self._digest(str(row["prev_hash"]), row, key_id, key), row["hash"]) and _extra_bound(row)
 
     def _classify(self, row: Dict[str, Any], legacy_key_id: Optional[str]) -> str:
         """legacy_key_id: the key id meta names for entries from before per-entry key ids."""
@@ -382,6 +398,10 @@ class AuditLog:
         earlier entries)."""
         text = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str) if arguments is not None else ""
         extra_text = self._extra(outcome, extra)
+        # Free text (it can quote what a model wrote) never ends like the binding of extra fields.
+        detail_text = _text(redact_secrets(detail or ""))[:1000].replace(_EXTRA_TAG, "[extra-sha256:")
+        if extra_text is not None:
+            detail_text += _extra_ref(extra_text)
         row = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "actor": _text(actor), "tool": _text(tool), "tier": _text(tier), "decision": _text(decision),
@@ -389,7 +409,7 @@ class AuditLog:
             "args_sha256": hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
             "args_preview": _text(redact_secrets(text))[:500],
             "outcome": _text(outcome),
-            "detail": _text(redact_secrets(detail or ""))[:1000],
+            "detail": detail_text,
             "extra": extra_text,
         }
         with self._lock:
@@ -466,13 +486,15 @@ class AuditLog:
 
     def entries(self, limit: int = 100) -> List[Dict[str, Any]]:
         """The newest entries, newest first. The extra fields are also given as keys of their own (they never
-        replace a column)."""
+        replace a column); `detail` is shown without their binding."""
         db = self._connect()
         try:
             rows = _dicts(db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(limit),)))
         finally:
             db.close()
         for row in rows:
+            if isinstance(row.get("detail"), str):
+                row["detail"] = _EXTRA_REF.sub("", row["detail"])
             for key, value in extra_fields(row).items():
                 row.setdefault(key, value)
         return rows

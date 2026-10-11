@@ -880,7 +880,10 @@ cancels a running call, the cancellation is recorded at once and passed to the r
 finishes, and its end entry follows. Entries also carry the client's self-reported name and version (a label, not
 proof of who it is), a hash of the connection, the confirmation channel (`elicitation`, `framework-gui`,
 `framework-cli`), the duration, the SHA-256 and size of the result (never the result itself) and a link to the call's
-`started` entry. These fields are part of the hash chain; logs written before them stay verifiable.
+`started` entry. These fields are bound to the hash chain (their SHA-256 ends the entry's chained detail), so
+adding, removing or changing them is detected, while an entry keeps the hash 3.0.0 computes: logs written before them
+stay verifiable, and a 3.0.0 process that still runs next to this version keeps verifying and appending to the same
+log.
 
 ---
 
