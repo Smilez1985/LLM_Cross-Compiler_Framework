@@ -10,7 +10,6 @@ candidates that do not answer the question at all. pack_excerpts fits the best e
 import hashlib
 import json
 import math
-import re
 import threading
 from collections import OrderedDict
 from pathlib import Path
@@ -18,13 +17,13 @@ from typing import Callable, List, Literal, Optional, Sequence, Tuple
 
 from pydantic import BaseModel, ConfigDict
 
-from orchestrator.rag.embeddings import _REGISTER_LOCK, _FastEmbedBase, approx_tokens, machine_resources
+from orchestrator.rag.chunking import _FENCE_OPEN
+from orchestrator.rag.embeddings import _FastEmbedBase, approx_tokens, machine_resources, register_model
 from orchestrator.rag.errors import EmbeddingError
 from orchestrator.utils.helpers import redact_secrets
 
 DEFAULT_MIN_SCORE = 0.2  # for cross-encoders without a calibrated floor
 CUT_MARK = "\n[…]"
-_FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")  # a Markdown code fence, as in chunking
 
 
 class RerankerSpec(BaseModel):
@@ -115,12 +114,9 @@ class FastEmbedReranker(_FastEmbedBase):
         from fastembed.common.model_description import ModelSource
         from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-        with _REGISTER_LOCK:
-            if not any(m["model"].lower() == self.model_id.lower() for m in TextCrossEncoder.list_supported_models()):
-                TextCrossEncoder.add_custom_model(
-                    model=self.model_id, sources=ModelSource(hf=self.model_id), model_file=self.spec.model_file,
-                    license=self.spec.license, size_in_gb=self.spec.size_gb,
-                    description="Registered by the LLM Cross-Compiler Framework.")
+        register_model(TextCrossEncoder, self.model_id, sources=ModelSource(hf=self.model_id),
+                       model_file=self.spec.model_file, license=self.spec.license, size_in_gb=self.spec.size_gb,
+                       description="Registered by the LLM Cross-Compiler Framework.")
         return TextCrossEncoder(self.model_id, cache_dir=str(self.cache_dir), local_files_only=offline)
 
     def _key(self, query: str, document: str) -> str:
@@ -177,7 +173,7 @@ def pack_excerpts(texts: Sequence[str], max_tokens: int, count: Callable[[str], 
 
 def _fence_after(fence: str, line: str) -> str:
     """The code fence still open after `line` ("" when none)."""
-    found = _FENCE.match(line)
+    found = _FENCE_OPEN.match(line)
     if not found:
         return fence
     if not fence:

@@ -4,8 +4,7 @@ Qdrant storage of the knowledge base.
 
 One collection per embedding model (alias name + model slug), so a model change never mixes or orphans
 vectors; the alias points at the active collection. Every point has a named dense vector and a BM25 sparse
-vector (Qdrant applies the IDF), and queries fuse both rankings with Reciprocal Rank Fusion. The keyword
-encoding is stamped on the collection; one of an older encoding is re-encoded from the stored text.
+vector (Qdrant applies the IDF), and queries fuse both rankings with Reciprocal Rank Fusion.
 """
 
 import base64
@@ -13,34 +12,18 @@ import gzip
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterator, List, Optional, Sequence
+from typing import Iterator, List, Optional, Sequence
 
 import numpy as np
 from qdrant_client import models
 
-from orchestrator.rag.chunking import passage_text
 from orchestrator.rag.embeddings import SparseVec, model_slug
-from orchestrator.rag.errors import EmbeddingError, KnowledgeBaseError, SparseEncodingMismatch
+from orchestrator.rag.errors import KnowledgeBaseError
 
 DENSE = "dense"
 SPARSE = "bm25"
 SCHEMA_VERSION = 2
 SNAPSHOT_FORMAT = "llm-framework-knowledge-snapshot"
-LEGACY_SPARSE_MODEL = "Qdrant/bm25"  # the encoding of collections and snapshots that do not name theirs
-SparseEncoder = Callable[[List[str]], Sequence[SparseVec]]
-
-
-def _passage(payload: dict) -> str:
-    """The text a stored chunk was embedded from."""
-    return passage_text(str(payload.get("source") or ""), str(payload.get("title") or ""),
-                        str(payload.get("section") or ""), str(payload.get("content") or ""))
-
-
-def _encode(encode: SparseEncoder, payloads: List[dict]) -> List[SparseVec]:
-    vectors = list(encode([_passage(p) for p in payloads])) if payloads else []
-    if len(vectors) != len(payloads):
-        raise EmbeddingError(f"The keyword encoder returned {len(vectors)} vectors for {len(payloads)} texts.")
-    return vectors
 
 
 class KnowledgeStore:
@@ -48,12 +31,11 @@ class KnowledgeStore:
 
     UPSERT_BATCH = 64
 
-    def __init__(self, client, alias: str, model_id: str, dim: int, sparse_model: str, server_mode: bool = False):
+    def __init__(self, client, alias: str, model_id: str, dim: int, server_mode: bool = False):
         self.client = client
         self.alias = alias
         self.model_id = model_id
         self.dim = dim
-        self.sparse_model = sparse_model
         self.server_mode = server_mode
         self.collection = self.collection_name(alias, model_id)
 
@@ -84,22 +66,13 @@ class KnowledgeStore:
 
     # --- schema ---
 
-    def ensure(self, reencode: Optional[SparseEncoder] = None) -> int:
-        """Creates the collection or checks that the existing one fits the models, then points the alias at it.
-        Keyword vectors of another encoding are rebuilt with `reencode` (the dense vectors stay); without it that
-        is an error. Returns the number of rebuilt chunks."""
-        rebuilt = 0
+    def ensure(self) -> None:
+        """Creates the collection or checks that the existing one fits the model, then points the alias at it."""
         if self.collection in self._collection_names():
-            try:
-                self._validate()
-            except SparseEncodingMismatch:
-                if reencode is None:
-                    raise
-                rebuilt = self.reencode_sparse(reencode)
+            self._validate()
         else:
             self._create()
         self._point_alias()
-        return rebuilt
 
     def _create(self) -> None:
         kwargs = dict(
@@ -107,8 +80,7 @@ class KnowledgeStore:
             vectors_config={DENSE: models.VectorParams(size=self.dim, distance=models.Distance.COSINE)},
             sparse_vectors_config={SPARSE: models.SparseVectorParams(modifier=models.Modifier.IDF)},
         )
-        metadata = {"embedding_model": self.model_id, "dim": self.dim, "sparse_model": self.sparse_model,
-                    "schema": SCHEMA_VERSION}
+        metadata = {"embedding_model": self.model_id, "dim": self.dim, "schema": SCHEMA_VERSION}
         try:
             self.client.create_collection(**kwargs, metadata=metadata)
         except Exception:
@@ -139,25 +111,6 @@ class KnowledgeStore:
         built_with = (config.metadata or {}).get("embedding_model")
         if built_with and built_with != self.model_id:
             raise KnowledgeBaseError(f"Collection {self.collection} was built with {built_with}, not {self.model_id}.")
-        sparse_built = (config.metadata or {}).get("sparse_model")  # servers before Qdrant 1.16 keep no metadata
-        if sparse_built and sparse_built != self.sparse_model:
-            raise SparseEncodingMismatch(
-                f"Collection {self.collection} has keyword vectors of {sparse_built}, this version uses "
-                f"{self.sparse_model}: the keyword index needs a rebuild from the stored text.")
-
-    def reencode_sparse(self, encode: SparseEncoder) -> int:
-        """Rebuilds every keyword vector from the stored text, then stamps the new encoding (an interrupted run
-        leaves the old stamp, so it runs again). The dense vectors are kept."""
-        records = list(self.records())
-        vectors = _encode(encode, [r.payload or {} for r in records])
-        updates = [models.PointVectors(id=r.id, vector={SPARSE: models.SparseVector(indices=v.indices,
-                                                                                   values=v.values)})
-                   for r, v in zip(records, vectors) if v.indices]
-        for start in range(0, len(updates), self.UPSERT_BATCH):
-            self.client.update_vectors(collection_name=self.collection,
-                                       points=updates[start:start + self.UPSERT_BATCH], wait=True)
-        self.client.update_collection(collection_name=self.collection, metadata={"sparse_model": self.sparse_model})
-        return len(records)
 
     def _point_alias(self) -> None:
         current = self.alias_target(self.client, self.alias)
@@ -235,7 +188,7 @@ class KnowledgeStore:
         count = 0
         with gzip.open(tmp, "wt", encoding="utf-8") as f:
             f.write(json.dumps({"format": SNAPSHOT_FORMAT, "version": 1, "collection": self.collection,
-                                "embedding_model": self.model_id, "dim": self.dim, "sparse_model": self.sparse_model,
+                                "embedding_model": self.model_id, "dim": self.dim,
                                 "created": datetime.now().isoformat()}) + "\n")
             for record in self.records(with_vectors=True):
                 vectors = record.vector if isinstance(record.vector, dict) else {}
@@ -250,9 +203,8 @@ class KnowledgeStore:
         tmp.replace(path)
         return count
 
-    def restore_file(self, path: Path, reencode: Optional[SparseEncoder] = None) -> int:
-        """Replaces the collection with a snapshot. The whole file is checked, and keyword vectors of another
-        encoding are rebuilt with `reencode`, before anything is deleted."""
+    def restore_file(self, path: Path) -> int:
+        """Replaces the collection with a snapshot; the whole file is checked before anything is deleted."""
         points = []
         with gzip.open(path, "rt", encoding="utf-8") as f:
             header = json.loads(f.readline() or "{}")
@@ -272,13 +224,6 @@ class KnowledgeStore:
                 if "sparse" in item:
                     vector[SPARSE] = models.SparseVector(**item["sparse"])
                 points.append(models.PointStruct(id=item["id"], vector=vector, payload=item.get("payload") or {}))
-        if (header.get("sparse_model") or LEGACY_SPARSE_MODEL) != self.sparse_model:
-            if reencode is None:
-                raise KnowledgeBaseError(f"{path.name} has keyword vectors of another encoding.")
-            for point, sparse in zip(points, _encode(reencode, [p.payload for p in points])):
-                point.vector.pop(SPARSE, None)
-                if sparse.indices:
-                    point.vector[SPARSE] = models.SparseVector(indices=sparse.indices, values=sparse.values)
         self.recreate()
         self.upsert(points)
         return len(points)

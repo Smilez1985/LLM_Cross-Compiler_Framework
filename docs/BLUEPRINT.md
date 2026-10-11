@@ -492,9 +492,9 @@ at all; a document is split this way when it is imported again. Every chunk gets
 `-DGGML_CUDA=ON` adds `GGML_CUDA`, `GGML` and `CUDA`, `rknn_toolkit2` adds `rknn` and `toolkit2`,
 `rknnToolkitLite` adds `rknn`, `Toolkit` and `Lite`. A leading `-D` is dropped only from definitions
 (`-DNAME=VALUE`, `-DNAME_WITH_UNDERSCORE`, not `-DEBUG`), and parts of one or two digits are left out (`x86_64`
-adds only `x86`). The dense input and the stored text stay as they are. The
-collection records this keyword encoding (`Qdrant/bm25+ids1`); a knowledge base or a snapshot of an older encoding
-gets its keyword vectors rebuilt once from the stored text, and its documents and dense vectors are kept.
+adds only `x86`). The dense input and the stored text stay as they are. The parts only add tokens of the same
+hashed BM25 vocabulary, so chunks imported before the splitting stay valid in the same index without a migration;
+importing a document again adds its parts.
 
 **Searching.**
 
@@ -511,8 +511,8 @@ gets its keyword vectors rebuilt once from the stored text, and its documents an
    model comes from `rag_reranker`: `auto` takes `onnx-community/bge-reranker-v2-m3-ONNX` with CUDA and at least
    16 GB RAM, `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` (a download of about 0.12 GB) from 6 GB RAM, and none
    below that; `off` turns reranking off; a model id picks one. The model is downloaded on first use, never in
-   offline mode. Scores are cached by text. A reranker that cannot run is logged once, the search keeps the fused
-   order, and the reranker is tried again after five minutes.
+   offline mode. Scores are cached by text. A reranker that cannot run is logged once, and searches keep the fused
+   order until the next start or a change of `rag_reranker`.
 4. **Excerpt budget.** Ditto takes the excerpts, best first, that fit together into a third of
    `chat_context_limit` (default 4096 tokens). One that does not fit is skipped, so a smaller one after it can
    still come along; a first excerpt that alone is too long is cut at a line, an open code block is closed and
@@ -779,7 +779,7 @@ These are real limitations of the current state. Most are scheduled in the [road
 | **No excerpt rather than an unrelated one** | Unrelated excerpts take room in a small context and mislead small local models. A relevance floor, calibrated with the retrieval evaluation, lets a reranked search return nothing. |
 | **The mMARCO cross-encoder is the default CPU reranker** | `cross-encoder/mmarco-mMiniLMv2-L12-H384-v1` is multilingual (German and English questions), small (about 0.12 GB) and fast enough on a CPU; its model card names the Apache-2.0 licence. It was trained on mMARCO, a translation of MS MARCO, which has its own terms of use; the maintainer accepted it as the default that `rag_reranker: auto` downloads on first use. `rag_reranker: off` or another model id replaces it. |
 | **The retrieval evaluation is the gate for search defaults** | Retrieval changes can help one kind of question and hurt another. A fixed corpus with fixed cases, graded by rules and without an AI judge, shows that before a change becomes a default. |
-| **Identifiers are split for the keyword index only** | Flags and names such as `-DGGML_CUDA=ON` were one token for BM25 and could not be found by their parts. Adding the parts only to the BM25 input leaves the dense vectors and the stored text unchanged; the stamped encoding rebuilds older keyword indexes once. |
+| **Identifiers are split for the keyword index only** | Flags and names such as `-DGGML_CUDA=ON` were one token for BM25 and could not be found by their parts. Adding the parts only to the BM25 input leaves the dense vectors and the stored text unchanged. They share the hashed BM25 vocabulary, so older chunks need no migration: a re-import adds their parts. |
 | **Public packs signed, private packs encrypted, with standard primitives** | For public data, authenticity and integrity matter; for private sharing, confidentiality too. The XOR "SwarmCipher" could be undone by anyone. Ed25519, X25519, HKDF-SHA256, scrypt and ChaCha20-Poly1305 composed in the style of age are well studied; one signing prefix per purpose keeps a signature for one thing from verifying another. |
 | **Installing always reads the current index first** | A revocation only protects users who see it. An install needs the network anyway, so it fetches the index first and installs nothing without it. A cached index serves listing and file installs, and is never replaced by an older one. |
 | **No token in the framework, and no upload of its own** | A repository token in the framework would be a valuable secret in one more place, and an upload button sends data without a review step. The framework prepares a scrubbed, signed pack and shows what the scrub changed; only when you open the pull request do the GitHub CLI or the browser send it, with their own credentials. |

@@ -605,8 +605,8 @@ and 1. Candidates below a relevance floor are dropped, so Ditto gets no excerpt 
   build-log analysis and module proposals keep the hybrid order.
 - **How a search is reranked:** up to 20 candidates (three times the requested number, at least 12), of each the
   title, section and first 1500 characters; scores are cached by text. A reranker that cannot run (not downloaded
-  in offline mode, unknown model id, an error) is logged once, the search keeps the hybrid order, and the reranker
-  is tried again after 5 minutes.
+  in offline mode, unknown model id, an error) is logged once, and searches keep the hybrid order until the next
+  start or a change of `rag_reranker`.
 
 ### Excerpt budget
 
@@ -627,10 +627,8 @@ hyphen inside a word, such as `E2041`, `GGML_CUDA`, `RKNN` or `librkllmrt.so`); 
 only. In the retrieval evaluation this raised hit@3 of the identifier questions from 83 % to 100 %; the other
 results stayed the same.
 
-A knowledge base built by an earlier version gets its keyword index rebuilt from the stored text once, on first use;
-documents and vectors are kept, and the log names the number of rebuilt chunks. Snapshots of earlier versions are
-rebuilt the same way when they are restored. A Qdrant server older than 1.16 keeps no collection metadata, so there
-the rebuild cannot be detected; re-import the documents.
+Documents imported before this keep their keyword vectors and stay searchable; import them again (for example a new
+Deep Ingest of the same URL) to add the identifier parts.
 
 ### Large code blocks and tables
 
