@@ -91,13 +91,27 @@ class SSHConnectDialog(QDialog):
 
 # --- WORKERS ---
 
+LOCAL_PROBE_FILE = "target_hardware_config_local.txt"  # the probe of this computer, in probe_result_dir()
+
+
+def probe_result_dir(framework) -> Path:
+    """Where the GUI keeps hardware probe results: <cache_dir>/probes, with cache_dir as configured (a relative value
+    is relative to the installation, never the working directory)."""
+    from orchestrator.Core.framework import resolve_install_path
+    get = getattr(getattr(framework, "config", None), "get", None)
+    cache = (get("cache_dir", "cache") if callable(get) else None) or "cache"
+    resolve = getattr(framework, "resolve_path", None) or resolve_install_path
+    return Path(resolve(cache)) / "probes"
+
+
 class LocalProbeWorker(QThread):
-    """Runs probe locally (Host)."""
+    """Runs the hardware probe on this computer; the probe writes output_file (see probe_result_dir)."""
     finished = Signal(bool, str, str) # success, message, file_path
     
-    def __init__(self, script_path):
+    def __init__(self, script_path, output_file):
         super().__init__()
         self.script_path = script_path
+        self.output_file = Path(output_file)
         
     def run(self):
         try:
@@ -105,14 +119,16 @@ class LocalProbeWorker(QThread):
                  self.finished.emit(False, f"Script not found: {self.script_path}", "")
                  return
 
-            # Output file is expected in current working dir usually
-            output_file = Path("target_hardware_config.txt").absolute()
-            if output_file.exists(): output_file.unlink()
+            # Told where to write: without it the probe writes into the GUI's working directory.
+            output_file = self.output_file.absolute()
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            output_file.unlink(missing_ok=True)  # a file of an earlier run must not count as this run's result
 
             if platform.system() == "Windows":
-                cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(self.script_path)]
+                cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(self.script_path),
+                       "-OutputFile", str(output_file)]
             else:
-                cmd = ["bash", str(self.script_path)]
+                cmd = ["bash", str(self.script_path), "--output", str(output_file)]
                 
             subprocess.run(cmd, check=True, capture_output=True, text=True)
             
@@ -525,8 +541,7 @@ class BuilderTab(QWidget):
             
             config = self.framework.config
             state_dir = getattr(config, "user_state_dir", Path.home() / ".llm-framework")
-            result_dir = self.framework.resolve_path(config.get("cache_dir", "cache")) / "probes" \
-                if hasattr(self.framework, "resolve_path") else Path("cache") / "probes"
+            result_dir = probe_result_dir(self.framework)
             self.probe_worker = SSHProbeWorker(ip, user, password or None, script, state_dir, result_dir)
             self.probe_worker.finished.connect(self._on_probe_finished)
             self.probe_worker.start()
@@ -539,7 +554,7 @@ class BuilderTab(QWidget):
         
         script = self.app_root / "scripts" / ("hardware_probe.ps1" if platform.system() == "Windows" else "hardware_probe.sh")
         
-        self.probe_worker = LocalProbeWorker(script)
+        self.probe_worker = LocalProbeWorker(script, probe_result_dir(self.framework) / LOCAL_PROBE_FILE)
         self.probe_worker.finished.connect(self._on_probe_finished)
         self.probe_worker.start()
 
