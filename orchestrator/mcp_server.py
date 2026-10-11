@@ -205,33 +205,86 @@ def _tool_context(ctx, caller: str = "mcp", instance: str = "") -> ToolContext:
 
 
 class _OpenQuestions:
-    """2026-07-28 rounds: questions returned to the client and not answered yet. Kept in memory (best effort; the
-    `confirmation_requested` entry is the durable record): one still unanswered after QUESTION_EXPIRY is recorded
-    as `unanswered`."""
+    """2026-07-28 rounds: questions returned to the client and not answered yet, per caller and session (two clients
+    asked the same question are two questions). Kept in memory (best effort; the `confirmation_requested` entry is
+    the durable record): a timer records one still unanswered after QUESTION_EXPIRY as `unanswered`, also when no
+    further request arrives, and the end of the session that asked records its open ones as
+    `client_disconnected`."""
 
-    def __init__(self, registry: ToolRegistry):
+    def __init__(self, registry: ToolRegistry, expiry: float = QUESTION_EXPIRY,
+                 clock: Callable[[], float] = time.monotonic):
         self.registry = registry
+        self.expiry = expiry
+        self.clock = clock
         self._open: Dict[tuple, tuple] = {}
         self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._timer: Optional[threading.Thread] = None
+
+    @staticmethod
+    def _key(name: str, digest: str, ctx: ToolContext) -> tuple:
+        return ctx.actor, ctx.session, name, digest
 
     def asked(self, name: str, digest: str, arguments: Dict[str, Any], ctx: ToolContext) -> None:
         with self._lock:
-            self._open[(name, digest)] = (time.monotonic(), dict(arguments), ctx)
+            self._open[self._key(name, digest, ctx)] = (self.clock(), dict(arguments), ctx)
+            if self._timer is None or not self._timer.is_alive():
+                self._timer = threading.Thread(target=self._watch, name="mcp-open-questions", daemon=True)
+                self._timer.start()
+        self._wake.set()
 
-    def answered(self, name: str, digest: str) -> None:
+    def answered(self, name: str, digest: str, ctx: ToolContext) -> None:
         with self._lock:
-            self._open.pop((name, digest), None)
+            self._open.pop(self._key(name, digest, ctx), None)
+
+    def answered_call(self, name: str, arguments: Dict[str, Any], ctx: ToolContext) -> None:
+        """A round that carries an answer for this call (same caller, session, tool and arguments): its question is
+        answered, whatever the call's fate now (a policy tightened meanwhile refuses it, and that is its record)."""
+        key = arguments_key(dict(arguments))
+        with self._lock:
+            for open_key in [k for k, (_, args, _) in self._open.items()
+                             if k[:3] == (ctx.actor, ctx.session, name) and arguments_key(args) == key]:
+                del self._open[open_key]
+
+    def open_count(self) -> int:
+        with self._lock:
+            return len(self._open)
+
+    def _watch(self) -> None:
+        """The timer: sleeps until the oldest open question is due, records what expired, ends when none is open."""
+        while True:
+            with self._lock:
+                if not self._open:
+                    self._timer = None
+                    return
+                due = min(at for at, _, _ in self._open.values()) + self.expiry
+            self._wake.clear()
+            self._wake.wait(min(max(due - self.clock(), 0.05), 60.0))
+            self.expire()
+
+    def _record(self, gone, detail: str, answer: str) -> None:
+        for (_, _, name, digest), (_, arguments, ctx) in gone:
+            with contextlib.suppress(Exception):
+                self.registry.refuse(name, arguments, ctx, detail=detail, confirm_channel="elicitation",
+                                     question_sha256=digest, answer=answer)
 
     def expire(self, now: Optional[float] = None) -> int:
-        now = time.monotonic() if now is None else now
+        now = self.clock() if now is None else now
         with self._lock:
-            gone = [(key, value) for key, value in self._open.items() if now - value[0] >= QUESTION_EXPIRY]
+            gone = [(key, value) for key, value in self._open.items() if now - value[0] >= self.expiry]
             for key, _ in gone:
                 del self._open[key]
-        for (name, digest), (_, arguments, ctx) in gone:
-            with contextlib.suppress(Exception):
-                self.registry.refuse(name, arguments, ctx, detail="The question was not answered within 15 minutes.",
-                                     confirm_channel="elicitation", question_sha256=digest, answer="unanswered")
+        minutes = max(1, round(self.expiry / 60))
+        self._record(gone, f"The question was not answered within {minutes} minutes.", "unanswered")
+        return len(gone)
+
+    def close(self, connection: str) -> int:
+        """The session that owns `connection` ended: its open questions are recorded as client_disconnected."""
+        with self._lock:
+            gone = [(key, value) for key, value in self._open.items() if value[2].connection == connection]
+            for key, _ in gone:
+                del self._open[key]
+        self._record(gone, "The client disconnected before it answered the question.", "client_disconnected")
         return len(gone)
 
 
@@ -311,7 +364,9 @@ async def _long_poll(spec: ToolSpec, registry: ToolRegistry, arguments: Dict[str
     inp = _parsed(spec, arguments)
     if seconds <= 0 or inp is None:
         return  # an invalid call: the registry call refuses and audits it
-    if registry.decide(spec, inp, ctx) == Decision.DENY:
+    import anyio.to_thread
+    # The decision reads the policy file (and a token store): a worker thread, never the event loop.
+    if await anyio.to_thread.run_sync(functools.partial(registry.decide, spec, inp, ctx)) == Decision.DENY:
         return
     from orchestrator.Core.job_service import MAX_WAIT_SECONDS
     ctx.metadata["waited"] = True
@@ -573,6 +628,8 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         decision = await anyio.to_thread.run_sync(functools.partial(registry.decide, spec, parsed, tool_ctx))
         rounds = _uses_input_required(ctx)
         retry = rounds and bool(ctx.input_responses)
+        if retry:  # the client came back with an answer: its question is no longer open
+            questions.answered_call(spec.name, arguments, tool_ctx)
         if decision != Decision.DENY and spec.prepare is not None and parsed is not None:
             # Two-phase: the facts only the server knows, before the question; they may make an allowed call ask.
             try:
@@ -604,7 +661,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         await anyio.to_thread.run_sync(questions.expire)
         if retry:
             state.question_sha256 = text_sha256(message)
-            questions.answered(spec.name, state.question_sha256)
+            questions.answered(spec.name, state.question_sha256, tool_ctx)
             return Elicit(message, form)
         # The question is recorded before it is asked; for a change that cannot be recorded it is not asked.
         try:
@@ -829,9 +886,11 @@ def end_session(framework, registry: Optional[ToolRegistry], session: McpSession
             logger.info(f"Could not wait for build {rid} to stop: {e}")
 
 
-def _session_lifespan(framework, registry, inner=None, caller: str = "mcp"):
+def _session_lifespan(framework, registry, inner=None, caller: str = "mcp",
+                      questions: Optional[_OpenQuestions] = None):
     """The server lifespan: one McpSession per connection (per stdio session; once for the HTTP server), composed
-    with `inner` (stdout to stderr for stdio). On exit the session's own builds and jobs are cancelled."""
+    with `inner` (stdout to stderr for stdio). On exit the session's own builds and jobs are cancelled and its open
+    questions are recorded as client_disconnected."""
     import anyio
     import anyio.to_thread
 
@@ -850,6 +909,8 @@ def _session_lifespan(framework, registry, inner=None, caller: str = "mcp"):
             finally:
                 with anyio.CancelScope(shield=True):
                     try:
+                        if questions is not None:
+                            await anyio.to_thread.run_sync(questions.close, session.key)
                         await anyio.to_thread.run_sync(end_session, framework, registry, session)
                     except Exception as e:
                         logger.warning(f"Cleaning up a closed MCP session failed: {e}")
@@ -934,7 +995,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
 
     server = AuditedServer(SERVER_NAME, title="LLM Cross-Compiler Framework", instructions=INSTRUCTIONS,
                            version=getattr(getattr(framework, "info", None), "version", "") or "",
-                           lifespan=_session_lifespan(framework, registry, lifespan, caller),
+                           lifespan=_session_lifespan(framework, registry, lifespan, caller, questions),
                            middleware=[ClientTracker(transport, caller=caller, still_valid=still_valid,
                                                      refused=lambda *args: _audit_refused_call(registry, *args))])
     server.open_questions = questions

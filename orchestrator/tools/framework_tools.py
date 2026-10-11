@@ -392,7 +392,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         try:
             hits = rag.search(inp.query, limit=inp.limit, strict=True)
         except KnowledgeBaseError as e:
-            raise ToolError(f"The knowledge base is unavailable: {e}", code="failed") from e
+            raise ToolError(f"The knowledge base is unavailable: {e}", code="failed",
+                            next="Tell the person; 'llm-cli doctor' shows what is wrong with the knowledge base.") from e
         # Crawled pages and community packs can hide instructions in invisible characters; the MCP client's
         # model reads this output, so it gets the same cleaning as text Ditto passes to its model.
         return SearchOut(results=[KnowledgeHit(source=sanitize_untrusted(str(h.source), 500),

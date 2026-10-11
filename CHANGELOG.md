@@ -289,6 +289,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   try again. The repeat guard lets a refused call run again 10 minutes after its last failure (it was refused until
   the process ended), and Ditto stops calling tools early only after failures without progress, with up to 4 more
   steps while it fixes an input error.
+- **`llm-cli tools audit` shows the newer audit fields in words**: who called (Ditto, all local stdio clients, a
+  named token, with the client's self-reported name), the tool's title and the name the AI wrote, the reason code and
+  how the person was asked with their answer; `--details` adds repairs, duration, result hash, links and session.
 - **`llm-cli ditto eval` records every tool call attempt**, not only those that reached a tool: the report's
   `tool_use` block gives tool calls per task, the share of malformed calls and of unknown tool names, repairs and
   repeat refusals.
@@ -453,6 +456,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- MCP questions of the 2026-07-28 protocol are kept per caller and session (one client's answer no longer closes
+  another client's identical question), an unanswered one is recorded as `unanswered` by a timer also when no
+  further request arrives, and the ones still open when a session ends are recorded as `client_disconnected`; the
+  permission check of a long-poll no longer reads the policy file on the server's event loop; every refusal with
+  the reason `failed` now carries a next step, and the build service's input refusals carry their own reason code.
 - MCP server: a client that disconnects no longer leaves its builds running with nobody to clean up. The builds
   and jobs its session started are cancelled, each with an audit entry ("client disconnected"), the server waits
   up to 30 seconds for their containers to stop, and `llm-cli mcp serve` then shuts the framework down. A SIGTERM
