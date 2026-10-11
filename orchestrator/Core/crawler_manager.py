@@ -12,18 +12,22 @@ Text and data mining of public pages is allowed unless the rightsholder reserved
 * the W3C TDM Reservation Protocol (TDMRep 1.0): /.well-known/tdmrep.json per origin, the tdm-reservation
   header, <meta name="tdm-reservation"> and tdm:reservation in PDF metadata.
 A reservation from any of these sources wins (TDMRep lets a later source lift an earlier reservation; the
-crawler stays on the cautious side). Every skipped page is logged and listed in `skipped` with the reason.
+crawler stays on the cautious side). Every skipped page is logged and listed in `skipped` with the reason,
+every page that could not be fetched or read in `failed`.
+
+iter_crawl() yields each page as soon as it is extracted, so the caller can store it right away; a stop event
+ends the crawl cleanly between two pages, and a progress callback gets "page N of M" before each request.
 """
 
 import json
-import time
+import threading
 from dataclasses import dataclass, field
 import logging
 import requests
 import re
 from urllib.parse import urlparse, urljoin
 from urllib.robotparser import RobotFileParser
-from typing import Iterable, List, NamedTuple, Set, Optional, Dict, Any, Tuple
+from typing import Callable, Iterable, Iterator, List, NamedTuple, Set, Optional, Dict, Any, Tuple
 from io import BytesIO
 
 # Third-party imports
@@ -65,7 +69,8 @@ _PDF_TDM_RESERVATION = re.compile(rb"tdm:reservation\s*(?:=\s*[\"']\s*1\s*[\"']|
 
 @dataclass(frozen=True)
 class SkippedPage:
-    """A page the crawl left out. opt_out: the site reserved it (robots.txt, robots directives, TDMRep)."""
+    """A page the crawl left out or could not read. opt_out: the site reserved it (robots.txt, robots
+    directives, TDMRep)."""
     url: str
     reason: str
     opt_out: bool = False
@@ -179,7 +184,8 @@ class PublicOnlyAdapter(HTTPAdapter):
 class CrawlerManager:
     """
     Breadth-first web crawler: robots.txt, robots directives and TDMRep reservations, rate limit, language
-    filter, PDF support, SSRF guard on every request. Skipped pages end up in `skipped` with the reason.
+    filter, PDF support, SSRF guard on every request. Skipped pages end up in `skipped`, pages that could not
+    be fetched or read in `failed`, each with the reason; `stopped` tells whether a stop event ended the crawl.
     """
 
     MAX_REDIRECTS = 5
@@ -204,6 +210,8 @@ class CrawlerManager:
         # State
         self.visited: Set[str] = set()
         self.skipped: List[SkippedPage] = []
+        self.failed: List[SkippedPage] = []
+        self.stopped = False
         self.robot_parsers: Dict[str, RobotFileParser] = {}
         self.tdm_rules: Dict[str, List[TdmRule]] = {}   # per origin, from /.well-known/tdmrep.json
         self.session = requests.Session()
@@ -227,10 +235,20 @@ class CrawlerManager:
         Crawls breadth-first from root_url and returns the pages as Documents. Pages left out (opt-outs,
         unsafe or off-site redirects, other languages) are listed in self.skipped with the reason.
         """
+        return list(self.iter_crawl(root_url))
+
+    def iter_crawl(self, root_url: str, stop: Optional[threading.Event] = None,
+                   progress: Optional[Callable[[int, int, str], None]] = None) -> Iterator[Document]:
+        """
+        Like crawl(), but yields each page as soon as it is extracted. Setting stop ends the crawl before the
+        next request (the politeness delay is cut short too); progress gets (page number, max pages, url)
+        before each request.
+        """
         self.logger.info(f"Starting Deep Ingest for: {root_url}")
         self.visited.clear()
-        self.skipped = []
-        documents: List[Document] = []
+        self.skipped, self.failed, self.stopped = [], [], False
+        stop = stop or threading.Event()
+        collected = 0
 
         # Queue für BFS: (url, current_depth, redirect_hops)
         queue = [(root_url, 0, 0)]
@@ -240,6 +258,9 @@ class CrawlerManager:
         requests_made = 0
 
         while queue and pages_crawled < self.max_pages:
+            if stop.is_set():
+                self.stopped = True
+                break
             if requests_made >= self.max_requests:
                 self.logger.warning(f"Request budget of {self.max_requests} exhausted, stopping crawl.")
                 break
@@ -272,9 +293,13 @@ class CrawlerManager:
 
             # 3. Fetch Content
             self.logger.info(f"Crawling ({pages_crawled}/{self.max_pages}): {url}")
+            if progress:
+                progress(pages_crawled + 1, self.max_pages, url)
             requests_made += 1
+            if stop.wait(self.rate_limit):  # politeness delay, cut short by a stop
+                self.stopped = True
+                break
             try:
-                time.sleep(self.rate_limit) # Politeness delay
                 response = self._guarded_get(url)
 
                 # Redirect targets are queued instead of followed, so they pass the SSRF check and the
@@ -283,7 +308,7 @@ class CrawlerManager:
                     location = urljoin(url, response.headers.get('Location', ''))
                     host = urlparse(location).netloc
                     if hops >= self.MAX_REDIRECTS:
-                        self._skip(url, f"more than {self.MAX_REDIRECTS} redirects")
+                        self._fail(url, f"more than {self.MAX_REDIRECTS} redirects")
                     elif depth > 0 and host not in allowed_hosts:
                         # A link on the site that redirects elsewhere is an external link.
                         if location not in self.visited:
@@ -296,7 +321,7 @@ class CrawlerManager:
                     continue
 
                 if response.status_code != 200:
-                    self.logger.warning(f"Failed to fetch {url}: Status {response.status_code}")
+                    self._fail(url, f"HTTP status {response.status_code}")
                     continue
 
                 content_type = response.headers.get('Content-Type', '').lower()
@@ -327,7 +352,8 @@ class CrawlerManager:
                 if reasons:
                     self._skip(url, "; ".join(reasons), opt_out=True)
                 elif doc:
-                    documents.append(doc)
+                    collected += 1
+                    yield doc
                 if nofollow and new_links:
                     self.logger.info(f"Not following the links of {url} (nofollow).")
                     new_links = []
@@ -339,15 +365,22 @@ class CrawlerManager:
                             queue.append((link, depth + 1, 0))
 
             except Exception as e:
-                self.logger.error(f"Error crawling {url}: {e}")
+                self._fail(url, _remote_text(e), level=logging.ERROR)
 
-        self.logger.info(f"Crawl finished. Collected {len(documents)} documents, skipped {len(self.skipped)} pages.")
-        return documents
+        if self.stopped:
+            self.logger.info(f"Crawl stopped on request after {collected} documents.")
+        self.logger.info(f"Crawl finished. Collected {collected} documents, skipped {len(self.skipped)} pages, "
+                         f"{len(self.failed)} failed.")
 
     def _skip(self, url: str, reason: str, opt_out: bool = False, level: int = logging.INFO) -> None:
         """Records a page the crawl leaves out; every skip is named in the log with its reason."""
         self.skipped.append(SkippedPage(url=url, reason=reason, opt_out=opt_out))
         self.logger.log(level, f"Skipped {_remote_text(url, 500)}: {reason}")
+
+    def _fail(self, url: str, reason: str, level: int = logging.WARNING) -> None:
+        """Records a page that could not be fetched or read."""
+        self.failed.append(SkippedPage(url=url, reason=reason))
+        self.logger.log(level, f"Failed {_remote_text(url, 500)}: {reason}")
 
     def _header_opt_outs(self, response) -> Tuple[List[str], bool]:
         """Reservations in the response headers (X-Robots-Tag, TDMRep tdm-reservation) and whether the
@@ -536,5 +569,5 @@ class CrawlerManager:
             return Document(page_content=text, metadata=metadata)
             
         except Exception as e:
-            self.logger.error(f"Failed to parse PDF {url}: {e}")
+            self._fail(url, f"unreadable PDF ({_remote_text(e)})", level=logging.ERROR)
             return None

@@ -476,6 +476,58 @@ class TestCrawlerPoliteness:
         assert "http://93.184.215.14/files/User%20Guide.html" in web.urls
         assert len(docs) == 2
 
+    def test_pages_are_yielded_one_by_one(self, make_crawler):
+        """The caller stores each page before the next request (so Stop keeps what was read)."""
+        crawler, web = make_crawler({
+            "http://93.184.215.14/": response(html='<a href="/a">a</a><a href="/b">b</a>' + EN),
+            "http://93.184.215.14/a": response(html="A." + EN),
+            "http://93.184.215.14/b": response(html="B." + EN),
+        }, respect_robots=False)
+
+        pages = crawler.iter_crawl("http://93.184.215.14/")
+        assert next(pages).metadata["source"] == "http://93.184.215.14/"
+        assert web.page_urls == ["http://93.184.215.14/"]
+        assert [d.metadata["source"] for d in pages] == ["http://93.184.215.14/a", "http://93.184.215.14/b"]
+
+    def test_stop_cuts_the_politeness_delay_short(self, make_crawler):
+        import threading
+        import time
+
+        crawler, web = make_crawler({"http://93.184.215.14/": response(html="Home." + EN)},
+                                    respect_robots=False, request_delay=30)
+        stop = threading.Event()
+        threading.Timer(0.1, stop.set).start()
+
+        start = time.monotonic()
+        assert list(crawler.iter_crawl("http://93.184.215.14/", stop=stop)) == []
+        assert time.monotonic() - start < 5
+        assert crawler.stopped and web.page_urls == []
+
+    def test_unfetchable_pages_are_listed_as_failed(self, make_crawler):
+        import requests
+        from orchestrator.Core.crawler_manager import CrawlerManager
+
+        def reset(url):
+            raise requests.ConnectionError("connection reset\x1b[2J")
+
+        def endless(url):
+            n = int(url.rsplit("/", 1)[1])
+            return response(302, location=f"http://93.184.215.14/r/{n + 1}")
+
+        pages = {"http://93.184.215.14/": response(html='<a href="/gone">g</a><a href="/reset">r</a>'
+                                                      '<a href="/r/0">loop</a>' + EN),
+                 "http://93.184.215.14/reset": reset}
+        pages.update({f"http://93.184.215.14/r/{i}": endless for i in range(10)})
+        crawler, web = make_crawler(pages, respect_robots=False)
+
+        crawler.crawl("http://93.184.215.14/")
+
+        failed = {page.url: page.reason for page in crawler.failed}
+        assert failed["http://93.184.215.14/gone"] == "HTTP status 404"
+        assert failed["http://93.184.215.14/reset"] == "connection reset\\u001b[2J"   # escaped for the log
+        assert failed[f"http://93.184.215.14/r/{CrawlerManager.MAX_REDIRECTS}"] == "more than 5 redirects"
+        assert crawler.skipped == [] and not crawler.stopped
+
 
 SITE = "http://93.184.215.14"
 OTHER_SITE = "http://93.184.215.15"

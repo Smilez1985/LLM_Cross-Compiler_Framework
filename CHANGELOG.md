@@ -39,8 +39,24 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   follow the links of `nofollow` pages, and honours the W3C TDM Reservation Protocol (`/.well-known/tdmrep.json`
   per site, the `tdm-reservation` header and meta tag, PDF metadata). Redirect targets on other hosts are
   checked the same way. Every skipped page is named in the crawl log with its reason.
+- **Notice before the first Deep Ingest** (English and German): what is read (only publicly reachable pages),
+  which opt-outs are honoured, that the knowledge stays on this computer, and that sharing it keeps source and
+  licence and needs your explicit release. It is information, not a legal confirmation: one "Understood"
+  button. It is shown once per user and again when its text changes.
+- **Spoken announcements** of the notice and of the Deep Ingest outcome through the speech engine built into
+  the operating system (Windows System.Speech, macOS `say`, Linux `spd-say` or `espeak-ng`), in the interface
+  language. Best effort and never in the way: no audio files, the system volume is never touched, and it is
+  silent in CI, over SSH without a display, on headless systems, with `LLM_FRAMEWORK_NO_AUDIO=1` or when
+  *Tools > Spoken Announcements* (setting `audio_announcements`) is off. Every announcement is also logged.
+- **Deep Ingest progress and Stop**: the wizard shows "Page N of M: <url>" instead of an endless spinner, and a
+  Stop button ends the crawl after the current page. Closing the wizard stops a running crawl the same way.
 
 ### Changed
+- **Deep Ingest outcome**: it said "Deep Ingest complete" even when every URL failed. It now reports success
+  (everything stored), partial (some pages stored; others failed, were reserved by the site or the crawl was
+  stopped) or failure (nothing stored), each with its own message, only after the last write has returned.
+  Pages are stored as soon as they are read, so a stopped or interrupted crawl keeps what it already stored,
+  and pages that could not be fetched are listed in the crawl log.
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
   built-in Transformers model for offline mode is gone (offline mode uses local providers: Ollama, the
   managed llama-server, a server on your network). Healing analyses, module proposals and build

@@ -17,7 +17,7 @@ Updates v2.3.0:
 import threading
 import re
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any, Callable, Dict, List, Optional
 
 from PySide6.QtWidgets import (
     QWizard, QWizardPage, QVBoxLayout, QLabel, QFormLayout, 
@@ -29,8 +29,10 @@ from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QRect
 from PySide6.QtGui import QPixmap
 
 from orchestrator.Core.module_generator import ModuleGenerator
-from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog
-from orchestrator.utils.localization import tr
+from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog, show_crawl_notice_once
+from orchestrator.tools.confirmation import visible
+from orchestrator.utils.announce import announce
+from orchestrator.utils.localization import current_language, tr, ui_text
 
 
 def module_name_hint(raw: str) -> str:
@@ -100,45 +102,78 @@ class SpriteAnimationWidget(QLabel):
         self.current_frame = (self.current_frame + 1) % self.frame_count
 
 class CrawlWorker(QThread):
-    """Worker Thread for Deep Ingest (prevents GUI freeze)."""
-    progress = Signal(str)
-    finished = Signal(str)
+    """
+    Runs Deep Ingest in the background. Each page is stored as soon as it is read; stop() ends the crawl after
+    the current page and keeps what is stored. Like the rag4ll USB watcher's eject rule, a state is announced
+    only once it is true: the outcome (success, partial or failure) is reported and spoken after the last write
+    has returned.
+    """
+    progress = Signal(str)          # crawl log lines
+    page = Signal(int, int, str)    # page n of at most m: url (before the request)
+    done = Signal(str, str)         # outcome, message
     error = Signal(str)
 
-    def __init__(self, rag_manager, urls: List[str], options: Dict[str, Any]):
+    def __init__(self, rag_manager, urls: List[str], options: Dict[str, Any],
+                 announcer: Optional[Callable[[str], Any]] = None, lang: Optional[str] = None):
         super().__init__()
         self.rag_manager = rag_manager
         self.urls = urls
         self.options = options
-        self._is_running = True
+        self.announcer = announcer
+        self.lang = lang or current_language()
+        self._stop = threading.Event()
 
     def run(self):
+        pages = chunks = 0
+        outcomes, stopped = [], False
         try:
-            total_docs = 0
-
             for url in self.urls:
-                if not self._is_running: break
-
+                if self._stop.is_set():
+                    stopped = True
+                    break
                 self.progress.emit(f"Crawling root: {url}...")
-
-                result = self.rag_manager.ingest_url(url, self.options)
-                for page in result.get("skipped", []):
-                    self.progress.emit(f"  -> Skipped {page['url']}: {page['reason']}")
-
-                if result.get("success"):
-                    count = result.get("count", 0)
-                    total_docs += count
-                    self.progress.emit(f"  -> Ingested {count} chunks from {url}")
-                else:
+                result = self.rag_manager.ingest_url(url, self.options, stop=self._stop, progress=self.page.emit)
+                for item in result.get("skipped", []):
+                    self.progress.emit(f"  -> Skipped {item['url']}: {item['reason']}")
+                for item in result.get("failed", []):
+                    self.progress.emit(f"  -> Failed {item['url']}: {item['reason']}")
+                outcome = result.get("outcome") or ("success" if result.get("success") else "failure")
+                outcomes.append(outcome)
+                stopped = stopped or bool(result.get("stopped"))
+                if outcome == "failure":
                     self.progress.emit(f"  -> Failed: {result.get('message')}")
-            
-            self.finished.emit(f"Deep Ingest complete. Added {total_docs} knowledge chunks.")
-            
+                else:
+                    pages += result.get("documents", 0)
+                    chunks += result.get("count", 0)
+                    self.progress.emit(f"  -> {result.get('message')}")
         except Exception as e:
+            self._announce(ui_text("crawl.done.failure", self.lang))
             self.error.emit(str(e))
+            return
+        outcome, message = self.summary(outcomes, pages, chunks, stopped)
+        self._announce(message)
+        self.done.emit(outcome, message)
+
+    def summary(self, outcomes: List[str], pages: int, chunks: int, stopped: bool):
+        """(outcome, message) over all URLs: success only when every URL fully succeeded."""
+        if not pages:
+            return "failure", ui_text("crawl.done.stopped_empty" if stopped else "crawl.done.failure", self.lang)
+        if stopped:
+            return "partial", ui_text("crawl.done.stopped", self.lang, pages=pages, chunks=chunks)
+        if len(outcomes) == len(self.urls) and all(o == "success" for o in outcomes):
+            return "success", ui_text("crawl.done.success", self.lang, pages=pages, chunks=chunks)
+        return "partial", ui_text("crawl.done.partial", self.lang, pages=pages, chunks=chunks)
+
+    def _announce(self, text: str) -> None:
+        if self.announcer:
+            try:
+                self.announcer(text)
+            except Exception:
+                pass  # audio is extra; the outcome is shown in any case
 
     def stop(self):
-        self._is_running = False
+        """Ends the crawl after the current page; pages already stored stay."""
+        self._stop.set()
 
 class ModuleCreationWizard(QWizard):
     """
@@ -230,6 +265,12 @@ class ModuleCreationWizard(QWizard):
         self.btn_deep_ingest.setToolTip("Crawl external documentation URLs to teach Ditto about new hardware.")
         self.btn_deep_ingest.clicked.connect(self.run_deep_ingest)
         hbox_know.addWidget(self.btn_deep_ingest)
+        self.btn_stop_crawl = QPushButton(ui_text("crawl.btn.stop"))
+        self.btn_stop_crawl.setToolTip("End Deep Ingest after the current page; pages already stored stay.")
+        self.btn_stop_crawl.setAccessibleName("Stop Deep Ingest")
+        self.btn_stop_crawl.clicked.connect(self.stop_deep_ingest)
+        self.btn_stop_crawl.setVisible(False)
+        hbox_know.addWidget(self.btn_stop_crawl)
         
         hbox_know.addStretch()
         
@@ -243,6 +284,8 @@ class ModuleCreationWizard(QWizard):
         # Progress & Status Area
         self.status_label = QLabel(tr("wiz.status.waiting"))
         self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setTextFormat(Qt.PlainText)  # shows crawled URLs
+        self.status_label.setWordWrap(True)
         import_layout.addWidget(self.status_label)
         
         self.ai_progress = QProgressBar()
@@ -491,7 +534,7 @@ Setup commands:
         if not self.framework_manager:
             QMessageBox.critical(self, "Error", "Framework Manager not linked.")
             return
-            
+
         rag = self.framework_manager.get_component("rag_manager")
         if not rag:
             QMessageBox.critical(self, "Error", "Local Knowledge Base (RAG) is not active.\nPlease enable it in 'Configure AI Agent' first.")
@@ -501,12 +544,19 @@ Setup commands:
         if not URLInputDialog:
              QMessageBox.critical(self, "Error", "URLInputDialog not available.")
              return
-             
+
+        cfg = self.framework_manager.config
+        lang = current_language()
+
+        def speak(text: str):
+            announce(text, lang=lang, config=cfg)
+
+        show_crawl_notice_once(self, cfg, announcer=speak)  # before the first crawl, again when its text changes
         dlg = URLInputDialog(self)
         if dlg.exec() == QDialog.Accepted:
             urls = dlg.get_urls()
             options = dlg.get_options()
-            
+
             if not urls:
                 return
 
@@ -515,33 +565,67 @@ Setup commands:
             self.crawl_log.clear()
             self.crawl_log.appendPlainText(f"Initializing Crawler for {len(urls)} URLs...")
             self.btn_deep_ingest.setEnabled(False)
+            self.btn_stop_crawl.setEnabled(True)
+            self.btn_stop_crawl.setVisible(True)
+            self.ai_progress.setRange(0, 1)  # "page N of M" replaces the endless spinner
+            self.ai_progress.setValue(0)
             self.ai_progress.setVisible(True)
-            self.ai_progress.setRange(0, 0) # Infinite spin
-            
+            self.status_label.setText(ui_text("crawl.progress.start", lang))
+
             # Start Worker
-            self.crawl_worker = CrawlWorker(rag, urls, options)
+            self.crawl_worker = CrawlWorker(rag, urls, options, announcer=speak, lang=lang)
             self.crawl_worker.progress.connect(self.on_crawl_progress)
-            self.crawl_worker.finished.connect(self.on_crawl_finished)
+            self.crawl_worker.page.connect(self.on_crawl_page)
+            self.crawl_worker.done.connect(self.on_crawl_done)
             self.crawl_worker.error.connect(self.on_crawl_error)
             self.crawl_worker.start()
+
+    def stop_deep_ingest(self):
+        """Stop button: the crawl ends after the current page and keeps what is stored."""
+        if self.crawl_worker is not None and self.crawl_worker.isRunning():
+            self.crawl_worker.stop()
+            self.btn_stop_crawl.setEnabled(False)
+            self.status_label.setText(ui_text("crawl.stopping"))
+            self.on_crawl_progress(ui_text("crawl.stopping"))
 
     def on_crawl_progress(self, msg):
         self.crawl_log.appendPlainText(msg)
         self.crawl_log.verticalScrollBar().setValue(self.crawl_log.verticalScrollBar().maximum())
 
-    def on_crawl_finished(self, msg):
-        self._set_avatar_state("success")
+    def on_crawl_page(self, number: int, maximum: int, url: str):
+        self.ai_progress.setRange(0, max(maximum, 1))
+        self.ai_progress.setValue(min(number, maximum))
+        shown = visible(url)
+        shown = shown if len(shown) <= 120 else shown[:117] + "..."
+        self.status_label.setText(ui_text("crawl.progress.page", n=number, m=maximum, url=shown))
+
+    def _crawl_controls_idle(self):
         self.btn_deep_ingest.setEnabled(True)
+        self.btn_stop_crawl.setVisible(False)
         self.ai_progress.setVisible(False)
-        self.crawl_log.appendPlainText(f"\n✅ {msg}")
-        QMessageBox.information(self, "Ingest Complete", msg)
+
+    def on_crawl_done(self, outcome: str, msg: str):
+        self._set_avatar_state("fail" if outcome == "failure" else "success")
+        self._crawl_controls_idle()
+        self.status_label.setText(msg)
+        icon = {"success": "✅", "partial": "⚠️"}.get(outcome, "❌")
+        self.crawl_log.appendPlainText(f"\n{icon} {msg}")
+        show = {"success": QMessageBox.information, "partial": QMessageBox.warning}.get(outcome, QMessageBox.critical)
+        show(self, ui_text(f"crawl.title.{outcome}"), msg)
 
     def on_crawl_error(self, err):
         self._set_avatar_state("fail")
-        self.btn_deep_ingest.setEnabled(True)
-        self.ai_progress.setVisible(False)
+        self._crawl_controls_idle()
         self.crawl_log.appendPlainText(f"\n❌ Error: {err}")
         QMessageBox.critical(self, "Crawl Error", str(err))
+
+    def done(self, result):
+        """Closing the wizard stops a running crawl cleanly (stored pages stay)."""
+        worker = self.crawl_worker
+        if worker is not None and worker.isRunning():
+            worker.stop()
+            worker.wait(15000)
+        super().done(result)
 
     # --- STANDARD IMPORT LOGIC (Rule Based) ---
 
