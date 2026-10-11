@@ -94,8 +94,11 @@ PATTERNS: Tuple[SecretPattern, ...] = (
     # Runtime only: a bearer token without its header name, e.g. quoted in a server's error message.
     _rule("Bearer token", r"(?i)\bbearer(?:\s+|%20|\+)(?P<secret>[A-Za-z0-9._~+/\-]{20,}=*)", scan=False,
           hints=("bearer",)),
+    # The value needs a digit or a capital: a lower-case identifier is the name of a secret
+    # (ENCRYPTION_SECRET = "community_encryption_key"), and a random 24-character key lacks both almost never.
     _rule("secret assignment",
-          r"(?i)(?:api[_-]?key|secret|token)" + _Q + r"?\s*[:=]\s*\\?['\"](?P<secret>[A-Za-z0-9_\-]{24,})\\?['\"]",
+          r"(?i)(?:api[_-]?key|secret|token)" + _Q + r"?\s*[:=]\s*\\?['\"]"
+          r"(?P<secret>(?-i:(?=[a-z_\-]*[A-Z0-9]))[A-Za-z0-9_\-]{24,})\\?['\"]",
           hints=("key", "secret", "token")),
     # Runtime only, too broad for the scan: quoted token-shaped values (OAuth access tokens with dots, base64
     # secrets), and environment-style assignments (env dumps, `docker run -e`, .env lines, shell exports).
