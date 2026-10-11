@@ -13,6 +13,8 @@ project live.
 
 - Two files in `configs/` steer the running framework: **`llm_providers.yml`** (Ditto's AI providers) and
   **`llama_runtime.yml`** (the local model server and its models). Both are new and not released yet.
+- **`hardware_probe_schema.yml`** defines the hardware probe file (schema 2): every key with its source,
+  normalisation and validation. The profile parser loads it and enforces it. It is new and not released yet.
 - **`project_sources.yml`** and **`detailed_project_sources.yml`** are a reference catalogue of upstream projects
   and documentation links for developers. The framework does **not** read them while it runs.
 - Your own settings are saved in **`config.yml`** in the config folder. It is personal and never committed.
@@ -23,6 +25,7 @@ project live.
 |---|---|---|---|
 | `llm_providers.yml` | Presets of the AI providers Ditto can use | yes | `orchestrator/llm/catalog.py` |
 | `llama_runtime.yml` | Pinned llama.cpp build, pinned GGUF models, server defaults, rules for the recommended model | yes | `orchestrator/runtime/catalog.py` |
+| `hardware_probe_schema.yml` | Keys of the hardware probe file (schema 2): type, validation, source and normalisation per OS, whether a key enters the performance key | yes, when a hardware profile is read | `orchestrator/runtime/profile.py` |
 | `project_sources.yml` | Catalogue of upstream projects: repositories, versions, documentation links, notes | no | people; `scripts/validate_ssot.py`, `scripts/sync_ssot.py` |
 | `detailed_project_sources.yml` | Extended developer reference: guides, decision trees, more vendor sections | no | people; `scripts/sync_ssot.py` |
 | `config.yml` (not in git) | Your settings | yes | `orchestrator/Core/config_manager.py` |
@@ -141,6 +144,38 @@ python -c "from orchestrator.runtime.catalog import load_catalog; c = load_catal
 
 `tests/test_runtime.py` checks the file itself and the loader.
 
+## hardware_probe_schema.yml
+
+The format of `target_hardware_config.txt`, the file the hardware probe writes on the machine that will run the
+binaries. The file starts with a comment that explains every field; the
+[Module Developer Guide](../docs/Module_Developer_Guide.md#11-the-hardware-probe-file) describes the format for
+people who write or read probe files.
+
+| Section | Content |
+|---|---|
+| `schema` | Always `2`. |
+| `file` | File rules: file name, the size limit, at most 4096 characters per value, the key pattern, `ON`/`OFF`/`UNKNOWN`, at most 16 GPUs. |
+| `patterns` | Named patterns shared by keys (`version`, `identifier`). |
+| `tables` | Normalisation tables: architecture names, OS families, CPU vendors, ARM core names, PCI vendors, the SoC models the framework takes decisions on, SMBIOS memory types, Rockchip USB product ids, warning codes. |
+| `keys` | One entry per key: `group`, `type` (`bool`, `enum`, `int`, `pattern`, `version`, `text`, `list`, `timestamp`) with its validation, `required`, `stability` (`stable` or `volatile`), `perf` (`key`, `recorded` or `none`), `platforms`, `sources` per OS, `normalise`, `consumers`, and where a value only exists on some architectures, operating systems or GPU vendors (`only_arch`, `only_os`, `only_gpu_vendor`, `os_values`). |
+| `gpu_keys` | The same for the per-GPU keys `GPU<n>_<NAME>`. |
+
+The loader refuses a key without sources, normalisation or validation, unquoted enum values (YAML reads `ON` as a
+boolean) and volatile keys that are required or enter the performance key. There is no per-user override: the file
+of the installation is always used.
+
+**Add a key:** add the entry with every field, write it in the probes, and add a test value to the fixtures in
+`tests/fixtures/hardware_probe/`. A new `perf: key` entry changes every stored performance key; say so in the
+changelog.
+
+**Check it:**
+
+```bash
+python -c "from orchestrator.runtime.profile import load_schema; s = load_schema(); print(len(s.keys), len(s.gpu_keys))"
+```
+
+`tests/test_hardware_profile.py` checks the file itself, the parser and the profile store.
+
 ## project_sources.yml
 
 A catalogue of upstream projects that the framework uses, learns from or might integrate. Sections: `metadata`,
@@ -252,5 +287,6 @@ moment.
 |---|---|---|
 | offer a new AI provider or model | `llm_providers.yml` (or your own copy in the config folder) | run the check above and `tests/test_llm.py`; changelog entry |
 | add a local model or a newer llama.cpp build | `llama_runtime.yml`, with size, SHA256 and commit | run the check above and `tests/test_runtime.py`; changelog entry |
+| add or change a key of the hardware probe file | `hardware_probe_schema.yml` and the probes that write it | run the check above and `tests/test_hardware_profile.py`; changelog entry |
 | let a target build a new board, format or type | the target's `target.yml` and `build.sh` | tests; see the [Module Developer Guide](../docs/Module_Developer_Guide.md) |
 | record an upstream project or a documentation link | `project_sources.yml` (new entries in the detailed file by hand) | `python ../scripts/validate_ssot.py` inside `configs/`, then `python ../scripts/sync_ssot.py --write` for changed versions |
