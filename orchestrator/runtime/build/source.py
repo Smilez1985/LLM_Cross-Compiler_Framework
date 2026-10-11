@@ -29,6 +29,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Optional, Sequence, Union
 
@@ -176,14 +177,15 @@ def remove_tree(path: Path) -> None:
 # --- verification ------------------------------------------------------------------------------------------------
 
 def verify_source(path: Path, commit: str, *, git: Optional[Git] = None) -> None:
-    """Raises SourceError unless `path` is a checkout of exactly `commit` with no changed or added files."""
+    """Raises SourceError unless `path` is a checkout of exactly `commit` with no changed or added files. Files git
+    ignores count too: llama.cpp ignores tools/ui/dist/, and its CMake embeds a web UI found there into llama-server."""
     git = git or Git()
     if not (path / ".git").is_dir():
         raise SourceError(f"{path} is not a git checkout")
     head = git(["rev-parse", "HEAD"], cwd=path).stdout.strip()
     if head != commit:
         raise SourceError(f"{path} holds commit {head[:12] or '?'}, not the pinned {commit[:12]}")
-    status = git(["status", "--porcelain=v1", "--untracked-files=normal", "--ignored=no"], cwd=path).stdout
+    status = git(["status", "--porcelain=v1", "--untracked-files=normal", "--ignored=traditional"], cwd=path).stdout
     if status.strip():
         raise SourceError(f"{path} has changed or added files; it is removed and fetched again")
 
@@ -249,6 +251,8 @@ def fetch_source(source: LlamaCppSource, state_dir: Union[str, Path], *, url: Op
     url = url or source.repo
     if url.startswith("-"):
         raise SourceError("the repository URL must not start with '-'")
+    if "://" not in url:
+        url = str(Path(url).absolute())  # a local mirror: git runs in a staging folder, the path is the user's
     cached = cached_source(source, state_dir, git=git)
     if cached is not None:
         return cached
@@ -295,7 +299,7 @@ def export_source(source: LlamaCppSource, state_dir: Union[str, Path], out: Path
     cached. Returns the manifest."""
     git = git or Git()
     path = fetch_source(source, state_dir, url=url, git=git, log=log)
-    out = Path(out)
+    out = Path(out).absolute()  # git runs inside the source cache: a relative path would land there
     out.parent.mkdir(parents=True, exist_ok=True)
     tmp = out.with_name(f".{out.name}.{secrets.token_hex(4)}.tmp")
     try:
@@ -403,9 +407,14 @@ def upstream_tag_commit(tag: str, *, repo: str, git: Optional[Git] = None, cwd: 
     """The commit `refs/tags/<tag>` points at upstream (peeled for annotated tags), from `git ls-remote`."""
     if not _TAG.fullmatch(tag):
         raise SourceError("a llama.cpp tag looks like b11429")
+    if repo.startswith("-"):
+        raise SourceError("the repository URL must not start with '-'")
     git = git or Git()
-    out = git(["ls-remote", repo, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"], cwd=cwd, allow_file=_is_local(repo),
-              timeout=120).stdout
+    with tempfile.TemporaryDirectory(prefix="llama-pin-") as empty:
+        # Never inside the caller's checkout: git would apply that repository's config (url.<x>.insteadOf could send
+        # the check to another repository).
+        out = git(["ls-remote", repo, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}"], cwd=cwd or Path(empty),
+                  allow_file=_is_local(repo), timeout=120).stdout
     found: Dict[str, str] = {}
     for line in out.splitlines()[:16]:
         parts = line.split("\t")

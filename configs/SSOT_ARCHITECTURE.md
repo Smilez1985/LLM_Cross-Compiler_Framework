@@ -156,7 +156,7 @@ both `b<build_number>` and `build`. Everything else follows from this entry:
 |---|---|
 | The build recipe (`orchestrator/runtime/build/recipe.py`) | reads it: every plan builds this commit and sets `LLAMA_BUILD_NUMBER` and `LLAMA_BUILD_COMMIT` from it |
 | The setting `llama_cpp_version` (the tag target images clone) | its default is derived from `tag` (`orchestrator/utils/llama_pin.py`) |
-| `ARG LLAMA_CPP_TAG` in `targets/Rockchip/dockerfile`, `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml` | fallbacks for image builds outside the framework; must equal `tag` |
+| `ARG LLAMA_CPP_TAG` in `targets/Rockchip/dockerfile` (every `Dockerfile*` of a target that sets it or clones llama.cpp is checked), `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml` | fallbacks for image builds outside the framework; must equal `tag` |
 | `inference_backends.llama_cpp.commit` in `project_sources.yml` and `detailed_project_sources.yml` | reference catalogue; must equal `tag` |
 | `LLAMA_CPP_COMMIT` defaults in `targets/*/modules/source_module.sh` | legacy four-module chain, left untouched (decision D20); reported, not checked |
 

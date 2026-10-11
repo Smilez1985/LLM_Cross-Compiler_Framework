@@ -479,6 +479,51 @@ class TestRefusals:
         with pytest.raises(PlanError, match=message):
             plan("rk3566_dietpi_cross", **kwargs)
 
+    def test_every_nvidia_gpu_needs_its_compute_capability(self):
+        # A -real build has no kernel for a GPU it was not built for: with GPU1's capability unknown (older driver,
+        # converted profile) the build would cover only the RTX 3090 while claiming CUDA0 and CUDA1.
+        partial = changed(TWO_NVIDIA, drop=("GPU1_COMPUTE_CAP",))
+        tc = ToolchainInfo.from_profile(partial)
+        with pytest.raises(PlanError, match="GPU1_COMPUTE_CAP"):
+            plan_build(partial, purpose="host-runtime", placement="native", backend="cuda", catalog=CATALOG,
+                       toolchain=tc)
+        backend, reason = choose_backend(partial, purpose="host-runtime", placement="native", catalog=CATALOG,
+                                         toolchain=tc)
+        assert backend == "vulkan" and "GPU1_COMPUTE_CAP" in reason
+        assert choose_cuda_toolkit(partial, CATALOG, tc)[0] is None
+
+    def test_cuda_is_not_offered_on_musl(self):
+        # NVIDIA's toolkit (redist archives and images) is built for glibc; the plan follows the C library (decision 8).
+        alpine = changed(TWO_NVIDIA, LIBC="musl", LIBC_VERSION="1.2.5", OS_ID="alpine", OS_FAMILY="alpine",
+                         drop=("OS_VARIANT_ID", "OS_VERSION_CODENAME"))
+        tc = ToolchainInfo.from_profile(alpine)
+        toolkit, why = choose_cuda_toolkit(alpine, CATALOG, tc)
+        assert toolkit is None and any("glibc" in w for w in why)
+        with pytest.raises(PlanError, match="glibc"):
+            plan_build(alpine, purpose="host-runtime", placement="native", backend="cuda", catalog=CATALOG,
+                       toolchain=tc)
+        assert choose_backend(alpine, purpose="host-runtime", placement="native", catalog=CATALOG,
+                              toolchain=tc)[0] == "vulkan"
+
+    def test_rocm_version_from_the_profile_is_validated(self):
+        profile = raw(Z1_LINUX, ROCM_VERSION="6.4.3; rm -rf /")
+        with pytest.raises(PlanError, match="ROCM_VERSION"):
+            plan("z1_extreme_linux_vulkan", backend="rocm", profile=profile,
+                 toolchain=ToolchainInfo(host_os="linux", host_arch="x86_64", cmake="3.31.6"))
+
+    def test_windows_builds_need_clang_not_msvc_for_the_cpu_part(self):
+        # D9: Clang builds the CPU backend on Windows; a toolchain that only reports MSVC cannot run the plan, and its
+        # compiler must not key the build ID of a Clang build.
+        tc = ToolchainInfo(host_os="windows", host_arch="x86_64", compiler="msvc-19.44.35207", cmake="3.31.6")
+        with pytest.raises(PlanError, match="Clang"):
+            plan("z1_extreme_windows_vulkan_clang", toolchain=tc)
+        unknown = ToolchainInfo(host_os="windows", host_arch="x86_64", cmake="3.31.6")
+        assert plan("z1_extreme_windows_vulkan_clang", toolchain=unknown).steps[0].compiler == "clang"
+
+    def test_host_tools_need_the_target_image(self):
+        with pytest.raises(PlanError, match="toolchain image"):
+            plan("host_tools_container", toolchain=ToolchainInfo(host_os="linux", host_arch="x86_64", cmake="3.25.1"))
+
     def test_cuda_cross_builds_are_not_offered(self):
         nvidia_board = changed(TWO_NVIDIA, LIBC_VERSION="2.39")
         with pytest.raises(PlanError, match="CUDA cross builds"):
@@ -543,9 +588,12 @@ class TestPin:
             "FROM debian\nRUN git clone -b master https://github.com/ggml-org/llama.cpp.git /src\n")
         (root / "targets" / "Plain").mkdir()
         (root / "targets" / "Plain" / "Dockerfile").write_text("FROM debian\nENV LLAMA_CPP_PATH=/usr/src/llama.cpp\n")
+        # Variants of a target's Dockerfile (the template has Dockerfile.gpu) are pin places too.
+        (root / "targets" / "Plain" / "Dockerfile.gpu").write_text(
+            "FROM debian\nARG LLAMA_CPP_TAG=b4009\nRUN git clone https://github.com/ggml-org/llama.cpp /src\n")
         bad = {(p.path, p.found) for p in pins.mismatches(pins.pin_places(PIN, root))}
         assert bad == {("targets/Board/Dockerfile", "v0.6.0"), ("targets/Board/target.yml", "b4009"),
-                       ("targets/Other/Dockerfile", None)}
+                       ("targets/Other/Dockerfile", None), ("targets/Plain/Dockerfile.gpu", "b4009")}
 
     def test_settings_default_is_derived_from_the_pin(self, tmp_path):
         from orchestrator.Core.config_manager import ConfigManager

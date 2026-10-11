@@ -690,9 +690,11 @@ llm-cli ditto runtime export-source FILE [--mirror URL] [-y]
 Writes the pinned llama.cpp source (the commit in `configs/llama_runtime.yml`, `llama_cpp.source`) as a git bundle
 to `FILE`, plus `FILE.json` with the commit, the tag, the size and SHA256 of the bundle and the framework version.
 Carry both files to a machine without internet access and import them there. If the source is not cached yet, it
-is fetched first (about 215 MB): by commit, never by a moving tag, and `git rev-parse HEAD` must give the pinned
-commit back. The verified tree is kept read-only in `~/.llm-framework/runtime/llama.cpp/src/<commit>/`, so later
-runs need no network. Needs `git`.
+is fetched first (about 40 MB to download, 215 MB on disk): by commit (by its tag only when the server refuses a
+fetch by commit), and either way `git rev-parse HEAD` must give the pinned commit back. The verified tree is kept
+read-only in `~/.llm-framework/runtime/llama.cpp/src/<commit>/`; later runs check that nothing in it was changed or
+added (files git ignores included) and need no network. A relative `FILE` is relative to the current folder. Needs
+`git`.
 
 | Option | Meaning |
 |---|---|
