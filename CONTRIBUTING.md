@@ -13,6 +13,8 @@ Ways to contribute:
 - **Report problems:** describe what you did and what happened, and attach the output of `llm-cli doctor --json`
   and the build log. Remove personal data (host names, user names, keys) first.
 - **Add or improve a hardware target** (see [section 7](#7-adding-a-hardware-target)).
+- **Share a target, a recipe or knowledge** as a signed community pack (see
+  [Contributing to the community zoo](#contributing-to-the-community-zoo)).
 - **Fix bugs and write tests.**
 - **Improve the documentation**, in English and German.
 
@@ -302,20 +304,94 @@ The full guide is the [Module Developer Guide](docs/Module_Developer_Guide.md). 
 1. **Probe the board:** run `scripts/hardware_probe.sh` on the device; it writes `target_hardware_config.txt`.
 2. **Create the target:** in the GUI under **Tools > Create Hardware Module...**, with `llm-cli module create`, or
    with Ditto: `llm-cli module generate-ai target_hardware_config.txt`. The generator checks names, images,
-   packages, flags and shell code, writes only below `targets/` and never overwrites an existing target.
-3. **Declare the capabilities:** add a `capabilities:` block to `targets/<name>/target.yml` (boards, formats,
-   quantizations per board, aliases, defaults, calibration needs; schema in `orchestrator/schemas/targets.py`). The
-   generator does not write it yet; use the Rockchip block as a reference. GUI, CLI, Ditto and the MCP server offer
-   and validate exactly what is declared there.
+   packages, flags and shell code, writes only below `targets/` and never overwrites an existing target, and the
+   finished folder must pass the same validators as a community pack.
+3. **Complete the capabilities:** the generator writes a `capabilities:` block with support level `community`, the
+   module name as the only board and GGUF with the quantization types of the `case` branches in the quantization
+   logic (without such branches, six common GGUF types). Add your real boards, formats, quantizations per board,
+   aliases, defaults and calibration needs to `targets/<name>/target.yml` (schema in
+   `orchestrator/schemas/targets.py`; the Rockchip block is the reference).
+   GUI, CLI, Ditto and the MCP server offer and validate exactly what is declared there.
 4. **Dockerfile and build script:** pin every version (tags, commits, hashes, like `RKLLM_WHEEL_SHA256` in the
    Rockchip Dockerfile). The conversion has to work in the sandbox: as a non-root user, without network, with a
    read-only image filesystem and only the build's own folders writable.
 5. **Test with a real build**, for example
    `llm-cli build start -m HuggingFaceTB/SmolLM2-135M-Instruct -t <name> -f gguf -b <board> -F`, and add the
    Dockerfile to the hadolint matrix in `.github/workflows/docker.yml` and to `.github/dependabot.yml`.
+6. **Share it** as a community pack (below), or, if the maintainers take the target over, with a pull request to
+   this repository ([section 9](#9-commits-and-pull-requests)).
 
-**Knowledge packs** (`community/knowledge/`) are not signed yet (see the [roadmap](docs/BLUEPRINT.md#roadmap)).
-Please open an issue before you contribute one.
+### Contributing to the community zoo
+
+Targets you maintain yourself, recipes (finished builds that others can rebuild) and knowledge are shared as signed
+community packs through the community repository, not as folders copied into `community/` by hand. The commands
+and options are in the [CLI guide](docs/CLI_Usage.md#zoo-export); for targets, see also the
+[Module Developer Guide](docs/Module_Developer_Guide.md#9-sharing-a-target).
+
+1. **Export a pack:** `llm-cli zoo export target <id> --author "<name>"` for a target,
+   `llm-cli zoo export recipe <build folder> --author "<name>"` for a finished build, or
+   `llm-cli zoo export knowledge --author "<name>"` for your knowledge base. In the GUI: "Export for community after
+   creating" on the last page of the module wizard, or "Export a finished build for the community..." in the
+   Builder log's context menu. The pack is privacy-scrubbed, checked and signed with your key, and written to
+   `community/contributions/`. Nothing is sent yet.
+2. **Review it:** the summary shows a diff for every file the privacy scrub changed (at most 40 lines per file).
+   Then check the pack the way the community repository will:
+   `llm-cli zoo verify community/contributions/<file>.zip`.
+3. **Open the pull request:** add `--pr` to the export command (it asks after the summary unless `--yes` is given),
+   or click "Open pull request" in the export dialog. With the GitHub CLI and git installed and `gh` logged in, the
+   framework forks the repository named in the setting `community_repo`, commits the pack to `contributions/<kind>/`
+   on a new branch and opens the pull request. Otherwise, or if that fails, the repository's upload page opens in
+   your browser, and you drop the file there.
+4. **The CI check:** on every pull request that touches `contributions/`, the community repository's workflow
+   accepts only pack files (`contributions/target/*.zip`, `contributions/recipe/*.zip`,
+   `contributions/knowledge/*.zip`) of at most 5 MB, runs `llm-cli zoo verify` on each of them (manifest and hashes,
+   no links, extra or binary files, the target validators, the recipe and knowledge formats, an included author
+   signature, the privacy scrub) and runs the secret scan over the changed files.
+5. **Review and index:** a maintainer reviews the pack, merges it, adds its entry to the signed index and signs the
+   index offline. Then it appears in `llm-cli zoo list` and in the Community Hub.
+
+The framework never asks for, reads or shows a token: `gh` and `git` use their own stored sign-in, and the upload
+page uses your browser's GitHub session.
+
+**Current state:** the community repository and its signed index are not published yet. `community_repo` and
+`community_index_url` are empty and `configs/community_keys.yml` lists no key, so `--pr` stops with "No community
+repository is configured" and leaves the pack in `community/contributions/`. Until the repository exists, a pack
+can be shared as a file (`llm-cli zoo install --file <pack>` installs it with trust `local`).
+
+Knowledge packs keep the source address of every page and claim no licence for the pages (`NOASSERTION`); the pages
+stay under their owners' terms. A target that should ship with the framework (support level `official`) is still
+contributed with a normal pull request to this repository.
+
+### Maintaining the community repository
+
+Two files in this repository are tools for the maintainers of the community repository; the framework itself does
+not use them.
+
+- `scripts/community_repo/validate-contribution.yml` is the CI workflow template of the community repository. Copy
+  it to `.github/workflows/` there (this repository does not run it) and set `LCF_REF` to the framework release the
+  packs are checked with. It runs the checks of step 4 above with the framework at that tag. The signing key never
+  reaches the CI.
+- `scripts/zoo_sign_index.py` signs the index. Its signing key lives only in the operating system's keyring
+  (service `lcf-community-index`):
+
+  ```bash
+  python scripts/zoo_sign_index.py keygen <key name>
+  python scripts/zoo_sign_index.py entry <pack>.zip --url https://<address of the pack> [--trust community|verified] [--title "<title>"]
+  python scripts/zoo_sign_index.py sign index.json --key <key name> [--previous <old index.json>]
+  ```
+
+  `keygen` creates a key (it refuses a name that exists) and prints its entry for `configs/community_keys.yml`,
+  valid for two years; ship that entry with a framework release before the first index the key signs. `entry`
+  checks a reviewed pack like `llm-cli zoo verify` and prints its index entry (kind, ID, version, title, author,
+  licence, trust, URL, size and sha256; `--trust` defaults to `community`). `sign` checks `index.json` against the
+  schema (with `--previous`, its `version` must be higher) and writes `index.json.sig` next to it.
+
+`index.json` holds `schema_version` (1), `version` (a number that grows with every signed index), `generated` (UTC
+time in the form `2026-10-11T12:00:00Z`), `entries` (the output of `entry`) and `revoked`. The signature covers the
+exact bytes, so publish `index.json` unchanged. Clients refuse an index whose version is lower than the one they
+have cached. To revoke a pack, add an entry to `revoked`, raise `version` and sign again. Each entry needs `kind`,
+`id` and a `reason`; with `sha256` it revokes exactly that pack file, without it the `version` given or, without a
+`version`, every version of that ID.
 
 ---
 
@@ -336,6 +412,10 @@ Please open an issue before you contribute one.
   `llama-server` that give it tools, an agent mode, MCP clients or a web UI.
 - New actions for AI clients and Ditto are tools in `orchestrator/tools/framework_tools.py` with the correct tier
   (`read`, `local_write`, `external`). Never bypass the registry, the permissions or the audit log.
+- The framework never asks for, reads or stores a repository token. Hand work over to GitHub through an installed
+  GitHub CLI (it keeps its own sign-in) or the browser, as `llm-cli zoo export --pr` does.
+- Code adapted from another project keeps a comment that names its source ("Adapted from ...") and gets an entry
+  with that project's licence in `THIRD_PARTY_NOTICES.md`.
 - Do not weaken the build sandbox, the privacy filter or the SSH trust rules.
 
 ---
