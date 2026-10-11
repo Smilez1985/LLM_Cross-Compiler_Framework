@@ -34,7 +34,9 @@ goto :EOF
 # --- INSTALLER LOGIC (PowerShell Teil) ---
 
 $ErrorActionPreference = "Stop"
-$ScriptPath = Split-Path -Parent $MyInvocation.MyCommand.Path
+# Run through Invoke-Expression (see above), this part has no script path of its own; the batch part has
+# changed into the folder of install.bat before, so that folder is the current one.
+$ScriptPath = if ($MyInvocation.MyCommand.Path) { Split-Path -Parent $MyInvocation.MyCommand.Path } else { (Get-Location).Path }
 
 # 1. KONFIGURATION
 $AppName = "LLM-Conversion-Framework"

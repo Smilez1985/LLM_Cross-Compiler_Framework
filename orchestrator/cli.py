@@ -2315,11 +2315,16 @@ def config_repos(ctx: FrameworkContext, add, remove):
 
     if add:
         name, url = add
+        variables = repo_override_names(name)
+        if not variables:  # the build engine could not pass it on under any name
+            console.print(f"[red]Invalid name {escape(repr(name))}: it needs ASCII letters or digits (it becomes "
+                          f"<NAME>_REPO_OVERRIDE, e.g. llama.cpp -> LLAMA_CPP_REPO_OVERRIDE).[/red]")
+            sys.exit(2)
         # The shape the build engine passes on as <NAME>_REPO_OVERRIDE (plain URLs of earlier versions still work).
         current_repos[name.lower()] = {"url": url}
         save()
         console.print(f"[green]Added repo override: {escape(name.lower())} -> {escape(redact_secrets(url))} (passed to "
-                      f"builds as {escape(repo_override_names(name)[0])})[/green]")
+                      f"builds as {escape(variables[0])})[/green]")
     elif remove:
         if remove.lower() in current_repos:
             del current_repos[remove.lower()]

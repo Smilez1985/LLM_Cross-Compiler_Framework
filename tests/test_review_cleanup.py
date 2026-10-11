@@ -251,6 +251,16 @@ class TestRepoOverrideNames:
         assert result.code == 0, result.out
         assert "LLAMA_CPP_REPO_OVERRIDE" in result.out
 
+    @pytest.mark.parametrize("name", ["...", "-", "äöü"])
+    def test_config_repos_refuses_a_name_that_gives_no_variable(self, cli, name):
+        # Before, the entry was saved and the command then crashed (IndexError) while printing the variable name.
+        before = dict(cli.framework.config.get("source_repositories", {}) or {})
+        result = cli.invoke("config", "repos", "--add", name, "https://git.example.com/x.git")
+        assert result.code == 2, result.out
+        assert result.exception is None or isinstance(result.exception, SystemExit), repr(result.exception)
+        assert "letters" in result.out and "digits" in result.out
+        assert dict(cli.framework.config.get("source_repositories", {}) or {}) == before
+
 
 def test_module_create_names_the_file_the_build_runs(tmp_path, monkeypatch):
     write_user_config(tmp_path, targets_dir=str(tmp_path / "targets"))
@@ -374,6 +384,14 @@ class TestWindowsScripts:
         app = re.search(r'\$AppName = "([^"]+)"', install).group(1)
         assert shortcut == f"{app}.lnk" and '"$AppName.lnk"' in install
 
+    def test_install_bat_finds_its_folder_without_a_script_path(self):
+        # Its PowerShell part runs through Invoke-Expression, where $MyInvocation.MyCommand.Path is empty: the folder
+        # it was started in (the batch part changes into it first) is the source folder then.
+        install = (REPO_ROOT / "install.bat").read_text(encoding="utf-8")
+        assert 'cd /d "%~dp0"' in install.split("powershell")[0]
+        line = next(x for x in install.splitlines() if x.startswith("$ScriptPath ="))
+        assert "if ($MyInvocation.MyCommand.Path)" in line and "(Get-Location).Path" in line
+
     def test_the_marker_and_the_backups_stay_out_of_git(self):
         for path in (".install_complete", "recovered_data/backup/config.yml"):
             ignored = subprocess.run(["git", "-C", str(REPO_ROOT), "check-ignore", "-q", path])
@@ -397,3 +415,38 @@ def test_shutdown_ends_the_background_event_loop(make_framework):
     assert not thread.is_alive() and loop.is_closed()
     assert pending.cancelled()
     fm.shutdown()  # a second call (the fixture's) changes nothing
+
+
+def test_git_variables_of_a_calling_git_command_do_not_reach_the_tests(tmp_path):
+    # Run under `git rebase --exec`, the secret-scan tests' `git init` acted on this repository (core.bare = true).
+    import conftest
+    env = {"GIT_DIR": "/outer/.git", "GIT_WORK_TREE": "/outer", "GIT_INDEX_FILE": "/outer/.git/index", "HOME": "/h"}
+    conftest.scrub_git_environment(env)
+    assert env == {"HOME": "/h"}
+    assert not set(conftest.GIT_REPOSITORY_VARIABLES) & set(os.environ)
+    subprocess.run(["git", "init", "-q", str(tmp_path / "repo")], check=True)
+    assert (tmp_path / "repo" / ".git").is_dir()
+
+
+def test_the_session_end_cleanup_is_not_stopped_by_a_dead_weak_proxy():
+    # isinstance() reads __class__, which raises ReferenceError for a weakref.proxy whose object is gone: one such
+    # proxy among the collected objects stopped pytest_unconfigure before it ended the loops and the widgets.
+    import weakref
+
+    import conftest
+    from orchestrator.Core.framework import FrameworkManager
+
+    class Gone:
+        pass
+
+    gone = Gone()
+    proxy = weakref.proxy(gone)
+    del gone
+    fm = FrameworkManager.__new__(FrameworkManager)  # not booted; only its loop field matters here
+    fm._loop = "a running loop"
+    try:
+        left = conftest.frameworks_left_running(FrameworkManager)
+        assert any(obj is fm for obj in left)
+        assert proxy is not None  # alive (and dead) during the call
+    finally:
+        fm._loop = None  # nothing for the real session end to stop

@@ -337,7 +337,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `<NAME>_REPO_OVERRIDE`; plain URLs stored by earlier versions are passed on as well. The name comes from the
   whole entry name (`llama.cpp` and `llama_cpp` both give `LLAMA_CPP_REPO_OVERRIDE`, the name the target scripts
   read; `llama.cpp` gave `CPP_REPO_OVERRIDE`). `--add` and `--remove` exit with code 1 when `config.yml` cannot
-  be saved, instead of reporting success.
+  be saved, instead of reporting success; `--add` refuses a name without any ASCII letter or digit (exit code 2).
 - A settings file given with `-c` that cannot be read no longer drops the `LLM_FRAMEWORK_*` variables as well: it
   is named on stderr and ignored, and the other settings apply.
 - The GUI's hardware scan of this PC (**Scan / Import...**) writes its result into `<cache_dir>/probes/` instead of
@@ -349,8 +349,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Windows: the uninstaller (`scripts/Uninstall-LLM-Conversion-Framework.bat`) finds the installation. `install.bat`
   now writes the marker with the installation folder that the uninstaller reads, next to `install.bat`, where the
   uninstaller looks for it; before, no installer wrote it and the uninstaller always reported that nothing was
-  installed. The start script `scripts/start-llm_convertion_framework.bat` also works from `scripts\` (it looked
-  for `orchestrator\main.py` and `.venv` there).
+  installed. When PowerShell reports no script path (the PowerShell part of `install.bat` runs through
+  `Invoke-Expression`), `install.bat` uses the current folder, which its batch part has set to its own. The start script
+  `scripts/start-llm_convertion_framework.bat` also works from `scripts\` (it looked for `orchestrator\main.py`
+  and `.venv` there).
 - `llm-cli targets list` shows each target's id (the value for `--target`), name, boards and formats from its
   capabilities instead of placeholders; `llm-cli targets validate` checks the capabilities block against the
   schema and prints every error (exit code 1).

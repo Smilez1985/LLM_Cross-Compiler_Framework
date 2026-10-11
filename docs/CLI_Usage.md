@@ -972,10 +972,10 @@ llm-cli config repos [--add NAME URL] [--remove NAME]
 Without options it lists the source repository overrides (setting `source_repositories`). `--add` and `--remove`
 change them and save `config.yml`; if it cannot be saved, the command says so and exits with code 1. `--add`
 stores an entry `{url: ...}`; the build engine passes every entry, and plain URLs stored by earlier versions, to
-the stage containers as `<NAME>_REPO_OVERRIDE` (`NAME`: the whole name in upper case, every other character than
-letters and digits as `_`, so `llama.cpp`, `llama_cpp` and `llama-cpp` all give `LLAMA_CPP_REPO_OVERRIDE`). A dotted
-name is passed under the name earlier versions used as well, its part after the last dot (`sources.llama_cpp`
-also gives `LLAMA_CPP_REPO_OVERRIDE`).
+the stage containers as `<NAME>_REPO_OVERRIDE` (`NAME`: the whole name in upper case, every character other than
+ASCII letters and digits as `_`, so `llama.cpp`, `llama_cpp` and `llama-cpp` all give `LLAMA_CPP_REPO_OVERRIDE`). A
+dotted name is passed under the name earlier versions used as well, its part after the last dot (`sources.llama_cpp`
+also gives `LLAMA_CPP_REPO_OVERRIDE`). `--add` refuses a name without any ASCII letter or digit (exit code 2).
 
 | Option | Meaning |
 |---|---|
