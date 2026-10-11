@@ -1,0 +1,216 @@
+# Retrieval cases (llm-cli ditto eval --kind retrieval): each query runs against a temporary knowledge base that
+# holds the corpus below (one file per document, front matter title/lang); no AI model is involved.
+# relevant: corpus document ids, any of them counts; within: rank the first relevant excerpt must reach.
+# none_relevant: an unrelated question, where nothing should reach Ditto (needs a relevance floor).
+# Tags group the report: en/de (query language), cross-lingual, identifier, oversized (answer deep inside a
+# block larger than the embedding model's context), framework (this framework's own docs), negative.
+version: 1
+corpus: corpus
+cases:
+  # --- English queries ------------------------------------------------------------------------------------------
+  - id: retr-en-rknn-onnx-convert
+    kind: retrieval
+    query: "How do I convert an ONNX model for the RK3588 NPU?"
+    tags: [en]
+    expect: {relevant: [rknn-onnx-conversion], within: 3}
+
+  - id: retr-en-cuda-oom
+    kind: retrieval
+    query: "llama.cpp crashes with CUDA out of memory, which options lower the VRAM use?"
+    tags: [en]
+    expect: {relevant: [llama-cpp-cuda-oom], within: 3}
+
+  - id: retr-en-gated-403
+    kind: retrieval
+    query: "The model download stops with 403, access to the repository is restricted"
+    tags: [en]
+    expect: {relevant: [hf-gated-models], within: 3}
+
+  - id: retr-en-lossless-quant
+    kind: retrieval
+    query: "Which GGUF quantization type is almost lossless compared with F16?"
+    tags: [en]
+    expect: {relevant: [gguf-quant-table], within: 3}
+
+  - id: retr-en-cli-build
+    kind: retrieval
+    query: "Which command builds a Q4_K_M GGUF for the rk3588 from the terminal?"
+    tags: [en, framework]
+    expect: {relevant: [llm-cli-build-start], within: 3}
+
+  - id: retr-en-ditto-permissions
+    kind: retrieval
+    query: "How can I make Ditto ask me before it starts a build?"
+    tags: [en, framework]
+    expect: {relevant: [ditto-tool-permissions], within: 3}
+
+  - id: retr-en-mcp-connect
+    kind: retrieval
+    query: "How do I connect an AI coding assistant to the framework over MCP?"
+    tags: [en, framework]
+    expect: {relevant: [mcp-server-setup], within: 3}
+
+  - id: retr-en-table-bottom-row
+    kind: retrieval
+    query: "How big is a 7B model with the smallest 1-bit quantization type?"
+    tags: [en, oversized]
+    expect: {relevant: [gguf-quant-table], within: 3}
+
+  - id: retr-en-script-checksums
+    kind: retrieval
+    query: "After the aarch64 cross build, strip the binaries and write SHA256 checksums for the archive"
+    tags: [en, oversized]
+    expect: {relevant: [aarch64-cross-build-script], within: 3}
+
+  - id: retr-xl-en-pi-throttle
+    kind: retrieval
+    query: "My Raspberry Pi 5 gets slower during long inference runs"
+    tags: [en, cross-lingual]
+    expect: {relevant: [raspberry-pi5-drosselung], within: 3}
+
+  - id: retr-xl-en-calibration-images
+    kind: retrieval
+    query: "How many calibration images does INT8 quantization need?"
+    tags: [en, cross-lingual]
+    expect: {relevant: [kalibrierungsdaten-int8], within: 3}
+
+  - id: retr-xl-en-jetson-arch
+    kind: retrieval
+    query: "Which CUDA architecture do I pass when building for a Jetson Orin?"
+    tags: [en, cross-lingual]
+    expect: {relevant: [jetson-jetpack-cuda], within: 3}
+
+  # --- German queries -------------------------------------------------------------------------------------------
+  - id: retr-de-rknn-toolkit-identifier
+    kind: retrieval
+    query: "rknn toolkit2 im Build-Container installieren"
+    tags: [de, cross-lingual]
+    expect: {relevant: [rknn-toolkit2-install], within: 3}
+
+  - id: retr-de-kalibrierbilder
+    kind: retrieval
+    query: "Wie viele Kalibrierungsbilder brauche ich für die INT8-Quantisierung?"
+    tags: [de]
+    expect: {relevant: [kalibrierungsdaten-int8], within: 3}
+
+  - id: retr-de-ram-7b
+    kind: retrieval
+    query: "Wie viel Arbeitsspeicher braucht ein 7B-Modell in Q4?"
+    tags: [de]
+    expect: {relevant: [gguf-speicherbedarf], within: 3}
+
+  - id: retr-de-pi-langsam
+    kind: retrieval
+    query: "Warum wird mein Raspberry Pi bei langen Inferenzläufen langsamer?"
+    tags: [de]
+    expect: {relevant: [raspberry-pi5-drosselung], within: 3}
+
+  - id: retr-de-docker-daemon
+    kind: retrieval
+    query: "Docker meldet, dass keine Verbindung zum Daemon möglich ist"
+    tags: [de]
+    expect: {relevant: [docker-daemon-start], within: 3}
+
+  - id: retr-de-rk3566-llm
+    kind: retrieval
+    query: "Kann der RK3566 ein großes Sprachmodell auf der NPU ausführen?"
+    tags: [de]
+    expect: {relevant: [rk3566-npu-grenzen], within: 3}
+
+  - id: retr-de-toolchain
+    kind: retrieval
+    query: "Wie schreibe ich eine CMake-Toolchain-Datei für aarch64?"
+    tags: [de]
+    expect: {relevant: [cmake-toolchain-datei, aarch64-cross-build-script], within: 3}
+
+  - id: retr-de-fingerabdruck
+    kind: retrieval
+    query: "Beim ersten SSH-Deployment zeigt das Framework einen Fingerabdruck an. Womit vergleiche ich ihn?"
+    tags: [de, framework]
+    expect: {relevant: [ssh-host-key-pruefung], within: 3}
+
+  - id: retr-de-offline-wissen
+    kind: retrieval
+    query: "Funktioniert die Wissensdatenbank auch ohne Internetverbindung?"
+    tags: [de, framework]
+    expect: {relevant: [wissensdatenbank-offline], within: 3}
+
+  - id: retr-de-neues-board
+    kind: retrieval
+    query: "Wie lege ich ein Modul für ein neues Board an?"
+    tags: [de, framework]
+    expect: {relevant: [modul-generator-zielplattform], within: 3}
+
+  - id: retr-de-rkllm-quant
+    kind: retrieval
+    query: "Welche RKLLM-Quantisierung kann ich auf dem RK3588 verwenden?"
+    tags: [de]
+    expect: {relevant: [rkllm-quantisierung], within: 3}
+
+  - id: retr-xl-de-gated-401
+    kind: retrieval
+    query: "Der Modell-Download scheitert mit 401, das Repository ist zugangsbeschränkt"
+    tags: [de, cross-lingual]
+    expect: {relevant: [hf-gated-models], within: 3}
+
+  # --- identifiers: flags, file names, quantization types ------------------------------------------------------
+  - id: retr-id-ggml-cuda
+    kind: retrieval
+    query: "GGML_CUDA"
+    tags: [identifier]
+    expect: {relevant: [llama-cpp-cuda-flags], within: 1}
+
+  - id: retr-id-dggml-cuda-on
+    kind: retrieval
+    query: "-DGGML_CUDA=ON"
+    tags: [identifier]
+    expect: {relevant: [llama-cpp-cuda-flags, jetson-jetpack-cuda], within: 3}
+
+  - id: retr-id-rknn-toolkit2
+    kind: retrieval
+    query: "rknn_toolkit2"
+    tags: [identifier]
+    expect: {relevant: [rknn-toolkit2-install], within: 3}
+
+  - id: retr-id-librkllmrt
+    kind: retrieval
+    query: "librkllmrt.so"
+    tags: [identifier]
+    expect: {relevant: [rkllm-version-mismatch], within: 3}
+
+  - id: retr-id-cuda-arch-87
+    kind: retrieval
+    query: "CMAKE_CUDA_ARCHITECTURES=87"
+    tags: [identifier]
+    expect: {relevant: [jetson-jetpack-cuda], within: 3}
+
+  - id: retr-id-rknpu-version
+    kind: retrieval
+    query: "/sys/kernel/debug/rknpu/version"
+    tags: [identifier]
+    expect: {relevant: [npu-treiber-version], within: 3}
+
+  # --- unrelated questions: nothing should come back -----------------------------------------------------------
+  - id: retr-neg-weather-de
+    kind: retrieval
+    query: "Wie wird das Wetter morgen in Berlin?"
+    tags: [de, negative]
+    expect: {none_relevant: true}
+
+  - id: retr-neg-banana-bread
+    kind: retrieval
+    query: "Give me a recipe for banana bread"
+    tags: [en, negative]
+    expect: {none_relevant: true}
+
+  - id: retr-neg-football-de
+    kind: retrieval
+    query: "Wer hat das letzte Finale der Champions League gewonnen?"
+    tags: [de, negative]
+    expect: {none_relevant: true}
+
+  - id: retr-neg-tax-en
+    kind: retrieval
+    query: "How do I file my income tax return?"
+    tags: [en, negative]
+    expect: {none_relevant: true}

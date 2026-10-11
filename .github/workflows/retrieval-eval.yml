@@ -1,0 +1,62 @@
+name: Retrieval evaluation
+
+# Grades the knowledge-base search on the fixture corpus (evals/retrieval) with the real local embedding model;
+# no AI model is involved. Manual and nightly only: the models (about 0.5 GB) are downloaded once and cached.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: retrieval-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  retrieval:
+    name: Retrieval (fixture corpus)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      QT_QPA_PLATFORM: offscreen
+      PYTHONUTF8: "1"
+      LLM_FRAMEWORK_NO_AUDIO: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Cache the embedding models
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/models/embeddings
+          key: retrieval-models-${{ hashFiles('orchestrator/rag/embeddings.py') }}
+          restore-keys: retrieval-models-
+
+      - name: Run the retrieval cases
+        env:
+          LLM_FRAMEWORK_HOME: ${{ runner.temp }}/llm-home
+          LLM_FRAMEWORK_CONFIG_DIR: ${{ runner.temp }}/llm-config
+          LLM_FRAMEWORK_MODELS_DIR: ${{ runner.temp }}/models
+        # Without a relevance floor every unrelated question gets excerpts, so 100 % is not reachable yet;
+        # the threshold catches a broken search, not small changes (compare the reports for those).
+        run: python -m orchestrator.cli -q ditto eval --kind retrieval --json retrieval-report.json --min-pass 0.7
+
+      - name: Upload the report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: retrieval-report
+          path: retrieval-report.json
+          if-no-files-found: ignore

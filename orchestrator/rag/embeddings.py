@@ -329,9 +329,21 @@ class FastEmbedSparseEmbedder(_FastEmbedBase):
 
     def _create(self, offline: bool):
         from fastembed import SparseTextEmbedding
-        extra = {"specific_model_path": str(self._model_dir)} if self._model_dir else {}
+        model_dir = self._model_dir or (self._cached_copy() if offline else None)
+        extra = {"specific_model_path": str(model_dir)} if model_dir else {}
         return SparseTextEmbedding(model_name=SPARSE_MODEL, cache_dir=str(self.cache_dir),
                                    local_files_only=offline, language=self.language, **extra)
+
+    def _cached_copy(self) -> Optional[Path]:
+        """The folder of the downloaded stop word file. FastEmbed 0.8.1 checks its cache for a model file that
+        BM25 does not have, so offline it never finds a downloaded copy by itself (and the copy is a partial
+        snapshot, which huggingface_hub's offline snapshot lookup refuses)."""
+        try:
+            from huggingface_hub import try_to_load_from_cache
+            found = try_to_load_from_cache(SPARSE_MODEL, f"{self.language}.txt", cache_dir=str(self.cache_dir))
+        except Exception:
+            return None
+        return Path(found).parent if isinstance(found, str) else None  # else not downloaded: FastEmbed reports it
 
     def embed_passages(self, texts: Sequence[str]) -> List[SparseVec]:
         texts = list(texts)
