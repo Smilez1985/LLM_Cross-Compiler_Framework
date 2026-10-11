@@ -219,6 +219,10 @@ class ToolContext:
     # Notes a handler that takes the context adds for this call's result (framework text only, e.g. "the wait was
     # shortened"); the registry puts them into the result's `notes` after the repairs. New for every call.
     notes: List[str] = field(default_factory=list)
+    # Set by the MCP server when nobody can be asked through the client (no form elicitation, a question too long for
+    # one, or a tool the person wants confirmed in the framework): "ask" then becomes a pending approval in the
+    # framework (GUI notice, `llm-cli tools approvals`) instead of a refusal.
+    pending_approvals: bool = False
 
     @property
     def owner(self) -> str:
@@ -285,6 +289,7 @@ class ToolRegistry:
         self.policy_store = policy_store
         self.audit = audit
         self.tokens = tokens  # named MCP tokens, each with its own policy
+        self.approvals = None  # ApprovalService: pending approvals for callers that cannot ask (attach_approvals)
         self._tools: Dict[str, ToolSpec] = {}
         # Repeat guard and per-session counters (in memory; per caller and session).
         self._guard_lock = threading.Lock()
@@ -315,6 +320,19 @@ class ToolRegistry:
             raise ValueError(f"Tool '{spec.name}' cannot be told apart from {clashes[0][0]} by a spelling variant.")
         self._tools[spec.name] = spec
         return spec
+
+    def attach_approvals(self, service) -> None:
+        """Pending approvals (design 6.9) for callers whose client cannot ask the person."""
+        service.registry = self
+        self.approvals = service
+
+    def framework_channel_required(self, spec: ToolSpec, caller: str) -> bool:
+        """Whether a question about this tool must be put to the person in the framework (approval window), not in
+        the client's dialog: the tool accepts no other channel, or the person set it so for this caller."""
+        if "elicitation" not in spec.channels:
+            return True
+        policy, section = self._policy_of(caller)
+        return spec.name in policy.framework_only_for(section)
 
     def get(self, name: str) -> ToolSpec:
         try:
@@ -698,6 +716,21 @@ class ToolRegistry:
                 finally:
                     _QUESTION.reset(token)
                 answer = "accepted" if approved else "declined"
+            if (not approved and approved is None and ctx.pending_approvals and self.approvals is not None
+                    and "framework" in spec.channels):
+                # Nobody could be asked through the client: the question appears in the framework instead, and the
+                # framework runs the call itself once the person approves it there.
+                try:
+                    job = self.approvals.request(spec, inp, arguments, ctx, decision)
+                except CallTooLong as e:  # longer than even the framework's window shows: nobody can confirm it
+                    self._audit(ctx, spec, decision, "not_confirmed", arguments, detail=str(e), confirm_channel="none",
+                                answer="unavailable", reason_code="limit_reached")
+                    raise ToolDenied(str(e), code="limit_reached",
+                                     next="Make the call smaller (shorter values) so the person can read all of it.")
+                raise ToolError(f"Waiting for the person to approve '{spec.title}' in the framework (GUI notice or "
+                                f"'llm-cli tools approvals'). Job {job.job_id}: poll get_job_status with "
+                                "wait_seconds=50.", code="waiting_for_approval",
+                                next="Do not call this tool again; the framework runs it when approved.")
             if not approved:
                 # approved stays None when nobody could be asked; False is a person's "no"
                 code = "declined" if approved is False else "needs_person"

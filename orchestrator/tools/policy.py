@@ -112,6 +112,8 @@ class CallerPolicy(BaseModel):
     tiers: Dict[ToolTier, Decision] = Field(default_factory=lambda: dict(RECOMMENDED_TIERS))
     overrides: Dict[str, Decision] = Field(default_factory=dict)
     reviewed: Optional[List[str]] = None  # tool names the person has seen in the setup for this caller
+    # Tools whose question always appears in the framework (approval window), never in the client's own dialog.
+    framework_only: List[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _limits(self):
@@ -133,6 +135,8 @@ class ToolPolicy(BaseModel):
     overrides: Dict[str, Decision] = Field(default_factory=dict)
     # Tool names the person has reviewed; None in a file from before this list (TOOLS_OF_3_0_0 count as reviewed).
     reviewed: Optional[List[str]] = None
+    # Tools whose question always appears in the framework (approval window), never in the client's own dialog.
+    framework_only: List[str] = Field(default_factory=list)
     callers: Dict[str, CallerPolicy] = Field(default_factory=dict)
 
     @model_validator(mode="after")
@@ -169,6 +173,12 @@ class ToolPolicy(BaseModel):
         if caller and caller.startswith("mcp:"):
             return None
         return self.tiers, self.overrides, self.reviewed
+
+    def framework_only_for(self, caller: Optional[str]) -> List[str]:
+        """The tools this caller's questions are always put to the person in the framework (the caller's own section,
+        else the shared one; a named token without its own section: the shared one)."""
+        own = self.callers.get(caller or "")
+        return list(own.framework_only if own is not None else self.framework_only)
 
     def reviewed_tool(self, caller: Optional[str], name: str) -> bool:
         section = self.section(caller)
@@ -252,7 +262,8 @@ def _section_rows(policy: Optional[ToolPolicy]) -> Dict[str, Dict[str, Any]]:
     sections = {"shared": policy, **policy.callers}
     return {name: {"tiers": {t.value: d.value for t, d in section.tiers.items()},
                    "overrides": {n: d.value for n, d in section.overrides.items()},
-                   "reviewed": None if section.reviewed is None else len(section.reviewed)}
+                   "reviewed": None if section.reviewed is None else len(section.reviewed),
+                   "framework_only": sorted(section.framework_only)}
             for name, section in sections.items()}
 
 
@@ -267,7 +278,7 @@ def policy_changes(before: Optional[ToolPolicy], after: ToolPolicy) -> List[str]
     before_rows, after_rows = _section_rows(before), _section_rows(after)
     for name in sorted(set(before_rows) - set(after_rows)):
         lines.append(f"{name}: own permissions removed (uses the shared ones)")
-    empty = {"tiers": {}, "overrides": {}, "reviewed": None}
+    empty = {"tiers": {}, "overrides": {}, "reviewed": None, "framework_only": []}
     for name in sorted(after_rows, key=lambda n: (n != "shared", n)):
         if before is not None and name not in before_rows:
             lines.append(f"{name}: own permissions added")
@@ -279,6 +290,9 @@ def policy_changes(before: Optional[ToolPolicy], after: ToolPolicy) -> List[str]
             if old["overrides"].get(tool) != new["overrides"].get(tool):
                 lines.append(f"{name}: {tool} {old['overrides'].get(tool, 'tier setting')} -> "
                              f"{new['overrides'].get(tool, 'tier setting')}")
+        for tool in sorted(set(old["framework_only"]) ^ set(new["framework_only"])):
+            lines.append(f"{name}: {tool} " + ("asked in the framework only" if tool in new["framework_only"] else
+                                              "asked in any channel"))
         if old["reviewed"] != new["reviewed"]:
             lines.append(f"{name}: reviewed tools {'-' if old['reviewed'] is None else old['reviewed']} -> "
                          f"{'-' if new['reviewed'] is None else new['reviewed']}")

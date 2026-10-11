@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Signatures of the per-user files that decide what an AI may do: the tool permissions (`tool_policy.json`, with the
-standing approvals) and the named MCP tokens (`mcp_tokens.json`).
+standing approvals), the named MCP tokens (`mcp_tokens.json`) and the pending approvals (`tool_approvals.json`).
 
 Each file carries a `signature` object: an HMAC-SHA256 over the file's canonical JSON (keys sorted, no spaces) and
 its kind, with a key derived from the audit key in the OS keyring. Only framework code that holds that key writes
@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, Optional
 
 SIGNATURE_FIELD = "signature"
 UNKEYED = "unkeyed"
-KINDS = ("tool_policy", "mcp_tokens")
+KINDS = ("tool_policy", "mcp_tokens", "tool_approvals")
 
 
 class SignatureError(ValueError):

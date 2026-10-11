@@ -13,7 +13,8 @@ from typing import Any, Dict, Optional
 # Shown first in a confirmation, because they decide what a call touches.
 PRIORITY_FIELDS = ("model", "dataset_path", "use_gpu", "target", "format", "board", "quantization",
                    "request_id", "approve")
-MAX_DESCRIPTION = 4000
+MAX_DESCRIPTION = 4000              # an MCP form elicitation
+MAX_FRAMEWORK_DESCRIPTION = 16000   # the framework's own windows (pending approvals)
 MAX_MARKS = 4  # combining marks shown on one letter; a longer stack draws over the lines around it
 
 # Always escaped: control, format, private use, surrogate, unassigned, line and paragraph separators.
@@ -66,10 +67,11 @@ def visible(value: Any) -> str:
 
 
 def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI client",
-                  marks: Optional[Dict[str, str]] = None, renamed: str = "") -> str:
+                  marks: Optional[Dict[str, str]] = None, renamed: str = "", limit: int = MAX_DESCRIPTION) -> str:
     """Every argument the tool will run with, complete. For MCP the question text is part of the elicitation's
     identity, so an answer can only ever confirm exactly these values. `marks`: values the framework repaired,
-    with what the AI wrote; `renamed`: the tool name as the AI wrote it, when it was a spelling variant."""
+    with what the AI wrote; `renamed`: the tool name as the AI wrote it, when it was a spelling variant. `limit`:
+    the most the channel shows (an elicitation 4,000 characters, the framework's own windows 16,000)."""
     marks = marks or {}
     shown = {k: v for k, v in arguments.items() if v is not None}
     order = [k for k in PRIORITY_FIELDS if k in shown] + [k for k in shown if k not in PRIORITY_FIELDS]
@@ -79,7 +81,7 @@ def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI cli
         lines.append(f"  (tool name repaired; the AI wrote {visible(renamed)})")
     text = (f"{actor} wants to run '{spec.title}' in the LLM Cross-Compiler Framework with:\n"
             + ("\n".join(lines) if lines else "  (no arguments)"))
-    if len(text) > MAX_DESCRIPTION:
+    if len(text) > limit:
         raise CallTooLong(f"The arguments for '{spec.title}' are too long to show for a confirmation "
                           f"({len(text)} characters); the call was not run.")
     return text

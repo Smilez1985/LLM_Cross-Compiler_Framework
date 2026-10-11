@@ -950,11 +950,12 @@ class ToolPermissionsDialog(QDialog):
         layout.addWidget(QLabel("Per tool (optional, overrides the category):"))
         tools = registry.list()
         facts = {row["tool"]: row for row in registry.permissions("")}
-        self.table = QTableWidget(len(tools), 5)
+        self.table = QTableWidget(len(tools), 6)
         self.table.setHorizontalHeaderLabels(["Tool", "Category", "Default / max / standing approval", "New",
-                                              "Permission"])
+                                              "Permission", "Ask in the framework"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.override_combos = {}
+        self.framework_checks = {}  # questions always shown here (approval window), never in the client's dialog
         for row, spec in enumerate(tools):
             name_item = QTableWidgetItem(spec.title)
             name_item.setToolTip(spec.description)
@@ -972,6 +973,13 @@ class ToolPermissionsDialog(QDialog):
             combo.setCurrentIndex(combo.findData(current.value) if current else 0)
             self.table.setCellWidget(row, 4, combo)
             self.override_combos[spec.name] = combo
+            from PySide6.QtWidgets import QCheckBox
+            check = QCheckBox()
+            check.setChecked(spec.name in policy.framework_only)
+            check.setToolTip("Always put this tool's questions to you in the framework's approval window, never in "
+                             "the AI client's own dialog")
+            self.table.setCellWidget(row, 5, check)
+            self.framework_checks[spec.name] = check
         layout.addWidget(self.table)
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -987,7 +995,8 @@ class ToolPermissionsDialog(QDialog):
                      for name, combo in self.override_combos.items() if combo.currentData()}
         return self.loaded.model_copy(update={
             "configured": True, "tiers": tiers, "overrides": overrides,
-            "reviewed": sorted(self.override_combos)})
+            "reviewed": sorted(self.override_combos),
+            "framework_only": sorted(n for n, check in self.framework_checks.items() if check.isChecked())})
 
     def save(self):
         try:

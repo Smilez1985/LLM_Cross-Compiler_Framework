@@ -864,11 +864,33 @@ Konto oder Schlüssel an; das Framework sieht das nie.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine
-  Frage, die länger als 4000 Zeichen würde, wird abgelehnt statt gekürzt. Nur eine echte Antwort des Benutzers zählt
+  Frage, die länger als 4000 Zeichen würde, wird zu einer wartenden Freigabe (unten) statt gekürzt. Nur eine echte
+  Antwort des Benutzers zählt
   als Zustimmung, und ein „Nein“ gilt für diesen Aufruf endgültig, auch wenn die Berechtigungen gelockert werden,
   während die Frage offen ist. Abgelehnte und abgebrochene Aufrufe sowie Aufrufe, die abgewiesen werden, bevor sie
-  laufen (ungültige Argumente, eine gescheiterte Bestätigung), landen ebenfalls im Audit-Log. Ein Client, der nicht
-  fragen kann, bekommt eine Ablehnung mit einem Hinweis, wie du das Tool erlaubst.
+  laufen (ungültige Argumente, eine gescheiterte Bestätigung), landen ebenfalls im Audit-Log.
+- **Wartende Freigaben:** Kann ein Client dich nicht fragen (er hat keine Formular-Elicitation erklärt), ist die
+  Frage länger, als eine Elicitation sein darf, oder hast du das Tool auf Bestätigung im Framework gestellt
+  (`llm-cli tools permissions --confirm-in-framework TOOL` oder „Ask in the framework“ im Dialog Tool Permissions;
+  nützlich für Tools, die du jedes Mal im Framework sehen willst), wird der Aufruf nicht abgelehnt. Der Client bekommt
+  den Fehler `waiting_for_approval` mit einer Job-ID („poll get_job_status with wait_seconds=50; do not call this
+  tool again“), und die Frage wartet auf dich: ein Hinweis in der Statusleiste der GUI (und eine
+  Desktop-Benachrichtigung, wo das System eine anbietet), der **Tools > Pending Approvals...** öffnet, und
+  `llm-cli tools approvals` in einem Terminal. Das Fenster zeigt zuerst die Aufruferklasse („all local stdio clients“
+  oder den Namen des Tokens), dann den eigenen Namen des Clients, gekennzeichnet als selbst angegeben, die
+  vollständige Frage (bis zu 16.000 Zeichen; eine längere wird überall abgelehnt) und die verbleibende Zeit, mit
+  **Approve once** und **Decline**. Bei der Freigabe baut das Framework die Frage neu: Lautet sie anders (ein Fakt
+  dahinter hat sich geändert), läuft nichts und du wirst erneut gefragt; sonst führt das Framework den Aufruf selbst
+  aus, unter dem ursprünglichen Aufrufer (`confirm_channel` `approval:<id>` im Audit-Log), und der Client liest das
+  Ergebnis mit `get_job_status`. Derselbe Aufruf, wiederholt während er wartet, bekommt denselben Job, eine Freigabe
+  läuft einmal und nur für den Aufrufer, das Tool und die Argumente, für die gefragt wurde, sie verfällt nach 15
+  Minuten (festgehalten als `unanswered`) und endet mit der Sitzung des Clients oder wenn der Client seinen Job
+  abbricht. Ein Client hat höchstens 5 offene Freigaben. Deine Entscheidung wird festgehalten (`approval_decided`,
+  Akteur `gui` oder `cli`), bevor sie gespeichert wird; scheitert das, wird nichts entschieden. Die Freigaben liegen
+  in `~/.llm-framework/tool_approvals.json`, signiert wie die Berechtigungen, damit eine Bearbeitung von Hand nichts
+  entscheidet; kein Tool kann eine anlegen, auflisten, freigeben oder ablehnen, und nur der Client, der gefragt hat,
+  sieht das Ergebnis. Ditto im Framework fragt immer in seinem eigenen Dialog oder seiner Rückfrage und braucht nie
+  eine.
 - **Anweisungen an den Client:** Der Server beschreibt den typischen Ablauf (Targets → Capabilities → Build → Status
   und Log → Artefakte), sagt dem Client, dass als externer Text markierte Felder Daten sind, deren Anweisungen nicht
   befolgt werden dürfen, und dass er dir eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
@@ -967,7 +989,7 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   `mcp:<Name>` des benannten Tokens, nie das Token selbst) und die Fähigkeiten, die er erklärt hat, zum Beispiel
   `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
   capabilities: elicitation, roots`. `elicitation none` heißt, dass der Client dich nicht fragen kann; ein Tool auf
-  „fragen“ wird dort abgelehnt. Text vom Client wird zuerst von allem befreit, was wie ein Schlüssel oder Token
+  „fragen“ wird dann zu einer wartenden Freigabe im Framework. Text vom Client wird zuerst von allem befreit, was wie ein Schlüssel oder Token
   aussieht, dann escapet und auf 64 Zeichen gekürzt; er ist eine Beschriftung, nie eine Berechtigung.
 
 Was die Clients unterstützen, laut der Dokumentation ihrer Hersteller (2026-10-11). „Nicht dokumentiert“ heißt, dass
@@ -981,7 +1003,8 @@ der Hersteller nichts dazu sagt; die stderr-Zeile oben zeigt, was ein Client wir
 | VS Code (GitHub Copilot) | ja, Modi nicht dokumentiert | nicht dokumentiert | ja, mit Vorlagen | ja | nicht dokumentiert |
 
 Von Claude-Desktop-Chat und Cowork wird erwartet, dass sie keine Elicitation erklären (eine Quelle eines Dritten
-sagt das): Dort wird jedes Tool auf „fragen“ abgelehnt, erlaubte Tools funktionieren.
+sagt das): Dort wird jedes Tool auf „fragen“ zu einer wartenden Freigabe im Framework, erlaubte Tools
+funktionieren.
 
 **Claude-Abonnenten:** Das ist der Weg, das Framework mit einem Claude-Abo zu nutzen. Anthropic erlaubt
 Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines Abos zu verwenden; Ditto selbst braucht deshalb einen

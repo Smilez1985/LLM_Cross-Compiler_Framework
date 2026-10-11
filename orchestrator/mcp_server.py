@@ -15,9 +15,12 @@ Security model
 - Results go through the registry's output filter (secrets redacted, external text cleaned and marked as
   untrusted in the output schema); the text block starts with one sentence of framework facts and wraps the
   JSON as untrusted data.
-- "Ask" permissions become an MCP elicitation (the client shows the question to the user). A client
-  without elicitation support cannot confirm, so such calls are denied with a hint on how to allow them.
-  A person's "no" is final for that call, even if the policy is loosened while the dialog is open.
+- "Ask" permissions become an MCP elicitation (the client shows the question to the user). When the client
+  cannot ask (no form elicitation), the question is too long for an elicitation, or the person wants the tool
+  confirmed in the framework, the question becomes a pending approval in the framework instead (GUI notice,
+  `llm-cli tools approvals`); the framework runs the call once the person approves it there, and the client reads
+  the result with get_job_status. A person's "no" is final for that call, even if the policy is loosened while the
+  dialog is open.
 - stdio is the default transport. Streamable HTTP binds to loopback only, refuses requests from web
   pages (any Origin header) and Host names other than loopback with its port, and requires a named
   token per client (`llm-cli mcp token`). The token's name is the caller (`mcp:<name>`) for the
@@ -97,6 +100,7 @@ class NotAsked(Confirmation):
     refused: str = ""
     outcome: str = "not_confirmed"
     answer: str = ""
+    pending: bool = False  # nobody can be asked through the client: the registry puts it to the person in the framework
 
 
 INPUT_REQUIRED_VERSION = "2026-07-28"  # elicitation as input_required rounds instead of a request mid-call
@@ -518,17 +522,23 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             return NotAsked(approve=False)  # the registry applies allow/deny itself
         capabilities = ctx.client_capabilities
         elicitation = getattr(capabilities, "elicitation", None) if capabilities is not None else None
+        # Pending approvals (design 6.9): the question appears in the framework when the client cannot ask the person.
+        pending = getattr(registry, "approvals", None) is not None and not answered
+        tool_ctx = _tool_context(ctx, caller, instance)
+        if pending and await anyio.to_thread.run_sync(registry.framework_channel_required, spec, tool_ctx.actor):
+            return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=True)
         # Same rule as the SDK: a bare `elicitation: {}` means form support, url-only does not.
         if elicitation is None or (getattr(elicitation, "form", None) is None
                                    and getattr(elicitation, "url", None) is not None):
-            return NotAsked(approve=False, can_ask=False, answer="unavailable")
+            return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=pending)
         state = _call_state()
         marks, renamed = repair_marks(state.repairs)
         try:
             message = describe_call(spec, arguments, marks=marks, renamed=renamed)
         except CallTooLong as e:
+            if pending:  # longer than an elicitation may be: the framework's window shows up to 16,000 characters
+                return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=True)
             return NotAsked(approve=False, refused=str(e))
-        tool_ctx = _tool_context(ctx, caller, instance)
         tool_ctx.confirm_channel = "elicitation"
         await anyio.to_thread.run_sync(questions.expire)
         if rounds and ctx.input_responses:
@@ -585,6 +595,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         if isinstance(data, NotAsked):
             approved, asked, can_ask = None, False, data.can_ask
             tool_ctx.answer = data.answer
+            tool_ctx.pending_approvals = data.pending
         else:
             approved, asked, can_ask = bool(data is not None and data.approve), True, True
             tool_ctx.confirm_channel, tool_ctx.question_sha256 = "elicitation", state.question_sha256
