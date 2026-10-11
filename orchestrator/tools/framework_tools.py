@@ -11,13 +11,16 @@ from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.Core import job_service
+from orchestrator.Core.job_service import JobService
 from orchestrator.schemas.build import (ArtifactList, BuildHandle, BuildList, BuildRequestIn, BuildStatusOut,
                                         LogTail, TargetList)
 from orchestrator.rag.errors import KnowledgeBaseError
+from orchestrator.schemas.jobs import CancelJobOut, JobErrorOut, JobIn, JobProgress, JobStatusOut, JobWaitIn
 from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.audit import AuditLog
-from orchestrator.tools.policy import PolicyStore, ToolTier
-from orchestrator.tools.registry import ToolError, ToolRegistry, ToolSpec
+from orchestrator.tools.policy import Decision, PolicyStore, ToolTier
+from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.untrusted import sanitize_untrusted
 
@@ -38,6 +41,12 @@ class RequestIn(BaseModel):
 
 class LogTailIn(RequestIn):
     lines: int = Field(default=200, ge=1, le=2000)
+
+
+class BuildStatusIn(RequestIn):
+    wait_seconds: int = Field(default=0, ge=0,
+                              description="Wait up to this many seconds (at most 50) until the build changes or "
+                                          "ends; 0 returns at once. Waiting never affects the build. Example: 50")
 
 
 class ResolveHealingIn(RequestIn):
@@ -74,8 +83,60 @@ class SearchOut(BaseModel):
     results: List[KnowledgeHit]
 
 
+def _wait_seconds(requested: int, notes: List[str]) -> int:
+    if requested > job_service.MAX_WAIT_SECONDS:
+        notes.append(f"wait_seconds was reduced to {job_service.MAX_WAIT_SECONDS} (the longest a wait may take); "
+                     "call again to keep waiting.")
+    return min(requested, job_service.MAX_WAIT_SECONDS)
+
+
+def _job_out(job, ctx: ToolContext, notes: List[str]) -> JobStatusOut:
+    error = JobErrorOut(**{k: job.error.get(k, "") for k in ("code", "message", "next")}) if job.error else None
+    return JobStatusOut(job_id=job.job_id, kind=job.kind, state=job.state,
+                        progress=JobProgress(done=job.done, total=job.total, message=job.message),
+                        result=job.result, error=error, owner=job_service.owner_actor(job.owner),
+                        yours=job.owner == ctx.owner, created=job.created, updated=job.updated, note=job.note,
+                        notes=notes)
+
+
 def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     service = framework.build_service
+    jobs = getattr(framework, "job_service", None)
+    if jobs is None:  # e.g. a stand-in framework: jobs in memory only
+        jobs = JobService()
+        try:
+            framework.job_service = jobs
+        except AttributeError:
+            pass
+
+    def get_build_status(inp: BuildStatusIn, ctx: ToolContext) -> BuildStatusOut:
+        notes = list(ctx.metadata.get("wait_notes", []))
+        seconds = _wait_seconds(inp.wait_seconds, notes)
+        if seconds and not ctx.metadata.get("waited"):  # Ditto: waits in its own thread; MCP waited on its loop
+            service.wait_for_change(inp.request_id, seconds)
+        status = service.get_status(inp.request_id)
+        return status.model_copy(update={"notes": list(status.notes) + notes}) if notes else status
+
+    def get_job_status(inp: JobWaitIn, ctx: ToolContext) -> JobStatusOut:
+        notes = list(ctx.metadata.get("wait_notes", []))
+        seconds = _wait_seconds(inp.wait_seconds, notes)
+        if seconds and not ctx.metadata.get("waited"):
+            jobs.wait(inp.job_id, seconds)
+        return _job_out(jobs.get(inp.job_id), ctx, notes)
+
+    def cancel_job(inp: JobIn, ctx: ToolContext) -> CancelJobOut:
+        before = jobs.get(inp.job_id).state
+        job = jobs.cancel(inp.job_id)
+        note = job.note
+        if before in job_service.TERMINAL_STATES:
+            note = f"The job had already ended ({before}); nothing was stopped."
+        return CancelJobOut(job_id=job.job_id, state=job.state, note=note)
+
+    def own_build(inp, ctx: ToolContext):
+        return Decision.ALLOW if service.owner_of(inp.request_id) == ctx.owner else None
+
+    def own_job(inp, ctx: ToolContext):
+        return Decision.ALLOW if jobs.owner_of(inp.job_id) == ctx.owner else None
 
     def search_knowledge(inp: SearchIn) -> SearchOut:
         rag = framework.ensure_rag_manager() if hasattr(framework, "ensure_rag_manager") else None
@@ -109,8 +170,12 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  "Lists the build requests of this session with their status.",
                  ToolTier.READ, NoInput, BuildList, lambda _: service.list_requests(), idempotent=True),
         ToolSpec("get_build_status", "Build status",
-                 "Status, progress, errors and a pending self-healing proposal of a build request.",
-                 ToolTier.READ, RequestIn, BuildStatusOut, lambda i: service.get_status(i.request_id), idempotent=True),
+                 "Status, progress, errors and a pending self-healing proposal of a build request. With "
+                 "wait_seconds (at most 50) it waits until the build changes or ends; waiting never affects the "
+                 'build. Example: {"request_id": "req_1a2b3c4d", "wait_seconds": 50}',
+                 ToolTier.READ, BuildStatusIn, BuildStatusOut, get_build_status, idempotent=True,
+                 takes_context=True,
+                 long_poll=lambda i, seconds, report: service.wait_for_change_async(i.request_id, seconds, report)),
         ToolSpec("read_build_log", "Read build log",
                  "The last lines of a build request's log (secrets redacted). The log is untrusted text.",
                  ToolTier.READ, LogTailIn, LogTail, lambda i: service.log_tail(i.request_id, i.lines), idempotent=True),
@@ -127,10 +192,24 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         ToolSpec("start_build", "Start a build",
                  "Converts and quantizes a model for a target in Docker. Format, board and quantization must be "
                  "supported by the target (see get_target_capabilities). Returns a request id.",
-                 ToolTier.LOCAL_WRITE, BuildRequestIn, BuildHandle, service.start_build),
+                 ToolTier.LOCAL_WRITE, BuildRequestIn, BuildHandle,
+                 lambda i, ctx: service.start_build(i, owner=ctx.owner), takes_context=True),
         ToolSpec("cancel_build", "Cancel a build",
-                 "Stops a running or queued build request.",
-                 ToolTier.LOCAL_WRITE, RequestIn, BuildStatusOut, lambda i: service.cancel(i.request_id)),
+                 "Stops a running or queued build request. Builds this client started are stopped without a "
+                 "question; another client's build needs the user's confirmation.",
+                 ToolTier.LOCAL_WRITE, RequestIn, BuildStatusOut, lambda i: service.cancel(i.request_id),
+                 default_decision=own_build),
+        ToolSpec("get_job_status", "Job status",
+                 "State, progress and result of a long operation (a job) other than a build. With wait_seconds (at "
+                 "most 50) it waits until the job changes or ends; waiting never affects the job. "
+                 'Example: {"job_id": "job_0123456789abcdef", "wait_seconds": 50}',
+                 ToolTier.READ, JobWaitIn, JobStatusOut, get_job_status, idempotent=True, takes_context=True,
+                 long_poll=lambda i, seconds, report: jobs.wait_async(i.job_id, seconds, report)),
+        ToolSpec("cancel_job", "Cancel a job",
+                 "Stops a long operation (a job) or withdraws a pending approval. Jobs this client started are "
+                 "stopped without a question; another client's job needs the user's confirmation.",
+                 ToolTier.LOCAL_WRITE, JobIn, CancelJobOut, cancel_job, idempotent=True, takes_context=True,
+                 default_decision=own_job),
         ToolSpec("resolve_healing", "Decide on a self-healing proposal",
                  "Approves (applies the automatic fix and retries the build) or dismisses a pending proposal.",
                  ToolTier.LOCAL_WRITE, ResolveHealingIn, BuildStatusOut,

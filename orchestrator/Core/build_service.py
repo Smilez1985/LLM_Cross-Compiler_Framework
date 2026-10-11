@@ -11,7 +11,9 @@ import time
 from pathlib import Path
 from typing import List, Optional, Tuple
 
+from orchestrator.Core import job_service
 from orchestrator.Core.builder import HF_REPO_ID, MODEL_FILE_SUFFIXES, ModelFormat, OptimizationLevel
+from orchestrator.Core.job_service import owner_actor
 from orchestrator.Core.deployment_manager import list_builds
 from orchestrator.Core.orchestrator import (BuildRequest, OrchestrationStatus, PriorityLevel, WorkflowState,
                                             WorkflowType)
@@ -25,6 +27,7 @@ from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
 AUTOMATIC_STRATEGIES = {"config_adjustment", "docker_prune", "retry_build"}
+BUILD_FINISHED = frozenset({"completed", "error", "cancelled"})
 
 
 class BuildServiceError(ValueError):
@@ -154,7 +157,8 @@ class BuildService:
             progress_percent=state.progress_percent, total_builds=state.total_builds,
             completed_builds=state.completed_builds, failed_builds=state.failed_builds,
             artifacts=list(state.artifacts), errors=[redact_secrets(e) for e in state.errors],
-            warnings=[redact_secrets(w) for w in state.warnings], pending_healing=pending)
+            warnings=[redact_secrets(w) for w in state.warnings], pending_healing=pending,
+            owner=owner_actor(getattr(state, "owner", "")) or None)
 
     def _state(self, request_id: str) -> WorkflowState:
         state = self._orchestrator._workflows.get(request_id)
@@ -167,6 +171,67 @@ class BuildService:
 
     def list_requests(self) -> BuildList:
         return BuildList(builds=[self._status_of(s) for s in list(self._orchestrator._workflows.values())])
+
+    # --- ownership and waiting --------------------------------------------------------------------------------
+
+    def owner_of(self, request_id: str) -> Optional[str]:
+        """The caller that started a build through a tool (`mcp#<session>`, `ditto`), or None."""
+        try:
+            state = self._orchestrator._workflows.get(request_id)
+        except BuildServiceError:
+            return None
+        return (getattr(state, "owner", "") or None) if state is not None else None
+
+    def active_requests(self, owner: str) -> List[str]:
+        """The unfinished builds `owner` started (a disconnected MCP session's are cancelled)."""
+        try:
+            items = list(self._orchestrator._workflows.items())
+        except BuildServiceError:
+            return []
+        return [rid for rid, state in items
+                if getattr(state, "owner", "") == owner and state.status.value not in BUILD_FINISHED]
+
+    def _change_key(self, request_id: str):
+        s = self.get_status(request_id)
+        return (s.status, s.stage, s.progress_percent, s.completed_builds, s.failed_builds, len(s.errors),
+                len(s.warnings), s.pending_healing is not None)
+
+    def wait_for_change(self, request_id: str, timeout: float, poll: float = 0.25) -> bool:
+        """Blocks until the build's status, stage, progress or healing proposal changes, or it has ended, at most
+        `timeout` seconds (capped at 50). For a caller in its own thread (Ditto). True when something changed."""
+        start = self._change_key(request_id)
+        if str(start[0]).lower() in BUILD_FINISHED:
+            return False
+        deadline = time.monotonic() + max(0.0, min(float(timeout), job_service.MAX_WAIT_SECONDS))
+        while time.monotonic() < deadline:
+            time.sleep(min(poll, max(0.0, deadline - time.monotonic())))
+            if self._change_key(request_id) != start:
+                return True
+        return False
+
+    async def wait_for_change_async(self, request_id: str, timeout: float, report=None, poll: float = 0.25) -> bool:
+        """wait_for_change() on the event loop, holding no worker thread (MCP long-poll), with a progress
+        notification every few seconds through `report` (sent only when the client gave a progress token).
+        Cancelling the wait never touches the build."""
+        import anyio
+        start = self._change_key(request_id)
+        if str(start[0]).lower() in BUILD_FINISHED:
+            return False
+        now = time.monotonic()
+        deadline = now + max(0.0, min(float(timeout), job_service.MAX_WAIT_SECONDS))
+        next_report = now + job_service.PROGRESS_EVERY
+        while time.monotonic() < deadline:
+            await anyio.sleep(min(poll, max(0.0, deadline - time.monotonic())))
+            key = self._change_key(request_id)
+            if key != start:
+                return True
+            if report is not None and time.monotonic() >= next_report:
+                next_report = time.monotonic() + job_service.PROGRESS_EVERY
+                try:  # framework facts only: status and percent, never stage text (it may quote a proposal)
+                    await report(key[2], 100, f"{key[0]} {key[2]}%")
+                except Exception:
+                    pass
+        return False
 
     def list_artifacts(self) -> ArtifactList:
         def text(value):
@@ -234,7 +299,8 @@ class BuildService:
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model}), inputs
 
-    def start_build(self, request: BuildRequestIn, *, local_paths: bool = False) -> BuildHandle:
+    def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "") -> BuildHandle:
+        """Validates and queues a build. `owner` is the tool caller that starts it (ToolContext.owner)."""
         req, inputs = self._validated(request, local_paths)
         build_request = BuildRequest(
             request_id="",
@@ -255,6 +321,7 @@ class BuildService:
             target_board=req.board,
             max_context_length=req.max_context_length,
             local_inputs=inputs,
+            owner=owner,
         )
         request_id = self.framework.run_coroutine(self._orchestrator.submit_build_request(build_request), timeout=30)
         self.logger.info(f"Build request {request_id} submitted ({req.model} -> {req.target}/{req.format}/{req.quantization})")

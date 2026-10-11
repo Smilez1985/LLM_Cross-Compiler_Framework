@@ -329,11 +329,20 @@ sequenceDiagram
 5. **Audit.** Every outcome (`ok`, `denied`, `not_confirmed`, `error`, `invalid_input`) is appended to `audit.db`
    with redacted, shortened arguments and a hash of the full text. `llm-cli tools audit --verify` checks the chain
    and its anchor; `llm-cli tools audit --archive` puts the log aside and starts a new chain.
+6. **Owner, waits and the end of a session.** The server lifespan gives each connection a session (one per stdio
+   session, one for the HTTP server); the caller is actor `mcp` with that session, and it owns the builds and jobs
+   it starts. `cancel_build` and `cancel_job` on its own work are allowed without a question (a per-tool setting
+   still wins, a damaged permission file still denies); on another client's work the tier decision applies. A call
+   with `wait_seconds` first waits on the event loop (no worker thread, at most 50 s and 4 waits per client,
+   progress every 5 s when the client gave a progress token), then runs through the registry once; cancelling the
+   wait leaves the build or job alone. When the session ends, its unfinished builds and jobs are cancelled and
+   audited as `cancelled` ("client disconnected"), the server waits up to 30 s for build containers to stop, and
+   `llm-cli mcp serve` then shuts the framework down.
 
-The eleven tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
-`read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge` (tier `read`) and `start_build`,
-`cancel_build`, `resolve_healing` (tier `local_write`). No tool of the `external` tier is registered, so neither
-AI clients nor Ditto can deploy to devices.
+The thirteen tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
+`read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `get_job_status` (tier `read`) and
+`start_build`, `cancel_build`, `resolve_healing`, `cancel_job` (tier `local_write`). No tool of the `external` tier
+is registered, so neither AI clients nor Ditto can deploy to devices.
 
 ### A question to Ditto (unreleased)
 

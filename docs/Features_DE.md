@@ -388,14 +388,16 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `list_targets` | lesen | Targets mit Boards, Formaten und Quantisierungen |
 | `get_target_capabilities` | lesen | Was ein Target bauen kann |
 | `list_build_requests` | lesen | Build-Anfragen dieser Sitzung |
-| `get_build_status` | lesen | Status, Fortschritt, Fehler, ein offener Self-Healing-Vorschlag |
+| `get_build_status` | lesen | Status, Fortschritt, Fehler, ein offener Self-Healing-Vorschlag; mit `wait_seconds` (höchstens 50) wartet es auf eine Änderung |
 | `read_build_log` | lesen | Die letzten Zeilen eines Build-Logs (Geheimnisse geschwärzt) |
 | `list_artifacts` | lesen | Fertige Builds aus ihren Manifesten |
 | `run_doctor` | lesen | Der Gesundheitscheck, ohne Korrekturen |
 | `search_knowledge` | lesen | In der Wissensbasis suchen |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen) |
-| `cancel_build` | lokal schreiben | Einen Build abbrechen |
+| `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
+| `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
+| `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |
 
 So läuft eine Frage mit Tools ab:
 
@@ -840,6 +842,22 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   gesperrten Ordner noch eine Datei mit Hardlink enthält; ein Snapshot aus dem Hugging-Face-Cache wird Datei für
   Datei eingebunden. Dasselbe gilt für den Ordner einer RKNN-Beispielliste, deshalb wird eine Liste direkt in einem
   Label-Ordner abgelehnt. GUI- und CLI-Builds, die du selbst startest, nehmen weiterhin jeden Pfad.
+- **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
+  größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
+  endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je
+  Client, und schickt alle 5 Sekunden eine Fortschrittsmeldung, wenn der Client Fortschritt angefordert hat. Ein
+  Client, der ein Warten abbricht, stoppt nur das Warten, nie den Build oder Job. Lange Operationen außer Builds (aus
+  den kommenden Tools für Crawlen, Herunterladen, Deployen und Freigaben) sind Jobs mit einer ID (`job_...`):
+  `get_job_status` zeigt Zustand, Fortschritt und Ergebnis, `cancel_job` stoppt sie. Eine Zusammenfassung jedes Jobs
+  (nie sein Ergebnis) bleibt in `~/.llm-framework/jobs/` für GUI und CLI.
+- **Wem ein Build gehört:** Jede Verbindung (eine stdio-Sitzung; bei HTTP der ganze Server, bis es benannte Tokens
+  gibt) besitzt die Builds und Jobs, die sie startet. Eigene darf sie ohne Frage abbrechen; einen Build oder Job
+  eines anderen Clients abzubrechen fragt dich (außer du hast das Tool auf „allow“ gestellt). `get_build_status`
+  zeigt die Aufruferklasse, die einen Build gestartet hat (`mcp`, `ditto`).
+- **Wenn ein Client die Verbindung trennt:** Die Builds und Jobs, die seine Sitzung gestartet hat, werden
+  abgebrochen, jeweils mit einem Audit-Eintrag („client disconnected“); der Server wartet bis zu 30 Sekunden, bis
+  ihre Container gestoppt sind, und fährt dann das Framework herunter, damit kein Build ohne Besitzer weiterläuft.
+  HTTP-Builds gehören dem Server und werden abgebrochen, wenn er endet.
 - **Transporte:** stdio (Standard; der Client startet den Server) oder Streamable HTTP nur auf einer
   Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). HTTP prüft Host und Origin und
   braucht ein Bearer-Token, das pro Benutzer in `~/.llm-framework/mcp_http_token` angelegt wird.

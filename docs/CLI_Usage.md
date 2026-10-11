@@ -717,10 +717,10 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-The framework tools are what Ditto and MCP clients use: 8 read-only tools (`list_targets`,
+The framework tools are what Ditto and MCP clients use: 9 read-only tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`) and 3 that change things on this computer (`start_build`, `cancel_build`,
-`resolve_healing`).
+`run_doctor`, `search_knowledge`, `get_job_status`) and 4 that change things on this computer (`start_build`,
+`cancel_build`, `resolve_healing`, `cancel_job`).
 
 ### tools list
 

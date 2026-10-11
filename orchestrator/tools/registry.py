@@ -8,7 +8,7 @@ the handler with an output check, and an audit entry - the same path for every c
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Type
 
 from pydantic import BaseModel, ValidationError
 
@@ -49,6 +49,14 @@ class ToolSpec:
     handler: Callable[[BaseModel], BaseModel]
     idempotent: bool = False
     open_world: bool = False  # talks to services outside this computer
+    # The handler is called as handler(input, ctx) with the caller's ToolContext (owner of builds and jobs).
+    takes_context: bool = False
+    # Decision for this call that comes before the tier decision (a per-tool setting of the person still wins and
+    # a damaged policy still denies), e.g. "allow" when the caller cancels its own build. None: the policy decides.
+    default_decision: Optional[Callable[[BaseModel, "ToolContext"], Optional[Decision]]] = None
+    # An async wait the MCP server runs on its event loop before the call, holding no worker thread (long-poll):
+    # long_poll(input, seconds, report_progress). The handler then sees ctx.metadata["waited"].
+    long_poll: Optional[Callable[..., Awaitable[Any]]] = None
 
     def annotations(self) -> Dict[str, Any]:
         """MCP tool annotations (hints for clients; the registry enforces the policy itself)."""
@@ -69,6 +77,12 @@ class ToolContext:
     actor: str                       # "ditto", "mcp", "cli", "gui"
     confirm: Optional[Confirm] = None  # asks the user; None = no way to ask, so "ask" means deny
     metadata: Dict[str, Any] = field(default_factory=dict)
+    session: str = ""                # the client session within the actor (one MCP connection); set by the server
+
+    @property
+    def owner(self) -> str:
+        """Who owns the builds and jobs this caller starts: the actor and, for MCP, its session."""
+        return f"{self.actor}#{self.session}" if self.session else self.actor
 
 
 class ToolRegistry:
@@ -98,8 +112,31 @@ class ToolRegistry:
     def policy(self) -> ToolPolicy:
         return self.policy_store.load()
 
-    def decide(self, spec: ToolSpec) -> Decision:
-        return self.policy().decide(spec.name, spec.tier)
+    def decide(self, spec: ToolSpec, inp: Optional[BaseModel] = None, ctx: Optional[ToolContext] = None) -> Decision:
+        """The person's per-tool setting, else the tool's own decision for this call (when it has one, e.g. own
+        builds), else the tier decision. A damaged policy file denies everything."""
+        policy = self.policy()
+        if (spec.default_decision is not None and inp is not None and ctx is not None
+                and spec.name not in policy.overrides and not getattr(self.policy_store, "damaged", False)):
+            try:
+                decision = spec.default_decision(inp, ctx)
+            except Exception as e:  # fall back to the policy, never to a looser answer
+                self.logger.warning(f"Default decision of {spec.name} failed: {e}")
+                decision = None
+            if decision is not None:
+                return decision
+        return policy.decide(spec.name, spec.tier)
+
+    def decide_call(self, spec: ToolSpec, arguments: Optional[Dict[str, Any]], ctx: ToolContext) -> Decision:
+        """decide() for raw arguments; arguments that do not validate get the policy's decision (the call is
+        refused as invalid input anyway)."""
+        if spec.default_decision is None:
+            return self.decide(spec)
+        try:
+            inp = spec.input_model.model_validate(arguments or {})
+        except ValidationError:
+            return self.decide(spec)
+        return self.decide(spec, inp, ctx)
 
     def _audit(self, ctx: ToolContext, spec: ToolSpec, decision: Decision, outcome: str,
                arguments: Any, approved: Optional[bool] = None, detail: str = ""):
@@ -137,6 +174,8 @@ class ToolRegistry:
         except ToolInputError as e:
             self._audit(ctx, spec, decision, "invalid_input", arguments, detail=str(e))
             raise
+        if spec.default_decision is not None:
+            decision = self.decide(spec, inp, ctx)
 
         if decision == Decision.DENY:
             self._audit(ctx, spec, decision, "denied", arguments)
@@ -151,7 +190,7 @@ class ToolRegistry:
                 raise ToolDenied(f"'{spec.title}' needs your confirmation, which was not given.")
 
         try:
-            result = spec.handler(inp)
+            result = spec.handler(inp, ctx) if spec.takes_context else spec.handler(inp)
             if isinstance(result, dict):
                 result = spec.output_model.model_validate(result)
             if not isinstance(result, spec.output_model):

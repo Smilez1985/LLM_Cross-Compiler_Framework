@@ -365,14 +365,16 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `list_targets` | read | Targets with boards, formats and quantizations |
 | `get_target_capabilities` | read | What a target can build |
 | `list_build_requests` | read | Build requests of this session |
-| `get_build_status` | read | Status, progress, errors, a pending self-healing proposal |
+| `get_build_status` | read | Status, progress, errors, a pending self-healing proposal; with `wait_seconds` (at most 50) it waits for a change |
 | `read_build_log` | read | The last lines of a build log (secrets redacted) |
 | `list_artifacts` | read | Finished builds from their manifests |
 | `run_doctor` | read | The health check, without fixes |
 | `search_knowledge` | read | Search the knowledge base |
 | `start_build` | local write | Start a build (must match the target's capabilities) |
-| `cancel_build` | local write | Cancel a build |
+| `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
+| `get_job_status` | read | State, progress and result of a long operation other than a build (a job); waits with `wait_seconds` |
+| `cancel_job` | local write | Stop a job (its own jobs without a question, another caller's only after one) |
 
 How a question with tools runs:
 
@@ -787,6 +789,21 @@ framework never sees it.
   folder and when it holds no denied folder and no hard-linked file; a Hugging Face cache snapshot is mounted file
   by file. The same holds for the folder of an RKNN sample list, so a list directly in a label folder is refused.
   GUI and CLI builds you start yourself still take any path.
+- **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
+  larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
+  server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification
+  every 5 seconds when the client asked for progress. A client that cancels a wait stops only the wait, never the
+  build or job. Long operations other than builds (from the coming crawl, download, deploy and approval tools) are
+  jobs with an id (`job_...`): `get_job_status` shows their state, progress and result, `cancel_job` stops them.
+  A summary of each job (never its result) is kept in `~/.llm-framework/jobs/` for the GUI and the CLI.
+- **Who owns a build:** each connection (one stdio session; for HTTP the whole server until named tokens exist)
+  owns the builds and jobs it starts. It may cancel its own without a question; cancelling another client's build
+  or job asks you (unless you set the tool to "allow"). `get_build_status` shows the caller class that started a
+  build (`mcp`, `ditto`).
+- **When a client disconnects:** the builds and jobs its session started are cancelled, each with an audit entry
+  ("client disconnected"), the server waits up to 30 seconds for their containers to stop and then shuts the
+  framework down, so no build is left running without an owner. HTTP builds belong to the server and are cancelled
+  when it stops.
 - **Transports:** stdio (default; the client starts the server) or Streamable HTTP on a loopback address only
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). HTTP checks Host and Origin and needs a bearer token
   that is created per user in `~/.llm-framework/mcp_http_token`.

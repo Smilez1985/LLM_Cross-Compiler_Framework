@@ -58,6 +58,9 @@ class BuildStatusOut(BaseModel):
     errors: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     pending_healing: Optional[PendingHealing] = None
+    owner: Optional[str] = Field(default=None, description="Caller class that started it through a tool (mcp, "
+                                                           "ditto); empty for the GUI and the CLI")
+    notes: List[str] = Field(default_factory=list)
 
 
 class BuildList(BaseModel):
