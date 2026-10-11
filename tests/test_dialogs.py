@@ -368,9 +368,19 @@ class TestURLInputDialog:
         assert message_boxes == [("warning", "No URLs")]
 
     def test_default_options(self, qapp):
-        assert URLInputDialog().get_options() == {
-            "max_depth": 2, "respect_robots": True, "download_pdfs": True, "request_delay": 1,
-        }
+        assert URLInputDialog().get_options() == {"max_depth": 2, "download_pdfs": True, "request_delay": 1}
+
+    def test_no_switch_to_ignore_robots_txt(self, qapp, tmp_path):
+        """robots.txt is a machine-readable opt-out like TDMRep: neither the dialog nor the config turns it off."""
+        from PySide6.QtWidgets import QCheckBox
+        from orchestrator.Core.crawler_manager import CrawlerManager
+
+        dlg = URLInputDialog()
+        assert not [box.text() for box in dlg.findChildren(QCheckBox) if "robots" in box.text().lower()]
+        cfg = ConfigManager(tmp_path)
+        cfg.set("crawler_respect_robots", False)
+        assert "crawler_respect_robots" not in cfg.config_schemas
+        assert CrawlerManager(SimpleNamespace(config=cfg), dlg.get_options()).respect_robots is True
 
     def test_no_recent_list_without_history(self, qapp):
         dlg = URLInputDialog()
@@ -408,13 +418,12 @@ class TestCrawlOptionWiring:
 
             def ingest_url(self, url, crawler_options=None, **kwargs):
                 crawler = CrawlerManager(self.framework, crawler_options)
-                seen.append((url, crawler.max_depth, crawler.respect_robots, crawler.download_pdfs, crawler.rate_limit))
+                seen.append((url, crawler.max_depth, crawler.download_pdfs, crawler.rate_limit))
                 return {"success": True, "outcome": "success", "count": 3, "documents": 1}
 
         dlg = URLInputDialog()
         dlg.txt_urls.setPlainText("https://docs.radxa.com/")
         dlg.spin_depth.setValue(4)
-        dlg.chk_robots.setChecked(False)
         dlg.chk_pdfs.setChecked(False)
         dlg.spin_delay.setValue(3)
 
@@ -423,11 +432,10 @@ class TestCrawlOptionWiring:
         worker.done.connect(lambda outcome, message: finished.append((outcome, message)))
         worker.run()
 
-        assert seen == [("https://docs.radxa.com/", 4, False, False, 3.0)]
+        assert seen == [("https://docs.radxa.com/", 4, False, 3.0)]
         assert finished == [("success", "Deep Ingest finished: 1 pages (3 chunks) are now searchable.")]
-        assert cfg.get("crawler_respect_robots") is True
-        assert cfg.get("crawler_max_depth") == 2
-        assert CrawlerManager(SimpleNamespace(config=cfg)).respect_robots is True
+        assert cfg.get("crawler_max_depth") == 2 and cfg.get("crawler_download_pdfs") is True
+        assert CrawlerManager(SimpleNamespace(config=cfg)).max_depth == 2
 
     def test_skipped_and_failed_pages_are_named_in_the_crawl_log(self, qapp):
         from orchestrator.gui.wizards import CrawlWorker
@@ -651,6 +659,37 @@ class TestDeepIngestControls:
         assert wizard.crawl_worker.stopped and not wizard.btn_stop_crawl.isEnabled()
         assert wizard.status_label.text() == "Stopping after the current page..."
 
+    def test_closing_during_a_crawl_waits_for_the_current_page_without_blocking(self, qapp, wizard):
+        """The wizard used to give up after a fixed wait and close while the page was still being stored;
+        the main window could then shut the knowledge base down in the middle of the write."""
+        import threading
+        import time
+        from orchestrator.gui.wizards import CrawlWorker
+
+        release, started, events = threading.Event(), threading.Event(), []
+
+        class SlowRag:
+            def ingest_url(self, url, crawler_options=None, stop=None, progress=None):
+                started.set()
+                release.wait(10)   # embedding and storing a long page
+                events.append(("stored", stop.is_set()))
+                return page_result("partial", 1, 9, stopped=True)
+
+        wizard.show()
+        wizard.crawl_worker = CrawlWorker(SlowRag(), ["https://docs.example/"], {}, lang="en")
+        wizard.crawl_worker.start()
+        assert started.wait(5)
+
+        begin = time.monotonic()
+        wizard.reject()
+        assert time.monotonic() - begin < 1.0          # the GUI stays responsive
+        assert wizard.isVisible() and wizard.status_label.text() == "Stopping after the current page..."
+        wizard.reject()                                  # a second click changes nothing
+        release.set()
+        assert wait_for(qapp, lambda: not wizard.isVisible())
+        assert events == [("stored", True)] and not wizard.crawl_worker.isRunning()
+        assert wizard.result() == dialogs.QDialog.Rejected
+
     def test_deep_ingest_shows_the_notice_once_then_crawls_in_the_background(self, qapp, wizard, tmp_path,
                                                                            monkeypatch, wizard_boxes):
         from orchestrator.gui import wizards
@@ -827,6 +866,18 @@ class TestCrawlNotice:
         monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
         monkeypatch.setattr(CrawlNotice, "acknowledge", lambda self, via: (_ for _ in ()).throw(OSError("read-only")))
         dialogs.show_crawl_notice_once(None, SimpleNamespace(user_state_dir=tmp_path))   # no exception
+
+    def test_without_a_usable_state_directory_the_notice_is_shown_and_the_crawl_starts(self, qapp, monkeypatch):
+        class Config:
+            @property
+            def user_state_dir(self):   # ConfigManager creates it on access; a read-only home fails here
+                raise PermissionError("read-only home")
+
+        shown = []
+        monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: shown.append(self.windowTitle()))
+        dialogs.show_crawl_notice_once(None, Config())
+        dialogs.show_crawl_notice_once(None, Config())
+        assert shown == ["Before your first Deep Ingest"] * 2   # nothing remembers it: shown every time
 
 
 class TestMainWindowWiring:

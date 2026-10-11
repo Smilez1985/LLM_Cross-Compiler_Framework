@@ -157,8 +157,12 @@ def announce(text: str, *, lang: Optional[str] = None, config: Any = None) -> Op
     if reason:
         logger.debug(f"Announcement not spoken: {reason}")
         return None
-    thread = threading.Thread(target=_speak, args=(text, _language(lang, config)), name="announce", daemon=True)
-    thread.start()
+    try:
+        thread = threading.Thread(target=_speak, args=(text, _language(lang, config)), name="announce", daemon=True)
+        thread.start()
+    except Exception as e:   # e.g. no thread can be started: the caller goes on
+        logger.debug(f"Announcement not spoken: {e}")
+        return None
     return thread
 
 

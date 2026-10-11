@@ -6,7 +6,8 @@ Deep Ingest of documentation: crawls web pages breadth-first, extracts text from
 it for the knowledge base. Rate-limited, behind the SSRF guard (every request and every redirect hop).
 
 Text and data mining of public pages is allowed unless the rightsholder reserved it in machine-readable form
-(EU DSM Directive Art. 4, German UrhG 44b). Besides robots.txt the crawler therefore honours:
+(EU DSM Directive Art. 4, German UrhG 44b). The crawler therefore honours, with no switch to turn them off:
+* robots.txt as in RFC 9309 (the groups for this crawler merged, '*' and '$' patterns, the longest rule wins);
 * X-Robots-Tag headers and <meta name="robots"> / <meta name="llm-conversion-framework-bot">:
   noindex, none, noai and noimageai keep the page out; nofollow and none stop following its links;
 * the W3C TDM Reservation Protocol (TDMRep 1.0): /.well-known/tdmrep.json per origin, the tdm-reservation
@@ -26,7 +27,6 @@ import logging
 import requests
 import re
 from urllib.parse import urlparse, urljoin
-from urllib.robotparser import RobotFileParser
 from typing import Callable, Iterable, Iterator, List, NamedTuple, Set, Optional, Dict, Any, Tuple
 from io import BytesIO
 
@@ -84,7 +84,8 @@ class TdmRule(NamedTuple):
 
 def robots_directives(values: Iterable[str], bot: str = BOT_NAME) -> Set[str]:
     """Lower-case directives of X-Robots-Tag or meta robots values that apply to this crawler: unscoped
-    ones and those after "<bot>:" (a scope lasts until the next one within the same value)."""
+    ones and those after "<bot>:" (a scope lasts until the next one within the same value). Directives are
+    separated by commas; "noindex nofollow" (spaces only) counts too."""
     found: Set[str] = set()
     for value in values:
         scope = None
@@ -94,7 +95,7 @@ def robots_directives(values: Iterable[str], bot: str = BOT_NAME) -> Set[str]:
             if scoped and scoped.group(1) not in _VALUED_DIRECTIVES:
                 scope, part = scoped.group(1), scoped.group(2)
             if scope in (None, bot.lower()) and part:
-                found.add(part.split(":", 1)[0].strip())
+                found.update(word.split(":", 1)[0].strip() for word in ([part] if ":" in part else part.split()))
     return found
 
 
@@ -105,7 +106,12 @@ def tdm_flag(value: Any) -> Optional[bool]:
 
 def tdm_location_matches(location: str, path: str) -> bool:
     """TDMRep location pattern (robots.txt syntax, case-sensitive): matches from the start of the path,
-    '*' is any run of characters, a trailing '$' anchors the end. Greedy segment search, no regex."""
+    '*' is any run of characters, a trailing '$' anchors the end. Greedy segment search, no regex. A pattern
+    written relative ("docs/*") or as a full URL means the same path from the root (cautious reading)."""
+    if re.match(r"https?://", location, re.I):
+        location = urlparse(location).path or "/"
+    elif not location.startswith(("/", "*")):
+        location = "/" + location
     anchored = location.endswith("$")
     parts = requote_uri(location[:-1] if anchored else location).split("*")
     if not path.startswith(parts[0]):
@@ -121,6 +127,42 @@ def tdm_location_matches(location: str, path: str) -> bool:
     if anchored:
         return path.endswith(parts[-1]) and len(path) - len(parts[-1]) >= pos
     return path.find(parts[-1], pos) >= 0
+
+
+def robots_rules(text: str, bot: str = BOT_NAME) -> List[Tuple[bool, str]]:
+    """(allow, pattern) rules of a robots.txt for this crawler (RFC 9309): all groups naming it, else all
+    '*' groups. urllib.robotparser would ignore '*'/'$' patterns and every '*' group after the first."""
+    groups: List[Tuple[Set[str], List[Tuple[bool, str]]]] = []
+    in_rules = False
+    for line in text.splitlines():
+        key, _, value = line.split("#", 1)[0].partition(":")
+        key, value = key.strip().lower(), value.strip()
+        if key == "user-agent":
+            if not groups or in_rules:   # a user-agent line after rules starts a new group
+                groups.append((set(), []))
+                in_rules = False
+            groups[-1][0].add(value.split("/")[0].strip().lower())
+        elif key in ("allow", "disallow") and groups:
+            in_rules = True
+            if value:   # "Disallow:" (empty) allows everything
+                groups[-1][1].append((key == "allow", value))
+    bot = bot.lower()
+    ours = [group for group in groups if any(agent not in ("", "*") and agent in bot for agent in group[0])]
+    return [rule for _, rules in (ours or [g for g in groups if "*" in g[0]]) for rule in rules]
+
+
+def robots_allows(rules: List[Tuple[bool, str]], path: str) -> bool:
+    """The longest matching rule decides; allow wins a tie; no matching rule means allowed (RFC 9309 2.2.2)."""
+    best = (-1, True)
+    for allow, pattern in rules:
+        if tdm_location_matches(pattern, path):
+            best = max(best, (len(pattern), allow))
+    return best[1]
+
+
+def _utf8(response) -> str:
+    """Body of a robots.txt or tdmrep.json (both UTF-8); a byte order mark would hide the first line or rule."""
+    return (response.content or b"").decode("utf-8-sig", errors="replace")
 
 
 def _header_values(response, name: str) -> List[str]:
@@ -195,8 +237,10 @@ class CrawlerManager:
         self.config = framework_manager.config
         opts = options or {}
         
-        # Per-crawl options (e.g. from the Deep Ingest dialog) override the stored defaults.
-        self.respect_robots = bool(opts.get("respect_robots", self.config.get("crawler_respect_robots", True)))
+        # Per-crawl options (e.g. from the Deep Ingest dialog) override the stored defaults. robots.txt is an
+        # opt-out like the others, so neither the dialog nor the config can switch it off; respect_robots=False
+        # exists for tests with a fake web only.
+        self.respect_robots = bool(opts.get("respect_robots", True))
         self.max_depth = int(opts.get("max_depth", self.config.get("crawler_max_depth", 2)))
         self.max_pages = int(opts.get("max_pages", self.config.get("crawler_max_pages", 50)))
         self.rate_limit = float(opts.get("request_delay", self.config.get("crawler_rate_limit", 1.0)))
@@ -212,7 +256,7 @@ class CrawlerManager:
         self.skipped: List[SkippedPage] = []
         self.failed: List[SkippedPage] = []
         self.stopped = False
-        self.robot_parsers: Dict[str, RobotFileParser] = {}
+        self.robot_rules: Dict[str, List[Tuple[bool, str]]] = {}   # per host, from robots.txt
         self.tdm_rules: Dict[str, List[TdmRule]] = {}   # per origin, from /.well-known/tdmrep.json
         self.session = requests.Session()
         adapter = PublicOnlyAdapter()
@@ -390,7 +434,8 @@ class CrawlerManager:
         hits = sorted(directives & SKIP_DIRECTIVES)
         if hits:
             reasons.append(f"X-Robots-Tag: {', '.join(hits)}")
-        if tdm_flag(response.headers.get("tdm-reservation")):
+        # Repeated headers arrive joined ("1, 1"); any reserving value counts.
+        if any(tdm_flag(v) for value in _header_values(response, "tdm-reservation") for v in value.split(",")):
             reasons.append(self._tdm_reason("tdm-reservation header", response.headers.get("tdm-policy")))
         return reasons, bool(directives & NOFOLLOW_DIRECTIVES)
 
@@ -435,7 +480,7 @@ class CrawlerManager:
             response = self._get_following_redirects(file_url)
             if response.status_code != 200:
                 return []
-            data = json.loads(response.text)
+            data = json.loads(_utf8(response))
         except Exception as e:
             self.logger.info(f"No usable {file_url} ({_remote_text(e)}).")
             return []
@@ -460,37 +505,33 @@ class CrawlerManager:
         raise RuntimeError("too many redirects")
 
     def _can_fetch(self, url: str) -> bool:
-        """Prüft robots.txt Regeln."""
+        """Checks the host's robots.txt (fetched once per host)."""
         if not self.respect_robots:
             return True
-            
         parsed = urlparse(url)
-        domain = parsed.netloc
-        if domain not in self.robot_parsers:
-            self.robot_parsers[domain] = self._load_robots(f"{parsed.scheme}://{domain}/robots.txt")
-        
-        return self.robot_parsers[domain].can_fetch(self.session.headers["User-Agent"], url)
+        if parsed.netloc not in self.robot_rules:
+            self.robot_rules[parsed.netloc] = self._load_robots(f"{parsed.scheme}://{parsed.netloc}/robots.txt")
+        path = (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+        return robots_allows(self.robot_rules[parsed.netloc], path)
 
-    def _load_robots(self, robots_url: str) -> RobotFileParser:
-        """Loads robots.txt through the SSRF guard (RobotFileParser.read() would follow redirects unchecked)."""
-        rp = RobotFileParser(robots_url)
+    def _load_robots(self, robots_url: str) -> List[Tuple[bool, str]]:
+        """robots.txt rules through the SSRF guard, every redirect hop checked again."""
+        disallow_all = [(False, "/")]
         try:
             response = self._get_following_redirects(robots_url)
             if response.status_code == 200:
-                rp.parse(response.text.splitlines())
-            elif response.status_code in (401, 403) or response.status_code >= 500:
+                return robots_rules(_utf8(response))
+            if response.status_code in (401, 403) or response.status_code >= 500:
                 # RFC 9309 2.3.1.4: an unreachable robots.txt (server error) means complete disallow.
-                rp.disallow_all = True
-            else:
-                rp.allow_all = True
+                return disallow_all
+            return []
         except requests.RequestException as e:
             self.logger.warning(f"Could not reach {robots_url} ({e}). Treating the site as disallowed.")
-            rp.disallow_all = True
+            return disallow_all
         except Exception as e:
             # Blocked by the SSRF guard or too many redirects: RFC 9309 treats robots.txt as unavailable.
             self.logger.warning(f"Could not read {robots_url} ({e}). Assuming allowed.")
-            rp.allow_all = True
-        return rp
+            return []
 
     @staticmethod
     def _language_codes(value: Any) -> Set[str]:

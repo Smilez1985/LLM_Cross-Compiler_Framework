@@ -38,7 +38,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `X-Robots-Tag` header or in `<meta name="robots">` / `<meta name="llm-conversion-framework-bot">`, does not
   follow the links of `nofollow` pages, and honours the W3C TDM Reservation Protocol (`/.well-known/tdmrep.json`
   per site, the `tdm-reservation` header and meta tag, PDF metadata). Redirect targets on other hosts are
-  checked the same way. Every skipped page is named in the crawl log with its reason.
+  checked the same way. Every skipped page is named in the crawl log with its reason. None of these checks can
+  be switched off.
 - **Notice before the first Deep Ingest** (English and German): what is read (only publicly reachable pages),
   which opt-outs are honoured, that the knowledge stays on this computer, and that sharing it keeps source and
   licence and needs your explicit release. It is information, not a legal confirmation: one "Understood"
@@ -49,15 +50,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   silent in CI, over SSH without a display, on headless systems, with `LLM_FRAMEWORK_NO_AUDIO=1` or when
   *Tools > Spoken Announcements* (setting `audio_announcements`) is off. Every announcement is also logged.
 - **Deep Ingest progress and Stop**: the wizard shows "Page N of M: <url>" instead of an endless spinner, and a
-  Stop button ends the crawl after the current page. Closing the wizard stops a running crawl the same way.
+  Stop button ends the crawl after the current page. Closing the wizard stops a running crawl the same way and
+  closes once the current page is stored, without freezing the window.
 - **Input history**: the input fields offer what you used recently, newest first. Model, calibration dataset,
   Deep Ingest URL and device (Deployment, remote hardware scan) are editable lists; the most recent model and
   device are filled in, datasets and URLs are only offered. Targets and boards come from the target
   definitions, so the most recently built one that is still offered is preselected (a target without declared
   boards offers recent boards as suggestions). The history is per user (`input_history.json` in the per-user
   state directory), at most 20 entries per field, and never holds secrets: values that look like an API key or
-  token, URLs with a user name or password and URLs with a credential parameter (such as `?token=`) are not
-  remembered. *Tools > Clear Input History...* forgets it.
+  token, URLs with a user name or password and URLs with a credential or session parameter (such as `?token=`
+  or `;jsessionid=`) are not remembered. *Tools > Clear Input History...* forgets it.
 
 ### Changed
 - **Deep Ingest outcome**: it said "Deep Ingest complete" even when every URL failed. It now reports success
@@ -89,9 +91,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Ditto's generated filler calibration data (builds use the shipped calibration text or your own dataset).
 - The unused setting `input_history` (the input history is personal and lives in the per-user state directory,
   not in the shared `configs/config.yml`).
+- The *Respect robots.txt* option of the Deep Ingest dialog and the setting `crawler_respect_robots`: robots.txt
+  is a machine-readable opt-out like the others, so it is always honoured.
 - `litellm` and `tiktoken`, and with them 19 indirect packages (aiohttp, boto3, jinja2 and others).
 
 ### Security
+- Deep Ingest reads robots.txt as RFC 9309 describes it. Rules with `*` or `$` (such as `Disallow: /*.pdf$`), an
+  `Allow` listed before a longer `Disallow`, every `User-agent: *` group after the first and a file that starts
+  with a byte order mark used to be ignored, so the crawler fetched pages the site had excluded.
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
   into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
   build log or a model name told the model.

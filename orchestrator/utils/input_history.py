@@ -19,7 +19,7 @@ import tempfile
 import unicodedata
 from pathlib import Path
 from typing import Dict, Iterable, List, Literal, Optional, get_args
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import unquote_plus, urlsplit
 
 from pydantic import BaseModel, ConfigDict, field_validator
 
@@ -30,8 +30,10 @@ FIELDS = get_args(Field)
 MAX_PER_FIELD = 20
 MAX_LENGTH = 1000
 
-# Query and fragment parameters that carry credentials (?token=, ?api_key=, X-Amz-Signature, #access_token=)
-_CREDENTIAL_PARAM = re.compile(r"token|key|secret|pass(word|wd)?|pwd|auth|sig(nature)?|credential|session", re.I)
+# Parameters that carry credentials (?token=, ?api_key=, X-Amz-Signature, #access_token=, ;jsessionid=,
+# ?PHPSESSID=, ?sid=, ?jwt=), in the query, the fragment or as path parameters
+_CREDENTIAL_PARAM = re.compile(r"token|key|secret|pass(word|wd)?|pwd|auth|sig(nature)?|credential|sess|jwt|^sid$",
+                               re.I)
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +56,10 @@ def refusal(value: str) -> Optional[str]:
             return "not a valid URL"
         if has_userinfo:
             return "URL with a user name or password"
-        for part in (parts.query, parts.fragment):
-            if any(_CREDENTIAL_PARAM.search(name) for name, _ in parse_qsl(part, keep_blank_values=True)):
-                return "URL with a credential parameter"
+        names = [unquote_plus(item.split("=", 1)[0]) for part in (parts.path, parts.query, parts.fragment)
+                 for item in re.split(r"[;&]", part) if "=" in item]
+        if any(_CREDENTIAL_PARAM.search(name.strip()) for name in names):
+            return "URL with a credential parameter"
     elif "@" in value and ":" in value.rsplit("@", 1)[0]:
         return "user:password@host"
     return None
@@ -155,15 +158,16 @@ class InputHistory:
         return self._save(data)
 
     def clear(self, field: Optional[str] = None) -> bool:
-        """Forgets one field, or everything (the file is removed)."""
+        """Forgets one field, or everything (the file and the copy of a damaged one are removed)."""
         if field is None:
-            try:
-                self.path.unlink()
-            except FileNotFoundError:
-                pass
-            except OSError as e:
-                logger.warning(f"Could not clear the input history: {e}")
-                return False
+            for path in (self.path, self.path.with_name(self.path.name + ".bad")):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    logger.warning(f"Could not clear the input history: {e}")
+                    return False
             return True
         data = self._load()
         data.fields.pop(self._field(field), None)

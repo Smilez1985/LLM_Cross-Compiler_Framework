@@ -199,6 +199,16 @@ class TestBestEffort:
             an._lock.release()
         assert runs.calls == []
 
+    def test_a_thread_that_cannot_start_is_not_fatal(self, audible, runs, monkeypatch):
+        audible()
+
+        def no_thread(self):
+            raise RuntimeError("can't start new thread")
+
+        monkeypatch.setattr(an.threading.Thread, "start", no_thread)
+        assert an.announce("Deep Ingest finished.") is None
+        assert runs.calls == []
+
 
 class TestSilence:
 

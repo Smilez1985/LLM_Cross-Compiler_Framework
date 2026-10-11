@@ -200,6 +200,7 @@ class ModuleCreationWizard(QWizard):
         self.module_data = {}
         self.ai_config = {} 
         self.crawl_worker = None
+        self._close_result = None   # closing waits for a running crawl to store its current page
         
         self.signals = WizardSignals()
         self.signals.analysis_finished.connect(self.on_ai_finished)
@@ -624,12 +625,21 @@ Setup commands:
         QMessageBox.critical(self, "Crawl Error", str(err))
 
     def done(self, result):
-        """Closing the wizard stops a running crawl cleanly (stored pages stay)."""
+        """Closing the wizard stops a running crawl. It closes once the current page is stored (without
+        blocking the GUI), so the knowledge base is never shut down in the middle of a write."""
         worker = self.crawl_worker
         if worker is not None and worker.isRunning():
-            worker.stop()
-            worker.wait(15000)
+            if self._close_result is None:
+                worker.finished.connect(self._close_after_crawl)
+            self._close_result = result
+            self.stop_deep_ingest()
+            return
         super().done(result)
+
+    def _close_after_crawl(self):
+        result, self._close_result = self._close_result, None
+        if result is not None:
+            self.done(result)
 
     # --- STANDARD IMPORT LOGIC (Rule Based) ---
 

@@ -70,6 +70,13 @@ class TestStore:
         assert history.clear() and not history.path.exists()
         assert history.clear()   # nothing to clear is fine
 
+    def test_clear_also_removes_the_copy_of_a_damaged_file(self, history):
+        history.path.parent.mkdir(parents=True)
+        history.path.write_text('{"version": 1, "fields": {"url": ["https://old.example/"]}, "extra": 1}')
+        assert history.get("url") == [] and history.path.with_name("input_history.json.bad").exists()
+        assert history.clear()
+        assert list(history.path.parent.iterdir()) == []   # nothing of the old history is left
+
     def test_damaged_file_starts_empty_and_keeps_a_copy(self, history):
         history.path.parent.mkdir(parents=True)
         history.path.write_text("{broken")
@@ -121,6 +128,12 @@ class TestNoSecrets:
         "https://docs.example.org/page?X-Amz-Signature=abc",
         "https://docs.example.org/#access_token=abc",
         "https://docs.example.org/?Password=abc",
+        "https://docs.example.org/guide;jsessionid=0123456789ABCDEF",   # session ids as path parameters,
+        "https://forum.example.org/viewtopic.php?t=5&sid=0123456789abcdef",   # in the query
+        "https://docs.example.org/?PHPSESSID=0123456789abcdef",
+        "https://docs.example.org/?a=1;token=abc",                      # ";" separates parameters too
+        "https://docs.example.org/?%74oken=abc",                        # percent-encoded name
+        "https://docs.example.org/?jwt=abc.def.ghi",
         "root:hunter2@192.168.1.10",
         "https://[::1/",
         "org/model\n--trust-remote-code",
@@ -135,6 +148,7 @@ class TestNoSecrets:
     @pytest.mark.parametrize("value", [
         "Qwen/Qwen3.5-0.8B", "/home/me/models/model.gguf", "C:\\data\\calib.txt", "https://docs.radxa.com/?q=npu",
         "https://wiki.example.org/page#section", "root@192.168.1.10", "fe80::1", "rock-5b.local", "rk3588",
+        "https://docs.example.org/side/inside?topic=sidebar",
     ])
     def test_allowed(self, history, value):
         assert refusal(value) is None
