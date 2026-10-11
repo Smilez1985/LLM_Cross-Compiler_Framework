@@ -37,12 +37,14 @@ class TestModelStaging:
         assert path == "/build-cache/input-model"
         assert volumes == {str(model.resolve()): {"bind": "/build-cache/input-model", "mode": "ro"}}
 
-    def test_local_file_is_mounted_with_its_directory(self, engine, tmp_path):
+    def test_local_file_is_mounted_alone(self, engine, tmp_path):
+        # Only the file: its folder may hold anything else (design G8; this test pinned the parent mount before).
         model = tmp_path / "model.onnx"
         model.write_bytes(b"onnx")
+        (tmp_path / "id_ed25519").write_text("private key")
         path, volumes = engine._stage_model(make_config(model_source=str(model)), BuildProgress("b1", BuildStatus.QUEUED, ""))
         assert path == "/build-cache/input-model/model.onnx"
-        assert str(tmp_path.resolve()) in volumes
+        assert volumes == {str(model.resolve()): {"bind": "/build-cache/input-model/model.onnx", "mode": "ro"}}
 
     @pytest.mark.parametrize("source", ["../etc/passwd", "not a repo", "a/b/c", "/abs/path/that/does/not/exist", ""])
     def test_invalid_sources_are_rejected(self, engine, source):
@@ -126,8 +128,22 @@ class TestSecretsAndCalibration:
             engine._dataset_mount(make_config(dataset_path=str(tmp_path / "missing.txt")))
 
     def test_dataset_inside_the_model_folder_reuses_its_mount(self, engine, tmp_path):
-        # Usual RKNN layout: model, sample list and images in one folder. A second bind of the same
-        # host folder would replace the model mount (docker-py keys binds by host path).
+        # A model folder with its sample list inside. A second bind of the same host folder would replace the
+        # model mount (docker-py keys binds by host path). (The model used to be a single file here, whose parent
+        # was mounted; a single file now mounts only itself, see the next test.)
+        folder = tmp_path / "yolo"
+        folder.mkdir()
+        (folder / "yolov5s.onnx").write_bytes(b"onnx")
+        (folder / "dataset.txt").write_text("img1.jpg\n")
+        config = make_config(target_format=ModelFormat.RKNN, quantization="i8",
+                             model_source=str(folder), dataset_path=str(folder / "dataset.txt"))
+        _, staged = engine._stage_model(config, BuildProgress("b1", BuildStatus.QUEUED, ""))
+        vols, inner = engine._dataset_mount(config, staged)
+        assert vols == {} and inner == "/build-cache/input-model/dataset.txt"
+
+    def test_dataset_next_to_a_model_file_gets_its_own_folder_mount(self, engine, tmp_path):
+        # Usual RKNN layout: model, sample list and images in one folder; the model file is bound alone and the
+        # sample list's folder separately (different host paths, so neither bind replaces the other).
         folder = tmp_path / "yolo"
         folder.mkdir()
         (folder / "yolov5s.onnx").write_bytes(b"onnx")
@@ -136,7 +152,8 @@ class TestSecretsAndCalibration:
                              model_source=str(folder / "yolov5s.onnx"), dataset_path=str(folder / "dataset.txt"))
         _, staged = engine._stage_model(config, BuildProgress("b1", BuildStatus.QUEUED, ""))
         vols, inner = engine._dataset_mount(config, staged)
-        assert vols == {} and inner == "/build-cache/input-model/dataset.txt"
+        assert vols == {str(folder.resolve()): {"bind": "/build-cache/dataset", "mode": "ro"}}
+        assert inner == "/build-cache/dataset/dataset.txt" and not set(vols) & set(staged)
 
     def test_json_dataset_keeps_its_suffix(self, engine, tmp_path):
         ds = tmp_path / "calib.json"

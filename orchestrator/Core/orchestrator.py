@@ -92,7 +92,13 @@ class BuildRequest:
     dataset_generated: bool = False
     # Commit of a Hugging Face model (recipes pin one); None builds the default branch
     model_revision: Optional[str] = None
-    
+    # Local model and dataset of an AI caller's build (orchestrator.tools.local_files.LocalInputs), checked again by
+    # the build engine right before each container starts; set for every AI caller (None: a person's own paths)
+    local_inputs: Optional[Any] = None
+    # Who started it through a tool ("mcp#<session>", "ditto"; empty for the GUI and the CLI): that caller may
+    # cancel it without a question, and a disconnected MCP session's builds are cancelled
+    owner: str = ""
+
     def __post_init__(self):
         if not self.request_id:
             self.request_id = f"req_{uuid.uuid4().hex[:8]}"
@@ -114,6 +120,7 @@ class WorkflowState:
     healing_proposal: Optional[Any] = None
     healing_decision: Optional[bool] = None
     build_ids: List[str] = field(default_factory=list)
+    owner: str = ""  # BuildRequest.owner
 
     @property
     def progress_percent(self) -> int:
@@ -180,7 +187,8 @@ class LLMOrchestrator:
             state = WorkflowState(
                 request_id=request.request_id,
                 status=OrchestrationStatus.QUEUED,
-                start_time=datetime.now()
+                start_time=datetime.now(),
+                owner=getattr(request, "owner", "") or "",
             )
             self._workflows[request.request_id] = state
             
@@ -309,6 +317,7 @@ class LLMOrchestrator:
             dataset_path=(None if req.dataset_generated and job.target_format != ModelFormat.GGUF
                           else req.dataset_path),
             build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
+            local_inputs=req.local_inputs,
         )
 
     async def _submit_to_engine(self, build_config: BuildConfiguration, state: Optional[WorkflowState]) -> Optional[str]:

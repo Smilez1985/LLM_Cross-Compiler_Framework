@@ -17,6 +17,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sqlite3
 import tempfile
 import threading
@@ -43,16 +44,43 @@ _SCHEMA = (
         detail TEXT NOT NULL,
         prev_hash TEXT NOT NULL,
         hash TEXT NOT NULL,
-        key_id TEXT
+        key_id TEXT,
+        extra TEXT
     )
     """,
     "CREATE TABLE IF NOT EXISTS meta (k TEXT PRIMARY KEY, v TEXT NOT NULL)",
 )
 _FIELDS = ("ts", "actor", "tool", "tier", "decision", "approved", "args_sha256", "args_preview", "outcome", "detail")
 _INSERT = ("INSERT INTO events (ts, actor, tool, tier, decision, approved, args_sha256, args_preview, outcome, detail, "
-           "prev_hash, hash, key_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+           "prev_hash, hash, key_id, extra) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
 GENESIS = "0" * 64
 UNKEYED = "unkeyed"
+
+# What an entry can record. `started` is the write-ahead entry of a call that changes something (written before
+# the handler runs; the call is refused when it cannot be written), `confirmation_requested` the record of a
+# question put to a person; the other outcomes are end states. `folder_added` and `folder_removed` record a person's
+# change to the folders the AI may use (framework-side events, actor cli or gui).
+OUTCOMES = frozenset({
+    "ok", "error", "denied", "not_confirmed", "invalid_input",
+    "started", "confirmation_requested", "cancelled", "rate_limited", "confirmation_timeout",
+    "audit_unavailable", "unknown_tool", "repeat_refused", "cannot_reported",
+    "folder_added", "folder_removed",
+})
+# How a person answered (or did not answer) a question.
+ANSWERS = frozenset({"accepted", "declined", "cancelled", "timeout", "client_disconnected", "unavailable",
+                     "unanswered"})
+# Where a confirmation came from: none, an MCP form elicitation, the framework's own windows, a pending approval
+# decided in the framework, or a standing approval.
+_CHANNEL = re.compile(r"^(none|elicitation|framework|framework-gui|framework-cli|approval:[\w-]{1,64}|"
+                      r"grant:[\w-]{1,64})$")
+# Fields kept in an entry's `extra` column. The entry's hash stays the 3.0.0 one (so a 3.0.0 process that still
+# runs next to this version verifies and appends to the same log); the extra fields are bound to it by their
+# SHA-256 at the end of the chained `detail` column, so adding, removing or editing them is detected.
+EXTRA_FIELDS = frozenset({"client", "session", "confirm_channel", "question_sha256", "answer", "name_requested",
+                          "repairs", "reason_code", "duration_ms", "result", "links"})
+_EXTRA_MAX = 2000
+_EXTRA_REF = re.compile(r"\n\[extra sha256:([0-9a-f]{64})\]\Z")
+_EXTRA_TAG = "[extra sha256:"
 _BREAKS = ("removed", "modified", "anchor_missing")
 _ANCHOR_MAX = 4096  # a real anchor has about 170 bytes
 
@@ -103,6 +131,33 @@ class AuditCheck:
 def _text(value: str) -> str:
     """Text SQLite can store: lone surrogates (valid in Python's JSON, e.g. from model output) become escapes."""
     return value.encode("utf-8", "backslashreplace").decode("utf-8")
+
+
+def extra_fields(row: Dict[str, Any]) -> Dict[str, Any]:
+    """The parsed extra fields of an entry ({} when it has none or they cannot be read)."""
+    raw = row.get("extra")
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError, RecursionError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _extra_ref(extra: str) -> str:
+    """The binding of an entry's extra fields, appended to its detail (which the 3.0.0 hash covers)."""
+    return f"\n{_EXTRA_TAG}{hashlib.sha256(extra.encode('utf-8', 'surrogatepass')).hexdigest()}]"
+
+
+def _extra_bound(row: Dict[str, Any]) -> bool:
+    """Whether the extra fields are exactly the ones the entry's detail names (none named: none stored)."""
+    extra, found = row.get("extra"), _EXTRA_REF.search(str(row.get("detail") or ""))
+    if extra is None:
+        return found is None
+    if found is None or not isinstance(extra, str):
+        return False
+    return hmac.compare_digest(_extra_ref(extra), found.group(0))
 
 
 def _same(expected: str, stored: Any) -> bool:
@@ -176,12 +231,15 @@ class AuditLog:
             # On every connect: the file may have been moved aside since the last one (a new log starts).
             for statement in _SCHEMA:
                 db.execute(statement)
-            if "key_id" not in {r[1] for r in db.execute("PRAGMA table_info(events)")}:
-                try:  # logs from before per-entry key ids
-                    db.execute("ALTER TABLE events ADD COLUMN key_id TEXT")
-                except sqlite3.OperationalError as e:
-                    if "duplicate column" not in str(e):  # another process was first
-                        raise
+            columns = {r[1] for r in db.execute("PRAGMA table_info(events)")}
+            # Logs from before per-entry key ids, and from before the extra fields.
+            for column in ("key_id", "extra"):
+                if column not in columns:
+                    try:
+                        db.execute(f"ALTER TABLE events ADD COLUMN {column} TEXT")
+                    except sqlite3.OperationalError as e:
+                        if "duplicate column" not in str(e):  # another process was first
+                            raise
         except BaseException:
             db.close()
             raise
@@ -198,7 +256,7 @@ class AuditLog:
         return hashlib.sha256(payload).hexdigest()
 
     def _matches(self, row: Dict[str, Any], key_id: Optional[str], key: Optional[bytes]) -> bool:
-        return _same(self._digest(str(row["prev_hash"]), row, key_id, key), row["hash"])
+        return _same(self._digest(str(row["prev_hash"]), row, key_id, key), row["hash"]) and _extra_bound(row)
 
     def _classify(self, row: Dict[str, Any], legacy_key_id: Optional[str]) -> str:
         """legacy_key_id: the key id meta names for entries from before per-entry key ids."""
@@ -306,9 +364,46 @@ class AuditLog:
             return "removed", head + 1
         return None
 
+    @staticmethod
+    def _extra(outcome: str, extra: Optional[Dict[str, Any]]) -> Optional[str]:
+        """The extra fields as canonical JSON (redacted), None when there are none. Unknown fields and values
+        outside the documented sets are refused: they are a bug in the caller, and an audit entry must not carry
+        text nobody can interpret."""
+        if outcome not in OUTCOMES:
+            raise ValueError(f"unknown audit outcome {outcome!r}")
+        fields = {k: v for k, v in (extra or {}).items() if v not in (None, "", [], {})}
+        if not fields:
+            return None
+        unknown = set(fields) - EXTRA_FIELDS
+        if unknown:
+            raise ValueError(f"unknown audit fields {sorted(unknown)}")
+        if "answer" in fields and fields["answer"] not in ANSWERS:
+            raise ValueError(f"unknown answer {fields['answer']!r}")
+        if "confirm_channel" in fields and not _CHANNEL.match(str(fields["confirm_channel"])):
+            raise ValueError(f"unknown confirmation channel {fields['confirm_channel']!r}")
+        text = json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
+        text = _text(redact_secrets(text))
+        if len(text) > _EXTRA_MAX:  # never cut JSON in the middle: keep the fields that fit, say what was cut
+            kept: Dict[str, Any] = {"truncated": sorted(fields)}
+            for key in ("reason_code", "answer", "confirm_channel", "question_sha256", "duration_ms", "links"):
+                if key in fields:
+                    kept[key] = fields[key]
+            text = _text(redact_secrets(json.dumps(kept, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+                                                   default=str)))[:_EXTRA_MAX]
+        return text
+
     def record(self, actor: str, tool: str, tier: str, decision: str, outcome: str,
-               arguments: Any = None, approved: Optional[bool] = None, detail: str = "") -> None:
+               arguments: Any = None, approved: Optional[bool] = None, detail: str = "",
+               extra: Optional[Dict[str, Any]] = None) -> int:
+        """Appends one entry and returns its id. `extra`: fields of EXTRA_FIELDS (client, session, confirmation
+        channel, question hash, answer, repaired names and arguments, reason code, duration, result hash, links to
+        earlier entries)."""
         text = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str) if arguments is not None else ""
+        extra_text = self._extra(outcome, extra)
+        # Free text (it can quote what a model wrote) never ends like the binding of extra fields.
+        detail_text = _text(redact_secrets(detail or ""))[:1000].replace(_EXTRA_TAG, "[extra-sha256:")
+        if extra_text is not None:
+            detail_text += _extra_ref(extra_text)
         row = {
             "ts": datetime.now(timezone.utc).isoformat(timespec="milliseconds"),
             "actor": _text(actor), "tool": _text(tool), "tier": _text(tier), "decision": _text(decision),
@@ -316,7 +411,8 @@ class AuditLog:
             "args_sha256": hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
             "args_preview": _text(redact_secrets(text))[:500],
             "outcome": _text(outcome),
-            "detail": _text(redact_secrets(detail or ""))[:1000],
+            "detail": detail_text,
+            "extra": extra_text,
         }
         with self._lock:
             db = self._connect()
@@ -351,6 +447,7 @@ class AuditLog:
                         self._warn(f"Audit anchor not updated: {e}")
             finally:
                 db.close()
+        return entry_id
 
     def _append(self, db, row: Dict[str, Any]) -> Tuple[int, str, bool, bool]:
         """Appends row; returns (entry id, hash, whether the anchor could be read, whether a new log started)."""
@@ -377,7 +474,7 @@ class AuditLog:
             db.execute("INSERT INTO meta (k, v) VALUES ('key_id', ?)", (own,))
         prev = str(last["hash"]) if last else GENESIS  # an edited head may hold a BLOB; check() reports it
         digest = self._digest(prev, row, own, self._key)
-        cur = db.execute(_INSERT, [row[f] for f in _FIELDS] + [prev, digest, own])
+        cur = db.execute(_INSERT, [row[f] for f in _FIELDS] + [prev, digest, own, row.get("extra")])
         entry_id = cur.lastrowid
         if problem:
             db.execute("INSERT INTO meta (k, v) VALUES ('break', ?)",
@@ -390,11 +487,19 @@ class AuditLog:
         get_logger("AuditLog").warning(message)
 
     def entries(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """The newest entries, newest first. The extra fields are also given as keys of their own (they never
+        replace a column); `detail` is shown without their binding."""
         db = self._connect()
         try:
-            return _dicts(db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(limit),)))
+            rows = _dicts(db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(limit),)))
         finally:
             db.close()
+        for row in rows:
+            if isinstance(row.get("detail"), str):
+                row["detail"] = _EXTRA_REF.sub("", row["detail"])
+            for key, value in extra_fields(row).items():
+                row.setdefault(key, value)
+        return rows
 
     def check(self) -> AuditCheck:
         """Walks the whole chain and compares its head with the anchor file. Writers wait meanwhile, so the

@@ -22,6 +22,7 @@ Rules:
 """
 
 import json
+import secrets
 import os
 import re
 import tempfile
@@ -37,7 +38,6 @@ from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest,
                               RateLimited, Refused, Truncated, Usage, make_registry_executor, run_tool_loop,
                               tool_specs_from_registry)
 from orchestrator.rag.retrieval import pack_excerpts
-from orchestrator.tools.policy import Decision
 from orchestrator.tools.registry import ToolContext, ToolDenied, ToolError, ToolInputError
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -735,8 +735,8 @@ class DittoCoder:
         if registry is None:
             return []
         try:
-            policy = registry.policy()
-            names = [s.name for s in registry.list() if policy.decide(s.name, s.tier) != Decision.DENY]
+            # The same tools an MCP client with the same permissions is offered (no subset by model size).
+            names = [s.name for s in registry.visible("ditto")]
         except Exception as e:
             self.logger.warning(f"Tools unavailable for this question: {e}")
             return []
@@ -744,7 +744,9 @@ class DittoCoder:
 
     def _executor(self, registry, confirm: Optional[Confirm], uses: List[ToolUse],
                   on_tool: Optional[Callable[[ToolUse], None]]):
-        run = make_registry_executor(registry, ToolContext(actor="ditto", confirm=confirm))  # output: untrusted block
+        # One session per question, for the repeat guard and the example calls after repeated input errors.
+        run = make_registry_executor(registry, ToolContext(actor="ditto", confirm=confirm,  # output: untrusted block
+                                                           session=f"ditto-{secrets.token_hex(6)}"))
 
         def title_of(name: str) -> str:
             try:

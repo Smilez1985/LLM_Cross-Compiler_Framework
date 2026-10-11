@@ -12,6 +12,10 @@ from typing import Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from orchestrator.tools.output import UntrustedText, untrusted_text
+
+# Labels, notes and board descriptions are free text from target.yml, which a community target pack installs: they
+# are marked as external text (UntrustedText), so tool results clean, cap and mark them like a pack's other texts.
 
 class SupportLevel(str, Enum):
     OFFICIAL = "official"          # maintained and tested by the project
@@ -22,18 +26,18 @@ class SupportLevel(str, Enum):
 class BoardInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    label: str
-    cpu: Optional[str] = None
+    label: untrusted_text(200)
+    cpu: Optional[untrusted_text(200)] = None
     ram_max_gb: Optional[float] = Field(default=None, gt=0)
-    npu: Optional[str] = None
-    gpu: Optional[str] = None
-    examples: List[str] = Field(default_factory=list)
+    npu: Optional[untrusted_text(200)] = None
+    gpu: Optional[untrusted_text(200)] = None
+    examples: List[untrusted_text(200)] = Field(default_factory=list)
 
 
 class FormatCapability(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    label: str
+    label: untrusted_text(200)
     input: List[Literal["hf", "onnx", "gguf"]] = Field(default_factory=lambda: ["hf"])
     quantizations: List[str] = Field(min_length=1)
     default_quantization: str
@@ -49,7 +53,7 @@ class FormatCapability(BaseModel):
     dataset_required_for: List[str] = Field(default_factory=list)
     # Other spellings the module scripts accept, e.g. {INT8: Q8_0}; matched case-insensitively.
     aliases: Dict[str, str] = Field(default_factory=dict)
-    notes: Optional[str] = None
+    notes: Optional[UntrustedText] = None
 
     @model_validator(mode="after")
     def _consistent(self):

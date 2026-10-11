@@ -88,6 +88,8 @@ PATTERNS: Tuple[SecretPattern, ...] = (
     # it, or lower case, which rage reads too (bech32 is never mixed case).
     _rule("age secret key", _key("AGE-SECRET-KEY-1", r"[02-9AC-HJ-NP-Z]{58}\b") + "|"
           + _key("age-secret-key-1", r"[02-9ac-hj-np-z]{58}\b")),
+    # This framework's named MCP tokens (orchestrator/tools/mcp_tokens.py): the prefix and 43 URL-safe characters.
+    _rule("MCP token", _key("lcf_mcp_", r"[A-Za-z0-9_\-]{43}(?![A-Za-z0-9_\-])"), "lcf_mcp_REDACTED"),
     _rule("JSON web token", _key("eyJ", r"[A-Za-z0-9_\-]{10,}\.eyJ[A-Za-z0-9_\-]{10,}\.[A-Za-z0-9_\-]{10,}")),
     # The scan reads line by line and reports the header; redaction removes the whole block (or everything
     # after a header without its end).
