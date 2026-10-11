@@ -126,7 +126,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Linux gebaut (mit dem erkannten Compiler, CMake 3.15 oder neuer und Ninja, in einer geleerten Umgebung) oder im
   Builder-Container des Frameworks, einem Image, das auf deinem Rechner aus `builder.Dockerfile` und einer per Digest
   festgelegten Basis gebaut wird und dessen Schritte Konfigurieren und Bauen ohne Netz laufen, mit schreibgeschützter
-  Quelle und der Sandbox der Konvertierungsschritte. Das Framework teilt dieses Rezept, nie ein fertig gebautes Image.
+  Quelle und der Sandbox der Konvertierungsschritte; beschreibbar sind nur die eigenen Ordner des Builds, und das
+  Framework folgt danach nie einem Link aus ihnen hinaus. Das Framework teilt dieses Rezept, nie ein fertig gebautes
+  Image.
   Die parallelen Jobs richten sich nach dem verfügbaren Speicher. Sagt die Ausgabe des Konfigurierens, dass etwas
   geholt oder heruntergeladen wurde, scheitert der Build, ebenso wenn sie für einen mit OpenMP geplanten Build keine
   OpenMP-Laufzeit gefunden hat. Bevor ein Build abgelegt wird, wird er geprüft: ELF-Architektur und Bibliotheken

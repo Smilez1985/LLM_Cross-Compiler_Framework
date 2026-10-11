@@ -158,15 +158,22 @@ def _make_read_only(root: Path) -> None:
 
 
 def remove_tree(path: Path) -> None:
-    """Removes a (read-only) tree of the source cache."""
+    """Removes a (read-only) tree of the source cache or a build folder. Links are removed, never followed: a link
+    that a build left behind must not make the host change or delete what it points to."""
     def retry(func, p, _exc):  # read-only files and folders: make writable, retry once
         try:
             os.chmod(os.path.dirname(p), stat.S_IRWXU)
+            if os.path.islink(p):
+                os.unlink(p)  # os.chmod would change the link's target
+                return
             os.chmod(p, stat.S_IRWXU)
             func(p)
         except OSError:
             pass
-    if not (path.exists() or path.is_symlink()):
+    if path.is_symlink():
+        path.unlink()
+        return
+    if not path.exists():
         return
     if sys.version_info >= (3, 12):
         shutil.rmtree(path, onexc=retry)

@@ -112,8 +112,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Self-built llama.cpp: build, checks and store** (`orchestrator/runtime/build/`): a plan is built natively on Linux
   (with the detected compiler, CMake 3.15 or newer and Ninja, in a cleared environment) or in the framework's builder
   container, an image built on your machine from `builder.Dockerfile` and a base pinned by digest, whose configure
-  and build steps run without network, with the source read-only and the sandbox of the conversion stages. The
-  framework shares this recipe, never a compiled image. Parallel jobs follow the available memory. A configure
+  and build steps run without network, with the source read-only and the sandbox of the conversion stages; only the
+  build's own folders are writable, and the framework never follows a link out of them afterwards. The framework
+  shares this recipe, never a compiled image. Parallel jobs follow the available memory. A configure
   output that says something was fetched or downloaded fails the build, and so does one that found no OpenMP runtime
   for a build planned with OpenMP. Before a build is stored it is checked: ELF architecture and libraries (device
   builds: no newer glibc symbol version than the device, no shared C++ runtime), the pinned build and commit in

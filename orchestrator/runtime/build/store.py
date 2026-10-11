@@ -219,7 +219,7 @@ class BuildStore:
         dest = self.logs_dir / f"failed-{build_id[:16]}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
         dest.parent.mkdir(parents=True, exist_ok=True)
         try:
-            shutil.copytree(logs, dest)
+            shutil.copytree(logs, dest, symlinks=True)  # a link is copied as a link, never followed
         except OSError:
             return None
         return dest
@@ -260,9 +260,8 @@ class BuildStore:
 
     def _commit(self, plan: BuildPlan, result: BuildResult, report: VerifyReport, staging: Path, *,
                 perf_key: Optional[str], host: Optional[Tuple[str, str]]) -> StoredBuild:
-        for scratch in ("build", "home", "tmp"):
-            remove_tree(staging / scratch)
-        (staging / "toolchain.cmake").unlink(missing_ok=True)
+        for scratch in ("build", "home", "tmp", "config"):
+            remove_tree(staging / scratch)  # never follows a link the build left there
         build = {"format": STORE_FORMAT, "build_id": plan.build_id, "plan": plan.as_dict(), "perf_key": perf_key,
                  "framework_version": __version__}
         manifest = {"format": STORE_FORMAT, "build_id": plan.build_id, "origin": "self-built",
