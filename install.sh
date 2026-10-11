@@ -4,6 +4,9 @@
 # Code und Python-Umgebung landen in /opt/llm-conversion-framework (dem aufrufenden Benutzer übergeben). Das
 # Framework legt Builds, Cache und Modelle dort an, wenn sie gebraucht werden (Einstellungen output_dir,
 # cache_dir, models_dir); persönlicher Zustand liegt in ~/.llm-framework des Benutzers.
+# Ein erneuter Aufruf aktualisiert die Dateien, die das Repository ausliefert, und entfernt nur Dateien, die ein
+# früheres install.sh kopiert hat und die nicht mehr ausgeliefert werden (Liste in .lcf-installed-files). Alles
+# andere bleibt: eigene Targets, installierte Community-Packs, Einstellungen, Builds, Cache und Modelle.
 
 # Das Skript braucht bash; unter sh (dash) mit einer klaren Meldung abbrechen statt mit "Bad substitution".
 if [ -z "${BASH_VERSION:-}" ]; then
@@ -16,6 +19,8 @@ set -u
 # --- KONFIGURATION ---
 APP_NAME="llm-conversion-framework"
 INSTALL_DIR="/opt/$APP_NAME"
+# Die Dateien, die das letzte install.sh nach $INSTALL_DIR kopiert hat (NUL-getrennt).
+MANIFEST_NAME=".lcf-installed-files"
 REPO_ROOT="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 # Paketindex, den pip erreichen muss (PIP_INDEX_URL, falls ein eigener Spiegel gesetzt ist)
 PACKAGE_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple/}"
@@ -99,6 +104,34 @@ setup_system() {
 }
 
 # --- SCHRITT 2: DATEIEN KOPIEREN ---
+# Die Dateien, die das Repository ausliefert, relativ zu REPO_ROOT und NUL-getrennt: in einem git-Klon die
+# verfolgten Dateien, sonst (etwa ein entpacktes Archiv) alle Dateien ohne Entwicklungsreste und Daten.
+shipped_files() {
+    if command -v git &> /dev/null \
+        && git -C "$REPO_ROOT" -c safe.directory="$REPO_ROOT" rev-parse --is-inside-work-tree &> /dev/null; then
+        git -C "$REPO_ROOT" -c safe.directory="$REPO_ROOT" ls-files -z | while IFS= read -r -d '' f; do
+            if [ -f "$REPO_ROOT/$f" ]; then printf '%s\0' "$f"; fi
+        done
+    else
+        (cd "$REPO_ROOT" && find . \( -name .git -o -name .venv -o -name __pycache__ -o -name build -o -name dist \
+            -o -path ./output -o -path ./cache -o -path ./models -o -path ./logs \) -prune \
+            -o -type f ! -path ./configs/config.yml -printf '%P\0')
+    fi
+}
+
+# Entfernt Dateien der alten Liste ($1), die in der neuen ($2) fehlen: was das Repository nicht mehr ausliefert.
+# Was nie in einer Liste stand (eigene Targets, Community-Packs, Einstellungen, Builds, Cache, Modelle), bleibt.
+# Nur einfache relative Pfade, die innerhalb von INSTALL_DIR bleiben (kein .., kein Link nach draußen).
+remove_stale_files() {
+    local f base target
+    base="$(realpath -m -- "$INSTALL_DIR")"
+    while IFS= read -r -d '' f; do
+        case "/$f/" in */../*|*/./*|//*) continue ;; esac
+        target="$(realpath -m -- "$INSTALL_DIR/$f")"
+        case "$target" in "$base"/*) rm -f -- "$target" ;; esac
+    done < <(comm -z -23 <(sort -z -u "$1") <(sort -z -u "$2"))
+}
+
 deploy_files() {
     log_info "[2/5] Kopiere Programmdateien..."
 
@@ -113,13 +146,20 @@ deploy_files() {
     # Wir nutzen rsync für sauberes Kopieren (exklusive Müll)
     if ! command -v rsync &> /dev/null; then apt-get install -y rsync; fi
 
-    # Ausgeschlossene Pfade löscht --delete auch im Ziel nicht: Builds, Cache, Modelle und die Einstellungen des
-    # Benutzers in /opt überstehen eine erneute Installation.
-    rsync -av --delete \
-        --exclude '.git' --exclude '.venv' --exclude '__pycache__' --exclude 'build' --exclude 'dist' \
-        --exclude '/output' --exclude '/cache' --exclude '/models' --exclude '/logs' \
-        --exclude '/configs/config.yml' \
-        ./ "$INSTALL_DIR/" > /dev/null
+    # Nur die ausgelieferten Dateien, ohne --delete: Was im Ziel sonst liegt, gehört dem Benutzer oder dem Framework
+    # (eigene Targets unter targets/, Community-Packs unter targets/ und community/, configs/config.yml, Builds,
+    # Cache, Modelle, .venv). Entfernt wird nur, was ein früheres install.sh kopiert hat und nicht mehr ausgeliefert
+    # wird; beim ersten Lauf ohne Liste wird nichts entfernt.
+    local list
+    list="$(mktemp)"
+    shipped_files > "$list"
+    rsync -a --from0 --files-from="$list" ./ "$INSTALL_DIR/" > /dev/null \
+        || log_error "Kopieren nach $INSTALL_DIR fehlgeschlagen."
+    if [ -f "$INSTALL_DIR/$MANIFEST_NAME" ]; then
+        remove_stale_files "$INSTALL_DIR/$MANIFEST_NAME" "$list"
+    fi
+    cp "$list" "$INSTALL_DIR/$MANIFEST_NAME"
+    rm -f "$list"
 
     # Rechte anpassen (Der normale User soll den Code besitzen, um ohne sudo auszuführen)
     REAL_USER="${SUDO_USER:-$USER}"
