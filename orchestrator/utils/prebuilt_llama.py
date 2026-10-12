@@ -226,3 +226,12 @@ def scan_target_folder(root: Path, skip: Iterable[str] = ()) -> List[str]:
         text = data.decode("utf-8", errors="replace")
         findings += scan_dockerfile(text, rel) if is_dockerfile(path) else scan_script(text, rel)
     return findings
+
+
+def download_finding(url: str, name: str = "") -> Optional[str]:
+    """Why a download a module declares (pinned_downloads, a pip index) would bring in prebuilt llama.cpp, or None:
+    the same checks as a download line in a Dockerfile or script."""
+    found = _text_findings(f"curl -o {name or 'file'} {url}")
+    found += [f"names a llama.cpp binary ({m.group(0)})" for m in [_BINARY.search(name or "")] if m]
+    found += ["names a llama.cpp archive or image" for _ in [1] if _LLAMA_IMAGE.search(name or "")]
+    return f"{found[0]}; {_ADVICE}" if found else None

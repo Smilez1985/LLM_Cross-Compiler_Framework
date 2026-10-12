@@ -213,6 +213,7 @@ class ModuleCreationWizard(QWizard):
         self._close_result = None   # closing waits for a running crawl to store its current page
         self.crawled_roots = set()  # URLs crawled in this wizard: the only pages a knowledge snapshot may hold
         self.probe_path = None      # the target's probe file: the runtime: block is planned from it
+        self.probe_id = None        # its copy in the probe store, by which AI clients and Ditto name it
 
         self.signals = WizardSignals()
         self.signals.analysis_finished.connect(self.on_ai_finished)
@@ -691,6 +692,7 @@ Setup commands:
         path, _ = QFileDialog.getOpenFileName(self, tr("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
         if not path: return
         self.probe_path = path
+        self._store_probe(path)
 
         self.status_label.setText("Parsing probe data...")
         
@@ -800,6 +802,18 @@ Setup commands:
             self.btn_import_ai.setEnabled(True)
             self.status_label.setText(f"{tr('msg.ai_ready')}: {self.ai_config.get('provider')}")
 
+    def _store_probe(self, path):
+        """Copies the chosen probe file, validated and without its host name, into the probe store, so AI clients and
+        Ditto can name the board's probe by its id (design T5); a file that is no probe the framework reads stays a
+        file the AI analysis reads."""
+        try:
+            from orchestrator.runtime.probe_service import HardwareProbes
+            probes = HardwareProbes.for_framework(self.framework_manager)
+            self.probe_id = probes.import_file(path)
+        except Exception:
+            self.probe_id = None
+        return self.probe_id
+
     def _target_profile(self):
         """The imported probe file as a hardware profile of the target (None without one, or when it is not a probe
         profile): the module's runtime: block is the build recipe's plan from it."""
@@ -828,6 +842,7 @@ Setup commands:
         path, _ = QFileDialog.getOpenFileName(self, tr("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
         if not path: return
         self.probe_path = path
+        self._store_probe(path)
 
         self._set_avatar_state("think") # ANIMATED SPRITE
         self.btn_import_ai.setEnabled(False)
@@ -953,7 +968,15 @@ Setup commands:
             "quantization_logic": self.quant_logic.toPlainText(),
             "detection_commands": "lscpu"
         }
-        
+        if self.ai_proposal:
+            # The proposal's fields without a widget of their own are passed on, never dropped (the person saw them
+            # in the proposal's facts), and the module is marked AI-generated and untested.
+            from orchestrator.Core.module_generator import AI_DEFINITION_FIELDS
+            for key in AI_DEFINITION_FIELDS:
+                if key not in self.module_data and self.ai_proposal.get(key):
+                    self.module_data[key] = self.ai_proposal[key]
+            self.module_data["provenance"] = "ai-generated"
+
         try:
             if not self.targets_dir.exists(): self.targets_dir.mkdir(parents=True, exist_ok=True)
             generator = ModuleGenerator(self.targets_dir)
@@ -964,6 +987,10 @@ Setup commands:
                                                         profile=profile)
             else:
                 output_path = generator.generate_module(self.module_data, profile=profile)
+            if self.ai_proposal:  # a module from an AI's proposal, saved by the person: audited (design 6.7)
+                from orchestrator.tools.tools_targets import record_module_saved
+                record_module_saved(self.framework_manager, "gui", self.module_data, Path(output_path),
+                                    "framework-gui")
             message = f"{tr('msg.module_created')}\n{output_path}"
             if roots and not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
                 message += "\n\n" + ui_text("crawl.snapshot_missing")

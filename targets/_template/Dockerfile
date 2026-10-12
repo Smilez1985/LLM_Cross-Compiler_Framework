@@ -25,6 +25,10 @@ ENV LLAMA_CPP_PATH=/usr/src/llama.cpp
 ENV BUILD_CACHE_DIR=/build-cache
 ENV PATH="/root/.local/bin:$PATH"
 
+# Vendor apt sources of the module (package_sources): the framework writes this block; each signing key is
+# checked against its fingerprint before the source is added (empty when the module has none).
+# [VENDOR_SOURCES]
+
 # System Dependencies
 # The wizard automatically injects cross-compilers here if needed
 RUN apt-get update && \
@@ -82,6 +86,12 @@ RUN python3 -m pip install --no-cache-dir \
         transformers tokenizers safetensors sentencepiece protobuf \
         huggingface-hub datasets numpy scipy onnx onnxruntime \
         tqdm psutil pyyaml requests
+
+# Vendor Python packages of the module (pip_packages, each pinned name==version; empty when it has none)
+# [PIP_PACKAGES]
+
+# Vendor downloads of the module (pinned_downloads: https, size and sha256 checked; empty when it has none)
+# [PINNED_DOWNLOADS]
 
 # --- llama.cpp conversion tools: the build (after the venvs, so a new LLAMA_CMAKE_ARGS rebuilds only this layer) ---
 # Every build: no option that downloads at configure or build time, no subprocess support in llama.cpp, no FetchContent
@@ -151,6 +161,7 @@ RUN apt-get update && \
 # Copy Python Environment and the llama.cpp tools (source tree with build/bin) from Builder
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /usr/src/llama.cpp /usr/src/llama.cpp
+# [PINNED_DOWNLOADS_COPY]
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

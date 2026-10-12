@@ -230,7 +230,8 @@ class TestFrameworkResources:
         for spec in registry.resources():
             if spec.tool:
                 with pytest.raises(ToolDenied):
-                    registry.read_resource(spec.uri, {"target": "Rockchip", "request_id": "r"}, ToolContext("mcp"))
+                    registry.read_resource(spec.uri, {"target": "Rockchip", "request_id": "r", "probe_id": "local"},
+                                           ToolContext("mcp"))
 
 
 class FakeBuilds:

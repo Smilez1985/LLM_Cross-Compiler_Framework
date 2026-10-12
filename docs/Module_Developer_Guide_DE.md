@@ -477,6 +477,42 @@ Image dann für die Builder-Stufe und setzt `CUDA_SOURCE=prebuilt-image`, das da
 das Log des Generators und das Log des Image-Builds sagen „not self-built“. Die Laufzeitstufe bleibt auf dem
 festgelegten Ubuntu 22.04, weil die Python-Umgebung von einer Stufe in die andere kopiert wird.
 
+### 5.3 Basis-Images und Hersteller-Software KI-erstellter Module
+
+Ein Modul, das eine KI vorschlägt (Ditto bei `module generate-ai` und im Assistenten oder ein MCP-Client über
+`create_target_module`), darf von **jedem Basis-Image** ausgehen, weil manche Hersteller ihre Toolchain nur als
+Container-Image ausliefern (zum Beispiel die Jetson/L4T-Images von NVIDIA auf `nvcr.io`). Die Regeln:
+
+- **Per Digest festgelegt.** Ein Tag wird beim Nachfragen in den Digest aufgelöst, auf den es gerade zeigt (anonym
+  über die öffentliche Schnittstelle der Registry; im Offline-Modus abgelehnt; eine Registry, die eine Anmeldung
+  verlangt, wird nicht genutzt, gib das Image dann als `image@sha256:...` an), und die Builder-Stufe des Dockerfiles
+  beginnt mit genau diesem Digest; der Generator prüft, dass die Builder-Stufe mit dem Basis-Image des Moduls
+  beginnt, auch bei der GPU-Vorlage. Registries mit Port (`registry.example:5000/img@sha256:...`) sind erlaubt.
+- **Klar gezeigt.** Ein Docker Official Image (`debian`, `ubuntu`, `python`, ohne Namensraum) bekommt die normale
+  Frage. Jedes andere Image wird gezeigt als „other registry: <Registry>; prebuilt image made by its publisher, not
+  checked by the framework“, mit „the image build runs with network access on this computer, outside the build
+  sandbox“, den Plattformen in seinem Manifest und ob eine zu diesem Rechner passt (ein reines arm64-Image auf einem
+  x86_64-Rechner wird gezeigt, nicht abgelehnt). Ein solches Image braucht `base_image_reason`; besser ist ein
+  offizielles Image mit den Paketquellen des Herstellers.
+- **Hersteller-Software**, die die Dockerfile-Vorlage des Frameworks beim Image-Build einfügt (die Shell-Felder der
+  KI dürfen weiterhin nichts herunterladen):
+  - `package_sources`: eine https-Paketquelle für apt (`url`, `suite`, `components`) mit ihrem öffentlichen
+    Signaturschlüssel (`signed_by_url`) und dem vollen Fingerabdruck des Schlüssels (`signed_by_fingerprint`). Der
+    Image-Build holt den Schlüssel, bricht ab, wenn sein Fingerabdruck abweicht, und trägt die Quelle mit
+    `signed-by` ein; `packages` kann dann ihre Pakete nennen.
+  - `pip_packages`: Python-Pakete, genau festgelegt als `name==version`, von PyPI oder aus einem https-Index
+    (`pip_index_url`), installiert in die Python-Umgebung des Images.
+  - `pinned_downloads`: Dateien mit https-Adresse, Dateiname (`name`), genauer Größe (`size_bytes`) und `sha256`; der
+    Image-Build prüft Größe und Prüfsumme, bevor die Datei ihren Namen in `/opt/vendor` bekommt (wird in die
+    Laufzeitstufe kopiert), wo `setup_commands` sie entpacken kann.
+  Die Sicherheitsprüfungen sind hart (https, genaue Versionen, Größe und sha256, Fingerabdrücke aus 40 Hex-Zeichen,
+  nie ein vorgebautes llama.cpp-Paket, ein Wheel-Index oder eine Binärdatei). Die Anzahlen sind weiche Grenzen
+  (3 Quellen, 30 pip-Pakete, 5 Downloads): Darüber zu gehen ist eine Warnung in der Frage, die die Zustimmung der
+  Person aufhebt, nie eine Ablehnung.
+- **Ungetestet wird gesagt.** Die neue `target.yml` bekommt `metadata.provenance: ai-generated`,
+  `metadata.untested: true`, die `assumptions` und den `base_image_reason` der KI und die Support-Stufe `community`;
+  Builds davon warnen. KI-erstellte Module bekommen nie eine dauerhafte Freigabe: Jedes bestätigt die Person.
+
 ## 6. Das Build-Skript
 
 `modules/build.sh` ist der einzige Einstieg. Es läuft einmal je Stufe, als `/app/modules/build.sh`, in der Sandbox
@@ -882,5 +918,9 @@ Sie bleibt gleich, wenn sich die IP-Adresse ändert, und enthält keinen Hostnam
 wird, bekommt eine zufällige ID. Die Dateien gehören nur dem Benutzer (Modus 0600 in Ordnern mit Modus 0700),
 flüchtige Werte werden nicht gespeichert, und gespeicherte Dateien werden beim Zurücklesen wie Probe-Dateien geprüft.
 `llm-cli scan` speichert das Profil dieses Rechners als `local`, und `llm-cli scan --device` speichert das Profil
-eines Geräts unter seiner ID. Die Scans des Build-Reiters der GUI nutzen den Speicher noch nicht; sie schreiben die
-Probe-Datei wie in [Abschnitt 3.1](#31-das-board-untersuchen) beschrieben.
+eines Geräts unter seiner ID, und `llm-cli scan --import DATEI` (oder **Import from File** in der GUI und die Importe
+des Assistenten) legt die Probe-Datei eines Boards unter einer zufälligen ID ab. KI-Clients und Ditto nennen ein
+gespeichertes Profil über diese Probe-ID (`local` oder die Geräte-ID; Tools `get_hardware_probe` und
+`probe_local_hardware`, Ressource `lcf://probes/{probe_id}`), nie über einen Pfad. Der lokale und der SSH-Scan des
+Build-Reiters der GUI schreiben die Probe-Datei weiterhin wie in [Abschnitt 3.1](#31-das-board-untersuchen)
+beschrieben.

@@ -455,16 +455,6 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                           fix_hint=f.fix_hint) for f in report.findings])
 
     specs = [
-        ToolSpec("list_targets", "List targets",
-                 "Lists the hardware targets with their boards, output formats and quantization types.",
-                 ToolTier.READ, NoInput, TargetListOut, lambda _: service.list_targets(), idempotent=True,
-                 summary=lambda o: count(len(o.targets), "target", "targets") + "."),
-        ToolSpec("get_target_capabilities", "Target capabilities",
-                 "Shows what a target can build: boards, formats, quantizations per board, calibration needs.",
-                 ToolTier.READ, TargetIn, TargetCapabilitiesOut, lambda i: service.capabilities(i.target),
-                 idempotent=True, fields={"target": target_field}, examples=({"target": "Rockchip"},),
-                 summary=lambda o: (f"Capabilities: {count(len(o.boards), 'board', 'boards')}, "
-                                    f"{count(len(o.formats), 'format', 'formats')}.")),
         ToolSpec("list_build_requests", "List build requests",
                  "Lists the build requests of this session with their status.",
                  ToolTier.READ, NoInput, BuildListOut, lambda _: service.list_requests(), idempotent=True,
@@ -551,6 +541,9 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                                     + count(o.permissions.listed, "tool", "tools") + " listed."
                                     if o.permissions else "Framework status.")),
     ]
+    # Targets, hardware probes and new target modules: their own module (design T5), first in the tool list.
+    from orchestrator.tools.tools_targets import register_target_tools
+    register_target_tools(registry, framework, service=service, jobs=jobs, target_field=target_field)
     for spec in specs:
         registry.register(spec)
     return registry
@@ -650,7 +643,9 @@ def build_tool_registry(framework) -> ToolRegistry:
     from orchestrator.tools.framework_prompts import register_framework_prompts
     from orchestrator.tools.framework_resources import register_framework_resources
     registry = register_framework_resources(register_framework_tools(registry, framework), framework)
-    registry = register_framework_prompts(registry, framework)
+    from orchestrator.runtime.probe_service import HardwareProbes
+    registry = register_framework_prompts(registry, framework,
+                                          probe_text=lambda pid: HardwareProbes.for_framework(framework).text(pid))
     # Pending approvals: a client that cannot ask gets its question shown in the framework instead (design 6.9).
     from orchestrator.tools.approvals import ApprovalService, ApprovalStore
     registry.attach_approvals(ApprovalService(ApprovalStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed),

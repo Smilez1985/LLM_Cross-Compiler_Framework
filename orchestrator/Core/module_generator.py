@@ -36,7 +36,10 @@ MODULE_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,63}$")
 SDK_RE = re.compile(r"^[\w .+/-]{0,64}$")
 DEB_PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]+(?::[a-z0-9-]+)?(?:=[A-Za-z0-9.+~:-]+)?$")
 FLAG_RE = re.compile(r"^-[A-Za-z][\w.=+,:/-]*$")
-IMAGE_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(?::[\w][\w.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$")
+# An image reference: an optional registry with a port (registry.example:5000/...; any registry is allowed, DECISIONS
+# round 3), the repository, an optional tag and an optional digest.
+IMAGE_RE = re.compile(r"^(?:[a-z0-9][a-z0-9.-]*(?::\d{1,5})?/)?[a-z0-9][a-z0-9._/-]*(?::[\w][\w.-]{0,127})?"
+                      r"(?:@sha256:[a-f0-9]{64})?$")
 # Images that may be used without a digest pin; anything else must be pinned by digest. NVIDIA's prebuilt CUDA images
 # are an explicit opt-in pinned by digest (decision D6): the GPU template provisions CUDA from the pinned redist
 # archives instead.
@@ -65,7 +68,8 @@ SHIPPED_TEMPLATE = Path(__file__).resolve().parents[2] / "targets" / "_template"
 # for any bracketed placeholder text, see _leftover_placeholders).
 TEMPLATE_PLACEHOLDERS = re.compile(  # not after a name: COMPILER_CONFIG[CMAKE_FLAGS] is a bash array entry
     r"(?<![\w$])\[(?:MODULE_NAME|Hardware-Familie|IHRE_ARCHITEKTUR|Hersteller|QUANTIZATION_LOGIC|CPU_FLAGS|CMAKE_FLAGS"
-    r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name)\]|\{packages_str\}|YYYY-MM-DD")
+    r"|SDK_SETUP_COMMANDS|PACKAGING_COMMANDS|ihr-target-name|VENDOR_SOURCES|PIP_PACKAGES|PINNED_DOWNLOADS"
+    r"|PINNED_DOWNLOADS_COPY)\]|\{packages_str\}|YYYY-MM-DD")
 GGUF_DEFAULT_QUANTS = ["Q4_K_M", "Q4_0", "Q5_K_M", "Q6_K", "Q8_0", "F16"]
 KNOWLEDGE_SNAPSHOT = "knowledge/initial_knowledge.json"  # crawled pages: data, not template output
 KNOWLEDGE_README = """# Knowledge snapshot of {slug}
@@ -86,6 +90,239 @@ knowledge base.
 def module_slug(module_name: str) -> str:
     slug = re.sub(r"[^a-z0-9_-]", "_", module_name.strip().lower().replace(" ", "_")).strip("_-")
     return slug
+
+
+def canonical_target_name(name: str) -> str:
+    """A target name compared the way a person reads it: lower case, separators (space, '_', '-', '.') ignored."""
+    return re.sub(r"[^a-z0-9]", "", str(name or "").lower())
+
+
+def target_name_collision(targets_dir: Path, *names: str) -> Optional[str]:
+    """The existing target id or folder name that a new target's names would equal ignoring case and separators
+    (None when there is none): target names resolve to the first case-insensitive match (G43), so a new target
+    must never capture the name of another one."""
+    wanted = {canonical_target_name(n) for n in names if canonical_target_name(n)}
+    root = Path(targets_dir)
+    if not wanted or not root.is_dir():
+        return None
+    from orchestrator.Core.target_manager import read_target_folders
+    existing = [p.name for p in root.iterdir() if not p.name.startswith(".")]
+    existing += list(read_target_folders(root))
+    return next((name for name in existing if canonical_target_name(name) in wanted), None)
+
+
+# --- vendor toolchains of a module (MCP design 2.6, DECISIONS round 3 (d) and round 4 item 4) ------------------------
+# A module adds software as apt packages, vendor apt sources with a signing key, pinned pip packages and pinned
+# downloads. The framework's Dockerfile template renders them during the image build (which runs with network); the
+# AI's shell fields may still not download. Security checks are hard (https, pinned versions, sha256 and size, key
+# fingerprints); the counts are soft caps: going above one is shown as a warning in the question and needs the
+# person's approval, never a refusal. The technical ceilings below only bound the size of a question.
+SOFT_CAPS = {"package_sources": 3, "pip_packages": 30, "pinned_downloads": 5}
+CEILINGS = {"package_sources": 20, "pip_packages": 200, "pinned_downloads": 50}
+HTTPS_URL_RE = re.compile(r"^https://[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::\d{1,5})?"
+                          r"(?:/[A-Za-z0-9._~%/+=-]*)?$")
+APT_SUITE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$")
+APT_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$")
+FINGERPRINT_RE = re.compile(r"^[A-F0-9]{40}$")
+PIP_REQUIREMENT_RE = re.compile(r"^([A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?)==([A-Za-z0-9][A-Za-z0-9.+!_-]{0,63})$")
+DOWNLOAD_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+MAX_DOWNLOAD_BYTES = 1 << 50  # a sanity bound for the declared size, not a cap
+_LLAMA_PACKAGE = re.compile(r"llama[._-]?cpp|^ggml", re.IGNORECASE)
+VENDOR_DIR = "/opt/vendor"
+TEXT_FIELD_LIMITS = {"assumptions": 300, "base_image_reason": 1000}
+
+
+def _https(url: Any) -> bool:
+    return isinstance(url, str) and bool(HTTPS_URL_RE.fullmatch(url)) and ".." not in url
+
+
+def soft_cap_warnings(data: Dict[str, Any]) -> List[str]:
+    """One plain warning per soft cap the module goes above (empty: none)."""
+    out = []
+    for key, cap in SOFT_CAPS.items():
+        n = len(data.get(key) or [])
+        if n > cap:
+            out.append(f"{key}: {n} entries, more than the usual {cap}. Every entry adds software from outside the "
+                       "framework to the image build; approving overrides this soft limit.")
+    return out
+
+
+def vendor_fact_lines(data: Dict[str, Any]) -> List[str]:
+    """What a person must see about a module's vendor software before it is created: every address, fingerprint, pin
+    and hash (the values are the AI's; callers show them as AI text), then a warning per soft cap gone above."""
+    lines = []
+    for s in data.get("package_sources") or []:
+        s = s.model_dump() if hasattr(s, "model_dump") else dict(s)
+        components = s.get("components") or []
+        lines.append(f"Vendor apt source: {s.get('url')} {s.get('suite')} "
+                     f"{' '.join(components) if isinstance(components, list) else components}; signing key "
+                     f"{s.get('signed_by_url')}, fingerprint {s.get('signed_by_fingerprint')}")
+    pips = data.get("pip_packages") or []
+    if pips:
+        lines.append(f"pip packages from {data.get('pip_index_url') or 'PyPI'}: {', '.join(map(str, pips))}")
+    for d in data.get("pinned_downloads") or []:
+        d = d.model_dump() if hasattr(d, "model_dump") else dict(d)
+        lines.append(f"Download into {VENDOR_DIR}/{d.get('name')}: {d.get('url')}, {d.get('size_bytes')} bytes, "
+                     f"sha256 {d.get('sha256')}")
+    return lines + [f"WARNING: {w}" for w in soft_cap_warnings(data)]
+
+
+def _validate_vendor_fields(data: Dict[str, Any], out: Dict[str, Any], problems: List[str]) -> None:
+    from orchestrator.utils.prebuilt_llama import download_finding
+    sources = []
+    for i, entry in enumerate(data.get("package_sources") or []):
+        entry = dict(entry) if isinstance(entry, dict) else {}
+        fingerprint = re.sub(r"\s", "", str(entry.get("signed_by_fingerprint", ""))).upper()
+        components = entry.get("components") or []
+        components = components.split() if isinstance(components, str) else [str(c).strip() for c in components]
+        where = f"package_sources[{i}]"
+        if not _https(entry.get("url")):
+            problems.append(f"{where}.url: an https address of an apt repository")
+        if not APT_SUITE_RE.fullmatch(str(entry.get("suite", ""))):
+            problems.append(f"{where}.suite: a plain suite name such as bookworm or jammy")
+        if not components or len(components) > 10 or not all(APT_COMPONENT_RE.fullmatch(c) for c in components):
+            problems.append(f"{where}.components: 1 to 10 plain component names such as main")
+        if not _https(entry.get("signed_by_url")):
+            problems.append(f"{where}.signed_by_url: the https address of the repository's signing key")
+        if not FINGERPRINT_RE.fullmatch(fingerprint):
+            problems.append(f"{where}.signed_by_fingerprint: the key's full fingerprint, 40 hex characters")
+        sources.append({"url": entry.get("url"), "suite": entry.get("suite"), "components": components,
+                        "signed_by_url": entry.get("signed_by_url"), "signed_by_fingerprint": fingerprint})
+    out["package_sources"] = sources
+
+    pips = [str(p).strip() for p in (data.get("pip_packages") or []) if str(p).strip()]
+    for p in pips:
+        m = PIP_REQUIREMENT_RE.fullmatch(p)
+        if not m:
+            problems.append(f"pip_packages: '{p[:80]}' must be pinned exactly as name==version")
+        elif _LLAMA_PACKAGE.search(m.group(1)):
+            problems.append(f"pip_packages: '{m.group(1)}' is llama.cpp; targets build llama.cpp from source with the "
+                            "shared recipe")
+    out["pip_packages"] = pips
+    index = str(data.get("pip_index_url") or "").strip()
+    if index and not _https(index):
+        problems.append("pip_index_url: one https address of a Python package index")
+    elif index and download_finding(index, ""):
+        problems.append(f"pip_index_url: {download_finding(index, '')}")
+    out["pip_index_url"] = index
+
+    downloads, names = [], set()
+    for i, entry in enumerate(data.get("pinned_downloads") or []):
+        entry = dict(entry) if isinstance(entry, dict) else {}
+        where = f"pinned_downloads[{i}]"
+        url, name = entry.get("url"), str(entry.get("name", "")).strip()
+        sha = str(entry.get("sha256", "")).strip().lower()
+        size = entry.get("size_bytes")
+        if not _https(url):
+            problems.append(f"{where}.url: an https address")
+        if not DOWNLOAD_NAME_RE.fullmatch(name) or name in names:
+            problems.append(f"{where}.name: a unique plain file name (letters, digits, '.', '_', '-')")
+        if not SHA256_RE.fullmatch(sha):
+            problems.append(f"{where}.sha256: the file's sha256, 64 hex characters")
+        if isinstance(size, bool) or not isinstance(size, int) or not 0 < size < MAX_DOWNLOAD_BYTES:
+            problems.append(f"{where}.size_bytes: the file's exact size in bytes")
+        finding = download_finding(str(url or ""), name)
+        if finding:
+            problems.append(f"{where}: {finding}")
+        names.add(name)
+        downloads.append({"url": url, "name": name, "sha256": sha, "size_bytes": size})
+    out["pinned_downloads"] = downloads
+
+    for key, ceiling in CEILINGS.items():
+        if len(out[key]) > ceiling:
+            problems.append(f"{key}: at most {ceiling} entries fit into one module definition")
+
+    assumptions = data.get("assumptions") or []
+    assumptions = [assumptions] if isinstance(assumptions, str) else list(assumptions)
+    cleaned = [" ".join(str(a).split()) for a in assumptions if str(a).strip()]
+    if len(cleaned) > 10:
+        problems.append("assumptions: at most 10 entries")
+    if any(len(a) > TEXT_FIELD_LIMITS["assumptions"] or _CONTROL_CHARS.search(a) for a in cleaned):
+        problems.append("assumptions: each at most 300 printable characters")
+    out["assumptions"] = cleaned
+    reason = " ".join(str(data.get("base_image_reason") or "").split())
+    if len(reason) > TEXT_FIELD_LIMITS["base_image_reason"]:
+        problems.append("base_image_reason: at most 1000 characters")
+    out["base_image_reason"] = reason
+    provenance = data.get("provenance")
+    if provenance not in (None, "", "ai-generated"):
+        problems.append("provenance: only 'ai-generated' (set by the framework)")
+    out["provenance"] = provenance or None
+
+
+def _q(value: str) -> str:
+    """A validated value in single quotes (the regexes above already keep quotes and shell characters out)."""
+    if "'" in value:
+        raise ValueError("a quoted value contains a quote")
+    return f"'{value}'"
+
+
+def vendor_blocks(data: Dict[str, Any]) -> Dict[str, str]:
+    """The Dockerfile blocks for a validated module's vendor sources, pip packages and downloads ("" for none)."""
+    blocks = {"# [VENDOR_SOURCES]": "", "# [PIP_PACKAGES]": "", "# [PINNED_DOWNLOADS]": "",
+              "# [PINNED_DOWNLOADS_COPY]": ""}
+    sources = data.get("package_sources") or []
+    if sources:
+        lines = ["RUN set -eu; \\",
+                 "    apt-get update; \\",
+                 "    apt-get install -y --no-install-recommends ca-certificates curl gnupg; \\",
+                 "    install -d -m 0755 /etc/apt/keyrings; \\",
+                 '    GNUPGHOME="$(mktemp -d)"; export GNUPGHOME; \\']
+        for n, s in enumerate(sources):
+            fpr, keyring = s["signed_by_fingerprint"], f"/etc/apt/keyrings/lcf-vendor-{n}.gpg"
+            lines += [f"    curl -fsSL --proto '=https' --tlsv1.2 {_q(s['signed_by_url'])} -o /tmp/lcf-vendor-{n}.key; \\",
+                      f"    gpg --batch --quiet --import /tmp/lcf-vendor-{n}.key; \\",
+                      f"    gpg --batch --with-colons --fingerprint {_q(fpr)} | grep -q '^fpr:::::::::{fpr}:' \\",
+                      f"        || {{ echo 'package source {n}: the signing key is not {fpr}' >&2; exit 1; }}; \\",
+                      f"    gpg --batch --export {_q(fpr)} > {keyring}; \\",
+                      f"    test -s {keyring}; \\",
+                      f"    echo {_q('deb [signed-by=' + keyring + '] ' + s['url'] + ' ' + s['suite'] + ' ' + ' '.join(s['components']))}"
+                      f" > /etc/apt/sources.list.d/lcf-vendor-{n}.list; \\",
+                      f"    rm -f /tmp/lcf-vendor-{n}.key; \\"]
+        lines += ['    rm -rf "$GNUPGHOME" /var/lib/apt/lists/*']
+        blocks["# [VENDOR_SOURCES]"] = "\n".join(lines)
+    pips = data.get("pip_packages") or []
+    if pips:
+        index = data.get("pip_index_url") or ""
+        args = (f"--index-url {_q(index)} " if index else "") + " ".join(_q(p) for p in pips)
+        blocks["# [PIP_PACKAGES]"] = f"RUN python3 -m pip install --no-cache-dir {args}"
+    downloads = data.get("pinned_downloads") or []
+    if downloads:
+        lines = ["RUN set -eu; \\", f"    mkdir -p {VENDOR_DIR}; \\"]
+        for d in downloads:
+            dest = f"{VENDOR_DIR}/{d['name']}"
+            lines += [f"    curl -fsSL --proto '=https' --tlsv1.2 -o {_q(dest + '.part')} {_q(d['url'])}; \\",
+                      f"    test \"$(wc -c < {_q(dest + '.part')})\" -eq {int(d['size_bytes'])} \\",
+                      f"        || {{ echo '{d['name']}: not the size the module declares' >&2; exit 1; }}; \\",
+                      f"    echo {_q(d['sha256'] + '  ' + dest + '.part')} | sha256sum -c -; \\",
+                      f"    mv {_q(dest + '.part')} {_q(dest)}; \\"]
+        lines[-1] = lines[-1][:-3]  # the last command ends the RUN step
+        blocks["# [PINNED_DOWNLOADS]"] = "\n".join(lines)
+        blocks["# [PINNED_DOWNLOADS_COPY]"] = f"COPY --from=builder {VENDOR_DIR} {VENDOR_DIR}"
+    return blocks
+
+
+AI_DEFINITION_FIELDS = ("architecture", "sdk", "base_os", "packages", "cpu_flags", "cmake_flags", "quantization_logic",
+                        "setup_commands", "package_sources", "pip_packages", "pip_index_url", "pinned_downloads",
+                        "assumptions", "base_image_reason")
+
+
+def generator_input(definition: Dict[str, Any], module_name: Optional[str] = None,
+                    boards: Optional[List[str]] = None) -> Dict[str, Any]:
+    """The module generator's input for an AI-proposed module definition, the one mapping for every path (Ditto's
+    `llm-cli module generate-ai`, the module wizard's AI proposal and the MCP tool create_target_module): every field
+    of the definition is passed on (none is dropped), the module is marked ai-generated and untested, and its
+    description says so with the values the AI guessed."""
+    from orchestrator.Core.ditto_manager import ai_module_description
+    name = module_name or str(definition.get("module_name") or "") or "Custom_Target"
+    data = {key: definition[key] for key in AI_DEFINITION_FIELDS if definition.get(key) is not None}
+    packages = data.get("packages", [])
+    data.update({"module_name": name, "packages": packages.split() if isinstance(packages, str) else packages,
+                 "description": ai_module_description(name, definition.get("assumptions") or []),
+                 "detection_commands": "lscpu", "supported_boards": list(boards or [name]),
+                 "provenance": "ai-generated"})
+    return data
 
 
 def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -166,9 +403,37 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
                 problems.append(f"{key}: not allowed, {reason}")
         out[key] = code
 
+    _validate_vendor_fields(data, out, problems)
     if problems:
         raise ValueError("Invalid module definition:\n- " + "\n- ".join(problems))
     return out
+
+
+DEFAULT_BASE = "debian:bookworm-slim"
+
+
+def uses_gpu_template(data: Dict[str, Any]) -> bool:
+    """Whether a module is generated from the GPU template (a CUDA SDK, or an NVIDIA image as the base)."""
+    return "cuda" in str(data.get("sdk", "")).lower() or "nvidia" in str(data.get("base_os", "")).lower()
+
+
+def effective_base(data: Dict[str, Any], template_dir: Path = SHIPPED_TEMPLATE) -> str:
+    """The image the generated Dockerfile's builder stage starts from: the module's base_os, except that the GPU
+    template keeps its own pinned Ubuntu base when the module names only the default base."""
+    base = str(data.get("base_os") or DEFAULT_BASE)
+    if uses_gpu_template(data) and base == DEFAULT_BASE:
+        try:
+            text = (Path(template_dir) / "Dockerfile.gpu").read_text(encoding="utf-8")
+        except OSError:
+            return base
+        m = re.search(r"^FROM (\S+) AS builder$", text, re.MULTILINE)
+        return m.group(1) if m else base
+    return base
+
+
+def _yaml_text(text: str) -> str:
+    """AI text for target.yml: brackets removed (a bracketed value reads as a template placeholder), one line."""
+    return " ".join(re.sub(r"[\[\]{}]", "", str(text)).split())
 
 
 def capabilities_block(board_names: List[str], quantization_logic: str = "") -> Dict[str, Any]:
@@ -340,10 +605,12 @@ class ModuleGenerator:
         target_dir = (targets_root / slug).resolve()
         if target_dir.parent != targets_root:
             raise ValueError(f"Module folder '{slug}' would be outside {targets_root}.")
-        # Never overwrite an existing target (case-insensitive: 'rockchip' must not replace 'Rockchip').
-        existing = {p.name.lower() for p in targets_root.iterdir()} if targets_root.exists() else set()
-        if slug.lower() in existing:
-            raise ValueError(f"A target named '{slug}' already exists; choose another module name.")
+        # Never overwrite or shadow an existing target: names are compared ignoring case and separators ('rockchip'
+        # and 'Rock-Chip' must not capture 'Rockchip'), against folder names and target ids.
+        taken = target_name_collision(targets_root, slug, module_name)
+        if taken:
+            raise ValueError(f"A target named '{taken}' already exists, and '{module_name}' would read the same "
+                             "(names are compared ignoring case and separators); choose another module name.")
         
         self.logger.info(f"Generating new target module: '{module_name}' at {target_dir}")
         
@@ -360,8 +627,7 @@ class ModuleGenerator:
             
             # Container Definition
             # Check if GPU template is needed
-            sdk = data.get("sdk", "").lower()
-            if "cuda" in sdk or "nvidia" in data.get("base_os", "").lower():
+            if uses_gpu_template(data):
                 self._process_template("Dockerfile.gpu", target_dir, data, target_filename="Dockerfile")
             else:
                 self._process_template("Dockerfile", target_dir, data)
@@ -392,8 +658,10 @@ class ModuleGenerator:
             if framework_manager and roots:
                 self._create_knowledge_snapshot(target_dir, framework_manager, slug, roots)
 
-            # 7. What others would build: capabilities, pinned images, deny-list, bash -n, no placeholders.
+            # 7. What others would build: capabilities, pinned images, deny-list, bash -n, no placeholders; and the
+            # image the person approved is the one the builder stage starts from.
             problems = validate_target_folder(target_dir, self.template_dir)
+            problems += self._base_problems(target_dir, effective_base(data, self.template_dir))
             if problems:
                 raise ValueError("The generated module is not usable:\n- " + "\n- ".join(problems[:20]))
             
@@ -406,6 +674,21 @@ class ModuleGenerator:
             # neither shows up as a buildable target nor blocks a corrected retry.
             shutil.rmtree(target_dir, ignore_errors=True)
             raise e
+
+    @staticmethod
+    def _base_problems(target_dir: Path, base_os: str) -> List[str]:
+        """The generated Dockerfile's builder stage must start from exactly the module's base image (the one the
+        person was shown); a template that keeps another base would build something else than was approved."""
+        try:
+            text = (Path(target_dir) / "Dockerfile").read_text(encoding="utf-8")
+        except OSError:
+            return ["Dockerfile: missing"]
+        for line in text.splitlines():
+            m = re.match(r"\s*FROM\s+(?:--platform=\S+\s+)?(\S+)\s+AS\s+builder\s*$", line, re.IGNORECASE)
+            if m:
+                return [] if m.group(1) == base_os else [
+                    f"Dockerfile: the builder stage starts from {m.group(1)}, not from the module's base image {base_os}"]
+        return ["Dockerfile: no builder stage"]
 
     def _runtime_block(self, data: Dict[str, Any], profile) -> Dict[str, Any]:
         """The runtime: block of the new target.yml (orchestrator/runtime/build/target_runtime.py). A recipe that
@@ -489,9 +772,13 @@ class ModuleGenerator:
             for key, value in replacements.items():
                 if value is not None:
                     content = content.replace(key, str(value))
-            
+            if filename.startswith("Dockerfile"):  # the framework-written vendor blocks, after the AI's fields
+                for key, value in vendor_blocks(data).items():
+                    content = content.replace(key, value)
+
             if filename == "Dockerfile.gpu":
                 content = self._cuda_opt_in(content, str(data.get("base_os", "")))
+                content = self._gpu_base(content, str(data.get("base_os", "")))
                 if re.search(r"^ARG CUDA_SOURCE=prebuilt-image$", content, re.MULTILINE):
                     self.logger.warning(f"CUDA for '{data.get('module_name')}' comes from the prebuilt image "
                                         f"{data.get('base_os')} (your explicit opt-in, not self-built), not from "
@@ -512,6 +799,19 @@ class ModuleGenerator:
                 
         except Exception as e:
             self.logger.error(f"Error processing template {filename}: {e}")
+
+    @staticmethod
+    def _gpu_base(content: str, base_os: str) -> str:
+        """The GPU template on the module's own base image: a base other than the default and the prebuilt CUDA opt-in
+        (for example a vendor's toolchain image) replaces the template's Ubuntu base in both stages, so the image that
+        is built is the one the person approved (CUDA still comes from the pinned redist archives)."""
+        if not base_os or base_os == DEFAULT_BASE or base_os.startswith("nvidia/cuda:"):
+            return content
+        content, n = re.subn(r"^FROM \S+ AS (builder|runtime)$", lambda m: f"FROM {base_os} AS {m.group(1)}", content,
+                             flags=re.MULTILINE)
+        if n != 2:
+            raise ValueError("the GPU template has no builder and runtime stage to put the base image into")
+        return content
 
     @staticmethod
     def _cuda_opt_in(content: str, base_os: str) -> str:
@@ -537,7 +837,14 @@ class ModuleGenerator:
             "name": name, "description": data.get("description") or f"Target for {name}",
             "maintainer": data.get("maintainer") or "community", "created": date.today().isoformat(),
             "architecture_family": data["architecture"], "vendor": data.get("vendor") or "community",
-            "sdk": data.get("sdk", "none")})
+            "sdk": data.get("sdk", "none"), "base_image": effective_base(data, self.template_dir)})
+        if data.get("provenance") == "ai-generated":
+            # Untested is a fact to state, not a reason to refuse (design 1.3); builds of this target warn.
+            config["metadata"].update({"provenance": "ai-generated", "untested": True})
+            if data.get("assumptions"):
+                config["metadata"]["assumptions"] = [_yaml_text(a) for a in data["assumptions"]]
+            if data.get("base_image_reason"):
+                config["metadata"]["base_image_reason"] = _yaml_text(data["base_image_reason"])
         config["supported_boards"] = [{"name": b} for b in boards]
         config.setdefault("docker", {})["image_name"] = f"llm-framework/{module_slug(name).replace('_', '-')}"
         config["capabilities"] = capabilities_block(boards, data.get("quantization_logic", ""))

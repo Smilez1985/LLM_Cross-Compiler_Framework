@@ -130,7 +130,7 @@ stays below the given share.
 | `mcp serve` / `mcp config` | Run the MCP server / show how to connect AI clients |
 | `secrets set` / `secrets list` | Store a token (Hugging Face, GitHub) / list the stored names |
 | `module create` / `module generate-ai` | Create a new hardware target, by questions or from a probe file with Ditto |
-| `scan` | Run the hardware probe on this computer or, with `--device`, on a board over SSH, and store the profile |
+| `scan` | Run the hardware probe on this computer or, with `--device`, on a board over SSH, or with `--import` store a board's probe file, and print its probe id |
 | `device list` / `device settings` | The probed boards / how the runtime is installed on a board (start script or systemd), decided before a deployment |
 | `device runtime plan/build/deploy/verify/status` | The self-built llama.cpp runtime of a board: plan it from the board's profile, cross-build it, install it over SSH and check it there |
 | `config show` / `config repos` | Show the effective settings and where each comes from / manage source repository overrides |
@@ -1181,6 +1181,7 @@ llm-cli module generate-ai target_hardware_config.txt --provider local
 llm-cli scan [--output TEXT] [--json] [--script]
 llm-cli scan --device HOST --user TEXT [--port N] [--password TEXT] [--trust-fingerprint TEXT] [--label TEXT]
              [--output TEXT] [--json]
+llm-cli scan --import FILE [--label TEXT]
 ```
 
 Runs the hardware probe and keeps its result, the hardware profile (schema 2, described in the
@@ -1202,6 +1203,18 @@ that runs the model, so the probe runs on that machine.
   (`~/.llm-framework/hardware/devices/<id>.txt`; the ID comes from the board's host key) with your label and its
   address. The SSH user becomes the board's deploy user for [`device runtime deploy`](#device) when none is set
   (never root).
+- **A board's probe file** (`--import FILE`): a `target_hardware_config.txt` you copied from a board (written there
+  by `scripts/hardware_probe.sh` or `llm-cli scan`) is checked like any probe file from outside, stored under a new
+  random ID with your label (default: the board model in the file) and the CLI prints that **probe id** and the
+  target that matches it (by the SoC as a board of a target, then by the SoC's or NPU's vendor, within the same
+  architecture). An older schema-1 file is converted; what the schema does not know, the host name among it, is
+  dropped. AI clients and Ditto name a board's probe only by this id (`get_hardware_probe`, the `add_board`
+  prompt); no tool reads a probe from a path.
+
+On this computer the probe runs without a terminal: the fallback script gets its input from `/dev/null`,
+`NON_INTERACTIVE=true` and its own working folder (`~/.llm-framework/hardware/work`, never the current folder), and a
+probe that takes longer than 120 seconds is stopped. The same service runs the probe for the MCP tool
+`probe_local_hardware`.
 
 The probes never ask, install or ask for administrator rights. Exit code 1 if the probe fails or its file cannot be
 read, 2 for wrong options.
@@ -1216,7 +1229,8 @@ read, 2 for wrong options.
 | `--port N` | SSH port of the board (default 22). |
 | `--password TEXT` | Only for the first connection: used once to install the framework's SSH key, never stored (asked interactively when omitted). |
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has this SHA256 fingerprint. |
-| `--label TEXT` | Your name for the board in the profile store. |
+| `--label TEXT` | Your name for the board in the profile store (with `--device` or `--import`). |
+| `--import FILE` | Store a board's probe file in the probe store and print its probe id (not together with `--device`). |
 
 A machine without network access runs a probe by hand, and you import its file
 ([README](../README.md#probing-the-boards-hardware)). In the GUI, **Scan / Import...** imports a probe file, scans a
@@ -1225,6 +1239,7 @@ board over SSH (with the same remote probe, so boards with `/tmp` mounted `noexe
 ```bash
 llm-cli scan                                        # this computer, stored as "local"
 llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W" --output zero3w.txt
+llm-cli scan --import zero3w.txt --label "ZERO 3W"   # a probe file copied from a board
 ```
 
 ---
