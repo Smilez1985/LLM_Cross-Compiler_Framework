@@ -107,6 +107,80 @@ def test_a_board_job_error_never_names_the_account(fw, monkeypatch):  # noqa: F8
     assert ACCOUNT not in status.model_dump_json(), status.model_dump_json()
 
 
+def test_an_unexpected_deploy_error_keeps_its_text_from_the_ai(fw, online, fake_deploy, monkeypatch):  # noqa: F811
+    """The device scrub applies to the deploy's own refusals (a ValueError, its words meant for the AI); an unexpected
+    exception's text never reaches an AI at all (job service rule), scrubbed or not."""
+    device, key = trust(fw, host=ADDRESS, user=ACCOUNT)
+    online["key"] = key
+    pkg = package(fw, build(fw))
+    manager = fw.deployment_manager if getattr(fw, "deployment_manager", None) is not None \
+        else fw.get_component("deployment_manager")
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("internal state dump: token-cache at /srv/internal/cache, peer 203.0.113.7")
+    monkeypatch.setattr(manager, "deploy_package", broken)
+    started = call(fw, "deploy_to_device", {"package_id": pkg["package_id"], "device_id": device.device_id},
+                   confirm=asking(True))
+    job = wait_job(fw, started.job_id)
+    assert job.state == "failed"
+    status = fw.tool_registry.call("get_job_status", {"job_id": started.job_id}, ToolContext("ditto"))
+    text = status.model_dump_json()
+    assert "internal state dump" not in text and "203.0.113.7" not in text, text
+
+    def refused(*args, **kwargs):
+        from orchestrator.Core.deployment_manager import DeployError
+        raise DeployError(f"The device refused the upload for {ACCOUNT} into /home/{ACCOUNT}/models.",
+                          code="hardware_unavailable")
+    monkeypatch.setattr(manager, "deploy_package", refused)
+    started = call(fw, "deploy_to_device", {"package_id": pkg["package_id"], "device_id": device.device_id},
+                   confirm=asking(True))
+    assert wait_job(fw, started.job_id).state == "failed"
+    status = fw.tool_registry.call("get_job_status", {"job_id": started.job_id}, ToolContext("ditto"))
+    assert status.error is not None and status.error.code == "hardware_unavailable"
+    assert "refused the upload" in status.error.message and ACCOUNT not in status.model_dump_json()
+
+
+SETTINGS_ACCOUNT = "kiosk7"   # an account the person chose in the deploy settings, other than the paired login
+
+
+@pytest.mark.parametrize("tool", ["deploy_device_runtime", "run_device_benchmark"])
+def test_a_board_job_error_never_names_the_deploy_settings_account(fw, monkeypatch, tool):  # noqa: F811
+    """The board tools log in with the deploy settings' account ('llm-cli device settings DEVICE --user NAME'),
+    which may differ from the account the device was paired with: a failed job never names either."""
+    from types import SimpleNamespace
+    from orchestrator.runtime.device import service
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    from orchestrator.runtime.device.settings import DeploySettings
+    from orchestrator.utils import ssh_trust
+    device, key = trust(fw, host=ADDRESS, user=ACCOUNT)
+    monkeypatch.setattr(ssh_trust, "fetch_host_key", lambda host, port=22, timeout=10.0: key)
+    settings = DeploySettings(ssh_user=SETTINGS_ACCOUNT, model="models/qwen.gguf")
+    monkeypatch.setattr(service, "device_profile", lambda s, d: SimpleNamespace(arch="aarch64"))
+    monkeypatch.setattr(service, "deploy_settings", lambda s, d, p: settings)
+    monkeypatch.setattr(service, "plan_facts", lambda s, p: service.DevicePlanFacts(
+        "b" * 64, True, True, {"os": "linux", "arch": "aarch64", "libc": "glibc"}, {"base": "debian"}))
+    monkeypatch.setattr(DeviceRuntimeStore, "record", lambda self: {"build_id": "b" * 64})
+
+    def refuse(*args, **kwargs):
+        raise service.DeviceRuntimeError(f"The framework's SSH key does not log in to the board as "
+                                         f"{SETTINGS_ACCOUNT} (AuthenticationException).", code="needs_person",
+                                         external_text=[f"/home/{SETTINGS_ACCOUNT}/.ssh/authorized_keys: denied"])
+    monkeypatch.setattr(service, "deploy" if tool == "deploy_device_runtime" else "benchmark", refuse)
+    from orchestrator.tools.policy import Decision, ToolPolicy
+    fw.tool_registry.policy_store.replace(ToolPolicy(configured=True, overrides={tool: Decision.ASK},
+                                                     reviewed=[s.name for s in fw.tool_registry.list()]))
+    confirm = asking(True)
+    started = call(fw, tool, {"device_id": device.device_id}, confirm=confirm)
+    (question,) = confirm.asked
+    assert ACCOUNT in question, "the person sees the login in the framework's window"
+    job = wait_job(fw, started.job_id)
+    assert job.state == "failed"
+    status = fw.tool_registry.call("get_job_status", {"job_id": started.job_id}, ToolContext("ditto"))
+    text = status.model_dump_json()
+    assert SETTINGS_ACCOUNT not in text and ACCOUNT not in text, text
+    assert DEVICE_ACCOUNT in text, "the AI still reads that the device account could not log in"
+
+
 # --- the source guard ------------------------------------------------------------------------------------------------
 
 ACCOUNT_ATTRS = frozenset({"user", "ssh_user"})

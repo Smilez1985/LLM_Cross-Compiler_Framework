@@ -1948,11 +1948,14 @@ sie:
 - **Sicherheits- und Rechtshinweise** bleiben immer bei dir: Modelldateien in einem alten Format, das versteckten Code
   ausführen kann (pickle), eine Build-Umgebung von außerhalb der geprüften Docker-Sammlung oder nicht auf eine genaue
   Version festgelegt, mehr Hersteller-Downloads als üblich, ein ungeprüftes oder ein Community-Hardware-Modul, ein
-  nicht vertrauenswürdiges Modell, das direkt auf deinem Computer läuft, ein Paket mit deinem Schlüssel signiert, ein
-  Modell mit Bedingungen, eine Lizenz, die die Nutzung einschränkt oder nicht auf der Liste bekannter freier Lizenzen
-  steht. Fakten, die sich nicht prüfen ließen (Hugging Face hat nicht geantwortet, keine Lizenz genannt, ein
-  Basismodell, das nicht nachgeschlagen werden konnte, ein unbekanntes Dateiformat), sind ebenfalls ein
-  Sicherheitshinweis: Unbekannt ist nie "kein Problem".
+  nicht vertrauenswürdiges Modell, das direkt auf deinem Computer läuft (oder in der Sandbox, außer du hast das für
+  KIs mit der Einstellung `bench_untrusted_sandbox_ok` erlaubt, die keine KI ändern kann), ein Paket mit deinem
+  Schlüssel signiert, ein Modell mit Bedingungen, eine Lizenz, die die Nutzung einschränkt oder nicht auf der Liste
+  bekannter freier Lizenzen steht. Fakten, die sich nicht prüfen ließen (Hugging Face hat nicht geantwortet, keine
+  Lizenz genannt, ein Basismodell, das nicht nachgeschlagen werden konnte, ein unbekanntes Dateiformat), sind
+  ebenfalls ein Sicherheitshinweis: Unbekannt ist nie "kein Problem". Eine Build-Umgebung von außerhalb der geprüften
+  Docker-Sammlung bleibt bei jedem Build ein Sicherheitshinweis, auch nachdem du einen Build damit einmal bestätigt
+  hast (eine Dauerfreigabe, die du gewählt hast, kann diesen Build trotzdem abdecken).
 - **Den ersten Build von Build-Code, den eine KI erstellt oder installiert hat, siehst du einmal selbst.** Ein Target-
   oder Rezept-Paket, das unter einer Dauerfreigabe (später auch einer Vollmacht) installiert wurde, ein Hardware-Modul,
   das eine KI ohne dein Ja erstellt hat, und ein Target von einem anderen Computer tragen den Sicherheitshinweis
@@ -1969,9 +1972,11 @@ Situationshinweise und getrennt davon die Sicherheits- und Rechtshinweise.
 
 Eine ausstehende Freigabe wird nicht mehr erneut gefragt, wenn sich nur der freie Speicherplatz geändert hat, während
 du sie gelesen hast: Eine Entscheidung ist an die Fakten gebunden, auf die es ankommt (die Anfrage, den Commit, die
-Größenklasse, die Hinweise, die Image-Digests, das Board und seinen Host-Key), nicht an freien Speicher oder
-Byte-Zahlen. Kommt ein Hinweis hinzu oder fällt einer weg, etwa weil der Speicher jetzt knapp ist, wirst du erneut
-gefragt. Unter einer Dauerfreigabe (und später einer Vollmacht) nutzt ein Build oder Download nur den Commit, den das
+Größenklasse, die Hinweise, die Image-Digests, das Board und seinen Host-Key), nicht an freien Speicher,
+Byte-Zahlen oder die Uhrzeit, nach der ein Sicherungs-Snapshot benannt wird. Kommt ein Hinweis hinzu oder fällt einer
+weg, etwa weil der Speicher jetzt knapp ist, wirst du erneut gefragt. Kurztexte in einer Rückfrage zeigen nie interne
+Wörter des Frameworks: Was nicht geprüft werden konnte oder welche Hersteller-Liste gemeint ist, steht in klaren
+Worten da. Unter einer Dauerfreigabe (und später einer Vollmacht) nutzt ein Build oder Download nur den Commit, den das
 Framework nachgeschlagen hat; konnte Hugging Face nicht gefragt werden, startet nichts ohne dich.
 
 **Board-Konten bleiben bei dir.** Das Konto, mit dem sich das Framework auf einem Board anmeldet (etwa `dietpi`), und

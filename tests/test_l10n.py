@@ -63,6 +63,28 @@ def test_the_texts_are_merged_into_the_framework_texts():
 
 
 @pytest.mark.parametrize("lang", ["en", "de"])
+def test_a_warnings_closed_words_reach_the_person_as_plain_words(lang):
+    """A warning's numbers may hold closed words (what could not be checked, which vendor list): the AI reads them as
+    they are, the person reads plain words in their language, never the code ('base_model+weights_format',
+    'pip_packages') in a question or its short summary."""
+    from itertools import combinations
+    from orchestrator.Core.module_generator import SOFT_CAPS
+    from orchestrator.tools.confirmation import person_summary
+    from orchestrator.tools.spec import CallFacts
+    cases = [catalog.facts_unknown(*c) for n in range(1, len(catalog.UNKNOWN_FACTS) + 1)
+             for c in combinations(catalog.UNKNOWN_FACTS, n)]
+    cases += [catalog.warn("vendor_soft_cap_exceeded", what=key, count=cap + 1, cap=cap) for key, cap in
+              SOFT_CAPS.items()]
+    for w in cases:
+        text = w.person_text(lang)
+        assert "_" not in text and "+" not in text and "huggingface" not in text, (lang, text)
+        assert "{" not in text, (lang, text)
+        assert w.numbers.get("unknown", w.numbers.get("what")) in w.ai_text(), "the AI keeps the closed words"
+        summary = " ".join(person_summary(CallFacts(consequence="c", warnings=(w,), tool="start_build"), lang))
+        assert "_" not in summary.replace("start_build", "") and "+" not in summary, (lang, summary)
+
+
+@pytest.mark.parametrize("lang", ["en", "de"])
 def test_every_warning_reads_in_both_languages(lang):
     for code, spec in catalog.WARNINGS.items():
         numbers = {name: 1 for name in placeholders(spec.ai_template)}

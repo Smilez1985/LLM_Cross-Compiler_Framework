@@ -264,9 +264,15 @@ def test_bench_untrusted_native_security(make_framework, tmp_path, monkeypatch):
     native = look_up(fw.tool_registry, "run_benchmark", {"kind": "artifact_speed", "artifact_id": aid})
     assert codes(native) == {"untrusted_model_native"} and native.warnings[0].kind == "security"
     assert_classified(native)
-    sandboxed = look_up(fw.tool_registry, "run_benchmark", {"kind": "artifact_speed", "artifact_id": aid,
-                                                             "sandbox": True})
-    assert codes(sandboxed) == set(), "in the sandbox it is no native run"
+    sandbox = {"kind": "artifact_speed", "artifact_id": aid, "sandbox": True}
+    # design 4.3 and 2.4 #12 (SEC-M9): the Docker sandbox for an untrusted model is the person's opt-in
+    # (bench_untrusted_sandbox_ok, which no AI can set); without it an AI's sandbox choice stays the person's to decide
+    unset = look_up(fw.tool_registry, "run_benchmark", sandbox)
+    assert codes(unset) == {"untrusted_model_native"} and unset.warnings[0].kind == "security"
+    assert "sandbox" in unset.warnings[0].ai_text(), "the AI reads why: the sandbox was not allowed by the person"
+    fw.config.set("bench_untrusted_sandbox_ok", True)
+    sandboxed = look_up(fw.tool_registry, "run_benchmark", sandbox)
+    assert codes(sandboxed) == set(), "in the sandbox the person allowed it is no native run"
 
 
 # --- the first build of AI-made build code ([Q1]) --------------------------------------------------------------------

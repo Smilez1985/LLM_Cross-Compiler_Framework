@@ -82,8 +82,12 @@ class BuildPlan:
     weights: str = ""            # safetensors, gguf, pickle, none or other (a local model's from its file names)
     # build code an AI made or installed that the person has not confirmed a build of yet ([Q1]): (kind, id)
     first_build: List[Tuple[str, str]] = field(default_factory=list)
-    # base images outside the Docker Official Images the person never confirmed in a build of this target
+    # base images outside the Docker Official Images the person never confirmed in a build of this target (what a
+    # standing approval may not cover)
     unconfirmed_images: List[str] = field(default_factory=list)
+    # every base image outside the Docker Official Images: a security warning on every build, confirmed before or not
+    # (only an acknowledgement bound to the digest, design question Q3, could lift it; none exists yet)
+    outside_images: List[str] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
 
     # --- the question --------------------------------------------------------------------------------------------
@@ -244,9 +248,9 @@ class BuildPlan:
             unknown.append("weights_format")
         if unknown:
             found.append(catalog.facts_unknown(*unknown))
-        if self.unconfirmed_images:
-            found.append(catalog.warn("base_image_unofficial", registry=_registry_word(self.unconfirmed_images[0])))
-            if any(not _pinned_image(i) for i in self.unconfirmed_images):
+        if self.outside_images:
+            found.append(catalog.warn("base_image_unofficial", registry=_registry_word(self.outside_images[0])))
+            if any(not _pinned_image(i) for i in self.outside_images):
                 found.append(catalog.warn("base_image_unpinned"))
         if self.target_trust == "local":
             found.append(catalog.warn("target_unreviewed"))
@@ -722,6 +726,7 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
     plan.weights = (plan.facts.weights if plan.facts is not None else "") if plan.source == "hf" else \
         _local_weights(Path(pin.path))
     pending, plan.unconfirmed_images = confirmation_state(framework, plan.confirm_record)
+    plan.outside_images = [i for i in plan.confirm_record.get("base_images") or [] if not _official(i)]
     plan.first_build = [(kind, item) for kind, item, _via in pending]
     plan.grant_scope = grant_scope(plan, framework, target_folder, pin, plan.confirm_record)
     plan.grant = plan.grant_scope if plan.grant_scope is not None and _standing_fits(plan, service, ledger) else None

@@ -211,6 +211,20 @@ def test_a_digest_without_named_keys_covers_every_bound_value():
     assert dataclasses.replace(facts, bound={"x": 1, "y": 3}).decision_digest() != facts.decision_digest()
 
 
+def test_a_digest_without_a_template_covers_the_consequence():
+    """A look-up that names no consequence template has not said which part of its consequence is volatile: the
+    consequence as rendered is part of the decision then (unknown is never "no problem"), for the digest and for the
+    question a pending approval compares; only a template lets free space in the consequence change unasked."""
+    from orchestrator.tools.approvals import stable_facts
+    facts = CallFacts(consequence="Deletes the build A.", facts=(Fact("a", "1"),), bound={"x": 1}, tool="t")
+    other = dataclasses.replace(facts, consequence="Deletes the build B.")
+    assert other.decision_digest() != facts.decision_digest()
+    assert stable_facts(other).consequence == "Deletes the build B.", "the question compared keeps the consequence"
+    templated = dataclasses.replace(facts, consequence_template="Deletes the build {name}.")
+    assert dataclasses.replace(templated, consequence="Deletes the build B.").decision_digest() == \
+        templated.decision_digest()
+
+
 def test_size_class_and_gb_numbers():
     assert catalog.size_class(4 * GB) == "5gb" and catalog.size_class(5 * GB + 1) == "20gb"
     assert catalog.size_class(300 * GB) == "any" and catalog.size_class(None) == "unknown"

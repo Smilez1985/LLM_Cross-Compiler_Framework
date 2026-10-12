@@ -260,6 +260,40 @@ class TestRestoreSnapshot:
             time.sleep(0.05)
         raise AssertionError(jobs)
 
+    def test_a_waiting_restore_is_not_asked_again_for_the_clock_or_free_space(self, env, monkeypatch):
+        """F3 (delegation design 4.4): the question names the backup by the time of the look-up and shows the free
+        space; both move while a pending approval waits. Neither is part of the decision (the snapshot is), so the
+        person's yes is not turned into the same question again, every time; another snapshot is a new question."""
+        from datetime import datetime as real
+        from orchestrator.Core import disk_plan
+        from orchestrator.tools import tools_optional
+        from orchestrator.tools.approvals import stable_facts
+        rag = FakeRag(env.tmp / "snapshots")
+        (rag.snapshot_dir / "pre_crawl_2.jsonl.gz").write_bytes(b"t" * 60)
+        env.framework.ensure_rag_manager = lambda: rag
+        enable(env, "restore_knowledge_snapshot")
+        spec = env.registry.get("restore_knowledge_snapshot")
+        clock, free = {"now": real(2026, 10, 12, 10, 0, 0)}, {"bytes": 900 * 10 ** 9}
+        monkeypatch.setattr(tools_optional, "datetime", SimpleNamespace(now=lambda: clock["now"]))
+        real_usage = disk_plan.shutil.disk_usage
+        monkeypatch.setattr(disk_plan.shutil, "disk_usage", lambda p: real_usage(p)._replace(free=free["bytes"]))
+        env.framework.build_service = None  # the disk check reads shutil, as without a build service
+
+        def look(snapshot="pre_crawl_1"):
+            ctx = ToolContext("mcp", session="opt")
+            inp = env.registry.validate_input(spec, {"snapshot": snapshot})
+            facts = env.registry.look_up(spec, inp, ctx)
+            return facts, env.registry.question_text(spec, inp.model_dump(mode="json"), ctx, stable_facts(facts))
+
+        first, first_question = look()
+        clock["now"], free["bytes"] = real(2026, 10, 12, 10, 7, 31), 850 * 10 ** 9
+        later, later_question = look()
+        assert first.bound["backup"] != later.bound["backup"], "the backup is named by the time of the look-up"
+        assert first.decision_digest() == later.decision_digest()
+        assert first_question == later_question, "the question a pending approval compares stays the same"
+        other, other_question = look("pre_crawl_2")
+        assert other.decision_digest() != first.decision_digest() and other_question != first_question
+
     def test_restore_runs_as_a_job_with_a_backup_named_in_the_question(self, env):
         rag = FakeRag(env.tmp / "snapshots")
         env.framework.ensure_rag_manager = lambda: rag

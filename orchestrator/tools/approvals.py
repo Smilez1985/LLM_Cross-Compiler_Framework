@@ -325,7 +325,7 @@ def stable_facts(facts: Any) -> Any:
     from orchestrator.tools.spec import CallWarning, volatile_numbers
     volatile = set(volatile_numbers(getattr(facts, "tool", "") or ""))
     return dataclasses.replace(
-        facts, consequence=facts.consequence_template or "",
+        facts, consequence=facts.consequence_template or facts.consequence,  # no template: all of it counts
         facts=tuple(f for f in facts.facts if not f.volatile),
         numbers={k: v for k, v in facts.numbers.items() if k not in volatile},
         warnings=tuple(CallWarning(w.code) for w in facts.warnings))

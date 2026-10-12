@@ -180,6 +180,27 @@ def test_a_pinned_vendor_image_counts_after_a_confirmed_build_and_a_tag_never(zo
     assert pinned(L4T) and not pinned("nvcr.io/nvidia/l4t-base:r36") and not pinned("debian:bookworm-slim")
 
 
+def test_a_confirmed_vendor_image_stays_a_security_warning_for_the_person(zoo):
+    """The person's standing approval may cover a pinned vendor image after one confirmed build (above); the warning
+    itself stays: an image outside the Docker Official Images is a security warning on every build (delegation design
+    4.2, 4.3), so no AI decides it under a delegation. Only an explicit "do not ask again for this version" (design
+    question Q3, bound to the digest) may lift it later; a confirmed build is no such acknowledgement."""
+    zoo.world.add(zoo.world.target_pack(dockerfile=f"FROM {L4T}\nRUN echo ok\n"), trust="verified")
+    zoo.world.publish()
+    zoo.world.install()
+    _, shown = ask(zoo, "start_build", BUILD)
+    assert len(shown) == 1 and "Needs you (security / legal):" in shown[0]
+    assert ConfirmedBuilds(zoo.state).image_confirmed("demo-board", L4T, installed_via="",
+                                                      pack_sha256=read_provenance(
+                                                          zoo.cm.targets_dir / "demo-board").pack_sha256)
+    spec = zoo.registry.get("start_build")
+    facts = zoo.registry.look_up(spec, zoo.registry.validate_input(spec, dict(BUILD)), ToolContext("ditto"))
+    found = {w.code: w for w in facts.warnings}
+    assert "base_image_unofficial" in found and found["base_image_unofficial"].kind == "security"
+    assert found["base_image_unofficial"].numbers == {"registry": "nvcr.io"}
+    assert "base_image_unpinned" not in found, "the image is pinned by digest"
+
+
 def test_only_digest_pinned_images_are_remembered(tmp_path):
     """A tag can later name another image: it is never remembered as confirmed (packs refuse tags anyway)."""
     store = ConfirmedBuilds(tmp_path)
