@@ -465,3 +465,38 @@ def test_the_gh_and_git_runner_never_reads_stdin(tmp_path):
                         opener=lambda url: pytest.fail("the browser was opened"))
     assert len(seen) >= 8 and all(s is subprocess.DEVNULL for s in seen), seen
 
+
+# --- review: what the person confirms is what is recorded and what runs ----------------------------------------------
+
+def test_the_build_question_shows_every_image_a_confirmed_build_remembers(zoo):
+    """A vendor image pulled by a later stage (COPY --from) is shown in the build question; only then may a confirmed
+    build remember it as confirmed (DECISIONS round 3: an image from another registry is shown plainly)."""
+    debian = "debian@sha256:" + "b" * 64
+    zoo.world.add(zoo.world.target_pack(dockerfile=f"FROM {debian}\nCOPY --from={L4T} /opt /opt\nRUN echo ok\n"),
+                  trust="verified")
+    zoo.world.publish()
+    zoo.world.install()
+    _, shown = ask(zoo, "start_build", BUILD)
+    assert len(shown) == 1
+    assert L4T in shown[0], "the vendor image of the second stage is in the question"
+    assert debian in shown[0]
+    entry = ConfirmedBuilds(zoo.state).get("target", "demo-board")
+    assert entry is not None and entry["base_images"] == [debian, L4T]
+
+
+def test_a_recipe_whose_options_changed_after_the_question_is_not_built(recipes):
+    """The importance matrix and the context length are part of what the person approved: the question shows them,
+    and a recipe edited after the question (any field) is refused."""
+    folder = install_recipe(recipes)
+    shown = []
+
+    def change(spec, inp):
+        shown.append(current_question())
+        data = json.loads((folder / "recipe.yml").read_text())
+        data["options"]["max_context_length"] = 65536
+        (folder / "recipe.yml").write_text(json.dumps(data))
+        return True
+    with pytest.raises(ToolError) as e:
+        recipes.registry.call("start_recipe_build", {"recipe_id": "demo-recipe"}, ToolContext("ditto", confirm=change))
+    assert "changed after the question" in e.value.message and recipes.orch.requests == []
+    assert "context length 4096" in shown[0] and "importance matrix no" in shown[0]

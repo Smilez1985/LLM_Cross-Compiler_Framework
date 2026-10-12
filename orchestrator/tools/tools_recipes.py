@@ -74,7 +74,9 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         base = plan.call_facts()
         facts = [Fact("Recipe", f"{recipe.id} by {recipe.author} (trust {prov.trust}"
                       + (", installed under a standing approval" if record["installed_via"] else "") + ")",
-                      RECIPE_TEXT)]
+                      RECIPE_TEXT),
+                 Fact("Recipe options", f"importance matrix {'yes' if recipe.options.use_imatrix else 'no'}, context "
+                      f"length {recipe.options.max_context_length or 'the target default'}")]
         target_note = target_match(recipe)
         if target_note:
             facts.append(Fact("Target files", target_note))
@@ -83,6 +85,7 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
                                                      f"{recipe.options.dataset.sha256} (checked)", RECIPE_TEXT))
         bound = dict(base.bound)
         bound["recipe_id"] = prov.id
+        bound["recipe_sha256"] = service.recipe_digest(recipe)  # every field, checked again at commit
         return CallFacts(consequence=f"Builds the community recipe {recipe.id}: " + base.consequence,
                          facts=tuple(facts) + tuple(base.facts), bound=bound, cap=base.cap)
 
@@ -110,7 +113,7 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         from orchestrator.Core.build_service import BuildServiceError
         expect = {"model": bound.get("model"), "revision": bound.get("revision"), "target": bound.get("target"),
                   "format": bound.get("format"), "board": bound.get("board"),
-                  "quantization": bound.get("quantization")}
+                  "quantization": bound.get("quantization"), "recipe_sha256": bound.get("recipe_sha256")}
 
         def start(reservation):
             try:

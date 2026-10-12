@@ -1332,7 +1332,8 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   fragen“) wird angeboten für Builds auf mitgelieferten oder verifizierten Targets mit safetensors- oder
   GGUF-Gewichten, einem nicht zugangsbeschränkten Modell, dessen Basismodell es auch nicht ist, einer Lizenz auf der
   Liste freizügiger Lizenzen (oder einer lokalen Datei), Docker Official Images als Basis (oder einem per Digest
-  gepinnten Basis-Image, das du in einem Build dieses Targets schon bestätigt hast), bis zur gewählten Größenklasse
+  gepinnten Basis-Image, das du in einem Build dieses Targets schon bestätigt hast; die Frage eines Builds auf einem
+  nicht mitgelieferten Target nennt jedes Image jedes Dockerfiles, auch späterer Stufen), bis zur gewählten Größenklasse
   und nur, wenn das Laufwerk die größere Reserve von 20 GiB oder 10 % behält. Diese größere Reserve wird beim Start
   des Builds erneut geprüft, im Reservierungsbuch, das alle Framework-Prozesse teilen, und unter seiner Sperre, so
   dass eine inzwischen von einem anderen Prozess genommene Reservierung mitzählt; reicht sie nicht mehr, startet
@@ -2246,10 +2247,11 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
 - **`start_recipe_build`** (lokal schreiben): baut ein installiertes Rezept genau so, wie es festgelegt ist: sein
   Hugging-Face-Modell beim Commit des Rezepts, Target, Format, Board, Quantisierung, Importance-Matrix und
   Kontextlänge. Es geht denselben zweistufigen Weg wie `start_build` (die Frage zeigt das Rezept, ob das
-  installierte Target das ist, mit dem das Rezept entstand, den Commit, die Downloadgröße, das Laufwerk, die
+  installierte Target das ist, mit dem das Rezept entstand, seine Importance-Matrix und Kontextlänge, den Commit,
+  die Downloadgröße, das Laufwerk, die
   Hardware-Schätzung, Lizenz, Zugangsbeschränkung und Image-Build; dieselbe Speicherreservierung und dieselben
   Kontingente). `dataset_path` nur, wenn das Rezept einen Kalibrierungsdatensatz nennt, und dann muss es genau diese
-  Datei sein (sha256). Ein nach der Frage geändertes Rezept wird nicht gebaut. „Ja, und nicht mehr fragen“ hat den
+  Datei sein (sha256). Ein nach der Frage in irgendeinem Feld geändertes Rezept wird nicht gebaut. „Ja, und nicht mehr fragen“ hat den
   Umfang von `start_build`; ein unter einem Dauerauftrag installiertes Rezept ist erst abgedeckt, nachdem du einen
   Build davon bestätigt hast. Die Ressource `lcf://packs/index` zeigt den zwischengespeicherten Index und die
   installierten Packs (wie `list_packs`, nie aktualisiert).
