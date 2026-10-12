@@ -1023,7 +1023,12 @@ class ToolPermissionsDialog(QDialog):
         except Exception as e:
             QMessageBox.critical(self, "Tool permissions", f"Could not revoke the standing approval:\n{e}")
             return False
-        self.loaded = self.registry.policy()
+        # Carry on from the new revision only when nothing but standing approvals changed since this window opened;
+        # otherwise its save stays based on what it showed and is refused, so a change made elsewhere is not undone.
+        fresh = self.registry.policy()
+        ignored = {"revision", "updated_at", "grants"}
+        if fresh.model_dump(exclude=ignored) == self.loaded.model_dump(exclude=ignored):
+            self.loaded = fresh
         self.refresh_grants()
         return revoked
 

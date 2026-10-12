@@ -25,7 +25,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, Union
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from orchestrator.tools.grants import Grant
-from orchestrator.tools.signing import SIGNATURE_FIELD, SignatureError, sign, verify
+from orchestrator.tools.signing import SIGNATURE_FIELD, RevisionAnchor, SignatureError, sign, verify
 
 
 class ToolTier(str, Enum):
@@ -344,16 +344,18 @@ class PolicyStore:
     KIND = "tool_policy"
 
     def __init__(self, state_dir: Path, key: Optional[bytes] = None, audit: Any = None,
-                 refuse_unkeyed: Optional[Callable[[], bool]] = None):
+                 refuse_unkeyed: Optional[Callable[[], bool]] = None, anchor: Optional[RevisionAnchor] = None):
         """key: the audit key (OS keyring), None without a keyring (unkeyed signatures). audit: the audit log every
         save is recorded in (None: not recorded, e.g. a test or the evaluation's own staging). refuse_unkeyed: asked
         whether an unkeyed signature must be refused although this process has no key (the audit log is kept with
-        one)."""
+        one). anchor: where the newest saved revision is kept outside the per-user folder (the OS keyring); with it
+        an older signed copy put back over the file, or a removed file, denies everything."""
         self.path = Path(state_dir) / self.FILE_NAME
         self.lock_path = Path(state_dir) / self.LOCK_NAME
         self.key = key
         self.audit = audit
         self.refuse_unkeyed = refuse_unkeyed
+        self.anchor = anchor
         self.problem: Optional[str] = None  # set when the stored file exists but could not be used
         self._lock = threading.Lock()  # a file lock belongs to one open file: one save of this store at a time
 
@@ -365,6 +367,7 @@ class PolicyStore:
     def _read(self) -> Tuple[ToolPolicy, Optional[str], Optional[int]]:
         """(the policy to decide with, the problem with the stored file or None, the revision the stored file names
         when it could be parsed, verified or not, for a save over it). Never raises."""
+        anchored = self._anchored()
         try:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError as e:
@@ -372,6 +375,12 @@ class PolicyStore:
                 # A link whose target is gone (moved folder, unmounted drive): the stored choice is unknown.
                 return restrictive_policy(), (f"{self.path} is a link to a missing file ({e}); all tools are "
                                               "denied until it is back."), None
+            if anchored:
+                # The framework saved permissions here before: the defaults could be looser than what was chosen.
+                return restrictive_policy(), (f"{self.path} was removed after the framework had saved revision "
+                                              f"{anchored} of it; all tools are denied until you set the "
+                                              "permissions up again with 'llm-cli tools permissions' or in the GUI "
+                                              "(Tool Permissions)."), None
             return ToolPolicy(), None, None
         except OSError as e:
             # Unreadable right now (permissions, too many open files): deny everything for this call.
@@ -396,7 +405,19 @@ class PolicyStore:
                                           f"kept as {self.path.name}.bad; set the permissions up again with "
                                           "'llm-cli tools permissions' or in the GUI (Tool Permissions)."), \
                 policy.revision
+        if policy.revision < anchored:
+            # Genuinely signed, but older than what the framework saved last: put back to undo a later change.
+            self._keep_copy()
+            return restrictive_policy(), (f"{self.path} cannot be trusted: it is an older copy (revision "
+                                          f"{policy.revision}; the framework saved revision {anchored} last). All "
+                                          f"tools are denied. A copy was kept as {self.path.name}.bad; set the "
+                                          "permissions up again with 'llm-cli tools permissions' or in the GUI "
+                                          "(Tool Permissions)."), policy.revision
         return policy, None, policy.revision
+
+    def _anchored(self) -> int:
+        """The newest revision the framework saved of this file (kept in the keyring), 0 without an anchor."""
+        return self.anchor.current(self.path) if self.anchor is not None else 0
 
     def _damaged(self, error: Exception) -> Tuple[ToolPolicy, str, None]:
         self._keep_copy()
@@ -460,7 +481,7 @@ class PolicyStore:
             raise PolicyConflict(
                 f"The tool permissions were changed elsewhere (now revision {before.revision}; this change was based "
                 f"on revision {policy.revision}). Nothing was saved: open them again and repeat the change.")
-        revision = max(stored_revision or 0, policy.revision) + 1
+        revision = max(stored_revision or 0, policy.revision, self._anchored()) + 1
         policy = policy.model_copy(update={"updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                                            "revision": revision})
         policy = ToolPolicy.model_validate(policy.model_dump())  # re-check limits after edits
@@ -482,6 +503,8 @@ class PolicyStore:
             except OSError:
                 pass
             raise
+        if self.anchor is not None:  # after the file: a reader in between sees a newer file, never an older one
+            self.anchor.saved(self.path, revision)
         self.problem = None
         return policy
 

@@ -22,7 +22,7 @@ from orchestrator.tools.output import ToolOutput
 from orchestrator.tools.policy import (CallerPolicy, Decision, PolicyConflict, PolicyStore, PolicyStoreError,
                                        ToolPolicy, ToolTier, policy_changes)
 from orchestrator.tools.registry import ToolContext, ToolDenied, ToolRegistry, ToolSpec
-from orchestrator.tools.signing import SignatureError, sign, verify
+from orchestrator.tools.signing import RevisionAnchor, SignatureError, sign, verify
 from pydantic import BaseModel  # noqa: E402
 
 KEY = b"k" * 32          # stands in for the audit key from the keyring (tests build no real credential)
@@ -249,6 +249,102 @@ class TestRevision:
         assert store.save(ToolPolicy(configured=True)).revision == 1 and store.problem is None
 
 
+# --- an older copy or a removed file (revision anchor) ---------------------------------------------------------
+
+def memory_anchor(slots=None):
+    """A revision anchor whose value lives in a dict (as the OS keyring keeps it, outside the per-user folder)."""
+    slots = {} if slots is None else slots
+    return slots, RevisionAnchor(lambda: slots.get("rev"), lambda v: slots.__setitem__("rev", v))
+
+
+class TestOlderCopiesAndRemovedFiles:
+    """A valid signature only says that the framework wrote a file once. An older signed copy put back over the
+    current permissions (or tokens) would bring back a revoked standing approval, a revoked token or a looser
+    permission, and a removed permission file would fall back to the defaults ("ask" where the person had denied a
+    tool). The newest saved revision is kept in the keyring; an older copy and a removed file deny everything."""
+
+    def test_an_older_signed_copy_of_the_permissions_denies_everything(self, tmp_path):
+        slots, anchor = memory_anchor()
+        store = store_at(tmp_path, anchor=anchor)
+        first = store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW}))
+        older = store.path.read_bytes()
+        store.save(first.model_copy(update={"overrides": {"start_build": Decision.DENY}}))
+        assert slots["rev"] == "2"
+        store.path.write_bytes(older)  # put back by hand: its signature is genuine
+        assert denies_everything(store.load())
+        assert "older copy" in store.problem and (tmp_path / "tool_policy.json.bad").exists()
+        # Another process (no value cached yet) refuses it too, and a person's save goes past the anchor.
+        other = store_at(tmp_path, anchor=memory_anchor(slots)[1])
+        assert denies_everything(other.load())
+        saved = other.save(ToolPolicy(configured=True))
+        assert saved.revision == 3 and slots["rev"] == "3" and store.load().configured and store.problem is None
+
+    def test_a_removed_permission_file_denies_everything_instead_of_the_defaults(self, tmp_path):
+        slots, anchor = memory_anchor()
+        store = store_at(tmp_path, anchor=anchor)
+        store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
+        store.path.unlink()
+        policy = store.load()
+        assert denies_everything(policy) and "was removed" in store.problem
+        fresh = store_at(tmp_path, anchor=memory_anchor(slots)[1])
+        assert denies_everything(fresh.load())
+        assert store.update(lambda p: ToolPolicy(configured=True)).revision == 2
+
+    def test_without_a_saved_revision_a_missing_file_still_gives_the_defaults(self, tmp_path):
+        store = store_at(tmp_path, anchor=memory_anchor()[1])
+        policy = store.load()
+        assert store.problem is None and not policy.configured and policy.tiers == ToolPolicy().tiers
+
+    def test_a_newer_save_by_another_process_is_accepted(self, tmp_path):
+        slots, anchor = memory_anchor()
+        mine = store_at(tmp_path, anchor=anchor)
+        mine.save(ToolPolicy(configured=True))
+        assert mine.load().revision == 1
+        theirs = store_at(tmp_path, anchor=memory_anchor(slots)[1])  # e.g. the GUI
+        theirs.update(lambda p: p.model_copy(update={"overrides": {"start_build": Decision.DENY}}))
+        assert mine.load().overrides == {"start_build": Decision.DENY} and mine.problem is None
+
+    def test_a_keyring_that_cannot_be_read_never_lowers_the_anchor(self, tmp_path):
+        slots, anchor = memory_anchor()
+        store = store_at(tmp_path, anchor=anchor)
+        store.save(ToolPolicy(configured=True))
+        older = store.path.read_bytes()
+        store.save(ToolPolicy(configured=True, revision=1))
+        broken = RevisionAnchor(lambda: (_ for _ in ()).throw(RuntimeError("locked")), lambda v: None)
+        assert store_at(tmp_path, anchor=broken).load().configured  # no value known: nothing to compare with
+        slots.clear()  # the entry removed from the keyring
+        store.path.write_bytes(older)
+        assert denies_everything(store.load()), "this process still knows revision 2"
+
+    def test_an_older_copy_of_the_token_store_brings_no_revoked_token_back(self, tmp_path):
+        slots, anchor = memory_anchor()
+        tokens = TokenStore(tmp_path, key=KEY, anchor=anchor)
+        token = tokens.add("laptop")
+        older = tokens.path.read_bytes()
+        tokens.revoke("laptop")
+        assert tokens.find(token) is None
+        tokens.path.write_bytes(older)
+        assert tokens.find(token) is None, "the revoked token stays revoked"
+        with pytest.raises(TokenStoreError, match="older copy"):
+            tokens.list()
+        fresh = TokenStore(tmp_path, key=KEY, anchor=memory_anchor(slots)[1])
+        assert fresh.find(token) is None
+
+    def test_the_framework_keeps_the_revisions_in_the_keyring(self, make_framework, memory_keyring):
+        fm = make_framework()
+        registry = fm.tool_registry
+        assert registry.policy_store.key is not None, "the test framework has a keyring"
+        registry.policy_store.replace(ToolPolicy(configured=True))
+        registry.tokens.add("laptop")
+        stored = {name: value for (service, name), value in memory_keyring.store.items()}
+        assert stored.get("tool_policy-revision") == str(registry.policy().revision)
+        assert stored.get("mcp_tokens-revision") == "1"
+        older = registry.policy_store.path.read_bytes()
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
+        registry.policy_store.path.write_bytes(older)
+        assert not registry.policy().configured and "older copy" in registry.policy_store.problem
+
+
 # --- audit (G11) -----------------------------------------------------------------------------------------------
 
 class TestAudit:
@@ -362,6 +458,36 @@ class TestPerson:
         fresh = ToolPermissionsDialog(registry)
         fresh.save()
         assert registry.audit.entries(1)[0]["actor"] == "gui"
+
+    def test_revoking_in_the_gui_never_makes_a_window_opened_earlier_save_over_a_change(self, tmp_path, qapp,
+                                                                                         monkeypatch):
+        """The window shows the permissions as they were when it opened. Revoking a standing approval there must not
+        let its later save overwrite a change made elsewhere meanwhile (here: the CLI denied start_build)."""
+        from PySide6.QtWidgets import QMessageBox
+
+        from orchestrator.gui.dialogs import ToolPermissionsDialog
+        from orchestrator.tools.grants import Grant
+        registry = make_registry(tmp_path)
+        grant = Grant(id="g_" + "1" * 16, tool="start_build", scope={"tool": "start_build"}, summary="every call",
+                      rule_version=1, created="2026-10-11T00:00:00+00:00", created_via="gui")
+        registry.policy_store.replace(ToolPolicy(configured=True, grants={"mcp": [grant]}))
+        shown = []
+        monkeypatch.setattr(QMessageBox, "critical", lambda *a, **k: shown.append(a[2]))
+        dialog = ToolPermissionsDialog(registry)
+        other = store_at(tmp_path)
+        other.update(lambda p: p.model_copy(update={"overrides": {"start_build": Decision.DENY}}), actor="cli")
+        assert dialog.revoke_grant(grant.id)
+        dialog.save()
+        assert shown and "changed elsewhere" in shown[0]
+        stored = registry.policy()
+        assert stored.overrides == {"start_build": Decision.DENY} and stored.grants == {}
+        # Without a change elsewhere, revoking and then saving works as before.
+        registry.policy_store.update(lambda p: p.model_copy(update={"grants": {"mcp": [grant]}}))
+        calm = ToolPermissionsDialog(registry)
+        assert calm.revoke_grant(grant.id)
+        shown.clear()
+        calm.save()
+        assert not shown and registry.policy().grants == {}
 
     def test_the_gui_shows_why_everything_is_denied(self, tmp_path, qapp):
         from PySide6.QtWidgets import QLabel
