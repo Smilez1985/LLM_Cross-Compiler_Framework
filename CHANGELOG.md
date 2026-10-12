@@ -31,6 +31,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   takes `kind` and `rerank`. Sources are named by ids, never by paths; all their text is marked untrusted. A tool call
   never downloads the embedding or reranking model: without the embedding model the search is refused with the next
   step instead of starting a download of about a gigabyte, and the refusal names no folder.
+- **Fix proposals from AI clients** (MCP tool `propose_healing_fix`): a client that analyses a failed build hands its
+  summary, cause, manual step and confidence to the framework. It passes the same checks as Ditto's own analysis,
+  including the dangerous-command filter, is confirmed by you like any local change, is accepted only for a failed
+  build (at most 10 per build) and is shown as AI-generated with who proposed it (the caller and the client's
+  self-reported name) in `get_build_status`, `llm-cli build status <request>` and the GUI (**Tools > Fix Proposals from
+  AI Clients...**). The framework never runs it, and `resolve_healing` refuses to apply it. The prompt
+  `diagnose_build_failure` leads to the tool.
 - **Reranking of knowledge-base results**: a local multilingual cross-encoder (FastEmbed/ONNX, about 120 MB,
   downloaded on first use, never in offline mode) reads the question together with each candidate and drops the
   ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build recommendations use

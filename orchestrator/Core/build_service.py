@@ -20,7 +20,7 @@ from orchestrator.Core.deployment_manager import list_builds
 from orchestrator.Core.orchestrator import (BuildQueueFull, BuildRequest, OrchestrationStatus, PriorityLevel,
                                             WorkflowState, WorkflowType)
 from orchestrator.schemas.build import (ArtifactList, ArtifactOut, BuildHandle, BuildList, BuildRequestIn,
-                                        BuildStatusOut, FormatSummary, LogTail, PendingHealing, TargetList,
+                                        BuildStatusOut, ClientProposalOut, FormatSummary, LogTail, PendingHealing, TargetList,
                                         TargetOut)
 from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.local_files import (LocalFileError, LocalFiles, LocalInputs, is_path, labels_hint,
@@ -205,6 +205,10 @@ class BuildService:
             completed_builds=state.completed_builds, failed_builds=state.failed_builds,
             artifacts=list(state.artifacts), errors=[redact_secrets(e) for e in state.errors],
             warnings=[redact_secrets(w) for w in state.warnings], pending_healing=pending,
+            client_proposals=[ClientProposalOut(
+                proposal_id=p.proposal_id, summary=p.summary, root_cause=p.root_cause, manual_step_text=p.manual_step,
+                confidence=p.confidence, where=p.where, proposed_by=p.proposed_by, client=p.client,
+                created=p.created) for p in getattr(state, "client_proposals", [])],
             owner=owner_actor(getattr(state, "owner", "")) or None)
 
     def _state(self, request_id: str) -> WorkflowState:
@@ -456,11 +460,63 @@ class BuildService:
     def _pending_proposal(self, request_id: str):
         state = self._state(request_id)
         proposal = state.healing_proposal if state.status == OrchestrationStatus.AWAITING_APPROVAL else None
+        if proposal is None and getattr(state, "client_proposals", None):
+            raise BuildServiceError(f"Build request '{request_id}' has only fix proposals from AI clients: manual "
+                                    "steps for the person, which the framework never applies.", code="not_supported",
+                                    next="Show the person the manual step (client_proposals in get_build_status); "
+                                         "they do it themselves.")
         if proposal is None:
             raise BuildServiceError(f"Build request '{request_id}' has no pending healing proposal.", code="failed",
                                     next="Call get_build_status to see the build's state; only a build that waits "
                                          "for a decision has a proposal.")
         return state, proposal
+
+    def propose_fix(self, request_id: str, summary: str, root_cause: str, manual_step: str, confidence: float,
+                    where: str, proposed_by: str, client: str = ""):
+        """An AI client's fix proposal for a failed build (propose_healing_fix): checked like Ditto's own analysis
+        (HealingAnalysis and the dangerous-command filter), kept with the build as a manual step and in the per-user
+        folder, so the GUI and `llm-cli build status` show it with who proposed it. Never applied."""
+        from orchestrator.Core.client_proposals import ClientProposal, ProposalLimit, new_proposal_id
+        from orchestrator.Core.ditto_manager import HealingAnalysis, dangerous_command
+        state = self._state(request_id)
+        try:
+            analysis = HealingAnalysis(summary=summary, root_cause=root_cause, fix_command=manual_step,
+                                       confidence=confidence, target=where)
+        except ValueError as e:
+            raise BuildServiceError(f"The proposal is not valid: {e}", code="invalid_value",
+                                    next="Give a one-sentence summary, the cause and one manual step.") from None
+        danger = dangerous_command(analysis.fix_command, analysis.root_cause, analysis.summary)
+        if danger:
+            raise BuildServiceError(f"The proposal contains a dangerous command ({danger}), so it was refused. The "
+                                    "build log may contain instructions aimed at the AI.", code="invalid_value",
+                                    next="Propose a step without that command, or tell the person to check the log "
+                                         "themselves.")
+        proposal = ClientProposal(proposal_id=new_proposal_id(), request_id=request_id, summary=analysis.summary,
+                                  root_cause=analysis.root_cause, manual_step=analysis.fix_command,
+                                  confidence=float(analysis.confidence), where=analysis.target,
+                                  proposed_by=proposed_by, client=str(client or "")[:200],
+                                  request=getattr(state, "label", "") or "")
+        try:
+            self._orchestrator.add_client_proposal(request_id, proposal)
+        except ProposalLimit as e:
+            raise BuildServiceError(str(e), code="limit_reached",
+                                    next="Tell the person about the proposals already made.") from None
+        except ValueError:
+            raise BuildServiceError(f"Build request '{request_id}' has not failed; a fix is proposed only for a "
+                                    "failed build.", code="not_supported",
+                                    next="Call get_build_status; propose a fix once the build has failed.") from None
+        store = self._proposal_store()
+        if store is not None:
+            try:
+                proposal = store.add(proposal)
+            except (ProposalLimit, OSError, TimeoutError) as e:  # the build's own copy is kept and shown
+                self.logger.warning(f"Could not keep the fix proposal {proposal.proposal_id} for other windows: {e}")
+        return proposal
+
+    def _proposal_store(self):
+        from orchestrator.Core.client_proposals import ClientProposalStore
+        state_dir = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
+        return ClientProposalStore(Path(state_dir)) if isinstance(state_dir, (str, Path)) else None
 
     def healing_proposal(self, request_id: str, approve: bool) -> Dict[str, Any]:
         """The pending healing proposal as the question about it shows it (texts redacted; they come from the

@@ -208,6 +208,20 @@ built-in fixes itself:
 Everything else, including every AI suggestion, is shown as a manual step and never executed. A retry gets its own
 build ID (`<job>_r1`), and both logs are kept.
 
+**Proposals from AI clients.** An MCP client that does Ditto's job (prompt `diagnose_build_failure`) can hand its own
+analysis of a failed build to the framework with the tool `propose_healing_fix`: a summary (up to 300 characters),
+the cause and one manual step (up to 2000 each), its confidence and whether the step is for the build computer or
+the device. It goes through the same checks as Ditto's analysis, including the dangerous-command filter (a proposal
+that pipes a download into a shell, makes files world-writable, deletes the root or home folder or overwrites a disk
+is refused and nothing is kept), and like every local change it is confirmed by you unless your permissions allow
+it (it may offer "yes, and do not ask again", since it only stores text you read). A proposal is accepted only for a
+failed build, at most 10 per build. It is kept in `~/.llm-framework/client_proposals.json` and shown with who
+proposed it and as AI-generated: in `get_build_status` (`client_proposals`, marked as untrusted text), in
+`llm-cli build status <request>` and in the GUI (**Tools > Fix Proposals from AI Clients...**, with a status bar notice
+for a new one). "Who" is the caller the framework knows (a local stdio client, a named token, or Ditto) and the
+client's own name, marked as self-reported. The framework never runs such a step, and `resolve_healing` refuses to
+apply it.
+
 ---
 
 ## Deployment
@@ -492,6 +506,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `start_build` | local write | Start a build (must match the target's capabilities) |
 | `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
+| `propose_healing_fix` | local write | Hand your own fix proposal for a failed build to the person, as a manual step (dangerous-command filter; never run) |
 | `get_status` | read | Your tool permissions for this caller: every tool with its decision and why (also the hidden ones), and what no tool does, with where you do it |
 | `get_job_status` | read | State, progress and result of a long operation other than a build (a job); waits with `wait_seconds` |
 | `cancel_job` | local write | Stop a job (its own jobs without a question, another caller's only after one) |

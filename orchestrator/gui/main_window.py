@@ -161,6 +161,10 @@ class MainOrchestrator(QMainWindow):
         act_approvals.triggered.connect(self._open_approvals)
         tools_menu.addAction(act_approvals)
 
+        act_proposals = QAction("Fix Proposals from AI Clients...", self)  # propose_healing_fix, never run
+        act_proposals.triggered.connect(self._open_client_proposals)
+        tools_menu.addAction(act_proposals)
+
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
         self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
         self.act_audio.setCheckable(True)
@@ -356,6 +360,7 @@ class MainOrchestrator(QMainWindow):
         """
         Polls the Orchestrator for active workflows and updates the UI (Ditto, Status).
         """
+        self._notice_client_proposals()
         orch = self.framework.orchestrator
         if not orch: return
 
@@ -496,6 +501,38 @@ class MainOrchestrator(QMainWindow):
         if kind == "target":
             self.builder_tab._refresh_targets()
             self.deployment_window.refresh_data()
+
+    def _proposal_store(self):
+        from orchestrator.Core.client_proposals import ClientProposalStore
+        state_dir = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
+        return ClientProposalStore(state_dir) if isinstance(state_dir, (str, Path)) else None
+
+    def _notice_client_proposals(self):
+        """A status bar notice when an AI client proposed a new fix (also from an MCP server in another process)."""
+        store = self._proposal_store()
+        try:
+            proposals = store.list() if store is not None else []
+        except Exception:
+            return
+        seen = getattr(self, "_proposals_seen", None)
+        ids = {p.proposal_id for p in proposals}
+        self._proposals_seen = ids
+        if seen is None:  # the ones from before this window opened are not news
+            return
+        new = [p for p in proposals if p.proposal_id not in seen]
+        if new:
+            latest = new[-1]
+            self.status.showMessage(f"An AI client proposed a fix for build {latest.request_id} (proposed by "
+                                    f"{latest.proposed_by}, AI-generated): Tools > Fix Proposals from AI Clients.",
+                                    15000)
+
+    def _open_client_proposals(self):
+        from orchestrator.gui.proposals_window import ClientProposalsDialog
+        store = self._proposal_store()
+        if store is None:
+            QMessageBox.critical(self, "Error", "Fix proposals are not available.")
+            return
+        ClientProposalsDialog(store, self).exec()
 
     def trigger_healing_dialog(self, request_id, proposal):
         """Shows the proposal; the orchestrator applies an approved fix and retries the build."""

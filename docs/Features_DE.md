@@ -218,6 +218,22 @@ das Framework nur feste, eingebaute Korrekturen an:
 Alles andere, auch jeder KI-Vorschlag, wird als manueller Schritt angezeigt und nie ausgeführt. Ein erneuter Versuch
 bekommt eine eigene Build-ID (`<job>_r1`), und beide Logs bleiben erhalten.
 
+**Vorschläge von KI-Clients.** Ein MCP-Client, der Dittos Aufgabe übernimmt (Prompt `diagnose_build_failure`), kann
+dem Framework mit dem Tool `propose_healing_fix` seine eigene Analyse eines gescheiterten Builds übergeben: eine
+Zusammenfassung (bis 300 Zeichen), die Ursache und einen manuellen Schritt (je bis 2000), seine Sicherheit und ob der
+Schritt für den Build-Rechner oder das Gerät gilt. Er durchläuft dieselben Prüfungen wie Dittos Analyse,
+einschließlich des Filters für gefährliche Befehle (ein Vorschlag, der einen Download in eine Shell leitet, Dateien
+für alle beschreibbar macht, den Wurzel- oder Home-Ordner löscht oder eine Platte überschreibt, wird abgelehnt, und
+nichts wird behalten), und wie jede lokale Änderung bestätigst du ihn, sofern deine Berechtigungen ihn nicht erlauben
+(er darf „Ja, und nicht mehr fragen“ anbieten, weil er nur Text speichert, den du liest). Ein Vorschlag wird nur für
+einen gescheiterten Build angenommen, höchstens 10 je Build. Er wird in `~/.llm-framework/client_proposals.json`
+aufbewahrt und mit dem, der ihn vorgeschlagen hat, und als KI-erzeugt angezeigt: in `get_build_status`
+(`client_proposals`, als nicht vertrauenswürdiger Text markiert), in `llm-cli build status <Request>` und in der GUI
+(**Tools > Fix Proposals from AI Clients...**, mit einem Hinweis in der Statusleiste bei einem neuen). „Wer“ ist der
+Aufrufer, den das Framework kennt (ein lokaler stdio-Client, ein benanntes Token oder Ditto), und der eigene Name des
+Clients, als Selbstauskunft markiert. Das Framework führt einen solchen Schritt nie aus, und `resolve_healing` lehnt
+ab, ihn anzuwenden.
+
 ---
 
 ## Übertragen auf das Board (Deployment)
@@ -530,6 +546,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen) |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
+| `propose_healing_fix` | lokal schreiben | Einen eigenen Korrekturvorschlag für einen gescheiterten Build als manuellen Schritt an dich übergeben (Filter für gefährliche Befehle; nie ausgeführt) |
 | `get_status` | lesen | Deine Tool-Berechtigungen für diesen Aufrufer: jedes Tool mit Entscheidung und Grund (auch die ausgeblendeten) und was kein Tool tut, mit dem Ort, wo du es tust |
 | `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
 | `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |

@@ -293,6 +293,9 @@ installation each user sees their own builds.
 | `-a, --all` | Show every kept build instead of the 20 newest (the 200 newest finished or interrupted builds are kept). |
 
 A request that waits for a self-healing decision shows its failed first attempt; decide in the program that runs it.
+With a request ID, the fix proposals AI clients made for it (`propose_healing_fix`) follow, each marked as
+AI-generated with who proposed it (the caller and the client's own, self-reported name) and its manual step, which
+the framework never runs. Without an ID, a line says for how many failed builds there are such proposals.
 
 ---
 
@@ -833,8 +836,8 @@ llm-cli ditto models download small-q2
 The framework tools are what Ditto and MCP clients use: 12 read-only tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
 `run_doctor`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `get_status`, `get_job_status`)
-and 4 that change things on this computer
-(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`).
+and 5 that change things on this computer
+(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`).
 
 ### tools list
 
