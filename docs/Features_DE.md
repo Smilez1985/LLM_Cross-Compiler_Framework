@@ -1098,8 +1098,10 @@ gescheiterte Schreibversuch wird protokolliert. Eine Frage an dich wird als `con
 des Fragetexts festgehalten, bevor sie gestellt wird; eine Frage zu einer Änderung, die sich nicht festhalten lässt,
 wird nicht gestellt. Jedes Ende wird festgehalten: `ok`, `error`, `denied`, `not_confirmed` mit der Antwort
 (`accepted`, `declined`, `cancelled`, `unavailable`, wenn niemand gefragt werden konnte, `unanswered`),
-`confirmation_timeout` (eine MCP-Frage während des Aufrufs wartet höchstens 5 Minuten) und `cancelled` (der Client
-hat den Aufruf aufgegeben). Eine Frage des Protokolls 2026-07-28, die an den Client zurückgeht und nie beantwortet
+`confirmation_timeout` (eine MCP-Frage während des Aufrufs wartet höchstens 5 Minuten; Grund `needs_person`, und eine
+Frage, die der Client nicht zeigen konnte, hat den Grund `failed`, beide mit einem nächsten Schritt) und `cancelled`
+(der Client hat den Aufruf aufgegeben). Eine Frage des Protokolls 2026-07-28, die an den Client zurückgeht und nie
+beantwortet
 wird, wird nach 15 Minuten als `unanswered` festgehalten, solange der Server läuft; der Eintrag
 `confirmation_requested` ist der bleibende Nachweis. Bricht ein Client einen laufenden Aufruf ab, wird der Abbruch
 sofort festgehalten und an den laufenden Aufruf weitergegeben; was schon läuft, endet, und sein Abschlusseintrag

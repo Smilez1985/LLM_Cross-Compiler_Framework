@@ -698,7 +698,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             state.question_sha256 = await anyio.to_thread.run_sync(functools.partial(
                 registry.record_question, spec.name, arguments, tool_ctx, message, decision=decision))
         except AuditUnavailable as e:
-            return NotAsked(approve=False, refused=str(e), outcome="audit_unavailable")
+            return NotAsked(approve=False, refused=str(e), outcome="audit_unavailable", code="failed")
         if rounds:
             questions.asked(spec.name, state.question_sha256, arguments, tool_ctx)
             return Elicit(message, form)
@@ -709,13 +709,16 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
                 return await ctx.elicit(message, form)
         except TimeoutError:
             minutes = max(1, round(ELICITATION_TIMEOUT / 60))
-            return NotAsked(approve=False, outcome="confirmation_timeout", answer="timeout",
-                            refused=f"The confirmation for '{spec.title}' got no answer within {minutes} minutes; "
-                                    "the call was not run.")
+            return NotAsked(approve=False, outcome="confirmation_timeout", answer="timeout", code="needs_person",
+                            refused=f"The confirmation for '{spec.title}' got no answer within {minutes} "
+                                    f"minute{'s' if minutes != 1 else ''}; the call was not run. Next: Ask the person "
+                                    "in your answer whether they want it; call it again only if they do.")
         except Exception as e:
             logger.info(f"Confirmation for '{spec.name}' failed: {e!r}")
-            return NotAsked(approve=False, refused=f"The confirmation for '{spec.title}' failed ({e}); "
-                                                   "the call was not run.")
+            return NotAsked(approve=False, code="failed",
+                            refused=f"The confirmation for '{spec.title}' failed ({_client_text(e, 200)}); the call "
+                                    "was not run. Next: Tell the person the question could not be shown; call it "
+                                    "again only if they want it.")
         finally:
             state.asking = False
 

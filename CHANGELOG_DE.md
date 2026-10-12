@@ -527,7 +527,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   festgehalten, auch wenn keine weitere Anfrage kommt, und die beim Ende einer Sitzung noch offenen als
   `client_disconnected`; die Berechtigungsprüfung eines Long-Polls liest die Berechtigungsdatei nicht mehr in der
   Ereignisschleife des Servers; jede Ablehnung mit dem Grund `failed` nennt jetzt einen nächsten Schritt, und die
-  Eingabe-Ablehnungen des Build-Service tragen ihren eigenen Grundcode.
+  Eingabe-Ablehnungen des Build-Service tragen ihren eigenen Grundcode; eine MCP-Bestätigung, die scheiterte oder
+  nicht rechtzeitig beantwortet wurde, wird mit einem Grundcode festgehalten (`failed`, `needs_person`), und ihre
+  Ablehnung nennt einen nächsten Schritt.
 - Zweistufige Bestätigung, auf beiden Wegen gleich: Eine MCP-Rückfrage, die für ein Formular zu lang ist, wird mit
   dem Grund `limit_reached` und der Antwort `unavailable` festgehalten und nennt einen nächsten Schritt, wie in
   Dittos Fenstern; eine Rückfrage, die ein nachgeschlagener Fakt nötig gemacht hat, wird mit der Entscheidung `ask`
