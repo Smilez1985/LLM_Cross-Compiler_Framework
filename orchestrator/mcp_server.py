@@ -15,6 +15,10 @@ Security model
 - Results go through the registry's output filter (secrets redacted, external text cleaned and marked as
   untrusted in the output schema); the text block starts with one sentence of framework facts and wraps the
   JSON as untrusted data.
+- Resources (`lcf://...`) are read through the registry as well (ToolRegistry.read_resource): the permission of
+  the read tool a resource mirrors decides, the same filter applies, every read is audited. The server owns an
+  event bus (CallerBus) and publishes list changes and build updates on it (ServerEvents), so it serves
+  `subscriptions/listen` only together with events it really sends.
 - "Ask" permissions become an MCP elicitation (the client shows the question to the user). When the client
   cannot ask (no form elicitation), the question is too long for an elicitation, or the person wants the tool
   confirmed in the framework, the question becomes a pending approval in the framework instead (GUI notice,
@@ -29,8 +33,11 @@ Security model
   round makes it a new question, recorded and limited like the first.
 - stdio is the default transport. Streamable HTTP binds to loopback only, refuses requests from web
   pages (any Origin header) and Host names other than loopback with its port, and requires a named
-  token per client (`llm-cli mcp token`). The token's name is the caller (`mcp:<name>`) for the
-  policy and the audit; over stdio LCF_MCP_TOKEN does the same, otherwise the caller is `mcp`.
+  token per client (`llm-cli mcp token`, or the GUI's Tool Permissions dialog). The token's name is the caller
+  (`mcp:<name>`) for the policy and the audit; over stdio LCF_MCP_TOKEN does the same, otherwise the caller is
+  `mcp`. A token holds at most 4 of the 8 sessions, an idle session closes after 10 minutes, and a request still
+  open when its token is revoked or rotated is closed, together with that token's sessions (a session belongs to
+  the token value that opened it). Outside a checked request the caller may do nothing.
 - What a client says about itself (clientInfo, protocol version, capabilities) is written to stderr once
   per client (ClientTracker). It is a label for people, never a reason to allow anything.
 - Each connection owns the builds and jobs it starts, together with its caller (one stdio session; over HTTP
@@ -44,6 +51,7 @@ import contextlib
 import contextvars
 import functools
 import hashlib
+import hmac
 import inspect
 import json
 import logging
@@ -67,8 +75,9 @@ from orchestrator.tools.confirmation import MAX_ELICITATION, CallTooLong
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, ENV_VAR, TokenStore, TokenStoreError, token_digest
 from orchestrator.tools.output import has_untrusted
 from orchestrator.tools.policy import Decision
-from orchestrator.tools.registry import (TOO_LONG_NEXT, AuditUnavailable, ToolContext, ToolDenied, ToolError,
-                                         ToolRegistry, ToolSpec, arguments_key, text_sha256)
+from orchestrator.tools.registry import (TOO_LONG_NEXT, AuditUnavailable, LimitHit, ResourceSpec, ResourceUnknown,
+                                         ToolContext, ToolDenied, ToolError, ToolRegistry, ToolSpec, arguments_key,
+                                         text_sha256)
 from orchestrator.tools.spec import CallFacts
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -191,9 +200,10 @@ def _client_label_text(ctx) -> str:
 def _tool_context(ctx, caller: str = "mcp", instance: str = "") -> ToolContext:
     """The registry context of an MCP request, the same identity for the policy, the audit log, the owner of builds
     and jobs and the per-client waits: the caller ClientTracker checked for this request (`mcp`, `mcp:<token>`;
-    `caller` when no request was seen), the client's self-reported label, a hash that groups the calls of one client
+    UNCHECKED_CALLER, which may do nothing, when no request was seen), the client's self-reported label, a hash that
+    groups the calls of one client
     (_session_seed, for the repeat guard) and the connection that owns the builds and jobs the caller starts."""
-    actor = current_caller() or caller
+    actor = current_caller()
     client, session = "", ""
     with contextlib.suppress(Exception):
         client = _client_label_text(ctx)
@@ -476,12 +486,12 @@ def current_client() -> Optional[ClientLabel]:
 
 # Who calls, for the policy and the audit: "mcp" (the local stdio clients, which share one policy) or
 # "mcp:<token name>" for a named token, checked by the framework (HTTP bearer header, LCF_MCP_TOKEN over stdio).
-# Never taken from what the client says about itself. Empty outside a request that ClientTracker saw; the tool
-# functions then use the server's own caller, which for an HTTP server is UNCHECKED_CALLER: a token name no token
-# can have, so it gets no permissions at all (fail closed).
+# Never taken from what the client says about itself. Outside a request that ClientTracker saw it is
+# UNCHECKED_CALLER, over stdio as over HTTP: a token name no token can have, so whatever runs there gets no
+# permissions at all (fail closed, deny-all), never the server's own caller.
 CALLER_SCOPE_KEY = "lcf.mcp_caller"  # set by TokenAuth on each HTTP request whose token it checked
 UNCHECKED_CALLER = ACTOR_PREFIX + "-unchecked-"  # never a valid token name (NAME_RE)
-_CALLER: "contextvars.ContextVar[str]" = contextvars.ContextVar("lcf_mcp_caller", default="")
+_CALLER: "contextvars.ContextVar[str]" = contextvars.ContextVar("lcf_mcp_caller", default=UNCHECKED_CALLER)
 
 
 def current_caller() -> str:
@@ -872,7 +882,7 @@ def _audit_rejection(registry: ToolRegistry, name: str, arguments: Any, error: B
         registry.get(name)
     except ToolError:
         return  # not a registry tool, nothing to record
-    ctx = ctx or ToolContext(current_caller() or "mcp")
+    ctx = ctx or ToolContext(current_caller())
     cause = error.__cause__
     if not isinstance(error, Exception):  # cancelled by the client (or the server stopping) before it ran
         state = _call_state()
@@ -959,10 +969,11 @@ def end_session(framework, registry: Optional[ToolRegistry], session: McpSession
 
 
 def _session_lifespan(framework, registry, inner=None, caller: str = "mcp",
-                      questions: Optional[_OpenQuestions] = None):
+                      questions: Optional[_OpenQuestions] = None, events=None):
     """The server lifespan: one McpSession per connection (per stdio session; once for the HTTP server), composed
-    with `inner` (stdout to stderr for stdio). On exit the session's own builds and jobs are cancelled and its open
-    questions are recorded as client_disconnected."""
+    with `inner` (stdout to stderr for stdio), and the change events (`events`, a ServerEvents) published while it
+    runs. On exit the session's own builds and jobs are cancelled and its open questions are recorded as
+    client_disconnected."""
     import anyio
     import anyio.to_thread
 
@@ -975,6 +986,10 @@ def _session_lifespan(framework, registry, inner=None, caller: str = "mcp",
                 entered = await stack.enter_async_context(inner(server))
                 if isinstance(entered, dict):
                     state.update(entered)
+            if events is not None:
+                tasks = await stack.enter_async_context(anyio.create_task_group())
+                tasks.start_soon(events.run)
+                stack.callback(tasks.cancel_scope.cancel)
             state[SESSION_STATE_KEY] = session
             try:
                 yield state
@@ -989,6 +1004,201 @@ def _session_lifespan(framework, registry, inner=None, caller: str = "mcp",
     return lifespan
 
 
+# --- Resources and change events (design 4.2, 4.4) ------------------------------------------------------------
+
+def _mcp_error(code: int, message: str) -> Exception:
+    from mcp.shared.exceptions import MCPError
+    return MCPError(code, message)
+
+
+def _resource_reader(spec: ResourceSpec, registry: ToolRegistry, caller: str, instance: str):
+    """Reads `spec` through the registry for the caller of the request (its permission, output filter, audit).
+    Errors become JSON-RPC errors: invalid params (-32602) for an unknown resource, id or parameter, invalid
+    request for a refusal, internal error otherwise."""
+    import anyio.to_thread
+    from mcp_types import INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST
+
+    async def read(params: Dict[str, str], mcp_ctx=None) -> str:
+        tool_ctx = _tool_context(mcp_ctx, caller, instance)  # static resources have no Context: the caller's label
+        try:
+            text, _ = await anyio.to_thread.run_sync(registry.read_resource, spec.uri, dict(params), tool_ctx)
+        except ResourceUnknown as e:  # each refusal below is in the audit log already (read_resource audits it)
+            raise _audited(_mcp_error(INVALID_PARAMS, error_text(spec.uri, e))) from None
+        except (ToolDenied, LimitHit) as e:  # a refusal (the permission, the read rate), no failure
+            raise _audited(_mcp_error(INVALID_REQUEST, error_text(spec.uri, e))) from None
+        except ToolError as e:
+            raise _audited(_mcp_error(INTERNAL_ERROR, error_text(spec.uri, e))) from None
+        return text
+    return read
+
+
+def _add_resources(server, registry: ToolRegistry, caller: str, instance: str) -> Dict[str, str]:
+    """Registers every registry resource with the SDK (templates, static resources and the concrete resources a
+    template lists, such as the documents that exist) and returns listed URI -> registry URI, for filtering the
+    lists per caller. The SDK checks template parameters (no `..`, absolute path or NUL byte) before a read."""
+    from mcp.server.mcpserver import Context
+    from mcp.server.mcpserver.resources import FunctionResource
+    from mcp.shared.uri_template import UriTemplate
+    listed: Dict[str, str] = {}
+
+    def static(uri: str, spec: ResourceSpec, params: Dict[str, str]) -> None:
+        read = _resource_reader(spec, registry, caller, instance)
+
+        async def fixed():
+            return await read(params)
+        server.add_resource(FunctionResource.from_function(fixed, uri=uri, name=spec.name, title=spec.title,
+                                                           description=spec.description, mime_type=spec.mime_type))
+        listed[uri] = spec.uri
+
+    for spec in registry.resources():
+        names = list(UriTemplate.parse(spec.uri).variable_names)
+        if not names:
+            static(spec.uri, spec, {})
+            continue
+        read = _resource_reader(spec, registry, caller, instance)
+
+        async def template(_read=read, **kwargs):
+            mcp_ctx = kwargs.pop("ctx", None)
+            return await _read({k: str(v) for k, v in kwargs.items()}, mcp_ctx)
+        params = [inspect.Parameter(n, inspect.Parameter.KEYWORD_ONLY, annotation=str) for n in names]
+        params.append(inspect.Parameter("ctx", inspect.Parameter.KEYWORD_ONLY, annotation=Context))
+        template.__signature__ = inspect.Signature(params, return_annotation=str)
+        template.__annotations__ = {**{n: str for n in names}, "ctx": Context, "return": str}
+        template.__name__ = spec.name
+        server.resource(spec.uri, name=spec.name, title=spec.title, description=spec.description,
+                        mime_type=spec.mime_type)(template)
+        listed[spec.uri] = spec.uri
+        for concrete in (spec.listed() if spec.listed is not None else []):
+            static(spec.uri.format(**concrete), spec, dict(concrete))
+    return listed
+
+
+class CallerBus:
+    """The server's own event bus for `subscriptions/listen` (the SDK's SubscriptionBus protocol, 2026-07-28). Each
+    listen stream is registered with the caller ClientTracker checked for its request, so an event that concerns
+    one caller (the status of its build) reaches only that caller's streams; list changes reach every stream."""
+
+    def __init__(self):
+        self._listeners: Dict[object, Tuple[str, Callable[[Any], None]]] = {}
+
+    async def publish(self, event, callers: Optional[set] = None) -> None:
+        import anyio.lowlevel
+        for caller, listener in list(self._listeners.values()):
+            if callers is not None and caller not in callers:
+                continue
+            try:
+                listener(event)
+            except Exception:  # one stream must not stop the others
+                logger.exception("A subscription listener failed; continuing")
+        await anyio.lowlevel.checkpoint()
+
+    def subscribe(self, listener: Callable[[Any], None]) -> Callable[[], None]:
+        token = object()
+        self._listeners[token] = (current_caller(), listener)
+        return lambda: self._listeners.pop(token, None)
+
+    def callers(self) -> List[str]:
+        return [caller for caller, _ in self._listeners.values()]
+
+
+class ServerEvents:
+    """Publishes the server's change events on its bus: tools, prompts and resources list changed when the policy
+    file or the token store changes (what a caller may see depends on them), and resource-updated for the status and
+    log URIs of a build request when it changes (only to the caller that owns the build). Polls in a worker thread
+    every POLL_SECONDS while the server runs. `ended()`: True once the stdio server's token was revoked or rotated;
+    the listen streams are then closed (`close_streams`) and nothing more is published."""
+
+    POLL_SECONDS = 1.0
+
+    def __init__(self, registry: ToolRegistry, framework, bus: CallerBus, ended: Optional[Callable[[], bool]] = None,
+                 close_streams: Optional[Callable[[], None]] = None):
+        self.registry, self.framework, self.bus = registry, framework, bus
+        self.ended, self.close_streams = ended, close_streams
+        self._seen: Optional[Tuple[str, Dict[str, tuple]]] = None
+
+    def _files(self) -> str:
+        digest = hashlib.sha256()
+        for path in (getattr(self.registry.policy_store, "path", None),
+                     getattr(getattr(self.registry, "tokens", None), "path", None)):
+            try:
+                digest.update(hashlib.sha256(Path(path).read_bytes()).digest() if path else b"-")
+            except OSError:
+                digest.update(b"missing")
+        return digest.hexdigest()
+
+    def _builds(self) -> Dict[str, tuple]:
+        service = getattr(self.framework, "build_service", None)
+        try:
+            builds = service.list_requests().builds if service is not None else []
+        except Exception:  # no orchestrator (yet)
+            return {}
+        state = {}
+        for b in builds:
+            try:
+                tail = service.log_tail(b.request_id, 1).lines
+            except Exception:
+                tail = []
+            state[b.request_id] = ((b.status, b.stage, b.progress_percent, b.completed_builds, b.failed_builds,
+                                    len(b.errors), len(b.warnings), b.pending_healing is not None),
+                                   text_sha256(tail[-1]) if tail else "", b.owner or "")
+        return state
+
+    def snapshot(self) -> Tuple[str, Dict[str, tuple]]:
+        return self._files(), self._builds()
+
+    def changes(self) -> List[Tuple[Any, Optional[set]]]:
+        """The events since the last snapshot (none on the first)."""
+        from mcp.server.subscriptions import PromptsListChanged, ResourcesListChanged, ResourceUpdated, \
+            ToolsListChanged
+        from orchestrator.tools.framework_resources import build_uris
+        files, builds = self.snapshot()
+        if self._seen is None:
+            self._seen = (files, builds)
+            return []
+        events: List[Tuple[Any, Optional[set]]] = []
+        if files != self._seen[0]:
+            events += [(ToolsListChanged(), None), (PromptsListChanged(), None), (ResourcesListChanged(), None)]
+        for rid, (status, log, owner) in builds.items():
+            before = self._seen[1].get(rid)
+            callers = {owner} if owner else None
+            status_uri, log_uri = build_uris(rid)
+            if before is None or before[0] != status:
+                events.append((ResourceUpdated(status_uri), callers))
+            if before is None or before[1] != log:
+                events.append((ResourceUpdated(log_uri), callers))
+        self._seen = (files, builds)
+        return events
+
+    async def run(self) -> None:
+        import anyio
+        import anyio.to_thread
+        await anyio.to_thread.run_sync(self.changes)  # the starting point
+        while True:
+            await anyio.sleep(self.POLL_SECONDS)
+            if self.ended is not None and self.ended():
+                if self.close_streams is not None:
+                    self.close_streams()
+                return
+            try:
+                events = await anyio.to_thread.run_sync(self.changes)
+            except Exception as e:  # events are a convenience; the server goes on without them
+                logger.debug(f"Could not check for changes: {e}")
+                continue
+            for event, callers in events:
+                await self.bus.publish(event, callers)
+
+
+def _listen_closer(server) -> Callable[[], None]:
+    """Closes every open listen stream of `server` (the SDK's ListenHandler)."""
+    def close() -> None:
+        entry = getattr(getattr(server, "_lowlevel_server", None), "get_request_handler", lambda m: None)(
+            "subscriptions/listen")
+        handler = getattr(entry, "handler", None)
+        with contextlib.suppress(Exception):
+            handler.close()
+    return close
+
+
 def closed_schema(model: type) -> Dict[str, Any]:
     """A tool's input schema as clients get it: the input model's own schema, closed to unknown keys."""
     schema = model.model_json_schema()
@@ -997,11 +1207,16 @@ def closed_schema(model: type) -> Dict[str, Any]:
 
 
 def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespan=None, caller: str = "mcp",
-                     transport: str = "stdio", still_valid: Optional[Callable[[], bool]] = None):
+                     transport: str = "stdio", still_valid: Optional[Callable[[], bool]] = None,
+                     events: bool = True):
     """The MCP server for the registry. Each request's caller comes from ClientTracker: over stdio `caller` ("mcp"
     for the local stdio clients, "mcp:<name>" for LCF_MCP_TOKEN; `still_valid` ends it once that token is revoked
-    or rotated), over HTTP the named token TokenAuth checked. Tools the caller's permissions deny are not listed;
-    a call to one is still refused and audited."""
+    or rotated), over HTTP the named token TokenAuth checked. Tools, resources and prompts the caller's permissions
+    deny are not listed; a call to one is still refused and audited.
+
+    `events`: the server owns a bus and publishes list changes and build updates on it, so `subscriptions/listen`
+    is served (2026-07-28 clients; the handshake revisions advertise no list changes). Without events the server is
+    built with subscriptions=False and advertises none."""
     import anyio
     caller = caller if transport == "stdio" else UNCHECKED_CALLER
     import anyio.to_thread
@@ -1020,10 +1235,60 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
         async def list_tools(self):
             """The tools this caller may use, each with its tool's own closed input schema (the schema Ditto's
             model sees too), not the looser one the SDK derives from the function signature."""
-            listed = {spec.name: spec for spec in await anyio.to_thread.run_sync(registry.visible,
-                                                                                  current_caller() or caller)}
+            listed = {spec.name: spec for spec in await anyio.to_thread.run_sync(registry.visible, current_caller())}
             return [tool.model_copy(update={"input_schema": closed_schema(listed[tool.name].input_model)})
                     for tool in await super().list_tools() if tool.name in listed]
+
+        async def _readable(self) -> set:
+            return {spec.uri for spec in await anyio.to_thread.run_sync(registry.resources, current_caller())}
+
+        async def list_resources(self):
+            """The resources this caller may read (a denied read tool hides the resources that mirror it)."""
+            readable = await self._readable()
+            return [r for r in await super().list_resources() if resource_of.get(str(r.uri)) in readable]
+
+        async def list_resource_templates(self):
+            readable = await self._readable()
+            return [t for t in await super().list_resource_templates() if t.uri_template in readable]
+
+        async def read_resource(self, uri, context=None):
+            """resources/read; a read the SDK refuses before any resource runs (an unknown URI, another scheme, a
+            parameter with `..`) is audited too, as an unknown tool name is."""
+            try:
+                return await super().read_resource(uri, context)
+            except BaseException as e:
+                if isinstance(e, Exception) and not getattr(e, "audited", False):
+                    detail = redact_secrets(str(e))[:300]
+                    with contextlib.suppress(Exception), anyio.CancelScope(shield=True):
+                        await anyio.to_thread.run_sync(registry.refuse_resource, str(uri),
+                                                       _tool_context(context, caller, instance), detail)
+                raise
+
+        async def list_prompts(self):
+            """The prompts offered to this caller (every tool a prompt leads to is registered, its permission
+            allows it); straight from the registry, so their arguments are the registry's own."""
+            from mcp_types import Prompt as MCPPrompt, PromptArgument as MCPPromptArgument
+            specs = await anyio.to_thread.run_sync(registry.prompts, current_caller())
+            return [MCPPrompt(name=s.name, title=s.title, description=s.description,
+                              arguments=[MCPPromptArgument(name=a.name, description=a.description, required=a.required)
+                                         for a in s.arguments]) for s in specs]
+
+        async def get_prompt(self, name, arguments=None, context=None):
+            """prompts/get through the registry with the raw arguments (an unknown one is refused, never dropped)."""
+            from mcp_types import INTERNAL_ERROR, INVALID_PARAMS, INVALID_REQUEST
+            from mcp_types import GetPromptResult, PromptMessage, TextContent
+            tool_ctx = _tool_context(context, caller, instance)
+            try:
+                description, texts = await anyio.to_thread.run_sync(registry.get_prompt, name, arguments or {},
+                                                                    tool_ctx)
+            except ResourceUnknown as e:
+                raise _mcp_error(INVALID_PARAMS, error_text(str(name), e)) from None
+            except (ToolDenied, LimitHit) as e:  # a refusal (the permission, the read rate), no failure
+                raise _mcp_error(INVALID_REQUEST, error_text(str(name), e)) from None
+            except ToolError as e:
+                raise _mcp_error(INTERNAL_ERROR, error_text(str(name), e)) from None
+            return GetPromptResult(description=description, messages=[
+                PromptMessage(role="user", content=TextContent(type="text", text=text)) for text in texts])
 
         async def call_tool(self, name, arguments, context=None):
             state = _CallState()
@@ -1033,7 +1298,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                 # The fool-proof layer runs on the raw arguments, before the SDK's argument model could drop an
                 # unknown key: the same name resolution, normalization and checks as Ditto's path.
                 ctx = (_tool_context(context, caller, instance) if context is not None
-                       else ToolContext(current_caller() or caller))
+                       else ToolContext(current_caller()))
                 try:
                     prepared = await anyio.to_thread.run_sync(registry.prepare, name, arguments, ctx)
                 except ToolError as e:
@@ -1053,7 +1318,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
             except BaseException as e:
                 if not state.audited:
                     ctx = (_tool_context(context, caller, instance) if context is not None
-                           else ToolContext(current_caller() or caller))
+                           else ToolContext(current_caller()))
                     ctx.repairs = list(state.repairs)
                     try:
                         with anyio.CancelScope(shield=True):  # a cancelled call is recorded as well
@@ -1067,23 +1332,53 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
             finally:
                 _CALL.reset(token)
 
+    bus = CallerBus() if events else None
+    publisher = None
+    if bus is not None:
+        publisher = ServerEvents(registry, framework, bus, ended=(lambda: not still_valid()) if still_valid else None)
     server = AuditedServer(SERVER_NAME, title="LLM Cross-Compiler Framework", instructions=INSTRUCTIONS,
                            version=getattr(getattr(framework, "info", None), "version", "") or "",
-                           lifespan=_session_lifespan(framework, registry, lifespan, caller, questions),
+                           lifespan=_session_lifespan(framework, registry, lifespan, caller, questions, publisher),
                            middleware=[ClientTracker(transport, caller=caller, still_valid=still_valid,
-                                                     refused=lambda *args: _audit_refused_call(registry, *args))])
+                                                     refused=lambda *args: _audit_refused_call(registry, *args))],
+                           subscriptions=bus if bus is not None else False)
     server.open_questions = questions
+    server.events = publisher
+    if publisher is not None:
+        publisher.close_streams = _listen_closer(server)
     for spec in registry.list():
         server.add_tool(make_tool_function(spec, registry, questions, caller, instance, kept), name=spec.name,
                         title=spec.title,
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
                         structured_output=True, meta=spec.meta())
+    resource_of = _add_resources(server, registry, caller, instance)
+    _add_completions(server, registry, caller, instance)
     return server
+
+
+def _add_completions(server, registry: ToolRegistry, caller: str, instance: str) -> None:
+    """completion/complete for prompt arguments and resource template parameters (documented by VS Code): values
+    only for a prompt or resource this caller is offered, from framework ids (targets, boards, the caller's own
+    build requests, document names)."""
+    import anyio.to_thread
+    from mcp_types import Completion
+
+    @server.completion()
+    async def complete(ref, argument, context):
+        kind, name = ("prompt", getattr(ref, "name", "")) if getattr(ref, "type", "") == "ref/prompt" else \
+            ("resource", getattr(ref, "uri", ""))
+        given = dict(getattr(context, "arguments", None) or {})
+        tool_ctx = _tool_context(None, caller, instance)
+        values = await anyio.to_thread.run_sync(registry.complete, kind, str(name), str(argument.name),
+                                                str(argument.value or ""), given, tool_ctx)
+        return Completion(values=values, total=len(values), has_more=False)
 
 
 # --- Streamable HTTP: loopback, a named token per client, no web pages ------------------------------
 
 MAX_HTTP_SESSIONS = 8           # concurrent sessions (the SDK allows 10,000)
+MAX_SESSIONS_PER_TOKEN = MAX_HTTP_SESSIONS // 2  # one client's share: it can never lock the others out
+HTTP_SESSION_IDLE_TIMEOUT = 10 * 60  # seconds a session may be idle (the SDK's default is 30 minutes)
 MAX_HTTP_BODY = 1024 * 1024     # bytes per request body (the SDK allows 4 MiB)
 
 
@@ -1099,13 +1394,57 @@ class TokenAuth:
     - the `Host` header must name a loopback address with this server's port (421);
     - `Authorization: Bearer <token>` must be a named token from the token store (401 otherwise; a revoked or
       rotated token stops working at once). The token's name becomes the caller (`mcp:<name>`) of this request,
-      and the SDK binds each session and each pending question round to it, so one token cannot use another
-      token's session or answer the question another token was asked."""
+      and the SDK binds each session and each pending question round to the token that opened it (its name and
+      which token of that name, `subject`), so one token cannot use another token's session or answer the question
+      another token was asked, and a rotated token's sessions do not answer the new one;
+    - a token may hold at most MAX_SESSIONS_PER_TOKEN sessions (503 beyond), so one client cannot take every slot;
+    - a request that is still open (a long-poll, a server-sent event stream, a listen stream) is ended as soon as its
+      token is revoked or rotated: it is checked every CHECK_SECONDS while the request runs. The sessions of a token
+      that is no longer valid are closed then, and before any new session is admitted, so they hold neither the
+      client's share nor the server's slots until they idle out."""
 
-    def __init__(self, app, tokens: TokenStore, hosts: List[str]):
+    CHECK_SECONDS = 1.0
+
+    def __init__(self, app, tokens: TokenStore, hosts: List[str],
+                 sessions_of: Optional[Callable[[str, str], int]] = None,
+                 drop_sessions: Optional[Callable[[set], Any]] = None):
         self.app = app
         self.tokens = tokens
         self.hosts = frozenset(hosts)
+        self.sessions_of = sessions_of  # (caller, subject) -> the sessions that token holds now (the SDK's manager)
+        self.drop_sessions = drop_sessions  # async: closes every session whose (caller, subject) is not in the set
+        self._subject_key = secrets.token_bytes(32)  # this process only: a subject never says anything about a token
+
+    def subject(self, digest: str) -> str:
+        """Which token of a name opened a session: derived from the token's stored hash with a key of this process,
+        so a rotated token (same name, new value) gets new sessions; kept in memory, never sent anywhere."""
+        return hmac.new(self._subject_key, digest.encode("ascii"), hashlib.sha256).hexdigest()[:32]
+
+    def valid_principals(self) -> set:
+        """(caller, subject) of every token that is valid now; none when the store cannot be used."""
+        try:
+            return {(ACTOR_PREFIX + r.name, self.subject(r.sha256)) for r in self.tokens.list()}
+        except TokenStoreError:
+            return set()
+
+    async def _drop_stale_sessions(self) -> None:
+        import anyio
+        import anyio.to_thread
+        if self.drop_sessions is None:
+            return
+        valid = await anyio.to_thread.run_sync(self.valid_principals)
+        with anyio.CancelScope(shield=True):
+            await self.drop_sessions(valid)
+
+    @staticmethod
+    def _opens_session(scope, headers) -> bool:
+        """A request that may open a session (handshake protocols): a POST without a session id, not on the
+        2026-07-28 protocol (which keeps no sessions)."""
+        from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+        if scope.get("method") != "POST" or any(name == b"mcp-session-id" for name, _ in headers):
+            return False
+        versions = [value.decode("latin-1") for name, value in headers if name == b"mcp-protocol-version"]
+        return not (versions and versions[0] in MODERN_PROTOCOL_VERSIONS)
 
     @staticmethod
     async def _reject(send, status: int, message: str, extra=()) -> None:
@@ -1131,36 +1470,89 @@ class TokenAuth:
             await self._reject(send, 421, "this server answers only on its loopback address")
             return
         auth = [value for name, value in headers if name == b"authorization"]
-        record = None
+        record, presented = None, ""
         if len(auth) == 1 and auth[0][:7].lower() == b"bearer ":
-            record = self.tokens.find(auth[0][7:].strip().decode("latin-1"))
+            presented = auth[0][7:].strip().decode("latin-1")
+            record = self.tokens.find(presented)
         if record is None:
             await self._reject(send, 401, "unauthorized", [(b"www-authenticate", b"Bearer")])
             return
+        import anyio
+        import anyio.to_thread
         from mcp.server.auth.middleware.auth_context import auth_context_var
         from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
         from mcp.server.auth.provider import AccessToken
         caller = ACTOR_PREFIX + record.name
+        name, digest = record.name, token_digest(presented)
+        subject = self.subject(digest)
+        if self.sessions_of is not None and self._opens_session(scope, headers):
+            await self._drop_stale_sessions()  # a revoked or rotated token's sessions hold no share and no slot
+            if self.sessions_of(caller, subject) >= MAX_SESSIONS_PER_TOKEN:
+                await self._reject(send, 503, f"this token already holds its share of {MAX_SESSIONS_PER_TOKEN} open "
+                                              "sessions; close one (or let it idle out) before opening another")
+                return
         # The SDK binds a session (handshake protocols) to the principal that opened it ("user"), and the sealed
         # requestState of a 2026-07-28 question round to the principal in its auth context; never the token itself.
-        user = AuthenticatedUser(AccessToken(token=caller, client_id=caller, scopes=[]))
+        user = AuthenticatedUser(AccessToken(token=caller, client_id=caller, scopes=[], subject=subject))
         bound = auth_context_var.set(user)
         try:
-            await self.app({**scope, CALLER_SCOPE_KEY: caller, "user": user}, receive, send)
+            async with anyio.create_task_group() as tasks:
+                async def revoked() -> None:  # an open request ends when its token does
+                    while True:
+                        await anyio.sleep(self.CHECK_SECONDS)
+                        if not await anyio.to_thread.run_sync(self.tokens.holds, name, digest):
+                            logger.info(f"MCP token '{name}' was revoked or rotated; its open request and its "
+                                        "sessions are closed.")
+                            await self._drop_stale_sessions()
+                            tasks.cancel_scope.cancel()
+                            return
+                tasks.start_soon(revoked)
+                await self.app({**scope, CALLER_SCOPE_KEY: caller, "user": user}, receive, send)
+                tasks.cancel_scope.cancel()
         finally:
             auth_context_var.reset(bound)
 
 
 def http_app(server, tokens: TokenStore, host: str = "127.0.0.1", port: int = 8765):
     """The ASGI app for `server` over HTTP: TokenAuth in front, and the SDK's own checks with an explicit
-    Host allowlist (numeric port), no allowed Origin, at most 8 sessions and 1 MiB per request body."""
+    Host allowlist (numeric port), no allowed Origin, at most 8 sessions (4 per token) idling out after 10 minutes,
+    and 1 MiB per request body."""
     from mcp.server.transport_security import TransportSecuritySettings
     hosts = allowed_hosts(port)
     security = TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts,
                                          allowed_origins=[])
     app = server.streamable_http_app(host=host, transport_security=security, max_sessions=MAX_HTTP_SESSIONS,
-                                     max_request_body_size=MAX_HTTP_BODY)
-    return TokenAuth(app, tokens, hosts)
+                                     max_request_body_size=MAX_HTTP_BODY,
+                                     session_idle_timeout=HTTP_SESSION_IDLE_TIMEOUT)
+
+    def owners() -> Dict[str, Any]:
+        return getattr(getattr(server, "session_manager", None), "_session_owners", None) or {}
+
+    def principal(owner) -> Tuple[Any, Any]:
+        if isinstance(owner, dict):
+            return owner.get("client_id"), owner.get("subject")
+        return getattr(owner, "client_id", None), getattr(owner, "subject", None)
+
+    def sessions_of(caller: str, subject: str) -> int:
+        """The sessions the token (caller, subject) holds: the SDK records the principal that opened each one
+        (2.3.0 `_session_owners`); without that record nothing is counted and only the server-wide limit applies."""
+        return sum(1 for owner in list(owners().values()) if principal(owner) == (caller, subject))
+
+    async def drop_sessions(valid: set) -> None:
+        """Closes every session opened by a token that is no longer valid (revoked, or rotated: a session belongs to
+        the token value that opened it), through the SDK's own discard (2.3.0 `_discard_session`); without it the
+        sessions idle out."""
+        manager = getattr(server, "session_manager", None)
+        instances = getattr(manager, "_server_instances", None)
+        discard = getattr(manager, "_discard_session", None)
+        if instances is None or discard is None:
+            return
+        for session_id, owner in list(owners().items()):
+            transport = instances.get(session_id)
+            if transport is not None and principal(owner) not in valid:
+                with contextlib.suppress(Exception):
+                    await discard(session_id, transport)
+    return TokenAuth(app, tokens, hosts, sessions_of=sessions_of, drop_sessions=drop_sessions)
 
 
 def _token_store(framework) -> TokenStore:

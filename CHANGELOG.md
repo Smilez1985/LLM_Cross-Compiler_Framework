@@ -353,8 +353,55 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   becomes a standing approval of a new token with the same name. `llm-cli tools permissions --grants`,
   `--revoke-grant ID` and the Tool Permissions dialog list and revoke them; while the GUI runs the command line cannot
   create one. No current tool offers one yet: the rules come with the tools whose facts the framework looks up.
+- **MCP resources**: `lcf://targets`, `lcf://targets/<target>/capabilities`, `lcf://builds/<id>/status`,
+  `lcf://builds/<id>/log`, `lcf://permissions` and the installation's documents `lcf://docs/<name>` (CLI_Usage,
+  Features, Module_Developer_Guide, BLUEPRINT and their `_DE` twins, from a fixed list). A resource is read through
+  the tool registry like the read tool it mirrors: that tool's permission decides (a denied tool hides its
+  resources, "ask" refuses with the tool to call), the same output filter cleans the result and wraps external text
+  as untrusted data, a read counts toward the read rate of the read tools (one limit for read tools, resources
+  and prompts together), and every read is audited as `read_resource:<uri>`. Unknown ids, documents outside the list and
+  parameters with `..`, an absolute path or a NUL byte are invalid params (-32602) and audited too, also an unknown
+  URI or another scheme the server refuses before any resource runs. Clients on protocol 2026-07-28
+  can listen for changes: the tool, prompt and resource lists change with the permissions, and a build's status and
+  log resources report each change to the caller that started the build, from the server's own event bus.
+- **MCP prompts**: Ditto's tasks for a client that does Ditto's job, with the same task text and knowledge context:
+  `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings`, `diagnose_build_failure`, and
+  `add_board` and `deploy_to_board`, which are offered once the tools they lead to exist. The first message is the
+  framework's constant text, the second the context with every outside value (the arguments too) wrapped as untrusted
+  data, secrets redacted, at most 24,000 characters. A prompt is read like a read tool: the read permission decides,
+  an unknown argument is refused with the valid names, a get counts toward the same read rate, every get is
+  audited as `get_prompt:<name>`. A prompt whose
+  context holds what a read tool returns (a build's state and log, a target's capabilities) follows that tool's
+  permission too (hidden while denied, refused while "ask"), and knowledge excerpts come only while
+  `search_knowledge` is allowed. Completions
+  (VS Code) offer target ids, boards, document names and the caller's own build requests.
+- **Honest "cannot" for Ditto's module proposals and build recommendations**: the model may answer `cannot` with a
+  reason code (missing information, not supported, no tool, permission, needs a person, hardware, resources, limit;
+  "untested" is none of them). Ditto asks once more when the framework's check of the task input finds what the task
+  needs, and shows a second `cannot` as not confirmed by the framework; with neither a probe nor a board it says so
+  itself without asking a model. Module proposals gain `assumptions` (the guessed values, at most 10) and
+  `base_image_reason` (required for an image that is not a Docker Official Image), and can start from the board and
+  its SoC when there is no probe. The wizard and `llm-cli module generate-ai` show the base image plainly before the
+  module is created: registry, digest, official image or another registry's prebuilt image, network access of the
+  image build, and the AI's reason.
+- **MCP tokens in the GUI**: the Tool Permissions dialog (Tools > Tool Permissions (Ditto / MCP)) has a section
+  "MCP tokens" that lists the tokens and adds one (shown once; read only, a copy of the local stdio clients' or Ditto's
+  permissions, or linked to Ditto's), rotates, revokes and sets each token's own permissions, audited with actor
+  `gui`, never with the token.
 
 ### Changed
+- **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
+  closes after 10 minutes without a request (the SDK's default is 30); a request still open when its token is revoked
+  or rotated (a wait, an event stream, a listen stream) is closed at once, and so are that token's sessions: a
+  session belongs to the token value that opened it, so after a rotation the client opens a new one and the old
+  ones hold neither its share nor the server's slots.
+- **Ditto's task texts** (chat with tools, healing analysis, module proposal, build recommendation) live in one
+  module, `orchestrator/llm/task_prompts.py`, shared with the MCP prompts, and each carries the honest-"cannot" rule:
+  name the specific reason, never claim a result you did not get, and untested hardware is no reason to refuse. The
+  module task no longer limits base images to `debian:*` and `ubuntu:*`: it prefers a Docker Official Image with the
+  vendor's packages and gives its reason for any other image. A module Ditto proposed says in its description that it
+  is untested on real hardware and names the assumptions, also one created in the module wizard from Ditto's
+  proposal.
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
   built-in Transformers model for offline mode is gone (offline mode uses local providers: Ollama, the
   managed llama-server, a server on your network). Healing analyses, module proposals and build
@@ -509,6 +556,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   turned into "Stop retrying" there while an MCP client kept getting the plain refusal); a start that was refused, for
   example by a full queue, no longer uses up one of the 20 builds a day; after the stop note a model that keeps
   calling tools gets at most two more turns instead of the rest of its budget.
+- Module wizard: a base image Ditto proposed was replaced by `debian:bookworm-slim` or `ubuntu:22.04` when its name
+  merely contained "debian" or "ubuntu" (for example a vendor image on `nvcr.io`), so another image than the proposed
+  one would have been built. The proposed image is now kept as it is and shown with its registry, and the messages
+  with the AI's text (also Ditto's errors and refusals) are shown as plain text instead of rich text.
+- MCP server: on protocol 2026-07-28 it advertised change notifications for tools, prompts and resources and
+  resource subscriptions, but never sent one. It now advertises them only together with the events it publishes,
+  and without events it is built with subscriptions turned off.
 - MCP server: a client that disconnects no longer leaves its builds running with nobody to clean up. The builds
   and jobs its session started are cancelled, each with an audit entry ("client disconnected"), the server waits
   up to 30 seconds for their containers to stop, and `llm-cli mcp serve` then shuts the framework down. A SIGTERM
@@ -671,6 +725,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (2026-07-28 rounds): a round counts as an answer only to a question the framework asked that client and that is
   still open. Before, any call that carried some answer was asked without the write-ahead `confirmation_requested`
   entry and without the 10-minute wait after a "no", the pause after three "no" and the questions-per-hour count.
+- Ditto's build recommendation and the `recommend_build_settings` prompt give the model the target's formats,
+  quantization types and format notes (text from `target.yml`, which a community target pack installs) inside an
+  untrusted block; before, they stood as plain text next to the instructions.
+- `LCF_MCP_TOKEN` is taken out of the environment by `llm-cli` itself before any command runs and handed only to
+  `mcp serve`; before, only `mcp serve` removed it, so every other command and its child processes inherited it.
+- MCP server: whatever runs outside a request that the server checked gets the deny-all caller, also on a stdio
+  server, which before fell back to its own caller.
+- The MCP token store is cached by the SHA-256 of the file's bytes instead of its identity, size and modification
+  time, so a running server cannot keep accepting a revoked or rotated token after a same-size change within the time
+  stamp's resolution.
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
   into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
   build log or a model name told the model.

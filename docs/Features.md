@@ -226,6 +226,30 @@ Defaults per task come from [`configs/llm_providers.yml`](../configs/llm_provide
 `ai_model` and `ai_effort` for every task, or `ai_model_<task>` and `ai_effort_<task>` for one task. Effort levels
 are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what it understands.
 
+### Honest "cannot" and untested hardware
+
+The task texts live in one module (`orchestrator/llm/task_prompts.py`), which Ditto and the
+[MCP prompts](#mcp-server) share. Each of them tells the model: when it cannot do a task, it says so with the specific
+reason (which information is missing, which capability or tool does not exist, which permission is denied, which
+device or hardware is not available, which limit was reached) and never claims a result it did not get; not being
+able to test a result on real hardware is no reason to refuse. Module proposals and build recommendations may answer
+`cannot` with such a reason. When the framework's own check of the task input finds what the task needs (a probe or
+the board and its SoC; formats the target offers), Ditto asks the model once more, and a second `cannot` reaches you
+as "not confirmed by the framework". With neither a probe nor a board there is nothing to base a module on: Ditto
+says so itself and asks no model. The healing analysis has no `cannot`; an unclear cause comes with a low confidence.
+
+**Module proposals** may use any base image. Ditto prefers a Docker Official Image (`debian`, `ubuntu`) with the
+vendor's packages; for any other image, for example a vendor's toolchain image on `nvcr.io`, it must give its reason
+(`base_image_reason`). It lists the values it guessed in `assumptions` (at most 10). Before the module is created, the
+module wizard and `llm-cli module generate-ai` show the base image plainly: registry, image, digest (or, without
+one, either that the module uses the image by its tag, for the module generator's short list of base images, or
+that the generator refuses it until it is pinned),
+"Docker Official Image" or "other registry: ...; prebuilt image made by its publisher, not checked by the framework",
+that the image build runs with network access on this computer outside the build sandbox, and the AI's reason. The
+wizard keeps the proposed image as it is (an image with "debian" in its name is no longer replaced by
+`debian:bookworm-slim`). The created module says in its description that it is untested and names the assumptions;
+its support level is community.
+
 ### Providers
 
 | ID | Kind | Where it runs | Sign-in today |
@@ -879,6 +903,44 @@ framework never sees it.
   quote a server reply, a log line or a name from a pack: it is cleaned the same way before secrets are redacted,
   and the client gets that part wrapped as untrusted data, while the framework's own refusals and the next step
   stay plain (Ditto's model gets such errors in an untrusted block too).
+- **Resources:** besides the tools, the server offers resources a client can attach or read:
+  `lcf://targets`, `lcf://targets/<target>/capabilities`, `lcf://builds/<request id>/status`,
+  `lcf://builds/<request id>/log` (the last 200 lines), `lcf://permissions`, and the installation's documents
+  `lcf://docs/<name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` and their German `_DE` twins;
+  only the ones that exist are listed). A resource returns what its read tool returns and is read through the tool
+  registry: your permission for that tool decides (a resource of a denied tool is neither listed nor readable, and
+  one whose tool is set to "ask" is refused with the tool to call instead, because reading a resource cannot ask
+  you), the same output filter cleans it (external text wrapped as untrusted data, so these resources come as
+  text), and every read is audited as `read_resource:<uri>`. An unknown id, a document outside the list or a
+  parameter with `..`, an absolute path or a NUL byte is an invalid-params error (-32602), audited as well, also
+  when the server refuses it before any resource runs (an unknown URI or another scheme). A document that cannot
+  be read is refused without its path.
+- **Change events:** a client on protocol 2026-07-28 can listen for changes (`subscriptions/listen`): the tool,
+  prompt and resource lists change when your permissions or a token's permissions change, and the status and log
+  resources of a build report each change, only to the caller that started the build. The server publishes them on
+  its own event bus; it checks for changes every second. On the older handshake revisions it advertises no change
+  notifications, so those clients see a permission change at their next session.
+- **Prompts:** Ditto's tasks for a client that does Ditto's job, with the same task text and the same knowledge
+  context Ditto gets (most clients show them as slash commands): `ask_about_framework` (a question; knowledge
+  excerpts and the documentation resources), `convert_model_for_board` (model, target, board; the target's
+  capabilities and the steps from the check to the built model), `recommend_build_settings` (model, target, board,
+  `use_knowledge`; the formats and quantization types the target offers for the board) and `diagnose_build_failure`
+  (a build request; its state, the end of its log and three knowledge excerpts). `add_board` and `deploy_to_board`
+  are ready and are offered once the tools they lead to exist (creating a target module, packaging and deploying). A
+  prompt grants nothing: every step still goes through the tools and your permissions. Its first message is the
+  framework's own text, the same for every call; the second holds the context, where every value from outside the
+  framework (your arguments too) is wrapped as untrusted data, secrets are redacted, and the whole prompt is capped
+  at 24,000 characters. Each prompt carries the honest-"cannot" rule (see
+  [Ditto](#honest-cannot-and-untested-hardware)). A prompt is read like a read tool: your read permission decides,
+  an unknown argument is refused with the valid names (never dropped), and every get is audited as
+  `get_prompt:<name>`. A prompt shows nothing a read tool may not: one whose context holds what a read tool
+  returns (a build's state and log for `diagnose_build_failure`, a target's capabilities for
+  `convert_model_for_board` and `recommend_build_settings`) is neither listed nor served while you deny that tool,
+  and refused with the tool to call while it is set to "ask"; knowledge excerpts come only while
+  `search_knowledge` is allowed. The target's own texts (format labels and notes from `target.yml`) are external
+  text too.
+- **Completions:** clients that complete arguments (VS Code) get target ids, a target's boards, document names and
+  the caller's own build requests, only for prompts and resources the caller may use.
 - **Local files for AI clients:** MCP clients and Ditto never name a path. A local model or calibration dataset is
   named as `<label>:<relative path>` inside a folder the AI may use, for example `models:qwen2.5-0.5b-instruct` or
   `datasets:calib/de.txt`, or by the file id (`lf_` and 16 hex characters) the framework recorded for it. The
@@ -927,8 +989,12 @@ framework never sees it.
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). Over HTTP every client sends its own named token as
   `Authorization: Bearer <token>`; a request with an `Origin` header (a web page, also a CORS preflight) is refused,
   the `Host` header must name a loopback address with the server's port (against DNS rebinding), and the server
-  keeps at most 8 sessions and takes at most 1 MiB per request. A session, and a pending question round of the
-  2026-07-28 protocol, belongs to the token that opened it.
+  keeps at most 8 sessions, at most 4 per token (so one client cannot lock the others out), closes a session after
+  10 minutes without a request, and takes at most 1 MiB per request. A session, and a pending question round of the
+  2026-07-28 protocol, belongs to the token that opened it (after a rotation the client opens a new session). A
+  request that is still open (a wait, an event stream, a listen stream) is closed as soon as its token is revoked
+  or rotated, and so are that token's sessions, so they hold no slot. Anything that runs outside a request the
+  server checked gets no permissions at all, over stdio as over HTTP.
 - **Named tokens:** `llm-cli mcp token add NAME` creates a token for one client and shows it once; the framework
   keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode 0600; while other users can read or change
   it, or it belongs to another user, no token is accepted and the server does not start). The token's name is the caller in the audit log (`mcp:<name>`), and it has its own permissions: a
@@ -937,10 +1003,14 @@ framework never sees it.
   computer; a change to Ditto's permissions applies to it at once). `rotate` replaces a token, `revoke` deletes it
   with its permissions; both take effect at once, also for a running server, and the calls a revoked stdio client
   still sends are refused and audited. A stdio client gets its own token
-  through the environment variable `LCF_MCP_TOKEN` in its server entry: the server reads it once at the start,
-  removes it from its environment and does not start with a value that is not a valid token. Without it, all local
-  stdio clients share the caller `mcp` and your own permissions. Only a person at a terminal manages tokens: no tool
-  can create, read or change them, and no token appears in a tool result, log line or audit entry.
+  through the environment variable `LCF_MCP_TOKEN` in its server entry: `llm-cli` takes it out of its environment
+  before any command runs (no command and no child process inherits it) and hands it only to `mcp serve`, which does
+  not start with a value that is not a valid token. Without it, all local stdio clients share the caller `mcp` and
+  your own permissions. Only a person manages tokens, at a terminal or in the GUI (Tools > Tool Permissions (Ditto /
+  MCP), section "MCP tokens": list, add with the token shown once, rotate, revoke and each token's own permissions;
+  audited with actor `gui`): no tool can create, read or change them, and no token appears in a tool result, log line
+  or audit entry. The server reads the token store on every check and caches it by the SHA-256 of the file's bytes,
+  so a change is seen even when it keeps the file's size and time.
 - **Working folder:** the server never reads settings or imports code from the folder it is started in (the client
   starts it with `python -P`), and on Windows it does not run programs such as `docker` or `git` from there. A
   project folder cannot change its behaviour.

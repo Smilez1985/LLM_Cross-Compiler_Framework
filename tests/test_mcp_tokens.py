@@ -328,8 +328,11 @@ class TestHttp:
         assert post(live_http, body, token).status_code == 413
 
     def test_at_most_8_sessions(self, live_http, tokens):
-        token = tokens.add("many")
-        statuses = [post(live_http, dict(INIT, id=i), token).status_code for i in range(9)]
+        # S12 leftover: one token holds at most its share (4); two tokens fill the server-wide 8.
+        first, second = tokens.add("many"), tokens.add("more")
+        statuses = [post(live_http, dict(INIT, id=i), token).status_code
+                    for token in (first, second) for i in range(4)]
+        statuses.append(post(live_http, dict(INIT, id=9), tokens.add("late")).status_code)
         assert statuses == [200] * 8 + [503]
 
     def test_one_token_cannot_use_another_tokens_session(self, live_http, tokens):

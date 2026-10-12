@@ -121,6 +121,30 @@ class TestRatesAndQuotas:
         clock.now += 10
         registry.call("look", {}, ctx)  # not repeat_refused
 
+    def test_resources_and_prompts_share_the_read_rate_of_the_read_tools(self, make, clock):
+        """Design 4.4: a resource read and a prompt get go through the same rate limit as the read tools (one bucket
+        per client), so a client cannot read past the limit through resources/read or prompts/get."""
+        from orchestrator.tools.registry import LimitHit, PromptSpec, ResourceSpec
+        registry = make(CallerLimits(read_rate=Rate(3, 10.0)))
+        registry.register_resource(ResourceSpec("lcf://look", "look", "Look", "", "application/json", tool="look"))
+        registry.register_prompt(PromptSpec("peek", "Peek", "", "Do it.", (), lambda args, ctx: "context",
+                                            tools=("look",)))
+        ctx = ToolContext("mcp", session="s")
+        registry.call("look", {}, ctx)
+        registry.read_resource("lcf://look", {}, ctx)
+        registry.get_prompt("peek", {}, ctx)
+        for read in (lambda: registry.read_resource("lcf://look", {}, ctx), lambda: registry.get_prompt("peek", {}, ctx),
+                     lambda: registry.call("look", {"item": "y"}, ctx)):
+            with pytest.raises(LimitHit) as exc:
+                read()
+            assert exc.value.code == "limit_reached" and "Try again in" in exc.value.message
+        names = [(e["tool"], e["outcome"], e["reason_code"]) for e in registry.audit.entries(3)]
+        assert {n[0] for n in names} == {"read_resource:lcf://look", "get_prompt:peek", "look"}
+        assert all(n[1:] == ("rate_limited", "limit_reached") for n in names)
+        registry.read_resource("lcf://look", {}, ToolContext("ditto", session="s"))  # another client: its own
+        clock.now += 10
+        registry.get_prompt("peek", {}, ctx)  # refilled
+
     @pytest.mark.parametrize("mode", MODES)
     def test_over_mcp_the_limit_is_checked_before_the_question(self, make, mode):
         registry = make(CallerLimits(), per_day=1)

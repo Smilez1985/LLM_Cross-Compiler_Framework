@@ -357,9 +357,18 @@ Python (see [Calling `llm-cli`](#calling-llm-cli)). After `--write claude-deskto
   every client needs its own named token: `llm-cli mcp token add NAME` shows it once, and the client sends it as
   `Authorization: Bearer <token>`. Web pages (requests with an `Origin` header) are refused.
 - **One token per client:** a named token is the caller in the audit log (`mcp:<name>`) and has its own
-  permissions; a new one can only read until you allow more (`llm-cli tools permissions --token NAME`). A stdio
+  permissions; a new one can only read until you allow more (`llm-cli tools permissions --token NAME`, or in the
+  GUI under Tools > Tool Permissions (Ditto / MCP), where tokens are also added, rotated and revoked). A stdio
   client gets its own token with `LCF_MCP_TOKEN` in its server entry; without it, all local stdio clients share your
   own permissions.
+- **Resources:** the targets, a target's capabilities, a build's status and log, your tool permissions and the
+  framework's documentation can also be attached as resources (`lcf://targets`, `lcf://builds/<id>/log`,
+  `lcf://docs/Features`, ...). They follow the permissions of the matching read tool and are audited like a tool
+  call; clients on protocol 2026-07-28 are told when a build or the permissions change.
+- **Prompts:** Ditto's tasks for your client, with the same instructions and knowledge context Ditto gets:
+  `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings` and `diagnose_build_failure` (in
+  Claude Code as slash commands). They grant nothing; every step still goes through the tools and your permissions,
+  and a prompt shows nothing a read tool you denied would show.
 - There is no deployment tool over MCP.
 
 **Using a Claude subscription:** Anthropic does not allow third-party apps to use a Claude subscription's sign-in
