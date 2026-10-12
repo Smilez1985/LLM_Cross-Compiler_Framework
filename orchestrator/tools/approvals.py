@@ -82,6 +82,24 @@ def caller_label(actor: str) -> str:
     return actor
 
 
+def actor_label(actor: str) -> str:
+    """Who acted, as the start of a sentence a person reads ("The client with the MCP token 'laptop'"), never the raw
+    caller id."""
+    if actor == "mcp":
+        return "A local stdio client"
+    if actor.startswith("mcp:"):
+        return f"The client with the MCP token '{actor[4:]}'"
+    return caller_label(actor)
+
+
+def tool_title(registry: Any, name: str) -> str:
+    """A tool's title as the person knows it from the windows (its name when the tool is not registered)."""
+    try:
+        return registry.get(name).title
+    except Exception:
+        return name
+
+
 class ApprovalRecord(BaseModel):
     """One pending approval as stored (and shown to the person)."""
     model_config = ConfigDict(extra="forbid")
@@ -303,8 +321,11 @@ def apply_decision(registry: Any, record: ApprovalRecord, actor: str) -> None:
     """Everything a person's decision does before it is stored: the audit entry, and for "approve and do not ask
     again" the standing approval itself, saved with the policy (`actor`: cli or gui). Raises when either cannot be
     written; then nothing is decided."""
+    always = record.state == "approved" and record.choice and record.grant is not None
+    if always:  # checked before the decision is recorded: an offer that cannot be used decides nothing
+        registry.check_grant(record.grant, record.choice["width"], record.choice["duration"], actor)
     audit_decision(registry, record, actor)
-    if record.state == "approved" and record.choice and record.grant is not None:
+    if always:
         registry.create_grant(record.grant, record.choice["width"], record.choice["duration"], actor, actor)
 
 

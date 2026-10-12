@@ -443,6 +443,81 @@ class TestLifecycle:
         assert asked_again.state == "pending" and "index key: changed" in asked_again.question
         assert asked_again.grant.scopes["this"]["signing_key"] == KEY2 and env.installed == []
 
+    def test_a_lapsed_standing_approval_stays_lapsed(self, env):
+        """90 days without use: the tool asks again, also on every later call (the record of the lapse in the audit
+        log is no use that would wake the standing approval up again)."""
+        spec = env.registry.get("add_pack_from_index")
+        inp, ctx = PackIn(pack_id="know-v"), ToolContext("mcp:laptop")
+        grant = grant_for(env, "know-v")
+        old = (datetime.now(timezone.utc) - timedelta(days=91)).isoformat(timespec="seconds")
+        env.registry.policy_store.update(lambda p: p.model_copy(update={"grants": {
+            c: [x.model_copy(update={"created": old}) if x.id == grant.id else x for x in gs]
+            for c, gs in p.grants.items()}}))
+        for _ in range(3):
+            assert env.registry.matching_grant(spec, inp, ctx) is None
+        with pytest.raises(ToolError) as info:
+            call_as(env, "mcp:laptop", "know-v")
+        assert info.value.code == "needs_person" and env.installed == []
+        row = next(r for r in env.registry.grant_rows() if r["grant"].id == grant.id)
+        assert row["state"] == "lapsed" and row["uses"] == 0 and row["last_use"] is None
+        assert len([e for e in env.registry.audit.entries(100) if e["outcome"] == "grant_lapsed"]) == 1
+
+    def test_a_request_of_a_revoked_token_never_becomes_a_new_tokens_standing_approval(self, env):
+        """The token 'laptop' asked; the person revoked it and made a new token with the same name. Approving the old
+        request with "do not ask again" must not give the new token a standing approval it never asked for."""
+        from orchestrator.tools.policy import CallerPolicy
+        env.registry.tokens.add("laptop")
+        env.registry.policy_store.update(lambda p: p.model_copy(update={"callers": {
+            **p.callers, "mcp:laptop": CallerPolicy(reviewed=[s.name for s in env.registry.list()])}}))
+        with pytest.raises(ToolError):
+            call_as(env, "mcp:laptop", "know-v", pending=True)
+        record = env.store.pending()[0]
+        assert record.grant is not None
+        env.registry.tokens.revoke("laptop")
+        env.registry.tokens.add("laptop")
+        result = cli(env.registry, "tools", "approvals", "approve", record.id, "--always", input="y\n")
+        assert result.exit_code == 1 and grants(env.registry) == []
+        assert env.store.get(record.id).state == "pending", "nothing was decided"
+
+    def test_only_offers_the_framework_computed_for_a_tool_with_a_rule_become_standing_approvals(self, env):
+        from orchestrator.tools.grants import GrantOffer
+        forged = GrantOffer(tool="cancel_job", caller="ditto", rule_version=1, scopes={"this": {"tool": "cancel_job"}},
+                            summaries={"this": "every call"}, durations=["revoke"], warning="x")
+        with pytest.raises(ValueError):
+            env.registry.create_grant(forged, "this", "revoke", "gui", "gui")
+        outdated = env.registry.grant_offer(env.registry.get("add_pack_from_index"), PackIn(pack_id="know-v"),
+                                            ToolContext("ditto")).model_copy(update={"rule_version": 99})
+        with pytest.raises(ValueError):
+            env.registry.create_grant(outdated, "this", "revoke", "gui", "gui")
+        assert grants(env.registry) == []
+
+    def test_what_the_person_sees_uses_speaking_names(self, env, qapp, monkeypatch):
+        """Notices, lists and announcements name the caller as a person reads it and the tool by its title, never the
+        raw caller id."""
+        from PySide6.QtWidgets import QMessageBox
+
+        from orchestrator.gui.dialogs import ToolPermissionsDialog
+        from orchestrator.gui.main_window import MainOrchestrator
+        grant = grant_for(env, "know-v", via="cli")
+        messages = []
+        window = SimpleNamespace(framework=SimpleNamespace(tool_registry=env.registry),
+                                 status=SimpleNamespace(showMessage=lambda text, *a: messages.append(text)),
+                                 btn_revoke_grant=SimpleNamespace(show=lambda: None, hide=lambda: None),
+                                 _used_grant="")
+        MainOrchestrator._grant_used(window, "add_pack_from_index", grant.id, "mcp:laptop", "")
+        assert "The client with the MCP token 'laptop'" in messages[0] and "Install a pack" in messages[0]
+        assert "mcp:laptop" not in messages[0] and "knowledge packs from the signed index" in messages[0]
+        assert window._used_grant == grant.id
+        dialog = ToolPermissionsDialog(env.registry)
+        assert dialog.grant_table.item(0, 1).text() == "the MCP token 'laptop'"
+        assert dialog.grant_table.item(0, 2).text().startswith("Install a pack: ")
+        shown = []
+        monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
+        MainOrchestrator._announce_cli_grants(window)
+        assert "Install a pack for the MCP token 'laptop'" in shown[0] and "mcp:laptop" not in shown[0]
+        listed = flat(cli(env.registry, "tools", "permissions", "--grants", terminal=False).output)
+        assert "Install a pack for the MCP token 'laptop'" in listed and "add_pack_from_index" not in listed
+
     def test_uses_come_from_the_audit_log_and_never_rewrite_the_policy_file(self, env):
         grant = grant_for(env, "know-v")
         before = env.registry.policy_store.path.read_bytes()

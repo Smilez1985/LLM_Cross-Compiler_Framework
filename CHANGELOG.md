@@ -330,10 +330,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   licence, up to a size class; never for deploying, settings, crawling, module creation, `export_pack`, healing,
   deleting or restoring, or stopping another client's work. All local stdio clients together get only the narrowest
   scope, a warning and at most 30 days. Stored in the signed permission file and written only on your action; uses
-  come from the audit log (`grant:<id>`), each use shows a notice with **Revoke** in the GUI; they lapse after 90
-  days without use. `llm-cli tools permissions --grants`, `--revoke-grant ID` and the Tool Permissions dialog list
-  and revoke them; while the GUI runs the command line cannot create one. No current tool offers one yet: the
-  rules come with the tools whose facts the framework looks up.
+  come from the audit log (`grant:<id>`), each use shows a notice with **Revoke** in the GUI that names who acted and
+  the tool; they lapse after 90 days without use and stay lapsed. A request from a token revoked since it asked never
+  becomes a standing approval of a new token with the same name. `llm-cli tools permissions --grants`,
+  `--revoke-grant ID` and the Tool Permissions dialog list and revoke them; while the GUI runs the command line cannot
+  create one. No current tool offers one yet: the rules come with the tools whose facts the framework looks up.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the

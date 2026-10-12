@@ -278,8 +278,18 @@ class MainOrchestrator(QMainWindow):
         QTimer.singleShot(0, self._announce_cli_grants)
 
     def _grant_used(self, tool: str, grant_id: str, actor: str, detail: str):
+        """A notice in speaking names: who acted, the tool's title and what the standing approval covers."""
+        from orchestrator.tools.approvals import actor_label, tool_title
         self._used_grant = grant_id
-        self.status.showMessage(f"{actor} ran {tool} under your standing approval {grant_id}{detail}.", 30000)
+        registry = getattr(self.framework, "tool_registry", None)
+        covers = ""
+        try:
+            found = registry.policy().grant_by_id(grant_id)
+            covers = f" ({found[1].summary})" if found else ""
+        except Exception:
+            pass
+        self.status.showMessage(f"{actor_label(actor)} ran '{tool_title(registry, tool)}' under your standing "
+                                f"approval{covers}{detail}.", 30000)
         self.btn_revoke_grant.show()
         QTimer.singleShot(30000, self.btn_revoke_grant.hide)
 
@@ -304,8 +314,10 @@ class MainOrchestrator(QMainWindow):
             return
         if not rows:
             return
-        listing = "\n".join(f"- {r['grant'].id}: {r['grant'].tool} for {r['caller']}: {r['grant'].summary} (created "
-                             f"{r['grant'].created} via {r['grant'].created_via})" for r in rows)
+        from orchestrator.tools.approvals import caller_label, tool_title
+        listing = "\n".join(f"- {r['grant'].id}: {tool_title(registry, r['grant'].tool)} for "
+                             f"{caller_label(r['caller'])}: {r['grant'].summary} (created {r['grant'].created} via "
+                             f"{r['grant'].created_via})" for r in rows)
         QMessageBox.information(self, "Standing approvals created on the command line",
                                 "These standing approvals were created on a command line. Revoke any you do not want "
                                 f"in Tools > Tool Permissions.\n\n{listing}")

@@ -1001,12 +1001,15 @@ class ToolPermissionsDialog(QDialog):
         layout.addWidget(buttons)
 
     def refresh_grants(self):
+        from orchestrator.tools.approvals import caller_label, tool_title
         rows = self.registry.grant_rows()
         self.grant_table.setRowCount(len(rows))
         for i, row in enumerate(rows):
             grant = row["grant"]
             uses = f"{row['uses']}" + (f", last {row['last_use']}" if row["last_use"] else "")
-            for col, text in enumerate((grant.id, row["caller"], f"{grant.tool}: {grant.summary}", row["state"], uses)):
+            texts = (grant.id, caller_label(row["caller"]), f"{tool_title(self.registry, grant.tool)}: {grant.summary}",
+                     row["state"], uses)
+            for col, text in enumerate(texts):
                 self.grant_table.setItem(i, col, QTableWidgetItem(text))
 
     def _selected_grant(self):

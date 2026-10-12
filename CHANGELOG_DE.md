@@ -377,8 +377,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `export_pack`, Healing, Löschen oder Wiederherstellen und das Stoppen der Arbeit eines anderen Clients. Alle lokalen
   stdio-Clients zusammen bekommen nur den engsten Rahmen, eine Warnung und höchstens 30 Tage. Gespeichert in der
   signierten Berechtigungsdatei und nur auf deine Handlung hin geschrieben; Nutzungen kommen aus dem Audit-Log
-  (`grant:<id>`), jede Nutzung zeigt in der GUI einen Hinweis mit **Revoke**; sie verfallen nach 90 Tagen ohne
-  Nutzung. `llm-cli tools permissions --grants`, `--revoke-grant ID` und der Dialog Tool Permissions führen sie auf
+  (`grant:<id>`), jede Nutzung zeigt in der GUI einen Hinweis mit **Revoke**, der nennt, wer gehandelt hat, und das
+  Tool; sie verfallen nach 90 Tagen ohne Nutzung und bleiben verfallen. Die Anfrage eines Tokens, das seitdem
+  widerrufen wurde, wird nie zur dauerhaften Freigabe eines neuen Tokens mit demselben Namen.
+  `llm-cli tools permissions --grants`, `--revoke-grant ID` und der Dialog Tool Permissions führen sie auf
   und widerrufen sie; solange die GUI läuft, kann die Kommandozeile keine anlegen. Noch bietet kein aktuelles Tool
   eine an: Die Regeln kommen mit den Tools, deren Fakten das Framework nachschlägt.
 

@@ -262,7 +262,7 @@ class ApprovalsDialog(QDialog):
             self.store.decide(record.id, approve, "gui", expected_question=record.question_sha256,
                               record_decision=lambda decided: apply_decision(self.registry, decided, "gui"),
                               choice=choice)
-        except ApprovalStoreError as e:
+        except (ApprovalStoreError, ValueError) as e:  # ValueError: "do not ask again" cannot be saved for it
             QMessageBox.warning(self, "Approvals", str(e))
             self.refresh()
             return False

@@ -852,9 +852,11 @@ framework never sees it.
   deleting or restoring, or stopping another client's work. Standing approvals are stored in the signed permission
   file (a hand edit denies everything) and written only when you create, revoke or reset them, so a use never
   rewrites the file and cannot undo a revocation; their uses and last use come from the audit log
-  (`confirm_channel` `grant:<id>`), and the GUI shows each use with a **Revoke** button. They lapse after 90 days
-  without use (audited `grant_lapsed`), at their expiry, when the tool's rule changes and when their token is
-  revoked; `llm-cli tools permissions --grants` and the Tool Permissions dialog list them with their uses, and
+  (`confirm_channel` `grant:<id>`), and the GUI shows each use with a **Revoke** button, naming who acted, the tool
+  and what the standing approval covers. They lapse after 90 days without use (audited `grant_lapsed` once; a lapsed
+  one stays lapsed), at their expiry, when the tool's rule changes and when their token is revoked; a request from a
+  token revoked since it asked never becomes a standing approval of a new token with the same name.
+  `llm-cli tools permissions --grants` and the Tool Permissions dialog list them with their uses, and
   `--revoke-grant ID`, the dialog's **Revoke** and `--reset` remove them. While the GUI runs, the command line
   cannot create one (use the GUI's window); one created on a command line is shown once at the next GUI start.
   `get_status` shows a caller its own standing approvals, read-only. Which tools offer one so far: only tools whose

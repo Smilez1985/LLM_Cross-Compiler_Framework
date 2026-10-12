@@ -383,7 +383,7 @@ class ToolRegistry:
         GrantRule, a tool that never gets one, a tool the person wants confirmed in the framework, or facts outside
         every scope. The shared stdio caller gets only the narrowest scope and the shorter durations."""
         from orchestrator.tools.grants import GrantOffer, durations_for, warning_text
-        caller, _ = self._grant_caller(ctx.actor)
+        caller, token_created = self._grant_caller(ctx.actor)
         if not caller or self.framework_channel_required(spec, ctx.actor):
             return None
         facts = self._grant_facts(spec, inp, ctx)
@@ -409,7 +409,8 @@ class ToolRegistry:
         return GrantOffer(tool=spec.name, caller=caller, rule_version=spec.grant.version, scopes=scopes,
                           summaries=summaries, durations=durations_for(caller),
                           warning=warning_text(spec.grant.warning, caller, ctx.client, linked,
-                                               external=spec.tier == ToolTier.EXTERNAL))
+                                               external=spec.tier == ToolTier.EXTERNAL),
+                          token_created=token_created)
 
     def matching_grant(self, spec: ToolSpec, inp: Any, ctx: "ToolContext"):
         """The standing approval that covers this call, or None. Read anew for every call (a revocation stops calls
@@ -456,17 +457,31 @@ class ToolRegistry:
         except Exception as e:
             self.logger.warning(f"Could not record the lapse of {grant.id}: {redact_secrets(str(e))}")
 
+    def check_grant(self, offer, width: str, duration: str, created_via: str) -> Tuple[str, Optional[str]]:
+        """(the caller, its token's creation mark) when a person may turn this offer into a standing approval now;
+        ValueError otherwise: a choice outside the offer, a tool that never gets one or no longer has the rule the
+        offer was computed with, or a caller whose token was revoked (or revoked and made anew) since it asked."""
+        from orchestrator.tools.grants import CREATED_VIA
+        if width not in offer.scopes or duration not in offer.durations or created_via not in CREATED_VIA:
+            raise ValueError("That choice is not offered for this call.")
+        spec = self._tools.get(offer.tool)
+        if (offer.tool in NEVER_GRANT or spec is None or spec.grant is None
+                or spec.grant.version != offer.rule_version):
+            raise ValueError(f"'{offer.tool}' cannot get this standing approval (never offered for it, or its rule "
+                             "changed since the question was asked).")
+        caller, token_created = self._grant_caller(offer.caller)
+        if not caller or token_created != offer.token_created:
+            raise ValueError("The client that asked no longer exists: its token was revoked (or revoked and made anew) "
+                             "since. Nothing was saved.")
+        return caller, token_created
+
     def create_grant(self, offer, width: str, duration: str, created_via: str, actor: str):
         """A standing approval a person just chose in the framework's own window (`actor`: cli or gui), from an offer
         the framework computed. Saved with the policy (audited, revision checked under the lock); ValueError when the
-        choice lies outside the offer."""
+        offer cannot be used (check_grant)."""
         import secrets as _secrets
-        from orchestrator.tools.grants import CREATED_VIA, Grant, expiry_for
-        if width not in offer.scopes or duration not in offer.durations or created_via not in CREATED_VIA:
-            raise ValueError("That choice is not offered for this call.")
-        caller, token_created = self._grant_caller(offer.caller)
-        if not caller:
-            raise ValueError("The caller of this request no longer exists (its token was revoked).")
+        from orchestrator.tools.grants import Grant, expiry_for
+        caller, token_created = self.check_grant(offer, width, duration, created_via)
         now = datetime_now_iso()
         grant = Grant(id=f"g_{_secrets.token_hex(8)}", tool=offer.tool, scope=offer.scopes[width],
                       summary=offer.summaries[width][:500], width=width, rule_version=offer.rule_version,

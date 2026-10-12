@@ -926,7 +926,7 @@ def _save_policy(registry, policy=None, change=None):
 def _print_grants(registry) -> None:
     """Each caller's standing approvals: scope in plain words, state, created (and how), uses and last use (from the
     audit log), expiry."""
-    from orchestrator.tools.approvals import caller_label
+    from orchestrator.tools.approvals import caller_label, tool_title
     rows = registry.grant_rows()
     if not rows:
         console.print("No standing approvals.")
@@ -934,8 +934,8 @@ def _print_grants(registry) -> None:
     console.print("[bold]Standing approvals (\"do not ask again\")[/bold]")
     for row in rows:
         grant = row["grant"]
-        console.print(f"  {escape(grant.id)}  {escape(grant.tool)} for {escape(caller_label(row['caller']))}: "
-                      f"{escape(grant.summary)}")
+        console.print(f"  {escape(grant.id)}  {escape(tool_title(registry, grant.tool))} for "
+                      f"{escape(caller_label(row['caller']))}: {escape(grant.summary)}")
         console.print(f"      {row['state']}; created {escape(grant.created)} via {grant.created_via}; used "
                       f"{row['uses']} times" + (f", last {escape(row['last_use'])}" if row["last_use"] else "")
                       + (f"; until {escape(grant.expires)}" if grant.expires else "; until revoked"))
@@ -1130,7 +1130,7 @@ def tools_approvals_list(ctx: FrameworkContext):
         left = record.seconds_left()
         what = "asks to stop asking" if record.kind == "grant_request" else \
             ("call, 'do not ask again' possible" if record.grant is not None else "call")
-        console.print(f"  {escape(record.id)}  {escape(record.tool)} ({what})  caller: {escape(record.caller_class)}  "
+        console.print(f"  {escape(record.id)}  {escape(record.title)} ({what})  caller: {escape(record.caller_class)}  "
                       f"client: {escape(record.client or 'unnamed')} (self-reported)  {left // 60} min left")
     console.print("Show one with 'llm-cli tools approvals show ID', then approve or decline it.")
 
@@ -1208,7 +1208,7 @@ def _decide_approval(ctx: FrameworkContext, approval_id: str, approve: bool, alw
     try:
         store.decide(approval_id, approve, "cli", expected_question=record.question_sha256, record_decision=audit,
                      choice=choice)
-    except ApprovalStoreError as e:
+    except (ApprovalStoreError, ValueError) as e:  # ValueError: "do not ask again" cannot be saved for it
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     except Exception as e:  # the audit log cannot record it: nothing was decided
