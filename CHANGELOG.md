@@ -378,8 +378,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - The target template builds llama.cpp's conversion tools with the same steps as the Rockchip image, so a generated
   module no longer stops with "llama.cpp converter not found". The GPU template takes CUDA 12.9.1 from NVIDIA's redist
   archives (the manifest pinned by sha256, every component checked) on Ubuntu 22.04 pinned by digest, instead of the
-  unpinned `nvidia/cuda:12.2.2` images; NVIDIA's prebuilt development image is an explicit opt-in pinned by digest
-  (chosen as base image) and labelled `org.llm-framework.cuda-source=prebuilt-image`. The wizard no longer fills in an
+  unpinned `nvidia/cuda:12.2.2` images; NVIDIA's prebuilt development image is an explicit opt-in pinned by digest (a
+  base image you choose yourself; Ditto's proposals never carry one, since a probe file could steer them) and labelled
+  `org.llm-framework.cuda-source=prebuilt-image`, "not self-built" in the logs. The wizard no longer fills in an
   `nvidia/cuda` image for NVIDIA hardware.
 
 ### Deprecated
@@ -640,9 +641,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   SSH scan treats the board's answer as untrusted (size limit, strict parser).
 - **No prebuilt llama.cpp in targets**: generated modules, community exports and target packs in quarantine are
   refused when a Dockerfile pulls a prebuilt llama.cpp image (by its name, also pinned by digest, or one of the
-  framework's former runtime images) or copies llama.cpp binaries out of another image, or when a Dockerfile, script
-  or YAML file downloads llama.cpp release archives or binaries, uses a prebuilt `llama-cpp-python` wheel index or
-  installs a llama.cpp package: the framework shares recipes, not binaries. `nvidia/cuda` images no longer count as
+  framework's former runtime images) or copies llama.cpp binaries out of another image (also through a build stage
+  that only names it), or when a Dockerfile, script (also one without a known suffix that starts with `#!`) or YAML
+  file downloads llama.cpp release archives or binaries (also through a pipeline such as `curl ... | tar -x`), uses a
+  prebuilt `llama-cpp-python` wheel index or installs a llama.cpp package: the framework shares recipes, not binaries. `nvidia/cuda` images no longer count as
   official base images and need a digest, and a llama.cpp image is refused as a module's base image.
 
 ## [3.0.0] - 2026-10-10

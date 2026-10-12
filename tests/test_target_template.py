@@ -202,12 +202,27 @@ def test_a_cuda_target_gets_cuda_from_the_pinned_redist_archives(tmp_path):
     assert validate_target_folder(target) == []
 
 
-def test_the_prebuilt_cuda_image_is_an_explicit_opt_in_pinned_by_digest(tmp_path):
+class LogRecorder:
+    """Stands in for the generator's logger: (level, message) of every call."""
+
+    def __init__(self):
+        self.lines = []
+
+    def __getattr__(self, level):
+        return lambda message, *args, **kwargs: self.lines.append((level, str(message)))
+
+
+def test_the_prebuilt_cuda_image_is_an_explicit_opt_in_pinned_by_digest(tmp_path, monkeypatch):
+    log = LogRecorder()
+    monkeypatch.setattr("orchestrator.Core.module_generator.get_logger", lambda name: log)
     target = generate(tmp_path, module_name="GPU Opt", architecture="x86_64", sdk="cuda", base_os=CUDA_OPT_IN)
     dockerfile = (target / "Dockerfile").read_text()
     assert f"FROM {CUDA_OPT_IN} AS builder" in dockerfile and "ARG CUDA_SOURCE=prebuilt-image" in dockerfile
     assert re.search(r"^FROM ubuntu:22\.04@sha256:[0-9a-f]{64} AS runtime$", dockerfile, re.M)
     assert validate_target_folder(target) == []
+    # Labelled for what it is: in the generator's log and in the image build's log (review of WP9).
+    assert any(level == "warning" and "not self-built" in message for level, message in log.lines)
+    assert "(explicit opt-in, not self-built)" in dockerfile.split("prebuilt-image)", 1)[1].split(";;", 1)[0]
 
 
 @pytest.mark.parametrize("base_os, message", [

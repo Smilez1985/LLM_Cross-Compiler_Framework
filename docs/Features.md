@@ -993,7 +993,8 @@ The GUI's input fields offer what you used recently, newest first.
 - **llama.cpp in new targets:** the template Dockerfile builds the conversion tools like the Rockchip image
   ([Conversion tools tuned to the build host](#conversion-tools-tuned-to-the-build-host)). The GPU template takes
   CUDA 12.9.1 from NVIDIA's redist archives (manifest pinned by sha256, every archive checked) on Ubuntu 22.04 pinned
-  by digest; NVIDIA's prebuilt development image is only an explicit opt-in, pinned by digest and labelled.
+  by digest; NVIDIA's prebuilt development image is only an explicit opt-in (a base image you choose yourself; Ditto's
+  proposals never carry one), pinned by digest and labelled "not self-built".
 - **Checks before anything is written:** names, images, packages and flags are validated strictly; shell code is
   checked against a deny-list and with `bash -n`; files are written only inside `targets/`; an existing target is
   never overwritten. Setup commands run later as an unprivileged user without network. A target that pulls a

@@ -976,7 +976,7 @@ Nicht geplant: airllm. Es ist eine Laufzeit, kein Konverter, und gehört nicht i
 | **CycloneDX-SBOM** und Herkunftsnachweise für Artefakte. | geplant |
 | **Dependabot-Wartezeit** für LLM-SDKs. | geplant |
 | **Ein zweiter Secret-Scanner in der CI** (das gitleaks-Programm, festgelegt und per Prüfsumme geprüft) und GitHub-Push-Schutz. | geplant |
-| **Signierte Updates** des Frameworks selbst (`orchestrator/utils/updater.py`, in Entwicklung: Update-Prüfung, Update und Neustart; noch nicht eingebunden), fertig gebaut als geprüfte Updates einer signierten Veröffentlichung statt eines einfachen `git pull`. Die Einstellungen `docker_registry` und `docker_namespace` benennen die eigenen Werkzeugketten-Images des Frameworks, sobald sie veröffentlicht und signiert werden. | geplant |
+| **Signierte Updates** des Frameworks selbst (`orchestrator/utils/updater.py`, in Entwicklung: Update-Prüfung, Update und Neustart; noch nicht eingebunden), fertig gebaut als geprüfte Updates einer signierten Veröffentlichung statt eines einfachen `git pull`. Werkzeugketten-Images gehören nicht dazu: Das Framework teilt Rezepte, nie kompilierte Images, daher werden sie weiter auf deinem Rechner aus dem Dockerfile des Targets gebaut; die Einstellungen `docker_registry` und `docker_namespace`, die nichts liest, bleiben erhalten. | geplant |
 | **Aufräumen**: Entfernung der alten Vier-Module-Skripte (Vorlagen-`build.sh` und Vorlagen-Dockerfile folgen bereits der aktuellen Pipeline: GGUF über llama.cpp, nach dem Rezept gebaut, Zwischendateien im Arbeitsordner). | geplant |
 | **SSOT-Korrekturen** für den Katalog der Projektquellen und seine Skripte. | fertig |
 
