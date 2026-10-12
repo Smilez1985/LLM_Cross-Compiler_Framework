@@ -148,8 +148,9 @@ llm-cli doctor [--json] [--fix] [--tier 1|2]
 
 Checks Python, the Docker daemon and buildx, free disk space for the cache and output folders, the targets and
 their capabilities, the privacy of the personal folder, the secrets store and the keyring, the tool
-permissions, the audit log, the shipped calibration data and the installed community packs (revoked, changed or
-imported from a file). Each finding comes with a hint how to fix it.
+permissions, the audit log, the chat feed (unreleased: it can be written, its newest entries verify), the shipped
+calibration data and the installed community packs (revoked, changed or imported from a file). Each finding comes
+with a hint how to fix it.
 
 | Option | Meaning |
 |---|---|
