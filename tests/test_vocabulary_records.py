@@ -169,6 +169,21 @@ def test_a_deletion_plan_lists_full_paths_for_the_person_and_labels_for_an_ai():
         DeletionPlan(items=[], total_bytes=0, mode_offered=("permanent",))
 
 
+def test_the_ai_view_of_a_deletion_can_never_carry_a_path():
+    """The speaking name is the only text of an item an AI sees (ai_view): it can never be the item's full path, hold
+    it, or be any absolute path, and the file name is a name, not a path (round 5 f: the AI keeps seeing labels)."""
+    for bad in (dict(speaking_name=ITEM["full_path"]), dict(speaking_name=f"Qwen ({ITEM['full_path']})"),
+                dict(speaking_name="/srv/models/qwen"), dict(speaking_name="~/models/qwen"),
+                dict(speaking_name="D:\\models\\qwen"), dict(file_name="qwen/Q4_K_M"),
+                dict(file_name="..\\Q4_K_M"),
+                dict(kind="docker_image", full_path="", file_name="x", speaking_name="/var/lib/docker/x")):
+        with pytest.raises(ValidationError):
+            plan(**bad)
+    assert plan(speaking_name="output:Rockchip/qwen/Q4_K_M").ai_view()[0]["label"] == "output:Rockchip/qwen/Q4_K_M"
+    # Docker's own objects have no host path; their "file name" is the image reference.
+    DeletionItem(**{**ITEM, "kind": "docker_image", "full_path": "", "file_name": "ghcr.io/owner/image:1.0"})
+
+
 # --- blockers -------------------------------------------------------------------------------------------------------
 
 def test_a_blocker_keeps_the_persons_action_apart_from_the_next_step(tmp_path):

@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from orchestrator.tools.output import ToolOutput, fact
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
-from orchestrator.tools.spec import CallFacts, Fact, FieldMeta
+from orchestrator.tools.spec import CallFacts, DeletionItem, DeletionPlan, Fact, FieldMeta
 
 SNAPSHOT_PATTERN = r"^[\w.-]{1,120}$"
 
@@ -83,7 +83,24 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
                  Fact("Also removed", "its golden ZIP next to it" if target.zips else "nothing else"))
         return CallFacts(consequence=f"Deletes the built model {target.label} ({_gb(target.size)}) from the output "
                                      "folder for good; it cannot be undone.",
-                         facts=facts, bound=target.describe())
+                         facts=facts, bound=target.describe(), deletion=deletion_plan(target))
+
+    def deletion_plan(target) -> DeletionPlan:
+        """Round 5 f: what the person is shown in the framework's own window, item by item with the full path (an AI
+        sees labels and sizes only): exactly the folder and the golden ZIP the handler deletes."""
+        try:
+            zips = [(z, z.stat().st_size) for z in target.zips]
+            folder_bytes = max(0, target.size - sum(s for _, s in zips))
+            items = [DeletionItem(kind="artifact", speaking_name=target.label, full_path=str(target.folder),
+                                  file_name=target.folder.name, size_bytes=folder_bytes,
+                                  what="built model folder (the model files and build record of this build)")]
+            items += [DeletionItem(kind="artifact", speaking_name=f"{target.label} (golden ZIP)", full_path=str(z),
+                                   file_name=z.name, size_bytes=size, what="the build's golden ZIP next to the folder")
+                      for z, size in zips]
+            return DeletionPlan(items=items, total_bytes=sum(i.size_bytes for i in items), mode_offered=("permanent",))
+        except (OSError, ValueError):  # never the error's own words: they quote host paths
+            raise ToolError(f"The built model {target.label} changed while it was looked up; nothing was deleted.",
+                            code="failed", next="Call list_artifacts again; the person is asked again.") from None
 
     def delete_artifact(inp: DeleteArtifactIn, ctx: ToolContext) -> DeleteArtifactOut:
         from orchestrator.Core.artifact_store import ArtifactRefused

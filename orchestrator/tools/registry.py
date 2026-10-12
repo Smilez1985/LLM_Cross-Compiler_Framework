@@ -1497,6 +1497,12 @@ class ToolRegistry:
             if approved is True and not person_confirmed(ctx.confirm_channel):
                 approved = None  # e.g. an accepted MCP form: the client's statement, not the person's confirmation
                 ctx = dataclasses.replace(ctx, confirm_channel="", answer="", question_sha256="")
+        elif (approved is True and ctx.confirm_channel == "elicitation"
+              and self.framework_channel_required(spec, ctx.actor, ctx.facts)):
+            # Only the framework's own window may ask about this call (a tool that takes no other channel, or one the
+            # person set to "confirm in the framework", also while the client's form was open): a form answer is none.
+            approved = None
+            ctx = dataclasses.replace(ctx, confirm_channel="", answer="", question_sha256="")
         if ctx.metadata.get("grant_requested"):
             ctx.notes.append(GRANT_REQUEST_NOTE)
         writes = spec.tier != ToolTier.READ
@@ -1702,13 +1708,33 @@ class ToolRegistry:
         """What the policy decides a resource as: the read tool it mirrors, or a read-tier pseudo-tool."""
         return self._tools[spec.tool] if spec.tool else _Surface(spec.audit_name, spec.title)
 
+    def hidden_tools(self, names: Sequence[str], ctx: "ToolContext") -> List[str]:
+        """The registered tools among `names` this session is not offered (`callers`, `visible_when`, checked against
+        the real actor): a resource that mirrors one, or a prompt that leads to one, is neither listed nor read for it,
+        so it never shows what the tool itself would not (SEC-M13)."""
+        return [n for n in names if n in self._tools and self.hidden_reason(self._tools[n], ctx)]
+
+    def _refuse_hidden(self, ctx: "ToolContext", surface: Any, title: str, hidden: List[str],
+                       arguments: Dict[str, Any]) -> None:
+        """Audits and refuses a resource read or prompt get built on a tool this caller is not offered."""
+        message = (f"'{title}' is not available to this caller (it uses {', '.join(hidden)}, which is for other "
+                   "callers).")
+        self._audit(ctx, surface, self.decide(self._tools[hidden[0]], None, ctx), "denied", arguments, detail=message,
+                    reason_code="not_supported")
+        raise ToolDenied(message, code="not_supported",
+                         next="Use only the tools, resources and prompts listed for you; tell the person what you "
+                              "wanted to do.")
+
     def resources(self, caller: Optional[str] = None) -> List[ResourceSpec]:
-        """Every resource, or the ones `caller` may read (MCP lists only those, as it hides denied tools)."""
+        """Every resource, or the ones `caller` may read (MCP lists only those, as it hides denied tools; a resource
+        that mirrors a tool for other callers is hidden too)."""
         if caller is None:
             return list(self._resources.values())
         policy, section = self._policy_of(caller)
+        bare = ToolContext(caller)
         return [r for r in self._resources.values()
-                if policy.decide_tool(self._decider(r), None, section, owner=caller) != Decision.DENY]
+                if not self.hidden_tools([r.tool] if r.tool else [], bare)
+                and policy.decide_tool(self._decider(r), None, section, owner=caller) != Decision.DENY]
 
     def _read_rate(self, ctx: ToolContext, surface: Any, decision: Decision, arguments: Dict[str, Any]) -> None:
         """The read rate of the limits table for a resource read or a prompt get, counted together with the read tool
@@ -1740,6 +1766,9 @@ class ToolRegistry:
         decider: Any = mirrored or surface
         inp: Optional[BaseModel] = None
         if mirrored is not None:
+            hidden = self.hidden_tools([mirrored.name], ctx)  # a tool for other callers: its resource is too
+            if hidden:
+                self._refuse_hidden(ctx, surface, spec.title, hidden, params)
             try:
                 normalized = normalize_arguments(mirrored, spec.arguments(params))
                 ctx = dataclasses.replace(ctx, repairs=list(normalized.repairs), notes=[])
@@ -1832,9 +1861,10 @@ class ToolRegistry:
         if caller is None:
             return list(self._prompts.values())
         policy, section = self._policy_of(caller)
+        bare = ToolContext(caller)
 
         def offered(p: PromptSpec) -> bool:
-            if self.missing_tools(p):
+            if self.missing_tools(p) or self.hidden_tools(p.tools, bare):  # it leads to a tool for other callers
                 return False
             deciders = [_Surface(p.audit_name, p.title)] + [self._tools[t] for t in p.reads]
             return all(policy.decide_tool(d, None, section, owner=caller) != Decision.DENY for d in deciders)
@@ -1875,6 +1905,9 @@ class ToolRegistry:
                         reason_code="no_tool")
             raise ResourceUnknown(message, code="no_tool", next="Do the task with the tools that are listed, or tell "
                                                                 "the user which tool is missing.")
+        hidden = self.hidden_tools(spec.tools, ctx)  # it leads to (or holds what returns) a tool for other callers
+        if hidden:
+            self._refuse_hidden(ctx, surface, spec.title, hidden, raw)
         known = {a.name: a for a in spec.arguments}
         args: Dict[str, str] = {}
         problems: List[str] = []

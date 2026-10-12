@@ -56,7 +56,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   every call asked, never a standing approval. A deletion is decided only by you in the framework's own window
   (Ditto's dialog or prompt, or a pending approval for an MCP client), never in the client's own form, never under
   a standing approval or a delegation; the registry refuses any tool that deletes and could be confirmed another
-  way. A deletion is refused outside the output folder, while a build of any
+  way. That window lists each item (the folder and its golden ZIP) with its speaking name, full path, file name, size
+  and what it is; an AI sees labels and sizes only, and Ditto's command line without a terminal prints only the call
+  and its arguments. A deletion is refused outside the output folder, while a build of any
   framework program writes into the folder or is queued for it, after the build changed, and when the folder is not
   the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
   outside MCP, and never prunes the snapshot it restores.
@@ -533,7 +535,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Pending approvals for AI clients that cannot ask you** (MCP server). When a client has no form elicitation
   (Claude Desktop chat, Cowork), a question is longer than 4,000 characters, or you set a tool with
   `llm-cli tools permissions --confirm-in-framework TOOL` (or "Ask in the framework" in the GUI), the question waits
-  for you in the framework: a notice in the GUI status bar opens **Tools > Pending Approvals...**, and
+  for you in the framework (an answer from the client's own form never counts for such a call, also when you set it
+  while the form was open): a notice in the GUI status bar opens **Tools > Pending Approvals...**, and
   `llm-cli tools approvals` (`list`, `show`, `approve`, `decline`; needs a terminal) works on a headless machine. The
   client gets `waiting_for_approval` with a job id; once you approve, the framework runs the call itself under the
   client's caller, unless its question would read differently by then (then you are asked again), and the client

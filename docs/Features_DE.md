@@ -608,11 +608,12 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 du sie in den Tool-Berechtigungen freigibst (die ganze Klasse „extern“ zu erlauben gibt sie nicht frei); jeder
 Aufruf wird erfragt, und sie bekommen nie einen Dauerauftrag. Über ein Löschen entscheidest nur du, im eigenen
 Fenster des Frameworks: Dittos Dialog oder Eingabeaufforderung, bei einem MCP-Client eine wartende Freigabe in der GUI
-oder in `llm-cli tools approvals`; das Formular des Clients wird dafür nie benutzt. `delete_artifact` nimmt die ID
-und das sha256, das
-`list_artifacts` zeigt; abgelehnt wird ein Ordner außerhalb des Ausgabeordners (auch über einen Link), solange ein
-Build irgendeines Programms des Frameworks hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256
-der Modelldatei seither geändert hat und wenn der Ordner nicht mehr der ist, den die Frage nannte.
+oder in `llm-cli tools approvals`; das Formular des Clients wird dafür nie benutzt. Die Frage dort nennt jedes Teil
+(den Modellordner und sein Golden-ZIP) mit vollem Pfad, Dateinamen, Größe und was es ist; die KI sieht nur
+Bezeichnungen und Größen. `delete_artifact` nimmt die ID und das sha256, das `list_artifacts` zeigt; abgelehnt wird
+ein Ordner außerhalb des Ausgabeordners (auch über einen Link), solange ein Build irgendeines Programms des Frameworks
+hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256 der Modelldatei seither geändert hat und
+wenn der Ordner nicht mehr der ist, den die Frage nannte.
 `restore_knowledge_snapshot` sichert die aktuelle Wissensbasis zuerst als Snapshot `pre_restore_<Zeit>` und stellt
 ohne diese Sicherung nichts wieder her; dieselbe Regel gilt jetzt für jede Wiederherstellung eines Snapshots, und
 der wiederherzustellende Snapshot wird dabei nie aufgeräumt.
