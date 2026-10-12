@@ -752,6 +752,8 @@ def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
             sys.exit(1)
         for record in reversed(matches):  # attempts in order
             _print_build_record(record)
+        for rid in dict.fromkeys(r.get("request_id") for r in matches if r.get("request_id")):
+            _print_client_proposals(_client_proposals(config, rid))
         return
     if not records:
         console.print(f"[yellow]No builds found in {escape(str(folder))}.[/yellow]")
@@ -769,6 +771,36 @@ def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
     console.print(table)
     if len(records) > len(shown):
         console.print(f"{len(records) - len(shown)} older builds: llm-cli build status --all")
+    proposed = sorted({p.request_id for p in _client_proposals(config)})
+    if proposed:
+        console.print(f"[magenta]AI clients proposed fixes for {len(proposed)} failed build(s): "
+                      f"llm-cli build status {escape(proposed[-1])}[/magenta]")
+
+
+def _client_proposals(config, request_id: Optional[str] = None) -> list:
+    """The fix proposals AI clients made (propose_healing_fix), kept in the per-user folder."""
+    from orchestrator.Core.client_proposals import ClientProposalStore
+    state_dir = getattr(config, "user_state_dir", None)
+    return ClientProposalStore(Path(state_dir)).list(request_id) if state_dir else []
+
+
+def _print_client_proposals(proposals: list) -> None:
+    """Who proposed each fix, marked as AI-generated; the texts are the AI's and are printed as plain text."""
+    from orchestrator.utils.untrusted import sanitize_untrusted
+
+    def text(value) -> str:  # invisible characters out, markup escaped
+        return escape(sanitize_untrusted(str(value), 2000))
+
+    for p in proposals:
+        console.print(f"[bold magenta]Fix proposal {escape(p.proposal_id)} (AI-generated), proposed by "
+                      f"{text(p.who())}[/bold magenta]")
+        console.print(f"  Summary: {text(p.summary)}")
+        if p.root_cause:
+            console.print(f"  Cause: {text(p.root_cause)}")
+        console.print(f"  Manual step ({escape(p.where)}, not run by the framework): [italic]{text(p.manual_step)}"
+                      f"[/italic]")
+        console.print(f"  Confidence: {p.confidence:.0%}" + (f", {escape(p.created)}" if p.created else ""))
+        console.print("")
 
 
 def _print_build_record(r: dict) -> None:

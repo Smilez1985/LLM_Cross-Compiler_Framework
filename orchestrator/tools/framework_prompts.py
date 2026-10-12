@@ -55,7 +55,9 @@ RECOMMEND_INSTRUCTIONS = (
     "the target with get_target_capabilities if anything is unclear." + CLOSING)
 DIAGNOSE_INSTRUCTIONS = (
     CLIENT_ROLE + HEALING_TASK + " Give the user what went wrong, the cause, one fix as a manual step for them and "
-    "how sure you are. Never run the fix and never present it as something the framework runs. More of the log comes "
+    "how sure you are, and hand the same to the framework with propose_healing_fix (summary, root_cause, "
+    "manual_step, confidence), which shows it to the person as a manual step written by you. Never run the fix and "
+    "never present it as something the framework runs. More of the log comes "
     "from read_build_log, the state from get_build_status. If the build waits for a self-healing decision "
     "(pending_healing in get_build_status), show that proposal to the user and call resolve_healing only with their "
     "explicit decision." + CLOSING)
@@ -236,7 +238,7 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    "Analyzes a failed build with its log and knowledge excerpts and proposes one fix as a manual step "
                    "(Ditto's self-healing task).", DIAGNOSE_INSTRUCTIONS,
                    (PromptArg("request_id", "The build request, e.g. req_1a2b3c4d", required=True, max_chars=64),),
-                   diagnose, tools=("get_build_status", "read_build_log", "resolve_healing"),
+                   diagnose, tools=("get_build_status", "read_build_log", "resolve_healing", "propose_healing_fix"),
                    completions={"request_id": own_builds}, reads=("get_build_status", "read_build_log")),
         PromptSpec("add_board", "Add a board",
                    "Proposes a target module for a board from its probe or from its name and SoC (Ditto's module "

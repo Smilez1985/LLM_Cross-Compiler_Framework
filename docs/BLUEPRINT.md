@@ -362,10 +362,10 @@ sequenceDiagram
    the client ends the session the same way (it interrupts the server like Ctrl+C instead of ending the process at
    once).
 
-The sixteen tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
+The seventeen tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
 `read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `list_knowledge_sources`,
 `read_knowledge_source`, `get_status`, `get_job_status` (tier `read`)
-and `start_build`, `cancel_build`, `resolve_healing`, `cancel_job` (tier `local_write`). Tools your permissions deny
+and `start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix` (tier `local_write`). Tools your permissions deny
 are not listed to the client. No tool of the `external` tier is registered, so neither AI clients nor Ditto can
 deploy to devices.
 

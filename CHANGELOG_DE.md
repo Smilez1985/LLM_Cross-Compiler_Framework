@@ -36,6 +36,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   IDs benannt, nie über Pfade; ihr ganzer Text ist als nicht vertrauenswürdig markiert. Ein Tool-Aufruf lädt nie das
   Embedding- oder Reranking-Modell herunter: Ohne Embedding-Modell wird die Suche mit dem nächsten Schritt abgelehnt,
   statt einen Download von etwa einem Gigabyte zu starten, und die Ablehnung nennt keinen Ordner.
+- **Korrekturvorschläge von KI-Clients** (MCP-Tool `propose_healing_fix`): Ein Client, der einen gescheiterten Build
+  analysiert, übergibt dem Framework Zusammenfassung, Ursache, manuellen Schritt und Sicherheit. Der Vorschlag
+  durchläuft dieselben Prüfungen wie Dittos eigene Analyse, einschließlich des Filters für gefährliche Befehle, wird
+  wie jede lokale Änderung von dir bestätigt, nur für einen gescheiterten Build angenommen (höchstens 10 je Build) und
+  als KI-erzeugt mit dem, der ihn vorgeschlagen hat (Aufrufer und selbst angegebener Name des Clients), in
+  `get_build_status`, `llm-cli build status <Request>` und der GUI (**Tools > Fix Proposals from AI Clients...**)
+  angezeigt. Das Framework führt ihn nie aus, und `resolve_healing` lehnt ab, ihn anzuwenden. Der Prompt
+  `diagnose_build_failure` führt zu dem Tool.
 - **Reranking der Ergebnisse der Wissensbasis**: Ein lokaler mehrsprachiger Cross-Encoder (FastEmbed/ONNX, etwa
   120 MB, beim ersten Gebrauch heruntergeladen, nie im Offline-Modus) liest die Frage zusammen mit jedem
   Kandidaten und verwirft die unter einer Relevanzschwelle, sodass Ditto lieber keinen Auszug bekommt als

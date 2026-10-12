@@ -298,7 +298,10 @@ jeder Benutzer seine eigenen Builds sieht.
 | `-a, --all` | Jeden aufbewahrten Build statt der 20 neuesten zeigen (aufbewahrt werden die 200 neuesten fertigen oder unterbrochenen Builds). |
 
 Ein Request, der auf eine Self-Healing-Entscheidung wartet, zeigt seinen gescheiterten ersten Versuch; entscheide in
-dem Programm, das ihn ausführt.
+dem Programm, das ihn ausführt. Mit einer Request-ID folgen die Korrekturvorschläge, die KI-Clients dafür gemacht
+haben (`propose_healing_fix`), jeder als KI-erzeugt markiert mit dem, der ihn vorgeschlagen hat (der Aufrufer und der
+eigene, selbst angegebene Name des Clients), und seinem manuellen Schritt, den das Framework nie ausführt. Ohne ID
+sagt eine Zeile, für wie viele gescheiterte Builds es solche Vorschläge gibt.
 
 ---
 
@@ -862,8 +865,8 @@ llm-cli ditto models download small-q2
 Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 12 nur lesende Tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
 `run_doctor`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `get_status`, `get_job_status`)
-und 4, die auf diesem Rechner etwas ändern
-(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`).
+und 5, die auf diesem Rechner etwas ändern
+(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`).
 
 ### tools list
 

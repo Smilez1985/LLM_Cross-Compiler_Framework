@@ -52,6 +52,21 @@ class PendingHealing(BaseModel):
     ai_generated: bool
 
 
+class ClientProposalOut(BaseModel):
+    """A fix proposal an AI client made for this build (propose_healing_fix): a manual step for the person, never run
+    by the framework and never applied by resolve_healing."""
+    proposal_id: str
+    summary: UntrustedText
+    root_cause: UntrustedText
+    manual_step_text: UntrustedText
+    confidence: float
+    where: str
+    proposed_by: str = Field(description="The caller that proposed it: mcp, mcp:<token name> or ditto")
+    client: untrusted_text(200) = Field(default="", description="The client's own name, as it reports it")
+    ai_generated: bool = True
+    created: str = ""
+
+
 class BuildStatusOut(BaseModel):
     request_id: str
     status: str
@@ -64,6 +79,7 @@ class BuildStatusOut(BaseModel):
     errors: List[UntrustedText] = Field(default_factory=list)
     warnings: List[UntrustedText] = Field(default_factory=list)
     pending_healing: Optional[PendingHealing] = None
+    client_proposals: List[ClientProposalOut] = Field(default_factory=list)
     owner: Optional[str] = Field(default=None, description="Caller that started it through a tool (mcp, "
                                                            "mcp:<token name>, ditto); empty for the GUI and the CLI")
 
