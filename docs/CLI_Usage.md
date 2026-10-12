@@ -1055,7 +1055,7 @@ never asks.
 | `--install user` | The start script in your home on the board (the default). You start the server with it. |
 | `--install systemd` | Also a systemd unit that starts the server at boot. Only for boards whose probe reports `INIT_SYSTEM=systemd`; it needs `--model` and your confirmation, right here, that deployments may run `sudo -n` on the board (asked at a terminal, or `--confirm-sudo`; written to the audit log). Choosing `user` again drops the confirmation. |
 | `--user NAME` | The SSH user on the board; the server and every check run as this user. root is refused. |
-| `--port N` | The loopback port of the systemd unit's server (1024-65535, default 8080). |
+| `--port N` | The loopback port of the systemd unit's server (1024-65535, default 8080). The start script listens on 8080 unless it gets `--port`; the start command a deployment prints includes this port. |
 | `--model PATH` | The model file on the board that the systemd unit serves (relative paths are in the user's home). |
 | `--confirm-sudo` | With `--install systemd`: confirm without a question. |
 
@@ -1087,20 +1087,23 @@ deploy settings or `--user`.
 
 1. The board is inspected: user ID (root is refused), home folder, architecture (it must match the build), init
    system, and the tools the deployment needs. With the systemd setting, `sudo -n true` must work; otherwise nothing
-   is changed.
+   is changed. With `--bench-model PATH` the model on the board is recognised by its sha256: a catalog model runs at
+   once, any other only after you agree (at a terminal, or `--allow-untrusted-model`), which is written to the audit
+   log. This is asked here, before anything changes on the board.
 2. The tarball goes over the SSH channel into a private staging folder in
    `~/.local/share/llm-framework/llama.cpp/`, is checked against its sha256 and every file against `SHA256SUMS`, made
-   readable only for you and becomes `current`. The previous build stays; older ones are removed unless a running
-   program uses them.
+   readable only for you and moved next to the active build.
 3. The start script creates the key `~/.config/llm-framework/llama-server.key` on the board (umask 077).
-4. With the systemd setting the unit `llm-llama-server.service` is written and enabled with `sudo -n` and started
+4. The new build is checked in its own folder, as your user: `--version` against the pin, `--list-devices`, and
+   `llama-server` must refuse `--tools`; with `--bench-model` also a short `llama-bench` run on that model.
+5. Only a build that passes becomes `current`. A build that fails (for example a `SIGILL` because the CPU baseline
+   does not fit the board) is removed again, the previous build stays active, and nothing else changes. After the
+   switch the previous build stays; older ones are removed unless a running program uses them.
+6. With the systemd setting the unit `llm-llama-server.service` is written and enabled with `sudo -n` and started
    when the model is there.
-5. The checks run on the board as your user: `--version` against the pin, `--list-devices`, and `llama-server` must
-   refuse `--tools`. `--bench-model PATH` adds a short `llama-bench` run on that model on the board; a model that is
-   not a catalog model runs only after you agree (at a terminal, or `--allow-untrusted-model`), which is written to
-   the audit log.
 
-The result is kept in `device/<ID>/deployed.json`. Exit code 1 when a step or a check fails.
+The result is kept in `device/<ID>/deployed.json` (a failed deployment does not change it). Exit code 1 when a step
+or a check fails.
 
 On the board, the start script runs the server:
 
@@ -1118,7 +1121,7 @@ foreground, `keygen` creates the key, `version` prints the server's version.
 
 ### device runtime verify
 
-Runs the checks of step 5 again on the deployed build (also with `--bench-model`) and updates the record.
+Runs the checks of step 4 again on the active build, `current` (also with `--bench-model`), and updates the record.
 
 ### device runtime status
 

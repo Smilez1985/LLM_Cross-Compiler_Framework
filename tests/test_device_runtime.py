@@ -143,6 +143,18 @@ class TestPolicy:
             server_policy.check_command(["llama-server", "--slot_save_path", "/tmp"])
         assert server_policy.forbidden_in(["x", "-c", "4096", "--ctx_size", "2"]) == []
 
+    @pytest.mark.parametrize("spelling", [
+        # Other names llama.cpp gives the forbidden download option -hf/--hf-repo at the pin (common/arg.cpp)
+        "-hfr",
+        # and the options next to it that download a model or projector, or put a token on the command line
+        "-hff", "--hf-file", "-hft", "--hf-token", "-dr", "--docker-repo", "-mmu", "--mmproj-url",
+        "--spec-draft-hf", "-hfd", "-hfrd", "--hf-repo-draft"])
+    def test_every_spelling_of_a_download_option_is_forbidden(self, spelling):
+        """The shared list says no forbidden option reaches a command line "in any spelling llama.cpp accepts"; a
+        launcher that only checked -hf and --hf-repo would let -hfr download a model from the network."""
+        assert server_policy.forbidden_in(["llama-server", spelling, "x"]) == [spelling]
+        assert spelling in launcher.render_start_script()
+
     def test_the_tuning_options_are_never_forbidden_ones(self):
         allowed = {n for names in server_policy.START_SCRIPT_OPTIONS for n in names}
         assert not allowed & server_policy.FORBIDDEN_FLAGS
@@ -674,9 +686,20 @@ def packaged_build(tmp_path, source, profile=RK3566, **kw):
 USER = DeploySettings(ssh_user="dietpi")
 
 
+def checks_of(dev, build, folders=None, **kw):
+    """The check a deployment runs on the new build before it becomes current (design 3.8, P6)."""
+    def check(home, folder):
+        if folders is not None:
+            folders.append(folder)
+        return verify_on_device(RemoteShell(dev), home=home, folder=folder, plan_verify=build.plan["verify"],
+                                pin_build=PIN.build_number, pin_commit=PIN.commit, port=8080, **kw)
+    return check
+
+
 def deploy(dev, build, packaged, settings=USER, **kw):
+    check = kw.pop("check", None) or checks_of(dev, build)
     return deploy_runtime(RemoteShell(dev), tarball=packaged.path, tarball_sha256=kw.pop("sha", packaged.sha256),
-                          build_id=build.build_id, arch="arm64", settings=settings, **kw)
+                          build_id=build.build_id, arch="arm64", settings=settings, check=check, **kw)
 
 
 def verify(dev, build, **kw):
@@ -742,17 +765,73 @@ class TestDeploy:
     def test_a_wrong_version_fails_the_checks(self, tmp_path, source, device_base):
         build, packaged = packaged_build(tmp_path, source, server=fake_program(FAKE_SERVER, build=1234))
         dev = FakeDevice(device_base)
-        deploy(dev, build, packaged)
-        report = verify(dev, build)
-        assert not report.ok and "reports build 1234" in report.check("version").detail
+        result = deploy(dev, build, packaged)
+        assert not result.activated and not result.report.ok
+        assert "reports build 1234" in result.report.check("version").detail
 
     def test_a_server_that_accepts_tools_fails_the_checks(self, tmp_path, source, device_base):
         accepting = fake_program(FAKE_SERVER).replace('echo "error: subprocess is not enabled on this build" >&2; '
                                                       "exit 1", "echo serving tools; exit 0")
         build, packaged = packaged_build(tmp_path, source, server=accepting)
         dev = FakeDevice(device_base)
-        deploy(dev, build, packaged)
-        assert verify(dev, build).check("server-tools").ok is False
+        result = deploy(dev, build, packaged)
+        assert not result.activated and result.report.check("server-tools").ok is False
+
+    def test_the_checks_run_on_the_new_build_before_it_becomes_current(self, tmp_path, source, device_base):
+        build, packaged = packaged_build(tmp_path, source)
+        dev = FakeDevice(device_base)
+        folders = []
+        result = deploy(dev, build, packaged, check=checks_of(dev, build, folders))
+        assert folders == [f"{dev.root}/{build.build_id[:16]}"] and result.activated and result.report.ok
+        assert os.readlink(dev.root / "current") == build.build_id[:16]
+
+    def test_a_build_that_fails_its_checks_on_the_device_never_becomes_current(self, tmp_path, source,
+                                                                                device_base):
+        """Design 3.8 and P6: a failed build is never activated, and the previous one stays active. A wrong CPU
+        baseline (SIGILL) or a wrong C library only shows when the programs run on the board."""
+        dev = FakeDevice(device_base)
+        good, packaged = packaged_build(tmp_path / "good", source)
+        assert deploy(dev, good, packaged).activated
+        bad, packaged = packaged_build(tmp_path / "bad", source, profile=changed(RK3566, LIBC_VERSION="2.41"),
+                                       server=fake_program(FAKE_SERVER, build=1234))
+        result = deploy(dev, bad, packaged)
+        assert not result.activated and not result.report.ok and result.previous is None
+        assert os.readlink(dev.root / "current") == good.build_id[:16], "the previous build stays active"
+        assert (dev.root / good.build_id[:16] / "bin" / "llama-server").is_file()
+        assert not (dev.root / bad.build_id[:16]).exists(), "the failed build is removed from the board"
+        assert any("stays active" in n for n in result.notes)
+        # A first deployment that fails leaves no `current` behind.
+        other = FakeDevice(device_base / "first")
+        assert not deploy(other, bad, packaged).activated and not (other.root / "current").exists()
+
+    def test_a_check_that_breaks_off_leaves_the_active_build_alone(self, tmp_path, source, device_base):
+        dev = FakeDevice(device_base)
+        good, packaged = packaged_build(tmp_path / "good", source)
+        deploy(dev, good, packaged)
+        new, packaged = packaged_build(tmp_path / "new", source, profile=changed(RK3566, LIBC_VERSION="2.41"))
+
+        def lost_connection(home, folder):
+            raise RemoteError("the SSH connection failed: reset")
+
+        with pytest.raises(RemoteError, match="connection failed"):
+            deploy(dev, new, packaged, check=lost_connection)
+        assert os.readlink(dev.root / "current") == good.build_id[:16]
+        assert not (dev.root / new.build_id[:16]).exists()
+        with pytest.raises(RemoteError, match="needs the checks"):
+            deploy_runtime(RemoteShell(dev), tarball=packaged.path, tarball_sha256=packaged.sha256,
+                           build_id=new.build_id, arch="arm64", settings=USER, check=None)
+
+    def test_a_failing_build_never_reaches_the_systemd_unit(self, tmp_path, source, device_base):
+        dev = FakeDevice(device_base)
+        (dev.home / "models").mkdir()
+        (dev.home / "models" / "qwen.gguf").write_bytes(b"GGUF")
+        settings = DeploySettings(install="systemd", ssh_user="dietpi", model="models/qwen.gguf",
+                                  sudo_confirmed_at=CONFIRMED)
+        bad, packaged = packaged_build(tmp_path, source, server=fake_program(FAKE_SERVER, build=1234))
+        result = deploy(dev, bad, packaged, settings=settings)
+        assert not result.activated and result.unit_started is None
+        assert dev.sudo_calls() == ["-n true"], "no unit is written, enabled or restarted for a failed build"
+        assert not (dev.fakeroot / "etc" / "systemd" / "system" / launcher.UNIT_NAME).exists()
 
     def test_redeploying_keeps_the_previous_build_and_removes_older_ones(self, tmp_path, source, device_base):
         dev = FakeDevice(device_base)
@@ -869,7 +948,7 @@ class TestDeploy:
         dev = FakeDevice(device_base)
         with pytest.raises(RemoteError, match="does not match SHA256SUMS"):
             deploy_runtime(RemoteShell(dev), tarball=tampered, tarball_sha256=digest, build_id=build.build_id,
-                           arch="arm64", settings=USER)
+                           arch="arm64", settings=USER, check=checks_of(dev, build))
         assert not (dev.root / "current").exists()
 
     def test_every_command_is_one_sh_c_with_quoted_values(self, tmp_path, source, device_base):
@@ -918,7 +997,7 @@ class TestFacts:
         tar.write_bytes(b"x")
         with pytest.raises(RemoteError, match="lacks tar"):
             deploy_runtime(shell, tarball=tar, tarball_sha256="a" * 64, build_id="b" * 64, arch="arm64",
-                           settings=USER)
+                           settings=USER, check=lambda home, folder: VerifyReport())
 
 
 # --- 8. finding devices -------------------------------------------------------------------------------------------
@@ -1130,6 +1209,51 @@ class TestCli:
         assert record["verification"]["ok"] is True
         status = json.loads(invoke_plain("device", "runtime", "status", device_id, "--json").stdout)
         assert status["current"] is True and status["built"] is True
+
+    @POSIX
+    def test_a_build_that_fails_on_the_device_is_not_recorded_and_the_previous_one_stays(self, monkeypatch,
+                                                                                        device_base, source):
+        from orchestrator import cli as cli_module
+        from test_cli_builds import invoke_plain
+        _store, device_id = stored_device(ssh_user="dietpi", port=9090)
+        state = cli_state()
+        builds = BuildStore(state)
+        build = builds.build(plan_for(RK3566), source=source,
+                             executor=FakeDeviceExecutor(server=fake_program(FAKE_SERVER, build=1234)),
+                             verifier=FormatOnlyVerifier(), jobs=1, host=HOST)
+        package_runtime(builds, build, licence=source / "LICENSE", out_dir=DeviceRuntimeStore(state, device_id).root)
+        earlier = {"build_id": "e" * 64, "deployed_at": "2026-10-01T10:00:00Z", "install": "user"}
+        DeviceRuntimeStore(state, device_id).save_record(earlier)
+        monkeypatch.setattr("orchestrator.runtime.build.toolchain.host_platform", lambda: HOST)
+        monkeypatch.setattr(cli_module, "_pinned_llama_source", lambda: PIN)
+        dev = FakeDevice(device_base)
+        install_folder(dev.home, id16="e" * 16)  # what runs on the board now
+        self.fake_ssh(monkeypatch, dev)
+        res = invoke_plain("device", "runtime", "deploy", "ZERO 3W")
+        out = " ".join(res.out.split())
+        assert res.code == 1 and "version: failed" in out and "Deployed" not in out
+        assert f"the previous build {'e' * 16} stays active" in out
+        assert os.readlink(dev.root / "current") == "e" * 16 and not (dev.root / build.build_id[:16]).exists()
+        record = DeviceRuntimeStore(state, device_id).record()
+        assert record["build_id"] == "e" * 64, "the record still names what runs on the board"
+
+    @POSIX
+    def test_the_start_hint_names_the_port_of_the_settings(self, monkeypatch, device_base, source):
+        from orchestrator import cli as cli_module
+        from test_cli_builds import invoke_plain
+        _store, device_id = stored_device(ssh_user="dietpi", port=9090)
+        state = cli_state()
+        builds = BuildStore(state)
+        build = builds.build(plan_for(RK3566), source=source, executor=FakeDeviceExecutor(),
+                             verifier=FormatOnlyVerifier(), jobs=1, host=HOST)
+        package_runtime(builds, build, licence=source / "LICENSE", out_dir=DeviceRuntimeStore(state, device_id).root)
+        monkeypatch.setattr("orchestrator.runtime.build.toolchain.host_platform", lambda: HOST)
+        monkeypatch.setattr(cli_module, "_pinned_llama_source", lambda: PIN)
+        self.fake_ssh(monkeypatch, FakeDevice(device_base))
+        res = invoke_plain("device", "runtime", "deploy", "ZERO 3W")
+        out = " ".join(res.out.split())
+        # The start script listens on 8080 unless --port is given: the hint must pass the port of the settings.
+        assert res.code == 0 and "start MODEL.gguf --port 9090" in out and "127.0.0.1:9090" in out
 
     @POSIX
     def test_deploy_refuses_another_machine_at_the_stored_address(self, monkeypatch, device_base, source):

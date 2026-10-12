@@ -6,6 +6,7 @@ build becomes a tarball with the programs, the OpenMP runtime when the build use
 llama.cpp licence (package.py). It is deployed over SSH into the device user's home (remote.py) with the start script
 of launcher.py (loopback, a key file generated on the device under umask 077, a cleared environment, the shared
 forbidden-option list) and, when the deploy settings say so, a systemd unit (settings.py: chosen before the
-deployment, never asked at run time). The programs are then checked on the device as the unprivileged user:
-version, devices and, with a model on the device, a short llama-bench run.
+deployment, never asked at run time). The new build's programs are checked on the device as the unprivileged user
+before it becomes active (version, devices, the refusal of --tools and, with a model on the device, a short
+llama-bench run); a build that fails is removed again and the previous one stays active.
 """

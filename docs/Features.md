@@ -190,8 +190,9 @@ Deployment copies a finished build to a board over SSH and installs the model fi
 - **Package:** a ZIP with the model file, the build's manifest and model card, `checksums.sha256` and a generated
   `deploy.sh`. Only model files are deployed (`.gguf`, `.rkllm`, `.rknn`, `.onnx`, `.safetensors`, `.bin`); a
   build with several weight files is refused.
-- **On the board:** the package goes into a private temporary folder (`mktemp -d`), `deploy.sh` checks every
-  checksum with `sha256sum -c`, copies the model to `~/models` (or `$MODEL_DIR`) and the temporary folder is
+- **On the board:** the package goes into a private temporary folder (`mktemp -d`), `deploy.sh` (run with `sh`,
+  so boards that mount `/tmp` with `noexec` or have no bash work too) checks every checksum with `sha256sum -c`,
+  copies the model to `~/models` (or `$MODEL_DIR`) and the temporary folder is
   removed. For GGUF it prints how to start the model with the start script of the
   [self-built runtime](#runtime-on-the-board-self-built-llamacpp) when that is installed on the board (on
   127.0.0.1 with the board's key), otherwise how to deploy it; it never points to a `llama-server` found on the
@@ -225,10 +226,12 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
   as the SSH user of the deploy settings; root is refused. Values the board reports (home folder, user ID,
   architecture, missing tools) are checked before they are used. The tarball travels on the command's stdin into a
   private staging folder in `~/.local/share/llm-framework/llama.cpp/` (never `/tmp`, which may be `noexec`), is
-  checked against its sha256 and every file against `SHA256SUMS`, made readable only for the user, and becomes
-  `current`. The previous build is kept; older ones are removed unless a running program uses them. The key in
-  `~/.config/llm-framework/llama-server.key` is generated on the board by the start script under umask 077 and never
-  leaves it.
+  checked against its sha256 and every file against `SHA256SUMS`, made readable only for the user, and placed next to
+  the active build. The new build's programs are then checked on the board (below), and only a build that passes
+  becomes `current`; one that fails is removed again and the previous build stays active (design 3.8: a failed
+  build is never activated). After the switch the previous build is kept; older ones are removed unless a running
+  program uses them. The key in `~/.config/llm-framework/llama-server.key` is generated on the board by the start
+  script under umask 077 and never leaves it.
 - **Start script** (`llama-server.sh serve|start|stop|status|keygen|version`): POSIX sh, tested with dash and bash.
   It starts `llama-server` from its own folder (never from `PATH`) with `env -i` (HOME, a fixed PATH, the C locale),
   `--host 127.0.0.1`, `--api-key-file`, `--no-ui`, `--no-slots`, `--jinja` and `--offline`. It passes on only
@@ -239,9 +242,9 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
 - **Deploy settings, decided before the deployment** (decision D7, `llm-cli device settings`): the start script in
   the user's home (the default) or a systemd unit. The unit can only be chosen when the board's probe reports
   `INIT_SYSTEM=systemd`, needs the model it serves, and needs your confirmation, given when you choose it, that
-  deployments may run `sudo -n` on the board; the confirmation is written to the audit log. The deployment writes
-  `/etc/systemd/system/llm-llama-server.service` with `sudo -n` (which fails instead of asking), enables it and
-  starts it once the model is there. The unit runs the start script's `serve` as the user, without `Environment=`,
+  deployments may run `sudo -n` on the board; the confirmation is written to the audit log. Once the new build has
+  passed its checks, the deployment writes `/etc/systemd/system/llm-llama-server.service` with `sudo -n` (which
+  fails instead of asking), enables it and starts it once the model is there. The unit runs the start script's `serve` as the user, without `Environment=`,
   with `NoNewPrivileges`, a read-only system and home, and `IPAddressDeny=any` plus `IPAddressAllow=localhost`.
   Boards with OpenRC or SysV init use the start script. A deployment never asks a question.
 - **Checks on the board** (also `llm-cli device runtime verify`), as the unprivileged user and never with sudo:
@@ -249,8 +252,9 @@ For GGUF models the framework builds llama.cpp for a board and installs it there
   the planned devices, and `llama-server --tools all` must be refused. With `--bench-model` a short `llama-bench -p
   64 -n 16 -r 1` runs on a model on the board: a catalog model (recognised by its sha256) at once, any other model
   only after your consent, written to the audit log (decision D23). A `SIGILL` means the build's CPU baseline does
-  not fit the board. The result is kept in `device/<device ID>/deployed.json`; `llm-cli device runtime status` says
-  whether the deployed build is still the one the profile and the pin call for.
+  not fit the board. A deployment runs these checks on the new build before it becomes `current`, so a build that
+  fails them never runs as the board's server. The result is kept in `device/<device ID>/deployed.json`; `llm-cli
+  device runtime status` says whether the deployed build is still the one the profile and the pin call for.
 - **Measured** with real programs instead of a board: `llama-server` and `llama-bench` built natively with the device
   plan's options for an x86-64 machine (GCC 13.3, `-j4`, about 8 minutes on 4 shared cores) gave 30 MB of programs
   and an 11.6 MB tarball; the format check (glibc 2.38 needed, no shared C++ runtime), the deployment to a local

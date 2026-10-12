@@ -122,7 +122,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   run and short benchmark on a tiny pinned model are skipped with a note until the catalog pins one; no other model
   is loaded there. Binaries come only from the build's own folder, never from `PATH`, and every program the
   framework starts takes the same forbidden-option list (also in the `--a_b` spelling, which llama.cpp reads as
-  `--a-b`) and a cleared environment without `LLAMA_*` variables.
+  `--a-b`, and with every name of the download options, such as `-hfr`, `-dr` or `--mmproj-url`) and a cleared
+  environment without `LLAMA_*` variables.
   Builds are stored under `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` with `build.json` and
   `manifest.json` (sha256 of every file, duration, verification) and reused, never stamped again; only a build
   verified on this machine can become active, and retention never removes the active build, the CPU fallback or the
@@ -153,15 +154,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   builds, the board's `libgomp.so.1` taken from the cross toolchain. The result is a tarball
   (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`, `lib/libgomp.so.1`, a start script, the build's
   stamps, llama.cpp's MIT licence and `SHA256SUMS`) that the deployment uploads over SSH into
-  `~/.local/share/llm-framework/llama.cpp/` on the board, checks there file by file and switches to with a `current`
-  link; the previous build is kept. The start script runs the server on 127.0.0.1 with a key that is generated on
-  the board under umask 077, a cleared environment and fixed options; it passes on only a few tuning options with
-  checked values (context size, threads, CPU mask, ...). How the runtime starts is chosen beforehand in the deploy
-  settings, never asked during a deployment: the start script in your home (the default), or a systemd unit, which
-  can be chosen only for boards with systemd and after you confirm that deployments may run `sudo -n` there.
-  After the deployment the programs are checked on the board as your unprivileged user: `--version` against the
-  pin, `--list-devices`, the server's refusal of `--tools` and, with `--bench-model`, a short `llama-bench` run
-  (a model that is not a catalog model only after your consent, written to the audit log). Tested with a fake SSH
+  `~/.local/share/llm-framework/llama.cpp/` on the board and checks there file by file. The new build's programs
+  are then checked on the board as your unprivileged user, before anything starts them: `--version` against the
+  pin, `--list-devices`, the server's refusal of `--tools` and, with `--bench-model`, a short `llama-bench` run (a
+  model that is not a catalog model only after your consent, written to the audit log). Only a build that passes
+  becomes active through a `current` link (the previous build is kept); a build that fails, for example with a
+  `SIGILL` from a CPU baseline that does not fit the board, is removed again and the previous build stays active.
+  The start script runs the server on 127.0.0.1 with a key that is generated on the board under umask 077, a
+  cleared environment and fixed options; it passes on only a few tuning options with checked values (context size,
+  threads, CPU mask, ...). How the runtime starts is chosen beforehand in the deploy settings, never asked during a
+  deployment: the start script in your home (the default), or a systemd unit, which can be chosen only for boards
+  with systemd and after you confirm that deployments may run `sudo -n` there. Tested with a fake SSH
   channel and fixture profiles (an RK3566 on DietPi, an Alpine board, a board without systemd), and with real
   programs: `llama-server` and `llama-bench` built natively with the device plan's options for an x86-64 machine
   (30 MB, an 11.6 MB tarball) passed the format check, the deployment to a local stand-in board and the checks
@@ -460,6 +463,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `hardware_probe.sh` there and ran it. It now sends the probe over the SSH channel like `llm-cli scan --device`
   (the Python probe with Python 3.8 or newer, else the shell probe), writes nothing on the board, and keeps the
   profile under the board's ID.
+- Deploying a model package to a board failed where `/tmp` is mounted `noexec` (the package is unpacked there and
+  `deploy.sh` was executed from it) and on boards without bash (the script started with `#!/bin/bash`). `deploy.sh`
+  is now a plain POSIX `sh` script and is run with `sh deploy.sh`.
 - Deployment from the GUI writes the package into the configured output folder (`output_dir`, relative to the
   installation) instead of `output/` in the working folder.
 - The AI settings dialog warns when the settings could not be saved to `config.yml` (they apply until the program

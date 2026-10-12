@@ -264,7 +264,7 @@ class DeploymentManager:
                                 inference_image: str = DEFAULT_INFERENCE_IMAGE,
                                 qdrant_image: Optional[str] = None) -> str:
         script = [
-            "#!/bin/bash",
+            "#!/bin/sh",
             "set -e",
             "echo '[1/3] Checking Integrity...'",
             "sha256sum -c checksums.sha256",
@@ -388,7 +388,9 @@ class DeploymentManager:
     @staticmethod
     def _remote_install_cmd(target_dir: str, package_name: str) -> str:
         d, pkg = shlex.quote(target_dir), shlex.quote(package_name)
-        return f"cd {d} && unzip -o {pkg} && chmod +x deploy.sh && ./deploy.sh"
+        # sh reads the script instead of executing it from /tmp, which many boards mount noexec (and deploy.sh is
+        # plain POSIX sh, so boards without bash, such as Alpine, run it too).
+        return f"cd {d} && unzip -o {pkg} && sh deploy.sh"
 
     # A private, unpredictable folder on the device (a fixed /tmp path could be pre-created by another user).
     REMOTE_MKTEMP = "mktemp -d /tmp/llm_deploy.XXXXXXXX"

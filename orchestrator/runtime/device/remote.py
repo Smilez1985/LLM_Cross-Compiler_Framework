@@ -14,13 +14,15 @@ every file against SHA256SUMS, and only then moved into place:
     ~/.local/share/llm-framework/llama.cpp/current            -> <build id[:16]>
     ~/.config/llm-framework/llama-server.key                   generated on the device under umask 077
 
-The previous build is kept (to go back by hand), older ones are removed unless a running program uses them. With
-the deploy setting "systemd" the unit is written and enabled with `sudo -n`, which fails instead of asking; whether
-sudo may be used was decided in the deploy settings, before the deployment. The checks on the device then run the
-programs as the unprivileged user with a cleared environment: --version (the pinned build and commit),
---list-devices, the server's refusal of --tools, and a short llama-bench run when a model on the device is given.
-A model that is not a catalog model is only benchmarked after the user's consent, which the caller writes to the
-audit log (decision D23).
+The new build's programs are checked in their own folder before anything starts them (design 3.8 and P6: a failed
+build is never activated): as the unprivileged user with a cleared environment, --version (the pinned build and
+commit), --list-devices, the server's refusal of --tools, and a short llama-bench run when a model on the device is
+given. A model that is not a catalog model is only benchmarked after the user's consent, which the caller writes to
+the audit log (decision D23). Only a build that passes becomes `current`; a build that fails (a SIGILL from a wrong
+CPU baseline, a C library its programs do not run with) is removed again, and the previous build stays active.
+After the switch the previous build is kept (to go back by hand), older ones are removed unless a running program
+uses them. With the deploy setting "systemd" the unit is then written and enabled with `sudo -n`, which fails
+instead of asking; whether sudo may be used was decided in the deploy settings, before the deployment.
 """
 
 import re
@@ -190,6 +192,10 @@ def read_facts(shell: RemoteShell, *, want_sudo: bool = False) -> DeviceFacts:
 
 # --- deployment ---------------------------------------------------------------------------------------------------
 
+# The checks of a new build before it becomes current: (device home, the build's folder on the device) -> report.
+CheckNewBuild = Callable[[str, str], VerifyReport]
+
+
 @dataclass
 class DeployResult:
     build_id: str
@@ -200,6 +206,8 @@ class DeployResult:
     install: str = "user"
     unit_started: Optional[bool] = None
     notes: List[str] = field(default_factory=list)
+    report: Optional[VerifyReport] = None   # the checks of the new build on the device
+    activated: bool = False                 # it passed them and is `current` now
 
 
 def _chunks(path: Path, size: int = 1 << 20) -> Iterable[bytes]:
@@ -213,12 +221,17 @@ def _hex16_glob() -> str:
 
 
 def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, build_id: str, arch: str,
-                   settings: DeploySettings, say: Callable[[str], None] = lambda _m: None) -> DeployResult:
+                   settings: DeploySettings, check: CheckNewBuild,
+                   say: Callable[[str], None] = lambda _m: None) -> DeployResult:
     """Installs the tarball on the device behind `shell` (see the module docstring). The caller has checked the
     settings against the device's profile (DeploySettings.problems) before; this function checks the device itself
-    again (user, architecture, tools, systemd, sudo) before it changes anything."""
+    again (user, architecture, tools, systemd, sudo) before it changes anything. `check` runs the checks of the new
+    build in its own folder (verify_on_device with `folder`); only when they pass does the build become `current`
+    and, with the systemd setting, the unit's build (result.activated)."""
     if not _RE_ID.fullmatch(build_id or "") or not _RE_SHA.fullmatch(tarball_sha256 or ""):
         raise RemoteError("the build ID or the tarball's sha256 is missing")
+    if not callable(check):
+        raise RemoteError("a deployment needs the checks of the new build before it becomes current")
     id16 = build_id[:16]
     systemd = settings.install == "systemd"
     facts = read_facts(shell, want_sudo=systemd)
@@ -255,7 +268,7 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         if res.status != 0:
             raise RemoteError(f"the upload failed (exit {res.status}): {_tail(res.err or res.out)}")
         say("checking the tarball and every file on the device ...")
-        check = "\n".join([
+        sums_check = "\n".join([
             "set -eu",
             "umask 077",
             f"cd {_q(staging)}",
@@ -269,10 +282,10 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
             f"cd {_q(id16)}",
             "sha256sum -c SHA256SUMS >/dev/null || { echo 'a file does not match SHA256SUMS' >&2; exit 3; }",
         ])
-        res = shell.run(check, timeout=HASH_TIMEOUT)
+        res = shell.run(sums_check, timeout=HASH_TIMEOUT)
         if res.status != 0:
             raise RemoteError(f"the check on the device failed (exit {res.status}): {_tail(res.err or res.out)}")
-        say("installing ...")
+        say("installing next to the active build ...")
         install = "\n".join([
             "set -eu",
             "umask 077",
@@ -280,16 +293,52 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
             "old=$(readlink current 2>/dev/null || true)",
             f"rm -rf {_q(id16)}",
             f"mv {_q(staging + '/' + id16)} {_q(id16)}",
-            f"ln -sfn {_q(id16)} current",
-            'printf "previous=%s\\n" "$old"',
+            'printf "current=%s\\n" "$old"',
         ])
         res = shell.run(install)
         if res.status != 0:
             raise RemoteError(f"installing on the device failed (exit {res.status}): {_tail(res.err or res.out)}")
-        previous = next((ln.split("=", 1)[1].strip() for ln in res.out.splitlines() if ln.startswith("previous=")), "")
-        result.previous = previous if _RE_ID16.fullmatch(previous) and previous != id16 else None
+        active = next((ln.split("=", 1)[1].strip() for ln in res.out.splitlines() if ln.startswith("current=")), "")
+        active = active if _RE_ID16.fullmatch(active) else ""
     finally:
         shell.run(f"rm -rf {_q(staging)}")
+    folder = f"{root}/{id16}"
+
+    say("creating the API key on the device (umask 077) ...")
+    key_check = "\n".join([
+        "set -eu",
+        f"sh {_q(folder + '/' + START_SCRIPT)} keygen >/dev/null",
+        f'mode=$(ls -ln {_q(facts.key)} | cut -c1-10)',
+        '[ "$mode" = "-rw-------" ] || { echo "the key file is readable by others ($mode)" >&2; exit 3; }',
+    ])
+    res = shell.run(key_check)
+    if res.status != 0:
+        _discard(shell, root, id16, active)
+        raise RemoteError(f"the key could not be created on the device (exit {res.status}): "
+                          f"{_tail(res.err or res.out)}")
+
+    say("checking the new build on the device before it becomes active ...")
+    try:
+        result.report = check(facts.home, folder)
+    except BaseException:
+        _discard(shell, root, id16, active)
+        raise
+    if not result.report.ok:
+        _discard(shell, root, id16, active)
+        if active == id16:
+            result.notes.append("this build was already the active one; its files were replaced by the same, "
+                                "checked files")
+        else:
+            result.notes.append((f"the previous build {active} stays active" if active else "nothing was activated")
+                                + "; the new build failed its checks and was removed from the device")
+        return result
+
+    res = shell.run("\n".join(["set -eu", f"cd {_q(root)}", f"ln -sfn {_q(id16)} current"]))
+    if res.status != 0:
+        _discard(shell, root, id16, active)
+        raise RemoteError(f"switching to the new build failed (exit {res.status}): {_tail(res.err or res.out)}")
+    result.activated = True
+    result.previous = active if active and active != id16 else None
 
     # Retention: the new build, the previous one, and every build a running program uses stay.
     keep = [id16] + ([result.previous] if result.previous else [])
@@ -313,18 +362,6 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
     result.removed = [ln.split("=", 1)[1] for ln in res.out.splitlines()
                       if ln.startswith("removed=") and _RE_ID16.fullmatch(ln.split("=", 1)[1])]
 
-    say("creating the API key on the device (umask 077) ...")
-    key_check = "\n".join([
-        "set -eu",
-        f"sh {_q(root + '/current/' + START_SCRIPT)} keygen >/dev/null",
-        f'mode=$(ls -ln {_q(facts.key)} | cut -c1-10)',
-        '[ "$mode" = "-rw-------" ] || { echo "the key file is readable by others ($mode)" >&2; exit 3; }',
-    ])
-    res = shell.run(key_check)
-    if res.status != 0:
-        raise RemoteError(f"the key could not be created on the device (exit {res.status}): "
-                          f"{_tail(res.err or res.out)}")
-
     if systemd:
         _install_unit(shell, facts, settings, result, say)
     elif facts.unit_installed:
@@ -336,6 +373,17 @@ def deploy_runtime(shell: RemoteShell, *, tarball: Path, tarball_sha256: str, bu
         result.notes.append("a server started with the start script is still running the previous build; restart "
                             f"it to use the new one ({root}/current/{START_SCRIPT} stop, then start)")
     return result
+
+
+def _discard(shell: RemoteShell, root: str, id16: str, active: str) -> None:
+    """Removes a new build that did not pass, unless it is the active build itself (the same build deployed again,
+    whose folder now holds the same files, checked against SHA256SUMS). Best effort: a folder that stays behind is
+    not active and goes with the next deployment's clean-up."""
+    if id16 != active:
+        try:
+            shell.run(f"rm -rf {_q(root + '/' + id16)}")
+        except RemoteError:
+            pass
 
 
 def _install_unit(shell: RemoteShell, facts: DeviceFacts, settings: DeploySettings, result: DeployResult,
@@ -365,8 +413,8 @@ def _install_unit(shell: RemoteShell, facts: DeviceFacts, settings: DeploySettin
 
 # --- checks on the device -----------------------------------------------------------------------------------------
 
-def _program(root: str, name: str) -> str:
-    return f"{root}/current/bin/{name}"
+def _program(folder: str, name: str) -> str:
+    return f"{folder}/bin/{name}"
 
 
 def _run_program(shell: RemoteShell, home: str, argv: Sequence[str], timeout: float, *,
@@ -392,13 +440,20 @@ def model_sha256(shell: RemoteShell, path: str) -> Optional[str]:
 
 def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str, Any], pin_build: int,
                      pin_commit: str, port: int, bench_model: Optional[str] = None,
-                     bench_allowed: bool = False, threads: Optional[int] = None) -> VerifyReport:
-    """The checks of design 3.8 steps 2-5 on the device, as the unprivileged SSH user (never with sudo)."""
+                     bench_allowed: bool = False, threads: Optional[int] = None,
+                     folder: Optional[str] = None) -> VerifyReport:
+    """The checks of design 3.8 steps 2-5 on the device, as the unprivileged SSH user (never with sudo), of the
+    programs in `folder`: a build folder of the install folder (a deployment checks the new build there before it
+    becomes current), by default the active build (`current`)."""
     report = VerifyReport()
     root = install_root(home)
+    if folder is None:
+        folder = f"{root}/current"
+    elif not (folder.startswith(root + "/") and _RE_ID16.fullmatch(folder[len(root) + 1:])):
+        raise RemoteError("the folder to check is not a build folder of the install folder")
     names = list(dict.fromkeys(list(plan_verify.get("binaries") or []) + list(_PROGRAMS)))
-    res = shell.run("; ".join(f"[ -f {_q(_program(root, n))} ] && [ -x {_q(_program(root, n))} ] || echo missing={n}"
-                              for n in names))
+    res = shell.run("; ".join(f"[ -f {_q(_program(folder, n))} ] && [ -x {_q(_program(folder, n))} ] "
+                              f"|| echo missing={n}" for n in names))
     missing = [ln.split("=", 1)[1] for ln in res.out.splitlines() if ln.startswith("missing=")]
     if res.status != 0 or missing:
         report.checks.append(Check("binaries", False, "missing on the device: " + (", ".join(missing) or "?")))
@@ -409,7 +464,7 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
     # Version
     found, problems = {}, []
     for name in _PROGRAMS:
-        r = _run_program(shell, home, [_program(root, name), "--version"], VERSION_TIMEOUT)
+        r = _run_program(shell, home, [_program(folder, name), "--version"], VERSION_TIMEOUT)
         parsed = parse_version(r.out)
         if r.status != 0 or parsed is None:
             sigill = r.status in (132, -4) or "Illegal instruction" in r.out
@@ -426,7 +481,7 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
                                ", ".join(f"{k} {v}" for k, v in found.items()), {"found": found}))
 
     # Devices
-    r = _run_program(shell, home, [_program(root, "llama-bench"), "--list-devices"], DEVICES_TIMEOUT)
+    r = _run_program(shell, home, [_program(folder, "llama-bench"), "--list-devices"], DEVICES_TIMEOUT)
     devices = parse_devices(r.out)
     if r.status != 0 or devices is None:
         report.checks.append(Check("devices", False, f"llama-bench --list-devices failed (exit {r.status}): "
@@ -444,7 +499,7 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
     # The server refuses --tools (built without subprocess support): the one deliberate use of a forbidden option,
     # with a model path that does not exist, loopback and the key file.
     missing_model = f"{root}/.no-model-{secrets.token_hex(4)}.gguf"
-    argv = [_program(root, "llama-server"), *SERVER_TOOLS_CHECK, "-m", missing_model, "--host", "127.0.0.1",
+    argv = [_program(folder, "llama-server"), *SERVER_TOOLS_CHECK, "-m", missing_model, "--host", "127.0.0.1",
             "--port", str(int(port)), "--api-key-file", f"{home}/{KEY_REL}", "--no-ui", "--offline"]
     r = _run_program(shell, home, argv, VERSION_TIMEOUT, checked=False)
     if r.status != 0 and SERVER_TOOLS_REFUSAL in r.out:
@@ -464,7 +519,7 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
     else:
         if not _RE_MODEL.fullmatch(bench_model) or ".." in bench_model.split("/"):
             raise RemoteError("the benchmark model path is not a plain absolute path")
-        argv = [_program(root, "llama-bench"), "-m", bench_model, "-p", "64", "-n", "16", "-r", "1", "-o", "json"]
+        argv = [_program(folder, "llama-bench"), "-m", bench_model, "-p", "64", "-n", "16", "-r", "1", "-o", "json"]
         if threads:
             argv += ["-t", str(int(threads))]
         r = _run_program(shell, home, argv, BENCH_TIMEOUT, merge=False)

@@ -34,6 +34,10 @@ FORBIDDEN_FLAGS = frozenset({
     "--ui-mcp-proxy", "--webui-mcp-proxy", "--ui", "--webui", "--api-key", "--props", "--media-path",
     "--slot-save-path", "--models-dir", "--models-preset", "--path", "-hf", "--hf-repo", "-mu", "--model-url",
     "--rpc", "--slots", "--metrics",
+    # The other names of -hf at the pin (common/arg.cpp), and the options next to it that download a model, a draft
+    # model or a projector, or put a token on the command line. Every launcher also passes --offline.
+    "-hfr", "-hff", "--hf-file", "-hft", "--hf-token", "-dr", "--docker-repo", "-mmu", "--mmproj-url",
+    "--spec-draft-hf", "-hfd", "-hfrd", "--hf-repo-draft",
 })
 # What Ditto's server may still take from the caller's environment (decision D22: a cleared environment for every
 # launcher): GPU selection of the CUDA, ROCm and Vulkan backends and where the GPU drivers and the Vulkan loader's
