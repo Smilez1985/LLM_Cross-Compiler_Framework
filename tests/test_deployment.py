@@ -24,8 +24,18 @@ class FakeImage:
     def __init__(self, name, repo_digests=None):
         self.name = name
         self.attrs = {"RepoDigests": list(repo_digests) if repo_digests is not None else [f"{name}@sha256:" + "c" * 64]}
+        self.tags = [] if "@sha256:" in name else [name]
+
+    def tag(self, repository, tag=None):
+        self.tags.append(f"{repository}:{tag}")
+        return True
+
+    def reload(self):
+        pass
 
     def save(self, named=True):
+        if isinstance(named, str):
+            assert named in self.tags, f"{named} not in self.tags"  # docker-py raises InvalidArgument
         yield f"tarball:{self.name}".encode()
 
 

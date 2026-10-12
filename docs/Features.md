@@ -249,7 +249,10 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   digest (`image_inference_runtime: name@sha256:...`) or was built on this computer (it exists here and was never
   pulled); an image named only by a tag, such as the default `...:latest`, is refused with the reason before anything
   is copied. A digest-pinned image that is not here is pulled by its digest, never by a tag, and a failed export
-  stops the package instead of leaving the image out.
+  stops the package instead of leaving the image out. A digest-pinned image is packed under the local name
+  `<repository>:lcf-<first 12 hex characters of the digest>` (`docker load` does not restore registry digests), and
+  `deploy.sh` starts every packed image with `--pull never`: the board runs exactly the packed image, and a board
+  where it is missing stops instead of pulling one from a registry.
 - **Trusted devices:** after a successful login to a board whose host key you confirmed (a deployment in the GUI or
   with `llm-cli deploy run`, a probe with `llm-cli scan --device`, a `device runtime deploy`), the framework records
   it in `~/.llm-framework/devices.json`: your label, address, user, the confirmed host key and whether the
@@ -1366,7 +1369,10 @@ framework never sees it.
   by a standing approval, one per device at a time and six per hour per client. `cancel_job` closes the SSH session
   and the job says the device state is unknown; nothing is retried. The job result has `success`, `exit_status`,
   `device_state` (`ok`, `failed`, `unknown`) and the last 100 lines the device printed in `external_text`, marked as
-  external text. The `deploy_to_board` prompt leads through the same steps.
+  external text; `reason` is always the framework's own sentence, without host paths. When a job of the device or
+  runtime tools fails, the error message is the framework's sentence too: what the device or `llama-bench` printed
+  (`llama-bench` prints the metadata of the model it loads) is returned in `external_text`. The `deploy_to_board`
+  prompt leads through the same steps.
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
   server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification

@@ -17,11 +17,22 @@ from orchestrator.runtime.device.trusted import TrustedDevice
 
 
 class DeviceRuntimeError(RuntimeError):
-    """A device step that cannot be done; `code` is a tool reason code, `next` the step that helps."""
+    """A device step that cannot be done; `code` is a tool reason code, `next` the step that helps. `external_text`
+    holds what the device answered (its stderr, a check's output): never part of the message, returned to AI callers
+    marked as external text."""
 
-    def __init__(self, message: str, code: str = "failed", next: str = ""):
+    def __init__(self, message: str, code: str = "failed", next: str = "",
+                 external_text: Optional[List[str]] = None):
         super().__init__(message)
         self.code, self.next = code, next
+        self.external_text = list(external_text or [])
+
+
+def _device_said(what: str, device: TrustedDevice, error: Exception) -> DeviceRuntimeError:
+    """A failed remote step: the framework's sentence as the message, the device's words (inside the remote error's
+    text) as external text."""
+    return DeviceRuntimeError(f"{what} on {device.label} failed; the details from the device are kept apart as "
+                              "external text.", code="failed", external_text=[str(error)[:2000]])
 
 
 class Stopped(DeviceRuntimeError):
@@ -95,7 +106,7 @@ def probe(device: TrustedDevice, state_dir: Path, expect_fingerprint: str, *,
         try:
             result = probe_over_ssh(client)
         except RemoteProbeError as e:
-            raise DeviceRuntimeError(f"The probe on {device.label} failed: {e}", code="failed") from None
+            raise _device_said("The probe", device, e) from None
     finally:
         client.close()
     store = ProfileStore(state_dir)
@@ -243,7 +254,7 @@ def deploy(state_dir: Path, device: TrustedDevice, profile: Any, settings: Any, 
                                                                       profile.arch), settings=settings,
                                     check=check_new_build, say=say)
         except RemoteError as e:
-            raise DeviceRuntimeError(f"The deploy on {device.label} failed: {e}", code="failed") from None
+            raise _device_said("The deploy", device, e) from None
     finally:
         client.close()
     report = result.report
@@ -319,7 +330,7 @@ def benchmark(state_dir: Path, device: TrustedDevice, profile: Any, settings: An
                                       pin_build=source.build_number, pin_commit=source.commit, port=settings.port,
                                       bench_model=path, bench_allowed=True)
         except RemoteError as e:
-            raise DeviceRuntimeError(f"The checks on {device.label} failed: {e}", code="failed") from None
+            raise _device_said("The checks", device, e) from None
     finally:
         client.close()
     record.update({"verification": report.as_dict(), "verified_at": report_time()})

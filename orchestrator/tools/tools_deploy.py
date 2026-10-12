@@ -48,6 +48,20 @@ def package_id(name: str) -> str:
     return "pkg_" + hashlib.sha256(name.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
+def hide_paths(text: str, labels: Dict[str, str]) -> str:
+    """Framework text for an AI caller with host paths replaced: each folder in `labels` by its label (longest
+    first, also resolved), then the home folder by ~ (design 6.4: ids and labels, never paths)."""
+    from orchestrator.tools.tools_status import _scrub_paths
+    pairs = []
+    for folder, label in labels.items():
+        for form in {str(folder), str(Path(folder).resolve())}:
+            if form and form != "/":
+                pairs.append((form, label))
+    for form, label in sorted(pairs, key=lambda p: -len(p[0])):
+        text = text.replace(form, label)
+    return _scrub_paths(text)
+
+
 def _size(n: Optional[int]) -> str:
     if n is None:
         return "size unknown"
@@ -330,7 +344,10 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             except DeployError as e:
                 if stop.is_set() or handle.cancelled:
                     raise JobCancelled() from None
-                raise ValueError(f"{e} Next: {e.next}" if e.next else str(e)) from None
+                err = ValueError(hide_paths(f"{e} Next: {e.next}" if e.next else str(e),
+                                            {str(folder): "the build folder", str(out): "the output folder"}))
+                err.code = e.code  # type: ignore[attr-defined]
+                raise err from None
             finally:
                 reservation.release()
             if stop.is_set() or handle.cancelled:
@@ -477,7 +494,9 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
             devices().note_deploy(device.device_id, result.success, path.name)
             return {"success": result.success, "exit_status": result.exit_status,
                     "device_state": result.device_state, "device_id": device.device_id,
-                    "reason": result.reason[:500] if result.reason else "", EXTERNAL_KEY: list(result.output)}
+                    # the framework's reason (the device's own words are in the output lines), without host paths
+                    "reason": hide_paths(result.reason, {str(path.parent): "the output folder"})[:500]
+                    if result.reason else "", EXTERNAL_KEY: list(result.output)}
 
         holder: Dict[str, str] = {}
 

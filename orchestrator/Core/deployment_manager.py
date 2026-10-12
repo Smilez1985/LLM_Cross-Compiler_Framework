@@ -235,13 +235,15 @@ class DeploymentManager:
                     # Wir erstellen nur die Struktur, kopieren aber KEINE Host-Daten.
                     self._setup_slim_vector_db(temp_path)
 
-                self._export_docker_images(images, temp_path / "images", client)
+                load_names = self._export_docker_images(images, temp_path / "images", client)
                 check_stop()
+            else:
+                load_names = {}
 
             # D. Script Generation (Deploy + Compose Logic)
             try:
                 script_content = self._generate_deploy_script(
-                    artifact_path.name, flags_str, use_docker, inference_image, qdrant_image)
+                    artifact_path.name, flags_str, use_docker, inference_image, qdrant_image, load_names)
             except ValueError as e:
                 raise DeployError(str(e), code="not_supported") from None
 
@@ -311,16 +313,29 @@ class DeploymentManager:
         (qdrant_storage / ".keep").touch()
         self.logger.info("Initialized Slim-RAG storage structure (Clean Slate).")
 
-    def _export_docker_images(self, images: List[str], dest_dir: Path, client: Any = None):
-        """Saves each image into the package. A digest-pinned image that is not here is pulled by its digest; an image
-        is never pulled by a tag. Any failure stops the package (DeployError): a package without its images would
-        fail on the air-gapped device."""
+    @staticmethod
+    def _load_name(image: str) -> str:
+        """The name a packed image carries in its tarball, so `docker load` restores it on the device: the image's own
+        tag, or for a digest-pinned image (docker keeps no tag for an image pulled by its digest, and `docker load`
+        does not restore registry digests) its repository with the tag lcf-<first 12 hex characters of the digest>."""
+        if not DIGEST_REFERENCE.fullmatch(image):
+            return image
+        name, digest = image.split("@sha256:", 1)
+        repo = name.rsplit(":", 1)[0] if ":" in name.rsplit("/", 1)[-1] else name
+        return f"{repo}:lcf-{digest[:12]}"
+
+    def _export_docker_images(self, images: List[str], dest_dir: Path, client: Any = None) -> Dict[str, str]:
+        """Saves each image into the package under the name deploy.sh starts it by (_load_name) and returns
+        {image: that name}. A digest-pinned image that is not here is pulled by its digest; an image is never pulled
+        by a tag. Any failure stops the package (DeployError): a package without its images would fail on the
+        air-gapped device."""
         dest_dir.mkdir(parents=True, exist_ok=True)
         client = client or self.framework.get_component("docker_client")
         if not client:
             raise DeployError("Docker is not available on this computer, so the images cannot be packaged.",
                               code="needs_person", next="Start Docker, or package without Docker images.")
 
+        names: Dict[str, str] = {}
         for img_name in images:
             sanitized = img_name.replace("/", "_").replace(":", "_").replace("@", "_")
             tar_path = dest_dir / f"{sanitized}.tar"
@@ -334,12 +349,19 @@ class DeploymentManager:
                         raise
                     client.images.pull(img_name)
                     img = client.images.get(img_name)
+                name = self._load_name(img_name)
+                if name != img_name:  # digest-pinned: the content is the digest's; the local tag only names it
+                    repo, tag = name.rsplit(":", 1)
+                    img.tag(repo, tag=tag)
+                    img.reload()
                 with open(tar_path, "wb") as f:
-                    for chunk in img.save(named=True):
+                    for chunk in img.save(named=name):
                         f.write(chunk)
+                names[img_name] = name
             except Exception as e:
                 raise DeployError(f"The image {img_name} could not be packaged: {e}", code="failed",
                                   next="Check Docker and the image reference, then package again.") from None
+        return names
 
     def _generate_checksums(self, directory: Path, output_file: Path):
         # LF line endings: sha256sum < coreutils 9.0 (Debian 11, Ubuntu 22.04, Git for Windows) treats CR as part of the name.
@@ -356,7 +378,12 @@ class DeploymentManager:
 
     def _generate_deploy_script(self, artifact, flags, use_docker,
                                 inference_image: str = DEFAULT_INFERENCE_IMAGE,
-                                qdrant_image: Optional[str] = None) -> str:
+                                qdrant_image: Optional[str] = None,
+                                load_names: Optional[Dict[str, str]] = None) -> str:
+        """deploy.sh of a package. The packed images are started by the names their tarballs carry (`load_names`,
+        from _export_docker_images) with `--pull never`: the device runs exactly what the package holds, and a device
+        where an image is missing fails instead of pulling a look-alike from a registry."""
+        names = load_names or {}
         script = [
             "#!/bin/sh",
             "set -e",
@@ -369,6 +396,7 @@ class DeploymentManager:
             script.extend([
                 "echo '[2/3] Loading Images (Air-Gap Support)...'",
                 "for img in images/*.tar; do if [ -e \"$img\" ]; then docker load -i \"$img\"; fi; done",
+                *[f"# {pinned} is packed as {name}" for pinned, name in sorted(names.items()) if pinned != name],
                 "",
                 "echo '[3/3] Starting Stack...'",
                 "docker network create llm-net || true",
@@ -381,7 +409,8 @@ class DeploymentManager:
                     "  --network llm-net \\",
                     "  -v \"$(pwd)/data/qdrant:/qdrant/storage\" \\",
                     "  --restart unless-stopped \\",
-                    f"  {shlex.quote(qdrant_image)}",
+                    "  --pull never \\",
+                    f"  {shlex.quote(names.get(qdrant_image, qdrant_image))}",
                     ""
                 ])
             node = [
@@ -396,7 +425,8 @@ class DeploymentManager:
             node.extend([
                 "  -v \"$(pwd)/data:/app/data\" \\",
                 "  --restart unless-stopped \\",
-                f"  {shlex.quote(inference_image)}",
+                "  --pull never \\",
+                f"  {shlex.quote(names.get(inference_image, inference_image))}",
                 ""
             ])
             script.extend(node)
@@ -579,9 +609,12 @@ class DeploymentManager:
             target_dir = out.read().decode().strip()
             # Checks mktemp's answer on the device; no local temp file is involved.
             if out.channel.recv_exit_status() != 0 or not target_dir.startswith("/tmp/llm_deploy."):  # nosec B108
-                return DeployResult(False, reason="Could not create a folder on the device: "
-                                                  f"{err.read().decode(errors='replace').strip()[:300]}",
-                                    device_state="ok")
+                # What the device answered is device text: it goes into the output lines, never into the reason.
+                for line in err.read().decode(errors="replace").splitlines()[-REMOTE_OUTPUT_LINES:]:
+                    self.logger.error(f"[REMOTE] {line.strip()}")
+                    self._keep(lines, line)
+                return DeployResult(False, reason="Could not create a folder on the device (its answer is in the "
+                                                  "device output).", output=lines, device_state="ok")
             if stop():
                 return DeployResult(False, reason="The deploy was cancelled before the upload.", device_state="ok")
 

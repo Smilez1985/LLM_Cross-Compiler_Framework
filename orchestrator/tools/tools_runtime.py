@@ -184,6 +184,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         nxt = getattr(e, "next", "")
         err = ValueError(scrub(f"{e} Next: {nxt}" if nxt else str(e)))
         err.code = code  # type: ignore[attr-defined]
+        # A device's or llama-bench's own words: returned by get_job_status as external text, never in the message.
+        err.external_text = [scrub(line) for line in getattr(e, "external_text", None) or []]  # type: ignore
         return err
 
     specs: List[ToolSpec] = []
@@ -523,6 +525,13 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             job = jobs.start("benchmark", ctx.owner, work, on_cancel=stop.set)
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
+        def artifact_name(value) -> Optional[str]:
+            """The built model's label for the person's question (speaking names), never its folder."""
+            try:
+                return service._artifact(str(value))[1]
+            except Exception:  # noqa: BLE001 - an unknown id: the question shows the id
+                return None
+
         specs.append(ToolSpec(
             "run_benchmark", "Benchmark a model",
             "Measures prompt and generation speed (tokens per second) and peak memory with the self-built "
@@ -534,7 +543,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             # the person's consent to load an untrusted model natively is given in the framework's own window only
             channels=("framework",),
             fields={"kind": FieldMeta(kind="choice", choices=("tier_speed", "artifact_speed")), "tier": tier_field,
-                    "artifact_id": FieldMeta(kind="id", list_tool="list_artifacts"),
+                    "artifact_id": FieldMeta(kind="id", list_tool="list_artifacts", describe=artifact_name),
                     "sandbox": FieldMeta(kind="trust")},
             examples=({"kind": "tier_speed", "tier": "small"},
                       {"kind": "artifact_speed", "artifact_id": "a_0123456789abcdef", "sandbox": True}),
