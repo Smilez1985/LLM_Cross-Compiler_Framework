@@ -435,11 +435,11 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                      if listed > MAX_LISTED_TOOLS else ""))
 
     def run_doctor(_inp: NoInput) -> DoctorOut:
-        from orchestrator.Core.doctor import Doctor
+        from orchestrator.Core.doctor import Doctor, ai_findings
         report = Doctor(framework).run()  # diagnosis only: fixes stay a human decision (llm-cli doctor --fix)
-        return DoctorOut(exit_code=report.exit_code, findings=[
-            DoctorFinding(subsystem=f.subsystem, code=f.code, severity=f.severity.value, message=f.message,
-                          fix_hint=f.fix_hint) for f in report.findings])
+        # Folders by label, other paths by file name: an AI never reads a host path (the person's CLI keeps them).
+        return DoctorOut(exit_code=report.exit_code,
+                         findings=[DoctorFinding(**row) for row in ai_findings(framework, report)])
 
     specs = [
         ToolSpec("get_build_status", "Build status",

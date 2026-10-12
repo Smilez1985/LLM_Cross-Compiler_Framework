@@ -72,7 +72,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   außerhalb des Ausgabeordners, solange ein Build irgendeines Programms des Frameworks in den Ordner schreibt oder
   dafür wartet, nachdem sich der Build geändert hat und wenn der Ordner nicht der ist, den die Frage nannte. Eine
   Wiederherstellung sichert immer zuerst die aktuelle Wissensbasis (`pre_restore_<Zeit>`), auch außerhalb von MCP,
-  und räumt den wiederherzustellenden Snapshot nie auf.
+  und löscht keinen Snapshot; sie bleibt außerhalb jeder Dauerfreigabe und Vollmacht, bis es den Papierkorb und den
+  Lösch-Dialog des Frameworks gibt.
 - **Ditto und das Framework auf einem anderen Computer** (MCP-Entwurf T12; Ditto ist hybrid; Entwurf 6.1):
   `llm-cli ditto remote set` richtet Ditto auf den MCP-Server des Frameworks aus, das auf einem zweiten Computer
   installiert ist (ein Build-PC, ein Server; dasselbe Programm, kein anderes). Docker ist nicht nötig: SSH erreicht
@@ -135,7 +136,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   werden.
 - **Lokale Wissensbasis** auf lokalen Embeddings (FastEmbed, ONNX auf der CPU) und einem eingebetteten
   Qdrant-Speicher: kein Vektordatenbank-Server und keine Cloud-Embeddings nötig, und sie funktioniert offline,
-  sobald ihre Modelle heruntergeladen sind.
+  sobald ihre Modelle heruntergeladen sind. Vor jeder Aufnahme und jeder Wiederherstellung sichert sie einen
+  Snapshot in `knowledge_snapshots/` des persönlichen Ordners; keiner wird je von selbst gelöscht, auf keinem Weg
+  (Runde 5 f). Bei mehr als fünf erinnern dich `llm-cli doctor` und ein Chat-Hinweis, und `llm-cli knowledge
+  snapshots` (in der GUI: Tools > Knowledge Snapshots...) listet jeden mit vollem Pfad, Namen, Größe und was er ist,
+  damit du entscheidest, welche gelöscht werden.
 - **Die Wissensbasis, die Ditto nutzt, für KI-Clients** (MCP-Tools `list_knowledge_sources` und
   `read_knowledge_source`, Ressource `lcf://knowledge/sources/<Quellen-ID>`): Ein Client, der Dittos Aufgabe
   übernimmt, sieht, was die Wissensbasis enthält, und liest die Auszüge einer Quelle der Reihe nach.
@@ -1052,6 +1057,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte
+  den ganzen Build-Cache des Docker-Daemons, auch den anderer Projekte, und löschte die verwaisten Images des
+  Frameworks, ohne sie zu zeigen. Der Build-Cache wird nicht mehr angerührt (er lässt sich nicht auf das Framework
+  beschränken). Stufe 2 listet jetzt die verwaisten Build-Images des Frameworks, jedes mit Namen, Image-ID, Größe und
+  was es ist, und löscht genau diese Liste, per Image-ID und ohne Prune, erst nach deinem Ja im Terminal (die Vorgabe
+  ist Nein). Ohne Terminal und mit `--json` listet es sie nur; das Löschen wird zuerst auditiert und abgelehnt, wenn
+  sich die Liste inzwischen geändert hat. Kein Tool, keine Ressource und kein Prompt erreicht es, eine KI-App oder
+  Ditto kann es also weder ausführen noch unter einer Vollmacht bekommen. Die Befunde zum Speicherplatz sagen, was
+  Stufe 2 listet, statt ein Aufräumen zu versprechen.
 - **Eine Reparatur wird genannt, wie auch immer der Aufruf endet** (Befund eines echten Laufs mit Claude Code 2.1.296
   über stdio, Protokoll 2026-07-28): ein erklärter Alias, den der Aufruf benutzte (`quant` gelesen als
   `quantization`), wurde im Audit-Log festgehalten, aber ein Aufruf, der vor oder statt der Frage abgelehnt wurde (zu
@@ -1354,6 +1368,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   private.
 
 ### Sicherheit
+- **`run_doctor` gibt KI-Clients keinen Pfad des Rechners** (veröffentlicht in 3.0.0): die Befunde, die eine KI las,
+  nannten den persönlichen Ordner, das Audit-Log, Pack-Ordner, die Ordner der Speicherplatz-Prüfung und jeden Pfad,
+  den der Fehler einer abgestürzten Prüfung zitierte, samt Benutzernamen. Was eine KI liest, nennt die Ordner des
+  Frameworks jetzt unter ihrer Bezeichnung (`state:audit.db`, "the state folder", `targets:<Pack>`) und jeden anderen
+  Pfad nur mit seinem Dateinamen, Geheimnisse geschwärzt; `llm-cli doctor` (auch `--json`) behält die vollen Pfade
+  für dich.
 - **`run_benchmark` startet genau die Datei, die es gehasht hat**: das Modell wird einmal geöffnet, über die offene
   Datei gehasht und llama-bench als genau diese offene Datei übergeben (nativ ein geerbter Deskriptor, in der
   Sandbox ein privater Hardlink), so dass ein Katalogmodell zwischen Prüfung und einem nativen Lauf ohne Zustimmung

@@ -19,6 +19,7 @@ Back to the [README](../README.md) · Features in detail: [Features.md](Features
 - [Global options, output and exit codes](#global-options-output-and-exit-codes)
 - [Overview of all commands](#overview-of-all-commands)
 - [doctor](#doctor): health check
+- [knowledge](#knowledge): `snapshots`
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
@@ -115,6 +116,7 @@ stays below the given share.
 | Command | What it does |
 |---|---|
 | `doctor` | Check the installation and explain how to fix problems |
+| `knowledge snapshots` | List the knowledge base's snapshots with full path, name, size and what each is (unreleased) |
 | `targets list` / `targets validate` | List hardware targets with their boards and formats / check that a target loads and its capabilities are valid |
 | `build start` / `build status` | Convert and quantize a model / show builds, also those the GUI, the MCP server or another CLI call started |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | List finished builds / pack a build into a ZIP / upload and install it on a board |
@@ -149,14 +151,14 @@ llm-cli doctor [--json] [--fix] [--tier 1|2]
 Checks Python, the Docker daemon and buildx, free disk space for the cache and output folders, the targets and
 their capabilities, the privacy of the personal folder, the secrets store and the keyring, the tool
 permissions, the audit log, the chat feed (unreleased: it can be written, its newest entries verify), the shipped
-calibration data and the installed community packs (revoked, changed or imported from a file). Each finding comes
-with a hint how to fix it.
+calibration data, the installed community packs (revoked, changed or imported from a file) and the knowledge
+snapshots (unreleased: more than five is a reminder). Each finding comes with a hint how to fix it.
 
 | Option | Meaning |
 |---|---|
-| `--json` | Machine-readable output (findings, fixes, exit code). |
+| `--json` | Machine-readable output (findings, fixes, exit code). With `--fix --tier 2` it also lists the dangling framework images (`framework_images`), but never deletes them. |
 | `--fix` | Apply the automatic fixes up to `--tier`, then check again. |
-| `--tier INTEGER RANGE` | `1` (default): harmless fixes (makes the personal folder private). `2`: also removes caches (dangling framework images and the Docker build cache). |
+| `--tier INTEGER RANGE` | `1` (default): harmless fixes (makes the personal folder private). `2`: also lists the framework's dangling build images (name, image id, size and what each is) and deletes exactly that list after you confirm it at a terminal (the default answer is no). Without a terminal (a pipe, a script, an AI app) it only lists them. The Docker build cache is never cleared: it cannot be limited to the framework. |
 
 Disk space: below 20 GB free is a warning, below 5 GB an error.
 
@@ -164,6 +166,30 @@ Disk space: below 20 GB free is a warning, below 5 GB an error.
 llm-cli doctor
 llm-cli doctor --json > doctor.json
 llm-cli doctor --fix --tier 2
+```
+
+---
+
+## knowledge
+
+### knowledge snapshots
+
+```
+llm-cli knowledge snapshots [list]
+```
+
+Unreleased. Before every Deep Ingest, every index of the framework's own code and every restore, the knowledge base
+is saved as a snapshot in `knowledge_snapshots/` of the personal folder, so the change can be undone. The command
+lists every snapshot, oldest first, with its name, when it was taken, its size, what it is (for example "backup of
+the knowledge base taken before a Deep Ingest") and its full path. It deletes nothing. The GUI shows the same list
+under **Tools > Knowledge Snapshots...**.
+
+The framework deletes no snapshot by itself. With more than five, `llm-cli doctor` and the chat remind you; delete
+the files you no longer need yourself, for example in your file manager. A trash and a deletion dialog in the
+framework follow.
+
+```bash
+llm-cli knowledge snapshots
 ```
 
 ---

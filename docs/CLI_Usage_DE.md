@@ -19,6 +19,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [Globale Optionen, Ausgabe und Exit-Codes](#globale-optionen-ausgabe-und-exit-codes)
 - [Überblick über alle Befehle](#überblick-über-alle-befehle)
 - [doctor](#doctor): Gesundheitscheck
+- [knowledge](#knowledge): `snapshots`
 - [targets](#targets): `list`, `validate`
 - [build](#build): `start`, `status`
 - [deploy](#deploy): `list-artifacts`, `package`, `run`
@@ -115,6 +116,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | Befehl | Was er tut |
 |---|---|
 | `doctor` | Die Installation prüfen und erklären, wie man Probleme behebt |
+| `knowledge snapshots` | Die Snapshots der Wissensbasis mit vollem Pfad, Namen, Größe und was jeder ist auflisten (unveröffentlicht) |
 | `targets list` / `targets validate` | Hardware-Targets mit ihren Boards und Formaten auflisten / prüfen, ob ein Target lädt und seine Capabilities gültig sind |
 | `build start` / `build status` | Ein Modell konvertieren und quantisieren / Builds zeigen, auch solche, die die GUI, der MCP-Server oder ein anderer CLI-Aufruf gestartet hat |
 | `deploy list-artifacts` / `deploy package` / `deploy run` | Fertige Builds auflisten / einen Build in eine ZIP-Datei packen / sie auf ein Board laden und installieren |
@@ -150,14 +152,15 @@ Prüft Python, den Docker-Daemon und buildx, den freien Speicherplatz für den C
 die Targets und ihre Capabilities, ob der persönliche Ordner privat ist, den Secrets-Speicher und den
 Schlüsselbund, die Tool-Berechtigungen, das Audit-Log, den Chat-Verlauf (unveröffentlicht: er lässt sich
 schreiben, seine neuesten Einträge stimmen), die mitgelieferten Kalibrierungsdaten und die installierten
-Community-Pakete (zurückgezogen, verändert oder aus einer Datei importiert). Zu jedem Befund gibt es einen Hinweis,
-wie du ihn behebst.
+Community-Pakete (zurückgezogen, verändert oder aus einer Datei importiert) und die Snapshots der Wissensbasis
+(unveröffentlicht: mehr als fünf ergeben eine Erinnerung). Zu jedem Befund gibt es einen Hinweis, wie du ihn
+behebst.
 
 | Option | Bedeutung |
 |---|---|
-| `--json` | Maschinenlesbare Ausgabe (Befunde, Korrekturen, Exit-Code). |
+| `--json` | Maschinenlesbare Ausgabe (Befunde, Korrekturen, Exit-Code). Mit `--fix --tier 2` listet sie auch die verwaisten Framework-Images (`framework_images`), löscht sie aber nie. |
 | `--fix` | Die automatischen Korrekturen bis `--tier` anwenden, dann erneut prüfen. |
-| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (macht den persönlichen Ordner privat). `2`: entfernt auch Caches (verwaiste Framework-Images und den Docker-Build-Cache). |
+| `--tier INTEGER RANGE` | `1` (Standard): harmlose Korrekturen (macht den persönlichen Ordner privat). `2`: listet auch die verwaisten Build-Images des Frameworks (Name, Image-ID, Größe und was jedes ist) und löscht genau diese Liste, nachdem du sie im Terminal bestätigt hast (die Vorgabe ist Nein). Ohne Terminal (eine Pipe, ein Skript, eine KI-App) listet es sie nur. Der Docker-Build-Cache wird nie geleert: Er lässt sich nicht auf das Framework beschränken. |
 
 Speicherplatz: Unter 20 GB frei gibt es eine Warnung, unter 5 GB einen Fehler.
 
@@ -165,6 +168,30 @@ Speicherplatz: Unter 20 GB frei gibt es eine Warnung, unter 5 GB einen Fehler.
 llm-cli doctor
 llm-cli doctor --json > doctor.json
 llm-cli doctor --fix --tier 2
+```
+
+---
+
+## knowledge
+
+### knowledge snapshots
+
+```
+llm-cli knowledge snapshots [list]
+```
+
+Unveröffentlicht. Vor jedem Deep Ingest, jeder Indexierung des eigenen Codes des Frameworks und jeder
+Wiederherstellung wird die Wissensbasis als Snapshot in `knowledge_snapshots/` des persönlichen Ordners gesichert,
+damit sich die Änderung rückgängig machen lässt. Der Befehl listet jeden Snapshot, den ältesten zuerst, mit Namen,
+Zeitpunkt, Größe, was er ist (zum Beispiel "backup of the knowledge base taken before a Deep Ingest") und vollem
+Pfad. Er löscht nichts. Die GUI zeigt dieselbe Liste unter **Tools > Knowledge Snapshots...**.
+
+Das Framework löscht keinen Snapshot von selbst. Bei mehr als fünf erinnern dich `llm-cli doctor` und der Chat;
+lösche die Dateien, die du nicht mehr brauchst, selbst, zum Beispiel im Dateimanager. Ein Papierkorb und ein
+Lösch-Dialog im Framework folgen.
+
+```bash
+llm-cli knowledge snapshots
 ```
 
 ---

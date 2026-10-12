@@ -616,7 +616,9 @@ hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256 der 
 wenn der Ordner nicht mehr der ist, den die Frage nannte.
 `restore_knowledge_snapshot` sichert die aktuelle Wissensbasis zuerst als Snapshot `pre_restore_<Zeit>` und stellt
 ohne diese Sicherung nichts wieder her; dieselbe Regel gilt jetzt für jede Wiederherstellung eines Snapshots, und
-der wiederherzustellende Snapshot wird dabei nie aufgeräumt.
+dabei wird kein Snapshot gelöscht (das Framework löscht keinen Snapshot von selbst, siehe
+[Wissensbasis](#wissensbasis-rag)). Es bleibt außerhalb jeder Dauerfreigabe und Vollmacht, bis es den Papierkorb und
+den Lösch-Dialog des Frameworks gibt.
 
 So läuft eine Frage mit Tools ab:
 
@@ -1120,8 +1122,11 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   neue Fassung nicht mehr hat, werden entfernt. Codeblöcke und Tabellen bleiben ganz, außer sie sind größer als der
   Kontext des Modells ([Große Codeblöcke und Tabellen](#große-codeblöcke-und-tabellen)).
 - **Schnappschüsse:** Vor jedem Crawl wird die Wissensbasis als Schnappschuss in
-  `~/.llm-framework/knowledge_snapshots` gesichert (die neuesten 5 bleiben). Einen Schnappschuss wiederherstellen
-  kann man über GUI oder CLI noch nicht.
+  `~/.llm-framework/knowledge_snapshots` gesichert. Das Framework löscht keinen davon von selbst (unveröffentlicht;
+  bisher blieben auf jedem Weg nur die neuesten 5): Bei mehr als fünf erinnern dich `llm-cli doctor` und der Chat,
+  und **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli knowledge snapshots` listet jeden mit vollem Pfad,
+  Namen, Größe und was er ist, damit du entscheidest, welche gelöscht werden. Ein Papierkorb und ein Lösch-Dialog im Framework folgen. Einen Schnappschuss
+  wiederherstellen kann man über GUI oder CLI noch nicht.
 - **Suche:** hybrid. Dichte Vektoren finden die Bedeutung, BM25 findet exakte Begriffe wie Fehlercodes und
   Compiler-Flags; beide Ranglisten werden mit Reciprocal Rank Fusion verbunden. Derselbe Text aus mehreren Quellen
   kommt nur einmal. Danach kann ein Cross-Encoder die Ergebnisse neu bewerten ([Reranking](#reranking)).
@@ -2101,11 +2106,21 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 | KI | Tool-Berechtigungen eingerichtet und lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel; unveröffentlicht) |
 | Daten | mitgelieferte Kalibrierungsdaten intakt (Prüfsummen) |
 | Community | installierte Community-Packs gegen den zwischengespeicherten Index: gesperrt (Fehler), seit der Installation verändert (Warnung), Vertrauensstufe `local` (Information) |
+| Wissen | mehr Snapshots der Wissensbasis als die üblichen fünf (Information, eine Erinnerung; nichts wird gelöscht; unveröffentlicht) |
 | Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
 
-`--fix` wendet die automatischen Korrekturen bis `--tier` an (1: macht den persönlichen Ordner privat; 2: entfernt
-zusätzlich verwaiste Framework-Images und den Docker-Build-Cache) und prüft danach erneut. Exit-Codes: 0 OK,
-1 Warnungen, 2 Fehler; `--json` für Skripte.
+`--fix` wendet die automatischen Korrekturen bis `--tier` an und prüft danach erneut. Stufe 1 macht den
+persönlichen Ordner privat. Stufe 2 löscht nichts von selbst: Sie listet die verwaisten Build-Images des Frameworks
+(Name, Image-ID, Größe und was jedes ist), und nur dein Ja im Terminal löscht genau diese Liste (Vorgabe Nein; ohne
+Terminal und mit `--json` listet sie sie nur). Der Docker-Build-Cache wird nie geleert, weil er sich nicht auf das
+Framework beschränken lässt: Bisher leerte Stufe 2 den ganzen Build-Cache des Docker-Daemons, auch den anderer
+Projekte. Nichts, was eine KI-App oder Ditto aufrufen kann, erreicht dieses Löschen. Exit-Codes: 0 OK, 1 Warnungen,
+2 Fehler; `--json` für Skripte.
+
+Was eine KI liest (`run_doctor`): dieselben Befunde, mit den Ordnern des Frameworks unter ihrer Bezeichnung
+(`state:audit.db`, "the state folder", `targets:<Pack>`) und jedem anderen Pfad nur mit seinem Dateinamen, auch in
+der Meldung einer abgestürzten Prüfung; deine eigene Ausgabe (`llm-cli doctor`, auch `--json`) behält die vollen
+Pfade.
 
 ---
 
