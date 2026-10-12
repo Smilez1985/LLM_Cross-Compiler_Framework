@@ -27,10 +27,14 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.tools.job_audit import audited_job
 from orchestrator.tools.output import ToolOutput, count, fact
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
 from orchestrator.tools.spec import CallFacts, Fact, FieldMeta, GrantRule, Rate, ToolLimits
+from orchestrator.utils.logging import get_logger
+
+logger = get_logger("DeployTools")
 
 PACKAGE_ID_PATTERN = r"^pkg_[0-9a-f]{16}$"
 DEVICE_ID_PATTERN = r"^[0-9a-f]{16}$"
@@ -150,7 +154,7 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
     def artifact(aid: str):
         """(label, manifest with its folder) of a built model by its id."""
         try:
-            _aid, label, info = service._artifact(aid)
+            _aid, label, info = service.artifact_entry(aid)
         except Exception as e:  # noqa: BLE001 - BuildServiceError: unknown id with the next step
             raise ToolError(str(e), code=getattr(e, "code", "unknown_id"),
                             next=getattr(e, "next", "") or "Call list_artifacts for the ids you can use.",
@@ -330,7 +334,7 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
         if bound.get("artifact_id") != inp.artifact_id or not bound.get("profile"):
             raise ToolError("The package is not bound to what the person was shown; nothing was packaged.",
                             code="failed", next="Call create_deploy_package again through the framework's registry.")
-        _label, info = artifact(inp.artifact_id)
+        label, info = artifact(inp.artifact_id)
         folder, out = Path(info["path"]), output_dir()
         stop = threading.Event()
         reservation = Reservation(f"package/{inp.artifact_id}/{id(stop)}", 2 * int(bound.get("size") or 0))
@@ -361,8 +365,16 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                     "sha256": package_sha256(path), "profile": bound["profile"],
                     "next": "Deploy it with deploy_to_device(package_id, device_id); list_devices shows the devices."}
 
+        def packaged(result: Dict[str, Any]):
+            return ("ok", f"packaged {result.get('name')}, {_size(result.get('size_bytes'))}, sha256 "
+                          f"{result.get('sha256')}", "")
+
+        # the end of the packaging in the audit log, linked to this call's started entry (design 6.7)
+        audited = audited_job(registry, "create_deploy_package", inp.model_dump(mode="json"), ctx, work,
+                              f"built model {label}, device profile {bound['profile']}", done=packaged,
+                              cancelled=lambda: "cancelled; a partial package is removed")
         try:
-            job = jobs.start("package", ctx.owner, work, on_cancel=stop.set)
+            job = jobs.start("package", ctx.owner, audited, on_cancel=stop.set)
         except Exception:
             reservation.release()
             raise
@@ -478,48 +490,49 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                     pass
 
         arguments = inp.model_dump(mode="json")
-
-        def audit_end(outcome: str, detail: str, reason_code: str = "") -> None:
-            """The deploy's own end entry, linked to the call's started entry (the call returned at the job's start,
-            so the registry's end entry says only that the job started)."""
-            try:
-                registry.record_job_end("deploy_to_device", arguments, ctx, outcome, detail, reason_code=reason_code)
-            except Exception:  # noqa: BLE001 - the deploy happened; the registry logs a failed write
-                pass
+        seen: Dict[str, Any] = {}
 
         def work(handle) -> Dict[str, Any]:
             from orchestrator.Core.job_service import EXTERNAL_KEY, JobCancelled
             handle.progress(None, None, f"deploying to {device.label}")
-            where = f"job {handle.job.job_id}, device {device.label}, package {path.name}"
             try:
                 result = manager().deploy_package(path, bound["host"], bound["user"], port=int(bound["port"]),
                                                   password=None, pair=False, expect_fingerprint=bound["fingerprint"],
                                                   expect_sha256=bound["sha256"], on_client=on_client,
                                                   cancelled=lambda: stop.is_set() or handle.cancelled)
-            except BaseException as e:
-                cancelled = stop.is_set() or handle.cancelled
-                audit_end("cancelled" if cancelled else "error",
-                          f"{where}: " + ("cancelled; the device state is unknown" if cancelled
-                                          else f"failed ({type(e).__name__})"), reason_code="failed")
-                raise
             finally:
                 with active_lock:
                     if active.get(device.device_id) == handle.job.job_id:
                         active.pop(device.device_id, None)
+            seen["device_state"] = result.device_state
             if stop.is_set() or handle.cancelled:
-                audit_end("cancelled", f"{where}: cancelled; the device state is "
-                                       f"{result.device_state or 'unknown'}", reason_code="failed")
                 raise JobCancelled()
-            devices().note_deploy(device.device_id, result.success, path.name)
-            audit_end("ok" if result.success else "error",
-                      f"{where}: {'deployed' if result.success else 'not deployed'}, exit status "
-                      f"{result.exit_status}, device state {result.device_state or 'unknown'}",
-                      reason_code="" if result.success else "failed")
-            return {"success": result.success, "exit_status": result.exit_status,
-                    "device_state": result.device_state, "device_id": device.device_id,
-                    # the framework's reason (the device's own words are in the output lines), without host paths
-                    "reason": hide_paths(result.reason, {str(path.parent): "the output folder"})[:500]
-                    if result.reason else "", EXTERNAL_KEY: list(result.output)}
+            out = {"success": result.success, "exit_status": result.exit_status,
+                   "device_state": result.device_state, "device_id": device.device_id,
+                   # the framework's reason (the device's own words are in the output lines), without host paths
+                   "reason": hide_paths(result.reason, {str(path.parent): "the output folder"})[:500]
+                   if result.reason else "", EXTERNAL_KEY: list(result.output)}
+            try:
+                devices().note_deploy(device.device_id, result.success, path.name)
+            except Exception as e:  # noqa: BLE001 - the deploy happened; only the device list's last deploy is missing
+                logger.warning(f"The last deploy of {device.label} could not be recorded: {type(e).__name__}")
+                out["note"] = "The device list could not record this deploy (its last deploy stays as it was)."
+            return out
+
+        def deployed(out: Dict[str, Any]):
+            ok = bool(out.get("success"))
+            return ("ok" if ok else "error",
+                    f"{'deployed' if ok else 'not deployed'}, exit status {out.get('exit_status')}, device state "
+                    f"{out.get('device_state') or 'unknown'}" + ("; not recorded in the device list"
+                                                                 if out.get("note") else ""),
+                    "" if ok else "failed")
+
+        # The deploy's own end entry, linked to the call's started entry (the call returned at the job's start, so the
+        # registry's end entry says only that the job started); written on every way out of the work.
+        audited = audited_job(registry, "deploy_to_device", arguments, ctx, work,
+                              f"device {device.label}, package {path.name}", done=deployed,
+                              cancelled=lambda: "cancelled; the device state is "
+                                                f"{seen.get('device_state') or 'unknown'}")
 
         holder: Dict[str, str] = {}
 
@@ -543,7 +556,7 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                 if running_there:
                     raise ToolError(f"A deploy to {device.label} is running ({jid}); one deploy per device at a "
                                     "time.", code="limit_reached", next=f"Wait for job {jid} with get_job_status.")
-            job = jobs.start("deploy", ctx.owner, work, on_cancel=cancel_hook)
+            job = jobs.start("deploy", ctx.owner, audited, on_cancel=cancel_hook)
             holder["job_id"] = job.job_id
             active[device.device_id] = job.job_id
         ctx.notes.append("Follow the deploy with get_job_status (wait_seconds=50); the device's output in its result "

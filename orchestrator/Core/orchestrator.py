@@ -83,6 +83,8 @@ class BuildRequest:
     # NEW v2.4.0: Smart Calibration Flags
     use_imatrix: bool = False
     dataset_path: Optional[str] = None
+    # The sha256 the dataset must have (a recipe pins it): the build engine uses only a copy with exactly that hash
+    dataset_sha256: Optional[str] = None
 
     # Board within the target family (e.g. rk3588 vs rk3566) and model kind
     target_board: Optional[str] = None
@@ -444,6 +446,7 @@ class LLMOrchestrator:
             use_imatrix=req.use_imatrix and job.target_format == ModelFormat.GGUF,
             dataset_path=(None if req.dataset_generated and job.target_format != ModelFormat.GGUF
                           else req.dataset_path),
+            dataset_sha256=None if req.dataset_generated else req.dataset_sha256,
             build_timeout=int(self.config.get("build_timeout", 3600)) if hasattr(self.config, "get") else 3600,
             local_inputs=req.local_inputs,
         )

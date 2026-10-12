@@ -153,7 +153,10 @@ class ContainerEngine:
         raise NotImplementedError
 
     def run(self, image: str, command: Sequence[str], *, mounts: Sequence[Mount], env: Mapping[str, str],
-            options: Mapping[str, Any], log: Path, timeout: float) -> int:  # pragma: no cover - interface
+            options: Mapping[str, Any], log: Path, timeout: float,
+            stop: Optional[threading.Event] = None) -> int:  # pragma: no cover - interface
+        """Runs `command` in a new container of `image` and returns its exit status; the container is killed at
+        `timeout` seconds or as soon as `stop` is set."""
         raise NotImplementedError
 
 
@@ -196,20 +199,30 @@ class DockerEngine(ContainerEngine):
                     raise BuildError(f"the builder image could not be built: {str(chunk['error'])[:300]}", log)
 
     def run(self, image: str, command: Sequence[str], *, mounts: Sequence[Mount], env: Mapping[str, str],
-            options: Mapping[str, Any], log: Path, timeout: float) -> int:
+            options: Mapping[str, Any], log: Path, timeout: float, stop: Optional[threading.Event] = None) -> int:
         volumes = {str(m.source): {"bind": m.target, "mode": "ro" if m.read_only else "rw"} for m in mounts}
         container = self.client().containers.create(image=image, command=list(command), volumes=volumes,
                                                     environment=dict(env), **dict(options))
         timer = threading.Timer(timeout, lambda: _quiet(container.kill))
+        ended = threading.Event()
+
+        def watch() -> None:  # a stop (cancel) kills the container at once
+            while not ended.wait(0.5):
+                if stop is not None and stop.is_set():
+                    _quiet(container.kill)
+                    return
         try:
             container.start()
             timer.start()
+            if stop is not None:
+                threading.Thread(target=watch, name="container-stop", daemon=True).start()
             with open(log, "ab") as out:
                 for chunk in container.logs(stream=True, follow=True):
                     out.write(chunk)
             result = container.wait(timeout=60)
             return int(result.get("StatusCode", -1))
         finally:
+            ended.set()
             timer.cancel()
             _quiet(lambda: container.remove(force=True))
 

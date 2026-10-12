@@ -729,7 +729,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
             raise ToolError(f"'{inp.source}' is not an artifact id (a_ and 16 hex characters).", code="invalid_value",
                             next="Call list_artifacts for the artifact ids.")
         service = getattr(framework, "build_service", None)
-        finder = getattr(service, "_artifact", None)
+        finder = getattr(service, "artifact_entry", None)
         if not callable(finder):
             raise ToolError("Built models cannot be looked up here.", code="not_supported",
                             next="Tell the person; 'llm-cli doctor' checks the installation.")
