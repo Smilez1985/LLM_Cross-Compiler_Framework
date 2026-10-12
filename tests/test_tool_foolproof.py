@@ -462,11 +462,13 @@ class TestRepeatGuardOverMcp:
         # Since S8 a person's "no" is not asked again for 10 minutes (design 6.5), so a declined call is asked once.
         expected, refusal = (2, "Stop retrying this call") if approve else (1, "declined this exact call")
         assert len(asked) == expected and refusal in text_of(results[2])
-        dittos = []
+        dittos, errors = [], []
         for _ in range(3):
-            with pytest.raises(ToolError):
+            with pytest.raises(ToolError) as exc:
                 ditto(env, "start_build", raw, session="d", confirm=lambda s, i: dittos.append(1) or approve)
+            errors.append(exc.value)
         assert len(dittos) == expected, "the same on Ditto's path"
+        assert refusal in str(errors[2]), "and the same answer on Ditto's path"
 
 
 class TestEveryToolRefusesUnknownArguments:

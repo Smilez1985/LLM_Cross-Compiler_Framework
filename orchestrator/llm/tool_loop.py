@@ -9,7 +9,7 @@ That keeps the prompt cache warm and Claude's preserved thinking valid across th
 An early honest stop (MCP design 6.11 D8): after `stop_after` failed tool calls in a row without progress (the same
 tool, reason code and field as the failure before it) or a `repeat_refused`, one instruction is appended telling the
 model to stop calling tools and answer the user with what it tried, what failed and why; tool calls after it are
-answered without running. A model that fixes one input error after another makes progress and is not stopped, and
+answered without running, and the loop ends at most two turns later. A model that fixes one input error after another makes progress and is not stopped, and
 while the last result is an input error it is fixing, the step budget grows by up to `extra_steps`.
 """
 
@@ -105,7 +105,9 @@ def run_tool_loop(client: Any, request: ChatRequest, execute_tool: ExecuteTool, 
             history.append(note)
             new.append(note)
             noted = True
-            budget = max(budget, step + 1)  # one turn to answer
+            # One turn to answer, and one more for a model that still called a tool; never the rest of the budget
+            # in "Not run" answers.
+            budget = min(max(budget, step + 1), step + 2)
         elif (fixing or fixed) and step == budget and extended < extra_steps:
             budget, extended = budget + 1, extended + 1
         was_fixing = fixing

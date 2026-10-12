@@ -1065,18 +1065,21 @@ Framework fragt: Es legt nie eine Dauerfreigabe an, und die Hinweise des Aufrufs
 
 **Grenzen** (je Client: Ditto, die lokalen stdio-Clients, jedes benannte Token; gezählt, solange der Prozess
 läuft): die lesenden Tools zusammen höchstens 20 Aufrufe in 10 Sekunden (40 auf einmal); `start_build` höchstens 3
-unfertige Builds und 20 Starts in 24 Stunden je Client, und ein Framework-Prozess reiht höchstens 20 unfertige
-Build-Anfragen von allen Aufrufern ein, GUI und CLI eingeschlossen; höchstens 30 Rückfragen an dich pro Stunde. Nach
+unfertige Builds und 20 gestartete Builds in 24 Stunden je Client (ein abgelehnter oder verweigerter Start, etwa
+wegen einer vollen Warteschlange, zählt nicht), und ein Framework-Prozess reiht höchstens 20 unfertige
+Build-Anfragen von KI-Aufrufern ein (deine eigenen GUI- und CLI-Builds zählen zu den 20, werden aber immer
+eingereiht: KI-Arbeit blockiert sie nie); höchstens 30 Rückfragen an dich pro Stunde. Nach
 deinem Nein wird derselbe Aufruf (dasselbe Tool mit denselben Argumenten nach der Reparatur, ein anders geschriebener
 Aufruf ist also derselbe) 10 Minuten lang ohne Rückfrage abgelehnt, und drei Nein zu einem Tool innerhalb von 30
 Minuten pausieren die Rückfragen dazu für 30 Minuten; ein geschlossener Dialog ist kein Nein. Ein Aufruf, den die
 Wiederholungssperre abgelehnt hat (derselbe scheiternde Aufruf zum dritten Mal), darf 10 Minuten nach seinem letzten
 Scheitern wieder laufen. Jede Grenze ist eine protokollierte Ablehnung (`rate_limited`, Grund `limit_reached` oder
-nach deinem Nein `declined`), die sagt, wann es wieder geht, und sie zählt nie als gescheiterter Aufruf. Dittos Chat
-hört nach drei gescheiterten Aufrufen in Folge ohne Fortschritt (jedes Mal dasselbe Tool, derselbe Grund und dasselbe
-Feld) oder einer abgelehnten Wiederholung auf, Tools aufzurufen, und antwortet mit dem, was er versucht hat, was
-gescheitert ist und warum; einen Eingabefehler nach dem anderen zu beheben ist Fortschritt, und solange Ditto einen
-behebt, bekommt er bis zu 4 Schritte mehr als seine 8.
+nach deinem Nein `declined`), die sagt, wann es wieder geht, und sie zählt nie als gescheiterter Aufruf, für Ditto wie
+für MCP-Clients. Dittos Chat hört nach drei gescheiterten Aufrufen in Folge ohne Fortschritt (jedes Mal dasselbe Tool,
+derselbe Grund und dasselbe Feld; das Framework nennt das Feld, um das es bei einem Eingabefehler geht) oder einer
+abgelehnten Wiederholung auf, Tools aufzurufen, und antwortet innerhalb von höchstens zwei weiteren Runden mit dem,
+was er versucht hat, was gescheitert ist und warum; einen Eingabefehler nach dem anderen zu beheben ist Fortschritt,
+und solange Ditto einen behebt, bekommt er bis zu 4 Schritte mehr als seine 8.
 
 **Audit-Log** (`~/.llm-framework/audit.db`, SQLite): Jeder Tool-Aufruf wird mit Zeit, Akteur, Tool, Entscheidung, ob
 ein Mensch bestätigt hat, und Ergebnis festgehalten. Argumente werden geschwärzt und gekürzt gespeichert, dazu ein

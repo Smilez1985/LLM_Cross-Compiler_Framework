@@ -284,8 +284,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   16,000 characters (a scrollable dialog, the pager); an MCP form stays at 4,000.
 - **Limits per client for tool calls** (Ditto and MCP clients): read tools 20 calls per 10 seconds, `start_build`
   3 unfinished builds and 20 starts a day, 30 questions per hour, and a build queue of at most 20 unfinished requests
-  per framework process (every caller); after a "no" the same call is not asked again for 10 minutes, and three "no"
-  to one tool pause its questions for 30 minutes. A limit hit is an audited `rate_limited` refusal that says when to
+  per framework process for AI callers (the person's own GUI and CLI builds are always queued); after a "no" the
+  same call is not asked again for 10 minutes, and three "no" to one tool pause its questions for 30 minutes. A limit hit is an audited `rate_limited` refusal that says when to
   try again. The repeat guard lets a refused call run again 10 minutes after its last failure (it was refused until
   the process ended), and Ditto stops calling tools early only after failures without progress, with up to 4 more
   steps while it fixes an input error.
@@ -467,6 +467,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   without the facts of its question, and the first line of its question names the build, not only its id; a local
   model or dataset an AI named that vanished before the build is named by its label in the refusal, never by its
   real path.
+- Limits, the same on both paths: Ditto's early stop sees which field an input error is about (the registry dropped
+  it, so a model that fixed one field after another was stopped and its correct call was not run); a refusal of the
+  question limits (after a "no", a paused tool, too many questions) is no failed call on Ditto's path either (it
+  turned into "Stop retrying" there while an MCP client kept getting the plain refusal); a start that was refused, for
+  example by a full queue, no longer uses up one of the 20 builds a day; after the stop note a model that keeps
+  calling tools gets at most two more turns instead of the rest of its budget.
 - MCP server: a client that disconnects no longer leaves its builds running with nobody to clean up. The builds
   and jobs its session started are cancelled, each with an audit entry ("client disconnected"), the server waits
   up to 30 seconds for their containers to stop, and `llm-cli mcp serve` then shuts the framework down. A SIGTERM

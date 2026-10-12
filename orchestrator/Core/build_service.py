@@ -46,11 +46,12 @@ def proposal_fingerprint(proposal: Any) -> str:
 
 class BuildServiceError(ValueError):
     """A request the service refuses, with a message meant for the user (or the calling model), a reason code
-    (the tool registry's codes, e.g. unknown_id, not_supported) and the next step."""
+    (the tool registry's codes, e.g. unknown_id, not_supported), the next step and, for an input refusal, the
+    argument it is about (Ditto's loop tells a fix of another argument from a repeat by it)."""
 
-    def __init__(self, message: str, code: str = "failed", next: str = ""):
+    def __init__(self, message: str, code: str = "failed", next: str = "", field: str = ""):
         super().__init__(message)
-        self.code, self.next = code, next
+        self.code, self.next, self.field = code, next, field
 
 
 class BuildService:
@@ -107,7 +108,8 @@ class BuildService:
         if caps is None:
             known = ", ".join(t.get("id", "?") for t in self._targets().list_targets()) or "none"
             raise BuildServiceError(f"Target '{target}' is unknown or declares no capabilities (targets: {known}).",
-                                    code="invalid_value", next="Call list_targets for the targets you can use.")
+                                    code="invalid_value", next="Call list_targets for the targets you can use.",
+                                    field="target")
         return caps
 
     def _confined(self, request: BuildRequestIn) -> Tuple[BuildRequestIn, Optional[LocalInputs]]:
@@ -122,20 +124,26 @@ class BuildService:
             files = files or LocalFiles.for_framework(self.framework)
             return files
 
-        model_pin = local().resolve(model) if looks_like_reference(model) else None
-        if model_pin is None and (".." in model or not HF_REPO_ID.match(model)):
-            try:
-                labels = [f.label for f in local().folders() if not f.problem]
-            except LocalFileError:
-                labels = []
-            if is_path(model):
-                split_reference(model, labels)  # refused with the reason: AI callers never name a path
-            raise LocalFileError(f"'{model}' is neither a Hugging Face repo id (owner/name) nor a local file "
-                                 "reference.", next_step=labels_hint(labels))
-        dataset_pin = local().resolve(dataset) if dataset else None
-        if dataset_pin is not None and dataset_pin.is_dir:
-            raise LocalFileError(f"{dataset_pin.ref} is a folder; a calibration dataset is a file (for RKNN the "
-                                 "sample list).", next_step="name the dataset file inside its folder.")
+        field = "model"  # the argument a refusal is about (Ditto's loop tells a fix from a repeat by it)
+        try:
+            model_pin = local().resolve(model) if looks_like_reference(model) else None
+            if model_pin is None and (".." in model or not HF_REPO_ID.match(model)):
+                try:
+                    labels = [f.label for f in local().folders() if not f.problem]
+                except LocalFileError:
+                    labels = []
+                if is_path(model):
+                    split_reference(model, labels)  # refused with the reason: AI callers never name a path
+                raise LocalFileError(f"'{model}' is neither a Hugging Face repo id (owner/name) nor a local file "
+                                     "reference.", next_step=labels_hint(labels))
+            field = "dataset_path"
+            dataset_pin = local().resolve(dataset) if dataset else None
+            if dataset_pin is not None and dataset_pin.is_dir:
+                raise LocalFileError(f"{dataset_pin.ref} is a folder; a calibration dataset is a file (for RKNN the "
+                                     "sample list).", next_step="name the dataset file inside its folder.")
+        except LocalFileError as e:
+            e.field = field
+            raise
         update = {"model": model_pin.path if model_pin else model,
                   "dataset_path": dataset_pin.path if dataset_pin else None}
         # Always present for an AI caller, also without pins: the build engine then never looks the model source up
@@ -152,14 +160,15 @@ class BuildService:
                 if not ((local / "config.json").is_file()
                         or any(f.name.lower().endswith(MODEL_FILE_SUFFIXES) for f in local.iterdir() if f.is_file())):
                     raise BuildServiceError(f"'{shown or local}' does not look like a model directory (no config.json "
-                                            "or model file).", code="invalid_value", next=MODEL_NEXT)
+                                            "or model file).", code="invalid_value", next=MODEL_NEXT,
+                                            field="model")
             elif not local.name.lower().endswith(MODEL_FILE_SUFFIXES):
                 raise BuildServiceError(f"'{shown or local.name}' is not a model file.", code="invalid_value",
-                                        next=MODEL_NEXT)
+                                        next=MODEL_NEXT, field="model")
             return str(local)
         if ".." in model or not HF_REPO_ID.match(model):
             raise BuildServiceError(f"'{shown or model}' is neither an existing local model nor a Hugging Face repo "
-                                    "id (owner/name).", code="invalid_value", next=MODEL_NEXT)
+                                    "id (owner/name).", code="invalid_value", next=MODEL_NEXT, field="model")
         return model
 
     # --- queries ----------------------------------------------------------------------------
@@ -352,7 +361,8 @@ class BuildService:
                 shown = getattr(getattr(inputs, "dataset", None), "ref", None) or request.dataset_path
                 raise BuildServiceError(f"Calibration dataset '{shown}' not found.",
                                         code="invalid_value",
-                                        next="Name an existing dataset file as <label>:<relative path>.")
+                                        next="Name an existing dataset file as <label>:<relative path>.",
+                                        field="dataset_path")
             dataset = str(path.resolve())
         problems = caps.check_request(fmt, board, quant, dataset=bool(dataset), imatrix=request.use_imatrix)
         if problems:
@@ -365,7 +375,8 @@ class BuildService:
             model = request.model  # a Hugging Face repo id: never looked up on disk for an AI caller
         if request.revision and Path(model).is_absolute():
             raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.",
-                                    code="invalid_value", next="Leave out the revision for a local model.")
+                                    code="invalid_value", next="Leave out the revision for a local model.",
+                                    field="revision")
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model}), inputs
 

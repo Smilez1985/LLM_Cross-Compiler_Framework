@@ -7,10 +7,12 @@ reported, refusals of the question limits on Ditto's path, the global build queu
 """
 
 import asyncio
+from datetime import datetime
 from types import SimpleNamespace
+from typing import Literal
 
 import pytest
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 pytest.importorskip("mcp")
 from mcp import Client  # noqa: E402
@@ -219,3 +221,169 @@ class TestRefusalsNameTheLabel:
         with pytest.raises(BuildServiceError) as exc:
             service.validate(request)
         assert "datasets:calib.txt" in str(exc.value) and "private-folder" not in str(exc.value)
+
+
+# --- S8: Ditto's early stop sees the field the registry's input errors name -----------------------------------------
+
+class ModuleIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(pattern=r"^[a-z]+$")
+    architecture: Literal["aarch64", "x86_64"]
+    cores: int = Field(gt=0)
+
+
+GOOD = {"name": "board", "architecture": "aarch64", "cores": 4}
+
+
+@pytest.fixture
+def modules(tmp_path):
+    registry = ToolRegistry(PolicyStore(tmp_path))
+    registry.created = []
+    registry.register(ToolSpec("create_target_module", "Create a target module", "", ToolTier.READ, ModuleIn, Out,
+                               lambda i: registry.created.append(i.name) or Out()))
+    return registry
+
+
+def ditto_loop(registry, calls):
+    """Ditto's real loop and executor over the registry: a model that makes `calls`, one per turn, then answers."""
+    from orchestrator.Core.ditto_manager import DittoCoder
+    from orchestrator.llm.tool_loop import run_tool_loop
+    from orchestrator.llm.types import ChatRequest, ChatResult, Message, ToolCall, ToolSpecLLM, Usage
+    calls = list(calls)
+
+    class Model:
+        def chat(self, request):
+            if calls:
+                call = ToolCall(id=f"c{len(calls)}", name="create_target_module", arguments=calls.pop(0))
+                return ChatResult(text="", stop="tool_use", tool_calls=[call], usage=Usage(),
+                                  message=Message(role="assistant", tool_calls=[call]))
+            return ChatResult(text="done", stop="end", usage=Usage(), message=Message(role="assistant", content="done"))
+    execute = DittoCoder._executor(SimpleNamespace(), registry, None, [], None)
+    tools = [ToolSpecLLM(name="create_target_module", description="", input_schema={"type": "object"})]
+    return run_tool_loop(Model(), ChatRequest(messages=[Message.user("add my board")], tools=tools), execute,
+                         max_steps=8)
+
+
+class TestEarlyStopThroughTheRegistry:
+
+    def test_fixing_one_field_after_another_is_progress(self, modules):
+        loop = ditto_loop(modules, [{**GOOD, "name": "Bad Name"}, {**GOOD, "architecture": "riscv"},
+                                    {**GOOD, "cores": 0}, GOOD])
+        assert [m for m in loop.new_messages if m.role == "system"] == [], "three fields fixed: never stopped"
+        assert loop.stop == "end" and modules.created == ["board"], "the fixed call ran"
+
+    def test_three_wrong_values_for_one_field_still_stop(self, modules):
+        loop = ditto_loop(modules, [{**GOOD, "name": "A A"}, {**GOOD, "name": "B B"}, {**GOOD, "name": "C C"}, GOOD])
+        assert len([m for m in loop.new_messages if m.role == "system"]) == 1 and modules.created == []
+
+    @pytest.mark.parametrize("arguments, field", [
+        ({**GOOD, "architecture": "riscv"}, "architecture"),     # the normalizer's own check
+        ({**GOOD, "cores": 0}, "cores"),                          # the input model's
+        ({"name": "board", "architecture": "aarch64"}, "cores"),  # a missing argument
+        ({**GOOD, "name": "Bad Name", "cores": 0}, "cores,name"),
+    ])
+    def test_input_errors_name_their_field(self, modules, arguments, field):
+        with pytest.raises(ToolError) as exc:
+            modules.call("create_target_module", arguments, ToolContext("ditto"))
+        assert exc.value.field == field
+
+    def test_the_build_services_input_refusals_name_their_field(self, tmp_path):
+        with pytest.raises(BuildServiceError) as exc:
+            BuildService._check_model_source("not a model or repo", None)
+        assert exc.value.field == "model"
+        registry = ToolRegistry(PolicyStore(tmp_path))
+
+        def refuse(inp):
+            raise exc.value
+        registry.register(ToolSpec("start", "Start", "", ToolTier.READ, ItemIn, Out, refuse))
+        with pytest.raises(ToolError) as raised:
+            registry.call("start", {}, ToolContext("ditto"))
+        assert (raised.value.code, raised.value.field) == ("invalid_value", "model")
+
+
+# --- S8: a refusal of the question limits is not a failed call, on either path ---------------------------------------
+
+class TestQuestionLimitsAreNotFailures:
+
+    def test_after_a_no_dittos_retries_are_refused_as_declined_like_an_mcp_clients(self, registry):
+        asked, errors = [], []
+        for _ in range(4):
+            with pytest.raises(ToolError) as exc:
+                registry.call("change_item", {"item_id": "a"},
+                              ToolContext("ditto", session="s", confirm=lambda s, i: bool(asked.append(1))))
+            errors.append(exc.value)
+        assert len(asked) == 1
+        assert [e.code for e in errors[1:]] == ["declined"] * 3, "never repeat_refused for a limit"
+        assert all("declined this exact call" in e.message and not e.message.startswith("This exact call already")
+                   for e in errors[1:])
+        mcp_asked = []
+        results = session(registry, [("change_item", {"item_id": "b"}, None)] * 4, answers(mcp_asked, "decline"))
+        assert len(mcp_asked) == 1 and all("declined this exact call" in text_of(r) for r in results[1:])
+
+    def test_the_questions_per_hour_refusal_is_not_counted_either(self, registry):
+        registry.limits = type(registry.limits)(questions_per_hour=1)
+        registry.call("change_item", {"item_id": "a"}, ToolContext("ditto", session="s", confirm=lambda s, i: True))
+        codes = []
+        for _ in range(3):
+            with pytest.raises(ToolError) as exc:
+                registry.call("change_item", {"item_id": "b"},
+                              ToolContext("ditto", session="s", confirm=lambda s, i: True))
+            codes.append(exc.value.code)
+        assert codes == ["limit_reached"] * 3
+
+
+# --- S8: the global build queue never refuses the person's own builds ------------------------------------------------
+
+def test_a_queue_full_of_ai_builds_never_refuses_the_persons_own_build(tmp_path):
+    from orchestrator.Core.builder import ModelFormat, OptimizationLevel
+    from orchestrator.Core.orchestrator import (MAX_UNFINISHED_REQUESTS, BuildQueueFull, BuildRequest,
+                                                LLMOrchestrator, OrchestrationStatus, PriorityLevel, WorkflowState,
+                                                WorkflowType)
+    orch = LLMOrchestrator(SimpleNamespace(targets_dir=str(tmp_path), get=lambda k, d=None: d),
+                           build_engine=SimpleNamespace(targets_dir=str(tmp_path)))
+    for i in range(MAX_UNFINISHED_REQUESTS):
+        orch._workflows[f"q{i}"] = WorkflowState(f"q{i}", OrchestrationStatus.QUEUED, datetime.now(),
+                                                 owner=f"mcp#{i}")
+    orch._ensure_worker_running = lambda: None
+
+    def request(owner):
+        return BuildRequest("", WorkflowType.SIMPLE_CONVERSION, PriorityLevel.NORMAL, ["Qwen/Qwen2.5-0.5B-Instruct"],
+                            ["Rockchip"], [ModelFormat.GGUF], OptimizationLevel.BALANCED, [], False, "out",
+                            owner=owner)
+
+    async def submit():
+        own = await orch.submit_build_request(request(""))  # the GUI or the CLI: the person's own build
+        with pytest.raises(BuildQueueFull):
+            await orch.submit_build_request(request("mcp#x"))
+        with pytest.raises(BuildQueueFull):
+            await orch.submit_build_request(request("ditto"))
+        return own
+    assert asyncio.run(submit())
+
+
+def test_a_refused_start_does_not_use_up_the_daily_quota(tmp_path):
+    """The queue was full (or the build service refused the request): nothing started, so nothing is counted."""
+    from orchestrator.tools.spec import ToolLimits
+    registry = ToolRegistry(PolicyStore(tmp_path))
+    results = [BuildServiceError("The build queue is full.", code="limit_reached", next="Wait."), None]
+
+    def start(inp):
+        error = results.pop(0)
+        if error is not None:
+            raise error
+        return Out()
+    registry.register(ToolSpec("start", "Start", "", ToolTier.READ, ItemIn, Out, start,
+                               limits=ToolLimits(per_day=1, what="builds")))
+    with pytest.raises(ToolError) as exc:
+        registry.call("start", {}, ToolContext("ditto"))
+    assert exc.value.code == "limit_reached"
+    registry.call("start", {"item_id": "b"}, ToolContext("ditto"))  # still the first start of the day
+    with pytest.raises(ToolError) as exc:
+        registry.call("start", {"item_id": "c"}, ToolContext("ditto"))
+    assert "in the last 24 hours" in exc.value.message
+
+
+def test_a_model_that_ignores_the_stop_gets_two_more_turns_not_the_whole_budget(modules):
+    loop = ditto_loop(modules, [{**GOOD, "name": "A A"}] * 3 + [GOOD] * 6)
+    not_run = [m for m in loop.new_messages if m.role == "tool" and m.content.startswith("Not run")]
+    assert loop.steps == 5 and len(not_run) == 2 and modules.created == [], "nothing runs after the stop"

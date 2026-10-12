@@ -323,8 +323,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   scrollbarer Dialog, der Pager); ein MCP-Formular bleibt bei 4.000.
 - **Grenzen je Client für Tool-Aufrufe** (Ditto und MCP-Clients): lesende Tools 20 Aufrufe in 10 Sekunden,
   `start_build` 3 unfertige Builds und 20 Starts am Tag, 30 Rückfragen pro Stunde und eine Build-Warteschlange von
-  höchstens 20 unfertigen Anfragen je Framework-Prozess (alle Aufrufer); nach einem Nein wird derselbe Aufruf 10
-  Minuten lang nicht erneut erfragt, und drei Nein zu einem Tool pausieren seine Rückfragen für 30 Minuten. Eine
+  höchstens 20 unfertigen Anfragen je Framework-Prozess für KI-Aufrufer (die eigenen GUI- und CLI-Builds des
+  Menschen werden immer eingereiht); nach einem Nein wird derselbe Aufruf 10 Minuten lang nicht erneut erfragt, und
+  drei Nein zu einem Tool pausieren seine Rückfragen für 30 Minuten. Eine
   erreichte Grenze ist eine protokollierte Ablehnung `rate_limited`, die sagt, wann es wieder geht. Die
   Wiederholungssperre lässt einen abgelehnten Aufruf 10 Minuten nach seinem letzten Scheitern wieder laufen (bisher
   war er bis zum Ende des Prozesses gesperrt), und Ditto hört nur nach Fehlern ohne Fortschritt vorzeitig auf, Tools
@@ -533,6 +534,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   festgehalten (bisher `allow`); `resolve_healing` entscheidet nichts ohne die Fakten seiner Rückfrage, und die erste
   Zeile seiner Rückfrage nennt den Build, nicht nur seine ID; ein lokales Modell oder Dataset, das eine KI benannt hat
   und das vor dem Build verschwunden ist, wird in der Ablehnung bei seinem Label genannt, nie bei seinem echten Pfad.
+- Grenzen, auf beiden Wegen gleich: Dittos vorzeitiges Aufhören sieht, um welches Feld es bei einem Eingabefehler
+  geht (die Registry ließ es weg, sodass ein Modell, das ein Feld nach dem anderen behob, gestoppt und sein richtiger
+  Aufruf nicht ausgeführt wurde); eine Ablehnung der Rückfrage-Grenzen (nach einem Nein, ein pausiertes Tool, zu
+  viele Rückfragen) ist auch auf Dittos Weg kein gescheiterter Aufruf (dort wurde daraus "Stop retrying", während ein
+  MCP-Client die einfache Ablehnung bekam); ein verweigerter Start, etwa wegen einer vollen Warteschlange, verbraucht
+  keinen der 20 Builds am Tag mehr; nach dem Stopp-Hinweis bekommt ein Modell, das weiter Tools aufruft, höchstens
+  zwei weitere Runden statt des restlichen Budgets.
 - MCP-Server: Ein Client, der die Verbindung trennt, lässt seine Builds nicht mehr ohne jemanden laufen, der
   aufräumt. Die Builds und Jobs, die seine Sitzung gestartet hat, werden abgebrochen, jeweils mit einem Audit-Eintrag
   („client disconnected“), der Server wartet bis zu 30 Sekunden, bis ihre Container gestoppt sind, und
