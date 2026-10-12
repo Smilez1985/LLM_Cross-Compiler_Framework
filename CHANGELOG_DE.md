@@ -35,7 +35,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (MCP-Design 6.10): ein Target- oder Rezept-Pack, das eine KI unter einem Dauerauftrag installiert hat, wird
   erfragt, bis die Person einen Build davon im eigenen Fenster des Frameworks bestätigt (eine Antwort per
   Elicitation, die Nutzung eines Dauerauftrags oder „erlauben“ zählen nie); das Framework vermerkt diesen Build
-  (`confirmed_builds.json` im Benutzerordner), und der Build-Dauerauftrag deckt die folgenden Builds ab. Ein per
+  (`confirmed_builds.json` im Benutzerordner, signiert wie die Berechtigungsdatei: eine Handänderung, ein anderer
+  Schlüssel oder eine fehlende Signatur zählt als keine Bestätigung), und der Build-Dauerauftrag deckt die folgenden
+  Builds ab. Ein per
   Digest gepinntes Basis-Image außerhalb der Docker Official Images zählt, sobald ein Build mit genau diesem Image
   bestätigt wurde; ein Tag nie. Die Regelversion des Build-Dauerauftrags ist jetzt 2, Daueraufträge nach der
   engeren Regel verfallen.
@@ -58,7 +60,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Optionale Tools `delete_artifact` und `restore_knowledge_snapshot`** (MCP-Entwurf T10): ein gebautes Modell
   (Ordner und Golden-ZIP) per ID und sha256 löschen oder die Wissensbasis als Job durch einen früheren Snapshot
   ersetzen. Beide zerstören etwas: standardmäßig verboten und verborgen, bis du sie freigibst (die ganze Klasse
-  „extern“ zu erlauben genügt nicht), jeder Aufruf mit Frage, nie ein Dauerauftrag. Ein Löschen wird abgelehnt
+  „extern“ zu erlauben genügt nicht), jeder Aufruf mit Frage, nie ein Dauerauftrag. Über ein Löschen entscheidest nur
+  du im eigenen Fenster des Frameworks (Dittos Dialog oder Eingabeaufforderung, bei einem MCP-Client eine wartende
+  Freigabe), nie im Formular des Clients, nie unter einem Dauerauftrag oder einer Vollmacht; die Registry lehnt jedes
+  löschende Tool ab, das sich auf anderem Weg bestätigen ließe. Dieses Fenster nennt jedes Teil (den Ordner und sein
+  Golden-ZIP) mit sprechendem Namen, vollem Pfad, Dateinamen, Größe und was es ist; eine KI sieht nur Bezeichnungen und
+  Größen, und Dittos Kommandozeile ohne Terminal gibt nur den Aufruf und seine Argumente aus. Ein Löschen wird abgelehnt
   außerhalb des Ausgabeordners, solange ein Build irgendeines Programms des Frameworks in den Ordner schreibt oder
   dafür wartet, nachdem sich der Build geändert hat und wenn der Ordner nicht der ist, den die Frage nannte. Eine
   Wiederherstellung sichert immer zuerst die aktuelle Wissensbasis (`pre_restore_<Zeit>`), auch außerhalb von MCP,
@@ -557,8 +564,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   drei Nein zu einem Tool pausieren seine Rückfragen für 30 Minuten. Eine
   erreichte Grenze ist eine protokollierte Ablehnung `rate_limited`, die sagt, wann es wieder geht. Die
   Wiederholungssperre lässt einen abgelehnten Aufruf 10 Minuten nach seinem letzten Scheitern wieder laufen (bisher
-  war er bis zum Ende des Prozesses gesperrt), und Ditto hört nur nach Fehlern ohne Fortschritt vorzeitig auf, Tools
-  aufzurufen, mit bis zu 4 Schritten mehr, solange er einen Eingabefehler behebt.
+  war er bis zum Ende des Prozesses gesperrt) und fasst die Aufrufe einer MCP-Verbindung über eine zufällige ID
+  zusammen, nie über eine Speicheradresse, die eine spätere Verbindung wieder bekommen könnte; Ditto hört nur nach
+  Fehlern ohne Fortschritt vorzeitig auf, Tools aufzurufen, mit bis zu 4 Schritten mehr, solange er einen
+  Eingabefehler behebt.
 - **`llm-cli tools audit` zeigt die neueren Audit-Felder in Worten**: wer aufgerufen hat (Ditto, alle lokalen
   stdio-Clients, ein benanntes Token, mit dem Namen, den der Client selbst angibt), den Titel des Tools und den Namen,
   den die KI geschrieben hat, den Grundcode und wie der Mensch gefragt wurde, mit seiner Antwort; `--details` ergänzt
@@ -605,7 +614,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Wartende Freigaben für KI-Clients, die dich nicht fragen können** (MCP-Server). Hat ein Client keine
   Formular-Elicitation (Claude-Desktop-Chat, Cowork), ist eine Frage länger als 4.000 Zeichen oder hast du ein Tool
   mit `llm-cli tools permissions --confirm-in-framework TOOL` gesetzt (oder „Ask in the framework“ in der GUI),
-  wartet die Frage im Framework auf dich: Ein Hinweis in der Statusleiste der GUI öffnet
+  wartet die Frage im Framework auf dich (eine Antwort aus dem Formular des Clients zählt für einen solchen Aufruf
+  nie, auch wenn du es gesetzt hast, während das Formular offen war): Ein Hinweis in der Statusleiste der GUI öffnet
   **Tools > Pending Approvals...**, und `llm-cli tools approvals` (`list`, `show`, `approve`, `decline`; braucht ein
   Terminal) funktioniert auf einem Rechner ohne Bildschirm. Der Client bekommt `waiting_for_approval` mit einer
   Job-ID; sobald du freigibst, führt das Framework den Aufruf selbst unter dem Aufrufer des Clients aus, außer seine
@@ -936,9 +946,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Audit-Einträge dieses Aufrufers; neu sind `get_settings` (eine feste Leseliste, Adressen als Schema und Host, Ordner
   als Labels) und `update_settings` (gewöhnliche Einstellungen mit einer Frage, die alten und neuen Wert zeigt,
   gespeichert in der `config.yml`; Einstellungen, die eine KI begrenzen, nur verschärfbar, und nur solche dürfen ohne
-  Frage erlaubt werden, und ein Speicherlimit von 0, das Docker als keins liest, zählt als Lockerung; Berechtigungen,
-  Geheimnisse, Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner vor der Frage abgelehnt; kein Wert wird als
-  „Standard“ gelesen).
+  Frage erlaubt werden, und ein Speicherlimit von 0, das Docker als keins liest, zählt als Lockerung;
+  `crawler_download_pdfs` nur ausschaltbar; Einstellungen, die dich darüber informieren, was KIs tun, etwa gesprochene
+  Ansagen, kann keine KI ändern, und `update_settings` wird nicht registriert, wenn es eine davon erreichen könnte;
+  Berechtigungen, Geheimnisse, Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner vor der Frage abgelehnt;
+  kein Wert wird als „Standard“ gelesen).
 - **MCP: ehrliches „kann nicht“, vom Framework geprüft** (DECISIONS Runde 3): Das neue `report_cannot_do` nimmt einen
   Grundcode (kein „ungetestet“) und was fehlt, prüft ihn an den Berechtigungen des Aufrufers, den Audit-Einträgen und
   Grenzen dieser Sitzung, dem Laufwerk und den Aktionen, die kein Tool tut, und antwortet confirmed, contradicted,

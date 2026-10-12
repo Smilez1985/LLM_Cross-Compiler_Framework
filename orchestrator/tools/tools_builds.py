@@ -211,9 +211,10 @@ def start_accepted(service, bound: Dict[str, Any], ctx, start):
     `start(reservation)`, releases the reservation when the start fails, and records a build the person confirmed in
     the framework's own window (design 6.10: a pack installed under a standing approval is covered by a build
     standing approval only after that)."""
+    from orchestrator.Core.confirmed_builds import unattended
     from orchestrator.Core.disk_plan import InsufficientSpace
     channel = str(getattr(ctx, "confirm_channel", "") or "")
-    standing = channel.startswith("grant:")
+    standing = unattended(channel)  # a standing approval or a delegation: nobody answered this call's question
     label = f"{bound.get('model')} for {bound.get('target')}"
     try:
         reservation = service.reserve_disk(bound, ctx.owner, label, standing=standing)

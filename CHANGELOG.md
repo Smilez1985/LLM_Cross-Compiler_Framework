@@ -31,7 +31,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **A confirmed build unlocks a build standing approval for packs installed under one** (MCP design 6.10): a target
   or recipe pack an AI installed under a standing approval is asked about until the person confirms one build of it
   in the framework's own window (an elicitation answer, a standing approval's own use or "allow" never count); the
-  framework records that build (`confirmed_builds.json` in the per-user folder) and the build standing approval
+  framework records that build (`confirmed_builds.json` in the per-user folder, signed like the permission file: a
+  hand edit, another key or a missing signature counts as no confirmation) and the build standing approval
   covers the next builds. A digest-pinned base image outside the Docker Official Images counts once a build with
   exactly that image was confirmed; a tag never does. The build standing approval's rule version is now 2, so
   standing approvals made under the narrower rule lapse.
@@ -52,7 +53,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Optional tools `delete_artifact` and `restore_knowledge_snapshot`** (MCP design T10): delete one built model
   (folder and golden ZIP) by id and sha256, or replace the knowledge base with an earlier snapshot as a job. Both are
   destructive: denied by default and hidden until you enable them (allowing the whole external class does not),
-  every call asked, never a standing approval. A deletion is refused outside the output folder, while a build of any
+  every call asked, never a standing approval. A deletion is decided only by you in the framework's own window
+  (Ditto's dialog or prompt, or a pending approval for an MCP client), never in the client's own form, never under
+  a standing approval or a delegation; the registry refuses any tool that deletes and could be confirmed another
+  way. That window lists each item (the folder and its golden ZIP) with its speaking name, full path, file name, size
+  and what it is; an AI sees labels and sizes only, and Ditto's command line without a terminal prints only the call
+  and its arguments. A deletion is refused outside the output folder, while a build of any
   framework program writes into the folder or is queued for it, after the build changed, and when the folder is not
   the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
   outside MCP, and never prunes the snapshot it restores.
@@ -487,8 +493,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   per framework process for AI callers (the person's own GUI and CLI builds are always queued); after a "no" the
   same call is not asked again for 10 minutes, and three "no" to one tool pause its questions for 30 minutes. A limit hit is an audited `rate_limited` refusal that says when to
   try again. The repeat guard lets a refused call run again 10 minutes after its last failure (it was refused until
-  the process ended), and Ditto stops calling tools early only after failures without progress, with up to 4 more
-  steps while it fixes an input error.
+  the process ended) and groups the calls of one MCP connection by a random id, never by a memory address a later
+  connection could get again; Ditto stops calling tools early only after failures without progress, with up to 4
+  more steps while it fixes an input error.
 - **`llm-cli tools audit` shows the newer audit fields in words**: who called (Ditto, all local stdio clients, a
   named token, with the client's self-reported name), the tool's title and the name the AI wrote, the reason code and
   how the person was asked with their answer; `--details` adds repairs, duration, result hash, links and session.
@@ -528,7 +535,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Pending approvals for AI clients that cannot ask you** (MCP server). When a client has no form elicitation
   (Claude Desktop chat, Cowork), a question is longer than 4,000 characters, or you set a tool with
   `llm-cli tools permissions --confirm-in-framework TOOL` (or "Ask in the framework" in the GUI), the question waits
-  for you in the framework: a notice in the GUI status bar opens **Tools > Pending Approvals...**, and
+  for you in the framework (an answer from the client's own form never counts for such a call, also when you set it
+  while the form was open): a notice in the GUI status bar opens **Tools > Pending Approvals...**, and
   `llm-cli tools approvals` (`list`, `show`, `approve`, `decline`; needs a terminal) works on a headless machine. The
   client gets `waiting_for_approval` with a job id; once you approve, the framework runs the call itself under the
   client's caller, unless its question would read differently by then (then you are asked again), and the client
@@ -822,7 +830,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (an explicit read list, addresses as scheme and host, folders as labels) and `update_settings` (ordinary settings
   with a question showing old and new value, saved in `config.yml`; settings that limit an AI only tightened, and
   only those may be allowed without a question, and a container memory limit of 0, which Docker reads as none,
-  counts as loosening; permissions, secrets, vault, AI provider settings, addresses and folders refused before the
+  counts as loosening; `crawler_download_pdfs` only switched off; settings that keep you informed of what AIs do,
+  such as spoken announcements, read-only for every AI, and `update_settings` is not registered if it could reach
+  one; permissions, secrets, vault, AI provider settings, addresses and folders refused before the
   question; no value is read as "default").
 - **MCP: honest "cannot" checked by the framework** (DECISIONS round 3): new `report_cannot_do` takes a reason code
   (no "untested") and what is missing, checks it against the caller's permissions, this session's audit entries and

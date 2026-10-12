@@ -83,7 +83,78 @@ class TestDeleteArtifact:
         assert not (folder.parent / "Q4_K_M.zip").exists(), "its golden ZIP goes too"
         text = shown[0]
         assert "output:Rockchip/my-model/Q4_K_M" in text and digest in text and "cannot be undone" in text
-        assert str(env.tmp) not in text, "never a host path in the question"
+        # Round 5 f: Ditto's dialog is the framework's own window, so the person sees each item's full path there
+        # (what an AI can read never holds it: test_the_delete_question_lists_full_path_name_size_and_kind_...).
+        assert str(folder.resolve()) in text
+
+    def test_the_delete_question_lists_full_path_name_size_and_kind_for_the_person_only(self, env, monkeypatch,
+                                                                                       capsys):
+        """Round 5 f: the person confirms a deletion in the framework's own window, which lists every item with its
+        speaking name, full path, file name, size and what it is (the folder and its golden ZIP). Nothing an AI can
+        read holds a host path: the question an MCP form would show, the waiting result, the job, the audit log, the
+        plan's AI view, and the question Ditto's command line prints when no terminal can confirm it."""
+        from orchestrator import cli
+        from orchestrator.Core.job_service import JobService
+        from orchestrator.tools.approvals import ApprovalService, ApprovalStore
+        from orchestrator.tools.confirmation import MAX_ELICITATION
+        enable(env, "delete_artifact")
+        folder, aid, digest = make_artifact(env)
+        folder = folder.resolve()  # the real path is what gets deleted
+        zip_path = folder.parent / "Q4_K_M.zip"
+        spec, args = env.registry.get("delete_artifact"), {"artifact_id": aid, "expect_sha256": digest}
+        facts = env.registry.look_up(spec, spec.input_model(**args), ToolContext("ditto"))
+        plan = facts.deletion
+        assert [(i.kind, i.full_path, i.file_name) for i in plan.items] == [
+            ("artifact", str(folder), "Q4_K_M"), ("artifact", str(zip_path), "Q4_K_M.zip")]
+        assert [i.size_bytes for i in plan.items] == [1234 + len((folder / "build_info.json").read_bytes()), 100]
+        assert plan.total_bytes == sum(i.size_bytes for i in plan.items) and plan.mode_offered == ("permanent",)
+        assert all(i.speaking_name.startswith("output:Rockchip/my-model/Q4_K_M") and i.what for i in plan.items)
+        assert str(env.tmp) not in json.dumps(plan.ai_view())
+
+        person = env.registry.question_text(spec, args, ToolContext("ditto"), facts)  # Ditto's dialog, the GUI, CLI
+        for item in plan.items:
+            assert f"    {item.full_path}" in person and f"{item.file_name}, {item.size_bytes} bytes" in person
+        ai_side = env.registry.question_text(spec, args, ToolContext("mcp"), facts, MAX_ELICITATION)
+        assert "Would be deleted:" in ai_side and str(env.tmp) not in ai_side
+
+        # An MCP client: a pending approval the person decides in the framework; the client learns no path.
+        env.registry.attach_approvals(ApprovalService(ApprovalStore(env.tmp / "approvals"), JobService(), poll=3600.0))
+        with pytest.raises(ToolError) as exc:
+            env.registry.call("delete_artifact", args, ToolContext("mcp", session="m", pending_approvals=True))
+        assert exc.value.code == "waiting_for_approval" and str(env.tmp) not in str(exc.value)
+        record = env.registry.approvals.store.pending()[0]
+        assert str(folder) in record.question and str(zip_path) in record.question, "the framework window lists it"
+        job = env.registry.approvals.jobs.get(record.job_id)
+        assert str(env.tmp) not in json.dumps([job.note, job.message, job.result, job.error], default=str)
+        audit_text = json.dumps(env.registry.audit.entries(100), default=str)
+        assert str(folder) not in audit_text and str(zip_path) not in audit_text
+
+        # Ditto's command line without a terminal denies, and what it prints holds no person-only fact.
+        monkeypatch.setattr("sys.stdin", SimpleNamespace(isatty=lambda: False))
+        with pytest.raises(ToolError):
+            env.registry.call("delete_artifact", args, ToolContext("ditto", session="c", confirm=cli._ditto_confirm))
+        err = capsys.readouterr().err
+        assert "denied" in err and aid in err and str(env.tmp) not in err
+        assert folder.exists() and zip_path.exists()
+
+    def test_a_plan_that_cannot_be_listed_is_refused_without_a_path(self, env, monkeypatch):
+        """The golden ZIP vanished between the look-up and the plan: the call is refused before any question, in
+        framework words; the refusal an AI reads never quotes a path (a validation error would quote the values)."""
+        from orchestrator.Core.artifact_store import ArtifactStore
+        enable(env, "delete_artifact")
+        folder, aid, digest = make_artifact(env)
+        resolve = ArtifactStore.resolve
+
+        def vanished(self, *args, **kwargs):
+            target = resolve(self, *args, **kwargs)
+            for z in target.zips:
+                z.unlink()
+            return target
+        monkeypatch.setattr(ArtifactStore, "resolve", vanished)
+        with pytest.raises(ToolError) as exc:
+            ask(env, "delete_artifact", {"artifact_id": aid, "expect_sha256": digest})
+        assert "changed while" in str(exc.value) and str(env.tmp) not in f"{exc.value} {exc.value.next}"
+        assert folder.exists()
 
     def test_a_no_deletes_nothing(self, env):
         enable(env, "delete_artifact")

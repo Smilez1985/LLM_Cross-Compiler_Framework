@@ -61,24 +61,41 @@ UNKEYED = "unkeyed"
 # question put to a person; the other outcomes are end states. `folder_added` and `folder_removed` record a person's
 # change to the folders the AI may use, `policy_changed` a saved change of the tool permissions with the old and new
 # decisions, `approval_decided` a person's answer to a pending approval (framework-side events, actor cli or gui).
+# For delegations and the chat (design 3.11): `ai_answered` an AI's answer to its own question, `delegation_lapsed`,
+# the person's trash, snapshot and chat cleanups, and `relay_question` a person's question relayed to an AI client.
 OUTCOMES = frozenset({
     "ok", "error", "denied", "not_confirmed", "invalid_input",
     "started", "confirmation_requested", "cancelled", "rate_limited", "confirmation_timeout",
     "audit_unavailable", "unknown_tool", "repeat_refused", "cannot_reported",
     "folder_added", "folder_removed", "policy_changed", "approval_decided", "grant_lapsed",
+    "ai_answered", "delegation_lapsed", "trash_restored", "trash_emptied", "snapshots_pruned", "feed_cleared",
+    "relay_question",
 })
-# How a person answered (or did not answer) a question.
+# How a person answered (or did not answer) a question; `escalated` and `withdrawn` are an AI's answers to its own
+# question ("ask the person", "no").
 ANSWERS = frozenset({"accepted", "declined", "cancelled", "timeout", "client_disconnected", "unavailable",
-                     "unanswered"})
+                     "unanswered", "escalated", "withdrawn"})
 # Where a confirmation came from: none, an MCP form elicitation, the framework's own windows, a pending approval
-# decided in the framework, or a standing approval.
+# decided in the framework, a standing approval, or a delegation.
 _CHANNEL = re.compile(r"^(none|elicitation|framework|framework-gui|framework-cli|approval:[\w-]{1,64}|"
-                      r"grant:[\w-]{1,64})$")
+                      r"grant:[\w-]{1,64}|delegation:d_[0-9a-f]{16})$")
 # Fields kept in an entry's `extra` column. The entry's hash stays the 3.0.0 one (so a 3.0.0 process that still
 # runs next to this version verifies and appends to the same log); the extra fields are bound to it by their
 # SHA-256 at the end of the chained `detail` column, so adding, removing or editing them is detected.
 EXTRA_FIELDS = frozenset({"client", "session", "confirm_channel", "question_sha256", "answer", "name_requested",
-                          "repairs", "reason_code", "duration_ms", "result", "links"})
+                          "repairs", "reason_code", "duration_ms", "result", "links",
+                          # delegations, the chat feed and the hybrid (design 3.11)
+                          "answered_by", "delegation", "reason_sha256", "facts_sha256", "warnings", "version",
+                          "feed_entry", "taint", "place", "remote_server", "transfer", "deletion_sha256"})
+# Who answered a question: the person, or an AI under a delegation.
+ANSWERED_BY = frozenset({"person", "ai"})
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_CODE = re.compile(r"^[a-z][a-z0-9_]{1,47}$")
+_LABEL = re.compile(r"^[^\x00-\x1f\x7f]{1,120}$")
+# Kept when the extra fields are too long and must be cut: what ties an entry to its question, answer, decision record
+# and deletion plan.
+_KEEP = ("reason_code", "answer", "confirm_channel", "question_sha256", "duration_ms", "links", "answered_by",
+         "delegation", "reason_sha256", "facts_sha256", "feed_entry", "place", "deletion_sha256")
 _EXTRA_MAX = 2000
 _EXTRA_REF = re.compile(r"\n\[extra sha256:([0-9a-f]{64})\]\Z")
 _EXTRA_TAG = "[extra sha256:"
@@ -144,6 +161,17 @@ def extra_fields(row: Dict[str, Any]) -> Dict[str, Any]:
     except (TypeError, ValueError, RecursionError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _shown(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Rows as a reader gets them: the extra fields also as keys of their own (they never replace a column), the
+    detail without their binding."""
+    for row in rows:
+        if isinstance(row.get("detail"), str):
+            row["detail"] = _EXTRA_REF.sub("", row["detail"])
+        for key, value in extra_fields(row).items():
+            row.setdefault(key, value)
+    return rows
 
 
 def _extra_ref(extra: str) -> str:
@@ -366,6 +394,41 @@ class AuditLog:
         return None
 
     @staticmethod
+    def _check_delegation_fields(fields: Dict[str, Any]) -> None:
+        """The fields of delegated answers take only the values the design gives them (design 3.11); anything else is
+        a bug in the caller, refused like an unknown field."""
+        from orchestrator.tools.delegation import delegation_id_ok
+        if "answered_by" in fields and fields["answered_by"] not in ANSWERED_BY:
+            raise ValueError(f"answered_by must be person or ai, not {fields['answered_by']!r}")
+        if "delegation" in fields and not delegation_id_ok(fields["delegation"]):
+            raise ValueError(f"delegation must be a delegation id (d_<16 hex>), not {fields['delegation']!r}")
+        for key in ("reason_sha256", "facts_sha256", "deletion_sha256"):
+            if key in fields and not (isinstance(fields[key], str) and _HEX64.fullmatch(fields[key])):
+                raise ValueError(f"{key} must be a sha256 in hex")
+        if "version" in fields and (isinstance(fields["version"], bool) or not isinstance(fields["version"], int)
+                                    or not 1 <= fields["version"] <= 99):
+            raise ValueError("version must be a whole number from 1 to 99")
+        if "feed_entry" in fields and not re.fullmatch(r"fe_[0-9a-f]{16}", str(fields["feed_entry"])):
+            raise ValueError("feed_entry must be a feed entry id (fe_<16 hex>)")
+        if "warnings" in fields:
+            codes = fields["warnings"]
+            if not isinstance(codes, list) or not all(isinstance(c, str) and _CODE.fullmatch(c) for c in codes):
+                raise ValueError("warnings must be a list of warning codes")
+            from orchestrator.tools.spec import _catalog
+            catalog = _catalog()
+            known = getattr(catalog, "WARNINGS", None) if catalog is not None else None
+            unknown = sorted(c for c in codes if known is not None and c not in known)
+            if unknown:
+                raise ValueError(f"unknown warning codes {unknown}")
+        if "taint" in fields and not (isinstance(fields["taint"], bool) or (
+                isinstance(fields["taint"], list) and all(isinstance(t, str) and _CODE.fullmatch(t)
+                                                          for t in fields["taint"]))):
+            raise ValueError("taint must be true/false or a list of reason codes")
+        for key in ("place", "remote_server", "transfer"):
+            if key in fields and not (isinstance(fields[key], str) and _LABEL.fullmatch(fields[key])):
+                raise ValueError(f"{key} must be a short single-line label")
+
+    @staticmethod
     def _extra(outcome: str, extra: Optional[Dict[str, Any]]) -> Optional[str]:
         """The extra fields as canonical JSON (redacted), None when there are none. Unknown fields and values
         outside the documented sets are refused: they are a bug in the caller, and an audit entry must not carry
@@ -380,13 +443,15 @@ class AuditLog:
             raise ValueError(f"unknown audit fields {sorted(unknown)}")
         if "answer" in fields and fields["answer"] not in ANSWERS:
             raise ValueError(f"unknown answer {fields['answer']!r}")
-        if "confirm_channel" in fields and not _CHANNEL.match(str(fields["confirm_channel"])):
+        # fullmatch: "$" alone would also accept a channel with a newline at its end
+        if "confirm_channel" in fields and not _CHANNEL.fullmatch(str(fields["confirm_channel"])):
             raise ValueError(f"unknown confirmation channel {fields['confirm_channel']!r}")
+        AuditLog._check_delegation_fields(fields)
         text = json.dumps(fields, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
         text = _text(redact_secrets(text))
         if len(text) > _EXTRA_MAX:  # never cut JSON in the middle: keep the fields that fit, say what was cut
             kept: Dict[str, Any] = {"truncated": sorted(fields)}
-            for key in ("reason_code", "answer", "confirm_channel", "question_sha256", "duration_ms", "links"):
+            for key in _KEEP:
                 if key in fields:
                     kept[key] = fields[key]
             text = _text(redact_secrets(json.dumps(kept, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
@@ -395,11 +460,16 @@ class AuditLog:
 
     def record(self, actor: str, tool: str, tier: str, decision: str, outcome: str,
                arguments: Any = None, approved: Optional[bool] = None, detail: str = "",
-               extra: Optional[Dict[str, Any]] = None) -> int:
+               extra: Optional[Dict[str, Any]] = None, omit: Tuple[str, ...] = ()) -> int:
         """Appends one entry and returns its id. `extra`: fields of EXTRA_FIELDS (client, session, confirmation
         channel, question hash, answer, repaired names and arguments, reason code, duration, result hash, links to
-        earlier entries)."""
+        earlier entries; the fields of delegated answers). `omit`: argument names whose values stay out of the
+        preview (a tool's FieldMeta(audit=False), e.g. a data chunk); args_sha256 still covers the full arguments."""
         text = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str) if arguments is not None else ""
+        preview = text
+        if omit and isinstance(arguments, dict) and any(k in arguments for k in omit):
+            shown = {k: (f"[not recorded: {len(str(v))} characters]" if k in omit else v) for k, v in arguments.items()}
+            preview = json.dumps(shown, ensure_ascii=False, sort_keys=True, default=str)
         extra_text = self._extra(outcome, extra)
         # Free text (it can quote what a model wrote) never ends like the binding of extra fields.
         detail_text = _text(redact_secrets(detail or ""))[:1000].replace(_EXTRA_TAG, "[extra-sha256:")
@@ -410,7 +480,7 @@ class AuditLog:
             "actor": _text(actor), "tool": _text(tool), "tier": _text(tier), "decision": _text(decision),
             "approved": None if approved is None else int(bool(approved)),
             "args_sha256": hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest(),
-            "args_preview": _text(redact_secrets(text))[:500],
+            "args_preview": _text(redact_secrets(preview))[:500],
             "outcome": _text(outcome),
             "detail": detail_text,
             "extra": extra_text,
@@ -495,12 +565,7 @@ class AuditLog:
             rows = _dicts(db.execute("SELECT * FROM events ORDER BY id DESC LIMIT ?", (int(limit),)))
         finally:
             db.close()
-        for row in rows:
-            if isinstance(row.get("detail"), str):
-                row["detail"] = _EXTRA_REF.sub("", row["detail"])
-            for key, value in extra_fields(row).items():
-                row.setdefault(key, value)
-        return rows
+        return _shown(rows)
 
     def check(self) -> AuditCheck:
         """Walks the whole chain and compares its head with the anchor file. Writers wait meanwhile, so the
@@ -589,6 +654,35 @@ class AuditLog:
         finally:
             db.close()
         return int(row[0] or 0), (row[1] if row else None)
+
+    def delegation_uses(self, delegation_id: str) -> Tuple[int, Optional[str]]:
+        """(how often a delegation ran a call, the time of the last one), read from the `started` entries of the calls
+        an AI answered under it (`confirm_channel: delegation:<id>`); the delegation file never counts uses, so a use
+        never rewrites it. Its lapse record is no use. (0, None) without a log."""
+        from orchestrator.tools.delegation import delegation_id_ok
+        if not delegation_id_ok(delegation_id) or not os.path.lexists(self.path):
+            return 0, None
+        needle = f'"confirm_channel":"delegation:{delegation_id}"'
+        db = self._connect()
+        try:
+            row = db.execute("SELECT COUNT(*), MAX(ts) FROM events WHERE instr(extra, ?) > 0 AND outcome = 'started'",
+                             (needle,)).fetchone()
+        finally:
+            db.close()
+        return int(row[0] or 0), (row[1] if row else None)
+
+    def entries_after(self, last_id: int, limit: int = 100) -> List[Dict[str, Any]]:
+        """The entries after `last_id`, oldest first, at most `limit` (as entries() gives them): a watcher's id cursor,
+        so a burst of entries never hides one between two looks."""
+        if not os.path.lexists(self.path):
+            return []
+        db = self._connect()
+        try:
+            rows = _dicts(db.execute("SELECT * FROM events WHERE id > ? ORDER BY id LIMIT ?",
+                                     (int(last_id), max(0, int(limit)))))
+        finally:
+            db.close()
+        return _shown(rows)
 
     def kept_with_key(self) -> bool:
         """Whether this log is kept with a key (its newest entry, or the key it started with, names one): then a

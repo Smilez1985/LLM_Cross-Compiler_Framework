@@ -27,8 +27,8 @@ from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.confirmation import MAX_FRAMEWORK, CallTooLong, describe_call
 from orchestrator.tools.grants import NEVER_GRANT
 from orchestrator.tools.limits import Limiter, wait_text
-from orchestrator.tools.normalize import (NormalizeError, Repair, check_names_distinct, list_item_literal,
-                                          normalize_arguments, resolve_name)
+from orchestrator.tools.normalize import (PENDING_CODES, NormalizeError, Repair, check_names_distinct,
+                                          list_item_literal, normalize_arguments, resolve_name)
 from orchestrator.tools.output import (MAX_RESULT_BYTES, UNTRUSTED_CHARS, ResultTooLarge, check_size, clean_note,
                                        filtered_result, has_untrusted, notes_text)
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStore, TokenStoreError
@@ -63,14 +63,22 @@ class ToolError(Exception):
     spelling variant of the tool name), the same notes a successful result carries, shown after the text
     ("<message> Next: <next> Notes: ...") on every path, so a refused call teaches the right argument name as a
     successful one does. `repairs` are the repairs a tool's look-up made before it refused (a file name matched in
-    another letter case, normalize.Repair): the registry names them in the notes and records them."""
+    another letter case, normalize.Repair): the registry names them in the notes and records them.
+
+    The facts model of the delegation design (4.1): `blocker` names the hard fact that refused the call before any
+    question (a code of the facts catalogue, e.g. disk_full), binding the AI and the person alike; `person_action` says
+    what the person can do about it (framework text, GUI place first), separate from `next`, which is for the AI;
+    `details` carries framework facts only (never external text), e.g. the waiting result of a pending approval."""
     code = "failed"
     quoted = ""
     field = ""
+    blocker = ""
+    person_action = ""
 
     def __init__(self, message: str = "", code: Optional[str] = None, next: str = "",
                  allowed: Optional[List[str]] = None, suggestions: Optional[List[str]] = None, quoted: str = "",
-                 field: str = "", notes: Optional[List[str]] = None):
+                 field: str = "", notes: Optional[List[str]] = None, blocker: str = "", person_action: str = "",
+                 details: Optional[Dict[str, Any]] = None):
         super().__init__(message)
         self.message = message
         if code:
@@ -83,6 +91,11 @@ class ToolError(Exception):
             self.field = field
         self.notes: List[str] = list(notes or [])
         self.repairs: List[Any] = []
+        if blocker:
+            self.blocker = blocker
+        if person_action:
+            self.person_action = person_action
+        self.details: Optional[Dict[str, Any]] = dict(details) if details is not None else None
 
     def text(self) -> str:
         """The message and the next step, without the notes (the MCP server adds them to every refusal itself)."""
@@ -103,6 +116,9 @@ class ToolError(Exception):
         copy.quoted = self.quoted if self.quoted and message.endswith(self.quoted) else ""
         copy.notes = list(self.notes)
         copy.repairs = list(getattr(self, "repairs", []))
+        copy.blocker, copy.person_action = self.blocker, self.person_action
+        details = getattr(self, "details", None)
+        copy.details = dict(details) if details is not None else None
         return copy
 
 
@@ -217,6 +233,20 @@ class ToolSpec:
     # discard(input, ctx): drops what prepare staged (a quarantined pack) when the call is not confirmed (a "no", nobody
     # could be asked, a pending approval declined or expired). It must never raise; it runs no handler code.
     discard: Optional[Callable[[BaseModel, "ToolContext"], None]] = None
+    # Who may use the tool at all, checked against the real actor of a call (ToolContext.actor, never a token's link):
+    # None = every caller; otherwise names such as "ditto", "mcp", "mcp:<token>", or "mcp:*" for every named token. A
+    # caller outside the list is not offered the tool, and a call by name is refused (not_supported) and audited.
+    callers: Optional[Tuple[str, ...]] = None
+    # False: never listed (MCP tools/list, Ditto's tool definitions); callable by name only (internal tools).
+    model_facing: bool = True
+    # visible_when(ctx) -> bool: whether this session is offered the tool now (e.g. only while pending approvals can
+    # occur); None = always. Checked again when it is called; a hidden tool called by name is refused and audited.
+    visible_when: Optional[Callable[["ToolContext"], bool]] = None
+    # The tool deletes something the person can see (round 5 f): only the person decides, in the framework's own
+    # window; never a client's form, a standing approval, a delegation or "allow" (ToolRegistry.register checks it).
+    deletes: bool = False
+    # undo(UndoContext) -> UndoPlan | CannotUndo: how the chat panel undoes a call (filled when the registry is built).
+    undo: Optional[Callable[[Any], Any]] = None
 
     def annotations(self) -> Dict[str, Any]:
         """MCP tool annotations (hints for clients; the registry enforces the policy itself)."""
@@ -385,6 +415,9 @@ class ToolContext:
     # work that goes on after the call returned (a job) can write its own end entry linked to it (record_job_end).
     audit_started: Optional[int] = None
     audit_decision: str = ""
+    # True for Ditto while it has a live delegation: a call the delegation covers becomes a pending approval Ditto's
+    # model answers, while every other question keeps the person's dialog (design 3.2). Set by Ditto, never by a client.
+    ai_pending: bool = False
 
     @property
     def owner(self) -> str:
@@ -420,6 +453,86 @@ def requester_of(ctx: "ToolContext") -> str:
     who = describe() if callable(describe) else (f"{ctx.client} (self-reported)" if ctx.client else
                                                  "an AI client that did not name itself")
     return f"{who}, with the permissions of {caller_label(ctx.actor)}"
+
+
+ANY_TOKEN = ACTOR_PREFIX + "*"  # in ToolSpec.callers: every named MCP token
+
+
+def caller_allowed(callers: Optional[Sequence[str]], actor: str) -> bool:
+    """Whether `actor` (the real actor of a call, never a token's link) is among a tool's callers."""
+    if callers is None:
+        return True
+    return actor in callers or (ANY_TOKEN in callers and actor.startswith(ACTOR_PREFIX) and actor != ANY_TOKEN)
+
+
+def deletes(spec: Any, facts: Optional[CallFacts] = None) -> bool:
+    """Whether a call deletes something the person can see (round 5 f): a tool marked `deletes`, or a call whose
+    looked-up facts carry a deletion plan (for example a healing strategy that deletes)."""
+    return bool(getattr(spec, "deletes", False)) or getattr(facts, "deletion", None) is not None
+
+
+def deletion_rule_problems(spec: "ToolSpec") -> List[str]:
+    """Why a tool marked `deletes` breaks the deletion rule (round 5 f): it must be the person's alone, confirmed only
+    in the framework's own window, never with a standing approval, never under a delegation, and every call asks."""
+    from orchestrator.tools.delegation import DELEGATION_SCOPE, NEVER_DELEGATE
+    problems = []
+    if tuple(spec.channels) != ("framework",):
+        problems.append("its questions are confirmed only in the framework's own window (channels must be exactly "
+                        "('framework',))")
+    if spec.name not in NEVER_GRANT or spec.grant is not None:
+        problems.append("it never gets a standing approval (NEVER_GRANT, no GrantRule)")
+    if spec.name not in NEVER_DELEGATE:
+        problems.append("it is never delegated (NEVER_DELEGATE)")
+    scope = DELEGATION_SCOPE.get(spec.name)
+    if scope is not None and scope.who != "person":
+        problems.append(f"its delegation scope must be 'person', not '{scope.who}'")
+    if spec.tier == ToolTier.READ:
+        problems.append("a tool that deletes is never a read tool")
+    if callable(spec.max_decision) or spec.cap() != Decision.ASK:
+        problems.append("every call asks the person (max_decision must be ask)")
+    return problems
+
+
+# What the registry tells its observers (design 5.4). An event carries framework facts only: names, ids and reason
+# codes, never arguments, results or external text.
+EVENT_KINDS = ("refused_before_question", "grant_used", "approval", "approval_end")
+_EVENT_VALUE = (str, int, float, bool, type(None))
+
+
+class RegistryEvents:
+    """The registry's observer interface (no-op until something subscribes): the producers of the chat feed subscribe
+    here instead of editing the registry. A subscriber that raises is logged and skipped; emitting never changes or
+    stops a call."""
+
+    def __init__(self):
+        self._subscribers: List[Callable[[str, Dict[str, Any]], None]] = []
+        self._lock = threading.Lock()
+        self.logger = get_logger("ToolRegistry")
+
+    def subscribe(self, callback: Callable[[str, Dict[str, Any]], None]) -> Callable[[], None]:
+        """Calls `callback(kind, data)` for every event from now on; returns the function that unsubscribes."""
+        with self._lock:
+            self._subscribers.append(callback)
+
+        def unsubscribe() -> None:
+            with self._lock:
+                if callback in self._subscribers:
+                    self._subscribers.remove(callback)
+        return unsubscribe
+
+    def emit(self, kind: str, **data: Any) -> None:
+        if kind not in EVENT_KINDS:
+            raise ValueError(f"unknown registry event {kind!r}")
+        bad = sorted(k for k, v in data.items() if not isinstance(v, _EVENT_VALUE))
+        if bad:
+            raise ValueError(f"registry event {kind}: {bad} must be plain values (framework facts only)")
+        with self._lock:
+            subscribers = list(self._subscribers)
+        for callback in subscribers:
+            try:
+                callback(kind, dict(data))
+            except Exception as e:  # noqa: BLE001 - an observer never fails a call
+                self.logger.warning(f"A subscriber of '{kind}' failed: {redact_secrets(str(e))}")
 
 
 @dataclass
@@ -514,10 +627,18 @@ class ToolRegistry:
         self._guard_lock = threading.Lock()
         self._failures: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
         self._sessions: "OrderedDict[tuple, Dict[str, int]]" = OrderedDict()
+        self.events = RegistryEvents()  # observers (the chat feed's producers); nothing listens by default
 
     def register(self, spec: ToolSpec) -> ToolSpec:
         if spec.grant is not None and spec.name in NEVER_GRANT:
             raise ValueError(f"Tool '{spec.name}' never gets a standing approval (design 6.10).")
+        if spec.deletes:
+            problems = deletion_rule_problems(spec)
+            if problems:
+                raise ValueError(f"Tool '{spec.name}' deletes something, so the person alone decides it (round 5 f): "
+                                 + "; ".join(problems) + ".")
+        if spec.callers is not None and (not spec.callers or not all(isinstance(c, str) and c for c in spec.callers)):
+            raise ValueError(f"Tool '{spec.name}': callers must name at least one caller (None: every caller).")
         if spec.name in self._tools:
             raise ValueError(f"Tool '{spec.name}' is already registered.")
         if spec.tier == ToolTier.FORBIDDEN:
@@ -547,10 +668,11 @@ class ToolRegistry:
         service.registry = self
         self.approvals = service
 
-    def framework_channel_required(self, spec: ToolSpec, caller: str) -> bool:
+    def framework_channel_required(self, spec: ToolSpec, caller: str, facts: Optional[CallFacts] = None) -> bool:
         """Whether a question about this tool must be put to the person in the framework (approval window), not in
-        the client's dialog: the tool accepts no other channel, or the person set it so for this caller."""
-        if "elicitation" not in spec.channels:
+        the client's dialog: the tool accepts no other channel, the call deletes something (round 5 f; `facts`: what
+        the tool looked up for this call), or the person set it so for this caller."""
+        if "elicitation" not in spec.channels or deletes(spec, facts):
             return True
         policy, section = self._policy_of(caller)
         return spec.name in policy.framework_only_for(section)
@@ -590,7 +712,7 @@ class ToolRegistry:
         every scope. The shared stdio caller gets only the narrowest scope and the shorter durations."""
         from orchestrator.tools.grants import GrantOffer, durations_for, warning_text
         caller, token_created = self._grant_caller(ctx.actor)
-        if not caller or self.framework_channel_required(spec, ctx.actor):
+        if not caller or self.framework_channel_required(spec, ctx.actor, getattr(ctx, "facts", None)):
             return None
         facts = self._grant_facts(spec, inp, ctx)
         if facts is None:
@@ -625,7 +747,7 @@ class ToolRegistry:
         if spec.grant is None or spec.name in NEVER_GRANT:
             return None
         caller, token_created = self._grant_caller(ctx.actor)
-        if not caller or self.framework_channel_required(spec, ctx.actor):
+        if not caller or self.framework_channel_required(spec, ctx.actor, getattr(ctx, "facts", None)):
             return None
         policy = self.policy_store.load()
         if self.policy_store.problem:
@@ -794,18 +916,39 @@ class ToolRegistry:
         policy, section = self._policy_of(actor)
         return policy.decide_tool(spec, inp, section, owner=owner)
 
-    def visible(self, caller: str) -> List[ToolSpec]:
-        """The tools a caller is offered: every tool its permissions do not deny (MCP tools/list, Ditto's tool
-        definitions). Denied tools stay registered; a call to one is refused and audited."""
-        policy, section = self._policy_of(caller)
+    def hidden_reason(self, spec: ToolSpec, ctx: "ToolContext") -> str:
+        """Why this session is not offered the tool at all ("" when it is): the tool is for other callers (checked
+        against the real actor, never a token's link), or its `visible_when` says no now (a check that fails hides
+        it)."""
+        if not caller_allowed(spec.callers, ctx.actor):
+            return "it is only for other callers"
+        if spec.visible_when is not None:
+            try:
+                shown = bool(spec.visible_when(ctx))
+            except Exception as e:  # noqa: BLE001 - a check that cannot run never shows a tool
+                self.logger.warning(f"visible_when of {spec.name} failed: {redact_secrets(str(e))}")
+                shown = False
+            if not shown:
+                return "it is not offered in this session now"
+        return ""
+
+    def visible(self, caller: str, ctx: Optional["ToolContext"] = None) -> List[ToolSpec]:
+        """The tools a caller is offered: every model-facing tool for this caller and session (`callers`,
+        `visible_when`, checked against `ctx`, by default a context of `caller` alone) that its permissions do not deny
+        (MCP tools/list, Ditto's tool definitions). Denied and hidden tools stay registered; a call to one is refused
+        and audited."""
+        ctx = ctx if ctx is not None else ToolContext(caller)
+        policy, section = self._policy_of(ctx.actor)
         return [s for s in self._tools.values()
-                if policy.decide_tool(s, None, section, owner=caller) != Decision.DENY]
+                if s.model_facing and not self.hidden_reason(s, ctx)
+                and policy.decide_tool(s, None, section, owner=ctx.actor) != Decision.DENY]
 
     def permissions(self, caller: str) -> List[Dict[str, Any]]:
         """Per tool, for one caller: decision and why, default, cap, listed or hidden, new (not reviewed yet), and
         whether a confirmation may offer a standing approval."""
         policy, section = self._policy_of(caller)
         rows = []
+        bare = ToolContext(caller)
         for spec in self._tools.values():
             decision, why = policy.explain_tool(spec, None, section, owner=caller)
             default = spec.default_decision
@@ -814,7 +957,8 @@ class ToolRegistry:
                 "why": why, "default": ("depends on the call" if callable(default) else
                                         default.value if default is not None else "tier setting"),
                 "max": ("depends on the call" if callable(spec.max_decision) else spec.cap().value),
-                "listed": decision != Decision.DENY, "new": not policy.reviewed_tool(section, spec.name),
+                "listed": decision != Decision.DENY and spec.model_facing and not self.hidden_reason(spec, bare),
+                "new": not policy.reviewed_tool(section, spec.name),
                 "standing_approval": spec.grant is not None,
             })
         return rows
@@ -835,9 +979,11 @@ class ToolRegistry:
             renamed = next((r for r in repairs if r.kind == "name"), None)
             if renamed is not None:
                 fields.setdefault("name_requested", str(renamed.wrote)[:64])
+        # Fields a tool marks audit=False (a data chunk) stay out of the preview; args_sha256 still covers them.
+        omit = tuple(name for name, meta in (getattr(spec, "fields", None) or {}).items() if not meta.audit)
         try:
             return self.audit.record(ctx.actor, spec.name, spec.tier.value, decision.value, outcome,
-                                     arguments=arguments, approved=approved, detail=detail, extra=fields)
+                                     arguments=arguments, approved=approved, detail=detail, extra=fields, omit=omit)
         except Exception as e:  # auditing must never break a read; a change is refused instead
             reason = redact_secrets(str(e)) or type(e).__name__
             if required:
@@ -959,6 +1105,12 @@ class ToolRegistry:
                 self._audit(work, spec, decision(), "repeat_refused", args, detail=refusal.message,
                             reason_code="repeat_refused")
                 raise refusal
+        hidden = self.hidden_reason(spec, work)  # the real actor: a token linked to Ditto is not Ditto
+        if hidden:
+            error = ToolError(f"'{spec.name}' is not available to this caller ({hidden}).", code="not_supported",
+                              next="Use only the tools listed for you; tell the person what you wanted to do.")
+            self._audit(work, spec, decision(), "denied", arguments, detail=error.message, reason_code="not_supported")
+            raise self._failed(work, spec.name, arguments, error)
         failure: Optional[NormalizeError] = None
         try:
             normalized = normalize_arguments(spec, arguments)
@@ -1090,7 +1242,7 @@ class ToolRegistry:
         """Records a failed call for the repeat guard and returns the error to raise: the second identical failure
         (same tool, same normalized arguments, same code) says so, and the second unknown id in a session adds
         "do not guess ids". A pending approval is not a failure, nor is a refusal of the limits table (LimitHit)."""
-        if error.code == "waiting_for_approval" or isinstance(error, LimitHit):
+        if error.code in PENDING_CODES or isinstance(error, LimitHit):
             return error
         key = (ctx.actor, ctx.session, tool, _args_key(arguments))
         now = self.limiter.clock()
@@ -1186,14 +1338,18 @@ class ToolRegistry:
         return names
 
     def question_text(self, spec: ToolSpec, arguments: Dict[str, Any], ctx: ToolContext,
-                      facts: Optional[CallFacts] = None, limit: int = MAX_FRAMEWORK) -> str:
+                      facts: Optional[CallFacts] = None, limit: int = MAX_FRAMEWORK,
+                      person_view: Optional[bool] = None) -> str:
         """The question for one call (confirmation text v2): the consequence and the facts the tool looked up, who
         asks, every argument with its speaking name and the repaired values marked. CallTooLong above `limit`
-        (4,000 characters for an MCP elicitation, 16,000 for the framework's own windows)."""
+        (4,000 characters for an MCP elicitation, 16,000 for the framework's own windows). `person_view`: the question
+        is shown only in the framework's own window (default: when `limit` is the framework's), so it may hold the
+        facts only the person sees; a question for a client's form never does."""
         marks, renamed = repair_marks(ctx.repairs)
         return describe_call(spec, arguments, actor="Ditto" if ctx.actor == "ditto" else "The AI client",
                              marks=marks, renamed=renamed, requester=requester_of(ctx), facts=facts,
-                             names=self.speaking_names(spec, arguments), limit=limit)
+                             names=self.speaking_names(spec, arguments), limit=limit,
+                             person_view=limit >= MAX_FRAMEWORK if person_view is None else person_view)
 
     def question_for(self, spec: ToolSpec, inp: BaseModel, ctx: ToolContext,
                      facts: Optional[CallFacts] = None) -> str:
@@ -1230,7 +1386,8 @@ class ToolRegistry:
         if not isinstance(facts, CallFacts):
             raise ToolError(f"{spec.title} could not be prepared (internal error; details are in the framework log).",
                             next=FAILED_NEXT)
-        return facts
+        # The facts name their tool, so their decision digest is bound to it (design 4.4).
+        return facts if facts.tool == spec.name else dataclasses.replace(facts, tool=spec.name)
 
     @staticmethod
     def capped(decision: Decision, facts: Optional[CallFacts]) -> Decision:
@@ -1301,11 +1458,22 @@ class ToolRegistry:
         except Exception as e:  # noqa: BLE001 - cleaning up never fails a refusal
             self.logger.warning(f"Discarding the staged work of {spec.name} failed: {redact_secrets(str(e))}")
 
+    def _refused_before_question(self, spec: ToolSpec, ctx: ToolContext, code: str, stage: str, blocker: str = "",
+                                 person_action: str = "") -> None:
+        """Tells the observers that an AI's call was refused before anything was asked (the chat shows what the
+        person can do about it). Framework facts only; the person's own CLI and GUI calls are not reported."""
+        if ctx.actor in ("cli", "gui"):
+            return
+        self.events.emit("refused_before_question", tool=spec.name, actor=ctx.actor, owner=ctx.owner,
+                         code=code or "failed", stage=stage, blocker=blocker or "", person_action=person_action or "")
+
     def _run(self, spec: ToolSpec, inp: BaseModel, arguments: Dict[str, Any], ctx: ToolContext,
              approved: Optional[bool], began: float) -> BaseModel:
+        from orchestrator.Core.confirmed_builds import person_confirmed
         decision = self.decide(spec, inp, ctx)
         if decision == Decision.DENY:
             self._audit(ctx, spec, decision, "denied", arguments, reason_code="permission_denied")
+            self._refused_before_question(spec, ctx, "permission_denied", stage="policy")
             raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
         # Two-phase: the facts only the server knows, looked up before the question (the MCP server hands in the
         # ones its question showed). They can make an allowed call ask, and the handler is bound to them.
@@ -1315,22 +1483,45 @@ class ToolRegistry:
             except ToolError as e:
                 self._audit(dataclasses.replace(ctx, repairs=call_repairs(ctx, repairs_of(e))), spec, decision,
                             "error", arguments, detail=f"{e.message} {e.next}".strip(), reason_code=e.code)
+                self._refused_before_question(spec, ctx, e.code, stage="look_up", blocker=e.blocker,
+                                              person_action=e.person_action)
                 raise
         decision = self.capped(decision, ctx.facts)
+        # Round 5 f: a call that deletes something is the person's alone. It always asks; neither "allow", a standing
+        # approval, a delegation nor a client's own form counts, only the person in the framework's own window (Ditto's
+        # dialog or prompt, or a pending approval decided in the GUI or CLI).
+        deleting = deletes(spec, ctx.facts)
+        if deleting:
+            if decision == Decision.ALLOW:
+                decision = Decision.ASK
+            if approved is True and not person_confirmed(ctx.confirm_channel):
+                approved = None  # e.g. an accepted MCP form: the client's statement, not the person's confirmation
+                ctx = dataclasses.replace(ctx, confirm_channel="", answer="", question_sha256="")
+        elif (approved is True and ctx.confirm_channel == "elicitation"
+              and self.framework_channel_required(spec, ctx.actor, ctx.facts)):
+            # Only the framework's own window may ask about this call (a tool that takes no other channel, or one the
+            # person set to "confirm in the framework", also while the client's form was open): a form answer is none.
+            approved = None
+            ctx = dataclasses.replace(ctx, confirm_channel="", answer="", question_sha256="")
         if ctx.metadata.get("grant_requested"):
             ctx.notes.append(GRANT_REQUEST_NOTE)
         writes = spec.tier != ToolTier.READ
         channel, answer, question = ctx.confirm_channel, ctx.answer, ctx.question_sha256
-        if decision == Decision.ASK and approved is None:
+        if decision == Decision.ASK and approved is None and not deleting:
             grant = self.matching_grant(spec, inp, ctx)  # read anew right before the handler
             if grant is not None:
                 approved, channel, answer, question = True, f"grant:{grant.id}", "accepted", ""
                 # the handler sees which standing approval ran it (a pack installed under one is marked so)
                 ctx = dataclasses.replace(ctx, confirm_channel=channel)
+                self.events.emit("grant_used", tool=spec.name, actor=ctx.actor, owner=ctx.owner, grant_id=grant.id)
+        # Only a framework window asks about a deletion (a confirm callback of another channel cannot).
+        confirm = ctx.confirm
+        if confirm is not None and deleting and not person_confirmed(getattr(confirm, "confirm_channel", "framework")):
+            confirm = None
         # A person's "no" is final, even if the policy was loosened to "allow" while they were asked.
         if decision == Decision.ASK or approved is False:
-            if approved is None and ctx.confirm is not None:
-                channel = getattr(ctx.confirm, "confirm_channel", "framework")
+            if approved is None and confirm is not None:
+                channel = getattr(confirm, "confirm_channel", "framework")
                 refusal = self.question_refusal(spec, inp, ctx)  # a recent "no", a paused tool, too many questions
                 if refusal is not None:
                     self._audit(ctx, spec, decision, "rate_limited", arguments, detail=refusal.message,
@@ -1350,7 +1541,7 @@ class ToolRegistry:
                 offer = self.grant_offer(spec, inp, ctx) if spec.grant is not None else None
                 token, offered, calling = _QUESTION.set(text), _OFFER.set(offer), _CALL.set((self, ctx.actor))
                 try:
-                    reply = ctx.confirm(spec, inp)
+                    reply = confirm(spec, inp)
                 finally:
                     _CALL.reset(calling)
                     _OFFER.reset(offered)
@@ -1517,13 +1708,33 @@ class ToolRegistry:
         """What the policy decides a resource as: the read tool it mirrors, or a read-tier pseudo-tool."""
         return self._tools[spec.tool] if spec.tool else _Surface(spec.audit_name, spec.title)
 
+    def hidden_tools(self, names: Sequence[str], ctx: "ToolContext") -> List[str]:
+        """The registered tools among `names` this session is not offered (`callers`, `visible_when`, checked against
+        the real actor): a resource that mirrors one, or a prompt that leads to one, is neither listed nor read for it,
+        so it never shows what the tool itself would not (SEC-M13)."""
+        return [n for n in names if n in self._tools and self.hidden_reason(self._tools[n], ctx)]
+
+    def _refuse_hidden(self, ctx: "ToolContext", surface: Any, title: str, hidden: List[str],
+                       arguments: Dict[str, Any]) -> None:
+        """Audits and refuses a resource read or prompt get built on a tool this caller is not offered."""
+        message = (f"'{title}' is not available to this caller (it uses {', '.join(hidden)}, which is for other "
+                   "callers).")
+        self._audit(ctx, surface, self.decide(self._tools[hidden[0]], None, ctx), "denied", arguments, detail=message,
+                    reason_code="not_supported")
+        raise ToolDenied(message, code="not_supported",
+                         next="Use only the tools, resources and prompts listed for you; tell the person what you "
+                              "wanted to do.")
+
     def resources(self, caller: Optional[str] = None) -> List[ResourceSpec]:
-        """Every resource, or the ones `caller` may read (MCP lists only those, as it hides denied tools)."""
+        """Every resource, or the ones `caller` may read (MCP lists only those, as it hides denied tools; a resource
+        that mirrors a tool for other callers is hidden too)."""
         if caller is None:
             return list(self._resources.values())
         policy, section = self._policy_of(caller)
+        bare = ToolContext(caller)
         return [r for r in self._resources.values()
-                if policy.decide_tool(self._decider(r), None, section, owner=caller) != Decision.DENY]
+                if not self.hidden_tools([r.tool] if r.tool else [], bare)
+                and policy.decide_tool(self._decider(r), None, section, owner=caller) != Decision.DENY]
 
     def _read_rate(self, ctx: ToolContext, surface: Any, decision: Decision, arguments: Dict[str, Any]) -> None:
         """The read rate of the limits table for a resource read or a prompt get, counted together with the read tool
@@ -1555,6 +1766,9 @@ class ToolRegistry:
         decider: Any = mirrored or surface
         inp: Optional[BaseModel] = None
         if mirrored is not None:
+            hidden = self.hidden_tools([mirrored.name], ctx)  # a tool for other callers: its resource is too
+            if hidden:
+                self._refuse_hidden(ctx, surface, spec.title, hidden, params)
             try:
                 normalized = normalize_arguments(mirrored, spec.arguments(params))
                 ctx = dataclasses.replace(ctx, repairs=list(normalized.repairs), notes=[])
@@ -1647,9 +1861,10 @@ class ToolRegistry:
         if caller is None:
             return list(self._prompts.values())
         policy, section = self._policy_of(caller)
+        bare = ToolContext(caller)
 
         def offered(p: PromptSpec) -> bool:
-            if self.missing_tools(p):
+            if self.missing_tools(p) or self.hidden_tools(p.tools, bare):  # it leads to a tool for other callers
                 return False
             deciders = [_Surface(p.audit_name, p.title)] + [self._tools[t] for t in p.reads]
             return all(policy.decide_tool(d, None, section, owner=caller) != Decision.DENY for d in deciders)
@@ -1690,6 +1905,9 @@ class ToolRegistry:
                         reason_code="no_tool")
             raise ResourceUnknown(message, code="no_tool", next="Do the task with the tools that are listed, or tell "
                                                                 "the user which tool is missing.")
+        hidden = self.hidden_tools(spec.tools, ctx)  # it leads to (or holds what returns) a tool for other callers
+        if hidden:
+            self._refuse_hidden(ctx, surface, spec.title, hidden, raw)
         known = {a.name: a for a in spec.arguments}
         args: Dict[str, str] = {}
         problems: List[str] = []

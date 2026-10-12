@@ -303,6 +303,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         return CallFacts(consequence=consequence, facts=tuple(lines), bound=bound, repairs=repairs)
 
     def download_hf_file(inp: DownloadIn, ctx: ToolContext) -> DownloadStartedOut:
+        from orchestrator.Core.confirmed_builds import unattended
         from orchestrator.Core.hf_hub import HubFetcher, HubFile
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
         if not bound.get("commit") or bound.get("model") != inp.model:
@@ -314,7 +315,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         token = hub().token()
         stop = threading.Event()
         reservation = take_reservation(repo, commit, name, file.size, dest, ctx.owner,
-                                       standing=str(ctx.confirm_channel or "").startswith("grant:"))
+                                       standing=unattended(ctx.confirm_channel))
 
         def work(handle) -> Dict[str, Any]:
             from orchestrator.tools.local_files import LocalFiles

@@ -31,11 +31,17 @@ from annotated_types import Ge, Gt, Le, Lt
 from orchestrator.tools.spec import Choices, FieldMeta
 
 # Reason and input codes (design 6.11, D6 and D10). A refusal or error always carries one.
+# question_changed: the facts behind a waiting question changed, so it has a new version (delegation design 3.3);
+# wrong_place: an explicit place contradicts where the object lives (hybrid design 6.3).
 INPUT_CODES = ("unknown_tool", "unknown_argument", "missing_argument", "invalid_value", "unknown_id",
-               "waiting_for_approval")
+               "waiting_for_approval", "question_changed", "wrong_place")
+# needs_transfer: the object is at the other computer; place_unreachable: that computer cannot be reached now.
 REASON_CODES = ("missing_information", "not_supported", "no_tool", "permission_denied", "declined", "needs_person",
-                "hardware_unavailable", "insufficient_resources", "limit_reached", "failed", "repeat_refused")
+                "hardware_unavailable", "insufficient_resources", "limit_reached", "failed", "repeat_refused",
+                "needs_transfer", "place_unreachable")
 CODES = INPUT_CODES + REASON_CODES
+# A call that waits for a decision has not failed: never counted by the repeat guard or as a failure in a loop.
+PENDING_CODES = ("waiting_for_approval", "question_changed")
 
 _NAME_CHARS = re.compile(r"^[A-Za-z0-9_\-. ]{1,80}$")
 _NAME_SEPARATORS = re.compile(r"[_\-. ]")

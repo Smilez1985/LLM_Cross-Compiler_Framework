@@ -7,9 +7,15 @@ tool.
 """
 
 import hashlib
+import importlib
 import json
+import math
+import os
+import re
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Callable, Dict, List, Literal, Mapping, Optional, Tuple
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from orchestrator.tools.output import MAX_RESULT_BYTES
 
@@ -49,6 +55,9 @@ class FieldMeta:
     # <label>:<path> for its file id), shown next to the value in a question; None when there is none. Only people
     # see it: a model gets the ids and labels it sent.
     describe: Optional[Callable[[Any], Optional[str]]] = None
+    # False: the value never appears in the audit log's argument preview (a data chunk of a transfer); the entry's
+    # args_sha256 still covers it, so the recorded call stays bound to exactly what was sent.
+    audit: bool = True
 
     def __post_init__(self):
         if self.kind not in FIELD_KINDS:
@@ -75,10 +84,127 @@ class GrantRule:
 class Fact:
     """One line of what the framework looked up for a question. `source` marks text from outside the framework (a
     build log, an AI's proposal, a pack index): it is shown escaped and labelled with where it comes from, never as
-    the framework's own words."""
+    the framework's own words. `volatile`: shown, but outside the decision digest (free space right now), so it alone
+    never makes a question new. `person_only`: shown to the person in the framework's own window, never to an AI (a
+    login with its address, a host key fingerprint, a full path); a question that can reach an AI client leaves it
+    out."""
     label: str
     value: str
     source: str = ""
+    volatile: bool = False
+    person_only: bool = False
+
+
+# The three kinds of warnings (design 4.1): an AI with a delegation may decide a situation warning itself; security
+# and legal warnings always go to the person.
+WARNING_KINDS = ("situation", "security", "legal")
+_WARNING_CODE = re.compile(r"^[a-z][a-z0-9_]{1,47}$")
+_NUMBER_KEY = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
+# A closed enum value (a size class, "tight", "does_not_fit", a format), never free text.
+_NUMBER_TEXT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]{0,39}$")
+# What a call's scope may say (design 4.4), matched by a delegation's limits; closed types only, like numbers.
+SCOPE_KEYS = ("device_id", "size_bytes", "pack_kind", "pack_trust", "strategy", "own_work")
+
+
+def number_problems(values: Any, what: str = "numbers") -> List[str]:
+    """Why a mapping of numbers (or scope values) is not closed: a key that is not a plain name, or a value that is
+    not a bool, a finite number or a short enum word (free text, which could carry external words, never is)."""
+    if not isinstance(values, Mapping):
+        return [f"{what} must be a mapping"]
+    problems = []
+    for key, value in values.items():
+        if not isinstance(key, str) or not _NUMBER_KEY.fullmatch(key):
+            problems.append(f"{what}: {key!r} is not a plain key")
+        elif isinstance(value, bool) or (isinstance(value, int) and abs(value) < 2 ** 63):
+            continue
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                problems.append(f"{what}: {key} is not a finite number")
+        elif not (isinstance(value, str) and _NUMBER_TEXT.fullmatch(value)):
+            problems.append(f"{what}: {key} must be a number, a bool or a short enum word, not free text")
+    return problems
+
+
+def _catalog() -> Any:
+    """The facts catalogue (orchestrator.tools.facts_catalog: warning kinds and texts, the stable and volatile numbers
+    per tool), or None while this framework version has none."""
+    name = "orchestrator.tools.facts_catalog"
+    try:
+        return importlib.import_module(name)
+    except ModuleNotFoundError as e:
+        if e.name != name:  # the catalogue exists but something it imports is missing: a real error
+            raise
+        return None
+
+
+def warning_spec(code: str) -> Any:
+    """The catalogue's entry for a warning code (kind, AI template), None for a code the catalogue does not know."""
+    catalog = _catalog()
+    warnings = getattr(catalog, "WARNINGS", None) if catalog is not None else None
+    return warnings.get(code) if isinstance(warnings, Mapping) else None
+
+
+def volatile_numbers(tool: str) -> Tuple[str, ...]:
+    """The number keys of a tool that are shown but never part of its decision digest (free space now, exact bytes
+    still to download). Only the catalogue names them: a number it does not know is stable, so it can only ever make a
+    question new, never hide a change."""
+    catalog = _catalog()
+    keys = getattr(catalog, "NUMBER_KEYS", None) if catalog is not None else None
+    entry = keys.get(tool) if isinstance(keys, Mapping) else None
+    try:
+        return tuple(sorted(entry[1]))
+    except (TypeError, IndexError):
+        return ()
+
+
+@dataclass(frozen=True)
+class CallWarning:
+    """A warning the framework found before a question (design 4.1). The tool names the code and the numbers; the
+    kind comes from the catalogue only, never from the tool. A code the catalogue does not know counts as a security
+    warning (unknown is never "no problem": only the person decides it)."""
+    code: str
+    numbers: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not isinstance(self.code, str) or not _WARNING_CODE.fullmatch(self.code):
+            raise ValueError(f"warning code {self.code!r} is not a plain code")
+        problems = number_problems(self.numbers, f"warning {self.code}")
+        if problems:
+            raise ValueError("; ".join(problems))
+
+    @property
+    def kind(self) -> str:
+        kind = getattr(warning_spec(self.code), "kind", None)
+        return kind if kind in WARNING_KINDS else "security"
+
+    def ai_text(self) -> str:
+        """The English text an AI gets (the catalogue's template filled with the numbers; never external text)."""
+        template = getattr(warning_spec(self.code), "ai_template", "")
+        if template:
+            try:
+                return str(template).format(**self.numbers)
+            except (KeyError, IndexError, ValueError):
+                pass
+        return f"Warning {self.code}: the framework has no text for it; only the person can decide it."
+
+    def person_text(self, lang: Optional[str] = None, names: Optional[Mapping[str, str]] = None) -> str:
+        """The person's text in their language (ui_text key warning.<code>, filled with the numbers and speaking
+        names); the AI text when there is no translation yet."""
+        from orchestrator.utils.localization import ui_text
+        key = f"warning.{self.code}"
+        try:
+            text = ui_text(key, lang, **{**dict(names or {}), **dict(self.numbers)})
+        except (KeyError, IndexError, ValueError):
+            text = key
+        return self.ai_text() if text == key else text
+
+
+def _canonical(data: Any) -> str:
+    return json.dumps(data, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -89,18 +215,138 @@ class CallFacts:
     tool is allowed). The handler gets exactly this object and uses `bound` or refuses. `repairs`: what the look-up
     repaired (normalize.Repair; a file name matched in another letter case): the registry names them in the result's
     notes and in every refusal after the look-up, and records them in the audit log, as it does the normalizer's. A
-    look-up that refuses after such a repair puts it on its error (`repairs`, a list), so the refusal names it too."""
+    look-up that refuses after such a repair puts it on its error (`repairs`, a list), so the refusal names it too.
+
+    The facts model of the delegation design (4.1): `warnings` (situation, security, legal; the kind from the
+    catalogue), `numbers` (closed values for texts and rules), `scope` (what a delegation's limits are matched
+    against), `digest_keys` (which keys of `bound` the decision digest covers; none named: all of them),
+    `consequence_template` (the consequence without volatile values), `deletion` (what the call would delete, for the
+    person; any plan makes the call the person's alone), `names` (speaking names for the person) and `tool` (set by
+    the registry when it looks the facts up)."""
     consequence: str
     facts: Tuple[Fact, ...] = ()
     bound: Mapping[str, Any] = field(default_factory=dict)
     cap: Optional[str] = None
     repairs: Tuple[Any, ...] = ()  # not part of the fingerprint: what the person is shown is `facts` and `bound`
+    warnings: Tuple[CallWarning, ...] = ()
+    numbers: Mapping[str, Any] = field(default_factory=dict)
+    scope: Mapping[str, Any] = field(default_factory=dict)
+    digest_keys: Tuple[str, ...] = ()
+    consequence_template: str = ""
+    deletion: Optional["DeletionPlan"] = None
+    names: Mapping[str, str] = field(default_factory=dict)
+    tool: str = ""
+
+    def __post_init__(self):
+        problems = number_problems(self.numbers) + number_problems(self.scope, "scope")
+        problems += [f"scope: {k} is not one of {', '.join(SCOPE_KEYS)}" for k in self.scope if k not in SCOPE_KEYS]
+        problems += [f"warnings: {w!r} is not a CallWarning" for w in self.warnings if not isinstance(w, CallWarning)]
+        problems += [f"digest_keys: {k!r} is not a key of bound" for k in self.digest_keys if k not in self.bound]
+        if self.deletion is not None and not isinstance(self.deletion, DeletionPlan):
+            problems.append("deletion must be a DeletionPlan")
+        if problems:
+            raise ValueError("; ".join(problems))
 
     def fingerprint(self) -> str:
-        """A hash of everything the person was shown and the handler is bound to."""
+        """A hash of everything the person was shown and the handler is bound to (with the warning codes and the
+        deletion plan when there are any)."""
         data = [self.consequence, [[f.label, f.value, f.source] for f in self.facts], dict(self.bound), self.cap]
+        if self.warnings:
+            data.append(sorted(w.code for w in self.warnings))
+        if self.deletion is not None:
+            data.append(self.deletion.sha256())
         text = json.dumps(data, sort_keys=True, ensure_ascii=False, default=str)
         return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+    def decision_digest(self) -> str:
+        """What a decision about this call is bound to (design 4.4): the tool, the covered part of `bound`, the
+        warning codes with their kinds, the cap and scope, every fact that is not volatile, the stable numbers, the
+        consequence template and the deletion plan. Volatile facts and numbers and the rendered consequence stay out,
+        so free space that changes without changing a warning never makes the question new."""
+        volatile = set(volatile_numbers(self.tool))
+        bound = {k: self.bound[k] for k in self.digest_keys} if self.digest_keys else dict(self.bound)
+        data = {
+            "tool": self.tool,
+            "bound": bound,
+            "warnings": sorted([w.code, w.kind] for w in self.warnings),
+            "cap": self.cap,
+            "scope": dict(self.scope),
+            "facts": [[f.label, f.value, f.source] for f in self.facts if not f.volatile],
+            "numbers": {k: v for k, v in self.numbers.items() if k not in volatile},
+            "consequence_template": self.consequence_template,
+            "deletion": self.deletion.sha256() if self.deletion is not None else None,
+        }
+        return _sha256(_canonical(data))
+
+
+# --- deletions (design 3.10, round 5 f) ------------------------------------------------------------------------------
+
+DELETION_KINDS = ("artifact", "model_file", "download", "knowledge_snapshot", "trash_entry", "docker_image",
+                  "build_cache", "pack", "module", "deploy_package", "exported_pack")
+# Docker's own objects have no host path; every other item is listed with its full path.
+NO_PATH_KINDS = ("docker_image", "build_cache")
+DeletionKind = Literal[DELETION_KINDS]  # type: ignore[valid-type]
+_WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def _looks_absolute(text: str) -> bool:
+    """An absolute path of any system (POSIX, the home folder, a Windows drive or share)."""
+    return text.startswith(("/", "~")) or bool(_WINDOWS_ABSOLUTE.match(text))
+
+
+class DeletionItem(BaseModel):
+    """One thing a call would delete, as the person sees it in the framework's own window: the speaking name, the
+    full path (person view only; "" for Docker's own objects), the file name, the size and what it is in framework
+    words. An AI sees only DeletionPlan.ai_view()."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: DeletionKind
+    speaking_name: str = Field(min_length=1, max_length=300)
+    full_path: str = Field(default="", max_length=4096)
+    file_name: str = Field(min_length=1, max_length=400)
+    size_bytes: int = Field(ge=0)
+    what: str = Field(min_length=1, max_length=300)
+
+    @model_validator(mode="after")
+    def _path(self) -> "DeletionItem":
+        if self.kind in NO_PATH_KINDS:
+            if self.full_path:
+                raise ValueError(f"a {self.kind} has no host path")
+        elif not self.full_path or not os.path.isabs(self.full_path):
+            raise ValueError(f"a {self.kind} is listed with its full path")
+        elif "/" in self.file_name or "\\" in self.file_name:
+            raise ValueError("file_name is the item's name, not a path")
+        # The speaking name is what an AI sees of the item (ai_view): never its path, nor any absolute path.
+        name = self.speaking_name.strip()
+        if (self.full_path and self.full_path in name) or _looks_absolute(name):
+            raise ValueError("speaking_name is a label an AI may see, never a path")
+        return self
+
+
+class DeletionPlan(BaseModel):
+    """Everything one call would delete (design 3.10). The person accepts exactly this plan; its sha256 is audited
+    (`deletion_sha256`) and binds the deletion to it. `mode_offered`: "trash" first when a trash exists for the
+    kind."""
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    items: List[DeletionItem] = Field(min_length=1, max_length=1000)
+    total_bytes: int = Field(ge=0)
+    mode_offered: Tuple[Literal["trash", "permanent"], ...] = Field(min_length=1, max_length=2)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "DeletionPlan":
+        if self.total_bytes != sum(i.size_bytes for i in self.items):
+            raise ValueError("total_bytes is not the sum of the items")
+        if len(set(self.mode_offered)) != len(self.mode_offered):
+            raise ValueError("a mode is offered twice")
+        return self
+
+    def ai_view(self) -> List[Dict[str, Any]]:
+        """What an AI may see of the plan: label, kind and size of each item, never a path (round 5 f)."""
+        return [{"label": i.speaking_name, "kind": i.kind, "size_bytes": i.size_bytes} for i in self.items]
+
+    def sha256(self) -> str:
+        return _sha256(_canonical(self.model_dump(mode="json")))
 
 
 @dataclass(frozen=True)
