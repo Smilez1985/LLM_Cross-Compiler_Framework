@@ -600,6 +600,15 @@ def remote_board_hint(probe: str) -> str:
             if family else "the board of the hardware probe Ditto sends with this task")
 
 
+def remote_model_name(model: str) -> str:
+    """The model argument of a remote task prompt: a Hugging Face id as it is, a model file on this computer (an
+    absolute path, '~/...' or a Windows drive path) by its file name only, so no host path reaches another framework."""
+    text = str(model or "").strip()
+    if text.startswith(("/", "~", "\\")) or re.match(r"^[A-Za-z]:[\\/]", text):
+        return re.split(r"[/\\]", text.rstrip("/\\"))[-1] or "a local model file"
+    return text
+
+
 def _text_block(text: str) -> Dict[str, str]:
     return {"type": "text", "text": text}
 
@@ -823,7 +832,9 @@ class DittoCoder:
                                                    json_schema_extra={"enum": formats})),
             quantization=(str, Field(description="A quantization type offered for that format",
                                      json_schema_extra={"enum": quants})))
-        arguments = {"model": model, "target": target, "use_knowledge": "yes" if use_knowledge else "no"}
+        # A local model file goes to the remote framework by its file name only (no host path, no user name).
+        arguments = {"model": remote_model_name(model), "target": target,
+                     "use_knowledge": "yes" if use_knowledge else "no"}
         remote = self._remote_task("recommend_build_settings", {**arguments, **({"board": board} if board else {})})
         if remote is not None:
             # The formats come from the remote framework's target; the answer is still checked against `options`.

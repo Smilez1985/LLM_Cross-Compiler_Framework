@@ -38,7 +38,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Request-ID ihren Kontext (Formate des Targets, Build-Log, Auszüge aus Dokumentation und Wissensbasis) aus den
   MCP-Prompts `recommend_build_settings`, `add_board` und `diagnose_build_failure` jenes Frameworks, unter Dittos
   eigenem Aufgabentext, als nicht vertrauenswürdige Daten; ein Prompt, den der Server nicht anbietet, wird mit dem
-  nächsten Schritt genannt.
+  nächsten Schritt genannt. Eine Modelldatei auf diesem Rechner erreicht jenes Framework nur mit ihrem Dateinamen.
 - **Das Ende eines Deployments im Audit-Log**: Endet ein `deploy_to_device`-Job (erledigt, gescheitert oder
   abgebrochen), wird ein eigener Abschlusseintrag mit Job, Gerätenamen und Gerätezustand geschrieben, verknüpft mit dem
   `started`-Eintrag des Aufrufs.
@@ -1238,7 +1238,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nicht gegen ein nicht vertrauenswürdiges ausgetauscht werden kann.
 - **Fehler der Board- und lokalen Laufzeit-Tools nennen keinen Pfad des Rechners**: Pfade in ihren Meldungen
   erscheinen als Ordner-Bezeichnungen des Frameworks (`state:...`, `cache:...`, `output:...`, `models:...`) oder nur
-  als Dateiname, nie als Pfad des Rechners oder `~/...`.
+  als Dateiname, nie als Pfad des Rechners oder `~/...` (auch nach einem Doppelpunkt wie in `file:/...` oder
+  `user@board:/...` und in einer `file:///`-URL).
 - **robots.txt lässt sich nicht mehr über Crawl-Optionen abschalten**: Der Crawler nimmt nur seine eigenen
   Optionsschlüssel (Seiten, Tiefe, Pause, PDFs, Sprachen) und übergeht jeden anderen Schlüssel, auch
   `respect_robots`, mit einer Log-Zeile; der Schalter für Tests mit einem nachgebildeten Web ist ein eigener

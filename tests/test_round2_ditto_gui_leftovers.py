@@ -180,6 +180,18 @@ class TestNoPathsInRuntimeErrors:
         kept = "https://github.com/ggml-org/llama.cpp and 127.0.0.1:8080/health, os/arch, and/or"
         assert label_paths(kept, roots) == kept, "addresses and words are not paths"
 
+    def test_a_path_after_a_colon_or_in_a_file_url_is_no_host_path_either(self, monkeypatch):
+        """Review: 'file:/home/u/...' and 'file:///home/u/...' kept the whole path (the colon guard meant for URLs),
+        and the home-folder shortening then made it '~/...'."""
+        from orchestrator.tools.tools_runtime import label_paths
+        monkeypatch.setenv("HOME", "/home/u")
+        roots = {"/home/u/.llm-framework": "state"}
+        assert label_paths("cannot open file:/home/u/private/a.bin", roots) == "cannot open file:a.bin"
+        assert label_paths("bad uri file:///home/u/private/a.bin", roots) == "bad uri file://a.bin"
+        assert label_paths("scp to dietpi@board:/home/u/x.tar failed", roots) == "scp to dietpi@board:x.tar failed"
+        kept = "https://example.org/a/b and http://127.0.0.1:8080/health"
+        assert label_paths(kept, roots) == kept
+
     def test_a_board_tool_error_names_no_home_path(self, make_framework, monkeypatch):
         import test_runtime_tools as rtt
         from orchestrator.runtime.device import service

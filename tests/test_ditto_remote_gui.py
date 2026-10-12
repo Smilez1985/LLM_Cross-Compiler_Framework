@@ -137,6 +137,17 @@ class TestRemoteTaskPrompts:
         assert rag.queries == [] and LOCAL_MARK not in text, "this framework's knowledge base is not used"
         assert {e["actor"] for e in prompt_gets(remote)} == {"mcp:ditto-laptop"}
 
+    def test_a_local_model_file_reaches_the_server_by_its_name_only(self, remote):
+        """Review: a local model file's host path (with the user name) was sent to the remote framework's prompt."""
+        seen = with_prompts(remote, "recommend_build_settings")
+        remote_ditto(remote, Structured()).recommend_build_settings(
+            "/home/someone/models/my-model.Q8_0.gguf", "Rockchip", {"gguf": ["Q4_K_M"]})
+        assert seen and seen[0][1]["model"] == "my-model.Q8_0.gguf"
+        seen.clear()
+        remote_ditto(remote, Structured()).recommend_build_settings(r"C:\Users\someone\m.gguf", "Rockchip",
+                                                                    {"gguf": ["Q4_K_M"]})
+        assert seen[0][1]["model"] == "m.gguf"
+
     def test_the_answer_is_still_checked_against_the_offered_options(self, remote):
         with_prompts(remote, "recommend_build_settings")
         with pytest.raises(DittoError, match="does not offer"):
