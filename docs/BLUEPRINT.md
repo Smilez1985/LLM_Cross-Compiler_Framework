@@ -402,7 +402,9 @@ cloud provider, personal details are replaced by placeholders.
    server of a framework running elsewhere, with a named token linked to Ditto's permissions there (`--link ditto`):
    that server decides, asks and audits (actor `mcp:<token name>`). One tool source per conversation; every remote
    result, error and question is untrusted data; Ditto's dialog names the server. Without a token the mode does not
-   start.
+   start. Ditto's tasks (build advice, module proposal, analysis of a remote build) take their context from that
+   server's task prompts under Ditto's own task text, and a refused call's reason code comes from the server's
+   structured error, never from its words.
 
 ### Self-healing approval
 

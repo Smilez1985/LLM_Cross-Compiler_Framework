@@ -630,8 +630,25 @@ started process (stdio; for `docker exec` or `podman exec` Ditto adds `-e LCF_MC
 One tool source per conversation: in MCP-client mode no tool of this framework is listed, and switching the source
 starts a new conversation. Ditto cannot check a remote server, so every result, error text, prompt and tool
 description from it reaches Ditto's model as untrusted data, and the confirmation dialog or prompt names the server
-("Question from the framework at <name>"). A "do not ask again" from there (CLI answer `r`) only asks that framework,
-where the person confirms it in its own approval window.
+("Question from the framework at <name>"). A "do not ask again" from there (CLI answer `r`, GUI button "Allow and
+ask it to stop asking...", offered only when that server's question offers it, with a warning first) only asks that
+framework, where the person confirms it in its own approval window.
+
+In the GUI the mode is set in **Configure AI Agent (Ditto)** under "Ditto's tools": the tool source, a command
+(stdio) or a server address (HTTP, https or loopback only), a name for the dialogs, and the named token. The token
+goes into the credential vault and is never shown again (the field stays empty and only says that one is stored);
+saving the mode without a token, with a command that cannot be read or with an address that would send the token
+in clear text is refused, and nothing is stored.
+
+Ditto's tasks use the same source in both modes: in MCP-client mode, build advice (`recommend_build_settings`), a
+module proposal (`add_board`; a probe file of this computer comes along as its own block) and the analysis of a
+build of that framework by its request id (`diagnose_build_failure`) take their context (the target's formats, the
+build log, the documentation and knowledge excerpts) from that framework's task prompts, the same ones an external
+client gets. Ditto's task text stays its own (the shared text those prompts are made from), and the server's
+context is untrusted data. A server that does not offer the prompt to Ditto's token is named with what to do; the
+self-healing of a build of this framework still uses this framework's log and knowledge base. A refused remote call
+carries its reason code as structured content (`{"error": {"code", "field"}}`), which Ditto reads instead of
+guessing it from the server's words.
 
 ---
 
@@ -1451,8 +1468,11 @@ framework never sees it.
   `device_state` (`ok`, `failed`, `unknown`) and the last 100 lines the device printed in `external_text`, marked as
   external text; `reason` is always the framework's own sentence, without host paths. When a job of the device or
   runtime tools fails, the error message is the framework's sentence too: what the device or `llama-bench` printed
-  (`llama-bench` prints the metadata of the model it loads) is returned in `external_text`. The `deploy_to_board`
-  prompt leads through the same steps.
+  (`llama-bench` prints the metadata of the model it loads) is returned in `external_text`; paths in such a message
+  appear as the framework's folder labels (`state:...`, `output:...`) or as a file name only, never as a host path
+  or `~/...`. When the deploy job ends, the audit log gets its own end entry (done, failed or cancelled, with the job,
+  the device's label and the device state), linked to the call's `started` entry. The `deploy_to_board` prompt leads
+  through the same steps.
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
   server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification
@@ -1852,7 +1872,10 @@ has no repository to go to.
 - **Author signatures** show where a pack comes from; they do not make it trusted. A signature is checked when the
   pack includes the public key (a broken signature refuses the pack), and the author's public key (the whole key,
   not its short key id) is pinned at the first installation of a pack by that author. A later pack with the same
-  author name and another key gets a warning in the summary.
+  author name and another key gets a warning in the summary. A damaged store of pinned keys (`authors.json` in the
+  community cache folder) is never taken for an empty one: it is kept as `authors.json.bad`, the summary warns that
+  the key could not be compared, and no key is pinned until you repair or remove the file, so the pins made so far
+  are never overwritten.
 
 ### Encrypted packs for private sharing
 

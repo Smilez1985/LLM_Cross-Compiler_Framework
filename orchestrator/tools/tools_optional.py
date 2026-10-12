@@ -64,7 +64,7 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
         if service is None:
             raise ToolError("The build service is not available.", code="failed",
                             next="Tell the person; 'llm-cli doctor' shows why.")
-        return ArtifactStore(service._output_dir(), service._artifacts, service.busy_output_folders)
+        return ArtifactStore.for_service(service)  # the service's public methods only
 
     def refused(e) -> ToolError:
         return ToolError(str(e), code=getattr(e, "code", "failed"), next=getattr(e, "next", ""))

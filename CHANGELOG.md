@@ -10,6 +10,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Ditto's MCP-client mode in the GUI** (MCP design T12): Configure AI Agent (Ditto) has a "Ditto's tools"
+  section with the tool source, a command (stdio) or a server address (HTTP, https or loopback only), a name and the
+  named token, which goes into the credential vault and is never shown again; saving the mode without a token, with
+  an unreadable command or with an address that would send the token in clear text is refused and stores nothing.
+  Ditto's GUI confirmation offers "Allow and ask it to stop asking..." for a remote framework's question only when
+  that server's form offers it, with a warning first; it is only a request that a person confirms in that
+  framework's own approval window.
+- **Ditto's tasks use the remote framework's task prompts** (MCP design 4.3, T12): in MCP-client mode build advice,
+  a module proposal and the analysis of a remote build by its request id take their context (target formats, build
+  log, documentation and knowledge excerpts) from that framework's MCP prompts `recommend_build_settings`,
+  `add_board` and `diagnose_build_failure`, under Ditto's own task text, as untrusted data; a prompt the server does
+  not offer is named with the next step.
+- **A deploy's end in the audit log**: when a `deploy_to_device` job ends (done, failed or cancelled), its own end
+  entry with the job, the device's label and the device state is written, linked to the call's `started` entry.
 - **Optional tools `delete_artifact` and `restore_knowledge_snapshot`** (MCP design T10): delete one built model
   (folder and golden ZIP) by id and sha256, or replace the knowledge base with an earlier snapshot as a job. Both are
   destructive: denied by default and hidden until you enable them (allowing the whole external class does not),
@@ -598,6 +612,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (prompt and generation speed, peak memory) with the model's sha256 and the build id; `get_status` shows the newest.
 
 ### Changed
+- **Refused MCP calls carry their reason code as structured content** (`{"error": {"code", "field"}}`, framework
+  facts only, the text unchanged). Ditto in MCP-client mode reads the code and field from it instead of guessing
+  them from the remote server's words; an unknown code is `failed`, a field outside the tool's schema is dropped.
+- **`ArtifactStore` (`delete_artifact`) uses only public `BuildService` methods** (`output_folder`,
+  `artifact_entries`, `busy_output_folders`, `ArtifactStore.for_service`).
 - **The Deep Ingest notice records who read it again**: its state file stores where it was acknowledged (`via`:
   `gui` or `cli`), and reading it is written to the audit log (actor `gui` or `cli`). Only a person acknowledges it;
   `CrawlNotice.acknowledge` refuses any other channel.
@@ -824,6 +843,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- **The module wizard's AI import and the AI settings' model lists hand their results to the GUI through the one
+  worker relay**: the wizard no longer emits from a plain thread on an unparented `WizardSignals` object it created
+  (a closed wizard could take it along), and the AI settings' own relay is folded into `WorkerRelay`.
+- **Deep Ingest Stop texts** (wizard button, tooltip and the `crawl.stopping` message in English and German) say
+  that Stop also abandons a page that is still arriving, instead of "after the current page".
+- **A damaged `authors.json` no longer loses the author keys pinned on first use**: it is kept as
+  `authors.json.bad`, the install summary warns that the key could not be compared, and no key is pinned (the file
+  is never overwritten) until it is repaired or removed.
 - **Digest-pinned images in a deployment package start on an air-gapped board**: an image pulled by its digest has
   no tag, so it was saved without a name, came back as `<none>` after `docker load`, and `deploy.sh` could not start
   it by its digest reference without a registry. It is now packed under `<repository>:lcf-<12 hex of the digest>`
@@ -1034,6 +1061,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   folders on the full disk with their sizes, and pruning Docker is proposed only when Docker's data root is full.
 
 ### Security
+- **Board and local runtime tool errors name no host path**: paths in their messages appear as the framework's
+  folder labels (`state:...`, `cache:...`, `output:...`, `models:...`) or as a file name only, never as a host path
+  or `~/...`.
 - **robots.txt can no longer be switched off through crawl options**: the crawler takes only its own option keys
   (pages, depth, delay, PDFs, languages) and ignores any other key, including `respect_robots`, with a log line; the
   switch for tests with a fake web is a separate keyword-only flag that no product code passes (a guard test checks

@@ -30,6 +30,8 @@ These reach another device: tier external, always asked, never covered by a stan
 presents must be the trusted one, and the question shows its fingerprint.
 """
 
+import os
+import re
 import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional
@@ -136,6 +138,31 @@ class StopOut(ToolOutput):
     stopped_processes: int
 
 
+# A path in an error text: absolute (POSIX or a Windows drive) or starting with ~/; never part of a URL or a word.
+_PATH_TOKEN = re.compile(r"(?<![\w:/.~-])(?:~/|/|[A-Za-z]:[\\/])[^\s'\"`,;()\[\]<>]+")
+
+
+def label_paths(text: str, roots: Dict[str, str]) -> str:
+    """Replaces every path in `text`: one inside a known folder becomes `<label>:<relative path>` (roots maps the
+    folder to its label), any other one, the home folder's ('~/...') included, its file name only. Ids and labels
+    instead of paths toward an AI (design 6.4)."""
+    ordered = sorted(((str(Path(k)), v) for k, v in roots.items() if k), key=lambda kv: -len(kv[0]))
+
+    def one(match: "re.Match[str]") -> str:
+        token = match.group(0)
+        tail = ""
+        while token and token[-1] in ".:!?":
+            token, tail = token[:-1], token[-1] + tail
+        for root, label in ordered:
+            if token == root or token.startswith(root.rstrip("/\\") + os.sep) or token.startswith(root + "/"):
+                rel = token[len(root):].lstrip("/\\").replace("\\", "/")
+                return f"{label}:{rel}" + tail if rel else f"the {label} folder" + tail
+        name = re.split(r"[/\\]", token.rstrip("/\\"))[-1]
+        return (name or "a folder") + tail
+
+    return _PATH_TOKEN.sub(one, text or "")
+
+
 # --- registration ---------------------------------------------------------------------------------------------------
 
 def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: Any, jobs: Any) -> ToolRegistry:
@@ -175,9 +202,28 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
     def running(kind: str, ctx: ToolContext) -> int:
         return sum(1 for j in jobs.list() if j.kind == kind and not j.finished)
 
+    def folder_labels() -> Dict[str, str]:
+        """The framework's own folders by label (state, cache, output, models), as an AI may name them."""
+        roots: Dict[str, str] = {}
+        try:
+            roots[str(state_dir())] = "state"
+        except Exception:  # noqa: BLE001
+            pass
+        resolve = getattr(framework, "resolve_path", None)
+        for key, label in (("cache_dir", "cache"), ("output_dir", "output"), ("models_dir", "models")):
+            try:
+                value = framework.config.get(key, None)
+                if value:
+                    roots[str(resolve(value) if callable(resolve) else Path(value))] = label
+            except Exception:  # noqa: BLE001
+                continue
+        return roots
+
     def scrub(text: str) -> str:
+        """An error of a local or board runtime tool as an AI may see it: the framework's folders by label, any other
+        path by its file name only (no host path, no '~/...'), secrets redacted, cleaned and capped."""
         from orchestrator.tools.tools_status import _scrub_paths
-        return _scrub_paths(str(text))
+        return _scrub_paths(label_paths(str(text), folder_labels()))
 
     def job_error(e: Exception) -> ValueError:
         code = getattr(e, "code", "failed")

@@ -25,11 +25,12 @@ from PySide6.QtWidgets import (
     QMessageBox, QGroupBox, QPushButton, QFileDialog, QProgressBar,
     QDialog, QHBoxLayout, QPlainTextEdit, QStackedWidget, QCheckBox
 )
-from PySide6.QtCore import Qt, Signal, QObject, QThread, QTimer, QRect
+from PySide6.QtCore import Qt, Signal, QThread, QTimer, QRect
 from PySide6.QtGui import QPixmap
 
 from orchestrator.Core.module_generator import KNOWLEDGE_SNAPSHOT, ModuleGenerator
 from orchestrator.gui.dialogs import AIConfigurationDialog, URLInputDialog, show_crawl_notice_once
+from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.tools.confirmation import visible
 from orchestrator.utils import input_history
 from orchestrator.utils.announce import announce
@@ -41,12 +42,6 @@ def module_name_hint(raw: str) -> str:
     name = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(raw or "").strip())
     name = re.sub(r"_+", "_", name).strip("_.- ")[:64]
     return name or "Custom_Target"
-
-class WizardSignals(QObject):
-    """Signale für Thread-Kommunikation"""
-    analysis_finished = Signal(dict)
-    analysis_error = Signal(str)
-
 
 class SummaryPage(QWizardPage):
     """The last page. Finish stays disabled while a Deep Ingest runs: the knowledge snapshot would be partial."""
@@ -112,8 +107,8 @@ class SpriteAnimationWidget(QLabel):
 
 class CrawlWorker(QThread):
     """
-    Runs Deep Ingest in the background. Each page is stored as soon as it is read; stop() ends the crawl after
-    the current page and keeps what is stored. Like the rag4ll USB watcher's eject rule, a state is announced
+    Runs Deep Ingest in the background. Each page is stored as soon as it is read; stop() ends the crawl: a page
+    that is still arriving is abandoned, a page already read is stored first, and what is stored stays. Like the rag4ll USB watcher's eject rule, a state is announced
     only once it is true: the outcome (success, partial or failure) is reported and spoken after the last write
     has returned.
     """
@@ -182,7 +177,7 @@ class CrawlWorker(QThread):
                 pass  # audio is extra; the outcome is shown in any case
 
     def stop(self):
-        """Ends the crawl after the current page; pages already stored stay."""
+        """Ends the crawl: a page still arriving is abandoned (a waiting delay is cut short); stored pages stay."""
         self._stop.set()
 
 class ModuleCreationWizard(QWizard):
@@ -210,14 +205,15 @@ class ModuleCreationWizard(QWizard):
         self.ai_config = {}
         self.ai_proposal = None  # Ditto's proposal the fields were filled from: the module is marked untested
         self.crawl_worker = None
-        self._close_result = None   # closing waits for a running crawl to store its current page
+        self._close_result = None   # closing waits for a running crawl to finish a write in progress
         self.crawled_roots = set()  # URLs crawled in this wizard: the only pages a knowledge snapshot may hold
         self.probe_path = None      # the target's probe file: the runtime: block is planned from it
         self.probe_id = None        # its copy in the probe store, by which AI clients and Ditto name it
 
-        self.signals = WizardSignals()
-        self.signals.analysis_finished.connect(self.on_ai_finished)
-        self.signals.analysis_error.connect(self.on_ai_error)
+        # Ditto's AI import answers on the application's one worker relay, queued to the GUI thread (a worker never
+        # emits on, or frees, a Qt object this wizard owns; gui/worker_relay.py). Only the latest request counts.
+        self._ai_request: Optional[object] = None
+        worker_relay().done.connect(self._on_ai_relay, Qt.QueuedConnection)
         
         # Container for Avatar (Stacked to switch widgets)
         self.avatar_container = QStackedWidget()
@@ -281,7 +277,8 @@ class ModuleCreationWizard(QWizard):
         self.btn_deep_ingest.clicked.connect(self.run_deep_ingest)
         hbox_know.addWidget(self.btn_deep_ingest)
         self.btn_stop_crawl = QPushButton(ui_text("crawl.btn.stop"))
-        self.btn_stop_crawl.setToolTip("End Deep Ingest after the current page; pages already stored stay.")
+        self.btn_stop_crawl.setToolTip("End Deep Ingest now: a page that is still arriving is abandoned; pages "
+                                       "already stored stay.")
         self.btn_stop_crawl.setAccessibleName("Stop Deep Ingest")
         self.btn_stop_crawl.clicked.connect(self.stop_deep_ingest)
         self.btn_stop_crawl.setVisible(False)
@@ -633,7 +630,7 @@ Setup commands:
         self.summary_page.completeChanged.emit()
 
     def stop_deep_ingest(self):
-        """Stop button: the crawl ends after the current page and keeps what is stored."""
+        """Stop button: the crawl ends, abandoning a page that is still arriving, and keeps what is stored."""
         if self.crawl_worker is not None and self.crawl_worker.isRunning():
             self.crawl_worker.stop()
             self.btn_stop_crawl.setEnabled(False)
@@ -672,8 +669,9 @@ Setup commands:
         QMessageBox.critical(self, "Crawl Error", str(err))
 
     def done(self, result):
-        """Closing the wizard stops a running crawl. It closes once the current page is stored (without
-        blocking the GUI), so the knowledge base is never shut down in the middle of a write."""
+        """Closing the wizard stops a running crawl (a page still arriving is abandoned). It closes once a page
+        that is being written is stored (without blocking the GUI), so the knowledge base is never shut down in the
+        middle of a write."""
         worker = self.crawl_worker
         if worker is not None and worker.isRunning():
             if self._close_result is None:
@@ -852,17 +850,32 @@ Setup commands:
         self.ai_progress.setVisible(True)
         self.status_label.setText(tr("msg.ai_thinking"))
         
-        threading.Thread(target=self._ai_worker, args=(ditto, Path(path)), daemon=True).start()
+        token = self._ai_request = object()
+        threading.Thread(target=self._ai_worker, args=(ditto, Path(path), token, worker_relay()), name="ai-import",
+                         daemon=True).start()
 
-    def _ai_worker(self, ditto, path):
+    @staticmethod
+    def _ai_worker(ditto, path, token, relay):
+        """Runs in a worker thread: touches no Qt object of the wizard, answers on the relay only."""
         from orchestrator.Core.ditto_manager import DittoError
         try:
-            definition = ditto.generate_module(path)
-            self.signals.analysis_finished.emit(definition.model_dump())
+            result = ("done", ditto.generate_module(path).model_dump())
         except (DittoError, OSError) as e:
-            self.signals.analysis_error.emit(str(e))
+            result = ("error", str(e))
         except Exception as e:
-            self.signals.analysis_error.emit(f"Unexpected error: {e}")
+            result = ("error", f"Unexpected error: {e}")
+        relay.done.emit(token, result)
+
+    def _on_ai_relay(self, token, result) -> None:
+        """GUI thread: the answer of this wizard's latest AI import (other workers' results are not ours)."""
+        if token is not self._ai_request or not isinstance(result, tuple) or len(result) != 2:
+            return
+        self._ai_request = None
+        kind, value = result
+        if kind == "done":
+            self.on_ai_finished(value)
+        else:
+            self.on_ai_error(value)
 
     def on_ai_error(self, err):
         self._set_avatar_state("fail")
