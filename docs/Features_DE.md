@@ -1012,9 +1012,10 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen, höchstens 4 je Token (damit ein Client die
   anderen nicht aussperren kann), schließt eine Sitzung nach 10 Minuten ohne Anfrage und nimmt höchstens 1 MiB pro
   Anfrage an. Eine Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet
-  hat. Eine noch offene Anfrage (ein Warten, ein Ereignisstrom, ein Listen-Strom) wird geschlossen, sobald ihr Token
-  widerrufen oder rotiert wird. Was außerhalb einer vom Server geprüften Anfrage läuft, bekommt keinerlei
-  Berechtigungen, über stdio wie über HTTP.
+  hat (nach einer Rotation öffnet der Client eine neue Sitzung). Eine noch offene Anfrage (ein Warten, ein
+  Ereignisstrom, ein Listen-Strom) wird geschlossen, sobald ihr Token widerrufen oder rotiert wird, und ebenso die
+  Sitzungen dieses Tokens, sodass sie keinen Platz belegen. Was außerhalb einer vom Server geprüften Anfrage läuft,
+  bekommt keinerlei Berechtigungen, über stdio wie über HTTP.
 - **Benannte Tokens:** `llm-cli mcp token add NAME` legt ein Token für einen Client an und zeigt es einmal; das
   Framework behält nur seinen SHA-256 in `~/.llm-framework/mcp_tokens.json` (Modus 0600; solange andere Benutzer
   die Datei lesen oder ändern können oder sie einem anderen Benutzer gehört, wird kein Token angenommen und der

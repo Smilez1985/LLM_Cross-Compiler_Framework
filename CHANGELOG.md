@@ -345,7 +345,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ### Changed
 - **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
   closes after 10 minutes without a request (the SDK's default is 30); a request still open when its token is revoked
-  or rotated (a wait, an event stream, a listen stream) is closed at once.
+  or rotated (a wait, an event stream, a listen stream) is closed at once, and so are that token's sessions: a
+  session belongs to the token value that opened it, so after a rotation the client opens a new one and the old
+  ones hold neither its share nor the server's slots.
 - **Ditto's task texts** (chat with tools, healing analysis, module proposal, build recommendation) live in one
   module, `orchestrator/llm/task_prompts.py`, shared with the MCP prompts, and each carries the honest-"cannot" rule:
   name the specific reason, never claim a result you did not get, and untested hardware is no reason to refuse. The

@@ -935,8 +935,9 @@ framework never sees it.
   the `Host` header must name a loopback address with the server's port (against DNS rebinding), and the server
   keeps at most 8 sessions, at most 4 per token (so one client cannot lock the others out), closes a session after
   10 minutes without a request, and takes at most 1 MiB per request. A session, and a pending question round of the
-  2026-07-28 protocol, belongs to the token that opened it. A request that is still open (a wait, an event stream, a
-  listen stream) is closed as soon as its token is revoked or rotated. Anything that runs outside a request the
+  2026-07-28 protocol, belongs to the token that opened it (after a rotation the client opens a new session). A
+  request that is still open (a wait, an event stream, a listen stream) is closed as soon as its token is revoked
+  or rotated, and so are that token's sessions, so they hold no slot. Anything that runs outside a request the
   server checked gets no permissions at all, over stdio as over HTTP.
 - **Named tokens:** `llm-cli mcp token add NAME` creates a token for one client and shows it once; the framework
   keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode 0600; while other users can read or change
