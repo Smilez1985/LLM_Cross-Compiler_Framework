@@ -877,8 +877,9 @@ to another user. Requests with an `Origin` header (web pages, CORS preflights) a
 the `Host` header must be `127.0.0.1`, `localhost` or `[::1]` with the server's port, and the server keeps at most
 8 sessions, at most 4 of them per token (so one client cannot lock the others out; beyond that a new session is
 refused with status 503), closes a session after 10 minutes without a request, and takes at most 1 MiB per request.
-A request that is still open (a wait, an event stream) is closed as soon as its token is revoked or rotated. The old
-shared token file `mcp_http_token` is no longer accepted.
+A request that is still open (a wait, an event stream) is closed as soon as its token is revoked or rotated, and so
+are that token's sessions (a session belongs to the token value that opened it; after `rotate` the client opens a
+new one). The old shared token file `mcp_http_token` is no longer accepted.
 
 Over stdio, the environment variable `LCF_MCP_TOKEN` in the client's server entry makes the client the caller of
 that named token (`mcp:<name>`, with the token's permissions) instead of the shared caller `mcp`. `llm-cli` takes it

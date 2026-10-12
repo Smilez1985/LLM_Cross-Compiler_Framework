@@ -904,8 +904,9 @@ werden abgelehnt, der `Host`-Header muss `127.0.0.1`, `localhost` oder `[::1]` m
 Server hält höchstens 8 Sitzungen, davon höchstens 4 je Token (damit ein Client die anderen nicht aussperren kann;
 darüber hinaus wird eine neue Sitzung mit Status 503 abgelehnt), schließt eine Sitzung nach 10 Minuten ohne Anfrage
 und nimmt höchstens 1 MiB pro Anfrage an. Eine noch offene Anfrage (ein Warten, ein Ereignisstrom) wird geschlossen,
-sobald ihr Token widerrufen oder rotiert wird. Die alte gemeinsame Token-Datei `mcp_http_token` wird nicht mehr
-akzeptiert.
+sobald ihr Token widerrufen oder rotiert wird, und ebenso die Sitzungen dieses Tokens (eine Sitzung gehört dem
+Token-Wert, der sie geöffnet hat; nach `rotate` öffnet der Client eine neue). Die alte gemeinsame Token-Datei
+`mcp_http_token` wird nicht mehr akzeptiert.
 
 Über stdio macht die Umgebungsvariable `LCF_MCP_TOKEN` im Server-Eintrag des Clients den Client zum Aufrufer dieses
 benannten Tokens (`mcp:<Name>`, mit den Berechtigungen des Tokens) statt zum gemeinsamen Aufrufer `mcp`. `llm-cli`

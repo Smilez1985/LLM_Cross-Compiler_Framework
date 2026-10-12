@@ -27,7 +27,8 @@ Security model
   token per client (`llm-cli mcp token`, or the GUI's Tool Permissions dialog). The token's name is the caller
   (`mcp:<name>`) for the policy and the audit; over stdio LCF_MCP_TOKEN does the same, otherwise the caller is
   `mcp`. A token holds at most 4 of the 8 sessions, an idle session closes after 10 minutes, and a request still
-  open when its token is revoked or rotated is closed. Outside a checked request the caller may do nothing.
+  open when its token is revoked or rotated is closed, together with that token's sessions (a session belongs to
+  the token value that opened it). Outside a checked request the caller may do nothing.
 - What a client says about itself (clientInfo, protocol version, capabilities) is written to stderr once
   per client (ClientTracker). It is a label for people, never a reason to allow anything.
 - Each connection owns the builds and jobs it starts, together with its caller (one stdio session; over HTTP
@@ -41,6 +42,7 @@ import contextlib
 import contextvars
 import functools
 import hashlib
+import hmac
 import inspect
 import json
 import logging
@@ -1171,19 +1173,47 @@ class TokenAuth:
     - the `Host` header must name a loopback address with this server's port (421);
     - `Authorization: Bearer <token>` must be a named token from the token store (401 otherwise; a revoked or
       rotated token stops working at once). The token's name becomes the caller (`mcp:<name>`) of this request,
-      and the SDK binds each session and each pending question round to it, so one token cannot use another
-      token's session or answer the question another token was asked;
+      and the SDK binds each session and each pending question round to the token that opened it (its name and
+      which token of that name, `subject`), so one token cannot use another token's session or answer the question
+      another token was asked, and a rotated token's sessions do not answer the new one;
     - a token may hold at most MAX_SESSIONS_PER_TOKEN sessions (503 beyond), so one client cannot take every slot;
     - a request that is still open (a long-poll, a server-sent event stream, a listen stream) is ended as soon as its
-      token is revoked or rotated: it is checked every CHECK_SECONDS while the request runs."""
+      token is revoked or rotated: it is checked every CHECK_SECONDS while the request runs. The sessions of a token
+      that is no longer valid are closed then, and before any new session is admitted, so they hold neither the
+      client's share nor the server's slots until they idle out."""
 
     CHECK_SECONDS = 1.0
 
-    def __init__(self, app, tokens: TokenStore, hosts: List[str], sessions_of: Optional[Callable[[str], int]] = None):
+    def __init__(self, app, tokens: TokenStore, hosts: List[str],
+                 sessions_of: Optional[Callable[[str, str], int]] = None,
+                 drop_sessions: Optional[Callable[[set], Any]] = None):
         self.app = app
         self.tokens = tokens
         self.hosts = frozenset(hosts)
-        self.sessions_of = sessions_of  # caller -> the sessions it holds now (the SDK's session manager)
+        self.sessions_of = sessions_of  # (caller, subject) -> the sessions that token holds now (the SDK's manager)
+        self.drop_sessions = drop_sessions  # async: closes every session whose (caller, subject) is not in the set
+        self._subject_key = secrets.token_bytes(32)  # this process only: a subject never says anything about a token
+
+    def subject(self, digest: str) -> str:
+        """Which token of a name opened a session: derived from the token's stored hash with a key of this process,
+        so a rotated token (same name, new value) gets new sessions; kept in memory, never sent anywhere."""
+        return hmac.new(self._subject_key, digest.encode("ascii"), hashlib.sha256).hexdigest()[:32]
+
+    def valid_principals(self) -> set:
+        """(caller, subject) of every token that is valid now; none when the store cannot be used."""
+        try:
+            return {(ACTOR_PREFIX + r.name, self.subject(r.sha256)) for r in self.tokens.list()}
+        except TokenStoreError:
+            return set()
+
+    async def _drop_stale_sessions(self) -> None:
+        import anyio
+        import anyio.to_thread
+        if self.drop_sessions is None:
+            return
+        valid = await anyio.to_thread.run_sync(self.valid_principals)
+        with anyio.CancelScope(shield=True):
+            await self.drop_sessions(valid)
 
     @staticmethod
     def _opens_session(scope, headers) -> bool:
@@ -1232,15 +1262,17 @@ class TokenAuth:
         from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
         from mcp.server.auth.provider import AccessToken
         caller = ACTOR_PREFIX + record.name
-        if (self.sessions_of is not None and self._opens_session(scope, headers)
-                and self.sessions_of(caller) >= MAX_SESSIONS_PER_TOKEN):
-            await self._reject(send, 503, f"this token already holds its share of {MAX_SESSIONS_PER_TOKEN} open "
-                                          "sessions; close one (or let it idle out) before opening another")
-            return
         name, digest = record.name, token_digest(presented)
+        subject = self.subject(digest)
+        if self.sessions_of is not None and self._opens_session(scope, headers):
+            await self._drop_stale_sessions()  # a revoked or rotated token's sessions hold no share and no slot
+            if self.sessions_of(caller, subject) >= MAX_SESSIONS_PER_TOKEN:
+                await self._reject(send, 503, f"this token already holds its share of {MAX_SESSIONS_PER_TOKEN} open "
+                                              "sessions; close one (or let it idle out) before opening another")
+                return
         # The SDK binds a session (handshake protocols) to the principal that opened it ("user"), and the sealed
         # requestState of a 2026-07-28 question round to the principal in its auth context; never the token itself.
-        user = AuthenticatedUser(AccessToken(token=caller, client_id=caller, scopes=[]))
+        user = AuthenticatedUser(AccessToken(token=caller, client_id=caller, scopes=[], subject=subject))
         bound = auth_context_var.set(user)
         try:
             async with anyio.create_task_group() as tasks:
@@ -1248,7 +1280,9 @@ class TokenAuth:
                     while True:
                         await anyio.sleep(self.CHECK_SECONDS)
                         if not await anyio.to_thread.run_sync(self.tokens.holds, name, digest):
-                            logger.info(f"MCP token '{name}' was revoked or rotated; its open request is closed.")
+                            logger.info(f"MCP token '{name}' was revoked or rotated; its open request and its "
+                                        "sessions are closed.")
+                            await self._drop_stale_sessions()
                             tasks.cancel_scope.cancel()
                             return
                 tasks.start_soon(revoked)
@@ -1270,14 +1304,34 @@ def http_app(server, tokens: TokenStore, host: str = "127.0.0.1", port: int = 87
                                      max_request_body_size=MAX_HTTP_BODY,
                                      session_idle_timeout=HTTP_SESSION_IDLE_TIMEOUT)
 
-    def sessions_of(caller: str) -> int:
-        """The sessions `caller` holds: the SDK records the principal that opened each one (2.3.0
-        `_session_owners`); without that record nothing is counted and only the server-wide limit applies."""
-        owners = getattr(getattr(server, "session_manager", None), "_session_owners", None) or {}
-        return sum(1 for owner in list(owners.values())
-                   if (owner.get("client_id") if isinstance(owner, dict) else getattr(owner, "client_id", None))
-                   == caller)
-    return TokenAuth(app, tokens, hosts, sessions_of=sessions_of)
+    def owners() -> Dict[str, Any]:
+        return getattr(getattr(server, "session_manager", None), "_session_owners", None) or {}
+
+    def principal(owner) -> Tuple[Any, Any]:
+        if isinstance(owner, dict):
+            return owner.get("client_id"), owner.get("subject")
+        return getattr(owner, "client_id", None), getattr(owner, "subject", None)
+
+    def sessions_of(caller: str, subject: str) -> int:
+        """The sessions the token (caller, subject) holds: the SDK records the principal that opened each one
+        (2.3.0 `_session_owners`); without that record nothing is counted and only the server-wide limit applies."""
+        return sum(1 for owner in list(owners().values()) if principal(owner) == (caller, subject))
+
+    async def drop_sessions(valid: set) -> None:
+        """Closes every session opened by a token that is no longer valid (revoked, or rotated: a session belongs to
+        the token value that opened it), through the SDK's own discard (2.3.0 `_discard_session`); without it the
+        sessions idle out."""
+        manager = getattr(server, "session_manager", None)
+        instances = getattr(manager, "_server_instances", None)
+        discard = getattr(manager, "_discard_session", None)
+        if instances is None or discard is None:
+            return
+        for session_id, owner in list(owners().items()):
+            transport = instances.get(session_id)
+            if transport is not None and principal(owner) not in valid:
+                with contextlib.suppress(Exception):
+                    await discard(session_id, transport)
+    return TokenAuth(app, tokens, hosts, sessions_of=sessions_of, drop_sessions=drop_sessions)
 
 
 def _token_store(framework) -> TokenStore:

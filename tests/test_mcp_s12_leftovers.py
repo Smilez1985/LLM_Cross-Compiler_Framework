@@ -228,6 +228,26 @@ class TestHttpSessions:
         tokens.revoke("streamer")
         assert ended.wait(10), "the revoked token's stream was closed"
 
+    def test_a_rotated_or_revoked_tokens_sessions_hold_no_share_and_no_slot(self, live_http, tokens):
+        """Rotating is what the person does when a token leaked: the client with the new token must get in at once,
+        and the old token's sessions must neither count toward the client's share nor keep the server's slots until
+        they idle out (10 minutes)."""
+        share = mcp_server.MAX_SESSIONS_PER_TOKEN
+        old = tokens.add("client")
+        sessions = [post(live_http, dict(INIT, id=i), old) for i in range(share)]
+        assert [r.status_code for r in sessions] == [200] * share
+        new = tokens.rotate("client")
+        assert post(live_http, INIT, new).status_code == 200, "the new token is not locked out by the old sessions"
+        stale = {"mcp-session-id": sessions[0].headers["mcp-session-id"], "mcp-protocol-version": "2025-11-25"}
+        listing = {"jsonrpc": "2.0", "id": 9, "method": "tools/list"}
+        assert post(live_http, listing, new, stale).status_code == 404, "a session belongs to the token that opened it"
+        tokens.revoke("client")
+        first, second = tokens.add("first"), tokens.add("second")
+        statuses = [post(live_http, dict(INIT, id=i), token).status_code
+                    for token in (first, second) for i in range(share)]
+        assert statuses == [200] * (2 * share), "no slot is held by the sessions of a revoked or rotated token"
+        assert len(live_http.server.session_manager._server_instances) <= mcp_server.MAX_HTTP_SESSIONS
+
 
 # --- the caller outside the middleware, LCF_MCP_TOKEN, the token cache ----------------------------------------------
 
@@ -269,3 +289,19 @@ def test_the_token_cache_follows_the_files_bytes(tokens):
     assert tokens.find(old) is None, "a cache by file identity, size and time would still accept the old token"
     assert tokens.find(new).name == "box"
     assert tokens.get("box").policy == read_only_policy()
+
+
+def test_the_session_subject_says_nothing_about_the_token(tokens):
+    """A session is bound to which token of a name opened it through a value derived with a key of this process:
+    never the token, never its stored hash, different in every server process."""
+    from orchestrator.tools.mcp_tokens import token_digest
+    token = tokens.add("subject")
+    digest = token_digest(token)
+    first = mcp_server.TokenAuth(None, tokens, mcp_server.allowed_hosts(8765))
+    second = mcp_server.TokenAuth(None, tokens, mcp_server.allowed_hosts(8765))
+    subject = first.subject(digest)
+    assert subject == first.subject(digest) and subject != second.subject(digest)
+    assert subject not in token and subject not in digest and digest[:16] not in subject
+    assert ("mcp:subject", subject) in first.valid_principals()
+    tokens.rotate("subject")
+    assert ("mcp:subject", subject) not in first.valid_principals(), "a rotated token's sessions are stale"
