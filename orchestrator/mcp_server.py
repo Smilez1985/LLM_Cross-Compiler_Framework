@@ -58,6 +58,7 @@ import logging
 import ntpath
 import os
 import posixpath
+import re
 import secrets
 import shlex
 import sys
@@ -466,6 +467,26 @@ def _audited(error: Exception) -> Exception:
     return error
 
 
+# The reason code (and field) of the tools/call being answered, for the structured error of an is_error result.
+_ERROR_FACTS: "contextvars.ContextVar[Optional[Dict[str, str]]]" = contextvars.ContextVar("lcf_mcp_error",
+                                                                                        default=None)
+_FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
+
+
+def _coded(error: Exception, code: Optional[str], field: str = "") -> Exception:
+    """Remembers why a call was refused or failed (a reason code of normalize.CODES, the argument it is about), so the
+    result carries it as structured content {"error": {"code", "field"}} next to the text: a client such as Ditto in
+    MCP-client mode reads the code instead of guessing it from the words. Framework facts only, never external text."""
+    from orchestrator.tools.normalize import CODES
+    box = _ERROR_FACTS.get()
+    if box is not None:
+        box.clear()
+        box["code"] = code if code in CODES else "failed"
+        if field and _FIELD_NAME.match(str(field)):
+            box["field"] = str(field)
+    return error
+
+
 def _uses_input_required(ctx) -> bool:
     from mcp_types.version import is_version_at_least
     version = ctx.protocol_version
@@ -807,7 +828,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             state.audited = True
             if getattr(spec, "discard", None) is not None:  # never runs: drop what prepare staged
                 await anyio.to_thread.run_sync(registry.discard_staged, spec, _parsed(spec, kwargs), tool_ctx)
-            raise _audited(MCPToolError(data.refused))
+            raise _coded(_audited(MCPToolError(data.refused)), data.code or "failed")
         if isinstance(data, NotAsked):
             approved, asked, can_ask = None, False, data.can_ask
             tool_ctx.answer = data.answer
@@ -848,14 +869,16 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         except ToolError as e:
             state.audited = True
             message = error_text(spec.name, e)
+            code = e.code
             if asked and not approved:
                 message = f"The user declined '{spec.title}'. Do not retry it unless they ask for it."
+                code = "declined"
             elif "needs your confirmation" in message and not can_ask:
                 message += " This client cannot ask you."
             if isinstance(e, ToolDenied) and tool_ctx.actor.startswith(ACTOR_PREFIX) and not (asked and not approved):
                 message += (f" This client uses the MCP token '{tool_ctx.actor[len(ACTOR_PREFIX):]}'; its "
                             f"permissions are set with '{_permissions_command(tool_ctx.actor)}'.")
-            raise _audited(MCPToolError(message)) from None
+            raise _coded(_audited(MCPToolError(message)), code, e.field) from None
 
     approval_param = inspect.Parameter("approval", inspect.Parameter.KEYWORD_ONLY,
                                        annotation=Annotated[ElicitationResult[Confirmation], Resolve(confirm)])
@@ -1315,6 +1338,21 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
             return GetPromptResult(description=description, messages=[
                 PromptMessage(role="user", content=TextContent(type="text", text=text)) for text in texts])
 
+        async def _handle_call_tool(self, ctx, params):
+            """tools/call as the SDK answers it, plus the structured error: a refused or failed call's result carries
+            {"error": {"code": <reason code>, "field": <argument>}} as structured content (framework facts only;
+            the text stays as it was), so a client takes the reason code from it instead of the words."""
+            from mcp_types import CallToolResult
+            box: Dict[str, str] = {}
+            token = _ERROR_FACTS.set(box)
+            try:
+                result = await super()._handle_call_tool(ctx, params)
+            finally:
+                _ERROR_FACTS.reset(token)
+            if isinstance(result, CallToolResult) and result.is_error and result.structured_content is None:
+                result = result.model_copy(update={"structured_content": {"error": dict(box or {"code": "failed"})}})
+            return result
+
         async def call_tool(self, name, arguments, context=None):
             state = _CallState()
             token = _CALL.set(state)
@@ -1328,7 +1366,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                     prepared = await anyio.to_thread.run_sync(registry.prepare, name, arguments, ctx)
                 except ToolError as e:
                     state.audited = True
-                    raise _audited(MCPToolError(error_text(str(name), e))) from None
+                    raise _coded(_audited(MCPToolError(error_text(str(name), e))), e.code, e.field) from None
                 state.repairs = prepared.repairs
                 audit_name, audit_arguments = prepared.spec.name, prepared.arguments
                 # The rate and quotas before the policy and the question (an audited refusal that says when).
@@ -1337,7 +1375,8 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                     await anyio.to_thread.run_sync(registry.enforce_limits, prepared, ctx)
                 except ToolError as e:
                     state.audited = True
-                    raise _audited(MCPToolError(error_text(prepared.spec.name, e))) from None
+                    error = _audited(MCPToolError(error_text(prepared.spec.name, e)))
+                    raise _coded(error, e.code, e.field) from None
                 state.limits_checked = True
                 return await super().call_tool(prepared.spec.name, prepared.arguments, context)
             except BaseException as e:

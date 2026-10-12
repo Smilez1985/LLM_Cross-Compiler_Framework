@@ -601,7 +601,8 @@ address. The mode does not start without a token. One tool source per conversati
 conversation, and in MCP-client mode no tool of this framework is listed. Every result, error and question of the
 remote framework is shown to Ditto's model as untrusted data, and Ditto's confirmation names the server. `test`
 connects and lists the tools and task prompts the server offers Ditto; `show` prints the settings (never the token);
-`off` switches back to Ditto's own tools.
+`off` switches back to Ditto's own tools. The GUI's AI settings ("Ditto's tools") set the same values; there too
+the token goes into the vault and is never shown again.
 
 ```bash
 llm-cli ditto remote set --transport stdio --command "docker exec -i lcf llm-cli mcp serve" --name "build box"

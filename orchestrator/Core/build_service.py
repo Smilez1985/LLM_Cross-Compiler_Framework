@@ -103,6 +103,20 @@ class BuildService:
     def _output_dir(self) -> Path:
         return self.framework.resolve_path(self._config_get("output_dir", "output"))
 
+    def output_folder(self) -> Path:
+        """The output folder finished builds are written to (resolved from the settings on every call)."""
+        return self._output_dir()
+
+    def artifact_entries(self) -> List[Tuple[str, str, Dict[str, Any]]]:
+        """(artifact id, output:<relative path>, manifest) of every finished build under the output folder, the
+        entries list_artifacts shows (the manifest is the build engine's, its values untrusted)."""
+        return self._artifacts()
+
+    def artifact_store(self):
+        """The deletion side of the built models (ArtifactStore), on this service's public methods only."""
+        from orchestrator.Core.artifact_store import ArtifactStore
+        return ArtifactStore.for_service(self)
+
     def resolve_target(self, target: str) -> str:
         """The registered id of a target given by id or folder name (any letter case)."""
         resolve = getattr(self._targets(), "resolve", None)
