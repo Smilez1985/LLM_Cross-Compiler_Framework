@@ -111,6 +111,13 @@ class AuditUnavailable(ToolError):
     """A call that changes something was refused because its audit entry could not be written."""
 
 
+class LimitHit(ToolError):
+    """A refusal of the limits table (a rate, a quota, the questions to the person: a recent "no", a paused tool,
+    too many questions). The call was never tried, so it is never a failed call for the repeat guard, on either
+    path."""
+    code = "limit_reached"
+
+
 def _with_message(error: ToolError, message: str) -> ToolError:
     """The same kind of error (denied, invalid input, ...) with another message."""
     return error.with_text(message)
@@ -532,8 +539,10 @@ class ToolRegistry:
         next_step = (f"Call {listing} for the values you can use, then call {spec.name} again." if listing else
                      f"Fix {'these arguments' if len(missing) + len(problems) > 1 else 'this argument'} and call "
                      f"{spec.name} again.")
+        # The fields the error is about (Ditto's loop tells a fix of another field from a repeat by them).
+        fields = ",".join(sorted({n for n in names if n}))
         return ToolInputError(" ".join(parts), code="missing_argument" if missing and not problems else
-                              "invalid_value", next=next_step, allowed=allowed_all)
+                              "invalid_value", next=next_step, allowed=allowed_all, field=fields)
 
     @staticmethod
     def _allowed(spec: ToolSpec, name: str, arguments: Dict[str, Any]) -> List[str]:
@@ -606,7 +615,8 @@ class ToolRegistry:
         try:
             normalized = normalize_arguments(spec, arguments)
         except NormalizeError as e:
-            error = ToolInputError(str(e), code=e.code, next=e.next, allowed=e.allowed, suggestions=e.suggestions)
+            error = ToolInputError(str(e), code=e.code, next=e.next, allowed=e.allowed, suggestions=e.suggestions,
+                                   field=e.field)
             raise self._input_failed(work, spec, decision, arguments, error) from None
         work.repairs = _merge(repairs, normalized.repairs)
         args = normalized.arguments
@@ -653,13 +663,13 @@ class ToolRegistry:
             return
         message, wait = problem
         message += f" Try again {wait_text(wait)}." if wait is not None else " Try again when one of them has ended."
-        error = ToolError(message, code="limit_reached",
-                          next="Wait, then call it again; tell the person if they are waiting for it.")
+        error = LimitHit(message, code="limit_reached",
+                         next="Wait, then call it again; tell the person if they are waiting for it.")
         self._audit(ctx, spec, self.decide(spec, caller=ctx.actor), "rate_limited", prepared.arguments,
                     detail=message, reason_code="limit_reached")
         raise error
 
-    def question_refusal(self, spec: ToolSpec, inp: Optional[BaseModel], ctx: ToolContext) -> Optional[ToolError]:
+    def question_refusal(self, spec: ToolSpec, inp: Optional[BaseModel], ctx: ToolContext) -> Optional[LimitHit]:
         """Why a question about this call must not be put to the person now (design 6.5, U8), or None: they said no
         to this exact call (same tool, same normalized arguments, so a respelled call counts as the same) less than
         10 minutes ago; they said no to this tool three times within 30 minutes (its questions pause for 30
@@ -668,18 +678,18 @@ class ToolRegistry:
         key = _args_key(inp.model_dump(mode="json")) if inp is not None else ""
         number, since, _ = self.limiter.count(("no", ctx.actor, spec.name, key), limits.decline_cooldown)
         if number:
-            return ToolError(f"The person declined this exact call of '{spec.title}' {_minutes(since)} ago; it is not "
+            return LimitHit(f"The person declined this exact call of '{spec.title}' {_minutes(since)} ago; it is not "
                              f"asked again for another {_minutes(limits.decline_cooldown - since)}.", code="declined",
                              next="Do not retry it unless the person asks for it; tell them what you wanted to do.")
         number, since, _ = self.limiter.count(("pause", ctx.actor, spec.name), limits.decline_pause)
         if number:
-            return ToolError(f"The person declined '{spec.title}' {limits.declines_to_pause} times within "
+            return LimitHit(f"The person declined '{spec.title}' {limits.declines_to_pause} times within "
                              f"{_minutes(limits.decline_window)}; questions about it are paused for another "
                              f"{_minutes(limits.decline_pause - since)}.", code="declined",
                              next="Do not call it again now; ask the person in your answer what they want instead.")
         wait = self.limiter.full(("questions", ctx.actor), limits.questions_per_hour, 3600.0)
         if wait is not None:
-            return ToolError(f"This client already asked the person {limits.questions_per_hour} questions in the last "
+            return LimitHit(f"This client already asked the person {limits.questions_per_hour} questions in the last "
                              f"hour, the most allowed. Try again {wait_text(wait)}.", code="limit_reached",
                              next="Tell the person what you would like to do instead of asking again now.")
         return None
@@ -721,8 +731,8 @@ class ToolRegistry:
     def _failed(self, ctx: ToolContext, tool: str, arguments: Any, error: ToolError) -> ToolError:
         """Records a failed call for the repeat guard and returns the error to raise: the second identical failure
         (same tool, same normalized arguments, same code) says so, and the second unknown id in a session adds
-        "do not guess ids". A pending approval is not a failure."""
-        if error.code == "waiting_for_approval":
+        "do not guess ids". A pending approval is not a failure, nor is a refusal of the limits table (LimitHit)."""
+        if error.code == "waiting_for_approval" or isinstance(error, LimitHit):
             return error
         key = (ctx.actor, ctx.session, tool, _args_key(arguments))
         now = self.limiter.clock()
@@ -968,9 +978,6 @@ class ToolRegistry:
                         detail="Cancelled before it started.", reason_code="failed", **confirmation)
             raise ToolError(f"'{spec.title}' was cancelled before it started.", code="failed",
                             next="Nothing ran. Call it again only if the person still wants it.")
-        if spec.limits.per_day:  # a run counts toward the tool's quota per day once it really starts
-            self.limiter.add(("day", ctx.actor, spec.name), DAY)
-
         def end(outcome: str, detail: str = "", result: Any = None, reason_code: str = "") -> None:
             if ctx.cancel.is_set():
                 detail = ("The client cancelled the call while it ran; this is what it did. " + detail).strip()
@@ -1007,7 +1014,8 @@ class ToolRegistry:
             next_step = redact_secrets(getattr(e, "next", "") or "")
             if not next_step and code == "failed" and "Next:" not in message:
                 next_step = FAILED_NEXT
-            raise ToolError(message, code=code, next=next_step, quoted=message) from e
+            raise ToolError(message, code=code, next=next_step, quoted=message,
+                            field=str(getattr(e, "field", "") or "")) from e
         except Exception as e:
             self.logger.error(f"Tool {spec.name} failed: {e}", exc_info=True)
             end("error", repr(e), reason_code="failed")
@@ -1018,6 +1026,10 @@ class ToolRegistry:
             raise
         finally:
             _CALL.reset(token)
+        # A run counts toward the tool's quota per day once it ran: a declined call, or a start the handler refused
+        # (a full build queue, an invalid request), started nothing.
+        if spec.limits.per_day:
+            self.limiter.add(("day", ctx.actor, spec.name), DAY)
         serialized = result.model_dump_json()
         end("ok", result={"sha256": text_sha256(serialized), "bytes": len(serialized.encode("utf-8"))})
         return result

@@ -129,11 +129,13 @@ class WorkflowState:
         return int((self.completed_builds / self.total_builds) * 100)
 
 class BuildQueueFull(RuntimeError):
-    """The build queue holds MAX_UNFINISHED_REQUESTS unfinished requests; a new one is refused, not queued."""
+    """The build queue holds MAX_UNFINISHED_REQUESTS unfinished requests; a tool caller's new one is refused, not
+    queued."""
 
 
 # Unfinished (queued or running) build requests in one framework process, from every caller (design 6.5: the global
-# queue cap; the queue was unbounded).
+# queue cap; the queue was unbounded). Only a tool caller's request (it has an owner: Ditto, an MCP client) is
+# refused when the queue is full; the person's own GUI and CLI builds are always queued, AI work never blocks them.
 MAX_UNFINISHED_REQUESTS = 20
 FINISHED_STATES = ("COMPLETED", "ERROR", "CANCELLED")
 
@@ -214,7 +216,7 @@ class LLMOrchestrator:
         """Nimmt einen neuen Build-Auftrag entgegen"""
         async with self._lock:
             unfinished = sum(1 for s in self._workflows.values() if s.status.name not in FINISHED_STATES)
-            if unfinished >= MAX_UNFINISHED_REQUESTS:
+            if getattr(request, "owner", "") and unfinished >= MAX_UNFINISHED_REQUESTS:
                 raise BuildQueueFull(f"The build queue is full ({MAX_UNFINISHED_REQUESTS} unfinished build requests); "
                                      "the request was not queued.")
             # Workflow State erstellen

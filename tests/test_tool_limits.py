@@ -173,15 +173,17 @@ class TestGlobalQueue:
             orch._workflows[f"q{i}"] = WorkflowState(f"q{i}", OrchestrationStatus.QUEUED, datetime.now())
         orch._workflows["done"] = WorkflowState("done", OrchestrationStatus.COMPLETED, datetime.now())
         orch._ensure_worker_running = lambda: None
+        # A tool caller's requests (they have an owner); the person's own builds are never refused (review).
         request = BuildRequest("", WorkflowType.SIMPLE_CONVERSION, PriorityLevel.NORMAL, [MODEL], ["Rockchip"],
-                               [ModelFormat.GGUF], OptimizationLevel.BALANCED, [], False, "out")
+                               [ModelFormat.GGUF], OptimizationLevel.BALANCED, [], False, "out", owner="mcp#a")
 
         async def submit():
             first = await orch.submit_build_request(request)
             with pytest.raises(BuildQueueFull):
                 await orch.submit_build_request(BuildRequest("", WorkflowType.SIMPLE_CONVERSION, PriorityLevel.NORMAL,
                                                              [MODEL], ["Rockchip"], [ModelFormat.GGUF],
-                                                             OptimizationLevel.BALANCED, [], False, "out"))
+                                                             OptimizationLevel.BALANCED, [], False, "out",
+                                                             owner="mcp#a"))
             return first
         assert asyncio.run(submit())
         assert MAX_UNFINISHED_REQUESTS == 20
