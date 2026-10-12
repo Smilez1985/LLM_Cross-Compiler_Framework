@@ -576,8 +576,9 @@ class AuditLog:
         return result("removed", anchor[0])
 
     def grant_uses(self, grant_id: str) -> Tuple[int, Optional[str]]:
-        """(how often a standing approval was used, the time of its last use or of its lapse record), read from the
-        entries whose confirmation channel names it; the policy file never counts uses. (0, None) without a log."""
+        """(how often a standing approval was used, the time of its last use), read from the end entries of the calls
+        that ran under it; the policy file never counts uses. The record of its lapse is no use: counting it would
+        wake a lapsed standing approval up again for another 90 days. (0, None) without a log."""
         if not re.fullmatch(r"g_[0-9a-f]{16}", grant_id or "") or not os.path.lexists(self.path):
             return 0, None
         needle = f'"confirm_channel":"grant:{grant_id}"'
@@ -585,10 +586,9 @@ class AuditLog:
         try:
             row = db.execute("SELECT COUNT(*), MAX(ts) FROM events WHERE instr(extra, ?) > 0 AND outcome IN "
                              "('ok', 'error', 'cancelled')", (needle,)).fetchone()
-            last = db.execute("SELECT MAX(ts) FROM events WHERE instr(extra, ?) > 0", (needle,)).fetchone()
         finally:
             db.close()
-        return int(row[0] or 0), (last[0] if last else None)
+        return int(row[0] or 0), (row[1] if row else None)
 
     def kept_with_key(self) -> bool:
         """Whether this log is kept with a key (its newest entry, or the key it started with, names one): then a

@@ -110,6 +110,9 @@ class GrantOffer(BaseModel):
     summaries: Dict[str, str]                   # width -> scope in plain words
     durations: List[str]                        # keys of DURATIONS this caller may choose
     warning: str = Field(max_length=4000)
+    # The named token that asked (Grant.token_created): a request of a token revoked since never becomes a standing
+    # approval of a new token with the same name.
+    token_created: Optional[str] = None
 
     def default_width(self) -> str:
         return "this" if "this" in self.scopes else next(iter(self.scopes))

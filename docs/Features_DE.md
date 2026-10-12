@@ -916,9 +916,11 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   (eine Bearbeitung von Hand verbietet alles) und werden nur geschrieben, wenn du sie anlegst, widerrufst oder
   zurücksetzt, damit eine Nutzung die Datei nie neu schreibt und keinen Widerruf rückgängig machen kann; ihre
   Nutzungen und die letzte Nutzung kommen aus dem Audit-Log (`confirm_channel` `grant:<id>`), und die GUI zeigt jede
-  Nutzung mit einem **Revoke**-Knopf. Sie verfallen nach 90 Tagen ohne Nutzung (festgehalten als `grant_lapsed`), mit
-  ihrem Ablauf, wenn sich die Regel des Tools ändert und wenn ihr Token widerrufen wird;
-  `llm-cli tools permissions --grants` und der Dialog Tool Permissions führen sie mit ihren Nutzungen auf, und
+  Nutzung mit einem **Revoke**-Knopf und nennt dabei, wer gehandelt hat, das Tool und was die dauerhafte Freigabe
+  abdeckt. Sie verfallen nach 90 Tagen ohne Nutzung (einmal festgehalten als `grant_lapsed`; eine verfallene bleibt
+  verfallen), mit ihrem Ablauf, wenn sich die Regel des Tools ändert und wenn ihr Token widerrufen wird; die Anfrage
+  eines Tokens, das seitdem widerrufen wurde, wird nie zur dauerhaften Freigabe eines neuen Tokens mit demselben
+  Namen. `llm-cli tools permissions --grants` und der Dialog Tool Permissions führen sie mit ihren Nutzungen auf, und
   `--revoke-grant ID`, **Revoke** im Dialog und `--reset` entfernen sie. Solange die GUI läuft, kann die
   Kommandozeile keine anlegen (nutze das Fenster der GUI); eine auf der Kommandozeile angelegte wird beim nächsten
   GUI-Start einmal gezeigt. `get_status` zeigt einem Aufrufer seine eigenen dauerhaften Freigaben, nur lesend.
