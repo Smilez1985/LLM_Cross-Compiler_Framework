@@ -411,6 +411,9 @@ class ConfigManager:
             ConfigSchema("audio_announcements", bool, False, True,
                          "Spoken announcements (Deep Ingest notice and outcome) through the speech engine of the "
                          "OS; never in CI, over SSH without a display or with LLM_FRAMEWORK_NO_AUDIO=1"),
+            ConfigSchema("chat_panel_auto_show", bool, False, True,
+                         "Show the chat panel when a question waits for you (it never takes the keyboard focus); "
+                         "an AI cannot change this setting"),
 
             # AI Agent (Ditto) Selection
             ConfigSchema("ai_provider", str, False, "OpenAI",
@@ -669,6 +672,7 @@ class ConfigManager:
                 "rag_reranker", "rag_rerank_default", "rag_rerank_min_score", "rag_model_idle_minutes",
                 "crawler_max_depth", "crawler_max_pages",
                 "crawler_rate_limit", "crawler_download_pdfs", "crawler_languages", "audio_announcements",
+                "chat_panel_auto_show",
                 "ai_provider", "ai_model", "ai_base_url", "ai_effort", "ai_fallback_chain",
                 "ai_anthropic_workspace_id", "ai_ditto_tool_source", "ai_ditto_mcp_transport", "ai_ditto_mcp_command",
                 "ai_ditto_mcp_url", "ai_ditto_mcp_name",

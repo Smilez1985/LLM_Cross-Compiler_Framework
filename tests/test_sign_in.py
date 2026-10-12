@@ -1108,7 +1108,8 @@ class TestGuiHelpers:
         monkeypatch.setattr(main_window, "FrameworkManager", FailingFramework)
         monkeypatch.setattr(main_window, "choose_storage_at_start",
                             lambda parent, config, error: offered.append(error.code) or len(offered) < 2)
-        monkeypatch.setattr(main_window.QMessageBox, "critical", lambda parent, title, text: shown.append(text))
+        from orchestrator.gui import plain   # the fatal error is a plain-text box (design 5.2 R1, SEC-M2)
+        monkeypatch.setattr(plain, "_exec", lambda box: shown.append(box.text()) or 0)
         with pytest.raises(SystemExit):
             main_window.MainOrchestrator(tmp_path)
         assert offered == ["storage.keyring_unavailable"] * 2 and "secret_storage" in shown[0]
@@ -1138,7 +1139,8 @@ class TestGuiHelpers:
 
         monkeypatch.setattr(main_window, "FrameworkManager", FailingFramework)
         monkeypatch.setattr(sign_in.StorageChooserDialog, "exec", choose)
-        monkeypatch.setattr(main_window.QMessageBox, "critical", lambda *args: None)
+        from orchestrator.gui import plain   # the fatal error is a plain-text box (design 5.2 R1, SEC-M2)
+        monkeypatch.setattr(plain, "_exec", lambda box: 0)
         with pytest.raises(SystemExit):
             main_window.MainOrchestrator(tmp_path)
         assert errors == [], "the choice was tried"

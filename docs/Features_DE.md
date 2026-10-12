@@ -552,6 +552,54 @@ hinaus (Standard 4096 Tokens, geschätzt mit vier Zeichen pro Token), fasst Ditt
 zusammen und setzt in einem neuen Gespräch fort, das mit der Zusammenfassung beginnt. Das Fenster behält bis zu 500
 Einträge. Verläufe früherer Versionen werden übernommen. `llm-cli ditto ask` nutzt den Verlauf nicht.
 
+### Der Chat-Bereich
+
+Der Chat sitzt in einem Bereich rechts im Hauptfenster; der frühere Reiter **AI Chat** ist dorthin umgezogen, und
+nichts, was er konnte, geht verloren. F9 oder **Ansicht > KI-Chat-Bereich** zeigt oder verbirgt ihn, **Ansicht > Im
+Chat schreiben** (Strg+Umschalt+C) setzt den Cursor ins Nachrichtenfeld, ein Klick auf Ditto in der Werkzeugleiste
+zeigt ihn, und die Schaltfläche **KI-Chat (3)** in der Werkzeugleiste zählt neue Nachrichten und wartende Fragen. Du
+kannst den Bereich nach links verschieben oder frei schweben lassen; wo er sitzt, ob er gezeigt wird, sein Filter und
+der neueste Eintrag, den du gesehen hast, stehen in `~/.llm-framework/gui_state.json` (eine beschädigte Datei ergibt
+die Vorgaben).
+
+- **Was ankommt:** deine Nachrichten, Dittos Antworten und Werkzeug-Hinweise, Hinweise (ein Korrekturvorschlag eines
+  KI-Clients, die Nutzung einer Dauerfreigabe) und die Einträge darüber, was KI-Apps getan haben, aus jedem Prozess
+  des Frameworks (der GUI, der Kommandozeile, jedem MCP-Server). Der Bereich liest den signierten Chat-Verlauf einmal
+  pro Sekunde und wartet nie darauf; ein Eintrag, der sich nicht prüfen lässt, wird nicht gezeigt, und der Bereich
+  sagt, wie viele übersprungen wurden. Ohne den Verlauf zeigt er Dittos Gespräch wie bisher und sagt, dass neue
+  Nachrichten nicht behalten werden.
+- **Wartende Fragen** kommen aus den ausstehenden Freigaben, nie allein aus Chat-Einträgen, und bleiben unten unter
+  **Braucht dich**: wer fragt, was, und wie viel Zeit bleibt. **Im Freigabe-Fenster öffnen…** entscheidet sie dort.
+  Eine neue Frage zeigt einen verborgenen Bereich, ohne den Tastaturfokus zu nehmen; das lässt sich im Menü **⋯** des
+  Bereichs abschalten (die Einstellung `chat_panel_auto_show` kann keine KI ändern).
+- **Filter:** Alles, Braucht dich, Entscheidungen, Chat mit Ditto. Routine-Entscheidungen einer App innerhalb von
+  zehn Minuten werden zu einer Zeile zusammengefasst („Claude Code hat 6 Dinge erledigt“, **Zeigen**). **Neu, seit du
+  zuletzt geschaut hast** markiert den ersten neuen Eintrag, mit einer Zusammenfassung, die aus den Einträgen selbst
+  gezählt wird, nie aus dem, was eine KI geschrieben hat.
+- **Nur reiner Text:** Was eine KI, eine App oder ein Dateiname geschrieben hat, erscheint als reiner Text,
+  versteckte Zeichen als Escape-Folgen: keine Formatierung, keine Bilder, nichts Anklickbares. Eine Adresse in einem
+  Text öffnet sich nur über ihr Kontextmenü (**Adresse öffnen…**), nach einer Frage, die die ganze Adresse zeigt.
+  Deine Nachrichten stehen rechts; Dittos links mit seinem Bild; die einer KI-App links unter dem Namen, unter dem das
+  Framework sie kennt, mit dem Namen, den die App sich selbst gibt, klein darunter (eine App, die sich Ditto, das
+  Framework oder das System nennt, wird als „nennt sich so“ gezeigt). Hinweise des Frameworks gehen über die ganze
+  Breite und schreiben „Warnung:“ aus; Werte von außerhalb des Frameworks stehen in Anführungszeichen und bleiben in
+  ihrer Zeile. KI-Text in einem Eintrag des Frameworks steht in einem Kasten mit der Überschrift „In eigenen Worten
+  (KI-Text, vom Framework nicht geprüft)“.
+- **Sprechende Namen:** Kennungen, die das Framework vergeben hat (ein Auftrag, ein Build, eine Frage), erscheinen in
+  KI-Text mit ihrem Namen «so»; **Ursprüngliche Worte zeigen** zeigt den Text genau so, wie er geschrieben wurde.
+  Kennungen in Code behalten ihre Form und bekommen eine Legendenzeile.
+- **Tastatur und Bildschirmleser:** Enter sendet, Umschalt+Enter fügt eine Zeile ein, Pfeil hoch in einem leeren
+  Nachrichtenfeld geht zum neuesten Eintrag, Pfeil hoch/runter und Pos1/Ende gehen zwischen den Einträgen, Escape
+  zurück ins Nachrichtenfeld. Jeder Eintrag hat einen zugänglichen Namen (Absender und Zeit), und neue Einträge werden
+  Bildschirmlesern angesagt, Fragen mit Vorrang. Keine Taste gibt etwas frei.
+- **Chat leeren…** fragt zuerst und nennt für Dittos Gespräch (`chat_history.json`) und für die Chat-Nachrichten im
+  Chat-Verlauf (`chat_feed.sqlite`) den vollständigen Pfad, den Dateinamen, die Größe und was es ist; **Nein, alles
+  behalten** ist die Vorgabe. Die Einträge darüber, was KI-Apps getan haben, werden nur im Bereich ausgeblendet, nie
+  gelöscht. Das Leeren wird ins Audit-Log geschrieben, bevor etwas gelöscht wird; ohne Audit-Log wird nichts gelöscht.
+
+Eine Frage direkt im Chat mit Ja oder Nein beantworten, „Warum?“ und Rückgängig kommen mit späterer Arbeit; bis
+dahin entscheidet das Freigabe-Fenster.
+
 ---
 
 ## Dittos Tools

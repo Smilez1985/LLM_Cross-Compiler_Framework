@@ -509,6 +509,50 @@ tokens, estimated at four characters per token), Ditto summarizes it in a separa
 conversation that starts with the summary. The window keeps up to 500 entries. Histories of earlier versions are
 migrated. `llm-cli ditto ask` does not use the history.
 
+### The chat panel
+
+The chat sits in a panel on the right of the main window; the former **AI Chat** tab moved there and nothing it did
+is lost. F9 or **View > AI Chat Panel** shows or hides it, **View > Write in the Chat** (Ctrl+Shift+C) puts the cursor
+into the message field, a click on Ditto in the toolbar shows it, and the toolbar button **AI Chat (3)** counts new
+messages and questions that wait. You can move the panel to the left or let it float; where it sits, whether it is
+shown, its filter and the newest entry you have seen are kept in `~/.llm-framework/gui_state.json` (a damaged file
+gives the defaults).
+
+- **What arrives:** your messages, Ditto's answers and tool notes, notices (a fix proposal of an AI client, a use of a
+  standing approval) and the records of what AI apps did, from every framework process (the GUI, the command line,
+  each MCP server). The panel reads the signed chat feed once a second and never waits on it; an entry that does not
+  verify is not shown, and the panel says how many were skipped. Without the feed it shows Ditto's conversation as
+  before and says that new messages are not kept.
+- **Questions that wait** come from the pending approvals, never from chat entries alone, and stay at the bottom
+  under **Needs you**: who asks, what, and the time left. **Open in the approvals window…** decides them there. A new
+  question shows a hidden panel without taking the keyboard focus; switch this off in the panel's **⋯** menu (the
+  setting `chat_panel_auto_show` cannot be changed by an AI).
+- **Filter:** All, Needs you, Decisions, Ditto chat. Routine decisions of one app within ten minutes are folded into
+  one line ("Claude Code did 6 things", **Show**). **New since you last looked** marks the first new entry, with a
+  summary counted from the entries themselves, never from what an AI wrote.
+- **Plain text only:** whatever an AI, an app or a file name wrote is shown as plain text with hidden characters as
+  escapes: no formatting, no images, nothing clickable. An address in a text opens only from its context menu
+  (**Open address…**), after a question that shows the whole address. Your messages sit on the right; Ditto's on the
+  left with its picture; an AI app's on the left under the name the framework knows it by, with the name the app gives
+  itself small below (an app that calls itself Ditto, the framework or the system is shown as calling itself so).
+  Framework notices span the whole width and spell out "Warning:"; values from outside the framework are quoted and
+  stay on their line. AI text inside a framework entry sits in a box captioned "In its own words (AI text, not
+  checked by the framework)".
+- **Speaking names:** ids the framework made (a job, a build, a question) in an AI's text are shown by name «like
+  this»; **Show the original words** shows the text exactly as written. Ids inside code keep their form and get a
+  legend line.
+- **Keyboard and screen readers:** Enter sends, Shift+Enter adds a line, Up in an empty message field moves to the
+  newest entry, Up/Down and Home/End move between entries, Escape goes back to the message field. Every entry has an
+  accessible name (sender and time), and new entries are announced to screen readers, questions with priority. No
+  key approves anything.
+- **Clear chat…** asks first and lists, for Ditto's conversation (`chat_history.json`) and for the chat messages in
+  the chat feed (`chat_feed.sqlite`), the full path, the file name, the size and what it is; **No, keep everything**
+  is the default. The records of what AI apps did are only hidden from the panel, never deleted. The clear is written
+  to the audit log before anything is deleted; without the audit log nothing is deleted.
+
+Answering a question with Yes or No right in the chat, "Why?" and undo come with later work; until then the
+approvals window decides.
+
 ---
 
 ## Ditto's tools
