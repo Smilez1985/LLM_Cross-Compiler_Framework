@@ -1588,11 +1588,40 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
   Netzzugang führen eine Probe von Hand aus ([README](../README_DE.md#die-hardware-des-boards-untersuchen)).
 - **Dittos lokales Modell** nutzt dieselbe Probe: Die Hardware, auf der Build- und Modellwahl beruhen, kommt aus einem
   Probe-Profil, und freier RAM und freier VRAM werden bei jedem Start neu gelesen.
+- **Probes über ihre ID für KI-Clients und Ditto:** Jede Probe, die das Framework behält, hat eine Probe-ID: `local`
+  für diesen Rechner, 16 Hex-Zeichen für ein Board (importiert mit `llm-cli scan --import DATEI` oder **Import from
+  File** in der GUI, die die Datei jetzt auch geprüft und ohne Hostnamen ablegen, oder untersucht mit
+  `scan --device`). Das Lese-Tool `get_hardware_probe` zeigt die neuesten Probes mit dem jeweils passenden Target
+  oder die Werte einer Probe (Text von außen) und ihr Target; die Ressource `lcf://probes/{probe_id}` zeigt dasselbe.
+  `probe_local_hardware` (fragt standardmäßig vorher) führt die Probe auf diesem Rechner als Job ohne Terminal aus, in
+  einem eigenen Ordner, höchstens 120 Sekunden, und behält das Ergebnis als `local`. Kein Tool liest eine Probe über
+  einen Pfad.
+- **Neues Target von einem KI-Client (`create_target_module`):** Ein MCP-Client in Dittos Rolle, oder Ditto, legt ein
+  Target-Modul für ein Board an, das hier vielleicht niemand testen kann, durch die Prüfungen des Modulgenerators.
+  Nicht testen zu können ist kein Grund abzulehnen: Das Modul bekommt die Support-Stufe `community`, die Herkunft
+  `ai-generated`, „untested“ in der Beschreibung und die Werte, die die KI geschätzt hat (`assumptions`), und Builds
+  davon warnen, dass es ungetestet ist und sein Image mit Netzzugang gebaut wird. Jedes Basis-Image ist erlaubt: Ein
+  Tag wird beim Nachfragen in den Digest aufgelöst, auf den es zeigt (anonym, im Offline-Modus abgelehnt; eine
+  Registry, die eine Anmeldung verlangt, braucht von dir `image@sha256:...`), und das Modul wird mit genau diesem
+  Digest geschrieben. Die Frage zeigt die Registry, „Docker Official Image“ oder klar „other registry; prebuilt image
+  made by its publisher, not checked by the framework“, dass der Image-Build mit Netzzugang läuft, die Plattformen
+  im Manifest des Images und ob eine zu diesem Rechner passt, die Begründung der KI für ein nicht offizielles Image
+  (Pflicht), jede Hersteller-Paketquelle mit dem Fingerabdruck ihres Schlüssels, jedes festgelegte pip-Paket und
+  jeden Download mit Adresse, Größe und sha256, und den aus der Probe des Boards (`probe_id`) geplanten
+  `runtime:`-Block. Die Anzahl der Quellen (3), pip-Pakete (30) und Downloads (5) sind weiche Grenzen: Darüber zu
+  gehen ist eine Warnung in der Frage, die deine Zustimmung aufhebt, nie eine Ablehnung. Das Tool fragt immer (auch
+  wenn du es erlaubt hast), bietet nie „nicht mehr fragen“ an, lehnt einen Namen ab, der sich wie ein vorhandenes
+  Target liest (Groß- und Kleinschreibung und Trennzeichen zählen nicht), und nimmt nie ein vorgefertigtes
+  llama.cpp. Eine lange Definition wird zu einer ausstehenden Freigabe im Framework, mit bis zu 16.000 Zeichen
+  angezeigt.
 - **Neues Target per Fragen:** `llm-cli module create` oder der Assistent unter **Tools > Create Hardware
   Module...**.
 - **Neues Target aus einer Probe:** `llm-cli module generate-ai <Probe-Datei>` oder die KI-Analyse im Assistenten.
-  Ditto schlägt Architektur, SDK, Basis-Image, Pakete, CPU- und CMake-Flags, Setup-Befehle und den
-  Quantisierungsblock von `build.sh` vor; du siehst zuerst den ganzen Vorschlag.
+  Ditto schlägt Architektur, SDK, Basis-Image, Pakete, Hersteller-Paketquellen, pip-Pakete und Downloads, CPU- und
+  CMake-Flags, Setup-Befehle und den Quantisierungsblock von `build.sh` vor; du siehst zuerst den ganzen Vorschlag.
+  `module generate-ai` legt das Basis-Image vor der Frage auf seinen Digest fest, und der Assistent gibt jedes Feld
+  des Vorschlags weiter; beide halten das gespeicherte Modul im Audit-Log fest (`module_saved`, mit dem sha256 der
+  Definition und dem Basis-Image).
 - **Die Geräte-Laufzeit im Modul:** Jede neue `target.yml` bekommt einen Block `runtime:`, den Plan des Build-Rezepts
   für die llama.cpp-Laufzeit des Boards aus der Probe des Targets (die im Assistenten eingelesene Probe-Datei, die
   Probe-Datei von `module generate-ai` oder `llm-cli module create --probe <Datei>`): Architektur, Betriebssystem, die

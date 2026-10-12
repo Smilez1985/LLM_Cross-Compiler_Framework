@@ -1212,4 +1212,9 @@ class TestCrawlsStayWithTheUser:
         assert registry.list()
         for spec in registry.list():
             assert not re.search(r"crawl|ingest|url|fetch", spec.name + spec.description, re.I), spec.name
-            assert not [f for f in spec.input_model.model_fields if "url" in f.lower()], spec.name
+            # The one named exception (MCP design 2.6, DECISIONS round 4 item 4): create_target_module takes vendor
+            # addresses (a pip index; apt sources and downloads inside its lists) that only the person-approved image
+            # build fetches; the tool itself never fetches them (test_targets_modules.py, test_vendor_addresses_are_
+            # never_fetched_by_the_tool). Every other tool takes no address at all.
+            urls = [f for f in spec.input_model.model_fields if "url" in f.lower()]
+            assert not urls or (spec.name == "create_target_module" and urls == ["pip_index_url"]), spec.name

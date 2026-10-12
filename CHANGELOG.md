@@ -477,6 +477,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   "MCP tokens" that lists the tokens and adds one (shown once; read only, a copy of the local stdio clients' or Ditto's
   permissions, or linked to Ditto's), rotates, revokes and sets each token's own permissions, audited with actor
   `gui`, never with the token.
+- **Hardware probes by id for AI clients and Ditto**: `llm-cli scan --import FILE [--label TEXT]` (and the GUI's
+  **Import from File** and the module wizard's imports) stores a board's probe file in the probe store, validated and
+  without its host name, and prints its probe id and the matching target. The read tool `get_hardware_probe` lists
+  the newest probes with their matching target or shows one probe's values (external text); the resource
+  `lcf://probes/{probe_id}` mirrors it; `probe_local_hardware` (asks by default; "do not ask again" offered) probes
+  this computer as a job and keeps the result as `local`. The `add_board` prompt is now listed and reads a probe by its
+  id. No tool reads a probe from a path.
+- **`create_target_module`**: an AI client in Ditto's role (or Ditto) adds a target module for a board nobody here may
+  have tested, through the module generator's checks. The question shows the base image pinned to the digest its tag
+  points at now (any registry; a non-official one shown plainly as a prebuilt image of its publisher; the image build
+  runs with network access), the image's platforms and whether one matches this computer, the AI's reason, every
+  vendor source, pip package and download, the values the AI guessed and that the module is untested; the module is
+  written with exactly that digest, support level `community`, `ai-generated` and the `runtime:` block planned from the
+  board's probe. It always asks, never offers "do not ask again", and a long definition becomes a pending approval.
+- **Vendor software in target modules**: `package_sources` (an https apt repository whose signing key the image build
+  checks against its fingerprint), `pip_packages` (pinned `name==version`, from PyPI or one https index) and
+  `pinned_downloads` (https, exact size and sha256, into `/opt/vendor`), rendered by the framework's Dockerfile
+  template, for Ditto's proposals, the wizard and the MCP tool. Their counts are soft limits (3, 30, 5): going above
+  one is a warning the person's approval overrides, never a refusal; prebuilt llama.cpp stays refused.
 
 ### Changed
 - **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
@@ -609,6 +628,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   carries no signature, so every tool is denied until you set the permissions up again (the GUI shows the dialog at
   the first start and says why; `llm-cli tools permissions`). `llm-cli tools permissions`, also with `--reset`, and
   `llm-cli ditto setup` need a person at a terminal: piped answers are refused.
+- **Targets for AI callers**: `list_targets` shows each target's trust (`shipped`, a pack's trust, `ai-generated`,
+  `own`) and whether it is untested; `get_target_capabilities` adds the trust, an AI-created target's assumptions and
+  base image reason (external text) and, with `check_files`, the problems the module and pack checks find in its
+  files. AI-created targets carry `provenance: ai-generated` and `untested: true` in `target.yml`, and builds of them
+  warn that they are untested and that their image is built with network access.
+- **Probing and AI modules without a terminal**: the local probe (`llm-cli scan`, `probe_local_hardware`) runs the
+  fallback script with input from `/dev/null`, `NON_INTERACTIVE=true` and its own working folder, and stops after 120
+  seconds. `llm-cli module generate-ai` pins the base image to its digest before it asks; it and the wizard record the
+  saved module in the audit log (`module_saved`), and the wizard passes on every field of Ditto's proposal.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -829,6 +857,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   approval is matched on the looked-up facts on the MCP path too (a client that could ask is not asked when one covers
   the call), Ditto's scrollable dialog for long questions also offers "do not ask again", and an approved call's
   quotas are checked again before it runs.
+- **Target names that read alike**: a new target (module generator, wizard, `create_target_module`) whose name equals an
+  existing target's id or folder ignoring case and separators (`rockchip`, `Rock-Chip` next to `Rockchip`) is refused,
+  so it can never capture the name of another target.
+- **A GPU-template module builds the base image it names**: a module on the GPU template with a base image other than
+  the default (for example a vendor toolchain image) silently kept the template's Ubuntu base; now both stages start
+  from it, and the generator checks that the builder stage starts from the module's base image. Image references
+  with a registry port (`registry.example:5000/img@sha256:...`) are accepted.
 
 ### Security
 - **AI clients never see the host path of a local model they named** (MCP clients and Ditto): the build's stage

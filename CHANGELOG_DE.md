@@ -544,6 +544,27 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Abschnitt „MCP tokens“, der die Tokens auflistet und eines anlegt (einmal gezeigt; nur lesend, eine Kopie der
   Berechtigungen der lokalen stdio-Clients oder Dittos, oder an Dittos gebunden), rotiert, widerruft und die eigenen
   Berechtigungen jedes Tokens festlegt, protokolliert mit dem Akteur `gui`, nie mit dem Token.
+- **Hardware-Probes über ihre ID für KI-Clients und Ditto**: `llm-cli scan --import DATEI [--label TEXT]` (und
+  **Import from File** in der GUI und die Importe des Modul-Assistenten) legt die Probe-Datei eines Boards im
+  Probe-Speicher ab, geprüft und ohne Hostnamen, und zeigt ihre Probe-ID und das passende Target. Das Lese-Tool
+  `get_hardware_probe` zeigt die neuesten Probes mit ihrem passenden Target oder die Werte einer Probe (Text von
+  außen); die Ressource `lcf://probes/{probe_id}` spiegelt es; `probe_local_hardware` (fragt standardmäßig; „nicht mehr
+  fragen“ wird angeboten) untersucht diesen Rechner als Job und behält das Ergebnis als `local`. Der Prompt
+  `add_board` wird jetzt angeboten und liest eine Probe über ihre ID. Kein Tool liest eine Probe über einen Pfad.
+- **`create_target_module`**: Ein KI-Client in Dittos Rolle (oder Ditto) legt ein Target-Modul für ein Board an, das
+  hier vielleicht niemand testen kann, durch die Prüfungen des Modulgenerators. Die Frage zeigt das Basis-Image,
+  festgelegt auf den Digest, auf den sein Tag gerade zeigt (jede Registry; eine nicht offizielle klar als fertiges
+  Image ihres Herausgebers; der Image-Build läuft mit Netzzugang), die Plattformen des Images und ob eine zu diesem
+  Rechner passt, die Begründung der KI, jede Hersteller-Quelle, jedes pip-Paket und jeden Download, die geschätzten
+  Werte und dass das Modul ungetestet ist; das Modul wird mit genau diesem Digest geschrieben, mit Support-Stufe
+  `community`, `ai-generated` und dem aus der Probe des Boards geplanten `runtime:`-Block. Es fragt immer, bietet nie
+  „nicht mehr fragen“ an, und eine lange Definition wird zu einer ausstehenden Freigabe.
+- **Hersteller-Software in Target-Modulen**: `package_sources` (eine https-Paketquelle für apt, deren
+  Signaturschlüssel der Image-Build gegen seinen Fingerabdruck prüft), `pip_packages` (festgelegt als
+  `name==version`, von PyPI oder einem https-Index) und `pinned_downloads` (https, genaue Größe und sha256, nach
+  `/opt/vendor`), eingefügt von der Dockerfile-Vorlage des Frameworks, für Dittos Vorschläge, den Assistenten und das
+  MCP-Tool. Ihre Anzahlen sind weiche Grenzen (3, 30, 5): Darüber zu gehen ist eine Warnung, die die Zustimmung der
+  Person aufhebt, nie eine Ablehnung; ein vorgebautes llama.cpp bleibt abgelehnt.
 
 ### Geändert
 - **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
@@ -693,6 +714,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (die GUI zeigt den Dialog beim ersten Start und nennt den Grund; `llm-cli tools permissions`).
   `llm-cli tools permissions`, auch mit `--reset`, und `llm-cli ditto setup` brauchen eine Person an einem Terminal:
   Weitergeleitete Antworten werden abgelehnt.
+- **Targets für KI-Aufrufer**: `list_targets` zeigt das Vertrauen jedes Targets (`shipped`, das Vertrauen eines
+  Pakets, `ai-generated`, `own`) und ob es ungetestet ist; `get_target_capabilities` ergänzt das Vertrauen, die
+  Annahmen und die Begründung des Basis-Images eines KI-erstellten Targets (Text von außen) und mit `check_files` die
+  Probleme, die die Modul- und Paketprüfungen in seinen Dateien finden. KI-erstellte Targets tragen
+  `provenance: ai-generated` und `untested: true` in `target.yml`, und ihre Builds warnen, dass sie ungetestet sind und
+  ihr Image mit Netzzugang gebaut wird.
+- **Probe und KI-Module ohne Terminal**: Die lokale Probe (`llm-cli scan`, `probe_local_hardware`) führt das
+  Ersatzskript mit Eingabe aus `/dev/null`, `NON_INTERACTIVE=true` und eigenem Arbeitsordner aus und hört nach 120
+  Sekunden auf. `llm-cli module generate-ai` legt das Basis-Image vor der Frage auf seinen Digest fest; es und der
+  Assistent halten das gespeicherte Modul im Audit-Log fest (`module_saved`), und der Assistent gibt jedes Feld von
+  Dittos Vorschlag weiter.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -935,6 +967,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nachgeschlagenen Fakten gemessen (ein Client, der fragen könnte, fragt nicht, wenn eine den Aufruf abdeckt), Dittos
   scrollbarer Dialog für lange Rückfragen bietet ebenfalls "nicht mehr fragen" an, und die Kontingente eines
   freigegebenen Aufrufs werden vor dem Ausführen noch einmal geprüft.
+- **Target-Namen, die sich gleich lesen**: Ein neues Target (Modulgenerator, Assistent, `create_target_module`), dessen
+  Name ohne Rücksicht auf Groß- und Kleinschreibung und Trennzeichen der ID oder dem Ordner eines vorhandenen Targets
+  gleicht (`rockchip`, `Rock-Chip` neben `Rockchip`), wird abgelehnt, damit es nie den Namen eines anderen Targets
+  übernimmt.
+- **Ein Modul auf der GPU-Vorlage baut das Basis-Image, das es nennt**: Ein Modul auf der GPU-Vorlage mit einem
+  anderen Basis-Image als dem Standard (zum Beispiel einem Toolchain-Image eines Herstellers) behielt still die
+  Ubuntu-Basis der Vorlage; jetzt beginnen beide Stufen damit, und der Generator prüft, dass die Builder-Stufe mit dem
+  Basis-Image des Moduls beginnt. Image-Angaben mit Registry-Port (`registry.example:5000/img@sha256:...`) werden
+  angenommen.
 
 ### Sicherheit
 - **KI-Clients sehen nie den Host-Pfad eines lokalen Modells, das sie benannt haben** (MCP-Clients und Ditto): Der

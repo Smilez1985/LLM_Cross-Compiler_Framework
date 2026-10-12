@@ -71,10 +71,7 @@ def env(make_framework):
         PackOut, lambda i: installed.append(i.pack_id) or PackOut(installed=i.pack_id), open_world=True,
         grant=GrantRule(rule=PACK_RULE, facts=pack_facts,
                         warning="install packs from the signed index within this scope")))
-    registry.register(ToolSpec(
-        "probe_local_hardware", "Probe this computer", "Probes this computer", ToolTier.LOCAL_WRITE, PackIn, PackOut,
-        lambda i: PackOut(installed="probe"), grant=GrantRule(rule=tool_rule("probe_local_hardware"),
-                                                              facts=lambda i, c: {}, warning="probe this computer")))
+    # probe_local_hardware is the framework's own tool now (design T5), with a standing approval scoped to the tool.
     registry.policy_store.replace(ToolPolicy(configured=True, reviewed=[s.name for s in registry.list()]))
     return SimpleNamespace(fm=fm, registry=registry, store=registry.approvals.store, installed=installed,
                            server=mcp_server.build_mcp_server(fm), state=registry.policy_store.path.parent)
