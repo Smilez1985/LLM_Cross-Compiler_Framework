@@ -369,7 +369,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   denen sie führen. Die erste Nachricht ist der feste Text des Frameworks, die zweite der Kontext, in dem jeder Wert
   von außen (auch die Argumente) als nicht vertrauenswürdige Daten eingepackt ist, Secrets geschwärzt, höchstens
   24.000 Zeichen. Ein Prompt wird wie ein Lese-Tool gelesen: Die Leseberechtigung entscheidet, ein unbekanntes Argument
-  wird mit den gültigen Namen abgelehnt, jeder Abruf landet als `get_prompt:<Name>` im Audit-Log. Vervollständigung
+  wird mit den gültigen Namen abgelehnt, jeder Abruf landet als `get_prompt:<Name>` im Audit-Log. Ein Prompt, dessen
+  Kontext enthält, was ein Lese-Tool liefert (Zustand und Log eines Builds, die Capabilities eines Targets), folgt
+  auch der Berechtigung dieses Tools (verborgen, solange es verboten ist, abgelehnt bei „fragen“), und Auszüge aus
+  der Wissensbasis kommen nur, solange `search_knowledge` erlaubt ist. Vervollständigung
   (VS Code) bietet Target-IDs, Boards, Dokumentnamen und die eigenen Build-Requests des Aufrufers an.
 - **Ehrliches „kann ich nicht“ für Dittos Modulvorschläge und Build-Empfehlungen**: Das Modell darf mit `cannot` und
   einem Grundcode antworten (fehlende Information, nicht unterstützt, kein Tool, Berechtigung, braucht einen Menschen,
@@ -396,7 +399,7 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ungetestete Hardware ist kein Grund abzulehnen. Die Modulaufgabe beschränkt Basis-Images nicht mehr auf `debian:*`
   und `ubuntu:*`: Sie bevorzugt ein Docker Official Image mit den Paketen des Herstellers und begründet jedes andere
   Image. Ein von Ditto vorgeschlagenes Modul sagt in seiner Beschreibung, dass es auf echter Hardware ungetestet ist,
-  und nennt die Annahmen.
+  und nennt die Annahmen, auch eines, das im Modul-Assistenten aus Dittos Vorschlag angelegt wird.
 - **Ditto läuft auf der neuen Anbieterschicht** (offizielle SDKs anthropic und openai) statt auf LiteLLM, und das
   eingebaute Transformers-Modell für den Offline-Modus ist entfernt (der Offline-Modus nutzt lokale Anbieter:
   Ollama, den verwalteten llama-server, einen Server in deinem Netzwerk). Healing-Analysen, Modulvorschläge und
@@ -547,8 +550,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Modul-Assistent: Ein Basis-Image, das Ditto vorgeschlagen hatte, wurde durch `debian:bookworm-slim` oder
   `ubuntu:22.04` ersetzt, wenn sein Name nur „debian“ oder „ubuntu“ enthielt (zum Beispiel ein Hersteller-Image auf
   `nvcr.io`), sodass ein anderes Image als das vorgeschlagene gebaut worden wäre. Das vorgeschlagene Image bleibt jetzt
-  unverändert und wird mit seiner Registry gezeigt, und die Meldung mit dem Text der KI erscheint als reiner Text statt
-  als Rich Text.
+  unverändert und wird mit seiner Registry gezeigt, und die Meldungen mit dem Text der KI (auch Dittos Fehler und
+  Absagen) erscheinen als reiner Text statt als Rich Text.
 - MCP-Server: Auf Protokoll 2026-07-28 kündigte er Änderungsmeldungen für Tools, Prompts und Ressourcen sowie
   Ressourcen-Abonnements an, schickte aber nie eine. Jetzt kündigt er sie nur zusammen mit den Ereignissen an, die er
   veröffentlicht, und ohne Ereignisse wird er mit abgeschalteten Abonnements gebaut.
@@ -703,6 +706,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   beiden Wegen angenommen, und unbekannte Tool-Namen werden im Audit-Log festgehalten (bisher auf keinem Weg).
 
 ### Sicherheit
+- Dittos Build-Empfehlung und der Prompt `recommend_build_settings` geben dem Modell die Formate,
+  Quantisierungstypen und Format-Hinweise des Targets (Text aus `target.yml`, den ein Community-Target-Pack
+  installiert) in einem nicht vertrauenswürdigen Block; vorher standen sie als einfacher Text neben den Anweisungen.
 - `LCF_MCP_TOKEN` nimmt `llm-cli` selbst aus der Umgebung, bevor irgendein Befehl läuft, und gibt es nur an
   `mcp serve` weiter; vorher entfernte es nur `mcp serve`, sodass jeder andere Befehl und seine Kindprozesse es erbten.
 - MCP-Server: Was außerhalb einer vom Server geprüften Anfrage läuft, bekommt den Aufrufer ohne jede Berechtigung,

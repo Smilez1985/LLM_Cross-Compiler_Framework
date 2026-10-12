@@ -241,8 +241,9 @@ says so itself and asks no model. The healing analysis has no `cannot`; an uncle
 **Module proposals** may use any base image. Ditto prefers a Docker Official Image (`debian`, `ubuntu`) with the
 vendor's packages; for any other image, for example a vendor's toolchain image on `nvcr.io`, it must give its reason
 (`base_image_reason`). It lists the values it guessed in `assumptions` (at most 10). Before the module is created, the
-module wizard and `llm-cli module generate-ai` show the base image plainly: registry, image, digest (or that it is
-not pinned yet: the module generator needs a digest for images outside its short list of official base images),
+module wizard and `llm-cli module generate-ai` show the base image plainly: registry, image, digest (or, without
+one, either that the module uses the image by its tag, for the module generator's short list of base images, or
+that the generator refuses it until it is pinned),
 "Docker Official Image" or "other registry: ...; prebuilt image made by its publisher, not checked by the framework",
 that the image build runs with network access on this computer outside the build sandbox, and the AI's reason. The
 wizard keeps the proposed image as it is (an image with "debian" in its name is no longer replaced by
@@ -880,7 +881,12 @@ framework never sees it.
   at 24,000 characters. Each prompt carries the honest-"cannot" rule (see
   [Ditto](#honest-cannot-and-untested-hardware)). A prompt is read like a read tool: your read permission decides,
   an unknown argument is refused with the valid names (never dropped), and every get is audited as
-  `get_prompt:<name>`.
+  `get_prompt:<name>`. A prompt shows nothing a read tool may not: one whose context holds what a read tool
+  returns (a build's state and log for `diagnose_build_failure`, a target's capabilities for
+  `convert_model_for_board` and `recommend_build_settings`) is neither listed nor served while you deny that tool,
+  and refused with the tool to call while it is set to "ask"; knowledge excerpts come only while
+  `search_knowledge` is allowed. The target's own texts (format labels and notes from `target.yml`) are external
+  text too.
 - **Completions:** clients that complete arguments (VS Code) get target ids, a target's boards, document names and
   the caller's own build requests, only for prompts and resources the caller may use.
 - **Local files for AI clients:** MCP clients and Ditto never name a path. A local model or calibration dataset is

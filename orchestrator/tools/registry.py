@@ -219,7 +219,10 @@ class PromptSpec:
     """An MCP prompt read through the registry like a read tool (design 4.3, 4.4). `instructions` is a constant the
     framework wrote (no argument value, no external text); `render(arguments, ctx)` builds the context message, with
     every value from outside the framework inside a wrap_untrusted block. `tools` are the tools the prompt leads to:
-    it is offered only when all of them are registered, so a prompt never names a tool that does not exist."""
+    it is offered only when all of them are registered, so a prompt never names a tool that does not exist. `reads`
+    are the read tools (among `tools`) whose data the context holds, such as a build's log: like a resource, a prompt
+    shows nothing those tools may not, so it is hidden while the caller's permissions deny one of them and refused
+    while one is set to "ask"."""
     name: str
     title: str
     description: str
@@ -228,6 +231,7 @@ class PromptSpec:
     render: Callable[[Dict[str, str], "ToolContext"], str]
     tools: Tuple[str, ...] = ()
     completions: Mapping[str, Callable[[Dict[str, str], "ToolContext"], List[str]]] = field(default_factory=dict)
+    reads: Tuple[str, ...] = ()
 
     @property
     def audit_name(self) -> str:
@@ -986,6 +990,9 @@ class ToolRegistry:
         names = [a.name for a in spec.arguments]
         if len(names) != len(set(names)):
             raise ValueError(f"Prompt '{spec.name}' declares an argument twice.")
+        if not set(spec.reads) <= set(spec.tools):
+            raise ValueError(f"Prompt '{spec.name}' reads tools it does not lead to: "
+                             f"{sorted(set(spec.reads) - set(spec.tools))}.")
         self._prompts[spec.name] = spec
         return spec
 
@@ -994,14 +1001,30 @@ class ToolRegistry:
         return [t for t in spec.tools if t not in self._tools]
 
     def prompts(self, caller: Optional[str] = None) -> List[PromptSpec]:
-        """Every prompt, or the ones offered to `caller`: every tool it leads to is registered and its read
-        permission allows it (pseudo-tool get_prompt:<name>, read tier)."""
+        """Every prompt, or the ones offered to `caller`: every tool it leads to is registered, its read permission
+        allows it (pseudo-tool get_prompt:<name>, read tier), and no read tool whose data it holds is denied."""
         if caller is None:
             return list(self._prompts.values())
         policy, section = self._policy_of(caller)
-        return [p for p in self._prompts.values()
-                if not self.missing_tools(p)
-                and policy.decide_tool(_Surface(p.audit_name, p.title), None, section, owner=caller) != Decision.DENY]
+
+        def offered(p: PromptSpec) -> bool:
+            if self.missing_tools(p):
+                return False
+            deciders = [_Surface(p.audit_name, p.title)] + [self._tools[t] for t in p.reads]
+            return all(policy.decide_tool(d, None, section, owner=caller) != Decision.DENY for d in deciders)
+        return [p for p in self._prompts.values() if offered(p)]
+
+    def _prompt_decision(self, spec: PromptSpec, ctx: ToolContext) -> Tuple[Decision, str]:
+        """(the decision for getting a prompt, the read tool that decided it or ""): the prompt's own read
+        permission and that of every read tool whose data its context holds; deny before ask before allow."""
+        decision, holder = self.decide(_Surface(spec.audit_name, spec.title), None, ctx), ""
+        for tool in spec.reads:
+            if decision == Decision.DENY:
+                break
+            read = self.decide(self._tools[tool], None, ctx)
+            if read == Decision.DENY or (read == Decision.ASK and decision == Decision.ALLOW):
+                decision, holder = read, tool
+        return decision, holder
 
     def get_prompt(self, name: Any, arguments: Any, ctx: ToolContext) -> Tuple[str, List[str]]:
         """A prompt for `ctx.actor`: (description, [instructions, context]). The arguments are checked against the
@@ -1044,7 +1067,7 @@ class ToolRegistry:
             elif value.strip():
                 args[key] = value.strip()
         problems += [f"'{a.name}' is required" for a in spec.arguments if a.required and a.name not in args]
-        decision = self.decide(surface, None, ctx)
+        decision, holder = self._prompt_decision(spec, ctx)
         if problems:
             message = (f"Invalid arguments for the prompt {spec.name}: {'; '.join(problems)}. Valid arguments: "
                        f"{', '.join(known) or 'none'}.")
@@ -1056,9 +1079,16 @@ class ToolRegistry:
             self._audit(ctx, surface, decision, "not_confirmed" if asks else "denied", args,
                         reason_code="needs_person" if asks else "permission_denied",
                         answer="unavailable" if asks else "")
+            if asks and holder:
+                raise ToolDenied(f"The prompt '{spec.title}' holds what {holder} returns, which needs the person's "
+                                 "confirmation; getting a prompt cannot ask for it.", code="needs_person",
+                                 next=f"Call the tool {holder} instead; it asks the person.")
             if asks:
                 raise ToolDenied(f"The prompt '{spec.title}' needs the person's confirmation, which getting a prompt "
                                  "cannot ask for.", code="needs_person", next=UNASKED_HINT)
+            if holder:
+                raise ToolDenied(f"The prompt '{spec.title}' holds what {holder} returns, which your tool permissions "
+                                 "do not allow.", next=DENIED_HINT)
             raise ToolDenied(f"The prompt '{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
 
         def end(outcome: str, detail: str = "", reason_code: str = "", text: str = "") -> None:

@@ -207,7 +207,8 @@ class ModuleCreationWizard(QWizard):
         self.setMinimumSize(900, 700)
         
         self.module_data = {}
-        self.ai_config = {} 
+        self.ai_config = {}
+        self.ai_proposal = None  # Ditto's proposal the fields were filled from: the module is marked untested
         self.crawl_worker = None
         self._close_result = None   # closing waits for a running crawl to store its current page
         self.crawled_roots = set()  # URLs crawled in this wizard: the only pages a knowledge snapshot may hold
@@ -772,6 +773,7 @@ Setup commands:
             self.cpu_flags.setText(" ".join(cpu_flags))
             self.cmake_flags.setText(" ".join(cmake_flags))
             
+            self.ai_proposal = None  # the fields now come from the probe, not from Ditto
             self._set_avatar_state("success")
             self.status_label.setText(tr("msg.import_success"))
             QMessageBox.information(self, tr("msg.import_success"), 
@@ -837,7 +839,10 @@ Setup commands:
         self.btn_import_std.setEnabled(True)
         self.ai_progress.setVisible(False)
         self.status_label.setText(f"❌ {tr('status.error')}")
-        QMessageBox.critical(self, "AI Error", err)
+        # The error can quote the model (Ditto's stated reason for "cannot"): AI text is never rendered as rich text.
+        box = QMessageBox(QMessageBox.Critical, "AI Error", str(err), QMessageBox.Ok, self)
+        box.setTextFormat(Qt.PlainText)
+        box.exec()
 
     def on_ai_finished(self, config):
         self._set_avatar_state("success")
@@ -849,6 +854,7 @@ Setup commands:
         if not isinstance(config, dict):
             self.on_ai_error("The AI answer is not a JSON object.")
             return
+        self.ai_proposal = dict(config)
 
         def text(key):
             value = config.get(key, "")
@@ -916,11 +922,14 @@ Setup commands:
              if "g++-riscv64-linux-gnu" not in packages_list:
                  packages_list.append("g++-riscv64-linux-gnu")
 
+        from orchestrator.Core.ditto_manager import ai_module_description
         self.module_data = {
             "module_name": self.name_edit.text(),
             "architecture": arch,
             "sdk": self.sdk_edit.text(),
-            "description": f"Target for {self.name_edit.text()}",
+            # A module from Ditto's proposal says it is untested and names Ditto's guesses, as generate-ai's does.
+            "description": (ai_module_description(self.name_edit.text(), self.ai_proposal.get("assumptions") or [])
+                            if self.ai_proposal else f"Target for {self.name_edit.text()}"),
             "base_os": self.custom_os_edit.text() if self.rad_custom.isChecked() else ("debian:bookworm-slim" if self.rad_debian.isChecked() else "ubuntu:22.04"),
             "packages": packages_list,
             "cpu_flags": self.cpu_flags.text(),

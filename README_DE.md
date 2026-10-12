@@ -382,7 +382,7 @@ du Claude Desktop neu.
 - **Prompts:** Dittos Aufgaben für deinen Client, mit denselben Anweisungen und demselben Wissenskontext, den Ditto
   bekommt: `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings` und `diagnose_build_failure`
   (in Claude Code als Slash-Befehle). Sie gewähren nichts; jeder Schritt läuft weiter über die Tools und deine
-  Berechtigungen.
+  Berechtigungen, und ein Prompt zeigt nichts, was ein Lese-Tool, das du verbietest, zeigen würde.
 - Ein Tool zum Übertragen auf Boards gibt es über MCP nicht.
 
 **Ein Claude-Abo nutzen:** Anthropic erlaubt Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines

@@ -252,8 +252,9 @@ unklare Ursache kommt mit einer niedrigen Sicherheit.
 `ubuntu`) mit den Paketen des Herstellers; für jedes andere Image, zum Beispiel das Toolchain-Image eines Herstellers
 auf `nvcr.io`, muss es seinen Grund angeben (`base_image_reason`). Werte, die es geraten hat, listet es in
 `assumptions` auf (höchstens 10). Bevor das Modul angelegt wird, zeigen der Modul-Assistent und
-`llm-cli module generate-ai` das Basis-Image offen: Registry, Image, Digest (oder dass es noch nicht festgelegt ist:
-der Modulgenerator braucht einen Digest für Images außerhalb seiner kurzen Liste offizieller Basis-Images),
+`llm-cli module generate-ai` das Basis-Image offen: Registry, Image, Digest (oder, ohne Digest, entweder dass das
+Modul das Image über sein Tag nutzt, bei der kurzen Liste von Basis-Images des Modulgenerators, oder dass der
+Generator es ablehnt, bis es festgelegt ist),
 „Docker Official Image“ oder „andere Registry: ...; fertiges Image seines Herausgebers, vom Framework nicht geprüft“,
 dass der Image-Build mit Netzwerkzugriff auf diesem Rechner außerhalb der Build-Sandbox läuft, und den Grund der KI.
 Der Assistent übernimmt das vorgeschlagene Image unverändert (ein Image mit „debian“ im Namen wird nicht mehr durch
@@ -948,7 +949,13 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Secrets geschwärzt sind und der ganze Prompt auf 24.000 Zeichen begrenzt ist. Jeder Prompt trägt die Regel für das
   ehrliche „kann ich nicht“ (siehe [Ditto](#ehrliches-kann-ich-nicht-und-ungetestete-hardware)). Ein Prompt wird wie
   ein Lese-Tool gelesen: Deine Leseberechtigung entscheidet, ein unbekanntes Argument wird mit den gültigen Namen
-  abgelehnt (nie verworfen), und jeder Abruf landet als `get_prompt:<Name>` im Audit-Log.
+  abgelehnt (nie verworfen), und jeder Abruf landet als `get_prompt:<Name>` im Audit-Log. Ein Prompt zeigt nichts,
+  was ein Lese-Tool nicht darf: Einer, dessen Kontext enthält, was ein Lese-Tool liefert (Zustand und Log eines
+  Builds bei `diagnose_build_failure`, die Capabilities eines Targets bei `convert_model_for_board` und
+  `recommend_build_settings`), wird weder aufgeführt noch geliefert, solange du dieses Tool verbietest, und mit dem
+  aufzurufenden Tool abgelehnt, solange es auf „fragen“ steht; Auszüge aus der Wissensbasis kommen nur, solange
+  `search_knowledge` erlaubt ist. Die eigenen Texte des Targets (Format-Bezeichnungen und Hinweise aus
+  `target.yml`) sind ebenfalls externer Text.
 - **Vervollständigung:** Clients, die Argumente vervollständigen (VS Code), bekommen Target-IDs, die Boards eines
   Targets, Dokumentnamen und die eigenen Build-Requests des Aufrufers, nur für Prompts und Ressourcen, die der
   Aufrufer nutzen darf.

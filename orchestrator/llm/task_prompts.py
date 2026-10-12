@@ -170,10 +170,14 @@ def format_listing(options: Dict[str, Sequence[str]], notes: Optional[Dict[str, 
 
 
 def optimizer_parts(model: str, target: str, board: Optional[str], listing: str, knowledge: str = "") -> List[str]:
+    # The formats, quantization types and notes come from the target's target.yml, which a community target pack
+    # installs: external text like the model name.
+    offered = (wrap_untrusted(listing, "target formats", max_len=6000) if (listing or "").strip()
+               else "(none for this board)")
     parts = ["Model:\n" + wrap_untrusted(model or "(not chosen)", "model name", max_len=500),
              "Target:\n" + wrap_untrusted(f"{target}" + (f", board {board}" if board else ""), "target",
                                           max_len=500),
-             f"Offered formats and their quantization types:\n{listing}"]
+             "Offered formats and their quantization types (from the target's description):\n" + offered]
     if knowledge:
         parts.append("Knowledge-base excerpts:\n" + knowledge)
     return parts
@@ -204,6 +208,19 @@ def is_official_image(reference: str) -> bool:
     return bool(split_image(reference)["official"])
 
 
+def _digest_text(reference: str, digest: str) -> str:
+    """What the module generator does with the image, said plainly: the person decides on this line, so an image the
+    generator takes by its tag must not read as one that will be pinned (until tags are resolved to digests when the
+    module is confirmed, design T5)."""
+    if digest:
+        return digest
+    from orchestrator.Core.module_generator import TRUSTED_IMAGE_PREFIXES
+    if reference.startswith(TRUSTED_IMAGE_PREFIXES):
+        return ("none - the module uses the image by its tag, which its publisher can later point at another "
+                "image")
+    return "not pinned yet - the module generator refuses this image until it is pinned (image@sha256:...)"
+
+
 def base_image_block(reference: str, reason: str = "") -> str:
     """The base image as the person must see it before an AI-proposed module is created (design 6.6 rule 11):
     registry, image, digest, Docker Official Image or plainly another registry, that the image build runs with
@@ -213,8 +230,7 @@ def base_image_block(reference: str, reason: str = "") -> str:
     lines = [f"Base image: {reference}",
              f"  Registry: {info['registry']}; image: {info['repository']}" + (f"; tag: {info['tag']}" if info['tag']
                                                                                else ""),
-             "  Digest: " + (info["digest"] or "not pinned yet - the module needs the image's digest "
-                                               "(image@sha256:...) before it is created")]
+             "  Digest: " + _digest_text(reference, info["digest"])]
     if info["official"]:
         lines.append("  Docker Official Image.")
     else:

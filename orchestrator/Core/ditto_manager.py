@@ -208,9 +208,16 @@ class DittoCannot(DittoError):
     """Ditto did not do the task and says why. `confirmed`: the framework's own check of the task input agrees
     (e.g. neither a probe nor a board was given); otherwise the reason is only the model's statement."""
 
+    # What the person reads for each reason code (speaking names, DECISIONS round 4 item 1); the code stays on .cannot.
+    REASON_TEXT = {"missing_information": "information is missing", "not_supported": "not supported",
+                   "no_tool": "no tool for it", "permission_denied": "not allowed by your permissions",
+                   "needs_person": "needs you", "hardware_unavailable": "hardware not available",
+                   "insufficient_resources": "not enough resources", "limit_reached": "a limit was reached"}
+
     def __init__(self, cannot: CannotAnswer, confirmed: bool):
         self.cannot, self.confirmed = cannot, confirmed
-        what = (f"{cannot.reason}: {sanitize_untrusted(cannot.missing, 500)}. "
+        reason = self.REASON_TEXT.get(cannot.reason, "other reason")
+        what = (f"{reason}: {sanitize_untrusted(cannot.missing, 500)}. "
                 f"Next: {sanitize_untrusted(cannot.next_step, 500)}")
         super().__init__(f"Ditto cannot do this ({what})" if confirmed else
                          f"Ditto did not complete this; its stated reason, not confirmed by the framework: {what}")
@@ -316,6 +323,17 @@ def proposal_facts(definition: Union["ModuleDefinition", Dict[str, Any]]) -> str
         lines += [f"  - {a}" for a in assumptions]
     lines.append("The module is untested on real hardware: it is created with support level community.")
     return "\n".join(lines)
+
+
+def ai_module_description(name: str, assumptions: Sequence[Any]) -> str:
+    """The description of a target module made from Ditto's proposal (`llm-cli module generate-ai` and the module
+    wizard alike): untested is a fact to state, not a reason to refuse, so it says so, with the values Ditto guessed
+    (brackets removed: target.yml must not look like a template placeholder)."""
+    cleaned = [re.sub(r"[\[\]{}]", "", str(a)).strip() for a in assumptions or [] if str(a).strip()]
+    description = f"AI-generated target for {name}, untested on real hardware"
+    if cleaned:
+        description += ". Assumptions: " + "; ".join(cleaned)[:1500]
+    return description
 
 
 class OptimizerRecommendation(BaseModel):
@@ -737,16 +755,11 @@ class DittoCoder:
         if isinstance(packages, str):
             packages = packages.split()
         name = module_name or data.get("module_name") or "Custom_Target"
-        # Untested is a fact to state, not a reason to refuse: the description says it, with the guessed values.
-        assumptions = [re.sub(r"[\[\]{}]", "", str(a)).strip() for a in data.get("assumptions") or [] if str(a).strip()]
-        description = f"AI-generated target for {name}, untested on real hardware"
-        if assumptions:
-            description += ". Assumptions: " + "; ".join(assumptions)[:1500]
         generator_input = {
             "module_name": name,
             "architecture": data.get("architecture", "aarch64"),
             "sdk": data.get("sdk", "none"),
-            "description": description,
+            "description": ai_module_description(name, data.get("assumptions") or []),
             "base_os": data.get("base_os", "debian:bookworm-slim"),
             "packages": packages,
             "cpu_flags": data.get("cpu_flags", ""),
