@@ -266,3 +266,87 @@ class TestOneCallerIdentity:
         registry.tokens.add("copy", policy=copied.model_copy(update={"configured": True}))
         assert registry.decide(registry.get("start_build"), caller="mcp:copy") == Decision.ALLOW
         assert registry.decide(registry.get("start_build"), caller="ditto") == Decision.ASK, "the shared ones"
+
+
+class TestPendingApprovalChain:
+    """A client that cannot ask (no elicitation), a write tool set to "ask", a person who approves in the framework:
+    over the real SDK and the real framework registry (S4 signed stores, S5 two-phase question, S9 pending approvals,
+    S10/S11 registry path). The person reads speaking names, never raw caller ids, tool names or host paths, and the
+    audit log holds one linked chain from the question to the run."""
+
+    LABEL = "models:qwen/model.gguf for Rockchip (gguf Q4_K_M)"
+
+    def test_pending_approval_approved_in_the_framework_runs_once_with_one_linked_audit_chain(self, framework, qapp):
+        from orchestrator.Core.orchestrator import OrchestrationStatus, WorkflowState
+        from orchestrator.gui.approvals_window import ApprovalNotifier, ApprovalsDialog
+
+        registry = framework.tool_registry
+        registry.approvals.poll = 0.05
+        registry.policy_store.replace(ToolPolicy(configured=True, reviewed=[s.name for s in registry.list()]))
+        host_path = str(models_dir(framework) / "qwen" / "model.gguf")
+        # A build Ditto started from a local model: cancelling another caller's build needs the person ("ask").
+        framework.orchestrator._workflows["req_ditto1"] = WorkflowState(
+            "req_ditto1", OrchestrationStatus.QUEUED, datetime.now(), owner="ditto", label=self.LABEL)
+        server = mcp_server.build_mcp_server(framework)
+        seen = {}
+
+        async def go():
+            async with Client(server) as client:  # no elicitation callback: this client cannot ask the person
+                result = await client.call_tool("cancel_build", {"request_id": "req_ditto1"})
+                seen["result"] = result
+                (record,) = registry.approvals.store.pending()
+                seen["record"] = record
+                assert framework.orchestrator.cancelled == [], "nothing runs before the person approves"
+
+                # The person, in the framework's GUI: the status-bar notice, then the approval window.
+                notifier = ApprovalNotifier(registry.approvals.store)
+                seen["notice"] = notifier.check()
+                dialog = ApprovalsDialog(registry)
+                seen["listed"] = dialog.list.item(0).text()
+                seen["shown"] = dialog.text.toPlainText()
+                seen["decided"] = dialog.decide(True)  # on the GUI thread, as a click would
+                dialog.timer.stop()
+                notifier.timer.stop()
+                status = None
+                for _ in range(30):
+                    status = await client.call_tool("get_job_status", {"job_id": record.job_id, "wait_seconds": 1})
+                    assert not status.is_error, text_of(status)
+                    if status.structured_content["state"] in ("done", "failed", "expired", "cancelled"):
+                        break
+                return status.structured_content
+        job = run(go())
+
+        # The client got a pending approval with a job instead of a refusal.
+        result, record = seen["result"], seen["record"]
+        assert result.is_error and record.job_id in text_of(result) and "get_job_status" in text_of(result)
+        assert (record.caller, record.tool, record.kind) == ("mcp", "cancel_build", "call")
+
+        # The person reads speaking names: who asks, which tool, which build; never the caller id or a host path.
+        assert seen["notice"] == 1 and seen["decided"] is True
+        assert seen["listed"].splitlines() == ["Cancel a build", record.caller_class]
+        assert record.caller_class == "all local stdio clients"
+        assert self.LABEL in record.question and self.LABEL in seen["shown"]
+        for text in (record.question, seen["shown"], seen["listed"]):
+            assert host_path not in text and str(models_dir(framework)) not in text
+            assert "cancel_build" not in text, "the tool's title, not its name"
+            assert "caller mcp" not in text.lower() and "mcp#" not in text, "who asks in words, not as an id"
+        assert record.question.splitlines()[0].startswith("Caller: all local stdio clients")
+
+        # The framework ran the call once, under the client's caller, and the client reads the result.
+        assert job["state"] == "done" and job["yours"], job
+        assert framework.orchestrator.cancelled == ["req_ditto1"]
+        assert registry.approvals.store.get(record.id).state == "done"
+
+        # One linked chain in the audit log: question -> person's decision -> run, all bound to the approval and to
+        # the question the person read, in that order, and the HMAC chain is intact.
+        channel = f"approval:{record.id}"
+        chain = sorted((e for e in registry.audit.entries(200) if e.get("confirm_channel") == channel),
+                       key=lambda e: e["id"])
+        outcomes = [e["outcome"] for e in chain]
+        assert outcomes[:2] == ["confirmation_requested", "approval_decided"], outcomes
+        assert outcomes[-1] == "ok" and outcomes.count("ok") == 1, outcomes
+        assert {e["tool"] for e in chain} == {"cancel_build"}
+        assert {e["question_sha256"] for e in chain} == {record.question_sha256}
+        assert (chain[1]["actor"], chain[1]["approved"], chain[1]["answer"]) == ("gui", 1, "accepted")
+        assert {e["actor"] for e in chain if e["outcome"] != "approval_decided"} == {"mcp"}
+        assert registry.audit.verify() is None
