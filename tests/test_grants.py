@@ -423,6 +423,26 @@ class TestCallers:
 
 class TestLifecycle:
 
+    def test_a_question_asked_again_offers_only_what_its_new_facts_allow(self, env, monkeypatch):
+        """The person approved; meanwhile the index entry is verified with another key, so the question is asked again.
+        Its "do not ask again" must be computed from the new facts, not offer the scope of the old key."""
+        service = env.registry.approvals
+        real_question = service.question
+        changed = {"now": False}
+        monkeypatch.setattr(service, "question", lambda spec, inp, ctx: real_question(spec, inp, ctx) + (
+            "\n  index key: changed" if changed["now"] else ""))
+        with pytest.raises(ToolError):
+            call_as(env, "mcp", "know-v", pending=True)
+        record = env.store.pending()[0]
+        assert record.grant.scopes["this"]["signing_key"] == KEY1
+        changed["now"] = True
+        monkeypatch.setitem(INDEX, "know-v", dict(INDEX["know-v"], signing_key=KEY2))
+        assert cli(env.registry, "tools", "approvals", "approve", record.id, input="y\n").exit_code == 0
+        service.poll_once()
+        asked_again = env.store.get(record.id)
+        assert asked_again.state == "pending" and "index key: changed" in asked_again.question
+        assert asked_again.grant.scopes["this"]["signing_key"] == KEY2 and env.installed == []
+
     def test_uses_come_from_the_audit_log_and_never_rewrite_the_policy_file(self, env):
         grant = grant_for(env, "know-v")
         before = env.registry.policy_store.path.read_bytes()

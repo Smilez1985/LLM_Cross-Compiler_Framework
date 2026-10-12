@@ -360,10 +360,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Job-ID; sobald du freigibst, führt das Framework den Aufruf selbst unter dem Aufrufer des Clients aus, außer seine
   Frage würde inzwischen anders lauten (dann wirst du erneut gefragt), und der Client liest das Ergebnis mit
   `get_job_status`. Eine Freigabe ist an Aufrufer, Tool, Argument-Hash und Fragen-Hash gebunden, läuft einmal,
-  verfällt nach 15 Minuten und endet mit der Sitzung des Clients oder `cancel_job`; ein Client hat höchstens 5 offen;
-  die Frage zeigt zuerst die Aufruferklasse und den Namen des Clients als selbst angegeben, bis zu 16.000 Zeichen.
-  Entscheidungen werden festgehalten, bevor sie gespeichert werden, und die Datei der Freigaben ist signiert wie die
-  Berechtigungen.
+  verfällt nach 15 Minuten und endet mit der Sitzung des Clients, `cancel_job` oder dem Beenden des Frameworks; ein
+  Client hat höchstens 5 offen; die Frage zeigt zuerst die Aufruferklasse und den Namen des Clients als selbst
+  angegeben, bis zu 16.000 Zeichen. Das Fenster setzt nie einen anderen Aufruf an die Stelle dessen, den du gerade
+  liest, und nachdem sich dessen Frage geändert hat, wartet die Freigabe einen Moment. Entscheidungen werden
+  festgehalten, bevor sie gespeichert werden, und die Datei der Freigaben ist signiert wie die Berechtigungen.
 - **Dauerhafte Freigaben: „ja, und nicht mehr fragen“** (MCP-Server, Ditto). Nur von dir im eigenen Fenster des
   Frameworks angelegt (das Freigabefenster, `llm-cli tools approvals approve ID --always`, Dittos Dialog und
   Rückfrage), nach einer Warnung, die nennt, wer dann ohne Nachfrage handeln darf, was in einfachen Worten abgedeckt

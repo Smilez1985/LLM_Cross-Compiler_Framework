@@ -316,6 +316,44 @@ class TestPendingApproval:
         other = env.registry.call("get_job_status", {"job_id": job_id}, ToolContext("mcp", connection="b"))
         assert own.result["written"] == "mine" and other.result is None
 
+    def test_a_call_withdrawn_while_the_approval_is_being_checked_never_runs(self, env, monkeypatch):
+        """The person approves; the client cancels its job (or its session ends) in the moment the framework checks
+        the approved call again: nothing may run then."""
+        ctx = ToolContext("mcp", connection="x", pending_approvals=True)
+        with pytest.raises(ToolError):
+            env.registry.call("write_note", {"text": "withdrawn"}, ctx)
+        record = env.store.pending()[0]
+        env.store.decide(record.id, True, "gui")
+        service = env.registry.approvals
+        real_validate = env.registry.validate_input
+
+        def validate_while_the_client_cancels(spec, arguments):
+            env.fm.job_service.cancel(record.job_id)  # cancel_job arrives right now
+            return real_validate(spec, arguments)
+        monkeypatch.setattr(env.registry, "validate_input", validate_while_the_client_cancels)
+        service.poll_once()
+        time.sleep(0.3)
+        assert env.writes == [] and env.store.get(record.id).state == "withdrawn"
+        assert env.fm.job_service.get(record.job_id).state == "cancelled"
+
+    def test_the_frameworks_shutdown_ends_its_pending_approvals_and_their_watch(self, env):
+        ctx = ToolContext("mcp", connection="x", pending_approvals=True)
+        with pytest.raises(ToolError):
+            env.registry.call("write_note", {"text": "left"}, ctx)
+        service = env.registry.approvals
+        record = env.store.pending()[0]
+        assert service._thread is not None and service._thread.is_alive()
+        env.fm.shutdown()
+        assert env.store.get(record.id).state == "withdrawn" and service.waiting_ids() == []
+        deadline = time.monotonic() + 5
+        while service._thread is not None and service._thread.is_alive():
+            assert time.monotonic() < deadline, "the watch keeps polling after the shutdown"
+            time.sleep(0.05)
+        ended = [e for e in entries(env.registry, "cancelled") if e["tool"] == "write_note"]
+        assert ended and ended[0]["confirm_channel"] == f"approval:{record.id}"
+        assert cli(env.registry, "tools", "approvals", "approve", record.id, input="y\n").exit_code == 1
+        assert env.writes == []
+
     def test_only_the_frameworks_windows_decide(self, env):
         ctx = ToolContext("mcp", connection="x", pending_approvals=True)
         with pytest.raises(ToolError):
@@ -427,6 +465,43 @@ class TestGui:
         assert record.state == "approved" and record.decided_by == "gui"
         assert entries(env.registry, "approval_decided")[0]["actor"] == "gui"
         assert notifier.check() == 0
+
+    def test_the_window_never_swaps_the_call_you_read_for_another(self, env, qapp):
+        """You read the second call; the client withdraws it while you read. The window must not select the first
+        call in its place, where your click on "Approve once" would approve a call you never read."""
+        from orchestrator.gui.approvals_window import ApprovalsDialog
+        for text in ("first call", "second call"):
+            with pytest.raises(ToolError):
+                env.registry.call("write_note", {"text": text}, ToolContext("mcp", connection="x",
+                                                                            pending_approvals=True))
+        dialog = ApprovalsDialog(env.registry)
+        dialog.list.setCurrentRow(1)
+        read = dialog.selected()
+        assert "second call" in dialog.text.toPlainText()
+        env.registry.approvals.withdraw(read.id)
+        dialog.refresh()
+        assert dialog.selected() is None and not dialog.approve_button.isEnabled()
+        assert "no longer waiting" in dialog.text.toPlainText()
+        assert not dialog.decide(True)
+        assert [r.state for r in env.store.list()] == ["pending", "withdrawn"]
+
+    def test_a_question_that_changes_while_you_read_it_is_not_approved_by_the_next_click(self, env, qapp):
+        from orchestrator.gui.approvals_window import ApprovalsDialog
+        from orchestrator.tools.approvals import question_sha256
+        with pytest.raises(ToolError):
+            env.registry.call("write_note", {"text": "hello"}, ToolContext("mcp", connection="x",
+                                                                           pending_approvals=True))
+        dialog = ApprovalsDialog(env.registry)
+        record = dialog.selected()
+        changed = record.question + "\n  upstream commit: 2b"
+        env.store.update(record.id, question=changed, question_sha256=question_sha256(changed))  # asked again
+        dialog.refresh()
+        assert "upstream commit: 2b" in dialog.text.toPlainText() and "changed" in dialog.text.toPlainText()
+        assert not dialog.approve_button.isEnabled() and not dialog.decide(True)
+        assert env.store.get(record.id).state == "pending"
+        dialog._arm()  # after the pause to read it again
+        assert dialog.approve_button.isEnabled() and dialog.decide(True)
+        assert env.store.get(record.id).question_sha256 == question_sha256(changed)
 
     def test_the_permissions_dialog_sets_tools_confirmed_in_the_framework(self, env, qapp):
         from orchestrator.gui.dialogs import ToolPermissionsDialog

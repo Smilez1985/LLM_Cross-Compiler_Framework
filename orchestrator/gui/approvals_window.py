@@ -20,6 +20,7 @@ from orchestrator.utils.logging import get_logger
 
 logger = get_logger("ApprovalsWindow")
 POLL_MS = 2000
+REREAD_MS = 1500  # after the call you read changed (asked again with new facts), approving waits this long
 
 
 class ApprovalNotifier(QObject):
@@ -143,6 +144,9 @@ class ApprovalsDialog(QDialog):
         self.registry = registry
         self.store = registry.approvals.store
         self.records = []
+        self._shown = None    # (id, question hash) of the call whose question the window shows
+        self._armed = True    # False for a moment after that question changed under your eyes
+        self._vanished = ""   # the call you were reading is no longer waiting
         self.setWindowTitle("Calls waiting for your approval")
         self.resize(860, 600)
         layout = QVBoxLayout(self)
@@ -188,10 +192,16 @@ class ApprovalsDialog(QDialog):
             item = QListWidgetItem(f"{record.title}\n{record.caller_class}")
             item.setData(Qt.UserRole, record.id)
             self.list.addItem(item)
-        self.list.blockSignals(False)
         ids = [r.id for r in self.records]
-        self.list.setCurrentRow(ids.index(current.id) if current is not None and current.id in ids else
-                                (0 if ids else -1))
+        if current is not None:
+            # Never another call in place of the one you were reading: a click meant for it must not approve a call
+            # you never read. When it is gone, nothing is selected until you choose one.
+            row = ids.index(current.id) if current.id in ids else -1
+            self._vanished = "" if row >= 0 else current.title
+        else:
+            row = 0 if ids and not self._vanished else -1
+        self.list.setCurrentRow(row)
+        self.list.blockSignals(False)
         self._show(self.list.currentRow())
 
     def selected(self):
@@ -200,20 +210,41 @@ class ApprovalsDialog(QDialog):
 
     def _show(self, row: int) -> None:
         record = self.records[row] if 0 <= row < len(self.records) else None
-        enabled = record is not None
-        self.approve_button.setEnabled(enabled and record.kind == "call")
-        self.always_button.setEnabled(enabled and record.grant is not None)
-        self.decline_button.setEnabled(enabled)
+        if record is not None:
+            self._vanished = ""
+        shown = (record.id, record.question_sha256) if record is not None else None
+        changed = shown is not None and self._shown is not None and shown[0] == self._shown[0] \
+            and shown != self._shown
+        self._shown = shown
+        if changed:  # the question of the call you read was asked again with new facts: read it before approving
+            self._armed = False
+            QTimer.singleShot(REREAD_MS, self._arm)
+        self._buttons(record)
         if record is None:
-            self.text.setPlainText("No call is waiting for your approval.")
+            self.text.setPlainText(f"The call you were reading ('{self._vanished}') is no longer waiting for you: the "
+                                   "client withdrew it, it expired or it was decided elsewhere. Choose another one "
+                                   "from the list." if self._vanished else "No call is waiting for your approval.")
             return
         left = record.seconds_left()
-        self.text.setPlainText(f"{record.question}\n\nTime left: {left // 60} min {left % 60:02d} s")
+        note = ("The facts behind this call changed and it is asked again; read it before you decide.\n\n"
+                if changed or not self._armed else "")
+        self.text.setPlainText(f"{note}{record.question}\n\nTime left: {left // 60} min {left % 60:02d} s")
+
+    def _buttons(self, record) -> None:
+        enabled = record is not None
+        self.approve_button.setEnabled(enabled and self._armed and record.kind == "call")
+        self.always_button.setEnabled(enabled and self._armed and record.grant is not None)
+        self.decline_button.setEnabled(enabled)
+
+    def _arm(self) -> None:
+        """Approving is possible again (after the pause that follows a changed question)."""
+        self._armed = True
+        self._buttons(self.selected())
 
     def decide_always(self, choice=None) -> bool:
         """"Approve and do not ask again": the warning first, then how wide and for how long."""
         record = self.selected()
-        if record is None or record.grant is None:
+        if record is None or record.grant is None or not self._armed:
             return False
         choice = choice or choose_grant(record.grant, self)
         if not choice:
@@ -225,6 +256,8 @@ class ApprovalsDialog(QDialog):
         record = self.selected()
         if record is None or (approve and record.kind == "grant_request" and choice is None):
             return False
+        if approve and (not self._armed or self._shown != (record.id, record.question_sha256)):
+            return False  # only what the window shows, and not in the moment after it changed
         try:
             self.store.decide(record.id, approve, "gui", expected_question=record.question_sha256,
                               record_decision=lambda decided: apply_decision(self.registry, decided, "gui"),

@@ -360,6 +360,7 @@ class ApprovalService:
     _waiting: Dict[str, _Waiting] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _thread: Optional[threading.Thread] = None
+    _closed: bool = False                       # the process shuts down: no new approvals, the watch ends
 
     # --- the question --------------------------------------------------------------------------------------------
 
@@ -383,6 +384,9 @@ class ApprovalService:
         many open approvals, AuditUnavailable when the question cannot be recorded)."""
         from orchestrator.tools.registry import ToolError
         key = (ctx.owner, spec.name, arguments_sha256(arguments))
+        if self._closed:
+            raise ToolError(f"'{spec.title}' was not put to the person: the framework is shutting down.",
+                            next="Ask again once the framework runs again.")
         with self._lock:
             for waiting in self._waiting.values():
                 if waiting.key == key:
@@ -471,14 +475,26 @@ class ApprovalService:
             waiting = self._waiting.pop(approval_id, None)
         if waiting is None or waiting.running:
             return
-        self.store.update(approval_id, state="withdrawn", note="Withdrawn by the client or its session ended.")
+        self.store.update(approval_id, state="withdrawn",
+                          note=(detail or "Withdrawn by the client or its session ended.")[:500])
         self._refuse(waiting, "cancelled", detail or "The pending approval was withdrawn.", answer)
+
+    def close(self) -> None:
+        """The process shuts down (framework.shutdown): every call still waiting for the person is withdrawn and
+        audited, its job ends, and the watch stops; nothing runs after this."""
+        detail = "The framework shut down before the person decided; nothing ran."
+        with self._lock:
+            self._closed = True
+            waiting = [w for w in self._waiting.values() if not w.running]
+        for item in waiting:
+            self.withdraw(item.approval_id, "cancelled", detail)
+            self.jobs.update(item.job_id, state="cancelled", note=detail)
 
     # --- watching for the person's decision ------------------------------------------------------------------------
 
     def _start(self) -> None:
         with self._lock:
-            if self._thread is not None and self._thread.is_alive():
+            if self._closed or (self._thread is not None and self._thread.is_alive()):
                 return
             self._thread = threading.Thread(target=self._watch, name="approval-watch", daemon=True)
             self._thread.start()
@@ -492,7 +508,7 @@ class ApprovalService:
             except Exception as e:  # keep watching; the next round tries again
                 logger.warning(f"Checking pending approvals failed: {redact_secrets(str(e))}")
             with self._lock:
-                if not any(not w.running for w in self._waiting.values()):
+                if self._closed or not any(not w.running for w in self._waiting.values()):
                     self._thread = None
                     return
 
@@ -557,14 +573,20 @@ class ApprovalService:
                 self._fail(item, "failed", redact_secrets(str(e)))
                 return
             expires = _now() + timedelta(seconds=self.ttl)
-            self.store.update(item.approval_id, state="pending", question=question, question_sha256=digest,
-                              decided_by=None, decided_at=None, expires=_iso(expires),
-                              note="The question changed after it was approved; it is asked again.")
+            # What "do not ask again" may cover is computed again from the facts behind the new question.
+            offer = self.registry.grant_offer(spec, inp, item.ctx) if spec.grant is not None else None
             with self._lock:
+                if self._waiting.get(item.approval_id) is not item:  # withdrawn meanwhile: nothing is asked
+                    return
                 item.question_sha256, item.expires = digest, expires
+            self.store.update(item.approval_id, state="pending", question=question, question_sha256=digest,
+                              decided_by=None, decided_at=None, expires=_iso(expires), grant=offer, choice=None,
+                              note="The question changed after it was approved; it is asked again.")
             self.jobs.update(item.job_id, note="The facts behind the question changed; the person is asked again.")
             return
         with self._lock:
+            if self._waiting.get(item.approval_id) is not item:  # withdrawn while it was checked: nothing runs
+                return
             item.running = True
         self.store.update(item.approval_id, state="running")
         threading.Thread(target=self._run, args=(item, record), name=f"approval-{item.approval_id}",
