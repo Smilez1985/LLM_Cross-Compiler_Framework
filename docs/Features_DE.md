@@ -547,6 +547,10 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
 | `propose_healing_fix` | lokal schreiben | Einen eigenen Korrekturvorschlag für einen gescheiterten Build als manuellen Schritt an dich übergeben (Filter für gefährliche Befehle; nie ausgeführt) |
+| `search_hf_models` | lesen | Hugging-Face-Modelle suchen; `gated: free` (Standard) listet nur Modelle, die ohne Annahme von Bedingungen herunterladbar sind |
+| `get_hf_model_info` | lesen | Lizenz (auch die des Basismodells), Zugangsbeschränkung, Zugriff deines gespeicherten Tokens, Parameter, Commit, Dateien und Größe eines Modells |
+| `download_hf_file` | lokal schreiben | Eine Datei eines Hugging-Face-Repositorys in den Modellordner laden, auf den Commit festgelegt und gegen das sha256 des Hubs geprüft (ein Job) |
+| `list_local_files` | lesen | Modell- und Datensatzdateien in den Ordnern, die die KI nutzen darf, mit ID und `<Label>:<relativer Pfad>` |
 | `get_status` | lesen | Deine Tool-Berechtigungen für diesen Aufrufer: jedes Tool mit Entscheidung und Grund (auch die ausgeblendeten) und was kein Tool tut, mit dem Ort, wo du es tust |
 | `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
 | `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |
@@ -1300,6 +1304,35 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   models:qwen/model.gguf for Rockchip"), der Kontext der Selbstheilung, `model_source` im Build-Manifest und
   `list_artifacts` (ein Host-Pfad, den ein älteres Manifest festhielt, erscheint als `<label>:<relativer Pfad>`, wenn
   er in einem Ordner liegt, den die KI nutzen darf, sonst nur als Dateiname).
+- **Hugging Face und lokale Dateien für KI-Clients:** `search_hf_models` listet Modelle, die meistgeladenen zuerst;
+  sein Filter `gated` ist standardmäßig `free` (nur Modelle, die ohne Annahme von Bedingungen herunterladbar sind, und
+  das Ergebnis sagt, dass zugangsbeschränkte weggelassen wurden), `any` oder `gated`. `get_hf_model_info` zeigt ein
+  Modell: seine Lizenz (`permissive` nur für eine Lizenz auf einer festen Positivliste wie `apache-2.0` oder `mit`;
+  `restrictive` für bekannte einschränkende; sonst `unknown`, auch für `other`, eigene und listenförmige Lizenzen, bei
+  `other` mit `license_name` und `license_link`), Lizenz und Zugangsbeschränkung des Basismodells (ein GGUF-Reupload
+  eines zugangsbeschränkten Modells zeigt sich als solcher), die Zugangsbeschränkung (`false`, `auto`, `manual`), ob
+  das im Framework gespeicherte Hugging-Face-Token es lesen kann, die Parameterzahl, den Commit, die Dateien mit
+  ihren Größen und die Gesamtgröße. `download_hf_file` lädt eine Datei (eine GGUF-Datei, einzelne Gewichte, eine
+  Tokenizer-Datei) als Job nach `models/hf/<owner>--<name>/<commit>/`: Bevor du gefragt wirst, legt das Framework
+  Commit, Größe und sha256 fest, die der Hub nennt, lehnt ein zugangsbeschränktes Repository ab, das dein
+  gespeichertes Token nicht lesen kann (mit dem nächsten Schritt), und prüft die Platte. Es gibt keine
+  Größengrenze: Ein Download wird nur abgelehnt, wenn die Platte des Modellordners ihn plus Reserve (2 GiB oder 2 %)
+  und das von anderen Downloads Reservierte nicht fasst; die Frage zeigt Größe, freien Platz danach, Lizenz und
+  Zugangsbeschränkung. Der eigene Abrufer des Frameworks schreibt eine `.part`-Datei, die ein späterer Lauf
+  fortsetzt, hält bei `cancel_job` zwischen zwei Blöcken an (der Teil bleibt) und gibt der Datei ihren Namen erst,
+  wenn Größe und sha256 zu den Angaben des Hubs passen (eine kleine Datei ohne LFS ist über Größe und Commit
+  festgelegt). Ein Download läuft zur Zeit, fünf am Tag je Client; Hugging-Face-Suchen sind auf 30 je Stunde
+  begrenzt. Eine Daueranfrage kann GGUF-, safetensors- und kleine Textdateien nicht zugangsbeschränkter
+  Repositories mit freizügiger Lizenz und nicht zugangsbeschränktem Basismodell abdecken, nie Pickle-Gewichte. Jeder
+  Hugging-Face-Aufruf für einen KI-Client sendet nur das im Framework gespeicherte Token (`llm-cli secrets set
+  hf_token`) oder gar keins: nie eins aus `HF_TOKEN` oder dem Hugging-Face-Home-Ordner und nie an einen anderen Host
+  als huggingface.co (eine Weiterleitung zum Dateispeicher des Hubs trägt kein Token). Das Token erscheint nie in
+  Eingabe, Ergebnis, Hinweisen, Fehlern oder dem Audit-Log eines Tools. Im Offline-Modus lehnen diese Tools ab, und
+  ein Netzwerkfehler ist ein Fehler, nie eine leere Liste. `list_local_files` listet die Modell- und Datensatzdateien
+  in den Ordnern, die die KI nutzen darf (ein Hugging-Face-Modellordner als ein Eintrag, PyTorch-Pickle-Gewichte
+  markiert, Links aus dem Ordner hinaus, mehrfach verlinkte und versteckte Dateien und unfertige Downloads
+  weggelassen; 50 je Seite), jede mit Datei-ID und `<Label>:<relativer Pfad>`, die `start_build` annimmt; eine
+  heruntergeladene Datei erscheint dort auch.
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je

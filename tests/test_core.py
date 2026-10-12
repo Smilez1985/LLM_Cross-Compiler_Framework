@@ -334,9 +334,11 @@ class TestDependencyApiRegressions:
             return str(Path(kwargs["cache_dir"]) / kwargs["filename"])
 
         monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_hf_hub_download)
+        monkeypatch.setattr(huggingface_hub.HfApi, "model_info", lambda self, repo_id, **kw: SimpleNamespace(sha="c" * 40))
         mm = ModelManager(ConfigManager(tmp_path / "configs"), base_dir=tmp_path)
 
         path = mm.download_file("Qwen/Qwen3.5-0.8B", "config.json", token=None)
 
         assert path is not None, "download_file swallowed an exception"
         assert seen["repo_id"] == "Qwen/Qwen3.5-0.8B" and seen["cache_dir"] == str(tmp_path / "models")
+        assert seen["revision"] == "c" * 40, "the file comes from the commit that was resolved, not a moving branch"

@@ -26,6 +26,7 @@ from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, T
                                          current_registry)
 from orchestrator.tools.signing import RevisionAnchor
 from orchestrator.tools.tools_healing import register_healing_tools
+from orchestrator.tools.tools_hf import register_hf_tools
 from orchestrator.tools.tools_knowledge import EMPTY_SEARCH_NOTE, register_knowledge_tools  # noqa: F401
 from orchestrator.tools.spec import BUILD_QUOTA, CallFacts, Choices, Fact, FieldMeta, ToolLimits
 from orchestrator.utils.file_lock import file_lock
@@ -510,6 +511,7 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     # Each group of later tools lives in its own module (design section 8, phase T), registered here.
     register_knowledge_tools(registry, framework)
     register_healing_tools(registry, framework, request_id["request_id"])
+    register_hf_tools(registry, framework, jobs)
     return registry
 
 

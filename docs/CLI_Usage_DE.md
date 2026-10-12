@@ -862,11 +862,11 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 12 nur lesende Tools (`list_targets`,
+Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 15 nur lesende Tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `get_status`, `get_job_status`)
-und 5, die auf diesem Rechner etwas ändern
-(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`).
+`run_doctor`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `search_hf_models`,
+`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`) und 6, die auf diesem Rechner etwas ändern
+(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`, `download_hf_file`).
 
 ### tools list
 
@@ -1143,7 +1143,7 @@ Namen, die das Framework verwendet:
 | Name | Wofür |
 |---|---|
 | `anthropic_api_key`, `openai_api_key`, `gemini_api_key`, `openrouter_api_key`, `custom_api_key` | Dittos Anbieter (besser: `llm-cli ditto login <anbieter>`) |
-| `hf_token` | Zugangsbeschränkte Hugging-Face-Modelle in Builds |
+| `hf_token` | Zugangsbeschränkte Hugging-Face-Modelle in Builds und die Hugging-Face-Tools der KI-Clients (`get_hf_model_info`, `download_hf_file`): nur im Framework gelesen, nie an eine KI weitergegeben; ohne es senden sie gar kein Token (nie eins aus `HF_TOKEN` oder dem Hugging-Face-Home-Ordner) |
 | `qdrant_api_key` | Ein entfernter Qdrant-Server für die Wissensbasis (Einstellung `qdrant_url`) |
 | `community_signing_key`, `community_age_identity` | Deine Schlüssel für Community-Pakete, beim ersten Mal von [`llm-cli zoo`](#zoo-keys) oder vom Community-Export und -Import der GUI angelegt; nicht von Hand setzen |
 
