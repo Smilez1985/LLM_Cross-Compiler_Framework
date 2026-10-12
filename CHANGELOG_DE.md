@@ -620,6 +620,38 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   MCP-Tool. Ihre Anzahlen sind weiche Grenzen (3, 30, 5): Darüber zu gehen ist eine Warnung, über die die Zustimmung der
   Person hinweggeht, nie eine Ablehnung; ein vorgebautes llama.cpp bleibt abgelehnt.
 
+- **Deployment für KI-Clients** (MCP-Tools `list_devices`, `create_deploy_package`, `deploy_to_device`, Prompt
+  `deploy_to_board`; Entscheidung 2): Ein Client listet die Geräte, denen du vertraut und die du gekoppelt hast,
+  paketiert ein gebautes Modell als Job (die Platte muss das Doppelte des Modells fassen) und überträgt es als Job.
+  Bevor das Deployment erfragt wird, liest das Framework den Host-Schlüssel des Geräts (keine Anmeldung) und lehnt
+  einen unbekannten oder geänderten Schlüssel oder ein nicht gekoppeltes Gerät ab; die Frage zeigt das Gerät mit
+  deinem Namen dafür, den Fingerabdruck des Host-Schlüssels, das sha256 des Pakets und das Vertrauen in sein Target,
+  und das Deployment bricht ab, wenn Paket oder Schlüssel danach abweichen. Es wird immer erfragt, nie von einer
+  Daueranfrage abgedeckt, eins je Gerät zur Zeit; `cancel_job` schließt die SSH-Sitzung und meldet den Zustand des
+  Geräts als unbekannt. Die Ausgabe des Geräts kommt als externer Text markiert zurück (`get_job_status`-Feld
+  `external_text`). Keine Eingabe nennt Adresse, Benutzer, Port, Passwort, Fingerabdruck oder Pfad.
+- **Vertraute Geräte** (`~/.llm-framework/devices.json`, `llm-cli deploy devices list|add|remove`, `deploy run
+  --label`): `deploy run`, `scan --device`, `device runtime deploy` und das Deployment-Fenster der GUI tragen ein
+  Gerät ein, nachdem du seinen Host-Schlüssel bestätigt hast und sich das Framework angemeldet hat (im Audit-Log
+  vermerkt); `devices add` übernimmt ein Gerät, dem du schon vorher vertraut hast (nur im Terminal, nie ein neuer
+  Schlüssel, nie ein Passwort). Nur diese Geräte können KI-Tools nennen, und nur, solange die `known_hosts` des
+  Frameworks noch genau diesen Schlüssel enthält; kein Tool schreibt einen Eintrag.
+
+- **Optionale Laufzeit-Tools für KI-Clients** (MCP-Tools `build_local_runtime`, `start_local_runtime`,
+  `stop_local_runtime`, `run_benchmark`, `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark`;
+  Ressource `lcf://runtime/catalog`; Prompt `set_up_offline_assistant`): mit ihren Laufzeitpaketen registriert und
+  verborgen, bis du sie freigibst, auch wenn die ganze Stufe erlaubt ist. Der lokale Server ist immer aus dem
+  festgelegten Commit selbst gebaut (keine Prebuilt-Option, keine CMake-Option und kein Befehl als Eingabe); ein
+  fehlender Toolchain-Teil wird mit `needs_person` und `llm-cli ditto runtime install` abgelehnt; gestartet wird nur ein
+  geprüfter Build, und kein Ergebnis enthält seine Adresse oder seinen Schlüssel; eine abgebrochene Installation wird
+  nie aktiv, und ein abgebrochener Modell-Download behält seine `.part`-Datei. Ein nicht vertrauenswürdiges Modell wird
+  nativ nur nach deiner Zustimmung im eigenen Fenster des Frameworks gemessen, die zuerst ins Audit-Log geschrieben
+  wird, oder in der Docker-Sandbox. Die Board-Tools erreichen nur vertraute Geräte mit dem vertrauten Host-Schlüssel,
+  werden immer erfragt und nie von einer Daueranfrage abgedeckt.
+- **Benchmark-Läufe dieses Rechners** (`~/.llm-framework/benchmarks/`): `llama-bench`-Ergebnisse des selbst gebauten
+  Builds (Prompt- und Erzeugungsgeschwindigkeit, höchster Speicherbedarf) mit dem sha256 des Modells und der Build-ID;
+  `get_status` zeigt die neuesten.
+
 ### Geändert
 - **Der Deep-Ingest-Hinweis hält wieder fest, wer ihn gelesen hat**: Seine Zustandsdatei speichert, wo er bestätigt
   wurde (`via`: `gui` oder `cli`), und das Lesen landet im Audit-Log (Akteur `gui` oder `cli`). Nur eine Person
@@ -824,6 +856,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Frameworks (ein Tool nur mit seinem registrierten Namen); „die Hardware ist nicht verfügbar“ wird für jedes Tool widersprochen, das kein Gerät nutzt. Meldungen
   werden als `cannot_reported` protokolliert; `llm-cli tools audit --summary` zählt sie je Aufrufer.
 
+- **Paketieren und Übertragen sagen, warum sie gescheitert sind**: `DeploymentManager` gibt den Grund zurück (kein
+  Docker, ein nicht festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`) statt `None`
+  oder `False` mit einer Logzeile (G23); `llm-cli deploy package` gibt ihn aus. Ein Paket wird unter einem vorläufigen
+  Namen geschrieben und erst umbenannt, wenn es vollständig ist.
+
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
   Prozessliste. Nutze die verdeckte Abfrage oder `--with-token`.
@@ -862,6 +899,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- **Per Digest festgelegte Images in einem Deployment-Paket starten auf einem Board ohne Netz**: Ein über seinen
+  Digest gezogenes Image hat kein Tag, wurde deshalb ohne Namen gespeichert, kam nach `docker load` als `<none>`
+  zurück, und `deploy.sh` konnte es ohne Registry nicht über seine Digest-Referenz starten. Es wird jetzt unter
+  `<Repository>:lcf-<12 Hex-Zeichen des Digests>` eingepackt und unter diesem Namen gestartet (ein hier gebautes Image
+  behält sein eigenes Tag), und `deploy.sh` startet jedes eingepackte Image mit `--pull never`, sodass ein Board, auf
+  dem ein Image fehlt, abbricht, statt eines aus einer Registry zu ziehen.
 - **Hugging-Face-Abfragen verbergen keine Fehler mehr**: Der Modellmanager hinter dem Hugging-Face-Browser der GUI
   lieferte ein leeres Suchergebnis, eine leere Dateiliste oder eine „nicht einschränkende“ Lizenz, wenn Hugging Face
   nicht erreichbar war; jetzt meldet er den Fehler. Eine Lizenz gilt nur auf einer festen Positivliste als
@@ -1094,6 +1137,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schlüsselwort-Parameter, den kein Produktcode übergibt (ein Wächtertest prüft das). Zeichenketten im Ergebnis eines
   Jobs (etwa die Adressen, die ein Crawl übersprungen hat, und die Gründe der Websites) werden jetzt wie der Rest des
   Job-Status als externer Text bereinigt, gekürzt und markiert.
+- **Fehler von Geräten und Benchmarks tragen keinen fremden Text und keine Pfade des Rechners mehr in den Kontext
+  einer KI**: Scheiterte ein Job von `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark` oder
+  `run_benchmark`, enthielt die Fehlermeldung unmarkiert die Fehlerausgabe des Geräts oder die letzte Ausgabe von
+  `llama-bench` (das die Metadaten des geladenen GGUF ausgibt, Text, den ein nicht vertrauenswürdiges Modell
+  bestimmt); ein gescheitertes mktemp auf dem Gerät setzte dessen Fehlerausgabe in das schlichte `reason` von
+  `deploy_to_device`; und ein Fehler beim Paketieren oder Deployen konnte den Build-Ordner, den Ausgabeordner oder den
+  Home-Ordner nennen. Meldung und `reason` sind jetzt die eigenen Sätze des Frameworks ohne Pfade des Rechners, und
+  was das Gerät oder das Programm ausgegeben hat, kommt in `get_job_status.external_text` zurück, als externer Text
+  markiert (auch bei gescheiterten Jobs).
 - **Der Filter für gefährliche Befehle lässt sich nicht mehr mit unsichtbaren Zeichen oder Zeichen in voller
   Breite umgehen** (Healing-Analysen und Empfehlungen von Ditto sowie Korrekturvorschläge von KI-Clients): Er
   prüft den Text auch so, wie GUI und CLI ihn zeigen (normalisiert, unsichtbare Zeichen und Verbinder entfernt),
@@ -1347,6 +1399,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `token=False`.
 - **Image-Builds lesen nie den MCP-Protokollstrom**: `docker buildx build` lief mit der Standardeingabe des Servers,
   die über stdio der Protokollstrom ist (G25); es bekommt jetzt `stdin=DEVNULL`.
+- **Deployment-Pakete nehmen Images nur per Digest festgelegt oder hier gebaut**: Das voreingestellte
+  Inferenz-Image war `...:latest`, und ein fehlgeschlagenes Ziehen über ein Tag wurde verschluckt, sodass ein Paket
+  enthalten konnte, was die Registry gerade auslieferte (G17). Ein Image kommt jetzt nur als `name@sha256:...` ins
+  Paket oder wenn es auf diesem Rechner gebaut wurde; ein Tag wird mit Grund abgelehnt, ein fehlendes festgelegtes
+  Image nur über seinen Digest gezogen, und ein fehlgeschlagener Export bricht das Paket ab.
+- **Deployments leiten nie den MCP-Protokollstrom weiter**: Ohne paramiko liefen `ssh` und `scp` mit der
+  Standardeingabe des Frameworks, die über MCP-stdio der Protokollstrom ist (G25); sie bekommen jetzt
+  `stdin=DEVNULL`.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

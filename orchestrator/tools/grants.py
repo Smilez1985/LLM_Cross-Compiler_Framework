@@ -46,7 +46,8 @@ CREATED_VIA = ("gui", "cli", "ditto-gui", "ditto-cli")
 # framework for every AI, read third-party sites, add AI-written code, sign under the person's identity, act on
 # pattern-matched log text, destroy something, or stop another client's work.
 NEVER_GRANT = frozenset({
-    "deploy_to_device", "probe_remote_device", "update_settings", "crawl_docs_site", "create_target_module",
+    "deploy_to_device", "probe_remote_device", "deploy_device_runtime", "run_device_benchmark",
+    "update_settings", "crawl_docs_site", "create_target_module",
     "export_pack", "resolve_healing", "cancel_build", "cancel_job", "delete_artifact", "restore_knowledge_snapshot",
 })
 

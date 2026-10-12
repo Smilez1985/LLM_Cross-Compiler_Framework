@@ -163,9 +163,9 @@ NO_TOOL_ACTIONS = [
     ("change_permissions", "Change tool permissions: 'llm-cli tools permissions' or Tools > Tool Permissions "
                            "(Ditto / MCP) in the GUI (an AI never changes its own permissions)."),
     ("audit_log", "Archive or repair the audit log: 'llm-cli tools audit --archive' (the person only)."),
-    ("trust_device", "Trust a device's SSH host key or pair it with a password: the GUI's Deployment window or "
-                     "'llm-cli deploy run' (only a person compares a fingerprint)."),
-    ("deploy_to_device", "Deploy to a device: the GUI's Deployment window or 'llm-cli deploy run' (no tool yet)."),
+    ("trust_device", "Trust a device's SSH host key or pair it with a password: the GUI's Deployment window, "
+                     "'llm-cli deploy run', 'llm-cli scan --device' or 'llm-cli deploy devices add' (only a person "
+                     "compares a fingerprint; deploy_to_device then reaches only such devices)."),
     ("deep_ingest_notice", "Acknowledge the one-time Deep Ingest notice (before crawl_docs_site can run): the GUI "
                            "(Tools > Create Hardware Module..., Deep Ingest) or 'llm-cli tools crawl-notice' (only a "
                            "person reads it)."),
@@ -293,9 +293,14 @@ def _job_out(job, ctx: ToolContext) -> JobStatusOut:
     error = JobErrorOut(**{k: job.error.get(k, "") for k in ("code", "message", "next")}) if job.error else None
     # An approved call's result belongs to the caller that asked for it.
     result = job.result if job.kind != "approval" or job.owner == ctx.owner else None
+    # A job's external text (job_service.EXTERNAL_KEY, e.g. a device's output) goes into the marked field.
+    external = []
+    if isinstance(result, dict) and job_service.EXTERNAL_KEY in result:
+        result = dict(result)
+        external = [str(line) for line in result.pop(job_service.EXTERNAL_KEY) or []]
     return JobStatusOut(job_id=job.job_id, kind=job.kind, state=job.state,
                         progress=JobProgress(done=job.done, total=job.total, message=job.message),
-                        result=result, error=error, owner=job_service.owner_actor(job.owner),
+                        result=result, external_text=external, error=error, owner=job_service.owner_actor(job.owner),
                         yours=job.owner == ctx.owner, created=job.created, updated=job.updated, note=job.note)
 
 
@@ -511,6 +516,13 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     register_crawl_tools(registry, framework, jobs)
     from orchestrator.tools.tools_community import register_community_tools  # community zoo (T9)
     register_community_tools(registry, framework, jobs)
+    # Devices and deploy (design 2.7, T8): trusted devices by id, packages as jobs, deploys always asked.
+    from orchestrator.tools.tools_deploy import register_deploy_tools
+    register_deploy_tools(registry, framework, service=service, jobs=jobs, target_field=target_field)
+    # The optional local and device runtime tools (design 2.10, T14): registered with their runtime packages, hidden
+    # (denied) until the person enables them.
+    from orchestrator.tools.tools_runtime import register_runtime_tools
+    register_runtime_tools(registry, framework, service=service, jobs=jobs)
     return registry
 
 

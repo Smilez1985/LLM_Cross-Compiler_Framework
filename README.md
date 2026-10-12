@@ -242,7 +242,13 @@ secrets: [details](docs/Features.md#input-history).
    the temporary folder.
 
 Leave the Docker option off for a plain model file. With it, the package also contains container images; that
-mode is experimental and not verified in this version.
+mode is experimental and not verified in this version, and it takes an image only when it is pinned by its digest
+(`name@sha256:...`) or was built on your computer.
+
+After a successful deployment the board is one of your **trusted devices** (`llm-cli deploy devices list`). An AI
+client connected over MCP, or Ditto, can then package a build and deploy it to that board (`list_devices`,
+`create_deploy_package`, `deploy_to_device`), each time only after you confirmed a question that shows the board,
+its host key fingerprint and the package's hash. No AI can trust a new board or accept a changed host key.
 
 ### The board
 
@@ -281,7 +287,7 @@ llm-cli device runtime deploy 192.168.1.50          # install it over SSH and ch
   which is written to the audit log. Only a build that passes becomes the active one (and the systemd unit's); a
   build that fails is removed again and the previous build stays active.
 
-Not yet tested on a real board; the GUI and the MCP tools for it follow.
+Not yet tested on a real board; the GUI for it follows. AI clients reach the same steps through the optional MCP tools `probe_remote_device`, `deploy_device_runtime` and `run_device_benchmark`, which stay hidden until you enable them and are confirmed by you on every call.
 
 ### Probing the board's hardware
 

@@ -340,9 +340,11 @@ geschrieben.
 |---|---|
 | `ARTIFACT_NAME` | Ein Build-Ordner, wie ihn `list-artifacts` zeigt (relativ zum Ausgabeordner), oder ein beliebiger vorhandener Pfad zu einem Build-Ordner oder einer Modelldatei. |
 | `--profile TEXT` | **Pflicht.** Das Target, z. B. `Rockchip` (für Geräteoptionen im Docker-Modus). |
-| `--docker / --no-docker` | Zusätzlich Container-Images einpacken (Standard aus). Experimentell und in dieser Version nicht geprüft; für eine Modelldatei aus lassen. |
+| `--docker / --no-docker` | Zusätzlich Container-Images einpacken (Standard aus). Experimentell und in dieser Version nicht geprüft; für eine Modelldatei aus lassen. Jedes Image (`image_inference_runtime` und mit Wissensdatenbank `image_qdrant`) muss per Digest festgelegt sein (`name@sha256:...`) oder auf diesem Rechner gebaut worden sein; ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte `...:latest`, wird mit Grund abgelehnt, und ein fehlgeschlagener Image-Export bricht das Paket ab. |
 
-Ohne Docker werden nur Modelldateien übertragen; Builds mit mehreren Gewichtsdateien werden abgelehnt.
+Ohne Docker werden nur Modelldateien übertragen; Builds mit mehreren Gewichtsdateien werden abgelehnt. Ein Paket,
+das nicht erstellt werden kann, gibt den Grund aus und endet mit 1; das ZIP wird unter einem vorläufigen Namen
+geschrieben und erst umbenannt, wenn es vollständig ist.
 
 ```bash
 llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
@@ -352,6 +354,7 @@ llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0
 
 ```
 llm-cli deploy run PACKAGE_PATH --ip IP --user BENUTZER [--port 22] [--password TEXT] [--trust-fingerprint TEXT]
+                   [--label TEXT]
 ```
 
 Lädt ein Paket per SSH in einen privaten temporären Ordner auf dem Board, führt dort `deploy.sh` aus und löscht den
@@ -366,10 +369,14 @@ gibt es eine passende `llama-server`-Befehlszeile aus, wenn `llama-server` auf d
 | `--port INTEGER` | SSH-Port (Standard 22). |
 | `--password TEXT` | Nur für die erste Verbindung: wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu hinterlegen, und nie gespeichert. Ohne Angabe wird interaktiv gefragt. Ein Passwort auf der Befehlszeile landet in deinem Shell-Verlauf. |
 | `--trust-fingerprint TEXT` | Einem neuen Board ohne Nachfrage vertrauen, wenn sein Host-Schlüssel genau diesen SHA256-Fingerabdruck hat (für Skripte). |
+| `--label TEXT` | Dein Name für das Board in den vertrauten Geräten (Standard: der Name, den es schon hat, oder seine Adresse). |
 
 Erste Verbindung: Die CLI zeigt den Fingerabdruck des Host-Schlüssels und fragt, ob du ihm vertraust. Vergleiche ihn
 mit `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` auf dem Board. Ohne Terminal und ohne `--trust-fingerprint`
-wird nichts übertragen. Ein Board, dessen Host-Schlüssel sich geändert hat, wird immer abgelehnt.
+wird nichts übertragen. Ein Board, dessen Host-Schlüssel sich geändert hat, wird immer abgelehnt. Nach einem
+erfolgreichen Deployment kommt das Board zu den [vertrauten Geräten](#deploy-devices) (im Audit-Log vermerkt), so dass
+ein KI-Client später dorthin übertragen darf, jedes Mal mit deiner Bestätigung. `ssh` und `scp` (genutzt, wenn
+paramiko fehlt) bekommen nie die Standardeingabe des Frameworks.
 
 ```bash
 llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --ip 192.168.1.50 --user rock
@@ -378,6 +385,32 @@ llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --ip 
 llm-cli deploy run output/deploy_model_1791801300.zip --ip 192.168.1.50 --user rock \
   --trust-fingerprint SHA256:AbCdEf...
 ```
+
+### deploy devices
+
+```
+llm-cli deploy devices list [--json]
+llm-cli deploy devices add HOST --user BENUTZER [--port 22] [--label TEXT]
+llm-cli deploy devices remove GERÄTE_ID
+```
+
+Die vertrauten Geräte (`~/.llm-framework/devices.json`): die einzigen Geräte, die KI-Clients und Ditto für
+`deploy_to_device` nennen dürfen, und jedes solche Deployment wird trotzdem erfragt. Ein Eintrag enthält deinen
+Namen für das Gerät, die Adresse, den Benutzer, den Host-Schlüssel, den du bestätigt hast, und ob der eigene
+SSH-Schlüssel des Frameworks sich dort anmeldet (gekoppelt); die Geräte-ID wird aus dem Host-Schlüssel abgeleitet,
+dieselbe ID, die `llm-cli device list` zeigt. Einträge schreibst nur du: `deploy run`, `scan --device` und
+`device runtime deploy` nach einer erfolgreichen Anmeldung, das Deployment-Fenster der GUI nach einem Deployment und
+`deploy devices add`. Kein Tool schreibt, ändert oder entfernt einen.
+
+| Befehl | Bedeutung |
+|---|---|
+| `list` | Jeder Eintrag mit seinem Host-Schlüssel und ob dieser noch der vertraute in der `known_hosts` des Frameworks ist (`trusted`, `CHANGED in known_hosts`, `not in known_hosts`), gekoppelt und dem letzten Deployment. |
+| `add HOST --user BENUTZER` | Nimmt ein Board auf, dem du vor dieser Version vertraut hast (sein Host-Schlüssel steht schon in der `known_hosts` des Frameworks). Braucht ein Terminal: Es zeigt den Fingerabdruck und fragt; es vertraut nie einem neuen Schlüssel, fragt nie nach einem Passwort und markiert das Board nur dann als gekoppelt, wenn der Schlüssel des Frameworks sich anmeldet. |
+| `remove GERÄTE_ID` | Entfernt den Eintrag (im Audit-Log vermerkt); KI-Tools können das Gerät dann nicht mehr nennen. Sein Eintrag in `known_hosts` bleibt. |
+
+Ein Eintrag ist nur nutzbar, solange die `known_hosts` des Frameworks genau den Schlüssel enthält, den er nennt:
+Hast du dort einen geänderten Schlüssel entfernt (um einem neu installierten Board wieder zu vertrauen), vertraue dem
+Board erneut mit `deploy run` oder `scan --device`.
 
 ---
 
@@ -660,7 +693,10 @@ llm-cli ditto eval --kind retrieval --case retr-en-rknn-onnx-convert --case retr
 
 Der verwaltete llama.cpp-Server für Dittos Offline-Modus. Diese Befehle funktionieren ohne Docker und ohne
 Schlüsselbund. Dateien: `~/.llm-framework/runtime/llama.cpp/` (Builds und Zustand) und
-`~/.llm-framework/logs/llama-server.log`.
+`~/.llm-framework/logs/llama-server.log`. Die optionalen MCP-Tools `build_local_runtime`, `start_local_runtime`,
+`stop_local_runtime` und `run_benchmark` tun dasselbe für einen KI-Client, sobald du sie freigibst
+([Details](Features_DE.md#laufzeit-tools-für-ki-clients-optional)); `install --prebuilt` und das Installieren von
+Toolchain-Teilen bleiben Befehle nur für dich.
 
 #### ditto runtime status
 
@@ -872,11 +908,13 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 15 nur lesende Tools (`list_targets`,
+Die Tools des Frameworks sind das, was Ditto und MCP-Clients verwenden: 16 nur lesende Tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
 `run_doctor`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `search_hf_models`,
-`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`) und 6, die auf diesem Rechner etwas ändern
-(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`, `download_hf_file`).
+`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`, `list_devices`), 7, die auf diesem Rechner
+etwas ändern (`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`,
+`download_hf_file`, `create_deploy_package`), und `deploy_to_device`, das ein Gerät erreicht, dem du vertraust
+(Stufe `external`: immer mit Frage).
 
 ### tools list
 
@@ -1428,6 +1466,11 @@ aktualisiert den Eintrag.
 
 Was deployt ist (Build, Zeit, Startskript oder systemd, Ergebnis der Prüfungen) und ob es noch der Build ist, den
 das Profil des Boards, der Pin und das Rezept verlangen; wenn nicht, erneut bauen und deployen.
+
+Für ein [vertrautes Gerät](#deploy-devices) führen die optionalen MCP-Tools `probe_remote_device`,
+`deploy_device_runtime` und `run_device_benchmark` für einen KI-Client `scan --device`, `device runtime build` mit
+`deploy` und `device runtime verify --bench-model` aus, jedes von dir bestätigt; die Deploy-Einstellungen bleiben
+immer deine (`device settings`).
 
 ```bash
 llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W"

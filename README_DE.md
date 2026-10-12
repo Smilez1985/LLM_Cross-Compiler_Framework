@@ -252,7 +252,14 @@ Benutzer und nie Geheimnisse: [Einzelheiten](docs/Features_DE.md#eingabeverlauf)
    und löscht danach den temporären Ordner.
 
 Lass die Docker-Option für eine einfache Modelldatei aus. Mit ihr enthält das Paket zusätzlich Container-Images;
-dieser Modus ist experimentell und in dieser Version nicht geprüft.
+dieser Modus ist experimentell und in dieser Version nicht geprüft, und er nimmt ein Image nur, wenn es per Digest
+festgelegt ist (`name@sha256:...`) oder auf deinem Rechner gebaut wurde.
+
+Nach einem erfolgreichen Deployment gehört das Board zu deinen **vertrauten Geräten** (`llm-cli deploy devices
+list`). Ein über MCP verbundener KI-Client oder Ditto kann dann einen Build paketieren und auf dieses Board übertragen
+(`list_devices`, `create_deploy_package`, `deploy_to_device`), jedes Mal erst, nachdem du eine Frage bestätigt hast,
+die das Board, den Fingerabdruck seines Host-Schlüssels und den Hash des Pakets zeigt. Keine KI kann einem neuen Board
+vertrauen oder einen geänderten Host-Schlüssel annehmen.
 
 ### Das Board
 
@@ -294,7 +301,7 @@ llm-cli device runtime deploy 192.168.1.50          # per SSH installieren und a
   Build, der besteht, wird der aktive (und der der systemd-Unit); ein Build, der scheitert, wird wieder entfernt, und
   der vorige Build bleibt aktiv.
 
-Noch nicht auf einem echten Board getestet; die GUI und die MCP-Werkzeuge dafür folgen.
+Noch nicht auf einem echten Board getestet; die GUI dafür folgt. KI-Clients erreichen dieselben Schritte über die optionalen MCP-Tools `probe_remote_device`, `deploy_device_runtime` und `run_device_benchmark`, die verborgen bleiben, bis du sie freigibst, und bei jedem Aufruf von dir bestätigt werden.
 
 ### Die Hardware des Boards untersuchen
 

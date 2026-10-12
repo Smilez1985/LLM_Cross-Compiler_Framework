@@ -49,8 +49,9 @@ CONVERT_INSTRUCTIONS = (
     "(model, target, format, board, quantization), then call start_build; the person confirms it if their "
     "permissions ask. 4. Follow the build with get_build_status and wait_seconds=50 until it ends; if it waits for a "
     "self-healing decision, show the proposal to the user and call resolve_healing only with their decision. "
-    "5. Show the result with list_artifacts. Deploying to a device is done by the person in the framework's GUI or "
-    "CLI; ask before suggesting it. A board nobody has measured is no reason to refuse: say that its fit is unknown."
+    "5. Show the result with list_artifacts. Deploy only when the user asks for it (create_deploy_package, then "
+    "deploy_to_device to a device the person trusted and paired; list_devices shows them). A board nobody has "
+    "measured is no reason to refuse: say that its fit is unknown."
     + CLOSING)
 RECOMMEND_INSTRUCTIONS = (
     CLIENT_ROLE + OPTIMIZER_TASK + " Give the format, the quantization type, an optimization level (balanced, "
@@ -72,8 +73,22 @@ ADD_BOARD_INSTRUCTIONS = (
     "create it with create_target_module; the person confirms every module." + CLOSING)
 DEPLOY_INSTRUCTIONS = (
     CLIENT_ROLE + "Deploy a built model to a device. A device must be trusted and paired by the person in the "
-    "framework's GUI or CLI first; you can never trust a device or its host key. Create the package with "
-    "create_deploy_package, then deploy it with deploy_to_device; the person confirms each deploy." + CLOSING)
+    "framework's GUI or CLI first; you can never trust a device or its host key. list_devices shows the devices "
+    "(use the label the person gave when you talk about one). Create the package with create_deploy_package and wait "
+    "for its job with get_job_status; then deploy it with deploy_to_device and follow that job too. The person "
+    "confirms each deploy and sees the device's host key and the package's hash. If a device is not usable "
+    "(not paired, or its host key changed), tell the user what the person has to do in the GUI or the CLI." + CLOSING)
+
+OFFLINE_INSTRUCTIONS = (
+    CLIENT_ROLE + "Set up Ditto's offline assistant on this computer: the framework's self-built llama.cpp server with "
+    "a catalog model. 1. Look at the hardware, the planned builds and the recommended model tier below (get_status "
+    "with the local_runtime and host sections shows them again). 2. Build the server with build_local_runtime "
+    "(backend auto unless the user wants another; model_tier: the recommended tier) and follow its job with "
+    "get_job_status. If it is refused because a toolchain part is missing, tell the user the command the refusal names: "
+    "only the person installs toolchains and accepts licences. 3. Start the server with start_local_runtime. 4. If the "
+    "user wants numbers, run_benchmark (kind: the tier speed) measures the tier's speed. These tools are optional: if one "
+    "is not available, say that the person enables it in the tool permissions. Never ask for a prebuilt download: the "
+    "server is always built from the pinned source." + CLOSING)
 
 
 def _block(label: str, text: str, source: str, max_len: int = 4000) -> str:
@@ -194,7 +209,40 @@ def register_framework_prompts(registry: ToolRegistry, framework,
         parts = [_block("Built model", args["artifact_id"], "artifact id", 200)]
         if args.get("device_id"):
             parts.append(_block("Device", args["device_id"], "device id", 200))
+        parts.append(_block("Trusted devices (list_devices)", trusted_devices(ctx), "device list", 4000))
         return "\n\n".join(parts)
+
+    def trusted_devices(ctx: ToolContext) -> str:
+        """The trusted devices by id and label, only while this caller may read list_devices without a question."""
+        try:
+            allowed = registry.decide(registry.get("list_devices"), None, ctx) == Decision.ALLOW
+        except ToolError:
+            allowed = False
+        if not allowed:
+            return "not shown: call list_devices"
+        from orchestrator.runtime.device.trusted import TrustedDevices
+        try:
+            rows = TrustedDevices.for_framework(framework).list()
+        except Exception:  # noqa: BLE001
+            rows = []
+        return "\n".join(f"{d.device_id}: {d.label}" + ("" if d.paired else " (not paired)") for d in rows) or \
+            "none yet: the person trusts and pairs a device in the GUI or the CLI"
+
+    def offline(_args: Dict[str, str], ctx: ToolContext) -> str:
+        from orchestrator.runtime.llama_server import LocalLLMRuntime
+        try:
+            rt = LocalLLMRuntime.from_framework(framework)
+            hardware = rt.hardware().summary()
+            backend, reason = rt.recommend_backend()
+            model, why = rt.choose_tier()
+            installed = rt.installed()
+            facts = [f"Hardware: {hardware}", f"Planned builds: CPU build, then {backend} ({reason})",
+                     f"Recommended model tier: {model.tier} ({model.file}): {why}",
+                     "Built already: " + (f"{installed.name} ({installed.backend}, {installed.label})"
+                                          if installed is not None else "nothing yet")]
+        except Exception as e:  # noqa: BLE001 - a probe that fails: the client asks get_status
+            facts = [f"The hardware could not be read here ({e.__class__.__name__}); call get_status."]
+        return _block("This computer", "\n".join(facts), "hardware probe", 4000)
 
     def targets(_args: Dict[str, str], _ctx: ToolContext) -> List[str]:
         try:
@@ -259,6 +307,11 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    (PromptArg("artifact_id", "The built model", required=True, max_chars=64),
                     PromptArg("device_id", "A paired device (optional)", max_chars=64)), deploy,
                    tools=("create_deploy_package", "deploy_to_device")),
+        PromptSpec("set_up_offline_assistant", "Set up the offline assistant",
+                   "Builds and starts Ditto's self-built local model server on this computer with a catalog model "
+                   "(the optional local runtime tools).", OFFLINE_INSTRUCTIONS, (), offline,
+                   tools=("build_local_runtime", "start_local_runtime", "run_benchmark", "get_status",
+                          "get_job_status")),
     ]
     for spec in specs:
         registry.register_prompt(spec)

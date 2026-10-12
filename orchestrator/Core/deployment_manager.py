@@ -22,8 +22,9 @@ import shutil
 import tempfile
 import json
 import zipfile
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional, List, Dict
+from typing import Any, Callable, Optional, List, Dict
 
 # paramiko is used through orchestrator.utils.ssh_trust; without it deployments fall back to OpenSSH.
 PARAMIKO_AVAILABLE = importlib.util.find_spec("paramiko") is not None
@@ -41,6 +42,59 @@ DEVICE_START_SCRIPT = ".local/share/llm-framework/llama.cpp/current/llama-server
 DEFAULT_QDRANT_IMAGE = "qdrant/qdrant:v1.16.0"
 SSH_USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
 MODEL_SUFFIXES = MODEL_FILE_SUFFIXES
+# An image reference pinned by its content digest (name@sha256:<64 hex>): the only form pulled for a package.
+DIGEST_REFERENCE = re.compile(r"^[a-z0-9][a-z0-9._/:-]{0,254}@sha256:[0-9a-f]{64}$", re.ASCII)
+REMOTE_OUTPUT_LINES = 100     # lines of the device's output kept for the result (the rest is in the log)
+REMOTE_LINE_CHARS = 500
+_HOST = re.compile(r"^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?|[0-9A-Fa-f:.]{2,45})$", re.ASCII)
+
+
+class DeployError(ValueError):
+    """A package or a deployment that cannot be made; the message says why (for the person or the calling AI), `code`
+    is a reason code of the tool registry and `next` the step that helps."""
+
+    def __init__(self, message: str, code: str = "failed", next: str = ""):
+        super().__init__(message)
+        self.code, self.next = code, next
+
+
+@dataclass
+class DeployResult:
+    """What a deployment did: success, the exit status of deploy.sh on the device (None when it did not run to its
+    end), the last lines the device printed (device text: untrusted), what state the device is in afterwards and,
+    when it failed, the reason."""
+    success: bool
+    exit_status: Optional[int] = None
+    output: List[str] = field(default_factory=list)
+    device_state: str = "unknown"   # ok | failed | unknown
+    reason: str = ""
+
+
+def image_problem(image: str, client: Any) -> Optional[str]:
+    """Why `image` cannot go into a deployment package (None: it can). An image is taken only when it is pinned by its
+    digest (name@sha256:...), or when it was built on this computer: it exists locally and no registry digest is
+    recorded for it, so it was never pulled. A tag alone names whatever the registry serves today."""
+    if DIGEST_REFERENCE.fullmatch(image or ""):
+        return None
+    if client is not None:
+        try:
+            local = client.images.get(image)
+        except Exception:  # noqa: BLE001 - not here (or no Docker): not built here either
+            local = None
+        if local is not None:
+            digests = (getattr(local, "attrs", None) or {}).get("RepoDigests")
+            if isinstance(digests, list) and not digests:
+                return None
+    return (f"the image {image} is neither pinned by its digest nor built on this computer; packages take only "
+            "image@sha256:<digest> references or images built here")
+
+
+def sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
 
 def _primary_name(info: Dict[str, Any]) -> Optional[str]:
@@ -111,16 +165,28 @@ class DeploymentManager:
     # --- PACKAGE GENERATION ---
 
     def create_deployment_package(self, artifact_path: Path, profile_name: str, docker_config: Dict, output_dir: Path) -> Optional[Path]:
+        """The package (see create_package), or None when it cannot be made (the reason is logged)."""
+        try:
+            return self.create_package(artifact_path, profile_name, docker_config, output_dir)
+        except DeployError as e:
+            self.logger.error(str(e))
+            return None
+
+    def create_package(self, artifact_path: Path, profile_name: str, docker_config: Dict, output_dir: Path, *,
+                       cancelled: Optional[Callable[[], bool]] = None) -> Path:
         """
-        Erstellt ein ZIP-Paket für das Zielsystem.
-        Inkludiert Binaries, Configs und Docker-Images (für Air-Gap).
+        Creates the ZIP package for the device: the model file (and the build's manifest and model card), the static
+        user configs, the generated deploy.sh and checksums; with docker_config["use_docker"] also the Docker images
+        (air-gap), each pinned by its digest or built on this computer (image_problem). Raises DeployError with the
+        reason. `cancelled()` is checked between the steps; the zip is written under a temporary name and renamed
+        when complete, so a cancelled or failed package leaves no file.
         """
+        stop = cancelled or (lambda: False)
         build_dir = Path(artifact_path) if Path(artifact_path).is_dir() else None
         try:
             artifact_path = resolve_model_artifact(Path(artifact_path))
         except (OSError, ValueError) as e:
-            self.logger.error(str(e))
-            return None
+            raise DeployError(str(e), code="invalid_value") from None
 
         # Hardware Flags vom TargetManager holen
         target_mgr = self.framework.get_component("target_manager")
@@ -129,43 +195,58 @@ class DeploymentManager:
             docker_flags = target_mgr.get_docker_flags_for_profile(profile_name)
         flags_str = " ".join(docker_flags)
 
+        # Images (names come from the central config), checked before anything is copied
+        use_docker = docker_config.get("use_docker", False)
+        cfg = self.framework.config
+        inference_image = cfg.get("image_inference_runtime", DEFAULT_INFERENCE_IMAGE)
+        qdrant_image = cfg.get("image_qdrant", DEFAULT_QDRANT_IMAGE) if cfg.get("enable_rag_knowledge", False) else None
+        images = ([inference_image] + ([qdrant_image] if qdrant_image else [])) if use_docker else []
+        client = self.framework.get_component("docker_client") if images else None
+        for image in images:
+            problem = image_problem(image, client)
+            if problem:
+                raise DeployError(problem[0].upper() + problem[1:] + ".", code="not_supported",
+                                  next="Set image_inference_runtime (and image_qdrant) to an image@sha256:<digest> "
+                                       "reference, build the image on this computer, or package without Docker "
+                                       "images.")
+
+        def check_stop():
+            if stop():
+                raise DeployError("Packaging was cancelled; no package was written.", code="failed")
+
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            
+
             # A. Model file, plus the build's provenance (manifest, model card) when deploying a build
             shutil.copy2(artifact_path, temp_path / artifact_path.name)
             if build_dir:
                 for extra in (BUILD_MANIFEST, "Model_Card.md"):
                     if (build_dir / extra).is_file():
                         shutil.copy2(build_dir / extra, temp_path / extra)
-            
+            check_stop()
+
             # B. Configs (User Profiles, Prompts)
             self._bundle_user_configs(temp_path / "data" / "configs")
 
-            # C. Docker Images & RAG Setup (image names come from the central config)
-            use_docker = docker_config.get("use_docker", False)
-            cfg = self.framework.config
-            inference_image = cfg.get("image_inference_runtime", DEFAULT_INFERENCE_IMAGE)
-            qdrant_image = cfg.get("image_qdrant", DEFAULT_QDRANT_IMAGE) if cfg.get("enable_rag_knowledge", False) else None
+            # C. Docker Images & RAG Setup
             if use_docker:
-                images = [inference_image]
-
                 if qdrant_image:
-                    images.append(qdrant_image)
                     # WICHTIG: Slim RAG Strategy
                     # Wir erstellen nur die Struktur, kopieren aber KEINE Host-Daten.
                     self._setup_slim_vector_db(temp_path)
 
-                self._export_docker_images(images, temp_path / "images")
+                load_names = self._export_docker_images(images, temp_path / "images", client)
+                check_stop()
+            else:
+                load_names = {}
 
             # D. Script Generation (Deploy + Compose Logic)
             try:
                 script_content = self._generate_deploy_script(
-                    artifact_path.name, flags_str, use_docker, inference_image, qdrant_image)
+                    artifact_path.name, flags_str, use_docker, inference_image, qdrant_image, load_names)
             except ValueError as e:
-                self.logger.error(str(e))
-                return None
-            
+                raise DeployError(str(e), code="not_supported") from None
+
             deploy_script_path = temp_path / "deploy.sh"
             with open(deploy_script_path, "w", newline='\n') as f:
                 f.write(script_content)
@@ -174,20 +255,31 @@ class DeploymentManager:
 
             # E. Checksums & Zip
             self._generate_checksums(temp_path, temp_path / "checksums.sha256")
-            
+            check_stop()
+
             timestamp = int(time.time())
             pkg_name = f"deploy_{artifact_path.stem}_{timestamp}.zip"
             pkg_path = output_dir / pkg_name
-            
+
             # Output Directory sicherstellen
             output_dir.mkdir(parents=True, exist_ok=True)
 
-            with zipfile.ZipFile(pkg_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-                for root, _, files in os.walk(temp_path):
-                    for file in files:
-                        p = Path(root) / file
-                        zipf.write(p, p.relative_to(temp_path))
-            
+            partial = output_dir / f".{pkg_name}.part"
+            try:
+                with zipfile.ZipFile(partial, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                    for root, _, files in os.walk(temp_path):
+                        for file in files:
+                            check_stop()
+                            p = Path(root) / file
+                            zipf.write(p, p.relative_to(temp_path))
+                os.replace(partial, pkg_path)
+            except BaseException:
+                try:
+                    partial.unlink()
+                except OSError:
+                    pass
+                raise
+
             self.logger.info(f"Deployment Package created: {pkg_path}")
             return pkg_path
 
@@ -221,31 +313,55 @@ class DeploymentManager:
         (qdrant_storage / ".keep").touch()
         self.logger.info("Initialized Slim-RAG storage structure (Clean Slate).")
 
-    def _export_docker_images(self, images: List[str], dest_dir: Path):
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        client = self.framework.get_component("docker_client")
-        if not client:
-            self.logger.warning("No Docker Client available. Skipping Image Export.")
-            return
+    @staticmethod
+    def _load_name(image: str) -> str:
+        """The name a packed image carries in its tarball, so `docker load` restores it on the device: the image's own
+        tag, or for a digest-pinned image (docker keeps no tag for an image pulled by its digest, and `docker load`
+        does not restore registry digests) its repository with the tag lcf-<first 12 hex characters of the digest>."""
+        if not DIGEST_REFERENCE.fullmatch(image):
+            return image
+        name, digest = image.split("@sha256:", 1)
+        repo = name.rsplit(":", 1)[0] if ":" in name.rsplit("/", 1)[-1] else name
+        return f"{repo}:lcf-{digest[:12]}"
 
+    def _export_docker_images(self, images: List[str], dest_dir: Path, client: Any = None) -> Dict[str, str]:
+        """Saves each image into the package under the name deploy.sh starts it by (_load_name) and returns
+        {image: that name}. A digest-pinned image that is not here is pulled by its digest; an image is never pulled
+        by a tag. Any failure stops the package (DeployError): a package without its images would fail on the
+        air-gapped device."""
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        client = client or self.framework.get_component("docker_client")
+        if not client:
+            raise DeployError("Docker is not available on this computer, so the images cannot be packaged.",
+                              code="needs_person", next="Start Docker, or package without Docker images.")
+
+        names: Dict[str, str] = {}
         for img_name in images:
-            sanitized = img_name.replace("/", "_").replace(":", "_")
+            sanitized = img_name.replace("/", "_").replace(":", "_").replace("@", "_")
             tar_path = dest_dir / f"{sanitized}.tar"
-            
-            if tar_path.exists():
-                continue # Cache check (optional)
 
             self.logger.info(f"Exporting Docker Image: {img_name}...")
             try:
-                # Versuch Pull, falls nicht lokal
-                try: client.images.pull(img_name)
-                except: pass
-                
-                img = client.images.get(img_name)
+                try:
+                    img = client.images.get(img_name)
+                except Exception:  # noqa: BLE001 - not here: only a digest-pinned image is fetched
+                    if not DIGEST_REFERENCE.fullmatch(img_name):
+                        raise
+                    client.images.pull(img_name)
+                    img = client.images.get(img_name)
+                name = self._load_name(img_name)
+                if name != img_name:  # digest-pinned: the content is the digest's; the local tag only names it
+                    repo, tag = name.rsplit(":", 1)
+                    img.tag(repo, tag=tag)
+                    img.reload()
                 with open(tar_path, "wb") as f:
-                    for chunk in img.save(named=True): f.write(chunk)
+                    for chunk in img.save(named=name):
+                        f.write(chunk)
+                names[img_name] = name
             except Exception as e:
-                self.logger.error(f"Export failed for {img_name}: {e}")
+                raise DeployError(f"The image {img_name} could not be packaged: {e}", code="failed",
+                                  next="Check Docker and the image reference, then package again.") from None
+        return names
 
     def _generate_checksums(self, directory: Path, output_file: Path):
         # LF line endings: sha256sum < coreutils 9.0 (Debian 11, Ubuntu 22.04, Git for Windows) treats CR as part of the name.
@@ -262,7 +378,12 @@ class DeploymentManager:
 
     def _generate_deploy_script(self, artifact, flags, use_docker,
                                 inference_image: str = DEFAULT_INFERENCE_IMAGE,
-                                qdrant_image: Optional[str] = None) -> str:
+                                qdrant_image: Optional[str] = None,
+                                load_names: Optional[Dict[str, str]] = None) -> str:
+        """deploy.sh of a package. The packed images are started by the names their tarballs carry (`load_names`,
+        from _export_docker_images) with `--pull never`: the device runs exactly what the package holds, and a device
+        where an image is missing fails instead of pulling a look-alike from a registry."""
+        names = load_names or {}
         script = [
             "#!/bin/sh",
             "set -e",
@@ -275,6 +396,7 @@ class DeploymentManager:
             script.extend([
                 "echo '[2/3] Loading Images (Air-Gap Support)...'",
                 "for img in images/*.tar; do if [ -e \"$img\" ]; then docker load -i \"$img\"; fi; done",
+                *[f"# {pinned} is packed as {name}" for pinned, name in sorted(names.items()) if pinned != name],
                 "",
                 "echo '[3/3] Starting Stack...'",
                 "docker network create llm-net || true",
@@ -287,7 +409,8 @@ class DeploymentManager:
                     "  --network llm-net \\",
                     "  -v \"$(pwd)/data/qdrant:/qdrant/storage\" \\",
                     "  --restart unless-stopped \\",
-                    f"  {shlex.quote(qdrant_image)}",
+                    "  --pull never \\",
+                    f"  {shlex.quote(names.get(qdrant_image, qdrant_image))}",
                     ""
                 ])
             node = [
@@ -302,7 +425,8 @@ class DeploymentManager:
             node.extend([
                 "  -v \"$(pwd)/data:/app/data\" \\",
                 "  --restart unless-stopped \\",
-                f"  {shlex.quote(inference_image)}",
+                "  --pull never \\",
+                f"  {shlex.quote(names.get(inference_image, inference_image))}",
                 ""
             ])
             script.extend(node)
@@ -356,27 +480,52 @@ class DeploymentManager:
     def deploy_artifact(self, artifact_path: Path, target_ip: str, user: str, password: Optional[str] = None,
                         port: int = 22, pair: bool = True) -> bool:
         """
-        Uploads the package and runs its deploy.sh on the device. The device's host key must be trusted
-        already (host_key_status/trust_host); a password is used for this connection only and, with
+        Uploads the package and runs its deploy.sh on the device (see deploy_package). The device's host key must be
+        trusted already (host_key_status/trust_host); a password is used for this connection only and, with
         pair=True, to install the framework's SSH key so later deployments need none.
         """
         if not validate_ip_address(target_ip):
             self.logger.error(f"Security/Format Error: Invalid IP address provided: {target_ip}")
             return False
+        result = self.deploy_package(Path(artifact_path), target_ip, user, port=port, password=password, pair=pair)
+        if not result.success and result.reason:
+            self.logger.error(result.reason)
+        return result.success
 
+    def deploy_package(self, package: Path, host: str, user: str, *, port: int = 22, password: Optional[str] = None,
+                       pair: bool = True, expect_fingerprint: Optional[str] = None,
+                       expect_sha256: Optional[str] = None, on_client: Optional[Callable[[Any], None]] = None,
+                       cancelled: Optional[Callable[[], bool]] = None) -> DeployResult:
+        """
+        Uploads the package and runs its deploy.sh on the device; returns what happened with the reason instead of a
+        bare bool. The device's host key must be trusted already. With `expect_fingerprint` the key the device presents
+        now must be exactly that one (the fingerprint a person was shown), with `expect_sha256` the package must still
+        have that hash (re-hashed right before the upload, from the same open file that is uploaded). `on_client`
+        gets the SSH session (an object with close()) so a cancel can close it; `cancelled()` is checked between the
+        steps. Child processes never inherit this process's stdin (over MCP stdio that is the protocol stream).
+        """
+        stop = cancelled or (lambda: False)
         # A leading '-' would be parsed by ssh/scp as an option (e.g. -oProxyCommand=...).
+        if not isinstance(host, str) or not _HOST.fullmatch(host) or host.startswith("-"):
+            return DeployResult(False, reason=f"Security/Format Error: Invalid host: {str(host)[:64]!r}")
         if not SSH_USER_PATTERN.match(user or ""):
-            self.logger.error(f"Security/Format Error: Invalid SSH user name: {user!r}")
-            return False
+            return DeployResult(False, reason=f"Security/Format Error: Invalid SSH user name: {user!r}")
+        if not Path(package).is_file():
+            return DeployResult(False, reason=f"The package {Path(package).name} does not exist.")
 
-        if not self._check_conn(target_ip, port):
-            self.logger.error(f"Target {target_ip} not reachable (port {port}).")
-            return False
+        if not self._check_conn(host, port):
+            return DeployResult(False, reason=f"Target {host} not reachable (port {port}).")
 
-        self.logger.info(f"Deploying to {target_ip}...")
+        self.logger.info(f"Deploying to {host}...")
         if PARAMIKO_AVAILABLE:
-            return self._deploy_paramiko(Path(artifact_path), target_ip, user, password, port, pair)
-        return self._deploy_system(Path(artifact_path), target_ip, user, port)
+            return self._deploy_paramiko(Path(package), host, user, password, port, pair, expect_fingerprint,
+                                         expect_sha256, on_client, stop)
+        if expect_fingerprint:
+            # OpenSSH checks the key against known_hosts only; the fingerprint shown cannot be compared without
+            # paramiko, so a deploy bound to one is refused rather than sent unchecked.
+            return DeployResult(False, reason="Checking the device's host key against the fingerprint shown needs the "
+                                              "'paramiko' package; nothing was deployed.")
+        return self._deploy_system(Path(package), host, user, port, expect_sha256, stop)
 
     def _check_conn(self, ip, port=22):
         try:
@@ -395,25 +544,63 @@ class DeploymentManager:
     # A private, unpredictable folder on the device (a fixed /tmp path could be pre-created by another user).
     REMOTE_MKTEMP = "mktemp -d /tmp/llm_deploy.XXXXXXXX"
 
-    def _deploy_paramiko(self, artifact: Path, ip: str, user: str, pw: Optional[str], port: int, pair: bool) -> bool:
+    @staticmethod
+    def _keep(lines: List[str], line: str) -> None:
+        text = "".join(ch if ch.isprintable() else " " for ch in str(line).rstrip("\r\n"))[:REMOTE_LINE_CHARS]
+        lines.append(text)
+        if len(lines) > REMOTE_OUTPUT_LINES:
+            del lines[0]
+
+    def _deploy_paramiko(self, artifact: Path, ip: str, user: str, pw: Optional[str], port: int, pair: bool,
+                         expect_fingerprint: Optional[str] = None, expect_sha256: Optional[str] = None,
+                         on_client: Optional[Callable[[Any], None]] = None,
+                         stop: Callable[[], bool] = lambda: False) -> DeployResult:
+        # The package is opened once: the bytes hashed are the bytes uploaded, and a changed package is refused before
+        # anything reaches the device.
+        with open(artifact, "rb") as fh:
+            if expect_sha256:
+                h = hashlib.sha256()
+                for chunk in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(chunk)
+                if h.hexdigest() != expect_sha256:
+                    return DeployResult(False, reason=f"The package {artifact.name} changed after it was shown (its "
+                                                      "sha256 differs); nothing was deployed.")
+                fh.seek(0)
+            return self._deploy_paramiko_open(fh, artifact.name, ip, user, pw, port, pair, expect_fingerprint,
+                                              on_client, stop)
+
+    def _deploy_paramiko_open(self, fh, name: str, ip: str, user: str, pw: Optional[str], port: int, pair: bool,
+                              expect_fingerprint: Optional[str], on_client: Optional[Callable[[Any], None]],
+                              stop: Callable[[], bool]) -> DeployResult:
         state_dir = self._state_dir()
         try:
-            status = ssh_trust.check_host_key(state_dir, ip, port, ssh_trust.fetch_host_key(ip, port))
+            key = ssh_trust.fetch_host_key(ip, port)
+            status = ssh_trust.check_host_key(state_dir, ip, port, key)
         except (OSError, ssh_trust.HostKeyError, Exception) as e:
-            self.logger.error(f"Could not read the host key of {ip}: {e}")
-            return False
+            return DeployResult(False, reason=f"Could not read the host key of {ip}: {e}")
         if status == "unknown":
-            self.logger.error(f"The device {ip} is not trusted yet: confirm its host key fingerprint first.")
-            return False
+            return DeployResult(False, reason=f"The device {ip} is not trusted yet: confirm its host key fingerprint "
+                                              "first.")
         if status == "changed":
-            self.logger.error(str(ssh_trust.HostKeyChanged(ip, port)))
-            return False
+            return DeployResult(False, reason=str(ssh_trust.HostKeyChanged(ip, port)))
+        if expect_fingerprint and ssh_trust.fingerprint(key) != expect_fingerprint:
+            return DeployResult(False, reason=f"The device {ip} now presents another host key than the one shown "
+                                              f"({ssh_trust.fingerprint(key)}, not {expect_fingerprint}); nothing was "
+                                              "deployed.")
+        if stop():
+            return DeployResult(False, reason="The deploy was cancelled before connecting; nothing was changed.")
 
         try:
             ssh = ssh_trust.connect(ip, user, state_dir, port=port, password=pw)
         except Exception as e:
-            self.logger.error(f"SSH login to {user}@{ip} failed: {e}")
-            return False
+            return DeployResult(False, reason=f"SSH login to {user}@{ip} failed: {e}")
+        if on_client is not None:
+            on_client(ssh)
+        lines: List[str] = []
+        started = False  # deploy.sh started on the device: its state is unknown unless it ends
+        cancelled = DeployResult(False, device_state="unknown", output=lines,
+                                 reason="The deploy was cancelled; the SSH session was closed and the device state is "
+                                        "unknown.")
         try:
             if pw and pair:
                 ssh_trust.install_public_key(ssh, ssh_trust.client_key(state_dir)[1])
@@ -422,47 +609,92 @@ class DeploymentManager:
             target_dir = out.read().decode().strip()
             # Checks mktemp's answer on the device; no local temp file is involved.
             if out.channel.recv_exit_status() != 0 or not target_dir.startswith("/tmp/llm_deploy."):  # nosec B108
-                self.logger.error(f"Could not create a folder on the device: {err.read().decode(errors='replace').strip()}")
-                return False
+                # What the device answered is device text: it goes into the output lines, never into the reason.
+                for line in err.read().decode(errors="replace").splitlines()[-REMOTE_OUTPUT_LINES:]:
+                    self.logger.error(f"[REMOTE] {line.strip()}")
+                    self._keep(lines, line)
+                return DeployResult(False, reason="Could not create a folder on the device (its answer is in the "
+                                                  "device output).", output=lines, device_state="ok")
+            if stop():
+                return DeployResult(False, reason="The deploy was cancelled before the upload.", device_state="ok")
 
             sftp = ssh.open_sftp()
             self.logger.info("Uploading package...")
-            sftp.put(str(artifact), f"{target_dir}/{artifact.name}")
-            
+            sftp.putfo(fh, f"{target_dir}/{name}")
+            if stop():
+                return DeployResult(False, reason="The deploy was cancelled after the upload; deploy.sh did not run.",
+                                    device_state="ok")
+
             self.logger.info("Installing on target...")
-            stdin, stdout, stderr = ssh.exec_command(self._remote_install_cmd(target_dir, artifact.name))
-            for line in stdout: self.logger.info(f"[REMOTE] {line.strip()}")
-            
+            started = True
+            stdin, stdout, stderr = ssh.exec_command(self._remote_install_cmd(target_dir, name))
+            for line in stdout:
+                self.logger.info(f"[REMOTE] {line.strip()}")
+                self._keep(lines, line)
+            for line in stderr:
+                self._keep(lines, line)
+            if stop():
+                return cancelled
+
             exit_status = stdout.channel.recv_exit_status()
             ssh.exec_command(f"rm -rf {shlex.quote(target_dir)}")
             if exit_status == 0:
                 self.logger.info("Remote deployment successful.")
-                return True
-            self.logger.error("Remote deployment failed.")
-            return False
+                return DeployResult(True, exit_status=0, output=lines, device_state="ok")
+            return DeployResult(False, exit_status=exit_status, output=lines, device_state="failed",
+                                reason=f"deploy.sh failed on the device (exit {exit_status}).")
         except Exception as e:
-            self.logger.error(f"SSH Deployment Error: {e}")
-            return False
+            if stop():
+                return cancelled if started else DeployResult(False, device_state="ok", reason="The deploy was "
+                                                              "cancelled before deploy.sh ran.")
+            return DeployResult(False, output=lines, device_state="unknown" if started else "ok",
+                                reason=f"SSH Deployment Error: {e}")
         finally:
             ssh.close()
 
-    def _deploy_system(self, artifact: Path, ip: str, user: str, port: int = 22) -> bool:
-        """Fallback to OpenSSH: framework key and known_hosts only, never prompts, never auto-accepts keys."""
+    def _deploy_system(self, artifact: Path, ip: str, user: str, port: int = 22,
+                       expect_sha256: Optional[str] = None, stop: Callable[[], bool] = lambda: False) -> DeployResult:
+        """Fallback to OpenSSH: framework key and known_hosts only, never prompts, never auto-accepts keys, and never
+        hands this process's stdin to ssh or scp (over MCP stdio it is the protocol stream)."""
+        lines: List[str] = []
+        started = False
         try:
-            opts = ssh_trust.system_ssh_options(self._state_dir())
-            target = f"{user}@{ip}"
-            made = subprocess.run(["ssh", *opts, "-p", str(port), target, self.REMOTE_MKTEMP],
-                                  capture_output=True, text=True, check=True)
-            target_dir = made.stdout.strip()
-            # Checks mktemp's answer on the device; no local temp file is involved.
-            if not target_dir.startswith("/tmp/llm_deploy."):  # nosec B108
-                raise RuntimeError("could not create a folder on the device")
-            subprocess.run(["scp", *opts, "-P", str(port), str(artifact), f"{target}:{target_dir}/"], check=True)
-            cmd = self._remote_install_cmd(target_dir, artifact.name) + f"; status=$?; rm -rf {shlex.quote(target_dir)}; exit $status"
-            res = subprocess.run(["ssh", *opts, "-p", str(port), target, cmd], capture_output=True, text=True)
+            with tempfile.TemporaryDirectory(prefix="llm-deploy-") as tmp:
+                upload = artifact
+                if expect_sha256:
+                    # The copy that is hashed is the copy that is uploaded.
+                    upload = Path(tmp) / artifact.name
+                    shutil.copyfile(artifact, upload)
+                    if sha256_file(upload) != expect_sha256:
+                        return DeployResult(False, reason=f"The package {artifact.name} changed after it was shown "
+                                                          "(its sha256 differs); nothing was deployed.")
+                opts = ssh_trust.system_ssh_options(self._state_dir())
+                target = f"{user}@{ip}"
+                made = subprocess.run(["ssh", *opts, "-p", str(port), target, self.REMOTE_MKTEMP],
+                                      capture_output=True, text=True, check=True, stdin=subprocess.DEVNULL)
+                target_dir = made.stdout.strip()
+                # Checks mktemp's answer on the device; no local temp file is involved.
+                if not target_dir.startswith("/tmp/llm_deploy."):  # nosec B108
+                    raise RuntimeError("could not create a folder on the device")
+                subprocess.run(["scp", *opts, "-P", str(port), str(upload), f"{target}:{target_dir}/"], check=True,
+                               stdin=subprocess.DEVNULL, capture_output=True)
+                if stop():
+                    return DeployResult(False, reason="The deploy was cancelled after the upload; deploy.sh did not "
+                                                      "run.", device_state="ok")
+                cmd = (self._remote_install_cmd(target_dir, artifact.name)
+                       + f"; status=$?; rm -rf {shlex.quote(target_dir)}; exit $status")
+                started = True
+                res = subprocess.run(["ssh", *opts, "-p", str(port), target, cmd], capture_output=True, text=True,
+                                     stdin=subprocess.DEVNULL)
             self.logger.info(res.stdout)
-            if res.stderr: self.logger.warning(res.stderr)
-            return res.returncode == 0
+            if res.stderr:
+                self.logger.warning(res.stderr)
+            for line in (res.stdout or "").splitlines() + (res.stderr or "").splitlines():
+                self._keep(lines, line)
+            if res.returncode == 0:
+                return DeployResult(True, exit_status=0, output=lines, device_state="ok")
+            return DeployResult(False, exit_status=res.returncode, output=lines, device_state="failed",
+                                reason=f"deploy.sh failed on the device (exit {res.returncode}).")
         except Exception as e:
-            self.logger.error(f"System Deployment Error: {e}")
-            return False
+            return DeployResult(False, output=lines, device_state="unknown" if started else "ok",
+                                reason=f"System Deployment Error: {e}")

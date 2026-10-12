@@ -245,7 +245,25 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   127.0.0.1 with the board's key), otherwise how to deploy it; it never points to a `llama-server` found on the
   board's `PATH`. For RKLLM it names the RKLLM runtime.
 - **Docker mode** (`--docker`, GUI option): also packs container images and starts them on the board. This mode
-  is experimental and not verified in this version.
+  is experimental and not verified in this version. An image goes into a package only when it is pinned by its
+  digest (`image_inference_runtime: name@sha256:...`) or was built on this computer (it exists here and was never
+  pulled); an image named only by a tag, such as the default `...:latest`, is refused with the reason before anything
+  is copied. A digest-pinned image that is not here is pulled by its digest, never by a tag, and a failed export
+  stops the package instead of leaving the image out. A digest-pinned image is packed under the local name
+  `<repository>:lcf-<first 12 hex characters of the digest>` (`docker load` does not restore registry digests), and
+  `deploy.sh` starts every packed image with `--pull never`: the board runs exactly the packed image, and a board
+  where it is missing stops instead of pulling one from a registry.
+- **Trusted devices:** after a successful login to a board whose host key you confirmed (a deployment in the GUI or
+  with `llm-cli deploy run`, a probe with `llm-cli scan --device`, a `device runtime deploy`), the framework records
+  it in `~/.llm-framework/devices.json`: your label, address, user, the confirmed host key and whether the
+  framework's key logs in (paired); the device id is derived from the host key. `llm-cli deploy devices
+  list|add|remove` shows and manages them ([CLI](CLI_Usage.md#deploy-devices)). These are the only devices an AI
+  client or Ditto can name for a deploy, and only while the framework's `known_hosts` still holds that key; no tool
+  trusts, pairs or records a device.
+- **Errors with their reason:** packaging and deploying return why they failed (no Docker, an image not pinned, the
+  host key changed, `deploy.sh` exit status) instead of only logging it. A package is written under a temporary name
+  and renamed when complete. Without paramiko, `ssh` and `scp` never get the framework's standard input (over MCP
+  stdio that is the protocol stream).
 
 ### Runtime on the board (self-built llama.cpp)
 
@@ -529,6 +547,13 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `report_cannot_do` | read | Report that a task cannot be done, with the reason; the framework checks the reason against its own state |
 | `get_job_status` | read | State, progress and result of a long operation other than a build (a job); waits with `wait_seconds` |
 | `cancel_job` | local write | Stop a job (its own jobs without a question, another caller's only after one) |
+| `list_devices` | read | The devices you trusted and paired in the GUI or the CLI, by your label, with host key fingerprint and whether they are usable |
+| `create_deploy_package` | local write | Package a built model for a target's device profile (a job; images only digest-pinned or built here) |
+| `deploy_to_device` | external | Copy a package to a trusted, paired device and run its `deploy.sh` (always asked; the question shows the host key and the package hash; a job) |
+| `build_local_runtime` | local write | Optional, hidden until enabled: build llama-server for this computer from the pinned commit (a job; never prebuilt) |
+| `start_local_runtime` / `stop_local_runtime` | local write | Optional, hidden until enabled: start (a job) or stop Ditto's local server; never its address or key |
+| `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on a catalog model or a built GGUF model; an untrusted model natively only after consent in the framework, or in the sandbox |
+| `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
 
 How a question with tools runs:
 
@@ -820,6 +845,42 @@ official prebuilt download stays only as the explicit choice `--prebuilt`, shown
 - **Measured** on a 4-core x86-64 virtual machine (GCC 13.3, `-j4`): `llama-server` and `llama-bench` at the pin in
   189 seconds including the checks, 28 MB of binaries; `ditto runtime install` with Ditto's CPU build
   (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 seconds including the checks.
+
+### Local runtime tools for AI clients (optional)
+
+Six optional MCP tools let an AI client (or Ditto) do what `llm-cli ditto runtime` and `llm-cli device runtime` do.
+Each is registered only when its runtime package exists in the installation, and each is denied, and so not listed,
+until you enable it in the tool permissions, also when you allowed the whole tier.
+
+- **`build_local_runtime`** builds llama-server for this computer from the pinned commit (CPU build first, then the
+  GPU build of `backend`: `auto`, `cpu`, `cuda`, `vulkan`, `rocm`, `metal`) as a job, and with `model_tier` fetches
+  that catalog model (pinned by size and sha256). The question shows the planned builds, the toolchain, whether the
+  pinned source must be fetched, the model and an estimate of the disk needed. There is no prebuilt option and no input
+  for a CMake option or a command. A missing toolchain part (a compiler, CMake, Docker, a GPU toolkit) is refused
+  before the question with reason `needs_person` and `llm-cli ditto runtime install`: only you install toolchains and
+  accept licences. `cancel_job` stops a model download between two chunks (its `.part` file is kept) and stops the
+  install before its next build or activation: a cancelled build is never made active.
+- **`start_local_runtime`** (a job; `tier`, `context_length`) and **`stop_local_runtime`** start and stop Ditto's
+  server. Only a build that passed its verification here is started. No result holds the server's address or its
+  per-start key.
+- **`run_benchmark`** measures prompt and generation speed and peak memory with the self-built `llama-bench`:
+  `tier_speed` for a downloaded catalog model, `artifact_speed` for a built GGUF model. A catalog model runs natively.
+  Any other model is untrusted (runtime decision D23): it runs natively only after your consent, which is asked in the
+  framework's own window (Ditto's dialog, the pending approvals of the GUI or `llm-cli tools approvals`, never a
+  client's dialog), is asked even when the tool is allowed, and is written to the audit log before the model is
+  loaded; with `sandbox: true` it runs in the Docker sandbox instead. Results are kept in
+  `~/.llm-framework/benchmarks/` (`runs/<run id>.json`, `index.jsonl`); `get_status` (section `local_runtime`) shows
+  the newest runs.
+- **Board tools** (tier `external`, always asked, never covered by a standing approval, only for a
+  [trusted device](#deployment) whose host key is still the trusted one, shown in the question):
+  `probe_remote_device` runs the read-only probe over SSH and stores it under the device id (as `scan --device`);
+  `deploy_device_runtime` builds the board's runtime in the builder container when needed and installs it as the
+  deploy settings you chose beforehand say (as `device runtime build` and `deploy`; activated only when its checks pass
+  on the board); `run_device_benchmark` runs the runtime checks with a short `llama-bench` on the model the deploy
+  settings name (as `device runtime verify --bench-model`), an untrusted model only with your consent in the
+  framework, written to the audit log first. The board's output comes back as external text.
+- The resource `lcf://runtime/catalog` holds the pinned commit and the model tiers; the prompt
+  `set_up_offline_assistant` leads a client through building, starting and measuring.
 
 ### Perplexity check of converted models
 
@@ -1330,6 +1391,26 @@ framework never sees it.
   folders the AI may use (a Hugging Face model folder as one entry, PyTorch pickle weights flagged, links out of the
   folder, hard-linked and hidden files and unfinished downloads left out; 50 per page), each with its file id and
   `<label>:<relative path>`, which `start_build` takes; a downloaded file shows up there too.
+- **Devices and deploy (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` shows the
+  [trusted devices](#deployment) with the label you gave, address, user, host key fingerprint, whether the device
+  is usable (paired, and its key still the trusted one) and the last deploy. `create_deploy_package` packages a
+  built model (artifact id) for a target's device profile (default: the target it was built for) as a job; the
+  output folder's disk must hold twice the model, and `include_docker_images` is refused unless every image is pinned
+  by its digest or built on this computer. Its result has the package id (`pkg_` and 16 hex characters), size and
+  sha256; a standing approval can cover it only without Docker images. `deploy_to_device` takes only a package id
+  and a device id. Before you are asked, the framework reads the device's host key (a key read, no login) and
+  refuses an unknown or changed key without writing anything (reason `needs_person`); an unpaired device is refused
+  too. The question shows the device by your label with user and address, the host key fingerprint you confirmed,
+  the package's name, size and sha256, the built model and the trust of its target. The deploy then runs as a job
+  without a password and refuses when the package's sha256 (computed from the same open file that is uploaded) or
+  the device's key differs from what you were shown. It is always asked (it can never be set to allow), never covered
+  by a standing approval, one per device at a time and six per hour per client. `cancel_job` closes the SSH session
+  and the job says the device state is unknown; nothing is retried. The job result has `success`, `exit_status`,
+  `device_state` (`ok`, `failed`, `unknown`) and the last 100 lines the device printed in `external_text`, marked as
+  external text; `reason` is always the framework's own sentence, without host paths. When a job of the device or
+  runtime tools fails, the error message is the framework's sentence too: what the device or `llama-bench` printed
+  (`llama-bench` prints the metadata of the model it loads) is returned in `external_text`. The `deploy_to_board`
+  prompt leads through the same steps.
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
   server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification

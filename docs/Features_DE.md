@@ -257,7 +257,27 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   installiert ist (auf 127.0.0.1 mit dem Schlüssel des Boards), sonst, wie du sie deployst; auf einen
   `llama-server` aus dem `PATH` des Boards verweist es nie. Für RKLLM nennt es die RKLLM-Runtime.
 - **Docker-Modus** (`--docker`, Option in der GUI): packt zusätzlich Container-Images ein und startet sie auf dem
-  Board. Dieser Modus ist experimentell und in dieser Version nicht geprüft.
+  Board. Dieser Modus ist experimentell und in dieser Version nicht geprüft. Ein Image kommt nur ins Paket, wenn es
+  per Digest festgelegt ist (`image_inference_runtime: name@sha256:...`) oder auf diesem Rechner gebaut wurde (es
+  liegt hier und wurde nie gezogen); ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte
+  `...:latest`, wird mit Grund abgelehnt, bevor etwas kopiert wird. Ein per Digest festgelegtes Image, das hier fehlt,
+  wird über seinen Digest gezogen, nie über ein Tag, und ein fehlgeschlagener Export bricht das Paket ab, statt das
+  Image wegzulassen. Ein per Digest festgelegtes Image wird unter dem lokalen Namen
+  `<Repository>:lcf-<erste 12 Hex-Zeichen des Digests>` eingepackt (`docker load` stellt Registry-Digests nicht
+  wieder her), und `deploy.sh` startet jedes eingepackte Image mit `--pull never`: Das Board führt genau das
+  eingepackte Image aus, und ein Board, auf dem es fehlt, bricht ab, statt eines aus einer Registry zu ziehen.
+- **Vertraute Geräte:** Nach einer erfolgreichen Anmeldung an einem Board, dessen Host-Schlüssel du bestätigt hast
+  (ein Deployment in der GUI oder mit `llm-cli deploy run`, eine Prüfung mit `llm-cli scan --device`, ein
+  `device runtime deploy`), trägt das Framework es in `~/.llm-framework/devices.json` ein: deinen Namen dafür,
+  Adresse, Benutzer, den bestätigten Host-Schlüssel und ob sich der Schlüssel des Frameworks anmeldet (gekoppelt); die
+  Geräte-ID wird aus dem Host-Schlüssel abgeleitet. `llm-cli deploy devices list|add|remove` zeigt und verwaltet sie
+  ([CLI](CLI_Usage_DE.md#deploy-devices)). Nur diese Geräte kann ein KI-Client oder Ditto für ein Deployment nennen,
+  und nur, solange die `known_hosts` des Frameworks noch genau diesen Schlüssel enthält; kein Tool vertraut einem
+  Gerät, koppelt es oder trägt es ein.
+- **Fehler mit Grund:** Paketieren und Übertragen melden, warum sie gescheitert sind (kein Docker, ein nicht
+  festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`), statt es nur zu protokollieren.
+  Ein Paket wird unter einem vorläufigen Namen geschrieben und erst umbenannt, wenn es vollständig ist. Ohne paramiko
+  bekommen `ssh` und `scp` nie die Standardeingabe des Frameworks (über MCP-stdio ist das der Protokollstrom).
 
 ### Laufzeit auf dem Board (selbst gebautes llama.cpp)
 
@@ -570,6 +590,13 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `report_cannot_do` | lesen | Melden, dass eine Aufgabe nicht machbar ist, mit Grund; das Framework prüft den Grund an seinem eigenen Zustand |
 | `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
 | `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |
+| `list_devices` | lesen | Die Geräte, denen du in der GUI oder CLI vertraut und die du gekoppelt hast, mit deinem Namen dafür, Fingerabdruck des Host-Schlüssels und ob sie nutzbar sind |
+| `create_deploy_package` | lokal schreiben | Ein gebautes Modell für das Geräteprofil eines Targets paketieren (ein Job; Images nur per Digest festgelegt oder hier gebaut) |
+| `deploy_to_device` | extern | Ein Paket auf ein vertrautes, gekoppeltes Gerät kopieren und dessen `deploy.sh` ausführen (immer mit Frage; die Frage zeigt Host-Schlüssel und Paket-Hash; ein Job) |
+| `build_local_runtime` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-server für diesen Rechner aus dem festgelegten Commit bauen (ein Job; nie vorgebaut) |
+| `start_local_runtime` / `stop_local_runtime` | lokal schreiben | Optional, verborgen bis zur Freigabe: Dittos lokalen Server starten (ein Job) oder stoppen; nie seine Adresse oder sein Schlüssel |
+| `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf einem Katalogmodell oder einem gebauten GGUF-Modell; ein nicht vertrauenswürdiges Modell nativ nur nach Zustimmung im Framework, oder in der Sandbox |
+| `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
 
 So läuft eine Frage mit Tools ab:
 
@@ -889,6 +916,47 @@ self-built“.
 - **Gemessen** auf einer virtuellen x86-64-Maschine mit 4 Kernen (GCC 13.3, `-j4`): `llama-server` und `llama-bench`
   am Pin in 189 Sekunden samt Prüfungen, 28 MB Programme; `ditto runtime install` mit dem CPU-Build für Ditto
   (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 Sekunden samt Prüfungen.
+
+### Laufzeit-Tools für KI-Clients (optional)
+
+Sechs optionale MCP-Tools lassen einen KI-Client (oder Ditto) tun, was `llm-cli ditto runtime` und
+`llm-cli device runtime` tun. Jedes wird nur registriert, wenn sein Laufzeitpaket in der Installation vorhanden ist,
+und jedes ist verweigert, also nicht aufgeführt, bis du es in den Tool-Berechtigungen freigibst, auch wenn du die
+ganze Stufe erlaubt hast.
+
+- **`build_local_runtime`** baut llama-server für diesen Rechner aus dem festgelegten Commit (zuerst der CPU-Build,
+  dann der GPU-Build von `backend`: `auto`, `cpu`, `cuda`, `vulkan`, `rocm`, `metal`) als Job und holt mit `model_tier`
+  dieses Katalogmodell (über Größe und sha256 festgelegt). Die Frage zeigt die geplanten Builds, die Toolchain, ob der
+  festgelegte Quellcode geholt werden muss, das Modell und eine Schätzung des nötigen Platzes. Es gibt keine
+  Prebuilt-Option und keine Eingabe für eine CMake-Option oder einen Befehl. Ein fehlender Toolchain-Teil (ein
+  Compiler, CMake, Docker, ein GPU-Toolkit) wird vor der Frage mit Grund `needs_person` und
+  `llm-cli ditto runtime install` abgelehnt: Nur du installierst Toolchains und nimmst Lizenzen an. `cancel_job` hält
+  einen Modell-Download zwischen zwei Blöcken an (seine `.part`-Datei bleibt) und hält die Installation vor ihrem
+  nächsten Build oder ihrer nächsten Aktivierung an: Ein abgebrochener Build wird nie aktiv.
+- **`start_local_runtime`** (ein Job; `tier`, `context_length`) und **`stop_local_runtime`** starten und stoppen
+  Dittos Server. Gestartet wird nur ein Build, der seine Prüfung hier bestanden hat. Kein Ergebnis enthält die
+  Adresse des Servers oder seinen Schlüssel für diesen Start.
+- **`run_benchmark`** misst Prompt- und Erzeugungsgeschwindigkeit und den höchsten Speicherbedarf mit dem selbst
+  gebauten `llama-bench`: `tier_speed` für ein heruntergeladenes Katalogmodell, `artifact_speed` für ein gebautes
+  GGUF-Modell. Ein Katalogmodell läuft nativ. Jedes andere Modell gilt als nicht vertrauenswürdig
+  (Laufzeit-Entscheidung D23): Es läuft nativ nur nach deiner Zustimmung, die im eigenen Fenster des Frameworks
+  erfragt wird (Dittos Dialog, die ausstehenden Freigaben der GUI oder `llm-cli tools approvals`, nie der Dialog eines
+  Clients), auch dann erfragt wird, wenn das Tool erlaubt ist, und ins Audit-Log geschrieben wird, bevor das Modell
+  geladen wird; mit `sandbox: true` läuft es stattdessen in der Docker-Sandbox. Ergebnisse liegen in
+  `~/.llm-framework/benchmarks/` (`runs/<Lauf-ID>.json`, `index.jsonl`); `get_status` (Abschnitt `local_runtime`)
+  zeigt die neuesten Läufe.
+- **Board-Tools** (Stufe `external`, immer mit Frage, nie von einer Daueranfrage abgedeckt, nur für ein
+  [vertrautes Gerät](#übertragen-auf-das-board-deployment), dessen Host-Schlüssel noch der vertraute ist und in der
+  Frage gezeigt wird): `probe_remote_device` führt die nur lesende Prüfung über SSH aus und speichert sie unter der
+  Geräte-ID (wie `scan --device`); `deploy_device_runtime` baut die Laufzeit des Boards bei Bedarf im
+  Builder-Container und installiert sie so, wie es die vorher von dir gewählten Deploy-Einstellungen sagen (wie
+  `device runtime build` und `deploy`; aktiv erst, wenn ihre Prüfungen auf dem Board bestehen);
+  `run_device_benchmark` führt die Laufzeitprüfungen mit einem kurzen `llama-bench` auf dem Modell aus, das die
+  Deploy-Einstellungen nennen (wie `device runtime verify --bench-model`), ein nicht vertrauenswürdiges Modell nur
+  mit deiner Zustimmung im Framework, die zuerst ins Audit-Log geschrieben wird. Die Ausgabe des Boards kommt als
+  externer Text zurück.
+- Die Ressource `lcf://runtime/catalog` enthält den festgelegten Commit und die Modellstufen; der Prompt
+  `set_up_offline_assistant` führt einen Client durch Bauen, Starten und Messen.
 
 ### Perplexity-Prüfung umgewandelter Modelle
 
@@ -1453,6 +1521,29 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   markiert, Links aus dem Ordner hinaus, mehrfach verlinkte und versteckte Dateien und unfertige Downloads
   weggelassen; 50 je Seite), jede mit Datei-ID und `<Label>:<relativer Pfad>`, die `start_build` annimmt; eine
   heruntergeladene Datei erscheint dort auch.
+- **Geräte und Deployment (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` zeigt die
+  [vertrauten Geräte](#übertragen-auf-das-board-deployment) mit deinem Namen dafür, Adresse, Benutzer,
+  Fingerabdruck des Host-Schlüssels, ob das Gerät nutzbar ist (gekoppelt und sein Schlüssel noch der vertraute) und
+  dem letzten Deployment. `create_deploy_package` paketiert ein gebautes Modell (Artefakt-ID) für das Geräteprofil
+  eines Targets (Standard: das Target, für das es gebaut wurde) als Job; die Platte des Ausgabeordners muss das
+  Doppelte des Modells fassen, und `include_docker_images` wird abgelehnt, solange nicht jedes Image per Digest
+  festgelegt oder auf diesem Rechner gebaut ist. Das Ergebnis enthält die Paket-ID (`pkg_` und 16 Hex-Zeichen), Größe
+  und sha256; eine Daueranfrage kann es nur ohne Docker-Images abdecken. `deploy_to_device` nimmt nur eine Paket-ID und
+  eine Geräte-ID. Bevor du gefragt wirst, liest das Framework den Host-Schlüssel des Geräts (nur das Lesen des
+  Schlüssels, keine Anmeldung) und lehnt einen unbekannten oder geänderten Schlüssel ab, ohne etwas zu schreiben
+  (Grund `needs_person`); ein nicht gekoppeltes Gerät wird ebenfalls abgelehnt. Die Frage zeigt das Gerät mit deinem
+  Namen dafür, Benutzer und Adresse, den Fingerabdruck des Host-Schlüssels, den du bestätigt hast, Name, Größe und
+  sha256 des Pakets, das gebaute Modell und das Vertrauen in sein Target. Das Deployment läuft dann als Job ohne
+  Passwort und bricht ab, wenn das sha256 des Pakets (berechnet aus derselben geöffneten Datei, die hochgeladen
+  wird) oder der Schlüssel des Geräts von dem abweicht, was dir gezeigt wurde. Es wird immer erfragt (es lässt sich
+  nie auf „erlauben“ stellen), nie von einer Daueranfrage abgedeckt, läuft eins je Gerät zur Zeit und sechs je Stunde
+  je Client. `cancel_job` schließt die SSH-Sitzung, und der Job sagt, dass der Zustand des Geräts unbekannt ist;
+  nichts wird wiederholt. Das Job-Ergebnis enthält `success`, `exit_status`, `device_state` (`ok`, `failed`,
+  `unknown`) und die letzten 100 Zeilen, die das Gerät ausgegeben hat, in `external_text`, als externer Text markiert;
+  `reason` ist immer der eigene Satz des Frameworks, ohne Pfade des Rechners. Scheitert ein Job der Geräte- oder
+  Laufzeit-Tools, ist auch die Fehlermeldung der Satz des Frameworks: Was das Gerät oder `llama-bench` ausgegeben hat
+  (`llama-bench` gibt die Metadaten des geladenen Modells aus), kommt in `external_text` zurück. Der Prompt
+  `deploy_to_board` führt durch dieselben Schritte.
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je

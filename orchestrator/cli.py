@@ -3203,20 +3203,17 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
         # TODO: Get real image name from config/profile logic
         docker_config["image_name"] = "ghcr.io/llm-framework/inference-node:latest"
     
-    with console.status(f"Generiere Paket für {artifact_name}...", spinner="dots"):
-        pkg_path = dep_mgr.create_deployment_package(
-            artifact_path=artifact_path,
-            profile_name=profile,
-            docker_config=docker_config,
-            output_dir=output_dir
-        )
-        
-    if pkg_path:
-        console.print(f"[bold green]Package created successfully![/bold green]")
-        console.print(f"Path: {pkg_path}")
-    else:
-        console.print("[bold red]Package generation failed. Check logs.[/bold red]")
+    from orchestrator.Core.deployment_manager import DeployError
+    try:
+        with console.status(f"Generiere Paket für {artifact_name}...", spinner="dots"):
+            pkg_path = dep_mgr.create_package(artifact_path, profile, docker_config, output_dir)
+    except DeployError as e:
+        console.print(f"[bold red]Package generation failed: {escape(str(e))}[/bold red]")
+        if e.next:
+            console.print(escape(e.next))
         sys.exit(1)
+    console.print(f"[bold green]Package created successfully![/bold green]")
+    console.print(f"Path: {pkg_path}")
 
 @deploy.command('run')
 @click.argument('package_path', type=click.Path(exists=True))
@@ -3227,8 +3224,10 @@ def create_package(ctx: FrameworkContext, artifact_name, profile, docker):
               "framework's SSH key, never stored (asked interactively when omitted)")
 @click.option('--trust-fingerprint', default=None,
               help="Trust a new device non-interactively if its host key has this SHA256 fingerprint")
+@click.option('--label', default=None, help="Your name for the device (shown to you and to AI tools; default: the "
+              "label it already has, or its address)")
 @pass_context
-def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, trust_fingerprint):
+def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, trust_fingerprint, label):
     """
     Upload and execute a deployment package on the target.
     """
@@ -3275,9 +3274,163 @@ def run_deploy(ctx: FrameworkContext, package_path, ip, user, port, password, tr
         
     if success:
         console.print("[bold green]✅ Deployment Execution Successful![/bold green]")
+        # Trusted by you and logged in to with the framework's key: AI tools may now name it (deploy_to_device).
+        _remember_device(ctx, ip, port, user, key, paired=True, label=label)
     else:
         console.print("[bold red]❌ Deployment Failed.[/bold red]")
         sys.exit(1)
+
+
+def _device_audit(ctx: FrameworkContext, state_dir: Path):
+    """The tool audit log for a person's device decisions, also when the framework is not booted (scan --device)."""
+    fm = ctx.framework_manager if getattr(ctx, "_initialized", False) else None
+    audit = getattr(getattr(fm, "tool_registry", None), "audit", None)
+    if audit is not None:
+        return audit
+    try:
+        from orchestrator.tools.audit import AuditLog
+        from orchestrator.tools.framework_tools import _audit_key
+        return AuditLog(state_dir / "audit.db", key=_audit_key(None, state_dir))
+    except Exception:  # noqa: BLE001 - the record is still written; the trust itself was the person's
+        return None
+
+
+def _remember_device(ctx: FrameworkContext, host: str, port: int, user: str, key, *, paired: bool,
+                     label: Optional[str] = None):
+    """Writes the trusted device's record (MCP design 2.7: only the GUI and the CLI write one, after the person
+    trusted the device's host key and the framework logged in to it) and audits it."""
+    from orchestrator.runtime.device.trusted import record_trusted_device
+    state_dir = _state_dir(ctx)
+    device = record_trusted_device(state_dir, host, port, user, key, via="cli", paired=paired, label=label,
+                                   audit=_device_audit(ctx, state_dir), actor="cli")
+    if device is not None:
+        console.print(f"Trusted device {device.device_id} ({escape(device.label)}): AI tools may deploy to it with "
+                      "your confirmation (llm-cli deploy devices list).")
+    return device
+
+
+@deploy.group('devices')
+def deploy_devices():
+    """Devices you trusted and paired: the only devices AI tools may deploy to (each deploy is still confirmed)"""
+    pass
+
+
+@deploy_devices.command('list')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def deploy_devices_list(ctx: FrameworkContext, as_json: bool):
+    """List the trusted devices with their host key and whether the key is still the trusted one"""
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    store = TrustedDevices(_state_dir(ctx))
+    last = store.last_deploys()
+    rows = []
+    for d in store.list():
+        rows.append({"device_id": d.device_id, "label": d.label, "address": d.address, "user": d.user,
+                     "key_type": d.key_type, "fingerprint": d.fingerprint, "paired": d.paired,
+                     "host_key": store.key_status(d), "trusted": f"{d.trusted_at} ({d.trusted_via})",
+                     "last_deploy": last.get(d.device_id)})
+    if as_json:
+        click.echo(json.dumps(rows, indent=2, sort_keys=True))
+        return
+    if not rows:
+        console.print("No trusted device yet: 'llm-cli deploy run', 'llm-cli scan --device' or the GUI's Deployment "
+                      "window adds one after you confirmed its host key; 'llm-cli deploy devices add' adds a device "
+                      "you trusted before.")
+        return
+    table = Table(title="Trusted devices")
+    for column in ("Device", "Label", "Address", "User", "Host key", "Paired", "Last deploy"):
+        table.add_column(column)
+    for r in rows:
+        state = {"known": "trusted", "changed": "[red]CHANGED in known_hosts[/red]",
+                 "unknown": "[yellow]not in known_hosts[/yellow]"}[r["host_key"]]
+        last_deploy = r["last_deploy"] or {}
+        table.add_row(r["device_id"], escape(r["label"]), escape(r["address"]), escape(r["user"]),
+                      f"{escape(r['key_type'])} {r['fingerprint']} ({state})", "yes" if r["paired"] else "no",
+                      escape(f"{last_deploy.get('at')} ({'ok' if last_deploy.get('ok') else 'failed'})")
+                      if last_deploy else "-")
+    console.print(table)
+
+
+@deploy_devices.command('remove')
+@click.argument('device_id')
+@pass_context
+def deploy_devices_remove(ctx: FrameworkContext, device_id: str):
+    """Remove a device's record: AI tools can no longer name it (its known_hosts entry is kept)"""
+    from orchestrator.runtime.device.trusted import TrustedDevices
+    state_dir = _state_dir(ctx)
+    if not TrustedDevices(state_dir).remove(device_id.strip()):
+        console.print(f"[red]No trusted device {escape(device_id)} (llm-cli deploy devices list).[/red]")
+        sys.exit(1)
+    audit = _device_audit(ctx, state_dir)
+    if audit is not None:
+        try:
+            audit.record("cli", "device_removed", "external", "ask", "ok", arguments={"device_id": device_id.strip()},
+                         approved=True, extra={"confirm_channel": "framework-cli", "answer": "accepted"})
+        except Exception:  # noqa: BLE001 - logged by the audit log itself
+            pass
+    console.print(f"Device {escape(device_id)} removed from the trusted devices.")
+
+
+@deploy_devices.command('add')
+@click.argument('host')
+@click.option('--user', required=True, help="The account on the device that deploys run as")
+@click.option('--port', default=22, show_default=True, type=click.IntRange(1, 65535))
+@click.option('--label', default=None, help="Your name for the device (default: its profile label or address)")
+@pass_context
+def deploy_devices_add(ctx: FrameworkContext, host: str, user: str, port: int, label: Optional[str]):
+    """Add a device you trusted before (its host key is already in the framework's known_hosts). Needs a terminal:
+    you confirm the fingerprint shown; nothing is trusted here that was not trusted before."""
+    from orchestrator.Core.deployment_manager import SSH_USER_PATTERN
+    from orchestrator.runtime.device.trusted import DeviceStoreError, TrustedDevices, clean_label
+    from orchestrator.runtime.remote_probe import valid_host
+    from orchestrator.utils import ssh_trust
+    if not _interactive():
+        console.print("[red]'deploy devices add' needs a terminal: you confirm the device's fingerprint yourself."
+                      "[/red]")
+        sys.exit(1)
+    if not valid_host(host) or not SSH_USER_PATTERN.fullmatch(user or ""):
+        raise click.UsageError("HOST must be a host name or an IP address and --user an account name")
+    if label is not None:
+        try:
+            label = clean_label(label)
+        except DeviceStoreError as e:
+            raise click.UsageError(str(e))
+    if ssh_trust.paramiko is None:
+        console.print("[red]Reaching a device needs the 'paramiko' package.[/red]")
+        sys.exit(1)
+    state_dir = _state_dir(ctx)
+    try:
+        key = ssh_trust.fetch_host_key(host, port)
+        status = ssh_trust.check_host_key(state_dir, host, port, key)
+    except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
+        console.print(f"[red]Could not reach {escape(host)}:{port}: {escape(str(e))}[/red]")
+        sys.exit(1)
+    if status != "known":
+        console.print(f"[red]{escape(host)}:{port} is not trusted yet (its host key is {status}). Trust it with "
+                      "'llm-cli deploy run' or 'llm-cli scan --device', which show the fingerprint for you to "
+                      "compare.[/red]")
+        sys.exit(1)
+    fp = ssh_trust.fingerprint(key)
+    console.print(f"{escape(host)}:{port} presents the trusted key {escape(key.get_name())} {fp}.")
+    if not click.confirm(f"Allow AI tools to deploy to {user}@{host} (each deploy is still confirmed by you)?",
+                         default=False):
+        console.print("Nothing was added.")
+        return
+    try:  # paired: the framework's own key logs in (no password is ever asked here)
+        client = ssh_trust.connect(host, user, state_dir, port=port, password=None)
+        client.close()
+        paired = True
+    except Exception:  # noqa: BLE001 - not paired yet: the record says so, and deploy_to_device refuses it
+        paired = False
+    device = _remember_device(ctx, host, port, user, key, paired=paired, label=label)
+    if device is None:
+        console.print("[red]The device record could not be written.[/red]")
+        sys.exit(1)
+    if not paired:
+        console.print("[yellow]The framework's SSH key does not log in there yet: pair the device once with "
+                      "'llm-cli deploy run' (it asks for the password one time).[/yellow]")
+    elif TrustedDevices(state_dir).key_status(device) != "known":
+        console.print("[yellow]The trusted key is not in the framework's known_hosts.[/yellow]")
 
 # ============================================================================
 # SCAN COMMAND
@@ -3335,7 +3488,8 @@ def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Opti
 
 
 def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host: str, user: Optional[str], port: int,
-                 password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str]) -> None:
+                 password: Optional[str], trust_fingerprint: Optional[str], label: Optional[str],
+                 ctx: Optional[FrameworkContext] = None) -> None:
     from orchestrator.runtime.profile import device_id_for_host_key
     from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh, store_address, valid_host
     from orchestrator.utils import ssh_trust
@@ -3378,6 +3532,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
         sys.exit(1)
     from orchestrator.runtime.device.settings import remember_ssh_user
     remember_ssh_user(store, device_id, user)  # the deploy user for `device runtime deploy` (never root)
+    if ctx is not None:
+        _remember_device(ctx, host, port, user, key, paired=True, label=label)
     tool = "Python probe" if result.tool == "python" else "shell probe"
     console.print(f"[bold green]Probe of {escape(host)} successful ({tool}). Config generated: "
                   f"{escape(str(output_file))}[/bold green]")
@@ -3425,7 +3581,8 @@ def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, p
         _scan_import(ctx, probes, import_file, label)
         return
     if device:
-        _scan_device(store, state_dir, output_file, as_json, device, user, port, password, trust_fingerprint, label)
+        _scan_device(store, state_dir, output_file, as_json, device, user, port, password, trust_fingerprint, label,
+                     ctx=ctx)
         return
 
     try:
@@ -3563,7 +3720,8 @@ def _device_plan(profile):
         sys.exit(1)
 
 
-def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str]):
+def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str],
+                    ctx: Optional[FrameworkContext] = None):
     """An SSH client for the stored device: its host key must be the trusted one the device was probed with (the
     device ID is derived from it), so a deployment never reaches another machine at the same address."""
     from orchestrator.runtime.profile import device_id_for_host_key
@@ -3601,6 +3759,8 @@ def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user:
             client.close()
             console.print(f"[red]{escape(str(e))}[/red]")
             sys.exit(1)
+    if ctx is not None:  # trusted by the person when it was probed, and logged in to with the framework's key now
+        _remember_device(ctx, host, port, user, key, paired=True)
     return client
 
 
@@ -3932,7 +4092,7 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     source = _pinned_llama_source()
-    client = _connect_device(state_dir, device_id, host, port, settings.ssh_user, password)
+    client = _connect_device(state_dir, device_id, host, port, settings.ssh_user, password, ctx=ctx)
     try:
         shell = RemoteShell(client)
         facts = read_facts(shell)

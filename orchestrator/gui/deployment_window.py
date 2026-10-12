@@ -81,12 +81,32 @@ class DeploymentWorker(QThread):
             )
 
             if success:
+                self._remember_device()
                 self.finished.emit(True, f"Deployment successful!\nPackage: {pkg_path.name}")
             else:
                 self.finished.emit(False, "Deployment failed during transfer/execution.")
 
         except Exception as e:
             self.finished.emit(False, str(e))
+
+    def _remember_device(self, port: int = 22) -> None:
+        """After a deployment to a device whose host key the person confirmed in this window (confirm_host_key) and
+        that the framework logged in to: its record, so AI tools may name it for deploy_to_device (each deploy is
+        still confirmed). Written only here and in the CLI, never by a tool; it never fails the deployment."""
+        from orchestrator.runtime.device.trusted import record_trusted_device
+        from orchestrator.utils import ssh_trust
+        state = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
+        if not state:
+            return
+        try:
+            key = ssh_trust.fetch_host_key(self.target_ip, port)
+            if ssh_trust.check_host_key(Path(state), self.target_ip, port, key) != "known":
+                return
+        except Exception:  # noqa: BLE001 - unreachable now: the next deployment records it
+            return
+        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        record_trusted_device(Path(state), self.target_ip, port, self.user, key, via="gui", paired=True,
+                              audit=audit, actor="gui")
 
 class DeploymentWindow(QWidget):
     def __init__(self, framework_manager, parent=None):
