@@ -33,7 +33,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Type,
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, field_validator, model_validator
 
-from orchestrator.Core.module_generator import ARCHITECTURES, MODULE_NAME_RE, ModuleGenerator
+from orchestrator.Core.module_generator import ARCHITECTURES, INPUT_LIST_BOUNDS, MODULE_NAME_RE, ModuleGenerator
 from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
 from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest, InvalidOutput, LLMClient, LLMError,
                               Message, NotConfigured, PermissionDenied, ProviderTimeout, ProviderUnavailable,
@@ -271,15 +271,17 @@ class ModuleDefinition(BaseModel):
                                                "documentation, each with what to check first; at most 10")
     base_image_reason: str = Field(default="", description="Why this base image; required when base_os is not a "
                                                            "Docker Official Image (e.g. a vendor image)")
-    package_sources: List[PackageSourceIn] = Field(default_factory=list, max_length=20,
+    package_sources: List[PackageSourceIn] = Field(default_factory=list,
+                                                   max_length=INPUT_LIST_BOUNDS["package_sources"],
                                                    description="Vendor apt repositories with their signing key "
                                                                "(usually at most 3)")
-    pip_packages: List[str] = Field(default_factory=list, max_length=200,
+    pip_packages: List[str] = Field(default_factory=list, max_length=INPUT_LIST_BOUNDS["pip_packages"],
                                     description="Vendor Python packages, each pinned as name==version (usually at "
                                                 "most 30)")
     pip_index_url: str = Field(default="", max_length=300,
                                description="One https Python package index for pip_packages; empty: PyPI")
-    pinned_downloads: List[PinnedDownloadIn] = Field(default_factory=list, max_length=50,
+    pinned_downloads: List[PinnedDownloadIn] = Field(default_factory=list,
+                                                     max_length=INPUT_LIST_BOUNDS["pinned_downloads"],
                                                      description="Vendor files with https address, size and sha256 "
                                                                  "(usually at most 5); never llama.cpp")
     cannot: Optional[CannotAnswer] = Field(default=None, description="Only when there is nothing to base a module "
@@ -800,6 +802,13 @@ class DittoCoder:
         data = definition.model_dump() if isinstance(definition, BaseModel) else dict(definition)
         if PREBUILT_CUDA_IMAGE.search(str(data.get("base_os") or "")):
             raise ValueError(f"base_os: {PREBUILT_CUDA_REFUSAL}")
+        # The same rule as create_target_module (DECISIONS round 3 (d)): an image that is not a Docker Official Image
+        # needs the AI's reason, which the person reads before approving.
+        from orchestrator.llm.task_prompts import is_official_image
+        base = str(data.get("base_os") or "debian:bookworm-slim").strip()
+        if not is_official_image(base) and not str(data.get("base_image_reason") or "").strip():
+            raise ValueError(f"base_os: '{base}' is not a Docker Official Image, so base_image_reason is required "
+                             "(why this image); or use an official image with the vendor's package_sources.")
         from orchestrator.Core.module_generator import generator_input
         return ModuleGenerator(Path(targets_dir)).generate_module(generator_input(data, module_name), self.framework,
                                                                   profile=profile)

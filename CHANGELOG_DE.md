@@ -591,8 +591,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Signaturschlüssel der Image-Build gegen seinen Fingerabdruck prüft), `pip_packages` (festgelegt als
   `name==version`, von PyPI oder einem https-Index) und `pinned_downloads` (https, genaue Größe und sha256, nach
   `/opt/vendor`), eingefügt von der Dockerfile-Vorlage des Frameworks, für Dittos Vorschläge, den Assistenten und das
-  MCP-Tool. Ihre Anzahlen sind weiche Grenzen (3, 30, 5): Darüber zu gehen ist eine Warnung, die die Zustimmung der
-  Person aufhebt, nie eine Ablehnung; ein vorgebautes llama.cpp bleibt abgelehnt.
+  MCP-Tool. Ihre Anzahlen sind weiche Grenzen (3, 30, 5): Darüber zu gehen ist eine Warnung, über die die Zustimmung der
+  Person hinweggeht, nie eine Ablehnung; ein vorgebautes llama.cpp bleibt abgelehnt.
 
 ### Geändert
 - **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
@@ -1062,6 +1062,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   lesbarer Befehl erscheinen. Der Vorschlag eines Clients wird in dieser bereinigten Form aufbewahrt; der Hinweis
   in der Statusleiste der GUI nennt den Build bei seinem sprechenden Namen und zeigt den Namen des Clients
   bereinigt.
+- **Die Abfrage des Basis-Images eines neuen Target-Moduls bleibt bei öffentlichen Adressen**: Eine Registry (jeder
+  öffentliche Host, den eine KI in `base_os` nennt) konnte die anonyme Digest-Abfrage oder ihre Token-Anfrage per
+  Weiterleitung ins lokale Netz umlenken, weil Weiterleitungen ungeprüft gefolgt wurde. Jede Weiterleitung wird jetzt
+  von Hand verfolgt und muss wie die erste Adresse https und öffentlich sein, Verbindungen gehen nur zur geprüften
+  Adresse, und das Pull-Token einer Registry geht nie an einen anderen Host.
+- **`create_target_module` plant den `runtime:`-Block aus genau der Probe, die der Person gezeigt wurde**: Eine Probe,
+  die zwischen Frage und Schreiben ersetzt wurde (zum Beispiel `local` neu gemessen, während eine ausstehende Freigabe
+  wartete), stoppt das Schreiben, statt verwendet zu werden.
+- **Ein fehlgeschlagener `probe_local_hardware`-Auftrag nennt keinen Host-Pfad**: Konnte die Probe nicht gespeichert
+  werden, enthielt der Fehler des Auftrags (den der KI-Client liest) den vollen Pfad des Benutzerordners; jetzt nennt
+  er nur den Grund, und `llm-cli scan` zeigt den vollen Fehler weiterhin im Terminal.
+- **Dittos Modul-Weg folgt derselben Regel für Basis-Images wie das MCP-Tool**: `llm-cli module generate-ai` lehnt ein
+  Basis-Image, das kein Docker Official Image ist, ohne `base_image_reason` der KI ab, wie `create_target_module`.
+  Die Anzahl der Herstellerquellen, pip-Pakete und Downloads hat nirgends mehr eine harte Grenze (über 20, 200 und 50
+  wurden sie abgelehnt); es bleiben nur die weichen Grenzen mit ihrer Warnung.
 - **KI-Clients sehen nie den Host-Pfad eines lokalen Modells, das sie benannt haben** (MCP-Clients und Ditto): Der
   Stufentext des Builds, der Kontext der Selbstheilung, `model_source` im Build-Manifest und `list_artifacts` nennen
   es bei seinem `<label>:<relativer Pfad>` (den Host-Pfad eines älteren Manifests beim Label, sonst nur beim

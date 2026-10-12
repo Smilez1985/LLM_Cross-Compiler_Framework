@@ -260,8 +260,12 @@ class HardwareProbes:
         try:
             self.store.save_local(profile)
         except (OSError, ValueError) as e:
-            raise ProbeError(f"The probe ran, but storing it as this computer's probe failed: {e}", code="failed",
-                             next="Check the per-user folder with 'llm-cli doctor'.") from None
+            # The reason without the per-user folder's path (the message reaches AI clients through the probe job);
+            # the full text stays in `detail` for the person's terminal.
+            reason = e.strerror if isinstance(e, OSError) and e.strerror else e.__class__.__name__
+            raise ProbeError(f"The probe ran, but storing it as this computer's probe failed ({reason}).",
+                             code="failed", next="Check the per-user folder with 'llm-cli doctor'.",
+                             detail=str(e)[:300]) from None
         return profile, how
 
     def _python_probe(self, probe: Optional[Callable[[], HardwareProfile]], timeout: float) -> HardwareProfile:

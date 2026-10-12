@@ -507,8 +507,8 @@ Container-Image ausliefern (zum Beispiel die Jetson/L4T-Images von NVIDIA auf `n
     Laufzeitstufe kopiert), wo `setup_commands` sie entpacken kann.
   Die Sicherheitsprüfungen sind hart (https, genaue Versionen, Größe und sha256, Fingerabdrücke aus 40 Hex-Zeichen,
   nie ein vorgebautes llama.cpp-Paket, ein Wheel-Index oder eine Binärdatei). Die Anzahlen sind weiche Grenzen
-  (3 Quellen, 30 pip-Pakete, 5 Downloads): Darüber zu gehen ist eine Warnung in der Frage, die die Zustimmung der
-  Person aufhebt, nie eine Ablehnung.
+  (3 Quellen, 30 pip-Pakete, 5 Downloads): Darüber zu gehen ist eine Warnung in der Frage, über die die Zustimmung
+  der Person hinweggeht, nie eine Ablehnung.
 - **Ungetestet wird gesagt.** Die neue `target.yml` bekommt `metadata.provenance: ai-generated`,
   `metadata.untested: true`, die `assumptions` und den `base_image_reason` der KI und die Support-Stufe `community`;
   Builds davon warnen. KI-erstellte Module bekommen nie eine dauerhafte Freigabe: Jedes bestätigt die Person.

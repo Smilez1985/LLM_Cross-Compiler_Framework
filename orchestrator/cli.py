@@ -3403,6 +3403,8 @@ def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, p
             profile, how = probes.run_local(use_script=use_script, output=output_file)
     except ProbeError as e:
         console.print(f"[red]Probe execution failed: {escape(str(e))}[/red]")
+        if e.detail:  # the underlying error for the person (it may name a path, so it is not part of the message)
+            console.print(f"[dim]{escape(e.detail)}[/dim]")
         if e.next:
             console.print(escape(e.next))
         sys.exit(1)

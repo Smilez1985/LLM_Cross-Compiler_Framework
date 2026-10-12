@@ -941,6 +941,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   full-width letters no longer pass and then appear as a readable command. A client's proposal is kept in that
   cleaned form; the GUI's status bar notice names the build by its speaking name and shows the client's name
   cleaned.
+- **The base image lookup of a new target module stays on public addresses**: a registry (any public host an AI names
+  in `base_os`) could redirect the anonymous digest lookup or its token request into the local network, because
+  redirects were followed without a check. Every redirect is now followed by hand and must be https and public like
+  the first address, connections go only to the address that was checked, and a registry's pull token is never sent
+  to another host.
+- **`create_target_module` plans the `runtime:` block from exactly the probe the person was shown**: a probe replaced
+  between the question and the write (for example `local` probed again while a pending approval waited) stops the
+  write instead of being used.
+- **A failed `probe_local_hardware` job names no host path**: when the probe could not be stored, the job's error
+  (which the AI client reads) carried the per-user folder's full path; it now gives only the reason, and
+  `llm-cli scan` still shows the full error in the terminal.
+- **Ditto's module path follows the same base image rule as the MCP tool**: `llm-cli module generate-ai` refuses a base
+  image that is not a Docker Official Image without the AI's `base_image_reason`, as `create_target_module` does.
+  The counts of vendor sources, pip packages and downloads have no hard limit any more anywhere (they were refused
+  above 20, 200 and 50); only the soft limits with their warning remain.
 - **AI clients never see the host path of a local model they named** (MCP clients and Ditto): the build's stage
   text, the self-healing context, the build manifest's `model_source` and `list_artifacts` name it by its
   `<label>:<relative path>` (an older manifest's host path by its label, else by the file name only).
