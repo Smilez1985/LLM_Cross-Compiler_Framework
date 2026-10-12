@@ -1116,8 +1116,16 @@ framework never sees it.
   and that the download size is unknown. An accepted build reserves its disk space in
   `~/.llm-framework/disk_reservations.json` (shared by GUI, CLI and every MCP server) until its request ends; when
   the build leaves the queue the disk is checked again, and a build that no longer fits fails with the numbers
-  before anything is downloaded. `optimization` (`fast`, `balanced`, `size`, `speed`, `aggressive`) is passed to
-  the build. `check_build_request` returns the same plan (normalized request, commit, sizes, disks, fit, mounts,
+  before anything is downloaded. `download_hf_file` reserves its file in the same ledger, so a download and a build
+  never count on the same free space. The build stages the model through the framework's Hugging Face fetcher: one
+  file after another, each resumable from its `.part` file and checked against the size and sha256 the Hub lists, and
+  stopped within seconds by a cancel. A disk watchdog stops the staging and the conversion containers when the cache
+  disk falls below half the reserve (reason `insufficient_resources`). A standing approval ("yes, and do not ask
+  again") is offered for builds on shipped or verified targets with safetensors or GGUF weights, an ungated model
+  whose base model is not gated either, a licence on the permissive allowlist (or a local file), an official base
+  image, up to the size class you choose, and only when the disk keeps the larger reserve of 20 GiB or 10 %; Hugging
+  Face look-ups of `check_build_request` count toward the 30 per hour Hugging Face rate. `optimization` (`fast`,
+  `balanced`, `size`, `speed`, `aggressive`) is passed to the build. `check_build_request` returns the same plan (normalized request, commit, sizes, disks, fit, mounts,
   trust, image build, what your permissions would do) without starting anything; its problems carry reason codes.
 - **Build reads:** `list_build_requests` (50 per page, filter by status) also lists builds another framework process
   started (GUI, CLI, another MCP server), from the shared build state, marked `process: other` with `started_in`

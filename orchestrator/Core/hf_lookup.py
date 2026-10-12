@@ -77,6 +77,8 @@ class ModelFacts:
     token_access: str = "not_needed"  # yes, no, no_token, not_needed
     parameters: Optional[int] = None
     base_model: Optional[str] = None
+    # Whether the base model the card names is gated: False without a base model, None when it could not be looked up
+    base_gated: Optional[bool] = False
 
     @property
     def download_bytes(self) -> int:
@@ -125,6 +127,7 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
                              if isinstance(t, str) and t.startswith("license:")), None)
     shown, klass = license_class(license_name)
     base = get("base_model", None)
+    base = base[0] if isinstance(base, (list, tuple)) and base else base
     files = [HubFile(s.rfilename, getattr(s, "size", None),
                      getattr(getattr(s, "lfs", None), "sha256", None) if getattr(s, "lfs", None) else None)
              for s in (getattr(info, "siblings", None) or [])]
@@ -140,6 +143,11 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
                        gated=gated, license=str(shown)[:200], license_class=klass,
                        parameters=int(parameters) if isinstance(parameters, int) and parameters > 0 else None,
                        base_model=str(base)[:200] if isinstance(base, str) else None)
+    if facts.base_model and facts.base_model != repo:
+        try:
+            facts.base_gated = gating(getattr(api.model_info(facts.base_model, token=auth), "gated", False)) != "false"
+        except Exception:  # noqa: BLE001 - unknown: outside every standing approval
+            facts.base_gated = None
     if gated != "false":
         if not token:
             facts.token_access = "no_token"
