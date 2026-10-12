@@ -1064,7 +1064,8 @@ same crawler with the same opt-out checks as the GUI, as a job.
   any other key in an options dict, so robots.txt cannot be switched off from anywhere; tests use a separate
   keyword-only flag that no product code passes (a guard test checks it).
 - **Limits:** one crawl at a time per user (also across framework processes, lock file `crawl.lock` in the per-user
-  folder), 5 crawls a day per client and at most 300 stored pages a day per client.
+  folder), 5 crawls a day per client and at most 300 stored pages a day per client. The page budget and offline
+  mode are checked again when an approved crawl starts, so questions answered later never add up past the budget.
 - **As a job:** the call returns a job id; `get_job_status` shows "page n of at most m" (no address);
   `cancel_job` stops after the current page and keeps what is stored. A snapshot is taken before each start
   address. The result has the outcome (`success`, `partial`, `failure`), pages and chunks stored, the skipped
@@ -1896,8 +1897,8 @@ and leave this computer only as a local file you publish yourself.
   quarantine and validates it; a refusal names its reason. The question shows the pack with author and licence
   (marked as index text), the trust level, the sha256, the files, where it goes (`targets/<id>`,
   `community/recipes/<id>`, `community/knowledge/<id>`), the pack's notes, and for a target pack that it adds build
-  scripts and a Dockerfile whose image build runs with network access, with every base image of every Dockerfile
-  shown plainly: registry, image, tag, digest or "not pinned by digest", and "Docker Official Image" or "other
+  scripts and a Dockerfile whose image build runs with network access, with every image every Dockerfile pulls
+  (`FROM`, `COPY --from=`, `RUN --mount=...,from=`) shown plainly: registry, image, tag, digest or "not pinned by digest", and "Docker Official Image" or "other
   registry: ...; prebuilt image made by its publisher, not checked by the framework". The job installs exactly the
   quarantined copy with the sha256 shown. The copy is reused while the same pack and hash are asked about, and
   removed when you say no, when a pending approval is declined or expires, or after 20 minutes without use. A target
@@ -1908,7 +1909,8 @@ and leave this computer only as a local file you publish yourself.
   for `verified` target packs; a `community` target pack always asks. A new index signing key voids it. Each install
   under it is audited with its id and shown as a GUI notice; such a pack is marked `installed_via: grant:<id>` in its
   `.lcf-provenance.json` and in `list_packs`. For all local stdio clients together only the narrowest scope and at
-  most 30 days are offered.
+  most 30 days are offered. An install under it must leave the larger disk reserve of a standing approval free (20 GiB
+  or 10 %), or it asks.
 - **`export_pack`** (local write, always asked, never "do not ask again"): a target (by target id), recipe (by the
   `artifact_id` of a finished build) or knowledge pack, privacy-scrubbed and signed with your community key, into
   `community/contributions/`. The question's first line says "Creates a pack signed with your key <key id> as author

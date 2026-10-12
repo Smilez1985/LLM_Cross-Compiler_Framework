@@ -1155,7 +1155,9 @@ Mit `crawl_docs_site` kann ein MCP-Client oder Ditto Dokumentation in die Wissen
   nirgends abschalten; Tests nutzen einen eigenen Schlüsselwort-Schalter, den kein Produktcode übergibt (ein
   Wächtertest prüft das).
 - **Grenzen:** ein Crawl gleichzeitig je Benutzer (auch über Framework-Prozesse hinweg, Sperrdatei `crawl.lock` im
-  persönlichen Ordner), 5 Crawls am Tag je Client und höchstens 300 gespeicherte Seiten am Tag je Client.
+  persönlichen Ordner), 5 Crawls am Tag je Client und höchstens 300 gespeicherte Seiten am Tag je Client. Das
+  Seitenbudget und der Offline-Modus werden beim Start eines freigegebenen Crawls erneut geprüft, damit später
+  beantwortete Fragen zusammen nie über das Budget gehen.
 - **Als Job:** Der Aufruf gibt eine Job-ID zurück; `get_job_status` zeigt "Seite n von höchstens m" (keine Adresse);
   `cancel_job` hält nach der aktuellen Seite an und behält, was gespeichert ist. Vor jeder Startadresse wird ein
   Snapshot angelegt. Das Ergebnis enthält den Ausgang (`success`, `partial`, `failure`), gespeicherte Seiten und
@@ -2077,7 +2079,7 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
   Autor und Lizenz (als Text aus dem Index markiert), die Vertrauensstufe, die sha256, die Dateien, wohin es kommt
   (`targets/<id>`, `community/recipes/<id>`, `community/knowledge/<id>`), die Hinweise des Packs und bei einem
   Target-Pack, dass es Build-Skripte und ein Dockerfile hinzufügt, dessen Image-Build mit Netzzugang läuft, mit jedem
-  Basis-Image jedes Dockerfiles klar benannt: Registry, Image, Tag, Digest oder „not pinned by digest“ und „Docker
+  Image, das ein Dockerfile bezieht (`FROM`, `COPY --from=`, `RUN --mount=...,from=`), klar benannt: Registry, Image, Tag, Digest oder „not pinned by digest“ und „Docker
   Official Image“ oder „other registry: ...; prebuilt image made by its publisher, not checked by the framework“.
   Der Job installiert genau die Kopie aus der Quarantäne mit der gezeigten sha256. Die Kopie wird wiederverwendet,
   solange nach demselben Pack und Hash gefragt wird, und entfernt, wenn du nein sagst, wenn eine wartende Freigabe
@@ -2090,7 +2092,8 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
   Signaturschlüssel des Index macht es ungültig. Jede Installation darunter landet mit ihrer ID im Audit-Log und
   erscheint als Hinweis in der GUI; ein solches Pack ist in seiner `.lcf-provenance.json` und in `list_packs` mit
   `installed_via: grant:<id>` markiert. Für alle lokalen stdio-Clients gemeinsam werden nur der engste Umfang und
-  höchstens 30 Tage angeboten.
+  höchstens 30 Tage angeboten. Eine Installation darunter muss die größere Speicherreserve einer dauerhaften Freigabe
+  frei lassen (20 GiB oder 10 %), sonst wird gefragt.
 - **`export_pack`** (lokal schreiben, immer gefragt, nie „nicht mehr fragen“): ein Target- (über die Target-ID),
   Rezept- (über die `artifact_id` eines fertigen Builds) oder Wissens-Pack, mit Datenschutz-Bereinigung und mit
   deinem Community-Schlüssel signiert, nach `community/contributions/`. Die erste Zeile der Frage sagt „Creates a pack

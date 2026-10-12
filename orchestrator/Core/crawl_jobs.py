@@ -20,6 +20,7 @@ way an AI caller reaches the crawler:
   client reads pages later through search_knowledge or read_knowledge_source, filtered and marked).
 """
 
+import re
 import threading
 import time
 from collections import deque
@@ -40,6 +41,12 @@ LOCK_NAME = "crawl.lock"
 DAY = 86400.0
 
 logger = get_logger("CrawlJobs")
+# A folder of this computer inside an error text (POSIX or Windows); not applied to addresses (their paths would match).
+_PATH = re.compile(r"(?<![\w:/])(?:[A-Za-z]:)?[\\/](?:[^\s'\"\\/]+[\\/])+[^\s'\"\\/,;:)]*")
+
+
+def _no_paths(text: str) -> str:
+    return _PATH.sub("(a folder on this computer)", text)
 
 
 class CrawlRefused(ValueError):
@@ -234,9 +241,18 @@ class CrawlJobService:
         if self.notice_needed():  # its text may have changed since the question
             raise CrawlRefused("The person has not read the current Deep Ingest notice, so no crawl can start.",
                                code="needs_person", next=NOTICE_NEXT)
+        if bool(self._cfg("offline_mode", False)):  # switched on while the person was asked
+            raise CrawlRefused("Offline mode is on: the framework does not read web sites.", code="not_supported",
+                               next="Only the person can switch offline mode off (in the GUI or with llm-cli).")
         if self.running() > 0:
             raise CrawlRefused("Another crawl for this user is running.", code="limit_reached",
                                next="Wait until it has ended (get_job_status), then call it again.")
+        # Checked again: questions answered later (pending approvals) were each planned against the same budget.
+        need, left = plan.max_pages * len(plan.start_urls), self.pages_left(caller)
+        if need > left:
+            raise CrawlRefused(f"This crawl may store up to {need} pages, but only {max(0, left)} of the "
+                               f"{PAGES_PER_DAY} pages a day are left for this client now.", code="limit_reached",
+                               next="Try again tomorrow, or ask for fewer pages.")
         lock = self._user_lock()
         stop = threading.Event()
         rag = self.rag()
@@ -288,7 +304,8 @@ class CrawlJobService:
                                "reason": str(item.get("reason", ""))[:300]})
             if result.get("outcome") == "failure" and not result.get("documents") and not result.get("skipped") \
                     and not result.get("failed") and result.get("message"):
-                failed.append({"address": url, "reason": str(result["message"])[:300]})
+                # the knowledge base's own error can name its storage folder: never a folder of this computer
+                failed.append({"address": url, "reason": _no_paths(str(result["message"]))[:300]})
         with self._lock:
             budget = self._budgets.setdefault(caller, _Budget())
             budget.used.append((self.clock(), pages))

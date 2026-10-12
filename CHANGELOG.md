@@ -37,19 +37,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   capped) and the question lists every start address. Refused while you have not read the one-time Deep Ingest
   notice (`needs_person`), in offline mode or with the knowledge base off; 1-5 public `http(s)` start addresses,
   checked before the question; `max_pages` up to the setting and 100, `max_depth` up to the setting and 3, at least
-  one second between requests; one crawl at a time per user, 5 a day and 300 stored pages a day per client.
+  one second between requests; one crawl at a time per user, 5 a day and 300 stored pages a day per client (the budget and offline mode are
+  checked again when an approved crawl starts).
   `cancel_job` stops after the current page and keeps what is stored; the result has counts and the skipped or
-  failed addresses with reasons, never page text. New: `llm-cli tools crawl-notice` shows the notice in a terminal
+  failed addresses with reasons, never page text or a folder of this computer. New: `llm-cli tools crawl-notice` shows the notice in a terminal
   and records that you read it.
 - **The community zoo for AI clients** (MCP tools `list_packs`, `add_pack_from_index`, `export_pack`): a client lists
   the signed index and the installed packs (details, verification; `refresh` once an hour), adds a knowledge, target
   or recipe pack from the signed index (trust verified or community, never revoked, never from a file) after you
-  saw the summary checked in quarantine, for a target pack with every base image shown plainly (registry, digest or
-  "not pinned", Docker Official Image or another registry) and that its image build runs with network, and exports a
+  saw the summary checked in quarantine, for a target pack with every image its Dockerfiles pull (`FROM`, `COPY --from=`,
+  `RUN --mount=...,from=`) shown plainly (registry, digest or "not pinned", Docker Official Image or another registry) and that its image build runs with network, and exports a
   pack to a local file signed with your key (always asked; refused without an existing key; returns scrub counts,
   never the removed text). A quarantined copy is reused for the same pack and hash and removed on a "no", a declined
   or expired approval, or after 20 minutes. "Yes, and do not ask again" covers one pack kind, trust level and index
-  key (knowledge and recipe packs, `verified` target packs); packs installed under it are marked `installed_via`.
+  key (knowledge and recipe packs, `verified` target packs); packs installed under it are marked `installed_via`; an install under it must leave the larger disk reserve
+  (20 GiB or 10 %) free, or it asks.
   No tool publishes a pull request.
 - **Fix proposals from AI clients** (MCP tool `propose_healing_fix`): a client that analyses a failed build hands its
   summary, cause, manual step and confidence to the framework. It passes the same checks as Ditto's own analysis,

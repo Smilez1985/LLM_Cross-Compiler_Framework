@@ -70,8 +70,9 @@ def _logical_lines(text: str) -> List[str]:
 
 
 def dockerfile_bases(text: str) -> List[str]:
-    """The base images a Dockerfile's FROM lines name, in order: build stages named with AS are left out, `scratch`
-    too; a build argument with a default declared before the first FROM is filled in, any other stays as written."""
+    """The base images a Dockerfile's FROM lines name, and the images COPY/ADD --from and RUN --mount=...,from= pull,
+    in order: build stages named with AS are left out, `scratch` too; a build argument with a default declared before
+    the first FROM is filled in, any other stays as written."""
     args: Dict[str, str] = {}
     stages, images = set(), []
     seen_from = False
@@ -82,6 +83,19 @@ def dockerfile_bases(text: str) -> List[str]:
             name, eq, value = rest.strip().partition("=")
             if eq:
                 args[name.strip()] = value.strip().strip('"').strip("'")
+        if word in ("COPY", "ADD", "RUN"):
+            # COPY --from=<image> and RUN --mount=...,from=<image> pull a prebuilt image just like FROM does (a stage
+            # name or a stage number is not an image)
+            for flag in (t for t in rest.split() if t.startswith("--")):
+                name, _, value = flag[2:].partition("=")
+                sources = [value] if name.lower() == "from" else [
+                    part.partition("=")[2] for part in value.split(",")
+                    if name.lower() == "mount" and part.partition("=")[0].strip().lower() == "from"]
+                for source in sources:
+                    source = source.strip().strip('"').strip("'")
+                    if source and not source.isdigit() and source.lower() not in stages and source not in images:
+                        images.append(source)
+            continue
         if word != "FROM":
             continue
         seen_from = True
@@ -539,6 +553,9 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                  # the facts a standing approval is matched against (grants.PACK_RULE), never the AI's words
                  "grant": {"source": "index", "kind": m.kind, "trust": prepared.trust.value,
                            "signing_key": getattr(state, "signer", "") or ""}}
+        if usage is None or usage.free < 2 * entry.size + reserve_for(usage.total, standing=True):
+            # design 6.5: under a standing approval the larger reserve (20 GiB or 10 %) must stay free, else it asks
+            bound["grant"] = None
         return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound)
 
     def add_pack_from_index(inp: AddPackIn, ctx: ToolContext) -> AddPackStartedOut:
