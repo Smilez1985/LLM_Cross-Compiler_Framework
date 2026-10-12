@@ -34,19 +34,25 @@ AUDIT_ROWS = 30
 
 # --- the settings an AI may read and change (design 2.9; threat model 6.G) -----------------------------------------
 
-ORDINARY = ("language", "gui_theme", "calibration_language", "crawler_languages", "crawler_download_pdfs",
-            "rag_rerank_default", "rag_model_idle_minutes", "audio_announcements", "build_jobs",
-            "chat_context_limit", "default_enable_imatrix")
-# key -> the direction an AI may move it: True/False for a boolean (only to that value), "lower"/"higher" for a number
+ORDINARY = ("language", "gui_theme", "calibration_language", "crawler_languages", "rag_rerank_default",
+            "rag_model_idle_minutes", "build_jobs", "chat_context_limit", "default_enable_imatrix")
+# key -> the direction an AI may move it: True/False for a boolean (only to that value), "lower"/"higher" for a number.
+# crawler_download_pdfs: Deep Ingest reads more third-party text with it on, so an AI may only turn it off (SEC-M3).
 TIGHTEN_ONLY: Dict[str, Any] = {
     "offline_mode": True, "enable_telemetry": False, "enable_security_scan": True, "build_sandbox": True,
     "enable_rag_knowledge": False, "crawler_max_pages": "lower", "crawler_max_depth": "lower",
-    "crawler_rate_limit": "higher", "build_memory_limit": "lower", "build_pids_limit": "lower"}
+    "crawler_rate_limit": "higher", "build_memory_limit": "lower", "build_pids_limit": "lower",
+    "crawler_download_pdfs": False}
 WRITABLE = ORDINARY + tuple(TIGHTEN_ONLY)
+# Settings that keep the person informed of what AIs do (delegation design 3.7, SEC-M3): an AI never changes them, in
+# either direction. Some belong to parts that are still being built (the chat panel, the relay, the trash, the benchmark
+# sandbox); they are named here already, so the day they exist they are read-only for an AI.
+OVERSIGHT = ("audio_announcements", "chat_panel_auto_show", "relay_questions_to_clients", "trash_retention_days",
+             "bench_untrusted_sandbox_ok")
 READ_ONLY = ("max_concurrent_builds", "build_timeout", "auto_cleanup", "log_level", "rag_embedding_model",
              "rag_reranker", "rag_rerank_min_score", "healing_approval_timeout", "llama_cpp_version", "image_trivy",
              "image_qdrant", "image_base_debian", "image_inference_runtime", "gui_auto_refresh",
-             "gui_refresh_interval", "api_enabled")
+             "gui_refresh_interval", "api_enabled") + OVERSIGHT
 URL_KEYS = ("qdrant_url", "community_index_url", "community_repo", "docker_registry", "source_repositories")
 FOLDER_KEYS = {"targets_dir": "targets", "models_dir": "models", "datasets_dir": "datasets", "output_dir": "output",
                "cache_dir": "cache", "logs_dir": "logs", "default_calibration_dataset": "datasets"}
@@ -319,7 +325,15 @@ def setting_value(framework, key: str) -> SettingValue:
     return str(value)[:200]
 
 
+def oversight_problems(writable: Any = None) -> List[str]:
+    """Settings that keep the person informed but would be writable by an AI (the registration refuses that)."""
+    keys = set(WRITABLE if writable is None else writable)
+    return sorted(k for k in OVERSIGHT if k in keys)
+
+
 def allowed_text(key: str) -> str:
+    if key in OVERSIGHT:
+        return "read-only over MCP: it keeps you informed of what AIs do; only you change it, in the GUI or CLI"
     if key in ORDINARY:
         return "may be changed over MCP; the person is asked"
     if key in TIGHTEN_ONLY:
@@ -772,9 +786,16 @@ def status_tool_specs(registry, framework, no_tool_actions: List[Tuple[str, str]
     from orchestrator.tools.registry import ToolError, ToolSpec
     from orchestrator.tools.spec import FieldMeta, Rate, ToolLimits
     no_tool = dict(no_tool_actions)
+    loose = oversight_problems()
+    if loose:  # never registered: a setting that keeps the person informed is not an AI's to change
+        raise ValueError(f"update_settings would let an AI change settings that keep the person informed: {loose}")
 
     def get_settings(inp: SettingsIn) -> SettingsOut:
-        keys = list(dict.fromkeys(inp.keys)) or list(READABLE)
+        missing = object()
+        # Without a choice: every readable setting this framework has (oversight settings of parts not built yet are
+        # left out instead of being shown as empty).
+        keys = list(dict.fromkeys(inp.keys)) or [k for k in READABLE if k not in OVERSIGHT
+                                                  or _cfg(framework, k, missing) is not missing]
         rows = []
         for key in keys:
             writable = "ordinary" if key in ORDINARY else "tighten_only" if key in TIGHTEN_ONLY else "read_only"

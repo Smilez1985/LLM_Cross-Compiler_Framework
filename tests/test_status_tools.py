@@ -280,3 +280,46 @@ class TestSections:
         assert tools_status.scheme_and_host("https://user:pw@q.example:6333/path?key=1") == "https://q.example:6333"
         assert tools_status.scheme_and_host("owner/repo") == "owner/repo"
         assert tools_status.scheme_and_host("tok@weird") == "(set)"
+
+
+# --- oversight (delegation design 3.7, SEC-M3, WP1) ----------------------------------------------------------------
+
+def test_oversight_settings_are_never_writable(fw, monkeypatch):
+    """Settings that keep the person informed of what AIs do (spoken announcements now; the chat panel, the relay,
+    the trash reminder and the benchmark sandbox as soon as they exist) are read-only for an AI in either direction,
+    and the registration refuses an update_settings that could reach one."""
+    oversight = set(tools_status.OVERSIGHT)
+    assert {"audio_announcements", "chat_panel_auto_show", "relay_questions_to_clients", "trash_retention_days",
+            "bench_untrusted_sandbox_ok"} <= oversight
+    assert not oversight & set(tools_status.WRITABLE) and oversight <= set(tools_status.READ_ONLY)
+    spec = fw.tool_registry.get("update_settings")
+    listed = set(json.loads(json.dumps(spec.input_model.model_json_schema()))["$defs"]["SettingChange"]["properties"]
+                 ["key"]["enum"])
+    assert not listed & oversight
+    for value in ("false", "true"):
+        error, shown = refused(fw, "update_settings", {"changes": [{"key": "audio_announcements", "value": value}]},
+                               session=f"o-{value}")
+        assert error.code == "invalid_value" and shown == []
+    out, _ = call(fw, "get_settings", {})
+    rows = {s.key: s for s in out.settings}
+    assert rows["audio_announcements"].writable == "read_only" and "keeps you informed" in rows[
+        "audio_announcements"].allowed
+    assert "trash_retention_days" not in rows, "a setting of a part not built yet is not shown as empty"
+    # The guard at registration: an update_settings that could change one is never registered.
+    monkeypatch.setattr(tools_status, "WRITABLE", tools_status.WRITABLE + ("audio_announcements",))
+    with pytest.raises(ValueError, match="keep the person informed"):
+        tools_status.status_tool_specs(fw.tool_registry, fw, [])
+
+
+def test_crawler_pdfs_can_only_be_turned_off_by_an_ai(fw):
+    """Reading PDFs brings more third-party text into the knowledge base: an AI may only switch it off (SEC-M3)."""
+    fw.config.set("crawler_download_pdfs", False)
+    error, shown = refused(fw, "update_settings", {"changes": [{"key": "crawler_download_pdfs", "value": "true"}]},
+                           session="pdf-on")
+    assert error.code == "permission_denied" and shown == []
+    fw.config.set("crawler_download_pdfs", True)
+    out, shown = call(fw, "update_settings", {"changes": [{"key": "crawler_download_pdfs", "value": "false"}]},
+                      session="pdf-off")
+    assert fw.config.get("crawler_download_pdfs") is False and "(tightens what an AI may do)" in shown[0]
+    assert tools_status.tighten_only(SimpleNamespace(changes=[SimpleNamespace(key="crawler_download_pdfs")])) \
+        == Decision.ALLOW

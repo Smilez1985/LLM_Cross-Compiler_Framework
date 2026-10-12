@@ -66,6 +66,8 @@ import tempfile
 import threading
 import time
 import unicodedata
+import uuid
+import weakref
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple
@@ -200,7 +202,31 @@ def _session_seed(ctx, instance: str) -> str:
         return f"session:{session_id}"
     if (getattr(connection, "protocol_version", None) or ctx.protocol_version) in MODERN_PROTOCOL_VERSIONS:
         return f"server:{instance}"
-    return f"connection:{instance}:{id(connection)}"
+    return f"connection:{instance}:{_connection_id(connection)}"
+
+
+_CONNECTION_IDS: "weakref.WeakKeyDictionary[Any, str]" = weakref.WeakKeyDictionary()
+_CONNECTION_IDS_LOCK = threading.Lock()
+
+
+def _connection_id(connection: Any) -> str:
+    """A random id per connection object, the same for as long as it lives (SEC-L3): id() is a memory address, which a
+    later connection may get again once the first is gone, and would then share the first one's repeat guard."""
+    with _CONNECTION_IDS_LOCK:
+        try:
+            known = _CONNECTION_IDS.get(connection)
+            if known is None:
+                known = _CONNECTION_IDS[connection] = uuid.uuid4().hex
+            return known
+        except TypeError:  # an object without weak references: kept on the object itself
+            known = getattr(connection, "_lcf_connection_id", None)
+            if not isinstance(known, str):
+                known = uuid.uuid4().hex
+                try:
+                    setattr(connection, "_lcf_connection_id", known)
+                except (AttributeError, TypeError):
+                    return f"unshared-{known}"  # nothing to keep it on: every request is its own session
+            return known
 
 
 def _client_label_text(ctx) -> str:
@@ -781,8 +807,11 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         # Pending approvals (design 6.9): the question appears in the framework when the client cannot ask the person
         # (the registry applies the limits on questions to it, and shows the same looked-up facts).
         pending = getattr(registry, "approvals", None) is not None and not retry
-        if pending and await anyio.to_thread.run_sync(registry.framework_channel_required, spec, tool_ctx.actor):
-            return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=True)
+        # Only the framework's own window may ask about a tool that takes no other channel, a call that deletes
+        # something (round 5 f; its looked-up facts may carry the deletion) or a tool the person wants confirmed there:
+        # never the client's form, also when no pending approval can be made (then nobody can be asked).
+        if await anyio.to_thread.run_sync(registry.framework_channel_required, spec, tool_ctx.actor, state.facts):
+            return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=pending)
         # Same rule as the SDK: a bare `elicitation: {}` means form support, url-only does not.
         if elicitation is None or (getattr(elicitation, "form", None) is None
                                    and getattr(elicitation, "url", None) is not None):
@@ -1324,8 +1353,10 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
     class AuditedServer(MCPServer):
         async def list_tools(self):
             """The tools this caller may use, each with its tool's own closed input schema (the schema Ditto's
-            model sees too), not the looser one the SDK derives from the function signature."""
-            listed = {spec.name: spec for spec in await anyio.to_thread.run_sync(registry.visible, current_caller())}
+            model sees too), not the looser one the SDK derives from the function signature. A tool for other callers,
+            an internal one (model_facing=False) and one its visible_when hides for this client are not listed."""
+            ctx = ToolContext(current_caller(), metadata={"client": current_client()})
+            listed = {spec.name: spec for spec in await anyio.to_thread.run_sync(registry.visible, ctx.actor, ctx)}
             return [tool.model_copy(update={"input_schema": closed_schema(listed[tool.name].input_model)})
                     for tool in await super().list_tools() if tool.name in listed]
 

@@ -563,7 +563,9 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 
 `delete_artifact` and `restore_knowledge_snapshot` destroy something, so they are denied by default and not listed until you enable them in
 Tool Permissions (allowing the whole "external" class does not enable them), every call is asked, and they never get
-a standing approval. `delete_artifact` takes the id and the sha256 `list_artifacts` shows; it is refused for a
+a standing approval. A deletion is decided only by you, in the framework's own window: Ditto's dialog or prompt, or
+for an MCP client a pending approval in the GUI or `llm-cli tools approvals`; the client's own form is never used for
+it. `delete_artifact` takes the id and the sha256 `list_artifacts` shows; it is refused for a
 folder outside the output folder (also through a link), while a build of any framework program writes into it or
 is queued for it, when the model file's sha256 changed since, and when the folder is no longer the one the question
 named. `restore_knowledge_snapshot` saves the current knowledge base as a snapshot `pre_restore_<time>` first and
@@ -1290,13 +1292,14 @@ framework never sees it.
   account or endpoint), `permissions` (as before) and `audit` (this caller's last 30 entries and whether the chain is
   intact). `get_settings` reads an explicit list of settings: addresses as scheme and host only, folders as labels
   (`models:`), never `secret_helper`, `secret_storage` or the AI provider's settings beyond a summary.
-  `update_settings` changes ordinary settings (language, GUI theme, calibration language, crawler languages and
-  PDFs, reranking by default, model idle time, announcements, `build_jobs`, chat context, importance matrix by
-  default); you are asked with the old and new value, and each change is saved in `config.yml`. Settings that limit
-  what an AI or a build may do can only be tightened (`offline_mode` and `enable_security_scan` and `build_sandbox`
-  to true, `enable_telemetry` and `enable_rag_knowledge` to false, page and depth limits and container limits lower,
-  the crawl delay higher; a container memory limit of 0 means none to Docker, so it counts as loosening); only such
-  calls may be set to "allow". Permissions, secrets, the vault, AI provider
+  `update_settings` changes ordinary settings (language, GUI theme, calibration language, crawler languages,
+  reranking by default, model idle time, `build_jobs`, chat context, importance matrix by default); you are asked
+  with the old and new value, and each change is saved in `config.yml`. Settings that limit what an AI or a build
+  may do can only be tightened (`offline_mode` and `enable_security_scan` and `build_sandbox` to true,
+  `enable_telemetry`, `enable_rag_knowledge` and `crawler_download_pdfs` to false, page and depth limits and container
+  limits lower, the crawl delay higher; a container memory limit of 0 means none to Docker, so it counts as
+  loosening); only such calls may be set to "allow". Settings that keep you informed of what AIs do (spoken
+  announcements) are read-only for every AI, in both directions. Permissions, secrets, the vault, AI provider
   settings, addresses, image references, folders and the loosening direction are refused before the question, and
   no value is ever read as "default". `report_cannot_do` is for a task the AI really cannot do: it names the reason
   (`missing_information`, `not_supported`, `no_tool`, `permission_denied`, `declined`, `needs_person`,

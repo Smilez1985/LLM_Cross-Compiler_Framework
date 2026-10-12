@@ -509,3 +509,22 @@ class TestGui:
         dialog.framework_checks["write_note"].setChecked(True)
         dialog.save()
         assert env.registry.policy().framework_only == ["write_note"]
+
+
+def test_ditto_sessions_never_share_an_approval(env):
+    """Ditto has one owner for all its tasks: two tasks asking for the same call wait for two approvals, so one task
+    never receives the other's (SEC-L2). An MCP client's owner names its connection already."""
+    from orchestrator.tools.policy import Decision
+    service, spec = env.registry.approvals, env.registry.get("write_note")
+    inp = spec.input_model(text="hello")
+    args = inp.model_dump(mode="json")
+
+    def request(ctx):
+        return service.request(spec, inp, args, ctx, Decision.ASK).job_id
+    first = request(ToolContext("ditto", session="task-1"))
+    assert request(ToolContext("ditto", session="task-1")) == first, "the same task waits for its one approval"
+    assert request(ToolContext("ditto", session="task-2")) != first, "another task never gets this one"
+    client = request(ToolContext("mcp", session="a", connection="c1"))
+    assert request(ToolContext("mcp", session="b", connection="c1")) == client
+    assert request(ToolContext("mcp", session="a", connection="c2")) != client
+    assert len(env.store.pending()) == 4

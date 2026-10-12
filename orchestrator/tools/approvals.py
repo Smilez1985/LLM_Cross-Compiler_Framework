@@ -355,7 +355,7 @@ class _Waiting:
     arguments: Dict[str, Any]
     ctx: Any                 # the original caller's ToolContext
     job_id: str
-    key: Tuple[str, str, str]
+    key: Tuple[str, str, str, str]   # owner, tool, arguments hash, Ditto's session ("" for MCP callers)
     question_sha256: str
     expires: datetime
     running: bool = False
@@ -399,7 +399,9 @@ class ApprovalService:
         questions are paused or the client asked too many questions this hour; AuditUnavailable when the question
         cannot be recorded."""
         from orchestrator.tools.registry import LimitHit, ToolError
-        key = (ctx.owner, spec.name, arguments_sha256(arguments))
+        # Ditto has one owner for all its tasks: its session tells two tasks apart, so one task never receives another's
+        # approval (an MCP client's owner already names its connection).
+        key = (ctx.owner, spec.name, arguments_sha256(arguments), ctx.session if ctx.actor == "ditto" else "")
         if self._closed:
             raise ToolError(f"'{spec.title}' was not put to the person: the framework is shutting down.",
                             next="Ask again once the framework runs again.")
@@ -445,8 +447,16 @@ class ApprovalService:
         with self._lock:
             self._waiting[approval_id] = _Waiting(approval_id, spec.name, dict(arguments), ctx, job.job_id, key,
                                                   digest, expires, facts=facts)
+        self._emit("approval", approval_id, spec.name, ctx, "pending", job.job_id)
         self._start()
         return job
+
+    def _emit(self, kind: str, approval_id: str, tool: str, ctx: Any, state: str, job_id: str = "") -> None:
+        """Tells the registry's observers (the chat feed) that an approval was created or ended: ids and states only."""
+        events = getattr(self.registry, "events", None)
+        if events is not None:
+            events.emit(kind, approval_id=approval_id, tool=tool, actor=str(getattr(ctx, "actor", "")),
+                        owner=str(getattr(ctx, "owner", "")), state=state, job_id=job_id)
 
     def request_grant(self, spec: Any, inp: Any, ctx: Any) -> Optional[ApprovalRecord]:
         """An elicitation was accepted with "ask the framework to stop asking for this": a request the person confirms
@@ -504,6 +514,7 @@ class ApprovalService:
         self.store.update(approval_id, state="withdrawn",
                           note=(detail or "Withdrawn by the client or its session ended.")[:500])
         self._refuse(waiting, "cancelled", detail or "The pending approval was withdrawn.", answer)
+        self._emit("approval_end", approval_id, waiting.tool, waiting.ctx, "withdrawn", waiting.job_id)
 
     def close(self) -> None:
         """The process shuts down (framework.shutdown): every call still waiting for the person is withdrawn and
@@ -582,6 +593,7 @@ class ApprovalService:
             minutes = max(1, round(self.ttl / 60))
             self._refuse(item, "not_confirmed", f"Nobody approved it within {minutes} minutes.", "unanswered")
             self.jobs.update(item.job_id, state="expired", note=f"Nobody approved it within {minutes} minutes.")
+        self._emit("approval_end", item.approval_id, item.tool, item.ctx, how, item.job_id)
 
     def _refuse(self, item: _Waiting, outcome: str, detail: str, answer: str) -> None:
         try:
@@ -645,6 +657,7 @@ class ApprovalService:
                                   cancel=job.cancel_event, pending_approvals=False, notes=[], facts=item.facts,
                                   limits_checked=True)
         self.jobs.update(item.job_id, state="running", note=f"Approved in the framework ({record.decided_by}).")
+        state = "failed"
         try:
             # The quotas once more: minutes may have passed, and the client's unfinished builds may have grown.
             self.registry.enforce_limits(self.registry.prepare(item.tool, item.arguments, ctx), ctx, rate_too=False)
@@ -660,11 +673,13 @@ class ApprovalService:
                                                                  "message": "The approved call failed (details in "
                                                                             "the framework log)."})
         else:
+            state = "done"
             self.store.update(item.approval_id, state="done")
             self.jobs.update(item.job_id, state="done", result=result.model_dump(mode="json"))
         finally:
             with self._lock:
                 self._waiting.pop(item.approval_id, None)
+        self._emit("approval_end", item.approval_id, item.tool, item.ctx, state, item.job_id)
 
     def _fail(self, item: _Waiting, code: str, message: str, error: Optional[BaseException] = None) -> None:
         with self._lock:
@@ -672,6 +687,7 @@ class ApprovalService:
         self.store.update(item.approval_id, state="failed", note=message[:500])
         self.jobs.update(item.job_id, state="failed", error={"code": code, "message": message,
                                                              "notes": self._notes(item, error)})
+        self._emit("approval_end", item.approval_id, item.tool, item.ctx, "failed", item.job_id)
 
     @staticmethod
     def _notes(item: _Waiting, error: Optional[BaseException] = None) -> List[str]:
