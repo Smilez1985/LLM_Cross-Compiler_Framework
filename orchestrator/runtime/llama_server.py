@@ -645,12 +645,15 @@ class LocalLLMRuntime:
 
     def install(self, plan: Any = None, *, backend: str = "auto", placement: str = "auto",
                 jobs: Optional[int] = None, log: Optional[Callable[[str], None]] = None,
-                fetch_source: Optional[Callable[[], bool]] = None):
+                fetch_source: Optional[Callable[[], bool]] = None,
+                cancelled: Optional[Callable[[], bool]] = None):
         """Builds llama-server on this machine from the pinned commit (the plan of plan_install): the CPU build first,
         verified and made active, then the GPU build, active once it is verified. A running server keeps running; the
         next start uses the new build. fetch_source() is asked before the pinned source (about 215 MB) is fetched;
-        without it the source is fetched. Returns the HostInstallResult; raises LocalRuntimeError when the CPU build
-        cannot be built (nothing is activated then)."""
+        without it the source is fetched. `cancelled()` is checked before every build and before every activation: a
+        cancelled install activates nothing more (the step running at that moment finishes, its result is kept in the
+        store but not made active). Returns the HostInstallResult; raises LocalRuntimeError when the CPU build cannot be
+        built or the install was cancelled before it was activated (nothing is activated then)."""
         from orchestrator.runtime.build import source as llama_source
         from orchestrator.runtime.build.executor import BuildExecutor
         from orchestrator.runtime.build.host import HostBuildError, install_host_runtime
@@ -675,7 +678,8 @@ class LocalLLMRuntime:
         smoke = smoke_model_file(self.catalog.smoke_model, self.models_dir.parent / "smoke")
         try:
             result = install_host_runtime(plan, store=self.store, source=source, executor=executor,
-                                          verifier=verifier, smoke_model=smoke, jobs=jobs, log=log)
+                                          verifier=verifier, smoke_model=smoke, jobs=jobs, log=log,
+                                          cancelled=cancelled)
         except HostBuildError as e:
             where = f" (log: {e.log})" if e.log else ""
             raise LocalRuntimeError(f"{e}{where}") from None
@@ -904,11 +908,12 @@ class LocalLLMRuntime:
         self._downloads().ensure_space(folder, needed, what)
 
     def _fetch(self, url: str, dest: Path, size: Optional[int], sha256: Optional[str],
-               progress: Optional[ProgressFn] = None, attempts: int = 5) -> Path:
-        """Resumable download into <dest>.part; the file only gets its final name after size and hash matched."""
+               progress: Optional[ProgressFn] = None, attempts: int = 5, stop: Any = None) -> Path:
+        """Resumable download into <dest>.part; the file only gets its final name after size and hash matched. A set
+        `stop` event ends it with DownloadStopped, keeping the part."""
         downloads = self._downloads()
         try:
-            return downloads.fetch(url, dest, size, sha256, progress, attempts)
+            return downloads.fetch(url, dest, size, sha256, progress, attempts, stop=stop)
         finally:
             self._session = downloads._session  # keep the connection pool for the next file
 
@@ -943,8 +948,9 @@ class LocalLLMRuntime:
         _write_private(self._marker(model), json.dumps({"sha256": model.sha256, "size": st.st_size,
                                                         "mtime_ns": st.st_mtime_ns}))
 
-    def download_model(self, tier: str, progress: Optional[ProgressFn] = None) -> Path:
-        """Downloads a model at its pinned commit; it gets its final name only after size and sha256 matched."""
+    def download_model(self, tier: str, progress: Optional[ProgressFn] = None, stop: Any = None) -> Path:
+        """Downloads a model at its pinned commit; it gets its final name only after size and sha256 matched. A set
+        `stop` event (threading.Event) ends it with DownloadStopped and keeps the `.part` file."""
         try:
             model = self.catalog.model(tier)
         except KeyError as e:
@@ -954,7 +960,7 @@ class LocalLLMRuntime:
         path = self.model_path(model)
         if self.model_ready(model):
             return path
-        self._fetch(model.url(self.catalog.model_base_url), path, model.size, model.sha256, progress)
+        self._fetch(model.url(self.catalog.model_base_url), path, model.size, model.sha256, progress, stop=stop)
         self._write_marker(model)
         return path
 

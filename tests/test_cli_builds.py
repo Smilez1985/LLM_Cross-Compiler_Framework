@@ -688,10 +688,15 @@ class TestExitCodes:
     def test_deploy_package_failure_exits_1(self, cli, monkeypatch):
         write_manifest(Path(cli.framework.info.installation_path) / "output" / "b", {"model": "m", "primary": "m"})
         assert cli.invoke("deploy", "package", "b", "--profile", "Rockchip").code == 0
-        monkeypatch.setattr(FakeDeploymentManager, "create_deployment_package", lambda self, **kw: None)
+        from orchestrator.Core.deployment_manager import DeployError
+
+        def refuse(self, *a, **kw):
+            raise DeployError("The image x:latest is neither pinned by its digest nor built on this computer.",
+                              code="not_supported", next="Package without Docker images.")
+        monkeypatch.setattr(FakeDeploymentManager, "create_package", refuse)
         result = cli.invoke("deploy", "package", "b", "--profile", "Rockchip")
         assert result.code == 1, result.out
-        assert "Package generation failed" in result.out
+        assert "Package generation failed" in result.out and "neither pinned" in result.out, "the reason is shown"
 
     def test_secrets_set_failure_exits_1(self, cli, monkeypatch):
         from click.testing import CliRunner

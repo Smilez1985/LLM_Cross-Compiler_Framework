@@ -220,13 +220,16 @@ def _planned(role: str, plan: BuildPlan, store: BuildStore) -> PlannedBuild:
 
 def install_host_runtime(plan: HostPlan, *, store: BuildStore, source: Optional[Path], executor: BuildExecutor,
                          verifier: Verifier, smoke_model: Optional[SmokeModelFile] = None, jobs: Optional[int] = None,
-                         keep_last: int = DEFAULT_KEEP, log: Optional[Callable[[str], None]] = None
-                         ) -> HostInstallResult:
+                         keep_last: int = DEFAULT_KEEP, log: Optional[Callable[[str], None]] = None,
+                         cancelled: Optional[Callable[[], bool]] = None) -> HostInstallResult:
     """Builds (or reuses) the CPU build, verifies it and makes it the fallback and the active build; then the GPU build,
     which becomes the active build once it is verified. Old builds are removed by retention (never the active build,
     the fallback or the build a running server uses). Raises HostBuildError when the CPU build fails; nothing is
-    activated then and the previous builds stay as they were."""
+    activated then and the previous builds stay as they were. `cancelled()` is checked before every build and every
+    activation: once it says yes, nothing more is activated (a cancelled build is never activated, runtime design P6);
+    before the CPU build is active that raises HostBuildError, after it the GPU build is left out."""
     say = log or (lambda _msg: None)
+    stopped = cancelled or (lambda: False)
     host = (plan.toolchain.info.host_os, plan.toolchain.info.host_arch)
     perf_key = plan.profile.perf_key()
     built: List[str] = []
@@ -254,7 +257,11 @@ def install_host_runtime(plan: HostPlan, *, store: BuildStore, source: Optional[
     cpu = plan.cpu
     if cpu.refusal:
         raise HostBuildError(cpu.refusal)
+    if stopped():
+        raise HostBuildError("the install was cancelled; nothing was built or activated")
     fallback = build(cpu)
+    if stopped():
+        raise HostBuildError("the install was cancelled; the new CPU build was not activated")
     try:
         store.activate(fallback.build_id, role="fallback")
         active = store.activate(fallback.build_id)
@@ -265,9 +272,14 @@ def install_host_runtime(plan: HostPlan, *, store: BuildStore, source: Optional[
     if gpu is not None:
         if gpu.refusal:
             problems.append(f"{gpu.backend}: {gpu.refusal}")
+        elif stopped():
+            problems.append(f"{gpu.backend}: the install was cancelled; the CPU build stays active")
         else:
             try:
-                active = store.activate(build(gpu).build_id)
+                built_gpu = build(gpu)
+                if stopped():
+                    raise HostBuildError("the install was cancelled; the new GPU build was not activated")
+                active = store.activate(built_gpu.build_id)
             except HostBuildError as e:
                 where = f" (log: {e.log})" if e.log else ""
                 problems.append(f"{e}{where}; the CPU build stays active")

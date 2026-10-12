@@ -544,6 +544,34 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   template, for Ditto's proposals, the wizard and the MCP tool. Their counts are soft limits (3, 30, 5): going above
   one is a warning the person's approval overrides, never a refusal; prebuilt llama.cpp stays refused.
 
+- **Deploy for AI clients** (MCP tools `list_devices`, `create_deploy_package`, `deploy_to_device`, prompt
+  `deploy_to_board`; decision 2): a client lists the devices you trusted and paired, packages a built model as a job
+  (the disk must hold twice the model) and deploys it as a job. Before the deploy is asked, the framework reads the
+  device's host key (no login) and refuses an unknown or changed key or an unpaired device; the question shows the
+  device by your label, the host key fingerprint, the package's sha256 and the trust of its target, and the deploy
+  refuses when the package or the key differs afterwards. It is always asked, never covered by a standing approval,
+  one per device at a time; `cancel_job` closes the SSH session and reports the device state as unknown. The device's
+  output comes back marked as external text (`get_job_status` field `external_text`). No input names an address, user,
+  port, password, fingerprint or path.
+- **Trusted devices** (`~/.llm-framework/devices.json`, `llm-cli deploy devices list|add|remove`, `deploy run
+  --label`): `deploy run`, `scan --device`, `device runtime deploy` and the GUI's Deployment window record a device
+  after you confirmed its host key and the framework logged in (written to the audit log); `devices add` takes over a
+  device you trusted before (terminal only, never a new key, never a password). Only these devices can be named by AI
+  tools, and only while the framework's `known_hosts` still holds that key; no tool writes a record.
+
+- **Optional runtime tools for AI clients** (MCP tools `build_local_runtime`, `start_local_runtime`,
+  `stop_local_runtime`, `run_benchmark`, `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark`;
+  resource `lcf://runtime/catalog`; prompt `set_up_offline_assistant`): registered with their runtime packages and
+  hidden until you enable them, also when the whole tier is allowed. The local server is always self-built from the
+  pinned commit (no prebuilt option, no CMake option or command as input); a missing toolchain part is refused with
+  `needs_person` and `llm-cli ditto runtime install`; only a verified build is started and no result holds its address
+  or key; a cancelled install is never activated and a cancelled model download keeps its `.part`. An untrusted model
+  is benchmarked natively only after your consent in the framework's own window, written to the audit log first, or in
+  the Docker sandbox. The board tools reach only trusted devices with the trusted host key, are always asked and never
+  covered by a standing approval.
+- **Benchmark runs of this computer** (`~/.llm-framework/benchmarks/`): `llama-bench` results of the self-built build
+  (prompt and generation speed, peak memory) with the model's sha256 and the build id; `get_status` shows the newest.
+
 ### Changed
 - **The Deep Ingest notice records who read it again**: its state file stores where it was acknowledged (`via`:
   `gui` or `cli`), and reading it is written to the audit log (actor `gui` or `cli`). Only a person acknowledges it;
@@ -725,6 +753,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   contradicted for every tool that uses no device. Reports are audited as `cannot_reported`;
   `llm-cli tools audit --summary` counts them per caller.
 
+- **Packaging and deploying say why they failed**: `DeploymentManager` returns the reason (no Docker, an image not
+  pinned, the host key changed, the exit status of `deploy.sh`) instead of `None` or `False` with a log line (G23);
+  `llm-cli deploy package` prints it. A package is written under a temporary name and renamed when complete.
+
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
   list. Use the hidden prompt or `--with-token`.
@@ -758,6 +790,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- **Digest-pinned images in a deployment package start on an air-gapped board**: an image pulled by its digest has
+  no tag, so it was saved without a name, came back as `<none>` after `docker load`, and `deploy.sh` could not start
+  it by its digest reference without a registry. It is now packed under `<repository>:lcf-<12 hex of the digest>`
+  and started by that name (an image built here keeps its own tag), and `deploy.sh` starts every packed image with
+  `--pull never`, so a board where an image is missing stops instead of pulling one from a registry.
 - **Hugging Face look-ups no longer hide failures**: the model manager behind the GUI's Hugging Face browser returned
   an empty search result, an empty file list or a "not restrictive" licence when Hugging Face could not be reached;
   it now reports the error. A licence counts as permissive only on a fixed allowlist: `other`, custom, list-valued
@@ -968,6 +1005,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   switch for tests with a fake web is a separate keyword-only flag that no product code passes (a guard test checks
   it). Strings in a job's result (for example the addresses a crawl skipped and the sites' reasons) are now cleaned,
   capped and marked as external text like the rest of a job's status.
+- **Device and benchmark failures no longer carry outside text or host paths into an AI's context**: when a job of
+  `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark` or `run_benchmark` failed, the error message
+  held the device's stderr or `llama-bench`'s last output (which prints the metadata of the GGUF it loads, text an
+  untrusted model controls) unmarked; a failed mktemp on the device put its stderr into `deploy_to_device`'s plain
+  `reason`; and a packaging or deploy failure could name the build folder, the output folder or the home folder. The
+  message and `reason` are now the framework's own sentences without host paths, and what the device or the program
+  printed is returned in `get_job_status.external_text`, marked as external text (also for failed jobs).
 - **The dangerous-command filter can no longer be bypassed with invisible or full-width characters** (Ditto's
   healing analyses and recommendations, and fix proposals of AI clients): it checks the text also as the GUI and
   the CLI show it (normalized, invisible characters and joiners removed), so `r<zero-width space>m -rf ~` or
@@ -1190,6 +1234,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Every Hugging Face call of a build now sends the stored token or `token=False`.
 - **Image builds never read the MCP protocol stream**: `docker buildx build` ran with the server's stdin, which over
   stdio is the protocol stream (G25); it now gets `stdin=DEVNULL`.
+- **Deployment packages take images only pinned by digest or built here**: the default inference image was
+  `...:latest` and a failed pull by tag was swallowed, so a package could carry whatever the registry served (G17).
+  An image now goes into a package only as `name@sha256:...` or when it was built on this computer; a tag is refused
+  with the reason, a missing pinned image is pulled by its digest only, and a failed export stops the package.
+- **Deploys never forward the MCP protocol stream**: without paramiko, `ssh` and `scp` ran with the framework's
+  stdin, which over MCP stdio is the protocol stream (G25); they now get `stdin=DEVNULL`.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

@@ -63,7 +63,8 @@ WritableKey = Literal[WRITABLE]  # type: ignore[valid-type]
 REASONS = ("missing_information", "not_supported", "no_tool", "permission_denied", "declined", "needs_person",
            "hardware_unavailable", "insufficient_resources", "limit_reached", "failed")
 # Tools that use a physical device or a host accelerator: only for them can "the hardware is not available" be true.
-HARDWARE_TOOLS = ("deploy_to_device", "probe_remote_device", "run_device_benchmark", "build_local_runtime")
+HARDWARE_TOOLS = ("deploy_to_device", "probe_remote_device", "run_device_benchmark", "build_local_runtime",
+                  "deploy_device_runtime", "start_local_runtime", "run_benchmark")
 UNTESTED_RULE = ("No tool you need here uses the physical board; not being able to test on real hardware is not a "
                  "reason to refuse: do the work, list your assumptions; the result is marked untested.")
 # What to try before reporting that something is missing (design 2.9: "premature").
@@ -121,6 +122,21 @@ class LocalRuntimeSection(BaseModel):
     tier: Optional[str] = None
     rebuild: Optional[str] = None
     problems: List[str] = Field(default_factory=list)
+    benchmarks: List["BenchmarkSummary"] = Field(default_factory=list,
+                                                 description="The newest llama-bench runs on this computer")
+
+
+class BenchmarkSummary(BaseModel):
+    run_id: str
+    kind: str
+    where: str
+    build_id: str = ""
+    prompt_ts: Optional[float] = None
+    gen_ts: Optional[float] = None
+    at: str = ""
+
+
+LocalRuntimeSection.model_rebuild()
 
 
 class KnowledgeSection(BaseModel):
@@ -237,7 +253,7 @@ class CannotIn(BaseModel):
     reason: Literal[REASONS] = Field(description="Why it cannot be done")  # type: ignore[valid-type]
     missing: str = Field(min_length=1, max_length=300, description="What exactly is missing")
     tool: Optional[str] = Field(default=None, max_length=64, description="The tool that would do it or that failed")
-    action: Optional[Literal["sign_in", "change_permissions", "audit_log", "trust_device", "deploy_to_device",
+    action: Optional[Literal["sign_in", "change_permissions", "audit_log", "trust_device",
                              "deep_ingest_notice", "publish_pull_request",
                              "install_pack_from_file", "run_command"]] = Field(
         default=None, description="One of the framework's known actions without a tool")
@@ -469,6 +485,14 @@ def local_runtime_section(framework) -> LocalRuntimeSection:
         section.origin = inst.origin if inst.origin != "prebuilt" else "prebuilt (not self-built)"
         section.build_id, section.commit, section.backend = inst.build_id, inst.commit, inst.backend
         section.verified_at = inst.verified_at
+    try:
+        from orchestrator.runtime.bench import BenchRunner
+        rows = BenchRunner(Path(framework.config.user_state_dir)).latest(5)
+        section.benchmarks = [BenchmarkSummary(**{k: r.get(k) for k in BenchmarkSummary.model_fields
+                                                  if r.get(k) is not None}) for r in rows
+                              if r.get("run_id") and r.get("kind") and r.get("where")]
+    except Exception:  # noqa: BLE001 - no runs or an unreadable index: none shown
+        section.benchmarks = []
     return section
 
 
