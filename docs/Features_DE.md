@@ -683,7 +683,26 @@ Im MCP-Client-Modus wird kein Tool dieses Frameworks angeboten, und ein Wechsel 
 Unterhaltung. Ditto kann einen entfernten Server nicht prüfen, darum erreichen jedes Ergebnis, jeder Fehlertext,
 jeder Prompt und jede Tool-Beschreibung von dort Dittos Modell als nicht vertrauenswürdige Daten, und Dialog oder
 Abfrage der Bestätigung nennen den Server („Question from the framework at <Name>“). Ein „nicht mehr fragen“ von
-dort (CLI-Antwort `r`) fragt nur jenes Framework an, wo die Person es in dessen eigenem Freigabefenster bestätigt.
+dort (CLI-Antwort `r`, GUI-Schaltfläche „Allow and ask it to stop asking...“, nur angeboten, wenn die Rückfrage jenes
+Servers es anbietet, mit einer Warnung vorab) fragt nur jenes Framework an, wo die Person es in dessen eigenem
+Freigabefenster bestätigt.
+
+In der GUI wird der Modus unter **Configure AI Agent (Ditto)** im Abschnitt „Ditto's tools“ eingestellt: die
+Tool-Quelle, ein Befehl (stdio) oder eine Serveradresse (HTTP, nur https oder Loopback), ein Name für die Dialoge und
+das benannte Token. Das Token landet im Tresor für Zugangsdaten und wird nie wieder angezeigt (das Feld bleibt leer
+und sagt nur, dass eines gespeichert ist); den Modus ohne Token, mit einem nicht lesbaren Befehl oder mit einer
+Adresse zu speichern, die das Token im Klartext senden würde, wird abgelehnt, und nichts wird gespeichert.
+
+Dittos Aufgaben nutzen in beiden Modi dieselbe Quelle: Im MCP-Client-Modus holen Build-Empfehlung
+(`recommend_build_settings`), Modulvorschlag (`add_board`; eine Probe-Datei dieses Rechners kommt als eigener Block
+mit) und die Analyse eines Builds jenes Frameworks über seine Request-ID (`diagnose_build_failure`) ihren Kontext (die
+Formate des Targets, das Build-Log, die Auszüge aus Dokumentation und Wissensbasis) aus den Aufgaben-Prompts jenes
+Frameworks, denselben, die ein externer Client bekommt. Dittos Aufgabentext bleibt sein eigener (der gemeinsame Text,
+aus dem diese Prompts gebaut sind), und der Kontext des Servers sind nicht vertrauenswürdige Daten. Ein Server, der
+Dittos Token den Prompt nicht anbietet, wird mit dem nächsten Schritt genannt; das Self-Healing eines Builds dieses
+Frameworks nutzt weiter Log und Wissensbasis dieses Frameworks. Ein abgelehnter entfernter Aufruf trägt seinen
+Grund-Code als strukturierten Inhalt (`{"error": {"code", "field"}}`), den Ditto liest, statt ihn aus den Worten des
+Servers zu raten.
 
 ---
 
@@ -1587,8 +1606,11 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   `unknown`) und die letzten 100 Zeilen, die das Gerät ausgegeben hat, in `external_text`, als externer Text markiert;
   `reason` ist immer der eigene Satz des Frameworks, ohne Pfade des Rechners. Scheitert ein Job der Geräte- oder
   Laufzeit-Tools, ist auch die Fehlermeldung der Satz des Frameworks: Was das Gerät oder `llama-bench` ausgegeben hat
-  (`llama-bench` gibt die Metadaten des geladenen Modells aus), kommt in `external_text` zurück. Der Prompt
-  `deploy_to_board` führt durch dieselben Schritte.
+  (`llama-bench` gibt die Metadaten des geladenen Modells aus), kommt in `external_text` zurück; Pfade in einer
+  solchen Meldung erscheinen als Ordner-Bezeichnungen des Frameworks (`state:...`, `output:...`) oder nur als
+  Dateiname, nie als Pfad des Rechners oder `~/...`. Endet der Deploy-Job, bekommt das Audit-Log einen eigenen
+  Abschlusseintrag (erledigt, gescheitert oder abgebrochen, mit Job, Gerätenamen und Gerätezustand), verknüpft mit dem
+  `started`-Eintrag des Aufrufs. Der Prompt `deploy_to_board` führt durch dieselben Schritte.
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je
@@ -2033,7 +2055,10 @@ sich nur Pack-Dateien (Vertrauensstufe `local`), und ein Pull Request hat kein R
   geprüft, wenn das Pack den öffentlichen Schlüssel enthält (eine kaputte Signatur weist das Pack ab), und der
   öffentliche Schlüssel des Autors (der ganze Schlüssel, nicht seine kurze Schlüssel-ID) wird bei der ersten
   Installation eines Packs dieses Autors festgehalten. Ein späteres Pack mit demselben Autorennamen und einem anderen
-  Schlüssel bekommt in der Zusammenfassung eine Warnung.
+  Schlüssel bekommt in der Zusammenfassung eine Warnung. Ein beschädigter Speicher der festgehaltenen Schlüssel
+  (`authors.json` im Cache-Ordner der Community) wird nie für einen leeren gehalten: Er bleibt als `authors.json.bad`
+  erhalten, die Zusammenfassung warnt, dass der Schlüssel nicht verglichen werden konnte, und kein Schlüssel wird
+  festgehalten, bis du die Datei reparierst oder entfernst, sodass die bisherigen Einträge nie überschrieben werden.
 
 ### Verschlüsselte Packs zum privaten Teilen
 

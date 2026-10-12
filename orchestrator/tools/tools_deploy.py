@@ -477,21 +477,44 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                 except Exception:  # noqa: BLE001
                     pass
 
+        arguments = inp.model_dump(mode="json")
+
+        def audit_end(outcome: str, detail: str, reason_code: str = "") -> None:
+            """The deploy's own end entry, linked to the call's started entry (the call returned at the job's start,
+            so the registry's end entry says only that the job started)."""
+            try:
+                registry.record_job_end("deploy_to_device", arguments, ctx, outcome, detail, reason_code=reason_code)
+            except Exception:  # noqa: BLE001 - the deploy happened; the registry logs a failed write
+                pass
+
         def work(handle) -> Dict[str, Any]:
             from orchestrator.Core.job_service import EXTERNAL_KEY, JobCancelled
             handle.progress(None, None, f"deploying to {device.label}")
+            where = f"job {handle.job.job_id}, device {device.label}, package {path.name}"
             try:
                 result = manager().deploy_package(path, bound["host"], bound["user"], port=int(bound["port"]),
                                                   password=None, pair=False, expect_fingerprint=bound["fingerprint"],
                                                   expect_sha256=bound["sha256"], on_client=on_client,
                                                   cancelled=lambda: stop.is_set() or handle.cancelled)
+            except BaseException as e:
+                cancelled = stop.is_set() or handle.cancelled
+                audit_end("cancelled" if cancelled else "error",
+                          f"{where}: " + ("cancelled; the device state is unknown" if cancelled
+                                          else f"failed ({type(e).__name__})"), reason_code="failed")
+                raise
             finally:
                 with active_lock:
                     if active.get(device.device_id) == handle.job.job_id:
                         active.pop(device.device_id, None)
             if stop.is_set() or handle.cancelled:
+                audit_end("cancelled", f"{where}: cancelled; the device state is "
+                                       f"{result.device_state or 'unknown'}", reason_code="failed")
                 raise JobCancelled()
             devices().note_deploy(device.device_id, result.success, path.name)
+            audit_end("ok" if result.success else "error",
+                      f"{where}: {'deployed' if result.success else 'not deployed'}, exit status "
+                      f"{result.exit_status}, device state {result.device_state or 'unknown'}",
+                      reason_code="" if result.success else "failed")
             return {"success": result.success, "exit_status": result.exit_status,
                     "device_state": result.device_state, "device_id": device.device_id,
                     # the framework's reason (the device's own words are in the output lines), without host paths

@@ -372,8 +372,10 @@ class TestAIConfigurationDialog:
                 arrived.append(threading.current_thread() is threading.main_thread())
                 super()._on_models_listed(request, ids, message)
 
-        relay = dialogs.model_list_relay()
-        assert relay is dialogs.model_list_relay() and relay.parent() is None
+        from orchestrator.gui.worker_relay import worker_relay
+        relay = worker_relay()
+        assert relay is worker_relay() and relay.parent() is None
+        assert not hasattr(dialogs, "model_list_relay"), "one relay for every GUI worker (folded into WorkerRelay)"
         first, second = Recording(framework), Recording(framework)
         select_provider(first, "ollama")
         assert wait_for(qapp, lambda: first.cb_model.findText("qwen3.5:9b") >= 0)
@@ -950,7 +952,7 @@ class TestDeepIngestControls:
         wizard.btn_stop_crawl.setEnabled(True)
         wizard.stop_deep_ingest()
         assert wizard.crawl_worker.stopped and not wizard.btn_stop_crawl.isEnabled()
-        assert wizard.status_label.text() == "Stopping after the current page..."
+        assert wizard.status_label.text() == "Stopping (a page that is still arriving is abandoned; stored pages stay)..."
 
     def test_closing_during_a_crawl_waits_for_the_current_page_without_blocking(self, qapp, wizard):
         """The wizard used to give up after a fixed wait and close while the page was still being stored;
@@ -976,7 +978,7 @@ class TestDeepIngestControls:
         begin = time.monotonic()
         wizard.reject()
         assert time.monotonic() - begin < 1.0          # the GUI stays responsive
-        assert wizard.isVisible() and wizard.status_label.text() == "Stopping after the current page..."
+        assert wizard.isVisible() and wizard.status_label.text() == "Stopping (a page that is still arriving is abandoned; stored pages stay)..."
         wizard.reject()                                  # a second click changes nothing
         release.set()
         assert wait_for(qapp, lambda: not wizard.isVisible())

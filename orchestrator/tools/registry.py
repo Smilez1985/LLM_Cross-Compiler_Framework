@@ -356,6 +356,10 @@ class ToolContext:
     report_progress: Optional[Callable[..., Any]] = None
     # The MCP server counted this call against the limits already (before its question); call() does not again.
     limits_checked: bool = False
+    # Set by the registry before the handler runs: the call's write-ahead `started` audit entry and its decision, so
+    # work that goes on after the call returned (a job) can write its own end entry linked to it (record_job_end).
+    audit_started: Optional[int] = None
+    audit_decision: str = ""
 
     @property
     def owner(self) -> str:
@@ -1213,6 +1217,21 @@ class ToolRegistry:
         self._succeeded(ctx, spec.name, prepared.key)
         return result
 
+    def record_job_end(self, name: str, arguments: Any, ctx: ToolContext, outcome: str, detail: str = "",
+                       reason_code: str = "", result: Any = None) -> Optional[int]:
+        """The end entry of work a call started that runs on after the call itself returned (a job, e.g. a deploy):
+        linked to the call's `started` entry (ctx.audit_started), so the audit log ties the end of the work to the
+        call, the question and the answer that started it. outcome: ok, error or cancelled. A failed write is logged;
+        the work has already happened."""
+        spec = self.get(name)
+        try:
+            decision = Decision(ctx.audit_decision) if ctx.audit_decision else self.decide(spec, caller=ctx.actor)
+        except ValueError:
+            decision = Decision.ASK
+        links = [ctx.audit_started] if ctx.audit_started else []
+        return self._audit(ctx, spec, decision, outcome, arguments, detail=("job end: " + detail).strip()[:1000],
+                           links=links, reason_code=reason_code, result=result)
+
     def discard_staged(self, spec: ToolSpec, inp: Optional[BaseModel], ctx: ToolContext) -> None:
         """Lets the tool drop what its prepare staged for a call that will not run (ToolSpec.discard)."""
         if spec.discard is None or inp is None:
@@ -1326,6 +1345,7 @@ class ToolRegistry:
             started = self._audit(ctx, spec, decision, "started", arguments, approved=approved, required=True,
                                   **confirmation)
         links = [started] if started else []
+        ctx.audit_started, ctx.audit_decision = started, decision.value  # ctx is this call's own copy (call())
         if ctx.cancel.is_set():  # the caller gave up before the handler started
             self._audit(ctx, spec, decision, "cancelled", arguments, approved=approved, links=links,
                         detail="Cancelled before it started.", reason_code="failed", **confirmation)

@@ -269,6 +269,13 @@ def ai_generated_target(target_path: Path) -> bool:
         meta["metadata"].get("provenance") == "ai-generated"
 
 
+AUTHORS_FILE = "authors.json"  # the author keys pinned on first use (community cache folder)
+
+
+class AuthorKeysDamaged(Exception):
+    """The store of pinned author keys exists but cannot be read; it is kept as authors.json.bad, never replaced."""
+
+
 class CommunityManager:
 
     def __init__(self, framework_manager, session=None, keys=None):
@@ -549,18 +556,50 @@ class CommunityManager:
         if key is None:
             return f"signed by author key {signature.key_id} (public key not included, not checked)"
         verify_manifest(manifest, signature, [key])  # a broken signature means a changed pack: refused
-        pinned = self._authors().get(manifest.author)
+        try:
+            pinned = self._authors().get(manifest.author)
+        except AuthorKeysDamaged:
+            return (f"WARNING: signed by key {signature.key_id}, but the store of pinned author keys is damaged (kept "
+                    f"as {AUTHORS_FILE}.bad), so this key could not be compared with the one '{manifest.author}' used "
+                    "before")
         if pinned and pinned != signature.pubkey:  # the whole key: a 64-bit key id can be matched on purpose
             return (f"WARNING: signed by key {signature.key_id}, but '{manifest.author}' signed with another key "
                     "before")
         return f"signed by author key {signature.key_id}" + ("" if pinned else " (first pack seen from this author)")
 
     def _authors(self) -> Dict[str, str]:
+        """The pinned author keys ({} when none was pinned yet). A store that exists but cannot be read is never
+        taken for an empty one (the next pin would overwrite every key pinned on first use): it is kept as
+        authors.json.bad and AuthorKeysDamaged is raised."""
+        path = self.cache_dir / AUTHORS_FILE
         try:
-            data = json.loads((self.cache_dir / "authors.json").read_text(encoding="utf-8"))
-            return {str(k): str(v) for k, v in data.items()} if isinstance(data, dict) else {}
-        except (OSError, ValueError):
+            raw = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
             return {}
+        except (OSError, ValueError) as e:  # unreadable, or not text
+            self._keep_damaged(path)
+            raise AuthorKeysDamaged(f"{AUTHORS_FILE} cannot be read ({type(e).__name__})") from None
+        try:
+            data = json.loads(raw)
+        except ValueError:
+            data = None
+        if not isinstance(data, dict) or not all(isinstance(k, str) and isinstance(v, str) for k, v in data.items()):
+            self._keep_damaged(path)
+            raise AuthorKeysDamaged(f"{AUTHORS_FILE} is damaged (not a map of author names to keys)")
+        return dict(data)
+
+    def _keep_damaged(self, path: Path) -> None:
+        """A copy of a damaged key store next to it (authors.json.bad; an older, different copy is kept too)."""
+        bad = path.with_name(path.name + ".bad")
+        try:
+            if bad.exists():
+                if bad.read_bytes() == path.read_bytes():
+                    return
+                bad = path.with_name(f"{path.name}.{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}.bad")
+            shutil.copy2(path, bad)
+            self.logger.warning(f"The store of pinned author keys is damaged; a copy is kept as {bad.name}.")
+        except OSError as e:
+            self.logger.warning(f"The damaged store of pinned author keys could not be copied: {e}")
 
     def _validate(self, manifest: PackManifest, root: Path, notes: List[str]) -> List[str]:
         from orchestrator.Core.module_generator import validate_target_folder
@@ -643,9 +682,16 @@ class CommunityManager:
     def _pin_author(self, author: str, pubkey: str) -> None:
         """Pins an author's public key on first use. The GUI, the CLI and another CLI call may install at the same
         time: read and write under the shared lock, so no process drops a key another one pinned."""
-        target = self.cache_dir / "authors.json"
+        target = self.cache_dir / AUTHORS_FILE
         with file_lock(self.cache_dir / "authors.json.lock"):
-            authors = self._authors()
+            try:
+                authors = self._authors()
+            except AuthorKeysDamaged as e:
+                # Refused rather than starting a new store: every key pinned on first use would be lost.
+                self.logger.warning(f"The key of author '{author}' was not pinned: {e} (kept as {AUTHORS_FILE}.bad). "
+                                    f"Repair or remove {AUTHORS_FILE} in the community cache folder; until then no "
+                                    "author key is pinned.")
+                return
             if author in authors:
                 return
             authors[author] = pubkey

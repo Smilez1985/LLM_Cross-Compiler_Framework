@@ -6,8 +6,9 @@ A worker thread must never emit on, or free, a Qt object that a window owns or c
 take the object with it while the worker still runs, and a QObject whose last reference goes away in a worker
 thread is destroyed there, which makes Qt abort. The relay is a single QObject, created in the GUI thread and never
 deleted. Receivers connect to `done` with a queued connection and pick their own results by a token they created
-(an `object()`), so their slot runs in the GUI thread, or not at all once the receiver is gone. dialogs.py keeps
-its own relay of the same kind for model lists (model_list_relay).
+(an `object()`), so their slot runs in the GUI thread, or not at all once the receiver is gone. Every worker of the
+GUI uses this one relay: the AI settings' model lists, the module wizard's AI import, the chat window's access check
+and the sign-in panel.
 """
 
 from typing import Optional

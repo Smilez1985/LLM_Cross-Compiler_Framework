@@ -393,7 +393,8 @@ class RemoteConnection:
         text = _result_text(result)
         source = f"remote:{self.server.label()}:{name}"
         if getattr(result, "is_error", False):
-            raise ToolError(wrap_untrusted(text, source=source, max_len=8000), code=_error_code(text))
+            code, field_name = structured_error(result, self._listed.get(name))
+            raise ToolError(wrap_untrusted(text, source=source, max_len=8000), code=code, field=field_name)
         return wrap_untrusted(text, source=source, max_len=MAX_RESULT)
 
     # --- prompts ------------------------------------------------------------------------------------------------
@@ -402,14 +403,20 @@ class RemoteConnection:
         result = self._run(self._client.list_prompts(), CONNECT_TIMEOUT)
         return sorted(str(getattr(p, "name", "")) for p in getattr(result, "prompts", []) or [] if getattr(p, "name", ""))
 
-    def prompt(self, name: str, arguments: Optional[Dict[str, str]] = None) -> str:
-        """The server's task prompt (its messages as text), as untrusted data: only used with this server's tools."""
+    def prompt_messages(self, name: str, arguments: Optional[Dict[str, str]] = None) -> List[str]:
+        """The texts of the server's task prompt, one per message (the framework's prompts: the instructions, then the
+        context it put together). Raw remote text: whoever uses it wraps it as untrusted data."""
         result = self._run(self._client.get_prompt(name, arguments or {}), CONNECT_TIMEOUT)
         parts = []
         for message in getattr(result, "messages", []) or []:
             content = getattr(message, "content", None)
             parts.append(str(getattr(content, "text", "") or ""))
-        return wrap_untrusted("\n\n".join(parts), source=f"remote prompt:{self.server.label()}:{name}")
+        return parts
+
+    def prompt(self, name: str, arguments: Optional[Dict[str, str]] = None) -> str:
+        """The server's task prompt (its messages as text), as untrusted data: only used with this server's tools."""
+        return wrap_untrusted("\n\n".join(self.prompt_messages(name, arguments)),
+                              source=f"remote prompt:{self.server.label()}:{name}")
 
 
 def _result_text(result: Any) -> str:
@@ -421,15 +428,23 @@ def _result_text(result: Any) -> str:
     return text
 
 
-def _error_code(text: str) -> str:
-    """A rough reason code for Ditto's loop (it tells a fix from a repeat by the code); the text stays untrusted."""
-    lowered = text.lower()
-    for marker, code in (("did you mean", "unknown_argument"), ("unknown argument", "unknown_argument"),
-                         ("declined", "declined"), ("not allowed", "permission_denied"),
-                         ("denied", "permission_denied")):
-        if marker in lowered:
-            return code
-    return "failed"
+def structured_error(result: Any, listed: Optional["_Listed"] = None) -> Tuple[str, str]:
+    """(reason code, field) of a refused or failed remote call, from the result's structured error
+    {"error": {"code", "field"}} that the framework's server sends (Ditto's loop tells a fix from a repeat by them).
+    Never guessed from the error's words, which are the remote server's untrusted text: a code outside the known
+    reason codes, or no structured error at all (an older server), is "failed"; a field the tool's input schema does
+    not have is dropped."""
+    from orchestrator.tools.normalize import CODES
+    data = getattr(result, "structured_content", None)
+    error = data.get("error") if isinstance(data, dict) else None
+    if not isinstance(error, dict):
+        return "failed", ""
+    code = error.get("code")
+    code = code if isinstance(code, str) and code in CODES else "failed"
+    field_name = error.get("field")
+    known = (listed.schema.get("properties") or {}) if listed is not None and isinstance(listed.schema, dict) else {}
+    field_name = field_name if isinstance(field_name, str) and field_name in known else ""
+    return code, field_name
 
 
 def stored_token(secrets_manager: Any) -> Optional[str]:
