@@ -159,8 +159,9 @@ sowohl `b<build_number>` als auch `build` entspricht. Alles andere folgt aus die
 | Stelle | Wie sie folgt |
 |---|---|
 | Das Build-Rezept (`orchestrator/runtime/build/recipe.py`) | liest ihn: Jeder Plan baut diesen Commit und setzt `LLAMA_BUILD_NUMBER` und `LLAMA_BUILD_COMMIT` daraus |
-| Die Einstellung `llama_cpp_version` (der Tag, den Target-Images klonen) | ihre Vorgabe wird aus `tag` abgeleitet (`orchestrator/utils/llama_pin.py`) |
-| `ARG LLAMA_CPP_TAG` in `targets/Rockchip/dockerfile` (geprüft wird jedes `Dockerfile*` eines Targets, das es setzt oder llama.cpp klont), `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml` | Rückfallwerte für Image-Builds außerhalb des Frameworks; müssen `tag` entsprechen |
+| Der Image-Build eines Targets | die Engine übergibt `tag` und `commit` als `LLAMA_CPP_TAG` und `LLAMA_CPP_COMMIT` (`orchestrator/utils/llama_pin.py`); das Dockerfile holt den Commit und bricht ab, wenn es nicht genau diesen bekommt. `LLAMA_CMAKE_ARGS` ist der Plan des Rezepts für die Konvertierungswerkzeuge auf dem Build-Rechner |
+| Die Einstellung `llama_cpp_version` | ihre Vorgabe wird aus `tag` abgeleitet; sie verschiebt nicht mehr, was Target-Images bauen (ein anderer Wert ergibt nur eine Warnung im Build-Log) |
+| `ARG LLAMA_CPP_TAG` und `ARG LLAMA_CPP_COMMIT` in `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` und `Dockerfile.gpu` (geprüft wird jedes `Dockerfile*` eines Targets, das sie setzt oder llama.cpp klont), `docker.build_args.LLAMA_CPP_TAG` und `LLAMA_CPP_COMMIT` in `targets/*/target.yml` | Rückfallwerte für Image-Builds außerhalb des Frameworks; müssen `tag` und `commit` entsprechen |
 | `inference_backends.llama_cpp.commit` in `project_sources.yml` und `detailed_project_sources.yml` | Nachschlagekatalog; muss `tag` entsprechen |
 | Vorgaben für `LLAMA_CPP_COMMIT` in `targets/*/modules/source_module.sh` | alte Vier-Modul-Kette, unverändert gelassen (Entscheidung D20); gemeldet, nicht geprüft |
 
@@ -242,9 +243,8 @@ Was die Datei **nicht** ist (ihr Kopfkommentar sagt dasselbe):
 - Kein Teil des Frameworks liest sie im Betrieb. Sie wird nicht in Umgebungsvariablen für die Build-Container
   übersetzt, der Crawler folgt ihren Links nicht, und Ditto nutzt `docs_workflow` nicht.
 - Ihre Versionen sind nicht die Versionen, mit denen gebaut wird. Builds nutzen, was das Dockerfile des Targets
-  festlegt, und die Einstellung `llama_cpp_version`, deren Vorgabe aus dem llama.cpp-Pin in `llama_runtime.yml`
-  stammt; der lokale Modellserver nutzt `llama_runtime.yml`. Ihr llama.cpp-Eintrag wird trotzdem gegen diesen Pin
-  geprüft.
+  festlegt, und den llama.cpp-Pin in `llama_runtime.yml`, nach dessen Commit Target-Images und der lokale
+  Modellserver bauen. Ihr llama.cpp-Eintrag wird trotzdem gegen diesen Pin geprüft.
 - Sie hat keine Roadmap. Die Roadmap des Projekts steht in [docs/BLUEPRINT_DE.md](../docs/BLUEPRINT_DE.md#roadmap).
 
 Nutze sie als Liste von Links und Notizen. Halte Notizen kurz, verwende vollständige URLs und führe nach einer

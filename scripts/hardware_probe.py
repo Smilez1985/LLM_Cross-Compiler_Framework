@@ -26,7 +26,9 @@ and facts that only a running program of the host could tell (the glibc version 
 not taken from the host.
 
 The framework imports this file in-process (collect(), render_text(), render_json()); orchestrator/runtime/hardware.py
-uses its GPU parsers.
+uses its GPU parsers. orchestrator/runtime/hardware_probe.py is a byte-identical copy of this file, so the probe is
+also part of the installed package (a wheel has no scripts/ folder). Edit this file, then copy it there; a test fails
+while the two differ.
 """
 
 import argparse
@@ -904,6 +906,12 @@ class Probe:
         rc, out, err = self.run(cmd, timeout)
         return (out or "") + "\n" + (err or "") if rc != -1 else None
 
+    def tool_stdout(self, cmd, timeout=10):
+        """Standard output of a tool that succeeded (exit code 0), None otherwise. For values read from the output
+        itself, such as sysctl's: an error message on stderr must never become a value."""
+        rc, out, _err = self.run(cmd, timeout)
+        return out or "" if rc == 0 else None
+
     # --- run ---
 
     def collect(self):
@@ -1108,7 +1116,7 @@ class Probe:
     def _macos_system(self):
         release, machine = self._uname()
         self.put("KERNEL", release)
-        out = self.tool_output(["sysctl", "-n", "hw.optional.arm64"], 5)
+        out = self.tool_stdout(["sysctl", "-n", "hw.optional.arm64"], 5)
         if out is not None and out.strip().startswith("1"):
             arch = "arm64"  # also under Rosetta
             if ARCH_ALIASES.get((machine or "").lower()) == "x86_64" and self.machine is None:
@@ -1137,7 +1145,7 @@ class Probe:
         elif self.os == "macos":
             self._cpu_macos()
         elif self.os == "freebsd":
-            out = self.tool_output(["sysctl", "-n", "hw.model"], 5)
+            out = self.tool_stdout(["sysctl", "-n", "hw.model"], 5)
             self.put("CPU_MODEL", (out or "").strip() or None, warn_invalid=False)
 
     def _cpu_linux(self):
@@ -1251,8 +1259,8 @@ class Probe:
 
     def _cpu_macos(self):
         def sysctl(name):
-            out = self.tool_output(["sysctl", "-n", name], 5)
-            return (out or "").strip() if out is not None else None
+            out = self.tool_stdout(["sysctl", "-n", name], 5)  # "sysctl: unknown oid" goes to stderr
+            return out.strip() if out is not None else None
 
         self.put("CPU_MODEL", sysctl("machdep.cpu.brand_string") or None)
         if self.arch == "arm64":
@@ -1302,11 +1310,11 @@ class Probe:
                 total, available = status[0], status[1]
                 swap = max(0, status[2] - status[0])
         elif self.os in ("macos", "freebsd"):
-            out = self.tool_output(["sysctl", "-n", "hw.memsize" if self.os == "macos" else "hw.physmem"], 5)
+            out = self.tool_stdout(["sysctl", "-n", "hw.memsize" if self.os == "macos" else "hw.physmem"], 5)
             total = int(out.strip()) if out and out.strip().isdigit() else None
             if self.os == "macos":
                 available = self._macos_available()
-                swap = parse_swapusage(self.tool_output(["sysctl", "-n", "vm.swapusage"], 5) or "")
+                swap = parse_swapusage(self.tool_stdout(["sysctl", "-n", "vm.swapusage"], 5) or "")
         if total is None and not self.sysroot and hasattr(os, "sysconf"):
             try:
                 total = os.sysconf("SC_PHYS_PAGES") * os.sysconf("SC_PAGE_SIZE")
@@ -1337,7 +1345,7 @@ class Probe:
         return None
 
     def _macos_available(self):
-        out = self.tool_output(["vm_stat"], 5) or ""
+        out = self.tool_stdout(["vm_stat"], 5) or ""
         page = re.search(r"page size of (\d+) bytes", out)
         free = re.search(r"Pages free:\s+(\d+)", out)
         inactive = re.search(r"Pages inactive:\s+(\d+)", out)

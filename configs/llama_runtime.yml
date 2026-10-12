@@ -19,6 +19,10 @@
 #   a GPU that only gets PTX (e.g. Turing, RTX 2080 Ti, compute 7.5) needs the toolkit's own driver
 #   (CUDA 13.4: branch R615; 12.8 GA: 570.26 Linux; 12.4 GA: 551.61 Windows).
 # - ROCm gpu_targets: GPU_TARGETS of the ubuntu-24-rocm and windows-rocm jobs in the release workflow.
+# - glibc_min of the Linux archives: the glibc of the Ubuntu release each job of .github/workflows/release.yml runs on
+#   at the tag (x64 CPU and Vulkan: ubuntu-22.04, glibc 2.35; arm64, CUDA and ROCm: Ubuntu 24.04, glibc 2.39). Read
+#   from the workflow, not from the binaries: a binary needs the glibc it was linked against or a newer one, so a
+#   machine with an older glibc, or with musl (Alpine), gets no prebuilt archive (it builds llama.cpp itself).
 # - Models: HfApi().model_info(repo, revision, files_metadata=True) -> siblings[].lfs.sha256 and size.
 schema_version: 1
 
@@ -37,8 +41,9 @@ llama_cpp:
     commit: d81235049384534c167caea52b85a694f6103d14
     tag: b11429
     build_number: 11429
-  # The official prebuilt archives below are what `llm-cli ditto runtime install` downloads until the self-built
-  # runtime replaces it; afterwards they are only used on explicit request, labelled "not self-built" (decision D1).
+  # The official prebuilt archives below are only used on explicit request, `llm-cli ditto runtime install
+  # --prebuilt`, and shown as "prebuilt, not self-built" (decision D1); `llm-cli ditto runtime install` builds
+  # llama-server from the commit above.
   base_url: https://github.com/ggml-org/llama.cpp/releases/download/b11429/
   # Server options that exist in this build (checked in tools/server and common/arg.cpp at the tag).
   features:
@@ -52,18 +57,21 @@ llama_cpp:
       os: linux
       arch: x86_64
       backend: cpu
+      glibc_min: "2.35"
       files:
         - {name: llama-b11429-bin-ubuntu-x64.tar.gz, size: 17693462, sha256: f6d25dde8f51133143d1453da4fd5f73b145127177612a283bf7995957af3392}
     - id: linux-x64-vulkan
       os: linux
       arch: x86_64
       backend: vulkan
+      glibc_min: "2.35"
       files:
         - {name: llama-b11429-bin-ubuntu-vulkan-x64.tar.gz, size: 31636673, sha256: 632c4e98feba2b94407a2130e3133e0c3aefb0ea1ab41337e926d8bfafdd0b74}
     - id: linux-x64-cuda-13.4
       os: linux
       arch: x86_64
       backend: cuda
+      glibc_min: "2.39"
       cuda: "13.4"
       min_driver: "580"
       jit_min_driver: "615"
@@ -76,6 +84,7 @@ llama_cpp:
       os: linux
       arch: x86_64
       backend: cuda
+      glibc_min: "2.39"
       cuda: "12.8"
       min_driver: "525.60.13"
       jit_min_driver: "570.26"
@@ -88,6 +97,7 @@ llama_cpp:
       os: linux
       arch: x86_64
       backend: rocm
+      glibc_min: "2.39"
       opt_in: true   # only when asked for: needs a ROCm installation (HIP runtime) and a supported GPU
       gpu_targets: [gfx908, gfx90a, gfx942, gfx950, gfx1010, gfx1011, gfx1012, gfx1030, gfx1031, gfx1032, gfx1033,
                     gfx1034, gfx1035, gfx1036, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1152,
@@ -100,18 +110,21 @@ llama_cpp:
       os: linux
       arch: arm64
       backend: cpu
+      glibc_min: "2.39"
       files:
         - {name: llama-b11429-bin-ubuntu-arm64.tar.gz, size: 13682895, sha256: ed44c0f79c3d02424f62bdc87e106318b0b89f49050e2e80c5f352723d14e00b}
     - id: linux-arm64-vulkan
       os: linux
       arch: arm64
       backend: vulkan
+      glibc_min: "2.39"
       files:
         - {name: llama-b11429-bin-ubuntu-vulkan-arm64.tar.gz, size: 24845090, sha256: 702d99c4219b4314cc6d3b10fb41ae96cbfc68226305c2681269dfb51487af34}
     - id: linux-arm64-cuda-13.4
       os: linux
       arch: arm64
       backend: cuda
+      glibc_min: "2.39"
       cuda: "13.4"
       min_driver: "580"
       jit_min_driver: "615"
@@ -249,6 +262,17 @@ build_bases:
   - {id: ubuntu-24.04, libc: glibc, libc_version: "2.39", gcc: "13.3", image: "ubuntu:24.04@sha256:534baea6a22c03a63003dbc8dbe78fe34bc0d7e595d9a9dc9834884ff530eb55"}
   - {id: debian-13, libc: glibc, libc_version: "2.41", gcc: "14.2", image: "debian:13-slim@sha256:a29215f6a35e51e22adffa17f89e9d2ef06214e64a2bad10d765c46aea49f11f"}
   - {id: alpine-3.22, libc: musl, libc_version: "1.2.5", gcc: "14.2", image: "alpine:3.22@sha256:5291449c3df73caf6ed85e649dec1b9e818b39a5d8c871e97afc13e9cd5e8fa8"}
+
+# Parallel compile jobs of a self-built llama.cpp (orchestrator/runtime/build/toolchain.py, parallel_jobs):
+# -j = min(logical CPUs, available RAM / the value of the backend), at least 1, and never more than the setting
+# build_jobs when that is set. The values are estimates of the peak memory per compile job in MiB (nvcc needs far
+# more than g++), to be replaced by measured peaks.
+build_jobs:
+  memory_mib: {cpu: 1024, vulkan: 1536, cuda: 3072, rocm: 2048, metal: 1024}
+
+# smoke_model: the tiny pinned GGUF the build verification loads after every build (decision D17), with repo,
+# revision, file, size, sha256 and license like the models below. None is pinned yet, so the smoke run and the short
+# llama-bench run of the verification are skipped with a note.
 
 # Models are downloaded from <model_base_url><repo>/resolve/<revision>/<file> (resumable, verified).
 model_base_url: https://huggingface.co/

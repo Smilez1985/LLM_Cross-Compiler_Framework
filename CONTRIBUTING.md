@@ -143,12 +143,14 @@ A change that only works on one Python version is not ready. Typical differences
 
 ## 4. The local model and the evaluation
 
-Tests never download models. To try Ditto's offline mode by hand, use a separate `LLM_FRAMEWORK_HOME` (models go
-to the `models/ditto/` folder of the installation, which is ignored by git):
+Tests never download models, and they never fetch or build llama.cpp: a fixture in `tests/conftest.py` refuses a
+network fetch of the llama.cpp source, so a test of the install uses fakes for the toolchain, the executor and the
+verifier (see `tests/test_runtime_selfbuilt.py`). To try Ditto's offline mode by hand, use a separate
+`LLM_FRAMEWORK_HOME` (models go to the `models/ditto/` folder of the installation, which is ignored by git):
 
 ```bash
 llm-cli ditto runtime status
-llm-cli ditto runtime install
+llm-cli ditto runtime install      # builds llama-server from the pinned commit (a few minutes for the CPU build)
 llm-cli ditto models download small
 llm-cli ditto runtime start --model small
 llm-cli ditto ask "Which formats can the Rockchip target build?"
@@ -176,8 +178,10 @@ content; a tag can be moved. A bump goes like this:
 2. In `configs/llama_runtime.yml` change `llama_cpp.source.commit`, `.tag` and `.build_number`, and
    `llama_cpp.build` (the same label). The official prebuilt archives of that release are labelled by `build`: pin
    their names, sizes and SHA256 values again, as the comment at the top of the file describes.
-3. Change the places that cannot read the catalog: the `ARG LLAMA_CPP_TAG` of `targets/Rockchip/dockerfile`,
-   `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml`, and `inference_backends.llama_cpp.commit` in
+3. Change the places that cannot read the catalog: `ARG LLAMA_CPP_TAG` and `ARG LLAMA_CPP_COMMIT` in
+   `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` and `targets/_template/Dockerfile.gpu` (the defaults
+   for image builds outside the framework; the framework passes the pin itself), `docker.build_args.LLAMA_CPP_TAG`
+   and `LLAMA_CPP_COMMIT` in `targets/*/target.yml`, and `inference_backends.llama_cpp.commit` in
    `configs/project_sources.yml` (then `python ../scripts/sync_ssot.py --write` inside `configs/`). The setting
    `llama_cpp_version` follows the catalog by itself.
 4. Check that the commit is upstream's: `python scripts/llama_cpp_pin.py check`. It runs
@@ -188,7 +192,9 @@ content; a tag can be moved. A bump goes like this:
 5. Re-check the download-capable options against the new tree. `DOWNLOAD_OPTIONS_OFF` and `NEVER_SET` in
    `orchestrator/runtime/build/recipe.py` name each option with its file and lines; search the new tree for
    `FetchContent_Declare`, `ExternalProject_Add` and `file(DOWNLOAD` and add any new one. Check the CUDA architecture
-   rules (`ggml/src/ggml-cuda/CMakeLists.txt`) and which targets `tools/CMakeLists.txt` builds as well.
+   rules (`ggml/src/ggml-cuda/CMakeLists.txt`) and which targets `tools/CMakeLists.txt` builds as well. The target
+   Dockerfiles repeat both lists in their llama.cpp build step (the options set last, and the ones they refuse);
+   `tests/test_target_dockerfiles.py` fails until they match the recipe again.
 6. Regenerate the golden plans and review the diff:
    `LLM_FRAMEWORK_UPDATE_GOLDEN=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_build_recipe.py`. Without a
    recipe change only the commit, the build number and the build IDs change.
@@ -483,7 +489,13 @@ have cached. To revoke a pack, add an entry to `revoked`, raise `version` and si
   providers or models are presets in `configs/llm_providers.yml`.
 - **Local runtime downloads are pinned.** A new llama.cpp build or model in `configs/llama_runtime.yml` needs size
   and SHA256 from a complete download, and models a Hugging Face commit as revision. Never pass options to
-  `llama-server` that give it tools, an agent mode, MCP clients or a web UI.
+  `llama-server` that give it tools, an agent mode, MCP clients or a web UI: every launcher takes the forbidden
+  options and the environment rules from `orchestrator/runtime/server_policy.py`, and a llama.cpp program is only
+  ever started from a verified build folder, never found on `PATH`.
+- **The hardware probe exists twice.** `scripts/hardware_probe.py` is the standalone file that is sent to devices
+  and run by hand; `orchestrator/runtime/hardware_probe.py` is its byte-identical copy inside the package. Edit the
+  script, then copy it (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`); a test fails while
+  the two differ.
 - New actions for AI clients and Ditto are tools in `orchestrator/tools/framework_tools.py` with the correct tier
   (`read`, `local_write`, `external`). Never bypass the registry, the permissions or the audit log.
 - The framework never asks for, reads or stores a repository token. Hand work over to GitHub through an installed

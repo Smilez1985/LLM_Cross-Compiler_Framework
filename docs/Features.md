@@ -93,7 +93,9 @@ A build runs these steps; each one is logged:
    RKLLM, RKNN `i8`).
 3. **Build image:** the target's Docker image with all toolkits (llama.cpp v0.6.0, RKLLM-Toolkit 1.3.1,
    RKNN-Toolkit2 2.3.2, each in its own Python environment). BuildKit is used when available, and the real cause
-   of a failure is reported. Later builds reuse Docker's build cache.
+   of a failure is reported. Later builds reuse Docker's build cache. llama.cpp's conversion tools
+   ([below](#conversion-tools-tuned-to-the-build-host)) are built in this step from the pinned commit with the build
+   recipe's options for this machine.
 4. **Stage the model on the host:** a Hugging Face model is downloaded on your computer (with the token
    `hf_token` for gated models), a local folder or file is used as it is. The containers get it read-only: a
    single file is mounted alone, never the folder it lies in, and a folder only itself (a model that needs files
@@ -132,6 +134,34 @@ Further behaviour:
 - **Output folder:** CLI builds go to `output/build_<date>_<time>/<target>/<model>/<quantization>/` in the
   installation (or the folder given with `-o`), builds started in the GUI, by Ditto or by MCP clients to
   `output/<target>/<model>/<quantization>/`.
+
+### Conversion tools tuned to the build host
+
+The target images build llama.cpp's conversion tools (`llama-quantize`, `llama-imatrix`, `llama-perplexity`,
+`llama-completion`, `llama-bench`) from source with the same recipe as Ditto's server
+([How the runtime is built](#how-the-runtime-is-built-self-built-llamacpp)); the shipped Rockchip target and the
+template for new targets use the same steps.
+
+- **The pin, by commit:** the engine passes `LLAMA_CPP_TAG` and `LLAMA_CPP_COMMIT`; the image fetches the commit and
+  stops unless `git rev-parse HEAD` gives it back, so a moved tag cannot change what is built. The setting
+  `llama_cpp_version` cannot move it either; a different value gives a warning.
+- **Tuned to the machine that runs them:** the image runs on the build host, so `LLAMA_CMAKE_ARGS` is the recipe's
+  plan for purpose `host-tools` from a probe of this machine, taken right before the image build (or this machine's
+  stored profile if the probe fails): its CPU features written out (AVX-512 only where the CPU has it, no AVX2 on a
+  CPU before Haswell, so no illegal instruction), or all CPU variants, the best one chosen at run time, when the
+  probe could not tell every feature. Without a probe, or with a Docker daemon on another machine, the Dockerfile's
+  default applies: the fixed x86-64 baseline these tools always had (AVX2, FMA, F16C, no AVX-512), written out.
+- **Every build:** after these options the image sets what every build has (nothing downloaded at configure time,
+  no subprocess support, the build number and commit); words that are not `-DNAME=VALUE`, options that download
+  whenever they are set and a configure log that reports a download stop the build, and `llama-bench --version`
+  must report the pinned build and commit. Build arguments of a build request cannot replace the three llama.cpp
+  arguments, and CPU or CMake flags from the module wizard or an AI never reach them.
+- **Recorded:** the build log names the tuning, and `build_info.json` keeps it under `llama_cpp_tools` (tag, commit,
+  tuning, plan ID and its words).
+- **Same output:** the GGUF `llama-quantize` writes does not depend on this tuning. Measured at the pin with GCC
+  13.3 on a synthetic 6 MB llama model: Q2_K, Q3_K_M, Q4_0, Q4_K_M, Q5_K_M, Q6_K, Q8_0, IQ4_NL, IQ4_XS and TQ2_0
+  (without an importance matrix) were byte-identical from three builds: the default baseline, AVX-512 with AMX, and
+  AVX without AVX2 or FMA. Building the five tools took 3 to 6 minutes on a 4-core virtual machine (`-j4`).
 
 ---
 
@@ -193,15 +223,78 @@ Deployment copies a finished build to a board over SSH and installs the model fi
 - **Package:** a ZIP with the model file, the build's manifest and model card, `checksums.sha256` and a generated
   `deploy.sh`. Only model files are deployed (`.gguf`, `.rkllm`, `.rknn`, `.onnx`, `.safetensors`, `.bin`); a
   build with several weight files is refused.
-- **On the board:** the package goes into a private temporary folder (`mktemp -d`), `deploy.sh` checks every
-  checksum with `sha256sum -c`, copies the model to `~/models` (or `$MODEL_DIR`) and the temporary folder is
-  removed. For GGUF, if `llama-server` is installed on the board, it prints a `llama-server` command line that
-  listens on 127.0.0.1 and warns never to expose the server without a key; otherwise it says to install llama.cpp.
-  For RKLLM it names the RKLLM runtime.
+- **On the board:** the package goes into a private temporary folder (`mktemp -d`), `deploy.sh` (run with `sh`,
+  so boards that mount `/tmp` with `noexec` or have no bash work too) checks every checksum with `sha256sum -c`,
+  copies the model to `~/models` (or `$MODEL_DIR`) and the temporary folder is
+  removed. For GGUF it prints how to start the model with the start script of the
+  [self-built runtime](#runtime-on-the-board-self-built-llamacpp) when that is installed on the board (on
+  127.0.0.1 with the board's key), otherwise how to deploy it; it never points to a `llama-server` found on the
+  board's `PATH`. For RKLLM it names the RKLLM runtime.
 - **Docker mode** (`--docker`, GUI option): also packs container images and starts them on the board. This mode
   is experimental and not verified in this version.
 
-The framework does not install a runtime on the board. That is on the [roadmap](BLUEPRINT.md#roadmap).
+### Runtime on the board (self-built llama.cpp)
+
+For GGUF models the framework builds llama.cpp for a board and installs it there (`llm-cli device ...`,
+[CLI_Usage.md](CLI_Usage.md#device)). The RKLLM and RKNN runtimes are vendor binaries and stay yours to install.
+
+- **Plan from the board's own probe** (decision D14): `llm-cli scan --device` stores the board's profile under its ID
+  (from its SSH host key). The plan is a cross build for that profile: `GGML_CPU_ARM_ARCH` from the board's CPU
+  features (RK3566: `armv8.2-a+dotprod+fp16`), and a builder base whose C library is not newer than the board's:
+  the newest Debian or Ubuntu base with a glibc not newer than the board's (Debian 11 for glibc 2.31 up to Debian 13
+  for 2.41), or Alpine for musl boards, which build with Clang and the board's sysroot (unverified). A board older
+  than every base, or a profile without `LIBC_VERSION`, gets no plan and a message saying why. Only CPU builds for
+  now: Vulkan on a Mali GPU only after `llama-bench` shows it beats the CPU build (decision D8). `llm-cli device
+  runtime plan` shows the plan.
+- **Build:** in the builder container without network, the C++ runtime linked statically, the server without
+  subprocess support. The build is format-checked on your PC (ELF architecture, no newer glibc symbol version than
+  the board, no shared C++ runtime) and stored like every self-built build. An OpenMP build also gets the board's
+  `libgomp.so.1` from the cross toolchain that linked it, checked the same way.
+- **Tarball:** `~/.llm-framework/runtime/llama.cpp/device/<device ID>/llama-runtime-<arch>-<build ID>.tar.gz` (with
+  a `.sha256`): `bin/` with `llama-server`, `llama-cli`, `llama-bench` and `llama-perplexity`, `lib/libgomp.so.1`
+  when needed (the programs find it through their `$ORIGIN/../lib` RUNPATH), the start script `llama-server.sh`,
+  `build.json` and `manifest.json`, llama.cpp's licence as `LICENSE-llama.cpp`, and `SHA256SUMS`. It is
+  deterministic (fixed owners, modes and times). The framework shares this recipe, never the tarball (decision D21).
+- **Deployment** (`llm-cli device runtime deploy`): only to the board whose host key the profile was made with,
+  as the SSH user of the deploy settings; root is refused. Values the board reports (home folder, user ID,
+  architecture, missing tools) are checked before they are used. The tarball travels on the command's stdin into a
+  private staging folder in `~/.local/share/llm-framework/llama.cpp/` (never `/tmp`, which may be `noexec`), is
+  checked against its sha256 and every file against `SHA256SUMS`, made readable only for the user, and placed next to
+  the active build. The new build's programs are then checked on the board (below), and only a build that passes
+  becomes `current`; one that fails is removed again and the previous build stays active (design 3.8: a failed
+  build is never activated). After the switch the previous build is kept; older ones are removed unless a running
+  program uses them. The key in `~/.config/llm-framework/llama-server.key` is generated on the board by the start
+  script under umask 077 and never leaves it.
+- **Start script** (`llama-server.sh serve|start|stop|status|keygen|version`): POSIX sh, tested with dash and bash.
+  It starts `llama-server` from its own folder (never from `PATH`) with `env -i` (HOME, a fixed PATH, the C locale),
+  `--host 127.0.0.1`, `--api-key-file`, `--no-ui`, `--no-slots`, `--jinja` and `--offline`. It passes on only
+  tuning options with checked values (`-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`, `-fa`,
+  `-cram`, `-lm`, `-a`, `--sleep-idle-seconds`, and `--port` from 1024 up); an option of the shared forbidden list is
+  refused by name, also in the `--a_b` spelling, and any other option too, so the model never gets tools and the
+  server never leaves loopback.
+- **Deploy settings, decided before the deployment** (decision D7, `llm-cli device settings`): the start script in
+  the user's home (the default) or a systemd unit. The unit can only be chosen when the board's probe reports
+  `INIT_SYSTEM=systemd`, needs the model it serves, and needs your confirmation, given when you choose it, that
+  deployments may run `sudo -n` on the board; the confirmation is written to the audit log. Once the new build has
+  passed its checks, the deployment writes `/etc/systemd/system/llm-llama-server.service` with `sudo -n` (which
+  fails instead of asking), enables it and starts it once the model is there. The unit runs the start script's `serve` as the user, without `Environment=`,
+  with `NoNewPrivileges`, a read-only system and home, and `IPAddressDeny=any` plus `IPAddressAllow=localhost`.
+  Boards with OpenRC or SysV init use the start script. A deployment never asks a question.
+- **Checks on the board** (also `llm-cli device runtime verify`), as the unprivileged user and never with sudo:
+  `llama-server --version` and `llama-bench --version` must report the pin, `llama-bench --list-devices` must show
+  the planned devices, and `llama-server --tools all` must be refused. With `--bench-model` a short `llama-bench -p
+  64 -n 16 -r 1` runs on a model on the board: a catalog model (recognised by its sha256) at once, any other model
+  only after your consent, written to the audit log (decision D23). A `SIGILL` means the build's CPU baseline does
+  not fit the board. A deployment runs these checks on the new build before it becomes `current`, so a build that
+  fails them never runs as the board's server. The result is kept in `device/<device ID>/deployed.json`; `llm-cli
+  device runtime status` says whether the deployed build is still the one the profile and the pin call for.
+- **Measured** with real programs instead of a board: `llama-server` and `llama-bench` built natively with the device
+  plan's options for an x86-64 machine (GCC 13.3, `-j4`, about 8 minutes on 4 shared cores) gave 30 MB of programs
+  and an 11.6 MB tarball; the format check (glibc 2.38 needed, no shared C++ runtime), the deployment to a local
+  stand-in board and the checks there passed, and `libgomp.so.1` was found in `lib/` through the RUNPATH.
+- **Not yet:** a run on a real board, a cross build in this development environment (no Docker daemon answered),
+  building on the board itself when no base is old enough, the GUI and the MCP tool `deploy_runtime`, and the
+  runtime inside deployment packages.
 
 ---
 
@@ -516,9 +609,14 @@ The managed runtime gives Ditto a local model without any cloud account. It is c
 [`configs/llama_runtime.yml`](../configs/llama_runtime.yml) is data: a newer build or another model is added there,
 not in code.
 
-- **llama.cpp build b11429** (version 0.6.0) for Linux x86-64 (CPU, Vulkan, CUDA 13.4, CUDA 12.8, ROCm on request),
+- **llama.cpp commit** `d8123504` (tag b11429, version 0.6.0): `ditto runtime install` builds the server from exactly
+  this commit (see [How the runtime is built](#how-the-runtime-is-built-self-built-llamacpp)).
+- **Official prebuilt archives** of b11429, only for the explicit opt-in `ditto runtime install --prebuilt` and
+  always shown as "prebuilt, not self-built": Linux x86-64 (CPU, Vulkan, CUDA 13.4, CUDA 12.8, ROCm on request),
   Linux arm64 (CPU, Vulkan, CUDA 13.4), Windows x86-64 (CPU, Vulkan, CUDA 13.4, CUDA 12.4, ROCm on request),
-  Windows arm64 (CPU) and macOS (Metal on Apple Silicon, CPU on Intel).
+  Windows arm64 (CPU) and macOS (Metal on Apple Silicon, CPU on Intel). Each Linux archive names the glibc it was
+  built against (2.35 for x86-64 CPU and Vulkan, 2.39 for the others, read from upstream's release workflow); a
+  machine with an older glibc, or with musl, is offered none.
 - **Models** at fixed Hugging Face commits, all Apache-2.0:
 
 | Tier | File | Size | Note |
@@ -531,24 +629,35 @@ not in code.
 | `large-iq2` | Qwen3.5-9B-UD-IQ2_M.gguf | 3.4 GiB | 2-bit, only on request; noticeably less accurate |
 | `granite` | granite-4.2-3b-Q4_K_M.gguf | 2.1 GiB | IBM Granite 4.2 3B, other model family, only on request |
 
-Every file has a pinned size and sha256 and is checked before it is unpacked or loaded; entries without both are
-refused. Downloads resume after an interruption, and a build is installed atomically next to the previous one.
+Every download has a pinned size and sha256 and is checked before it is unpacked or loaded; entries without both
+are refused. Downloads resume after an interruption, and a prebuilt archive is installed atomically next to the
+previous one.
 
 ### Which build
 
-`llm-cli ditto runtime status` shows the decision and the reason:
+The self-built server: the build recipe chooses the GPU backend from the machine's hardware profile, following its
+OS, architecture and C library (`recipe.choose_backend`). The CPU build is always built first and stays the
+fallback. A GPU on which Vulkan beats the CPU (every dedicated GPU, AMD Radeon GPUs and APUs such as the Ryzen Z1
+Extreme, Intel Arc) gets a Vulkan build; Mali GPUs on boards only after `llama-bench` shows that Vulkan is faster.
+NVIDIA GPUs will get a CUDA build matched to every GPU and the driver once the CUDA toolkit provisioning lands; until
+then the CPU build runs there, `runtime status` says so, and `--backend vulkan` builds a Vulkan server that also uses
+NVIDIA GPUs. The model tier and the context then follow the build that actually runs.
 
-1. An explicit `--backend` wins (ROCm is only ever used this way; on Linux it needs an installed HIP runtime and a
+The prebuilt opt-in (`--prebuilt`): `llm-cli ditto runtime status` shows which archive it would install and why:
+
+1. Archives whose C library does not fit the machine are never offered (musl, an unknown C library, or an older
+   glibc than the archive's).
+2. An explicit `--backend` wins (ROCm is only ever used this way; on Linux it needs an installed HIP runtime and a
    supported GPU).
-2. Apple Silicon gets the Metal build.
-3. An NVIDIA GPU gets the newest CUDA build that suits every NVIDIA GPU in the machine and its driver. GPUs for which
+3. Apple Silicon gets the Metal build.
+4. An NVIDIA GPU gets the newest CUDA build that suits every NVIDIA GPU in the machine and its driver. GPUs for which
    the build only contains PTX code need the toolkit's own driver: for example an RTX 2080 Ti (compute capability
    7.5) needs driver 570.26 on Linux for the CUDA 12.8 build and branch R615 for CUDA 13.4 (on Windows 551.61 for
    CUDA 12.4). With an older driver the next option is used, and the reason says that a newer driver enables CUDA.
-4. Vulkan, when a Vulkan driver is found and the GPU is worth it: every dedicated GPU, AMD Radeon GPUs and APUs
+5. Vulkan, when a Vulkan driver is found and the GPU is worth it: every dedicated GPU, AMD Radeon GPUs and APUs
    (for example the Ryzen Z1 Extreme) and Intel Arc. Older Intel graphics are usually slower than the CPU and are
    only used with `--backend vulkan`.
-5. Otherwise the CPU build.
+6. Otherwise the CPU build.
 
 ### Which model
 
@@ -569,13 +678,31 @@ recommendation.
 
 ### How the server runs
 
+- **Only verified builds:** `runtime start` starts the active self-built (or imported) build only when it passed its
+  verification on this machine, every file still matches its manifest, it is of the pinned commit and it is built
+  for this machine (OS and architecture, and for a `-march=native` build a CPU of the same vendor with every CPU
+  feature of the CPU it was built on); otherwise the CPU fallback build, and otherwise nothing, with the reason. The
+  prebuilt archive is started only after `install --prebuilt`. An archive an earlier version downloaded without that
+  request is not used: `runtime status` names it, and `install --prebuilt` switches to it without downloading it
+  again. A self-built build that cannot be used never switches to it on its own.
+- **One launch policy:** the forbidden options, the cleared environment, loopback, the key file and the fixed server
+  options come from one module, `orchestrator/runtime/server_policy.py`, which every launcher uses: Ditto's server,
+  the build verification, the perplexity check, and on a board the start script, the systemd unit and the checks
+  there. The start script's server line is held to the same check as Ditto's command line, and the server's
+  `--tools` check is the same command here and on a board.
 - **Context length:** computed from the free memory next to the model (free GPU memory, or free RAM on CPUs, Apple
   Silicon and integrated GPUs), rounded to 256 tokens, at least 4096 and at most 32768 (`--ctx` sets it).
 - **Isolation:** `llama-server` listens on 127.0.0.1 only, on a free port. A new random API key per start reaches it
   only through a key file readable by you, and the framework checks that the server refuses requests without the
   key. The web UI and the slots endpoint are off, and the server runs with `--offline`. Options that would give the
-  model its own tools, agent mode, MCP servers, remote computing or a key on the command line are refused, and
-  environment variables that could set server options or look like secrets are removed.
+  model its own tools, agent mode, MCP servers or remote computing, that download (Hugging Face, URLs, Docker Hub), write the
+  prompts to disk, run programs from a folder, or put a key or token on the command line are refused, in every
+  spelling llama.cpp accepts (its aliases, and `--a_b` for `--a-b`). The
+  server starts with a cleared environment: besides your home folder, a fixed `PATH` and the C locale it only gets
+  the variables that choose GPUs or locate GPU drivers (`CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`,
+  `ROCR_VISIBLE_DEVICES`, `GGML_VK_VISIBLE_DEVICES`, `HSA_OVERRIDE_GFX_VERSION`, the Vulkan driver variables,
+  `LD_LIBRARY_PATH` and a few more), so no `LLAMA_*` option, no `GGML_BACKEND_PATH` library, no proxy and no key
+  reaches it.
 - **GPU offload:** with a GPU build, as many layers as fit go to the GPU.
 - **Idle:** the model is unloaded after 600 idle seconds and reloaded on the next request (`--sleep-idle`).
 - **State and log:** `~/.llm-framework/runtime/llama.cpp/` holds the builds and the server state, which is trusted
@@ -583,6 +710,74 @@ recommendation.
   log `~/.llm-framework/logs/llama-server.log` is rotated at 5 MiB, keeping 3 old logs.
 - **Thinking:** Qwen3.5 on `llama-server` otherwise thinks at full length, which takes minutes on a CPU. So effort
   `low` turns thinking off, `medium` and higher keep it.
+
+### How the runtime is built (self-built llama.cpp)
+
+`llm-cli ditto runtime install` builds llama.cpp on this machine from the pinned source: it probes the machine,
+detects the toolchain, plans the CPU build and the GPU build, shows them and asks, fetches and checks the source
+once, builds and verifies the CPU build and makes it active, then does the same for the GPU build. A build of
+another machine of the same kind can be imported (`ditto runtime export` there, `ditto runtime import` here). The
+official prebuilt download stays only as the explicit choice `--prebuilt`, shown as "prebuilt, not self-built".
+
+- **One recipe:** the hardware profile of the machine that will run the binaries becomes a build plan: the pinned
+  commit, every download-capable option of llama.cpp off, the server without subprocess support
+  (`LLAMA_SUBPROCESS=OFF`), `-march=native` on that machine itself or the probe's CPU features for another machine.
+  A Linux build with Clang uses OpenMP only when libomp is installed. All CPU variants for an ARM board whose
+  features the probe could not tell need GCC 14 or Clang 18 (upstream's list contains `armv9.2-a+sme`); with an
+  older compiler the plan asks for a new probe instead.
+- **Toolchain:** the framework looks for the compiler, CMake (3.15 or newer) and Ninja and names what is missing; it
+  never installs a toolchain or accepts a licence for you. Parallel jobs follow the memory: `-j` is the number of
+  CPUs, but at most the available RAM divided by an estimate per job (1 GiB for a CPU build; `build_jobs` in the
+  catalog).
+- **Where it builds:** natively on Linux, in a cleared environment, or in the framework's builder container. That
+  image is built on your machine from `orchestrator/runtime/build/builder.Dockerfile` and a Debian, Ubuntu or Alpine
+  base pinned by digest whose C library is not newer than the one of the machine that runs the binaries. Configure
+  and build run in containers of that image without network, with the source mounted read-only, no capabilities, a
+  read-only root file system and your user, as the conversion stages run. Only the build's own folders are writable,
+  and when the framework collects the programs or cleans up afterwards it never follows a link out of them. The
+  framework shares this recipe, never a compiled image.
+- **No downloads:** besides the options, the configure output is checked: a line that says llama.cpp fetched or
+  downloaded anything fails the build. So does a configure that found no OpenMP runtime for a build planned with
+  OpenMP (ggml would only warn and build without it, so the build ID would no longer be right).
+- **Checks before use:** every binary must be an ELF file for the planned architecture whose libraries are in the
+  build or are system libraries; device builds must not need a newer glibc symbol version than the device has, nor a
+  shared C++ runtime. `llama-bench --version` and `llama-server --version` must report the pinned build and commit,
+  `llama-bench --list-devices` must show the planned GPU, and `llama-server --tools all` must be refused. A smoke run
+  and a short `llama-bench` run on a tiny pinned model follow once the catalog pins one; until then they are skipped
+  with a note. No other model is ever loaded there. Binaries are only ever taken from the build's own folder, never
+  from `PATH`, and run with a cleared environment.
+- **Store:** `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` holds the binaries with `build.json` (the plan)
+  and `manifest.json` (sha256 of every file, duration, build host, verification results). The build ID is the hash of
+  everything that changes the binaries, so a stored build is reused and never stamped again. Only a build verified on
+  this machine can become the active one; retention keeps the active build, the CPU fallback, the build a running
+  server uses and the two newest others. A build made on another of your machines can be imported: every file is
+  checked against its manifest, the build ID against its plan and the commit against the pin, you confirm before any
+  of its programs runs, and then it is verified like a local build. The version it must report comes from the pin,
+  not from the archive, and every program in it is checked, also one the archive does not list. Ditto's import
+  (`ditto runtime import`) refuses a `-march=native` build of a CPU of another vendor or with a CPU feature this CPU
+  lacks (AVX-512, for example) before anything runs: such a build would stop with SIGILL at the first computation,
+  which the checks cannot reach while no smoke-test model is pinned.
+- **Measured** on a 4-core x86-64 virtual machine (GCC 13.3, `-j4`): `llama-server` and `llama-bench` at the pin in
+  189 seconds including the checks, 28 MB of binaries; `ditto runtime install` with Ditto's CPU build
+  (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 seconds including the checks.
+
+### Perplexity check of converted models
+
+The dataset manager (`orchestrator/Core/dataset_manager.py`) measures the perplexity of a GGUF model on a text file
+with the self-built `llama-perplexity` of this machine, which `ditto runtime install` builds together with the server.
+No prebuilt runtime image is pulled and no `llama-perplexity` from `PATH` is used: only a stored build that passed its
+verification here, still matches its manifest and is of the pinned commit.
+
+- **Catalog models** (pinned by sha256) run natively.
+- **Every other model** (your conversions, downloads) is untrusted. It runs natively, without Docker overhead, only
+  after your explicit consent, and that consent is written to the tool audit log (`llm-cli tools audit`) before the
+  run; without consent, or when the audit log cannot be written, nothing runs.
+- **Docker sandbox (opt-in):** the run happens in the build's own builder image (only a build made in the builder
+  container has one; it is built locally and never pulled) without network, without capabilities, with a read-only
+  root file system and your user; the program, the model and the text are mounted read-only.
+- Every run uses the shared launch policy (no forbidden option, a cleared environment). Failures are errors with the
+  reason (for example a text too short for the context), never placeholder values.
+- In this version nothing in the GUI or CLI calls the check yet; the benchmark and auto-tune work of the roadmap will.
 
 ---
 
@@ -1056,12 +1251,17 @@ The GUI's input fields offer what you used recently, newest first.
   product), memory, SoC, NPU and every GPU (NVIDIA compute capability, AMD gfx target, Vulkan); no host name, serial
   number or MAC address. The probes need no network, never prompt, install or ask for administrator rights, and run
   external tools with a time limit. Tests run the `.py` and the `.sh` on the same fixture machines and require the
-  same result.
+  same result. The installed package carries a byte-identical copy of `hardware_probe.py`
+  (`orchestrator/runtime/hardware_probe.py`), so the framework's own probing also works without the `scripts/`
+  folder.
 - **Where it runs:** on the machine the build is for. `llm-cli scan` probes this computer with the Python probe and
   keeps the profile as `local`; `llm-cli scan --device` runs it on a board over SSH (the Python probe with `python3
   -I` if the board has Python 3.8 or newer, else the shell probe; nothing is installed on the board) and keeps the
-  profile under the board's ID. In the GUI, **Scan / Import...** imports a probe file, scans a board over SSH with the
-  same trust-on-first-use rules as deployment, or scans this PC; it keeps scan results in `<cache_dir>/probes/`.
+  profile under the board's ID; the SSH user becomes the board's deploy user (never root). In the GUI, **Scan /
+  Import...** imports a probe file, scans a board over SSH with the same trust-on-first-use rules as deployment, or
+  scans this PC; it keeps scan results in `<cache_dir>/probes/`. The GUI's SSH scan runs the same remote probe as
+  `llm-cli scan --device`: the script travels over the SSH channel, so it also works on boards that mount `/tmp`
+  with `noexec`, and the profile is kept under the board's ID.
   Machines without network access run a probe by hand ([README](../README.md#probing-the-boards-hardware)).
 - **Ditto's local model** uses the same probe: the hardware its build and model choice are based on comes from a
   probe profile, and free RAM and free VRAM are read again at every start.
@@ -1069,9 +1269,23 @@ The GUI's input fields offer what you used recently, newest first.
 - **New target from a probe:** `llm-cli module generate-ai <probe file>` or the wizard's AI analysis. Ditto proposes
   architecture, SDK, base image, packages, CPU and CMake flags, setup commands and the quantization block of
   `build.sh`; you see the whole proposal first.
+- **The device runtime in the module:** every new `target.yml` gets a `runtime:` block, the build recipe's plan for
+  the board's llama.cpp runtime from the target's probe (the wizard's imported probe file, the probe file of
+  `module generate-ai`, or `llm-cli module create --probe <file>`): architecture, OS, the C library the cross build
+  must not exceed, the builder base, the CPU options (for the RK3566 `armv8.2-a+dotprod+fp16`), the backends and the
+  programs. It says that llama.cpp is built from source; it is a record, and the runtime is always planned again from
+  the device's own probe. CPU and CMake flags from the wizard or Ditto are kept there under `advisory` and never
+  applied.
+- **llama.cpp in new targets:** the template Dockerfile builds the conversion tools like the Rockchip image
+  ([Conversion tools tuned to the build host](#conversion-tools-tuned-to-the-build-host)). The GPU template takes
+  CUDA 12.9.1 from NVIDIA's redist archives (manifest pinned by sha256, every archive checked) on Ubuntu 22.04 pinned
+  by digest; NVIDIA's prebuilt development image is only an explicit opt-in (a base image you choose yourself; Ditto's
+  proposals never carry one), pinned by digest and labelled "not self-built".
 - **Checks before anything is written:** names, images, packages and flags are validated strictly; shell code is
   checked against a deny-list and with `bash -n`; files are written only inside `targets/`; an existing target is
-  never overwritten. Setup commands run later as an unprivileged user without network.
+  never overwritten. Setup commands run later as an unprivileged user without network. A target that pulls a
+  prebuilt llama.cpp image, copies llama.cpp binaries out of another image, downloads release archives or binaries
+  or installs a llama.cpp package is refused: the framework shares recipes, not binaries.
 - **Knowledge snapshot (opt-in):** on the wizard's last page, **Attach the knowledge crawled for this target** (off
   by default, available after a Deep Ingest in the wizard) writes the pages crawled from the wizard's Deep Ingest
   URLs, privacy-scrubbed, to `knowledge/initial_knowledge.json` in the new target, with a `README.md` that says
@@ -1101,6 +1315,7 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key) |
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
+| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
 
 `--fix` applies the automatic fixes up to `--tier` (1: makes the personal folder private; 2: also removes dangling
 framework images and the Docker build cache) and checks again. Exit codes: 0 OK, 1 warnings, 2 errors; `--json`
@@ -1203,9 +1418,10 @@ rebuilt, never downloaded as a model.
 2. A pack from the index is downloaded pinned by the size and sha256 the index gives.
 3. The pack is extracted into a quarantine folder (`.quarantine/` in the install folder) and checked: exactly the
    listed files with their hashes, no links, special or binary files, and the checks of its kind. Targets: a valid
-   `capabilities` block, every image a Dockerfile pulls (`FROM`, `COPY --from`, `RUN --mount=...,from=`) pinned by
-   digest unless it is an official base image, the shell deny-list on every script line that is not from the
-   shipped template, `bash -n`, no template placeholders. Recipes: the recipe schema and the target's capabilities.
+   `capabilities` block (and `runtime` block, if there is one), every image a Dockerfile pulls (`FROM`,
+   `COPY --from`, `RUN --mount=...,from=`) pinned by digest unless it is an official base image, no prebuilt
+   llama.cpp (images, copied or downloaded binaries, packages), the shell deny-list on every script line that is not
+   from the shipped template, `bash -n`, no template placeholders. Recipes: the recipe schema and the target's capabilities.
    Knowledge: a list of pages, each with its source.
 4. A summary (kind, id, version, author, licence, trust level, source, files, destination and notes such as the
    author signature) is shown as plain text, so text from a pack cannot hide its trust level. Nothing is installed
@@ -1332,7 +1548,8 @@ What does not work yet, so you are not surprised:
 - **Windows hosts:** conversions on a Windows host are not verified.
 - **Browser and cloud sign-in:** OAuth flows and the credential chains of AWS, Google Cloud and Azure are not
   available yet; Ditto signs in with API keys, and local engines need none.
-- **Device runtime:** the framework does not install a runtime on the board.
+- **Device runtime:** the self-built llama.cpp runtime on a board works from the command line and is tested with a
+  fake SSH channel, not yet on a real board; there is no GUI or MCP tool for it yet.
 - **GUI:** the Auto-Tuning and Models tabs are placeholders; the local runtime is controlled from the CLI only.
 - **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it. Restoring a
   knowledge-base snapshot is not available from the GUI or the CLI.

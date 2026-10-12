@@ -24,6 +24,7 @@ import yaml
 
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.helpers import ensure_directory
+from orchestrator.utils.prebuilt_llama import is_prebuilt_llama_image, scan_target_folder
 
 # --- Validation of module data (wizard input, AI output, community input) ---------------------------
 # Every value below ends up in Dockerfiles, YAML or shell scripts, so it is checked before any
@@ -36,8 +37,13 @@ SDK_RE = re.compile(r"^[\w .+/-]{0,64}$")
 DEB_PACKAGE_RE = re.compile(r"^[a-z0-9][a-z0-9+.-]+(?::[a-z0-9-]+)?(?:=[A-Za-z0-9.+~:-]+)?$")
 FLAG_RE = re.compile(r"^-[A-Za-z][\w.=+,:/-]*$")
 IMAGE_RE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(?::[\w][\w.-]{0,127})?(?:@sha256:[a-f0-9]{64})?$")
-# Images that may be used without a digest pin; anything else must be pinned by digest.
-TRUSTED_IMAGE_PREFIXES = ("debian:", "ubuntu:", "nvidia/cuda:", "rocm/dev-ubuntu-", "rocm/rocm-terminal:", "python:")
+# Images that may be used without a digest pin; anything else must be pinned by digest. NVIDIA's prebuilt CUDA images
+# are an explicit opt-in pinned by digest (decision D6): the GPU template provisions CUDA from the pinned redist
+# archives instead.
+TRUSTED_IMAGE_PREFIXES = ("debian:", "ubuntu:", "rocm/dev-ubuntu-", "rocm/rocm-terminal:", "python:")
+# The prebuilt CUDA base the GPU template accepts as opt-in: a development image on the Ubuntu release of its runtime
+# stage (the Python environment is copied from one stage to the other), pinned by digest.
+CUDA_OPT_IN_RE = re.compile(r"^nvidia/cuda:[\w.-]+-devel-ubuntu22\.04@sha256:[a-f0-9]{64}$")
 DETECTION_RE = re.compile(r"^[\w ./=-]{0,200}$")
 SHELL_DENY_PATTERNS = [
     # Generated build code must not fetch anything: downloads belong in a reviewed Dockerfile, and build
@@ -109,6 +115,13 @@ def validate_module_data(data: Dict[str, Any]) -> Dict[str, Any]:
         problems.append("base_os: not a valid image reference")
     elif "@sha256:" not in base_os and not base_os.startswith(TRUSTED_IMAGE_PREFIXES):
         problems.append(f"base_os: '{base_os}' must be pinned by digest (image@sha256:...) unless it is an official base image")
+    elif base_os.startswith("nvidia/cuda:") and not CUDA_OPT_IN_RE.fullmatch(base_os):
+        problems.append("base_os: a prebuilt NVIDIA image is an opt-in for the GPU template and must be an "
+                        "nvidia/cuda:<version>-devel-ubuntu22.04 image pinned by digest; without it CUDA comes from "
+                        "NVIDIA's pinned redist archives")
+    elif is_prebuilt_llama_image(base_os):
+        problems.append(f"base_os: '{base_os}' is a prebuilt llama.cpp image; targets build llama.cpp from source "
+                        "with the shared recipe")
     out["base_os"] = base_os
 
     packages = data.get("packages", [])
@@ -218,13 +231,16 @@ def _leftover_placeholders(root: Path) -> List[str]:
 
 
 def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) -> List[str]:
-    """Problems of a target folder that others will build (empty: none): target.yml with valid capabilities,
-    every Dockerfile FROM pinned by digest unless it is an official base image or an earlier stage, the shell
-    deny-list on every script line that is not in the shipped template, bash -n, no template placeholders and
-    no binary files. Used for generated modules, community exports and packs in quarantine."""
-    from orchestrator.schemas.targets import TargetCapabilities
+    """Problems of a target folder that others will build (empty: none): target.yml with valid capabilities (and a
+    valid runtime: block if it has one), every Dockerfile FROM pinned by digest unless it is an official base image
+    or an earlier stage, no prebuilt llama.cpp (images, copied or downloaded binaries, packages: the framework shares
+    recipes, decision D21), the shell deny-list on every script line that is not in the shipped template, bash -n,
+    no template placeholders and no binary files. Used for generated modules, community exports and packs in
+    quarantine."""
+    from orchestrator.schemas.targets import TargetCapabilities, TargetRuntime
     root = Path(root)
     problems: List[str] = []
+    meta = None
     try:
         meta = yaml.safe_load((root / "target.yml").read_text(encoding="utf-8"))
         TargetCapabilities.model_validate((meta or {}).get("capabilities"))
@@ -232,6 +248,11 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
         problems.append("target.yml: missing")
     except Exception as e:  # YAML error, not a mapping, invalid capabilities
         problems.append(f"target.yml: no valid capabilities block ({str(e).splitlines()[0][:200]})")
+    if isinstance(meta, dict) and meta.get("runtime") is not None:
+        try:
+            TargetRuntime.model_validate(meta["runtime"])
+        except Exception as e:
+            problems.append(f"target.yml: invalid runtime block ({str(e).splitlines()[0][:200]})")
     for path in sorted(p for p in root.rglob("*") if p.is_file() and not p.is_symlink()):
         rel = path.relative_to(root).as_posix()
         data = path.read_bytes()
@@ -260,6 +281,7 @@ def validate_target_folder(root: Path, template_dir: Path = SHIPPED_TEMPLATE) ->
                     continue
                 problems += [f"{rel}:{number}: not allowed, {reason}" for pattern, reason in SHELL_DENY_PATTERNS
                              if pattern.search(line)]
+    problems += scan_target_folder(root, skip=(KNOWLEDGE_SNAPSHOT,))
     problems += [f"template placeholder left: {p}" for p in _leftover_placeholders(root)]
     return problems + check_shell_syntax(root)
 
@@ -294,7 +316,7 @@ class ModuleGenerator:
                  self.logger.warning(f"Template directory not found at {self.template_dir} or {possible_path}")
 
     def generate_module(self, data: Dict[str, Any], framework_manager=None,
-                        knowledge_roots: Optional[Iterable[str]] = None) -> Path:
+                        knowledge_roots: Optional[Iterable[str]] = None, profile=None) -> Path:
         """
         Generate a complete module from configuration data.
         
@@ -303,11 +325,15 @@ class ModuleGenerator:
             framework_manager: Optional reference to access Community/RAG Managers for snapshots.
             knowledge_roots: Opt-in knowledge snapshot: the root URLs crawled for this target. Only their
                 pages are attached (scrubbed); without roots nothing from the knowledge base is attached.
+            profile: The hardware probe of the TARGET (a HardwareProfile), if one was given. The runtime: block of
+                target.yml is the build recipe's plan for the device runtime from it; cpu_flags and cmake_flags
+                are kept there as advisory text and never applied (decision D20).
         
         Returns:
             Path: Path to the created module directory
         """
         data = validate_module_data(data)
+        data["runtime_block"] = self._runtime_block(data, profile)
         module_name = data["module_name"]
         slug = module_slug(module_name)
         targets_root = Path(self.targets_dir).resolve()
@@ -381,6 +407,22 @@ class ModuleGenerator:
             shutil.rmtree(target_dir, ignore_errors=True)
             raise e
 
+    def _runtime_block(self, data: Dict[str, Any], profile) -> Dict[str, Any]:
+        """The runtime: block of the new target.yml (orchestrator/runtime/build/target_runtime.py). A recipe that
+        cannot plan says so in the block's notes; it never stops the module from being created."""
+        from orchestrator.runtime.build.target_runtime import runtime_block
+        from orchestrator.runtime.profile import HardwareProfile
+        if profile is not None and not isinstance(profile, HardwareProfile):
+            raise ValueError("profile: expected a parsed hardware profile of the target")
+        advisory = {"cpu_flags": data.get("cpu_flags", ""), "cmake_flags": data.get("cmake_flags", "")}
+        try:
+            return runtime_block(profile, architecture=data["architecture"], advisory=advisory)
+        except Exception as e:  # e.g. an unreadable runtime catalog
+            self.logger.warning(f"Device runtime not planned for the new module: {e}")
+            block = runtime_block(None, architecture=data["architecture"], advisory=advisory)
+            block["notes"] = [f"the device runtime could not be planned: {str(e)[:200]}"]
+            return block
+
     def _create_knowledge_snapshot(self, target_dir: Path, framework_manager, module_slug: str,
                                    roots: List[str]):
         """Exports the pages crawled from the given root URLs (scrubbed) into the module's knowledge folder."""
@@ -448,6 +490,13 @@ class ModuleGenerator:
                 if value is not None:
                     content = content.replace(key, str(value))
             
+            if filename == "Dockerfile.gpu":
+                content = self._cuda_opt_in(content, str(data.get("base_os", "")))
+                if re.search(r"^ARG CUDA_SOURCE=prebuilt-image$", content, re.MULTILINE):
+                    self.logger.warning(f"CUDA for '{data.get('module_name')}' comes from the prebuilt image "
+                                        f"{data.get('base_os')} (your explicit opt-in, not self-built), not from "
+                                        "NVIDIA's pinned redist archives.")
+
             # YAML Handling
             if dst.suffix == ".yml":
                 try:
@@ -464,6 +513,21 @@ class ModuleGenerator:
         except Exception as e:
             self.logger.error(f"Error processing template {filename}: {e}")
 
+    @staticmethod
+    def _cuda_opt_in(content: str, base_os: str) -> str:
+        """The GPU template with a prebuilt NVIDIA development image as the builder's base: the explicit opt-in of
+        decision D6 (validate_module_data accepts only a digest-pinned *-devel-ubuntu22.04 image), labelled through
+        CUDA_SOURCE=prebuilt-image. Every other base keeps the template: CUDA from the pinned redist archives."""
+        if not base_os.startswith("nvidia/cuda:"):
+            return content
+        content, stages = re.subn(r"^FROM \S+ AS builder$", f"FROM {base_os} AS builder", content, count=1,
+                                  flags=re.MULTILINE)
+        content, sources = re.subn(r"^ARG CUDA_SOURCE=redist$", "ARG CUDA_SOURCE=prebuilt-image", content, count=1,
+                                   flags=re.MULTILINE)
+        if (stages, sources) != (1, 1):
+            raise ValueError("the GPU template has no builder stage or CUDA_SOURCE to switch to the prebuilt image")
+        return content
+
     def _update_yaml_config(self, template_content: str, dst: Path, data: Dict[str, Any]):
         """target.yml from the template: metadata, boards, image name and the capabilities block."""
         config = yaml.safe_load(template_content)
@@ -477,6 +541,8 @@ class ModuleGenerator:
         config["supported_boards"] = [{"name": b} for b in boards]
         config.setdefault("docker", {})["image_name"] = f"llm-framework/{module_slug(name).replace('_', '-')}"
         config["capabilities"] = capabilities_block(boards, data.get("quantization_logic", ""))
+        if data.get("runtime_block"):
+            config["runtime"] = data["runtime_block"]
 
         with open(dst, "w", encoding="utf-8") as f:
             yaml.dump(config, f, default_flow_style=False, sort_keys=False)
@@ -559,5 +625,6 @@ echo "Generated $OUTPUT_FILE"
             f.write(content)
 
     def _make_executable(self, path: Path):
-        try: os.chmod(path, 0o755)
+        # Generated build scripts must run in the image; packs keep exactly the modes 0644 or 0755.
+        try: os.chmod(path, 0o755)  # nosec B103
         except: pass

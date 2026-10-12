@@ -35,7 +35,11 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from orchestrator.runtime.catalog import BuildBase, CudaToolkit, RuntimeCatalog, version_tuple
 from orchestrator.runtime.profile import HardwareProfile
 
-RECIPE_VERSION = 1  # bump when the same inputs give different options: every build ID changes with it
+RECIPE_VERSION = 3  # bump when the same inputs give different options: every build ID changes with it
+# 2: Linux Clang builds use OpenMP only with a usable libomp; ARM CPU variants need a compiler that knows +sme;
+#    the CPU variant modules of device builds link the C++ runtime statically too
+# 3: conversion tools (host-tools, built in the target's image) get the build host's CPU features as explicit
+#    options instead of GGML_NATIVE
 
 PURPOSES = ("host-runtime", "host-tools", "device-runtime")
 PLACEMENTS = ("native", "container", "cross", "on-device")
@@ -133,6 +137,12 @@ _MUSL_TRIPLE = {"x86_64": "x86_64-alpine-linux-musl", "arm64": "aarch64-alpine-l
 _CMAKE_PROCESSOR = {"x86_64": "x86_64", "arm64": "aarch64"}
 _SYSROOT = "/opt/sysroot"  # where the builder image keeps the target's root file system for clang cross builds
 
+# Upstream's ARM CPU variants (GGML_CPU_ALL_VARIANTS on Linux) include armv9.2-a+sme, which GCC 13 rejects (upstream's
+# release workflow installs GCC 14 for it, .github/workflows/release.yml at the pin). No option shortens the list
+# (ggml/src/CMakeLists.txt:533-544), so an older compiler gets no variant build. Clang: an estimate, from the SME
+# keyword attribute ggml's feature check uses (__arm_locally_streaming).
+SME_COMPILER_MIN: Mapping[str, Tuple[int, ...]] = {"gcc": (14,), "clang": (18,)}
+
 _STATIC_RUNTIME = "-static-libstdc++ -static-libgcc"
 _DEVICE_RPATH = "$ORIGIN;$ORIGIN/../lib"  # binaries in bin/, libgomp.so.1 in lib/ of the device tarball
 
@@ -150,6 +160,8 @@ class ToolchainInfo:
     toolkit found or provisioned; None lets the recipe choose one from the catalog. cuda_image opts in to a prebuilt
     NVIDIA image (decision D6). base_image is the image a host-tools build runs in (the target's toolchain image),
     base_libc its C library. native_expansion is what -march=native / -mcpu=native expands to on the build machine.
+    openmp says whether the compiler of a native build compiles and links OpenMP code (Clang needs libomp for it);
+    None means not checked, which a Linux Clang build treats as no.
     """
     host_os: str
     host_arch: str
@@ -164,6 +176,7 @@ class ToolchainInfo:
     base_libc: str = "glibc"
     native_expansion: Optional[str] = None
     ccache: bool = False
+    openmp: Optional[bool] = None
 
     def __post_init__(self) -> None:
         if self.host_os not in _SUPPORTED_OS:
@@ -184,6 +197,8 @@ class ToolchainInfo:
             raise PlanError("base_libc must be glibc or musl")
         if self.native_expansion is not None and not _RE_NATIVE.fullmatch(self.native_expansion):
             raise PlanError("native_expansion contains unexpected characters")
+        if self.openmp not in (None, True, False):
+            raise PlanError("openmp must be true, false or unset")
 
     @classmethod
     def from_profile(cls, profile: HardwareProfile, **overrides: Any) -> "ToolchainInfo":
@@ -270,6 +285,62 @@ class BuildPlan:
 
     def to_json(self) -> str:
         return json.dumps(self.as_dict(), indent=2, sort_keys=True) + "\n"
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "BuildPlan":
+        """The plan of as_dict() back, from a file that may come from elsewhere (an imported build.json): every
+        field is type-checked and the options go through the same character check as a computed plan. Raises
+        PlanError. The build ID is taken as written; build_id_of(plan.id_inputs()) tells whether it fits."""
+        def mapping(value: Any, what: str) -> Mapping[str, Any]:
+            if not isinstance(value, Mapping):
+                raise PlanError(f"{what} is not a mapping")
+            return value
+
+        def text(value: Any, what: str) -> str:
+            if not isinstance(value, str):
+                raise PlanError(f"{what} is not text")
+            return value
+
+        if not isinstance(data, Mapping):
+            raise PlanError("the plan is not a mapping")
+        raw_steps = data.get("steps")
+        if not isinstance(raw_steps, list) or not 1 <= len(raw_steps) <= 4:
+            raise PlanError("the plan has no build steps")
+        steps = []
+        for raw in raw_steps:
+            raw = mapping(raw, "a build step")
+            options = mapping(raw.get("options"), "the options of a build step")
+            pairs = tuple(sorted((text(k, "an option name"), text(v, "an option value")) for k, v in options.items()))
+            for name, value in pairs:
+                if not _RE_OPTION_NAME.fullmatch(name) or not _RE_OPTION_VALUE.fullmatch(value):
+                    raise PlanError(f"option {name[:64]!r} has unexpected characters")
+            targets = raw.get("targets")
+            if not isinstance(targets, list) or not all(isinstance(t, str) for t in targets):
+                raise PlanError("the targets of a build step are not a list of names")
+            toolchain_file = raw.get("toolchain_file")
+            if toolchain_file is not None:
+                text(toolchain_file, "the toolchain file")
+            steps.append(BuildStep(text(raw.get("name"), "a step name"), text(raw.get("compiler"), "a compiler"),
+                                   text(raw.get("generator"), "a generator"), pairs, tuple(targets), toolchain_file))
+        source = mapping(data.get("source"), "source")
+        target = mapping(data.get("target"), "target")
+        for key in ("commit", "tag"):
+            text(source.get(key), f"source.{key}")
+        for key in ("os", "arch"):
+            text(target.get(key), f"target.{key}")
+        recipe_version = data.get("recipe_version")
+        if not isinstance(recipe_version, int) or isinstance(recipe_version, bool):
+            raise PlanError("recipe_version is not a number")
+        notes = data.get("notes") or []
+        if not isinstance(notes, list):
+            raise PlanError("notes is not a list")
+        return cls(recipe_version=recipe_version, purpose=text(data.get("purpose"), "purpose"),
+                   placement=text(data.get("placement"), "placement"), backend=text(data.get("backend"), "backend"),
+                   source=dict(source), target={"libc": None, **target},
+                   builder=dict(mapping(data.get("builder"), "builder")), steps=tuple(steps),
+                   toolchain=dict(mapping(data.get("toolchain"), "toolchain")),
+                   verify=dict(mapping(data.get("verify") or {}, "verify")), notes=tuple(str(n) for n in notes),
+                   build_id=str(data.get("build_id") or ""))
 
 
 def build_id_of(inputs: Mapping[str, Any]) -> str:
@@ -579,10 +650,16 @@ def _variants_supported(target: _Target) -> bool:
     return target.arch == "x86_64" or (target.arch == "arm64" and target.os in ("linux", "macos"))
 
 
-def _cpu_mode(profile: HardwareProfile, target: _Target, placement: str, backend_dl: bool) -> str:
+def _cpu_mode(profile: HardwareProfile, target: _Target, placement: str, backend_dl: bool,
+              purpose: str = "host-runtime") -> str:
     """native: GGML_NATIVE on the machine that runs the binaries (a container build runs on the build host's CPU).
-    explicit: the probe's features. variants: all CPU variants, chosen at run time, when the probe could not tell."""
-    on_machine = placement in ("native", "on-device", "container")
+    explicit: the probe's features. variants: all CPU variants, chosen at run time, when the probe could not tell.
+
+    Conversion tools are compiled inside the image build of the target's toolchain image (design 4.3). They run on
+    the build host, but get its CPU features as explicit options: the options are then part of the image build's
+    arguments, so the layer cache and the plan say what the tools were built for, and nothing depends on what
+    -march=native gives inside the image build."""
+    on_machine = placement in ("native", "on-device") or (placement == "container" and purpose != "host-tools")
     if on_machine and not (backend_dl and target.arch == "x86_64"):
         return "native"  # GGML_NATIVE is not compatible with GGML_BACKEND_DL on x86 (ggml-cpu/CMakeLists.txt:413)
     features = X86_FEATURES if target.arch == "x86_64" else ARM_FEATURES
@@ -590,6 +667,37 @@ def _cpu_mode(profile: HardwareProfile, target: _Target, placement: str, backend
     if unknown and _variants_supported(target):
         return "variants"
     return "explicit"
+
+
+def _variants_compiler(target: _Target, toolchain: ToolchainInfo,
+                       base: Optional[BuildBase]) -> Optional[Tuple[str, Optional[str]]]:
+    """(family, version) of the compiler that builds the CPU variants; the version is None when it is not known."""
+    if base is not None:
+        if target.libc == "musl" and target.arch != toolchain.host_arch:
+            return ("clang", None)  # the Alpine builder's clang with the target's sysroot (_toolchain_file)
+        return ("gcc", base.gcc)
+    cid = toolchain.compiler_id()
+    return (cid[0], cid[1]) if cid else None
+
+
+def _check_arm_variants(compiler: Optional[Tuple[str, Optional[str]]], base: Optional[BuildBase],
+                        notes: List[str]) -> None:
+    """Upstream's ARM CPU variants include armv9.2-a+sme: a compiler known to be too old for it is refused."""
+    family, version = compiler if compiler is not None else ("", None)
+    minimum = SME_COMPILER_MIN.get(family)
+    need = (f"GCC {'.'.join(map(str, SME_COMPILER_MIN['gcc']))} or Clang "
+            f"{'.'.join(map(str, SME_COMPILER_MIN['clang']))}")
+    if minimum is None or version is None:
+        notes.append(f"upstream's ARM CPU variants include armv9.2-a+sme, which needs {need}; the compiler version is "
+                     "not known (unverified)")
+        return
+    if (version_tuple(version) or (0,))[:len(minimum)] < minimum:
+        where = f"the builder base {base.id} has" if base is not None else "the build machine has"
+        name = "GCC" if family == "gcc" else "Clang"
+        raise PlanError(f"the probe could not tell this machine's CPU features, so all of upstream's ARM CPU variants "
+                        f"would be built, and they include armv9.2-a+sme, which needs {need}; {where} {name} "
+                        f"{version}. Probe the machine again with hardware_probe.py or hardware_probe.sh (both read "
+                        "its CPU features), and the build uses exactly those")
 
 
 def _x86_options(profile: HardwareProfile, notes: List[str]) -> Tuple[Dict[str, str], List[str]]:
@@ -771,7 +879,7 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
 
     leaves = _leaves_userland(target, purpose, placement)
     windows_cuda = target.os == "windows" and backend == "cuda"
-    mode = _cpu_mode(profile, target, placement, backend_dl=windows_cuda)
+    mode = _cpu_mode(profile, target, placement, backend_dl=windows_cuda, purpose=purpose)
     if profile.needs_reprobe and mode == "explicit":
         notes.append("CPU features the probe could not tell are left out (treated as OFF)")
 
@@ -790,6 +898,8 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
             if unused:
                 notes.append(f"not used for GGML_CPU_ARM_ARCH: {', '.join(unused)}")
     elif mode == "variants":
+        if target.arch == "arm64":
+            _check_arm_variants(_variants_compiler(target, toolchain, base), base, notes)
         cpu_opts.update({"GGML_BACKEND_DL": "ON", "GGML_CPU_ALL_VARIANTS": "ON"})
         notes.append("CPU features the probe could not tell: all CPU variants are built and the best one is chosen "
                      "at run time")
@@ -822,6 +932,15 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
     else:
         cid = toolchain.compiler_id()
         compiler = cid[0] if cid else "cc"
+        if target.os == "linux" and cid is not None and cid[0] == "clang" and toolchain.openmp is not True:
+            # CMake's FindOpenMP fails quietly without libomp and the build loses OpenMP: switch it off openly, so
+            # the build ID tells the two builds apart.
+            openmp = False
+            notes.append("Clang without a usable OpenMP runtime (libomp): ggml's own thread pool (GGML_OPENMP=OFF); "
+                         "install libomp (for example libomp-dev) and detect the toolchain again for an OpenMP build")
+        elif toolchain.openmp is False:
+            openmp = False
+            notes.append("the compiler cannot build OpenMP code: ggml's own thread pool (GGML_OPENMP=OFF)")
     options["GGML_OPENMP"] = "ON" if openmp else "OFF"
 
     runtime_libs: List[str] = []
@@ -829,6 +948,9 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
         options["CMAKE_EXE_LINKER_FLAGS"] = _STATIC_RUNTIME
         if shared:
             options["CMAKE_SHARED_LINKER_FLAGS"] = _STATIC_RUNTIME
+            # GGML_BACKEND_DL builds the backends (the CPU variants) as MODULE libraries
+            # (ggml/src/CMakeLists.txt:381-383), which CMake links with the module flags, not the shared ones.
+            options["CMAKE_MODULE_LINKER_FLAGS"] = _STATIC_RUNTIME
         if openmp:
             runtime_libs.append("libgomp.so.1")
         options["CMAKE_INSTALL_RPATH"] = _DEVICE_RPATH if openmp else "$ORIGIN"

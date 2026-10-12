@@ -55,10 +55,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Modelle der Wissensbasis werden nach 10 Minuten ohne Nutzung entladen und bei der nächsten Suche wieder geladen
   (Einstellung `rag_model_idle_minutes`, 0 hält sie geladen, höchstens 7 Tage). Die Zeit läuft ab dem Ende der
   letzten Suche oder des letzten Imports, nie währenddessen.
-- **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install|start|stop|status`
-  betreibt einen gepinnten llama.cpp-`llama-server` auf 127.0.0.1 (Build passend zur Hardware, die die
-  Hardware-Probe findet, wobei freier RAM und VRAM bei jedem Start neu gelesen werden: CUDA, Vulkan, Metal oder CPU,
-  ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei), und `llm-cli ditto models list|download`
+- **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install` baut `llama-server` auf
+  deinem Rechner aus dem gepinnten llama.cpp-Commit, zuerst den CPU-Build (ein paar Minuten, danach funktioniert
+  `runtime start`) und dann den GPU-Build, den das Bau-Rezept für Betriebssystem, Architektur und C-Bibliothek des
+  Rechners wählt (in dieser Version Vulkan unter Linux; CUDA-, ROCm-, Windows- und macOS-Builds folgen), jeder auf
+  diesem Rechner geprüft, bevor er genutzt wird; es baut nativ mit deinem Compiler, CMake und Ninja oder im
+  Builder-Container des Frameworks, installiert nie eine Toolchain für dich und nennt die Auswege, wenn beides nicht
+  geht. `llm-cli ditto runtime start|stop|status` betreibt den Server auf 127.0.0.1 (freier RAM und VRAM werden bei
+  jedem Start neu gelesen; API-Schlüssel je Start in einer privaten Datei; eine geleerte Umgebung, die nur die
+  Variablen behält, die GPUs auswählen oder ihre Treiber finden, sodass keine `LLAMA_*`-Option und keine
+  `GGML_BACKEND_PATH`-Bibliothek den Server erreicht); `status` zeigt, ob der genutzte Build selbst gebaut,
+  importiert oder „prebuilt, not self-built“ ist, seine Build-ID, seinen Commit und seine Prüfung, und ob ein neuer
+  Build nötig oder empfohlen ist. Das offizielle vorgebaute Archiv von upstream ist nur die ausdrückliche Wahl
+  `runtime install --prebuilt`. `llm-cli ditto models list|download`
   lädt Qwen3.5-Modelle in gepinnten Revisionen in den Ordner `ditto/` des eingestellten Modellordners
   (`models_dir`, den Ditto nutzt; die Laufzeit nimmt ihn auch, wenn sie keinen Ordner bekommt) und prüft sie
   anhand von Größe und sha256. Die Modellstufen reichen bis zu 2-Bit-Modellen für schwache Hardware (3 GB RAM).
@@ -100,27 +109,74 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   schreibt die JSON-Ansicht); `llm-cli scan --device HOST --user BENUTZER` führt sie per SSH mit `python3 -I` auf
   einem Board aus und weicht auf `hardware_probe.sh` aus, wenn das Board kein Python 3.8 hat. Das Skript kommt über
   den SSH-Kanal, also bleibt auf dem Board nichts zurück, und das Profil wird unter der ID des Boards gespeichert. Für
-  Rechner ohne Netzzugang beschreibt die README die Probe von Hand.
+  Rechner ohne Netzzugang beschreibt die README die Probe von Hand. Das installierte Paket enthält eine byte-gleiche
+  Kopie der Probe (`orchestrator/runtime/hardware_probe.py`), also funktioniert die Hardware-Erkennung des Frameworks
+  auch ohne den Ordner `scripts/`.
 - **Build-Rezept für selbst gebautes llama.cpp** (`orchestrator/runtime/build/recipe.py`): Aus dem Hardware-Profil
   des Rechners, der die Programme ausführen wird, wird ein Build-Plan (CMake-Optionen, Ziele, Toolchain-Datei,
   Builder, Prüfungen) mit einer Build-ID, die sich mit jeder Option und jeder Werkzeugversion ändert, aber nicht mit
   flüchtigen Werten wie dem freien Speicher. Jeder Plan baut den festgelegten Commit, schaltet jede Option von
   llama.cpp, die etwas herunterladen kann, aus oder lässt sie ungesetzt (`FETCHCONTENT_FULLY_DISCONNECTED=ON`) und
-  baut den Server ohne Unterprozesse. Ein Build auf dem Rechner selbst nutzt `-march=native`; ein Build für einen
-  anderen Rechner nutzt die CPU-Merkmale der Probe (alle 14 x86-Optionen oder `GGML_CPU_ARM_ARCH`, etwa
+  baut den Server ohne Unterprozesse. Ein Build auf dem Rechner selbst nutzt `-march=native`,
+  Konvertierungswerkzeuge, die in einem Target-Image entstehen, bekommen die CPU-Merkmale des Build-Rechners
+  ausgeschrieben, und ein Build für einen anderen Rechner nutzt die CPU-Merkmale der Probe (alle 14 x86-Optionen oder `GGML_CPU_ARM_ARCH`, etwa
   `armv8.2-a+dotprod+fp16` für den RK3566) oder alle CPU-Varianten, wenn die Probe es nicht sagen konnte.
   NVIDIA-GPUs bekommen echten Code für genau ihre Compute Capabilities (jede NVIDIA-GPU muss ihre melden) mit einem
   CUDA-Toolkit, das nicht neuer ist, als der Treiber unterstützt, auf Systemen mit glibc; AMD-GPUs ihr gfx-Target
   (ROCm unter Linux, auf Wunsch); Vulkan und Metal sind Schalter; Windows-Builds nutzen Clang. Der Plan folgt
   Betriebssystem und C-Bibliothek des Ziels: eine Builder-Basis, deren C-Bibliothek (glibc, oder musl unter Alpine)
   nicht neuer ist als die des Geräts, ein Build für einen anderen Rechner braucht also die `LIBC_VERSION`, die seine
-  Probe meldet, und eine statisch gelinkte C++-Laufzeit für Geräte-Builds. Ausgeführt werden die Pläne noch nicht.
+  Probe meldet, und eine statisch gelinkte C++-Laufzeit für Geräte-Builds. Ein Linux-Build mit Clang nutzt OpenMP nur,
+  wenn libomp installiert ist, und die Build-ID unterscheidet beide; alle CPU-Varianten für ein ARM-Board, dessen
+  Merkmale die Probe nicht erkennen konnte, brauchen GCC 14 oder Clang 18 (die Liste von upstream enthält
+  `armv9.2-a+sme`), sonst verlangt der Plan eine neue Probe.
+- **Selbst gebautes llama.cpp: Bauen, Prüfen, Ablegen** (`orchestrator/runtime/build/`): Ein Plan wird nativ unter
+  Linux gebaut (mit dem erkannten Compiler, CMake 3.15 oder neuer und Ninja, in einer geleerten Umgebung) oder im
+  Builder-Container des Frameworks, einem Image, das auf deinem Rechner aus `builder.Dockerfile` und einer per Digest
+  festgelegten Basis gebaut wird und dessen Schritte Konfigurieren und Bauen ohne Netz laufen, mit schreibgeschützter
+  Quelle und der Sandbox der Konvertierungsschritte; beschreibbar sind nur die eigenen Ordner des Builds, und das
+  Framework folgt danach nie einem Link aus ihnen hinaus. Das Framework teilt dieses Rezept, nie ein fertig gebautes
+  Image.
+  Die parallelen Jobs richten sich nach dem verfügbaren Speicher. Sagt die Ausgabe des Konfigurierens, dass etwas
+  geholt oder heruntergeladen wurde, scheitert der Build, ebenso wenn sie für einen mit OpenMP geplanten Build keine
+  OpenMP-Laufzeit gefunden hat. Bevor ein Build abgelegt wird, wird er geprüft: ELF-Architektur und Bibliotheken
+  (Geräte-Builds: keine neuere glibc-Symbolversion als auf dem Gerät, keine geteilte C++-Laufzeit), der festgelegte
+  Build und Commit in `--version`, die geplante GPU in `llama-bench --list-devices`, und `llama-server` muss
+  `--tools` ablehnen. Rauchtest und kurzer Benchmark auf einem winzigen festgelegten Modell werden mit einem Hinweis
+  übersprungen, bis der Katalog eines festlegt; ein anderes Modell wird dort nie geladen. Programme kommen nur aus
+  dem eigenen Ordner des Builds, nie aus `PATH`, und jedes Programm, das das Framework startet, bekommt dieselbe
+  Liste verbotener Optionen (auch in der Schreibweise `--a_b`, die llama.cpp als `--a-b` liest, und unter jedem
+  Namen der Download-Optionen, etwa `-hfr`, `-dr` oder `--mmproj-url`) und eine geleerte Umgebung ohne
+  `LLAMA_*`-Variablen. Builds liegen unter
+  `~/.llm-framework/runtime/llama.cpp/builds/<Build-ID>/` mit `build.json` und `manifest.json` (sha256 jeder Datei,
+  Dauer, Prüfung) und werden wiederverwendet, nie neu gestempelt; nur ein auf diesem Rechner geprüfter Build kann
+  aktiv werden, und die Aufbewahrung entfernt nie den aktiven Build, den CPU-Ersatz, den Build, aus dem ein
+  laufender Server gestartet wurde, oder den Build eines Boards (Dittos Builds und die Builds der Boards liegen in
+  diesem einen Speicher). Ein Build von einem deiner anderen Rechner kann importiert werden: Seine Dateien
+  werden gegen das Manifest geprüft, seine Build-ID gegen seinen Bauplan und sein Commit gegen den Pin, und du
+  bestätigst, bevor eines seiner Programme läuft; danach muss jedes seiner Programme die Version des Pins melden,
+  nicht die, die das Archiv erwartet. `runtime install` von Ditto baut darüber. Ein CPU-Build von `llama-server` und
+  `llama-bench` am Pin dauerte auf einer virtuellen Maschine mit 4 Kernen 189 s und ergab 28 MB Programme; Dittos
+  CPU-Build mit zusätzlich `llama-cli` und `llama-perplexity` dauerte 195 s.
+- **Builds von Dittos Server wechseln den Rechner**: `llm-cli ditto runtime export DATEI` schreibt den genutzten
+  selbst gebauten Build, und `llm-cli ditto runtime import DATEI` auf einem anderen Rechner derselben Art prüft ihn
+  gegen den Pin und sein Manifest, fragt, bevor eines seiner Programme läuft, prüft ihn dort und macht ihn zum aktiven
+  Build. Ein mit `-march=native` gemachter Build wird abgelehnt, bevor irgendetwas läuft, auf einer CPU eines anderen
+  Herstellers oder ohne eine der CPU-Funktionen der CPU, die ihn gebaut hat (er bräche bei der ersten Rechnung mit
+  SIGILL ab); `runtime start` und die Perplexity-Prüfung überspringen einen solchen Build ebenso, etwa in einem
+  Benutzerordner, den sich mehrere Rechner teilen. `llm-cli ditto runtime prune` entfernt alte Builds und behält immer
+  den aktiven Build, den CPU-Ersatz und den Build, aus dem ein laufender Server gestartet wurde.
+- `llm-cli doctor` prüft die lokale llama.cpp-Laufzeit: einen genutzten selbst gebauten Build, der verändert wurde
+  (Fehler) oder älter als der Pin ist (Warnung), das genutzte vorgefertigte Archiv (Information: nicht selbst gebaut)
+  und ob dieser Rechner Compiler, CMake und Ninja für einen nativen Build hat (Information, mit dem Builder-Container
+  als Alternative).
 - **llama.cpp per Commit festgelegt**: `llama_cpp.source` in `configs/llama_runtime.yml` (Commit
   `d81235049384534c167caea52b85a694f6103d14`, Tag `b11429`) ist die eine Stelle. Dazu kommen die CUDA-Toolkits für
   selbst gebaute CUDA-Builds (die Redist-Manifeste von NVIDIA per Größe und SHA256 festgelegt, mit den Grenzen für
   Treiber, Compute Capability, Host-Compiler und CMake je Toolkit; die vorgebauten Entwicklungs-Images von NVIDIA nur
   als ausdrücklicher Opt-in-Eintrag) und die Builder-Basen, per Digest festgelegt. Ein Test schlägt fehl, wenn eine
-  andere Stelle, die die llama.cpp-Version nennt, abweicht, und `python scripts/llama_cpp_pin.py check` prüft mit
+  andere Stelle, die die llama.cpp-Version nennt, abweicht, auch das `ARG LLAMA_CPP_COMMIT`, das jedes Target-Dockerfile
+  braucht, das llama.cpp baut, und `python scripts/llama_cpp_pin.py check` prüft mit
   `git ls-remote`, dass der Tag bei Upstream auf den festgelegten Commit zeigt.
 - **Festgelegter llama.cpp-Quelltext für Rechner ohne Netz**: `llm-cli ditto runtime export-source DATEI` schreibt
   den festgelegten Commit als Git-Bundle mit Manifest, und `llm-cli ditto runtime import-source DATEI` installiert ihn
@@ -128,6 +184,51 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ablehnt), muss den festgelegten Commit zurückgeben und liegt schreibgeschützt in
   `~/.llm-framework/runtime/llama.cpp/src/`; spätere Läufe prüfen, dass darin nichts geändert oder hinzugefügt wurde,
   auch keine Dateien, die Git ignoriert, und brauchen kein Netz.
+- **Konvertierungswerkzeuge abgestimmt auf den Build-Rechner**: Target-Images bauen die Konvertierungswerkzeuge von
+  llama.cpp (`llama-quantize`, `llama-imatrix`, `llama-perplexity`, `llama-completion` und jetzt `llama-bench`) nach
+  dem Build-Rezept. Der Image-Build bekommt den Pin (`LLAMA_CPP_TAG`, `LLAMA_CPP_COMMIT`) und den Plan für den Zweck
+  `host-tools` aus einer Probe dieses Rechners unmittelbar davor (`LLAMA_CMAKE_ARGS`: seine CPU-Merkmale
+  ausgeschrieben, oder alle CPU-Varianten, wenn die Probe es nicht sagen konnte). Das Rockchip-Dockerfile und die
+  Vorlage holen den Commit und brechen ab, wenn sie nicht genau diesen bekommen, lehnen Wörter ab, die nicht
+  `-DNAME=WERT` sind, und Optionen, die bei jedem Setzen etwas herunterladen, setzen nach dem Plan die Optionen, die
+  jeder Build hat (Download-Optionen aus, `LLAMA_SUBPROCESS=OFF`, `FETCHCONTENT_FULLY_DISCONNECTED=ON`, Build-Nummer
+  und Commit), brechen bei einem Konfigurationsprotokoll ab, das einen Download meldet, und prüfen
+  `llama-bench --version`. Ohne Probe, oder mit einem Docker-Daemon auf einem anderen Rechner, gilt die Vorgabe des
+  Dockerfiles: die feste x86-64-Basis mit AVX2, die diese Werkzeuge immer hatten, ausgeschrieben und jetzt statisch
+  gelinkt. `build_info.json` hält die Abstimmung fest (`llama_cpp_tools`). Zehn Quantisierungstypen eines Testmodells
+  waren aus der Basis, einem Build mit AVX-512/AMX und einem ohne AVX2 byteweise gleich; der Bau der fünf Werkzeuge
+  dauerte auf einer virtuellen Maschine mit 4 Kernen 3 bis 6 Minuten.
+- **Block `runtime:` in neuen Target-Modulen**: Der Modul-Assistent, `llm-cli module create` (neue Option
+  `--probe DATEI`) und `llm-cli module generate-ai` schreiben den Plan des Build-Rezepts für die llama.cpp-Laufzeit des
+  Boards aus der Probe des Targets in `target.yml`: Architektur, Betriebssystem, die C-Bibliothek, die der Cross-Build
+  nicht überschreiten darf, Builder-Basis, CPU-Optionen (`armv8.2-a+dotprod+fp16` für den RK3566), Backends und
+  Programme, aus dem Quelltext gebaut. Der Block ist eine Aufzeichnung (eine Geräte-Laufzeit wird immer neu aus der
+  Probe des Geräts geplant) und wird in Paketen gegen sein Schema geprüft. CPU- und CMake-Flags aus dem Assistenten
+  oder von Ditto stehen dort als Hinweistext und werden nie angewendet; der Assistent kennzeichnet sie so.
+- **Selbst gebautes llama.cpp auf dem Board** (`llm-cli device runtime plan|build|deploy|verify|status`,
+  `llm-cli device list|settings`): Das eigene Probe-Profil des Boards (`llm-cli scan --device`) wird zu einem
+  Cross-Build im Builder-Container, ohne Netz, auf einer Basis, deren C-Bibliothek nicht neuer ist als die des Boards
+  (glibc, oder musl unter Alpine; ein Board, das älter ist als jede Basis, bekommt eine klare Meldung), mit statisch
+  gelinkter C++-Laufzeit und bei OpenMP-Builds der `libgomp.so.1` des Boards aus der Cross-Toolchain. Das Ergebnis
+  ist ein Tarball (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`, `lib/libgomp.so.1`, ein
+  Startskript, die Stempel des Builds, die MIT-Lizenz von llama.cpp und `SHA256SUMS`), den das Deployment per SSH
+  nach `~/.local/share/llm-framework/llama.cpp/` auf dem Board hochlädt und dort Datei für Datei prüft. Dann werden
+  die Programme des neuen Builds auf dem Board als dein unprivilegierter Benutzer geprüft, bevor irgendetwas sie
+  startet: `--version` gegen den Pin, `--list-devices`, die Ablehnung von `--tools` durch den Server und mit
+  `--bench-model` ein kurzer `llama-bench`-Lauf (ein Modell, das kein Katalogmodell ist, erst nach deiner
+  Zustimmung, die ins Audit-Log geschrieben wird). Nur ein Build, der besteht, wird über einen Link `current` aktiv
+  (der vorige Build bleibt); ein Build, der scheitert, etwa mit `SIGILL`, weil die CPU-Grundstufe nicht zum Board
+  passt, wird wieder entfernt, und der vorige Build bleibt aktiv. Das Startskript startet den Server auf 127.0.0.1
+  mit einem Schlüssel, der auf dem Board unter umask 077 erzeugt wird, einer geleerten Umgebung und festen Optionen;
+  es reicht nur wenige Tuning-Optionen mit geprüften Werten weiter (Kontextgröße, Threads, CPU-Maske, ...). Wie die
+  Laufzeit startet, wird vorher in den Deploy-Einstellungen festgelegt und während eines Deployments nie gefragt: das
+  Startskript in deinem Home (die Vorgabe) oder eine systemd-Unit, die nur für Boards mit systemd wählbar ist und
+  erst, nachdem du bestätigst, dass Deployments dort `sudo -n` ausführen dürfen. Getestet mit einem
+  nachgebildeten SSH-Kanal und Testprofilen (ein RK3566 unter DietPi, ein Alpine-Board, ein Board ohne systemd) und
+  mit echten Programmen: `llama-server` und `llama-bench`, nativ mit den Optionen des Geräte-Bauplans für einen
+  x86-64-Rechner gebaut (30 MB, ein Tarball von 11,6 MB), bestanden die Formatprüfung, das Deployment auf ein lokal
+  nachgebildetes Board und die Prüfungen dort. Noch nicht auf einem echten Board, und hier lief kein Cross-Build
+  (kein Docker-Dienst).
 - **Deep Ingest beachtet maschinenlesbare Nutzungsvorbehalte.** Text und Data Mining öffentlicher Seiten ist
   erlaubt, solange der Rechteinhaber es nicht maschinenlesbar vorbehalten hat (EU-DSM-Richtlinie Art. 4,
   § 44b UrhG). Deshalb überspringt der Crawler neben robots.txt Seiten, die in einem `X-Robots-Tag`-Header oder in
@@ -429,12 +530,31 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Python-Probe (Tests führen die `.sh` und die `.py` auf denselben Testrechnern aus). Beide sind standardmäßig nicht
   interaktiv: Die Paketinstallations-Abfrage der `.sh` braucht `--install-tools` (sie bietet jetzt `vulkan-tools` an,
   das einzige Hilfsprogramm, das die Probe nutzt), und die `.ps1` startet sich nur mit `-Elevate` mit erhöhten Rechten
-  neu. Die `.sh` läuft in jeder POSIX-Shell (dash, BusyBox ash), liest `/proc` und `/sys` direkt statt über `lspci`
-  und `lsusb` und schreibt alle GPUs; die `.ps1` liest den nutzbaren Speicher statt der Summe der Speicherplätze.
-- Die Einstellung `llama_cpp_version` (der llama.cpp-Tag, den Target-Images klonen) hat als Vorgabe den Tag des
-  llama.cpp-Pins in `configs/llama_runtime.yml`, jetzt `b11429`, statt eines fest geschriebenen `v0.6.0`; beide nennen
-  denselben Commit, die Images bauen also denselben Quelltext. Das Rockchip-Dockerfile, die Build-Argumente in
-  `target.yml` und `configs/project_sources.yml` (dort stand noch `b4009`) nennen denselben Tag.
+  neu. Die `.sh` läuft in jeder POSIX-Shell (dash, BusyBox ash), und `llm-cli scan --script` und der GUI-Scan dieses
+  PCs führen sie mit `sh` aus, also geht es auch ohne bash; sie liest `/proc` und `/sys` direkt statt über `lspci` und
+  `lsusb` und schreibt alle GPUs; die `.ps1` liest den nutzbaren Speicher statt der Summe der Speicherplätze.
+- Target-Images bauen den llama.cpp-Pin aus `configs/llama_runtime.yml` per Commit (`b11429`, `d8123504`): Die
+  Engine übergibt Tag und Commit, und das Image prüft den Commit. Die Einstellung `llama_cpp_version` hat als Vorgabe
+  den Tag des Pins statt eines fest geschriebenen `v0.6.0` und ändert nicht mehr, was gebaut wird (ein anderer Wert
+  ergibt eine Warnung im Build-Log). Die Dockerfiles, die Build-Argumente in `target.yml` und
+  `configs/project_sources.yml` (dort stand noch `b4009`) nennen denselben Tag und Commit.
+- Die Target-Vorlage baut die Konvertierungswerkzeuge von llama.cpp mit denselben Schritten wie das Rockchip-Image,
+  ein erzeugtes Modul bricht also nicht mehr mit „llama.cpp converter not found“ ab. Die GPU-Vorlage nimmt CUDA 12.9.1
+  aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jede Komponente geprüft) auf Ubuntu 22.04, per
+  Digest festgelegt, statt der nicht festgelegten `nvidia/cuda:12.2.2`-Images; das vorgebaute Entwicklungs-Image von
+  NVIDIA ist ein ausdrücklicher Opt-in, per Digest festgelegt (ein Basis-Image, das du selbst wählst; Dittos
+  Vorschläge enthalten nie eines, weil eine Probe-Datei sie lenken könnte) und gekennzeichnet mit
+  `org.llm-framework.cuda-source=prebuilt-image`, in den Logs mit „not self-built“. Der Assistent trägt für NVIDIA-Hardware kein `nvidia/cuda`-Image
+  mehr ein.
+- `deploy.sh` eines GGUF-Pakets schlägt keinen `llama-server` mehr vor, der im `PATH` des Boards gefunden wird: Es
+  nennt das Startskript der selbst gebauten Geräte-Laufzeit, wenn sie installiert ist, und sonst, wie man sie
+  deployt (`llm-cli device runtime build` und `deploy`). `llm-cli scan --device` merkt sich den SSH-Benutzer als
+  Deploy-Benutzer des Boards (nie root).
+- Die Perplexity-Prüfung des Dataset-Managers nutzt das selbst gebaute `llama-perplexity` dieses Rechners, statt
+  `ghcr.io/smilez1985/llm-runtime` zu holen: Katalogmodelle nativ; jedes andere Modell nativ nur nach deiner
+  Zustimmung, die zuerst ins Tool-Audit-Log geschrieben wird; die Docker-Sandbox (das eigene, lokal gebaute Image des
+  Builds, ohne Netzwerk) auf Wunsch. Eine gescheiterte Messung ist ein Fehler mit Grund statt der Werte 999.99 oder
+  888.88.
 - **MCP-Ergebnisse**: Der Textblock eines Tool-Ergebnisses beginnt mit einem Satz, der nur aus Fakten des Frameworks
   besteht (IDs, Zustände, Anzahlen), gefolgt vom JSON, eingepackt als nicht vertrauenswürdige Daten;
   Ausgabeschemas markieren jedes Feld mit externem Text (`"untrusted": true`); Ergebnisse tragen `notes`, die das
@@ -553,6 +673,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `LLM_FRAMEWORK_*`: Sie wird auf stderr genannt und übergangen, und die übrigen Einstellungen gelten.
 - Der Hardware-Scan dieses PCs in der GUI (**Scan / Import...**) schreibt sein Ergebnis nach `<cache_dir>/probes/`
   statt in den Arbeitsordner der GUI, und *Auto-fill from Probe Result* im Modul-Assistenten liest es dort.
+- Der SSH-Scan eines Boards in der GUI (**Scan / Import...**) scheiterte auf Boards, die `/tmp` mit `noexec`
+  einhängen: Er kopierte `hardware_probe.sh` dorthin und führte es dort aus. Jetzt schickt er die Probe über den
+  SSH-Kanal wie `llm-cli scan --device` (die Python-Probe ab Python 3.8, sonst die Shell-Probe), schreibt nichts auf
+  das Board und legt das Profil unter der ID des Boards ab.
+- Das Deployment eines Modellpakets auf ein Board scheiterte, wo `/tmp` mit `noexec` eingehängt ist (das Paket wird
+  dort entpackt, und `deploy.sh` wurde von dort ausgeführt), und auf Boards ohne bash (das Skript begann mit
+  `#!/bin/bash`). `deploy.sh` ist jetzt ein reines POSIX-`sh`-Skript und wird mit `sh deploy.sh` gestartet.
 - Das Deployment aus der GUI schreibt das Paket in den eingestellten Ausgabeordner (`output_dir`, relativ zur
   Installation) statt nach `output/` im Arbeitsordner.
 - Der Dialog der KI-Einstellungen warnt, wenn sich die Einstellungen nicht in der `config.yml` speichern ließen
@@ -656,8 +783,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   alle, das Überschreiben eines Datenträgers), ganz gleich, welche Anweisungen ein Build-Log oder ein
   Modellname dem Modell gegeben hat.
 - Anfragen an lokale Modellserver auf 127.0.0.1 laufen nie über einen HTTP(S)-Proxy aus der Umgebung.
-- Downloads lokaler Modelle werden abgelehnt, wenn Größe und sha256 nicht gepinnt sind; das Archiv mit dem
-  Server-Programm wird genauso geprüft und atomar installiert.
+- Downloads lokaler Modelle werden abgelehnt, wenn Größe und sha256 nicht gepinnt sind; das offizielle vorgebaute
+  Archiv mit dem Server-Programm (nur mit `runtime install --prebuilt`) wird genauso geprüft, atomar installiert und
+  nie auf musl oder einer älteren glibc angeboten als der, gegen die es gebaut wurde.
+- Eine Startregel für jedes llama.cpp-Programm, das das Framework startet (`orchestrator/runtime/server_policy.py`):
+  Dittos Server, die Prüfungen nach dem Build, die Perplexity-Prüfung, das Startskript und die systemd-Unit auf einem
+  Board und die Prüfungen dort teilen eine Liste verbotener Optionen (Tools, Agentenmodus, MCP, Weboberfläche,
+  entferntes Rechnen, Downloads, ein Prompt-Protokoll auf der Platte, ein Schlüssel oder Token auf der Befehlszeile,
+  in jeder Schreibweise, die llama.cpp annimmt, auch `--a_b` für `--a-b`) und eine geleerte Umgebung, und jeder
+  Server lauscht nur auf 127.0.0.1 und liest seinen Schlüssel aus einer privaten Datei, gebunden an dieselben
+  Server-Optionen (Dittos Befehlszeile wird unmittelbar vor dem Start noch einmal geprüft, die des Startskripts, wenn
+  es erzeugt wird). `runtime start` startet nur einen Build, der seine Prüfung auf diesem
+  Rechner bestanden hat, noch zu seinem Manifest passt und vom gepinnten Commit ist (sonst seinen CPU-Ersatz, sonst
+  nichts); ein selbst gebauter Build, der nicht genutzt werden kann, weicht nie von selbst auf das vorgebaute Archiv
+  aus, und ein offizielles Archiv, das eine frühere Version heruntergeladen hat, wird erst nach
+  `runtime install --prebuilt` genutzt (das es übernimmt, ohne es neu herunterzuladen).
 - Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt, mit einer vorsichtigen Abweichung. Regeln mit `*`
   oder `$` (etwa `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach
   der ersten und eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler
@@ -810,6 +950,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   eine Sitzung und eine offene Fragerunde des Protokolls 2026-07-28 antworten nur dem Token, das sie geöffnet hat,
   und kein Token wird angenommen (und der Server startet nicht), solange andere Benutzer die Token-Datei lesen oder
   ändern können oder sie einem anderen Benutzer gehört.
+- **Kein vorgebautes llama.cpp in Targets**: Erzeugte Module, Community-Exporte und Target-Pakete in Quarantäne
+  werden abgelehnt, wenn ein Dockerfile ein vorgebautes llama.cpp-Image bezieht (nach seinem Namen, auch per Digest
+  festgelegt, oder eines der früheren Laufzeit-Images des Frameworks) oder llama.cpp-Programme aus einem anderen Image
+  kopiert (auch über eine Build-Stufe, die es nur nennt), oder wenn ein Dockerfile, ein Skript (auch eines ohne
+  bekannte Endung, das mit `#!` beginnt) oder eine YAML-Datei llama.cpp-Release-Archive oder -Programme herunterlädt
+  (auch über eine Pipeline wie `curl ... | tar -x`), eine Paketquelle mit vorgebauten `llama-cpp-python`-Wheels nutzt oder ein llama.cpp-Paket installiert:
+  Das Framework teilt Rezepte, keine Binärdateien. `nvidia/cuda`-Images gelten nicht mehr als offizielle Basis-Images
+  und brauchen einen Digest, und ein llama.cpp-Image wird als Basis-Image eines Moduls abgelehnt.
+- Der llama.cpp-Server auf einem Board lauscht nur auf 127.0.0.1 und braucht einen Schlüssel, der auf dem Board
+  erzeugt wird und es nie verlässt. Ein Deployment erreicht nur das Board, mit dessen Host-Schlüssel das Profil
+  erstellt wurde, läuft als unprivilegierter Benutzer (root wird abgelehnt) und nutzt sudo nur für eine systemd-Unit,
+  die du in den Deploy-Einstellungen erlaubt hast, nie mit einer Passwortabfrage. Jeder Wert, der vom Board gelesen
+  wird (Home-Ordner, Benutzer-ID, Architektur), wird geprüft, bevor er einen Befehl erreicht.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

@@ -295,16 +295,36 @@ def module():
     """Manage hardware target modules"""
     pass
 
+def _target_profile(probe_file, strict: bool):
+    """The hardware profile in a probe file of the target (schema 2, or schema 1 converted), for the runtime: block of
+    a new module. strict: a file that is no probe profile is an error; otherwise it gives None (a free-form probe
+    that only the AI reads)."""
+    from orchestrator.runtime.profile import ProfileError, read_profile
+    try:
+        return read_profile(Path(probe_file))
+    except (ProfileError, OSError, ValueError) as e:
+        if strict:
+            console.print(f"[red]{escape(str(probe_file))} is not a hardware probe profile: {escape(str(e))}[/red]")
+            sys.exit(1)
+        console.print("[yellow]The probe file is not a hardware probe profile (llm-cli scan writes one), so the "
+                      "module's runtime: block plans the device runtime when the device is probed.[/yellow]")
+        return None
+
+
 @module.command('create')
 @click.option('--name', prompt='Module Name', help='Name of the new target')
 @click.option('--arch', prompt='Architecture', type=click.Choice(['aarch64', 'x86_64', 'armv7l', 'riscv64']), help='CPU Architecture')
 @click.option('--sdk', prompt='SDK/Backend', default='None', help='Special SDK (e.g. CUDA, RKNN)')
+@click.option('--probe', 'probe_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Hardware probe of the target (llm-cli scan --device writes one): the module's runtime: block is "
+                   "the build recipe's plan for its device runtime")
 @pass_context
-def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
+def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_file: Optional[str]):
     """Create a new hardware target module interactively"""
-    
+
     console.print(f"\n[bold cyan]Creating new target module: {name}[/bold cyan]")
-    
+    profile = _target_profile(probe_file, strict=True) if probe_file else None
+
     # Interaktive Abfrage weiterer Details (CLI Wizard Style)
     base_os = click.prompt("Base Docker Image", default="debian:bookworm-slim")
     description = click.prompt("Description", default=f"Target for {name}")
@@ -313,8 +333,10 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
     packages_input = click.prompt("Packages", default="build-essential, cmake, git")
     packages = [p.strip() for p in packages_input.split(',')]
     
-    cpu_flags = click.prompt("Default CPU Flags", default="")
-    
+    # Advisory only: kept in the runtime: block of target.yml, never applied (llama.cpp's options come from the
+    # build recipe and the device's probe).
+    cpu_flags = click.prompt("CPU flags to note in the module (advisory, not applied)", default="")
+
     module_data = {
         "module_name": name,
         "architecture": arch,
@@ -334,8 +356,8 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
         config, resolve = _settings(ctx)
         targets_dir = resolve(config.get("targets_dir", "targets"))
         generator = ModuleGenerator(targets_dir)
-        
-        output_path = generator.generate_module(module_data)
+
+        output_path = generator.generate_module(module_data, profile=profile)
         
         console.print(f"\n[bold green]✅ Module successfully created![/bold green]")
         console.print(f"Location: {output_path}")
@@ -422,11 +444,14 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     click.echo(json.dumps(definition.model_dump(), indent=2, ensure_ascii=False))
     if not Confirm.ask("Generate module with these settings?"):
         return
+    console.print("[dim]cpu_flags and cmake_flags are kept in the module as advisory text; llama.cpp is built by the "
+                  "framework's recipe from the device's probe.[/dim]")
     fm = ctx.framework_manager
     targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
     module_name = definition.module_name.replace(" ", "_")
+    profile = _target_profile(probe_file, strict=False)
     try:
-        path = ditto.save_module(definition, targets_dir, module_name=module_name)
+        path = ditto.save_module(definition, targets_dir, module_name=module_name, profile=profile)
     except ValueError as e:
         console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(str(e))}")
         sys.exit(1)
@@ -1116,23 +1141,48 @@ def ditto_runtime():
     pass
 
 
+def _installed_json(inst) -> Optional[dict]:
+    if inst is None:
+        return None
+    data = inst.model_dump(mode="json", include={"origin", "build_id", "commit", "backend", "variant", "asset_id",
+                                                 "role", "placement", "built_on", "built_at", "verified_at",
+                                                 "duration_s", "devices", "notes"})
+    data["label"] = inst.label
+    data["path"] = str(inst.path)
+    return data
+
+
+def _installed_line(inst) -> str:
+    """origin label, build, backend and commit of the build in use (escaped for rich)."""
+    if inst.build_id:
+        role = ", CPU fallback" if inst.role == "fallback" else ""
+        text = (f"{inst.label}: build {inst.build_id[:16]} ({inst.backend}{role}), llama.cpp {inst.build} commit "
+                f"{(inst.commit or '')[:8]}")
+    else:
+        text = f"{inst.label}: {inst.asset_id} ({inst.backend})"
+    return escape(text)
+
+
 @ditto_runtime.command('status')
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @pass_context
 def runtime_status(ctx: FrameworkContext, as_json: bool):
-    """Hardware, recommended build and model, and whether the server is running"""
+    """Hardware, the build in use (self-built, imported or prebuilt), the recommended model, and the server"""
     rt = _local_runtime(ctx)
-    with console.status("Checking the hardware ..."):
-        status = rt.status()
+    with console.status("Checking the hardware and the builds ..."):
+        status = rt.status(check_rebuild=True)
         hardware = rt.hardware()
-        choice = rt.select_backend()
+        backend, backend_reason = rt.recommend_backend()
+        prebuilt = rt.select_backend()
         model, why = rt.choose_tier()
     preferred = rt.preferred_tier()
+    inst = status.installed
     if as_json:
         click.echo(json.dumps({
             "build": status.build, "hardware": hardware.model_dump(mode="json"),
-            "recommended_build": choice.asset.id if choice.asset else None, "build_reason": choice.reason,
-            "installed": status.installed.asset_id if status.installed else None,
+            "installed": _installed_json(inst), "problems": status.problems, "rebuild": status.rebuild,
+            "recommended_backend": backend, "backend_reason": backend_reason,
+            "prebuilt_option": prebuilt.asset.id if prebuilt.asset else None, "prebuilt_reason": prebuilt.reason,
             "running": status.running, "healthy": status.healthy, "base_url": status.base_url, "pid": status.pid,
             "model": status.model, "tier": status.tier, "ctx": status.ctx,
             "recommended_tier": model.tier, "tier_reason": why, "preferred_tier": preferred,
@@ -1142,10 +1192,33 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
     table.add_column("", style="cyan")
     table.add_column("")
     table.add_row("Hardware", escape(hardware.summary()))
-    table.add_row("Recommended build", escape(f"{choice.asset.id if choice.asset else '-'}: {choice.reason}"))
-    inst = status.installed
-    table.add_row("Installed", escape(f"{inst.asset_id} ({inst.path})") if inst else
-                  "[yellow]no[/yellow] (llm-cli ditto runtime install)")
+    if inst is not None:
+        style = "yellow" if inst.origin == "prebuilt" else "green"
+        table.add_row("In use", f"[{style}]{_installed_line(inst)}[/{style}]")
+        if inst.build_id:
+            built = [f"{inst.placement or '?'} build"]
+            if inst.duration_s is not None:
+                built.append(f"{inst.duration_s:.0f} s")
+            if inst.built_on and inst.origin == "imported":
+                built.append(f"on {inst.built_on}")
+            if inst.built_at:
+                built.append(inst.built_at)
+            table.add_row("Built", escape(", ".join(built)))
+            devices = ", ".join(inst.devices) or "CPU only"
+            table.add_row("Verified", escape(f"{inst.verified_at or '?'}; devices: {devices}"))
+        for note in inst.notes:
+            table.add_row("Note", f"[yellow]{escape(note)}[/yellow]")
+    else:
+        table.add_row("In use", "[yellow]nothing[/yellow] (llm-cli ditto runtime install builds llama-server)")
+    for problem in status.problems:
+        if inst is None or problem not in inst.notes:
+            table.add_row("Problem", f"[red]{escape(problem)}[/red]")
+    if status.rebuild:
+        table.add_row("Rebuild", f"[yellow]{escape(status.rebuild)}[/yellow]")
+    table.add_row("Self-built plan", escape(f"{backend}: {backend_reason}" if backend == "cpu" or not backend_reason
+                                            else f"CPU build, then {backend}: {backend_reason}"))
+    table.add_row("Prebuilt opt-in", escape(f"{prebuilt.asset.id if prebuilt.asset else '-'} (--prebuilt, not "
+                                            f"self-built): {prebuilt.reason}"))
     if status.running:
         health = "[green]ready[/green]" if status.healthy else "[yellow]starting / not answering[/yellow]"
         table.add_row("Server", f"{health} {escape(str(status.base_url))} (pid {status.pid}, "
@@ -1161,28 +1234,142 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
 
 @ditto_runtime.command('install')
 @click.option('--backend', type=click.Choice(['auto', 'cpu', 'vulkan', 'cuda', 'rocm', 'metal']), default='auto',
-              show_default=True, help='Build to install (ROCm only when chosen here)')
-@click.option('--force', is_flag=True, help='Download and unpack again even if it is installed')
-@click.option('--yes', '-y', is_flag=True, help='Do not ask before downloading')
+              show_default=True, help='GPU backend to build after the CPU build (auto: the build recipe chooses; '
+              'cpu: only the CPU build)')
+@click.option('--placement', type=click.Choice(['auto', 'native', 'container']), default='auto', show_default=True,
+              help="Where the build runs: with this machine's toolchain, or in the framework's builder container "
+              "(Docker, no network during the build)")
+@click.option('--jobs', type=click.IntRange(1, 256), default=None,
+              help='Parallel compile jobs (default: from the CPUs and the free memory)')
+@click.option('--prebuilt', is_flag=True,
+              help="Download the official prebuilt llama.cpp archive instead (not self-built; size and sha256 "
+              "verified)")
+@click.option('--force', is_flag=True, help='With --prebuilt: download and unpack again even if it is installed')
+@click.option('--yes', '-y', is_flag=True, help='Do not ask before building or downloading')
 @pass_context
-def runtime_install(ctx: FrameworkContext, backend: str, force: bool, yes: bool):
-    """Download the pinned llama.cpp build (size and sha256 verified before unpacking)"""
-    from orchestrator.runtime.llama_server import LocalRuntimeError
+def runtime_install(ctx: FrameworkContext, backend: str, placement: str, jobs: Optional[int], prebuilt: bool,
+                    force: bool, yes: bool):
+    """Build llama-server on this machine from the pinned llama.cpp commit (CPU build first, then the GPU build)"""
+    from orchestrator.runtime.llama_server import PREBUILT_LABEL, LocalRuntimeError
     rt = _local_runtime(ctx)
-    choice = rt.select_backend(backend)
-    if choice.asset is None:
-        console.print(f"[red]{escape(choice.reason)}[/red]")
-        sys.exit(1)
-    console.print(f"llama.cpp {escape(rt.build)} - {escape(choice.asset.id)}: {escape(choice.reason)}")
-    if not yes and not click.confirm(f"Download {_gib(choice.asset.download_size)} into {rt.root}?", default=True):
+    if prebuilt:
+        choice = rt.select_backend(backend)
+        if choice.asset is None:
+            console.print(f"[red]{escape(choice.reason)}[/red]")
+            sys.exit(1)
+        console.print(f"llama.cpp {escape(rt.build)} - {escape(choice.asset.id)} ([yellow]{PREBUILT_LABEL}[/yellow]): "
+                      f"{escape(choice.reason)}")
+        if rt.prebuilt_installed(choice.asset) and not force:
+            question = (f"This official archive is already installed in {rt.root}. Use it for Ditto's server "
+                        f"({PREBUILT_LABEL})?")
+        else:
+            question = f"Download the official archive ({_gib(choice.asset.download_size)}) into {rt.root}?"
+        if not yes and not click.confirm(question, default=True):
+            return
+        bar, update = _download_progress()
+        try:
+            with bar:
+                inst = rt.install_prebuilt(prefer=backend, force=force, progress=update)
+        except LocalRuntimeError as e:
+            _runtime_failure(e)
+        console.print(f"[green]Installed {escape(str(inst.asset_id))} in {escape(str(inst.path))}[/green] "
+                      f"([yellow]{PREBUILT_LABEL}[/yellow])")
         return
-    bar, update = _download_progress()
+    if force:
+        console.print("[dim]--force applies to --prebuilt: a self-built build is reused by its build ID and built "
+                      "again when its files no longer match its manifest.[/dim]")
     try:
-        with bar:
-            inst = rt.install(prefer=backend, force=force, progress=update)
+        with console.status("Probing this machine and planning the build ..."):
+            plan = rt.plan_install(backend=backend, placement=placement)
     except LocalRuntimeError as e:
         _runtime_failure(e)
-    console.print(f"[green]Installed {escape(inst.asset_id)} in {escape(str(inst.path))}[/green]")
+    for line in plan.describe():
+        console.print(escape(line))
+    for note in plan.notes:
+        console.print(f"[dim]{escape(note)}[/dim]")
+    if plan.needs_source and not yes and not click.confirm(
+            "Build now? The CPU build takes a few minutes, a GPU build longer.", default=True):
+        return
+
+    def fetch_ok() -> bool:
+        pin = rt.catalog.llama_cpp.source
+        return yes or click.confirm(f"The pinned llama.cpp source ({pin.tag}, commit {pin.commit[:12]}, about 215 MB) "
+                                    "is not cached yet. Fetch it now?", default=True)
+
+    try:
+        result = rt.install(plan, jobs=jobs, log=lambda msg: console.print(escape(msg)), fetch_source=fetch_ok)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    active, fallback = result.active, result.fallback
+    console.print(f"[green]Self-built llama-server ready:[/green] {escape(active.backend)} build "
+                  f"{escape(active.build_id[:16])} (verified on this machine)" +
+                  (f", CPU fallback {escape(fallback.build_id[:16])}" if fallback.build_id != active.build_id else ""))
+    for problem in result.problems:
+        console.print(f"[yellow]{escape(problem)}[/yellow]")
+    if result.removed:
+        console.print(f"[dim]Removed {len(result.removed)} old build(s).[/dim]")
+    if rt.endpoint() is not None:
+        console.print("The running server keeps running; the next start uses the new build "
+                      "(llm-cli ditto runtime start).")
+    if result.requested_missing:
+        sys.exit(1)
+
+
+@ditto_runtime.command('import')
+@click.argument('file', type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option('--yes', '-y', is_flag=True, help='Do not ask before running the imported programs for the check')
+@pass_context
+def runtime_import(ctx: FrameworkContext, file: Path, yes: bool):
+    """Import a llama-server build made on another machine of the same kind (checked against the pin, then verified)"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    rt = _local_runtime(ctx)
+
+    def confirm(info: dict) -> bool:
+        built_on = info.get("built_on") or {}
+        console.print(f"Build {escape(str(info.get('build_id', ''))[:16])} of llama.cpp {escape(str(info.get('tag')))} "
+                      f"(commit {escape(str(info.get('commit', ''))[:12])}), built on "
+                      f"{escape(str(built_on.get('os')))}/{escape(str(built_on.get('arch')))} at "
+                      f"{escape(str(info.get('built_at')))}; programs: {escape(', '.join(info.get('files') or []))}")
+        return yes or click.confirm("Its files match its manifest and the pin. Run its programs here to verify it? "
+                                    "Import only builds you made yourself.", default=False)
+
+    try:
+        with console.status("Checking the build ..."):
+            inst = rt.import_build(file, confirm)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    console.print(f"[green]Imported and verified:[/green] {_installed_line(inst)}")
+
+
+@ditto_runtime.command('export')
+@click.argument('file', type=click.Path(dir_okay=False, path_type=Path))
+@pass_context
+def runtime_export(ctx: FrameworkContext, file: Path):
+    """Write the self-built build in use to FILE (.tar.gz) for another machine of the same kind"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    if not file.name.endswith((".tar.gz", ".tgz")):
+        console.print("[red]FILE must end with .tar.gz[/red]")
+        sys.exit(2)
+    try:
+        path = _local_runtime(ctx).export_build(file)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    console.print(f"[green]Wrote {escape(str(path))}[/green]. On the other machine: llm-cli ditto runtime import "
+                  f"{escape(path.name)}")
+
+
+@ditto_runtime.command('prune')
+@click.option('--keep', type=click.IntRange(0, 50), default=2, show_default=True,
+              help='Other builds to keep besides the active build, the CPU fallback and the running one')
+@pass_context
+def runtime_prune(ctx: FrameworkContext, keep: int):
+    """Remove old self-built builds (never the active build, the CPU fallback or the running one)"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    try:
+        removed = _local_runtime(ctx).prune(keep_last=keep)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    console.print(f"Removed {len(removed)} build(s)." if removed else "Nothing to remove.")
 
 
 @ditto_runtime.command('start')
@@ -2667,7 +2854,7 @@ def _scan_with_script(output_file: Path):
     if is_windows:
         cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script), "-OutputFile", str(output_file)]
     else:
-        cmd = ["bash", str(script), "--output", str(output_file)]
+        cmd = ["sh", str(script), "--output", str(output_file)]  # POSIX sh: hosts without bash (Alpine, BusyBox)
     try:
         output_file.parent.mkdir(parents=True, exist_ok=True)
         output_file.unlink(missing_ok=True)  # a file of an earlier run must not count as this run's result
@@ -2756,6 +2943,8 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
     except (OSError, ValueError) as e:
         console.print(f"[red]Could not save the profile: {escape(str(e))}[/red]")
         sys.exit(1)
+    from orchestrator.runtime.device.settings import remember_ssh_user
+    remember_ssh_user(store, device_id, user)  # the deploy user for `device runtime deploy` (never root)
     tool = "Python probe" if result.tool == "python" else "shell probe"
     console.print(f"[bold green]Probe of {escape(host)} successful ({tool}). Config generated: "
                   f"{escape(str(output_file))}[/bold green]")
@@ -2822,6 +3011,598 @@ def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, p
     if profile.needs_reprobe:
         console.print("[yellow]This profile lacks facts a build needs; run the probe again before a build.[/yellow]")
     console.print(f"Stored as this computer's profile: {escape(str(stored))}")
+
+
+# ============================================================================
+# DEVICES AND THEIR RUNTIME (self-built llama.cpp on a board)
+# ============================================================================
+
+def _utc_stamp() -> str:
+    from datetime import timezone
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _state_dir(ctx: FrameworkContext) -> Path:
+    from orchestrator.runtime.profile import default_state_dir
+    config, _ = _settings(ctx)
+    return Path(getattr(config, "user_state_dir", None) or default_state_dir())
+
+
+def _device_context(ctx: FrameworkContext, name: str):
+    """(state dir, profile store, device ID, stored profile) of a stored device; exits with 1 when it is unknown."""
+    from orchestrator.runtime.device.devices import DeviceNotFound, resolve_device
+    from orchestrator.runtime.profile import ProfileError, ProfileStore
+    state_dir = _state_dir(ctx)
+    store = ProfileStore(state_dir)
+    try:
+        device_id = resolve_device(store, name)
+        profile = store.load_device(device_id)
+    except (DeviceNotFound, ProfileError) as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if profile is None:
+        console.print(f"[red]Device {device_id} has no stored profile: probe it again with llm-cli scan --device."
+                      "[/red]")
+        sys.exit(1)
+    return state_dir, store, device_id, profile
+
+
+def _deploy_settings(store, device_id: str):
+    from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    try:
+        return DeploySettings.from_dict(store.load_deploy_settings(device_id))
+    except (SettingsError, ValueError) as e:
+        console.print(f"[red]The deploy settings of device {device_id} cannot be used: {escape(str(e))}[/red]")
+        sys.exit(1)
+
+
+def _record_consent(ctx: FrameworkContext, tool: str, arguments: Dict[str, Any], detail: str) -> None:
+    """Writes a consent to the audit log; without its record there is no consent (exit 1, nothing changed)."""
+    registry = _tool_registry(ctx)
+    try:
+        if getattr(registry, "audit", None) is None:
+            raise RuntimeError("no audit log")
+        registry.audit.record("user", tool, "external", "ask", "ok", arguments=arguments, approved=True,
+                              detail=detail, extra={"answer": "accepted", "confirm_channel": "framework-cli"})
+    except Exception as e:
+        console.print(f"[red]The consent could not be written to the audit log ({escape(str(e))}); nothing was "
+                      "changed.[/red]")
+        sys.exit(1)
+
+
+def _device_plan(profile):
+    from orchestrator.runtime.build.recipe import PlanError
+    from orchestrator.runtime.build.toolchain import host_platform
+    from orchestrator.runtime.catalog import load_catalog
+    from orchestrator.runtime.device.package import plan_device_runtime
+    try:
+        return plan_device_runtime(profile, catalog=load_catalog(), host=host_platform())
+    except PlanError as e:
+        console.print(f"[red]No device runtime can be planned for this device: {escape(str(e))}[/red]")
+        sys.exit(1)
+
+
+def _connect_device(state_dir: Path, device_id: str, host: str, port: int, user: str, password: Optional[str]):
+    """An SSH client for the stored device: its host key must be the trusted one the device was probed with (the
+    device ID is derived from it), so a deployment never reaches another machine at the same address."""
+    from orchestrator.runtime.profile import device_id_for_host_key
+    from orchestrator.utils import ssh_trust
+    if ssh_trust.paramiko is None:
+        console.print("[red]Reaching a device needs the 'paramiko' package.[/red]")
+        sys.exit(1)
+    try:
+        key = ssh_trust.fetch_host_key(host, port)
+        status = ssh_trust.check_host_key(state_dir, host, port, key)
+    except Exception as e:  # unreachable, no SSH server, a broken known_hosts file
+        console.print(f"[red]Could not reach {escape(host)}:{port}: {escape(str(e))}[/red]")
+        sys.exit(1)
+    if status == "changed":
+        console.print(f"[bold red]{escape(str(ssh_trust.HostKeyChanged(host, port)))}[/bold red]")
+        sys.exit(1)
+    if status != "known":
+        console.print(f"[red]{escape(host)}:{port} is not trusted yet: probe it first with llm-cli scan --device "
+                      f"{escape(host)} --user USER.[/red]")
+        sys.exit(1)
+    if device_id_for_host_key(ssh_trust.fingerprint(key)) != device_id:
+        console.print(f"[red]{escape(host)}:{port} answers with the host key of another device than {device_id}; "
+                      "probe it again before deploying to it.[/red]")
+        sys.exit(1)
+    try:
+        client = ssh_trust.connect(host, user, state_dir, port=port, password=password)
+    except Exception as e:  # authentication, network, a host key that changed meanwhile
+        console.print(f"[red]SSH login to {escape(user)}@{escape(host)} failed: {escape(str(e))}. Pair the device "
+                      "once with llm-cli scan --device (it asks for the password one time) or pass --password.[/red]")
+        sys.exit(1)
+    if password:
+        try:
+            ssh_trust.install_public_key(client, ssh_trust.client_key(state_dir)[1])
+        except ssh_trust.HostKeyError as e:
+            client.close()
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+    return client
+
+
+def _bench_choice(ctx: FrameworkContext, shell, home: str, bench_model: Optional[str], allow_untrusted: bool,
+                  device_id: str, user: str):
+    """(model path on the device or None, allowed): a catalog model (by sha256) runs; any other model only after
+    the user's consent, written to the audit log first (decision D23)."""
+    from orchestrator.runtime.catalog import load_catalog
+    from orchestrator.runtime.device.remote import model_sha256
+    from orchestrator.runtime.device.settings import SettingsError, check_model_path
+    if bench_model is None:
+        return None, False
+    try:
+        path = check_model_path(bench_model if bench_model.startswith("/") else f"{home}/{bench_model}")
+    except SettingsError as e:
+        raise click.UsageError(f"--bench-model: {e}")
+    digest = model_sha256(shell, path)
+    if digest is None:
+        console.print(f"[yellow]No readable model at {escape(path)} on the device; the short benchmark is skipped."
+                      "[/yellow]")
+        return None, False
+    catalog = load_catalog()
+    pinned = {m.sha256 for m in catalog.models if m.sha256}
+    if catalog.smoke_model is not None:
+        pinned.add(catalog.smoke_model.sha256)
+    if digest in pinned:
+        return path, True
+    question = (f"{path} is not a catalog model, so it is untrusted. llama-bench loads it natively on the device as "
+                f"{user} (no sandbox). Run the short benchmark with it? Your answer is written to the audit log.")
+    if not (allow_untrusted or (_interactive() and click.confirm(question, default=False))):
+        return path, False
+    _record_consent(ctx, "device_runtime_untrusted_model", {"device": device_id, "model_sha256": digest},
+                    "an untrusted model may run natively on the device for the short llama-bench run")
+    return path, True
+
+
+def _print_report(report) -> None:
+    for check in report.checks:
+        mark = {True: "[green]passed[/green]", False: "[red]failed[/red]", None: "[yellow]skipped[/yellow]"}[check.ok]
+        console.print(f"  {check.name}: {mark} - {escape(check.detail)}")
+
+
+@cli.group()
+def device():
+    """Devices probed over SSH and their self-built llama.cpp runtime"""
+    pass
+
+
+@device.command('list')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def device_list(ctx: FrameworkContext, as_json: bool):
+    """List the stored devices with their system, deploy settings and deployed runtime"""
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    from orchestrator.runtime.device.settings import DeploySettings, SettingsError
+    from orchestrator.runtime.profile import ProfileError, ProfileStore
+    state_dir = _state_dir(ctx)
+    store = ProfileStore(state_dir)
+    rows = []
+    for device_id in store.list_devices():
+        info = store.device_info(device_id)
+        try:
+            profile = store.load_device(device_id)
+        except ProfileError:
+            profile = None
+        try:
+            settings: Dict[str, Any] = DeploySettings.from_dict(store.load_deploy_settings(device_id)).as_dict()
+        except (SettingsError, ValueError):
+            settings = {"problem": "damaged; set them again"}
+        record = DeviceRuntimeStore(state_dir, device_id).record()
+        system = None
+        if profile is not None:
+            system = {k: profile.get(k) for k in ("OS", "OS_ID", "OS_VERSION_ID", "ARCH", "LIBC", "LIBC_VERSION",
+                                                  "INIT_SYSTEM", "SOC_MODEL")}
+        rows.append({"device_id": device_id, "label": info.get("label"), "address": info.get("address"),
+                     "system": system, "deploy": settings,
+                     "deployed": {k: record.get(k) for k in ("build_id", "deployed_at", "install")} if record
+                     else None})
+    if as_json:
+        click.echo(json.dumps(rows, indent=2, sort_keys=True))
+        return
+    if not rows:
+        console.print("No device is stored yet: probe one with llm-cli scan --device HOST --user USER.")
+        return
+    table = Table(title="Devices")
+    for column in ("Device", "Label", "Address", "System", "Deploy", "Deployed runtime"):
+        table.add_column(column)
+    for row in rows:
+        s = row["system"] or {}
+        system = (f"{s.get('OS_ID') or s.get('OS') or '?'} {s.get('OS_VERSION_ID') or ''} {s.get('ARCH') or ''}, "
+                  f"{s.get('LIBC') or '?'} {s.get('LIBC_VERSION') or ''}, init {s.get('INIT_SYSTEM') or '?'}"
+                  if s else "profile missing")
+        deploy = row["deploy"]
+        deploy_text = deploy.get("problem") or f"{deploy.get('install', 'user')} as {deploy.get('ssh_user') or '?'}"
+        deployed = row["deployed"]
+        table.add_row(row["device_id"], escape(row["label"] or "-"), escape(row["address"] or "-"), escape(system),
+                      escape(deploy_text), escape(f"{deployed['build_id'][:16]} ({deployed.get('install')})")
+                      if deployed else "-")
+    console.print(table)
+
+
+@device.command('settings')
+@click.argument('device_name', metavar='DEVICE')
+@click.option('--install', type=click.Choice(['user', 'systemd']),
+              help='user: start script in your home on the device (default); systemd: also a systemd unit, '
+                   'written with sudo (only on devices with systemd, after your confirmation now)')
+@click.option('--user', 'ssh_user', help='SSH user on the device; the server runs as this user (never root)')
+@click.option('--port', type=int, help='Loopback port of the systemd unit\'s server (1024-65535, default 8080)')
+@click.option('--model', help='Model file on the device that the systemd unit serves (relative: in the home folder)')
+@click.option('--confirm-sudo', is_flag=True,
+              help='With --install systemd: confirm without a question that deployments may run sudo on the device')
+@pass_context
+def device_settings(ctx: FrameworkContext, device_name: str, install: Optional[str], ssh_user: Optional[str],
+                    port: Optional[int], model: Optional[str], confirm_sudo: bool):
+    """Show or change how the runtime is installed on a device. Decided here, before a deployment: a deployment
+    never asks."""
+    from dataclasses import replace
+    from orchestrator.runtime.device.settings import SettingsError
+    _state, store, device_id, profile = _device_context(ctx, device_name)
+    current = _deploy_settings(store, device_id)
+    changes = {k: v for k, v in (("install", install), ("ssh_user", ssh_user), ("port", port), ("model", model))
+               if v is not None}
+    if changes:
+        try:
+            new = current.changed(**changes)
+        except SettingsError as e:
+            raise click.UsageError(str(e))
+        if new.install == "systemd" and new.sudo_confirmed_at is None:
+            if profile.get("INIT_SYSTEM") != "systemd":
+                console.print(f"[red]Device {device_id} does not run systemd (its probe reports "
+                              f"{escape(profile.get('INIT_SYSTEM') or 'no init system')}); the start script is the "
+                              "way to run the runtime there. The settings were not changed.[/red]")
+                sys.exit(1)
+            question = ("The systemd unit is written to /etc/systemd/system and enabled with sudo on the device "
+                        "(sudo -n: it must work without a password, the deployment never asks). Allow deployments to "
+                        "this device to run these sudo commands? Your answer is written to the audit log.")
+            if not (confirm_sudo or (_interactive() and click.confirm(question, default=False))):
+                console.print("[red]The systemd unit needs your confirmation that deployments may use sudo on the "
+                              "device; the settings were not changed.[/red]")
+                sys.exit(1)
+            _record_consent(ctx, "device_runtime_systemd", {"device": device_id},
+                            "deployments may run sudo -n on the device to install the systemd unit")
+            new = replace(new, sudo_confirmed_at=_utc_stamp())
+        try:
+            store.save_deploy_settings(device_id, new.as_dict())
+        except (OSError, ValueError) as e:
+            console.print(f"[red]Could not save the deploy settings: {escape(str(e))}[/red]")
+            sys.exit(1)
+        current = new
+        console.print(f"[green]Deploy settings of device {device_id} saved.[/green]")
+    console.print(f"Install: {current.install}" + (" (start script in the user's home)" if current.install == "user"
+                                                    else f" (systemd unit; sudo confirmed {current.sudo_confirmed_at})"))
+    console.print(f"SSH user: {escape(current.ssh_user or 'not set (--user)')}")
+    console.print(f"Port: {current.port}")
+    console.print(f"Model for the systemd unit: {escape(current.model or 'not set')}")
+    for problem in current.problems(profile):
+        console.print(f"[yellow]{escape(problem)}[/yellow]")
+
+
+@device.group('runtime')
+def device_runtime():
+    """The self-built llama.cpp runtime of a device: plan, build, deploy, verify"""
+    pass
+
+
+@device_runtime.command('plan')
+@click.argument('device_name', metavar='DEVICE')
+@click.option('--json', 'as_json', is_flag=True, help='The whole plan as JSON')
+@pass_context
+def device_runtime_plan(ctx: FrameworkContext, device_name: str, as_json: bool):
+    """Show the cross build planned from the device's own probe profile"""
+    from orchestrator.runtime.build.store import BuildStore
+    state_dir, _store, device_id, profile = _device_context(ctx, device_name)
+    plan = _device_plan(profile)
+    if as_json:
+        click.echo(plan.to_json(), nl=False)
+        return
+    target, builder, options = plan.target, plan.builder, plan.options()
+    console.print(f"Device {device_id}: {target['os']}/{target['arch']}, {target.get('libc')} "
+                  f"{target.get('libc_version')}")
+    console.print(f"Builder: container {builder.get('base')} ({builder.get('libc')} {builder.get('libc_version')}, "
+                  f"GCC {builder.get('gcc')}), without network")
+    console.print(f"CPU: {options.get('GGML_CPU_ARM_ARCH') or ('all variants' if options.get('GGML_CPU_ALL_VARIANTS') == 'ON' else 'x86 features of the probe')}"
+                  f", OpenMP {options.get('GGML_OPENMP')}, C++ runtime linked statically: "
+                  f"{'yes' if plan.verify.get('static_libstdcxx') else 'no'}")
+    console.print(f"Programs: {', '.join(plan.targets)}"
+                  + (f"; with {', '.join(plan.verify['runtime_libs'])}" if plan.verify.get("runtime_libs") else ""))
+    console.print(f"Build ID: {plan.build_id}")
+    for note in plan.notes:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
+    built = BuildStore(state_dir).find(plan)
+    console.print("Built: yes, " + str(built.path) if built else "Built: no (llm-cli device runtime build "
+                  f"{device_id})")
+
+
+@device_runtime.command('build')
+@click.argument('device_name', metavar='DEVICE')
+@click.option('--jobs', '-j', type=click.IntRange(1, 256), default=None,
+              help='Parallel compile jobs (default: CPUs, limited by the available memory)')
+@click.option('--mirror', default=None, metavar='URL', help='Fetch the pinned source from this mirror')
+@click.option('--yes', '-y', is_flag=True, help='Fetch the pinned source without asking when it is not cached')
+@pass_context
+def device_runtime_build(ctx: FrameworkContext, device_name: str, jobs: Optional[int], mirror: Optional[str],
+                         yes: bool):
+    """Cross-build llama.cpp for the device in the builder container (no network) and package the tarball"""
+    from orchestrator.runtime.build.executor import BuildExecutor, DockerEngine
+    from orchestrator.runtime.build.source import SourceError, cached_source, fetch_source
+    from orchestrator.runtime.build.store import BuildFailed, BuildStore, StoreError
+    from orchestrator.runtime.build.toolchain import host_platform
+    from orchestrator.runtime.build.verify import Verifier
+    from orchestrator.runtime.device.package import DeviceRuntimeStore, PackageError, package_runtime
+    state_dir, _store, device_id, profile = _device_context(ctx, device_name)
+    plan = _device_plan(profile)
+    source = _pinned_llama_source()
+    builds = BuildStore(state_dir)
+    try:
+        src = cached_source(source, state_dir)
+        if src is None:
+            if not yes and not (_interactive() and click.confirm(
+                    f"The pinned llama.cpp source ({source.tag}, commit {source.commit[:12]}, about 215 MB) is not "
+                    "cached yet. Fetch it now?", default=True)):
+                console.print("[red]The build needs the pinned source (or llm-cli ditto runtime import-source on a "
+                              "machine without internet).[/red]")
+                sys.exit(1)
+            with console.status("Fetching the pinned llama.cpp source ..."):
+                src = fetch_source(source, state_dir, url=mirror, log=lambda msg: console.print(escape(msg)))
+    except SourceError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    build = builds.find(plan)
+    if build is None:
+        console.print(f"Building llama.cpp {source.tag} for device {device_id} ({plan.target['arch']}, "
+                      f"{plan.target.get('libc')} {plan.target.get('libc_version')}) in the builder container "
+                      f"{plan.builder.get('base')} ...")
+        executor = BuildExecutor(engine=DockerEngine(), log=lambda msg: console.print(escape(msg)))
+        try:
+            build = builds.build(plan, source=src, executor=executor, verifier=Verifier(), jobs=jobs,
+                                 perf_key=profile.perf_key(), host=host_platform())
+        except BuildFailed as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            if e.log:
+                console.print(f"Logs: {escape(str(e.log))}")
+            sys.exit(1)
+        except StoreError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+    else:
+        console.print(f"Build {build.build_id[:16]} for this device is already stored; packaging it.")
+    devices = DeviceRuntimeStore(state_dir, device_id)
+    try:
+        packaged = package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
+    except PackageError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    deployed = devices.record().get("build_id")
+    devices.prune(keep=tuple(b for b in (build.build_id, deployed) if b))
+    console.print(f"[bold green]Device runtime ready:[/bold green] {escape(str(packaged.path))}")
+    console.print(f"sha256 {packaged.sha256}; format checked here (ELF, glibc symbol versions, no shared C++ runtime); "
+                  "the programs run their checks on the device during the deployment.")
+    console.print(f"Next: llm-cli device runtime deploy {device_id}")
+
+
+def _ensure_package(state_dir: Path, device_id: str, builds, build):
+    from orchestrator.runtime.build.source import cached_source
+    from orchestrator.runtime.device.package import DeviceRuntimeStore, PackageError, package_runtime
+    devices = DeviceRuntimeStore(state_dir, device_id)
+    packaged = devices.tarball(build)
+    if packaged is not None:
+        return devices, packaged
+    src = cached_source(_pinned_llama_source(), state_dir)
+    if src is None:
+        console.print("[red]The tarball must be packaged again, which needs the pinned source (its licence text): "
+                      f"run llm-cli device runtime build {device_id}.[/red]")
+        sys.exit(1)
+    try:
+        return devices, package_runtime(builds, build, licence=src / "LICENSE", out_dir=devices.root)
+    except PackageError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+
+
+@device_runtime.command('deploy')
+@click.argument('device_name', metavar='DEVICE')
+@click.option('--user', 'ssh_user', default=None, help='SSH user for this deployment (default: the deploy settings)')
+@click.option('--password', default=None, help="Only for a device that is not paired yet: used once to install the "
+              "framework's SSH key, never stored")
+@click.option('--bench-model', default=None, metavar='PATH',
+              help='A model file on the device for the short llama-bench check (relative: in the home folder)')
+@click.option('--allow-untrusted-model', is_flag=True,
+              help='Run the short benchmark also with a model that is not a catalog model (written to the audit log)')
+@pass_context
+def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Optional[str], password: Optional[str],
+                          bench_model: Optional[str], allow_untrusted_model: bool):
+    """Install the built runtime on the device over SSH as the deploy settings say, then check it there"""
+    from orchestrator.runtime.build.store import BuildStore
+    from orchestrator.runtime.device.devices import split_address
+    from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, deploy_runtime, read_facts,
+                                                    start_script_path, verify_on_device)
+    from orchestrator.runtime.device.settings import SettingsError
+    from orchestrator.runtime.server_policy import DEVICE_DEFAULT_PORT
+    state_dir, store, device_id, profile = _device_context(ctx, device_name)
+    settings = _deploy_settings(store, device_id)
+    if ssh_user is not None:
+        try:
+            settings = settings.changed(ssh_user=ssh_user)
+        except SettingsError as e:
+            raise click.UsageError(str(e))
+    if settings.ssh_user is None:
+        console.print(f"[red]No SSH user is set for device {device_id}: llm-cli device settings {device_id} --user "
+                      "NAME (or --user for this deployment).[/red]")
+        sys.exit(1)
+    problems = settings.problems(profile)
+    if problems:
+        for problem in problems:
+            console.print(f"[red]{escape(problem)}[/red]")
+        console.print("[red]Nothing was deployed; change the deploy settings first (llm-cli device settings).[/red]")
+        sys.exit(1)
+    plan = _device_plan(profile)
+    builds = BuildStore(state_dir)
+    build = builds.find(plan)
+    if build is None:
+        console.print(f"[red]The runtime for this device is not built yet (or the device's profile changed): "
+                      f"llm-cli device runtime build {device_id}[/red]")
+        sys.exit(1)
+    devices, packaged = _ensure_package(state_dir, device_id, builds, build)
+    try:
+        host, port = split_address(store.device_info(device_id).get("address"))
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    source = _pinned_llama_source()
+    client = _connect_device(state_dir, device_id, host, port, settings.ssh_user, password)
+    try:
+        shell = RemoteShell(client)
+        facts = read_facts(shell)
+        if facts.uid == 0:
+            console.print("[red]The SSH user on the device is root: the runtime never runs as root. Deploy as an "
+                          "unprivileged user (llm-cli device settings DEVICE --user NAME).[/red]")
+            sys.exit(1)
+        # Asked before anything changes on the device (decision D23: an untrusted model only after consent).
+        model_path, allowed = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model, device_id,
+                                            settings.ssh_user)
+
+        def check_new_build(home: str, folder: str):
+            # Design 3.8 and P6: the new build is checked in its own folder and becomes current only if it passes.
+            return verify_on_device(shell, home=home, folder=folder, plan_verify=build.plan.get("verify") or {},
+                                    pin_build=source.build_number, pin_commit=source.commit, port=settings.port,
+                                    bench_model=model_path, bench_allowed=allowed)
+
+        result = deploy_runtime(shell, tarball=packaged.path, tarball_sha256=packaged.sha256,
+                                build_id=build.build_id, arch=str(plan.target["arch"]), settings=settings,
+                                check=check_new_build, say=lambda msg: console.print(escape(msg)))
+    except RemoteError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    finally:
+        client.close()
+    report = result.report
+    if not result.activated or report is None or not report.ok:
+        console.print(f"[red]Build {build.build_id[:16]} did not pass its checks on the device; it was not "
+                      "activated.[/red]")
+        if report is not None:
+            _print_report(report)
+        for note in result.notes:
+            console.print(f"[yellow]{escape(note)}[/yellow]")
+        sys.exit(1)
+    now = _utc_stamp()
+    devices.save_record({"build_id": build.build_id, "deployed_at": now, "install": settings.install,
+                         "ssh_user": settings.ssh_user, "previous": result.previous, "perf_key": profile.perf_key(),
+                         "verification": report.as_dict(), "verified_at": now,
+                         "unit_started": result.unit_started})
+    devices.prune(keep=(build.build_id,))
+    console.print(f"[bold green]Deployed[/bold green] build {build.build_id[:16]} to {escape(result.root)}"
+                  + (f" (previous {result.previous} kept)" if result.previous else ""))
+    _print_report(report)
+    for note in result.notes:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
+    script = start_script_path(result.home)
+    if settings.install == "systemd":
+        console.print(f"systemd unit: {'started' if result.unit_started else 'enabled'}; the server listens on "
+                      f"127.0.0.1:{settings.port} with the key in ~/.config/llm-framework/llama-server.key")
+    else:
+        # The start script listens on its default port unless --port is given.
+        port_option = f" --port {settings.port}" if settings.port != DEVICE_DEFAULT_PORT else ""
+        console.print(f"Start it on the device: sh {escape(script)} start MODEL.gguf{port_option} "
+                      f"(127.0.0.1:{settings.port}, key in ~/.config/llm-framework/llama-server.key; stop, status, "
+                      "serve for the foreground)")
+
+
+@device_runtime.command('verify')
+@click.argument('device_name', metavar='DEVICE')
+@click.option('--user', 'ssh_user', default=None, help='SSH user (default: the deploy settings)')
+@click.option('--bench-model', default=None, metavar='PATH',
+              help='A model file on the device for the short llama-bench check (relative: in the home folder)')
+@click.option('--allow-untrusted-model', is_flag=True,
+              help='Run the short benchmark also with a model that is not a catalog model (written to the audit log)')
+@pass_context
+def device_runtime_verify(ctx: FrameworkContext, device_name: str, ssh_user: Optional[str],
+                          bench_model: Optional[str], allow_untrusted_model: bool):
+    """Check the deployed runtime on the device again (as the unprivileged user, never with sudo)"""
+    from orchestrator.runtime.build.store import BuildStore
+    from orchestrator.runtime.device.devices import split_address
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    from orchestrator.runtime.device.remote import RemoteError, RemoteShell, read_facts, verify_on_device
+    from orchestrator.runtime.device.settings import SettingsError
+    state_dir, store, device_id, profile = _device_context(ctx, device_name)
+    settings = _deploy_settings(store, device_id)
+    try:
+        user = settings.changed(ssh_user=ssh_user).ssh_user if ssh_user else settings.ssh_user
+    except SettingsError as e:
+        raise click.UsageError(str(e))
+    if user is None:
+        console.print(f"[red]No SSH user is set for device {device_id} (llm-cli device settings ... --user).[/red]")
+        sys.exit(1)
+    devices = DeviceRuntimeStore(state_dir, device_id)
+    record = devices.record()
+    if not record:
+        console.print(f"[red]Nothing was deployed to device {device_id} yet (llm-cli device runtime deploy).[/red]")
+        sys.exit(1)
+    stored = BuildStore(state_dir).get(record["build_id"])
+    plan_verify = (stored.plan.get("verify") if stored else None) or _device_plan(profile).verify
+    try:
+        host, port = split_address(store.device_info(device_id).get("address"))
+    except ValueError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    source = _pinned_llama_source()
+    client = _connect_device(state_dir, device_id, host, port, user, None)
+    try:
+        shell = RemoteShell(client)
+        facts = read_facts(shell)
+        if facts.uid == 0:
+            console.print("[red]The SSH user is root; the checks run as the unprivileged user only.[/red]")
+            sys.exit(1)
+        model_path, allowed = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model, device_id,
+                                            user)
+        report = verify_on_device(shell, home=facts.home, plan_verify=plan_verify, pin_build=source.build_number,
+                                  pin_commit=source.commit, port=settings.port, bench_model=model_path,
+                                  bench_allowed=allowed)
+    except RemoteError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    finally:
+        client.close()
+    record.update({"verification": report.as_dict(), "verified_at": _utc_stamp()})
+    record.pop("format", None)
+    devices.save_record(record)
+    console.print(f"Device {device_id}, build {record['build_id'][:16]}:")
+    _print_report(report)
+    if not report.ok:
+        sys.exit(1)
+
+
+@device_runtime.command('status')
+@click.argument('device_name', metavar='DEVICE')
+@click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
+@pass_context
+def device_runtime_status(ctx: FrameworkContext, device_name: str, as_json: bool):
+    """What is deployed on the device and whether it still matches the device's profile and the pin"""
+    from orchestrator.runtime.build.store import BuildStore
+    from orchestrator.runtime.device.package import DeviceRuntimeStore
+    state_dir, store, device_id, profile = _device_context(ctx, device_name)
+    plan = _device_plan(profile)
+    record = DeviceRuntimeStore(state_dir, device_id).record()
+    built = BuildStore(state_dir).find(plan)
+    status = {"device_id": device_id, "planned_build_id": plan.build_id, "built": built is not None,
+              "deployed": record or None,
+              "current": bool(record) and record.get("build_id") == plan.build_id}
+    if as_json:
+        click.echo(json.dumps(status, indent=2, sort_keys=True))
+        return
+    console.print(f"Device {device_id}: planned build {plan.build_id[:16]} "
+                  f"({'built' if built else 'not built yet'})")
+    if not record:
+        console.print("Deployed: nothing yet")
+        return
+    report = record.get("verification") or {}
+    console.print(f"Deployed: build {record['build_id'][:16]} on {escape(str(record.get('deployed_at')))} "
+                  f"({escape(str(record.get('install')))}), checks on the device "
+                  f"{'passed' if report.get('ok') else 'failed'} ({escape(str(record.get('verified_at')))})")
+    if not status["current"]:
+        console.print("[yellow]The deployed build is not the one planned now (the profile, the pin or the recipe "
+                      "changed): build and deploy again.[/yellow]")
 
 
 # ============================================================================

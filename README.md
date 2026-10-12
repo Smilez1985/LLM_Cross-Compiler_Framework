@@ -31,7 +31,8 @@ The conversion tools run in a Docker container on your PC, so you do not install
 container has no network access while it converts. Every build writes a manifest (`build_info.json`) with the
 model files and their SHA256 hashes, plus a `Model_Card.md`.
 
-The framework does not install software that runs the model on the board (see [The board](#the-board)).
+For GGUF models the framework can also build llama.cpp for the board and install it there; the RKLLM and RKNN
+runtimes stay yours to install (see [The board](#the-board)).
 
 ## Supported targets and formats
 
@@ -245,11 +246,42 @@ mode is experimental and not verified in this version.
 
 ### The board
 
-To run the model on the board you need a runtime there, which the framework does not install: llama.cpp
-(`llama-server`) for GGUF, Rockchip's RKLLM runtime for `.rkllm` files (RK3588/RK3576), and the RKNN runtime for
-`.rknn` files. For GGUF, `deploy.sh` prints a matching `llama-server` command line if `llama-server` is already
-installed on the board, otherwise a hint to install llama.cpp. A runtime that the deploy step installs on the
-board is on the [roadmap](docs/BLUEPRINT.md#roadmap).
+To run the model on the board you need a runtime there: llama.cpp (`llama-server`) for GGUF, Rockchip's RKLLM
+runtime for `.rkllm` files (RK3588/RK3576), and the RKNN runtime for `.rknn` files. The framework builds and installs
+llama.cpp for the board itself (below); the RKLLM and RKNN runtimes you install yourself. For GGUF, `deploy.sh` prints
+how to start the model with the framework's start script when the runtime is installed, otherwise how to deploy it.
+
+**Deploying the llama.cpp runtime to a board** (command line; Docker on your PC for the build):
+
+```bash
+llm-cli scan --device 192.168.1.50 --user dietpi   # probe the board (once, and again after an OS upgrade)
+llm-cli device settings 192.168.1.50                # how the runtime will start (default: the start script)
+llm-cli device runtime build 192.168.1.50           # cross-build for this board in the builder container
+llm-cli device runtime deploy 192.168.1.50          # install it over SSH and check it on the board
+```
+
+- **Built for the board:** the plan comes from the board's own probe: its architecture and CPU features (for the
+  RK3566 `armv8.2-a+dotprod+fp16`) and its C library and version. The builder container uses a base whose glibc
+  (or musl on Alpine) is not newer than the board's, links the C++ runtime statically and has no network while it
+  builds. `llm-cli device runtime plan` shows the plan first.
+- **Installed in your home:** under `~/.local/share/llm-framework/llama.cpp/` on the board, never as root and never
+  with files in `/tmp`. The previous build stays next to the new one.
+- **Started on loopback with a key:** `~/.local/share/llm-framework/llama.cpp/current/llama-server.sh start
+  ~/models/model.gguf` runs `llama-server` on 127.0.0.1:8080 with the key in
+  `~/.config/llm-framework/llama-server.key` (made on the board, readable only by you) and a cleared environment;
+  `stop`, `status` and `serve` (foreground) work the same way. Options such as `-c 4096` or `-t 4` are passed on;
+  options that would give the model tools, open the web UI or leave loopback are refused.
+- **Start script or systemd unit, decided beforehand:** `llm-cli device settings DEVICE --install systemd --model
+  models/model.gguf` chooses a systemd unit that starts the server at boot. It needs systemd on the board and your
+  confirmation, given right there, that deployments may run `sudo -n` on it; a deployment itself never asks.
+  Boards without systemd (OpenRC on Alpine, SysV init) use the start script.
+- **Checked on the board before it is used:** the new build's programs run as your user: the version must be the
+  pinned one, the devices are listed, and the server must refuse `--tools`. `--bench-model models/model.gguf` adds a
+  short `llama-bench` run; a model that is not one of the framework's catalog models runs only after your consent,
+  which is written to the audit log. Only a build that passes becomes the active one (and the systemd unit's); a
+  build that fails is removed again and the previous build stays active.
+
+Not yet tested on a real board; the GUI and the MCP tools for it follow.
 
 ### Probing the board's hardware
 
@@ -431,17 +463,40 @@ enough; `--kind retrieval` grades the knowledge-base search instead. Details and
 
 ## Offline mode: the managed local model
 
-Ditto can run without any cloud account on a local model. The framework downloads a pinned llama.cpp build and a
-pinned Qwen3.5 model and runs `llama-server` on your computer:
+Ditto can run without any cloud account on a local model. The framework builds `llama-server` on your computer from
+the pinned llama.cpp commit, downloads a pinned Qwen3.5 model and runs the server:
 
 ```bash
-llm-cli ditto runtime status       # hardware, recommended llama.cpp build and model, server state
-llm-cli ditto runtime install      # the pinned llama.cpp build for this machine
+llm-cli ditto runtime status       # hardware, the build in use, the recommended model, server state
+llm-cli ditto runtime install      # builds llama-server for this machine (CPU build first, then the GPU build)
 llm-cli ditto models list          # the model tiers, their size and whether they are downloaded
 llm-cli ditto models download      # the recommended model (or a tier, e.g. small-q2)
 llm-cli ditto runtime start        # starts llama-server; it keeps running until "runtime stop"
 llm-cli ditto runtime stop
 ```
+
+**The build.** `runtime install` shows what it will build and asks first. It needs a C/C++ compiler (GCC or Clang),
+CMake and Ninja (on Debian or Ubuntu: `build-essential cmake ninja-build`); without them it builds in the framework's
+builder container when Docker runs. The framework never installs a toolchain for you. The pinned source (about
+215 MB) is fetched once by its commit and checked; the build itself runs without network. The CPU build comes first
+and takes a few minutes, so `runtime start` works soon; a GPU build (Vulkan on Linux in this version; CUDA, ROCm,
+Windows and macOS builds follow) is built after it and used once it passed its checks. Every build is checked on this
+machine before it is kept (version and commit of the pin, the devices it finds, and that the server refuses its own
+tools), and `runtime start` starts nothing else.
+
+- **Air-gapped machines:** `llm-cli ditto runtime export-source FILE` and `import-source FILE` carry the source;
+  `llm-cli ditto runtime export FILE.tar.gz` on a machine of the same kind (same OS and architecture, and a CPU of
+  the same vendor with at least the CPU features of that machine, since the build uses `-march=native`) and
+  `llm-cli ditto runtime import FILE.tar.gz` here carry a finished build. An imported build is checked against the
+  pin and its own manifest, you confirm it, and it is verified here before it is used.
+- **Official prebuilt archive:** `llm-cli ditto runtime install --prebuilt` downloads upstream's archive instead (size
+  and sha256 checked). It is only used when you ask for it, also an archive an earlier version downloaded (then
+  `--prebuilt` takes it without downloading it again), and is always shown as "prebuilt, not self-built". On
+  Linux it needs the glibc it was built for (2.35 or 2.39); on musl systems such as Alpine only the self-built server
+  runs. Until the Windows and macOS builds land, this is the way to run the local model there.
+- `llm-cli ditto runtime prune` removes old builds; the active build, its CPU fallback and the build a running server
+  uses are always kept, and so are your boards' builds. `runtime status` says when a rebuild is required (the pin changed) or recommended (this
+  machine's build plan changed).
 
 Then choose **Local model (managed llama-server)** in the AI settings (provider `local`). Turn on **Offline Mode**
 as well if Ditto should never use a cloud provider. Ditto finds the running server by itself. In this version the
@@ -457,14 +512,16 @@ server is controlled from the command line only.
 
 - `llm-cli ditto runtime start --model <tier>` picks a tier and remembers it; `--model auto` returns to the
   recommendation.
-- **Hardware:** NVIDIA GPUs get a CUDA build that matches GPU and driver; AMD Radeon GPUs and APUs (e.g. Ryzen Z1
-  Extreme) and Intel Arc use Vulkan (ROCm only with `runtime install --backend rocm`); Apple Silicon uses Metal;
-  everything else uses the CPU build. `runtime status` explains each choice.
-- **Verified downloads:** every build and model is pinned with size and sha256 in
-  [`configs/llama_runtime.yml`](configs/llama_runtime.yml) (models at a fixed Hugging Face commit) and checked
-  before it is unpacked or loaded; unpinned entries are refused.
+- **Hardware:** the build recipe follows the machine's OS, architecture and C library. AMD Radeon GPUs and APUs
+  (e.g. Ryzen Z1 Extreme) and Intel Arc get a Vulkan build; NVIDIA GPUs will get a CUDA build matched to GPU and
+  driver (until then the CPU build runs there, and `runtime install --backend vulkan` builds a Vulkan server that
+  also uses NVIDIA GPUs); everything else uses the CPU build. `runtime status` explains each choice.
+- **Verified downloads:** the llama.cpp commit, the prebuilt archives and every model are pinned in
+  [`configs/llama_runtime.yml`](configs/llama_runtime.yml) (archives and models with size and sha256, models at a
+  fixed Hugging Face commit) and checked before they are used; unpinned entries are refused.
 - **Isolation:** the server listens on 127.0.0.1 only, on a free port, with a new API key per start that is
-  passed in a file only you can read. Its web UI, its own tools and its MCP client stay off.
+  passed in a file only you can read, and with a cleared environment. Its web UI, its own tools and its MCP client
+  stay off; the self-built server is compiled without its shell tool at all.
 - **Effort:** with effort "low" the local model answers without thinking first (much faster on a CPU); "medium"
   and higher let it think.
 
@@ -592,9 +649,10 @@ The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGE
 - **In progress:** the remaining sign-in methods per access type, browser sign-in and cloud platforms (API keys,
   local engines and the `ant` profile work in the GUI and with `llm-cli ditto login`; the Claude-subscription
   provider is removed, and Claude subscribers use MCP or an API key); a hardened headless Docker image for the CLI and the MCP server; a new
-  Ditto evaluation run with the improved prompts.
-- **Planned:** a runtime that the deploy step installs on the board, targets for NVIDIA GPUs and AMD (Ryzen Z1
-  Extreme), more formats, LoRA and large models, and supply-chain hardening.
+  Ditto evaluation run with the improved prompts; the self-built llama.cpp runtime on the board (the command line
+  works; the GUI, the MCP tools and a run on a real board follow).
+- **Planned:** targets for NVIDIA GPUs and AMD (Ryzen Z1 Extreme), more formats, LoRA and large models, and
+  supply-chain hardening.
 
 Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
 

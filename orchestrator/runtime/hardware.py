@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """
-Hardware detection for the local runtime: which llama.cpp build fits this machine, which Ditto model
-tier, and how much context fits next to the model. Every decision carries a human-readable reason.
+Hardware detection for the local runtime: which Ditto model tier fits this machine, how much context fits next to
+the model, and which official prebuilt llama.cpp archive it could run (select_backend, only for the explicit opt-in
+`ditto runtime install --prebuilt`, decision D1; the self-built server's backend comes from the build recipe,
+orchestrator/runtime/build/recipe.py choose_backend, which also follows the C library). Every decision carries a
+human-readable reason.
 
-detect_hardware() runs the hardware probe (scripts/hardware_probe.py, the same file that probes boards) in-process
-for its memory and GPU parts, checks the result with the probe file parser (orchestrator/runtime/profile.py) and
-builds HardwareInfo from that profile. Free RAM and free GPU memory are volatile: they are read again at every call
-and never taken from a stored profile. hardware_from_profile() builds HardwareInfo from any profile, for example a
-stored one or a device's.
+detect_hardware() runs the hardware probe in-process (orchestrator/runtime/hardware_probe.py, a byte-identical copy of
+scripts/hardware_probe.py, the file that probes boards) for its memory and GPU parts, checks the result with the
+probe file parser (orchestrator/runtime/profile.py) and builds HardwareInfo from that profile. Free RAM and free GPU
+memory are volatile: they are read again at every call and never taken from a stored profile.
+hardware_from_profile() builds HardwareInfo from any profile, for example a stored one or a device's.
 
 The probe's GPU sources (each optional; a missing tool contributes nothing): nvidia-smi for NVIDIA GPUs (driver,
 compute capability, VRAM), vulkaninfo for any Vulkan device, amdgpu's sysfs and the KFD topology on Linux (VRAM, gfx
@@ -15,7 +18,7 @@ target), WMI and the display-class registry on Windows (adapter names, dedicated
 into GpuInfo for existing callers.
 """
 
-import importlib.util
+import importlib
 import logging
 import os
 import platform
@@ -33,7 +36,9 @@ from orchestrator.runtime.profile import HardwareProfile, ProfileError, load_sch
 GIB = 1024 ** 3
 MIB = 1024 ** 2
 SYSTEM_RESERVE = int(1.5 * GIB)  # RAM left to the OS, the GUI and the knowledge base when a model is chosen
-PROBE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "hardware_probe.py"
+# The package copy of scripts/hardware_probe.py (byte-identical, tests/test_hardware_probe.py compares them): a wheel
+# install has no scripts/ folder.
+PROBE_PATH = Path(__file__).resolve().with_name("hardware_probe.py")
 
 # (command, timeout) -> (returncode, stdout, stderr); returncode -1 means "not found / not runnable".
 Runner = Callable[[Sequence[str], float], Tuple[int, str, str]]
@@ -72,6 +77,8 @@ class HardwareInfo(BaseModel):
     gpus: List[GpuInfo] = []
     vulkan: bool = False                 # a Vulkan loader or Vulkan device was seen
     hip_runtime: Optional[bool] = None   # Linux: libamdhip64 found (ROCm builds need it); None elsewhere
+    libc: Optional[str] = None           # glibc, musl, ... (LIBC of the probe); prebuilt Linux archives need glibc
+    libc_version: Optional[str] = None
 
     def summary(self) -> str:
         gpus = "; ".join(g.label() for g in self.gpus) or "no GPU found"
@@ -107,17 +114,15 @@ def normalize_platform(system: Optional[str] = None, machine: Optional[str] = No
 # --- the probe ---------------------------------------------------------------------------------------------
 
 def load_probe():
-    """scripts/hardware_probe.py as a module (loaded once). It is a standalone file, not part of the package,
-    because the same file is copied to devices; RuntimeError when it is missing from this installation."""
+    """The hardware probe as a module: orchestrator.runtime.hardware_probe, the package copy of the standalone
+    scripts/hardware_probe.py that is sent to devices. RuntimeError when it is missing from this installation."""
     global _probe_module
     with _probe_lock:
         if _probe_module is None:
-            spec = importlib.util.spec_from_file_location("llm_framework_hardware_probe", PROBE_PATH)
-            if spec is None or spec.loader is None or not PROBE_PATH.is_file():
-                raise RuntimeError(f"The hardware probe {PROBE_PATH} is missing from this installation.")
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            _probe_module = module
+            try:
+                _probe_module = importlib.import_module("orchestrator.runtime.hardware_probe")
+            except ImportError as e:
+                raise RuntimeError(f"The hardware probe {PROBE_PATH} is missing from this installation.") from e
         return _probe_module
 
 
@@ -195,7 +200,8 @@ def hardware_from_profile(profile: HardwareProfile, memory: Optional[Tuple[int, 
     os_name = profile.os or "unknown"
     return HardwareInfo(os=os_name, arch=profile.arch or "other", ram_total=ram_total, ram_available=ram_available,
                         gpus=gpus, vulkan=profile.is_on("VULKAN"),
-                        hip_runtime=profile.is_on("HIP_RUNTIME") if os_name == "linux" else None)
+                        hip_runtime=profile.is_on("HIP_RUNTIME") if os_name == "linux" else None,
+                        libc=profile.libc, libc_version=profile.libc_version)
 
 
 def detect_hardware(run: Optional[Runner] = None, system: Optional[str] = None, machine: Optional[str] = None,
@@ -268,14 +274,45 @@ def cuda_problem(asset: RuntimeAsset, gpu: GpuInfo) -> Optional[str]:
     return None
 
 
+def prebuilt_libc_problem(asset: RuntimeAsset, hw: HardwareInfo) -> Optional[str]:
+    """Why an official prebuilt Linux archive cannot start with this machine's C library, or None. The archives are
+    built against the glibc of an Ubuntu release (RuntimeAsset.glibc_min): musl (Alpine), an unknown C library or an
+    older glibc cannot run them."""
+    if asset.os != "linux":
+        return None
+    if hw.libc != "glibc":
+        what = f"musl ({hw.libc})" if hw.libc == "musl" else (hw.libc or "a C library the probe could not read")
+        return (f"the official Linux archives are built against glibc, and this machine has {what}: only the "
+                "self-built server runs here")
+    have = version_tuple(hw.libc_version)
+    if asset.glibc_min and (have is None or have < version_tuple(asset.glibc_min)):
+        return (f"the {asset.id} archive needs glibc {asset.glibc_min} or newer, this machine has "
+                f"{hw.libc_version or 'an unknown version'}")
+    return None
+
+
 def select_backend(hw: HardwareInfo, catalog: RuntimeCatalog, prefer: Optional[str] = None) -> BackendChoice:
-    """Picks the llama.cpp build for this machine. ROCm builds are only used when asked for (prefer="rocm")."""
+    """Picks the official prebuilt llama.cpp archive for this machine: only for the explicit opt-in of
+    `ditto runtime install --prebuilt` (decision D1); the self-built server follows recipe.choose_backend. Archives
+    whose C library does not fit the machine are never offered (prebuilt_libc_problem), and archives marked opt_in
+    (ROCm) only when their backend is asked for (prefer="rocm")."""
     assets = catalog.assets_for(hw.os, hw.arch)
     if not assets:
         return BackendChoice(reason=f"No llama.cpp build for {hw.os}/{hw.arch} in the catalog.")
+    refused: Dict[str, str] = {}
     by_backend: Dict[str, List[RuntimeAsset]] = {}
     for a in assets:
+        problem = prebuilt_libc_problem(a, hw)
+        if problem:
+            refused.setdefault(a.backend, problem)
+            continue
+        if a.opt_in and a.backend != prefer:
+            continue
         by_backend.setdefault(a.backend, []).append(a)
+    if not by_backend:
+        why = refused.get(prefer or "") or next(iter(refused.values()), "no archive fits this machine")
+        return BackendChoice(reason=f"No official prebuilt llama.cpp archive starts on this machine: {why}. Build it "
+                                    "instead: llm-cli ditto runtime install")
     for group in by_backend.values():
         group.sort(key=lambda a: version_tuple(a.cuda) or (0,), reverse=True)
 
@@ -296,13 +333,13 @@ def select_backend(hw: HardwareInfo, catalog: RuntimeCatalog, prefer: Optional[s
             skipped = f" ({'; '.join(notes)})" if notes else ""
             return asset, (f"{_named(nvidia)} (driver {nvidia.driver_version}{cap}) -> CUDA {asset.cuda} "
                            f"build{skipped}")
-        why = "; ".join(notes) or f"no CUDA build for {hw.os}/{hw.arch}"
+        why = "; ".join(notes) or refused.get("cuda") or f"no CUDA build for {hw.os}/{hw.arch}"
         hint = "; a newer NVIDIA driver enables the CUDA build" if any("driver" in n for n in notes) else ""
         return None, f"{_named(nvidia)} (driver {nvidia.driver_version}{cap}): {why}{hint}"
 
     def rocm_asset() -> Tuple[Optional[RuntimeAsset], Optional[GpuInfo], str]:
         if "rocm" not in by_backend:
-            return None, None, f"no ROCm build for {hw.os}/{hw.arch}"
+            return None, None, refused.get("rocm") or f"no ROCm build for {hw.os}/{hw.arch}"
         amd = _best([g for g in hw.gpus if g.vendor == "amd"])
         if amd is None:
             return None, None, "no AMD GPU found"
@@ -330,6 +367,8 @@ def select_backend(hw: HardwareInfo, catalog: RuntimeCatalog, prefer: Optional[s
                 return BackendChoice(asset=asset, backend="rocm", gpu=amd, reason=reason)
             return BackendChoice(reason=f"ROCm requested, but {reason}.")
         if prefer not in by_backend:
+            if prefer in refused:
+                return BackendChoice(reason=f"No '{prefer}' build: {refused[prefer]}.")
             have = ", ".join(sorted(by_backend))
             return BackendChoice(reason=f"No '{prefer}' build for {hw.os}/{hw.arch} (available: {have}).")
         gpu = None
@@ -365,6 +404,22 @@ def select_backend(hw: HardwareInfo, catalog: RuntimeCatalog, prefer: Optional[s
     if "cpu" in by_backend:
         return pick("cpu", None, f"{note}CPU build (no usable GPU backend)")
     return BackendChoice(reason=f"{note}No CPU build for {hw.os}/{hw.arch} in the catalog.")
+
+
+def backend_choice(hw: HardwareInfo, backend: Optional[str], reason: str = "") -> BackendChoice:
+    """The GPU a llama.cpp build of `backend` uses on this machine, for a build that is no catalog archive (a self-built
+    or imported one): CUDA the best NVIDIA GPU, ROCm the best AMD GPU, Metal Apple's GPU, Vulkan the best GPU on which
+    Vulkan beats the CPU (else the best non-Apple GPU); the CPU build none. Used for the model tier and the context."""
+    gpu: Optional[GpuInfo] = None
+    if backend == "cuda":
+        gpu = _best([g for g in hw.gpus if g.vendor == "nvidia"])
+    elif backend == "rocm":
+        gpu = _best([g for g in hw.gpus if g.vendor == "amd"])
+    elif backend == "metal":
+        gpu = _best([g for g in hw.gpus if g.vendor == "apple"])
+    elif backend == "vulkan":
+        gpu = _best([g for g in hw.gpus if vulkan_worthy(g)]) or _best([g for g in hw.gpus if g.vendor != "apple"])
+    return BackendChoice(backend=backend, gpu=gpu, reason=reason or f"{backend or 'no'} build")
 
 
 def usable_vram_gib(choice: Optional[BackendChoice]) -> Optional[float]:

@@ -66,6 +66,21 @@ def isolated_environment(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_network_llama_source(monkeypatch):
+    """Tests never fetch the llama.cpp source from the network: a real fetch is about 215 MB, and a test that reaches
+    it would go on to a real build. Local mirrors and bundles (the source tests) still work."""
+    from orchestrator.runtime.build import source
+    real = source.fetch_source
+
+    def guarded(pin, state_dir, *, url=None, **kwargs):
+        if str(url or pin.repo).lower().startswith(("https://", "http://", "ssh://", "git://")):
+            raise RuntimeError("a test tried to fetch the llama.cpp source from the network; inject a fake")
+        return real(pin, state_dir, url=url, **kwargs)
+
+    monkeypatch.setattr(source, "fetch_source", guarded)
+
+
+@pytest.fixture(autouse=True)
 def sdk_debug_logging_off():
     """A CLI or GUI test with --debug-http must not leave the SDK loggers at DEBUG, with a stderr handler, for
     the tests after it (the choice is process-wide and kept by later setup_logging() calls)."""

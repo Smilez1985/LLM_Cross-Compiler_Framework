@@ -147,12 +147,15 @@ Version noch fehlen.
 
 ## 4. Das lokale Modell und die Evaluation
 
-Tests laden nie Modelle herunter. Um Dittos Offline-Modus von Hand auszuprobieren, nutze ein eigenes
-`LLM_FRAMEWORK_HOME` (Modelle landen im Ordner `models/ditto/` der Installation, den git ignoriert):
+Tests laden nie Modelle herunter, und sie holen oder bauen nie llama.cpp: Eine Fixture in `tests/conftest.py` lehnt
+ein Holen des llama.cpp-Quellcodes über das Netzwerk ab, also nutzt ein Test der Installation Attrappen für
+Toolchain, Executor und Prüfung (siehe `tests/test_runtime_selfbuilt.py`). Um Dittos Offline-Modus von Hand
+auszuprobieren, nutze ein eigenes `LLM_FRAMEWORK_HOME` (Modelle landen im Ordner `models/ditto/` der Installation,
+den git ignoriert):
 
 ```bash
 llm-cli ditto runtime status
-llm-cli ditto runtime install
+llm-cli ditto runtime install      # baut llama-server aus dem festgelegten Commit (einige Minuten für den CPU-Build)
 llm-cli ditto models download small
 llm-cli ditto runtime start --model small
 llm-cli ditto ask "Welche Formate kann das Rockchip-Target bauen?"
@@ -182,8 +185,10 @@ Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läu
    `llama_cpp.build` (dieselbe Bezeichnung). Die offiziellen vorgebauten Archive dieses Releases tragen die
    Bezeichnung aus `build`: Ihre Namen, Größen und SHA256-Werte neu festlegen, wie es der Kommentar am Anfang der
    Datei beschreibt.
-3. Die Stellen ändern, die den Katalog nicht lesen können: das `ARG LLAMA_CPP_TAG` in `targets/Rockchip/dockerfile`,
-   `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml` und `inference_backends.llama_cpp.commit` in
+3. Die Stellen ändern, die den Katalog nicht lesen können: `ARG LLAMA_CPP_TAG` und `ARG LLAMA_CPP_COMMIT` in
+   `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` und `targets/_template/Dockerfile.gpu` (die Vorgaben
+   für Image-Builds außerhalb des Frameworks; das Framework übergibt den Pin selbst), `docker.build_args.LLAMA_CPP_TAG`
+   und `LLAMA_CPP_COMMIT` in `targets/*/target.yml` und `inference_backends.llama_cpp.commit` in
    `configs/project_sources.yml` (danach `python ../scripts/sync_ssot.py --write` in `configs/`). Die Einstellung
    `llama_cpp_version` folgt dem Katalog von selbst.
 4. Prüfen, dass der Commit von Upstream stammt: `python scripts/llama_cpp_pin.py check`. Es ruft
@@ -195,6 +200,8 @@ Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läu
    in `orchestrator/runtime/build/recipe.py` nennen jede Option mit Datei und Zeilen; den neuen Baum nach
    `FetchContent_Declare`, `ExternalProject_Add` und `file(DOWNLOAD` durchsuchen und jede neue ergänzen. Ebenso die
    Regeln für CUDA-Architekturen (`ggml/src/ggml-cuda/CMakeLists.txt`) und welche Ziele `tools/CMakeLists.txt` baut.
+   Die Target-Dockerfiles wiederholen beide Listen in ihrem llama.cpp-Bauschritt (die zuletzt gesetzten Optionen und
+   die, die sie ablehnen); `tests/test_target_dockerfiles.py` schlägt fehl, bis sie wieder zum Rezept passen.
 6. Die Golden-Pläne neu erzeugen und den Unterschied durchsehen:
    `LLM_FRAMEWORK_UPDATE_GOLDEN=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_build_recipe.py`. Ohne
    Änderung am Rezept ändern sich nur der Commit, die Build-Nummer und die Build-IDs.
@@ -502,7 +509,13 @@ diese Paketdatei zurück, ohne `sha256` die angegebene `version` oder, ohne `ver
 - **Downloads der lokalen Laufzeit sind festgelegt.** Ein neuer llama.cpp-Build oder ein neues Modell in
   `configs/llama_runtime.yml` braucht Größe und SHA256 aus einem vollständigen Download, Modelle zusätzlich einen
   Hugging-Face-Commit als Revision. Übergib `llama-server` nie Optionen, die ihm Tools, einen Agentenmodus,
-  MCP-Clients oder eine Weboberfläche geben.
+  MCP-Clients oder eine Weboberfläche geben: Jeder Startweg nimmt die verbotenen Optionen und die Regeln für die
+  Umgebung aus `orchestrator/runtime/server_policy.py`, und ein llama.cpp-Programm wird nur aus einem geprüften
+  Build-Ordner gestartet, nie über `PATH` gefunden.
+- **Die Hardware-Probe gibt es zweimal.** `scripts/hardware_probe.py` ist die eigenständige Datei, die an Geräte
+  geschickt und von Hand ausgeführt wird; `orchestrator/runtime/hardware_probe.py` ist ihre byte-gleiche Kopie im
+  Paket. Ändere das Skript und kopiere es dann (`cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py`);
+  ein Test schlägt fehl, solange die beiden sich unterscheiden.
 - Neue Aktionen für KI-Clients und Ditto sind Tools in `orchestrator/tools/framework_tools.py` mit der richtigen
   Stufe (`read`, `local_write`, `external`). Umgehe nie die Tool-Registry, die Berechtigungen oder das Audit-Log.
 - Das Framework fragt nie nach einem Repository-Token, liest keines und speichert keines. Übergib Arbeit an GitHub
