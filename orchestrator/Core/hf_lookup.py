@@ -14,15 +14,14 @@ import fnmatch
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
+# One licence allowlist and keyword list, one gating map and one file record for every Hugging Face path
+# (builds here, get_hf_model_info and download_hf_file in hf_hub), so a model is classified the same everywhere.
+from orchestrator.Core.hf_hub import HubFile, classify_license, gating
 from orchestrator.utils.helpers import redact_secrets
 
 # What the build engine leaves out when it stages a repository (one list for staging and for the size look-up).
 STAGE_IGNORE = ("*.gguf", "*.onnx", "*.onnx_data", "*.h5", "*.msgpack", "*.ot", "*.tflite", "original/*", "onnx/*")
 PICKLE_PATTERNS = ("*.bin", "*.pt", "*.pth")
-# Licences shown as "permissive" (everything else is "restrictive" when it matches the known list, else "unknown").
-from orchestrator.tools.grants import PERMISSIVE_LICENSES  # noqa: E402 - one allowlist (design 2.4)
-RESTRICTIVE_KEYWORDS = ("non-commercial", "cc-by-nc", "research-only", "llama-2-community", "creativeml-openrail-m",
-                        "llama3", "gemma", "openrail")
 
 
 class HubLookupError(ValueError):
@@ -58,22 +57,10 @@ def weights_type(files: List[str]) -> str:
 
 
 def license_class(license_name: Any) -> Tuple[str, str]:
-    """(licence as text, permissive|restrictive|unknown). A list-valued or missing licence is unknown."""
-    if not isinstance(license_name, str) or not license_name.strip():
-        return ("unknown" if not isinstance(license_name, list) else ", ".join(map(str, license_name))), "unknown"
-    name = license_name.strip().lower()
-    if name in PERMISSIVE_LICENSES:
-        return license_name, "permissive"
-    if any(k in name for k in RESTRICTIVE_KEYWORDS):
-        return license_name, "restrictive"
-    return license_name, "unknown"
-
-
-@dataclass
-class HubFile:
-    name: str
-    size: Optional[int]
-    sha256: Optional[str] = None
+    """(licence as text, permissive|restrictive|unknown), from hf_hub.classify_license: permissive only on the
+    allowlist; a list-valued, missing, `other` or custom licence is unknown."""
+    shown, restrictive = classify_license(license_name)
+    return shown, {"false": "permissive", "true": "restrictive"}.get(restrictive, "unknown")
 
 
 @dataclass
@@ -98,12 +85,6 @@ class ModelFacts:
     @property
     def sizes_known(self) -> bool:
         return all(f.size is not None for f in self.staged)
-
-
-def _gated(value: Any) -> str:
-    if value in ("auto", "manual"):
-        return str(value)
-    return "manual" if value is True else "false"
 
 
 def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any = None) -> ModelFacts:
@@ -135,7 +116,7 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
                                  code="needs_person", next=TOKEN_NEXT)
         raise HubLookupError(f"'{repo}' is a gated model, and the Hugging Face token stored in the framework has no "
                              "access to it.", code="permission_denied", next=TOKEN_NEXT)
-    gated = _gated(getattr(info, "gated", False))
+    gated = gating(getattr(info, "gated", False))
     card = getattr(info, "card_data", None) or getattr(info, "cardData", None) or {}
     get = card.get if hasattr(card, "get") else (lambda k, d=None: getattr(card, k, d))
     license_name = get("license", None)
