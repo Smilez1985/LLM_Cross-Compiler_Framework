@@ -617,3 +617,176 @@ class TestTargetTools:
     def test_without_check_files_nothing_is_checked(self, booted_framework):
         out = booted_framework.tool_registry.call("get_target_capabilities", {"target": "Rockchip"}, ToolContext("mcp"))
         assert not out.checked_files and out.problems == [] and out.trust == "shipped" and not out.untested
+
+
+# --- adversarial review of T5 ----------------------------------------------------------------------------------------
+
+class RedirectingSession:
+    """A registry whose answers are scripted per URL; records every URL, header set and redirect setting."""
+
+    def __init__(self, answers):
+        self.answers, self.calls = answers, []
+
+    def get(self, url, headers=None, timeout=None, stream=False, allow_redirects=True, params=None):
+        self.calls.append((url, dict(headers or {}), allow_redirects))
+        answer = self.answers.get(url.split("?", 1)[0])
+        if answer is None:
+            raise AssertionError(f"unexpected request to {url}")
+        return answer
+
+
+@pytest.fixture
+def public_only(monkeypatch):
+    """Every address counts as public, except the ones on 10.0.0.0/8 (this test's local network)."""
+    from orchestrator.utils import validation
+    monkeypatch.setattr(validation, "validate_public_url",
+                        lambda url: SimpleNamespace(valid="//10." not in url, message="private"))
+
+
+class TestRegistryRedirects:
+    """A registry (any public host an AI names in base_os) must not be able to point the lookup into the local
+    network with a redirect: every hop is checked like the first address, and a bearer token never leaves its host."""
+
+    MANIFEST = "https://registry.example/v2/vendor/img/manifests/1"
+
+    def test_a_manifest_redirect_into_the_local_network_is_not_followed(self, public_only):
+        from orchestrator.utils.image_registry import ImageLookupError, RegistryClient, inspect_image
+        session = RedirectingSession({self.MANIFEST: FakeResponse(307, headers={
+            "Location": "https://10.0.0.5/admin"})})
+        with pytest.raises(ImageLookupError) as exc:
+            inspect_image("registry.example/vendor/img:1", client=RegistryClient(session))
+        assert exc.value.code == "invalid_value" and "not a public address" in str(exc.value)
+        assert [c[0] for c in session.calls] == [self.MANIFEST]
+        assert all(c[2] is False for c in session.calls), "requests must never follow a redirect on its own"
+
+    def test_a_token_service_redirect_into_the_local_network_is_not_followed(self, public_only):
+        from orchestrator.utils.image_registry import ImageLookupError, RegistryClient, inspect_image
+        session = RedirectingSession({
+            self.MANIFEST: FakeResponse(401, headers={"WWW-Authenticate": 'Bearer realm="https://auth.example/token"'}),
+            "https://auth.example/token": FakeResponse(302, headers={"Location": "https://10.1.2.3/token"})})
+        with pytest.raises(ImageLookupError):
+            inspect_image("registry.example/vendor/img:1", client=RegistryClient(session))
+        assert "https://10.1.2.3/token" not in [c[0].split("?")[0] for c in session.calls]
+        assert all(c[2] is False for c in session.calls)
+
+    def test_a_public_redirect_is_followed_without_the_token(self, public_only):
+        from orchestrator.utils.image_registry import RegistryClient, inspect_image
+        body = json.dumps({"schemaVersion": 2, "mediaType": "application/vnd.oci.image.index.v1+json",
+                           "manifests": [{"platform": {"os": "linux", "architecture": "arm64"}}]}).encode()
+        session = RedirectingSession({
+            self.MANIFEST: FakeResponse(401, headers={"WWW-Authenticate": 'Bearer realm="https://auth.example/t"'}),
+            "https://auth.example/t": FakeResponse(200, json.dumps({"token": "anon"}).encode()),
+            "https://cdn.example/m": FakeResponse(200, body)})
+        real = session.get
+
+        def get(url, headers=None, **kw):
+            if url == self.MANIFEST and (headers or {}).get("Authorization"):
+                session.calls.append((url, dict(headers), kw.get("allow_redirects")))
+                return FakeResponse(307, headers={"Location": "https://cdn.example/m"})
+            return real(url, headers=headers, **kw)
+        session.get = get
+        facts = inspect_image("registry.example/vendor/img:1", client=RegistryClient(session))
+        assert facts.digest == "sha256:" + hashlib.sha256(body).hexdigest() and facts.platforms == ("linux/arm64",)
+        cdn = [c for c in session.calls if c[0] == "https://cdn.example/m"]
+        assert cdn and "Authorization" not in cdn[0][1], "the registry's token stays with the registry"
+        assert all(c[2] is False for c in session.calls)
+
+    def test_the_default_session_connects_only_to_public_addresses(self):
+        from orchestrator.Core.crawler_manager import PublicOnlyAdapter
+        from orchestrator.utils.image_registry import RegistryClient
+        session = RegistryClient().session
+        assert isinstance(session.get_adapter("https://registry.example/"), PublicOnlyAdapter)
+
+
+class TestSoftCapsAreNeverHardBlocks:
+    """DECISIONS round 4 item 4: counts of vendor sources, pip packages and downloads are soft caps; going above one
+    is a warning the person overrides, never a refusal (the question's own length is the only bound on the MCP path)."""
+
+    def test_the_generator_refuses_no_count(self):
+        from orchestrator.Core.module_generator import validate_module_data
+        downloads = [{"url": f"https://vendor.example.com/f{i}", "name": f"f{i}", "sha256": "c" * 64,
+                      "size_bytes": 1} for i in range(60)]
+        sources = [{"url": f"https://apt{i}.example.com/debian", "suite": "bookworm", "components": ["main"],
+                    "signed_by_url": f"https://apt{i}.example.com/k.asc", "signed_by_fingerprint": FPR}
+                   for i in range(25)]
+        pips = [f"pkg{i}==1.0" for i in range(250)]
+        out = validate_module_data({"module_name": "Many", "architecture": "aarch64", "pinned_downloads": downloads,
+                                    "package_sources": sources, "pip_packages": pips})
+        assert len(out["pinned_downloads"]) == 60 and len(out["package_sources"]) == 25
+        assert len(out["pip_packages"]) == 250
+
+    def test_the_tool_and_ditto_accept_counts_above_the_old_ceilings(self, booted_framework):
+        from orchestrator.Core.ditto_manager import ModuleDefinition
+        downloads = [{"url": f"https://v.example/f{i}", "name": f"f{i}", "sha256": "c" * 64, "size_bytes": 1}
+                     for i in range(60)]
+        pips = [f"p{i}==1" for i in range(250)]
+        spec = booted_framework.tool_registry.get("create_target_module")
+        spec.input_model.model_validate(module(pinned_downloads=downloads, pip_packages=pips))
+        ModuleDefinition.model_validate({**module(pinned_downloads=downloads, pip_packages=pips), "sdk": "none",
+                                         "cpu_flags": "", "cmake_flags": "", "setup_commands": ""})
+
+
+class TestSamePathForDitto:
+
+    def test_ditto_save_refuses_a_vendor_image_without_a_reason(self, tmp_path, monkeypatch):
+        """llm-cli module generate-ai (Ditto's save_module) follows the same rule as create_target_module: a base
+        image that is not a Docker Official Image needs the AI's reason (DECISIONS round 3 (d))."""
+        from orchestrator.Core import ditto_manager
+        captured = []
+
+        class Generator:
+            def __init__(self, targets_dir):
+                pass
+
+            def generate_module(self, data, framework=None, **kwargs):
+                captured.append(data)
+                return tmp_path / "t"
+        monkeypatch.setattr(ditto_manager, "ModuleGenerator", Generator)
+        coder = ditto_manager.DittoCoder.__new__(ditto_manager.DittoCoder)
+        coder.framework = None
+        vendor = f"ghcr.io/vendor/toolchain:1@{DIGEST}"
+        with pytest.raises(ValueError) as exc:
+            coder.save_module(module(base_os=vendor), tmp_path)
+        assert "base_image_reason" in str(exc.value) and captured == []
+        coder.save_module(module(base_os=vendor, base_image_reason="the vendor ships it only as this image"),
+                          tmp_path)
+        coder.save_module(module(), tmp_path)
+        assert len(captured) == 2
+
+
+class TestProbeBoundToTheQuestion:
+
+    def test_a_probe_that_changed_after_the_question_is_not_used(self, fw, registry_fake):
+        """The runtime block is planned from exactly the probe the person was shown: a probe replaced between the
+        question and the write (e.g. 'local' probed again while the approval waited) stops the write."""
+        from orchestrator.runtime.probe_service import HardwareProbes
+        from orchestrator.runtime.profile import read_profile
+        registry_fake.add_index("library/debian", "bookworm-slim", ["linux/amd64"])
+        probes = HardwareProbes(state(fw))
+        probe_id = probes.import_file(RK3566, "Zero 3W")
+
+        def confirm(spec, inp, *rest):
+            probes.store.save_device(probe_id, read_profile(FIXTURES / "schema2_rk3588_devuan_sysvinit.txt"))
+            return True
+        with pytest.raises(ToolError) as exc:
+            call(fw, "create_target_module", module(probe_id=probe_id), confirm=confirm)
+        assert "probe" in str(exc.value) and exc.value.field == "probe_id"
+        assert not (Path(fw.target_manager.targets_dir) / "orin_board").exists()
+
+
+class TestProbeErrorsNameNoHostPath:
+
+    def test_a_failed_store_of_the_local_probe_names_no_host_path(self, tmp_path, monkeypatch):
+        """The job's error reaches the AI client verbatim: the reason, never the per-user folder's path."""
+        from orchestrator.runtime.probe_service import HardwareProbes, ProbeError
+        from orchestrator.runtime.profile import read_profile
+        probes = HardwareProbes(tmp_path / "state")
+        secret_path = "/home/alice-private/.local/state/llm-framework/hardware/local.txt"
+
+        def full(profile):
+            raise OSError(28, "No space left on device", secret_path)
+        monkeypatch.setattr(probes.store, "save_local", full)
+        with pytest.raises(ProbeError) as exc:
+            probes.run_local(probe=lambda: read_profile(RK3566))
+        assert "No space left on device" in str(exc.value) and "alice" not in str(exc.value)
+        assert secret_path in exc.value.detail, "the person's terminal may still see it"

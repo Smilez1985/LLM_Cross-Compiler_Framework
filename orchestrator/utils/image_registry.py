@@ -23,6 +23,7 @@ from orchestrator.llm.task_prompts import split_image
 
 MAX_MANIFEST_BYTES = 4 * 1024 * 1024
 TIMEOUT = 15.0
+MAX_REDIRECTS = 5
 MANIFEST_TYPES = ", ".join((
     "application/vnd.oci.image.index.v1+json",
     "application/vnd.docker.distribution.manifest.list.v2+json",
@@ -110,24 +111,51 @@ class RegistryClient:
     def __init__(self, session: Any = None, timeout: float = TIMEOUT):
         if session is None:
             import requests
+            from orchestrator.Core.crawler_manager import PublicOnlyAdapter
             session = requests.Session()
             session.trust_env = False  # never a proxy or .netrc credential from the environment
+            adapter = PublicOnlyAdapter()  # connects only to the public address that was checked (DNS rebinding)
+            session.mount("https://", adapter)
+            session.mount("http://", adapter)
         self.session, self.timeout = session, timeout
         self._tokens: Dict[str, str] = {}
 
+    def _fetch(self, url: str, headers: Dict[str, str], params: Optional[Dict[str, str]] = None):
+        """GET with every redirect followed by hand: each hop must be https and public like the first address (a
+        registry must not point the lookup into the local network), and the Authorization header is sent only to
+        the host it was issued for."""
+        host = urllib.parse.urlsplit(url).netloc.lower()
+        for _ in range(MAX_REDIRECTS + 1):
+            _check_public(url)
+            same_host = urllib.parse.urlsplit(url).netloc.lower() == host
+            sent = headers if same_host else {k: v for k, v in headers.items() if k.lower() != "authorization"}
+            response = self.session.get(url, headers=sent, params=params, timeout=self.timeout, stream=True,
+                                        allow_redirects=False)
+            if response.status_code not in (301, 302, 303, 307, 308):
+                return response
+            location = response.headers.get("Location", "")
+            close = getattr(response, "close", None)
+            if callable(close):
+                close()
+            target = urllib.parse.urljoin(url, location)
+            params = None  # the query belongs to the first address; a redirect names its own
+            if not location or not target.startswith("https://"):
+                raise ImageLookupError("The registry redirected the lookup to an address that is not https.",
+                                       code="failed", next=PIN_NEXT)
+            url = target
+        raise ImageLookupError("The registry redirected the lookup too often.", code="failed", next=PIN_NEXT)
+
     def _get(self, url: str, headers: Dict[str, str], repo: str):
-        _check_public(url)
         auth = self._tokens.get(repo)
         sent = dict(headers, **({"Authorization": f"Bearer {auth}"} if auth else {}))
-        response = self.session.get(url, headers=sent, timeout=self.timeout, stream=True, allow_redirects=True)
+        response = self._fetch(url, sent)
         if response.status_code == 401 and not auth:
             challenge = _bearer(response.headers.get("WWW-Authenticate", ""))
             realm = challenge.get("realm", "")
             if not realm.startswith("https://"):
                 raise self._login_needed()
-            _check_public(realm)
             query = {"service": challenge.get("service", ""), "scope": f"repository:{repo}:pull"}
-            token_resp = self.session.get(realm, params={k: v for k, v in query.items() if v}, timeout=self.timeout)
+            token_resp = self._fetch(realm, {}, params={k: v for k, v in query.items() if v})
             if token_resp.status_code != 200:
                 raise self._login_needed()
             try:

@@ -1752,7 +1752,7 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
   (Pflicht), jede Hersteller-Paketquelle mit dem Fingerabdruck ihres Schlüssels, jedes festgelegte pip-Paket und
   jeden Download mit Adresse, Größe und sha256, und den aus der Probe des Boards (`probe_id`) geplanten
   `runtime:`-Block. Die Anzahl der Quellen (3), pip-Pakete (30) und Downloads (5) sind weiche Grenzen: Darüber zu
-  gehen ist eine Warnung in der Frage, die deine Zustimmung aufhebt, nie eine Ablehnung. Das Tool fragt immer (auch
+  gehen ist eine Warnung in der Frage, über die deine Zustimmung hinweggeht, nie eine Ablehnung. Das Tool fragt immer (auch
   wenn du es erlaubt hast), bietet nie „nicht mehr fragen“ an, lehnt einen Namen ab, der sich wie ein vorhandenes
   Target liest (Groß- und Kleinschreibung und Trennzeichen zählen nicht), und nimmt nie ein vorgefertigtes
   llama.cpp. Eine lange Definition wird zu einer ausstehenden Freigabe im Framework, mit bis zu 16.000 Zeichen

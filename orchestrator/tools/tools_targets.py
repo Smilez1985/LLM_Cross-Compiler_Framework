@@ -27,9 +27,9 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from orchestrator.Core.module_generator import (ARCHITECTURES, DEFAULT_BASE, MODULE_NAME_RE, SHIPPED_TEMPLATE,
-                                                ModuleGenerator, effective_base, generator_input, module_slug,
-                                                soft_cap_warnings, target_name_collision, uses_gpu_template,
+from orchestrator.Core.module_generator import (ARCHITECTURES, DEFAULT_BASE, INPUT_LIST_BOUNDS, MODULE_NAME_RE,
+                                                SHIPPED_TEMPLATE, ModuleGenerator, effective_base, generator_input,
+                                                module_slug, soft_cap_warnings, target_name_collision, uses_gpu_template,
                                                 validate_module_data, vendor_fact_lines)
 from orchestrator.runtime.probe_service import (IMPORT_NEXT, LIST_LIMIT, LOCAL_ID, PROBE_TIMEOUT, HardwareProbes,
                                                 ProbeError, match_target)
@@ -146,14 +146,16 @@ class CreateModuleIn(BaseModel):
     supported_boards: List[str] = Field(default_factory=list, max_length=20,
                                         description="Board names of the target; default: the module name")
     packages: List[str] = Field(default_factory=list, max_length=100, description="Debian/Ubuntu package names")
-    package_sources: List[PackageSourceIn] = Field(default_factory=list, max_length=20,
+    package_sources: List[PackageSourceIn] = Field(default_factory=list,
+                                                   max_length=INPUT_LIST_BOUNDS["package_sources"],
                                                    description="Vendor apt repositories with their signing key "
                                                                "(usually at most 3)")
-    pip_packages: List[str] = Field(default_factory=list, max_length=200,
+    pip_packages: List[str] = Field(default_factory=list, max_length=INPUT_LIST_BOUNDS["pip_packages"],
                                     description="Vendor Python packages pinned as name==version (usually at most 30)")
     pip_index_url: str = Field(default="", max_length=300, description="One https package index for pip_packages; "
                                                                        "empty: PyPI")
-    pinned_downloads: List[PinnedDownloadIn] = Field(default_factory=list, max_length=50,
+    pinned_downloads: List[PinnedDownloadIn] = Field(default_factory=list,
+                                                     max_length=INPUT_LIST_BOUNDS["pinned_downloads"],
                                                      description="Vendor files with https address, size and sha256 "
                                                                  "(usually at most 5); never llama.cpp")
     cpu_flags: str = Field(default="", max_length=500, description="Compiler flags such as -mcpu=cortex-a76 "
@@ -213,6 +215,12 @@ MODULE_EXAMPLE = {"module_name": "Orin Nano", "architecture": "aarch64", "base_o
 def definition_sha256(inp: CreateModuleIn) -> str:
     text = json.dumps(inp.model_dump(mode="json"), sort_keys=True, ensure_ascii=False)
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def probe_sha256(profile: Any) -> str:
+    """The fingerprint of a stored probe's values: the module's runtime block is planned from exactly the probe the
+    question named (a probe replaced while an approval waited is not used)."""
+    return hashlib.sha256(profile.to_text().encode("utf-8", "surrogatepass")).hexdigest()
 
 
 # --- registration -------------------------------------------------------------------------------------------------
@@ -442,11 +450,12 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
             validate_module_data({**data, "base_os": pinned_base})
         except ValueError as e:
             raise refuse(str(e), "Fix base_os and call create_target_module again.", field="base_os") from None
-        label = None
+        label, probe_sha = None, ""
         if inp.probe_id:
             try:
                 store = probes()
-                label = store.info(inp.probe_id, store.get(inp.probe_id)).label
+                profile = store.get(inp.probe_id)
+                label, probe_sha = store.info(inp.probe_id, profile).label, probe_sha256(profile)
             except ProbeError as e:
                 raise ToolError(str(e), code=e.code, next=e.next, field="probe_id") from None
         warnings = soft_cap_warnings(data)
@@ -483,7 +492,7 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
         facts.append(Fact("Untested", "Nobody here may have run this module on the board; builds of it warn that it "
                                       "is untested and AI-generated."))
         bound = {"base_os": pinned_base, "image": pinned, "definition": definition_sha256(inp),
-                 "probe_id": inp.probe_id or ""}
+                 "probe_id": inp.probe_id or "", "probe_sha256": probe_sha}
         return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, cap=Decision.ASK.value)
 
     def create_target_module(inp: CreateModuleIn, ctx: ToolContext) -> CreateModuleOut:
@@ -499,6 +508,10 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
                 profile = probes().get(inp.probe_id)
             except ProbeError as e:
                 raise ToolError(str(e), code=e.code, next=e.next, field="probe_id") from None
+            if probe_sha256(profile) != bound.get("probe_sha256"):
+                raise ToolError(f"The probe {inp.probe_id} changed after the person was asked; nothing was written.",
+                                code="failed", field="probe_id",
+                                next="Call create_target_module again, so the person sees the current probe.")
         root = targets_dir()
         try:
             folder = ModuleGenerator(root).generate_module(data, None, profile=profile)

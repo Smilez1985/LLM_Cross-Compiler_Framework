@@ -116,9 +116,12 @@ def target_name_collision(targets_dir: Path, *names: str) -> Optional[str]:
 # downloads. The framework's Dockerfile template renders them during the image build (which runs with network); the
 # AI's shell fields may still not download. Security checks are hard (https, pinned versions, sha256 and size, key
 # fingerprints); the counts are soft caps: going above one is shown as a warning in the question and needs the
-# person's approval, never a refusal. The technical ceilings below only bound the size of a question.
+# person's approval, never a refusal. No count is refused here; over MCP the question's own length (16,000
+# characters, every entry shown) is the only bound.
 SOFT_CAPS = {"package_sources": 3, "pip_packages": 30, "pinned_downloads": 5}
-CEILINGS = {"package_sources": 20, "pip_packages": 200, "pinned_downloads": 50}
+# Sanity bounds of the input models (MCP tool, Ditto's ModuleDefinition), far above what one question can show, so
+# they never decide before the question's length does.
+INPUT_LIST_BOUNDS = {"package_sources": 200, "pip_packages": 2000, "pinned_downloads": 200}
 HTTPS_URL_RE = re.compile(r"^https://[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?(?::\d{1,5})?"
                           r"(?:/[A-Za-z0-9._~%/+=-]*)?$")
 APT_SUITE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$")
@@ -228,10 +231,6 @@ def _validate_vendor_fields(data: Dict[str, Any], out: Dict[str, Any], problems:
         names.add(name)
         downloads.append({"url": url, "name": name, "sha256": sha, "size_bytes": size})
     out["pinned_downloads"] = downloads
-
-    for key, ceiling in CEILINGS.items():
-        if len(out[key]) > ceiling:
-            problems.append(f"{key}: at most {ceiling} entries fit into one module definition")
 
     assumptions = data.get("assumptions") or []
     assumptions = [assumptions] if isinstance(assumptions, str) else list(assumptions)
