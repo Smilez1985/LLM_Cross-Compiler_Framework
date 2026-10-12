@@ -14,8 +14,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   installiertes Community-Rezept genau wie festgelegt (das Modell beim Commit des Rezepts, Target, Format, Board,
   Quantisierung, Importance-Matrix, Kontextlänge) über den zweistufigen Weg von `start_build` (dieselbe Frage,
   Speicherreservierung, Kontingente und derselbe Umfang für Daueraufträge; `BuildService.start_recipe`). Ein
-  Kalibrierungsdatensatz wird nur genommen, wenn das Rezept einen nennt, und muss genau diese Datei sein; ein nach
-  der Frage geändertes Rezept wird nicht gebaut. Die Ressource zeigt den zwischengespeicherten Index und die
+  Kalibrierungsdatensatz wird nur genommen, wenn das Rezept einen nennt, und muss genau diese Datei sein; die Frage
+  zeigt Importance-Matrix und Kontextlänge, und ein nach der Frage in irgendeinem Feld geändertes Rezept wird nicht
+  gebaut. Die Ressource zeigt den zwischengespeicherten Index und die
   installierten Packs wie `list_packs`, nie aktualisiert.
 - **Ein bestätigter Build gibt den Build-Dauerauftrag für Packs frei, die unter einem installiert wurden**
   (MCP-Design 6.10): ein Target- oder Rezept-Pack, das eine KI unter einem Dauerauftrag installiert hat, wird
@@ -959,6 +960,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Reservierung, die ein anderer Prozess zwischen Frage und Start genommen hat, mitzählt (vorher nur eine Momentaufnahme
   zur Zeit der Frage). `add_pack_from_index` nimmt jetzt überhaupt eine Reservierung und zählt die Reservierungen
   anderer Aufrufe schon vor der Frage.
+- **Die Build-Frage nennt jedes Basis-Image des Targets**: vorher zeigte ein Build auf einem nicht mitgelieferten
+  Target nur das erste `FROM` seines obersten Dockerfiles, so dass ein Hersteller-Image einer späteren Stufe
+  (`COPY --from`, `RUN --mount=...,from=`) oder eines anderen Dockerfiles nie gezeigt, von einem bestätigten Build
+  aber für den Build-Dauerauftrag als bestätigt vermerkt wurde. Jetzt wird jedes Image jedes Dockerfiles einzeln
+  gezeigt (Registry, Digest, offiziell oder nicht), auch bei einem mitgelieferten Target, das ein Image außerhalb
+  der Docker Official Images zieht.
 - **GitHub-CLI und git der Pull-Request-Übergabe lesen nie stdin** (`stdin=DEVNULL`, G25): über stdio ist stdin
   des MCP-Servers der Protokollstrom.
 - **Per Digest festgelegte Images in einem Deployment-Paket starten auf einem Board ohne Netz**: Ein über seinen

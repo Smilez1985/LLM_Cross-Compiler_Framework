@@ -14,7 +14,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   community recipe exactly as pinned (the model at the recipe's commit, target, format, board, quantization,
   importance matrix, context length) through the two-phase path of `start_build` (same question, disk reservation,
   quotas and standing-approval scope; `BuildService.start_recipe`). A calibration dataset is taken only when the
-  recipe names one and must be exactly that file; a recipe changed after the question is not built. The resource
+  recipe names one and must be exactly that file; the question shows the importance matrix and context length, and
+  a recipe changed in any field after the question is not built. The resource
   shows the cached index and the installed packs as `list_packs` does, never refreshed.
 - **A confirmed build unlocks a build standing approval for packs installed under one** (MCP design 6.10): a target
   or recipe pack an AI installed under a standing approval is asked about until the person confirms one build of it
@@ -842,6 +843,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   10 % reserve inside the reservation ledger every framework process shares, so a reservation another process took
   between the question and the start is counted (before, only a snapshot at question time). `add_pack_from_index`
   now takes a ledger reservation at all and counts other calls' reservations before the question.
+- **The build question lists every base image of the target**: before, a build on a target that is not shipped
+  showed only the first `FROM` of its top-level Dockerfile, so a vendor image pulled by a later stage (`COPY
+  --from`, `RUN --mount=...,from=`) or by another Dockerfile was never shown, yet a confirmed build remembered it as
+  confirmed for the build standing approval. Every image of every Dockerfile is now shown one by one (registry,
+  digest, official or not), also for a shipped target that pulls an image outside the Docker Official Images.
 - **The GitHub CLI and git of the pull-request handoff never read stdin** (`stdin=DEVNULL`, G25): over stdio the
   MCP server's stdin is the protocol stream.
 - **Digest-pinned images in a deployment package start on an air-gapped board**: an image pulled by its digest has

@@ -732,6 +732,13 @@ class BuildService:
         return request, recipe, prov
 
     @staticmethod
+    def recipe_digest(recipe) -> str:
+        """sha256 of every field of a recipe (canonical JSON): the recipe the person was asked about is the one that
+        is built, including the importance matrix, context length and dataset the question showed."""
+        text = json.dumps(recipe.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    @staticmethod
     def check_recipe_dataset(recipe, dataset_file: Optional[str]) -> None:
         """The calibration dataset must be exactly the file the recipe pins (its sha256)."""
         import hmac
@@ -762,6 +769,8 @@ class BuildService:
             now = {"model": request.model, "revision": request.revision, "target": validated.target,
                    "format": validated.format, "board": validated.board, "quantization": validated.quantization}
             changed = [k for k, v in now.items() if str(v or "").casefold() != str(expect.get(k) or "").casefold()]
+            if not changed and self.recipe_digest(recipe) != str(expect.get("recipe_sha256") or ""):
+                changed = ["recipe"]  # any other field (importance matrix, context length, dataset, target pin)
             if changed:
                 raise BuildServiceError(f"The recipe {recipe.id} changed after the question ({', '.join(changed)}); "
                                         "nothing was started.", code="failed",

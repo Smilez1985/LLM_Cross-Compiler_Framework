@@ -59,6 +59,9 @@ class BuildPlan:
     image_build: str = ""
     base_image: str = ""
     base_image_class: str = ""
+    # (file, image) of every image the target's Dockerfiles build from, shown in the question one by one; only these
+    # (and Docker Official Images) can be remembered by a confirmed build
+    base_images: List[Tuple[str, str]] = field(default_factory=list)
     sandbox: bool = True
     hub_problem: str = ""        # Hugging Face could not be asked (network): sizes and commit unknown
     grant: Optional[Dict[str, Any]] = None  # facts for grants.BUILD_RULE; None: outside every standing approval
@@ -135,7 +138,11 @@ class BuildPlan:
                                                               if self.support_level else "")
                           + (f"; {self.trust_note}" if self.trust_note else "")))
         facts.append(Fact("Image build", self.image_build))
-        if self.base_image:
+        if self.base_images:
+            from orchestrator.tools.tools_community import base_image_line
+            for file, image in self.base_images:
+                facts.append(Fact(f"Base image ({file})", base_image_line(image), TARGET_TEXT))
+        elif self.base_image:
             facts.append(Fact("Base image", f"{self.base_image} ({self.base_image_class})", TARGET_TEXT))
         facts.append(Fact("Sandbox", "the conversion runs without network, capabilities or root (build_sandbox)"
                           if self.sandbox else "build_sandbox is off"))
@@ -284,16 +291,26 @@ def _local_weights(path: Path) -> str:
     return "other"
 
 
-def _target_images(target_folder: Optional[Path]) -> List[str]:
-    """Every image the target's Dockerfiles build from (FROM, COPY --from, RUN --mount from), as the pack question
-    showed them; [] without a Dockerfile."""
+def _target_image_pairs(target_folder: Optional[Path]) -> List[Tuple[str, str]]:
+    """(file, image) for every image the target's Dockerfiles build from (FROM, COPY --from, RUN --mount from), as
+    the pack question showed them; [] without a Dockerfile."""
     if target_folder is None:
         return []
     try:
         from orchestrator.tools.tools_community import pack_base_images
-        return list(dict.fromkeys(image for _, image in pack_base_images(Path(target_folder))))
+        return list(pack_base_images(Path(target_folder)))
     except Exception:  # noqa: BLE001 - images that cannot be read are no official images
-        return ["?"]
+        return [("Dockerfile", "?")]
+
+
+def _official(image: str) -> bool:
+    return registry_class(image) == "Docker Official Image" and "$" not in image and image != "?"
+
+
+def _target_images(target_folder: Optional[Path], pairs: Optional[List[Tuple[str, str]]] = None) -> List[str]:
+    """Every image the target's Dockerfiles build from, once each."""
+    pairs = _target_image_pairs(target_folder) if pairs is None else pairs
+    return list(dict.fromkeys(image for _, image in pairs))
 
 
 def confirm_record(plan: "BuildPlan", framework, target_folder: Optional[Path],
@@ -309,8 +326,10 @@ def confirm_record(plan: "BuildPlan", framework, target_folder: Optional[Path],
             pack_sha = str(getattr(provenance, "pack_sha256", "") or "")
     except Exception:  # noqa: BLE001
         pass
+    # every image outside the Docker Official Images is in plan.base_images, so in the question the person answered
+    images = _target_images(target_folder, plan.base_images or None)
     record = {"target": plan.request.target, "installed_via": installed_via, "pack_sha256": pack_sha,
-              "base_images": _target_images(target_folder)}
+              "base_images": images}
     if recipe:
         record["recipe"] = {"id": recipe.get("id"), "installed_via": recipe.get("installed_via") or "",
                             "pack_sha256": recipe.get("pack_sha256") or ""}
@@ -356,7 +375,7 @@ def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[P
                and not (store is not None and store.confirmed(p[0], p[1], installed_via=p[2], pack_sha256=p[3]))]
     images = record["base_images"]
     official = bool(images) and all(
-        registry_class(i) == "Docker Official Image" and "$" not in i or
+        _official(i) or
         (store is not None and store.image_confirmed(record["target"], i, installed_via=record["installed_via"],
                                                      pack_sha256=record["pack_sha256"]))
         for i in images)
@@ -425,9 +444,12 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
             pass
     plan.image_build = ("a Docker image for the target is built first if none exists yet; the image build runs with "
                         "network access on this computer, outside the build sandbox (size unknown, first build only)")
-    if plan.support_level != "official" or plan.target_trust != "shipped":
+    pairs = _target_image_pairs(target_folder)
+    if plan.support_level != "official" or plan.target_trust != "shipped" or not all(_official(i) for _, i in pairs):
         plan.base_image = _base_image(target_folder)
         plan.base_image_class = registry_class(plan.base_image) if plan.base_image else ""
+        # every image, not only the first FROM: a later stage can pull a vendor image too (DECISIONS round 3)
+        plan.base_images = pairs
 
     # sandbox
     plan.sandbox = bool(_config(framework, "build_sandbox", True))

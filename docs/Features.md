@@ -1225,7 +1225,8 @@ framework never sees it.
   disk falls below half the reserve (reason `insufficient_resources`). A standing approval ("yes, and do not ask
   again") is offered for builds on shipped or verified targets with safetensors or GGUF weights, an ungated model
   whose base model is not gated either, a licence on the permissive allowlist (or a local file), Docker Official
-  base images (or a digest-pinned base image you already confirmed in a build of that target), up to the size class
+  base images (or a digest-pinned base image you already confirmed in a build of that target; the question of a
+  build on a target that is not shipped lists every image of every Dockerfile, also later stages), up to the size class
   you choose, and only when the disk keeps the larger reserve of 20 GiB or 10 %. That larger reserve is checked again
   when the build starts, inside the reservation ledger every framework process shares and under its lock, so a
   reservation another process took meanwhile is counted; if it no longer holds, nothing starts and the next call
@@ -2048,9 +2049,10 @@ and leave this computer only as a local file you publish yourself.
 - **`start_recipe_build`** (local write): builds an installed recipe exactly as it is pinned: its Hugging Face model
   at the recipe's commit, target, format, board, quantization, importance matrix and context length. It takes the
   same two-phase path as `start_build` (the question shows the recipe, whether the installed target is the one the
-  recipe was made with, the commit, download size, disk, hardware estimate, licence, gating and image build; the
+  recipe was made with, its importance matrix and context length, the commit, download size, disk, hardware
+  estimate, licence, gating and image build; the
   same disk reservation and quotas). `dataset_path` only when the recipe names a calibration dataset, and then it
-  must be exactly that file (sha256). A recipe changed after the question is not built. "Yes, and do not ask again"
+  must be exactly that file (sha256). A recipe changed in any field after the question is not built. "Yes, and do not ask again"
   has the scope of `start_build`; a recipe installed under a standing approval is covered only after you confirmed
   one build of it. The resource `lcf://packs/index` shows the cached index and the installed packs (as `list_packs`,
   never refreshed).
