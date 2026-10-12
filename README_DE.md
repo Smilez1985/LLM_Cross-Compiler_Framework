@@ -143,6 +143,22 @@ Verknüpfung startet `start_framework.bat` und damit die GUI.
 
 Konvertierungen auf einem Windows-Host sind noch nicht geprüft (siehe [Bekannte Lücken](#bekannte-lücken)).
 
+### In einem Container (Server, NAS, Proxmox)
+
+Kein Framework-Image wird veröffentlicht oder geladen: Du baust das Image auf deinem eigenen Computer, und es führt im
+Container dieselbe Installation aus wie oben (`install.sh`), aus genau den Dateien, die das Repository ausliefert. Es
+ist ohne Oberfläche (CLI und MCP-Server); die GUI ist eine ausdrückliche Option.
+
+```bash
+make build      # scripts/build_container_image.sh: prüft Docker, baut lcf-framework:local hier, zeigt, wie du es startest
+make up         # startet den Container lcf-framework; deine Daten liegen im Volume lcf-data
+docker exec -it lcf-framework llm-cli doctor
+```
+
+KI-Clients erreichen seinen MCP-Server über stdio (`docker exec -i lcf-framework llm-cli mcp serve`, von einem
+anderen Computer per SSH zum Host). Der Container baut selbst keine Modelle (er enthält kein Docker). Einrichtung,
+Tresor für Zugangsdaten, Daten, GUI und Updates: [docs/Container_Setup_DE.md](docs/Container_Setup_DE.md).
+
 ### `llm-cli` aufrufen
 
 Die Installer legen `llm-cli` nicht in deinen PATH. Nimm das Python des Frameworks im Installationsordner:
@@ -500,12 +516,16 @@ der `config.yml` (oder die Umgebungsvariable `LLM_FRAMEWORK_AI_PROVIDER`).
 Modell gut genug ist; `--kind retrieval` bewertet stattdessen die Suche in der Wissensbasis. Einzelheiten und
 Messungen: [docs/Features_DE.md](docs/Features_DE.md#ditto-evaluation).
 
-**Ditto für ein Framework, das anderswo läuft** (zum Beispiel im Headless-Docker-Image): Lege dort ein Token mit
-`llm-cli mcp token add ditto-laptop --link ditto` an, dann hier `llm-cli ditto remote set --transport stdio --command
-"docker exec -i <container> llm-cli mcp serve"` (das Token wird ohne Echo abgefragt). Ditto nutzt dann die Tools jenes
-Frameworks mit seinen eigenen Berechtigungen dort; `llm-cli ditto remote off` schaltet zurück. In der GUI wird
-dasselbe unter Configure AI Agent (Ditto) im Abschnitt „Ditto's tools“ eingestellt (das Token landet im Tresor und
-wird nie wieder angezeigt). Einzelheiten:
+**Ditto und das Framework auf einem anderen Computer** (optional): Ist das Framework auch auf einem zweiten
+Computer installiert (ein stärkerer Build-PC, ein Server), kann Ditto es über den MCP-Server jener Installation
+nutzen. Docker ist nicht nötig, SSH genügt. Lege dort ein Token mit `llm-cli mcp token add ditto-laptop --link ditto`
+an und starte dort `llm-cli mcp serve --transport http`; öffne hier einen Tunnel mit
+`ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box` und führe `llm-cli ditto remote set --transport http --url
+http://127.0.0.1:8765/mcp` aus (das Token wird ohne Echo abgefragt). Ditto nutzt dann die Tools jenes Computers mit
+seinen eigenen Berechtigungen dort; die Dateien dieses Computers bleiben, wie sie sind, und `llm-cli ditto remote off`
+schaltet zurück. In der GUI wird dasselbe unter Configure AI Agent (Ditto) im Abschnitt „Another computer
+(optional)“ eingestellt (das Token landet im Tresor und wird nie wieder angezeigt). Einzelheiten:
+[docs/Features_DE.md](docs/Features_DE.md#ditto-und-ein-framework-auf-einem-anderen-computer) und
 [docs/CLI_Usage_DE.md](docs/CLI_Usage_DE.md#ditto-remote).
 
 ---
@@ -692,11 +712,9 @@ Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Feat
 
 ## Bekannte Lücken
 
-- **Docker-Setup des Frameworks selbst:** `Docker Setup/` und die Makefile-Ziele `make setup`, `make build`,
-  `make up`, `make gui` und `make test-container` funktionieren nicht (die angegebenen Dateien
-  `scripts/setup_linux.sh` und `orchestrator/Dockerfile` gibt es nicht). Ein gehärtetes Image ohne Oberfläche für
-  CLI und MCP-Server wird gerade gebaut ([Roadmap](docs/BLUEPRINT_DE.md#roadmap)). Die Konvertierungen selbst
-  laufen in Docker und sind nicht betroffen.
+- **Das Framework im Container baut keine Modelle:** Das Image, das du mit `make build` baust, enthält kein
+  Docker; Konvertierungen laufen deshalb auf einem Computer, auf dem das Framework direkt installiert ist
+  ([docs/Container_Setup_DE.md](docs/Container_Setup_DE.md#8-grenzen)).
 - **Windows-Hosts:** Die Testsuite läuft in der CI unter Windows, Konvertierungen auf einem Windows-Host sind aber
   nicht geprüft.
 - **Anmeldung im Browser und bei Cloud-Plattformen** (OAuth, AWS, Google Cloud, Azure) gibt es noch nicht; Ditto
@@ -716,8 +734,7 @@ Die Roadmap führt auf, was geplant ist; Erledigtes wandert beim Release in den 
 
 - **In Arbeit:** die übrigen Anmeldeverfahren je Zugangsart, Anmeldung im Browser und Cloud-Plattformen
   (API-Schlüssel, lokale Engines und das `ant`-Profil funktionieren in der GUI und mit `llm-cli ditto login`; der
-  Claude-Abo-Anbieter ist entfernt, und Claude-Abonnenten nutzen MCP oder einen API-Schlüssel); ein gehärtetes Docker-Image ohne Oberfläche für CLI und
-  MCP-Server; eine neue Ditto-Evaluation mit den verbesserten Prompts; die selbst gebaute llama.cpp-Laufzeit auf dem
+  Claude-Abo-Anbieter ist entfernt, und Claude-Abonnenten nutzen MCP oder einen API-Schlüssel); eine neue Ditto-Evaluation mit den verbesserten Prompts; die selbst gebaute llama.cpp-Laufzeit auf dem
   Board (die Kommandozeile funktioniert; die GUI, die MCP-Werkzeuge und ein Lauf auf einem echten Board folgen).
 - **Geplant:** Targets für NVIDIA-GPUs und AMD (Ryzen Z1 Extreme), weitere Formate, LoRA und große Modelle sowie
   eine gehärtete Lieferkette.
@@ -734,6 +751,7 @@ Vollständige Liste: [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md#roadmap).
 | [docs/Features_DE.md](docs/Features_DE.md) | Funktionen im Detail: Build-Pipeline, Sandbox, Ditto, Evaluation, lokale Laufzeit, Wissensbasis, Deep Ingest, MCP, Community-Zoo |
 | [docs/BLUEPRINT_DE.md](docs/BLUEPRINT_DE.md) | Architektur und Roadmap |
 | [docs/Module_Developer_Guide_DE.md](docs/Module_Developer_Guide_DE.md) | Ein neues Hardware-Target hinzufügen |
+| [docs/Container_Setup_DE.md](docs/Container_Setup_DE.md) | Das Framework in einem Container, den du selbst baust (Server, NAS, Proxmox) |
 | [CHANGELOG_DE.md](CHANGELOG_DE.md) | Was sich in jeder Version geändert hat |
 | [CONTRIBUTING_DE.md](CONTRIBUTING_DE.md) | Entwicklungsumgebung, Tests, Konventionen |
 | [configs/SSOT_ARCHITECTURE_DE.md](configs/SSOT_ARCHITECTURE_DE.md) | Projektquellen (Single Source of Truth) |

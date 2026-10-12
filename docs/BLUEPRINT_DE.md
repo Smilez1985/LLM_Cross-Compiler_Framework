@@ -415,7 +415,8 @@ Cloud-Anbieter geht, werden persönliche Angaben durch Platzhalter ersetzt.
 6. **Verlauf.** Die fertige Runde wird an `chat_history.json` angehängt. Ein langes Gespräch wird zusammengefasst
    und als neues Gespräch fortgesetzt; frühere Runden werden nie verändert.
 7. **MCP-Client-Modus** (`llm-cli ditto remote set`). Statt aus der Registry im Prozess kommen die Tools vom
-   MCP-Server eines Frameworks, das anderswo läuft, mit einem benannten Token, das dort mit Dittos Berechtigungen
+   MCP-Server des Frameworks, das auf einem anderen Computer installiert ist (dasselbe Programm; Docker ist nicht
+   nötig, SSH oder eine Serveradresse genügt), mit einem benannten Token, das dort mit Dittos Berechtigungen
    verknüpft ist (`--link ditto`): Jener Server entscheidet, fragt und protokolliert (Akteur `mcp:<Token-Name>`).
    Eine Tool-Quelle pro Unterhaltung; jedes entfernte Ergebnis, jeder Fehler und jede Rückfrage sind nicht
    vertrauenswürdige Daten; Dittos Dialog nennt den Server. Ohne Token startet der Modus nicht. Dittos Aufgaben
@@ -843,11 +844,10 @@ jedes davon erreichen kann. Die Tabelle nennt jede Bedrohung, den Schutz und wo 
 
 Das sind echte Einschränkungen des aktuellen Stands. Die meisten sind in der [Roadmap](#roadmap) eingeplant.
 
-- **Das Docker-Setup für das Framework selbst ist kaputt.** `Docker Setup/docker-compose.yml` baut aus
-  `orchestrator/Dockerfile`, die es nie gegeben hat; deshalb scheitern die Makefile-Ziele `build`, `up`, `gui`,
-  `test-container` und `audit`, und `build`, `up` und `gui` rufen außerdem das fehlende `scripts/setup_linux.sh`
-  auf. Installiere das Framework stattdessen direkt auf dem Host. Ein gehärtetes Image ohne Oberfläche (CLI und
-  MCP-Server) entsteht gerade für 3.1.0.
+- **Das Framework im Container baut keine Modelle.** Das Image, das du mit `make build` baust
+  ([Container-Einrichtung](Container_Setup_DE.md)), enthält kein Docker; Konvertierungen laufen deshalb auf einem
+  Computer, auf dem das Framework direkt installiert ist. Den Docker-Socket des Hosts in den Container zu geben wird
+  nicht angeboten.
 - **Die Anmeldung umfasst bisher API-Schlüssel, lokale Engines und das `ant`-Profil** (der Anmeldebereich der GUI
   und `llm-cli ditto login`). Eine Anmeldung im Browser und Anmeldeketten von Cloud-Plattformen gibt es noch
   nicht. Bei Anthropic wird ein Profil von `ant auth login` nur genutzt, wenn du es wählst. Die übrigen
@@ -982,7 +982,7 @@ dieser Version.
 | **Ditto-Evaluation.** `llm-cli ditto eval` mit festen, nach Regeln bewerteten Fällen, je Anbieter oder lokaler Modellstufe. Die erste Messung hat Lücken in Dittos Prompts gefunden; sie sind behoben, eine neue Messung läuft. | fertig |
 | **Anmeldung je Zugangsart** für alle gängigen Cloud- und API-Anbieter und für lokale Engines (Einzelheiten unten). | in Arbeit |
 | **Entfernung des Anbieters `claude_code`.** Anthropic erlaubt Drittanbieter-Apps die Anmeldung mit einem Claude-Abo nicht. Wer ein Claude-Abo hat, nutzt das Framework aus Claude Code oder Claude Desktop über den MCP-Server (`llm-cli mcp config` zeigt die Einrichtung) oder gibt Ditto einen Anthropic-API-Schlüssel; die Tarife Max und Team enthalten monatliches API-Guthaben. | fertig |
-| **Gehärtetes Docker-Image ohne Oberfläche** für die CLI und den MCP-Server, mit funktionierender Compose-Datei und Makefile-Zielen; ersetzt das kaputte `Docker Setup/`. | in Arbeit |
+| **Das Framework in einem Container, lokal gebaut.** Kein Framework-Image wird veröffentlicht oder geladen: `scripts/build_container_image.sh` (`make build`) baut das Image auf deinem Computer, indem es aus den ausgelieferten Dateien dieselbe Installation ausführt wie auf dem Rechner selbst (`install.sh`); standardmäßig CLI und MCP-Server ohne Oberfläche, die GUI nur als Option; eine funktionierende Compose-Datei, Makefile-Ziele und eine Bauanleitung ([Container-Einrichtung](Container_Setup_DE.md)). | fertig |
 | **Dokumentation auf Englisch und Deutsch** für jedes Dokument. | in Arbeit |
 | **Crawler, der die eigenen Signale der Seite prüft.** Ob eine Seite ausgewertet werden darf, kann ein Nutzer nicht wissen. Deshalb prüft der Crawler die maschinenlesbaren Nutzungsvorbehalte selbst (robots.txt nach RFC 9309, den Header `X-Robots-Tag`, Robots-Meta-Tags einschließlich `noai` und seines eigenen Bot-Namens, das TDM Reservation Protocol) und überspringt vorbehaltene Seiten mit Nennung im Log; jeder Vorbehalt gewinnt, und keine Prüfung lässt sich abschalten. Statt einer rechtlichen Bestätigung erklärt ein einmaliger Hinweis (je Benutzer, erneut, wenn sich sein Text ändert), was gelesen und behalten wird, mit Sprachansage über die Sprachausgabe des Betriebssystems (die Technik des USB-Watchers aus rag4ll); ein Stopp-Knopf behält das Gespeicherte, der Fortschritt zeigt „Seite N von M“, das Ergebnis nennt ehrlich Erfolg, Teilerfolg oder Fehler, und der Crawler meldet seine echte Version. Eine Person startet Deep Ingest in der GUI oder bestätigt das `crawl_docs_site` eines KI-Clients (unveröffentlicht). | fertig |
 | **Eingabe-Historie**: zuletzt verwendete Modelle, Targets, Boards, URLs, Geräte und Datensätze als Auswahl in den GUI-Feldern, je Benutzer, ohne Geheimnisse; Tools > Eingabeverlauf löschen... vergisst sie. | fertig |
