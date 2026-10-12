@@ -138,8 +138,10 @@ class StopOut(ToolOutput):
     stopped_processes: int
 
 
-# A path in an error text: absolute (POSIX or a Windows drive) or starting with ~/; never part of a URL or a word.
-_PATH_TOKEN = re.compile(r"(?<![\w:/.~-])(?:~/|/|[A-Za-z]:[\\/])[^\s'\"`,;()\[\]<>]+")
+# A path in an error text: absolute (POSIX or a Windows drive) or starting with ~/; never part of a word or of a URL's
+# "//host/..." (a single slash after a colon is a path: "file:/home/...", "user@board:/home/...").
+_PATH_TOKEN = re.compile(r"(?<![\w/.~-])(?:~/|/(?!/)|[A-Za-z]:[\\/])[^\s'\"`,;()\[\]<>]+")
+_PATH_END = "[^\\s'\"`,;()\\[\\]<>]*"
 
 
 def label_paths(text: str, roots: Dict[str, str]) -> str:
@@ -160,7 +162,14 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
         name = re.split(r"[/\\]", token.rstrip("/\\"))[-1]
         return (name or "a folder") + tail
 
-    return _PATH_TOKEN.sub(one, text or "")
+    text = _PATH_TOKEN.sub(one, text or "")
+    # What the token rule cannot see (a "file:///home/..." URL): any path left in the home folder, by its file name.
+    home = str(Path.home())
+    if home and home not in ("/", "\\"):
+        text = re.sub(re.escape(home) + r"(?:[/\\]" + _PATH_END + ")?",
+                      lambda m: (re.split(r"[/\\]", m.group(0).rstrip("/\\"))[-1] if m.group(0) != home
+                                 else "the home folder"), text)
+    return text
 
 
 # --- registration ---------------------------------------------------------------------------------------------------

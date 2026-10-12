@@ -35,7 +35,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   a module proposal and the analysis of a remote build by its request id take their context (target formats, build
   log, documentation and knowledge excerpts) from that framework's MCP prompts `recommend_build_settings`,
   `add_board` and `diagnose_build_failure`, under Ditto's own task text, as untrusted data; a prompt the server does
-  not offer is named with the next step.
+  not offer is named with the next step. A model file on this computer reaches that framework by its file name only.
 - **A deploy's end in the audit log**: when a `deploy_to_device` job ends (done, failed or cancelled), its own end
   entry with the job, the device's label and the device state is written, linked to the call's `started` entry.
 - **Optional tools `delete_artifact` and `restore_knowledge_snapshot`** (MCP design T10): delete one built model
@@ -1092,7 +1092,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   so a catalog model cannot be swapped for an untrusted one between the check and a native run without consent.
 - **Board and local runtime tool errors name no host path**: paths in their messages appear as the framework's
   folder labels (`state:...`, `cache:...`, `output:...`, `models:...`) or as a file name only, never as a host path
-  or `~/...`.
+  or `~/...` (also after a colon, as in `file:/...` or `user@board:/...`, and inside a `file:///` URL).
 - **robots.txt can no longer be switched off through crawl options**: the crawler takes only its own option keys
   (pages, depth, delay, PDFs, languages) and ignores any other key, including `respect_robots`, with a log line; the
   switch for tests with a fake web is a separate keyword-only flag that no product code passes (a guard test checks
