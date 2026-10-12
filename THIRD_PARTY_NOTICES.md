@@ -16,6 +16,12 @@ toolkits are installed by the user from their vendors under the vendors' own lic
 accepts a licence on the user's behalf. The GPU target template downloads NVIDIA's CUDA components (CUDA Toolkit
 licence, LICENSE in each archive) while the user builds that image; the framework ships none of them.
 
+A device tarball (`llm-cli device runtime build`) carries this notice as `LICENSE-llama.cpp`. A tarball of an
+OpenMP build also holds `lib/libgomp.so.1`, the OpenMP runtime from the GCC packages of the builder image's base
+distribution, under the GNU GPL version 3 with the GCC Runtime Library Exception; its source is in that
+distribution's archive. The framework passes none of these files on itself: tarballs are built on the user's
+machine for the user's devices, and whoever passes one on to others passes these licences on with it.
+
 ```
 MIT License
 

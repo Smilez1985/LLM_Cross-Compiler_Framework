@@ -17,6 +17,9 @@ Two placements on Linux:
   user, process and memory limits). The verified source and the toolchain file are mounted read-only; only the
   build, home and tmp folders are writable, and what the host reads back afterwards never follows a link out of
   them (cross builds are never run on the host, so this sandbox is all that stands between their build and it).
+  A build whose binaries leave the builder (a device build, decision D7) also gets the runtime libraries the plan
+  names (libgomp.so.1 of an OpenMP build) from the builder image's own toolchain, copied next to the programs, which
+  find them through their $ORIGIN RUNPATH; the verification then checks them like the programs.
 
 No command carries a licence-accept flag, and nothing is installed on the host. Windows, macOS, CUDA and ROCm builds
 follow in later work packages; the executor refuses them with a message instead of guessing.
@@ -54,6 +57,9 @@ _SAFE_PATH_DIRS = ("/usr/local/bin", "/usr/bin", "/bin")
 _RE_BUILD_ID = re.compile(r"^[0-9a-f]{64}$", re.ASCII)
 _RE_SHARED = re.compile(r"\.so(\.\d+)*$", re.ASCII)
 _RE_IMAGE = re.compile(r"^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]{1,128})?@sha256:[0-9a-f]{64}$", re.ASCII)
+# The runtime libraries a plan may ask for (verify.runtime_libs) and where the toolchain may say they are.
+RUNTIME_LIBS = frozenset({"libgomp.so.1"})
+_RE_CONTAINER_PATH = re.compile(r"^/[A-Za-z0-9._+/-]{1,512}$", re.ASCII)
 
 # (argv, cwd, env, log file, timeout) -> exit code; -1 when it could not start or was stopped at the time limit.
 ProcessRunner = Callable[[Sequence[str], Path, Mapping[str, str], Path, float], int]
@@ -428,7 +434,41 @@ class BuildExecutor:
         self._finish_configure(dirs["logs"] / "configure.log", plan, dirs["build"])
         build = ["cmake", "--build", "/work/build", "--parallel", str(jobs), "--target", *step.targets]
         self._container_step("build", engine, tag, build, mounts, env, options, dirs, self.build_timeout)
+        libs = list((plan.verify or {}).get("runtime_libs") or [])
+        if libs:
+            self._copy_runtime_libs(plan, engine, tag, libs, mounts, env, options, dirs)
         return tag
+
+    def _copy_runtime_libs(self, plan: BuildPlan, engine: ContainerEngine, image: str, libs: Sequence[str],
+                           mounts: Sequence[Mount], env: Mapping[str, str], options: Mapping[str, Any],
+                           dirs: Dict[str, Path]) -> None:
+        """Copies the runtime libraries the plan names (libgomp.so.1) from the builder image's toolchain into the
+        build's bin/ folder: the compiler that linked the programs says where its library is
+        (`gcc -print-file-name`), so the copy matches the build, also for a cross toolchain."""
+        step = plan.steps[0]
+        if step.compiler != "gcc":
+            raise BuildError(f"runtime libraries come from a GCC toolchain; this plan builds with {step.compiler}")
+        compiler = f"{plan.target.get('triple')}-gcc" if step.toolchain_file else "gcc"
+        log = dirs["logs"] / "runtime-libs.log"
+        for lib in libs:
+            if lib not in RUNTIME_LIBS:
+                raise BuildError(f"the plan asks for the runtime library {str(lib)[:40]!r}, which is not one this "
+                                 "executor copies")
+            self.say(f"copying {lib} from the builder's toolchain ...")
+            rc = engine.run(image, [compiler, f"-print-file-name={lib}"], mounts=mounts, env=env, options=options,
+                            log=log, timeout=120)
+            try:
+                found = log.read_text(encoding="utf-8", errors="replace").strip().splitlines()[-1].strip()
+            except (OSError, IndexError):
+                found = ""
+            # Without the library GCC prints just its name back; anything but an absolute path to it is refused.
+            if rc != 0 or not _RE_CONTAINER_PATH.fullmatch(found) or found.rsplit("/", 1)[-1] != lib:
+                raise BuildError(f"the builder image's toolchain has no {lib} (the OpenMP runtime for the target's "
+                                 "C library); build the builder image again", log)
+            rc = engine.run(image, ["cp", "-L", found, f"/work/build/bin/{lib}"], mounts=mounts, env=env,
+                            options=options, log=log, timeout=120)
+            if rc != 0:
+                raise BuildError(f"{lib} could not be copied out of the builder image (exit {rc})", log)
 
     def _container_step(self, name: str, engine: ContainerEngine, image: str, command: Sequence[str],
                         mounts: Sequence[Mount], env: Mapping[str, str], options: Mapping[str, Any],

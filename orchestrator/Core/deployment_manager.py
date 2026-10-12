@@ -10,12 +10,12 @@ Features:
 - Centralized Security Validation.
 """
 
+import importlib.util
 import os
 import re
 import shlex
 import time
 import socket
-import logging
 import subprocess
 import hashlib
 import shutil
@@ -25,13 +25,9 @@ import zipfile
 from pathlib import Path
 from typing import Any, Optional, List, Dict
 
-try:
-    import paramiko
-    PARAMIKO_AVAILABLE = True
-except ImportError:
-    PARAMIKO_AVAILABLE = False
+# paramiko is used through orchestrator.utils.ssh_trust; without it deployments fall back to OpenSSH.
+PARAMIKO_AVAILABLE = importlib.util.find_spec("paramiko") is not None
 
-import docker
 from orchestrator.utils.logging import get_logger
 
 # NEU: Import der zentralen Validierungslogik
@@ -40,6 +36,8 @@ from orchestrator.Core.builder import BUILD_MANIFEST, MODEL_FILE_SUFFIXES, is_st
 from orchestrator.utils import ssh_trust
 
 DEFAULT_INFERENCE_IMAGE = "ghcr.io/smilez1985/llm-runtime:latest"
+# The device runtime's start script, relative to the device user's home (orchestrator/runtime/device/launcher.py).
+DEVICE_START_SCRIPT = ".local/share/llm-framework/llama.cpp/current/llama-server.sh"
 DEFAULT_QDRANT_IMAGE = "qdrant/qdrant:v1.16.0"
 SSH_USER_PATTERN = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
 MODEL_SUFFIXES = MODEL_FILE_SUFFIXES
@@ -171,7 +169,8 @@ class DeploymentManager:
             deploy_script_path = temp_path / "deploy.sh"
             with open(deploy_script_path, "w", newline='\n') as f:
                 f.write(script_content)
-            os.chmod(deploy_script_path, 0o755)
+            # deploy.sh is run on the board and holds no secret.
+            os.chmod(deploy_script_path, 0o755)  # nosec B103
 
             # E. Checksums & Zip
             self._generate_checksums(temp_path, temp_path / "checksums.sha256")
@@ -265,7 +264,7 @@ class DeploymentManager:
                                 inference_image: str = DEFAULT_INFERENCE_IMAGE,
                                 qdrant_image: Optional[str] = None) -> str:
         script = [
-            "#!/bin/bash",
+            "#!/bin/sh",
             "set -e",
             "echo '[1/3] Checking Integrity...'",
             "sha256sum -c checksums.sha256",
@@ -318,12 +317,17 @@ class DeploymentManager:
                 f'echo "[3/3] Model installed: $MODEL_DIR/"{q}',
             ])
             if str(artifact).lower().endswith(".gguf"):
+                # The framework's self-built runtime (llm-cli device runtime deploy), never a llama-server found on
+                # PATH: its start script keeps the server on 127.0.0.1 with the key file and a cleared environment.
                 script.extend([
-                    "if command -v llama-server >/dev/null 2>&1; then",
-                    f'  echo "Start it with: llama-server -m $MODEL_DIR/"{q}" --host 127.0.0.1 --port 8080"',
-                    "  echo 'For access from the LAN add --host 0.0.0.0 --api-key-file <file with a secret key>; never expose it without a key.'",
+                    f'RUNTIME="$HOME/{DEVICE_START_SCRIPT}"',
+                    'if [ -f "$RUNTIME" ]; then',
+                    f'  echo "Start it with: sh $RUNTIME start $MODEL_DIR/"{q}',
+                    "  echo '(llama-server -m <model> --host 127.0.0.1 --port 8080 --api-key-file "
+                    "~/.config/llm-framework/llama-server.key: loopback only, every request needs that key)'",
                     "else",
-                    "  echo 'Install llama.cpp (llama-server) on this board to run the model.'",
+                    "  echo 'No self-built llama-server on this board yet: deploy it from your computer with "
+                    "llm-cli device runtime build <device> and llm-cli device runtime deploy <device>.'",
                     "fi",
                 ])
             elif str(artifact).lower().endswith(".rkllm"):
@@ -384,7 +388,9 @@ class DeploymentManager:
     @staticmethod
     def _remote_install_cmd(target_dir: str, package_name: str) -> str:
         d, pkg = shlex.quote(target_dir), shlex.quote(package_name)
-        return f"cd {d} && unzip -o {pkg} && chmod +x deploy.sh && ./deploy.sh"
+        # sh reads the script instead of executing it from /tmp, which many boards mount noexec (and deploy.sh is
+        # plain POSIX sh, so boards without bash, such as Alpine, run it too).
+        return f"cd {d} && unzip -o {pkg} && sh deploy.sh"
 
     # A private, unpredictable folder on the device (a fixed /tmp path could be pre-created by another user).
     REMOTE_MKTEMP = "mktemp -d /tmp/llm_deploy.XXXXXXXX"
@@ -414,7 +420,8 @@ class DeploymentManager:
                 self.logger.info("Framework SSH key installed; later deployments need no password.")
             _, out, err = ssh.exec_command(self.REMOTE_MKTEMP)
             target_dir = out.read().decode().strip()
-            if out.channel.recv_exit_status() != 0 or not target_dir.startswith("/tmp/llm_deploy."):
+            # Checks mktemp's answer on the device; no local temp file is involved.
+            if out.channel.recv_exit_status() != 0 or not target_dir.startswith("/tmp/llm_deploy."):  # nosec B108
                 self.logger.error(f"Could not create a folder on the device: {err.read().decode(errors='replace').strip()}")
                 return False
 
@@ -447,7 +454,8 @@ class DeploymentManager:
             made = subprocess.run(["ssh", *opts, "-p", str(port), target, self.REMOTE_MKTEMP],
                                   capture_output=True, text=True, check=True)
             target_dir = made.stdout.strip()
-            if not target_dir.startswith("/tmp/llm_deploy."):
+            # Checks mktemp's answer on the device; no local temp file is involved.
+            if not target_dir.startswith("/tmp/llm_deploy."):  # nosec B108
                 raise RuntimeError("could not create a folder on the device")
             subprocess.run(["scp", *opts, "-P", str(port), str(artifact), f"{target}:{target_dir}/"], check=True)
             cmd = self._remote_install_cmd(target_dir, artifact.name) + f"; status=$?; rm -rf {shlex.quote(target_dir)}; exit $status"

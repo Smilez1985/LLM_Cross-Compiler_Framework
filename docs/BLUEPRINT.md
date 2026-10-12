@@ -899,7 +899,7 @@ Ryzen Z1 Extreme, on Windows and Linux.
 
 | Item | Status |
 |---|---|
-| **Runtime on the device.** llama-server, llama-cli and llama-bench cross-compiled per ARM baseline (armv8.2-a with dotprod and fp16 for RK3566, RK3568 and RK3588; armv8-a for RK3576 and RK3562), installed by the deploy step together with a start script and a systemd unit. | planned |
+| **Runtime on the device.** llama-server, llama-cli and llama-bench cross-compiled per ARM baseline (armv8.2-a with dotprod and fp16 for RK3566, RK3568 and RK3588; armv8-a for RK3576 and RK3562), installed by the deploy step together with a start script and a systemd unit. | in progress |
 | **More Rockchip SoCs for RKLLM** (RK3562, RV1126B) with a per-SoC table of supported types. | planned |
 | **NVIDIA GPU target**: GGUF with CUDA for the RTX 2080 Ti and RTX 3090 (CUDA version chosen by driver), vLLM formats AWQ and GPTQ, EXL3, and native deployment to Windows machines with NVIDIA GPUs. | planned |
 | **GPU acceleration** for the importance matrix and the RKLLM export. | planned |
