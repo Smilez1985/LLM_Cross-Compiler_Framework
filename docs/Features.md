@@ -120,9 +120,12 @@ Further behaviour:
   including a running security scan or image build, and a later step can never undo it; the button and Ctrl+C wait
   until the build has stopped and say so. Once a build has failed or is moving its files into the output folder,
   it can no longer be cancelled and finishes on its own.
-- **Build status across programs:** every program that builds writes one record per build into
-  `<cache_dir>/build_records/`, so `llm-cli build status` also lists builds that the GUI, the MCP server or another
-  CLI call started; a build whose program has ended before it finished is shown as interrupted.
+- **Build status across programs (shared build state):** every program that builds (the GUI, a CLI call, each MCP
+  server) writes a summary of each build request into the per-user folder (`build_requests/`: model as repo id or
+  label, target, format, quantization, status, stage, progress, who started it and in which program; no host path,
+  no secret) and one record per build into `<cache_dir>/build_records/`. So the GUI status bar, `llm-cli build
+  status`, `list_build_requests` and `get_build_status` see the same builds, also a request that still waits in
+  another program's queue; a request whose program has ended before it finished is shown as interrupted.
 - **Build slots:** at most `max_concurrent_builds` builds (setting, 1 to 10, default 2) run at the same time in one
   program; a further build waits for a free slot (its stage shows "Waiting for a free build slot") instead of
   failing. A cancelled build keeps its slot until its container has stopped.
@@ -1087,8 +1090,9 @@ framework never sees it.
   the build. `check_build_request` returns the same plan (normalized request, commit, sizes, disks, fit, mounts,
   trust, image build, what your permissions would do) without starting anything; its problems carry reason codes.
 - **Build reads:** `list_build_requests` (50 per page, filter by status) also lists builds another framework process
-  started (GUI, CLI, another MCP server), from their build records, marked `process: other` and read-only (they are
-  stopped where they were started; a build whose process ended is `interrupted`). `get_build_status` adds what the
+  started (GUI, CLI, another MCP server), from the shared build state, marked `process: other` with `started_in`
+  and read-only (they are stopped where they were started; a build whose process ended is `interrupted`); the note
+  that only this process's builds are visible is gone. `get_build_status` adds what the
   request builds (`request`: model as repo id or label, target, format, board, quantization, optimization, commit).
   `read_build_log` returns at most 1000 lines (200 by default), 2000 characters per line and 48,000 in all, with
   `first_line` and `before_line` for paging back. `list_artifacts` names built models by an id (`a_` and 16 hex

@@ -125,10 +125,13 @@ Weiteres Verhalten:
   Schritt kann den Abbruch rückgängig machen; Schaltfläche und Strg+C warten, bis der Build angehalten hat, und
   sagen das. Ist ein Build gescheitert oder verschiebt er gerade seine Dateien in den Ausgabeordner, lässt er sich
   nicht mehr abbrechen und läuft von selbst zu Ende.
-- **Build-Status über Programme hinweg:** Jedes Programm, das baut, schreibt je Build einen Eintrag nach
-  `<cache_dir>/build_records/`, deshalb listet `llm-cli build status` auch Builds, die die GUI, der MCP-Server oder
-  ein anderer CLI-Aufruf gestartet hat; ein Build, dessen Programm endete, bevor er fertig war, erscheint als
-  unterbrochen.
+- **Build-Status über Programme hinweg (gemeinsamer Build-Zustand):** Jedes Programm, das baut (die GUI, ein
+  CLI-Aufruf, jeder MCP-Server), schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner
+  (`build_requests/`: Modell als Repo-ID oder Label, Target, Format, Quantisierung, Status, Stufe, Fortschritt, wer
+  sie gestartet hat und in welchem Programm; kein Host-Pfad, kein Geheimnis) und je Build einen Eintrag nach
+  `<cache_dir>/build_records/`. So sehen die Statusleiste der GUI, `llm-cli build status`, `list_build_requests` und
+  `get_build_status` dieselben Builds, auch eine Anfrage, die noch in der Warteschlange eines anderen Programms
+  wartet; eine Anfrage, deren Programm endete, bevor sie fertig war, erscheint als unterbrochen.
 - **Build-Slots:** In einem Programm laufen höchstens `max_concurrent_builds` Builds gleichzeitig (Einstellung, 1
   bis 10, Vorgabe 2); ein weiterer Build wartet auf einen freien Slot (seine Stufe zeigt „Waiting for a free build
   slot“), statt zu scheitern. Ein abgebrochener Build behält seinen Slot, bis sein Container gestoppt ist.
@@ -1180,9 +1183,9 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   (normalisierte Anfrage, Commit, Größen, Laufwerke, Passung, Einbindungen, Vertrauen, Image-Build, was deine
   Berechtigungen tun würden), ohne etwas zu starten; seine Probleme tragen Grundcodes.
 - **Build-Abfragen:** `list_build_requests` (50 pro Seite, Filter nach Status) listet auch Builds, die ein anderer
-  Framework-Prozess gestartet hat (GUI, CLI, ein anderer MCP-Server), aus ihren Build-Records, markiert mit
-  `process: other` und nur lesbar (gestoppt werden sie dort, wo sie gestartet wurden; ein Build, dessen Prozess
-  endete, ist `interrupted`). `get_build_status` ergänzt, was die Anfrage baut (`request`: Modell als Repo-ID oder
+  Framework-Prozess gestartet hat (GUI, CLI, ein anderer MCP-Server), aus dem gemeinsamen Build-Zustand, markiert
+  mit `process: other` und `started_in` und nur lesbar (gestoppt werden sie dort, wo sie gestartet wurden; ein Build,
+  dessen Prozess endete, ist `interrupted`); der Hinweis, nur Builds dieses Prozesses seien sichtbar, entfällt. `get_build_status` ergänzt, was die Anfrage baut (`request`: Modell als Repo-ID oder
   Label, Target, Format, Board, Quantisierung, Optimierung, Commit). `read_build_log` liefert höchstens 1000 Zeilen
   (Standard 200), 2000 Zeichen pro Zeile und 48.000 insgesamt, mit `first_line` und `before_line` zum
   Zurückblättern. `list_artifacts` benennt gebaute Modelle mit einer ID (`a_` und 16 Hex-Zeichen) und einem Label

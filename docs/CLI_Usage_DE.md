@@ -293,9 +293,11 @@ $ echo $?
 llm-cli build status [REQUEST_ID] [-a|--all]
 ```
 
-Zeigt Builds aus den Build-Einträgen im Cache-Ordner (`<cache_dir>/build_records/`): Jedes Programm, das baut
-(CLI, GUI, MCP-Server), schreibt je Build einen Eintrag mit Request, Modell, Target, Format, Quantisierung, Status,
-Stufe und Fortschritt, deshalb erscheinen auch Builds, die ein anderer Prozess gestartet hat. Ohne ID: eine Tabelle
+Zeigt Builds aus dem gemeinsamen Build-Zustand: Jedes Programm, das baut (CLI, GUI, MCP-Server), schreibt eine
+Zusammenfassung jeder Build-Anfrage in den Benutzerordner (`build_requests/`) und je Build einen Eintrag in den
+Cache-Ordner (`<cache_dir>/build_records/`) mit Request, Modell, Target, Format, Quantisierung, Status, Stufe und
+Fortschritt, deshalb erscheinen auch Builds, die ein anderer Prozess gestartet hat, einschließlich Anfragen, die
+noch in seiner Warteschlange warten (Spalte `Where`: das Programm, das sie ausführt). Ohne ID: eine Tabelle
 der 20 neuesten Builds; mit einer Request-ID (`req_...`) oder einer Build-ID: die Einzelheiten jedes Versuchs,
 einschließlich des Fehlers eines gescheiterten Builds (Zugangsdaten geschwärzt). Ein Build, dessen Prozess endete,
 bevor der Build fertig war, erscheint als `interrupted`. Exit-Code 1, wenn die ID nicht gefunden wird. Der Befehl

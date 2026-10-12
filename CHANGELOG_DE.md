@@ -10,6 +10,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Gemeinsamer Build-Zustand** (MCP-Entwurf T11): Jedes Programm des Frameworks (die GUI, ein CLI-Aufruf, jeder
+  MCP-Server) schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner (`build_requests/`), sodass die
+  Statusleiste der GUI, `llm-cli build status`, `list_build_requests` und `get_build_status` dieselben Builds sehen,
+  gleich welches Programm sie gestartet hat, auch eine Anfrage, die noch in der Warteschlange eines anderen Programms
+  wartet. Jede Zusammenfassung nennt das Modell mit Repo-ID oder Label (nie einen Host-Pfad), die Aufruferklasse, die
+  sie gestartet hat (nie einen MCP-Sitzungsschlüssel), und das Programm, das sie ausführt (`started_in`, Spalte
+  `Where`); Fehler sind geschwärzt. Eine Anfrage, deren Programm endete, bevor sie fertig war, erscheint als
+  unterbrochen. Builds eines anderen Programms bleiben nur lesbar. Der Hinweis, nur Builds dieses Prozesses seien
+  sichtbar, entfällt.
 - **Ditto nutzt die Tools des Frameworks**: Im Chat (GUI) und mit `llm-cli ditto ask "<Frage>"` kann Ditto
   Targets auflisten, Capabilities prüfen, Builds starten und abbrechen, Logs lesen, die Wissensbasis durchsuchen
   und den Doctor ausführen, immer im Rahmen deiner Tool-Berechtigungen. Tools, die eine Bestätigung brauchen,

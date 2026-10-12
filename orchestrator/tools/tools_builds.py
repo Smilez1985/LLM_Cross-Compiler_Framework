@@ -265,10 +265,12 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
                  takes_context=True, arg_aliases=aliases, fields=build_fields, examples=(example,),
                  notes=lambda o: [PREFLIGHT_NOTE], summary=check_summary),
         ToolSpec("list_build_requests", "List build requests",
-                 "Lists build requests with their status, 50 per page: this framework process's, and read-only "
-                 "those another process (GUI, CLI, another MCP server) started.",
+                 "Lists build requests with their status, 50 per page: every build of this person, whichever "
+                 "framework process started it (the GUI, the CLI, an MCP server; from the shared build state). "
+                 "Builds of another process are read-only here.",
                  ToolTier.READ, BuildListIn, BuildPageOut, lambda i: service.list_requests(i.status, i.page),
-                 idempotent=True, notes=lambda o: [visibility_note] + (
+                 idempotent=True, notes=lambda o: (
+                     [visibility_note] if any(b.process == "other" for b in o.builds) else []) + (
                      ["More build requests: call again with the next page."] if o.more else []),
                  summary=lambda o: count(len(o.builds), "build request", "build requests") + f" on page {o.page}."),
         ToolSpec("read_build_log", "Read build log",
