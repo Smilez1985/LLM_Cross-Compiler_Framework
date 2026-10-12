@@ -535,6 +535,7 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `list_packs` | read | Community packs of the signed index and the installed ones with trust; details, verification of installed packs ([details](#packs-for-ai-clients)) |
 | `add_pack_from_index` | external | Add a knowledge, target or recipe pack from the signed index, as a job; always asked with the checked summary and every base image of a target pack |
 | `export_pack` | local write | Export a target, recipe or knowledge pack to a local file signed with your key; always asked, nothing uploaded |
+| `start_recipe_build` | local write | Build an installed community recipe exactly as pinned (model commit, target, format, board, quantization), with the question and checks of `start_build` |
 | `crawl_docs_site` | local write | Deep Ingest of 1 to 5 public documentation sites into the knowledge base, as a job; always asked with every start address, only after a person read the notice ([details](#deep-ingest-by-an-ai-client)) |
 | `start_build` | local write | Start a build (must match the target's capabilities); the question shows commit, size, disk and hardware estimate |
 | `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
@@ -901,7 +902,9 @@ until you enable it in the tool permissions, also when you allowed the whole tie
   Any other model is untrusted (runtime decision D23): it runs natively only after your consent, which is asked in the
   framework's own window (Ditto's dialog, the pending approvals of the GUI or `llm-cli tools approvals`, never a
   client's dialog), is asked even when the tool is allowed, and is written to the audit log before the model is
-  loaded; with `sandbox: true` it runs in the Docker sandbox instead. Results are kept in
+  loaded; with `sandbox: true` it runs in the Docker sandbox instead. The model file is opened once and hashed
+  through that open file; llama-bench reads exactly that file (natively the inherited descriptor, in the sandbox a
+  private hard link of it), so it cannot be swapped between the check and the run. Results are kept in
   `~/.llm-framework/benchmarks/` (`runs/<run id>.json`, `index.jsonl`); `get_status` (section `local_runtime`) shows
   the newest runs.
 - **Board tools** (tier `external`, always asked, never covered by a standing approval, only for a
@@ -1221,8 +1224,14 @@ framework never sees it.
   stopped within seconds by a cancel. A disk watchdog stops the staging and the conversion containers when the cache
   disk falls below half the reserve (reason `insufficient_resources`). A standing approval ("yes, and do not ask
   again") is offered for builds on shipped or verified targets with safetensors or GGUF weights, an ungated model
-  whose base model is not gated either, a licence on the permissive allowlist (or a local file), an official base
-  image, up to the size class you choose, and only when the disk keeps the larger reserve of 20 GiB or 10 %; Hugging
+  whose base model is not gated either, a licence on the permissive allowlist (or a local file), Docker Official
+  base images (or a digest-pinned base image you already confirmed in a build of that target), up to the size class
+  you choose, and only when the disk keeps the larger reserve of 20 GiB or 10 %. That larger reserve is checked again
+  when the build starts, inside the reservation ledger every framework process shares and under its lock, so a
+  reservation another process took meanwhile is counted; if it no longer holds, nothing starts and the next call
+  asks you. A target or recipe pack an AI installed under a standing approval is covered only after you confirmed
+  one build of it in the framework's own window (Ditto's dialog or prompt, or a pending approval; an answer in the
+  client's form does not count); the framework records that build and covers the next ones; Hugging
   Face look-ups of `check_build_request` count toward the 30 per hour Hugging Face rate. `optimization` (`fast`,
   `balanced`, `size`, `speed`, `aggressive`) is passed to the build. `check_build_request` returns the same plan (normalized request, commit, sizes, disks, fit, mounts,
   trust, image build, what your permissions would do) without starting anything; its problems carry reason codes.
@@ -1344,7 +1353,8 @@ framework never sees it.
 - **Resources:** besides the tools, the server offers resources a client can attach or read:
   `lcf://targets`, `lcf://targets/<target>/capabilities`, `lcf://builds/<request id>/status`,
   `lcf://builds/<request id>/log` (the last 200 lines), `lcf://permissions`, `lcf://knowledge/sources/<source id>`
-  (the first excerpts of one knowledge source, as `read_knowledge_source`), and the installation's documents
+  (the first excerpts of one knowledge source, as `read_knowledge_source`), `lcf://packs/index` (the cached community
+  index and the installed packs, as `list_packs`), and the installation's documents
   `lcf://docs/<name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` and their German `_DE` twins;
   only the ones that exist are listed). A resource returns what its read tool returns and is read through the tool
   registry: your permission for that tool decides (a resource of a denied tool is neither listed nor readable, and
@@ -2033,7 +2043,17 @@ and leave this computer only as a local file you publish yourself.
   under it is audited with its id and shown as a GUI notice; such a pack is marked `installed_via: grant:<id>` in its
   `.lcf-provenance.json` and in `list_packs`. For all local stdio clients together only the narrowest scope and at
   most 30 days are offered. An install under it must leave the larger disk reserve of a standing approval free (20 GiB
-  or 10 %), or it asks.
+  or 10 %), or it asks. Every import takes a reservation (twice the pack size) in the shared reservation ledger,
+  checked again under its lock when the import starts.
+- **`start_recipe_build`** (local write): builds an installed recipe exactly as it is pinned: its Hugging Face model
+  at the recipe's commit, target, format, board, quantization, importance matrix and context length. It takes the
+  same two-phase path as `start_build` (the question shows the recipe, whether the installed target is the one the
+  recipe was made with, the commit, download size, disk, hardware estimate, licence, gating and image build; the
+  same disk reservation and quotas). `dataset_path` only when the recipe names a calibration dataset, and then it
+  must be exactly that file (sha256). A recipe changed after the question is not built. "Yes, and do not ask again"
+  has the scope of `start_build`; a recipe installed under a standing approval is covered only after you confirmed
+  one build of it. The resource `lcf://packs/index` shows the cached index and the installed packs (as `list_packs`,
+  never refreshed).
 - **`export_pack`** (local write, always asked, never "do not ask again"): a target (by target id), recipe (by the
   `artifact_id` of a finished build) or knowledge pack, privacy-scrubbed and signed with your community key, into
   `community/contributions/`. The question's first line says "Creates a pack signed with your key <key id> as author

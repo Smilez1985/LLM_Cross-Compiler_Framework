@@ -10,6 +10,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **`start_recipe_build` and the resource `lcf://packs/index`** (MCP design T9): an AI client builds an installed
+  community recipe exactly as pinned (the model at the recipe's commit, target, format, board, quantization,
+  importance matrix, context length) through the two-phase path of `start_build` (same question, disk reservation,
+  quotas and standing-approval scope; `BuildService.start_recipe`). A calibration dataset is taken only when the
+  recipe names one and must be exactly that file; a recipe changed after the question is not built. The resource
+  shows the cached index and the installed packs as `list_packs` does, never refreshed.
+- **A confirmed build unlocks a build standing approval for packs installed under one** (MCP design 6.10): a target
+  or recipe pack an AI installed under a standing approval is asked about until the person confirms one build of it
+  in the framework's own window (an elicitation answer, a standing approval's own use or "allow" never count); the
+  framework records that build (`confirmed_builds.json` in the per-user folder) and the build standing approval
+  covers the next builds. A digest-pinned base image outside the Docker Official Images counts once a build with
+  exactly that image was confirmed; a tag never does. The build standing approval's rule version is now 2, so
+  standing approvals made under the narrower rule lapse.
 - **Optional tools `delete_artifact` and `restore_knowledge_snapshot`** (MCP design T10): delete one built model
   (folder and golden ZIP) by id and sha256, or replace the knowledge base with an earlier snapshot as a job. Both are
   destructive: denied by default and hidden until you enable them (allowing the whole external class does not),
@@ -824,6 +837,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- **The larger disk reserve of a standing approval is checked under the ledger's lock** for `start_build`,
+  `start_recipe_build`, `download_hf_file` and `add_pack_from_index`: the reservation is taken with the 20 GiB /
+  10 % reserve inside the reservation ledger every framework process shares, so a reservation another process took
+  between the question and the start is counted (before, only a snapshot at question time). `add_pack_from_index`
+  now takes a ledger reservation at all and counts other calls' reservations before the question.
+- **The GitHub CLI and git of the pull-request handoff never read stdin** (`stdin=DEVNULL`, G25): over stdio the
+  MCP server's stdin is the protocol stream.
 - **Digest-pinned images in a deployment package start on an air-gapped board**: an image pulled by its digest has
   no tag, so it was saved without a name, came back as `<none>` after `docker load`, and `deploy.sh` could not start
   it by its digest reference without a registry. It is now packed under `<repository>:lcf-<12 hex of the digest>`
@@ -1034,6 +1054,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   folders on the full disk with their sizes, and pruning Docker is proposed only when Docker's data root is full.
 
 ### Security
+- **`run_benchmark` runs the very file it hashed**: the model is opened once, hashed through the open file and
+  handed to llama-bench as that open file (an inherited descriptor natively, a private hard link in the sandbox),
+  so a catalog model cannot be swapped for an untrusted one between the check and a native run without consent.
 - **robots.txt can no longer be switched off through crawl options**: the crawler takes only its own option keys
   (pages, depth, delay, PDFs, languages) and ignores any other key, including `respect_robots`, with a log line; the
   switch for tests with a fake web is a separate keyword-only flag that no product code passes (a guard test checks

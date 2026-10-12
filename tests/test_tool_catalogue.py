@@ -26,8 +26,8 @@ CORE = {
 OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
             "stop_local_runtime", "run_benchmark", "deploy_device_runtime"}
 LATER = {"probe_remote_device", "run_device_benchmark"}
-# Built by phase T so far (T1-T9, T14); start_recipe_build (T9) is still missing.
-BUILT = CORE - {"start_recipe_build"}
+# Built by phase T (T1-T9, T14): every core tool.
+BUILT = set(CORE)
 
 
 def test_the_catalogue_has_the_designed_size():

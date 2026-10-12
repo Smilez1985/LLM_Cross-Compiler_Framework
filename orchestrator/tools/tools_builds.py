@@ -201,6 +201,39 @@ def start_request(inp: StartBuildIn, bound: Dict[str, Any]) -> BuildRequestIn:
     return BuildRequestIn(**data)
 
 
+STANDING_RESERVE_TEXT = ("Under the standing approval the larger disk reserve (20 GiB or 10 % of the disk) must stay "
+                         "free, and other calls reserved space since this one was prepared")
+
+
+def start_accepted(service, bound: Dict[str, Any], ctx, start):
+    """Starts an accepted build (start_build, start_recipe_build): takes the disk reservation in the ledger every
+    process shares, under its lock (under a standing approval with the larger reserve, design 6.5), calls
+    `start(reservation)`, releases the reservation when the start fails, and records a build the person confirmed in
+    the framework's own window (design 6.10: a pack installed under a standing approval is covered by a build
+    standing approval only after that)."""
+    from orchestrator.Core.disk_plan import InsufficientSpace
+    channel = str(getattr(ctx, "confirm_channel", "") or "")
+    standing = channel.startswith("grant:")
+    label = f"{bound.get('model')} for {bound.get('target')}"
+    try:
+        reservation = service.reserve_disk(bound, ctx.owner, label, standing=standing)
+    except InsufficientSpace as e:
+        if not standing:
+            raise
+        raise ToolError(f"{STANDING_RESERVE_TEXT}; nothing was started. {e}", code="insufficient_resources",
+                        next="Call it again once: outside the standing approval the person is asked, with the disk "
+                             "numbers.") from None
+    try:
+        handle = start(reservation)
+    except BaseException:
+        ledger = service.disk_ledger() if reservation else None
+        if ledger is not None:
+            ledger.release(reservation)
+        raise
+    service.record_confirmed_build(bound, channel)
+    return handle
+
+
 # --- the specs -----------------------------------------------------------------------------------------------------
 
 def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict[str, Any], visibility_note: str,
@@ -230,17 +263,9 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
         if "download" not in bound:
             raise ToolError("The build is not bound to the facts the person was shown; nothing was started.",
                             code="failed", next="Call start_build again through the framework's tool registry.")
-        label = f"{bound.get('model')} for {bound.get('target')}"
-        reservation = service.reserve_disk(bound, ctx.owner, label)
-        try:
-            return service.start_build(start_request(inp, bound), owner=ctx.owner,
-                                       optimization=bound.get("optimization") or inp.optimization,
-                                       disk_reservation=reservation)
-        except BaseException:
-            ledger = service.disk_ledger() if reservation else None
-            if ledger is not None:
-                ledger.release(reservation)
-            raise
+        return start_accepted(service, bound, ctx, lambda reservation: service.start_build(
+            start_request(inp, bound), owner=ctx.owner, optimization=bound.get("optimization") or inp.optimization,
+            disk_reservation=reservation))
 
     def check_build_request(inp, ctx):
         look_up = inp.include_download_size and hub_lookup_allowed(inp, ctx)
@@ -280,11 +305,15 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
                  summary=lambda o: f"Build request {fact(o.request_id)} is {fact(o.status)}.",
                  arg_aliases=aliases, fields=build_fields, examples=(example,), limits=limits,
                  prepare=prepare_build,
-                 grant=GrantRule(rule=BUILD_RULE, facts=build_grant_facts,
+                 # version 2: a digest-pinned base image the person confirmed in a build of the target counts like
+                 # an official one, so standing approvals of the narrower version 1 lapse
+                 grant=GrantRule(rule=BUILD_RULE, facts=build_grant_facts, version=2,
                                  warning="start builds on shipped or verified targets (safetensors or GGUF weights; "
                                          "ungated Hugging Face models with a permissive licence, or local files; no "
-                                         "image from outside the Docker Official Images; up to the size class you "
-                                         "chose)"),
+                                         "image from outside the Docker Official Images unless you confirmed a build "
+                                         "with that pinned image; a target or recipe installed under a standing "
+                                         "approval only after you confirmed one build of it; up to the size class "
+                                         "you chose)"),
                  consequence="Converts and quantizes a model in a Docker build on this computer; it may download "
                              "the model first and take a long time."),
         ToolSpec("check_build_request", "Check a build request",

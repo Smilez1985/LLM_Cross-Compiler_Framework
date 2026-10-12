@@ -625,14 +625,17 @@ class BuildService:
         folder = state_dir(self.framework)
         return ReservationLedger(folder) if folder is not None else None
 
-    def plan(self, request, look_up_hub: bool = True):
+    def plan(self, request, look_up_hub: bool = True, recipe: Optional[Dict[str, Any]] = None):
+        """The plan of an AI caller's build; `recipe` (id, installed_via, pack_sha256) for a recipe build."""
         from orchestrator.Core.build_plan import plan_build
-        return plan_build(self, request, look_up_hub=look_up_hub, ledger=self.disk_ledger())
+        return plan_build(self, request, look_up_hub=look_up_hub, ledger=self.disk_ledger(), recipe=recipe)
 
-    def reserve_disk(self, bound: Dict[str, Any], owner: str, label: str) -> str:
+    def reserve_disk(self, bound: Dict[str, Any], owner: str, label: str, standing: bool = False) -> str:
         """Takes the disk reservation for an accepted build from the sizes its question showed; InsufficientSpace
-        when the disk no longer holds it beside what others reserved. "" when there is no ledger (no per-user
-        folder) or nothing lands on disk."""
+        when the disk no longer holds it beside what others reserved. `standing`: the build runs under a standing
+        approval, so the larger reserve (20 GiB or 10 %) must stay free, checked under the ledger's lock together
+        with every other process's reservations (design 6.5). "" when there is no ledger (no per-user folder) or
+        nothing lands on disk."""
         from orchestrator.Core.build_plan import folder
         from orchestrator.Core import disk_plan
         ledger = self.disk_ledger()
@@ -643,8 +646,128 @@ class BuildService:
         needs = disk_plan.build_needs(size, str(bound.get("format") or ""), bound.get("quantization"),
                                       folder(self.framework, "cache_dir", "cache"),
                                       folder(self.framework, "output_dir", "output"), cached=cached)
-        rid, _ = ledger.reserve(needs, owner, label, disk_usage=self.disk_usage)
+        rid, _ = ledger.reserve(needs, owner, label, standing=standing, disk_usage=self.disk_usage)
         return rid
+
+    def record_confirmed_build(self, bound: Dict[str, Any], channel: str) -> bool:
+        """After a build the person confirmed in the framework's own window was accepted: records it, so a target or
+        recipe pack installed under a standing approval may be covered by a build standing approval from now on, and
+        the target's digest-pinned base images count as confirmed (design 6.10). Nothing for any other channel."""
+        from orchestrator.Core.build_plan import state_dir
+        from orchestrator.Core.confirmed_builds import ConfirmedBuilds, person_confirmed
+        record = bound.get("confirm_record") if isinstance(bound, dict) else None
+        state = state_dir(self.framework)
+        if not isinstance(record, dict) or state is None or not person_confirmed(channel):
+            return False
+        store = ConfirmedBuilds(state)
+        try:
+            done = store.record("target", str(record.get("target") or ""),
+                                installed_via=str(record.get("installed_via") or ""),
+                                pack_sha256=str(record.get("pack_sha256") or ""),
+                                base_images=list(record.get("base_images") or []), channel=channel)
+            recipe = record.get("recipe")
+            if isinstance(recipe, dict) and recipe.get("id"):
+                done = store.record("recipe", str(recipe["id"]), installed_via=str(recipe.get("installed_via") or ""),
+                                    pack_sha256=str(recipe.get("pack_sha256") or ""), channel=channel) and done
+            return done
+        except Exception as e:  # noqa: BLE001 - the build runs; the next one is asked again
+            self.logger.warning(f"Could not record the confirmed build: {redact_secrets(str(e))}")
+            return False
+
+    # --- recipes (community zoo) ----------------------------------------------------------------------------
+
+    def installed_recipe(self, recipe_id: str):
+        """(Recipe, provenance) of an installed recipe pack; BuildServiceError (unknown_id, not_supported)
+        otherwise. A revoked recipe is refused."""
+        import yaml
+        from orchestrator.Core.community_manager import CommunityManager, trust_of_folder
+        from orchestrator.schemas.recipes import Recipe
+        cm = getattr(self.framework, "community_manager", None)
+        if cm is None:
+            raise BuildServiceError("The community zoo is not available here.", code="not_supported",
+                                    next="Tell the person; 'llm-cli doctor' checks the installation.")
+        found = next(((folder, prov) for folder, prov in cm.installed()
+                      if prov.kind == "recipe" and prov.id.casefold() == str(recipe_id).casefold()), None)
+        if found is None:
+            raise BuildServiceError(f"No installed recipe '{recipe_id}'.", code="unknown_id", field="recipe_id",
+                                    next="Call list_packs with kind recipe and installed_only true for the ids, or "
+                                         "add one with add_pack_from_index.")
+        folder, prov = found
+        try:
+            index = CommunityManager.read_cached_index(Path(cm.cache_dir), revocations=True)
+        except Exception:  # noqa: BLE001 - no cached index: no revocations known
+            index = None
+        trust, reason = trust_of_folder(folder, index)
+        if trust is not None and trust.value == "revoked":
+            raise BuildServiceError(f"The recipe {prov.id} was revoked by the community index; it is not built.",
+                                    code="not_supported", next="Tell the person; they remove it in the Community Hub.")
+        try:
+            recipe = Recipe.model_validate(yaml.safe_load((folder / "recipe.yml").read_text(encoding="utf-8")))
+        except Exception:  # noqa: BLE001 - details of a broken pack are not shown
+            raise BuildServiceError(f"The installed recipe {prov.id} cannot be read.", code="not_supported",
+                                    next="Tell the person; list_packs with verify true checks the installed "
+                                         "packs.") from None
+        return recipe, prov
+
+    def recipe_request(self, recipe_id: str, dataset_path: Optional[str] = None,
+                       use_gpu: bool = False) -> Tuple[BuildRequestIn, Any, Any]:
+        """The build request an installed recipe pins: its model at its commit, target, format, board, quantization,
+        importance matrix and context length. A calibration dataset is taken only when the recipe names one (and
+        then it is required). Returns (request, recipe, provenance)."""
+        recipe, prov = self.installed_recipe(recipe_id)
+        named = recipe.options.dataset
+        if named is not None and not dataset_path:
+            raise BuildServiceError(f"The recipe {recipe.id} was calibrated with {named.name} (sha256 "
+                                    f"{named.sha256[:16]}...); give that file as dataset_path.",
+                                    code="missing_argument", field="dataset_path",
+                                    next="Call list_local_files with kind dataset and pass its reference.")
+        if named is None and dataset_path:
+            raise BuildServiceError(f"The recipe {recipe.id} names no calibration dataset; leave dataset_path out.",
+                                    code="invalid_value", field="dataset_path",
+                                    next="Call start_recipe_build without dataset_path.")
+        request = BuildRequestIn(model=recipe.model.repo, revision=recipe.model.revision, target=recipe.target.id,
+                                 format=recipe.format, board=recipe.board, quantization=recipe.quantization,
+                                 use_imatrix=recipe.options.use_imatrix, dataset_path=dataset_path or None,
+                                 use_gpu=bool(use_gpu), max_context_length=recipe.options.max_context_length)
+        return request, recipe, prov
+
+    @staticmethod
+    def check_recipe_dataset(recipe, dataset_file: Optional[str]) -> None:
+        """The calibration dataset must be exactly the file the recipe pins (its sha256)."""
+        import hmac
+        named = recipe.options.dataset
+        if named is None or not dataset_file:
+            return
+        h = hashlib.sha256()
+        try:
+            with open(dataset_file, "rb") as f:
+                for chunk in iter(lambda: f.read(1024 * 1024), b""):
+                    h.update(chunk)
+        except OSError:
+            raise BuildServiceError("The calibration dataset cannot be read.", code="invalid_value",
+                                    field="dataset_path", next="Name an existing dataset file.") from None
+        if not hmac.compare_digest(h.hexdigest(), named.sha256):
+            raise BuildServiceError(f"The calibration dataset is not the file the recipe {recipe.id} pins (its sha256 "
+                                    f"differs from {named.sha256[:16]}...).", code="invalid_value",
+                                    field="dataset_path", next=f"Give exactly the file {named.name} the recipe names.")
+
+    def start_recipe(self, recipe_id: str, *, dataset_path: Optional[str] = None, use_gpu: bool = False,
+                     owner: str = "", local_paths: bool = False, disk_reservation: str = "",
+                     expect: Optional[Dict[str, Any]] = None) -> BuildHandle:
+        """Builds an installed recipe exactly as pinned, through start_build. `expect`: the request values the
+        person was shown (model, revision, target, format, board, quantization); a recipe changed since is refused."""
+        request, recipe, _prov = self.recipe_request(recipe_id, dataset_path, use_gpu)
+        validated, _ = self._validated(request, local_paths)
+        if expect is not None:
+            now = {"model": request.model, "revision": request.revision, "target": validated.target,
+                   "format": validated.format, "board": validated.board, "quantization": validated.quantization}
+            changed = [k for k, v in now.items() if str(v or "").casefold() != str(expect.get(k) or "").casefold()]
+            if changed:
+                raise BuildServiceError(f"The recipe {recipe.id} changed after the question ({', '.join(changed)}); "
+                                        "nothing was started.", code="failed",
+                                        next="Call start_recipe_build again; the person is asked again.")
+        self.check_recipe_dataset(recipe, validated.dataset_path)
+        return self.start_build(request, local_paths=local_paths, owner=owner, disk_reservation=disk_reservation)
 
     # --- actions ----------------------------------------------------------------------------
 
