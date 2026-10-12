@@ -8,11 +8,16 @@ external text labelled as such; then every argument, complete and with invisible
 fields first, repaired values marked with what the AI wrote and ids followed by their speaking name. A confirmation
 can only ever approve exactly the values the tool will run with. A question longer than its channel shows (4,000
 characters in an MCP elicitation, 16,000 in the framework's own windows) cannot be confirmed there.
+
+With the facts catalogue (delegation design 4.5, WP4): a question in the framework's own window starts, right after the
+consequence, with a short summary in the person's language (person_summary); every question lists the warnings the
+framework found after its facts, the situation warnings apart from the security and legal ones only the person
+decides.
 """
 
 import json
 import unicodedata
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 # Shown first in a confirmation, because they decide what a call touches.
 PRIORITY_FIELDS = ("model", "dataset_path", "use_gpu", "target", "format", "board", "quantization",
@@ -107,6 +112,15 @@ def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI cli
     shown = {k: v for k, v in arguments.items() if v is not None}
     order = [k for k in PRIORITY_FIELDS if k in shown] + [k for k in shown if k not in PRIORITY_FIELDS]
     lines = [visible(getattr(facts, "consequence", "") or consequence_line(spec))]
+    classified = facts is not None and any(getattr(facts, k, None) for k in ("warnings", "numbers", "names"))
+    if person_view and classified:
+        # The person's short layer (design 4.5) right after the consequence: what happens, how much, and why it needs
+        # them; built from the facts' numbers, warnings and speaking names only, never from external text. A tool
+        # whose look-up carries none of them (not classified by the facts catalogue) keeps its question as it was.
+        summary = person_summary(facts, title=getattr(spec, "title", ""))
+        if summary:
+            lines.append(ui_text("summary.title"))
+            lines += [f"  {line}" for line in summary]
     if requester:
         lines.append(f"Requested by {_plain(requester)}.")
     checked = [f for f in (getattr(facts, "facts", ()) or ()) if person_view or not getattr(f, "person_only", False)]
@@ -115,6 +129,7 @@ def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI cli
         for fact in checked:
             label = f"{fact.label} ({fact.source}, not checked)" if fact.source else fact.label
             lines.append(f"  {visible(label)}: {visible(fact.value)}")
+    lines += warning_blocks(facts)
     plan = getattr(facts, "deletion", None)
     if plan is not None:
         lines.append("Would be deleted:")
@@ -137,6 +152,102 @@ def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI cli
         raise CallTooLong(f"The question for '{spec.title}' is too long to show for a confirmation here "
                           f"({len(text)} characters, at most {limit}); the call was not run.")
     return text
+
+
+SUMMARY_LINES = 6       # at most this many lines in the short summary
+SUMMARY_NAME_CHARS = 80  # a speaking name in the summary is cut here
+
+
+def ui_text(key: str, lang: Optional[str] = None, **values: Any) -> str:
+    """A localized framework text (orchestrator.utils.localization.ui_text)."""
+    from orchestrator.utils.localization import ui_text as text
+    return text(key, lang, **values)
+
+
+def _localized(key: str, lang: Optional[str], values: Dict[str, Any]) -> str:
+    """The text of `key` filled with `values`, "" when the key is missing or a placeholder has no value."""
+    try:
+        text = ui_text(key, lang, **values)
+    except (KeyError, IndexError, ValueError):
+        return ""
+    return "" if text == key else text
+
+
+def warning_blocks(facts: Any) -> List[str]:
+    """The question's warning blocks (design 4.5), after "Checked by the framework:": the situation warnings an AI with
+    a delegation may weigh, then the security and legal warnings only the person decides. English catalogue texts
+    filled with numbers, never external text."""
+    from orchestrator.tools.facts_catalog import warnings_of
+    situation, person = warnings_of(facts)
+    lines: List[str] = []
+    if situation:
+        lines.append("Situation:")
+        lines += [f"  {visible(w.ai_text())}" for w in situation]
+    if person:
+        lines.append("Needs you (security / legal):")
+        lines += [f"  {visible(w.ai_text())}" for w in person]
+    return lines
+
+
+def person_summary(facts: Any, lang: Optional[str] = None, *, title: str = "", who: str = "", delegation: str = "",
+                   recommendation: str = "") -> List[str]:
+    """The short summary of a question for the person (design 4.5, "PersonSummary"): 3 to 6 lines in their language,
+    built only from the facts' numbers, warnings, scope and speaking names and the catalogue's texts, never from
+    external text (a model card, a log line, an AI's words; an AI's recommendation is passed in and marked as its own
+    words). The lines: what happens (with speaking names); how much it downloads, how much disk it needs and how long
+    it takes; "Needs your decision because: ..." with every security or legal warning; the situation warnings to weigh;
+    a safer option; and who may decide (`who` and `delegation`: the AI and the person's delegation that covers the
+    call; `recommendation`: the AI's ask_person note)."""
+    from orchestrator.tools.facts_catalog import WARNINGS, warnings_of
+    if facts is None:
+        return []
+    numbers = dict(getattr(facts, "numbers", {}) or {})
+    names = {k: visible(str(v))[:SUMMARY_NAME_CHARS] for k, v in (getattr(facts, "names", {}) or {}).items()}
+    values = {**{k: v for k, v in numbers.items()}, **names}
+    tool = str(getattr(facts, "tool", "") or "")
+    lines: List[str] = []
+    what = _localized(f"summary.what.{tool}", lang, values) if tool else ""
+    lines.append(what or _localized("summary.what", lang, {"title": visible(title or tool or "?")}))
+    amounts = []
+    for key, number in (("summary.download", "download_bytes"), ("summary.disk", "needed_bytes")):
+        value = numbers.get(number)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            amounts.append(_localized(key, lang, {"gb": round(value / 1000 ** 3, 1)}))
+    minutes = numbers.get("est_minutes")
+    if isinstance(minutes, int) and not isinstance(minutes, bool) and minutes > 0:
+        amounts.append(_localized("summary.minutes", lang, {"minutes": minutes}))
+    if any(amounts):
+        lines.append(" ".join(a for a in amounts if a))
+    situation, person = warnings_of(facts)
+
+    def short(w) -> str:
+        return visible(w.person_text(lang, names))
+
+    if person:
+        lines.append(_localized("summary.needs_you", lang, {"reasons": " ".join(short(w) for w in person)}))
+    if situation:
+        lines.append(_localized("summary.situation", lang, {"items": " ".join(short(w) for w in situation)}))
+    safer = next((WARNINGS[w.code].safer for w in person + situation
+                  if w.code in WARNINGS and WARNINGS[w.code].safer), "")
+    if safer:
+        option = _localized(safer, lang, {})
+        if option:
+            lines.append(_localized("summary.safer", lang, {"option": option}))
+    if person:
+        decide = _localized("summary.only_you", lang, {})
+    elif who and delegation:
+        decide = _localized("summary.delegated", lang, {"who": visible(who), "label": visible(delegation)})
+    elif who and recommendation:
+        decide = _localized("summary.recommends", lang, {"who": visible(who), "note": visible(recommendation)[:500]})
+    else:
+        decide = _localized("summary.you_decide", lang, {})
+    lines = [line for line in lines if line]
+    if len(lines) >= SUMMARY_LINES:
+        lines = lines[:SUMMARY_LINES - 1]
+    return lines + ([decide] if decide else [])
+
+
+PersonSummary = person_summary  # the design's name (4.5)
 
 
 def argument_lines(text: str) -> list:

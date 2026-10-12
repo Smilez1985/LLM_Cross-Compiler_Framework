@@ -321,7 +321,9 @@ class TestWhatIsStored:
         from orchestrator.tools.spec import CallWarning, number_problems
         # A warning the framework found is recorded with the kind the catalogue gives it, never one a producer
         # chose; a code the catalogue does not know is a security warning (only the person decides it).
-        assert chat_feed.WarningRow.of(CallWarning("disk_tight", {"free_gb": 3})).kind == "security"
+        # (the facts catalogue knows disk_tight now, as a situation warning: the unknown code is a made-up one)
+        assert chat_feed.WarningRow.of(CallWarning("not_in_the_catalogue", {"free_gb": 3})).kind == "security"
+        assert chat_feed.WarningRow.of(CallWarning("disk_tight", {"free_gb": 3})).kind == "situation"
         catalogue = SimpleNamespace(WARNINGS={"disk_tight": SimpleNamespace(kind="situation", ai_template="")},
                                     NUMBER_KEYS={})
         monkeypatch.setattr(spec, "_catalog", lambda: catalogue)

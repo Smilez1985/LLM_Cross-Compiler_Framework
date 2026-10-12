@@ -1514,15 +1514,17 @@ framework never sees it.
   folder, hard-linked and hidden files and unfinished downloads left out; 50 per page), each with its file id and
   `<label>:<relative path>`, which `start_build` takes; a downloaded file shows up there too.
 - **Devices and deploy (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` shows the
-  [trusted devices](#deployment) with the label you gave, address, user, host key fingerprint, whether the device
-  is usable (paired, and its key still the trusted one) and the last deploy. `create_deploy_package` packages a
+  [trusted devices](#deployment) with the label you gave, address, host key fingerprint, whether the device is
+  usable (paired, and its key still the trusted one) and the last deploy; the account the framework logs in with is
+  shown as "device account", never by its name. `create_deploy_package` packages a
   built model (artifact id) for a target's device profile (default: the target it was built for) as a job; the
   output folder's disk must hold twice the model, and `include_docker_images` is refused unless every image is pinned
   by its digest or built on this computer. Its result has the package id (`pkg_` and 16 hex characters), size and
   sha256; a standing approval can cover it only without Docker images. `deploy_to_device` takes only a package id
   and a device id. Before you are asked, the framework reads the device's host key (a key read, no login) and
   refuses an unknown or changed key without writing anything (reason `needs_person`); an unpaired device is refused
-  too. The question shows the device by your label with user and address, the host key fingerprint you confirmed,
+  too. The question shows the device by your label (its login, account and address, only in the framework's own
+  window, never in a form an AI may read), the host key fingerprint you confirmed,
   the package's name, size and sha256, the built model and the trust of its target. The deploy then runs as a job
   without a password and refuses when the package's sha256 (computed from the same open file that is uploaded) or
   the device's key differs from what you were shown. It is always asked (it can never be set to allow), never covered
@@ -1748,6 +1750,52 @@ proof of who it is), a hash of the connection, the confirmation channel (`elicit
 adding, removing or changing them is detected, while an entry keeps the hash 3.0.0 computes: logs written before them
 stay verifiable, and a 3.0.0 process that still runs next to this version keeps verifying and appending to the same
 log.
+
+### What the framework checks before a question
+
+Before a call that changes something is put to you, the framework looks up the facts behind it and sorts what it
+finds into three kinds. The kind of each finding is fixed in the framework's catalogue, never chosen by a tool or an
+AI:
+
+- **Hard blockers** stop the call before anyone is asked, for an AI and for you alike: not enough disk space, offline
+  mode, a board that is not paired or whose identity changed, a gated model your Hugging Face sign-in cannot open,
+  the Deep Ingest notice not read yet, a withdrawn pack. The AI gets the reason and its next step; the framework
+  shows you, separately, what you can do (for example "Free disk space (old builds, the model cache, the trash), or
+  choose a smaller model"). When an AI can clear a blocker itself (Ditto's model server not built yet, a model not
+  downloaded yet), the refusal names the tool that does it.
+- **Situation warnings** are worth weighing but not dangerous: the disk gets tight but there is enough, a large
+  download, memory that is tight for the conversion or too small on the board, many pages for Deep Ingest, a
+  hardware module nobody has tried on the board yet, the runtime on a board being replaced. Later, an AI you give a
+  delegation may decide these itself.
+- **Security and legal warnings** are always yours: model files in an old format that can run hidden code (pickle),
+  a build environment from outside Docker's checked collection or not fixed to one exact version, more vendor
+  downloads than usual, an unreviewed or community hardware module, an untrusted model run directly on your
+  computer, a pack signed with your key, a gated model, a licence that restricts use or is not on the list of known
+  free licences. Facts that could not be checked (Hugging Face did not answer, no licence named, a base model that
+  could not be looked up, an unknown file format) are a security warning too: unknown is never "no problem".
+- **The first build of build code an AI made or installed is shown to you once.** A target or recipe pack installed
+  under a standing approval (later also a delegation), a hardware module an AI created without your yes, and a
+  target from another computer carry the security warning "first build" until you have confirmed one build of
+  exactly that content (the pack's SHA-256, or the module's definition); an updated pack or a module recreated
+  under the same name is shown again.
+
+A question in the framework's own window (Ditto's dialog, the CLI prompt, the approval window) starts, right after
+its first line, with a short summary in your language: what happens with the names you know, how much it downloads
+and how much disk it needs, "Needs your decision because: ..." with every security or legal warning, what to weigh,
+a safer option where there is one, and who may decide. The summary is built only from numbers the framework computed,
+the warnings and the names, never from text out of a repository, a log or an AI. After the facts, every question
+(also an MCP form) lists the situation warnings and, apart from them, the security and legal ones.
+
+A pending approval is no longer asked again when only the free space changed while you read it: a decision is bound
+to the facts that matter (the request, the commit, the size class, the warnings, the image digests, the board and its
+host key), not to free space or byte counts. If a warning appears or disappears, for example the disk is now tight,
+you are asked again. Under a standing approval (and later a delegation) a build or download uses only the commit the
+framework looked up; when Hugging Face could not be asked, nothing starts without you.
+
+**Board accounts stay with you.** The account the framework logs in with on a board (for example `dietpi`) and paths
+on the board never reach an AI: `list_devices` says "device account", the login (account and address) appears only
+in the framework's own window, and everything a board answers (its output, check results and errors, also when
+everything worked) reaches an AI with the account's name, its home folder and board paths removed.
 
 ---
 

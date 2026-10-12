@@ -10,6 +10,26 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Der Faktenkatalog und die Einordnung je Tool** (Delegationsentwurf 4.1-4.6, `orchestrator/tools/
+  facts_catalog.py`, Texte in `orchestrator/utils/l10n_facts.py`): Jeder Befund vor einer Rückfrage hat eine feste
+  Art. Harte Hindernisse (volle Platte, Offline-Modus, ein nicht gekoppeltes Board oder ein geänderter Host-Schlüssel,
+  ein Modell mit Bedingungen ohne Zugang, der nicht gelesene Hinweis zu Deep Ingest, ein zurückgezogenes Pack, ...)
+  lehnen vor jeder Rückfrage ab, mit ihrem Grund-Code, einem nächsten Schritt für die KI und, getrennt davon, dem,
+  was die Person tun kann; ein Hindernis, das eine KI beheben kann, nennt das Tool, das es behebt.
+  Situationshinweise (knapper Speicherplatz, ein großer Download, knapper oder zu kleiner Arbeitsspeicher, viele
+  Seiten, ein ungetestetes Modul, eine ersetzte Board-Laufzeit) bringen eine Regel für eine KI mit; Sicherheits- und
+  Rechtshinweise (Pickle-Gewichte, ein Basis-Image außerhalb der Docker Official Images oder nicht gepinnt,
+  Hersteller-Downloads über der weichen Grenze, ein ungeprüftes oder Community-Target, der erste Build von KI-Build-
+  Code, ein nicht vertrauenswürdiges Modell nativ, Signieren als die Person, Modelle mit Bedingungen, Lizenzen)
+  bleiben immer bei der Person, und Fakten, die sich nicht prüfen ließen, sind der Sicherheitshinweis
+  `facts_unknown`, nie „kein Problem“. Builds, Rezept-Builds, Downloads, Pack-Importe und -Exporte, Deep Ingest,
+  Deployment-Pakete und Deployments, die Board-Tools, die lokale Laufzeit, Benchmarks, das Erstellen von Modulen und
+  Einstellungen melden sie. Eine Entscheidung ist an den Entscheidungs-Digest der Fakten gebunden, der freien
+  Speicher und Byte-Zahlen auslässt; ein Build oder Download unter einem Dauerauftrag (und später einer Vollmacht)
+  nutzt nur den Commit, den sein Nachschlagen ermittelt hat (Hindernis `commit_required`, wenn Hugging Face nicht
+  gefragt werden konnte). Die Sicht der KI auf die Fakten (`delegation.ai_view`) enthält nie einen Fakt, den nur die
+  Person sieht. Die Codes der Hinweise sind feste Bezeichner, bereit für eine spätere Wahl „für diese Modellversion
+  nicht mehr fragen“ (Entwurfsfrage Q3), die noch nicht gebaut ist.
 - **Ein Smoke-Test mit einem echten Client** (`scripts/mcp_client_smoke.sh`, Prüfung `scripts/mcp_smoke_check.py`):
   lässt Claude Code (`claude -p`, vier vorgegebene Prompts) in einer Wegwerf-Umgebung gegen den stdio-Server des
   Frameworks laufen (Home, Hugging-Face-Home, XDG-Ordner, Benutzerordner, Zugangsdaten nur im Speicher, das
@@ -40,7 +60,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Builds ab. Ein per
   Digest gepinntes Basis-Image außerhalb der Docker Official Images zählt, sobald ein Build mit genau diesem Image
   bestätigt wurde; ein Tag nie. Die Regelversion des Build-Dauerauftrags ist jetzt 2, Daueraufträge nach der
-  engeren Regel verfallen.
+  engeren Regel verfallen. Bis zu diesem ersten bestätigten Build trägt die Frage den Sicherheitshinweis „erster
+  Build“ (die Person sieht von einer KI erstellten oder installierten Build-Code einmal selbst, Entwurfsfrage Q1),
+  auch für ein Hardware-Modul, das eine KI ohne das Ja der Person erstellt hat (gebunden an das sha256 seiner
+  Definition: unter demselben Namen neu erstellt, wird es erneut gezeigt), und für ein Target von einem anderen
+  Computer.
 - **Ditto und das Framework auf einem anderen Computer, in der GUI** (MCP-Entwurf T12, Entwurf 6.1): Configure AI
   Agent (Ditto) hat einen Abschnitt „Another computer (optional)“, standardmäßig aus, der in einfachen Worten sagt,
   dass das andere Framework dasselbe Programm auf einem zweiten Computer ist und dass Docker nicht nötig ist (SSH oder
@@ -645,8 +669,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nie, auch wenn du es gesetzt hast, während das Formular offen war): Ein Hinweis in der Statusleiste der GUI öffnet
   **Tools > Pending Approvals...**, und `llm-cli tools approvals` (`list`, `show`, `approve`, `decline`; braucht ein
   Terminal) funktioniert auf einem Rechner ohne Bildschirm. Der Client bekommt `waiting_for_approval` mit einer
-  Job-ID; sobald du freigibst, führt das Framework den Aufruf selbst unter dem Aufrufer des Clients aus, außer seine
-  Frage würde inzwischen anders lauten (dann wirst du erneut gefragt), und der Client liest das Ergebnis mit
+  Job-ID; sobald du freigibst, führt das Framework den Aufruf selbst unter dem Aufrufer des Clients aus, außer ein
+  Fakt, von dem die Entscheidung abhängt, hat sich inzwischen geändert (ein neuer Commit, ein neuer Hinweis wie ein
+  jetzt knapper Speicherplatz: dann wirst du erneut gefragt; freier Speicher oder Byte-Zahlen, die sich nur bewegt
+  haben, fragen nie erneut, der Aufruf läuft dann mit den Fakten von jetzt), und der Client liest das Ergebnis mit
   `get_job_status`. Eine Freigabe ist an Aufrufer, Tool, Argument-Hash und Fragen-Hash gebunden, läuft einmal,
   verfällt nach 15 Minuten und endet mit der Sitzung des Clients, `cancel_job` oder dem Beenden des Frameworks; ein
   Client hat höchstens 5 offen; die Frage zeigt zuerst die Aufruferklasse und den Namen des Clients als selbst
@@ -740,7 +766,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   und das Deployment bricht ab, wenn Paket oder Schlüssel danach abweichen. Es wird immer erfragt, nie von einer
   Daueranfrage abgedeckt, eins je Gerät zur Zeit; `cancel_job` schließt die SSH-Sitzung und meldet den Zustand des
   Geräts als unbekannt. Die Ausgabe des Geräts kommt als externer Text markiert zurück (`get_job_status`-Feld
-  `external_text`). Keine Eingabe nennt Adresse, Benutzer, Port, Passwort, Fingerabdruck oder Pfad.
+  `external_text`). Keine Eingabe nennt Adresse, Benutzer, Port, Passwort, Fingerabdruck oder Pfad. Das Konto, mit
+  dem sich das Framework anmeldet, und Pfade auf dem Gerät erreichen nie eine KI: `list_devices` sagt „device
+  account“, die Anmeldung (Konto und Adresse) steht nur im eigenen Fenster des Frameworks (nie in einem Formular, das
+  ein Client lesen kann, und nicht im sprechenden Namen eines Geräts), und Ausgabe, Fehler und Begründung des
+  Deployments erreichen eine KI ohne den Namen des Kontos, seinen Home-Ordner und Gerätepfade, auch wenn das
+  Deployment geklappt hat.
 - **Vertraute Geräte** (`~/.llm-framework/devices.json`, `llm-cli deploy devices list|add|remove`, `deploy run
   --label`): `deploy run`, `scan --device`, `device runtime deploy` und das Deployment-Fenster der GUI tragen ein
   Gerät ein, nachdem du seinen Host-Schlüssel bestätigt hast und sich das Framework angemeldet hat (im Audit-Log
@@ -758,7 +789,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nie aktiv, und ein abgebrochener Modell-Download behält seine `.part`-Datei. Ein nicht vertrauenswürdiges Modell wird
   nativ nur nach deiner Zustimmung im eigenen Fenster des Frameworks gemessen, die zuerst ins Audit-Log geschrieben
   wird, oder in der Docker-Sandbox. Die Board-Tools erreichen nur vertraute Geräte mit dem vertrauten Host-Schlüssel,
-  werden immer erfragt und nie von einer Daueranfrage abgedeckt.
+  werden immer erfragt und nie von einer Daueranfrage abgedeckt; ihre Fakten, Folgen, Fortschritte, Prüfergebnisse und
+  Fehler (auch bei Erfolg) nennen nie das Gerätekonto oder einen Pfad auf dem Board (das Fenster der Person zeigt die
+  Anmeldung und den Pfad des Modells). Ist Dittos Server noch nicht gebaut oder das Modell einer Stufe noch nicht
+  heruntergeladen, lautet die Ablehnung `missing_information` und nennt `build_local_runtime`, das die KI selbst
+  aufrufen kann.
 - **Benchmark-Läufe dieses Rechners** (`~/.llm-framework/benchmarks/`): `llama-bench`-Ergebnisse des selbst gebauten
   Builds (Prompt- und Erzeugungsgeschwindigkeit, höchster Speicherbedarf) mit dem sha256 des Modells und der Build-ID;
   `get_status` zeigt die neuesten.
@@ -788,9 +823,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   stimmen. Noch entfernt nichts Zeilen von selbst.
 
 ### Geändert
-- **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field"}}`, nur
-  Fakten des Frameworks, der Text unverändert). Ditto im MCP-Client-Modus liest Code und Feld daraus, statt sie aus
-  den Worten des entfernten Servers zu raten; ein unbekannter Code ist `failed`, ein Feld außerhalb des Schemas des
+- **Rückfragen zeigen eine Kurzfassung und die Arten der Hinweise** (Delegationsentwurf 4.5, LAY-L2): Eine Rückfrage
+  im eigenen Fenster des Frameworks (Dittos Dialog, die CLI-Abfrage, das Freigabefenster) beginnt nach ihrer ersten
+  Zeile mit 3 bis 6 Zeilen in der Sprache der Person (Englisch oder Deutsch): was passiert, mit sprechenden Namen, wie
+  viel heruntergeladen wird und wie viel Speicherplatz nötig ist, „Braucht deine Entscheidung, weil: ...“ mit jedem
+  Sicherheits- und Rechtshinweis, die abzuwägenden Situationshinweise, eine sicherere Wahl und wer entscheiden darf.
+  Die Kurzfassung entsteht nur aus berechneten Zahlen, den Hinweisen und sprechenden Namen, nie aus Text aus einem
+  Repository, einem Log oder von einer KI. Jede Rückfrage, auch ein MCP-Formular, nennt nach den geprüften Fakten
+  „Situation:“ und „Needs you (security / legal):“.
+- **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field",
+  "blocker"}}`, nur Fakten des Frameworks, der Text unverändert; `blocker` nennt das harte Hindernis aus dem
+  Faktenkatalog, das den Aufruf vor jeder Rückfrage abgelehnt hat, etwa `disk_full`). Ditto im MCP-Client-Modus liest
+  Code und Feld daraus, statt sie aus den Worten des entfernten Servers zu raten; ein unbekannter Code ist `failed`,
+  ein Feld außerhalb des Schemas des
   Tools wird verworfen.
 - **`ArtifactStore` (`delete_artifact`) nutzt nur öffentliche Methoden von `BuildService`** (`output_folder`,
   `artifact_entries`, `busy_output_folders`, `ArtifactStore.for_service`).
@@ -1314,8 +1359,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Ausstehende Freigaben zeigen die zweiphasige Rückfrage und laufen gebunden an sie.** Ein Aufruf, der im
   Framework auf dich wartet, zeigt dieselbe Rückfrage wie jedes andere Fenster: die Fakten, die das Framework
   nachgeschlagen hat, die sprechenden Namen seiner IDs und wer fragt. Wenn du ihn freigibst, werden die Fakten erneut
-  nachgeschlagen; würde die Rückfrage anders lauten (etwa ein neuer Upstream-Commit), wirst du erneut gefragt, sonst
-  läuft der Aufruf genau mit den Fakten, die du gesehen hast. Eine MCP-Rückfrage zwischen 4.000 und 16.000 Zeichen
+  nachgeschlagen; hat sich ein Fakt geändert, von dem die Entscheidung abhängt (etwa ein neuer Upstream-Commit; freier
+  Speicher allein zählt nie), wirst du erneut gefragt, sonst läuft der Aufruf gebunden an die Fakten, die du gesehen
+  hast. Eine MCP-Rückfrage zwischen 4.000 und 16.000 Zeichen
   wird jetzt zu einer ausstehenden Freigabe statt abgelehnt, eine Dauerfreigabe wird auch auf dem MCP-Weg an den
   nachgeschlagenen Fakten gemessen (ein Client, der fragen könnte, fragt nicht, wenn eine den Aufruf abdeckt), Dittos
   scrollbarer Dialog für lange Rückfragen bietet ebenfalls "nicht mehr fragen" an, und die Kontingente eines

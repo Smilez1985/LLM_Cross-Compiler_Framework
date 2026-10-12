@@ -50,11 +50,12 @@ def _no_paths(text: str) -> str:
 
 
 class CrawlRefused(ValueError):
-    """A crawl that cannot start; `code` is the reason code of design 6.11 (D10), `next` the next step."""
+    """A crawl that cannot start; `code` is the reason code of design 6.11 (D10), `next` the next step, `blocker` the
+    facts catalogue's code of the hard fact that refused it (delegation design 4.2)."""
 
-    def __init__(self, message: str, code: str = "failed", next: str = ""):
+    def __init__(self, message: str, code: str = "failed", next: str = "", blocker: str = ""):
         super().__init__(message)
-        self.code, self.next = code, next
+        self.code, self.next, self.blocker = code, next, blocker
 
 
 NOTICE_NEXT = ("Ask the person to read the one-time Deep Ingest notice: in the GUI (Tools > Create Hardware "
@@ -176,44 +177,49 @@ class CrawlJobService:
         from orchestrator.utils.validation import validate_public_url
         if self.notice_needed():
             raise CrawlRefused("The person has not read the one-time Deep Ingest notice yet, so no crawl can start.",
-                               code="needs_person", next=NOTICE_NEXT)
+                               code="needs_person", next=NOTICE_NEXT, blocker="ingest_notice_unread")
         if bool(self._cfg("offline_mode", False)):
             raise CrawlRefused("Offline mode is on: the framework does not read web sites.", code="not_supported",
-                               next="Only the person can switch offline mode off (in the GUI or with llm-cli).")
+                               next="Only the person can switch offline mode off (in the GUI or with llm-cli).",
+                               blocker="offline_mode")
         if not bool(self._cfg("enable_rag_knowledge", True)) or self.rag() is None:
             raise CrawlRefused("The knowledge base is switched off, so nothing can be stored.", code="not_supported",
                                next="Only the person can switch it on (setting enable_rag_knowledge, in the GUI or "
-                                    "with llm-cli).")
+                                    "with llm-cli).", blocker="knowledge_off")
         urls = list(dict.fromkeys(u.strip() for u in start_urls))
         if not 1 <= len(urls) <= MAX_START_URLS:
             raise CrawlRefused(f"A crawl takes 1 to {MAX_START_URLS} different start addresses.",
-                               code="invalid_value", next=f"Give at most {MAX_START_URLS} addresses.")
+                               code="invalid_value", next=f"Give at most {MAX_START_URLS} addresses.",
+                               blocker="crawl_caps")
         for url in urls:
             check = validate_public_url(url) if len(url) <= MAX_URL_CHARS else None
             if not check:
                 raise CrawlRefused(f"'{url[:200]}' is not a public http(s) address the crawler may read.",
                                    code="invalid_value",
-                                   next="Give public http:// or https:// addresses of documentation sites.")
+                                   next="Give public http:// or https:// addresses of documentation sites.",
+                                   blocker="url_not_public")
         caps = self.limits()
         pages = caps["max_pages"] if max_pages is None else max_pages
         depth = min(2, caps["max_depth"]) if max_depth is None else max_depth
         if not 1 <= pages <= caps["max_pages"]:
             raise CrawlRefused(f"max_pages must be 1 to {caps['max_pages']} here (the person's setting "
                                f"crawler_max_pages, at most {PAGE_CAP}).", code="invalid_value",
-                               next=f"Call it again with max_pages between 1 and {caps['max_pages']}.")
+                               next=f"Call it again with max_pages between 1 and {caps['max_pages']}.",
+                               blocker="crawl_caps")
         if not 1 <= depth <= caps["max_depth"]:
             raise CrawlRefused(f"max_depth must be 1 to {caps['max_depth']} here (the person's setting "
                                f"crawler_max_depth, at most {DEPTH_CAP}).", code="invalid_value",
-                               next=f"Call it again with max_depth between 1 and {caps['max_depth']}.")
+                               next=f"Call it again with max_depth between 1 and {caps['max_depth']}.",
+                               blocker="crawl_caps")
         left = self.pages_left(caller)
         if left <= 0:
             raise CrawlRefused(f"This client stored {PAGES_PER_DAY} crawled pages in the last 24 hours, the most a "
-                               "day allows.", code="limit_reached", next="Try again tomorrow.")
+                               "day allows.", code="limit_reached", next="Try again tomorrow.", blocker="crawl_quota")
         if pages * len(urls) > left:
             raise CrawlRefused(f"This crawl may store up to {pages * len(urls)} pages, but only {left} of the "
                                f"{PAGES_PER_DAY} pages a day are left for this client.", code="limit_reached",
                                next=f"Ask for fewer pages: max_pages times the number of start addresses at most "
-                                    f"{left}.")
+                                    f"{left}.", blocker="crawl_quota")
         langs = tuple(dict.fromkeys(languages)) if languages is not None else self.default_languages()
         pdfs = bool(self._cfg("crawler_download_pdfs", True)) if include_pdfs is None else bool(include_pdfs)
         return CrawlPlan(tuple(urls), pages, depth, self.delay(), langs, pdfs)
@@ -232,7 +238,7 @@ class CrawlJobService:
             lock.acquire()
         except Timeout:
             raise CrawlRefused("Another crawl for this user is running (in this or another framework process).",
-                               code="limit_reached",
+                               code="limit_reached", blocker="crawl_running",
                                next="Wait until it has ended (get_job_status), then call it again.") from None
         return lock
 
@@ -240,19 +246,21 @@ class CrawlJobService:
         """Starts the crawl of a confirmed plan; returns the job."""
         if self.notice_needed():  # its text may have changed since the question
             raise CrawlRefused("The person has not read the current Deep Ingest notice, so no crawl can start.",
-                               code="needs_person", next=NOTICE_NEXT)
+                               code="needs_person", next=NOTICE_NEXT, blocker="ingest_notice_unread")
         if bool(self._cfg("offline_mode", False)):  # switched on while the person was asked
             raise CrawlRefused("Offline mode is on: the framework does not read web sites.", code="not_supported",
-                               next="Only the person can switch offline mode off (in the GUI or with llm-cli).")
+                               next="Only the person can switch offline mode off (in the GUI or with llm-cli).",
+                               blocker="offline_mode")
         if self.running() > 0:
             raise CrawlRefused("Another crawl for this user is running.", code="limit_reached",
-                               next="Wait until it has ended (get_job_status), then call it again.")
+                               next="Wait until it has ended (get_job_status), then call it again.",
+                               blocker="crawl_running")
         # Checked again: questions answered later (pending approvals) were each planned against the same budget.
         need, left = plan.max_pages * len(plan.start_urls), self.pages_left(caller)
         if need > left:
             raise CrawlRefused(f"This crawl may store up to {need} pages, but only {max(0, left)} of the "
                                f"{PAGES_PER_DAY} pages a day are left for this client now.", code="limit_reached",
-                               next="Try again tomorrow, or ask for fewer pages.")
+                               next="Try again tomorrow, or ask for fewer pages.", blocker="crawl_quota")
         lock = self._user_lock()
         stop = threading.Event()
         rag = self.rag()
