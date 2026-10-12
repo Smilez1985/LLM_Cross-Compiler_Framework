@@ -1657,8 +1657,9 @@ def _runtime_failure(error) -> None:
 
 @ditto.group('remote')
 def ditto_remote():
-    """Ditto's MCP-client mode: use the tools of a framework running elsewhere (for example the headless Docker
-    image) through its MCP server, with a named token linked to Ditto's permissions there"""
+    """Ditto and the framework on another computer (optional): Ditto uses the framework installed on a second
+    computer (a build PC, a server) through its MCP server, with a named token linked to Ditto's permissions there.
+    Docker is not needed: connect over SSH (as the command, or a tunnel to the server address)"""
     pass
 
 
@@ -1674,18 +1675,24 @@ def _remote_settings_text(config) -> List[str]:
 
 @ditto_remote.command('set')
 @click.option('--transport', type=click.Choice(['stdio', 'http']), required=True,
-              help='stdio: Ditto starts the server command (with LCF_MCP_TOKEN); http: Ditto connects to the address '
-                   'with the token as bearer header')
+              help='stdio: Ditto starts the command that runs the MCP server there (with LCF_MCP_TOKEN), for '
+                   'example over SSH; http: Ditto connects to the address with the token as bearer header, for '
+                   'example through an SSH tunnel')
 @click.option('--command', 'command', default=None,
-              help='stdio: the command that starts the server, e.g. "docker exec -i lcf llm-cli mcp serve"')
-@click.option('--url', default=None, help='http: the server address (https, or http on a loopback address)')
-@click.option('--name', default='', help='Your name for that framework, shown in Ditto\'s dialogs')
+              help='stdio: the command that starts the MCP server on the other computer, e.g. "ssh -T -o '
+                   'SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve" (the SSH server there needs AcceptEnv '
+                   'LCF_MCP_TOKEN, and llm-cli must be a command there, not only an alias); for a framework '
+                   'container you built yourself "docker exec -i lcf llm-cli mcp '
+                   'serve"')
+@click.option('--url', default=None, help='http: the server address (https, or http on a loopback address such as '
+              'an SSH tunnel: ssh -N -L 8765:127.0.0.1:8765 user@build-box, then http://127.0.0.1:8765/mcp)')
+@click.option('--name', default='', help='Your name for the other computer, shown in Ditto\'s dialogs')
 @click.option('--with-token', is_flag=True, help='Read the named token from stdin instead of asking for it')
 @pass_context
 def ditto_remote_set(ctx: FrameworkContext, transport: str, command: Optional[str], url: Optional[str], name: str,
                      with_token: bool):
-    """Switch Ditto to the tools of another framework's MCP server. Create the token there first:
-    llm-cli mcp token add NAME --link ditto (its permissions are then Ditto's own permissions on that framework)."""
+    """Let Ditto use the framework on another computer. Create the token on that computer first:
+    llm-cli mcp token add NAME --link ditto (its permissions are then Ditto's own permissions there)."""
     import shlex
     from orchestrator.llm.remote_tools import (COMMAND_SETTING, NAME_SETTING, SOURCE_SETTING, TOKEN_SECRET,
                                                TRANSPORT_SETTING, URL_SETTING, RemoteSetupError, check_url)
@@ -1721,15 +1728,16 @@ def ditto_remote_set(ctx: FrameworkContext, transport: str, command: Optional[st
     if not config.save_user_config():
         console.print("[red]The settings could not be saved.[/red]")
         sys.exit(1)
-    console.print("[green]Ditto now uses the tools of that framework (MCP-client mode); the token is in the "
-                  "credential vault.[/green]")
+    console.print("[green]Ditto now uses the tools of the framework on that computer instead of this computer's; "
+                  "the token is in the credential vault. This computer's files and settings stay as they are "
+                  "(back with: llm-cli ditto remote off).[/green]")
     console.print("Check the connection with: llm-cli ditto remote test")
 
 
 @ditto_remote.command('off')
 @pass_context
 def ditto_remote_off(ctx: FrameworkContext):
-    """Back to Ditto's own tools in this framework (the stored token is kept; remove it with
+    """Back to the framework on this computer (the stored token is kept; remove it with
     llm-cli secrets delete ditto_mcp_token)."""
     from orchestrator.llm.remote_tools import SOURCE_SETTING
     config, _ = _settings(ctx)
@@ -1737,13 +1745,13 @@ def ditto_remote_off(ctx: FrameworkContext):
     if not config.save_user_config():
         console.print("[red]The settings could not be saved.[/red]")
         sys.exit(1)
-    console.print("[green]Ditto uses its own tools again.[/green]")
+    console.print("[green]Ditto uses the framework on this computer again.[/green]")
 
 
 @ditto_remote.command('show')
 @pass_context
 def ditto_remote_show(ctx: FrameworkContext):
-    """Ditto's tool source and the remote server settings (never the token)"""
+    """Which computer's framework Ditto uses, and the connection settings (never the token)"""
     config, _ = _settings(ctx)
     for line in _remote_settings_text(config):
         console.print(escape(line))
@@ -1752,7 +1760,8 @@ def ditto_remote_show(ctx: FrameworkContext):
 @ditto_remote.command('test')
 @pass_context
 def ditto_remote_test(ctx: FrameworkContext):
-    """Connect to the remote framework with the stored token and list the tools and task prompts it offers Ditto"""
+    """Connect to the framework on the other computer with the stored token and list the tools and task prompts it
+    offers Ditto"""
     from orchestrator.llm.remote_tools import RemoteConnection, RemoteSetupError, TOKEN_NEXT, remote_server, \
         stored_token
     ctx.require_framework()
@@ -1762,7 +1771,8 @@ def ditto_remote_test(ctx: FrameworkContext):
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     if server is None:
-        console.print("Ditto uses its own tools (no remote server set): llm-cli ditto remote set ...")
+        console.print("Ditto uses the framework on this computer (no other computer set): llm-cli ditto remote "
+                      "set ...")
         return
     token = stored_token(ctx.framework_manager.secrets_manager)
     if not token:

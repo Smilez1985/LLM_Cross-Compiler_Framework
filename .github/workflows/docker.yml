@@ -78,21 +78,21 @@ jobs:
 
       - name: Smoke test (toolchain, Python packages, entrypoint)
         run: |
-          docker run --rm llm-framework/rockchip:ci test
-          docker run --rm llm-framework/rockchip:ci status
+          docker run --rm --pull never llm-framework/rockchip:ci test
+          docker run --rm --pull never llm-framework/rockchip:ci status
           # Each SDK lives in its own venv (their torch pins conflict); import it with that interpreter.
-          docker run --rm --entrypoint python3 llm-framework/rockchip:ci \
+          docker run --rm --pull never --entrypoint python3 llm-framework/rockchip:ci \
             -c "import torch, transformers, gguf; print('gguf venv ok')"
-          docker run --rm --entrypoint /opt/venv-rkllm/bin/python llm-framework/rockchip:ci \
+          docker run --rm --pull never --entrypoint /opt/venv-rkllm/bin/python llm-framework/rockchip:ci \
             -c "from rkllm.api import RKLLM; print('rkllm venv ok')"
-          docker run --rm --entrypoint /opt/venv-rknn/bin/python llm-framework/rockchip:ci \
+          docker run --rm --pull never --entrypoint /opt/venv-rknn/bin/python llm-framework/rockchip:ci \
             -c "from rknn.api import RKNN; print('rknn venv ok')"
 
       - name: Smoke test (llama.cpp conversion tools from the pinned commit)
         run: |
-          commit="$(docker run --rm --entrypoint cat llm-framework/rockchip:ci /usr/src/llama.cpp/.llama_cpp_commit)"
+          commit="$(docker run --rm --pull never --entrypoint cat llm-framework/rockchip:ci /usr/src/llama.cpp/.llama_cpp_commit)"
           grep -q "commit: ${commit}" configs/llama_runtime.yml
-          docker run --rm --entrypoint /usr/src/llama.cpp/build/bin/llama-bench llm-framework/rockchip:ci --version \
+          docker run --rm --pull never --entrypoint /usr/src/llama.cpp/build/bin/llama-bench llm-framework/rockchip:ci --version \
             2>&1 | grep -F "commit ${commit:0:8})"
 
       - name: Smoke test (container setup as used by BuildEngine)
@@ -100,17 +100,17 @@ jobs:
         # entrypoint must fix permissions, drop to llmbuilder and keep the venv on PATH.
         run: |
           echo "calibration text" > "$RUNNER_TEMP/dataset.txt"
-          docker run --rm --user 0:0 -v "$RUNNER_TEMP/dataset.txt:/build-cache/dataset.txt:ro" \
+          docker run --rm --pull never --user 0:0 -v "$RUNNER_TEMP/dataset.txt:/build-cache/dataset.txt:ro" \
             llm-framework/rockchip:ci python3 -c \
             "import getpass, sys; assert getpass.getuser() == 'llmbuilder', getpass.getuser(); assert sys.prefix == '/opt/venv', sys.prefix; print('entrypoint ok')"
-          docker run --rm --entrypoint test llm-framework/rockchip:ci -x /app/modules/build.sh
+          docker run --rm --pull never --entrypoint test llm-framework/rockchip:ci -x /app/modules/build.sh
 
       - name: Smoke test (sandboxed conversion container)
         # BuildEngine runs conversion stages as the host user without network, capabilities or a
         # writable image filesystem; only the work folder is writable.
         run: |
           mkdir -p "$RUNNER_TEMP/work/tmp" "$RUNNER_TEMP/work/home"
-          docker run --rm --user "$(id -u):$(id -g)" --network none --cap-drop ALL \
+          docker run --rm --pull never --user "$(id -u):$(id -g)" --network none --cap-drop ALL \
             --security-opt no-new-privileges:true --read-only --tmpfs /tmp \
             -v "$RUNNER_TEMP/work:/build-cache/work" -w /build-cache/work \
             -e HOME=/build-cache/work/home -e TMPDIR=/build-cache/work/tmp -e BUILD_SCRATCH_DIR=/build-cache/work \

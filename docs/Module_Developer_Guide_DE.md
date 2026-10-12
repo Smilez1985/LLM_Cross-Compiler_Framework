@@ -382,6 +382,12 @@ sein Schema geprüft, aber kein Build liest ihn. Die übrigen Blöcke in der Roc
 Kette aus vier Modulen liest ([Abschnitt 10](#10-altlasten)), und `docker.build_args` wiederholt nur den Pin für
 Builds außerhalb des Frameworks.
 
+`docker.image_name`, `docker.registry` und `docker.tags` sind **nur lokale Image-Namen**. Kein Framework-Image wird
+veröffentlicht oder geladen: Die Build-Engine baut das Image jedes Targets auf deinem Computer und versieht es lokal
+mit dem Tag `llm-framework/<Target>:<Build-ID>`, und nichts liest `registry` oder `tags` (die Werte `ghcr.io` und
+`latest`/`v1.0.0` in der Rockchip-Datei und der Vorlage sind Überbleibsel, die nur einen Namen beschreiben). Lade
+Target-Images nicht aus dem Framework heraus in eine Registry hoch, und verlasse dich für nichts auf diese Schlüssel.
+
 ## 5. Das Dockerfile
 
 Der Build-Kontext, den die Engine zusammenstellt, sieht so aus; das Dockerfile kopiert also von diesen Pfaden:

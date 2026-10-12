@@ -684,31 +684,67 @@ was die Tools zurückgegeben haben.
 
 ---
 
-### Ditto als MCP-Client eines anderen Frameworks
+### Ditto und ein Framework auf einem anderen Computer
 
-Ditto ist hybrid: Neben seinen eigenen Tools in diesem Prozess kann es die Tools eines Frameworks nutzen, das
-anderswo läuft (zum Beispiel im Headless-Docker-Image), über dessen MCP-Server (`llm-cli ditto remote set`,
-Einstellungen `ai_ditto_*`, die nur du in GUI oder CLI änderst; keine KI kann sie lesen oder schreiben). Registry,
-Berechtigungen, die narrensichere Schicht (ein unbekanntes Argument wird mit einem Vorschlag abgelehnt, nie
-verworfen), Rückfragen und Audit-Log sind die jenes Servers. Dittos Identität dort ist ein benanntes Token, angelegt
-mit `llm-cli mcp token add NAME --link ditto`, sodass der Server Dittos eigene Berechtigungen und Daueraufträge per
-Verweis anwendet: Wird `start_build` für Ditto verboten, gilt das in beiden Modi zugleich. Der Audit-Akteur dort ist
-`mcp:NAME`, nie `ditto`; ein neues Token ohne Verknüpfung darf nur lesen. Das Token liegt in Dittos Tresor für
-Zugangsdaten und erreicht den Server nur als `LCF_MCP_TOKEN` des gestarteten Prozesses (stdio; bei `docker exec` oder `podman exec` ergänzt Ditto `-e LCF_MCP_TOKEN`, nur den Namen, und es lehnt einen Server ab, der den gemeinsamen lokalen Aufrufer `mcp` meldet, das Token also nicht angekommen ist) oder als
-Bearer-Header (HTTP, nur https oder Loopback); ohne Token startet der Modus nicht. Eine Tool-Quelle pro Unterhaltung:
-Im MCP-Client-Modus wird kein Tool dieses Frameworks angeboten, und ein Wechsel der Quelle beginnt eine neue
-Unterhaltung. Ditto kann einen entfernten Server nicht prüfen, darum erreichen jedes Ergebnis, jeder Fehlertext,
-jeder Prompt und jede Tool-Beschreibung von dort Dittos Modell als nicht vertrauenswürdige Daten, und Dialog oder
-Abfrage der Bestätigung nennen den Server („Question from the framework at <Name>“). Ein „nicht mehr fragen“ von
-dort (CLI-Antwort `r`, GUI-Schaltfläche „Allow and ask it to stop asking...“, nur angeboten, wenn die Rückfrage jenes
+**Warum „ein anderes Framework“?** Es ist kein anderes Programm, sondern dasselbe Framework, auf einem zweiten
+Computer installiert, zum Beispiel ein stärkerer Build-PC mit großer Platte und GPU, ein Server oder ein Labor-PC, an
+dem die Boards hängen. Ditto spricht mit dem Framework auf seinem eigenen Computer direkt, im selben Prozess. Die
+zweite Installation erreicht es über deren MCP-Server, dieselbe Tür, die auch Claude Code nutzt. Mit der Verbindung
+kann derselbe Chat dort einen Build starten, ihn verfolgen, sein Log lesen, die dort gekoppelten Boards nutzen und
+dessen Wissensbasis durchsuchen.
+
+**Braucht es Docker?** Nein. Die Verbindung ist ein Befehl (stdio) oder eine Serveradresse (HTTP), und keins von
+beiden hängt von Docker ab. SSH erreicht den anderen Computer, so wie es Boards erreicht:
+
+- **Ein SSH-Tunnel zur Serveradresse** (empfohlen; am SSH-Server des anderen Computers ändert sich nichts): Dort läuft
+  `llm-cli mcp serve --transport http` dauerhaft und lauscht nur auf dem Loopback jenes Computers; hier bleibt
+  `ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box` in einem Terminal offen (auf beiden Seiten derselbe Port: der
+  Server prüft ihn), und
+  `llm-cli ditto remote set --transport http --url http://127.0.0.1:8765/mcp --name "Build-Rechner"` richtet Ditto
+  darauf aus.
+- **SSH als Befehl** (der Server startet für jede Unterhaltung):
+  `llm-cli ditto remote set --transport stdio --command "ssh -T -o BatchMode=yes -o SendEnv=LCF_MCP_TOKEN
+  benutzer@build-box llm-cli mcp serve" --name "Build-Rechner"`. Der SSH-Server dort muss die Variable annehmen
+  (`AcceptEnv LCF_MCP_TOKEN` in seiner `sshd_config`), der Befehl muss `llm-cli` dort finden (gib den vollen Pfad an,
+  siehe [`llm-cli` aufrufen](../README_DE.md#llm-cli-aufrufen)), und ssh startet ohne deinen SSH-Agenten (nur `HOME`,
+  `PATH` und wenige andere Variablen erreichen es), braucht also einen Schlüssel, den es ohne Abfrage nutzen kann.
+- **Ein Framework-Container, den du selbst gebaut hast** ([Container-Einrichtung](Container_Setup_DE.md)), ist eine
+  Alternative: `docker exec -i <container> llm-cli mcp serve` auf dem Computer, auf dem er läuft.
+
+Docker bleibt sonst, was es ist: die Sandbox, in der das Framework auf dem Computer, der baut, Modelle
+cross-kompiliert und konvertiert, dazu ausdrückliche Opt-ins. Kein Framework-Image wird veröffentlicht oder geladen.
+
+**Geht lokal etwas kaputt?** Mit ausgeschalteter Verbindung (der Standard) arbeitet Ditto wie bisher. Solange sie an
+ist, nutzt Ditto in dieser Version statt der Tools und Aufgaben-Prompts dieses Computers die des Frameworks auf dem
+anderen Computer (eine Tool-Quelle pro Unterhaltung: Kein Tool dieses Frameworks wird angeboten, und ein Wechsel
+beginnt eine neue Unterhaltung). Dateien, Targets, Boards, Einstellungen und Wissensbasis dieses Computers bleiben,
+wie sie sind, und `llm-cli ditto remote off` bringt Dittos eigene Tools zurück. Antwortet der andere Computer nicht,
+sagt Ditto das; schalte zurück, um lokal zu arbeiten.
+
+**Was dort gilt.** Die Einstellungen sind `ai_ditto_*`, die nur du in GUI oder CLI änderst; keine KI kann sie lesen
+oder schreiben. Registry, Berechtigungen, die narrensichere Schicht (ein unbekanntes Argument wird mit einem Vorschlag
+abgelehnt, nie verworfen), Rückfragen und Audit-Log sind die des Frameworks auf dem anderen Computer. Dittos
+Identität dort ist ein benanntes Token, dort angelegt mit `llm-cli mcp token add NAME --link ditto`, sodass jenes
+Framework Dittos eigene Berechtigungen und Daueraufträge per Verweis anwendet: Wird `start_build` für Ditto
+verboten, gilt das in beiden Modi zugleich. Der Audit-Akteur dort ist `mcp:NAME`, nie `ditto`; ein neues Token ohne
+Verknüpfung darf nur lesen. Das Token liegt in Dittos Tresor für Zugangsdaten und erreicht den Server nur als
+`LCF_MCP_TOKEN` des gestarteten Prozesses (stdio; bei `docker exec` oder `podman exec` ergänzt Ditto
+`-e LCF_MCP_TOKEN`, nur den Namen, und es lehnt einen Server ab, der den gemeinsamen lokalen Aufrufer `mcp` meldet,
+das Token also nicht angekommen ist) oder als Bearer-Header (HTTP, nur https oder Loopback); ohne Token startet der
+Modus nicht. Ditto kann den anderen Computer nicht prüfen, darum erreichen jedes Ergebnis, jeder Fehlertext, jeder
+Prompt und jede Tool-Beschreibung von dort Dittos Modell als nicht vertrauenswürdige Daten, und Dialog oder Abfrage
+der Bestätigung nennen den Server („Question from the framework at <Name>“). Ein „nicht mehr fragen“ von dort
+(CLI-Antwort `r`, GUI-Schaltfläche „Allow and ask it to stop asking...“, nur angeboten, wenn die Rückfrage jenes
 Servers es anbietet, mit einer Warnung vorab) fragt nur jenes Framework an, wo die Person es in dessen eigenem
 Freigabefenster bestätigt.
 
-In der GUI wird der Modus unter **Configure AI Agent (Ditto)** im Abschnitt „Ditto's tools“ eingestellt: die
-Tool-Quelle, ein Befehl (stdio) oder eine Serveradresse (HTTP, nur https oder Loopback), ein Name für die Dialoge und
-das benannte Token. Das Token landet im Tresor für Zugangsdaten und wird nie wieder angezeigt (das Feld bleibt leer
-und sagt nur, dass eines gespeichert ist); den Modus ohne Token, mit einem nicht lesbaren Befehl oder mit einer
-Adresse zu speichern, die das Token im Klartext senden würde, wird abgelehnt, und nichts wird gespeichert.
+In der GUI wird die Verbindung unter **Configure AI Agent (Ditto)** im Abschnitt „Another computer (optional)“
+eingestellt, der standardmäßig aus ist und sagt, dass Docker nicht nötig ist: „Ditto works with“ (dieser Computer
+oder das Framework auf einem anderen Computer), ein Befehl (stdio, zum Beispiel über SSH) oder eine Serveradresse
+(HTTP, nur https oder Loopback, zum Beispiel über einen SSH-Tunnel), ein Name für die Dialoge und das benannte
+Token. Das Token landet im Tresor für Zugangsdaten und wird nie wieder angezeigt (das Feld bleibt leer und sagt nur,
+dass eines gespeichert ist); die Verbindung ohne Token, mit einem nicht lesbaren Befehl oder mit einer Adresse zu
+speichern, die das Token im Klartext senden würde, wird abgelehnt, und nichts wird gespeichert.
 
 Dittos Aufgaben nutzen in beiden Modi dieselbe Quelle: Im MCP-Client-Modus holen Build-Empfehlung
 (`recommend_build_settings`), Modulvorschlag (`add_board`; eine Probe-Datei dieses Rechners kommt als eigener Block
@@ -2372,10 +2408,9 @@ unecht aussieht, weil der Push-Schutz von GitHub den Push ohnehin ablehnen würd
 
 Was noch nicht funktioniert, damit dich nichts überrascht:
 
-- **Docker-Setup des Frameworks selbst:** `Docker Setup/` sowie `make setup`, `make build`, `make up`, `make gui`
-  und `make test-container` funktionieren nicht (`scripts/setup_linux.sh` und `orchestrator/Dockerfile` gibt es
-  nicht). Ein gehärtetes Image ohne Oberfläche für CLI und MCP-Server wird gerade gebaut. Die Konvertierungen sind
-  nicht betroffen.
+- **Das Framework im Container baut keine Modelle:** Das Image, das du selbst baust
+  ([Container-Einrichtung](Container_Setup_DE.md)), enthält kein Docker; Konvertierungen laufen deshalb auf einem
+  Computer, auf dem das Framework direkt installiert ist.
 - **Windows-Hosts:** Konvertierungen auf einem Windows-Host sind nicht geprüft.
 - **Anmeldung im Browser und bei Cloud-Plattformen:** OAuth-Abläufe und die Anmeldeketten von AWS, Google Cloud
   und Azure gibt es noch nicht; Ditto meldet sich mit API-Schlüsseln an, und lokale Engines brauchen keine

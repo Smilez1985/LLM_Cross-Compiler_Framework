@@ -1,0 +1,64 @@
+name: Framework container
+
+# Builds the framework's container image the way a person does (scripts/build_container_image.sh: local tag, the same
+# installation as on bare metal) and checks it. It only builds and lints: no framework image is published or pulled,
+# and nothing is pushed anywhere.
+
+on:
+  pull_request:
+    paths:
+      - "Docker Setup/**"
+      - "install.sh"
+      - "requirements.txt"
+      - "scripts/build_container_image.sh"
+      - "Makefile"
+      - ".github/workflows/framework-container.yml"
+  push:
+    branches: [main]
+    paths:
+      - "Docker Setup/**"
+      - "install.sh"
+      - "requirements.txt"
+      - "scripts/build_container_image.sh"
+      - "Makefile"
+      - ".github/workflows/framework-container.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: framework-container-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build locally and smoke-test (never pushed)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Copy the Dockerfile to a path without spaces (the hadolint action splits its argument)
+        run: cp "Docker Setup/Dockerfile" framework-container.Dockerfile
+
+      - uses: hadolint/hadolint-action@06be81baf89a55ffd0e24b8f04a4185738dd3387 # v3.5.0
+        with:
+          dockerfile: framework-container.Dockerfile
+          failure-threshold: error
+
+      - name: Build with the builder script (local tag lcf-framework:local)
+        run: |
+          rm framework-container.Dockerfile
+          scripts/build_container_image.sh
+
+      - name: Smoke test (non-root user, CLI, data folder, no Docker engine inside)
+        run: |
+          test "$(docker run --rm --pull never lcf-framework:local id -u)" != 0
+          docker run --rm --pull never lcf-framework:local llm-cli --version
+          docker run --rm --pull never lcf-framework:local sh -c 'test ! -e /usr/bin/dockerd && test -d /data && test -w /data'
+          docker run --rm --pull never lcf-framework:local sh -c 'test -x /opt/llm-conversion-framework/.venv/bin/python'
+          # No keyring in a container and nothing chosen for the person: a vault in memory for this check only.
+          docker run --rm --pull never -e LLM_SECRET_STORAGE=ephemeral lcf-framework:local llm-cli targets list

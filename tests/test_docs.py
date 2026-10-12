@@ -40,6 +40,7 @@ EXPECTED_PAIRS: List[Tuple[str, str]] = [
     ("docs/CLI_Usage.md", "docs/CLI_Usage_DE.md"),
     ("docs/Features.md", "docs/Features_DE.md"),
     ("docs/Module_Developer_Guide.md", "docs/Module_Developer_Guide_DE.md"),
+    ("docs/Container_Setup.md", "docs/Container_Setup_DE.md"),  # the framework in a container you build locally
     ("configs/SSOT_ARCHITECTURE.md", "configs/SSOT_ARCHITECTURE_DE.md"),
     ("data/calibration/README.md", "data/calibration/README_DE.md"),
 ]
@@ -509,3 +510,51 @@ def test_document_version_lines_match_the_package_and_their_twin():
         if len(set(stamps.values())) > 1:
             problems.append(f"{rel} and {_twin(rel)} differ in version or date: {stamps}")
     assert not problems, "\n  ".join(["version lines:"] + problems)
+
+
+# --- (5) No published framework image (DECISIONS round 5 h; design WP2) ---------------------------------------------
+
+# Wording that promises or suggests a framework image to pull. There is none: people who want the framework in a
+# container build the image on their own computer (docs/Container_Setup.md), and Ditto reaches a framework on
+# another computer without Docker.
+PUBLISHED_IMAGE_WORDING = [
+    re.compile(r"headless[- ]docker[- ]image", re.I),
+    re.compile(r"docker[- ]image ohne oberfläche", re.I),
+    re.compile(r"image (for the cli and the mcp server|ohne oberfläche für (die )?cli)", re.I),
+    re.compile(r"\b(docker|podman|nerdctl) (image )?pull\s+\S*(llm-framework|lcf-framework|smilez1985|orchestrator)",
+               re.I),
+    re.compile(r"\bghcr\.io/\S*(llm-framework|lcf-framework|orchestrator)\S*:(latest|v?\d)", re.I),
+    re.compile(r"\bframework (running elsewhere|elsewhere)\b|\bframeworks?, das anderswo läuft", re.I),
+]
+
+
+def _current_text(rel: str) -> str:
+    """The text a reader takes as current: for a changelog only [Unreleased]; released versions record history."""
+    text = _read(rel)
+    if Path(rel).name.startswith("CHANGELOG"):
+        released = re.search(r"^## \[\d+\.\d+\.\d+\]", text, re.M)
+        return text[:released.start()] if released else text
+    return text
+
+
+def test_docs_never_promise_a_published_framework_image():
+    found = []
+    for rel in DOCUMENTS:
+        for number, line in enumerate(_current_text(rel).splitlines(), 1):
+            if any(pattern.search(line) for pattern in PUBLISHED_IMAGE_WORDING):
+                found.append(f"{rel}:{number}: {line.strip()[:120]}")
+    assert not found, ("documents suggest a published framework image or a framework 'elsewhere' (there is none: "
+                       "the image is built locally, docs/Container_Setup.md):\n  " + "\n  ".join(found))
+
+
+def test_the_published_image_check_finds_the_old_wording():
+    old = ["Ditto for a framework running elsewhere (for example the headless Docker image)",
+           "Ein gehärtetes Docker-Image ohne Oberfläche für CLI und MCP-Server",
+           "docker pull ghcr.io/smilez1985/llm-framework:latest",
+           "A hardened headless image for the CLI and the MCP server is being built",
+           "MCP-Server eines Frameworks, das anderswo läuft"]
+    for line in old:
+        assert any(pattern.search(line) for pattern in PUBLISHED_IMAGE_WORDING), line
+    for line in ["No framework image is published or pulled.", "Kein Framework-Image wird veröffentlicht oder geladen.",
+                 "docker exec -i lcf-framework llm-cli mcp serve", "the Rockchip build image installs Rockchip's toolkits"]:
+        assert not any(pattern.search(line) for pattern in PUBLISHED_IMAGE_WORDING), line

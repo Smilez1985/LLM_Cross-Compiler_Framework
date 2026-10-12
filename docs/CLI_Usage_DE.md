@@ -609,24 +609,38 @@ llm-cli ditto remote set --transport stdio|http [--command "..."] [--url URL] [-
 llm-cli ditto remote show | test | off
 ```
 
-Dittos MCP-Client-Modus: Ditto nutzt statt seiner eigenen Tools die Tools eines Frameworks, das anderswo läuft (zum
-Beispiel im Headless-Docker-Image), über dessen MCP-Server. Es gelten Registry, Berechtigungen, Rückfragen und
-Audit-Log jenes Servers. Lege zuerst auf dem Rechner des Frameworks das Token mit `llm-cli mcp token add NAME --link
-ditto` an: Das Token nutzt dort Dittos eigene Berechtigungen (eine Änderung daran gilt für beide Modi zugleich), und
-das Audit-Log dort zeigt `mcp:NAME`. `set` speichert das Token im Tresor für Zugangsdaten dieses Rechners (ohne Echo
-abgefragt oder mit `--with-token` von stdin gelesen) und den Server in Dittos KI-Einstellungen; das Token läuft nie
-durch ein Tool, ein Ergebnis oder eine Befehlszeile. Über stdio startet Ditto `--command` (zum Beispiel `docker exec
--i lcf llm-cli mcp serve`) mit dem Token in `LCF_MCP_TOKEN`. `docker exec` und `podman exec` geben ihre Umgebung nicht in den Container weiter, darum ergänzt Ditto bei einem solchen Befehl `-e LCF_MCP_TOKEN` (nur den Namen, nie den Wert); und nennt der erreichte Server statt des Tokens den gemeinsamen lokalen Aufrufer `mcp` (zum Beispiel über `ssh`, das die Umgebung verwirft), nutzt Ditto ihn nicht und sagt, wie die Variable weitergegeben wird. Über HTTP sendet es das Token als Bearer-Header an
-`--url`, das https oder eine Loopback-Adresse sein muss. Ohne Token startet der Modus nicht. Eine Tool-Quelle pro
-Unterhaltung: Ein Wechsel beginnt eine neue Unterhaltung, und im MCP-Client-Modus wird kein Tool dieses Frameworks
-angeboten. Jedes Ergebnis, jeder Fehler und jede Rückfrage des entfernten Frameworks erreicht Dittos Modell als
-nicht vertrauenswürdige Daten, und Dittos Bestätigung nennt den Server. `test` verbindet sich und listet die Tools
-und Aufgaben-Prompts, die der Server Ditto anbietet; `show` zeigt die Einstellungen (nie das Token); `off` schaltet
-zurück auf Dittos eigene Tools. Die KI-Einstellungen der GUI („Ditto's tools“) setzen dieselben Werte; auch dort
-landet das Token im Tresor und wird nie wieder angezeigt.
+Ditto und das Framework auf einem anderen Computer (optional): Ditto nutzt statt der Tools dieses Computers das
+Framework, das auf einem zweiten Computer installiert ist (ein stärkerer Build-PC, ein Server), über den MCP-Server
+jener Installation. Es ist dasselbe Programm, kein anderes, und Docker ist nicht nötig: Verbinde dich über SSH,
+entweder mit einem Tunnel zur Adresse des Servers oder mit `ssh` als Befehl
+([Einzelheiten](Features_DE.md#ditto-und-ein-framework-auf-einem-anderen-computer)). Es gelten Registry,
+Berechtigungen, Rückfragen und Audit-Log jenes Frameworks. Lege zuerst auf dem anderen Computer das Token mit
+`llm-cli mcp token add NAME --link ditto` an: Das Token nutzt dort Dittos eigene Berechtigungen (eine Änderung daran
+gilt für beide Modi zugleich), und das Audit-Log dort zeigt `mcp:NAME`. `set` speichert das Token im Tresor für
+Zugangsdaten dieses Computers (ohne Echo abgefragt oder mit `--with-token` von stdin gelesen) und die Verbindung in
+Dittos KI-Einstellungen; das Token läuft nie durch ein Tool, ein Ergebnis oder eine Befehlszeile. Über stdio startet
+Ditto `--command` (zum Beispiel `ssh -T -o BatchMode=yes -o SendEnv=LCF_MCP_TOKEN benutzer@build-box llm-cli mcp
+serve`, das `AcceptEnv LCF_MCP_TOKEN` in der Konfiguration des SSH-Servers dort braucht und `llm-cli` dort als Befehl,
+nicht nur als Alias, siehe [`llm-cli` aufrufen](../README_DE.md#llm-cli-aufrufen); oder, für einen
+Framework-Container, den du selbst gebaut hast, `docker exec -i lcf llm-cli mcp serve`) mit dem Token in
+`LCF_MCP_TOKEN`. `docker exec` und `podman exec` geben ihre Umgebung nicht in den Container weiter, darum ergänzt
+Ditto bei einem solchen Befehl `-e LCF_MCP_TOKEN` (nur den Namen, nie den Wert); und nennt der erreichte Server statt
+des Tokens den gemeinsamen lokalen Aufrufer `mcp` (zum Beispiel über `ssh` ohne `SendEnv`, das die Umgebung
+verwirft), nutzt Ditto ihn nicht und sagt, wie die Variable weitergegeben wird. Über HTTP sendet es das Token als
+Bearer-Header an `--url`, das https oder eine Loopback-Adresse sein muss, etwa das lokale Ende eines SSH-Tunnels
+(`ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box`, dann `http://127.0.0.1:8765/mcp`). Ohne Token startet der Modus
+nicht. Eine Tool-Quelle pro Unterhaltung (in dieser Version): Ein Wechsel beginnt eine neue Unterhaltung, und
+solange der andere Computer genutzt wird, wird kein Tool dieses Frameworks angeboten; Dateien und Einstellungen
+dieses Computers bleiben, wie sie sind. Jedes Ergebnis, jeder Fehler und jede Rückfrage des anderen Frameworks
+erreicht Dittos Modell als nicht vertrauenswürdige Daten, und Dittos Bestätigung nennt den Server. `test` verbindet
+sich und listet die Tools und Aufgaben-Prompts, die der Server Ditto anbietet; `show` zeigt die Einstellungen (nie
+das Token); `off` schaltet zurück auf das Framework dieses Computers. Die KI-Einstellungen der GUI („Another computer
+(optional)“) setzen dieselben Werte; auch dort landet das Token im Tresor und wird nie wieder angezeigt.
 
 ```bash
-llm-cli ditto remote set --transport stdio --command "docker exec -i lcf llm-cli mcp serve" --name "Build-Rechner"
+# Auf dem anderen Computer: llm-cli mcp token add ditto-laptop --link ditto, dann llm-cli mcp serve --transport http
+ssh -N -L 8765:127.0.0.1:8765 benutzer@build-box &   # der Tunnel (offen lassen)
+llm-cli ditto remote set --transport http --url http://127.0.0.1:8765/mcp --name "Build-Rechner"
 llm-cli ditto remote test
 ```
 
