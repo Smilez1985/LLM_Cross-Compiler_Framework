@@ -2,8 +2,12 @@
 """
 The text a person sees before confirming a tool call (MCP elicitation, Ditto's GUI dialog and CLI prompt).
 
-Every argument is shown, complete and with invisible characters escaped, so a confirmation can only ever
-approve exactly the values the tool will run with. Arguments too long to show cannot be confirmed.
+In this order (design 6.6): the consequence in plain words, from facts the framework looked up; who asks (an MCP
+client's self-reported name, version and transport, and whose permissions apply); the facts the framework checked,
+external text labelled as such; then every argument, complete and with invisible characters escaped, priority
+fields first, repaired values marked with what the AI wrote and ids followed by their speaking name. A confirmation
+can only ever approve exactly the values the tool will run with. A question longer than its channel shows (4,000
+characters in an MCP elicitation, 16,000 in the framework's own windows) cannot be confirmed there.
 """
 
 import json
@@ -13,8 +17,15 @@ from typing import Any, Dict, Optional
 # Shown first in a confirmation, because they decide what a call touches.
 PRIORITY_FIELDS = ("model", "dataset_path", "use_gpu", "target", "format", "board", "quantization",
                    "request_id", "approve")
-MAX_DESCRIPTION = 4000              # an MCP form elicitation
-MAX_FRAMEWORK_DESCRIPTION = 16000   # the framework's own windows (pending approvals)
+MAX_ELICITATION = 4000   # an MCP form elicitation (what clients show without cutting)
+MAX_FRAMEWORK = 16000    # the framework's own windows: Ditto's GUI dialog, the CLI prompt (with a pager)
+MAX_DESCRIPTION = MAX_ELICITATION
+# The first line for a tool that looks nothing up: what its class of tools does, in plain words.
+TIER_CONSEQUENCES = {
+    "read": "Reads information in the framework: {title}.",
+    "local_write": "Changes something on this computer: {title}.",
+    "external": "Reaches another device, installs third-party code or deletes data: {title}.",
+}
 MAX_MARKS = 4  # combining marks shown on one letter; a longer stack draws over the lines around it
 
 # Always escaped: control, format, private use, surrogate, unassigned, line and paragraph separators.
@@ -66,22 +77,58 @@ def visible(value: Any) -> str:
     return "".join(pieces)
 
 
+def _plain(text: str) -> str:
+    """Framework text with an already escaped client label in it (ASCII only) as it is; anything else escaped."""
+    return text if text.isascii() and text.isprintable() else visible(text)
+
+
+def consequence_line(spec: Any) -> str:
+    """The question's first line for a tool without looked-up facts: the tool's own `consequence` text, else what
+    its class of tools does."""
+    own = getattr(spec, "consequence", "") or ""
+    if own:
+        return own
+    tier = getattr(getattr(spec, "tier", None), "value", "local_write")
+    return TIER_CONSEQUENCES.get(tier, TIER_CONSEQUENCES["local_write"]).format(title=spec.title)
+
+
 def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI client",
-                  marks: Optional[Dict[str, str]] = None, renamed: str = "", limit: int = MAX_DESCRIPTION) -> str:
-    """Every argument the tool will run with, complete. For MCP the question text is part of the elicitation's
-    identity, so an answer can only ever confirm exactly these values. `marks`: values the framework repaired,
-    with what the AI wrote; `renamed`: the tool name as the AI wrote it, when it was a spelling variant. `limit`:
-    the most the channel shows (an elicitation 4,000 characters, the framework's own windows 16,000)."""
-    marks = marks or {}
+                  marks: Optional[Dict[str, str]] = None, renamed: str = "", *, requester: str = "",
+                  facts: Any = None, names: Optional[Dict[str, str]] = None, limit: int = MAX_ELICITATION) -> str:
+    """The question for one call. For MCP the text is part of the elicitation's identity, so an answer can only
+    ever confirm exactly these values. `marks`: values the framework repaired, with what the AI wrote; `renamed`:
+    the tool name as the AI wrote it, when it was a spelling variant; `requester`: who asks, for people; `facts`:
+    the tool's looked-up CallFacts (consequence and facts); `names`: speaking names of id values (field -> name);
+    `limit`: what the channel shows (CallTooLong above it)."""
+    marks, names = marks or {}, names or {}
     shown = {k: v for k, v in arguments.items() if v is not None}
     order = [k for k in PRIORITY_FIELDS if k in shown] + [k for k in shown if k not in PRIORITY_FIELDS]
-    lines = [f"  {visible(k)}: {visible(shown[k])}"
-             + (f" (repaired; the AI wrote {visible(marks[k])})" if k in marks else "") for k in order]
+    lines = [visible(getattr(facts, "consequence", "") or consequence_line(spec))]
+    if requester:
+        lines.append(f"Requested by {_plain(requester)}.")
+    checked = list(getattr(facts, "facts", ()) or ())
+    if checked:
+        lines.append("Checked by the framework:")
+        for fact in checked:
+            label = f"{fact.label} ({fact.source}, not checked)" if fact.source else fact.label
+            lines.append(f"  {visible(label)}: {visible(fact.value)}")
+    arguments_lines = [f"  {visible(k)}: {visible(shown[k])}"
+                       + (f" (that is: {visible(names[k])})" if names.get(k) else "")
+                       + (f" (repaired; the AI wrote {visible(marks[k])})" if k in marks else "") for k in order]
     if renamed:
-        lines.append(f"  (tool name repaired; the AI wrote {visible(renamed)})")
-    text = (f"{actor} wants to run '{spec.title}' in the LLM Cross-Compiler Framework with:\n"
-            + ("\n".join(lines) if lines else "  (no arguments)"))
+        arguments_lines.append(f"  (tool name repaired; the AI wrote {visible(renamed)})")
+    lines.append(f"{actor} wants to run '{spec.title}' in the LLM Cross-Compiler Framework with:")
+    text = "\n".join(lines + (arguments_lines or ["  (no arguments)"]))
     if len(text) > limit:
-        raise CallTooLong(f"The arguments for '{spec.title}' are too long to show for a confirmation "
-                          f"({len(text)} characters); the call was not run.")
+        raise CallTooLong(f"The question for '{spec.title}' is too long to show for a confirmation here "
+                          f"({len(text)} characters, at most {limit}); the call was not run.")
     return text
+
+
+def argument_lines(text: str) -> list:
+    """The argument lines of a question (after the line that ends with 'with:'), for checks and tests."""
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        if line.endswith(" with:") and " wants to run '" in line:
+            return lines[i + 1:]
+    return []

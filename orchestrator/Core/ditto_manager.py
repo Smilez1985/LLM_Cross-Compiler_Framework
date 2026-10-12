@@ -46,6 +46,7 @@ from orchestrator.utils.untrusted import UNTRUSTED_RULE, sanitize_untrusted, wra
 logger = get_logger("DittoManager")
 
 MAX_TOOL_STEPS = 8             # model turns per question; every tool call is answered before the loop ends
+FIX_EXTRA_STEPS = 4            # more turns while the model fixes an input error (design 6.11 D8)
 MIN_MESSAGES_TO_SUMMARIZE = 4  # never summarize a conversation of a single exchange
 OPTIMIZATION_LEVELS = ("BALANCED", "SPEED", "SIZE", "AGGRESSIVE")
 
@@ -770,8 +771,10 @@ class DittoCoder:
                 raise
             except ToolError as e:
                 # Handler errors can carry external text (server replies, log lines): data, not instructions.
+                # The reason code and field stay, so the loop tells a fix from a repeat.
                 note(ToolUse(name, title_of(name), False, redact_secrets(str(e))[:300]))
-                raise ToolError(wrap_untrusted(str(e), source=f"tool error:{name}", max_len=4000)) from None
+                raise ToolError(wrap_untrusted(str(e), source=f"tool error:{name}", max_len=4000), code=e.code,
+                                field=e.field) from None
             note(ToolUse(name, title_of(name), True))
             return output
 
@@ -812,7 +815,7 @@ class DittoCoder:
         try:
             if tools:
                 loop = run_tool_loop(client, request, self._executor(registry, confirm, uses, on_tool),
-                                     max_steps=MAX_TOOL_STEPS)
+                                     max_steps=MAX_TOOL_STEPS, extra_steps=FIX_EXTRA_STEPS)
                 if loop.stop == "refusal":
                     raise self._error(loop.refusal)
                 results, new, text, stop, usage = loop.results, loop.new_messages, loop.text, loop.stop, loop.usage
@@ -823,7 +826,8 @@ class DittoCoder:
             raise self._error(e) from None
         text = text.strip()
         if stop == "max_steps":
-            text = (text + "\n\n" if text else "") + (f"(Ditto stopped after {MAX_TOOL_STEPS} steps without a final "
+            steps = getattr(loop, "steps", MAX_TOOL_STEPS) if tools else MAX_TOOL_STEPS
+            text = (text + "\n\n" if text else "") + (f"(Ditto stopped after {steps} steps without a final "
                                                       "answer. Ask to continue if needed.)")
         elif stop == "max_tokens":
             text = (text + "\n\n" if text else "") + "(The answer was cut off at the length limit.)"

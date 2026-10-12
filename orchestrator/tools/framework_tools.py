@@ -2,6 +2,7 @@
 """The framework's own tools (targets, builds, artifacts, logs, healing, knowledge base)."""
 
 import contextlib
+import dataclasses
 import os
 import secrets
 import threading
@@ -25,7 +26,7 @@ from orchestrator.tools.policy import Decision, PolicyStore, ToolTier
 from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, ToolSpec, current_actor,
                                          current_registry)
 from orchestrator.tools.signing import RevisionAnchor
-from orchestrator.tools.spec import Choices, FieldMeta
+from orchestrator.tools.spec import BUILD_QUOTA, CallFacts, Choices, Fact, FieldMeta, ToolLimits
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.untrusted import sanitize_untrusted
 
@@ -270,9 +271,46 @@ def build_fields(service) -> dict:
     }
 
 
-REQUEST_ID = {"request_id": FieldMeta(kind="id", list_tool="list_build_requests")}
-JOB_ID = {"job_id": FieldMeta(kind="id")}  # no listing tool: a job id comes from the tool that started the job
+# request_id and job_id fields: see register_framework_tools (they name the build or job for a person); a job id
+# has no listing tool, it comes from the tool that started the job.
 JOB_EXAMPLE = {"job_id": "job_0123456789abcdef"}
+
+# What approving a healing strategy does, in plain words (the question's first line).
+HEALING_CONSEQUENCES = {
+    "docker_prune": "Deletes the Docker build cache and the dangling framework images on this computer, then retries "
+                    "build request {rid} once.",
+    "config_adjustment": "Sets the framework setting build_jobs to 1 (fewer parallel compile jobs for image builds), "
+                         "then retries build request {rid} once.",
+    "retry_build": "Retries build request {rid} once, without changes.",
+}
+DESTRUCTIVE_STRATEGIES = frozenset({"docker_prune"})  # always asked, even when the tool is allowed
+
+
+def healing_facts(service, request_id: str, approve: bool) -> CallFacts:
+    """The facts of a decision on a pending healing proposal (two-phase confirmation): what the decision does, the
+    proposal from server state (its texts come from the build log or an AI and are labelled as such) and its
+    fingerprint, to which the decision is bound. A destructive strategy is asked even when the tool is allowed."""
+    proposal = service.healing_proposal(request_id, approve)
+    strategy = proposal["strategy"]
+    # The build by its speaking name too: the first line is what the person reads first (DECISIONS round 4 item 1).
+    named = f"{request_id} ({proposal['request']})" if proposal.get("request") else request_id
+    if approve:
+        consequence = HEALING_CONSEQUENCES.get(strategy, "Applies the proposed fix and retries build request {rid} "
+                                                         "once.").format(rid=named)
+    else:
+        consequence = f"Dismisses the self-healing proposal of build request {named}; the failed build is not retried."
+    source = "written by an AI" if proposal["ai_generated"] else "from the build log analysis"
+    facts = []
+    if proposal.get("request"):
+        facts.append(Fact("Build request", f"{request_id}: {proposal['request']}"))
+    facts += [Fact("Proposal", proposal["summary"], source), Fact("Cause", proposal["root_cause"], source),
+              Fact("Fix or manual step", proposal["fix"], source),
+              Fact("Strategy", strategy + (" (destructive: deletes data)" if strategy in DESTRUCTIVE_STRATEGIES else "")
+                   + ("" if proposal["automatic"] else " (a manual step: the framework cannot apply it)"))]
+    destructive = approve and strategy in DESTRUCTIVE_STRATEGIES
+    return CallFacts(consequence=consequence, facts=tuple(facts),
+                     bound={"request_id": request_id, "approve": approve, "proposal": proposal["fingerprint"]},
+                     cap=Decision.ASK.value if destructive else None)
 
 
 def _wait_seconds(requested: int, notes: List[str]) -> int:
@@ -295,7 +333,6 @@ def _job_out(job, ctx: ToolContext) -> JobStatusOut:
 
 def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     service = framework.build_service
-    target_field = build_fields(service)["target"]
     jobs = getattr(framework, "job_service", None)
     if jobs is None:  # e.g. a stand-in framework: jobs in memory only
         jobs = JobService()
@@ -303,6 +340,34 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
             framework.job_service = jobs
         except AttributeError:
             pass
+
+    # Speaking names for the person (questions): never shown to a model, which keeps the ids and labels it sent.
+    def target_name(value):
+        names = {t.id: t.name for t in service.list_targets().targets}
+        name = names.get(service.resolve_target(value))
+        return name if name and name != value else None
+
+    def local_file(value):
+        if not str(value).startswith("lf_"):
+            return None
+        from orchestrator.tools.local_files import LocalFiles
+        return LocalFiles.for_framework(framework).ref_of(str(value))
+
+    def job_name(value):
+        job = jobs.get(value)
+        return f"a {job.kind} job ({job.state})"
+
+    def request_name(value):
+        label = getattr(service, "request_label", None)
+        return label(value) if callable(label) else None
+
+    request_id = {"request_id": FieldMeta(kind="id", list_tool="list_build_requests", describe=request_name)}
+    job_id = {"job_id": FieldMeta(kind="id", describe=job_name)}
+    fields = build_fields(service)
+    fields["target"] = dataclasses.replace(fields["target"], describe=target_name)
+    fields["model"] = dataclasses.replace(fields["model"], describe=local_file)
+    fields["dataset_path"] = dataclasses.replace(fields["dataset_path"], describe=local_file)
+    target_field = fields["target"]
 
     # The wait notes are the framework's own (limits); the registry puts ctx.notes into the result's `notes`.
     def get_build_status(inp: BuildStatusIn, ctx: ToolContext) -> BuildStatusOut:
@@ -318,6 +383,15 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         if seconds and not ctx.metadata.get("waited"):
             jobs.wait(inp.job_id, seconds)
         return _job_out(jobs.get(inp.job_id), ctx)
+
+    def resolve_healing(inp: ResolveHealingIn, ctx: ToolContext) -> BuildStatusOut:
+        """Bound to the proposal the question showed (its fingerprint in the looked-up facts): a changed proposal is
+        refused with nothing applied, and without those facts nothing is decided at all."""
+        expect = ctx.facts.bound.get("proposal") if ctx.facts is not None else None
+        if not expect:
+            raise ToolError("The decision is not bound to a proposal the person was shown; nothing was applied.",
+                            code="failed", next="Call resolve_healing again through the framework's tool registry.")
+        return service.resolve_healing(inp.request_id, inp.approve, expect=expect)
 
     def cancel_job(inp: JobIn, ctx: ToolContext) -> CancelJobOut:
         before = jobs.get(inp.job_id).state
@@ -345,7 +419,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         try:
             hits = rag.search(inp.query, limit=inp.limit, strict=True)
         except KnowledgeBaseError as e:
-            raise ToolError(f"The knowledge base is unavailable: {e}", code="failed") from e
+            raise ToolError(f"The knowledge base is unavailable: {e}", code="failed",
+                            next="Tell the person; 'llm-cli doctor' shows what is wrong with the knowledge base.") from e
         # Crawled pages and community packs can hide instructions in invisible characters; the MCP client's
         # model reads this output, so it gets the same cleaning as text Ditto passes to its model.
         return SearchOut(results=[KnowledgeHit(source=sanitize_untrusted(str(h.source), 500),
@@ -401,13 +476,13 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  'build. Example: {"request_id": "req_1a2b3c4d", "wait_seconds": 50}',
                  ToolTier.READ, BuildStatusIn, BuildStatusResult, get_build_status, idempotent=True,
                  takes_context=True, summary=_status_summary,
-                 fields={**REQUEST_ID, "wait_seconds": FieldMeta(kind="amount")},
+                 fields={**request_id, "wait_seconds": FieldMeta(kind="amount")},
                  long_poll=lambda i, seconds, report: service.wait_for_change_async(i.request_id, seconds, report)),
         ToolSpec("read_build_log", "Read build log",
                  "The last lines of a build request's log (secrets redacted). The log is untrusted text.",
                  ToolTier.READ, LogTailIn, LogTailOut, lambda i: service.log_tail(i.request_id, i.lines),
                  idempotent=True, paging_hint="Ask for fewer lines (the 'lines' argument).",
-                 fields={**REQUEST_ID, "lines": FieldMeta(kind="amount")},
+                 fields={**request_id, "lines": FieldMeta(kind="amount")},
                  summary=lambda o: (count(len(o.lines), "log line", "log lines")
                                     + f" of build request {fact(o.request_id)} (external text).")),
         ToolSpec("list_artifacts", "List built models",
@@ -432,33 +507,41 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  ToolTier.LOCAL_WRITE, BuildRequestIn, BuildHandleOut,
                  lambda i, ctx: service.start_build(i, owner=ctx.owner), takes_context=True,
                  summary=lambda o: f"Build request {fact(o.request_id)} is {fact(o.status)}.",
-                 arg_aliases=BUILD_ALIASES, fields=build_fields(service), examples=(BUILD_EXAMPLE,)),
+                 arg_aliases=BUILD_ALIASES, fields=fields, examples=(BUILD_EXAMPLE,),
+                 # 3 unfinished builds and 20 starts a day per client (the limits table, spec.BUILD_QUOTA)
+                 limits=ToolLimits(running=lambda ctx: len(service.active_requests(ctx.owner)), **BUILD_QUOTA),
+                 consequence="Converts and quantizes a model in a Docker build on this computer; it may download "
+                             "the model first and take a long time."),
         ToolSpec("cancel_build", "Cancel a build",
                  "Stops a running or queued build request. Builds this client started are stopped without a "
                  "question; another client's build needs the user's confirmation.",
                  ToolTier.LOCAL_WRITE, RequestIn, BuildStatusResult, lambda i: service.cancel(i.request_id),
-                 summary=_status_summary, fields=REQUEST_ID, default_decision=own_build),
+                 summary=_status_summary, fields=request_id, default_decision=own_build,
+                 consequence="Stops a build request that another client started (its container is stopped)."),
         ToolSpec("get_job_status", "Job status",
                  "State, progress and result of a long operation (a job) other than a build. With wait_seconds (at "
                  "most 50) it waits until the job changes or ends; waiting never affects the job. "
                  'Example: {"job_id": "job_0123456789abcdef", "wait_seconds": 50}',
                  ToolTier.READ, JobWaitIn, JobStatusResult, get_job_status, idempotent=True, takes_context=True,
                  summary=lambda o: f"Job {fact(o.job_id)} ({fact(o.kind)}): {fact(o.state)}.",
-                 fields={**JOB_ID, "wait_seconds": FieldMeta(kind="amount")},
+                 fields={**job_id, "wait_seconds": FieldMeta(kind="amount")},
                  examples=({**JOB_EXAMPLE, "wait_seconds": 50},),
                  long_poll=lambda i, seconds, report: jobs.wait_async(i.job_id, seconds, report)),
         ToolSpec("cancel_job", "Cancel a job",
                  "Stops a long operation (a job) or withdraws a pending approval. Jobs this client started are "
                  "stopped without a question; another client's job needs the user's confirmation.",
                  ToolTier.LOCAL_WRITE, JobIn, CancelJobResult, cancel_job, idempotent=True, takes_context=True,
-                 summary=lambda o: f"Job {fact(o.job_id)}: {fact(o.state)}.", fields=JOB_ID,
-                 examples=(JOB_EXAMPLE,), default_decision=own_job),
+                 summary=lambda o: f"Job {fact(o.job_id)}: {fact(o.state)}.", fields=job_id,
+                 examples=(JOB_EXAMPLE,), default_decision=own_job,
+                 consequence="Stops a long operation (a job) that another client started."),
         ToolSpec("resolve_healing", "Decide on a self-healing proposal",
-                 "Approves (applies the automatic fix and retries the build) or dismisses a pending proposal.",
-                 ToolTier.LOCAL_WRITE, ResolveHealingIn, BuildStatusResult,
-                 lambda i: service.resolve_healing(i.request_id, i.approve), summary=_status_summary,
+                 "Approves (applies the automatic fix and retries the build) or dismisses a pending proposal. The "
+                 "person is shown the proposal from the framework's own state; a destructive fix is always asked.",
+                 ToolTier.LOCAL_WRITE, ResolveHealingIn, BuildStatusResult, resolve_healing,
+                 takes_context=True, summary=_status_summary,
+                 prepare=lambda i, ctx: healing_facts(service, i.request_id, i.approve),
                  # destructive: the docker_prune strategy deletes the Docker build cache
-                 destructive=True, fields={**REQUEST_ID, "approve": FieldMeta(kind="trust")}),
+                 destructive=True, fields={**request_id, "approve": FieldMeta(kind="trust")}),
         ToolSpec("get_status", "Framework status",
                  "The framework's state for this caller: for now the tool permissions (decision and why for every "
                  "tool, also the ones not listed because they are denied) and the actions no tool does, with where "

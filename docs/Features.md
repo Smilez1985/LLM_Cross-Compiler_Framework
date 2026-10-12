@@ -901,7 +901,11 @@ framework never sees it.
   socket, device or pipe); a Hugging Face cache snapshot is mounted file by file. The same holds for the folder of
   an RKNN sample list, so a list directly in a label folder is refused. A Hugging Face repo id from an AI client is
   always downloaded, never looked up as a folder on this computer. Refusals name the label, never the real path.
-  GUI and CLI builds you start yourself still take any path.
+  GUI and CLI builds you start yourself still take any path. What an AI client reads back names such a model by its
+  label too, never by the folders on this computer: the build's stage text ("Building models:qwen/model.gguf for
+  Rockchip"), the self-healing context, the build manifest's `model_source` and `list_artifacts` (a host path an
+  older manifest recorded is shown as `<label>:<relative path>` when it lies in a folder the AI may use, else as
+  the file name only).
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
   server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification
@@ -1022,6 +1026,52 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
   unknown or revoked token, or a token file that cannot be read, may not even read.
 
+**What a question shows** (Ditto's GUI dialog and CLI prompt, an MCP client's form), in this order: the
+consequence in plain words, from what the framework looked up, with ids followed by their speaking names (for example
+"Deletes the Docker build cache and the dangling framework images on this computer, then retries build request
+req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); who asks (Ditto, or the
+MCP client with the name, version and transport it reports, and whose permissions apply: all local stdio clients or
+a named token); the facts the framework checked, where text from outside the framework (a build log, an AI's
+proposal) is labelled "not checked" and escaped; then every argument, complete, repaired values marked, and an id
+followed by its speaking name (a build request's model and target, a local file's `<label>:<relative path>`, a
+target's name). Some tools look facts up before the question (two-phase confirmation), and the call is then bound
+to exactly what you were shown: approving a self-healing proposal applies the proposal in the question, and one that
+changed meanwhile is refused with nothing applied; a destructive fix (`docker_prune`, which deletes the Docker build
+cache) is asked even when `resolve_healing` is allowed; a lookup that fails (no pending proposal) refuses the call
+before anything is asked; without the looked-up facts a decision on a proposal is not made at all. A 2026-07-28
+client that answers in a second round gets the facts of the question it answered. A round counts as an answer only
+to a question the framework asked that client and that is still open: an answer a client sends along with a new call
+is a new question, recorded before it is asked and subject to the limits below (after your "no" it is not asked
+again). An MCP form shows at most 4,000 characters, the framework's own windows up to 16,000 (Ditto's GUI shows a
+long question in a scrollable dialog, which also offers "do not ask again" where the framework can, the CLI through
+the pager); over MCP a question between 4,000 and 16,000 characters becomes a pending approval, and a longer one is
+refused everywhere (reason `limit_reached`, with a next step). A pending approval is the same question: it shows the
+facts the framework looked up and the speaking names, and the framework runs the approved call bound to exactly the
+facts of the question you approved (a fact that changed before you approved it, for example a new upstream commit,
+asks you again instead). A standing approval is matched on these looked-up facts too, so a client that could ask
+you is not asked when one covers the call. A question that a looked-up fact made necessary is recorded with the
+decision `ask`, also when the tool itself is allowed. Where the framework could offer "do not ask again", the MCP
+form has one more box, which only asks the framework: it never creates a standing approval, and the call's notes say
+so.
+
+**Limits** (per client: Ditto, the local stdio clients, each named token; counted while the process runs): the
+read tools together at most 20 calls per 10 seconds (40 at once); `start_build` at most 3 unfinished builds and 20
+started builds in 24 hours per client (a start that was declined or refused, for example by a full queue, does not
+count), and one framework process queues at most 20 unfinished build requests from AI callers (your own GUI and CLI
+builds count toward the 20 but are always queued: AI work never blocks them); at most 30 questions to you per hour,
+pending approvals and requests to stop asking included, and at most 5 open pending approvals per client. When you
+approve a pending call, its quotas are checked again before it runs (the client's unfinished builds may have grown
+meanwhile). After you say no, in the client's dialog or in the approval window, the same call (the same
+tool with the same arguments after repair, so a respelled call is the same call) is refused without asking for 10
+minutes, and three "no" to one tool within 30 minutes pause the questions about it for 30 minutes; a dismissed dialog
+is not a "no". A call the repeat guard refused (the same failing call a third time) may run again 10 minutes after
+its last failure. Each limit is an audited refusal (`rate_limited`, reason `limit_reached`, or `declined` after your
+"no") that says when to try again, and it never counts as a failed call, for Ditto as for MCP clients. Ditto's chat
+stops calling tools after three failed calls in a row without progress (the same tool, reason and field each time;
+the framework names the field an input error is about) or a refused repeat, and answers with what it tried, what
+failed and why, within at most two more turns; fixing one input error after another is progress, and while Ditto
+fixes one it gets up to 4 steps more than its 8.
+
 **Audit log** (`~/.llm-framework/audit.db`, SQLite): every tool call is recorded with time, actor, tool, decision,
 whether a person confirmed it, and the outcome. Arguments are stored redacted and shortened, plus a hash of the full
 text. Each entry contains the hash of the previous one; with the key from your operating system's keyring this is an
@@ -1037,7 +1087,8 @@ when they are recorded. Read-only calls stay available, and the failed write is 
 as `confirmation_requested` with the SHA-256 of the question text before it is asked; a question about a change that
 cannot be recorded is not asked. Every end is recorded: `ok`, `error`, `denied`, `not_confirmed` with the answer
 (`accepted`, `declined`, `cancelled`, `unavailable` when nobody could be asked, `unanswered`), `confirmation_timeout`
-(an MCP question asked during the call waits at most 5 minutes) and `cancelled` (the client gave up on the call). A
+(an MCP question asked during the call waits at most 5 minutes; reason `needs_person`, and a question the client
+could not show has reason `failed`, both with a next step) and `cancelled` (the client gave up on the call). A
 question of the 2026-07-28 protocol that is returned to the client and never answered is recorded as `unanswered`
 after 15 minutes while the server runs; the `confirmation_requested` entry is the lasting record. When a client
 cancels a running call, the cancellation is recorded at once and passed to the running call; what already runs

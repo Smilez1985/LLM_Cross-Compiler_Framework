@@ -429,8 +429,8 @@ class TestLifecycle:
         service = env.registry.approvals
         real_question = service.question
         changed = {"now": False}
-        monkeypatch.setattr(service, "question", lambda spec, inp, ctx: real_question(spec, inp, ctx) + (
-            "\n  index key: changed" if changed["now"] else ""))
+        monkeypatch.setattr(service, "question", lambda spec, inp, ctx, facts=None: real_question(
+            spec, inp, ctx, facts) + ("\n  index key: changed" if changed["now"] else ""))
         with pytest.raises(ToolError):
             call_as(env, "mcp", "know-v", pending=True)
         record = env.store.pending()[0]

@@ -252,8 +252,15 @@ def render_messages(messages: List[Message], family: str = "anthropic"):
                 system_parts.append(msg.text())
             else:
                 # Mid-conversation operator note as user text: works on every model, and the history stays
-                # append-only (the note is never removed).
-                out.append({"role": "user", "content": f"[System note] {msg.text()}"})
+                # append-only (the note is never removed). Right after tool results it joins their user turn (a
+                # text block after the tool_result blocks), so two user turns never follow each other.
+                text = f"[System note] {msg.text()}"
+                last = out[-1] if out else None
+                if (last and last["role"] == "user" and isinstance(last["content"], list) and last["content"]
+                        and all(b.get("type") == "tool_result" for b in last["content"])):
+                    last["content"].append({"type": "text", "text": text})
+                else:
+                    out.append({"role": "user", "content": text})
             continue
         started = True
         if msg.role == "user":

@@ -312,6 +312,28 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   zu laufen; nach drei Eingabefehlern zeigt ein Fehler einen gültigen Beispielaufruf. Was repariert wurde, ist in
   der Frage markiert, in den `notes` des Ergebnisses aufgeführt und im Audit-Log festgehalten. Tool-Argumente, die
   ein lokales Modell mit Codeblock-Zäunen oder in Python-Schreibweise schickt, werden einmal erneut gelesen.
+- **Zweistufige Bestätigung und Rückfragetext v2** (Ditto und MCP-Clients): Eine Rückfrage beginnt mit der Folge in
+  einfachen Worten aus Fakten, die das Framework nachgeschlagen hat, dann wer fragt (Name, Version und Transport, die
+  ein MCP-Client selbst angibt, und wessen Berechtigungen gelten), die Fakten, die das Framework geprüft hat (externer
+  Text als "not checked" gekennzeichnet), und jedes Argument mit dem sprechenden Namen einer ID (Modell und Ziel eines
+  Builds, das Label einer lokalen Datei). Ein Tool kann Fakten vor der Rückfrage nachschlagen, und der Aufruf ist an
+  sie gebunden: `resolve_healing` zeigt den offenen Vorschlag aus dem eigenen Zustand des Frameworks, lehnt einen
+  Vorschlag ab, der sich nach der Rückfrage geändert hat, und fragt vor einem zerstörenden Fix (`docker_prune`) immer,
+  auch wenn das Tool erlaubt ist. Dittos GUI-Dialog und CLI-Abfrage zeigen Rückfragen bis zu 16.000 Zeichen (ein
+  scrollbarer Dialog, der Pager); ein MCP-Formular bleibt bei 4.000.
+- **Grenzen je Client für Tool-Aufrufe** (Ditto und MCP-Clients): lesende Tools 20 Aufrufe in 10 Sekunden,
+  `start_build` 3 unfertige Builds und 20 Starts am Tag, 30 Rückfragen pro Stunde und eine Build-Warteschlange von
+  höchstens 20 unfertigen Anfragen je Framework-Prozess für KI-Aufrufer (die eigenen GUI- und CLI-Builds des
+  Menschen werden immer eingereiht); nach einem Nein wird derselbe Aufruf 10 Minuten lang nicht erneut erfragt, und
+  drei Nein zu einem Tool pausieren seine Rückfragen für 30 Minuten. Eine
+  erreichte Grenze ist eine protokollierte Ablehnung `rate_limited`, die sagt, wann es wieder geht. Die
+  Wiederholungssperre lässt einen abgelehnten Aufruf 10 Minuten nach seinem letzten Scheitern wieder laufen (bisher
+  war er bis zum Ende des Prozesses gesperrt), und Ditto hört nur nach Fehlern ohne Fortschritt vorzeitig auf, Tools
+  aufzurufen, mit bis zu 4 Schritten mehr, solange er einen Eingabefehler behebt.
+- **`llm-cli tools audit` zeigt die neueren Audit-Felder in Worten**: wer aufgerufen hat (Ditto, alle lokalen
+  stdio-Clients, ein benanntes Token, mit dem Namen, den der Client selbst angibt), den Titel des Tools und den Namen,
+  den die KI geschrieben hat, den Grundcode und wie der Mensch gefragt wurde, mit seiner Antwort; `--details` ergänzt
+  Reparaturen, Dauer, Hash des Ergebnisses, Verweise und Sitzung.
 - **`llm-cli ditto eval` hält jeden Versuch eines Tool-Aufrufs fest**, nicht nur die, die ein Tool erreicht haben:
   Der Block `tool_use` des Berichts nennt Tool-Aufrufe pro Aufgabe, den Anteil fehlerhafter Aufrufe und unbekannter
   Tool-Namen, Reparaturen und Ablehnungen wiederholter Aufrufe.
@@ -540,6 +562,27 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- Rückfragen des 2026-07-28-Protokolls werden je Aufrufer und Sitzung geführt (die Antwort eines Clients schließt die
+  gleiche Rückfrage eines anderen Clients nicht mehr), eine unbeantwortete wird von einem Timer als `unanswered`
+  festgehalten, auch wenn keine weitere Anfrage kommt, und die beim Ende einer Sitzung noch offenen als
+  `client_disconnected`; die Berechtigungsprüfung eines Long-Polls liest die Berechtigungsdatei nicht mehr in der
+  Ereignisschleife des Servers; jede Ablehnung mit dem Grund `failed` nennt jetzt einen nächsten Schritt, und die
+  Eingabe-Ablehnungen des Build-Service tragen ihren eigenen Grundcode; eine MCP-Bestätigung, die scheiterte oder
+  nicht rechtzeitig beantwortet wurde, wird mit einem Grundcode festgehalten (`failed`, `needs_person`), und ihre
+  Ablehnung nennt einen nächsten Schritt.
+- Zweistufige Bestätigung, auf beiden Wegen gleich: Eine MCP-Rückfrage, die für ein Formular zu lang ist, wird mit
+  dem Grund `limit_reached` und der Antwort `unavailable` festgehalten und nennt einen nächsten Schritt, wie in
+  Dittos Fenstern; eine Rückfrage, die ein nachgeschlagener Fakt nötig gemacht hat, wird mit der Entscheidung `ask`
+  festgehalten (bisher `allow`); `resolve_healing` entscheidet nichts ohne die Fakten seiner Rückfrage, und die erste
+  Zeile seiner Rückfrage nennt den Build, nicht nur seine ID; ein lokales Modell oder Dataset, das eine KI benannt hat
+  und das vor dem Build verschwunden ist, wird in der Ablehnung bei seinem Label genannt, nie bei seinem echten Pfad.
+- Grenzen, auf beiden Wegen gleich: Dittos vorzeitiges Aufhören sieht, um welches Feld es bei einem Eingabefehler
+  geht (die Registry ließ es weg, sodass ein Modell, das ein Feld nach dem anderen behob, gestoppt und sein richtiger
+  Aufruf nicht ausgeführt wurde); eine Ablehnung der Rückfrage-Grenzen (nach einem Nein, ein pausiertes Tool, zu
+  viele Rückfragen) ist auch auf Dittos Weg kein gescheiterter Aufruf (dort wurde daraus "Stop retrying", während ein
+  MCP-Client die einfache Ablehnung bekam); ein verweigerter Start, etwa wegen einer vollen Warteschlange, verbraucht
+  keinen der 20 Builds am Tag mehr; nach dem Stopp-Hinweis bekommt ein Modell, das weiter Tools aufruft, höchstens
+  zwei weitere Runden statt des restlichen Budgets.
 - MCP-Server: Ein Client, der die Verbindung trennt, lässt seine Builds nicht mehr ohne jemanden laufen, der
   aufräumt. Die Builds und Jobs, die seine Sitzung gestartet hat, werden abgebrochen, jeweils mit einem Audit-Eintrag
   („client disconnected“), der Server wartet bis zu 30 Sekunden, bis ihre Container gestoppt sind, und
@@ -698,8 +741,26 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   macOS-Schlüsselbund, Windows-Anmeldeinformationsverwaltung) und lässt den Lauf scheitern, wenn sich die Schlüssel-,
   Token-, Schlüsselbund- oder Framework-Ordner des echten Benutzerordners verändert haben (er vergleicht ihre
   Auflistungen und öffnet nie eine Datei).
+- **Ausstehende Freigaben zeigen die zweiphasige Rückfrage und laufen gebunden an sie.** Ein Aufruf, der im
+  Framework auf dich wartet, zeigt dieselbe Rückfrage wie jedes andere Fenster: die Fakten, die das Framework
+  nachgeschlagen hat, die sprechenden Namen seiner IDs und wer fragt. Wenn du ihn freigibst, werden die Fakten erneut
+  nachgeschlagen; würde die Rückfrage anders lauten (etwa ein neuer Upstream-Commit), wirst du erneut gefragt, sonst
+  läuft der Aufruf genau mit den Fakten, die du gesehen hast. Eine MCP-Rückfrage zwischen 4.000 und 16.000 Zeichen
+  wird jetzt zu einer ausstehenden Freigabe statt abgelehnt, eine Dauerfreigabe wird auch auf dem MCP-Weg an den
+  nachgeschlagenen Fakten gemessen (ein Client, der fragen könnte, fragt nicht, wenn eine den Aufruf abdeckt), Dittos
+  scrollbarer Dialog für lange Rückfragen bietet ebenfalls "nicht mehr fragen" an, und die Kontingente eines
+  freigegebenen Aufrufs werden vor dem Ausführen noch einmal geprüft.
 
 ### Sicherheit
+- **KI-Clients sehen nie den Host-Pfad eines lokalen Modells, das sie benannt haben** (MCP-Clients und Ditto): Der
+  Stufentext des Builds, der Kontext der Selbstheilung, `model_source` im Build-Manifest und `list_artifacts` nennen
+  es bei seinem `<label>:<relativer Pfad>` (den Host-Pfad eines älteren Manifests beim Label, sonst nur beim
+  Dateinamen).
+- **Ein MCP-Client kann den Eintrag und die Grenzen einer Rückfrage nicht mehr umgehen, indem er seinem Aufruf eine
+  Antwort mitgibt** (2026-07-28-Runden): Eine Runde zählt nur als Antwort auf eine Rückfrage, die das Framework genau
+  diesem Client gestellt hat und die noch offen ist. Bisher wurde jeder Aufruf, der irgendeine Antwort mitbrachte,
+  ohne den vorab geschriebenen Eintrag `confirmation_requested` gefragt und ohne die 10 Minuten Wartezeit nach einem
+  Nein, die Pause nach drei Nein und die Zählung der Rückfragen pro Stunde.
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
   Download, der direkt in eine Shell geleitet wird, das Löschen des Wurzel- oder Home-Ordners, Schreibrechte für
   alle, das Überschreiben eines Datenträgers), ganz gleich, welche Anweisungen ein Build-Log oder ein
@@ -873,6 +934,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   widerrufene dauerhafte Freigabe oder ein widerrufenes Token käme zurück), und eine entfernte Berechtigungsdatei
   alles. Ohne Schlüsselbund hat die Signatur keinen Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt,
   solange das Audit-Log mit Schlüssel geführt wird.
+- **Ausstehende Freigaben und Bitten, nicht mehr zu fragen, sind Rückfragen wie alle anderen.** Sie zählen zu den
+  30 Rückfragen pro Stunde; ein Nein im Freigabefenster verhindert für 10 Minuten, dass dir derselbe Aufruf erneut
+  vorgelegt wird, und zählt zur Pause des Tools, wie ein Nein im Dialog des Clients; ein kürzliches Nein, ein
+  pausiertes Tool oder eine aufgebrauchte Stunde lehnen eine neue ausstehende Freigabe ab; und die Grenze von 5
+  offenen ausstehenden Freigaben ist eine protokollierte Ablehnung, die nie als gescheiterter Aufruf zählt. Vorher
+  konnte ein Client, der nicht fragen kann, Rückfragen ohne diese Grenzen einreihen.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

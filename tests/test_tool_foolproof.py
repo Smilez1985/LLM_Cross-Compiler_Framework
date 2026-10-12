@@ -459,12 +459,16 @@ class TestRepeatGuardOverMcp:
         asked = []
         raw = {**BUILD, "format": "rkllm", "board": "rk3566"}  # refused by the build service: not_supported
         results = mcp_session(env, [("start_build", raw)] * 3, answering("accept", approve=approve, asked=asked))
-        assert len(asked) == 2 and "Stop retrying this call" in text_of(results[2])
-        dittos = []
+        # Since S8 a person's "no" is not asked again for 10 minutes (design 6.5), so a declined call is asked once.
+        expected, refusal = (2, "Stop retrying this call") if approve else (1, "declined this exact call")
+        assert len(asked) == expected and refusal in text_of(results[2])
+        dittos, errors = [], []
         for _ in range(3):
-            with pytest.raises(ToolError):
+            with pytest.raises(ToolError) as exc:
                 ditto(env, "start_build", raw, session="d", confirm=lambda s, i: dittos.append(1) or approve)
-        assert len(dittos) == 2, "the same on Ditto's path"
+            errors.append(exc.value)
+        assert len(dittos) == expected, "the same on Ditto's path"
+        assert refusal in str(errors[2]), "and the same answer on Ditto's path"
 
 
 class TestEveryToolRefusesUnknownArguments:

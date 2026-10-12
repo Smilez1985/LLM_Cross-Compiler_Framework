@@ -11,13 +11,50 @@ import threading
 from typing import Any, Optional
 
 from PySide6.QtCore import QObject, Qt, Signal
-from PySide6.QtWidgets import QMessageBox, QWidget
+from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QLabel, QMessageBox, QPlainTextEdit, QPushButton,
+                               QVBoxLayout, QWidget)
 
-from orchestrator.tools.confirmation import CallTooLong, describe_call
+from orchestrator.tools.confirmation import MAX_FRAMEWORK, CallTooLong, describe_call
 from orchestrator.tools.registry import current_grant_offer, current_question
 from orchestrator.utils.logging import get_logger
 
 logger = get_logger("ToolConfirmation")
+
+LONG_QUESTION = 1500  # characters: a longer question (up to 16,000) is shown in a scrollable dialog, whole
+ALWAYS = 2            # the long dialog's result code for "Allow and do not ask again..."
+
+
+def long_question_dialog(parent: Optional[QWidget], title: str, text: str, offer=None):
+    """(dialog, allow button) for a long question: the whole text read-only and scrollable (plain text, never rich
+    text), "Deny" the default and the Escape answer. With an offer the dialog also has "Allow and do not ask
+    again..." (dialog.always_button), which ends it with the result code ALWAYS."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(f"Confirm: {title}")
+    layout = QVBoxLayout(dialog)
+    view = QPlainTextEdit(dialog)
+    view.setReadOnly(True)
+    view.setPlainText(text)
+    view.setMinimumSize(640, 420)
+    layout.addWidget(view)
+    layout.addWidget(QLabel("Allow this?", dialog))
+    buttons = QDialogButtonBox(dialog)
+    allow = QPushButton("Allow", dialog)
+    deny = QPushButton("Deny", dialog)
+    buttons.addButton(allow, QDialogButtonBox.AcceptRole)
+    buttons.addButton(deny, QDialogButtonBox.RejectRole)
+    allow.setAutoDefault(False)
+    deny.setDefault(True)
+    dialog.always_button = None
+    if offer is not None:
+        always = QPushButton("Allow and do not ask again...", dialog)
+        always.setAutoDefault(False)
+        buttons.addButton(always, QDialogButtonBox.ActionRole)
+        always.clicked.connect(lambda: dialog.done(ALWAYS))
+        dialog.always_button = always
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    layout.addWidget(buttons)
+    return dialog, allow
 
 
 class _Question:
@@ -48,7 +85,8 @@ class ToolConfirmation(QObject):
             return False
         try:
             # The registry's question (with repaired values marked) when it asks; it is what the audit log hashes.
-            text = current_question() or describe_call(spec, inp.model_dump(mode="json"), actor=self.actor)
+            text = current_question() or describe_call(spec, inp.model_dump(mode="json"), actor=self.actor,
+                                                       limit=MAX_FRAMEWORK)
         except CallTooLong as e:
             logger.warning(str(e))
             return False
@@ -74,9 +112,16 @@ class ToolConfirmation(QObject):
             question.done.set()
 
     def ask_user(self, title: str, text: str, offer=None):
-        """The modal question; "Deny" is the default and the Escape answer. With an offer, "Allow and do not ask
-        again..." shows its warning and asks how wide and for how long."""
+        """The modal question; "Deny" is the default and the Escape answer. A long question is shown whole in a
+        scrollable dialog. With an offer, "Allow and do not ask again..." shows its warning and asks how wide and
+        for how long."""
         parent = self.parent() if isinstance(self.parent(), QWidget) else None
+        if len(text) > LONG_QUESTION:
+            dialog, _ = long_question_dialog(parent, title, text, offer)
+            result = dialog.exec()
+            if offer is not None and result == ALWAYS:
+                return self._always(title, text, offer)
+            return result == QDialog.Accepted
         box = QMessageBox(parent)
         box.setIcon(QMessageBox.Question)
         box.setWindowTitle(f"Confirm: {title}")
@@ -90,12 +135,17 @@ class ToolConfirmation(QObject):
         box.exec()
         clicked = box.clickedButton()
         if always is not None and clicked is always:
-            from orchestrator.gui.approvals_window import choose_grant
-            from orchestrator.tools.grants import GrantChoice
-            parent = self.parent() if isinstance(self.parent(), QWidget) else None
-            choice = choose_grant(offer, parent)
-            return GrantChoice(*choice) if choice else self.ask_user(title, text, None)
+            return self._always(title, text, offer)
         return clicked is not None and box.buttonRole(clicked) == QMessageBox.AcceptRole
+
+    def _always(self, title: str, text: str, offer):
+        """"Allow and do not ask again...": the width and duration with the warning; backing out asks once more,
+        without the offer."""
+        from orchestrator.gui.approvals_window import choose_grant
+        from orchestrator.tools.grants import GrantChoice
+        parent = self.parent() if isinstance(self.parent(), QWidget) else None
+        choice = choose_grant(offer, parent)
+        return GrantChoice(*choice) if choice else self.ask_user(title, text, None)
 
     def close(self) -> None:
         """Answers open and later questions with "no" (e.g. when the window closes)."""

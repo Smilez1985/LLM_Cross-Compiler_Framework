@@ -21,6 +21,12 @@ Security model
   `llm-cli tools approvals`); the framework runs the call once the person approves it there, and the client reads
   the result with get_job_status. A person's "no" is final for that call, even if the policy is loosened while the
   dialog is open.
+- Two-phase confirmation: a tool's `prepare` looks up the facts only the server knows before the question (in a
+  worker thread); the question shows them with the consequence first, who asks and every argument, and the
+  handler is bound to exactly those facts. A 2026-07-28 retry that carries the answer gets the same facts (kept for
+  the question's lifetime), so the question it answers is the one it was asked. A round is a retry only for a
+  question this server asked that caller and session and that is still open; an answer sent along with any other
+  round makes it a new question, recorded and limited like the first.
 - stdio is the default transport. Streamable HTTP binds to loopback only, refuses requests from web
   pages (any Origin header) and Host names other than loopback with its port, and requires a named
   token per client (`llm-cli mcp token`). The token's name is the caller (`mcp:<name>`) for the
@@ -57,12 +63,13 @@ from typing import Annotated, Any, Callable, Dict, List, Optional, Tuple
 
 from pydantic import BaseModel, Field, ValidationError
 
-from orchestrator.tools.confirmation import CallTooLong, describe_call
+from orchestrator.tools.confirmation import MAX_ELICITATION, CallTooLong
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, ENV_VAR, TokenStore, TokenStoreError, token_digest
 from orchestrator.tools.output import has_untrusted
 from orchestrator.tools.policy import Decision
-from orchestrator.tools.registry import (AuditUnavailable, ToolContext, ToolDenied, ToolError, ToolRegistry, ToolSpec,
-                                         repair_marks, text_sha256)
+from orchestrator.tools.registry import (TOO_LONG_NEXT, AuditUnavailable, ToolContext, ToolDenied, ToolError,
+                                         ToolRegistry, ToolSpec, arguments_key, text_sha256)
+from orchestrator.tools.spec import CallFacts
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.untrusted import wrap_untrusted
@@ -108,6 +115,7 @@ class NotAsked(Confirmation):
     outcome: str = "not_confirmed"
     answer: str = ""
     pending: bool = False  # nobody can be asked through the client: the registry puts it to the person in the framework
+    code: str = ""  # the refusal's reason code for the audit log
 
 
 INPUT_REQUIRED_VERSION = "2026-07-28"  # elicitation as input_required rounds instead of a request mid-call
@@ -126,6 +134,9 @@ class _CallState:
     asking: bool = False          # a question is open
     question_sha256: str = ""
     repairs: list = field(default_factory=list)  # what the fool-proof layer changed (normalize.Repair)
+    facts: Optional[CallFacts] = None  # what the tool's prepare looked up (the handler is bound to it)
+    limits_checked: bool = False  # counted against the rate and quotas before the question
+    decision: str = ""            # the decision the question was asked under (after the facts' cap), for the audit
 
 
 _CALL: contextvars.ContextVar = contextvars.ContextVar("lcf_mcp_call", default=None)
@@ -201,34 +212,135 @@ def _tool_context(ctx, caller: str = "mcp", instance: str = "") -> ToolContext:
 
 
 class _OpenQuestions:
-    """2026-07-28 rounds: questions returned to the client and not answered yet. Kept in memory (best effort; the
-    `confirmation_requested` entry is the durable record): one still unanswered after QUESTION_EXPIRY is recorded
-    as `unanswered`."""
+    """2026-07-28 rounds: questions returned to the client and not answered yet, per caller and session (two clients
+    asked the same question are two questions). Kept in memory (best effort; the `confirmation_requested` entry is
+    the durable record): a timer records one still unanswered after QUESTION_EXPIRY as `unanswered`, also when no
+    further request arrives, and the end of the session that asked records its open ones as
+    `client_disconnected`."""
 
-    def __init__(self, registry: ToolRegistry):
+    def __init__(self, registry: ToolRegistry, expiry: float = QUESTION_EXPIRY,
+                 clock: Callable[[], float] = time.monotonic):
         self.registry = registry
+        self.expiry = expiry
+        self.clock = clock
         self._open: Dict[tuple, tuple] = {}
         self._lock = threading.Lock()
+        self._wake = threading.Event()
+        self._timer: Optional[threading.Thread] = None
+
+    @staticmethod
+    def _key(name: str, digest: str, ctx: ToolContext) -> tuple:
+        return ctx.actor, ctx.session, name, digest
 
     def asked(self, name: str, digest: str, arguments: Dict[str, Any], ctx: ToolContext) -> None:
         with self._lock:
-            self._open[(name, digest)] = (time.monotonic(), dict(arguments), ctx)
+            self._open[self._key(name, digest, ctx)] = (self.clock(), dict(arguments), ctx)
+            if self._timer is None or not self._timer.is_alive():
+                self._timer = threading.Thread(target=self._watch, name="mcp-open-questions", daemon=True)
+                self._timer.start()
+        self._wake.set()
 
-    def answered(self, name: str, digest: str) -> None:
+    def answered(self, name: str, digest: str, ctx: ToolContext) -> None:
         with self._lock:
-            self._open.pop((name, digest), None)
+            self._open.pop(self._key(name, digest, ctx), None)
+
+    def is_open(self, name: str, digest: str, ctx: ToolContext) -> bool:
+        """Whether this server asked this caller and session exactly this question and it is still unanswered: only
+        then can a round carry its answer. A round that merely carries some answer (a client may send one with its
+        first call) is a new question, recorded and limited like any other."""
+        with self._lock:
+            entry = self._open.get(self._key(name, digest, ctx))
+        return entry is not None and self.clock() - entry[0] < self.expiry
+
+    def answered_call(self, name: str, arguments: Dict[str, Any], ctx: ToolContext) -> None:
+        """A round that carries an answer for this call (same caller, session, tool and arguments): its question is
+        answered, whatever the call's fate now (a policy tightened meanwhile refuses it, and that is its record)."""
+        key = arguments_key(dict(arguments))
+        with self._lock:
+            for open_key in [k for k, (_, args, _) in self._open.items()
+                             if k[:3] == (ctx.actor, ctx.session, name) and arguments_key(args) == key]:
+                del self._open[open_key]
+
+    def open_count(self) -> int:
+        with self._lock:
+            return len(self._open)
+
+    def _watch(self) -> None:
+        """The timer: sleeps until the oldest open question is due, records what expired, ends when none is open."""
+        while True:
+            with self._lock:
+                if not self._open:
+                    self._timer = None
+                    return
+                due = min(at for at, _, _ in self._open.values()) + self.expiry
+            self._wake.clear()
+            self._wake.wait(min(max(due - self.clock(), 0.05), 60.0))
+            self.expire()
+
+    def _record(self, gone, detail: str, answer: str) -> None:
+        for (_, _, name, digest), (_, arguments, ctx) in gone:
+            with contextlib.suppress(Exception):
+                self.registry.refuse(name, arguments, ctx, detail=detail, confirm_channel="elicitation",
+                                     question_sha256=digest, answer=answer)
 
     def expire(self, now: Optional[float] = None) -> int:
-        now = time.monotonic() if now is None else now
+        now = self.clock() if now is None else now
         with self._lock:
-            gone = [(key, value) for key, value in self._open.items() if now - value[0] >= QUESTION_EXPIRY]
+            gone = [(key, value) for key, value in self._open.items() if now - value[0] >= self.expiry]
             for key, _ in gone:
                 del self._open[key]
-        for (name, digest), (_, arguments, ctx) in gone:
-            with contextlib.suppress(Exception):
-                self.registry.refuse(name, arguments, ctx, detail="The question was not answered within 15 minutes.",
-                                     confirm_channel="elicitation", question_sha256=digest, answer="unanswered")
+        minutes = max(1, round(self.expiry / 60))
+        self._record(gone, f"The question was not answered within {minutes} minutes.", "unanswered")
         return len(gone)
+
+    def close(self, connection: str) -> int:
+        """The session that owns `connection` ended: its open questions are recorded as client_disconnected."""
+        with self._lock:
+            gone = [(key, value) for key, value in self._open.items() if value[2].connection == connection]
+            for key, _ in gone:
+                del self._open[key]
+        self._record(gone, "The client disconnected before it answered the question.", "client_disconnected")
+        return len(gone)
+
+
+class _QuestionFacts:
+    """The facts a question showed, kept for the question's lifetime (QUESTION_EXPIRY): the 2026-07-28 retry that
+    carries the answer must show the same question, or the SDK discards the answer and asks again; a prepare that
+    reads changing values (free space, a clock) would otherwise never get an answer through. Keyed per tool,
+    caller, session and arguments; dropped when the call runs, so the next call looks the facts up again."""
+
+    MAX_ENTRIES = 256
+
+    def __init__(self, registry: ToolRegistry):
+        self.registry = registry
+        self._items: Dict[tuple, Tuple[float, CallFacts]] = {}
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _key(spec: ToolSpec, arguments: Dict[str, Any], ctx: ToolContext) -> tuple:
+        return spec.name, ctx.actor, ctx.session, arguments_key(arguments)
+
+    def get(self, spec: ToolSpec, inp: BaseModel, arguments: Dict[str, Any], ctx: ToolContext,
+            retry: bool) -> Optional[CallFacts]:
+        """The facts for this call: the kept ones on a retry that answers a question, else looked up anew."""
+        key, now = self._key(spec, arguments, ctx), time.monotonic()
+        with self._lock:
+            for old in [k for k, (at, _) in self._items.items() if now - at >= QUESTION_EXPIRY]:
+                del self._items[old]
+            kept = self._items.get(key)
+        if retry and kept is not None:
+            return kept[1]
+        facts = self.registry.look_up(spec, inp, ctx)
+        if facts is not None:
+            with self._lock:
+                self._items[key] = (now, facts)
+                while len(self._items) > self.MAX_ENTRIES:
+                    del self._items[min(self._items, key=lambda k: self._items[k][0])]
+        return facts
+
+    def drop(self, spec: ToolSpec, arguments: Dict[str, Any], ctx: ToolContext) -> None:
+        with self._lock:
+            self._items.pop(self._key(spec, arguments, ctx), None)
 
 
 @dataclass
@@ -267,7 +379,9 @@ async def _long_poll(spec: ToolSpec, registry: ToolRegistry, arguments: Dict[str
     inp = _parsed(spec, arguments)
     if seconds <= 0 or inp is None:
         return  # an invalid call: the registry call refuses and audits it
-    if registry.decide(spec, inp, ctx) == Decision.DENY:
+    import anyio.to_thread
+    # The decision reads the policy file (and a token store): a worker thread, never the event loop.
+    if await anyio.to_thread.run_sync(functools.partial(registry.decide, spec, inp, ctx)) == Decision.DENY:
         return
     from orchestrator.Core.job_service import MAX_WAIT_SECONDS
     ctx.metadata["waited"] = True
@@ -501,10 +615,11 @@ class ClientTracker:
 
 
 def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Optional["_OpenQuestions"] = None,
-                       caller: str = "mcp", instance: str = ""):
+                       caller: str = "mcp", instance: str = "", kept: Optional[_QuestionFacts] = None):
     """An MCPServer tool function for a registry tool: same input schema, typed structured output,
-    confirmation through elicitation when the user's policy says "ask". `instance` names the server (the same
-    for every tool of one server, see _session_seed)."""
+    confirmation through elicitation when the user's policy says "ask", the tool's looked-up facts in the
+    question and bound to the handler. `instance` names the server (the same for every tool of one server, see
+    _session_seed); `kept` holds the facts of open questions (one per server)."""
     import anyio
     import anyio.to_thread
     from mcp.server.elicitation import (AcceptedElicitation, CancelledElicitation, DeclinedElicitation,
@@ -516,60 +631,97 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
     field_params = _model_parameters(spec.input_model)
     outcomes = (AcceptedElicitation, DeclinedElicitation, CancelledElicitation)
     questions = questions or _OpenQuestions(registry)
+    kept = kept or _QuestionFacts(registry)
 
     async def confirm(ctx: Context, **arguments):
+        state = _call_state()
+        tool_ctx = _tool_context(ctx, caller, instance)
+        tool_ctx.repairs = list(state.repairs)  # marked in the question and recorded with it
+        parsed = _parsed(spec, arguments)
         # With the caller's context: cancelling its own build or job needs no question (the tool's default).
-        decision = await anyio.to_thread.run_sync(
-            functools.partial(registry.decide, spec, _parsed(spec, arguments), _tool_context(ctx, caller, instance)))
+        policy = await anyio.to_thread.run_sync(functools.partial(registry.decide, spec, parsed, tool_ctx))
         rounds = _uses_input_required(ctx)
+        # The round carries some answer. It answers a question only if this server asked this caller exactly that
+        # question and it is still open (checked below): a client can send an answer with its very first call, and
+        # such a round is a new question, recorded and limited (a recent "no", questions per hour) like any other.
+        replied = rounds and bool(ctx.input_responses)
+
+        async def look_up(kept_facts: bool) -> Decision:
+            """The facts only the server knows, before the question (two-phase); they may make an allowed call
+            ask. `kept_facts`: the facts of the open question this round may answer."""
+            state.facts = None
+            if policy == Decision.DENY or spec.prepare is None or parsed is None:
+                return policy
+            state.facts = await anyio.to_thread.run_sync(kept.get, spec, parsed, arguments, tool_ctx, kept_facts)
+            return registry.capped(policy, state.facts)
+
+        async def question() -> str:  # speaking names may look something up: off the event loop
+            return await anyio.to_thread.run_sync(functools.partial(
+                registry.question_text, spec, arguments, tool_ctx, state.facts, MAX_ELICITATION))
+
+        try:
+            decision = await look_up(replied)
+            retry = False
+            if replied and decision != Decision.DENY:
+                with contextlib.suppress(CallTooLong):
+                    retry = questions.is_open(spec.name, text_sha256(await question()), tool_ctx)
+                if not retry and state.facts is not None:  # kept facts of no open question: looked up anew
+                    decision = await look_up(False)
+        except (ToolError, ValueError):
+            state.facts = None
+            return NotAsked(approve=False)  # the registry call looks them up again and refuses with the reason
+        state.decision = decision.value
         # The person already answered in an earlier round: their answer decides, even if the policy was
         # loosened to "allow" meanwhile (the SDK checks that it answers exactly this question).
-        answered = rounds and decision == Decision.ALLOW and bool(ctx.input_responses)
+        answered = retry and decision == Decision.ALLOW
         if decision != Decision.ASK and not answered:
             return NotAsked(approve=False)  # the registry applies allow/deny itself
-        if spec.grant is not None and not answered and hasattr(registry, "matching_grant"):
+        # A standing approval's scope and the "stop asking" offer come from the facts the framework looked up.
+        tool_ctx.facts = state.facts
+        if spec.grant is not None and not answered:
             # A standing approval covers the call: no question; the registry applies it and checks it again right
             # before the handler (a revocation in between stops the call).
-            covered = await anyio.to_thread.run_sync(registry.matching_grant, spec, _parsed(spec, arguments),
-                                                     _tool_context(ctx, caller, instance))
+            covered = await anyio.to_thread.run_sync(registry.matching_grant, spec, parsed, tool_ctx)
             if covered is not None:
                 return NotAsked(approve=False)
         capabilities = ctx.client_capabilities
         elicitation = getattr(capabilities, "elicitation", None) if capabilities is not None else None
-        # Pending approvals (design 6.9): the question appears in the framework when the client cannot ask the person.
-        pending = getattr(registry, "approvals", None) is not None and not answered
-        tool_ctx = _tool_context(ctx, caller, instance)
+        # Pending approvals (design 6.9): the question appears in the framework when the client cannot ask the person
+        # (the registry applies the limits on questions to it, and shows the same looked-up facts).
+        pending = getattr(registry, "approvals", None) is not None and not retry
         if pending and await anyio.to_thread.run_sync(registry.framework_channel_required, spec, tool_ctx.actor):
             return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=True)
         # Same rule as the SDK: a bare `elicitation: {}` means form support, url-only does not.
         if elicitation is None or (getattr(elicitation, "form", None) is None
                                    and getattr(elicitation, "url", None) is not None):
             return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=pending)
-        state = _call_state()
-        marks, renamed = repair_marks(state.repairs)
+        tool_ctx.confirm_channel = "elicitation"
+        if not retry:  # a recent "no" to this call, a paused tool, too many questions: not asked again
+            refusal = await anyio.to_thread.run_sync(registry.question_refusal, spec, parsed, tool_ctx)
+            if refusal is not None:
+                return NotAsked(approve=False, refused=str(refusal), outcome="rate_limited", code=refusal.code)
         try:
-            message = describe_call(spec, arguments, marks=marks, renamed=renamed)
-        except CallTooLong as e:
+            message = await question()
+        except CallTooLong as e:  # nobody could be shown it here: not a person's "no"
             if pending:  # longer than an elicitation may be: the framework's window shows up to 16,000 characters
                 return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=True)
-            return NotAsked(approve=False, refused=str(e))
-        tool_ctx.confirm_channel = "elicitation"
+            return NotAsked(approve=False, refused=f"{e} Next: {TOO_LONG_NEXT}", answer="unavailable",
+                            code="limit_reached")
         # The form offers "ask the framework to stop asking" only where the framework could offer a standing approval.
         offer = None
         if spec.grant is not None and getattr(registry, "approvals", None) is not None:
-            offer = await anyio.to_thread.run_sync(registry.grant_offer, spec, _parsed(spec, arguments), tool_ctx)
+            offer = await anyio.to_thread.run_sync(registry.grant_offer, spec, parsed, tool_ctx)
         form = ConfirmationWithRequest if offer is not None else Confirmation
         await anyio.to_thread.run_sync(questions.expire)
-        if rounds and ctx.input_responses:
+        if retry:  # the open question this round answers (closed once the call reaches its decision)
             state.question_sha256 = text_sha256(message)
-            questions.answered(spec.name, state.question_sha256)
             return Elicit(message, form)
         # The question is recorded before it is asked; for a change that cannot be recorded it is not asked.
         try:
-            state.question_sha256 = await anyio.to_thread.run_sync(registry.record_question, spec.name,
-                                                                   arguments, tool_ctx, message)
+            state.question_sha256 = await anyio.to_thread.run_sync(functools.partial(
+                registry.record_question, spec.name, arguments, tool_ctx, message, decision=decision))
         except AuditUnavailable as e:
-            return NotAsked(approve=False, refused=str(e), outcome="audit_unavailable")
+            return NotAsked(approve=False, refused=str(e), outcome="audit_unavailable", code="failed")
         if rounds:
             questions.asked(spec.name, state.question_sha256, arguments, tool_ctx)
             return Elicit(message, form)
@@ -580,13 +732,16 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
                 return await ctx.elicit(message, form)
         except TimeoutError:
             minutes = max(1, round(ELICITATION_TIMEOUT / 60))
-            return NotAsked(approve=False, outcome="confirmation_timeout", answer="timeout",
-                            refused=f"The confirmation for '{spec.title}' got no answer within {minutes} minutes; "
-                                    "the call was not run.")
+            return NotAsked(approve=False, outcome="confirmation_timeout", answer="timeout", code="needs_person",
+                            refused=f"The confirmation for '{spec.title}' got no answer within {minutes} "
+                                    f"minute{'s' if minutes != 1 else ''}; the call was not run. Next: Ask the person "
+                                    "in your answer whether they want it; call it again only if they do.")
         except Exception as e:
             logger.info(f"Confirmation for '{spec.name}' failed: {e!r}")
-            return NotAsked(approve=False, refused=f"The confirmation for '{spec.title}' failed ({e}); "
-                                                   "the call was not run.")
+            return NotAsked(approve=False, code="failed",
+                            refused=f"The confirmation for '{spec.title}' failed ({_client_text(e, 200)}); the call "
+                                    "was not run. Next: Tell the person the question could not be shown; call it "
+                                    "again only if they want it.")
         finally:
             state.asking = False
 
@@ -604,11 +759,18 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         state = _call_state()
         tool_ctx = _tool_context(ctx, caller, instance)
         tool_ctx.repairs = list(state.repairs)
+        tool_ctx.facts = state.facts  # what the question showed: the handler is bound to exactly these
+        tool_ctx.limits_checked = state.limits_checked
+        kept.drop(spec, kwargs, tool_ctx)
+        # The call has reached its decision (an answer, a refusal, the policy): a question about it is closed, also
+        # when a policy tightened meanwhile refuses it now (that refusal is its record).
+        questions.answered_call(spec.name, kwargs, tool_ctx)
         if isinstance(data, NotAsked) and data.refused:
             await anyio.to_thread.run_sync(functools.partial(
                 registry.refuse, spec.name, kwargs, tool_ctx, outcome=data.outcome, detail=data.refused,
-                answer=data.answer, question_sha256=state.question_sha256,
-                confirm_channel="elicitation" if data.answer == "timeout" else "none"))
+                answer=data.answer, question_sha256=state.question_sha256, reason_code=data.code or None,
+                confirm_channel="elicitation" if data.answer == "timeout" else "none",
+                decision=Decision(state.decision) if state.decision else None))
             state.audited = True
             raise _audited(MCPToolError(data.refused))
         if isinstance(data, NotAsked):
@@ -622,6 +784,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
                                else "declined")
         if approved and getattr(data, "stop_asking", False) is True and getattr(registry, "approvals", None):
             # Only a request: the person confirms "do not ask again" in the framework's own window, or not at all.
+            tool_ctx.metadata["grant_requested"] = True  # the result says so (registry.GRANT_REQUEST_NOTE)
             try:
                 await anyio.to_thread.run_sync(registry.approvals.request_grant, spec, _parsed(spec, kwargs), tool_ctx)
             except Exception as e:  # never stops the call the person just confirmed
@@ -795,9 +958,11 @@ def end_session(framework, registry: Optional[ToolRegistry], session: McpSession
             logger.info(f"Could not wait for build {rid} to stop: {e}")
 
 
-def _session_lifespan(framework, registry, inner=None, caller: str = "mcp"):
+def _session_lifespan(framework, registry, inner=None, caller: str = "mcp",
+                      questions: Optional[_OpenQuestions] = None):
     """The server lifespan: one McpSession per connection (per stdio session; once for the HTTP server), composed
-    with `inner` (stdout to stderr for stdio). On exit the session's own builds and jobs are cancelled."""
+    with `inner` (stdout to stderr for stdio). On exit the session's own builds and jobs are cancelled and its open
+    questions are recorded as client_disconnected."""
     import anyio
     import anyio.to_thread
 
@@ -816,6 +981,8 @@ def _session_lifespan(framework, registry, inner=None, caller: str = "mcp"):
             finally:
                 with anyio.CancelScope(shield=True):
                     try:
+                        if questions is not None:
+                            await anyio.to_thread.run_sync(questions.close, session.key)
                         await anyio.to_thread.run_sync(end_session, framework, registry, session)
                     except Exception as e:
                         logger.warning(f"Cleaning up a closed MCP session failed: {e}")
@@ -846,6 +1013,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
     if registry is None:
         raise RuntimeError("The framework has no tool registry (not initialized).")
     questions = _OpenQuestions(registry)
+    kept = _QuestionFacts(registry)
     instance = secrets.token_hex(8)  # this server, for the calls of clients without a connection (_session_seed)
 
     class AuditedServer(MCPServer):
@@ -873,6 +1041,14 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                     raise _audited(MCPToolError(error_text(str(name), e))) from None
                 state.repairs = prepared.repairs
                 audit_name, audit_arguments = prepared.spec.name, prepared.arguments
+                # The rate and quotas before the policy and the question (an audited refusal that says when).
+                ctx.repairs = list(prepared.repairs)
+                try:
+                    await anyio.to_thread.run_sync(registry.enforce_limits, prepared, ctx)
+                except ToolError as e:
+                    state.audited = True
+                    raise _audited(MCPToolError(error_text(prepared.spec.name, e))) from None
+                state.limits_checked = True
                 return await super().call_tool(prepared.spec.name, prepared.arguments, context)
             except BaseException as e:
                 if not state.audited:
@@ -885,18 +1061,20 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                                                            e, ctx)
                     except Exception as audit_error:  # never hide the refusal itself
                         logger.warning(f"Could not audit the refused call of '{name}': {audit_error}")
+                    if state.question_sha256:  # the round that answered a question ended here: it is closed
+                        questions.answered(audit_name, state.question_sha256, ctx)
                 raise
             finally:
                 _CALL.reset(token)
 
     server = AuditedServer(SERVER_NAME, title="LLM Cross-Compiler Framework", instructions=INSTRUCTIONS,
                            version=getattr(getattr(framework, "info", None), "version", "") or "",
-                           lifespan=_session_lifespan(framework, registry, lifespan, caller),
+                           lifespan=_session_lifespan(framework, registry, lifespan, caller, questions),
                            middleware=[ClientTracker(transport, caller=caller, still_valid=still_valid,
                                                      refused=lambda *args: _audit_refused_call(registry, *args))])
     server.open_questions = questions
     for spec in registry.list():
-        server.add_tool(make_tool_function(spec, registry, questions, caller, instance), name=spec.name,
+        server.add_tool(make_tool_function(spec, registry, questions, caller, instance, kept), name=spec.name,
                         title=spec.title,
                         description=spec.description, annotations=ToolAnnotations(**spec.annotations()),
                         structured_output=True, meta=spec.meta())
