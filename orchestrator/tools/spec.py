@@ -86,11 +86,15 @@ class CallFacts:
     """What a tool's `prepare` looked up before the question (design principle 11): the consequence in plain words
     (the question's first line), the facts the person is shown, the values the handler must use (`bound`) and a
     cap the facts call for (the value of a Decision, e.g. "ask" for a destructive healing strategy even when the
-    tool is allowed). The handler gets exactly this object and uses `bound` or refuses."""
+    tool is allowed). The handler gets exactly this object and uses `bound` or refuses. `repairs`: what the look-up
+    repaired (normalize.Repair; a file name matched in another letter case): the registry names them in the result's
+    notes and in every refusal after the look-up, and records them in the audit log, as it does the normalizer's. A
+    look-up that refuses after such a repair puts it on its error (`repairs`, a list), so the refusal names it too."""
     consequence: str
     facts: Tuple[Fact, ...] = ()
     bound: Mapping[str, Any] = field(default_factory=dict)
     cap: Optional[str] = None
+    repairs: Tuple[Any, ...] = ()  # not part of the fingerprint: what the person is shown is `facts` and `bound`
 
     def fingerprint(self) -> str:
         """A hash of everything the person was shown and the handler is bound to."""

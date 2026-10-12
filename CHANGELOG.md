@@ -10,6 +10,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **A real-client smoke test** (`scripts/mcp_client_smoke.sh`, checker `scripts/mcp_smoke_check.py`): runs Claude Code
+  (`claude -p`, four scripted prompts) against the framework's stdio server in a throw-away environment (home, Hugging
+  Face home, XDG folders, per-user folder, secrets in memory only, the null keyring backend, no window system; the
+  server runs under `env -i`, so it gets none of the caller's variables) and checks from the isolated audit database,
+  never from the model's answer: the client line, `get_status`, an unknown argument refused with a suggestion, a
+  declared alias recorded on a call that ran and on a refused one and shown to the client in both (read from the tool
+  results of the client's JSON output), and a call that needs a confirmation not run without an answer (a question put
+  to the person, or an end for want of an answer; a refusal before any question, such as a denied permission, does not
+  count). It exits with 77 (skipped) when the claude command is missing or not signed in, never reads, copies or passes
+  Claude credentials or tokens, removes its temporary folder (the client's log of the server and its temporary files
+  included) and needs no Docker; a manual or optional CI check (CONTRIBUTING, "The real-client smoke test").
 - **`start_recipe_build` and the resource `lcf://packs/index`** (MCP design T9): an AI client builds an installed
   community recipe exactly as pinned (the model at the recipe's commit, target, format, board, quantization,
   importance matrix, context length) through the two-phase path of `start_build` (same question, disk reservation,
@@ -857,6 +868,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- **A repair is named however the call ends** (finding of a real Claude Code 2.1.296 run over stdio, protocol
+  2026-07-28): a declared alias the call used (`quant` read as `quantization`) was recorded in the audit log, but a
+  call refused before or instead of the question (too little disk space found by the look-up, a limit, an invalid
+  value, a denied permission, a "no", a question nobody answered in time, the repeat guard) told the client nothing
+  about it, so the model never learned the right argument name. Every refusal and error after a repair now carries
+  the same notes as a successful result: at the end of the text ("Notes: ...") and, over MCP, in the structured
+  error (`{"error": {"code", "field", "notes"}}`), on Ditto's in-process path and on Ditto's MCP-client path. A
+  refusal of the normalizer after an alias (an invalid value, an unknown argument next to it) records the alias in
+  the audit log too. A registry-wide test runs every tool that declares aliases through every kind of refusal on
+  all three paths. The repair a tool's look-up makes (`download_hf_file` with a file name in other letter case) is a
+  repair like the others: over MCP its note was lost even from a successful result (the look-up runs before the
+  question with a context of its own), a refusal after it (too little disk space) never named it, and the audit log
+  did not record it; now it is named in the result and in every refusal after it on every path and recorded with
+  kind and field only. A pending approval's job that ends declined or refused names the call's repairs in
+  `get_job_status` (`error.notes`), as its result's notes do.
 - **The larger disk reserve of a standing approval is checked under the ledger's lock** for `start_build`,
   `start_recipe_build`, `download_hf_file` and `add_pack_from_index`: the reservation is taken with the 20 GiB /
   10 % reserve inside the reservation ledger every framework process shares, so a reservation another process took

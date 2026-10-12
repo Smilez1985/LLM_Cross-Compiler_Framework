@@ -655,6 +655,18 @@ So läuft eine Frage mit Tools ab:
   ohne Sitzung teilen sich einen, bis benannte Tokens sie unterscheiden).
 - Was repariert wurde, ist in der Bestätigungsfrage markiert, in den `notes` des Ergebnisses aufgeführt und im
   Audit-Log festgehalten (`name_requested`, `repairs`). Dittos Bestätigung zeigt genau die Frage des Frameworks.
+- Auch ein abgelehnter oder gescheiterter Aufruf nennt seine Reparaturen, mit denselben Worten wie die `notes` eines
+  erfolgreichen Ergebnisses: Der Text endet mit „Notes: argument 'quant' read as 'quantization'.“, und über MCP
+  enthält auch der strukturierte Fehler sie (`{"error": {"code": ..., "field": ..., "notes": [...]}}`). Das gilt,
+  wie auch immer der Aufruf endet: ein ungültiger Wert, ein Limit, eine verweigerte Berechtigung, zu wenig
+  Speicherplatz schon vor der Frage, ein „Nein“, eine Frage, die niemand rechtzeitig beantwortet, die
+  Wiederholungssperre. So lernt ein Modell den richtigen Argumentnamen auch aus einer Ablehnung, auf Dittos eigenem
+  Weg, als MCP-Client und mit Ditto als MCP-Client eines anderen Frameworks. Eine Reparatur, die die Vorabprüfung
+  des Tools vor der Frage macht, wird genauso genannt und als Reparatur festgehalten (nur Art und Feld):
+  `download_hf_file` mit einem Dateinamen in anderer Groß- und Kleinschreibung („filename: model.gguf (you wrote
+  MODEL.gguf)“), auch wenn sich danach der Speicherplatz als zu klein herausstellt. Eine wartende Freigabe, die du
+  ablehnst oder die nach deiner Freigabe abgelehnt wird, beendet ihren Job mit denselben Hinweisen in
+  `get_job_status` (`error.notes`).
 - MCP-Clients bekommen das eigene geschlossene Eingabeschema jedes Tools (`additionalProperties: false`), dasselbe,
   das Dittos Modell sieht.
 - Tool-Argumente, die ein lokales Modell mit Codeblock-Zäunen oder in Python-Schreibweise schickt (einfache
@@ -1688,6 +1700,13 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   capabilities: elicitation, roots`. `elicitation none` heißt, dass der Client dich nicht fragen kann; ein Tool auf
   „fragen“ wird dann zu einer wartenden Freigabe im Framework. Text vom Client wird zuerst von allem befreit, was wie ein Schlüssel oder Token
   aussieht, dann escapet und auf 64 Zeichen gekürzt; er ist eine Beschriftung, nie eine Berechtigung.
+- **Test mit einem echten Client:** `scripts/mcp_client_smoke.sh` lässt Claude Code (`claude -p`) in einer
+  Wegwerf-Umgebung gegen den Server laufen und prüft anhand des isolierten Audit-Logs, dass der Client festgehalten
+  wird, `get_status` funktioniert, ein unbekanntes Argument mit Vorschlag abgelehnt wird, ein erklärter Alias
+  festgehalten und in einem Ergebnis wie in einer Ablehnung gezeigt wird und ein Aufruf, der deine Bestätigung
+  braucht, ohne Antwort nicht läuft. Er nutzt die eigene Anmeldung des claude-Befehls und rührt dessen Zugangsdaten
+  nie an; ohne angemeldeten claude-Befehl wird er übersprungen. Siehe
+  [den Smoke-Test mit einem echten Client](../CONTRIBUTING_DE.md#der-smoke-test-mit-einem-echten-client).
 
 Was die Clients unterstützen, laut der Dokumentation ihrer Hersteller (2026-10-11). „Nicht dokumentiert“ heißt, dass
 der Hersteller nichts dazu sagt; die stderr-Zeile oben zeigt, was ein Client wirklich erklärt.
