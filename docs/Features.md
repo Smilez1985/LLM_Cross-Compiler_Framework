@@ -931,7 +931,12 @@ until you enable it in the tool permissions, also when you allowed the whole tie
   client's dialog), is asked even when the tool is allowed, and is written to the audit log before the model is
   loaded; with `sandbox: true` it runs in the Docker sandbox instead. The model file is opened once and hashed
   through that open file; llama-bench reads exactly that file (natively the inherited descriptor, in the sandbox a
-  private hard link of it), so it cannot be swapped between the check and the run. Results are kept in
+  private hard link of it), so it cannot be swapped between the check and the run. The sandbox's private link goes
+  next to the model, or, when that folder is read-only, into the framework's cache or state folder on the same file
+  system; where no link is possible it is a copy read from the open file and hashed again (it must have the checked
+  sha256). It is removed when the run ends, also on failure and on `cancel_job` (which also kills the sandbox
+  container, stops a copy that is still being written and starts no container after the cancel); when no private
+  file can be made, the job fails with the reason (`insufficient_resources` or `needs_person`). Results are kept in
   `~/.llm-framework/benchmarks/` (`runs/<run id>.json`, `index.jsonl`); `get_status` (section `local_runtime`) shows
   the newest runs.
 - **Board tools** (tier `external`, always asked, never covered by a standing approval, only for a
@@ -1491,8 +1496,13 @@ framework never sees it.
   runtime tools fails, the error message is the framework's sentence too: what the device or `llama-bench` printed
   (`llama-bench` prints the metadata of the model it loads) is returned in `external_text`; paths in such a message
   appear as the framework's folder labels (`state:...`, `output:...`) or as a file name only, never as a host path
-  or `~/...`. When the deploy job ends, the audit log gets its own end entry (done, failed or cancelled, with the job,
-  the device's label and the device state), linked to the call's `started` entry. The `deploy_to_board` prompt leads
+  or `~/...`, also when a path holds spaces (a quoted path, the framework's folders and the home folder, also by its
+  real path, are replaced whole, also further on in a path list). When the deploy job ends, the audit log gets its
+  own end entry (done, failed or cancelled, with the job, the device's label and the device state), linked to the
+  call's `started` entry; it is written on every way out of
+  the job, also when the device list cannot record the deploy (the result then has a `note`). The jobs of
+  `create_deploy_package`, of the board tools and of the local runtime tools write such an end entry too (ok, error
+  with its reason code, or cancelled; devices and models by their labels). The `deploy_to_board` prompt leads
   through the same steps.
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
@@ -2091,7 +2101,9 @@ and leave this computer only as a local file you publish yourself.
   recipe was made with, its importance matrix and context length, the commit, download size, disk, hardware
   estimate, licence, gating and image build; the
   same disk reservation and quotas). `dataset_path` only when the recipe names a calibration dataset, and then it
-  must be exactly that file (sha256). A recipe changed in any field after the question is not built. "Yes, and do not ask again"
+  must be exactly that file (sha256): the build copies the file into its own folder while it hashes it and uses only
+  that copy, so a file swapped after the question is never used. A recipe changed in any field after the question is
+  not built. "Yes, and do not ask again"
   has the scope of `start_build`; a recipe installed under a standing approval is covered only after you confirmed
   one build of it. The resource `lcf://packs/index` shows the cached index and the installed packs (as `list_packs`,
   never refreshed).

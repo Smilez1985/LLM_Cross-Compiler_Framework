@@ -17,12 +17,21 @@ decision D23).
   index.jsonl: kind, model sha256, build id, the llama-bench values (prompt and generation tokens per second), peak
   memory, duration and time. A run is valid while build id and model sha256 are unchanged.
 
-A stop event ends a native run (the process is terminated); a sandbox run stops at its time limit.
+A stop event ends a native run (the process is terminated) and a sandbox run (its container is killed).
+
+The sandbox mounts a private file that is exactly the checked open model: a hard link in a private folder next to the
+model, else in the framework's own cache or state folder on the same file system, else a copy read from the open file
+and hashed again (its sha256 must be the checked one) in one of the framework's own folders with room for it. The
+private folder is removed when the run ends, also on failure and cancel; a folder a crash left behind is removed by a
+later run. When no private file can be made, the error says why (reason code insufficient_resources or needs_person).
 """
 
+import contextlib
 import hashlib
 import json
+import os
 import secrets
+import shutil
 import subprocess
 import tempfile
 import threading
@@ -41,6 +50,9 @@ BENCH_ARGS = ("-p", "512", "-n", "128", "-r", "3", "-o", "json")
 # The tmpfs inside the sandbox container, not a host path.
 CONTAINER_TMP = "/tmp"  # nosec B108
 AUDIT_TOOL = "benchmark.untrusted_model_native"
+PIN_PREFIX = ".llm-bench-"              # the private folder of a sandbox run's model file
+PIN_STALE_SECONDS = 3 * RUN_TIMEOUT     # older private folders are leftovers of a crash
+COPY_RESERVE = 512 * 1024 ** 2          # free space a copy of the model leaves on its disk
 
 
 class BenchError(RuntimeError):
@@ -179,9 +191,12 @@ class BenchRunner:
 
     def __init__(self, state_dir: Path, *, store: Any = None, catalog: Any = None, engine: Any = None,
                  platform: Optional[Tuple[str, str]] = None, cpu_problem: Optional[Callable[[Any], Optional[str]]] = None,
-                 popen: Callable[..., Any] = subprocess.Popen):
+                 popen: Callable[..., Any] = subprocess.Popen, cache_dir: Optional[Path] = None):
+        """`cache_dir`: the framework's cache folder, where a sandbox run's private model file may go when the
+        model's own folder cannot hold it (before the state folder)."""
         self.state_dir = Path(state_dir)
         self.root = self.state_dir / "benchmarks"
+        self.cache_dir = Path(cache_dir) if cache_dir else None
         self._store, self._catalog, self._engine = store, catalog, engine
         self._platform, self._cpu_problem, self._popen = platform, cpu_problem, popen
 
@@ -246,7 +261,7 @@ class BenchRunner:
         try:
             started = time.monotonic()
             if sandbox:
-                output, peak = self._run_sandbox(build, model, fd=fd), None
+                output, peak = self._run_sandbox(build, model, fd=fd, sha256=sha256, label=label, stop=stop), None
             else:
                 output, peak = self._run_native(binary, model, build, stop, fd=fd)
         finally:
@@ -331,27 +346,174 @@ class BenchRunner:
         return peak // (1024 * 1024) if peak else None
 
     @staticmethod
-    def _pinned_copy(model: Path, fd: int, folder: Path) -> Path:
-        """A file in the private folder `folder` that is exactly the open, checked model: a hard link of the open file
-        where the system allows it (Linux, through its descriptor path; no copy), else a copy read from it."""
-        import os
-        import shutil
+    def _pinned_link(fd: int, folder: Path, model: Optional[Path] = None) -> Optional[Path]:
+        """A hard link of the open, checked model in the private folder `folder` (no copy): through its descriptor
+        path (Linux), else through the model's path, kept only when the link is the very file that is open (same
+        device and inode; a path swapped meanwhile names another file and is refused). None where the system or the
+        file system allows neither."""
         target = folder / "model.gguf"
+        open_st = os.fstat(fd)
         through = fd_path(fd)
-        if through and through.startswith("/proc/"):
+        for source in ([through] if through and through.startswith("/proc/") else []) + \
+                ([str(model)] if model is not None else []):
             try:
-                os.link(through, target, follow_symlinks=True)
-                if os.stat(target).st_ino == os.fstat(fd).st_ino:
+                os.link(source, target)
+            except (OSError, NotImplementedError):
+                continue
+            try:
+                st = os.lstat(target)
+                if (st.st_dev, st.st_ino) == (open_st.st_dev, open_st.st_ino):
                     return target
-                target.unlink()
             except OSError:
-                target.unlink(missing_ok=True)
-        with os.fdopen(os.dup(fd), "rb") as src, open(target, "xb") as dst:
-            src.seek(0)
-            shutil.copyfileobj(src, dst, 1 << 20)
+                pass
+            with contextlib.suppress(OSError):
+                target.unlink()
+        return None
+
+    @staticmethod
+    def _pinned_copy(model: Path, fd: int, folder: Path, sha256: Optional[str] = None,
+                     stop: Optional[threading.Event] = None) -> Path:
+        """A file in the private folder `folder` that is exactly the open, checked model: a hard link of the open file
+        where the system allows it, else a copy read from it. With `sha256` the copy is hashed while it is written and
+        must have that sha256 (BenchError otherwise; the copy is removed). A set `stop` (a cancel) ends the copy at
+        once (BenchStopped; the partial copy is removed)."""
+        import hmac
+        linked = BenchRunner._pinned_link(fd, folder, model)
+        if linked is not None:
+            return linked
+        target = folder / "model.gguf"
+        h = hashlib.sha256()
+        out = os.open(str(target), os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+        try:
+            with os.fdopen(out, "wb") as dst:
+                offset = 0
+                while True:
+                    if stop is not None and stop.is_set():
+                        raise BenchStopped()
+                    chunk = os.pread(fd, 1 << 20, offset) if hasattr(os, "pread") else _read_at(fd, offset)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+                    dst.write(chunk)
+                    offset += len(chunk)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                target.unlink()
+            raise
+        if sha256 is not None and not hmac.compare_digest(h.hexdigest(), str(sha256)):
+            with contextlib.suppress(OSError):
+                target.unlink()
+            raise BenchError("The model changed after it was checked (the copy for the sandbox has another sha256); "
+                             "nothing ran.", code="failed", next="Call run_benchmark again; the person is asked again.")
         return target
 
-    def _run_sandbox(self, build: Any, model: Path, fd: Optional[int] = None) -> str:
+    def _scratch_folders(self) -> List[Path]:
+        """The framework's own folders a sandbox run's private model file may go to: the cache folder, then the state
+        folder's benchmarks folder."""
+        return ([self.cache_dir / "bench"] if self.cache_dir else []) + [self.root / "pinned"]
+
+    @staticmethod
+    def _private_folder(parent: Path) -> Optional[Path]:
+        """A new private folder (mode 0700) in `parent`, or None when `parent` cannot hold one (read-only, missing)."""
+        try:
+            return Path(tempfile.mkdtemp(prefix=PIN_PREFIX, dir=str(parent)))
+        except OSError:
+            return None
+
+    @staticmethod
+    def _sweep(parent: Path) -> None:
+        """Removes private folders a crashed run left in `parent` (older than any run can take)."""
+        cutoff = time.time() - PIN_STALE_SECONDS
+        try:
+            entries = list(parent.iterdir())
+        except OSError:
+            return
+        for entry in entries:
+            try:
+                if entry.name.startswith(PIN_PREFIX) and entry.is_dir() and not entry.is_symlink() \
+                        and entry.lstat().st_mtime < cutoff:
+                    shutil.rmtree(entry, ignore_errors=True)
+            except OSError:
+                continue
+
+    @contextlib.contextmanager
+    def _pinned_model(self, model: Path, fd: int, sha256: str, label: str, stop: Optional[threading.Event] = None):
+        """Yields a private file that is exactly the checked open model, for the sandbox mount, and removes its
+        private folder afterwards (also on failure and cancel). In this order: a hard link next to the model; a hard
+        link in one of the framework's own folders on the same file system; a copy read from the open file and hashed
+        again in one of the framework's own folders (else next to the model) with room for it. BenchError when nothing
+        works; BenchStopped when `stop` is set meanwhile (a copy stops at once)."""
+        open_st = os.fstat(fd)
+        scratch = []
+        for folder in self._scratch_folders():
+            try:
+                folder.mkdir(parents=True, exist_ok=True, mode=0o700)
+                scratch.append(folder)
+            except OSError:
+                continue
+        for folder in [model.parent, *scratch]:
+            self._sweep(folder)
+        made: Optional[Path] = None
+        try:
+            source: Optional[Path] = None
+            # 1 and 2: a hard link (no copy) where the folder lies on the model's file system
+            for parent in [model.parent, *scratch]:
+                try:
+                    if os.stat(parent).st_dev != open_st.st_dev:
+                        continue
+                except OSError:
+                    continue
+                made = self._private_folder(parent)
+                if made is None:
+                    continue
+                source = self._pinned_link(fd, made, model)
+                if source is not None:
+                    break
+                shutil.rmtree(made, ignore_errors=True)
+                made = None
+            # 3: a copy, hashed again, in one of the framework's own folders with room for it (the model's own
+            # folder last, as before: a system without descriptor links, e.g. macOS)
+            no_room = False
+            if source is None:
+                for parent in [*scratch, model.parent]:
+                    try:
+                        if shutil.disk_usage(parent).free < open_st.st_size + COPY_RESERVE:
+                            no_room = True
+                            continue
+                    except OSError:
+                        continue
+                    made = self._private_folder(parent)
+                    if made is None:
+                        continue
+                    try:
+                        source = self._pinned_copy(model, fd, made, sha256=sha256 or None, stop=stop)
+                        break
+                    except BenchError:
+                        raise
+                    except OSError as e:
+                        import errno
+                        no_room = no_room or e.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC))
+                        shutil.rmtree(made, ignore_errors=True)
+                        made = None
+            if source is None:
+                if no_room:
+                    raise BenchError(f"The Docker sandbox needs a private copy of {label} (its folder cannot hold a "
+                                     "link of it), and the framework's folders lack the room for one (about "
+                                     f"{(open_st.st_size + COPY_RESERVE) / 1000 ** 3:.1f} GB needed).",
+                                     code="insufficient_resources",
+                                     next="Tell the person how much space the copy needs, or benchmark natively.")
+                raise BenchError(f"The Docker sandbox needs a private link or copy of {label}, and neither its own "
+                                 "folder nor the framework's cache or state folder can hold one (read-only or not "
+                                 "writable).", code="needs_person",
+                                 next="Ask the person to make the model's folder or the framework's cache folder "
+                                      "writable, or benchmark natively.")
+            yield source
+        finally:
+            if made is not None:
+                shutil.rmtree(made, ignore_errors=True)
+
+    def _run_sandbox(self, build: Any, model: Path, fd: Optional[int] = None, sha256: str = "",
+                     label: str = "the model", stop: Optional[threading.Event] = None) -> str:
         import re
         from orchestrator.runtime.build.executor import DockerEngine, Mount
         from orchestrator.runtime.server_policy import check_command
@@ -373,17 +535,23 @@ class BenchRunner:
         if options.get("network_mode") != "none":  # pragma: no cover - guarded by the sandbox module's tests
             raise BenchError("the sandbox must have no network")
         env = {"HOME": CONTAINER_TMP, "LANG": "C", "LC_ALL": "C"}
-        # the mounted file is exactly the checked open file: a private hard link (or copy) next to the model
-        with tempfile.TemporaryDirectory(prefix=".llm-bench-", dir=str(model.parent)) as pinned, \
-                tempfile.TemporaryDirectory(prefix="llm-bench-") as tmp:
-            source = self._pinned_copy(model, fd, Path(pinned)) if fd is not None else model.resolve()
+        # the mounted file is exactly the checked open file: a private hard link or a checked copy (_pinned_model)
+        pinned = self._pinned_model(model, fd, sha256, label, stop=stop) if fd is not None else \
+            contextlib.nullcontext(model.resolve())
+        with pinned as source, tempfile.TemporaryDirectory(prefix="llm-bench-") as tmp:
+            if stop is not None and stop.is_set():  # cancelled while the private file was made: no container
+                raise BenchStopped()
             mounts = [Mount(build.bin_dir, "/opt/llama/bin", True), Mount(source, "/models/model.gguf", True)]
             log = Path(tmp) / "bench.log"
-            rc = engine.run(image, command, mounts=mounts, env=env, options=options, log=log, timeout=RUN_TIMEOUT)
+            extra = {"stop": stop} if stop is not None else {}
+            rc = engine.run(image, command, mounts=mounts, env=env, options=options, log=log, timeout=RUN_TIMEOUT,
+                            **extra)
             try:
                 output = log.read_bytes()[-MAX_OUTPUT:].decode("utf-8", "replace")
             except OSError:
                 output = ""
+        if stop is not None and stop.is_set():
+            raise BenchStopped()
         if rc != 0:
             raise BenchError(f"llama-bench failed in the sandbox (exit {rc}); its last output is kept apart as "
                              "external text.", external_text=[_tail(output)])

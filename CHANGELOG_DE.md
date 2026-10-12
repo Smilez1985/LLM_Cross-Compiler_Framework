@@ -1260,6 +1260,23 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Ein volles Laufwerk schlug immer vor, Docker aufzuräumen** (G40): Der Vorschlag ist jetzt ein manueller Schritt,
   der die Ordner des Frameworks auf dem vollen Laufwerk mit ihrer Größe nennt; Docker aufzuräumen wird nur
   vorgeschlagen, wenn Dockers Datenverzeichnis voll ist.
+- **Ein Sandbox-Benchmark eines Modells in einem schreibgeschützten Ordner scheiterte mit einem allgemeinen Fehler**:
+  `run_benchmark` mit `sandbox=true` legte seinen privaten Link des geprüften Modells nur neben dem Modell an. Jetzt
+  weicht es auf einen privaten Ordner im eigenen Cache- oder Zustandsordner des Frameworks auf demselben Dateisystem
+  aus, sonst auf eine Kopie, die aus der geprüften offenen Datei gelesen und erneut gehasht wird (ihr sha256 muss der
+  geprüfte sein); nur wenn nichts davon geht, lehnt es ab, mit dem Grund (`insufficient_resources` oder
+  `needs_person`). Der private Ordner wird entfernt, wenn der Lauf endet, auch bei einem Fehler und bei `cancel_job`,
+  das jetzt auch den Sandbox-Container beendet, eine noch laufende Kopie anhält und nach dem Abbruch keinen Container
+  mehr startet; einen Ordner, den ein Absturz zurückließ, entfernt ein späterer Lauf.
+- **Job-Enden im Audit-Log**: Wenn das Eintragen eines fertigen Deployments in die Geräteliste scheiterte, schrieb
+  `deploy_to_device` keinen End-Eintrag, obwohl das Deployment stattgefunden hatte; der End-Eintrag wird jetzt auf
+  jedem Weg aus dem Job geschrieben (das Ergebnis sagt dann, dass die Geräteliste es nicht eingetragen hat).
+  `create_deploy_package`, die Board-Laufzeit-Jobs (`probe_remote_device`, `deploy_device_runtime`,
+  `run_device_benchmark`) und die lokalen Laufzeit-Jobs (`build_local_runtime`, `start_local_runtime`,
+  `run_benchmark`) schreiben jetzt ebenfalls Job-End-Einträge (ok, Fehler mit seinem Grundcode oder abgebrochen),
+  verknüpft mit dem Start-Eintrag des Aufrufs und mit Geräten und Modellen unter ihren Bezeichnungen. Die Deploy- und
+  Laufzeit-Tools erreichen gebaute Modelle über die öffentliche Methode `BuildService.artifact_entry` statt über eine
+  private.
 
 ### Sicherheit
 - **`run_benchmark` startet genau die Datei, die es gehasht hat**: das Modell wird einmal geöffnet, über die offene
@@ -1565,6 +1582,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Deployments leiten nie den MCP-Protokollstrom weiter**: Ohne paramiko liefen `ssh` und `scp` mit der
   Standardeingabe des Frameworks, die über MCP-stdio der Protokollstrom ist (G25); sie bekommen jetzt
   `stdin=DEVNULL`.
+- **Der Kalibrierdatensatz eines Rezepts wird in einem Zug geprüft und benutzt**: `start_recipe_build` prüfte den
+  sha256 des Datensatzes beim Festschreiben des Aufrufs, aber der Build öffnete den Pfad später erneut, sodass eine
+  dazwischen ausgetauschte Datei benutzt wurde. Die Build-Engine öffnet die Datei jetzt einmal (nie über einen Link),
+  kopiert ihre Bytes in den eigenen Ordner des Builds, während sie sie hasht, und benutzt nur diese Kopie, und nur wenn
+  ihr sha256 der ist, den das Rezept festlegt (eine RKNN-Beispielliste behält ihren Ordner, die geprüfte Liste wird
+  über ihren eigenen Namen gelegt).
+- **Pfade mit Leerzeichen in Fehlern an eine KI oder die Person**: Ein Pfad mit einem Leerzeichen (ein Ordner wie
+  `My Models` oder ein Home-Ordner, dessen Benutzername eines enthält) wurde am ersten Leerzeichen abgeschnitten,
+  sodass die Bezeichnung falsch war und ein Stück des Benutzernamens oder des Host-Pfads übrig bleiben konnte. Pfade
+  in Anführungszeichen, die Ordner des Frameworks und der Home-Ordner (auch unter seinem echten Pfad, wenn er ein
+  Link ist) werden jetzt als Ganzes ersetzt, ein bekannter Ordner weiter hinten in einer Pfadliste
+  (`/usr/bin:/home/...`) oder in einem Text in Anführungszeichen mit mehr als einem Pfad beginnt einen eigenen Pfad,
+  und ein Leerzeichen setzt einen Pfad fort, wenn das nächste Wort klar dazugehört (oder, in einem bekannten Ordner,
+  der längere Pfad existiert), sodass der Fehler nur eine Bezeichnung oder den Dateinamen nennt.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

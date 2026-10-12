@@ -536,7 +536,9 @@ class BuildService:
                 folders.append(str(out / str(target) / name))
         return folders
 
-    def _artifact(self, aid: str) -> Tuple[str, str, Dict[str, Any]]:
+    def artifact_entry(self, aid: str) -> Tuple[str, str, Dict[str, Any]]:
+        """(artifact id, output:<relative path>, manifest) of one finished build by its id, as list_artifacts shows it
+        (the manifest is the build engine's, its values untrusted); BuildServiceError (unknown_id) otherwise."""
         if ARTIFACT_ID.fullmatch(aid or ""):
             for item in self._artifacts():
                 if item[0] == aid:
@@ -544,10 +546,12 @@ class BuildService:
         raise BuildServiceError(f"Unknown built model '{aid}'.", code="unknown_id",
                                 next="Call list_artifacts for the ids you can use.")
 
+    _artifact = artifact_entry  # the former private name; tools use artifact_entry
+
     def artifact_details(self, aid: str) -> ArtifactDetails:
         """Manifest (every string external text, model_source as a label), model card and files of one build. Only
         regular files directly inside the build's folder are listed; links are skipped."""
-        _, label, info = self._artifact(aid)
+        _, label, info = self.artifact_entry(aid)
         folder = Path(info["path"])
         manifest = {k: v for k, v in info.items() if k not in ("path",)}
         for key in ("model_source", "model"):
@@ -790,7 +794,11 @@ class BuildService:
                                         "nothing was started.", code="failed",
                                         next="Call start_recipe_build again; the person is asked again.")
         self.check_recipe_dataset(recipe, validated.dataset_path)
-        return self.start_build(request, local_paths=local_paths, owner=owner, disk_reservation=disk_reservation)
+        # checked now for an early answer; the build engine checks the bytes it uses again (a copy in its own folder
+        # with exactly the pinned sha256), so a file swapped after this check is never used
+        named = recipe.options.dataset
+        return self.start_build(request, local_paths=local_paths, owner=owner, disk_reservation=disk_reservation,
+                                dataset_sha256=named.sha256 if named is not None else None)
 
     # --- actions ----------------------------------------------------------------------------
 
@@ -835,9 +843,12 @@ class BuildService:
                                           "dataset_path": dataset, "model": model}), inputs
 
     def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "",
-                    optimization: str = "balanced", disk_reservation: str = "") -> BuildHandle:
+                    optimization: str = "balanced", disk_reservation: str = "",
+                    dataset_sha256: Optional[str] = None) -> BuildHandle:
         """Validates and queues a build. `owner` is the tool caller that starts it (ToolContext.owner);
-        `disk_reservation` the reservation an AI caller's accepted build took (released when the request ends)."""
+        `disk_reservation` the reservation an AI caller's accepted build took (released when the request ends);
+        `dataset_sha256` the sha256 the calibration dataset must have (a recipe's pin), checked by the build engine
+        on the copy it uses."""
         try:
             level = OptimizationLevel(str(optimization or "balanced").lower())
         except ValueError:
@@ -861,6 +872,7 @@ class BuildService:
             use_gpu=req.use_gpu,
             use_imatrix=req.use_imatrix,
             dataset_path=req.dataset_path,
+            dataset_sha256=dataset_sha256 if req.dataset_path else None,
             target_board=req.board,
             max_context_length=req.max_context_length,
             local_inputs=inputs,
