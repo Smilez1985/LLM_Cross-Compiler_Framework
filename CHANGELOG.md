@@ -523,6 +523,7 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   one is a warning the person's approval overrides, never a refusal; prebuilt llama.cpp stays refused.
 
 ### Changed
+- **One Hugging Face classification for builds and downloads**: `check_build_request` and `start_build` now read a model's licence, gating and files with the same rules as `get_hf_model_info` and `download_hf_file` (licences such as GPL, DeepSeek or Qwen research were "unknown" on the build path and "restrictive" on the download path), and both keep the same disk reserve.
 - **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
   closes after 10 minutes without a request (the SDK's default is 30); a request still open when its token is revoked
   or rotated (a wait, an event stream, a listen stream) is closed at once, and so are that token's sessions: a

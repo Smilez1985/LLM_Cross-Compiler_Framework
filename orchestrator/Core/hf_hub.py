@@ -39,7 +39,6 @@ HUB_URL = f"https://{HUB_HOST}"
 REPO_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 MAX_FILES = 2000
-GIB = 1024 ** 3
 # Licence names that are known to restrict use (the old keyword check of ModelManager, kept and widened).
 RESTRICTIVE_KEYWORDS = ("non-commercial", "noncommercial", "cc-by-nc", "research-only", "llama", "gemma",
                         "creativeml-openrail", "openrail", "gpl", "agpl", "deepseek", "qwen-research")
@@ -415,14 +414,17 @@ _RESERVED_LOCK = threading.Lock()
 
 
 def reserve_bytes(total: int) -> int:
-    """The reserve a file system keeps free: 2 GiB or 2 % of its size, whichever is larger (design 6.5)."""
-    return max(2 * GIB, int(total * 0.02))
+    """The reserve a file system keeps free: 2 GiB or 2 % of its size, whichever is larger (design 6.5; the one rule
+    of disk_plan, shared with the build tools)."""
+    from orchestrator.Core.disk_plan import reserve_for
+    return reserve_for(int(total))
 
 
 def standing_reserve_bytes(total: int) -> int:
     """The larger reserve a call under a standing approval must leave: 20 GiB or 10 %, whichever is larger (design
-    6.5); a call that does not leave it asks the person instead."""
-    return max(20 * GIB, int(total * 0.10))
+    6.5, disk_plan's rule); a call that does not leave it asks the person instead."""
+    from orchestrator.Core.disk_plan import reserve_for
+    return reserve_for(int(total), standing=True)
 
 
 def disk_check(folder: Path, needed: int) -> Dict[str, int]:

@@ -538,7 +538,10 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | Tool | Stufe | Was es tut |
 |---|---|---|
 | `list_targets` | lesen | Targets mit Boards, Formaten und Quantisierungen |
-| `get_target_capabilities` | lesen | Was ein Target bauen kann |
+| `get_target_capabilities` | lesen | Was ein Target bauen kann und wie weit ihm vertraut wird (mitgeliefert, geprüft, Community, KI-erstellt und so weiter); mit `check_files` auch, ob seine Moduldateien vollständig sind |
+| `get_hardware_probe` | lesen | Die neuesten Hardware-Probes mit dem jeweils passenden Target, oder die Werte einer Probe (externer Text) über ihre Probe-ID |
+| `probe_local_hardware` | lokal schreiben | Die Hardware dieses Rechners als Job messen und als Probe `local` behalten |
+| `create_target_module` | lokal schreiben | Ein neues Target-Modul aus einer Definition anlegen (immer mit Frage; Basis-Image per Digest festgelegt; als ungetestet und KI-erstellt markiert) |
 | `list_build_requests` | lesen | Build-Anfragen mit Status, 50 pro Seite; die anderer Framework-Prozesse nur lesbar |
 | `get_build_status` | lesen | Status, Fortschritt, Fehler, ein offener Self-Healing-Vorschlag; mit `wait_seconds` (höchstens 50) wartet es auf eine Änderung |
 | `read_build_log` | lesen | Die letzten Zeilen eines Build-Logs (Geheimnisse geschwärzt; höchstens 1000, zurückblättern mit `before_line`) |

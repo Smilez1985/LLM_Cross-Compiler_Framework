@@ -497,7 +497,10 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | Tool | Tier | What it does |
 |---|---|---|
 | `list_targets` | read | Targets with boards, formats and quantizations |
-| `get_target_capabilities` | read | What a target can build |
+| `get_target_capabilities` | read | What a target can build and how far it is trusted (shipped, verified, community, AI-generated and so on); with `check_files` also whether its module files are complete |
+| `get_hardware_probe` | read | The newest hardware probes with the target each matches, or one probe's values (external text) by probe id |
+| `probe_local_hardware` | local write | Probe this computer's hardware as a job and keep it as the probe `local` |
+| `create_target_module` | local write | Create a new target module from a definition (always asked; base image pinned by digest; marked untested and AI-generated) |
 | `list_build_requests` | read | Build requests with their status, 50 per page; those of other framework processes read-only |
 | `get_build_status` | read | Status, progress, errors, a pending self-healing proposal; with `wait_seconds` (at most 50) it waits for a change |
 | `read_build_log` | read | The last lines of a build log (secrets redacted; at most 1000, paging back with `before_line`) |
