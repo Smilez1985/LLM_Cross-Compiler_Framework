@@ -32,15 +32,20 @@ ASK_INSTRUCTIONS = (
     CLIENT_ROLE + "Answer the user's question about the framework. For facts about targets, boards, builds, built "
     "models and this installation, call the framework's read tools (list_targets, get_target_capabilities, "
     "list_build_requests, get_build_status, read_build_log, list_artifacts, run_doctor, search_knowledge, get_status) "
-    "instead of answering from memory, and use the documentation resources listed below. You may add your own "
+    "instead of answering from memory, and use the documentation resources listed below. The knowledge base Ditto "
+    "uses is yours too: search_knowledge gives excerpts with their source, list_knowledge_sources what it holds, "
+    "read_knowledge_source more of one source. You may add your own "
     "knowledge; say which part comes from the framework. Answer in the language of the question, concisely."
     + CLOSING)
 CONVERT_INSTRUCTIONS = (
     CLIENT_ROLE + "Convert a model for a board. 1. Use only the formats, boards and quantization types the target's "
     "capabilities below list (get_target_capabilities shows them again; list_targets shows the other targets). "
-    "2. The model is a Hugging Face repo id (owner/name), or a local model the person names as <label>:<relative "
-    "path> inside a folder the AI may use (for example models:qwen2.5-0.5b-instruct); never a path. Prefer a model "
-    "that needs no licence acceptance unless the user wants another one. 3. Tell the user what you will build "
+    "2. The model is a Hugging Face repo id (owner/name), or a local model the person put into a folder the AI may "
+    "use: list_local_files shows them with an id and a <label>:<relative path> reference; never a path. To find a "
+    "Hugging Face model use search_hf_models, which by default (gated: free) lists only models that download without "
+    "accepting conditions; use gated=any only when the user wants a gated model. get_hf_model_info shows licence, "
+    "gating, size and files; for a single file (a GGUF-only repository) use download_hf_file and build the "
+    "downloaded file by its id. 3. Tell the user what you will build "
     "(model, target, format, board, quantization), then call start_build; the person confirms it if their "
     "permissions ask. 4. Follow the build with get_build_status and wait_seconds=50 until it ends; if it waits for a "
     "self-healing decision, show the proposal to the user and call resolve_healing only with their decision. "
@@ -56,7 +61,9 @@ RECOMMEND_INSTRUCTIONS = (
     + CLOSING)
 DIAGNOSE_INSTRUCTIONS = (
     CLIENT_ROLE + HEALING_TASK + " Give the user what went wrong, the cause, one fix as a manual step for them and "
-    "how sure you are. Never run the fix and never present it as something the framework runs. More of the log comes "
+    "how sure you are, and hand the same to the framework with propose_healing_fix (summary, root_cause, "
+    "manual_step, confidence), which shows it to the person as a manual step written by you. Never run the fix and "
+    "never present it as something the framework runs. More of the log comes "
     "from read_build_log, the state from get_build_status. If the build waits for a self-healing decision "
     "(pending_healing in get_build_status), show that proposal to the user and call resolve_healing only with their "
     "explicit decision." + CLOSING)
@@ -217,12 +224,14 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    ASK_INSTRUCTIONS, (PromptArg("question", "Your question (free text)", required=True,
                                                 max_chars=2000),), ask,
                    tools=("list_targets", "get_target_capabilities", "list_build_requests", "get_build_status",
-                          "read_build_log", "list_artifacts", "run_doctor", "search_knowledge", "get_status")),
+                          "read_build_log", "list_artifacts", "run_doctor", "search_knowledge", "get_status",
+                          "list_knowledge_sources", "read_knowledge_source")),
         PromptSpec("convert_model_for_board", "Convert a model for a board",
                    "Checks the target, starts the build, follows it and shows the result.", CONVERT_INSTRUCTIONS,
                    (model, target, board), convert,
                    tools=("list_targets", "get_target_capabilities", "start_build", "get_build_status",
-                          "resolve_healing", "list_artifacts"),
+                          "resolve_healing", "list_artifacts", "list_local_files", "search_hf_models",
+                          "get_hf_model_info", "download_hf_file"),
                    completions={"target": targets, "board": boards}, reads=("get_target_capabilities",)),
         PromptSpec("recommend_build_settings", "Recommend build settings",
                    "Recommends format, quantization and optimization for a model on a target (Ditto's optimizer task).",
@@ -236,7 +245,7 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    "Analyzes a failed build with its log and knowledge excerpts and proposes one fix as a manual step "
                    "(Ditto's self-healing task).", DIAGNOSE_INSTRUCTIONS,
                    (PromptArg("request_id", "The build request, e.g. req_1a2b3c4d", required=True, max_chars=64),),
-                   diagnose, tools=("get_build_status", "read_build_log", "resolve_healing"),
+                   diagnose, tools=("get_build_status", "read_build_log", "resolve_healing", "propose_healing_fix"),
                    completions={"request_id": own_builds}, reads=("get_build_status", "read_build_log")),
         PromptSpec("add_board", "Add a board",
                    "Proposes a target module for a board from its probe or from its name and SoC (Ditto's module "
