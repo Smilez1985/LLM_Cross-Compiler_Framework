@@ -168,7 +168,11 @@ class FakeRag:
     def list_snapshots(self):
         return sorted(p.name[:-len(".jsonl.gz")] for p in self.snapshot_dir.glob("*.jsonl.gz"))
 
-    def restore_snapshot(self, name, backup=None):
+    def restore_snapshot(self, name, backup=None, proceed=None):
+        self.backups = getattr(self, "backups", []) + [backup]
+        if proceed is not None and not proceed():
+            self.last_restore_problem = "cancelled"
+            return False
         self.restored.append((name, backup))
         self.last_backup, self.last_restored_chunks = backup, 7
         return True
@@ -195,6 +199,29 @@ class TestRestoreSnapshot:
         assert status.state == "done", status
         (name, backup), = rag.restored
         assert name == "pre_crawl_1" and backup.startswith("pre_restore_")
+
+    def test_a_cancel_after_the_backup_leaves_the_knowledge_base_as_it_was(self, env):
+        # cancel_job (or the end of the session) marks the job cancelled at once; the restore must then not replace
+        # the knowledge base behind that "cancelled".
+        import threading
+        backup_taken, cancelled = threading.Event(), threading.Event()
+
+        class SlowRag(FakeRag):
+            def restore_snapshot(self, name, backup=None, proceed=None):
+                backup_taken.set()
+                cancelled.wait(5)
+                return super().restore_snapshot(name, backup, proceed)
+
+        rag = SlowRag(env.tmp / "snapshots")
+        env.framework.ensure_rag_manager = lambda: rag
+        enable(env, "restore_knowledge_snapshot")
+        out, _ = ask(env, "restore_knowledge_snapshot", {"snapshot": "pre_crawl_1"})
+        assert backup_taken.wait(5)
+        env.registry.call("cancel_job", {"job_id": out.job_id}, ToolContext("ditto", session="opt"))
+        cancelled.set()
+        assert self.wait(env, out.job_id).state == "cancelled"
+        time.sleep(0.2)
+        assert rag.restored == [], "a cancelled restore never replaced the knowledge base"
 
     def test_an_unknown_snapshot_is_refused_before_the_question(self, env):
         env.framework.ensure_rag_manager = lambda: FakeRag(env.tmp / "snapshots")
@@ -261,6 +288,13 @@ class TestCoreRestoreAlwaysBacksUp:
             os.utime(path, (1000 + i, 1000 + i))
         assert rag.restore_snapshot("s0")
         assert store.restored == ["s0.jsonl.gz"] and (rag.snapshot_dir / "s0.jsonl.gz").exists()
+
+    def test_a_refused_proceed_after_the_backup_restores_nothing(self, tmp_path):
+        store = Store()
+        rag = rag_with(tmp_path, store)
+        (rag.snapshot_dir / "old.jsonl.gz").write_bytes(b"old")
+        assert not rag.restore_snapshot("old", proceed=lambda: False)
+        assert store.restored == [] and rag.last_backup and "cancelled" in rag.last_restore_problem
 
     def test_an_empty_knowledge_base_needs_no_backup(self, tmp_path):
         store = Store(count=0)

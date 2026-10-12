@@ -565,7 +565,7 @@ the token then uses Ditto's own permissions there (a change to them applies to b
 there shows `mcp:NAME`. `set` stores the token in this computer's credential vault (asked without echo, or read from
 stdin with `--with-token`) and the server in Ditto's AI settings; the token never passes through a tool, a result or
 a command line. Over stdio Ditto starts `--command` (for example `docker exec -i lcf llm-cli mcp serve`) with the
-token in `LCF_MCP_TOKEN`; over HTTP it sends the token as bearer header to `--url`, which must be https or a loopback
+token in `LCF_MCP_TOKEN`. `docker exec` and `podman exec` do not pass their environment into the container, so Ditto adds `-e LCF_MCP_TOKEN` (the name only, never the value) to such a command; and when the server it reached names the shared local caller `mcp` instead of the token (for example over `ssh`, which drops the environment), Ditto does not use it and says how to pass the variable on. Over HTTP it sends the token as bearer header to `--url`, which must be https or a loopback
 address. The mode does not start without a token. One tool source per conversation: switching starts a new
 conversation, and in MCP-client mode no tool of this framework is listed. Every result, error and question of the
 remote framework is shown to Ditto's model as untrusted data, and Ditto's confirmation names the server. `test`

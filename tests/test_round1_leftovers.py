@@ -17,6 +17,7 @@ import pytest
 pytest.importorskip("mcp")
 
 from orchestrator.Core import disk_plan  # noqa: E402
+from orchestrator.Core.hf_lookup import look_up  # noqa: E402 - the real one (conftest patches the module's name)
 from orchestrator.tools.grants import BUILD_RULE  # noqa: E402
 from orchestrator.tools.registry import ToolContext, ToolError  # noqa: E402
 from orchestrator.tools.tools_hf import SEARCH_RATE  # noqa: E402
@@ -152,3 +153,38 @@ class TestCheckBuildHfRate:
         out = env.registry.call("check_build_request", {**BUILD, "include_download_size": False},
                                 ToolContext("ditto", session="r3"))
         assert out.decision in ("allow", "ask", "deny"), "a dry run without the look-up still works"
+
+
+# --- review: facts a build standing approval is matched against ----------------------------------------------------
+
+class TestGrantFactsReview:
+
+    def test_pickle_weights_in_a_local_folder_are_pickle_even_beside_safetensors(self, tmp_path):
+        # The whole folder is mounted into the build, so the pickle file is there to be loaded (design 6.10: never
+        # pickle weights under a standing approval).
+        from orchestrator.Core.build_plan import _local_weights
+        folder = tmp_path / "model"
+        (folder / "sub").mkdir(parents=True)
+        (folder / "model.safetensors").write_bytes(b"s")
+        assert _local_weights(folder) == "safetensors"
+        (folder / "sub" / "pytorch_model.bin").write_bytes(b"p")
+        assert _local_weights(folder) == "pickle"
+        (folder / "sub" / "pytorch_model.bin").unlink()
+        (folder / "extra.pkl").write_bytes(b"p")
+        assert _local_weights(folder) == "pickle"
+        gguf = tmp_path / "m.gguf"
+        gguf.write_bytes(b"g")
+        assert _local_weights(gguf) == "gguf"
+
+    def test_every_base_model_of_a_merge_is_looked_up_for_gating(self):
+        from test_hf_tools import Hub, info
+        hub = Hub()
+        hub.models[REPO] = info(base=["acme/open-base", "meta/gated-base"])
+        hub.models["acme/open-base"] = info(repo="acme/open-base")
+        hub.models["meta/gated-base"] = info(repo="meta/gated-base", gated="manual")
+        facts = look_up(REPO, None, None, api=hub.factory(None))
+        assert facts.base_model == "acme/open-base" and facts.base_gated is True
+        hub.models["meta/gated-base"] = info(repo="meta/gated-base")
+        assert look_up(REPO, None, None, api=hub.factory(None)).base_gated is False
+        hub.models[REPO] = info(base=["acme/open-base", "acme/missing"])
+        assert look_up(REPO, None, None, api=hub.factory(None)).base_gated is None, "unknown: outside every grant"

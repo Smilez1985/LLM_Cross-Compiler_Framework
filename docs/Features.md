@@ -597,7 +597,7 @@ log are that server's. Ditto's identity there is a named token made with `llm-cl
 so the server applies Ditto's own permissions and standing approvals by reference: denying `start_build` for Ditto
 denies it in both modes at once. The audit actor there is `mcp:NAME`, never `ditto`; a new token without the link
 may only read. The token is kept in Ditto's credential vault and reaches the server only as `LCF_MCP_TOKEN` of the
-started process (stdio) or as bearer header (HTTP, https or loopback only); the mode does not start without it.
+started process (stdio; for `docker exec` or `podman exec` Ditto adds `-e LCF_MCP_TOKEN`, the name only, and it refuses a server that reports the shared local caller `mcp`, which means the token did not arrive) or as bearer header (HTTP, https or loopback only); the mode does not start without it.
 One tool source per conversation: in MCP-client mode no tool of this framework is listed, and switching the source
 starts a new conversation. Ditto cannot check a remote server, so every result, error text, prompt and tool
 description from it reaches Ditto's model as untrusted data, and the confirmation dialog or prompt names the server

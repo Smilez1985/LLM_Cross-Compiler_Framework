@@ -25,6 +25,7 @@ Rules of this mode:
 
 import asyncio
 import ipaddress
+import os
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -96,6 +97,30 @@ def check_url(url: str) -> str:
                                "network in clear text): use https, or publish the container's port to "
                                "127.0.0.1 and connect there.")
     return url
+
+
+CONTAINER_CLIS = ("docker", "podman", "nerdctl")
+
+
+def with_token_env(command: Tuple[str, ...]) -> Tuple[str, ...]:
+    """The stdio command as Ditto starts it. `docker exec` (podman, nerdctl) does not hand its own environment to the
+    process in the container, so without `-e LCF_MCP_TOKEN` the server there would run without the token, as the
+    shared local caller "mcp" with another policy. The name-only form passes the value from Ditto's environment of
+    the started process, so the token never appears on the command line."""
+    cmd = list(command)
+    if not cmd:
+        return tuple(cmd)
+    program = os.path.basename(cmd[0]).lower()
+    program = program[:-4] if program.endswith(".exe") else program
+    if program not in CONTAINER_CLIS or any(TOKEN_ENV in part for part in cmd[1:]):
+        return tuple(cmd)
+    if cmd[1:2] == ["exec"]:
+        at = 2
+    elif cmd[1:3] == ["container", "exec"]:
+        at = 3
+    else:
+        return tuple(cmd)
+    return tuple(cmd[:at] + ["-e", TOKEN_ENV] + cmd[at:])
 
 
 def remote_server(config: Any) -> Optional[RemoteServer]:
@@ -217,8 +242,8 @@ class RemoteConnection:
         info = Implementation(name="Ditto (LLM Cross-Compiler Framework)", version="1")
         if self.server.transport == "stdio":
             from mcp.client.stdio import StdioServerParameters
-            params = StdioServerParameters(command=self.server.command[0], args=list(self.server.command[1:]),
-                                           env={TOKEN_ENV: self.token})
+            command = with_token_env(self.server.command)
+            params = StdioServerParameters(command=command[0], args=list(command[1:]), env={TOKEN_ENV: self.token})
             return Client(params, elicitation_callback=elicit, client_info=info)
         from mcp.client.streamable_http import streamable_http_client
         from mcp.shared._httpx_utils import create_mcp_http_client
@@ -275,7 +300,37 @@ class RemoteConnection:
             raise RemoteSetupError(f"Could not connect to the framework's MCP server at {self.server.label()}: "
                                    f"{type(e).__name__}. Check the server settings ('llm-cli ditto remote show') "
                                    "and that the token is valid there ('llm-cli mcp token list').") from None
+        try:
+            self._check_identity()
+        except RemoteSetupError:
+            self.close()
+            raise
         return self
+
+    def _check_identity(self) -> None:
+        """A stdio server that did not receive the token (a command that does not pass the environment on, such as
+        ssh or a container runtime without -e LCF_MCP_TOKEN) runs as the shared local caller "mcp" with another
+        policy than Ditto's: the mode refuses that. Checked with the server's own get_status (permissions section,
+        which names the caller); when the server does not offer it, nothing can be checked here. Over HTTP a server
+        refuses a request without a valid token anyway."""
+        if self.server.transport != "stdio":
+            return
+        try:
+            listed = self._run(self._client.list_tools(), CONNECT_TIMEOUT)
+            if "get_status" not in {str(getattr(t, "name", "")) for t in getattr(listed, "tools", []) or []}:
+                return
+            result = self._run(self._client.call_tool("get_status", {"sections": ["permissions"]}), CONNECT_TIMEOUT)
+        except Exception:  # noqa: BLE001 - cannot be checked: the server's own policy still applies
+            return
+        data = getattr(result, "structured_content", None)
+        permissions = data.get("permissions") if isinstance(data, dict) else None
+        caller = permissions.get("caller") if isinstance(permissions, dict) else None
+        if isinstance(caller, str) and not caller.startswith("mcp:"):
+            raise RemoteSetupError(f"The framework at {self.server.label()} did not receive Ditto's named token (it "
+                                   "treats Ditto as the shared local caller, with other permissions than Ditto's), so "
+                                   "Ditto does not use it. The command must pass the environment variable "
+                                   f"{TOKEN_ENV} on to the server, e.g. 'docker exec -i -e {TOKEN_ENV} <container> "
+                                   "llm-cli mcp serve': llm-cli ditto remote set --command \"...\".")
 
     def _stop_loop(self) -> None:
         if self._loop is not None:
