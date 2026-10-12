@@ -344,15 +344,26 @@ class CrawlerManager:
     REQUEST_DEADLINE = 60.0
     PDF_DEADLINE = 180.0
 
-    def __init__(self, framework_manager, options: Optional[Dict[str, Any]] = None):
+    # Options a crawl may set (the Deep Ingest dialog, the crawl_docs_site job); anything else is ignored with a log
+    # line. No opt-out check is among them: robots.txt, the robots directives and TDMRep are always checked.
+    OPTION_KEYS = frozenset({"max_depth", "max_pages", "request_delay", "download_pdfs", "languages"})
+
+    def __init__(self, framework_manager, options: Optional[Dict[str, Any]] = None, *,
+                 _skip_robots_txt_for_tests: bool = False):
         self.logger = get_logger(__name__)
         self.config = framework_manager.config
-        opts = options or {}
-        
+        opts = dict(options or {})
+        ignored = sorted(str(k) for k in opts if k not in self.OPTION_KEYS)
+        if ignored:
+            self.logger.warning(f"Crawl options ignored: {', '.join(ignored)[:200]} (opt-out checks cannot be "
+                                "switched off).")
+            opts = {k: v for k, v in opts.items() if k in self.OPTION_KEYS}
+
         # Per-crawl options (e.g. from the Deep Ingest dialog) override the stored defaults. robots.txt is an
-        # opt-out like the others, so neither the dialog nor the config can switch it off; respect_robots=False
-        # exists for tests with a fake web only.
-        self.respect_robots = bool(opts.get("respect_robots", True))
+        # opt-out like the others, so neither the dialog, the config nor an options dict can switch it off. The
+        # keyword-only flag exists for tests with a fake web only (no product code passes it; a guard test in
+        # tests/test_security.py checks that).
+        self.respect_robots = not _skip_robots_txt_for_tests
         self.max_depth = int(opts.get("max_depth", self.config.get("crawler_max_depth", 2)))
         self.max_pages = int(opts.get("max_pages", self.config.get("crawler_max_pages", 50)))
         self.rate_limit = float(opts.get("request_delay", self.config.get("crawler_rate_limit", 1.0)))

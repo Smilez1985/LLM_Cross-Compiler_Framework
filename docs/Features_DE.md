@@ -552,6 +552,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `search_knowledge` | lesen | In der Wissensbasis suchen; jeder Auszug mit Quellen-ID, Adresse oder Pack, Art (`web`, `pack`, `docs`), Vertrauensstufe, Aufnahmedatum und Position; `kind` grenzt die Suche ein |
 | `list_knowledge_sources` | lesen | Was die Wissensbasis enthält: jede Quelle mit ID, Titel, Art, Vertrauensstufe, Aufnahmedatum und Zahl der Auszüge (50 je Seite) |
 | `read_knowledge_source` | lesen | Die Auszüge einer Quelle in ihrer Reihenfolge, über die Quellen-ID (höchstens 20 je Aufruf) |
+| `crawl_docs_site` | lokal schreiben | Deep Ingest von 1 bis 5 öffentlichen Dokumentations-Websites in die Wissensbasis, als Job; immer gefragt mit jeder Startadresse, erst nachdem eine Person den Hinweis gelesen hat ([Details](#deep-ingest-durch-einen-ki-client)) |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
@@ -1041,7 +1042,8 @@ Der eingebettete Speicher wird davon getrennt nach 30 Sekunden ohne Zugriff frei
 
 Deep Ingest liest Dokumentationsseiten aus dem Web in die Wissensbasis ein. Du startest es mit **Deep Ingest (Add
 Docs)** im Modul-Assistenten (**Tools > Create Hardware Module...**); die Wissensbasis muss eingeschaltet sein. Einen
-CLI-Befehl dafür gibt es in dieser Version nicht.
+CLI-Befehl dafür gibt es in dieser Version nicht. KI-Clients und Ditto können mit dem Tool `crawl_docs_site` um einen
+Crawl bitten ([unten](#deep-ingest-durch-einen-ki-client)); du bestätigst jeden einzeln.
 
 Text- und Data-Mining öffentlich zugänglicher Inhalte ist erlaubt, solange der Rechteinhaber es sich nicht
 maschinenlesbar vorbehalten hat (EU-Richtlinie 2019/790, Art. 4; § 44b UrhG). Deshalb prüft der Crawler diese
@@ -1059,8 +1061,11 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 - Er ist eine Information, keine rechtliche Bestätigung: eine Schaltfläche, **Verstanden** (englische Oberfläche:
   *Understood*, auch Esc), nichts zum Ankreuzen.
 - Er erscheint einmal pro Benutzer und erneut, wenn sich sein Text in einer Sprache ändert. Die Zustandsdatei
-  `crawl_notice.json` im persönlichen Ordner (`~/.llm-framework`) speichert einen Hash seiner Texte. Lässt sich
-  dieser Ordner nicht nutzen, erscheint der Hinweis jedes Mal.
+  `crawl_notice.json` im persönlichen Ordner (`~/.llm-framework`) speichert einen Hash seiner Texte, wann er gelesen
+  wurde und wo (`via`: `gui`, oder `cli` für `llm-cli tools crawl-notice`); das Lesen landet auch im Audit-Log. Lässt
+  sich dieser Ordner nicht nutzen, erscheint der Hinweis jedes Mal.
+- Nur eine Person bestätigt ihn, in der GUI oder mit `llm-cli tools crawl-notice` in einem Terminal. Solange er nicht
+  gelesen ist, wird `crawl_docs_site` mit dem Grund `needs_person` und diesen beiden Orten abgelehnt.
 
 ### Was der Crawler beachtet
 
@@ -1125,6 +1130,37 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   complete response within 60 s“, unlesbares PDF, zu viele Weiterleitungen). Jede Seite, die ankommt
   (HTTP 200), zählt zur Seitengrenze, ob gespeichert oder nicht. Vorbehalte von Sites und Fehler machen das
   Ergebnis zu „teilweise“, die übrigen Gründe nicht.
+
+### Deep Ingest durch einen KI-Client
+
+Mit `crawl_docs_site` kann ein MCP-Client oder Ditto Dokumentation in die Wissensbasis aufnehmen (Entscheidung vom
+11.10.2026): derselbe Crawler mit denselben Opt-out-Prüfungen wie in der GUI, als Job.
+
+- **Immer gefragt, mit jeder Startadresse.** Voreinstellung und Obergrenze sind "nachfragen" (ein "erlauben" pro Tool
+  wird gedeckelt), und es bietet nie „ja, und nicht mehr fragen“ an. Die erste Zeile der Frage sagt, was passiert (Websites,
+  Seiten je Startadresse, Linktiefe, die Pause, dass die Opt-outs beachtet werden und sich nicht abschalten
+  lassen), dann eine Zeile je Startadresse (markiert als vom KI-Client angegeben), die behaltenen Sprachen, PDFs, der
+  Snapshot und dass das Embedding-Modell einmal heruntergeladen werden kann.
+- **Vor der Frage geprüft:** Der Hinweis muss gelesen sein (sonst `needs_person`); Offline-Modus aus und Wissensbasis
+  an (`not_supported`); 1 bis 5 Startadressen, jede eine öffentliche `http(s)`-Adresse, die die SSRF-Prüfung besteht
+  (`invalid_value` für alles andere); `max_pages` je Startadresse von 1 bis `crawler_max_pages` (nie über 100),
+  `max_depth` von 1 bis `crawler_max_depth` (nie über 3; Voreinstellung 2); ein Wert über der Grenze wird mit dem
+  erlaubten Bereich abgelehnt, nie verkleinert.
+- **Nichts erreicht die Opt-outs oder die Pause:** Das Tool nimmt keinen robots-Schalter und keine Pause (ein
+  unbekanntes Argument wird abgelehnt); der Crawler wartet mindestens `crawler_rate_limit` und nie weniger als eine
+  Sekunde. Der Crawler übergeht jeden anderen Schlüssel in einem Options-Dictionary, robots.txt lässt sich also von
+  nirgends abschalten; Tests nutzen einen eigenen Schlüsselwort-Schalter, den kein Produktcode übergibt (ein
+  Wächtertest prüft das).
+- **Grenzen:** ein Crawl gleichzeitig je Benutzer (auch über Framework-Prozesse hinweg, Sperrdatei `crawl.lock` im
+  persönlichen Ordner), 5 Crawls am Tag je Client und höchstens 300 gespeicherte Seiten am Tag je Client.
+- **Als Job:** Der Aufruf gibt eine Job-ID zurück; `get_job_status` zeigt "Seite n von höchstens m" (keine Adresse);
+  `cancel_job` hält nach der aktuellen Seite an und behält, was gespeichert ist. Vor jeder Startadresse wird ein
+  Snapshot angelegt. Das Ergebnis enthält den Ausgang (`success`, `partial`, `failure`), gespeicherte Seiten und
+  Abschnitte, die übersprungenen Adressen mit Grund und ob eine Website sie vorbehalten hat (höchstens 50), die
+  fehlgeschlagenen (höchstens 50) und den Namen des Snapshots; nie Seitentext (der Client liest Seiten mit
+  `search_knowledge` oder `read_knowledge_source`). Adressen und Gründe im Ergebnis eines Jobs sind externer Text und
+  werden wie anderer externer Text markiert und bereinigt.
+- Die Seiten sind als `crawled` markiert, wie die eines Deep Ingest in der GUI.
 
 ### Gesprochene Ansagen
 

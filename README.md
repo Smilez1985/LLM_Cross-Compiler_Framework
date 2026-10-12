@@ -555,7 +555,8 @@ Turn it on in the AI settings (**Enable Local Knowledge Base**). Everything runs
 - a local cross-encoder reranks the excerpts for build recommendations and drops irrelevant ones (setting
   `rag_reranker`).
 
-Add documentation with **Deep Ingest (Add Docs)** in the module wizard (**Tools > Create Hardware Module...**).
+Add documentation with **Deep Ingest (Add Docs)** in the module wizard (**Tools > Create Hardware Module...**), or let
+an AI client or Ditto ask for a crawl with `crawl_docs_site` (you confirm each one and see every start address).
 Before your first crawl, a one-time notice says what is read and kept; it is information, not a confirmation. The
 crawler blocks private network addresses, limits pages and depth, and honours these machine-readable opt-outs of a
 site: robots.txt, the `X-Robots-Tag` header, robots meta tags (including `noai`) and the TDM Reservation Protocol.
@@ -648,7 +649,8 @@ The knowledge-base, Deep Ingest and community settings are explained in [docs/Fe
   verified.
 - **Browser and cloud sign-in** (OAuth, AWS, Google Cloud, Azure) are not available yet; Ditto signs in with API
   keys, local engines need none, and an `ant auth login` profile is an advanced option.
-- **Deep Ingest** runs only from the module wizard in the GUI; there is no CLI command for it.
+- **Deep Ingest** has no CLI command: you start it in the module wizard in the GUI, or confirm an AI client's
+  `crawl_docs_site`.
 - **Community zoo:** no community repository, index or maintainer key is published yet (`configs/community_keys.yml`
   is empty, `community_index_url` and `community_repo` are empty), so only pack files can be installed.
 

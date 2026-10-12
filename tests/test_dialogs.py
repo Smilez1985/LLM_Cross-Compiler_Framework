@@ -1204,7 +1204,8 @@ class TestCrawlNotice:
         if os.name == "posix":
             assert state.stat().st_mode & 0o777 == 0o600
         stored = json.loads(state.read_text())
-        assert set(stored) == {"notice_sha256", "acknowledged_at"} and len(stored["notice_sha256"]) == 64
+        assert set(stored) == {"notice_sha256", "via", "acknowledged_at"} and len(stored["notice_sha256"]) == 64
+        assert stored["via"] == "gui"   # who acknowledged it: a person in the GUI (G18)
 
         de = dict(localization.LocalizationManager.TRANSLATIONS["de"])
         de["crawl.notice.text"] += " Neu."
@@ -1219,14 +1220,14 @@ class TestCrawlNotice:
         (tmp_path / CrawlNotice.FILE_NAME).write_text(content)
         notice = CrawlNotice(tmp_path)
         assert notice.needed()
-        notice.acknowledge()
+        notice.acknowledge("cli")
         assert not notice.needed()
 
     def test_a_failed_save_still_lets_the_crawl_start(self, qapp, tmp_path, monkeypatch):
         from orchestrator.utils.crawl_notice import CrawlNotice
 
         monkeypatch.setattr(dialogs.CrawlNoticeDialog, "exec", lambda self: 0)
-        monkeypatch.setattr(CrawlNotice, "acknowledge", lambda self: (_ for _ in ()).throw(OSError("read-only")))
+        monkeypatch.setattr(CrawlNotice, "acknowledge", lambda self, via: (_ for _ in ()).throw(OSError("read-only")))
         dialogs.show_crawl_notice_once(None, SimpleNamespace(user_state_dir=tmp_path))   # no exception
 
     def test_without_a_usable_state_directory_the_notice_is_shown_and_the_crawl_starts(self, qapp, monkeypatch):

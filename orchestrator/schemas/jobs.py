@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Inputs and outputs of the job tools (get_job_status, cancel_job)."""
 
-from typing import Any, Dict, Literal, Optional
+from typing import Annotated, Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from orchestrator.tools.output import UntrustedText
+from orchestrator.tools.output import UNTRUSTED_DESCRIPTION, Untrusted, UntrustedText
 
 # A job's progress message and error can quote text from outside the framework (a server reply, a page, a device),
 # so they are marked as external text (cleaned, capped and wrapped for the client's model).
@@ -39,12 +39,18 @@ class JobErrorOut(BaseModel):
     next: str = ""
 
 
+# A job's result can hold external text too (addresses a crawl skipped and the sites' reasons, pack titles): every
+# string in it is cleaned, capped and marked like other external text.
+JobResult = Annotated[Dict[str, Any], Untrusted(2000),
+                      Field(json_schema_extra={"untrusted": True}, description=UNTRUSTED_DESCRIPTION)]
+
+
 class JobStatusOut(BaseModel):
     job_id: str
     kind: JobKind
     state: JobState
     progress: JobProgress
-    result: Optional[Dict[str, Any]] = None
+    result: Optional[JobResult] = None
     error: Optional[JobErrorOut] = None
     owner: str = Field(description="Caller class that started the job (mcp, ditto, ...)")
     yours: bool = Field(description="True if this client started the job (it may cancel it without a question)")
