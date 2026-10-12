@@ -232,8 +232,8 @@ def match_filename(name: str, candidates: Sequence[str], field_name: str) -> Tup
     if name in candidates:
         return name, None
     folded = [c for c in candidates if c.casefold() == name.casefold()]
-    if len(folded) == 1:
-        return folded[0], Repair("filename", field_name, name, folded[0])
+    if len(folded) == 1:  # the audit log records kind and field only (a file name is free text)
+        return folded[0], Repair("filename", field_name, name, folded[0], show_values=False)
     suggestions = suggest(name, candidates)
     raise NormalizeError(f"No file named '{_short(name, 120)}'." + (f" Did you mean {', '.join(suggestions)}?"
                                                                   if suggestions else ""),

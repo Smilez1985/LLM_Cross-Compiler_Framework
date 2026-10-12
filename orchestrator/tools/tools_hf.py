@@ -223,7 +223,6 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
     # -- download_hf_file: two-phase ---------------------------------------------------------------------------------
 
     def prepare_download(inp: DownloadIn, ctx: ToolContext) -> CallFacts:
-        from orchestrator.Core.hf_hub import disk_check
         from orchestrator.tools.normalize import NormalizeError, match_filename
         client = hub()
         facts = client.info(inp.model, inp.revision)
@@ -239,8 +238,17 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         except NormalizeError as e:
             raise ToolError(f"{inp.model} has no file '{inp.filename}' at commit {facts.commit[:12]}.",
                             code="invalid_value", next="Call get_hf_model_info for the file names.") from e
-        if repair is not None:
-            ctx.notes.append(f"filename: {name} (you wrote {inp.filename})")
+        # The repair (a name in another letter case) is the look-up's: named in the result and in every refusal after
+        # it, and audited (CallFacts.repairs; a refusal carries it as `repairs`).
+        repairs = (repair,) if repair is not None else ()
+        try:
+            return _download_facts(inp, facts, name, repairs)
+        except (ToolError, ValueError) as e:
+            e.repairs = list(repairs)
+            raise
+
+    def _download_facts(inp: DownloadIn, facts, name: str, repairs: tuple) -> CallFacts:
+        from orchestrator.Core.hf_hub import disk_check
         file = facts.file(name)
         if not safe_filename(name):
             raise ToolError("That file name cannot be used as a file on this computer.", code="not_supported",
@@ -292,7 +300,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
             bound["grant"] = None
         consequence = (f"Downloads {name} ({_size(file.size)}) of {inp.model} from huggingface.co (commit "
                        f"{facts.commit[:12]}) into the models folder.")
-        return CallFacts(consequence=consequence, facts=tuple(lines), bound=bound)
+        return CallFacts(consequence=consequence, facts=tuple(lines), bound=bound, repairs=repairs)
 
     def download_hf_file(inp: DownloadIn, ctx: ToolContext) -> DownloadStartedOut:
         from orchestrator.Core.hf_hub import HubFetcher, HubFile

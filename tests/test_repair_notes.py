@@ -322,6 +322,77 @@ class TestTheRealClientsCase:
         assert "deploy_to_device" not in text_of(result)
 
 
+class TestPendingApprovals:
+    """Review finding: a client that cannot ask gets a pending approval in the framework. Its waiting response named
+    the repair, but the job the client then polls with get_job_status ended without it when the person declined or
+    the approved call was refused, while a successful job's result carries the call's notes."""
+
+    @pytest.fixture
+    def service(self, env, tmp_path):
+        from orchestrator.Core.job_service import JobService
+        from orchestrator.tools.approvals import ApprovalService, ApprovalStore
+        service = ApprovalService(ApprovalStore(tmp_path / "approvals"), JobService(), poll=3600.0)
+        env.registry.attach_approvals(service)
+        policy(env, Decision.ASK, "start_build")
+        yield service
+        service.close()
+
+    def waiting(self, env, service):
+        """start_build with "quant" from a caller nobody can ask: the waiting response and its pending record."""
+        with pytest.raises(ToolError) as exc:
+            env.registry.call("start_build", {**BUILD, "quant": "Q4_K_M"},
+                              ToolContext("mcp", session="pending", pending_approvals=True))
+        assert exc.value.code == "waiting_for_approval" and exc.value.notes == [ALIAS_NOTE], str(exc.value)
+        [record] = [r for r in service.store.list() if r.state == "pending"]
+        return record
+
+    def job_error(self, service, record, timeout=10.0):
+        import time
+        from orchestrator.tools.framework_tools import _job_out
+        deadline = time.monotonic() + timeout
+        while not service.jobs.get(record.job_id).finished and time.monotonic() < deadline:
+            service.poll_once()
+            time.sleep(0.02)
+        job = service.jobs.get(record.job_id)
+        assert job.finished and job.state == "failed", (job.state, job.error)
+        return _job_out(job, ToolContext("mcp", session="pending")).error
+
+    def test_the_waiting_response_names_the_repair_over_mcp(self, env, service):
+        [result] = mcp_calls(env, [("start_build", {**BUILD, "quant": "Q4_K_M"})])  # no elicitation: cannot ask
+        assert result.structured_content["error"]["code"] == "waiting_for_approval", text_of(result)
+        assert_noted(result, [ALIAS_NOTE], "MCP, pending approval")
+
+    def test_a_no_in_the_framework_names_the_repair(self, env, service):
+        record = self.waiting(env, service)
+        service.store.decide(record.id, False, "gui")
+        error = self.job_error(service, record)
+        assert error.code == "declined" and error.notes == [ALIAS_NOTE]
+
+    def test_an_approved_call_refused_by_its_look_up_names_the_repair(self, env, service, monkeypatch):
+        record = self.waiting(env, service)
+        original = env.registry.look_up
+
+        def full(spec, inp, ctx):
+            if spec.name == "start_build":
+                raise ToolError(DISK, code="insufficient_resources", next="Tell the person how much space is needed.")
+            return original(spec, inp, ctx)
+        monkeypatch.setattr(env.registry, "look_up", full)  # the disk filled up while the person decided
+        service.store.decide(record.id, True, "gui")
+        error = self.job_error(service, record)
+        assert error.code == "insufficient_resources" and error.notes == [ALIAS_NOTE]
+
+    def test_an_approved_call_its_handler_refuses_names_the_repair(self, env, service, monkeypatch):
+        record = self.waiting(env, service)
+        spec = env.registry.get("start_build")
+
+        def handler(*_a, **_k):
+            raise ToolError(DISK, code="insufficient_resources")
+        monkeypatch.setitem(env.registry._tools, spec.name, dataclasses.replace(spec, handler=handler))
+        service.store.decide(record.id, True, "gui")
+        error = self.job_error(service, record)
+        assert error.code == "insufficient_resources" and error.notes == [ALIAS_NOTE]
+
+
 def test_notes_text_reads_like_one_sentence():
     assert notes_text([]) == ""
     assert notes_text(["a.", " b "]) == " Notes: a; b."

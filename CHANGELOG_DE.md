@@ -13,15 +13,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Ein Smoke-Test mit einem echten Client** (`scripts/mcp_client_smoke.sh`, Prüfung `scripts/mcp_smoke_check.py`):
   lässt Claude Code (`claude -p`, vier vorgegebene Prompts) in einer Wegwerf-Umgebung gegen den stdio-Server des
   Frameworks laufen (Home, Hugging-Face-Home, XDG-Ordner, Benutzerordner, Zugangsdaten nur im Speicher, das
-  Null-Keyring-Backend, kein Fenstersystem; der Server läuft unter `env -i` und bekommt so keine Variable des
-  Aufrufers) und prüft anhand der isolierten Audit-Datenbank, nie anhand der Antwort des Modells: die Client-Zeile,
-  `get_status`, ein unbekanntes Argument, das mit Vorschlag abgelehnt wird, ein erklärter Alias, der bei einem
-  Aufruf, der lief, und bei einem abgelehnten festgehalten und dem Client in beiden gezeigt wird (gelesen aus den
-  Tool-Ergebnissen der JSON-Ausgabe des Clients), und ein Aufruf, der eine Bestätigung braucht und ohne Antwort
-  nicht läuft. Er endet mit 77 (übersprungen), wenn der claude-Befehl fehlt oder nicht angemeldet ist, liest,
-  kopiert oder übergibt nie Claude-Zugangsdaten oder Tokens, löscht seinen temporären Ordner (samt dem Protokoll des
-  Clients über den Server) und braucht kein Docker; eine manuelle oder optionale CI-Prüfung (CONTRIBUTING, „Der
-  Smoke-Test mit einem echten Client“).
+  Null-Keyring-Backend, kein Fenstersystem; der Server läuft unter `env -i` und bekommt so keine Variable des Aufrufers)
+  und prüft anhand der isolierten Audit-Datenbank, nie anhand der Antwort des Modells: die Client-Zeile, `get_status`,
+  ein unbekanntes Argument, das mit Vorschlag abgelehnt wird, ein erklärter Alias, der bei einem Aufruf, der lief, und
+  bei einem abgelehnten festgehalten und dem Client in beiden gezeigt wird (gelesen aus den Tool-Ergebnissen der
+  JSON-Ausgabe des Clients), und ein Aufruf, der eine Bestätigung braucht und ohne Antwort nicht läuft (eine Frage an
+  die Person oder ein Ende mangels Antwort; eine Ablehnung vor jeder Frage, etwa eine verweigerte Berechtigung, zählt
+  nicht). Er endet mit 77 (übersprungen), wenn der claude-Befehl fehlt oder nicht angemeldet ist, liest, kopiert oder
+  übergibt nie Claude-Zugangsdaten oder Tokens, löscht seinen temporären Ordner (samt dem Protokoll des Clients über den
+  Server und dessen temporären Dateien) und braucht kein Docker; eine manuelle oder optionale CI-Prüfung (CONTRIBUTING,
+  „Der Smoke-Test mit einem echten Client“).
 - **`start_recipe_build` und die Ressource `lcf://packs/index`** (MCP-Design T9): ein KI-Client baut ein
   installiertes Community-Rezept genau wie festgelegt (das Modell beim Commit des Rezepts, Target, Format, Board,
   Quantisierung, Importance-Matrix, Kontextlänge) über den zweistufigen Weg von `start_build` (dieselbe Frage,
@@ -998,7 +999,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Fehler (`{"error": {"code", "field", "notes"}}`), auf Dittos Weg im Prozess und auf Dittos Weg als MCP-Client. Eine
   Ablehnung durch den Normalisierer nach einem Alias (ein ungültiger Wert, ein unbekanntes Argument daneben) hält den
   Alias ebenfalls im Audit-Log fest. Ein registerweiter Test schickt jedes Tool mit erklärten Aliasen durch jede Art
-  von Ablehnung auf allen drei Wegen.
+  von Ablehnung auf allen drei Wegen. Die Reparatur, die die Vorabprüfung eines Tools macht (`download_hf_file` mit
+  einem Dateinamen in anderer Groß- und Kleinschreibung), ist eine Reparatur wie die anderen: über MCP ging ihr
+  Hinweis sogar in einem erfolgreichen Ergebnis verloren (die Vorabprüfung läuft vor der Frage mit einem eigenen
+  Kontext), eine Ablehnung danach (zu wenig Speicherplatz) nannte sie nie, und das Audit-Log hielt sie nicht fest;
+  jetzt wird sie im Ergebnis und in jeder Ablehnung danach auf jedem Weg genannt und nur mit Art und Feld
+  festgehalten. Der Job einer wartenden Freigabe, der abgelehnt oder verweigert endet, nennt die Reparaturen des
+  Aufrufs in `get_job_status` (`error.notes`), wie es die Hinweise seines Ergebnisses tun.
 - **Die größere Speicherreserve eines Dauerauftrags wird unter der Sperre des Reservierungsbuchs geprüft** für
   `start_build`, `start_recipe_build`, `download_hf_file` und `add_pack_from_index`: die Reservierung wird mit der
   Reserve von 20 GiB / 10 % im Reservierungsbuch genommen, das alle Framework-Prozesse teilen, so dass eine

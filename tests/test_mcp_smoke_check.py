@@ -176,6 +176,36 @@ class TestChecker:
         ok, message = smoke.check_confirmation(smoke.read_audit(tmp_path / "audit.db"))
         assert ok and "asked via approval:ap_0123456789abcdef" in message
 
+    @pytest.mark.parametrize("outcome,reason", [("denied", "permission_denied"), ("error", "failed"),
+                                                ("rate_limited", "limit_reached"), ("invalid_input", "invalid_value"),
+                                                ("repeat_refused", "repeat_refused"), ("cancelled", "failed")])
+    def test_a_refusal_before_any_question_proves_nothing(self, tmp_path, outcome, reason):
+        """Review finding: a call the policy denied (or one refused by a look-up, a limit, an invalid value) never
+        reached the confirmation, so it says nothing about a call that needs one: the check fails and says why."""
+        audit = AuditLog(tmp_path / "audit.db")
+        record(audit, "update_settings", outcome, reason_code=reason)
+        ok, message = smoke.check_confirmation(smoke.read_audit(tmp_path / "audit.db"))
+        assert not ok, message
+        assert f"was refused before any question ({outcome}" in message and "not tested" in message
+
+    @pytest.mark.parametrize("outcome,reason,answer", [("not_confirmed", "needs_person", "unavailable"),
+                                                       ("not_confirmed", "declined", "declined"),
+                                                       ("confirmation_timeout", "needs_person", "timeout")])
+    def test_a_call_nobody_confirmed_counts_as_not_run(self, tmp_path, outcome, reason, answer):
+        """Nobody could be asked, the person said no, or the question timed out: the call needed a confirmation
+        and did not run without one."""
+        audit = AuditLog(tmp_path / "audit.db")
+        record(audit, "update_settings", outcome, reason_code=reason, answer=answer)
+        ok, message = smoke.check_confirmation(smoke.read_audit(tmp_path / "audit.db"))
+        assert ok and f"ended {outcome} (answer {answer})" in message
+
+    def test_a_refusal_after_the_question_still_counts(self, tmp_path):
+        """Asked first, then refused for another reason (the client's question limit, say): it was asked."""
+        audit = AuditLog(tmp_path / "audit.db")
+        record(audit, "update_settings", "confirmation_requested", confirm_channel="elicitation")
+        record(audit, "update_settings", "rate_limited", reason_code="limit_reached")
+        assert smoke.check_confirmation(smoke.read_audit(tmp_path / "audit.db"))[0]
+
     def test_text_from_the_log_is_shown_as_one_short_line(self):
         line = smoke.shown("a\nb\x1b[31m" + "x" * 300, 20)
         assert len(line) == 20 and line.startswith("a b?[31mx") and line.endswith("...")
@@ -245,8 +275,13 @@ FAKE_CLAUDE = textwrap.dedent('''\
     #!{python}
     """A stand-in for the claude command: answers `auth status`, and for -p drives the server of the MCP
     configuration through the SDK the way Claude Code does (one session per prompt), printing a verbose JSON output."""
-    import asyncio, json, os, sys
+    import asyncio, json, os, sys, tempfile
     args = sys.argv[1:]
+    # Like Claude Code, every run (also `auth status` and `--version`) keeps state in the temporary directory
+    # (TMPDIR/claude-<uid>/...).
+    scratch = os.path.join(tempfile.gettempdir(), "claude-0", "project")
+    os.makedirs(scratch, exist_ok=True)
+    open(os.path.join(scratch, "cache-break-state.json"), "w").write("{{}}")
     if args[:2] == ["auth", "status"]:
         print(json.dumps({{"loggedIn": {signed_in}, "authMethod": "none"}}, indent=2))
         sys.exit(0 if {signed_in} else 1)
@@ -355,7 +390,8 @@ class TestScript:
         assert f"PASS  the client was shown \"{smoke.ALIAS_NOTE}\" in a refusal" in out
         assert "PASS  update_settings did not run without an answer" in out
         assert "all 8 checks passed" in out
-        assert list((tmp_path / "tmp").iterdir()) == [], "the temporary folder is cleaned up"
+        # Review finding: the client's own temporary files (its TMPDIR) stayed behind in the caller's TMPDIR.
+        assert list((tmp_path / "tmp").iterdir()) == [], "the temporary folder is cleaned up, the client's files too"
         server_env = json.loads((tmp_path / "log" / "server_env.json").read_text())
         client_cache = Path((tmp_path / "log" / "client_cache.txt").read_text())
         assert client_cache.is_relative_to(tmp_path / "tmp"), "the client logs the server's stderr into the temp folder"

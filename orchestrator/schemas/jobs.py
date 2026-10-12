@@ -37,6 +37,10 @@ class JobErrorOut(BaseModel):
     code: str
     message: UntrustedText
     next: str = ""
+    # The framework's notes about the call a pending approval ran (the repairs it made, "argument 'quant' read as
+    # 'quantization'"), as its result's notes would name them.
+    notes: List[str] = Field(default_factory=list, description="The framework's notes about the call: the repairs "
+                                                               "it made, as a successful result names them")
 
 
 # A job's result can hold external text too (addresses a crawl skipped and the sites' reasons, pack titles): every
