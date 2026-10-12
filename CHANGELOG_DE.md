@@ -690,9 +690,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   angelegt (`~/.ssh`, `~/.cache/huggingface`). Bevor irgendetwas das Framework importiert, lenkt `tests/conftest.py`
   jetzt `HOME`, `USERPROFILE`, die `XDG_*`-Ordner, `HF_HOME`, `HF_TOKEN_PATH` und die übrigen Variablen für
   Benutzerordner in einen temporären Ordner um (jeder Test bekommt seinen eigenen), entfernt Zugangsdaten wie
-  `HF_TOKEN` und `SSH_AUTH_SOCK` aus der Umgebung und lässt den Lauf scheitern, wenn sich die Schlüssel-, Token-,
-  Schlüsselbund- oder Framework-Ordner des echten Benutzerordners verändert haben (er vergleicht ihre Auflistungen
-  und öffnet nie eine Datei).
+  `HF_TOKEN` und `SSH_AUTH_SOCK` sowie den Sitzungsbus des Desktops aus der Umgebung, gibt jedem Test eine
+  Schlüsselbund-Datei in seinem eigenen Benutzerordner statt des Schlüsselbunds des Betriebssystems (Secret Service,
+  macOS-Schlüsselbund, Windows-Anmeldeinformationsverwaltung) und lässt den Lauf scheitern, wenn sich die Schlüssel-,
+  Token-, Schlüsselbund- oder Framework-Ordner des echten Benutzerordners verändert haben (er vergleicht ihre
+  Auflistungen und öffnet nie eine Datei).
 
 ### Sicherheit
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen

@@ -67,6 +67,35 @@ class TestRedirect:
     def test_the_session_home_is_a_temporary_folder(self):
         assert not any(_inside(str(SESSION_HOME), home) for home in REAL_HOMES)
 
+    def test_no_test_reaches_the_operating_systems_keyring(self, tmp_path):
+        """Secret Service, the macOS Keychain and the Windows Credential Manager live outside the temporary home: a
+        test that stored a secret there would change the developer's real keyring. Every test gets a file keyring in
+        its own home (or one that keeps nothing), and the desktop's session bus is gone."""
+        assert os.environ.get("PYTHON_KEYRING_BACKEND") in ("keyrings.alt.file.PlaintextKeyring",
+                                                            "keyring.backends.null.Keyring")
+        assert "DBUS_SESSION_BUS_ADDRESS" not in os.environ
+        keyring = pytest.importorskip("keyring")
+        backend = keyring.get_keyring()
+        assert f"{type(backend).__module__}.{type(backend).__qualname__}" == os.environ["PYTHON_KEYRING_BACKEND"]
+        path = getattr(backend, "file_path", None)
+        if path is not None:
+            assert _inside(path, tmp_path / "home"), path
+
+    def test_a_fresh_interpreter_gets_the_test_keyring_too(self, tmp_path):
+        pytest.importorskip("keyring")
+        env = {k: v for k, v in os.environ.items() if k not in ("PYTHON_KEYRING_BACKEND",)}
+        env.update(HOME=str(tmp_path), TMPDIR=str(tmp_path), PYTHONPATH=str(TESTS),
+                   DBUS_SESSION_BUS_ADDRESS="unix:path=/nonexistent/bus")
+        code = ("import os, conftest, keyring; b = keyring.get_keyring(); "
+                "print(type(b).__module__ + '.' + type(b).__qualname__); "
+                "print('DBUS_SESSION_BUS_ADDRESS' in os.environ)")
+        out = subprocess.run([sys.executable, "-c", code], env=env, cwd=tmp_path, capture_output=True, text=True,
+                             timeout=120, stdin=subprocess.DEVNULL)
+        assert out.returncode == 0, out.stderr[-2000:]
+        backend, bus = out.stdout.strip().splitlines()[-2:]
+        assert backend in ("keyrings.alt.file.PlaintextKeyring", "keyring.backends.null.Keyring"), backend
+        assert bus == "False"
+
 
 class TestGuard:
 
