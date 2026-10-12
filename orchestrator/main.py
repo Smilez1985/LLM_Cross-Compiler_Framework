@@ -52,6 +52,8 @@ def main():
 
     # Determine App Root
     app_root = root_dir
+    from orchestrator.Core.request_store import set_program
+    set_program("gui")  # shown with this window's builds in the shared build state
 
     # 1. Load Config (User Preferences) from the effective config folder: LLM_FRAMEWORK_CONFIG_DIR, else the
     # installation's configs/ if this user may write there, else the per-user folder (C:\Program Files is

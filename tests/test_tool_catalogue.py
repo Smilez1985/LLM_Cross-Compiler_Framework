@@ -49,6 +49,16 @@ def test_the_built_core_tools_are_registered_and_listed_by_default(booted_framew
     assert not hidden, f"core tools must be listed by default: {hidden}"
 
 
+def test_only_the_core_tools_are_listed_by_default(booted_framework):
+    """After the round-2 merges: every optional and later tool is registered but hidden (denied) until the person
+    enables it, so a client lists exactly the built core tools, inside the 40-tool limit (design 2.1)."""
+    rows = {r["tool"]: r for r in booted_framework.tool_registry.permissions("mcp")}
+    assert (OPTIONAL | LATER) <= set(rows), sorted((OPTIONAL | LATER) - set(rows))
+    listed = {n for n, r in rows.items() if r["listed"]}
+    assert listed == BUILT, (sorted(listed - BUILT), sorted(BUILT - listed))
+    assert len(listed) <= 40
+
+
 @pytest.mark.parametrize("licence", ["apache-2.0", "MIT", "llama3.1", "llama-2-community", "gemma", "cc-by-nc-4.0",
                                      "gpl-3.0", "agpl-3.0", "deepseek", "qwen-research", "noncommercial", "other",
                                      "", None, ["mit", "apache-2.0"]])

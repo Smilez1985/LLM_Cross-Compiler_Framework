@@ -10,6 +10,31 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Optional tools `delete_artifact` and `restore_knowledge_snapshot`** (MCP design T10): delete one built model
+  (folder and golden ZIP) by id and sha256, or replace the knowledge base with an earlier snapshot as a job. Both are
+  destructive: denied by default and hidden until you enable them (allowing the whole external class does not),
+  every call asked, never a standing approval. A deletion is refused outside the output folder, while a build of any
+  framework program writes into the folder or is queued for it, after the build changed, and when the folder is not
+  the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
+  outside MCP, and never prunes the snapshot it restores.
+- **Ditto as an MCP client of another framework** (MCP design T12; Ditto is hybrid): `llm-cli ditto remote set`
+  points Ditto at the MCP server of a framework running elsewhere, for example the headless Docker image (stdio
+  through a command such as `docker exec -i <container> llm-cli mcp serve`, or HTTP to an https or loopback address).
+  That server's registry, permissions, fool-proof layer, questions and audit log apply; Ditto's identity there is a
+  named token made with `llm-cli mcp token add NAME --link ditto`, so Ditto's own permissions apply in both modes at
+  once and the audit log there shows `mcp:NAME`. The token is kept in Ditto's credential vault and reaches the server
+  only as `LCF_MCP_TOKEN` or as bearer header; the mode does not start without it. One tool source per conversation;
+  every remote result, error, prompt and tool description is untrusted data for Ditto's model; Ditto's confirmation
+  names the server. `llm-cli ditto remote show|test|off`. `llm-cli mcp serve --transport http --container` binds the
+  container's interfaces inside a container only (named token, Host and Origin checks unchanged; publish the port to
+  the host's loopback).
+- **Shared build state** (MCP design T11): every framework program (the GUI, a CLI call, each MCP server) writes a
+  summary of each build request into the per-user folder (`build_requests/`), so the GUI status bar, `llm-cli build
+  status`, `list_build_requests` and `get_build_status` see the same builds whichever program started them, also a
+  request that still waits in another program's queue. Each summary names the model by its repo id or label (never a
+  host path), the caller class that started it (never an MCP session key) and the program that runs it (`started_in`,
+  column `Where`); errors are redacted. A request whose program ended before it finished is shown as interrupted.
+  Builds of another program stay read-only. The note that only this process's builds are visible is gone.
 - **Ditto uses the framework tools**: in the chat (GUI) and with `llm-cli ditto ask "<question>"`, Ditto can
   list targets, check capabilities, start and cancel builds, read logs, search the knowledge base and run the
   doctor, always within your tool permissions. Tools that need a confirmation show their title and every
@@ -578,6 +603,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `CrawlNotice.acknowledge` refuses any other channel.
 - **A target pack never takes another target's name**: installing a target pack whose id (or declared target id)
   equals an existing target's ignoring case and separators is refused, in the Community Hub, the CLI and over MCP.
+- **Builds and downloads share one disk reservation; staging through the framework's fetcher** (MCP phase T round 1
+  leftovers): `download_hf_file` reserves its disk space in the cross-process ledger builds use. A build stages its
+  Hugging Face model through the framework's fetcher (resumable `.part` files, each file checked against the Hub's
+  size and sha256, stopped within seconds by a cancel) instead of `hf_hub_download`, and refuses when the commit
+  cannot be resolved. A disk watchdog stops staging and the conversion containers when the cache disk falls below
+  half the reserve. `start_build` offers a standing approval within the design's scope (shipped or verified target,
+  safetensors or GGUF, ungated model and base model, permissive licence, official base image, size class) only when
+  the disk keeps the larger reserve. `report_cannot_do` counts only the current session's calls, and Hugging Face
+  look-ups of `check_build_request` count toward the 30 per hour rate.
 - **One Hugging Face classification for builds and downloads**: `check_build_request` and `start_build` now read a model's licence, gating and files with the same rules as `get_hf_model_info` and `download_hf_file` (licences such as GPL, DeepSeek or Qwen research were "unknown" on the build path and "restrictive" on the download path), and both keep the same disk reserve.
 - **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
   closes after 10 minutes without a request (the SDK's default is 30); a request still open when its token is revoked
@@ -1012,6 +1046,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `reason`; and a packaging or deploy failure could name the build folder, the output folder or the home folder. The
   message and `reason` are now the framework's own sentences without host paths, and what the device or the program
   printed is returned in `get_job_status.external_text`, marked as external text (also for failed jobs).
+- **Ditto's MCP-client mode no longer runs as the shared local caller when the token does not reach the server**
+  (MCP design T12): `docker exec` and `podman exec` do not pass their environment into the container, so the
+  documented `docker exec -i <container> llm-cli mcp serve` started the server there without `LCF_MCP_TOKEN`, as the
+  caller `mcp` with another policy than Ditto's. Ditto now adds `-e LCF_MCP_TOKEN` (the name only, never the value)
+  to such a command, and refuses a stdio server whose `get_status` names a caller other than its token (for example
+  over `ssh`, which drops the environment), with the next step.
+- **A cancelled `restore_knowledge_snapshot` job no longer replaces the knowledge base** (MCP design T10): a cancel
+  (`cancel_job`, or the end of the session) marked the job cancelled at once while the restore went on. The restore
+  now checks for the cancel after the backup and before the knowledge base is replaced, and leaves it as it was.
+- **A local model folder with pickle weights is no longer matched by a build standing approval** (design 6.10):
+  pickle files beside a safetensors file (the whole folder is mounted into the build) counted as safetensors. Pickle
+  weights anywhere in the folder now make it "pickle", so the person is asked.
+- **Every base model of a merged model is checked for gating** (design 6.10): a card naming several base models had
+  only the first one looked up, so a gated second base model did not keep the build or download out of a standing
+  approval. Each one is looked up now; a gated one, or one that cannot be looked up, keeps it out.
 - **The dangerous-command filter can no longer be bypassed with invisible or full-width characters** (Ditto's
   healing analyses and recommendations, and fix proposals of AI clients): it checks the text also as the GUI and
   the CLI show it (normalized, invisible characters and joiners removed), so `r<zero-width space>m -rf ~` or

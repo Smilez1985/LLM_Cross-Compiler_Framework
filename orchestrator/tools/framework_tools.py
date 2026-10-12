@@ -180,8 +180,9 @@ MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
 
 # --- notes and summary lines (framework facts only: ids the framework issued, states, counts) ------------------
 
-VISIBILITY_NOTE = ("Builds started by another framework process (the GUI, the CLI, another MCP server) are listed "
-                   "from their build records with process 'other': read-only, stopped where they were started.")
+VISIBILITY_NOTE = ("Builds with process 'other' run in another framework process (started_in: the GUI, the CLI, "
+                   "another MCP server), read from the shared build state: read-only here; the person stops them "
+                   "where they were started.")
 
 
 def _status_summary(out) -> str:
@@ -523,6 +524,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     # (denied) until the person enables them.
     from orchestrator.tools.tools_runtime import register_runtime_tools
     register_runtime_tools(registry, framework, service=service, jobs=jobs)
+    from orchestrator.tools.tools_optional import register_optional_tools  # T10: hidden until enabled
+    register_optional_tools(registry, framework, jobs)
     return registry
 
 

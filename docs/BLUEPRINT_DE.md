@@ -414,6 +414,11 @@ Cloud-Anbieter geht, werden persönliche Angaben durch Platzhalter ersetzt.
    weiter. Ein Fehler wird nie als Antwort angezeigt oder gespeichert.
 6. **Verlauf.** Die fertige Runde wird an `chat_history.json` angehängt. Ein langes Gespräch wird zusammengefasst
    und als neues Gespräch fortgesetzt; frühere Runden werden nie verändert.
+7. **MCP-Client-Modus** (`llm-cli ditto remote set`). Statt aus der Registry im Prozess kommen die Tools vom
+   MCP-Server eines Frameworks, das anderswo läuft, mit einem benannten Token, das dort mit Dittos Berechtigungen
+   verknüpft ist (`--link ditto`): Jener Server entscheidet, fragt und protokolliert (Akteur `mcp:<Token-Name>`).
+   Eine Tool-Quelle pro Unterhaltung; jedes entfernte Ergebnis, jeder Fehler und jede Rückfrage sind nicht
+   vertrauenswürdige Daten; Dittos Dialog nennt den Server. Ohne Token startet der Modus nicht.
 
 ### Freigabe beim Self-Healing
 

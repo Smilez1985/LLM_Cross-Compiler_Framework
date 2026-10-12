@@ -74,6 +74,10 @@ class BuildCancelled(Exception):
     """The user cancelled the build; not a failure."""
 
 
+STAGING_WATCH_EVERY = 2.0    # seconds between two disk checks while a model is staged
+CONTAINER_WATCH_EVERY = 5.0  # seconds between two disk checks while a stage container runs
+
+
 class BuildSlotsBusy(RuntimeError):
     """Every build slot is taken (a cancelled build keeps its slot until its worker has stopped)."""
 
@@ -491,6 +495,24 @@ class BuildEngine:
 
             reader = threading.Thread(target=pump, name=f"logs-{config.build_id}", daemon=True)
             reader.start()
+            watched = threading.Event()
+            full: Dict[str, str] = {}
+
+            def watchdog():
+                # Disk watchdog (design 6.5): the container is stopped when the cache disk falls below half the
+                # reserve, so the per-user folder always keeps room to record what happened.
+                while not watched.wait(CONTAINER_WATCH_EVERY):
+                    problem = self._low_disk_text(Path(self.cache_dir), prefix.strip(": ") or "The build")
+                    if problem:
+                        full["text"] = problem
+                        progress.add_log(problem)
+                        try:
+                            container.kill()
+                        except Exception:
+                            pass
+                        return
+            guard = threading.Thread(target=watchdog, name=f"disk-watch-{config.build_id}", daemon=True)
+            guard.start()
             timeout = config.build_timeout or self.default_timeout
             started = time.monotonic()
             try:
@@ -501,6 +523,9 @@ class BuildEngine:
                     container.kill()
                 except Exception:
                     pass
+                if full:  # the disk watchdog stopped it
+                    from orchestrator.Core.disk_plan import InsufficientSpace
+                    raise InsufficientSpace(full["text"]) from e
                 stage = prefix.strip(': ').lower() or 'build'
                 if _is_read_timeout(e) or time.monotonic() - started >= timeout:
                     raise TimeoutError(f"The {stage} stage ran longer than {timeout} s and was stopped "
@@ -509,9 +534,15 @@ class BuildEngine:
                 raise RuntimeError(f"The {stage} stage failed while waiting for its container: {e}\n"
                                    f"{self._log_tail(progress, prefix)}") from e
             reader.join(timeout=10)
+            watched.set()
             self._check_cancelled(progress)
+            if full:
+                from orchestrator.Core.disk_plan import InsufficientSpace
+                raise InsufficientSpace(full["text"])
             return int(result.get("StatusCode", 1))
         finally:
+            if "watched" in locals():
+                watched.set()
             with self._lock:
                 self._active_containers.pop(config.build_id, None)
             try:
@@ -1031,7 +1062,8 @@ class BuildEngine:
         if not HF_REPO_ID.match(source) or ".." in source:
             raise ValueError(f"Model '{source}' is neither an existing local path nor a HuggingFace repo id (owner/name).")
 
-        from huggingface_hub import HfApi, hf_hub_download
+        from huggingface_hub import HfApi
+        from orchestrator.Core.hf_hub import DownloadStopped
         from orchestrator.Core.hf_lookup import staged_files
         # The token stored in the framework, or none at all: never an implicit token (HF_TOKEN, the Hugging Face home
         # folder's token file) the person did not give the framework (G37).
@@ -1039,23 +1071,73 @@ class BuildEngine:
         api = HfApi()
         revision = config.model_branch or None
         commit = self._model_commit(api, source, revision, auth)
-        if commit:
-            revision = config.model_revision = commit  # listing and download see the same commit
-        files = api.list_repo_files(source, revision=revision, token=auth)
+        if not commit:
+            raise ValueError(f"The commit of {source} could not be found out on Hugging Face (not reachable, or no "
+                             f"such revision '{revision or 'main'}'); nothing was downloaded.")
+        revision = config.model_revision = commit  # listing and download see the same commit
+        files = self._hub_files(api, source, commit, auth)
         keep = staged_files(list(files))
         dest = self.staging_folder(source, commit, revision)
-        progress.add_log(f"Downloading {source} ({len(keep)} files, commit {commit or 'unknown'}) from Hugging Face ...")
+        progress.add_log(f"Downloading {source} ({len(keep)} files, commit {commit}) from Hugging Face ...")
         # One folder per commit, under a lock: two builds of different commits never mix files, and two builds of
-        # the same commit fetch it once (G38). File by file, so a cancel stops the staging between two files and the
-        # disk watchdog can stop it before the disk is full (G39 in part: a file already being fetched finishes).
-        with StagingLock(dest.parent / f".{dest.name}.lock"):
-            for name in keep:
-                self._check_cancelled(progress)
-                self._check_staging_space(dest, progress)
-                hf_hub_download(repo_id=source, filename=name, revision=revision, local_dir=str(dest), token=auth)
+        # the same commit fetch it once (G38). Through the framework's Hugging Face fetcher (T6): each file resumable
+        # from its .part file, checked against the Hub's size and sha256 before it gets its name, and stopped between
+        # two chunks by a cancel or by the disk watchdog (G39), which keeps the .part file.
+        stop = threading.Event()
+        reason: Dict[str, Any] = {}
+
+        def watch():
+            while not stop.wait(STAGING_WATCH_EVERY):
+                if progress.status == BuildStatus.CANCELLED:
+                    reason["cancelled"] = True
+                    stop.set()
+                    return
+                problem = self._low_disk_text(dest, "Staging")
+                if problem:
+                    reason["disk"] = problem
+                    stop.set()
+                    return
+        watcher = threading.Thread(target=watch, name=f"staging-watch-{config.build_id}", daemon=True)
+        fetcher = self._hub_fetcher(auth or None, stop)
+        try:
+            with StagingLock(dest.parent / f".{dest.name}.lock"):
+                watcher.start()
+                for name in keep:
+                    self._check_cancelled(progress)
+                    self._check_staging_space(dest, progress)
+                    try:
+                        fetcher.fetch_file(source, commit, files[name], dest / name)
+                    except DownloadStopped:
+                        self._check_cancelled(progress)
+                        if reason.get("disk"):
+                            from orchestrator.Core.disk_plan import InsufficientSpace
+                            raise InsufficientSpace(reason["disk"]) from None
+                        raise
+        finally:
+            stop.set()
         self._check_cancelled(progress)
         inner = "/build-cache/input-model"
         return inner, {str(dest): {"bind": inner, "mode": "ro"}}
+
+    @staticmethod
+    def _hub_files(api, source: str, commit: str, auth: Any) -> Dict[str, Any]:
+        """The commit's files with the sizes and LFS sha256 the Hub lists (what the fetcher checks each file against)."""
+        from orchestrator.Core.hf_hub import HubFile
+        info = api.model_info(source, revision=commit, files_metadata=True, token=auth)
+        files = {}
+        for s in getattr(info, "siblings", None) or []:
+            lfs = getattr(s, "lfs", None)
+            sha = getattr(lfs, "sha256", None) if lfs is not None and not isinstance(lfs, dict) else \
+                (lfs.get("sha256") if isinstance(lfs, dict) else None)
+            size = getattr(s, "size", None)
+            files[str(s.rfilename)] = HubFile(str(s.rfilename), int(size) if isinstance(size, int) else None,
+                                              str(sha).lower() if sha else None)
+        return files
+
+    @staticmethod
+    def _hub_fetcher(token: Optional[str], stop: threading.Event):
+        from orchestrator.Core.hf_hub import HubFetcher
+        return HubFetcher(token=token, stop=stop)
 
     def staging_folder(self, source: str, commit: Optional[str], revision: Optional[str]) -> Path:
         """<cache>/models/hf/<owner>--<name>/<commit>/: Hugging Face forbids '--' in repo ids, so the encoding never
@@ -1068,19 +1150,28 @@ class BuildEngine:
     def _check_staging_space(self, folder: Path, progress: BuildProgress) -> None:
         """Disk watchdog for staging: stops it when the file system falls below half the reserve, so the per-user
         folder (audit log, permissions) always keeps room to record what happened."""
-        from orchestrator.Core.disk_plan import InsufficientSpace, gb, reserve_for
-        probe = folder
+        from orchestrator.Core.disk_plan import InsufficientSpace
+        problem = self._low_disk_text(folder, "Staging")
+        if problem:
+            raise InsufficientSpace(problem)
+
+    @staticmethod
+    def _low_disk_text(folder: Path, what: str) -> Optional[str]:
+        """Why `what` must stop when the file system of `folder` has fallen below half the reserve (design 6.5), or
+        None while it has room."""
+        from orchestrator.Core.disk_plan import gb, reserve_for
+        probe = Path(folder)
         while not probe.exists() and probe.parent != probe:
             probe = probe.parent
         try:
             usage = shutil.disk_usage(probe)
         except OSError:
-            return
+            return None
         floor = reserve_for(usage.total) // 2
         if usage.free < floor:
-            raise InsufficientSpace(f"Staging stopped: the cache disk has only {gb(usage.free)} free, less than half "
-                                    f"of the {gb(floor * 2)} that must stay free. No space left on device for the "
-                                    "rest of the model.")
+            return (f"{what} stopped: the cache disk has only {gb(usage.free)} free, less than half of the "
+                    f"{gb(floor * 2)} that must stay free. No space left on device for the rest of the build.")
+        return None
 
     @staticmethod
     def _model_commit(api, source: str, revision: Optional[str], token: Any = False) -> Optional[str]:

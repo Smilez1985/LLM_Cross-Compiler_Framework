@@ -421,6 +421,10 @@ class ChatReply:
     provider: str = ""
     model: str = ""
     usage: Usage = field(default_factory=Usage)
+    # Where the turn's tools came from: "local" (the in-process registry) or "mcp:<server name>" (MCP-client mode);
+    # one tool source per conversation, so a change starts a new conversation (source_changed)
+    tool_source: str = "local"
+    source_changed: bool = False
 
 
 class TranscriptEntry(BaseModel):
@@ -446,6 +450,7 @@ class ChatHistory:
         self.path = Path(path) if path else None
         self.messages: List[Message] = []
         self.transcript: List[TranscriptEntry] = []
+        self.tool_source = "local"  # the tool source of the current conversation (ChatReply.tool_source)
 
     @classmethod
     def in_state_dir(cls, state_dir: Path) -> "ChatHistory":
@@ -481,6 +486,8 @@ class ChatHistory:
             self.transcript.append(TranscriptEntry(role=entry["role"], text=entry["content"]))
 
     def _read(self, raw: dict) -> None:
+        source = raw.get("tool_source")
+        self.tool_source = source if isinstance(source, str) and source else "local"
         for entry in raw.get("transcript") or []:
             try:
                 self.transcript.append(TranscriptEntry.model_validate(entry))
@@ -506,7 +513,7 @@ class ChatHistory:
     def save(self) -> bool:
         if self.path is None:
             return True
-        data = {"version": self.VERSION,
+        data = {"version": self.VERSION, "tool_source": self.tool_source,
                 "messages": [m.model_dump(mode="json", exclude_defaults=True) for m in self.messages],
                 "transcript": [t.model_dump() for t in self.transcript]}
         try:
@@ -530,10 +537,18 @@ class ChatHistory:
 
     def apply(self, reply: ChatReply) -> None:
         """Appends a finished turn (only finished turns: an error is not an answer)."""
-        if reply.new_conversation:
+        if reply.source_changed:
+            self.messages = []
+            where = ("its own tools" if reply.tool_source == "local"
+                     else f"the tools of the framework at {reply.tool_source[len('mcp:'):]}")
+            self.transcript.append(TranscriptEntry(role="notice", text=f"Ditto now uses {where}: a new "
+                                                                       "conversation (one tool source per "
+                                                                       "conversation)."))
+        elif reply.new_conversation:
             self.messages = []
             self.transcript.append(TranscriptEntry(role="notice", text="The conversation got long: Ditto summarized "
                                                                        "it and continues in a new conversation."))
+        self.tool_source = reply.tool_source or "local"
         self.messages.extend(reply.new_messages)
         self.transcript.append(TranscriptEntry(role="user", text=reply.question))
         for use in reply.tools:
@@ -545,6 +560,7 @@ class ChatHistory:
     def clear(self) -> None:
         self.messages = []
         self.transcript = []
+        self.tool_source = "local"
 
 
 def render_transcript(messages: Sequence[Message], tool_text: int = 800) -> str:
@@ -582,7 +598,8 @@ class DittoCoder:
     """Ditto: chat with tools, build-log analysis, module generation and build recommendations."""
 
     def __init__(self, framework_manager: Any = None, *, config_manager: Any = None, secrets_manager: Any = None,
-                 client: Optional[LLMClient] = None, registry: Any = None):
+                 client: Optional[LLMClient] = None, registry: Any = None,
+                 remote_client_factory: Optional[Callable[[Any], Any]] = None):
         self.logger = logger
         self.framework = framework_manager
         self.config = config_manager if config_manager is not None else getattr(framework_manager, "config", None)
@@ -590,6 +607,8 @@ class DittoCoder:
         self._client = client
         self._own_client = client is None  # an injected client (tests, tools) is kept by reload()
         self._registry_override = registry
+        # MCP-client mode (remote_tools): how the SDK client is made (tests pass an in-process server)
+        self._remote_client_factory = remote_client_factory
 
     # --- settings and wiring ------------------------------------------------------------------------------
     def _cfg(self, key: str, default: Any = None) -> Any:
@@ -905,13 +924,77 @@ class DittoCoder:
             earlier, new_conversation = [], True
             blocks.append(_text_block("Summary of our earlier conversation, for context:\n"
                                       + wrap_untrusted(summary, "conversation summary")))
-        registry = self._registry() if use_tools else None
-        tools = self._tool_specs(registry)
+        remote = self._remote_connection(confirm) if use_tools else None
+        source = f"mcp:{remote.server.label()}" if remote is not None else "local"
+        source_changed = bool(history is not None and earlier and getattr(history, "tool_source", "local") != source)
+        if source_changed:
+            # One tool source per conversation: tool calls of another source never continue here.
+            earlier, new_conversation, blocks = [], False, []
+        try:
+            return self._chat_turn(client, question, earlier, blocks, new_conversation, remote, source,
+                                   source_changed, confirm, use_tools, on_tool)
+        finally:
+            if remote is not None:
+                remote.close()
+
+    def _remote_connection(self, confirm: Optional[Confirm]):
+        """The open connection of the MCP-client mode, or None when Ditto uses its in-process tools. DittoError when
+        the mode is chosen but cannot start (no named token, no server, the server does not answer)."""
+        from orchestrator.llm.remote_tools import (TOKEN_NEXT, RemoteConnection, RemoteSetupError, remote_server,
+                                                   stored_token)
+        try:
+            server = remote_server(self.config)
+        except RemoteSetupError as e:
+            raise DittoError(str(e)) from None
+        if server is None:
+            return None
+        secrets_manager = self._secrets if self._secrets is not None else getattr(self.framework, "secrets_manager",
+                                                                                  None)
+        token = stored_token(secrets_manager)
+        if not token:
+            raise DittoError("Ditto is set to use the tools of the framework at " + server.label() + " (MCP-client "
+                             "mode), but no named MCP token is stored, so it does not start. " + TOKEN_NEXT)
+        try:
+            return RemoteConnection(server, token, confirm, client_factory=self._remote_client_factory).open()
+        except RemoteSetupError as e:
+            raise DittoError(str(e)) from None
+
+    def _remote_executor(self, remote, uses: List[ToolUse], on_tool: Optional[Callable[[ToolUse], None]]):
+        """execute_tool for the MCP-client mode: the remote server's registry decides, asks and audits; results and
+        errors come back as untrusted data (remote_tools)."""
+        def note(use: ToolUse) -> None:
+            uses.append(use)
+            if on_tool is not None:
+                try:
+                    on_tool(use)
+                except Exception:
+                    pass
+
+        def execute(name: str, arguments: dict) -> str:
+            title = f"{name} (framework at {remote.server.label()})"
+            try:
+                output = remote.call(name, arguments)
+            except ToolError:
+                note(ToolUse(name, title, False, "refused or failed on the remote framework"))
+                raise
+            except Exception as e:  # noqa: BLE001 - a broken connection is a failed call, not a crash of the turn
+                note(ToolUse(name, title, False, type(e).__name__))
+                raise ToolError(f"The framework at {remote.server.label()} did not answer ({type(e).__name__}).",
+                                code="failed", next="Tell the person the remote framework is not reachable.") from None
+            note(ToolUse(name, title, True))
+            return output
+
+        return execute
+
+    def _chat_turn(self, client, question, earlier, blocks, new_conversation, remote, source, source_changed,
+                   confirm, use_tools, on_tool) -> ChatReply:
+        registry = self._registry() if use_tools and remote is None else None
+        tools = remote.tools() if remote is not None else self._tool_specs(registry)
         if not tools and registry is not None and any(m.role == "tool" for m in earlier):
             # Tool calls in the conversation need tool definitions (Claude rejects the request otherwise); the
             # registry still denies every call the permissions forbid.
             tools = tool_specs_from_registry(registry)
-        if not tools:
+        if not tools and remote is None:
             # Without tools Ditto cannot search the knowledge base itself, so matching excerpts come along.
             excerpts = self._knowledge(question)
             if excerpts:
@@ -923,8 +1006,9 @@ class DittoCoder:
         uses: List[ToolUse] = []
         try:
             if tools:
-                loop = run_tool_loop(client, request, self._executor(registry, confirm, uses, on_tool),
-                                     max_steps=MAX_TOOL_STEPS, extra_steps=FIX_EXTRA_STEPS)
+                execute = (self._remote_executor(remote, uses, on_tool) if remote is not None
+                           else self._executor(registry, confirm, uses, on_tool))
+                loop = run_tool_loop(client, request, execute, max_steps=MAX_TOOL_STEPS, extra_steps=FIX_EXTRA_STEPS)
                 if loop.stop == "refusal":
                     raise self._error(loop.refusal)
                 results, new, text, stop, usage = loop.results, loop.new_messages, loop.text, loop.stop, loop.usage
@@ -945,4 +1029,5 @@ class DittoCoder:
         last = results[-1] if results else None
         return ChatReply(question=question, text=text, new_messages=[user_turn, *new],
                          new_conversation=new_conversation, tools=uses, stop=stop,
-                         provider=getattr(last, "provider", ""), model=getattr(last, "model", ""), usage=usage)
+                         provider=getattr(last, "provider", ""), model=getattr(last, "model", ""), usage=usage,
+                         tool_source=source, source_changed=source_changed)

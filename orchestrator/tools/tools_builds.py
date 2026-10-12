@@ -10,6 +10,7 @@ output filter). External text (repository licence names, manifest values, model 
 UntrustedText; the question labels it as repository or target text.
 """
 
+import re
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -19,6 +20,7 @@ from orchestrator.schemas.build import (ArtifactDetails, ArtifactList, BuildList
 from orchestrator.tools.output import ToolOutput, count, fact, untrusted_text
 from orchestrator.tools.registry import ToolError
 
+HF_REPO = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 PREFLIGHT_NOTE = ("The pre-flight check and measured quantization recommendations are not part of this framework "
                   "version yet; fit values are estimates.")
 
@@ -204,9 +206,16 @@ def start_request(inp: StartBuildIn, bound: Dict[str, Any]) -> BuildRequestIn:
 def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict[str, Any], visibility_note: str,
                      limits, handle_out) -> List[Any]:
     """The ToolSpecs of the build tools of T1 (registered by framework_tools.register_framework_tools)."""
+    from orchestrator.tools.grants import BUILD_RULE
     from orchestrator.tools.policy import ToolTier
     from orchestrator.tools.registry import ToolSpec
-    from orchestrator.tools.spec import FieldMeta
+    from orchestrator.tools.spec import FieldMeta, GrantRule
+
+    def build_grant_facts(inp, ctx):
+        """The facts the framework looked up for this build (never the AI's words); None: the person is asked."""
+        bound = getattr(getattr(ctx, "facts", None), "bound", None) or {}
+        grant = bound.get("grant")
+        return dict(grant) if isinstance(grant, dict) else None
 
     def prepare_build(inp, ctx):
         plan = service.plan(inp)
@@ -234,10 +243,27 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
             raise
 
     def check_build_request(inp, ctx):
-        plan = service.plan(inp, look_up_hub=inp.include_download_size)
+        look_up = inp.include_download_size and hub_lookup_allowed(inp, ctx)
+        plan = service.plan(inp, look_up_hub=look_up)
         start = registry.get("start_build")
         decision = registry.decide(start, StartBuildIn(**inp.model_dump(exclude={"include_download_size"})), ctx)
         return check_out(plan, decision.value, False)
+
+    def hub_lookup_allowed(inp, ctx) -> bool:
+        """A Hugging Face look-up of a dry run counts toward the client's Hugging Face rate (30 per hour, the limits
+        table's row for Hugging Face searches); over it the dry run is refused with the time to wait. A local model
+        needs no look-up."""
+        from orchestrator.tools.limits import wait_text
+        from orchestrator.tools.tools_hf import SEARCH_RATE
+        if not HF_REPO.match(str(inp.model or "")) or ":" in str(inp.model):
+            return True
+        wait = registry.limiter.take(("rate", ctx.actor, "hf_lookup"), SEARCH_RATE.count, SEARCH_RATE.per,
+                                     SEARCH_RATE.burst)
+        if wait is not None:
+            raise ToolError(f"This client asked Hugging Face {SEARCH_RATE.count} times in the last hour; try again "
+                            f"{wait_text(wait)}.", code="limit_reached",
+                            next="Wait, or call check_build_request with include_download_size: false.")
+        return True
 
     optimization = FieldMeta(kind="choice", choices=("fast", "balanced", "size", "speed", "aggressive"))
     build_fields = dict(fields, optimization=optimization)
@@ -254,6 +280,11 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
                  summary=lambda o: f"Build request {fact(o.request_id)} is {fact(o.status)}.",
                  arg_aliases=aliases, fields=build_fields, examples=(example,), limits=limits,
                  prepare=prepare_build,
+                 grant=GrantRule(rule=BUILD_RULE, facts=build_grant_facts,
+                                 warning="start builds on shipped or verified targets (safetensors or GGUF weights; "
+                                         "ungated Hugging Face models with a permissive licence, or local files; no "
+                                         "image from outside the Docker Official Images; up to the size class you "
+                                         "chose)"),
                  consequence="Converts and quantizes a model in a Docker build on this computer; it may download "
                              "the model first and take a long time."),
         ToolSpec("check_build_request", "Check a build request",
@@ -265,10 +296,12 @@ def build_tool_specs(registry, service, fields: Dict[str, Any], request_id: Dict
                  takes_context=True, arg_aliases=aliases, fields=build_fields, examples=(example,),
                  notes=lambda o: [PREFLIGHT_NOTE], summary=check_summary),
         ToolSpec("list_build_requests", "List build requests",
-                 "Lists build requests with their status, 50 per page: this framework process's, and read-only "
-                 "those another process (GUI, CLI, another MCP server) started.",
+                 "Lists build requests with their status, 50 per page: every build of this person, whichever "
+                 "framework process started it (the GUI, the CLI, an MCP server; from the shared build state). "
+                 "Builds of another process are read-only here.",
                  ToolTier.READ, BuildListIn, BuildPageOut, lambda i: service.list_requests(i.status, i.page),
-                 idempotent=True, notes=lambda o: [visibility_note] + (
+                 idempotent=True, notes=lambda o: (
+                     [visibility_note] if any(b.process == "other" for b in o.builds) else []) + (
                      ["More build requests: call again with the next page."] if o.more else []),
                  summary=lambda o: count(len(o.builds), "build request", "build requests") + f" on page {o.page}."),
         ToolSpec("read_build_log", "Read build log",

@@ -61,6 +61,7 @@ class BuildPlan:
     base_image_class: str = ""
     sandbox: bool = True
     hub_problem: str = ""        # Hugging Face could not be asked (network): sizes and commit unknown
+    grant: Optional[Dict[str, Any]] = None  # facts for grants.BUILD_RULE; None: outside every standing approval
     problems: List[Problem] = field(default_factory=list)
 
     # --- the question --------------------------------------------------------------------------------------------
@@ -143,7 +144,7 @@ class BuildPlan:
         return {"model": self.model, "revision": self.commit, "download": self.download, "cached": self.cached,
                 "local_bytes": self.local_bytes, "format": self.request.format,
                 "quantization": self.request.quantization, "optimization": self.optimization,
-                "target": self.request.target, "board": self.request.board}
+                "target": self.request.target, "board": self.request.board, "grant": self.grant}
 
     def call_facts(self) -> CallFacts:
         return CallFacts(consequence=self.consequence(), facts=self.question_facts(), bound=self.bound())
@@ -249,6 +250,73 @@ def _cached_bytes(cache_dir: Path, repo: str, commit: Optional[str], facts: Mode
         except OSError:
             continue
     return total
+
+
+MAX_LOCAL_NAMES = 10000  # files looked at in a local model folder; more: "other" (outside every standing approval)
+
+
+def _local_weights(path: Path) -> str:
+    """safetensors, gguf, pickle or other for a local model file or folder (never read beyond its names). A folder is
+    mounted whole into the build, so pickle weights anywhere in it make it "pickle", even beside safetensors (design
+    6.10: never pickle weights under a standing approval)."""
+    from orchestrator.tools.grants import PICKLE_SUFFIXES
+    if path.is_file():
+        names = [path.name]
+    elif path.is_dir():
+        names = []
+        for p in path.rglob("*"):
+            if len(names) >= MAX_LOCAL_NAMES:
+                return "other"
+            if p.is_file() or p.is_symlink():
+                names.append(p.name)
+    else:
+        names = []
+    lowered = [n.lower() for n in names]
+    if any(n.endswith(PICKLE_SUFFIXES) for n in lowered):
+        return "pickle"
+    if any(n.endswith(".safetensors") for n in lowered):
+        return "safetensors"
+    if any(n.endswith(".gguf") for n in lowered):
+        return "gguf"
+    return "other"
+
+
+def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[Path], pin, ledger) -> Optional[dict]:
+    """What a standing approval for start_build is matched against (grants.BUILD_RULE, design 6.10): target trust
+    (shipped: no pack provenance, not AI-generated, support level official; verified: a verified pack), how the target
+    was installed, the weights type, an official base image, the source with gating, base-model gating and licence, and
+    the download size. None (the person is asked) when the plan has a problem or the disk does not keep the larger
+    reserve of a standing approval (20 GiB or 10 %)."""
+    if plan.problems:
+        return None
+    trust, installed_via = "other", ""
+    try:
+        from orchestrator.Core.community_manager import ai_generated_target, read_provenance
+        provenance = read_provenance(target_folder) if target_folder is not None else None
+        if provenance is not None:
+            trust = "verified" if plan.target_trust == "verified" else plan.target_trust
+            installed_via = str(getattr(provenance, "installed_via", "") or "")
+        elif target_folder is not None and not ai_generated_target(target_folder) and plan.support_level == "official":
+            trust = "shipped"
+    except Exception:  # noqa: BLE001 - trust that cannot be read is no trust
+        trust = "other"
+    if plan.needs:
+        standing = disk_plan.check_disk(plan.needs, ledger, standing=True, disk_usage=service.disk_usage)
+        if any(not c.fits for c in standing):
+            return None
+    base = _base_image(target_folder)
+    facts = {"target": plan.request.target, "target_trust": trust, "installed_via": installed_via,
+             "confirmed_build": False, "image_base_official": bool(base) and registry_class(base) ==
+             "Docker Official Image", "source": plan.source, "model": plan.model}
+    if plan.source == "hf":
+        f = plan.facts
+        if f is None:
+            return None
+        facts.update(weights_format=f.weights, gated=f.gated != "false", base_gated=f.base_gated,
+                     license=f.license, size_bytes=plan.download if plan.download_known else None)
+    else:
+        facts["weights_format"] = _local_weights(Path(pin.path)) if pin is not None else "other"
+    return facts
 
 
 # --- the plan ------------------------------------------------------------------------------------------------------
@@ -362,6 +430,8 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
             disk_plan.require(plan.disk)
         except disk_plan.InsufficientSpace as e:
             plan.problems.append(Problem("insufficient_resources", str(e), e.next))
+
+    plan.grant = grant_facts(plan, service, framework, target_folder, pin, ledger)
 
     # hardware estimate (never a refusal)
     params, basis = disk_plan.parameters_from(size, plan.facts.parameters if plan.facts else None)

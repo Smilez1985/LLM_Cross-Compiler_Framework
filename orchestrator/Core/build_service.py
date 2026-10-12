@@ -45,6 +45,10 @@ MAX_ARTIFACT_FILES = 200
 # Engine statuses of a build record (another process's build) as request statuses
 RECORD_STATUS = {"failed": "error", "queued": "queued", "completed": "completed", "cancelled": "cancelled",
                  "interrupted": "interrupted"}
+# Request statuses a shared summary (request_store) may carry
+SHARED_STATUSES = ("queued", "preparing", "building", "healing", "awaiting_approval", "completed", "error",
+                   "cancelled", "interrupted")
+INTERRUPTED_TEXT = "The process that ran this build ended before the build finished."
 
 
 def artifact_id(relative: str) -> str:
@@ -262,14 +266,29 @@ class BuildService:
         except Exception:  # noqa: BLE001 - no cache folder (a stand-in framework): nothing to show
             return []
 
+    def _shared_requests(self) -> List[Dict[str, Any]]:
+        """The request summaries of the shared build state (request_store, per-user folder), newest first."""
+        try:
+            from orchestrator.Core.request_store import for_config
+            store = for_config(self.framework.config)
+            return store.read() if store is not None else []
+        except Exception:  # noqa: BLE001 - no per-user folder (a stand-in framework): nothing to show
+            return []
+
     def _other_builds(self) -> Dict[str, BuildStatusOut]:
-        """Build requests of other framework processes from their build records (newest attempt per request),
-        read-only: model as a repo id or label, never a host path; errors as external text."""
+        """Build requests of other framework processes, read-only: first from the shared build state (every
+        request, also one still queued there), then from the build engines' records for builds without a summary
+        (an older framework version). The model as a repo id or label, never a host path; errors as external text."""
         try:
             own = set(self._orchestrator._workflows)
         except BuildServiceError:
             own = set()
         found: Dict[str, BuildStatusOut] = {}
+        for record in self._shared_requests():  # newest first
+            rid = str(record.get("request_id") or "")
+            if not rid or rid in own or rid in found or not re.fullmatch(r"[\w.-]{1,64}", rid):
+                continue
+            found[rid] = self._shared_status(rid, record)
         for record in self._records():  # newest first
             rid = str(record.get("request_id") or record.get("build_id") or "")
             if not rid or rid in own or rid in found or not re.fullmatch(r"[\w.-]{1,64}", rid):
@@ -285,13 +304,50 @@ class BuildService:
                 total_builds=1, completed_builds=1 if status == "completed" else 0,
                 failed_builds=1 if status in ("error", "interrupted") else 0,
                 errors=[redact_secrets(str(error))] if error else [],
-                warnings=(["The process that ran this build ended before the build finished."]
-                          if status == "interrupted" else []),
+                warnings=([INTERRUPTED_TEXT] if status == "interrupted" else []),
                 request=RequestSummary(model=self._shown_model(record.get("model")), target=record.get("target"),
                                        format=record.get("format"), board=record.get("board"),
                                        quantization=record.get("quantization")),
                 process="other")
         return found
+
+    def _shared_status(self, rid: str, record: Dict[str, Any]) -> BuildStatusOut:
+        """One summary of the shared build state as a read-only build status."""
+        def number(key: str) -> int:
+            try:
+                return max(0, int(record.get(key) or 0))
+            except (TypeError, ValueError):
+                return 0
+
+        status = str(record.get("status") or "")
+        if status not in SHARED_STATUSES:
+            status = "interrupted"
+        warnings = [redact_secrets(str(w)) for w in (record.get("warnings") or [])[-5:] if isinstance(w, str)]
+        if status == "interrupted":
+            warnings.append(INTERRUPTED_TEXT)
+        elif record.get("awaiting_decision"):
+            warnings.append(f"Waits for the person's decision on a self-healing proposal in the {self._program(record)}"
+                            " that started it.")
+        summary = record.get("summary") if isinstance(record.get("summary"), dict) else {}
+        owner = str(record.get("owner") or "")
+        return BuildStatusOut(
+            request_id=rid, status=status, stage=str(record.get("stage") or ""),
+            progress_percent=min(100, number("progress")), total_builds=number("total_builds"),
+            completed_builds=number("completed_builds"), failed_builds=number("failed_builds"),
+            errors=[redact_secrets(str(e)) for e in (record.get("errors") or [])[-5:] if isinstance(e, str)],
+            warnings=warnings, owner=owner if re.fullmatch(r"[\w:.-]{1,80}", owner) else None,
+            request=RequestSummary(model=self._shown_model(summary.get("model")), target=summary.get("target"),
+                                   format=summary.get("format"), board=summary.get("board"),
+                                   quantization=summary.get("quantization"),
+                                   optimization=summary.get("optimization"), revision=summary.get("revision")),
+            process="other", started_in=self._program(record))
+
+    @staticmethod
+    def _program(record: Dict[str, Any]) -> str:
+        from orchestrator.Core.request_store import PROGRAMS
+        kind = str(record.get("program") or "")
+        return {"gui": "GUI", "cli": "CLI", "mcp": "MCP server", "api": "API server"}.get(
+            kind if kind in PROGRAMS else "", "framework process")
 
     def _record_of(self, request_id: str) -> Optional[BuildStatusOut]:
         return self._other_builds().get(request_id)
@@ -440,6 +496,31 @@ class BuildService:
         page = max(1, int(page))
         start = (page - 1) * PAGE_SIZE
         return ArtifactList(artifacts=items[start:start + PAGE_SIZE], page=page, more=len(items) > start + PAGE_SIZE)
+
+    def busy_output_folders(self) -> List[str]:
+        """Output folders unfinished builds write into, in every framework process: the build engines' records of
+        running builds, and for requests still queued (no build record yet) the folder their build will use."""
+        folders: List[str] = []
+        for record in self._records():
+            if record.get("status") not in ("completed", "failed", "cancelled", "interrupted") and \
+                    record.get("output_dir"):
+                folders.append(str(record["output_dir"]))
+        out = self._output_dir()
+        pending = []
+        try:
+            for state in list(self._orchestrator._workflows.values()):
+                if state.status.value not in BUILD_FINISHED:
+                    pending.append(dict(getattr(state, "summary", {}) or {}))
+        except BuildServiceError:
+            pass
+        pending += [r.get("summary") or {} for r in self._shared_requests()
+                    if r.get("status") not in ("completed", "error", "cancelled", "interrupted")]
+        for summary in pending:
+            target, model = summary.get("target"), str(summary.get("model") or "")
+            if target and model:
+                name = model.rsplit(":", 1)[-1].rstrip("/").split("/")[-1]
+                folders.append(str(out / str(target) / name))
+        return folders
 
     def _artifact(self, aid: str) -> Tuple[str, str, Dict[str, Any]]:
         if ARTIFACT_ID.fullmatch(aid or ""):
