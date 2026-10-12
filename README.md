@@ -490,7 +490,7 @@ tools), and `runtime start` starts nothing else.
   Linux it needs the glibc it was built for (2.35 or 2.39); on musl systems such as Alpine only the self-built server
   runs. Until the Windows and macOS builds land, this is the way to run the local model there.
 - `llm-cli ditto runtime prune` removes old builds; the active build, its CPU fallback and the build a running server
-  uses are always kept. `runtime status` says when a rebuild is required (the pin changed) or recommended (this
+  uses are always kept, and so are your boards' builds. `runtime status` says when a rebuild is required (the pin changed) or recommended (this
   machine's build plan changed).
 
 Then choose **Local model (managed llama-server)** in the AI settings (provider `local`). Turn on **Offline Mode**

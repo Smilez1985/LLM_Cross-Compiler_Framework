@@ -483,6 +483,18 @@ class TestContainerExecutor:
         assert ["gcc", "-print-file-name=libgomp.so.1"] in [r["command"] for r in engine.runs]
         assert "libgomp.so.1" in result.files
 
+    def test_dittos_container_build_carries_its_openmp_runtime(self, tmp_path, source):
+        """Ditto's server built in the builder container (a host without a compiler) runs on the host: the executor
+        copies the builder's libgomp.so.1 next to the programs, which find it through $ORIGIN, so the host needs no
+        GCC runtime of its own (the same copy as for the device runtime)."""
+        plan = plan_build(PC, purpose="host-runtime", placement="container", backend="cpu", catalog=CATALOG,
+                          toolchain=ToolchainInfo(host_os="linux", host_arch="x86_64"))
+        assert plan.verify["runtime_libs"] == ["libgomp.so.1"] and "$ORIGIN" in plan.options()["CMAKE_INSTALL_RPATH"]
+        engine = FakeEngine(gcc=plan.builder["gcc"], libdir="/usr/lib/gcc/x86_64-linux-gnu/13/")
+        result = BuildExecutor(engine=engine).build(plan, source=source, work=tmp_path / "w", jobs=1)
+        assert ["gcc", "-print-file-name=libgomp.so.1"] in [r["command"] for r in engine.runs]
+        assert "libgomp.so.1" in result.files and (result.bin_dir / "libgomp.so.1").is_file()
+
     @pytest.mark.skipif(os.name != "posix", reason="symlinks")
     def test_a_hostile_build_cannot_hand_the_host_files_from_outside_its_folder(self, tmp_path, source):
         """The build runs upstream's code; after it, the host reads only what lies inside the build folder."""
@@ -822,6 +834,15 @@ class TestServerPolicy:
         model.write_text("x")
         with pytest.raises(server_policy.PolicyError):
             server_policy.server_tools_check_command(Path("srv"), model, 1, tmp_path / "k")
+
+    def test_the_tools_check_is_one_command_here_and_on_a_board(self, tmp_path):
+        """The build verification here and the checks on a board (device/remote.py) run the same --tools check:
+        `--tools all` and a missing model, and otherwise exactly the rules every llama-server command keeps."""
+        here = server_policy.server_tools_check_command(Path("srv"), tmp_path / "none.gguf", 8081, tmp_path / "k")
+        board = server_policy.tools_check_args("srv", str(tmp_path / "none.gguf"), 8081, str(tmp_path / "k"))
+        assert here == board and here[1:3] == list(server_policy.SERVER_TOOLS_CHECK)
+        server_policy.check_server_command([here[0], *here[3:]])
+        assert set(server_policy.SERVER_FIXED) <= set(here)
 
 
 # --- the store -------------------------------------------------------------------------------------------------------

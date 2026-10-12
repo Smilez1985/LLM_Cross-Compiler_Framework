@@ -134,8 +134,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   environment without `LLAMA_*` variables.
   Builds are stored under `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/` with `build.json` and
   `manifest.json` (sha256 of every file, duration, verification) and reused, never stamped again; only a build
-  verified on this machine can become active, and retention never removes the active build, the CPU fallback or the
-  build a running server uses. A build from another of your machines can be imported: its files are checked against
+  verified on this machine can become active, and retention never removes the active build, the CPU fallback, the
+  build a running server uses or a board's build (Ditto's builds and the boards' builds share this store). A build from another of your machines can be imported: its files are checked against
   the manifest, its build ID against its plan and its commit against the pin, and you confirm before any of its
   programs runs; then every program in it must report the pin's version, not the one the archive expects. Ditto's
   `runtime install` builds through it. A CPU build of `llama-server` and `llama-bench` at the pin took 189 s on a
@@ -601,10 +601,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   with `runtime install --prebuilt`) is verified the same way, installed atomically, and never offered on musl or on
   an older glibc than the one it was built against.
 - One launch policy for every llama.cpp program the framework starts (`orchestrator/runtime/server_policy.py`):
-  Ditto's server, the build checks and the perplexity check share one list of forbidden options (tools, agent mode,
-  MCP, web UI, remote compute, downloads, a prompt log on disk, a key or token on the command line, in every spelling
-  llama.cpp accepts, also `--a_b` for `--a-b`) and a cleared environment, and a server listens on 127.0.0.1 only and
-  reads its key from a private file, checked again right before the start. `runtime start` starts only a build that
+  Ditto's server, the build checks, the perplexity check, the start script and systemd unit on a board and the
+  checks there share one list of forbidden options (tools, agent mode, MCP, web UI, remote compute, downloads, a
+  prompt log on disk, a key or token on the command line, in every spelling llama.cpp accepts, also `--a_b` for
+  `--a-b`) and a cleared environment, and every server listens on 127.0.0.1 only and reads its key from a private
+  file, held to the same server options (Ditto's command line is checked again right before the start, the start
+  script's when it is generated). `runtime start` starts only a build that
   passed its verification on this machine, still matches its manifest and is of the pinned commit (else its CPU
   fallback, else nothing); a self-built build that cannot be used never falls back to the prebuilt archive on its
   own, and an official archive an earlier version downloaded is used only after `runtime install --prebuilt` (which

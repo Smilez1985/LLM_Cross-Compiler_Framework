@@ -389,6 +389,46 @@ class TestServerFromTheStore:
         assert running.build_id in rt.prune(keep_last=0), "once it stopped, retention may remove it"
 
 
+class TestTheStoreIsSharedWithTheDevices:
+    """The device runtime (llm-cli device runtime build) keeps its cross builds in the same build store: one recipe,
+    one executor, one store. Ditto's retention keeps to Ditto's own builds."""
+
+    def _device_builds(self, store, tmp_path):
+        """Three boards with three different cross builds: an RK3566 on DietPi (glibc), an Alpine board (musl), and
+        an RK3566 whose probe reports no dotprod (plain armv8-a)."""
+        from orchestrator.runtime.device.package import plan_device_runtime
+        from orchestrator.runtime.profile import parse_profile
+        dietpi = (PROBES / "schema2_rk3566_dietpi.txt").read_text(encoding="utf-8")
+        boards = [parse_profile(dietpi), read_profile(PROBES / "schema2_rk3566_alpine_musl.txt"),
+                  parse_profile(dietpi.replace("SUPPORTS_DOTPROD=ON", "SUPPORTS_DOTPROD=OFF"))]
+        builds = []
+        for profile in boards:
+            plan = plan_device_runtime(profile, catalog=CATALOG, host=("linux", "x86_64"))
+            builds.append(store.build(plan, source=tmp_path, executor=FakeExecutor(), verifier=FakeVerifier(ran=False),
+                                      jobs=1, host=("linux", "x86_64")))
+        assert len({b.build_id for b in builds}) == 3 and all(b.purpose == "device-runtime" for b in builds)
+        return builds
+
+    def test_installing_dittos_runtime_keeps_every_device_build(self, tmp_path, no_source):
+        rt = runtime(tmp_path)
+        devices = self._device_builds(rt.store, tmp_path)
+        result = rt.install()  # two host builds (CPU and Vulkan), then retention with its default of 2 others
+        assert result.removed == []
+        assert all(rt.store.get(b.build_id) is not None for b in devices), "a device's build stays for its deployment"
+
+    def test_dittos_prune_removes_only_dittos_builds(self, tmp_path, no_source):
+        rt = runtime(tmp_path)
+        devices = self._device_builds(rt.store, tmp_path)
+        first = rt.install(backend="cpu").active
+        other = runtime(tmp_path, hw=machine([]))
+        other._toolchain = toolchain(info=replace(GCC, cmake="3.31.0"))
+        second = other.install(backend="cpu").active
+        assert first.build_id != second.build_id
+        removed = rt.prune(keep_last=0)
+        assert removed == [first.build_id], "the old host build goes; the active one and the device builds stay"
+        assert all(rt.store.get(b.build_id) is not None for b in devices)
+
+
 # --- import ---------------------------------------------------------------------------------------------------------
 
 class TestImport:

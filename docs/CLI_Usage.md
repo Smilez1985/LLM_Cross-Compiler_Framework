@@ -713,8 +713,9 @@ for `ditto runtime import` on another machine of the same kind. The prebuilt arc
 llm-cli ditto runtime prune [--keep N]
 ```
 
-Removes old self-built builds. The active build, the CPU fallback and the build a running server was started from
-are always kept, plus the `N` newest others (default 2). `runtime install` does the same after every build.
+Removes old self-built builds of Ditto's server. The active build, the CPU fallback and the build a running server
+was started from are always kept, plus the `N` newest others (default 2). `runtime install` does the same after every
+build. The builds of your boards (`llm-cli device runtime build`) share the build store and are never removed here.
 
 #### ditto runtime start
 

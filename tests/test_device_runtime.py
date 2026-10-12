@@ -164,6 +164,24 @@ class TestPolicy:
         assert server_policy.posix_cleared_env("/home/u") == {"HOME": "/home/u", "PATH": "/usr/bin:/bin",
                                                               "LANG": "C", "LC_ALL": "C"}
 
+    def test_the_start_scripts_server_line_keeps_the_rules_of_dittos_server(self, monkeypatch):
+        """One policy for every launcher: the start script's server line is built from the same constants as Ditto's
+        server and held to the same check_server_command; a policy the line would break stops the generation."""
+        line = next(ln for ln in launcher.render_start_script().splitlines() if '"$SERVER" -m' in ln)
+        assert line.strip().endswith(" ".join(server_policy.SERVER_FIXED) + ' "$@"')
+        assert f"--host {server_policy.LOOPBACK} " in line and '--api-key-file "$KEY"' in line
+        monkeypatch.setattr(launcher, "SERVER_FIXED", ("--no-ui", "--offline"))
+        with pytest.raises(server_policy.PolicyError, match="--no-slots"):
+            launcher.render_start_script()
+
+    def test_the_tools_check_on_the_board_is_the_shared_one(self):
+        """The checks on a board build their --tools check with the policy's tools_check_args, never their own
+        argument list."""
+        import inspect
+        from orchestrator.runtime.device import remote
+        source = inspect.getsource(remote.verify_on_device)
+        assert "tools_check_args(" in source and "SERVER_TOOLS_CHECK" not in inspect.getsource(remote)
+
 
 # --- 3. the start script ------------------------------------------------------------------------------------------
 
@@ -488,6 +506,19 @@ def stored_build(state, source, profile=RK3566, **kw):
     build = store.build(plan_for(profile), source=source, executor=FakeDeviceExecutor(**kw),
                         verifier=FormatOnlyVerifier(), jobs=1, host=HOST, perf_key=profile.perf_key())
     return store, build
+
+
+class TestOneStoreForDittoAndTheDevices:
+    """Ditto's builds and the devices' builds live in the same build store (one recipe, one executor, one store):
+    Ditto's retention must keep to its own builds."""
+
+    def test_dittos_prune_never_removes_a_device_build(self, tmp_path, source):
+        from orchestrator.runtime.llama_server import LocalLLMRuntime
+        store, build = stored_build(tmp_path / "state", source)
+        rt = LocalLLMRuntime(data_dir=tmp_path / "state", models_dir=tmp_path / "models", catalog=CATALOG)
+        assert rt.prune(keep_last=0) == []
+        assert store.get(build.build_id) is not None, "the device's build stays for its next deployment"
+        assert store.prune(keep_last=0) == [build.build_id], "a prune without a purpose still sees every build"
 
 
 class TestPackage:

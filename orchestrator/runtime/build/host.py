@@ -273,7 +273,7 @@ def install_host_runtime(plan: HostPlan, *, store: BuildStore, source: Optional[
                 problems.append(f"{e}{where}; the CPU build stays active")
             except StoreError as e:
                 problems.append(f"{gpu.backend}: {e}; the CPU build stays active")
-    removed = store.prune(keep_last=keep_last)
+    removed = store.prune(keep_last=keep_last, purpose=PURPOSE)  # never a device's build (same store)
     missing = plan.requested not in ("auto", "cpu") and active.backend != plan.requested
     return HostInstallResult(active=active, fallback=fallback, built=built, reused=reused, problems=problems,
                              removed=removed, requested_missing=missing)
