@@ -20,6 +20,7 @@ from orchestrator.schemas.jobs import CancelJobOut, JobErrorOut, JobIn, JobProgr
 from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.audit import AuditLog
 from orchestrator.tools.mcp_tokens import TokenStore
+from orchestrator.tools import tools_status
 from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, untrusted_text
 from orchestrator.tools.policy import Decision, PolicyStore, ToolTier
 from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, ToolSpec, current_actor,
@@ -27,6 +28,7 @@ from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, T
 from orchestrator.tools.signing import RevisionAnchor
 from orchestrator.tools.spec import BUILD_QUOTA, CallFacts, Choices, Fact, FieldMeta, ToolLimits
 from orchestrator.utils.file_lock import file_lock
+from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.untrusted import sanitize_untrusted
 
 
@@ -111,9 +113,10 @@ class CancelJobResult(CancelJobOut, ToolOutput):
 
 class StatusIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    sections: List[Literal["permissions"]] = Field(
-        default_factory=lambda: ["permissions"], min_length=1, max_length=1,
-        description="Which part of the framework's state to show; for now: permissions")
+    sections: List[Literal["framework", "host", "local_runtime", "knowledge", "ai_access", "permissions", "audit"]] = \
+        Field(default_factory=lambda: ["framework", "permissions"], min_length=1, max_length=7,
+              description="Which parts of the framework's state to show: framework, host, local_runtime, knowledge, "
+                          "ai_access, permissions, audit (default: framework and permissions)")
 
 
 class ToolPermission(BaseModel):
@@ -159,7 +162,14 @@ class PermissionsStatus(BaseModel):
 
 
 class StatusOut(ToolOutput):
+    # The sections of design 2.9 (orchestrator/tools/tools_status.py); none holds a secret or a host path.
+    framework: Optional[tools_status.FrameworkSection] = None
+    host: Optional[tools_status.HostSection] = None
+    local_runtime: Optional[tools_status.LocalRuntimeSection] = None
+    knowledge: Optional[tools_status.KnowledgeSection] = None
+    ai_access: Optional[tools_status.AiAccessSection] = None
     permissions: Optional[PermissionsStatus] = None
+    audit: Optional[tools_status.AuditSection] = None
 
 
 # What no tool does (design section 3), with where the person does it, so a model can name the real reason.
@@ -404,8 +414,34 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                                                score=float(getattr(h, "score", 0.0)),
                                                content=sanitize_untrusted(str(h.content), 4000)) for h in hits])
 
-    def get_status(inp: StatusIn) -> StatusOut:
+    def sign_in():
+        from orchestrator.llm.auth.signin import SignIn
+        return SignIn(framework.config, getattr(framework, "secrets_manager", None))
+
+    def get_status(inp: StatusIn, ctx: ToolContext) -> StatusOut:
+        """The sections asked for; one that cannot be read is left out with a note (it never fails the others)."""
         caller, running = current_actor(), current_registry() or registry
+        builders = {
+            "framework": lambda: tools_status.framework_section(framework, running),
+            "host": lambda: tools_status.host_section(framework, service.host_hardware),
+            "local_runtime": lambda: tools_status.local_runtime_section(framework),
+            "knowledge": lambda: tools_status.knowledge_section(framework),
+            "ai_access": lambda: tools_status.ai_access_section(framework, sign_in),
+            "permissions": lambda: permissions_section(caller, running),
+            "audit": lambda: tools_status.audit_section(running, caller or "framework"),
+        }
+        values = {}
+        for name in dict.fromkeys(inp.sections):
+            try:
+                values[name] = builders[name]()
+            except Exception as e:  # noqa: BLE001 - a section that cannot be read never hides the others
+                registry.logger.warning(f"Status section {name} not read: {redact_secrets(str(e))}")
+                ctx.notes.append(f"The section {name} could not be read in this installation.")
+            if values.get(name) is None and name == "host":
+                ctx.notes.append("This computer's hardware could not be probed.")
+        return StatusOut(**{k: v for k, v in values.items() if v is not None})
+
+    def permissions_section(caller, running) -> PermissionsStatus:
         rows = running.permissions(caller)
         # loaded after permissions(): the damage flag below belongs to this load; a token's own permissions for it
         policy = running.policy(caller) if caller else running.policy()
@@ -416,13 +452,13 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                                         created_via=g["grant"].created_via, expires=g["grant"].expires,
                                         uses=g["uses"], last_use=g["last_use"])
                     for g in (running.grant_rows(grant_caller) if grant_caller else [])]
-        return StatusOut(permissions=PermissionsStatus(
+        return PermissionsStatus(
             caller=caller or "framework", configured=policy.configured,
             damaged=bool(getattr(running.policy_store, "problem", None)), listed=listed,
             tools=[ToolPermission(**{k: r[k] for k in ToolPermission.model_fields}) for r in rows],
             standing_approvals=standing, no_tool_actions=[NoToolAction(action=a, where=w) for a, w in NO_TOOL_ACTIONS],
             warning=(f"{listed} tools are listed; some clients take at most {MAX_LISTED_TOOLS}."
-                     if listed > MAX_LISTED_TOOLS else "")))
+                     if listed > MAX_LISTED_TOOLS else ""))
 
     def run_doctor(_inp: NoInput) -> DoctorOut:
         from orchestrator.Core.doctor import Doctor
@@ -493,10 +529,15 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  # destructive: the docker_prune strategy deletes the Docker build cache
                  destructive=True, fields={**request_id, "approve": FieldMeta(kind="trust")}),
         ToolSpec("get_status", "Framework status",
-                 "The framework's state for this caller: for now the tool permissions (decision and why for every "
-                 "tool, also the ones not listed because they are denied) and the actions no tool does, with where "
-                 "the person does them.",
-                 ToolTier.READ, StatusIn, StatusOut, get_status, idempotent=True,
+                 "The framework's state in sections: framework (version, Docker, targets, offline mode, active "
+                 "builds), host (this computer's hardware and the recommended local runtime), local_runtime (the "
+                 "self-built llama.cpp server), knowledge (the knowledge base), ai_access (sign-in states, never a "
+                 "key), permissions (every tool's decision and why, standing approvals, and the actions no tool "
+                 "does, with where the person does them) and audit (your own recent calls). Default: framework and "
+                 'permissions. Example: {"sections": ["permissions", "audit"]}',
+                 ToolTier.READ, StatusIn, StatusOut, get_status, idempotent=True, takes_context=True,
+                 fields={"sections": FieldMeta(kind="value", split=True)},
+                 examples=({"sections": ["permissions", "audit"]},),
                  summary=lambda o: (f"Permissions for {fact(o.permissions.caller)}: "
                                     + count(o.permissions.listed, "tool", "tools") + " listed."
                                     if o.permissions else "Framework status.")),
@@ -507,6 +548,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                               # 3 unfinished builds and 20 starts a day per client (the limits table, BUILD_QUOTA)
                               ToolLimits(running=lambda ctx: len(service.active_requests(ctx.owner)), **BUILD_QUOTA),
                               BuildHandleOut)
+    # Settings and the honest "cannot" path of T2.
+    specs += tools_status.status_tool_specs(registry, framework, NO_TOOL_ACTIONS)
     for spec in specs:
         registry.register(spec)
     return registry

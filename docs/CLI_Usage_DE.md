@@ -914,7 +914,7 @@ geantwortet hast. Eine Berechtigungsdatei, die beschädigt, von Hand bearbeitet 
 ### tools audit
 
 ```
-llm-cli tools audit [--limit N] [--details] [--verify] [--archive]
+llm-cli tools audit [--limit N] [--details] [--verify] [--archive] [--summary]
 ```
 
 Zeigt die letzten Tool-Aufrufe: Zeit, wer aufgerufen hat (in Worten: Ditto, alle lokalen stdio-Clients, das
@@ -928,11 +928,13 @@ Mensch bestätigt hat, das Ergebnis, den Grundcode und wie der Mensch gefragt wu
 | `--limit INTEGER` | Anzahl der Einträge (Standard 30). |
 | `--details` | Zusätzlich, was die narrensichere Schicht repariert hat (Art und Feld), die Dauer, SHA-256 und Größe des Ergebnisses, Verweise auf frühere Einträge und den Sitzungs-Hash. |
 | `--verify` | Stattdessen die Kette prüfen: geänderte oder entfernte Einträge und das Entfernen der neuesten Einträge (Anker-Datei). Exit-Code 0, wenn intakt, sonst 1. |
+| `--summary` | Stattdessen Zahlen je Aufrufer: Aufrufe, Ablehnungen und die Meldungen, dass eine Aufgabe nicht machbar ist (`report_cannot_do`), nach dem Ergebnis der Prüfung durch das Framework: confirmed, contradicted, premature, unchecked. |
 | `--archive` | Das Log und seinen Anker beiseitelegen (aufbewahrt als `audit.db.<UTC-Zeit>` und `audit.db.<UTC-Zeit>.anchor` im persönlichen Ordner) und mit dem nächsten Tool-Aufruf ein neues Log beginnen. Nutze es, wenn `--verify` oder `llm-cli doctor` ein Problem mit dem Log meldet. Lässt sich das Log nicht beiseitelegen (zum Beispiel, weil es gerade benutzt wird), endet der Befehl mit Exit-Code 1; schließe die GUI und die KI-Clients und versuche es erneut. |
 
 ```bash
 llm-cli tools audit --limit 100
 llm-cli tools audit --verify
+llm-cli tools audit --summary
 llm-cli tools audit --archive
 ```
 
@@ -1422,6 +1424,12 @@ Der Befehl braucht weder den Tresor für Zugangsdaten noch Docker.
 ```bash
 llm-cli -q config show | jq '.models_dir'
 ```
+
+KI-Clients lesen Einstellungen mit dem MCP-Tool `get_settings` (eine feste Liste; Adressen als Schema und Host,
+Ordner als Labels) und ändern gewöhnliche mit `update_settings`, das dich mit altem und neuem Wert fragt und die
+Änderung in der `config.yml` speichert. Einstellungen, die begrenzen, was eine KI darf, lassen sich so nur
+verschärfen; Berechtigungen, Geheimnisse, den Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner änderst
+nur du, hier oder in der GUI.
 
 ### config repos
 
