@@ -279,6 +279,9 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
                            if facts.base_model else False, "license": facts.license}}
         if facts.base_model and facts.base_gated is None:
             bound["grant"]["base_gated"] = None  # unknown: outside every standing approval
+        if not disk.get("fits_standing"):
+            # design 6.5: under a standing approval the larger reserve (20 GiB or 10 %) must stay free, else it asks
+            bound["grant"] = None
         consequence = (f"Downloads {name} ({_size(file.size)}) of {inp.model} from huggingface.co (commit "
                        f"{facts.commit[:12]}) into the models folder.")
         return CallFacts(consequence=consequence, facts=tuple(lines), bound=bound)

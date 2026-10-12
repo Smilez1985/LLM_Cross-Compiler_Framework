@@ -508,7 +508,11 @@ und Quantisierungen auf, die das Target anbietet, und die Antwort wird pro Forma
 Was auch immer ein Build-Log, eine Probe-Datei oder ein Modellname dem Modell erzählt: Ditto verwirft eine
 Healing-Korrektur oder Empfehlung mit einem gefährlichen Befehl. Dazu zählen ein Download, der direkt in eine Shell
 geleitet wird, für alle beschreibbare Rechte (`chmod 777`/`666`), das Löschen des Wurzel- oder Home-Ordners, das
-Überschreiben einer Platte (`mkfs`, `dd` auf eine Platte) und eine Fork-Bombe.
+Überschreiben einer Platte (`mkfs`, `dd` auf eine Platte) und eine Fork-Bombe. Der Filter liest den Text so, wie er
+geschrieben ist, und so, wie du ihn sehen wirst (normalisiert, unsichtbare Zeichen entfernt), damit ein Zeichen
+ohne Breite oder Buchstaben in voller Breite einen solchen Befehl nicht verstecken. Ein Korrekturvorschlag, den ein
+KI-Client mit `propose_healing_fix` macht, durchläuft denselben Filter und wird in dieser bereinigten Form
+aufbewahrt.
 
 ### Nicht vertrauenswürdiger Text
 
@@ -1323,7 +1327,9 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   wenn Größe und sha256 zu den Angaben des Hubs passen (eine kleine Datei ohne LFS ist über Größe und Commit
   festgelegt). Ein Download läuft zur Zeit, fünf am Tag je Client; Hugging-Face-Suchen sind auf 30 je Stunde
   begrenzt. Eine Daueranfrage kann GGUF-, safetensors- und kleine Textdateien nicht zugangsbeschränkter
-  Repositories mit freizügiger Lizenz und nicht zugangsbeschränktem Basismodell abdecken, nie Pickle-Gewichte. Jeder
+  Repositories mit freizügiger Lizenz und nicht zugangsbeschränktem Basismodell abdecken, nie Pickle-Gewichte, und
+  nur, solange die Platte nach dem Download die größere Reserve von 20 GiB oder 10 % frei behält (sonst wirst du
+  gefragt). Jeder
   Hugging-Face-Aufruf für einen KI-Client sendet nur das im Framework gespeicherte Token (`llm-cli secrets set
   hf_token`) oder gar keins: nie eins aus `HF_TOKEN` oder dem Hugging-Face-Home-Ordner und nie an einen anderen Host
   als huggingface.co (eine Weiterleitung zum Dateispeicher des Hubs trägt kein Token). Das Token erscheint nie in

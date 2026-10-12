@@ -861,6 +861,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   quotas are checked again before it runs.
 
 ### Security
+- **The dangerous-command filter can no longer be bypassed with invisible or full-width characters** (Ditto's
+  healing analyses and recommendations, and fix proposals of AI clients): it checks the text also as the GUI and
+  the CLI show it (normalized, invisible characters and joiners removed), so `r<zero-width space>m -rf ~` or
+  full-width letters no longer pass and then appear as a readable command. A client's proposal is kept in that
+  cleaned form; the GUI's status bar notice names the build by its speaking name and shows the client's name
+  cleaned.
 - **AI clients never see the host path of a local model they named** (MCP clients and Ditto): the build's stage
   text, the self-healing context, the build manifest's `model_source` and `list_artifacts` name it by its
   `<label>:<relative path>` (an older manifest's host path by its label, else by the file name only).

@@ -470,6 +470,9 @@ and quantizations the target offers, and the answer is checked again per format.
 Whatever a build log, a probe file or a model name tells the model, Ditto discards a healing fix or a
 recommendation that contains a dangerous command: a download piped into a shell, world-writable permissions
 (`chmod 777`/`666`), deleting the root or home folder, overwriting a disk (`mkfs`, `dd` to a disk) or a fork bomb.
+The filter reads the text both as written and as you will see it (normalized, invisible characters removed), so a
+zero-width character or full-width letters cannot hide such a command. A fix an AI client proposes with
+`propose_healing_fix` passes the same filter and is kept in that cleaned form.
 
 ### Untrusted text
 
@@ -1213,7 +1216,8 @@ framework never sees it.
   size and sha256 matched the Hub's (a small file stored without LFS is pinned by its size and the commit). One
   download runs at a time, five a day per client; Hugging Face searches are limited to 30 an hour. A standing approval
   can cover GGUF, safetensors and small text files of ungated repositories with a permissive licence and an ungated
-  base model, never pickle weights. Every Hugging Face call for an AI client sends only the token stored in the
+  base model, never pickle weights, and only while the disk keeps the larger reserve of 20 GiB or 10 % free after
+  the download (otherwise you are asked). Every Hugging Face call for an AI client sends only the token stored in the
   framework (`llm-cli secrets set hf_token`), or none at all: never one from `HF_TOKEN` or the Hugging Face home
   folder, and never to another host than huggingface.co (a redirect to the Hub's file storage carries no token). The
   token never appears in a tool's input, result, notes, errors or the audit log. Offline mode refuses these tools,
