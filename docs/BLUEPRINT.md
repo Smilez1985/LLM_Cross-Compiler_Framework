@@ -182,7 +182,7 @@ flowchart TB
 | MCP server | `orchestrator/mcp_server.py` | Exposes the tool registry over MCP (official SDK `mcp` 2.3.0) via stdio or local Streamable HTTP. The launch command it writes for clients uses `python -P`, so nothing is imported from the folder a client starts it in. |
 | Provider layer (unreleased) | `orchestrator/llm/` | One client (`LLMClient`) for every AI provider, built on the official `anthropic` and `openai` SDKs; OpenAI-compatible servers go through `openai`. Picks provider, model and effort per task from the settings and the presets in `configs/llm_providers.yml` (a file of the same name in the config folder adds or replaces presets). Retries (two, the SDKs' own retries are off), a fallback chain for refusals and outages (`ai_fallback_chain`), structured answers validated against schemas with one repair attempt, typed errors, the privacy filter for cloud providers, and a tool loop. The sign-in core (`orchestrator/llm/auth/`) resolves the credential of each call from the sign-in methods in the catalog: keys from the vault (keys of custom servers bound to their address) or from the environment variables the catalog lists, a free credential check, errors with a known cause and the next step, and token renewal under a lock shared by all processes. |
 | Ditto (rebuilt, unreleased) | `orchestrator/Core/ditto_manager.py` | The assistant: chat with the framework tools (at most 8 model turns per question, tool calls as actor `ditto` through the registry), analysis of failed builds, module proposals from a hardware probe and build recommendations. The last three are validated structured answers; an invalid answer is an error and is never applied. A healing analysis or build recommendation with a dangerous command is discarded; a module proposal is checked again by the module generator. The chat history is append-only (`chat_history.json`); a long conversation is summarized into a new one. |
-| Managed local model (unreleased) | `orchestrator/runtime/`, `configs/llama_runtime.yml` | Downloads a pinned llama.cpp build (b11429, the same commit as v0.6.0) for the hardware (CPU, Vulkan, CUDA, Metal; ROCm only when chosen) and pinned GGUF models in tiers (Qwen3.5 9B, 4B and 2B, 2-bit variants for weak hardware, and an IBM Granite 4.2 3B model on request), each checked by size and SHA256. Runs `llama-server` on 127.0.0.1 with a free port and a per-start API key. The `local` provider finds the running server by itself. |
+| Managed local model (unreleased) | `orchestrator/runtime/`, `configs/llama_runtime.yml` | Builds `llama-server` on the machine from the pinned llama.cpp commit (b11429, the same commit as v0.6.0): the CPU build first, then a GPU build (Vulkan in this version), each verified before it is used; imports a build of another machine of the same kind; downloads the official prebuilt archive only on explicit request, labelled not self-built. Downloads pinned GGUF models in tiers (Qwen3.5 9B, 4B and 2B, 2-bit variants for weak hardware, and an IBM Granite 4.2 3B model on request), each checked by size and SHA256. Runs `llama-server` on 127.0.0.1 with a free port and a per-start API key. The `local` provider finds the running server by itself. |
 | Ditto evaluation (unreleased) | `orchestrator/evals/ditto_eval.py`, `evals/ditto/cases.yml`, `evals/retrieval/` | `llm-cli ditto eval`: 19 fixed cases (build-log analysis, build recommendations, module proposals, chat with tools, prompt injection) graded by rules, against the configured provider or per local model tier. Nothing is built: chat cases use the real tool definitions over a stand-in build service. With `--kind retrieval`, 42 searches grade the knowledge-base search on a fixed corpus, without an AI model (see [A knowledge-base search](#a-knowledge-base-search-unreleased)). |
 | Self-healing | `orchestrator/Core/self_healing_manager.py` | Recognizes known failures with fixed patterns first and asks Ditto only for unknown ones. Applies only framework-defined fixes, and only after your approval. |
 | Knowledge base and crawler | `orchestrator/Core/rag_manager.py`, `orchestrator/rag/`, `orchestrator/Core/crawler_manager.py` | Optional (`enable_rag_knowledge`). Web pages, PDFs, community knowledge packs and the framework's own code are split into chunks and stored with a local dense embedding (FastEmbed on ONNX Runtime, CPU; model chosen by hardware unless `rag_embedding_model` is set) and a BM25 vector. Searches combine both rankings with Reciprocal Rank Fusion; a local cross-encoder can rerank the results and drop those below a relevance floor (unreleased, see [A knowledge-base search](#a-knowledge-base-search-unreleased)). Qdrant runs embedded in the process with its storage in the per-user folder (unreleased); a Qdrant server is used only when `qdrant_url` is set. The crawler of Deep Ingest honours the sites' machine-readable opt-outs (see [Deep Ingest](#deep-ingest-from-a-web-page-to-the-knowledge-base-unreleased)). |
@@ -382,22 +382,33 @@ Nothing is changed without your yes.
 
 ### The local model for offline mode (unreleased)
 
-In plain words: the framework can download a small language model and a matching server program, check both, and
-run them on your computer only. Ditto then needs no internet.
+In plain words: the framework builds the server program on your computer from a pinned source, downloads a small
+language model, checks both, and runs them on your computer only. Ditto then needs no internet.
 
-1. **Status.** `llm-cli ditto runtime status` shows the detected hardware, the recommended server build and model
-   tier, and whether the server runs.
-2. **Install the server.** `llm-cli ditto runtime install` downloads the pinned llama.cpp build for your hardware
-   (`--backend auto|cpu|vulkan|cuda|rocm|metal`; ROCm only when chosen). Size and SHA256 are checked before
-   anything is unpacked; the build is installed atomically.
+1. **Status.** `llm-cli ditto runtime status` shows the detected hardware, the build in use (self-built, imported,
+   or "prebuilt, not self-built"), whether it should be built again, the model tier, and whether the server runs.
+2. **Build the server.** `llm-cli ditto runtime install` probes the machine and detects the toolchain; the build
+   recipe (`orchestrator/runtime/build/recipe.py`) turns the hardware profile into a CPU build plan and, when a GPU
+   is worth it, a GPU build plan (Vulkan in this version; the recipe follows OS, architecture and C library). After
+   you confirm, the pinned llama.cpp commit is fetched once and checked; configure and build run natively or in the
+   builder container, without network (`orchestrator/runtime/build/host.py`, `executor.py`). Each build is verified
+   on this machine (`verify.py`: version and commit, devices, the server refuses `--tools`) and kept in the build
+   store (`store.py`, `~/.llm-framework/runtime/llama.cpp/builds/<build ID>/`). The CPU build becomes active first
+   and stays the fallback; a verified GPU build then becomes active. A build of another machine of the same kind can
+   be imported instead (`ditto runtime export` there, `ditto runtime import` here: checked against the pin and its
+   manifest, confirmed by you, then verified here). The official prebuilt archive is only the explicit choice
+   `--prebuilt` (size and SHA256 checked before unpacking).
 3. **Download a model.** `llm-cli ditto models list` shows the tiers; `llm-cli ditto models download [TIER]`
    fetches one at its pinned Hugging Face revision and checks size and SHA256. The recommendation follows memory:
    the 9B model with at least 7.5 GiB of GPU memory, 2B at 2-bit for 3 GiB of RAM or less, 2B at 4-bit up to
    4.5 GiB, otherwise 4B, in each case only if the model fits next to the system. The other tiers (4B and 9B at
    2-bit, IBM Granite 4.2 3B) are never recommended; you download them by name.
 4. **Start.** `llm-cli ditto runtime start` (`--model`, `--ctx`, `--sleep-idle`) starts `llama-server` on
-   127.0.0.1 with a free port. A new random API key is written to a private file for every start; the framework
-   checks that the server refuses requests without it. The context length follows free memory (at most 32768
+   127.0.0.1 with a free port, but only a build that passed its verification on this machine and still matches its
+   manifest (else the CPU fallback, else nothing; the prebuilt archive only after `--prebuilt`). The command line,
+   the cleared environment, loopback and the key file come from the one launch policy every launcher uses
+   (`orchestrator/runtime/server_policy.py`). A new random API key is written to a private file for every start;
+   the framework checks that the server refuses requests without it. The context length follows free memory (at most 32768
    tokens); an idle model is unloaded after 10 minutes and reloaded on the next request.
 5. **Use.** The `local` provider reads address, key and model from the running server on every call, so a server
    started from the CLI or the GUI is found without configuration. Requests to 127.0.0.1 never go through an

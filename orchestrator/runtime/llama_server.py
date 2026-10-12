@@ -2,16 +2,24 @@
 """
 Managed llama-server (llama.cpp) for Ditto's local/offline mode.
 
-Downloads a pinned llama.cpp build and pinned GGUF models (size and sha256 are checked before anything is
-unpacked or loaded; entries without both are refused), starts llama-server on 127.0.0.1 with a free port and
-a random per-start API key that reaches the server only through a 0600 key file, and hands base_url, key and
-model to the provider layer (read_endpoint; LLMClient uses it for the "local" provider). The server never gets
-its own tools, agent mode, MCP servers or web UI: Ditto's tools run inside the framework, where approval is
-enforced.
+`install()` builds llama-server on this machine from the pinned llama.cpp commit (orchestrator/runtime/build/host.py:
+the CPU build first, then the GPU build the recipe chooses, each verified before it is kept), `import_build()` takes
+a build made on another machine of the same kind (checked against the pin and verified here), and
+`install_prebuilt()` downloads the official prebuilt archive only on explicit request (decision D1; size and sha256
+are checked before anything is unpacked, and it is always shown as "prebuilt, not self-built"). Pinned GGUF models are
+downloaded the same way. `start()` starts only a build that passed its verification on this machine and still matches
+its manifest (or the opted-in prebuilt archive), on 127.0.0.1 with a free port and a random per-start API key that
+reaches the server only through a 0600 key file, with a cleared environment and without any option of the shared
+forbidden list (orchestrator/runtime/server_policy.py, decision D22). It hands base_url, key and model to the provider
+layer (read_endpoint; LLMClient uses it for the "local" provider). The server never gets its own tools, agent mode,
+MCP servers or web UI: Ditto's tools run inside the framework, where approval is enforced.
 
 Files under <user state dir>/runtime/llama.cpp/:
-  b<build>-<variant>/   unpacked build with its manifest (runtime.json)
-  active.json           installed variant and the model tier chosen with `start --model`
+  builds/<build id>/    self-built and imported builds with build.json and manifest.json (build/store.py)
+  src/<commit>/         the verified llama.cpp source (build/source.py)
+  b<build>-<variant>/   an opted-in prebuilt archive, unpacked, with its manifest (runtime.json)
+  active.json           the active build and the CPU fallback (build_id, fallback_build_id), which one is used
+                        ("use": self-built or prebuilt), the prebuilt variant, and the model tier of `start --model`
   server.json           pid, start time, port and model of the running server; trusted only while that
                         exact process (pid + start time + executable) is alive
   server-<random>.key   API key of the running server (0600, deleted on stop)
@@ -38,9 +46,10 @@ import requests
 from pydantic import BaseModel, Field
 
 from orchestrator.runtime.catalog import GPU_BACKENDS, ModelEntry, RuntimeAsset, RuntimeCatalog, load_catalog
-from orchestrator.runtime.hardware import (BackendChoice, HardwareInfo, Runner, choose_model_tier, compute_context,
-                                           detect_hardware, select_backend)
+from orchestrator.runtime.hardware import (BackendChoice, HardwareInfo, Runner, backend_choice, choose_model_tier,
+                                           compute_context, detect_hardware, normalize_platform, select_backend)
 from orchestrator.runtime.server_policy import FORBIDDEN_FLAGS, forbidden_in, server_env  # noqa: F401 (re-export)
+from orchestrator.runtime.server_policy import PolicyError, check_server_command, server_command, write_key_file
 from orchestrator.utils.download import DownloadError, FileLock, PinnedDownloader
 from orchestrator.utils.download import IntegrityError as DownloadIntegrityError
 from orchestrator.utils.helpers import redact_secrets, safe_extract_archive
@@ -71,14 +80,43 @@ class IntegrityError(LocalRuntimeError, DownloadIntegrityError):
     """A download is not pinned or does not match its pin; nothing was installed."""
 
 
+PREBUILT_LABEL = "prebuilt, not self-built"
+
+
 class InstalledRuntime(BaseModel):
+    """The llama-server build start() uses: a self-built or imported build of the store (origin, build_id, commit,
+    verification) or the opted-in official archive (origin "prebuilt", asset_id)."""
     build: str
-    asset_id: str
     variant: str
     backend: str
     path: Path
     server: Path
     files: Dict[str, str]
+    origin: str = "prebuilt"                 # self-built | imported | prebuilt
+    asset_id: Optional[str] = None           # prebuilt: the catalog archive
+    build_id: Optional[str] = None           # self-built and imported builds
+    commit: Optional[str] = None
+    role: Optional[str] = None               # active | fallback (the CPU build used when the active one cannot be)
+    placement: Optional[str] = None          # native | container
+    built_on: Optional[str] = None           # os/arch of the machine that built it (imported builds)
+    built_at: Optional[str] = None
+    verified_at: Optional[str] = None
+    duration_s: Optional[float] = None
+    devices: List[str] = Field(default_factory=list)   # what --list-devices showed at the verification
+    notes: List[str] = Field(default_factory=list)
+
+    @property
+    def label(self) -> str:
+        if self.origin == "prebuilt":
+            return PREBUILT_LABEL
+        if self.origin == "imported":
+            return f"self-built on another machine ({self.built_on or 'unknown'}), imported"
+        return "self-built"
+
+    @property
+    def name(self) -> str:
+        """Short name for messages: the build ID or the catalog archive."""
+        return f"build {self.build_id[:16]}" if self.build_id else str(self.asset_id or self.variant)
 
 
 class LocalEndpoint(BaseModel):
@@ -93,6 +131,8 @@ class LocalEndpoint(BaseModel):
 class RuntimeStatus(BaseModel):
     build: str
     installed: Optional[InstalledRuntime] = None
+    problems: List[str] = Field(default_factory=list)   # why a stored build cannot be used
+    rebuild: Optional[str] = None                        # "required: ..." / "recommended: ..." (decision D16)
     running: bool = False
     healthy: bool = False
     pid: Optional[int] = None
@@ -166,24 +206,17 @@ def _free_port() -> int:
 
 def build_server_command(server: Path, model: Path, port: int, key_file: Path, ctx: int, alias: str,
                          gpu: bool, cache_ram_mib: int, sleep_idle_seconds: Optional[int] = None) -> List[str]:
-    """The complete llama-server command line. Only loopback, only the key file, no tools/agent/MCP/web UI."""
-    cmd = [str(server), "-m", str(model), "--alias", alias,
-           "--host", LOOPBACK, "--port", str(port),
-           "--api-key-file", str(key_file),
-           "--no-ui",              # web UI off (--no-webui is the deprecated spelling)
-           "--no-slots",           # /slots would show the prompts in the slots
-           "--jinja",              # chat template engine; OpenAI-style tool calls need it
-           "--offline",            # never fetch anything; the model is a local file
-           "-c", str(ctx),
-           "--cache-ram", str(cache_ram_mib)]
+    """The complete llama-server command line, from the shared policy (server_policy.server_command): only loopback,
+    only the key file, no web UI, no /slots, offline, and none of the forbidden options (no tools, agent, MCP)."""
+    extra = ["-c", str(ctx), "--cache-ram", str(cache_ram_mib)]
     if gpu:
-        cmd += ["-ngl", "auto"]    # offload as many layers as fit (llama.cpp's --fit is on by default)
+        extra += ["-ngl", "auto"]  # offload as many layers as fit (llama.cpp's --fit is on by default)
     if sleep_idle_seconds:
-        cmd += ["--sleep-idle-seconds", str(sleep_idle_seconds)]
-    bad = forbidden_in(cmd)
-    if bad:
-        raise LocalRuntimeError(f"Refusing to start llama-server with {bad}")
-    return cmd
+        extra += ["--sleep-idle-seconds", str(sleep_idle_seconds)]
+    try:
+        return server_command(server, model, port=port, key_file=key_file, alias=alias, extra=extra)
+    except PolicyError as e:
+        raise LocalRuntimeError(str(e)) from None
 
 
 def popen_options(os_name: str = os.name) -> Dict[str, Any]:
@@ -310,12 +343,24 @@ class LocalLLMRuntime:
     def __init__(self, data_dir: Optional[Path] = None, models_dir: Optional[Path] = None,
                  catalog: Optional[RuntimeCatalog] = None, hardware: Optional[HardwareInfo] = None,
                  session: Optional[requests.Session] = None, runner: Optional[Runner] = None,
-                 sleep: Callable[[float], None] = time.sleep):
+                 sleep: Callable[[float], None] = time.sleep, *, profile: Any = None, toolchain: Any = None,
+                 engine: Any = None, executor: Any = None, verifier: Any = None,
+                 platform: Optional[Tuple[str, str]] = None):
+        """profile (HardwareProfile), toolchain (DetectedToolchain), engine (ContainerEngine), executor and verifier
+        replace the probe, the toolchain detection, Docker and the build steps (tests); platform is (os, arch) of this
+        machine."""
         self.logger = get_logger("LocalLLMRuntime")
         self.catalog = catalog or load_catalog()
         self.data_dir = Path(data_dir) if data_dir else user_data_dir()
         self.models_dir = Path(models_dir) if models_dir else framework_models_dir() / "ditto"
         self.root = runtime_root(self.data_dir)
+        self._profile = profile
+        self._toolchain = toolchain
+        self._toolchain_full = toolchain is not None  # a given toolchain is used as it is
+        self._engine = engine
+        self._executor = executor
+        self._verifier = verifier
+        self._platform = platform
         self.state_file = self.root / "server.json"
         self.active_file = self.root / "active.json"
         self.lock_file = self.root / ".lock"
@@ -353,14 +398,74 @@ class LocalLLMRuntime:
             self._hardware = detect_hardware(self._runner)
         return self._hardware
 
+    def platform(self) -> Tuple[str, str]:
+        """(os, arch) of this machine in the recipe's words."""
+        return self._platform or normalize_platform()
+
+    def profile(self, refresh: bool = False):
+        """The full hardware profile of this machine (a fresh probe; volatile values are not used from it)."""
+        if self._profile is None or refresh:
+            from orchestrator.runtime.hardware import local_profile
+            self._profile = local_profile()
+        return self._profile
+
+    def toolchain(self, full: bool = True):
+        """This machine's toolchain for a native build (orchestrator/runtime/build/toolchain.py). full=False skips
+        the compile checks (what -march=native expands to, OpenMP), which only a build plan needs."""
+        if self._toolchain is None or (full and not getattr(self, "_toolchain_full", False)):
+            from orchestrator.runtime.build.toolchain import detect_toolchain
+            os_name, arch = self.platform()
+            self._toolchain = detect_toolchain(system=os_name, machine=arch, full=full)
+            self._toolchain_full = full
+        return self._toolchain
+
+    def engine(self):
+        """The container engine for builds in the builder container (Docker through docker-py)."""
+        if self._engine is None:
+            from orchestrator.runtime.build.executor import DockerEngine
+            self._engine = DockerEngine()
+        return self._engine
+
+    @property
+    def store(self):
+        """The store of self-built and imported builds (shares runtime_root and active.json)."""
+        from orchestrator.runtime.build.store import BuildStore
+        return BuildStore(self.data_dir)
+
     def select_backend(self, prefer: Optional[str] = None) -> BackendChoice:
+        """The official prebuilt archive for this machine: only for `install_prebuilt` (the opt-in of decision D1)."""
         return select_backend(self.hardware(), self.catalog, prefer)
 
+    def recommend_backend(self) -> Tuple[str, str]:
+        """(backend, reason) the self-built install makes active on this machine: the recipe's choice
+        (recipe.choose_backend, which follows OS, architecture and C library) when it is built here, else the CPU."""
+        from orchestrator.runtime.build.host import planned_backend
+        from orchestrator.runtime.build.recipe import ToolchainInfo
+        try:
+            detected = self.toolchain(full=False)
+            profile = self.profile()
+            placement = "native" if detected.native_ready else "container"
+            info = detected.info if placement == "native" else ToolchainInfo(host_os=detected.info.host_os,
+                                                                             host_arch=detected.info.host_arch)
+            return planned_backend(profile, info, self.catalog, placement)
+        except Exception as e:  # a probe or detection that fails: the CPU build is always planned
+            return "cpu", f"the GPU backend could not be chosen ({e})"
+
     def choose_tier(self, prefer: Optional[str] = None) -> Tuple[ModelEntry, str]:
-        """Recommended Ditto model for this machine (RAM, and VRAM when a GPU build is used), with the reason."""
+        """Recommended Ditto model for this machine (RAM, and VRAM when a GPU build is used), with the reason. The
+        build in use decides the backend; before anything is built, the backend the self-built install would use
+        (`prefer` names one explicitly)."""
         installed = self.installed()
-        choice = self.select_backend(installed.backend if installed else prefer)
-        return choose_model_tier(self.hardware(), self.catalog, choice)
+        hw = self.hardware()
+        if installed is not None and installed.origin == "prebuilt":
+            choice = self.select_backend(installed.backend)
+        elif installed is not None:
+            choice = backend_choice(hw, installed.backend)
+        elif prefer and prefer != "auto":
+            choice = backend_choice(hw, prefer)
+        else:
+            choice = backend_choice(hw, self.recommend_backend()[0])
+        return choose_model_tier(hw, self.catalog, choice)
 
     def preferred_tier(self) -> Optional[str]:
         """The tier chosen with `start --model`, if the catalog still has it."""
@@ -391,23 +496,230 @@ class LocalLLMRuntime:
     def _read_manifest(self, path: Path) -> Optional[InstalledRuntime]:
         data = _read_json(path / "runtime.json")
         try:
-            inst = InstalledRuntime(path=path, server=path / data["server"], **{
-                k: data[k] for k in ("build", "asset_id", "variant", "backend", "files")})
+            inst = InstalledRuntime(path=path, server=path / data["server"], origin="prebuilt",
+                                    verified_at=data.get("installed_at"), **{
+                                        k: data[k] for k in ("build", "asset_id", "variant", "backend", "files")})
         except (KeyError, TypeError, ValueError):
             return None
         return inst if inst.server.is_file() and inst.build == self.build else None
 
     def installed(self) -> Optional[InstalledRuntime]:
-        """The runtime chosen by the last install, if it is still complete and belongs to the pinned build."""
-        variant = (_read_json(self.active_file) or {}).get("variant")
-        if not isinstance(variant, str) or not re.fullmatch(r"[a-z0-9.-]+", variant):
-            return None
-        return self._read_manifest(self.root / f"{self.build}-{variant}")
+        """The build start() uses, or None (resolve_installed() says why)."""
+        return self.resolve_installed()[0]
 
-    def install(self, prefer: Optional[str] = None, force: bool = False,
-                progress: Optional[ProgressFn] = None) -> InstalledRuntime:
-        """Downloads, verifies and unpacks the llama.cpp build for this machine (or the requested backend).
-        The previous installation of the same variant stays in place until the new one is complete."""
+    def _store_problem(self, build, build_id: str, role: str) -> Optional[str]:
+        """Why a stored build cannot be started (None: it can). Only a build that passed its verification on this
+        machine, still matches its manifest, is of the pinned commit and has a llama-server for this machine runs."""
+        what = "active build" if role == "active" else "CPU fallback build"
+        if build is None:
+            return f"the {what} {build_id[:16]} is missing or incomplete"
+        if not build.verified:
+            return f"the {what} {build.build_id[:16]} has not passed its verification on this machine"
+        problems = self.store.check_files(build)
+        if problems:
+            return f"the {what} {build.build_id[:16]} does not match its manifest ({'; '.join(problems[:3])})"
+        pin = self.catalog.llama_cpp.source
+        if pin is not None and build.commit != pin.commit:
+            return (f"the {what} {build.build_id[:16]} is of llama.cpp commit {build.commit[:8]}, but the pin is "
+                    f"{pin.tag} ({pin.commit[:8]})")
+        target = build.plan.get("target") or {}
+        machine = self.platform()
+        if (target.get("os"), target.get("arch")) != machine:
+            return (f"the {what} {build.build_id[:16]} is for {target.get('os')}/{target.get('arch')}, this machine "
+                    f"is {machine[0]}/{machine[1]}")
+        if build.purpose != "host-runtime" or "llama-server" not in (build.manifest.get("files") or {}):
+            return f"the {what} {build.build_id[:16]} has no llama-server"
+        from orchestrator.runtime.build.verify import VerifyError
+        try:
+            build.binary("llama-server")
+        except VerifyError as e:
+            return f"the {what} {build.build_id[:16]}: {e}"
+        return None
+
+    def _from_store(self, build, role: str, notes: List[str]) -> InstalledRuntime:
+        manifest = build.manifest
+        verification = manifest.get("verification") or {}
+        devices: List[str] = []
+        for check in verification.get("checks") or []:
+            if isinstance(check, dict) and check.get("name") == "devices":
+                devices = [str(d.get("name")) for d in (check.get("data") or {}).get("devices") or []
+                           if isinstance(d, dict)][:16]
+        host = (manifest.get("imported") or {}).get("built_on") or manifest.get("build_host") or {}
+        built_on = f"{host.get('os')}/{host.get('arch')}" if isinstance(host, dict) and host else None
+        duration = manifest.get("duration_s")
+        return InstalledRuntime(
+            build=self.build, variant=build.backend, backend=build.backend, path=build.path,
+            server=build.binary("llama-server"), files=dict(manifest.get("files") or {}), origin=build.origin,
+            build_id=build.build_id, commit=build.commit, role=role, placement=manifest.get("placement"),
+            built_on=built_on, built_at=build.built_at or None, verified_at=manifest.get("verified_at"),
+            duration_s=float(duration) if isinstance(duration, (int, float)) else None, devices=devices, notes=notes)
+
+    def resolve_installed(self) -> Tuple[Optional[InstalledRuntime], List[str]]:
+        """(the build start() uses, problems). A self-built or imported build of the store is used when it passed its
+        verification on this machine and still matches its manifest: the active build, else the CPU fallback. The
+        prebuilt archive is used only after `install_prebuilt` (the opt-in of decision D1), or when it was installed
+        before self-built builds existed and nothing was built since; a self-built build that cannot be used never
+        falls back to it."""
+        data = _read_json(self.active_file) or {}
+        use = data.get("use")
+        problems: List[str] = []
+        if use != "prebuilt":
+            store = self.store
+            refs = store.references()
+            for role in ("active", "fallback"):
+                build_id = refs.get(role)
+                if not build_id or (role == "fallback" and build_id == refs.get("active")):
+                    continue
+                build = store.get(build_id)
+                problem = self._store_problem(build, build_id, role)
+                if problem:
+                    problems.append(problem)
+                    continue
+                notes = [*problems, "the CPU fallback build is used"] if role == "fallback" else []
+                return self._from_store(build, role, notes), problems
+            if refs or use == "self-built":
+                return None, problems or ["no self-built build is active"]
+        variant = data.get("variant")
+        if not isinstance(variant, str) or not re.fullmatch(r"[a-z0-9.-]+", variant):
+            return None, problems
+        inst = self._read_manifest(self.root / f"{self.build}-{variant}")
+        if inst is not None and use != "prebuilt":
+            inst.notes.append("installed before self-built builds; llm-cli ditto runtime install builds llama-server "
+                              "from the pinned source")
+        return inst, problems
+
+    # --- self-built runtime (orchestrator/runtime/build/host.py) --------------------------------------------------
+    def plan_install(self, backend: str = "auto", placement: str = "auto"):
+        """What `install` will build on this machine (HostPlan): the CPU build, then the GPU build of `backend`.
+        Raises LocalRuntimeError when not even the CPU build can be planned (the message names the ways out)."""
+        from orchestrator.runtime.build.host import HostBuildError, plan_host_runtime
+        try:
+            return plan_host_runtime(self.profile(), self.toolchain(full=True), self.catalog, self.store,
+                                     backend=backend, placement=placement, engine=self.engine())
+        except HostBuildError as e:
+            raise LocalRuntimeError(str(e)) from None
+
+    def install(self, plan: Any = None, *, backend: str = "auto", placement: str = "auto",
+                jobs: Optional[int] = None, log: Optional[Callable[[str], None]] = None,
+                fetch_source: Optional[Callable[[], bool]] = None):
+        """Builds llama-server on this machine from the pinned commit (the plan of plan_install): the CPU build first,
+        verified and made active, then the GPU build, active once it is verified. A running server keeps running; the
+        next start uses the new build. fetch_source() is asked before the pinned source (about 215 MB) is fetched;
+        without it the source is fetched. Returns the HostInstallResult; raises LocalRuntimeError when the CPU build
+        cannot be built (nothing is activated then)."""
+        from orchestrator.runtime.build import source as llama_source
+        from orchestrator.runtime.build.executor import BuildExecutor
+        from orchestrator.runtime.build.host import HostBuildError, install_host_runtime
+        from orchestrator.runtime.build.store import smoke_model_file
+        from orchestrator.runtime.build.verify import Verifier
+        plan = plan or self.plan_install(backend=backend, placement=placement)
+        pin = self.catalog.llama_cpp.source
+        source = None
+        if plan.needs_source:
+            try:
+                source = llama_source.cached_source(pin, self.data_dir)
+                if source is None:
+                    if fetch_source is not None and not fetch_source():
+                        raise LocalRuntimeError("The pinned llama.cpp source is needed for the build and was not "
+                                                "fetched. On a machine without network: llm-cli ditto runtime "
+                                                "import-source FILE (made with export-source elsewhere).")
+                    source = llama_source.fetch_source(pin, self.data_dir, log=log)
+            except llama_source.SourceError as e:
+                raise LocalRuntimeError(f"The pinned llama.cpp source: {e}") from None
+        executor = self._executor or BuildExecutor(engine=self.engine(), log=log)
+        verifier = self._verifier or Verifier()
+        smoke = smoke_model_file(self.catalog.smoke_model, self.models_dir.parent / "smoke")
+        try:
+            result = install_host_runtime(plan, store=self.store, source=source, executor=executor,
+                                          verifier=verifier, smoke_model=smoke, jobs=jobs, log=log)
+        except HostBuildError as e:
+            where = f" (log: {e.log})" if e.log else ""
+            raise LocalRuntimeError(f"{e}{where}") from None
+        with self._lock():
+            self._update_active(use="self-built")
+            self._prune_old_builds()
+        self.logger.info(f"Self-built llama.cpp {self.build}: active build {result.active.build_id[:16]} "
+                         f"({result.active.backend}), CPU fallback {result.fallback.build_id[:16]}")
+        return result
+
+    def import_build(self, archive: Path, confirm: Callable[[Dict[str, Any]], bool]) -> InstalledRuntime:
+        """Imports a llama-server build made on another machine of the same kind (ditto runtime export there): the
+        archive is checked against its manifest and the pin, confirm() is asked before any of its programs runs, and
+        the build is verified here like a local one before it becomes the active build."""
+        from orchestrator.runtime.build.store import StoreError
+        from orchestrator.runtime.build.verify import Verifier
+        pin = self.catalog.llama_cpp.source
+        if pin is None:
+            raise LocalRuntimeError("configs/llama_runtime.yml has no llama_cpp.source (the pinned commit)")
+        store = self.store
+
+        def ask(info: Dict[str, Any]) -> bool:
+            if "llama-server" not in (info.get("files") or []):
+                raise StoreError("the build has no llama-server (a build for Ditto's server is needed)")
+            return bool(confirm(info))
+
+        try:
+            build = store.import_build(Path(archive), pin=pin, verifier=self._verifier or Verifier(), confirm=ask,
+                                       host=self.platform())
+            problem = self._store_problem(build, build.build_id, "active")
+            if problem:
+                raise LocalRuntimeError(f"The imported build cannot be used: {problem}")
+            store.activate(build.build_id)
+            if build.backend == "cpu":
+                store.activate(build.build_id, role="fallback")
+        except StoreError as e:
+            raise LocalRuntimeError(str(e)) from None
+        with self._lock():
+            self._update_active(use="self-built")
+        inst = self.installed()
+        if inst is None:  # pragma: no cover - just activated
+            raise LocalRuntimeError("The imported build could not be activated.")
+        return inst
+
+    def export_build(self, out: Path) -> Path:
+        """Writes the build in use to a tar.gz for another machine of the same kind (ditto runtime import there)."""
+        from orchestrator.runtime.build.store import StoreError
+        inst = self.installed()
+        if inst is None or inst.build_id is None:
+            raise LocalRuntimeError("There is no self-built build to export: llm-cli ditto runtime install builds one "
+                                    "(the prebuilt archive is never exported).")
+        try:
+            return self.store.export_build(inst.build_id, Path(out))
+        except StoreError as e:
+            raise LocalRuntimeError(str(e)) from None
+
+    def prune(self, keep_last: int = 2) -> List[str]:
+        """Removes old self-built builds: never the active build, the CPU fallback or the build a running server
+        uses."""
+        from orchestrator.runtime.build.store import StoreError
+        try:
+            return self.store.prune(keep_last=keep_last)
+        except StoreError as e:
+            raise LocalRuntimeError(str(e)) from None
+
+    def rebuild_advice(self) -> Optional[str]:
+        """Whether the build in use should be built again (pin changed: required; this machine's plan changed:
+        recommended), None when it is current or no self-built build is in use."""
+        from orchestrator.runtime.build.host import rebuild_advice
+        inst = self.installed()
+        if inst is None or inst.build_id is None:
+            return None
+        build = self.store.get(inst.build_id)
+        if build is None:
+            return None
+        try:
+            plan = self.plan_install(backend=inst.backend if inst.backend != "cpu" else "cpu",
+                                     placement=inst.placement or "auto")
+        except LocalRuntimeError:
+            plan = None
+        return rebuild_advice(build, plan, self.catalog.llama_cpp.source)
+
+    # --- the official prebuilt archive (explicit opt-in, decision D1) ------------------------------------------------
+    def install_prebuilt(self, prefer: Optional[str] = None, force: bool = False,
+                         progress: Optional[ProgressFn] = None) -> InstalledRuntime:
+        """Downloads, verifies and unpacks the official prebuilt llama.cpp archive for this machine (or the requested
+        backend): only on explicit request (`ditto runtime install --prebuilt`), and always shown as "prebuilt, not
+        self-built". The previous installation of the same variant stays in place until the new one is complete."""
         choice = self.select_backend(prefer)
         asset = choice.asset
         if asset is None:
@@ -420,7 +732,7 @@ class LocalLLMRuntime:
             target = self.install_dir(asset)
             current = self._read_manifest(target)
             if current and not force and current.files == {f.name: f.sha256 for f in asset.files}:
-                self._update_active(variant=asset.variant, asset_id=asset.id)
+                self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
                 return current
             running = owned_process(_read_json(self.state_file))
             if running and target.exists() and self._uses(running, target):
@@ -459,12 +771,13 @@ class LocalLLMRuntime:
                     shutil.rmtree(old, ignore_errors=True)
             for archive in archives:
                 archive.unlink(missing_ok=True)
-            self._update_active(variant=asset.variant, asset_id=asset.id)
+            self._update_active(variant=asset.variant, asset_id=asset.id, use="prebuilt")
             self._prune_old_builds()
         inst = self._read_manifest(target)
         if inst is None:
             raise LocalRuntimeError(f"Installation in {target} is incomplete.")
-        self.logger.info(f"Installed llama.cpp {self.build} ({asset.id}) in {target}")
+        self.logger.info(f"Installed the official llama.cpp archive {self.build} ({asset.id}, {PREBUILT_LABEL}) in "
+                         f"{target}")
         return inst
 
     @staticmethod
@@ -661,10 +974,16 @@ class LocalLLMRuntime:
         """base_url, api key and model of the running server, or None."""
         return read_endpoint(self.root)
 
-    def status(self) -> RuntimeStatus:
+    def status(self, check_rebuild: bool = False) -> RuntimeStatus:
+        """The build in use (origin, ID, commit, backend, verification), why a stored build cannot be used, the
+        running server, and with check_rebuild whether the build should be built again (plans the build, so it
+        detects the toolchain)."""
         state = self._load_state()
         proc = owned_process(state)
-        status = RuntimeStatus(build=self.build, installed=self.installed(), log_file=self.log_file)
+        installed, problems = self.resolve_installed()
+        status = RuntimeStatus(build=self.build, installed=installed, problems=problems, log_file=self.log_file)
+        if check_rebuild and installed is not None and installed.build_id:
+            status.rebuild = self.rebuild_advice()
         if proc and state:
             status.running, status.pid, status.port = True, state.get("pid"), state.get("port")
             status.model, status.tier, status.ctx = state.get("alias"), state.get("tier"), state.get("ctx")
@@ -678,10 +997,18 @@ class LocalLLMRuntime:
               tie_to_process: bool = False, remember: bool = True) -> LocalEndpoint:
         """Starts llama-server (or returns the running one if it already serves this model and context).
         tier "auto" forgets a tier chosen earlier; tie_to_process ends the server together with this process;
-        remember=False keeps the tier chosen earlier (e.g. for an evaluation run)."""
-        installed = self.installed()
+        remember=False keeps the tier chosen earlier (e.g. for an evaluation run). Only a build that passed its
+        verification on this machine and still matches its manifest is started (or the opted-in prebuilt archive)."""
+        installed, problems = self.resolve_installed()
         if installed is None:
-            raise LocalRuntimeError("The local runtime is not installed. Run: llm-cli ditto runtime install")
+            if problems:
+                raise LocalRuntimeError("The local model server is not started: " + "; ".join(problems) +
+                                        ". Build it again: llm-cli ditto runtime install")
+            raise LocalRuntimeError("The local runtime is not installed. Run: llm-cli ditto runtime install (builds "
+                                    "llama-server from the pinned llama.cpp source; --prebuilt downloads the official "
+                                    "archive instead, not self-built)")
+        for note in installed.notes:
+            self.logger.warning(f"Local runtime: {note}")
         model, _ = self.resolve_model(tier)
         with self._lock():
             state = self._load_state() or {}
@@ -703,7 +1030,10 @@ class LocalLLMRuntime:
                 sleep_idle_seconds: Optional[int], timeout: Optional[float], tie_to_process: bool) -> LocalEndpoint:
         # Free RAM and VRAM are volatile: every start probes them again for the context size.
         hw = self.hardware(refresh=not self._hardware_given)
-        choice = select_backend(hw, self.catalog, installed.backend)
+        if installed.origin == "prebuilt":
+            choice = select_backend(hw, self.catalog, installed.backend)
+        else:
+            choice = backend_choice(hw, installed.backend)
         if ctx is None:
             ctx, why = compute_context(model, hw, choice, self.catalog.server, model_bytes=model_path.stat().st_size)
         else:
@@ -715,25 +1045,31 @@ class LocalLLMRuntime:
         cache_ram = max(256, min(8192, hw.ram_total // (8 * MIB)))
         timeout = timeout or self.catalog.server.health_timeout_seconds
 
+        again = ("llm-cli ditto runtime install --prebuilt --force" if installed.origin == "prebuilt"
+                 else "llm-cli ditto runtime install")
         for _ in range(3):  # a free port can be taken between choosing and binding it
-            key = secrets.token_urlsafe(32)
-            key_file = self.root / f"server-{secrets.token_hex(8)}.key"
-            _write_private(key_file, key + "\n")
+            key_file, key = write_key_file(self.root)
             port = _free_port()
             cmd = build_server_command(installed.server, model_path, port, key_file, ctx, model.alias,
                                        gpu=installed.backend in GPU_BACKENDS, cache_ram_mib=cache_ram,
                                        sleep_idle_seconds=sleep_idle_seconds or None)
-            self.logger.info(f"Starting llama-server {self.build} ({installed.variant}) on {LOOPBACK}:{port}, "
-                             f"model {model.file}, ctx {why}")
+            env = server_env()
+            try:
+                check_server_command(cmd)  # the shared policy, once more right before the start (decision D22)
+            except PolicyError as e:
+                key_file.unlink(missing_ok=True)
+                raise LocalRuntimeError(str(e)) from None
+            self.logger.info(f"Starting llama-server {self.build} ({installed.label}, {installed.name}, "
+                             f"{installed.variant}) on {LOOPBACK}:{port}, model {model.file}, ctx {why}")
             try:
                 with self._open_log() as log:
                     proc = self._popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
-                                       cwd=str(installed.server.parent), env=server_env(), close_fds=True,
+                                       cwd=str(installed.server.parent), env=env, close_fds=True,
                                        **popen_options())
             except OSError as e:  # not executable, wrong architecture, missing loader
                 key_file.unlink(missing_ok=True)
-                raise LocalRuntimeError(f"Could not start {installed.server}: {e.strerror or e}. Reinstall with: "
-                                        "llm-cli ditto runtime install --force") from e
+                raise LocalRuntimeError(f"Could not start {installed.server}: {e.strerror or e}. Build or install "
+                                        f"it again: {again}") from e
             self._proc = proc
             try:
                 created = psutil.Process(proc.pid).create_time()
@@ -741,7 +1077,8 @@ class LocalLLMRuntime:
                 created = 0.0  # already gone; the health wait reports it
             _write_private(self.state_file, json.dumps({
                 "pid": proc.pid, "create_time": created, "port": port, "server": str(installed.server),
-                "variant": installed.variant, "tier": model.tier, "alias": model.alias, "ctx": ctx,
+                "variant": installed.variant, "origin": installed.origin, "build_id": installed.build_id,
+                "tier": model.tier, "alias": model.alias, "ctx": ctx,
                 "key_file": str(key_file), "started_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}))
             if tie_to_process:
                 self._tie_to_this_process(proc.pid, created)

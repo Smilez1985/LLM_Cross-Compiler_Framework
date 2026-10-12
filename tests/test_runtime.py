@@ -124,10 +124,14 @@ def amd_sysfs(root: Path, card="card1", device="0x15bf", vram=512 * MIB, render=
     return root
 
 
-def hw(gpus=(), ram_gib=16.0, os_name="linux", arch="x86_64", vulkan=False, hip=None, free_gib=None):
+def hw(gpus=(), ram_gib=16.0, os_name="linux", arch="x86_64", vulkan=False, hip=None, free_gib=None, libc=None,
+       libc_version=None):
+    """A machine; Linux ones get glibc 2.39 unless the C library is given."""
     total = int(ram_gib * GIB)
+    if os_name == "linux" and libc is None:
+        libc, libc_version = "glibc", libc_version or "2.39"
     return HardwareInfo(os=os_name, arch=arch, ram_total=total, ram_available=int((free_gib or ram_gib * 0.8) * GIB),
-                        gpus=list(gpus), vulkan=vulkan, hip_runtime=hip)
+                        gpus=list(gpus), vulkan=vulkan, hip_runtime=hip, libc=libc, libc_version=libc_version)
 
 
 def nvidia(driver="580.95.05", cap=7.5, vram=11264, name="NVIDIA GeForce RTX 2080 Ti", free=None):
@@ -676,7 +680,7 @@ class TestInstall:
 
     def test_linux_cuda_install_merges_the_runtime_libraries(self, tmp_path):
         rt, session = self.setup_runtime(tmp_path)
-        inst = rt.install()
+        inst = rt.install_prebuilt()
         assert inst.variant == "cuda-13.4" and inst.server == rt.root / "b1-cuda-13.4" / "llama-b1" / "llama-server"
         bin_dir = inst.server.parent
         assert (bin_dir / "libcudart.so.13").read_bytes() == b"rt" and (bin_dir / "libcublas.so.13").exists()
@@ -687,40 +691,40 @@ class TestInstall:
             assert not os.stat(bin_dir / "LICENSE").st_mode & stat.S_IXUSR
         assert rt.installed() == inst
         calls = len(session.calls)
-        assert rt.install() == inst and len(session.calls) == calls  # already installed: nothing downloaded
-        rt.install(force=True)
+        assert rt.install_prebuilt() == inst and len(session.calls) == calls  # already installed: nothing downloaded
+        rt.install_prebuilt(force=True)
         assert len(session.calls) == calls + 2
 
     def test_windows_zips_unpack_into_one_folder(self, tmp_path):
         rt, _ = self.setup_runtime(tmp_path, os_name="windows")
-        inst = rt.install()
+        inst = rt.install_prebuilt()
         assert inst.server.name == "llama-server.exe" and (inst.server.parent / "cudart64_13.dll").exists()
 
     def test_a_failed_reinstall_keeps_the_previous_installation(self, tmp_path):
         rt, session = self.setup_runtime(tmp_path)
-        inst = rt.install()
+        inst = rt.install_prebuilt()
         for url in session.files:
             session.files[url] = b"tampered" + session.files[url][8:]
         with pytest.raises(IntegrityError):
-            rt.install(force=True)
+            rt.install_prebuilt(force=True)
         assert rt.installed() == inst and inst.server.is_file()
         assert not list(rt.root.glob(".staging-*")) and not list(rt.root.glob(".old-*"))
 
     def test_archive_escaping_its_folder_is_refused(self, tmp_path):
         rt, _ = self.setup_runtime(tmp_path, symlinks={"evil": "../../../../outside"})
         with pytest.raises(IntegrityError, match="Unsafe or broken archive"):
-            rt.install()
+            rt.install_prebuilt()
         assert rt.installed() is None and not (rt.root / "b1-cuda-13.4").exists()
 
     def test_runtime_libraries_may_not_replace_build_files(self, tmp_path):
         rt, _ = self.setup_runtime(tmp_path, lib_files={"libggml-cuda.so": b"other"})
         with pytest.raises(IntegrityError, match="would replace"):
-            rt.install()
+            rt.install_prebuilt()
 
     def test_missing_server_binary(self, tmp_path):
         rt, _ = self.setup_runtime(tmp_path, main_files={"llama-cli": b"x"}, symlinks={})
         with pytest.raises(LocalRuntimeError, match="llama-server not found"):
-            rt.install()
+            rt.install_prebuilt()
 
     def test_unpinned_asset_is_refused_before_any_download(self, tmp_path):
         asset = {"id": "linux-x64-cpu", "os": "linux", "arch": "x86_64", "backend": "cpu",
@@ -729,19 +733,19 @@ class TestInstall:
         rt = LocalLLMRuntime(data_dir=tmp_path / "state", catalog=runtime_catalog(assets=[asset]), hardware=CPU_HW,
                              session=session, models_dir=tmp_path / "m")
         with pytest.raises(IntegrityError, match="refusing to download"):
-            rt.install()
+            rt.install_prebuilt()
         assert session.calls == []
 
     def test_old_builds_are_pruned_other_variants_stay(self, tmp_path):
         rt, _ = self.setup_runtime(tmp_path)
         (rt.root / "b0-cpu").mkdir(parents=True)
         (rt.root / "b1-vulkan").mkdir(parents=True)
-        rt.install()
+        rt.install_prebuilt()
         assert not (rt.root / "b0-cpu").exists() and (rt.root / "b1-vulkan").exists()
 
     def test_refuses_to_replace_the_installation_the_server_runs_from(self, tmp_path, monkeypatch):
         rt, _ = self.setup_runtime(tmp_path)
-        inst = rt.install()
+        inst = rt.install_prebuilt()
 
         class Running:
             pid = 1
@@ -751,13 +755,13 @@ class TestInstall:
                 return str(inst.server)
         monkeypatch.setattr(ls, "owned_process", lambda state: Running())
         with pytest.raises(LocalRuntimeError, match="stop it first"):
-            rt.install(force=True)
+            rt.install_prebuilt(force=True)
 
     def test_no_build_for_this_machine(self, tmp_path):
         rt = LocalLLMRuntime(data_dir=tmp_path / "s", models_dir=tmp_path / "m", catalog=runtime_catalog(),
                              hardware=hw(arch="riscv64"))
         with pytest.raises(LocalRuntimeError, match="No llama.cpp build"):
-            rt.install()
+            rt.install_prebuilt()
 
 
 # --- models -----------------------------------------------------------------------------------------------------
@@ -1041,7 +1045,7 @@ class TestServerProcess:
     def test_server_that_cannot_be_executed(self, fake_runtime):
         rt = fake_runtime()
         (rt.root / "b1-cpu" / "llama-server").chmod(0o644)
-        with pytest.raises(LocalRuntimeError, match="runtime install --force"):
+        with pytest.raises(LocalRuntimeError, match="runtime install --prebuilt --force"):
             rt.start()
         assert not list(rt.root.glob("server-*.key"))
 
@@ -1211,22 +1215,37 @@ class TestCli:
         monkeypatch.setattr(cli_module, "_local_runtime", lambda ctx: rt)
         return CliRunner().invoke(cli_module.cli, ["-q", "ditto", *args], **kw)
 
+    @staticmethod
+    def probed(tmp_path, machine):
+        """A runtime with a stored probe and toolchain (no real probe, no compiler run)."""
+        from orchestrator.runtime.build.recipe import ToolchainInfo
+        from orchestrator.runtime.build.toolchain import DetectedToolchain
+        from orchestrator.runtime.profile import read_profile
+        profile = read_profile(Path(__file__).parent / "fixtures" / "hardware_probe" / "schema2_pc_two_nvidia.txt")
+        tools = DetectedToolchain(info=ToolchainInfo(host_os="linux", host_arch="x86_64", compiler="gcc-13.3.0",
+                                                     cmake="3.28.3", openmp=True), cpus=4, ram_available_mib=8192)
+        return LocalLLMRuntime(data_dir=tmp_path / "s", models_dir=tmp_path / "m", hardware=machine, profile=profile,
+                               toolchain=tools, platform=("linux", "x86_64"))
+
     def test_status_json_for_an_rtx_2080_ti(self, tmp_path, monkeypatch):
-        rt = LocalLLMRuntime(data_dir=tmp_path / "s", models_dir=tmp_path / "m",
-                             hardware=hw([nvidia("580.95.05")], ram_gib=32))
+        rt = self.probed(tmp_path, hw([nvidia("580.95.05")], ram_gib=32))
         result = self.invoke(monkeypatch, rt, "runtime", "status", "--json")
         data = json.loads(result.output)
-        assert data["recommended_build"] == "linux-x64-cuda-12.8" and "615" in data["build_reason"]
-        assert data["recommended_tier"] == "large" and data["installed"] is None and not data["running"]
+        assert data["prebuilt_option"] == "linux-x64-cuda-12.8" and "615" in data["prebuilt_reason"]
+        # The self-built server: CUDA would fit, but CUDA builds come with a later work package, so the CPU build
+        # runs and the tier follows the RAM.
+        assert data["recommended_backend"] == "cpu" and "cuda" in data["backend_reason"]
+        assert data["recommended_tier"] == "default" and data["installed"] is None and not data["running"]
 
     def test_status_table(self, tmp_path, monkeypatch):
-        rt = LocalLLMRuntime(data_dir=tmp_path / "s", models_dir=tmp_path / "m", hardware=hw(ram_gib=2.9))
+        rt = self.probed(tmp_path, hw(ram_gib=2.9))
         result = self.invoke(monkeypatch, rt, "runtime", "status")
         assert result.exit_code == 0 and "small-q2" in result.output and "runtime install" in result.output
+        assert "not self-built" in result.output, "the prebuilt opt-in is labelled"
 
     def test_install_and_model_download(self, tmp_path, monkeypatch):
         rt, _ = TestInstall().setup_runtime(tmp_path)
-        result = self.invoke(monkeypatch, rt, "runtime", "install", "--yes")
+        result = self.invoke(monkeypatch, rt, "runtime", "install", "--prebuilt", "--yes")
         assert result.exit_code == 0 and "Installed" in result.output, result.output
         data = b"GGUF" + os.urandom(1000)
         rt.catalog = runtime_catalog(data, assets=[a.model_dump() for a in rt.catalog.llama_cpp.assets])
@@ -1243,7 +1262,7 @@ class TestCli:
         assert result.exit_code == 1 and "llm-cli ditto runtime install" in result.output
         result = self.invoke(monkeypatch, rt, "models", "download", "nope")
         assert result.exit_code == 2 and "Unknown model tier" in result.output
-        result = self.invoke(monkeypatch, rt, "runtime", "install", "--backend", "rocm", "--yes")
+        result = self.invoke(monkeypatch, rt, "runtime", "install", "--prebuilt", "--backend", "rocm", "--yes")
         assert result.exit_code == 1 and "ROCm requested" in result.output
         declined = self.invoke(monkeypatch, rt, "models", "download", "small", input="n\n")
         assert declined.exit_code == 0 and not list(rt.models_dir.glob("*.gguf"))
@@ -1252,7 +1271,7 @@ class TestCli:
         rt, session = TestInstall().setup_runtime(tmp_path)
         for url in session.files:
             session.files[url] = b"x" + session.files[url][1:]
-        result = self.invoke(monkeypatch, rt, "runtime", "install", "--yes")
+        result = self.invoke(monkeypatch, rt, "runtime", "install", "--prebuilt", "--yes")
         assert result.exit_code == 1 and "does not match its pin" in result.output
 
 

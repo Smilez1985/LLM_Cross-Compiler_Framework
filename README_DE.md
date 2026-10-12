@@ -444,17 +444,40 @@ Messungen: [docs/Features_DE.md](docs/Features_DE.md#ditto-evaluation).
 
 ## Offline-Modus: das verwaltete lokale Modell
 
-Ditto kann ganz ohne Cloud-Konto mit einem lokalen Modell arbeiten. Das Framework lädt einen festgelegten
-llama.cpp-Build und ein festgelegtes Qwen3.5-Modell herunter und betreibt `llama-server` auf deinem Rechner:
+Ditto kann ganz ohne Cloud-Konto mit einem lokalen Modell arbeiten. Das Framework baut `llama-server` auf deinem
+Rechner aus dem festgelegten llama.cpp-Commit, lädt ein festgelegtes Qwen3.5-Modell herunter und betreibt den Server:
 
 ```bash
-llm-cli ditto runtime status       # Hardware, empfohlener llama.cpp-Build und empfohlenes Modell, Serverzustand
-llm-cli ditto runtime install      # der festgelegte llama.cpp-Build für diesen Rechner
+llm-cli ditto runtime status       # Hardware, der genutzte Build, das empfohlene Modell, Serverzustand
+llm-cli ditto runtime install      # baut llama-server für diesen Rechner (zuerst den CPU-Build, dann den GPU-Build)
 llm-cli ditto models list          # die Modellstufen, ihre Größe und ob sie heruntergeladen sind
 llm-cli ditto models download      # das empfohlene Modell (oder eine Stufe, z. B. small-q2)
 llm-cli ditto runtime start        # startet llama-server; er läuft weiter bis „runtime stop“
 llm-cli ditto runtime stop
 ```
+
+**Der Build.** `runtime install` zeigt, was es bauen wird, und fragt vorher. Es braucht einen C/C++-Compiler (GCC
+oder Clang), CMake und Ninja (unter Debian oder Ubuntu: `build-essential cmake ninja-build`); ohne sie baut es im
+Builder-Container des Frameworks, wenn Docker läuft. Das Framework installiert nie eine Toolchain für dich. Der
+festgelegte Quellcode (etwa 215 MB) wird einmal über seinen Commit geholt und geprüft; der Build selbst läuft ohne
+Netzwerk. Der CPU-Build kommt zuerst und dauert ein paar Minuten, damit `runtime start` bald funktioniert; ein
+GPU-Build (in dieser Version Vulkan unter Linux; CUDA-, ROCm-, Windows- und macOS-Builds folgen) wird danach gebaut
+und genutzt, sobald er seine Prüfungen bestanden hat. Jeder Build wird auf diesem Rechner geprüft, bevor er behalten
+wird (Version und Commit der Festlegung, die gefundenen Geräte, und dass der Server eigene Tools ablehnt), und
+`runtime start` startet nichts anderes.
+
+- **Rechner ohne Netzwerk:** `llm-cli ditto runtime export-source DATEI` und `import-source DATEI` tragen den
+  Quellcode; `llm-cli ditto runtime export DATEI.tar.gz` auf einem Rechner derselben Art und `llm-cli ditto runtime
+  import DATEI.tar.gz` hier tragen einen fertigen Build. Ein importierter Build wird gegen die Festlegung und sein
+  eigenes Manifest geprüft, du bestätigst ihn, und er wird hier geprüft, bevor er genutzt wird.
+- **Offizielles vorgebautes Archiv:** `llm-cli ditto runtime install --prebuilt` lädt stattdessen das Archiv von
+  upstream herunter (Größe und sha256 geprüft). Es wird nur genutzt, wenn du es verlangst, und immer als „prebuilt,
+  not self-built“ (vorgebaut, nicht selbst gebaut) angezeigt. Unter Linux braucht es die glibc, für die es gebaut
+  wurde (2.35 oder 2.39); auf musl-Systemen wie Alpine läuft nur der selbst gebaute Server. Bis die Windows- und
+  macOS-Builds kommen, ist das dort der Weg zum lokalen Modell.
+- `llm-cli ditto runtime prune` entfernt alte Builds; der aktive Build, sein CPU-Ersatz und der Build, aus dem ein
+  laufender Server gestartet wurde, bleiben immer erhalten. `runtime status` sagt, wann ein neuer Build nötig (die
+  Festlegung hat sich geändert) oder empfohlen ist (der Bauplan dieses Rechners hat sich geändert).
 
 Wähle danach in den KI-Einstellungen **Local model (managed llama-server)** (Anbieter `local`). Schalte zusätzlich
 den **Offline Mode** ein, wenn Ditto nie einen Cloud-Anbieter nutzen soll. Ditto findet den laufenden Server von
@@ -470,16 +493,19 @@ selbst. In dieser Version wird der Server nur über die Kommandozeile gesteuert.
 
 - `llm-cli ditto runtime start --model <Stufe>` wählt eine Stufe und merkt sie sich; `--model auto` kehrt zur
   Empfehlung zurück.
-- **Hardware:** NVIDIA-GPUs bekommen einen CUDA-Build, der zu GPU und Treiber passt; AMD-Radeon-GPUs und -APUs
-  (z. B. Ryzen Z1 Extreme) sowie Intel Arc nutzen Vulkan (ROCm nur mit `runtime install --backend rocm`); Apple
-  Silicon nutzt Metal; alles andere den CPU-Build. `runtime status` begründet jede Wahl.
-- **Geprüfte Downloads:** Jeder Build und jedes Modell ist mit Größe und sha256 in
-  [`configs/llama_runtime.yml`](configs/llama_runtime.yml) festgelegt (Modelle auf einem festen
-  Hugging-Face-Commit) und wird geprüft, bevor es entpackt oder geladen wird; Einträge ohne diese Angaben werden
-  abgelehnt.
+- **Hardware:** Das Bau-Rezept folgt Betriebssystem, Architektur und C-Bibliothek des Rechners. AMD-Radeon-GPUs und
+  -APUs (z. B. Ryzen Z1 Extreme) sowie Intel Arc bekommen einen Vulkan-Build; NVIDIA-GPUs werden einen CUDA-Build
+  bekommen, der zu GPU und Treiber passt (bis dahin läuft dort der CPU-Build, und `runtime install --backend vulkan`
+  baut einen Vulkan-Server, der auch NVIDIA-GPUs nutzt); alles andere nutzt den CPU-Build. `runtime status` begründet
+  jede Wahl.
+- **Geprüfte Downloads:** Der llama.cpp-Commit, die vorgebauten Archive und jedes Modell sind in
+  [`configs/llama_runtime.yml`](configs/llama_runtime.yml) festgelegt (Archive und Modelle mit Größe und sha256,
+  Modelle auf einem festen Hugging-Face-Commit) und werden geprüft, bevor sie genutzt werden; Einträge ohne diese
+  Angaben werden abgelehnt.
 - **Abschottung:** Der Server lauscht nur auf 127.0.0.1, auf einem freien Port, mit einem neuen API-Schlüssel pro
-  Start, der in einer Datei übergeben wird, die nur du lesen kannst. Seine Weboberfläche, seine eigenen Tools und
-  sein MCP-Client bleiben aus.
+  Start, der in einer Datei übergeben wird, die nur du lesen kannst, und mit einer geleerten Umgebung. Seine
+  Weboberfläche, seine eigenen Tools und sein MCP-Client bleiben aus; der selbst gebaute Server wird ganz ohne sein
+  Shell-Tool kompiliert.
 - **Aufwand:** Mit dem Aufwand „low“ antwortet das lokale Modell, ohne vorher nachzudenken (auf einer CPU viel
   schneller); „medium“ und höher lassen es nachdenken.
 
