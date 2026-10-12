@@ -891,6 +891,21 @@ class TestGenerator:
         ("FROM debian:bookworm-slim\n", {"scripts/fetch.py": "import urllib.request\nurllib.request.urlretrieve("
                                          "'https://github.com/ggml-org/llama.cpp/releases/latest/download/x.zip')\n"},
          "scripts/fetch.py:2: downloads a llama.cpp release archive"),
+        # A foreign image behind a stage name is still a foreign image (review of WP9).
+        ("FROM acme/tools@sha256:" + "e" * 64 + " AS tools\nFROM debian:bookworm-slim\n"
+         "COPY --from=tools /usr/bin/llama-server /usr/bin/\n", {},
+         "Dockerfile:3: copies llama.cpp binaries out of the image acme/tools"),
+        ("FROM acme/tools@sha256:" + "e" * 64 + " AS tools\nFROM tools AS again\nFROM debian:bookworm-slim\n"
+         "COPY --from=1 /usr/lib/libllama.so /usr/lib/\n", {},
+         "Dockerfile:4: copies llama.cpp binaries out of the image acme/tools"),
+        # A pipeline is one command: the download feeds the unpacking of the binary.
+        ("FROM debian:bookworm-slim\nARG U=https://mirror.invalid/tools.tgz\n"
+         "RUN curl -fsSL \"$U\" | tar -xz -C /usr/local/bin llama-server\n", {},
+         "Dockerfile:3: downloads llama.cpp binaries (llama-server)"),
+        # A script without a known suffix that the Dockerfile runs is still a script.
+        ("FROM debian:bookworm-slim\nCOPY scripts/ /s/\nRUN sh /s/setup\n",
+         {"scripts/setup": "#!/bin/sh\nwget -qO /usr/local/bin/llama-quantize https://mirror.invalid/q\n"},
+         "scripts/setup:2: downloads llama.cpp binaries (llama-quantize)"),
     ])
     def test_prebuilt_llama_cpp_is_flagged(self, tmp_path, dockerfile, files, finding):
         from orchestrator.Core.module_generator import validate_target_folder
@@ -910,6 +925,23 @@ class TestGenerator:
             "    cmake --build /src/build --target llama-quantize llama-bench\n"
             "# FROM ghcr.io/ggml-org/llama.cpp:full (a comment is not an instruction)\n"
             "RUN pip install llama-cpp-python\n"))
+        assert validate_target_folder(target) == []
+
+    def test_binaries_built_in_an_earlier_stage_may_be_copied_on(self, tmp_path):
+        """Multi-stage builds of the recipe: the tools compiled in one stage, copied into the next and from there into
+        a third stage, are built from source (only a stage that never builds them is a foreign image)."""
+        from orchestrator.Core.module_generator import validate_target_folder
+        target = make_target(tmp_path / "t", dockerfile=(
+            "FROM debian:bookworm-slim AS builder\n"
+            "RUN cmake -S /src -B /src/build && cmake --build /src/build --target llama-quantize\n"
+            "FROM debian:bookworm-slim AS runtime\n"
+            "COPY --from=builder /src/build/bin/llama-quantize /usr/local/bin/\n"
+            "FROM runtime AS final\n"
+            "COPY --from=runtime /usr/local/bin/llama-quantize /opt/bin/\n"
+            "COPY --from=0 /src/build/bin/libllama.so /opt/lib/\n"
+            "RUN curl -fsSL https://example.invalid/calibration.txt | sha256sum -c sums.txt && \\\n"
+            "    /opt/bin/llama-quantize --help\n"))
+        (target / "modules" / "README").write_text("Download llama-server with curl? No: it is built here.\n")
         assert validate_target_folder(target) == []
 
     def test_knowledge_snapshot_is_opt_in_and_target_scoped(self, generator, world):

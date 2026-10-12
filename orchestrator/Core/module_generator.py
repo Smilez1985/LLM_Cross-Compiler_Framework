@@ -492,6 +492,10 @@ class ModuleGenerator:
             
             if filename == "Dockerfile.gpu":
                 content = self._cuda_opt_in(content, str(data.get("base_os", "")))
+                if re.search(r"^ARG CUDA_SOURCE=prebuilt-image$", content, re.MULTILINE):
+                    self.logger.warning(f"CUDA for '{data.get('module_name')}' comes from the prebuilt image "
+                                        f"{data.get('base_os')} (your explicit opt-in, not self-built), not from "
+                                        "NVIDIA's pinned redist archives.")
 
             # YAML Handling
             if dst.suffix == ".yml":

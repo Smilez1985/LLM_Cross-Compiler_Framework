@@ -1064,7 +1064,8 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
   ([Konvertierungswerkzeuge abgestimmt auf den Build-Rechner](#konvertierungswerkzeuge-abgestimmt-auf-den-build-rechner)).
   Die GPU-Vorlage nimmt CUDA 12.9.1 aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jedes Archiv
   geprüft) auf Ubuntu 22.04, per Digest festgelegt; das vorgebaute Entwicklungs-Image von NVIDIA ist nur ein
-  ausdrücklicher Opt-in, per Digest festgelegt und gekennzeichnet.
+  ausdrücklicher Opt-in (ein Basis-Image, das du selbst wählst; Dittos Vorschläge enthalten nie eines), per Digest
+  festgelegt und als „not self-built“ gekennzeichnet.
 - **Prüfungen, bevor etwas geschrieben wird:** Namen, Images, Pakete und Flags werden streng geprüft; Shell-Code wird
   gegen eine Sperrliste und mit `bash -n` geprüft; Dateien werden nur innerhalb von `targets/` geschrieben; ein
   vorhandenes Target wird nie überschrieben. Setup-Befehle laufen später als Benutzer ohne Sonderrechte und ohne

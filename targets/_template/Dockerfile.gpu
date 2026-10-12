@@ -12,8 +12,9 @@
 # Opt-in, not provisioned from the manifest: NVIDIA's prebuilt development image, pinned by digest. To use it,
 # replace the FROM line of the builder stage with
 #   FROM nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8 AS builder
-# and set CUDA_SOURCE=prebuilt-image; the image is then labelled as built with a prebuilt CUDA image. The module
-# generator does this when a digest-pinned nvidia/cuda:*-devel-ubuntu22.04 image is chosen as base image.
+# and set CUDA_SOURCE=prebuilt-image; the image is then labelled as built with a prebuilt CUDA image, not self-built.
+# The module generator does this when you choose a digest-pinned nvidia/cuda:*-devel-ubuntu22.04 image as base image
+# yourself (an AI proposal never does).
 
 # ============================================================================
 # STAGE 1: Build Environment (CUDA toolkit)
@@ -89,7 +90,7 @@ RUN set -euf; \
     prebuilt-image) \
         [ -x "${CUDA_HOME}/bin/nvcc" ] \
             || { echo "CUDA_SOURCE=prebuilt-image needs an NVIDIA development image as base" >&2; exit 1; }; \
-        echo "CUDA from a prebuilt NVIDIA image (opt-in): not provisioned from the pinned manifest" ;; \
+        echo "CUDA from a prebuilt NVIDIA image (explicit opt-in, not self-built): not provisioned from the pinned manifest" ;; \
     *) echo "CUDA_SOURCE must be redist or prebuilt-image" >&2; exit 1 ;; \
     esac; \
     mkdir -p "${CUDA_RUNTIME_DIR}/lib"; \

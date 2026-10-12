@@ -432,8 +432,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ein erzeugtes Modul bricht also nicht mehr mit „llama.cpp converter not found“ ab. Die GPU-Vorlage nimmt CUDA 12.9.1
   aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jede Komponente geprüft) auf Ubuntu 22.04, per
   Digest festgelegt, statt der nicht festgelegten `nvidia/cuda:12.2.2`-Images; das vorgebaute Entwicklungs-Image von
-  NVIDIA ist ein ausdrücklicher Opt-in, per Digest festgelegt (als Basis-Image gewählt) und gekennzeichnet mit
-  `org.llm-framework.cuda-source=prebuilt-image`. Der Assistent trägt für NVIDIA-Hardware kein `nvidia/cuda`-Image
+  NVIDIA ist ein ausdrücklicher Opt-in, per Digest festgelegt (ein Basis-Image, das du selbst wählst; Dittos
+  Vorschläge enthalten nie eines, weil eine Probe-Datei sie lenken könnte) und gekennzeichnet mit
+  `org.llm-framework.cuda-source=prebuilt-image`, in den Logs mit „not self-built“. Der Assistent trägt für NVIDIA-Hardware kein `nvidia/cuda`-Image
   mehr ein.
 
 ### Veraltet
@@ -726,8 +727,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Kein vorgebautes llama.cpp in Targets**: Erzeugte Module, Community-Exporte und Target-Pakete in Quarantäne
   werden abgelehnt, wenn ein Dockerfile ein vorgebautes llama.cpp-Image bezieht (nach seinem Namen, auch per Digest
   festgelegt, oder eines der früheren Laufzeit-Images des Frameworks) oder llama.cpp-Programme aus einem anderen Image
-  kopiert, oder wenn ein Dockerfile, ein Skript oder eine YAML-Datei llama.cpp-Release-Archive oder -Programme
-  herunterlädt, eine Paketquelle mit vorgebauten `llama-cpp-python`-Wheels nutzt oder ein llama.cpp-Paket installiert:
+  kopiert (auch über eine Build-Stufe, die es nur nennt), oder wenn ein Dockerfile, ein Skript (auch eines ohne
+  bekannte Endung, das mit `#!` beginnt) oder eine YAML-Datei llama.cpp-Release-Archive oder -Programme herunterlädt
+  (auch über eine Pipeline wie `curl ... | tar -x`), eine Paketquelle mit vorgebauten `llama-cpp-python`-Wheels nutzt oder ein llama.cpp-Paket installiert:
   Das Framework teilt Rezepte, keine Binärdateien. `nvidia/cuda`-Images gelten nicht mehr als offizielle Basis-Images
   und brauchen einen Digest, und ein llama.cpp-Image wird als Basis-Image eines Moduls abgelehnt.
 

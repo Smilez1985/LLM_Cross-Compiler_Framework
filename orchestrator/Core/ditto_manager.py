@@ -150,6 +150,14 @@ def describe_llm_error(err: BaseException) -> str:
 
 # --- structured answers -----------------------------------------------------------------------------------------
 
+# NVIDIA's prebuilt development images are an explicit opt-in of the user (decision D6): typed as the base image in the
+# module wizard or `llm-cli module create`. A proposal, which a probe file can steer, never carries one; without it the
+# GPU template provisions CUDA from the pinned redist archives.
+PREBUILT_CUDA_IMAGE = re.compile(r"(?:^|/)nvidia/cuda(?:[:@]|$)", re.IGNORECASE)
+PREBUILT_CUDA_REFUSAL = ("a prebuilt nvidia/cuda image is the user's explicit opt-in, never part of a proposal; "
+                         "propose ubuntu:22.04 (CUDA comes from the framework's pinned redist archives)")
+
+
 def _limit(value: str, size: int, name: str) -> str:
     # Lengths are checked here, not in the JSON schema: not every provider's strict mode accepts maxLength.
     value = value.strip()
@@ -214,6 +222,13 @@ class ModuleDefinition(BaseModel):
     @classmethod
     def _short(cls, v: str, info) -> str:
         return _limit(v, 500, info.field_name)
+
+    @field_validator("base_os")
+    @classmethod
+    def _no_prebuilt_cuda(cls, v: str) -> str:
+        if PREBUILT_CUDA_IMAGE.search(v):
+            raise ValueError(PREBUILT_CUDA_REFUSAL)
+        return v
 
     @field_validator("setup_commands", "quantization_logic")
     @classmethod
@@ -689,11 +704,13 @@ class DittoCoder:
         """Creates the module through the module generator (which validates every value again). `profile` is the
         parsed hardware probe of the target, when the probe file was one: the runtime: block of the module is the
         build recipe's plan from it. The proposal's cpu_flags and cmake_flags are kept there as advisory text and
-        never applied (decision D20)."""
+        never applied (decision D20). A proposal never opts in to a prebuilt nvidia/cuda image (decision D6)."""
         data = definition.model_dump() if isinstance(definition, BaseModel) else dict(definition)
         packages = data.get("packages", [])
         if isinstance(packages, str):
             packages = packages.split()
+        if PREBUILT_CUDA_IMAGE.search(str(data.get("base_os") or "")):
+            raise ValueError(f"base_os: {PREBUILT_CUDA_REFUSAL}")
         name = module_name or data.get("module_name") or "Custom_Target"
         generator_input = {
             "module_name": name,

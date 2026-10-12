@@ -927,7 +927,7 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **CycloneDX SBOM** and artifact provenance. | planned |
 | **Dependabot cooldown** for LLM SDKs. | planned |
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
-| **Signed updates** of the framework itself (`orchestrator/utils/updater.py`, in development: update check, update and restart; not wired yet), finished as verified updates of a signed release instead of a plain `git pull`. The settings `docker_registry` and `docker_namespace` name the framework's own toolchain images once they are published and signed. | planned |
+| **Signed updates** of the framework itself (`orchestrator/utils/updater.py`, in development: update check, update and restart; not wired yet), finished as verified updates of a signed release instead of a plain `git pull`. Toolchain images are not part of it: the framework shares recipes, never compiled images, so they stay built on your machine from the target's Dockerfile; the settings `docker_registry` and `docker_namespace`, which nothing reads, are kept. | planned |
 | **Clean-up**: removal of the legacy four-module scripts (the template `build.sh` and Dockerfile already follow the current pipeline: GGUF through llama.cpp built from the recipe, intermediates in the work folder). | planned |
 | **SSOT corrections** for the project-sources catalogue and its scripts. | done |
 

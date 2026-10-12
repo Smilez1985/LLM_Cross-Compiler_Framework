@@ -44,8 +44,12 @@ _PACKAGE_INSTALL = re.compile(
     r"choco|scoop)\b.*?(?:\binstall\b|\badd\b|\s-S\b|\s-i\b).*?"
     r"(?<![\w.-])(?:llama\.cpp[\w.-]*|llama-cpp[\w.-]*|llamacpp|libllama[\w.-]*|libggml[\w.-]*)(?![\w.-])",
     re.IGNORECASE)
-# Shell command separators: a download and a binary name count together only within one command.
-_COMMANDS = re.compile(r"&&|\|\||[;|\n]")
+# Shell command separators: a download and a binary name count together only within one command. A pipeline is one
+# command here: `curl ... | tar -x llama-server` unpacks the binary it downloads.
+_COMMANDS = re.compile(r"&&|\|\||[;\n]")
+# A RUN step of the shared recipe compiles with CMake: llama.cpp binaries of such a stage are built from source.
+_RUN = re.compile(r"^\s*RUN\b", re.IGNORECASE)
+_COMPILES = re.compile(r"\bcmake\b", re.IGNORECASE)
 
 _FROM = re.compile(r"^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?", re.IGNORECASE)
 _FROM_REF = re.compile(r"(?:--|,)from=([^\s,]+)", re.IGNORECASE)
@@ -106,25 +110,78 @@ def _text_findings(line: str) -> List[str]:
     return found
 
 
+class _Stage:
+    """One build stage: its name, its FROM reference, and whether llama.cpp binaries in it are built from source (a
+    RUN step that compiles, or a COPY --from= of a stage whose binaries are)."""
+
+    def __init__(self, name: Optional[str], base: str):
+        self.name, self.base, self.builds = name, base, False
+
+
+def _stage_of(stages: List[_Stage], ref: str) -> Optional[int]:
+    """The index of the earlier stage `ref` names (by name or number), None for an image."""
+    if ref.isdigit():
+        return int(ref) if int(ref) < len(stages) else None
+    for index in range(len(stages) - 1, -1, -1):
+        if stages[index].name == ref.lower():
+            return index
+    return None
+
+
+def _origin(stages: List[_Stage], index: int) -> Tuple[bool, str]:
+    """(llama.cpp binaries of the stage are built from source, the image at the root of its FROM chain). A stage that
+    only names a foreign image (FROM acme/tools@sha256:... AS tools) holds that image's files, not built ones."""
+    seen: set = set()
+    base = stages[index].base
+    current: Optional[int] = index
+    while current is not None and current not in seen:
+        seen.add(current)
+        stage = stages[current]
+        if stage.builds:
+            return True, stage.base
+        base = stage.base
+        parent = _stage_of(stages[:current], base)
+        current = parent if not base.isdigit() else None
+    return False, base
+
+
 def scan_dockerfile(text: str, name: str = "Dockerfile") -> List[str]:
     """Findings of one Dockerfile: prebuilt llama.cpp images in FROM, COPY --from and RUN --mount=...,from=, llama.cpp
-    binaries copied out of another image, and downloads or package installs of prebuilt llama.cpp."""
+    binaries copied out of another image (also through a stage that only names that image), and downloads or package
+    installs of prebuilt llama.cpp."""
     findings: List[str] = []
-    stages: set = set()
+    stages: List[_Stage] = []
     for number, line in _logical_lines(text):
         where = f"{name}:{number}"
         m = _FROM.match(line)
-        refs = [m.group(1)] if m else []
-        refs += _FROM_REF.findall(line)
-        for ref in refs:
-            if ref.lower() in stages or ref.isdigit():
+        if m:
+            base = m.group(1)
+            if _stage_of(stages, base) is None and not base.isdigit() and is_prebuilt_llama_image(base):
+                findings.append(f"{where}: pulls a prebuilt llama.cpp image ({base}); {_ADVICE}")
+            stages.append(_Stage(m.group(2).lower() if m.group(2) else None, base))
+        # COPY/ADD --from= copies files out of an image or stage; RUN --mount=...,from= mounts one.
+        takes = bool(_COPY.match(line) or _RUN.match(line))
+        # The binary names of a RUN step that compiles are its build targets.
+        names_binary = bool(_BINARY.search(line)) and not (_RUN.match(line) and _COMPILES.search(line))
+        for ref in _FROM_REF.findall(line):
+            index = _stage_of(stages[:-1], ref) if stages else None
+            if index is None:
+                if ref.isdigit():
+                    continue
+                if is_prebuilt_llama_image(ref):
+                    findings.append(f"{where}: pulls a prebuilt llama.cpp image ({ref}); {_ADVICE}")
+                elif takes and names_binary:
+                    findings.append(f"{where}: copies llama.cpp binaries out of the image {ref}; {_ADVICE}")
                 continue
-            if is_prebuilt_llama_image(ref):
-                findings.append(f"{where}: pulls a prebuilt llama.cpp image ({ref}); {_ADVICE}")
-            elif _COPY.match(line) and _BINARY.search(line):
-                findings.append(f"{where}: copies llama.cpp binaries out of the image {ref}; {_ADVICE}")
-        if m and m.group(2):
-            stages.add(m.group(2).lower())
+            built, image = _origin(stages, index)
+            if built:
+                if takes and stages:
+                    stages[-1].builds = True  # the binaries it takes over are built from source
+            elif takes and names_binary:
+                findings.append(f"{where}: copies llama.cpp binaries out of the image {image} (stage {ref}), which "
+                                f"does not build them; {_ADVICE}")
+        if stages and _RUN.match(line) and _COMPILES.search(line):
+            stages[-1].builds = True
         findings += [f"{where}: {reason}; {_ADVICE}" for reason in _text_findings(line)]
     return findings
 
@@ -141,9 +198,19 @@ def is_dockerfile(path: Path) -> bool:
     return path.name.lower().startswith("dockerfile")  # Dockerfile, dockerfile, Dockerfile.gpu
 
 
+def _is_script(path: Path) -> bool:
+    """A file without a known suffix that starts with #! (a script a Dockerfile RUN step can execute)."""
+    try:
+        with open(path, "rb") as f:
+            return f.read(2) == b"#!"
+    except OSError:
+        return False
+
+
 def scan_target_folder(root: Path, skip: Iterable[str] = ()) -> List[str]:
-    """Findings of every Dockerfile, script and YAML file below `root` (paths relative to it in the messages). Files
-    in `skip` (relative POSIX paths, e.g. a crawled knowledge snapshot) and symbolic links are left out."""
+    """Findings of every Dockerfile, script (by its suffix, or any file that starts with #!) and YAML file below
+    `root` (paths relative to it in the messages). Files in `skip` (relative POSIX paths, e.g. a crawled knowledge
+    snapshot) and symbolic links are left out."""
     root = Path(root)
     skipped = set(skip)
     findings: List[str] = []
@@ -151,13 +218,11 @@ def scan_target_folder(root: Path, skip: Iterable[str] = ()) -> List[str]:
         rel = path.relative_to(root).as_posix()
         if rel in skipped:
             continue
-        text: Optional[str] = None
-        if is_dockerfile(path) or path.suffix.lower() in SCRIPT_SUFFIXES:
-            data = path.read_bytes()
-            if b"\0" in data:
-                continue  # binary files are refused by the validator on their own
-            text = data.decode("utf-8", errors="replace")
-        if text is None:
+        if not (is_dockerfile(path) or path.suffix.lower() in SCRIPT_SUFFIXES or _is_script(path)):
             continue
+        data = path.read_bytes()
+        if b"\0" in data:
+            continue  # binary files are refused by the validator on their own
+        text = data.decode("utf-8", errors="replace")
         findings += scan_dockerfile(text, rel) if is_dockerfile(path) else scan_script(text, rel)
     return findings
