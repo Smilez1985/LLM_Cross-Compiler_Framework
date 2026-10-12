@@ -122,7 +122,7 @@ class TestPermissions:
         assert registry.writes == []
 
     def test_allowed_tools_run_without_asking(self, server, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         asked = []
 
         async def go():
@@ -131,7 +131,7 @@ class TestPermissions:
         assert not run(go()).is_error and asked == [] and registry.writes == ["x"]
 
     def test_denied_tools_never_run(self, server, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
 
         async def go():
             async with Client(server, elicitation_callback=answering("accept")) as client:

@@ -912,7 +912,9 @@ class ToolPermissionsDialog(QDialog):
         from orchestrator.tools.policy import Decision, TIER_LABELS, ToolTier
         self._Decision, self._ToolTier = Decision, ToolTier
         self.registry = registry
-        policy = registry.policy()
+        # What this window shows and changes: saving refuses when the stored permissions changed meanwhile
+        # (another window or process), so a change made elsewhere is never undone silently.
+        self.loaded = policy = registry.policy()
         self.setWindowTitle("Ditto setup - tool permissions" if first_run else "Tool permissions")
         self.resize(720, 520)
         layout = QVBoxLayout(self)
@@ -924,6 +926,12 @@ class ToolPermissionsDialog(QDialog):
             "Tools marked new use their own default until you save here.")
         intro.setWordWrap(True)
         layout.addWidget(intro)
+        problem = getattr(registry.policy_store, "problem", None)
+        if problem:  # e.g. not signed or edited by hand: everything is denied until saved here
+            warning = QLabel(problem)
+            warning.setWordWrap(True)
+            warning.setStyleSheet("color: #b00020;")
+            layout.addWidget(warning)
 
         tier_box = QGroupBox("Per category")
         form = QFormLayout(tier_box)
@@ -942,11 +950,12 @@ class ToolPermissionsDialog(QDialog):
         layout.addWidget(QLabel("Per tool (optional, overrides the category):"))
         tools = registry.list()
         facts = {row["tool"]: row for row in registry.permissions("")}
-        self.table = QTableWidget(len(tools), 5)
+        self.table = QTableWidget(len(tools), 6)
         self.table.setHorizontalHeaderLabels(["Tool", "Category", "Default / max / standing approval", "New",
-                                              "Permission"])
+                                              "Permission", "Ask in the framework"])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.override_combos = {}
+        self.framework_checks = {}  # questions always shown here (approval window), never in the client's dialog
         for row, spec in enumerate(tools):
             name_item = QTableWidgetItem(spec.title)
             name_item.setToolTip(spec.description)
@@ -964,12 +973,67 @@ class ToolPermissionsDialog(QDialog):
             combo.setCurrentIndex(combo.findData(current.value) if current else 0)
             self.table.setCellWidget(row, 4, combo)
             self.override_combos[spec.name] = combo
+            from PySide6.QtWidgets import QCheckBox
+            check = QCheckBox()
+            check.setChecked(spec.name in policy.framework_only)
+            check.setToolTip("Always put this tool's questions to you in the framework's approval window, never in "
+                             "the AI client's own dialog")
+            self.table.setCellWidget(row, 5, check)
+            self.framework_checks[spec.name] = check
         layout.addWidget(self.table)
+
+        # Standing approvals ("do not ask again"): only created in the framework's approval windows, revoked here.
+        layout.addWidget(QLabel("Standing approvals (\"do not ask again\"), with their uses from the audit log:"))
+        self.grant_table = QTableWidget(0, 5)
+        self.grant_table.setHorizontalHeaderLabels(["Id", "Caller", "Covers", "State", "Uses / last use"])
+        self.grant_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.grant_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.grant_table.setSelectionBehavior(QTableWidget.SelectRows)
+        layout.addWidget(self.grant_table)
+        revoke = QPushButton("Revoke selected standing approval")
+        revoke.clicked.connect(lambda: self.revoke_grant(self._selected_grant()))
+        layout.addWidget(revoke)
+        self.refresh_grants()
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         buttons.accepted.connect(self.save)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
+
+    def refresh_grants(self):
+        from orchestrator.tools.approvals import caller_label, tool_title
+        rows = self.registry.grant_rows()
+        self.grant_table.setRowCount(len(rows))
+        for i, row in enumerate(rows):
+            grant = row["grant"]
+            uses = f"{row['uses']}" + (f", last {row['last_use']}" if row["last_use"] else "")
+            texts = (grant.id, caller_label(row["caller"]), f"{tool_title(self.registry, grant.tool)}: {grant.summary}",
+                     row["state"], uses)
+            for col, text in enumerate(texts):
+                self.grant_table.setItem(i, col, QTableWidgetItem(text))
+
+    def _selected_grant(self):
+        row = self.grant_table.currentRow()
+        item = self.grant_table.item(row, 0) if row >= 0 else None
+        return item.text() if item is not None else ""
+
+    def revoke_grant(self, grant_id: str) -> bool:
+        """Revokes at once (audited); the window's other settings are then saved on top of the new state."""
+        if not grant_id:
+            return False
+        try:
+            revoked = self.registry.revoke_grant(grant_id, "gui")
+        except Exception as e:
+            QMessageBox.critical(self, "Tool permissions", f"Could not revoke the standing approval:\n{e}")
+            return False
+        # Carry on from the new revision only when nothing but standing approvals changed since this window opened;
+        # otherwise its save stays based on what it showed and is refused, so a change made elsewhere is not undone.
+        fresh = self.registry.policy()
+        ignored = {"revision", "updated_at", "grants"}
+        if fresh.model_dump(exclude=ignored) == self.loaded.model_dump(exclude=ignored):
+            self.loaded = fresh
+        self.refresh_grants()
+        return revoked
 
     def build_policy(self):
         """The shared permissions as set here; every listed tool counts as reviewed, and callers with permissions
@@ -977,13 +1041,14 @@ class ToolPermissionsDialog(QDialog):
         tiers = {tier: self._Decision(combo.currentData()) for tier, combo in self.tier_combos.items()}
         overrides = {name: self._Decision(combo.currentData())
                      for name, combo in self.override_combos.items() if combo.currentData()}
-        return self.registry.policy().model_copy(update={
+        return self.loaded.model_copy(update={
             "configured": True, "tiers": tiers, "overrides": overrides,
-            "reviewed": sorted(self.override_combos)})
+            "reviewed": sorted(self.override_combos),
+            "framework_only": sorted(n for n, check in self.framework_checks.items() if check.isChecked())})
 
     def save(self):
         try:
-            self.registry.policy_store.save(self.build_policy())
+            self.registry.policy_store.save(self.build_policy(), actor="gui")
         except Exception as e:
             QMessageBox.critical(self, "Tool permissions", f"Could not save the permissions:\n{e}")
             return

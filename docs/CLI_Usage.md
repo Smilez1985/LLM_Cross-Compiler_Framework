@@ -787,6 +787,12 @@ set in the GUI are kept. It first lists every tool with its own default, the hig
 it (`at most`), whether it is new since the last review and whether a confirmation may offer a standing approval;
 saving counts every listed tool as reviewed. The GUI dialog shows the same facts.
 
+It needs a person at a terminal, with and without `--reset` (as does `ditto setup`): piped answers are refused with
+exit code 2. Every save is audited with actor `cli` and the old and new decisions before it takes effect, and is
+refused (exit code 1, nothing changed) when the audit entry cannot be written or when the permissions were saved
+elsewhere (the GUI, another terminal) while you answered. A permission file that is damaged, edited by hand or not
+signed (one saved by 3.0.0, too) denies every tool until you run this again; the questions then start from "deny".
+
 | Option | Meaning |
 |---|---|
 | `--caller ditto\|mcp` | Set the permissions of one caller (Ditto, or local MCP clients over stdio) instead of the shared ones. A caller's first permissions start from the shared ones, including the settings for single tools. |
@@ -813,6 +819,40 @@ llm-cli tools audit --limit 100
 llm-cli tools audit --verify
 llm-cli tools audit --archive
 ```
+
+### tools approvals
+
+```
+llm-cli tools approvals [list]
+llm-cli tools approvals show ID
+llm-cli tools approvals approve ID
+llm-cli tools approvals decline ID
+```
+
+Calls of AI clients that could not ask you themselves (the client has no form elicitation, the question is longer
+than 4,000 characters, or you set the tool with `tools permissions --confirm-in-framework TOOL`). `list` (also
+without a subcommand) shows each waiting call with its id, tool, caller class, the client's self-reported name and
+the time left; `show` prints the full question; `approve` and `decline` show it again and ask "Approve this call?"
+or "Decline this call?" before anything is decided. On approval the framework runs the call for the client, under
+the client's caller; the client reads the result with `get_job_status`. Every subcommand needs a terminal (exit code
+2 otherwise); a decision is refused (exit code 1) when the approval has expired (15 minutes), was already decided,
+its client's session has ended, its question changed meanwhile, or the audit log cannot record the decision. On a
+headless machine, such as the Docker image, run it in a terminal there (`docker exec -it <container> llm-cli tools
+approvals`). The GUI shows the same calls under **Tools > Pending Approvals...**.
+
+`approve ID --always [--width this|any] [--duration revoke|30d|24h]` approves the call and saves a standing
+approval ("do not ask again") within the scope the framework offered for it, after showing the scope and the
+warning; `list` marks the calls where it is offered and the requests a client's dialog sent ("asks to stop
+asking"), which are approved only with a scope. `--always` is refused while a GUI session of the framework runs:
+use its approval window. For all local stdio clients together only `--width this` and `--duration 30d` or `24h`
+exist.
+
+| Option of `tools permissions` | Meaning |
+|---|---|
+| `--confirm-in-framework TOOL` | Always put this tool's questions to you in the framework (the approval window or this command), never in the AI client's own dialog. Repeatable; with `--caller` for one caller. Needs a terminal; audited. |
+| `--confirm-anywhere TOOL` | Undo `--confirm-in-framework` for this tool. |
+| `--grants` | List the standing approvals of every caller: what each covers, its state (active, expired, lapsed, outdated), when and how it was created, its uses and last use (from the audit log) and its expiry. |
+| `--revoke-grant ID` | Revoke one standing approval at once (needs a terminal; audited). `--reset` clears them all, `--reset --caller` those of that caller; revoking a token removes its own. |
 
 ### tools folders
 
@@ -861,8 +901,8 @@ llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT]
 ```
 
 Runs the MCP server. Normally the AI client starts it for you (see `mcp config`). stdout carries the protocol;
-logs go to stderr. If the tool permissions are not set up yet, read-only tools work and everything else asks (or is
-denied when the client cannot ask).
+logs go to stderr. If the tool permissions are not set up yet, read-only tools work and everything else asks (when
+the client cannot ask, the question waits in the framework: see [tools approvals](#tools-approvals)).
 
 | Option | Meaning |
 |---|---|

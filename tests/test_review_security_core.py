@@ -1429,11 +1429,11 @@ class TestApprovalAuditing:
         assert (entry["outcome"], entry["approved"]) == ("ok", 1)
 
     def test_allow_and_deny_are_not_recorded_as_approvals(self, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"probe": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"probe": Decision.ALLOW}))
         registry.call("probe", {"text": "x"}, ToolContext("mcp"))
         assert (last_entry(registry)["decision"], self.approved_column(registry)) == ("allow", (None, 1))
 
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"probe": Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"probe": Decision.DENY}))
         with pytest.raises(ToolDenied):
             registry.call("probe", {"text": "x"}, ToolContext("mcp"), approved=True)
         entry = last_entry(registry)

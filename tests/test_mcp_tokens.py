@@ -103,7 +103,7 @@ class TestTokenStore:
     def test_policy_from_copies_and_link_follows_by_reference(self, tokens, registry):
         # The tools count as reviewed (S3): a tool you have not reviewed never gets a loosened tier setting.
         reviewed = ["echo", "write"]
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW},
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW},
                                               reviewed=reviewed))
         tokens.add("copy", policy=registry.policy("mcp").model_copy(deep=True))
         tokens.add("linked", link="ditto")
@@ -111,7 +111,7 @@ class TestTokenStore:
         assert registry.decide(write, caller="mcp:copy") == registry.decide(write, caller="mcp:linked") \
             == Decision.ALLOW
         # A change to Ditto's permissions applies to the linked token at once; the copy keeps what it got.
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY},
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY},
                                               reviewed=reviewed))
         assert registry.decide(write, caller="mcp:linked") == Decision.DENY
         assert registry.decide(write, caller="mcp:copy") == Decision.ALLOW
@@ -394,7 +394,7 @@ def test_a_token_pasted_into_an_argument_or_client_name_reaches_no_audit_entry_o
 def test_an_http_server_never_falls_back_to_the_shared_caller(registry, tmp_path):
     # Your own permissions allow the write. A server built for HTTP that gets a request without a checked token
     # (here: served in-process, no HTTP request at all) refuses it instead of running it as the shared caller "mcp".
-    registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+    registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
     server = mcp_server.build_mcp_server(framework_for(registry, tmp_path), transport="http")
 
     async def go():
@@ -626,7 +626,7 @@ class TestTokenCommands:
         assert token not in listing.output and tokens.get("laptop").sha256 not in listing.output
 
     def test_policy_from_and_link(self, cli_run, tokens, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW}))
         assert cli_run("mcp", "token", "add", "copy", "--policy-from", "mcp").exit_code == 0
         assert cli_run("mcp", "token", "add", "remote-ditto", "--link", "ditto").exit_code == 0
         assert cli_run("mcp", "token", "add", "copy2", "--policy-from", "mcp:copy").exit_code == 0
@@ -639,7 +639,7 @@ class TestTokenCommands:
     def test_policy_from_with_the_mcp_prefix_names_only_a_token(self, cli_run, tokens, registry):
         # "mcp:<name>" is the audit actor of a token. A token may be named like a caller ("mcp", "ditto"); its actor
         # must then copy that token's permissions, never the wider ones of the caller with the same name.
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW}))
         tokens.add("mcp")
         tokens.add("ditto")
         assert cli_run("mcp", "token", "add", "from-mcp", "--policy-from", "mcp:mcp").exit_code == 0

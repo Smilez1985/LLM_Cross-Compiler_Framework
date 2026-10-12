@@ -58,7 +58,7 @@ def registry(tmp_path):
 
 
 def save(registry, **fields):
-    registry.policy_store.save(ToolPolicy(configured=True, **fields))
+    registry.policy_store.replace(ToolPolicy(configured=True, **fields))
 
 
 def decision(registry, name, caller="mcp", inp=None):
@@ -164,11 +164,21 @@ class TestReviewedTools:
         save(registry, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}, reviewed=[])
         assert decision(registry, "export_pack") == Decision.DENY
 
-    def test_a_300_policy_file_counts_the_300_tools_as_reviewed(self, registry):
-        registry.policy_store.path.write_text(json.dumps(
-            {"version": 1, "configured": True, "tiers": {"local_write": "allow"}}))
+    def test_a_policy_without_a_reviewed_list_counts_the_300_tools_as_reviewed(self, registry):
+        """A stored policy without the reviewed list (as 3.0.0 wrote it, signed since S4) was set up while exactly the
+        3.0.0 tools existed."""
+        from orchestrator.tools.signing import sign
+        registry.policy_store.path.write_text(json.dumps(sign("tool_policy", {
+            "version": 1, "configured": True, "tiers": {"local_write": "allow"}}, registry.policy_store.key)))
         assert decision(registry, "start_build") == Decision.ALLOW, "existed when the person chose the tier"
         assert decision(registry, "export_pack") == Decision.ASK, "added later"
+
+    def test_an_unsigned_300_policy_file_denies_everything_until_set_up_again(self, registry):
+        registry.policy_store.path.write_text(json.dumps(
+            {"version": 1, "configured": True, "tiers": {"local_write": "allow"}}))
+        assert decision(registry, "start_build") == Decision.DENY
+        assert decision(registry, "read_thing") == Decision.DENY
+        assert "signature" in registry.policy_store.problem
 
     def test_permissions_mark_new_tools_and_say_why(self, registry):
         save(registry, tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW}, reviewed=["start_build"])
@@ -297,12 +307,16 @@ class TestRegistration:
 
 # --- CLI and GUI ----------------------------------------------------------------------------------------------
 
-def invoke(registry, *args, input=None):
+def invoke(registry, *args, input=None, terminal=True):
+    """The CLI with a person at a terminal (`terminal`), as permission changes require (S4)."""
+    from unittest import mock
+
     class Ctx(cli_module.FrameworkContext):
         def require_framework(self):
             self.framework_manager = SimpleNamespace(tool_registry=registry)
             return self
-    return CliRunner().invoke(cli_module.cli, ["-q", *args], obj=Ctx(), input=input)
+    with mock.patch.object(cli_module, "_interactive", lambda: terminal):
+        return CliRunner().invoke(cli_module.cli, ["-q", *args], obj=Ctx(), input=input)
 
 
 class TestCli:

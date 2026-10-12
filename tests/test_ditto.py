@@ -191,7 +191,7 @@ class TestChatTools:
         assert reply.tools[0].ok is False and "confirmation" in reply.tools[0].detail
 
     def test_denied_tools_are_not_offered(self, tmp_path, llm, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.DENY}))
         llm.script.append(answer("ok"))
         make_ditto(tmp_path, registry).chat("hi")
         assert "start_build" not in {t.name for t in llm.requests[0].tools}
@@ -200,7 +200,7 @@ class TestChatTools:
         history = ChatHistory()
         llm.script += [answer(calls=[call("list_targets")]), answer("Rockchip.")]
         history.apply(make_ditto(tmp_path, registry).chat("Targets?", history))
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={
             ToolTier.READ: Decision.DENY, ToolTier.LOCAL_WRITE: Decision.DENY, ToolTier.EXTERNAL: Decision.DENY}))
         llm.script += [answer(calls=[call("list_targets", call_id="t2")]), answer("Not allowed now.")]
 
@@ -210,7 +210,7 @@ class TestChatTools:
         assert "not allowed" in tool_messages(llm.requests[3])[-1].text()
 
     def test_allowed_tools_run_without_asking(self, tmp_path, llm, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW}))
         llm.script += [answer(calls=[call("start_build", {"model": "m", "target": "Rockchip"})]), answer("done")]
 
         def confirm(spec, inp):

@@ -1,7 +1,9 @@
 import gc
 import logging
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -9,6 +11,138 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+
+# --- The real home folder is never touched --------------------------------------------------------------------------
+# Libraries read the home folder when they are imported (huggingface_hub's token and cache paths, the keyring file,
+# platform folders), and some tests run code that writes SSH, Hugging Face or framework files below it. So before
+# anything imports the framework, every variable that names a home or a per-user folder points into a temporary folder
+# for the whole session, and each test gets its own (isolated_environment). At the end, the session fails if the real
+# home folder's sensitive folders changed (their listings are compared; no file is ever opened).
+
+def _real_homes():
+    homes = {os.path.expanduser("~")}
+    try:
+        import pwd
+        homes.add(pwd.getpwuid(os.getuid()).pw_dir)
+    except (ImportError, KeyError, OSError):
+        pass
+    homes.update(os.environ.get(var, "") for var in ("USERPROFILE",))
+    return sorted(Path(h) for h in homes if h and os.path.isabs(h))
+
+
+# Credentials a developer's shell may hold; a test must never use them. Without the session bus no test reaches the
+# desktop's keyring (Secret Service, KWallet) either.
+CREDENTIAL_VARIABLES = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "SSH_AUTH_SOCK", "SSH_AGENT_PID", "GH_TOKEN",
+                        "GITHUB_TOKEN", "DOCKER_AUTH_CONFIG", "DBUS_SESSION_BUS_ADDRESS")
+
+
+def session_keyring_backend() -> str:
+    """The keyring every test uses unless it installs its own (memory_keyring): never the operating system's store
+    (Secret Service, macOS Keychain, Windows Credential Manager), which outlives the temporary home. A file keyring
+    below the test's home (its XDG data folder) when keyrings.alt is installed, else one that keeps nothing."""
+    import importlib.util
+    try:
+        alt = importlib.util.find_spec("keyrings.alt.file") is not None
+    except (ImportError, ValueError):
+        alt = False
+    return "keyrings.alt.file.PlaintextKeyring" if alt else "keyring.backends.null.Keyring"
+
+
+
+def home_variables(home: Path):
+    """Every variable that names a home or per-user folder, pointed into `home` (the layout the defaults have)."""
+    home = Path(home)
+    cache, hf = home / ".cache", home / ".cache" / "huggingface"
+    return {
+        "HOME": str(home), "USERPROFILE": str(home),
+        "XDG_CONFIG_HOME": str(home / ".config"), "XDG_CACHE_HOME": str(cache),
+        "XDG_DATA_HOME": str(home / ".local" / "share"), "XDG_STATE_HOME": str(home / ".local" / "state"),
+        "APPDATA": str(home / "AppData" / "Roaming"), "LOCALAPPDATA": str(home / "AppData" / "Local"),
+        "HF_HOME": str(hf), "HF_TOKEN_PATH": str(hf / "token"), "HF_HUB_CACHE": str(hf / "hub"),
+        "HUGGINGFACE_HUB_CACHE": str(hf / "hub"), "HF_XET_CACHE": str(hf / "xet"), "HF_ASSETS_CACHE": str(hf / "assets"),
+        "TRANSFORMERS_CACHE": str(hf / "hub"), "FASTEMBED_CACHE_PATH": str(cache / "fastembed"),
+        "GNUPGHOME": str(home / ".gnupg"), "DOCKER_CONFIG": str(home / ".docker"),
+        "LLM_FRAMEWORK_HOME": str(home / ".llm-framework"),
+    }
+
+
+def redirect_home(environ, home: Path) -> None:
+    for name, value in home_variables(home).items():
+        environ[name] = value
+    for name in CREDENTIAL_VARIABLES:
+        environ.pop(name, None)
+    environ["PYTHON_KEYRING_BACKEND"] = session_keyring_backend()
+
+
+# What the guard compares, relative to the real home: SSH and GnuPG keys, the framework's per-user folder, the Hugging
+# Face home (token and model cache), Claude Desktop's configuration, keyring files and other credential folders.
+HOME_GUARD_ROOTS = (".ssh", ".gnupg", ".llm-framework", ".cache/huggingface", ".cache/fastembed", ".config/Claude",
+                    ".config/llm-framework", ".local/share/python_keyring", ".local/share/keyrings", ".netrc",
+                    ".docker", ".aws", ".kube", ".password-store", ".huggingface")
+# Content caches inside those roots that other programs change all the time (no credential lives there).
+HOME_GUARD_SKIP = (".cache/huggingface/xet", ".cache/huggingface/hub/.locks")
+HOME_GUARD_MAX = 50_000  # entries per root
+
+
+def home_snapshot(home: Path, roots=HOME_GUARD_ROOTS, skip=HOME_GUARD_SKIP):
+    """{relative path: (kind, size, mtime_ns)} for everything below `roots` in `home`, from lstat alone: no file is
+    opened and no link followed. A missing root is recorded as missing, so creating it counts as a change."""
+    found = {}
+    skipped = {os.path.normpath(s) for s in skip}
+    for root in roots:
+        top = os.path.join(str(home), root)
+        try:
+            st = os.lstat(top)
+        except FileNotFoundError:
+            found[root] = ("missing", 0, 0)
+            continue
+        except OSError as e:
+            found[root] = (f"unreadable {type(e).__name__}", 0, 0)
+            continue
+        if not os.path.isdir(top) or os.path.islink(top):
+            found[root] = ("link" if os.path.islink(top) else "file", st.st_size, st.st_mtime_ns)
+            continue
+        found[root] = ("dir", 0, 0)
+        pending, count = [root], 0
+        while pending and count < HOME_GUARD_MAX:
+            relative = pending.pop()
+            try:
+                with os.scandir(os.path.join(str(home), relative)) as entries:
+                    listing = list(entries)
+            except OSError as e:
+                found[relative] = (f"unreadable {type(e).__name__}", 0, 0)
+                continue
+            for entry in listing:
+                rel = os.path.normpath(os.path.join(relative, entry.name))
+                if rel in skipped:
+                    continue
+                count += 1
+                try:
+                    est = entry.stat(follow_symlinks=False)
+                except OSError:
+                    found[rel] = ("gone", 0, 0)
+                    continue
+                if entry.is_dir(follow_symlinks=False):
+                    found[rel] = ("dir", 0, 0)  # a folder's own time changes with its entries, which are listed
+                    pending.append(rel)
+                else:
+                    found[rel] = ("link" if entry.is_symlink() else "file", est.st_size, est.st_mtime_ns)
+    return found
+
+
+def snapshot_changes(before, after):
+    """What changed between two home_snapshot() results, one line each."""
+    changes = [f"added {p}" for p in sorted(set(after) - set(before)) if after[p][0] != "missing"]
+    changes += [f"removed {p}" for p in sorted(set(before) - set(after)) if before[p][0] != "missing"]
+    changes += [f"changed {p}" for p in sorted(set(before) & set(after)) if before[p] != after[p]]
+    return changes
+
+
+REAL_HOMES = _real_homes()
+REAL_HOME_SNAPSHOTS = {home: home_snapshot(home) for home in REAL_HOMES}
+SESSION_HOME = Path(tempfile.mkdtemp(prefix="lcf-test-home-"))
+redirect_home(os.environ, SESSION_HOME)
 
 # Exported by a git command that runs the tests (a hook, `git rebase --exec`, `git bisect run`): with them, the
 # tests' own git commands (`git init` and `git commit` in a temporary folder) would act on this repository instead.
@@ -46,11 +180,15 @@ def isolated_environment(tmp_path, monkeypatch):
     home.mkdir()
     # Components that fall back to relative paths (output/, cache/, models/) must not write into the repo.
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("HOME", str(home))
-    monkeypatch.setenv("USERPROFILE", str(home))
     for var in list(os.environ):
         if var.startswith(("LLM_", "FRAMEWORK_")):
             monkeypatch.delenv(var)
+    # HOME, the XDG folders, the Hugging Face home and token file, ... all point into this test's own home.
+    for name, value in home_variables(home).items():
+        if name != "LLM_FRAMEWORK_HOME":  # the per-user folder stays unset unless a test sets it (as before)
+            monkeypatch.setenv(name, value)
+    for name in CREDENTIAL_VARIABLES:
+        monkeypatch.delenv(name, raising=False)
     # Without it the installation's configs/ folder (the repository) would be used and written to.
     monkeypatch.setenv("LLM_FRAMEWORK_CONFIG_DIR", str(tmp_path / "configs"))
     # Spoken announcements stay off; audio tests switch them on explicitly.
@@ -162,6 +300,7 @@ def pytest_unconfigure(config):
                 obj._stop_loop(timeout=5)
             except Exception as e:  # e.g. a half-built stand-in: the widgets below must still be deleted
                 print(f"conftest: event loop of {obj!r} not stopped: {e!r}", file=sys.stderr)
+    shutil.rmtree(SESSION_HOME, ignore_errors=True)
     widgets = sys.modules.get("PySide6.QtWidgets")
     app = widgets.QApplication.instance() if widgets is not None else None
     if app is None:
@@ -172,3 +311,29 @@ def pytest_unconfigure(config):
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     gc.collect()
     app.shutdown()
+
+
+def real_home_changes():
+    """Changes below the real home folder's guarded folders since the session started, one line each."""
+    lines = []
+    for home, before in REAL_HOME_SNAPSHOTS.items():
+        lines += [f"{home}: {change}" for change in snapshot_changes(before, home_snapshot(home))]
+    return lines
+
+
+def pytest_sessionfinish(session, exitstatus):
+    """Fails the session when the real home folder changed while the tests ran (by a test or, rarely, by another
+    program at the same time: the list says what changed, never what a file holds)."""
+    changes = real_home_changes()
+    if not changes:
+        return
+    shown = changes[:40] + ([f"... and {len(changes) - 40} more"] if len(changes) > 40 else [])
+    message = ("The real home folder changed during this test run; tests must use tmp paths and the isolation "
+               "fixture:\n  " + "\n  ".join(shown))
+    reporter = session.config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is not None:
+        reporter.write_sep("=", "real home folder changed", red=True)
+        reporter.write_line(message)
+    else:
+        print(message, file=sys.stderr)
+    session.exitstatus = pytest.ExitCode.TESTS_FAILED

@@ -307,6 +307,34 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   still sends are refused and audited); a revoked token loses its permissions. Only a person at a terminal manages
   tokens (audited with actor `cli`, never the token itself), and a token that ends up in a tool argument, a log line
   or the audit log is redacted like other keys.
+- **Pending approvals for AI clients that cannot ask you** (MCP server). When a client has no form elicitation
+  (Claude Desktop chat, Cowork), a question is longer than 4,000 characters, or you set a tool with
+  `llm-cli tools permissions --confirm-in-framework TOOL` (or "Ask in the framework" in the GUI), the question waits
+  for you in the framework: a notice in the GUI status bar opens **Tools > Pending Approvals...**, and
+  `llm-cli tools approvals` (`list`, `show`, `approve`, `decline`; needs a terminal) works on a headless machine. The
+  client gets `waiting_for_approval` with a job id; once you approve, the framework runs the call itself under the
+  client's caller, unless its question would read differently by then (then you are asked again), and the client
+  reads the result with `get_job_status`. An approval is bound to the caller, tool, argument hash and question hash,
+  runs once, expires after 15 minutes and ends with the client's session, `cancel_job` or the framework's shutdown;
+  a client has at most 5 open; the question shows the caller class first and the client's name as self-reported, up
+  to 16,000 characters. The window never puts another call in place of the one you are reading, and after that
+  call's question changed, approving waits a moment. Decisions are audited before they are stored, and the approval
+  file is signed like the permissions.
+- **Standing approvals: "yes, and do not ask again"** (MCP server, Ditto). Created only by you in the framework's own
+  window (the approval window, `llm-cli tools approvals approve ID --always`, Ditto's dialog and prompt), after a
+  warning that names who may then act without asking, what is covered in plain words, how wide and for how long.
+  An MCP client's form can only ask the framework for one, which you confirm in its window (one open request per
+  caller and tool; a declined scope is not asked for again for 24 hours). Scopes come from facts the framework
+  looked up: zoo packs only for knowledge and recipe packs (trust verified or community) and verified target packs,
+  bound to kind, trust level and index key; builds and downloads only for safetensors or GGUF, ungated, permissive
+  licence, up to a size class; never for deploying, settings, crawling, module creation, `export_pack`, healing,
+  deleting or restoring, or stopping another client's work. All local stdio clients together get only the narrowest
+  scope, a warning and at most 30 days. Stored in the signed permission file and written only on your action; uses
+  come from the audit log (`grant:<id>`), each use shows a notice with **Revoke** in the GUI that names who acted and
+  the tool; they lapse after 90 days without use and stay lapsed. A request from a token revoked since it asked never
+  becomes a standing approval of a new token with the same name. `llm-cli tools permissions --grants`,
+  `--revoke-grant ID` and the Tool Permissions dialog list and revoke them; while the GUI runs the command line cannot
+  create one. No current tool offers one yet: the rules come with the tools whose facts the framework looks up.
 
 ### Changed
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
@@ -404,6 +432,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`~/.llm-framework/mcp_http_token`) is no longer accepted: create a token per client with
   `llm-cli mcp token add NAME`, give it to the client, and delete the old file. `llm-cli mcp serve --transport http`
   does not start before a named token exists.
+- **A client that cannot ask you is no longer refused** for a tool set to "ask": the call waits for your approval in
+  the framework instead (see Added); before, it failed with a hint how to allow the tool.
+- **Confirm your tool permissions once after the update.** The permission file is signed now, and one saved by 3.0.0
+  carries no signature, so every tool is denied until you set the permissions up again (the GUI shows the dialog at
+  the first start and says why; `llm-cli tools permissions`). `llm-cli tools permissions`, also with `--reset`, and
+  `llm-cli ditto setup` need a person at a terminal: piped answers are refused.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -576,6 +610,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   normalizer on the raw arguments, MCP clients get the tools' closed input schemas (`additionalProperties: false`)
   instead of open ones, JSON text in a list field is accepted on both paths, and unknown tool names are audited
   (before: on neither path).
+- **The tests no longer touch the real home folder.** A test run had written SSH and Hugging Face files there
+  (`~/.ssh`, `~/.cache/huggingface`). Before anything imports the framework, `tests/conftest.py` now points `HOME`,
+  `USERPROFILE`, the `XDG_*` folders, `HF_HOME`, `HF_TOKEN_PATH` and the other per-user folder variables into a
+  temporary folder (each test gets its own), removes credentials such as `HF_TOKEN` and `SSH_AUTH_SOCK` and the
+  desktop session bus from the environment, gives every test a keyring file in its own home instead of the operating
+  system's keyring (Secret Service, macOS Keychain, Windows Credential Manager), and fails the run when the real
+  home's key, token, keyring or framework folders changed (it compares their listings and never opens a file).
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
@@ -716,6 +757,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   most 1 MiB per request (was 4 MiB), a session and a pending question round of the 2026-07-28 protocol only answer
   the token that opened them, and no token is accepted (and the server does not start) while other users can read or
   change the token file or it belongs to another user.
+- **Only a person changes what an AI may do.** The tool permissions (`tool_policy.json`) and the MCP token store
+  (`mcp_tokens.json`) are signed with a key derived from the audit key in the OS keyring. A file edited by hand,
+  damaged, signed with another key or unsigned denies every tool, and the token store accepts no token, until a
+  person sets them up again; `llm-cli doctor` reports it. Before, anyone who could write the per-user folder could
+  allow every tool or add a token, and nothing noticed. Every change of the permissions is recorded in the audit log
+  with the old and new decisions (actor `cli` or `gui`) before it takes effect, and is refused when the entry cannot
+  be written. Saves take a revision number under a lock shared by the GUI, the CLI and MCP servers; a save based on
+  an older revision is refused, so a window opened earlier can no longer undo a change made meanwhile. The newest
+  saved revision of each file is kept in the keyring as well, so an older signed copy put back over it (a revoked
+  standing approval or token would return) and a removed permission file deny everything too. Without a keyring the
+  signature has no key, as for the audit chain; such a file is refused while the audit log is kept with a key.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
