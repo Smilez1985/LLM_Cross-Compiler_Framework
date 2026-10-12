@@ -415,15 +415,26 @@ Cloud-Anbieter geht, werden persönliche Angaben durch Platzhalter ersetzt.
    weiter. Ein Fehler wird nie als Antwort angezeigt oder gespeichert.
 6. **Verlauf.** Die fertige Runde wird an `chat_history.json` angehängt. Ein langes Gespräch wird zusammengefasst
    und als neues Gespräch fortgesetzt; frühere Runden werden nie verändert.
-7. **MCP-Client-Modus** (`llm-cli ditto remote set`). Statt aus der Registry im Prozess kommen die Tools vom
-   MCP-Server des Frameworks, das auf einem anderen Computer installiert ist (dasselbe Programm; Docker ist nicht
-   nötig, SSH oder eine Serveradresse genügt), mit einem benannten Token, das dort mit Dittos Berechtigungen
-   verknüpft ist (`--link ditto`): Jener Server entscheidet, fragt und protokolliert (Akteur `mcp:<Token-Name>`).
-   Eine Tool-Quelle pro Unterhaltung; jedes entfernte Ergebnis, jeder Fehler und jede Rückfrage sind nicht
-   vertrauenswürdige Daten; Dittos Dialog nennt den Server. Ohne Token startet der Modus nicht. Dittos Aufgaben
-   (Build-Empfehlung, Modulvorschlag, Analyse eines entfernten Builds) holen ihren Kontext aus den Aufgaben-Prompts
-   jenes Servers unter Dittos eigenem Aufgabentext, und der Grund-Code eines abgelehnten Aufrufs kommt aus dem
-   strukturierten Fehler des Servers, nie aus seinen Worten.
+7. **Dieser Computer und ein anderer Computer** (`llm-cli ditto remote set`; `orchestrator/llm/hybrid_tools.py`).
+   Die Tools dieses Computers bleiben immer. Ist das Framework auf einem anderen Computer eingerichtet (dasselbe
+   Programm; Docker ist nicht nötig, SSH oder eine Serveradresse genügt, mit einem benannten Token, das dort mit
+   Dittos Berechtigungen verknüpft ist, `--link ditto`), kommen seine Tools in dieselbe Liste: ein Tool, das beide mit
+   demselben Eingabeschema anbieten, einmal, mit optionalem `place`; ein Katalog-Tool nur dort mit Pflichtfeld
+   `place`; das Tool einer anderen Framework-Version als `remote_<name>`. Von dort kommen nur Katalognamen, immer mit
+   Titeln und Beschreibungen dieses Computers; die eigenen Texte der Gegenseite erreichen das Modell nie. Ein Router
+   schickt jeden Aufruf dorthin, wo sein Objekt liegt (IDs, gelernt aus strukturierten Ergebnissen, stehen in der
+   signierten `ditto_places.json`): Ein widersprechender Ort ist `wrong_place`, Objekte auf beiden Computern
+   `needs_transfer`, weil nichts von selbst kopiert wird. Ein entfernter Aufruf bekommt den vorab geschriebenen
+   Eintrag `started` dieses Computers (Stufe `remote`, `place remote:<Name>`) und einen verknüpften Abschlusseintrag,
+   und eine Änderung wird nicht geschickt, wenn dieser Eintrag nicht geschrieben werden kann; jener Server
+   entscheidet, fragt und protokolliert dann (Akteur `mcp:<Token-Name>`). Jedes entfernte Ergebnis beginnt vor seinem
+   nicht vertrauenswürdigen Block mit einer Zeile des Frameworks, und die Runde wird als belastet markiert; nur Dittos
+   Dialog beantwortet die Rückfragen jenes Servers, und eine Runde ohne Dialog verbindet sich ohne die Fähigkeit zu
+   fragen. Ein nicht erreichbarer Computer hält nie eine Runde an und setzt nie die Unterhaltung zurück (die Runde
+   läuft mit den Tools dieses Computers und einem Hinweis für die Person weiter). Dittos Aufgaben
+   (Build-Empfehlung, Modulvorschlag, Analyse eines entfernten Builds) holen ihren Kontext weiter aus den
+   Aufgaben-Prompts jenes Servers unter Dittos eigenem Aufgabentext, und der Grund-Code eines abgelehnten Aufrufs
+   kommt aus dem strukturierten Fehler des Servers, nie aus seinen Worten.
 
 ### Freigabe beim Self-Healing
 

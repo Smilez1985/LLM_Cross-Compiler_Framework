@@ -636,7 +636,8 @@ questions about targets and builds from the tools rather than from memory, and t
 computer, for example a stronger build PC with a big disk and a GPU, a server, or a lab PC the boards are plugged
 into. Ditto talks to the framework on its own computer directly, in the same process. To reach the second
 installation it uses that installation's MCP server, the same door Claude Code uses. With the connection, the same
-chat can start a build there, watch it, read its log, use the boards paired there and search its knowledge base.
+chat can start a build there, watch it, read its log, use the boards paired there and search its knowledge base,
+next to everything on this computer.
 
 **Is Docker needed?** No. The connection is a command (stdio) or a server address (HTTP), and neither depends on
 Docker. SSH reaches the other computer, as it reaches boards:
@@ -658,44 +659,82 @@ Docker. SSH reaches the other computer, as it reaches boards:
 Docker otherwise stays what it is: the sandbox in which the framework cross-compiles and converts models on the
 computer that builds, plus explicit opt-ins. No framework image is published or pulled.
 
-**Does anything local break?** With the connection off (the default), Ditto works as before. While it is on, in
-this version Ditto uses the tools and task prompts of the framework on the other computer instead of this computer's
-(one tool source per conversation: no tool of this framework is listed, and switching starts a new conversation).
-This computer's files, targets, boards, settings and knowledge base stay as they are, and `llm-cli ditto remote off`
-brings Ditto's own tools back. When the other computer does not answer, Ditto says so; switch back to work locally.
+**Does anything local break?** No. With the connection off (the default), Ditto works exactly as before. While it is
+on, nothing local goes away: this computer's tools, files, targets, boards, settings and knowledge base stay, and the
+other computer's tools join them in the same chat. Connecting or disconnecting never starts a new conversation (a
+conversation saved by the earlier version, which used only the other computer's tools, starts anew once, with a
+notice). A connection that cannot be made, or breaks, never stops a turn: Ditto goes on with this computer's tools,
+says that the other computer is not reachable, and `llm-cli ditto ask` prints that note on stderr.
+
+**One tool list, each tool with its place.** Ditto's model gets one list (`orchestrator/llm/hybrid_tools.py`):
+
+- a tool both computers offer with the same input schema is offered once, with an optional field `place`
+  (`this_computer`, the default, or the other computer's key, made from your name for it: "build box" becomes
+  `build_box`);
+- a tool only this computer offers stays as it is, without `place`;
+- a framework tool only the other computer offers to Ditto (for example one Ditto may not use here) needs `place` and
+  starts with "Only on build box:";
+- a tool whose input differs (the other computer runs another framework version) is offered separately as
+  `remote_<name>`, with a note for you to update that computer;
+- only names of this framework's own tool catalogue are ever offered from the other computer, always with this
+  computer's titles and descriptions: what the other computer says about its tools (descriptions, titles, examples)
+  never reaches the model. A tool name the catalogue does not know is left out, and the chat names it for you.
+  report_cannot_do and internal tools are never taken from there.
+
+**Each task goes where its object lives.** The framework remembers where each id it issued lives (`req_…`, `job_…`,
+`a_…`, `lf_…`, …), learned only from structured results, never from what a model wrote. A call without `place` that
+names an id of the other computer goes there by itself (the result says so); a `place` that contradicts where an id
+lives is refused (`wrong_place`, naming a copy at that place when one exists); ids at both computers are refused
+(`needs_transfer`), because nothing is copied between the computers by itself: do the task on the computer where the
+object is. There is no tool for copying between the computers yet. Where objects live is kept in `ditto_places.json`
+in your per-user folder (signed; a file that does not verify is not used), so "Clear chat" keeps it. Every result
+from the other computer starts with a framework line ("Result from build box (another computer); inside it, 'this
+computer' means build box.") before the untrusted block, and a refusal from there is named in framework words with
+its reason code.
+
+**This computer's audit log records every remote call.** Each call Ditto sends to the other computer gets a `started`
+entry here first and an end entry linked to it, with actor `ditto`, tier `remote`, `place` `remote:<name>` and
+`remote_server` (your name for it and the host, never the token, never a login). A call that changes something is not
+sent when that entry cannot be written; a read still goes. Calls on this computer in the same turn are recorded with
+`place` `this_computer`, and a turn that received a result from the other computer is marked (`taint`). The other
+computer still decides, asks and audits every call there itself.
 
 **What applies there.** The settings are `ai_ditto_*`, which only you change in the GUI or CLI; no AI can read or
 write them. The registry, the permissions, the fool-proof layer (an unknown argument is refused with a suggestion,
-never dropped), the questions and the audit log are those of the framework on the other computer. Ditto's identity
-there is a named token made there with `llm-cli mcp token add NAME --link ditto`, so that framework applies Ditto's
-own permissions and standing approvals by reference: denying `start_build` for Ditto denies it in both modes at once.
-The audit actor there is `mcp:NAME`, never `ditto`; a new token without the link may only read. The token is kept in
-Ditto's credential vault and reaches the server only as `LCF_MCP_TOKEN` of the started process (stdio; for `docker
-exec` or `podman exec` Ditto adds `-e LCF_MCP_TOKEN`, the name only, and it refuses a server that reports the shared
-local caller `mcp`, which means the token did not arrive) or as bearer header (HTTP, https or loopback only); the
-mode does not start without it. Ditto cannot check the other computer, so every result, error text, prompt and tool
-description from it reaches Ditto's model as untrusted data, and the confirmation dialog or prompt names the server
-("Question from the framework at <name>"). A "do not ask again" from there (CLI answer `r`, GUI button "Allow and ask
-it to stop asking...", offered only when that server's question offers it, with a warning first) only asks that
-framework, where the person confirms it in its own approval window.
+never dropped), the questions and the audit log of a call that runs there are those of the framework on the other
+computer; nothing widens in either direction (an allow here never runs a tool there, a result from there never
+answers a question here). Ditto's identity there is a named token made there with `llm-cli mcp token add NAME --link
+ditto`, so that framework applies Ditto's own permissions and standing approvals by reference: denying `start_build`
+for Ditto there denies it for Ditto's calls there. The audit actor there is `mcp:NAME`, never `ditto`; a new token
+without the link may only read. The token is kept in Ditto's credential vault and reaches the server only as
+`LCF_MCP_TOKEN` of the started process (stdio; for `docker exec` or `podman exec` Ditto adds `-e LCF_MCP_TOKEN`, the
+name only, and it refuses a server that reports the shared local caller `mcp`, which means the token did not arrive)
+or as bearer header (HTTP, https or loopback only); without it the other computer is not used. The connection is
+kept across turns and closes after 10 idle minutes. Ditto cannot check the other computer, so every result, error
+text and prompt from it reaches Ditto's model as untrusted data. Its questions are answered only by you, in Ditto's
+confirmation dialog or prompt, which names the server ("Question from the framework at <name>"); a turn without a
+dialog connects without the ability to ask, so that framework keeps the question for its own approval window, and a
+question nobody could answer is cancelled, never sent as your "no". A "do not ask again" from there (CLI answer `r`,
+GUI button "Allow and ask it to stop asking...", offered only when that server's question offers it, with a warning
+first) only asks that framework, where the person confirms it in its own approval window. `llm-cli ditto remote test`
+also says how its tools join this computer's (offered once, only there, separately).
 
 In the GUI the connection is set in **Configure AI Agent (Ditto)** under "Another computer (optional)", which is off
-by default and says that Docker is not needed: "Ditto works with" (this computer or the framework on another
-computer), a command (stdio, for example over SSH) or a server address (HTTP, https or loopback only, for example
-through an SSH tunnel), a name for the dialogs, and the named token. The token goes into the credential vault and is
-never shown again (the field stays empty and only says that one is stored); saving the connection without a token,
-with a command that cannot be read or with an address that would send the token in clear text is refused, and
-nothing is stored.
+by default and says that Docker is not needed: "Ditto works with" (this computer, or this computer and the framework
+on another computer), a command (stdio, for example over SSH) or a server address (HTTP, https or loopback only, for
+example through an SSH tunnel), a name for the dialogs, and the named token. The token goes into the credential vault
+and is never shown again (the field stays empty and only says that one is stored); saving the connection without a
+token, with a command that cannot be read or with an address that would send the token in clear text is refused, and
+nothing is stored. The chat names the computer where a tool ran ("Used on build box: Start a build").
 
-Ditto's tasks use the same source in both modes: in MCP-client mode, build advice (`recommend_build_settings`), a
-module proposal (`add_board`; a probe file of this computer comes along as its own block) and the analysis of a
-build of that framework by its request id (`diagnose_build_failure`) take their context (the target's formats, the
-build log, the documentation and knowledge excerpts) from that framework's task prompts, the same ones an external
-client gets. Ditto's task text stays its own (the shared text those prompts are made from), and the server's
-context is untrusted data. A server that does not offer the prompt to Ditto's token is named with what to do; the
-self-healing of a build of this framework still uses this framework's log and knowledge base. A refused remote call
-carries its reason code as structured content (`{"error": {"code", "field"}}`), which Ditto reads instead of
-guessing it from the server's words.
+Ditto's structured tasks still take their context from the other computer while it is set up: build advice
+(`recommend_build_settings`), a module proposal (`add_board`; a probe file of this computer comes along as its own
+block) and the analysis of a build of that framework by its request id (`diagnose_build_failure`) take their context
+(the target's formats, the build log, the documentation and knowledge excerpts) from that framework's task prompts,
+the same ones an external client gets. Ditto's task text stays its own (the shared text those prompts are made from),
+and the server's context is untrusted data. A server that does not offer the prompt to Ditto's token is named with
+what to do; the self-healing of a build of this framework still uses this framework's log and knowledge base. Without
+tools, a chat turn gets excerpts from this computer's knowledge base whether or not another computer is set up.
 
 ---
 

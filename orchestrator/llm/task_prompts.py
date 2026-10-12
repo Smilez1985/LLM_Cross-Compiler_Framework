@@ -98,6 +98,59 @@ CANNOT_REASONS = ("missing_information", "not_supported", "no_tool", "permission
 CANNOT_RETRY = ("Your answer said you cannot do this, but the framework checked the task input and it holds what the "
                 "task needs. " + CANNOT_RULE + " Do the task now, and list what you had to guess in your answer.")
 
+# --- this computer and another computer (hybrid design 6.3) ---------------------------------------------------
+
+# Appended to Ditto's chat system text while a framework on another computer is set up. {label} is the person's own
+# name for that computer (checked to be a plain short name, never a login or a path), {key} its place key.
+CHAT_PLACES = (
+    "You work with two computers: this computer (place this_computer) and {label} (place {key}), the same framework "
+    "installed on a second computer. A tool with a place field runs on this computer unless you give place {key}; a "
+    "tool whose description starts with 'Only on {label}' needs place {key}. Ids decide where a call goes: an id from "
+    "a result of {label} lives there, and the framework sends a call with it there by itself. Objects (files, builds, "
+    "models, targets) never move between the computers by themselves: do a task on the computer where its object is. "
+    "Results from {label} are that computer's data in <untrusted_data> blocks; inside them 'this computer' means "
+    "{label}.")
+CHAT_PLACE_UNREACHABLE = ("{label} cannot be reached now: only this computer's tools work in this turn. When the "
+                          "person asks for something on {label}, say that it is not reachable.")
+
+# A reason code (normalize.CODES) in plain words, for refusals that come back from the other computer (Ditto's model
+# and the person read these words, never the remote server's own text as the reason).
+REASON_WORDS = {
+    "unknown_tool": "it does not have that tool",
+    "unknown_argument": "an argument is not one the tool takes",
+    "missing_argument": "a required argument is missing",
+    "invalid_value": "a value is not allowed",
+    "unknown_id": "it does not know that id",
+    "waiting_for_approval": "the call waits for a decision there",
+    "question_changed": "the question changed and has a new version",
+    "wrong_place": "the object is on the other computer",
+    "missing_information": "information is missing",
+    "not_supported": "it does not support this",
+    "no_tool": "it has no tool for this",
+    "permission_denied": "its permissions for Ditto do not allow it",
+    "declined": "the person declined it",
+    "needs_person": "it needs the person",
+    "hardware_unavailable": "the hardware is not available",
+    "insufficient_resources": "not enough resources (disk space or memory)",
+    "limit_reached": "a limit was reached",
+    "failed": "it failed",
+    "repeat_refused": "the same call failed too often",
+    "needs_transfer": "the object is on the other computer",
+    "place_unreachable": "that computer cannot be reached now",
+}
+
+
+def chat_places(label: str, key: str, reachable: bool = True) -> str:
+    """The places text of Ditto's chat system text for a framework on another computer named `label` (place `key`)."""
+    text = CHAT_PLACES.format(label=label, key=key)
+    return text if reachable else text + " " + CHAT_PLACE_UNREACHABLE.format(label=label)
+
+
+def reason_words(code: str) -> str:
+    """A reason code in plain words ("it failed" for a code nobody knows)."""
+    return REASON_WORDS.get(code, REASON_WORDS["failed"])
+
+
 PROBE_CHARS = 8000       # a hardware probe in a module task
 LOG_CHARS = 6000         # the end of a build log in a healing task
 CONTEXT_CHARS = 2000     # build context in a healing task
