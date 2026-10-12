@@ -11,7 +11,9 @@ Search results are plain data from external sources; callers wrap them as untrus
 A cross-encoder can rerank them and drop the irrelevant ones; it is quality on top and never a reason to fail.
 """
 
+import contextlib
 import functools
+import hashlib
 import ipaddress
 import math
 import os
@@ -28,7 +30,7 @@ from orchestrator.rag.chunking import PREAMBLE_RESERVE_TOKENS, chunk_document, p
 from orchestrator.rag.embeddings import (DenseEmbedder, EmbeddingModelSpec, FastEmbedDenseEmbedder,
                                          FastEmbedSparseEmbedder, SparseEmbedder, check_vectors, recommend_model,
                                          resolve_spec, spec_for_slug)
-from orchestrator.rag.errors import EmbeddingError, KnowledgeBaseError
+from orchestrator.rag.errors import EmbeddingError, EmbeddingModelNotCached, KnowledgeBaseError
 from orchestrator.rag.retrieval import FastEmbedReranker, RerankerSpec, select_reranker
 from orchestrator.utils.helpers import redact_secrets, sanitize_filename
 from orchestrator.utils.logging import get_logger
@@ -52,8 +54,51 @@ MAX_SNAPSHOTS = 5
 # Windows above about 49 days).
 MAX_MODEL_IDLE_SECONDS = 7 * 24 * 3600.0
 MAX_CODE_FILE_BYTES = 512 * 1024
+SOURCES_TTL = 60.0  # seconds a list of the knowledge sources is reused (cleared at once by every write)
+SOURCE_ID_PREFIX = "ks_"
+SOURCE_KINDS = ("web", "pack", "docs", "other")
+# Payload fields a source listing reads (never the chunk text).
+_SOURCE_FIELDS = ["source", "title", "content_type", "type", "origin_pack", "root_url", "ingested_at"]
 _RESERVED_PAYLOAD = {"content", "source", "section", "chunk_index", "chunk_hash", "embedding_model", "ingested_at",
                      "fused_score", "reranker"}
+
+
+_LOCAL = threading.local()
+
+
+@contextlib.contextmanager
+def local_models_only():
+    """Within this block (in this thread) the knowledge base never downloads a model: an embedding or reranking model
+    that is not on this computer yet fails with EmbeddingModelNotCached instead. AI tool calls read the knowledge base
+    this way, so a search stays read-only and closed-world and never starts a download of about a gigabyte."""
+    depth = getattr(_LOCAL, "depth", 0)
+    _LOCAL.depth = depth + 1
+    try:
+        yield
+    finally:
+        _LOCAL.depth = depth
+
+
+def models_local_only() -> bool:
+    return getattr(_LOCAL, "depth", 0) > 0
+
+
+def source_id(source: str) -> str:
+    """The id of a knowledge source (its address, pack entry or file label): stable across processes."""
+    return SOURCE_ID_PREFIX + hashlib.sha256(str(source).encode("utf-8", "surrogatepass")).hexdigest()[:16]
+
+
+def source_kind(payload: Dict[str, Any]) -> str:
+    """Where a chunk came from: an installed knowledge pack, the framework's own code and documentation, a crawled
+    web page or PDF, or something else (an evaluation corpus)."""
+    if payload.get("origin_pack"):
+        return "pack"
+    source = str(payload.get("source") or "")
+    if payload.get("type") == "internal_code" or source.startswith("code:"):
+        return "docs"
+    if str(payload.get("content_type") or "").lower() in ("html", "pdf") or source.startswith(("http://", "https://")):
+        return "web"
+    return "other"
 
 
 @dataclass
@@ -168,6 +213,7 @@ class RAGManager:
         self._model_lock = threading.Lock()
         self._model_timer: Optional[threading.Timer] = None
         self._models_in_use = 0
+        self._sources: Optional[Tuple[float, List[Dict[str, Any]]]] = None  # (time, list_sources()) for SOURCES_TTL
 
     # --- configuration ---
 
@@ -180,8 +226,10 @@ class RAGManager:
 
     def _offline(self) -> bool:
         # Ditto's own switch counts too: offline mode must never download a model.
+        # So does a tool call of an AI (local_models_only): it never downloads a model either.
         ditto = getattr(self.framework, "ditto_manager", None)
-        return bool(self._cfg("offline_mode", False)) or getattr(ditto, "offline_mode", False) is True
+        return (bool(self._cfg("offline_mode", False)) or getattr(ditto, "offline_mode", False) is True
+                or models_local_only())
 
     def _state_dir(self) -> Path:
         try:
@@ -489,6 +537,7 @@ class RAGManager:
             payloads.append(payload)
 
         def write(store: "KnowledgeStore"):
+            self._sources = None
             store.upsert([store.point(*row) for row in zip(ids, dense, sparse_vectors, payloads)])
             if replace:
                 store.delete_stale(source, ids)
@@ -640,6 +689,7 @@ class RAGManager:
             self.logger.error(f"Snapshot {snapshot_name} not found.")
             return False
         try:
+            self._sources = None
             count = self._with_store(lambda store: store.restore_file(path))
         except (KnowledgeBaseError, OSError, ValueError) as e:
             self._fail(e)
@@ -749,6 +799,12 @@ class RAGManager:
 
         try:
             scores = reranker.scores(query, [text(r) for r in results])
+        except EmbeddingModelNotCached as e:
+            if models_local_only():  # an AI's tool call never downloads it; Ditto's next search still may
+                self.logger.info(f"Reranking skipped for a tool call: {e}")
+                return results
+            self._rerank_failed(e)
+            return results
         except KnowledgeBaseError as e:
             self._rerank_failed(e)
             return results
@@ -769,6 +825,57 @@ class RAGManager:
         self._fail(KnowledgeBaseError(f"reranking is off until the next start or a change of rag_reranker: {error}"))
         self.reranker_reason = self.last_error
 
+    # --- sources (what the knowledge base holds, with provenance) ---
+
+    def chunk_count(self) -> int:
+        """How many excerpts (chunks) the knowledge base holds."""
+        return int(self._with_store(lambda store: store.count()))
+
+    def list_sources(self) -> List[Dict[str, Any]]:
+        """Every source of the knowledge base with its provenance: source_id, source (address, pack entry or file
+        label), title, kind (web, pack, docs, other), origin_pack, root (the crawl's start address or the pack),
+        ingested_at (the newest chunk) and chunks. Reads payload fields only, never the chunk text; the list is
+        reused for SOURCES_TTL seconds and dropped by every write. Raises KnowledgeBaseError."""
+        with self._lock:
+            cached = self._sources
+            if cached is not None and time.monotonic() - cached[0] < SOURCES_TTL:
+                return [dict(s) for s in cached[1]]
+            payloads = self._with_store(lambda store: list(store.payloads(_SOURCE_FIELDS)))
+            sources: Dict[str, Dict[str, Any]] = {}
+            for payload in payloads:
+                source = str(payload.get("source") or "unknown")
+                entry = sources.get(source)
+                if entry is None:
+                    kind = source_kind(payload)
+                    entry = sources[source] = {
+                        "source_id": source_id(source), "source": source, "title": "", "kind": kind,
+                        "origin_pack": str(payload.get("origin_pack") or ""),
+                        "root": str(payload.get("origin_pack") or payload.get("root_url") or ""),
+                        "ingested_at": "", "chunks": 0}
+                entry["chunks"] += 1
+                if not entry["title"] and payload.get("title"):
+                    entry["title"] = str(payload["title"])[:500]
+                stamp = str(payload.get("ingested_at") or "")
+                if stamp > entry["ingested_at"]:
+                    entry["ingested_at"] = stamp
+            listed = sorted(sources.values(), key=lambda e: (e["kind"], e["source"]))
+            self._sources = (time.monotonic(), listed)
+            return [dict(s) for s in listed]
+
+    def find_source(self, sid: str) -> Optional[Dict[str, Any]]:
+        """The source with this id (list_sources), or None."""
+        return next((s for s in self.list_sources() if s["source_id"] == sid), None)
+
+    def read_source(self, source: str, start: int = 0, count: int = 5) -> Tuple[List[Dict[str, Any]], int]:
+        """The chunks of one source in their order, from chunk position `start` (at most `count`), each as
+        {index, section, content}; and how many chunks the source has. Raises KnowledgeBaseError."""
+        records = self._with_store(lambda store: list(store.source_records(source)))
+        chunks = sorted(({"index": int(p.get("chunk_index") or 0), "section": str(p.get("section") or ""),
+                          "content": str(p.get("content") or "")} for p in (r.payload or {} for r in records)),
+                        key=lambda c: c["index"])
+        start, count = max(0, int(start)), max(0, int(count))
+        return chunks[start:start + count], len(chunks)
+
     def export_records(self) -> Iterator[Dict[str, Any]]:
         """All stored chunks as plain records (source, content, metadata), e.g. for a community export."""
         records = self._with_store(lambda store: list(store.records()))
@@ -779,6 +886,7 @@ class RAGManager:
     def clear_knowledge_base(self) -> bool:
         """Deletes all stored vectors (of every embedding model used so far)."""
         try:
+            self._sources = None
             self._with_store(lambda store: (store.drop_all(), store.ensure()))
         except KnowledgeBaseError as e:
             self._fail(e)

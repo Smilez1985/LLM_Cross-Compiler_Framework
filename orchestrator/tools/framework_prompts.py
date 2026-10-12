@@ -32,7 +32,9 @@ ASK_INSTRUCTIONS = (
     CLIENT_ROLE + "Answer the user's question about the framework. For facts about targets, boards, builds, built "
     "models and this installation, call the framework's read tools (list_targets, get_target_capabilities, "
     "list_build_requests, get_build_status, read_build_log, list_artifacts, run_doctor, search_knowledge, get_status) "
-    "instead of answering from memory, and use the documentation resources listed below. You may add your own "
+    "instead of answering from memory, and use the documentation resources listed below. The knowledge base Ditto "
+    "uses is yours too: search_knowledge gives excerpts with their source, list_knowledge_sources what it holds, "
+    "read_knowledge_source more of one source. You may add your own "
     "knowledge; say which part comes from the framework. Answer in the language of the question, concisely."
     + CLOSING)
 CONVERT_INSTRUCTIONS = (
@@ -214,7 +216,8 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    ASK_INSTRUCTIONS, (PromptArg("question", "Your question (free text)", required=True,
                                                 max_chars=2000),), ask,
                    tools=("list_targets", "get_target_capabilities", "list_build_requests", "get_build_status",
-                          "read_build_log", "list_artifacts", "run_doctor", "search_knowledge", "get_status")),
+                          "read_build_log", "list_artifacts", "run_doctor", "search_knowledge", "get_status",
+                          "list_knowledge_sources", "read_knowledge_source")),
         PromptSpec("convert_model_for_board", "Convert a model for a board",
                    "Checks the target, starts the build, follows it and shows the result.", CONVERT_INSTRUCTIONS,
                    (model, target, board), convert,

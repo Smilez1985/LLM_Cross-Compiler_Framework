@@ -376,8 +376,9 @@ sequenceDiagram
    `llm-cli mcp serve` fährt danach das Framework herunter. Über stdio beendet ein SIGTERM des Clients die Sitzung
    genauso (es unterbricht den Server wie Strg+C, statt den Prozess sofort zu beenden).
 
-Die vierzehn Tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
-`read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `get_status`, `get_job_status` (Stufe `read`)
+Die sechzehn Tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
+`read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `list_knowledge_sources`,
+`read_knowledge_source`, `get_status`, `get_job_status` (Stufe `read`)
 sowie `start_build`, `cancel_build`, `resolve_healing`, `cancel_job` (Stufe `local_write`). Tools, die deine
 Berechtigungen verweigern, werden dem Client nicht aufgeführt. Kein Tool der Stufe `external` ist registriert; weder
 KI-Clients noch Ditto können also auf Geräte deployen.
