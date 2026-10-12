@@ -652,8 +652,9 @@ class RAGManager:
 
     # --- SNAPSHOT & ROLLBACK ---
 
-    def create_snapshot(self, name: Optional[str] = None) -> Optional[str]:
-        """Saves the active collection (vectors included) to a file; returns its name, None if empty or failed."""
+    def create_snapshot(self, name: Optional[str] = None, keep: Optional[Path] = None) -> Optional[str]:
+        """Saves the active collection (vectors included) to a file; returns its name, None if empty or failed.
+        `keep`: a snapshot file the pruning of old snapshots must not remove (the one about to be restored)."""
         name = sanitize_filename(name or f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}") or "snapshot"
         path = self.snapshot_dir / f"{name}.jsonl.gz"
         try:
@@ -663,7 +664,7 @@ class RAGManager:
             return None
         if not count:
             return None
-        self._prune_snapshots()
+        self._prune_snapshots(keep)
         self.logger.info(f"Knowledge base snapshot {name}: {count} chunks.")
         return name
 
@@ -672,8 +673,10 @@ class RAGManager:
             return []
         return sorted(self.snapshot_dir.glob("*.jsonl.gz"), key=lambda p: p.stat().st_mtime)
 
-    def _prune_snapshots(self) -> None:
+    def _prune_snapshots(self, keep: Optional[Path] = None) -> None:
         for old in self._snapshot_files()[:-MAX_SNAPSHOTS]:
+            if keep is not None and old == keep:
+                continue
             try:
                 old.unlink()
             except OSError:
@@ -682,19 +685,40 @@ class RAGManager:
     def list_snapshots(self) -> List[str]:
         return [p.name[:-len(".jsonl.gz")] for p in self._snapshot_files()]
 
-    def restore_snapshot(self, snapshot_name: str) -> bool:
-        """Replaces the active collection with a snapshot of the same embedding model."""
+    def restore_snapshot(self, snapshot_name: str, backup: Optional[str] = None) -> bool:
+        """Replaces the active collection with a snapshot of the same embedding model. The current content is saved
+        first as the snapshot `backup` (default pre_restore_<time>); without that backup nothing is restored (an
+        empty knowledge base needs none). last_backup, last_restored_chunks and last_restore_problem tell what
+        happened."""
+        self.last_backup, self.last_restored_chunks, self.last_restore_problem = None, 0, ""
         path = self.snapshot_dir / f"{sanitize_filename(snapshot_name)}.jsonl.gz"
         if not path.is_file():
             self.logger.error(f"Snapshot {snapshot_name} not found.")
+            self.last_restore_problem = "the snapshot does not exist"
             return False
+        try:
+            current = self._with_store(lambda store: store.count())
+        except KnowledgeBaseError as e:
+            self._fail(e)
+            self.last_restore_problem = "the knowledge base could not be read"
+            return False
+        if current:
+            name = backup or f"pre_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            self.last_backup = self.create_snapshot(name, keep=path)
+            if not self.last_backup:
+                self.last_restore_problem = "the backup of the current knowledge base could not be written"
+                self.logger.error(f"Snapshot {snapshot_name} not restored: {self.last_restore_problem}.")
+                return False
         try:
             self._sources = None
             count = self._with_store(lambda store: store.restore_file(path))
         except (KnowledgeBaseError, OSError, ValueError) as e:
             self._fail(e)
+            self.last_restore_problem = "the snapshot could not be read into the knowledge base"
             return False
-        self.logger.warning(f"Knowledge base restored from snapshot {snapshot_name} ({count} chunks).")
+        self.last_restored_chunks = int(count or 0)
+        self.logger.warning(f"Knowledge base restored from snapshot {snapshot_name} ({count} chunks; backup "
+                            f"{self.last_backup or 'not needed'}).")
         return True
 
     # --- SEARCH ---

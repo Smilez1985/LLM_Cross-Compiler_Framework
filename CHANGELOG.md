@@ -10,6 +10,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Optional tools `delete_artifact` and `restore_knowledge_snapshot`** (MCP design T10): delete one built model
+  (folder and golden ZIP) by id and sha256, or replace the knowledge base with an earlier snapshot as a job. Both are
+  destructive: denied by default and hidden until you enable them (allowing the whole external class does not),
+  every call asked, never a standing approval. A deletion is refused outside the output folder, while a build of any
+  framework program writes into the folder or is queued for it, after the build changed, and when the folder is not
+  the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
+  outside MCP, and never prunes the snapshot it restores.
 - **Ditto as an MCP client of another framework** (MCP design T12; Ditto is hybrid): `llm-cli ditto remote set`
   points Ditto at the MCP server of a framework running elsewhere, for example the headless Docker image (stdio
   through a command such as `docker exec -i <container> llm-cli mcp serve`, or HTTP to an https or loopback address).

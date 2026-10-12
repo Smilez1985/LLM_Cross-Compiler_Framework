@@ -569,6 +569,18 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `report_cannot_do` | lesen | Melden, dass eine Aufgabe nicht machbar ist, mit Grund; das Framework prüft den Grund an seinem eigenen Zustand |
 | `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
 | `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |
+| `delete_artifact` | extern, optional | Ein gebautes Modell löschen (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP); verborgen, bis du es freigibst, immer mit Frage |
+| `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |
+
+Die beiden optionalen Tools zerstören etwas, darum sind sie standardmäßig verboten und werden nicht angeboten, bis
+du sie in den Tool-Berechtigungen freigibst (die ganze Klasse „extern“ zu erlauben gibt sie nicht frei); jeder
+Aufruf wird erfragt, und sie bekommen nie einen Dauerauftrag. `delete_artifact` nimmt die ID und das sha256, das
+`list_artifacts` zeigt; abgelehnt wird ein Ordner außerhalb des Ausgabeordners (auch über einen Link), solange ein
+Build irgendeines Programms des Frameworks hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256
+der Modelldatei seither geändert hat und wenn der Ordner nicht mehr der ist, den die Frage nannte.
+`restore_knowledge_snapshot` sichert die aktuelle Wissensbasis zuerst als Snapshot `pre_restore_<Zeit>` und stellt
+ohne diese Sicherung nichts wieder her; dieselbe Regel gilt jetzt für jede Wiederherstellung eines Snapshots, und
+der wiederherzustellende Snapshot wird dabei nie aufgeräumt.
 
 So läuft eine Frage mit Tools ab:
 

@@ -497,6 +497,31 @@ class BuildService:
         start = (page - 1) * PAGE_SIZE
         return ArtifactList(artifacts=items[start:start + PAGE_SIZE], page=page, more=len(items) > start + PAGE_SIZE)
 
+    def busy_output_folders(self) -> List[str]:
+        """Output folders unfinished builds write into, in every framework process: the build engines' records of
+        running builds, and for requests still queued (no build record yet) the folder their build will use."""
+        folders: List[str] = []
+        for record in self._records():
+            if record.get("status") not in ("completed", "failed", "cancelled", "interrupted") and \
+                    record.get("output_dir"):
+                folders.append(str(record["output_dir"]))
+        out = self._output_dir()
+        pending = []
+        try:
+            for state in list(self._orchestrator._workflows.values()):
+                if state.status.value not in BUILD_FINISHED:
+                    pending.append(dict(getattr(state, "summary", {}) or {}))
+        except BuildServiceError:
+            pass
+        pending += [r.get("summary") or {} for r in self._shared_requests()
+                    if r.get("status") not in ("completed", "error", "cancelled", "interrupted")]
+        for summary in pending:
+            target, model = summary.get("target"), str(summary.get("model") or "")
+            if target and model:
+                name = model.rsplit(":", 1)[-1].rstrip("/").split("/")[-1]
+                folders.append(str(out / str(target) / name))
+        return folders
+
     def _artifact(self, aid: str) -> Tuple[str, str, Dict[str, Any]]:
         if ARTIFACT_ID.fullmatch(aid or ""):
             for item in self._artifacts():
