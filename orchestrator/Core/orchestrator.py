@@ -127,6 +127,8 @@ class WorkflowState:
     label: str = ""  # the request's speaking name: model (a local model by its label), target, format, quantization
     # What the request builds, as tools show it (the model by its repo id or label, never a host path)
     summary: Dict[str, Any] = field(default_factory=dict)
+    # Fix proposals of AI clients (client_proposals.ClientProposal): manual steps for the person, never applied.
+    client_proposals: List[Any] = field(default_factory=list)
 
     @property
     def progress_percent(self) -> int:
@@ -521,6 +523,25 @@ class LLMOrchestrator:
         state.current_stage = f"Retrying {job.job_id} after the fix"
         self.logger.info(f"Fix applied; retrying {job.job_id}.")
         return await self._run_job(job, req, attempt=2)
+
+    def add_client_proposal(self, request_id: str, proposal: Any) -> Any:
+        """Keeps an AI client's fix proposal (client_proposals.ClientProposal, already validated and filtered) with
+        a failed build: a build that ended with an error, failed a job, or waits for or works on a self-healing
+        decision. It is a manual step for the person; nothing here ever applies it. Raises ValueError for an unknown
+        or not failed build, ProposalLimit when the build holds MAX_PER_REQUEST proposals."""
+        from orchestrator.Core.client_proposals import MAX_PER_REQUEST, ProposalLimit
+        state = self._workflows.get(request_id)
+        if state is None:
+            raise KeyError(request_id)
+        failed = state.status in (OrchestrationStatus.ERROR, OrchestrationStatus.AWAITING_APPROVAL,
+                                  OrchestrationStatus.HEALING) or state.failed_builds > 0
+        if not failed:
+            raise ValueError(f"build request {request_id} has not failed ({state.status.value})")
+        if len(state.client_proposals) >= MAX_PER_REQUEST:
+            raise ProposalLimit(f"Build request '{request_id}' already has {MAX_PER_REQUEST} proposals from AI "
+                                "clients.")
+        state.client_proposals.append(proposal)
+        return proposal
 
     def resolve_healing(self, request_id: str, approved: bool, expected: Any = None) -> bool:
         """Records the user's decision on a pending healing proposal. Safe to call from any thread. `expected`: the

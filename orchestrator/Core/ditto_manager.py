@@ -26,6 +26,7 @@ import secrets
 import os
 import re
 import tempfile
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Type, Union
@@ -76,11 +77,17 @@ def format_notes(caps) -> Dict[str, str]:
 
 
 def dangerous_command(*texts: str) -> Optional[str]:
-    """What is dangerous about the text (None if nothing found)."""
+    """What is dangerous about the text (None if nothing found). The text is checked as given and as the person reads
+    it (cleaned: NFKC, invisible characters removed), so a zero-width character or full-width letters cannot hide a
+    command that the GUI and the CLI then show readable and whole."""
     for text in texts:
-        for rx, what in DANGEROUS_COMMANDS:
-            if rx.search(text or ""):
-                return what
+        shown = sanitize_untrusted(text or "")
+        # The cleaning keeps a few joiners for emoji (ZWJ, variation selectors); they render invisibly, too.
+        bare = "".join(ch for ch in shown if unicodedata.category(ch) not in ("Cf", "Mn"))
+        for variant in (text or "", shown, bare):
+            for rx, what in DANGEROUS_COMMANDS:
+                if rx.search(variant):
+                    return what
     return None
 
 

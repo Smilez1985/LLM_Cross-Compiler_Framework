@@ -218,6 +218,22 @@ das Framework nur feste, eingebaute Korrekturen an:
 Alles andere, auch jeder KI-Vorschlag, wird als manueller Schritt angezeigt und nie ausgeführt. Ein erneuter Versuch
 bekommt eine eigene Build-ID (`<job>_r1`), und beide Logs bleiben erhalten.
 
+**Vorschläge von KI-Clients.** Ein MCP-Client, der Dittos Aufgabe übernimmt (Prompt `diagnose_build_failure`), kann
+dem Framework mit dem Tool `propose_healing_fix` seine eigene Analyse eines gescheiterten Builds übergeben: eine
+Zusammenfassung (bis 300 Zeichen), die Ursache und einen manuellen Schritt (je bis 2000), seine Sicherheit und ob der
+Schritt für den Build-Rechner oder das Gerät gilt. Er durchläuft dieselben Prüfungen wie Dittos Analyse,
+einschließlich des Filters für gefährliche Befehle (ein Vorschlag, der einen Download in eine Shell leitet, Dateien
+für alle beschreibbar macht, den Wurzel- oder Home-Ordner löscht oder eine Platte überschreibt, wird abgelehnt, und
+nichts wird behalten), und wie jede lokale Änderung bestätigst du ihn, sofern deine Berechtigungen ihn nicht erlauben
+(er darf „Ja, und nicht mehr fragen“ anbieten, weil er nur Text speichert, den du liest). Ein Vorschlag wird nur für
+einen gescheiterten Build angenommen, höchstens 10 je Build. Er wird in `~/.llm-framework/client_proposals.json`
+aufbewahrt und mit dem, der ihn vorgeschlagen hat, und als KI-erzeugt angezeigt: in `get_build_status`
+(`client_proposals`, als nicht vertrauenswürdiger Text markiert), in `llm-cli build status <Request>` und in der GUI
+(**Tools > Fix Proposals from AI Clients...**, mit einem Hinweis in der Statusleiste bei einem neuen). „Wer“ ist der
+Aufrufer, den das Framework kennt (ein lokaler stdio-Client, ein benanntes Token oder Ditto), und der eigene Name des
+Clients, als Selbstauskunft markiert. Das Framework führt einen solchen Schritt nie aus, und `resolve_healing` lehnt
+ab, ihn anzuwenden.
+
 ---
 
 ## Übertragen auf das Board (Deployment)
@@ -492,7 +508,11 @@ und Quantisierungen auf, die das Target anbietet, und die Antwort wird pro Forma
 Was auch immer ein Build-Log, eine Probe-Datei oder ein Modellname dem Modell erzählt: Ditto verwirft eine
 Healing-Korrektur oder Empfehlung mit einem gefährlichen Befehl. Dazu zählen ein Download, der direkt in eine Shell
 geleitet wird, für alle beschreibbare Rechte (`chmod 777`/`666`), das Löschen des Wurzel- oder Home-Ordners, das
-Überschreiben einer Platte (`mkfs`, `dd` auf eine Platte) und eine Fork-Bombe.
+Überschreiben einer Platte (`mkfs`, `dd` auf eine Platte) und eine Fork-Bombe. Der Filter liest den Text so, wie er
+geschrieben ist, und so, wie du ihn sehen wirst (normalisiert, unsichtbare Zeichen entfernt), damit ein Zeichen
+ohne Breite oder Buchstaben in voller Breite einen solchen Befehl nicht verstecken. Ein Korrekturvorschlag, den ein
+KI-Client mit `propose_healing_fix` macht, durchläuft denselben Filter und wird in dieser bereinigten Form
+aufbewahrt.
 
 ### Nicht vertrauenswürdiger Text
 
@@ -526,10 +546,17 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `get_artifact_details` | lesen | Manifest, Model Card und Dateien eines gebauten Modells (externer Text) |
 | `check_build_request` | lesen | Probelauf von `start_build`: Commit, Downloadgröße, Speicherplatz, Hardware-Schätzung, Lizenz, Zugangsbeschränkung; startet nichts |
 | `run_doctor` | lesen | Der Gesundheitscheck, ohne Korrekturen |
-| `search_knowledge` | lesen | In der Wissensbasis suchen |
+| `search_knowledge` | lesen | In der Wissensbasis suchen; jeder Auszug mit Quellen-ID, Adresse oder Pack, Art (`web`, `pack`, `docs`), Vertrauensstufe, Aufnahmedatum und Position; `kind` grenzt die Suche ein |
+| `list_knowledge_sources` | lesen | Was die Wissensbasis enthält: jede Quelle mit ID, Titel, Art, Vertrauensstufe, Aufnahmedatum und Zahl der Auszüge (50 je Seite) |
+| `read_knowledge_source` | lesen | Die Auszüge einer Quelle in ihrer Reihenfolge, über die Quellen-ID (höchstens 20 je Aufruf) |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
+| `propose_healing_fix` | lokal schreiben | Einen eigenen Korrekturvorschlag für einen gescheiterten Build als manuellen Schritt an dich übergeben (Filter für gefährliche Befehle; nie ausgeführt) |
+| `search_hf_models` | lesen | Hugging-Face-Modelle suchen; `gated: free` (Standard) listet nur Modelle, die ohne Annahme von Bedingungen herunterladbar sind |
+| `get_hf_model_info` | lesen | Lizenz (auch die des Basismodells), Zugangsbeschränkung, Zugriff deines gespeicherten Tokens, Parameter, Commit, Dateien und Größe eines Modells |
+| `download_hf_file` | lokal schreiben | Eine Datei eines Hugging-Face-Repositorys in den Modellordner laden, auf den Commit festgelegt und gegen das sha256 des Hubs geprüft (ein Job) |
+| `list_local_files` | lesen | Modell- und Datensatzdateien in den Ordnern, die die KI nutzen darf, mit ID und `<Label>:<relativer Pfad>` |
 | `get_status` | lesen | Der Zustand des Frameworks in Abschnitten (Framework, Rechner, lokale Laufzeit, Wissensbasis, KI-Zugang, deine Tool-Berechtigungen mit dem, was kein Tool tut, deine eigenen Audit-Einträge); nie ein Geheimnis oder ein Host-Pfad |
 | `get_settings` | lesen | Die Einstellungen, die eine KI lesen darf (Adressen als Schema und Host, Ordner als Labels), und welche sie ändern darf |
 | `update_settings` | lokal schreiben | Gewöhnliche Einstellungen ändern (mit Frage); Grenzen dessen, was eine KI darf, nur verschärfen; nie Berechtigungen, Geheimnisse oder den Tresor |
@@ -910,6 +937,19 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
 - **Nutzung:** das Tool `search_knowledge` (Ditto, MCP-Clients); ohne Tools hängt Ditto passende Auszüge selbst an
   die Frage. Auch Healing-Analysen, Modulvorschläge und Build-Empfehlungen (Builder: **Use RAG Knowledge Base**)
   bekommen Auszüge. Ergebnisse gelten immer als nicht vertrauenswürdige Daten.
+- **Dieselbe Wissensbasis für KI-Clients:** Ein MCP-Client, der Dittos Aufgabe übernimmt, bekommt, was Ditto
+  bekommt. Jeder Treffer von `search_knowledge` nennt seine Quelle (`source_id`, die Adresse oder den Pack-Eintrag,
+  Titel, Abschnitt, Position in der Quelle), seine Art (`web`: eine Seite, die du per Deep Ingest aufgenommen hast;
+  `pack`: ein installiertes Wissens-Pack; `docs`: Code und Dokumente des Frameworks selbst) und seine
+  Vertrauensstufe (`crawled`, beim Pack dessen `verified`, `community` oder `local`, `framework`, oder `unknown` für
+  ein nicht mehr installiertes Pack). `list_knowledge_sources` listet die Quellen (Filter nach Art und Text, 50 je
+  Seite; die Liste wird eine Minute lang wiederverwendet und nach jedem Schreiben erneuert), und
+  `read_knowledge_source` liest die Auszüge einer Quelle der Reihe nach. Eine Quelle wird über ihre ID (`ks_` und
+  16 Hex-Zeichen) benannt, nie über einen Pfad; jeder Auszug, jede Adresse und jeder Titel wird bereinigt, auf 4000
+  Zeichen gekürzt und als nicht vertrauenswürdig markiert. Ein Tool-Aufruf lädt nie ein Modell herunter: Liegt das
+  Embedding-Modell noch nicht auf diesem Rechner, wird die Suche mit dem nächsten Schritt abgelehnt (Ditto einmal
+  in der GUI oder mit `llm-cli ditto ask` fragen, das lädt es einmal), und ein noch fehlendes Reranking-Modell wird
+  nur für diesen Aufruf übersprungen. Auflisten und Lesen brauchen kein Modell.
 - **Dokumentation aufnehmen:** [Deep Ingest](#deep-ingest) im Modul-Assistenten und
   [Wissens-Packs](#community-zoo) aus dem Community-Zoo.
 
@@ -1265,7 +1305,9 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   vertrauenswürdige Daten).
 - **Ressourcen:** Neben den Tools bietet der Server Ressourcen, die ein Client anhängen oder lesen kann:
   `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<Request-ID>/status`,
-  `lcf://builds/<Request-ID>/log` (die letzten 200 Zeilen), `lcf://permissions` und die Dokumente der Installation
+  `lcf://builds/<Request-ID>/log` (die letzten 200 Zeilen), `lcf://permissions`,
+  `lcf://knowledge/sources/<Quellen-ID>` (die ersten Auszüge einer Wissensquelle, wie `read_knowledge_source`) und die
+  Dokumente der Installation
   `lcf://docs/<Name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` und ihre deutschen
   `_DE`-Zwillinge; aufgeführt werden nur die vorhandenen). Eine Ressource liefert, was ihr Lese-Tool liefert, und wird
   über die Tool-Registry gelesen: Deine Berechtigung für dieses Tool entscheidet (die Ressource eines verbotenen Tools
@@ -1336,6 +1378,37 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   models:qwen/model.gguf for Rockchip"), der Kontext der Selbstheilung, `model_source` im Build-Manifest und
   `list_artifacts` (ein Host-Pfad, den ein älteres Manifest festhielt, erscheint als `<label>:<relativer Pfad>`, wenn
   er in einem Ordner liegt, den die KI nutzen darf, sonst nur als Dateiname).
+- **Hugging Face und lokale Dateien für KI-Clients:** `search_hf_models` listet Modelle, die meistgeladenen zuerst;
+  sein Filter `gated` ist standardmäßig `free` (nur Modelle, die ohne Annahme von Bedingungen herunterladbar sind, und
+  das Ergebnis sagt, dass zugangsbeschränkte weggelassen wurden), `any` oder `gated`. `get_hf_model_info` zeigt ein
+  Modell: seine Lizenz (`permissive` nur für eine Lizenz auf einer festen Positivliste wie `apache-2.0` oder `mit`;
+  `restrictive` für bekannte einschränkende; sonst `unknown`, auch für `other`, eigene und listenförmige Lizenzen, bei
+  `other` mit `license_name` und `license_link`), Lizenz und Zugangsbeschränkung des Basismodells (ein GGUF-Reupload
+  eines zugangsbeschränkten Modells zeigt sich als solcher), die Zugangsbeschränkung (`false`, `auto`, `manual`), ob
+  das im Framework gespeicherte Hugging-Face-Token es lesen kann, die Parameterzahl, den Commit, die Dateien mit
+  ihren Größen und die Gesamtgröße. `download_hf_file` lädt eine Datei (eine GGUF-Datei, einzelne Gewichte, eine
+  Tokenizer-Datei) als Job nach `models/hf/<owner>--<name>/<commit>/`: Bevor du gefragt wirst, legt das Framework
+  Commit, Größe und sha256 fest, die der Hub nennt, lehnt ein zugangsbeschränktes Repository ab, das dein
+  gespeichertes Token nicht lesen kann (mit dem nächsten Schritt), und prüft die Platte. Es gibt keine
+  Größengrenze: Ein Download wird nur abgelehnt, wenn die Platte des Modellordners ihn plus Reserve (2 GiB oder 2 %)
+  und das von anderen Downloads Reservierte nicht fasst; die Frage zeigt Größe, freien Platz danach, Lizenz und
+  Zugangsbeschränkung. Der eigene Abrufer des Frameworks schreibt eine `.part`-Datei, die ein späterer Lauf
+  fortsetzt, hält bei `cancel_job` zwischen zwei Blöcken an (der Teil bleibt) und gibt der Datei ihren Namen erst,
+  wenn Größe und sha256 zu den Angaben des Hubs passen (eine kleine Datei ohne LFS ist über Größe und Commit
+  festgelegt). Ein Download läuft zur Zeit, fünf am Tag je Client; Hugging-Face-Suchen sind auf 30 je Stunde
+  begrenzt. Eine Daueranfrage kann GGUF-, safetensors- und kleine Textdateien nicht zugangsbeschränkter
+  Repositories mit freizügiger Lizenz und nicht zugangsbeschränktem Basismodell abdecken, nie Pickle-Gewichte, und
+  nur, solange die Platte nach dem Download die größere Reserve von 20 GiB oder 10 % frei behält (sonst wirst du
+  gefragt). Jeder
+  Hugging-Face-Aufruf für einen KI-Client sendet nur das im Framework gespeicherte Token (`llm-cli secrets set
+  hf_token`) oder gar keins: nie eins aus `HF_TOKEN` oder dem Hugging-Face-Home-Ordner und nie an einen anderen Host
+  als huggingface.co (eine Weiterleitung zum Dateispeicher des Hubs trägt kein Token). Das Token erscheint nie in
+  Eingabe, Ergebnis, Hinweisen, Fehlern oder dem Audit-Log eines Tools. Im Offline-Modus lehnen diese Tools ab, und
+  ein Netzwerkfehler ist ein Fehler, nie eine leere Liste. `list_local_files` listet die Modell- und Datensatzdateien
+  in den Ordnern, die die KI nutzen darf (ein Hugging-Face-Modellordner als ein Eintrag, PyTorch-Pickle-Gewichte
+  markiert, Links aus dem Ordner hinaus, mehrfach verlinkte und versteckte Dateien und unfertige Downloads
+  weggelassen; 50 je Seite), jede mit Datei-ID und `<Label>:<relativer Pfad>`, die `start_build` annimmt; eine
+  heruntergeladene Datei erscheint dort auch.
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je

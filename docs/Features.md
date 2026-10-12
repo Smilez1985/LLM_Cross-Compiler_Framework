@@ -208,6 +208,20 @@ built-in fixes itself:
 Everything else, including every AI suggestion, is shown as a manual step and never executed. A retry gets its own
 build ID (`<job>_r1`), and both logs are kept.
 
+**Proposals from AI clients.** An MCP client that does Ditto's job (prompt `diagnose_build_failure`) can hand its own
+analysis of a failed build to the framework with the tool `propose_healing_fix`: a summary (up to 300 characters),
+the cause and one manual step (up to 2000 each), its confidence and whether the step is for the build computer or
+the device. It goes through the same checks as Ditto's analysis, including the dangerous-command filter (a proposal
+that pipes a download into a shell, makes files world-writable, deletes the root or home folder or overwrites a disk
+is refused and nothing is kept), and like every local change it is confirmed by you unless your permissions allow
+it (it may offer "yes, and do not ask again", since it only stores text you read). A proposal is accepted only for a
+failed build, at most 10 per build. It is kept in `~/.llm-framework/client_proposals.json` and shown with who
+proposed it and as AI-generated: in `get_build_status` (`client_proposals`, marked as untrusted text), in
+`llm-cli build status <request>` and in the GUI (**Tools > Fix Proposals from AI Clients...**, with a status bar notice
+for a new one). "Who" is the caller the framework knows (a local stdio client, a named token, or Ditto) and the
+client's own name, marked as self-reported. The framework never runs such a step, and `resolve_healing` refuses to
+apply it.
+
 ---
 
 ## Deployment
@@ -456,6 +470,9 @@ and quantizations the target offers, and the answer is checked again per format.
 Whatever a build log, a probe file or a model name tells the model, Ditto discards a healing fix or a
 recommendation that contains a dangerous command: a download piped into a shell, world-writable permissions
 (`chmod 777`/`666`), deleting the root or home folder, overwriting a disk (`mkfs`, `dd` to a disk) or a fork bomb.
+The filter reads the text both as written and as you will see it (normalized, invisible characters removed), so a
+zero-width character or full-width letters cannot hide such a command. A fix an AI client proposes with
+`propose_healing_fix` passes the same filter and is kept in that cleaned form.
 
 ### Untrusted text
 
@@ -488,10 +505,17 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `get_artifact_details` | read | Manifest, model card and files of one built model (external text) |
 | `check_build_request` | read | Dry run of `start_build`: commit, download size, disk space, hardware estimate, licence, gating; starts nothing |
 | `run_doctor` | read | The health check, without fixes |
-| `search_knowledge` | read | Search the knowledge base |
+| `search_knowledge` | read | Search the knowledge base; every excerpt with its source id, address or pack, kind (`web`, `pack`, `docs`), trust, date added and position; `kind` narrows the search |
+| `list_knowledge_sources` | read | What the knowledge base holds: every source with id, title, kind, trust, date added and number of excerpts (50 per page) |
+| `read_knowledge_source` | read | One source's excerpts in their order, by source id (at most 20 per call) |
 | `start_build` | local write | Start a build (must match the target's capabilities); the question shows commit, size, disk and hardware estimate |
 | `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
+| `propose_healing_fix` | local write | Hand your own fix proposal for a failed build to the person, as a manual step (dangerous-command filter; never run) |
+| `search_hf_models` | read | Search Hugging Face models; `gated: free` (default) lists only models that download without accepting conditions |
+| `get_hf_model_info` | read | Licence (also the base model's), gating, access of your stored token, parameters, commit, files and size of one model |
+| `download_hf_file` | local write | Download one file of a Hugging Face repository into the models folder, pinned to the commit and checked against the Hub's sha256 (a job) |
+| `list_local_files` | read | Model and dataset files in the folders the AI may use, with id and `<label>:<relative path>` |
 | `get_status` | read | The framework's state in sections (framework, host, local runtime, knowledge base, AI access, your tool permissions with what no tool does, your own audit entries); never a secret or a host path |
 | `get_settings` | read | The settings an AI may read (addresses as scheme and host, folders as labels) and which it may change |
 | `update_settings` | local write | Change ordinary settings (asked); limits on what an AI may do only tightened; never permissions, secrets or the vault |
@@ -839,6 +863,17 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
 - **Use:** the `search_knowledge` tool (Ditto, MCP clients); without tools Ditto adds matching excerpts to the
   question itself. Healing analyses, module proposals and build recommendations (Builder: **Use RAG Knowledge
   Base**) also get excerpts. Results are always treated as untrusted data.
+- **The same knowledge base for AI clients:** an MCP client that does Ditto's job gets what Ditto gets. Every hit of
+  `search_knowledge` names its source (`source_id`, the address or pack entry, title, section, position in the
+  source), its kind (`web`: a page you added by Deep Ingest; `pack`: an installed knowledge pack; `docs`: the
+  framework's own code and documents) and its trust (`crawled`, the pack's `verified`, `community` or `local`,
+  `framework`, or `unknown` for a pack that is no longer installed). `list_knowledge_sources` lists the sources
+  (filter by kind and text, 50 per page; the list is reused for a minute and refreshed after every write) and
+  `read_knowledge_source` reads one source's excerpts in order. A source is named by its id (`ks_` and 16 hex
+  characters), never by a path; every excerpt, address and title is cleaned, capped at 4000 characters and marked as
+  untrusted. A tool call never downloads a model: if the embedding model is not on this computer yet, the search is
+  refused with the next step (ask Ditto one question in the GUI or with `llm-cli ditto ask`, which loads it once),
+  and a reranking model that is not there yet is skipped for that call only. Listing and reading need no model.
 - **Adding documentation:** [Deep Ingest](#deep-ingest) in the module wizard, and [knowledge packs](#community-zoo)
   from the community zoo.
 
@@ -1164,7 +1199,8 @@ framework never sees it.
   stay plain (Ditto's model gets such errors in an untrusted block too).
 - **Resources:** besides the tools, the server offers resources a client can attach or read:
   `lcf://targets`, `lcf://targets/<target>/capabilities`, `lcf://builds/<request id>/status`,
-  `lcf://builds/<request id>/log` (the last 200 lines), `lcf://permissions`, and the installation's documents
+  `lcf://builds/<request id>/log` (the last 200 lines), `lcf://permissions`, `lcf://knowledge/sources/<source id>`
+  (the first excerpts of one knowledge source, as `read_knowledge_source`), and the installation's documents
   `lcf://docs/<name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` and their German `_DE` twins;
   only the ones that exist are listed). A resource returns what its read tool returns and is read through the tool
   registry: your permission for that tool decides (a resource of a denied tool is neither listed nor readable, and
@@ -1227,6 +1263,32 @@ framework never sees it.
   Rockchip"), the self-healing context, the build manifest's `model_source` and `list_artifacts` (a host path an
   older manifest recorded is shown as `<label>:<relative path>` when it lies in a folder the AI may use, else as
   the file name only).
+- **Hugging Face and local files for AI clients:** `search_hf_models` lists models most downloaded first; its
+  filter `gated` is `free` by default (only models that download without accepting conditions, and the result says
+  that gated ones were left out), `any` or `gated`. `get_hf_model_info` shows one model: its licence (`permissive`
+  only for a licence on a fixed allowlist such as `apache-2.0` or `mit`; `restrictive` for known restrictive ones;
+  otherwise `unknown`, also for `other`, custom and list-valued licences, with `license_name` and `license_link` for
+  `other`), the base model's licence and gating (a GGUF re-upload of a gated model shows as such), the gating
+  (`false`, `auto`, `manual`), whether the Hugging Face token you stored in the framework can read it, the parameter
+  count, the commit, the files with their sizes and the total size. `download_hf_file` downloads one file (a GGUF
+  file, single weights, a tokenizer file) into `models/hf/<owner>--<name>/<commit>/` as a job: before you are asked
+  the framework pins the commit, size and sha256 the Hub lists, refuses a gated repository your stored token cannot
+  read (with the next step), and checks the disk. There is no size limit: a download is refused only when the models
+  folder's disk cannot hold it plus a reserve (2 GiB or 2 %) and what other downloads reserved; the question shows the
+  size, the free space after it, the licence and the gating. The framework's own fetcher writes a `.part` file that a
+  later run resumes, stops between two chunks on `cancel_job` (the part is kept), and names the file only after its
+  size and sha256 matched the Hub's (a small file stored without LFS is pinned by its size and the commit). One
+  download runs at a time, five a day per client; Hugging Face searches are limited to 30 an hour. A standing approval
+  can cover GGUF, safetensors and small text files of ungated repositories with a permissive licence and an ungated
+  base model, never pickle weights, and only while the disk keeps the larger reserve of 20 GiB or 10 % free after
+  the download (otherwise you are asked). Every Hugging Face call for an AI client sends only the token stored in the
+  framework (`llm-cli secrets set hf_token`), or none at all: never one from `HF_TOKEN` or the Hugging Face home
+  folder, and never to another host than huggingface.co (a redirect to the Hub's file storage carries no token). The
+  token never appears in a tool's input, result, notes, errors or the audit log. Offline mode refuses these tools,
+  and a network error is an error, never an empty list. `list_local_files` lists the model and dataset files in the
+  folders the AI may use (a Hugging Face model folder as one entry, PyTorch pickle weights flagged, links out of the
+  folder, hard-linked and hidden files and unfinished downloads left out; 50 per page), each with its file id and
+  `<label>:<relative path>`, which `start_build` takes; a downloaded file shows up there too.
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
   server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification

@@ -170,6 +170,28 @@ class KnowledgeStore:
             if offset is None:
                 break
 
+    def payloads(self, fields: Sequence[str]) -> Iterator[dict]:
+        """The payload of every point, limited to `fields` (a source listing never reads the chunk text)."""
+        offset = None
+        while True:
+            batch, offset = self.client.scroll(collection_name=self.collection, limit=512, offset=offset,
+                                               with_payload=list(fields), with_vectors=False)
+            for record in batch:
+                yield record.payload or {}
+            if offset is None:
+                break
+
+    def source_records(self, source: str) -> Iterator[models.Record]:
+        """The points of one source (filtered on the `source` payload field)."""
+        flt = models.Filter(must=[models.FieldCondition(key="source", match=models.MatchValue(value=source))])
+        offset = None
+        while True:
+            batch, offset = self.client.scroll(collection_name=self.collection, scroll_filter=flt, limit=256,
+                                               offset=offset, with_payload=True, with_vectors=False)
+            yield from batch
+            if offset is None:
+                break
+
     def recreate(self) -> None:
         self.client.delete_collection(self.collection)
         self._create()

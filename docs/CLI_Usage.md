@@ -301,6 +301,9 @@ installation each user sees their own builds.
 | `-a, --all` | Show every kept build instead of the 20 newest (the 200 newest finished or interrupted builds are kept). |
 
 A request that waits for a self-healing decision shows its failed first attempt; decide in the program that runs it.
+With a request ID, the fix proposals AI clients made for it (`propose_healing_fix`) follow, each marked as
+AI-generated with who proposed it (the caller and the client's own, self-reported name) and its manual step, which
+the framework never runs. Without an ID, a line says for how many failed builds there are such proposals.
 
 ---
 
@@ -838,10 +841,11 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-The framework tools are what Ditto and MCP clients use: 10 read-only tools (`list_targets`,
+The framework tools are what Ditto and MCP clients use: 15 read-only tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
-`run_doctor`, `search_knowledge`, `get_status`, `get_job_status`) and 4 that change things on this computer
-(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`).
+`run_doctor`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `search_hf_models`,
+`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`) and 6 that change things on this computer
+(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`, `download_hf_file`).
 
 ### tools list
 
@@ -1109,7 +1113,7 @@ Names the framework uses:
 | Name | Used for |
 |---|---|
 | `anthropic_api_key`, `openai_api_key`, `gemini_api_key`, `openrouter_api_key`, `custom_api_key` | Ditto's providers (better: `llm-cli ditto login <provider>`) |
-| `hf_token` | Gated Hugging Face models in builds |
+| `hf_token` | Gated Hugging Face models in builds, and the Hugging Face tools of AI clients (`get_hf_model_info`, `download_hf_file`): read inside the framework only, never passed to an AI; without it they send no token at all (never one from `HF_TOKEN` or the Hugging Face home folder) |
 | `qdrant_api_key` | A remote Qdrant server for the knowledge base (setting `qdrant_url`) |
 | `community_signing_key`, `community_age_identity` | Your keys for community packs, created on first use by [`llm-cli zoo`](#zoo-keys) or the GUI's community export and import; do not set them by hand |
 

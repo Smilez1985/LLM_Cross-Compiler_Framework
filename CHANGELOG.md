@@ -24,6 +24,31 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   replaced by stable placeholders that are mapped back locally in the answer.
 - **Local knowledge base** on local embeddings (FastEmbed, ONNX on the CPU) and an embedded Qdrant store: no
   vector-database server and no cloud embeddings needed, and it works offline once its models are downloaded.
+- **The knowledge base Ditto uses, for AI clients** (MCP tools `list_knowledge_sources` and
+  `read_knowledge_source`, resource `lcf://knowledge/sources/<source id>`): a client that does Ditto's job sees what
+  the knowledge base holds and reads one source's excerpts in order. `search_knowledge` now gives every excerpt its
+  provenance (source id, address or pack, title, section, kind `web`/`pack`/`docs`, trust, date added, position) and
+  takes `kind` and `rerank`. Sources are named by ids, never by paths; all their text is marked untrusted. A tool call
+  never downloads the embedding or reranking model: without the embedding model the search is refused with the next
+  step instead of starting a download of about a gigabyte, and the refusal names no folder.
+- **Fix proposals from AI clients** (MCP tool `propose_healing_fix`): a client that analyses a failed build hands its
+  summary, cause, manual step and confidence to the framework. It passes the same checks as Ditto's own analysis,
+  including the dangerous-command filter, is confirmed by you like any local change, is accepted only for a failed
+  build (at most 10 per build) and is shown as AI-generated with who proposed it (the caller and the client's
+  self-reported name) in `get_build_status`, `llm-cli build status <request>` and the GUI (**Tools > Fix Proposals from
+  AI Clients...**). The framework never runs it, and `resolve_healing` refuses to apply it. The prompt
+  `diagnose_build_failure` leads to the tool.
+- **Hugging Face and local files for AI clients** (MCP tools `search_hf_models`, `get_hf_model_info`,
+  `download_hf_file`, `list_local_files`): the search filters gated models with `gated: free` by default (`any`,
+  `gated`) and says what it left out; the model details show the licence (permissive only on an allowlist; `other`
+  with its name and link; the base model's licence and gating), the gating mode, whether the token you stored can
+  read the repository (checked inside the framework), parameters, commit, files and size; `download_hf_file` fetches
+  one file into `models/hf/<owner>--<name>/<commit>/` as a job, pinned to the commit and checked against the Hub's
+  sha256 before it gets its name, resumable, stopped by `cancel_job` (the part is kept), with no size limit but a
+  disk check; `list_local_files` lists the model and dataset files in the folders the AI may use by id and label.
+  AI calls send only the stored token, or none at all (never `HF_TOKEN` or the Hugging Face home folder's token), and
+  only to huggingface.co; the token never appears in inputs, results or the audit log. The prompt
+  `convert_model_for_board` leads to these tools.
 - **Reranking of knowledge-base results**: a local multilingual cross-encoder (FastEmbed/ONNX, about 120 MB,
   downloaded on first use, never in offline mode) reads the question together with each candidate and drops the
   ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build recommendations use
@@ -677,6 +702,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- **Hugging Face look-ups no longer hide failures**: the model manager behind the GUI's Hugging Face browser returned
+  an empty search result, an empty file list or a "not restrictive" licence when Hugging Face could not be reached;
+  it now reports the error. A licence counts as permissive only on a fixed allowlist: `other`, custom, list-valued
+  and unknown licences are shown as unknown, and the browser asks before downloading such a model. A file the
+  browser downloads comes from the commit it resolved first, not from a branch that may move meanwhile.
 - MCP questions of the 2026-07-28 protocol are kept per caller and session (one client's answer no longer closes
   another client's identical question), an unanswered one is recorded as `unanswered` by a timer also when no
   further request arrives, and the ones still open when a session ends are recorded as `client_disconnected`; the
@@ -870,6 +900,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   folders on the full disk with their sizes, and pruning Docker is proposed only when Docker's data root is full.
 
 ### Security
+- **The dangerous-command filter can no longer be bypassed with invisible or full-width characters** (Ditto's
+  healing analyses and recommendations, and fix proposals of AI clients): it checks the text also as the GUI and
+  the CLI show it (normalized, invisible characters and joiners removed), so `r<zero-width space>m -rf ~` or
+  full-width letters no longer pass and then appear as a readable command. A client's proposal is kept in that
+  cleaned form; the GUI's status bar notice names the build by its speaking name and shows the client's name
+  cleaned.
 - **AI clients never see the host path of a local model they named** (MCP clients and Ditto): the build's stage
   text, the self-healing context, the build manifest's `model_source` and `list_artifacts` name it by its
   `<label>:<relative path>` (an older manifest's host path by its label, else by the file name only).
