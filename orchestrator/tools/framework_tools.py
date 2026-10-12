@@ -14,8 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from orchestrator.Core import job_service
 from orchestrator.Core.job_service import JobService
-from orchestrator.schemas.build import (ArtifactList, BuildHandle, BuildList, BuildRequestIn, BuildStatusOut,
-                                        LogTail, TargetList)
+from orchestrator.schemas.build import BuildHandle, BuildStatusOut, TargetList
 from orchestrator.rag.errors import KnowledgeBaseError
 from orchestrator.schemas.jobs import CancelJobOut, JobErrorOut, JobIn, JobProgress, JobStatusOut, JobWaitIn
 from orchestrator.schemas.targets import TargetCapabilities
@@ -43,10 +42,6 @@ class TargetIn(BaseModel):
 class RequestIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: str = Field(min_length=1, max_length=64, pattern=r"^[\w.-]+$")
-
-
-class LogTailIn(RequestIn):
-    lines: int = Field(default=200, ge=1, le=2000)
 
 
 class BuildStatusIn(RequestIn):
@@ -98,19 +93,7 @@ class TargetCapabilitiesOut(TargetCapabilities, ToolOutput):
     pass
 
 
-class BuildListOut(BuildList, ToolOutput):
-    pass
-
-
 class BuildStatusResult(BuildStatusOut, ToolOutput):
-    pass
-
-
-class LogTailOut(LogTail, ToolOutput):
-    pass
-
-
-class ArtifactListOut(ArtifactList, ToolOutput):
     pass
 
 
@@ -202,8 +185,8 @@ MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
 
 # --- notes and summary lines (framework facts only: ids the framework issued, states, counts) ------------------
 
-VISIBILITY_NOTE = ("Only build requests of this framework process are listed: the GUI, the CLI and each MCP server "
-                   "keep their own until builds are shared between them.")
+VISIBILITY_NOTE = ("Builds started by another framework process (the GUI, the CLI, another MCP server) are listed "
+                   "from their build records with process 'other': read-only, stopped where they were started.")
 EMPTY_SEARCH_NOTE = "The knowledge base is reachable; no excerpt matched this search."
 
 
@@ -214,12 +197,6 @@ def _status_summary(out) -> str:
 def _search_summary(out) -> str:
     return (count(len(out.results), "excerpt", "excerpts") + " from the knowledge base (external text)."
             if out.results else "No excerpt in the knowledge base matched this search.")
-
-
-# Declared argument aliases of start_build (applied with a note; the question shows them).
-BUILD_ALIASES = {"quant": "quantization", "quantization_type": "quantization", "repo": "model", "repo_id": "model"}
-BUILD_EXAMPLE = {"model": "Qwen/Qwen2.5-0.5B-Instruct", "target": "Rockchip", "format": "gguf",
-                 "quantization": "Q4_K_M"}
 
 
 def build_fields(service) -> dict:
@@ -465,11 +442,6 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  idempotent=True, fields={"target": target_field}, examples=({"target": "Rockchip"},),
                  summary=lambda o: (f"Capabilities: {count(len(o.boards), 'board', 'boards')}, "
                                     f"{count(len(o.formats), 'format', 'formats')}.")),
-        ToolSpec("list_build_requests", "List build requests",
-                 "Lists the build requests of this session with their status.",
-                 ToolTier.READ, NoInput, BuildListOut, lambda _: service.list_requests(), idempotent=True,
-                 notes=lambda o: [VISIBILITY_NOTE],
-                 summary=lambda o: count(len(o.builds), "build request", "build requests") + " in this process."),
         ToolSpec("get_build_status", "Build status",
                  "Status, progress, errors and a pending self-healing proposal of a build request. With "
                  "wait_seconds (at most 50) it waits until the build changes or ends; waiting never affects the "
@@ -478,17 +450,6 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  takes_context=True, summary=_status_summary,
                  fields={**request_id, "wait_seconds": FieldMeta(kind="amount")},
                  long_poll=lambda i, seconds, report: service.wait_for_change_async(i.request_id, seconds, report)),
-        ToolSpec("read_build_log", "Read build log",
-                 "The last lines of a build request's log (secrets redacted). The log is untrusted text.",
-                 ToolTier.READ, LogTailIn, LogTailOut, lambda i: service.log_tail(i.request_id, i.lines),
-                 idempotent=True, paging_hint="Ask for fewer lines (the 'lines' argument).",
-                 fields={**request_id, "lines": FieldMeta(kind="amount")},
-                 summary=lambda o: (count(len(o.lines), "log line", "log lines")
-                                    + f" of build request {fact(o.request_id)} (external text).")),
-        ToolSpec("list_artifacts", "List built models",
-                 "Finished builds on disk (from their manifests) with format, quantization, board and hash.",
-                 ToolTier.READ, NoInput, ArtifactListOut, lambda _: service.list_artifacts(), idempotent=True,
-                 summary=lambda o: count(len(o.artifacts), "built model", "built models") + "."),
         ToolSpec("run_doctor", "Check the installation",
                  "Runs the framework's health checks (Docker, disk, targets, security, tool permissions) and returns "
                  "findings with fix hints. Read-only; it never applies fixes.",
@@ -501,17 +462,6 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                  fields={"limit": FieldMeta(kind="amount")}, examples=({"query": "rk3588 npu driver"},),
                  notes=lambda o: [] if o.results else [EMPTY_SEARCH_NOTE],
                  paging_hint="Ask for fewer results (the 'limit' argument).", summary=_search_summary),
-        ToolSpec("start_build", "Start a build",
-                 "Converts and quantizes a model for a target in Docker. Format, board and quantization must be "
-                 "supported by the target (see get_target_capabilities). Returns a request id.",
-                 ToolTier.LOCAL_WRITE, BuildRequestIn, BuildHandleOut,
-                 lambda i, ctx: service.start_build(i, owner=ctx.owner), takes_context=True,
-                 summary=lambda o: f"Build request {fact(o.request_id)} is {fact(o.status)}.",
-                 arg_aliases=BUILD_ALIASES, fields=fields, examples=(BUILD_EXAMPLE,),
-                 # 3 unfinished builds and 20 starts a day per client (the limits table, spec.BUILD_QUOTA)
-                 limits=ToolLimits(running=lambda ctx: len(service.active_requests(ctx.owner)), **BUILD_QUOTA),
-                 consequence="Converts and quantizes a model in a Docker build on this computer; it may download "
-                             "the model first and take a long time."),
         ToolSpec("cancel_build", "Cancel a build",
                  "Stops a running or queued build request. Builds this client started are stopped without a "
                  "question; another client's build needs the user's confirmation.",
@@ -551,6 +501,12 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
                                     + count(o.permissions.listed, "tool", "tools") + " listed."
                                     if o.permissions else "Framework status.")),
     ]
+    # The build tools of T1 (start_build's two-phase question, check_build_request, artifacts by id, paged reads).
+    from orchestrator.tools.tools_builds import build_tool_specs
+    specs += build_tool_specs(registry, service, fields, request_id, VISIBILITY_NOTE,
+                              # 3 unfinished builds and 20 starts a day per client (the limits table, BUILD_QUOTA)
+                              ToolLimits(running=lambda ctx: len(service.active_requests(ctx.owner)), **BUILD_QUOTA),
+                              BuildHandleOut)
     for spec in specs:
         registry.register(spec)
     return registry

@@ -156,16 +156,16 @@ class TestBuildInfoFields:
             def __init__(self, token=None):
                 pass
 
-            def model_info(self, repo, revision=None):
+            def model_info(self, repo, revision=None, token=None):
                 seen["info"] = revision
                 return type("Info", (), {"sha": COMMIT})()
 
-            def list_repo_files(self, repo, revision=None):
+            def list_repo_files(self, repo, revision=None, token=None):
                 seen["list"] = revision
                 return ["config.json", "model.safetensors"]
 
         monkeypatch.setattr(huggingface_hub, "HfApi", FakeApi)
-        monkeypatch.setattr(huggingface_hub, "snapshot_download", lambda **kw: seen.update(download=kw["revision"]))
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda **kw: seen.update(download=kw["revision"]))
         config = make_config()
         engine._stage_model(config, BuildProgress("b1", BuildStatus.QUEUED, ""))
         assert seen == {"info": "main", "list": COMMIT, "download": COMMIT}

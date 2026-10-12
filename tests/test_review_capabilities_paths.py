@@ -436,7 +436,7 @@ class TestListArtifacts:
         write_manifest(out / "Rockchip" / "broken" / "z", None, raw="{not json")
         write_manifest(out / "Rockchip" / "list" / "z", ["not", "a", "dict"])
         write_manifest(out / "Rockchip" / "binary" / "z", None, raw=b"\xff\xfe{")  # not UTF-8
-        items = {Path(a.path).parent.name: a for a in service.list_artifacts().artifacts}
+        items = {Path(a.label.split(":", 1)[1]).parent.name: a for a in service.list_artifacts().artifacts}
         assert set(items) == {"good", "odd", "artifacts_is_text"}
         assert (items["good"].primary, items["good"].sha256, items["good"].board) == ("good.gguf", "ab", "rk3566")
         odd = items["odd"]
@@ -459,9 +459,9 @@ class TestListArtifacts:
         write_manifest(out / "a", {"model": "short", "primary": "a.gguf"})
         write_manifest(out / "b", {"model": "x" * 200, "primary": "b.gguf"})
         write_manifest(out / "c", {"model": "also-short", "primary": "c.gguf"})
-        listed = sorted(Path(a.path).name for a in service.list_artifacts().artifacts)
+        listed = sorted(Path(a.label.split(":", 1)[1]).name for a in service.list_artifacts().artifacts)
         assert listed == ["a", "c"]
-        assert len(warnings) == 1 and str(out / "b") in warnings[0]
+        assert len(warnings) == 1 and "output:b" in warnings[0] and str(out) not in warnings[0]
 
     def test_relative_output_dir_is_the_installations_not_the_working_directory(self, service, tmp_path, monkeypatch):
         work = tmp_path / "work"

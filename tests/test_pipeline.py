@@ -59,23 +59,28 @@ class TestModelStaging:
             def __init__(self, token=None):
                 pass
 
-            def list_repo_files(self, repo, revision=None):
-                return ["config.json", "model.safetensors", "pytorch_model.bin", "tokenizer.json"]
+            def model_info(self, repo, revision=None, token=None):
+                return type("Info", (), {"sha": "c" * 40})()
+
+            def list_repo_files(self, repo, revision=None, token=None):
+                return ["config.json", "model.safetensors", "pytorch_model.bin", "model.gguf", "tokenizer.json"]
 
         def fake_download(**kwargs):
+            calls.setdefault("files", []).append(kwargs["filename"])
             calls.update(kwargs)
             return kwargs["local_dir"]
 
         monkeypatch.setattr(huggingface_hub, "HfApi", FakeApi)
-        monkeypatch.setattr(huggingface_hub, "snapshot_download", fake_download)
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
 
         path, volumes = engine._stage_model(make_config(), BuildProgress("b1", BuildStatus.QUEUED, ""))
 
-        assert path == "/build-cache/models/hf/HuggingFaceTB__SmolLM2-135M-Instruct"
-        assert volumes == {}
+        folder = engine.cache_dir / "models" / "hf" / "HuggingFaceTB--SmolLM2-135M-Instruct" / ("c" * 40)
+        assert path == "/build-cache/input-model"
+        assert volumes == {str(folder): {"bind": "/build-cache/input-model", "mode": "ro"}}
         assert calls["repo_id"] == "HuggingFaceTB/SmolLM2-135M-Instruct"
-        assert "*.bin" in calls["ignore_patterns"] and "*.gguf" in calls["ignore_patterns"]
-        assert Path(calls["local_dir"]).is_relative_to(engine.cache_dir / "models")
+        assert calls["files"] == ["config.json", "model.safetensors", "tokenizer.json"]  # no .bin twice, no .gguf
+        assert Path(calls["local_dir"]) == folder
 
 
 class TestContainerEnvironment:

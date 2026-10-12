@@ -48,9 +48,12 @@ CONVERT_INSTRUCTIONS = (
     "CLI; ask before suggesting it. A board nobody has measured is no reason to refuse: say that its fit is unknown."
     + CLOSING)
 RECOMMEND_INSTRUCTIONS = (
-    CLIENT_ROLE + OPTIMIZER_TASK + " Give the format, the quantization type, an optimization level (BALANCED, "
-    "SPEED, SIZE or AGGRESSIVE) and your reason. Start the build with start_build only when the user agrees; check "
-    "the target with get_target_capabilities if anything is unclear." + CLOSING)
+    CLIENT_ROLE + OPTIMIZER_TASK + " Give the format, the quantization type, an optimization level (balanced, "
+    "speed, size, aggressive or fast) and your reason. Check your recommendation with check_build_request: it shows "
+    "the download size, whether the disk holds the build and an estimate of whether this computer and the board can "
+    "take it (an unmeasured board is no reason to refuse; say that its fit is unknown). Start the build with "
+    "start_build only when the user agrees; check the target with get_target_capabilities if anything is unclear."
+    + CLOSING)
 DIAGNOSE_INSTRUCTIONS = (
     CLIENT_ROLE + HEALING_TASK + " Give the user what went wrong, the cause, one fix as a manual step for them and "
     "how sure you are. Never run the fix and never present it as something the framework runs. More of the log comes "
@@ -226,7 +229,7 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    RECOMMEND_INSTRUCTIONS,
                    (model, target, board, PromptArg("use_knowledge", "yes to add knowledge-base excerpts (default no)",
                                                     max_chars=8)), recommend,
-                   tools=("get_target_capabilities", "start_build"),
+                   tools=("get_target_capabilities", "check_build_request", "start_build"),
                    completions={"target": targets, "board": boards, "use_knowledge": lambda a, c: ["yes", "no"]},
                    reads=("get_target_capabilities",)),
         PromptSpec("diagnose_build_failure", "Diagnose a failed build",

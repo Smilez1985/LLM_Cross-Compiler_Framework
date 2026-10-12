@@ -373,7 +373,8 @@ def make_engine(tmp_path, monkeypatch, client):
     monkeypatch.setattr("orchestrator.Core.builder.docker.from_env",
                         lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
     monkeypatch.setattr(builder_module, "subprocess", SimpleNamespace(
-        Popen=client.popen, PIPE=subprocess.PIPE, STDOUT=subprocess.STDOUT, run=subprocess.run))
+        Popen=client.popen, PIPE=subprocess.PIPE, STDOUT=subprocess.STDOUT, DEVNULL=subprocess.DEVNULL,
+        run=subprocess.run))
     dockerfile = tmp_path / "context" / "Dockerfile"
     dockerfile.parent.mkdir()
     dockerfile.write_text("FROM scratch\n")

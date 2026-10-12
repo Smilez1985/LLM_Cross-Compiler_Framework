@@ -694,6 +694,27 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `llm-cli tools permissions`, auch mit `--reset`, und `llm-cli ditto setup` brauchen eine Person an einem Terminal:
   Weitergeleitete Antworten werden abgelehnt.
 
+- **MCP: Builds werden mit dem gefragt, was das Framework nachgeschlagen hat** (Design T1, DECISIONS Runde 2 Punkt
+  8): `start_build` zeigt den Hugging-Face-Commit, den es baut (und baut genau diesen), Downloadgröße, Art der
+  Gewichte, Lizenz, Zugangsbeschränkung und den Zugriff des gespeicherten Tokens, den Platz auf jedem Laufwerk mit
+  Konvertierungsreserve und dreifach gezählter Ausgabe, eine Schätzung, ob dieser Rechner und das Board es tragen,
+  Einbindungen, Vertrauen des Targets und den Image-Build. Keine Größengrenze: Abgelehnt wird nur, wenn ein Laufwerk
+  den Build neben einer Reserve und dem von anderen angenommenen Builds reservierten Platz nicht fasst
+  (`insufficient_resources`, mit den Zahlen); Reservierungen liegen in `~/.llm-framework/disk_reservations.json` und
+  werden geprüft, wenn ein Build die Warteschlange verlässt. Neues Lese-Tool `check_build_request`: derselbe Plan als
+  Probelauf. `start_build` nimmt `optimization`.
+- **MCP: Build-Abfragen mit ID und Label**: `list_artifacts` benennt gebaute Modelle mit einer ID und
+  `output:<relativer Pfad>` mit Größe und Hash (seitenweise, gefiltert), das neue `get_artifact_details` liefert
+  Manifest (externer Text), Model Card und Dateien, mit den Ressourcen `lcf://artifacts/{id}/manifest` und
+  `/model-card`; `list_build_requests` (seitenweise) und `get_build_status` zeigen auch Builds anderer
+  Framework-Prozesse aus ihren Build-Records, nur lesbar; `get_build_status` sagt, was die Anfrage baut;
+  `read_build_log` liefert höchstens 1000 Zeilen und blättert mit `before_line` zurück.
+- **Hugging-Face-Modelle werden in einem Ordner pro Commit bereitgestellt**,
+  `<cache_dir>/models/hf/<owner>--<name>/<commit>/`, Datei für Datei unter einer Sperre; nur dieser Ordner wird in die
+  Build-Container eingebunden (nicht mehr der ganze Modell-Cache), ein Abbruch stoppt den Download vor der nächsten
+  Datei, und der Download stoppt, wenn das Cache-Laufwerk unter die Hälfte seiner Reserve fällt. Ein volles Laufwerk
+  wird als `insufficient_resources` mit dem freien Platz gemeldet.
+
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
   Prozessliste. Nutze die verdeckte Abfrage oder `--with-token`.
@@ -936,6 +957,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   scrollbarer Dialog für lange Rückfragen bietet ebenfalls "nicht mehr fragen" an, und die Kontingente eines
   freigegebenen Aufrufs werden vor dem Ausführen noch einmal geprüft.
 
+- **`start_build` über MCP ignorierte die Optimierungsstufe** (immer balanced, G26), und **zwei Builds verschiedener
+  Commits eines Modells teilten sich einen Bereitstellungsordner** (und `a/b__c` und `a__b/c` kollidierten, G38).
+- **Ein volles Laufwerk schlug immer vor, Docker aufzuräumen** (G40): Der Vorschlag ist jetzt ein manueller Schritt,
+  der die Ordner des Frameworks auf dem vollen Laufwerk mit ihrer Größe nennt; Docker aufzuräumen wird nur
+  vorgeschlagen, wenn Dockers Datenverzeichnis voll ist.
+
 ### Sicherheit
 - **KI-Clients sehen nie den Host-Pfad eines lokalen Modells, das sie benannt haben** (MCP-Clients und Ditto): Der
   Stufentext des Builds, der Kontext der Selbstheilung, `model_source` im Build-Manifest und `list_artifacts` nennen
@@ -1161,6 +1188,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   pausiertes Tool oder eine aufgebrauchte Stunde lehnen eine neue ausstehende Freigabe ab; und die Grenze von 5
   offenen ausstehenden Freigaben ist eine protokollierte Ablehnung, die nie als gescheiterter Aufruf zählt. Vorher
   konnte ein Client, der nicht fragen kann, Rückfragen ohne diese Grenzen einreihen.
+
+- **Kein implizites Hugging-Face-Token**: Builds übergaben huggingface_hub `token=None`, wenn kein Token gespeichert
+  war, sodass ein Token aus `HF_TOKEN` oder dem Hugging-Face-Home-Ordner verwendet wurde, ohne dass die Person es dem
+  Framework gegeben hatte (G37). Jeder Hugging-Face-Aufruf eines Builds sendet jetzt das gespeicherte Token oder
+  `token=False`.
+- **Image-Builds lesen nie den MCP-Protokollstrom**: `docker buildx build` lief mit der Standardeingabe des Servers,
+  die über stdio der Protokollstrom ist (G25); es bekommt jetzt `stdin=DEVNULL`.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

@@ -481,13 +481,15 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 |---|---|---|
 | `list_targets` | read | Targets with boards, formats and quantizations |
 | `get_target_capabilities` | read | What a target can build |
-| `list_build_requests` | read | Build requests of this session |
+| `list_build_requests` | read | Build requests with their status, 50 per page; those of other framework processes read-only |
 | `get_build_status` | read | Status, progress, errors, a pending self-healing proposal; with `wait_seconds` (at most 50) it waits for a change |
-| `read_build_log` | read | The last lines of a build log (secrets redacted) |
-| `list_artifacts` | read | Finished builds from their manifests |
+| `read_build_log` | read | The last lines of a build log (secrets redacted; at most 1000, paging back with `before_line`) |
+| `list_artifacts` | read | Finished builds by id and label (never a host path), with size and hash |
+| `get_artifact_details` | read | Manifest, model card and files of one built model (external text) |
+| `check_build_request` | read | Dry run of `start_build`: commit, download size, disk space, hardware estimate, licence, gating; starts nothing |
 | `run_doctor` | read | The health check, without fixes |
 | `search_knowledge` | read | Search the knowledge base |
-| `start_build` | local write | Start a build (must match the target's capabilities) |
+| `start_build` | local write | Start a build (must match the target's capabilities); the question shows commit, size, disk and hardware estimate |
 | `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
 | `get_status` | read | Your tool permissions for this caller: every tool with its decision and why (also the hidden ones), and what no tool does, with where you do it |
@@ -1022,6 +1024,37 @@ framework never sees it.
   confirmation, audit log (actor `mcp` for local stdio clients, `mcp:<name>` for a named token), exactly as for
   Ditto ([how names and values are matched](#dittos-tools)). Tool annotations (read-only, idempotent) are only
   hints for the client.
+- **Builds (`start_build`, `check_build_request`):** before you are asked, the framework looks up what the build
+  would do and shows it in the question: the Hugging Face commit the default branch points to now (the build then
+  fetches exactly that commit, even if the branch moves while you read), the download size, the weights type
+  (safetensors, GGUF, or pickle files, which can run code inside the build container and are named as such), the
+  licence (repository text, marked as such), the gating and whether the Hugging Face token stored in the framework
+  has access, the disk space on each disk the build writes to, an estimate whether this computer can convert it and
+  whether the board can run it, what is mounted (labels, never paths), the target's trust and support level, and
+  that a Docker image may be built first with network access. There is no size cap for downloads: a 72B model is
+  built when the disks hold it. A build is refused before the question only when a disk cannot hold the download,
+  the conversion margin (about the download again) and the output three times (build cache, staged copy, ZIP) plus a
+  reserve of 2 GiB or 2 % of the disk and the space other accepted builds reserved and have not written yet (reason
+  `insufficient_resources`, with the numbers); when a gated model's access is missing (`needs_person` without a
+  stored token, `permission_denied` when the stored token has no access); when the build sandbox is off
+  (`build_sandbox`, `needs_person`); and in offline mode. The hardware estimate is never a refusal: "does not fit"
+  is shown and you decide. When Hugging Face cannot be reached, the question says "default branch, commit unknown"
+  and that the download size is unknown. An accepted build reserves its disk space in
+  `~/.llm-framework/disk_reservations.json` (shared by GUI, CLI and every MCP server) until its request ends; when
+  the build leaves the queue the disk is checked again, and a build that no longer fits fails with the numbers
+  before anything is downloaded. `optimization` (`fast`, `balanced`, `size`, `speed`, `aggressive`) is passed to
+  the build. `check_build_request` returns the same plan (normalized request, commit, sizes, disks, fit, mounts,
+  trust, image build, what your permissions would do) without starting anything; its problems carry reason codes.
+- **Build reads:** `list_build_requests` (50 per page, filter by status) also lists builds another framework process
+  started (GUI, CLI, another MCP server), from their build records, marked `process: other` and read-only (they are
+  stopped where they were started; a build whose process ended is `interrupted`). `get_build_status` adds what the
+  request builds (`request`: model as repo id or label, target, format, board, quantization, optimization, commit).
+  `read_build_log` returns at most 1000 lines (200 by default), 2000 characters per line and 48,000 in all, with
+  `first_line` and `before_line` for paging back. `list_artifacts` names built models by an id (`a_` and 16 hex
+  characters) and a label (`output:<relative path>`) with size and hash, 50 per page, filtered by target and format;
+  `get_artifact_details` returns one model's manifest (every string marked as external text, a local model's path
+  as its label), model card and files. The resources `lcf://artifacts/{artifact_id}/manifest` and
+  `lcf://artifacts/{artifact_id}/model-card` read the same.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
   elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
   and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be

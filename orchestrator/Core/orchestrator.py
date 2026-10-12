@@ -98,6 +98,9 @@ class BuildRequest:
     # Who started it through a tool ("mcp#<session>", "ditto"; empty for the GUI and the CLI): that caller may
     # cancel it without a question, and a disconnected MCP session's builds are cancelled
     owner: str = ""
+    # The disk reservation an AI caller's accepted build took (orchestrator.Core.disk_plan.ReservationLedger): checked
+    # again when the request leaves the queue, released when it ends
+    disk_reservation: str = ""
 
     def __post_init__(self):
         if not self.request_id:
@@ -122,6 +125,8 @@ class WorkflowState:
     build_ids: List[str] = field(default_factory=list)
     owner: str = ""  # BuildRequest.owner
     label: str = ""  # the request's speaking name: model (a local model by its label), target, format, quantization
+    # What the request builds, as tools show it (the model by its repo id or label, never a host path)
+    summary: Dict[str, Any] = field(default_factory=dict)
 
     @property
     def progress_percent(self) -> int:
@@ -163,6 +168,16 @@ def model_label(model: str, local_inputs: Any = None) -> str:
     return Path(model).name if Path(str(model)).is_absolute() else str(model)
 
 
+def request_summary(request: "BuildRequest") -> Dict[str, Any]:
+    """What a request builds, for the build tools: model (repo id or label), target, format, board, quantization."""
+    return {"model": ", ".join(model_label(m, request.local_inputs) for m in request.models) or None,
+            "target": ", ".join(request.targets) or None,
+            "format": ", ".join(getattr(f, "value", str(f)) for f in request.target_formats) or None,
+            "board": request.target_board, "quantization": ", ".join(str(q) for q in request.quantization_options if q)
+            or None, "optimization": getattr(request.optimization_level, "value", None),
+            "revision": request.model_revision}
+
+
 def request_label(request: "BuildRequest") -> str:
     """A build request's speaking name: "<model> for <target> (<format> <quantization>)"."""
     models = ", ".join(model_label(m, request.local_inputs) for m in request.models) or "?"
@@ -193,6 +208,9 @@ class LLMOrchestrator:
         
         # Dependency Injection Containers
         self.self_healing = None 
+
+        # Disk reservations of accepted AI builds (disk_plan.ReservationLedger), set by the build service
+        self.disk_ledger = None
 
         # Pending healing approvals (request_id -> event set by resolve_healing from the GUI/CLI thread)
         self._healing_events: Dict[str, asyncio.Event] = {}
@@ -226,6 +244,7 @@ class LLMOrchestrator:
                 start_time=datetime.now(),
                 owner=getattr(request, "owner", "") or "",
                 label=request_label(request),
+                summary=request_summary(request),
             )
             self._workflows[request.request_id] = state
             
@@ -296,6 +315,7 @@ class LLMOrchestrator:
         _, _, request = await self._queue.get()
         state = self._workflows.get(request.request_id)
         if state is not None and state.status == OrchestrationStatus.CANCELLED:
+            self._release_disk(request)
             self._ensure_worker_running()  # cancelled while queued: go on with the next request
             return
         
@@ -313,9 +333,36 @@ class LLMOrchestrator:
                 self._workflows[request.request_id].status = OrchestrationStatus.ERROR
                 self._workflows[request.request_id].errors.append(str(e))
         finally:
+            self._release_disk(request)
             self._active_tasks.pop(request.request_id, None)
             self._queue.task_done()
             self._ensure_worker_running()
+
+    def _release_disk(self, request: BuildRequest) -> None:
+        rid = getattr(request, "disk_reservation", "")
+        if rid and self.disk_ledger is not None:
+            try:
+                self.disk_ledger.release(rid)
+            except Exception as e:  # noqa: BLE001 - a reservation of an ended process is dropped anyway
+                self.logger.warning(f"Disk reservation of {request.request_id} not released: {e}")
+
+    def _disk_still_fits(self, req: BuildRequest, state: "WorkflowState") -> bool:
+        """When an AI caller's build leaves the queue: the disk still holds what was reserved for it (other programs
+        and builds wrote meanwhile). Otherwise the request fails with the numbers, before anything is downloaded."""
+        rid = getattr(req, "disk_reservation", "")
+        if not rid or self.disk_ledger is None:
+            return True
+        try:
+            self.disk_ledger.recheck(rid)
+        except ValueError as e:  # disk_plan.InsufficientSpace
+            state.status = OrchestrationStatus.ERROR
+            state.current_stage = "Failed"
+            state.errors.append(f"insufficient_resources: {e}")
+            state.end_time = datetime.now()
+            return False
+        except Exception as e:  # noqa: BLE001 - a ledger that cannot be read does not stop the build
+            self.logger.warning(f"Disk reservation of {req.request_id} not checked again: {e}")
+        return True
 
     def _target_exists(self, target: str) -> bool:
         """Through the engine's id -> folder map (a target id may differ from its folder name)."""
@@ -500,6 +547,8 @@ class LLMOrchestrator:
         self._loop = asyncio.get_running_loop()
         
         self.logger.info(f"Starting pipeline for {req.request_id}")
+        if not self._disk_still_fits(req, state):
+            return
         
         # 0. Importance matrix: without a dataset of its own, a GGUF build uses the shipped, checksummed
         #    calibration text (German/English/tool use, see data/calibration). No generated filler.

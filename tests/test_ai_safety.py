@@ -102,9 +102,48 @@ class TestSelfHealing:
         assert healer.framework.config.get("build_jobs") == 1
         assert healer.apply_fix(proposal) is False, "nothing left to lower: report honestly"
 
-    def test_prune_is_limited_to_framework_images(self, healer):
-        assert healer.apply_fix(healer._analyze_heuristics("No space left on device")) is True
+    @staticmethod
+    def full_disks(monkeypatch, tmp_path, healer, full):
+        """Docker's data root and the framework's folders on separate fake disks; `full` names the full ones."""
+        import shutil
+        from orchestrator.Core import disk_plan, self_healing_manager
+        disks = {}
+        for name in ("docker", "cache", "models", "output"):
+            (tmp_path / name).mkdir()
+            disks[str(tmp_path / name)] = name
+        (tmp_path / "cache" / "old.safetensors").write_bytes(b"x" * 2048)
+        healer.framework.config.values.update(cache_dir=str(tmp_path / "cache"), models_dir=str(tmp_path / "models"),
+                                              output_dir=str(tmp_path / "output"))
+        client = healer.framework.get_component("docker_client")
+        client.info = lambda: {"DockerRootDir": str(tmp_path / "docker")}
+
+        def usage(path):
+            name = disks.get(str(path), "other")
+            free = 10 ** 6 if name in full else 500 * 10 ** 9
+            return shutil._ntuple_diskusage(1000 * 10 ** 9, 1000 * 10 ** 9 - free, free)
+        monkeypatch.setattr(self_healing_manager.shutil, "disk_usage", usage)
+        monkeypatch.setattr(disk_plan, "device_of", lambda path: disks.get(str(path), "other"))
+
+    def test_prune_is_limited_to_framework_images(self, healer, monkeypatch, tmp_path):
+        self.full_disks(monkeypatch, tmp_path, healer, full={"docker"})
+        proposal = healer._analyze_heuristics("No space left on device")
+        assert proposal.strategy == HealingStrategy.DOCKER_PRUNE
+        assert healer.apply_fix(proposal) is True
         assert healer.images.pruned[0] == {"dangling": True, "label": "org.llm-framework.target"}
+
+    def test_a_full_model_cache_is_a_manual_step_never_a_docker_prune(self, healer, monkeypatch, tmp_path):
+        """G40: 'No space left on device' proposed docker_prune whatever disk was full; pruning Docker never frees
+        the model cache. The manual step names the folders by label with their sizes, never a path."""
+        self.full_disks(monkeypatch, tmp_path, healer, full={"cache"})
+        proposal = healer._analyze_heuristics("OSError: [Errno 28] No space left on device")
+        assert proposal.strategy == HealingStrategy.MANUAL_INTERVENTION
+        assert "model cache" in proposal.root_cause and "2048" not in proposal.root_cause
+        assert str(tmp_path) not in proposal.root_cause + proposal.fix_command
+        assert healer.apply_fix(proposal) is False and healer.images.pruned == []
+
+    def test_an_unknown_full_disk_is_a_manual_step(self, healer):
+        proposal = healer._analyze_heuristics("No space left on device")
+        assert proposal.strategy == HealingStrategy.MANUAL_INTERVENTION
 
     def test_ai_proposals_are_never_applied(self, healer):
         ditto = SimpleNamespace(analyze_error_log=lambda log, ctx: HealingAnalysis(
