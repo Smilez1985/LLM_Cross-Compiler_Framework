@@ -339,6 +339,33 @@ Einstellungen überschreiben sie: `ai_model` und `ai_effort` für alle Aufgaben,
 `ai_effort_<Aufgabe>` für eine Aufgabe. Aufwandsstufen sind `low`, `medium`, `high`, `xhigh` und `max`; jeder
 Anbieter übersetzt sie in das, was er versteht.
 
+### Ehrliches „kann ich nicht“ und ungetestete Hardware
+
+Die Aufgabentexte stehen in einem Modul (`orchestrator/llm/task_prompts.py`), das Ditto und die
+[MCP-Prompts](#mcp-server) teilen. Jeder von ihnen sagt dem Modell: Wenn es eine Aufgabe nicht erledigen kann, sagt es
+das mit dem konkreten Grund (welche Information fehlt, welche Fähigkeit oder welches Tool es nicht gibt, welche
+Berechtigung verweigert ist, welches Gerät oder welche Hardware nicht verfügbar ist, welches Limit erreicht ist) und
+behauptet nie ein Ergebnis, das es nicht bekommen hat; dass sich ein Ergebnis nicht auf echter Hardware testen lässt,
+ist kein Grund abzulehnen. Modulvorschläge und Build-Empfehlungen dürfen mit `cannot` und einem solchen Grund
+antworten. Wenn die eigene Prüfung des Frameworks in den Eingaben der Aufgabe findet, was die Aufgabe braucht (eine
+Probe oder das Board mit seinem SoC; Formate, die das Target anbietet), fragt Ditto das Modell noch einmal, und ein
+zweites `cannot` erreicht dich als „vom Framework nicht bestätigt“. Ohne Probe und ohne Board gibt es nichts, worauf
+ein Modul aufbauen könnte: Das sagt Ditto selbst und fragt kein Modell. Die Healing-Analyse hat kein `cannot`; eine
+unklare Ursache kommt mit einer niedrigen Sicherheit.
+
+**Modulvorschläge** dürfen jedes Basis-Image verwenden. Ditto bevorzugt ein Docker Official Image (`debian`,
+`ubuntu`) mit den Paketen des Herstellers; für jedes andere Image, zum Beispiel das Toolchain-Image eines Herstellers
+auf `nvcr.io`, muss es seinen Grund angeben (`base_image_reason`). Werte, die es geraten hat, listet es in
+`assumptions` auf (höchstens 10). Bevor das Modul angelegt wird, zeigen der Modul-Assistent und
+`llm-cli module generate-ai` das Basis-Image offen: Registry, Image, Digest (oder, ohne Digest, entweder dass das
+Modul das Image über sein Tag nutzt, bei der kurzen Liste von Basis-Images des Modulgenerators, oder dass der
+Generator es ablehnt, bis es festgelegt ist),
+„Docker Official Image“ oder „andere Registry: ...; fertiges Image seines Herausgebers, vom Framework nicht geprüft“,
+dass der Image-Build mit Netzwerkzugriff auf diesem Rechner außerhalb der Build-Sandbox läuft, und den Grund der KI.
+Der Assistent übernimmt das vorgeschlagene Image unverändert (ein Image mit „debian“ im Namen wird nicht mehr durch
+`debian:bookworm-slim` ersetzt). Das angelegte Modul sagt in seiner Beschreibung, dass es ungetestet ist, und nennt
+die Annahmen; seine Unterstützungsstufe ist community.
+
 ### Anbieter
 
 | ID | Art | Wo es läuft | Anmeldung heute |
@@ -1084,11 +1111,68 @@ Konto oder Schlüssel an; das Framework sieht das nie.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine
-  Frage, die länger als 4000 Zeichen würde, wird abgelehnt statt gekürzt. Nur eine echte Antwort des Benutzers zählt
+  Frage, die länger als 4000 Zeichen würde, wird zu einer wartenden Freigabe (unten) statt gekürzt. Nur eine echte
+  Antwort des Benutzers zählt
   als Zustimmung, und ein „Nein“ gilt für diesen Aufruf endgültig, auch wenn die Berechtigungen gelockert werden,
   während die Frage offen ist. Abgelehnte und abgebrochene Aufrufe sowie Aufrufe, die abgewiesen werden, bevor sie
-  laufen (ungültige Argumente, eine gescheiterte Bestätigung), landen ebenfalls im Audit-Log. Ein Client, der nicht
-  fragen kann, bekommt eine Ablehnung mit einem Hinweis, wie du das Tool erlaubst.
+  laufen (ungültige Argumente, eine gescheiterte Bestätigung), landen ebenfalls im Audit-Log.
+- **Wartende Freigaben:** Kann ein Client dich nicht fragen (er hat keine Formular-Elicitation erklärt), ist die
+  Frage länger, als eine Elicitation sein darf, oder hast du das Tool auf Bestätigung im Framework gestellt
+  (`llm-cli tools permissions --confirm-in-framework TOOL` oder „Ask in the framework“ im Dialog Tool Permissions;
+  nützlich für Tools, die du jedes Mal im Framework sehen willst), wird der Aufruf nicht abgelehnt. Der Client bekommt
+  den Fehler `waiting_for_approval` mit einer Job-ID („poll get_job_status with wait_seconds=50; do not call this
+  tool again“), und die Frage wartet auf dich: ein Hinweis in der Statusleiste der GUI (und eine
+  Desktop-Benachrichtigung, wo das System eine anbietet), der **Tools > Pending Approvals...** öffnet, und
+  `llm-cli tools approvals` in einem Terminal. Das Fenster zeigt zuerst die Aufruferklasse („all local stdio clients“
+  oder den Namen des Tokens), dann den eigenen Namen des Clients, gekennzeichnet als selbst angegeben, die
+  vollständige Frage (bis zu 16.000 Zeichen; eine längere wird überall abgelehnt) und die verbleibende Zeit, mit
+  **Approve once** und **Decline**. Bei der Freigabe baut das Framework die Frage neu: Lautet sie anders (ein Fakt
+  dahinter hat sich geändert), läuft nichts und du wirst erneut gefragt; sonst führt das Framework den Aufruf selbst
+  aus, unter dem ursprünglichen Aufrufer (`confirm_channel` `approval:<id>` im Audit-Log), und der Client liest das
+  Ergebnis mit `get_job_status`. Derselbe Aufruf, wiederholt während er wartet, bekommt denselben Job, eine Freigabe
+  läuft einmal und nur für den Aufrufer, das Tool und die Argumente, für die gefragt wurde, sie verfällt nach 15
+  Minuten (festgehalten als `unanswered`) und endet mit der Sitzung des Clients, wenn der Client seinen Job abbricht
+  oder wenn das Framework beendet wird. Ein Client hat höchstens 5 offene Freigaben. Das Fenster setzt nie einen
+  anderen Aufruf an die Stelle dessen, den du gerade liest: Wird er zurückgezogen, läuft er ab oder wird er anderswo
+  entschieden, ist nichts ausgewählt; wird er mit neuen Fakten erneut gefragt, ist seine neue Frage gekennzeichnet und
+  die Freigabe wartet einen Moment, damit ein Klick, der dem alten Text galt, nicht den neuen freigibt. Deine
+  Entscheidung wird festgehalten (`approval_decided`, Akteur `gui` oder `cli`), bevor sie gespeichert wird; scheitert
+  das, wird nichts entschieden. Die Freigaben liegen in `~/.llm-framework/tool_approvals.json`, signiert wie die
+  Berechtigungen, damit eine Bearbeitung von Hand nichts entscheidet; kein Tool kann eine anlegen, auflisten,
+  freigeben oder ablehnen, und nur der Client, der gefragt hat, sieht das Ergebnis. Ditto im Framework fragt immer in
+  seinem eigenen Dialog oder seiner Rückfrage und braucht nie eine.
+- **Dauerhafte Freigaben („ja, und nicht mehr fragen“):** ein begrenztes „erlauben“ für einen Aufrufer, das nur du im
+  eigenen Fenster des Frameworks anlegst: **Approve and do not ask again...** im Freigabefenster,
+  `llm-cli tools approvals approve ID --always` oder Dittos Dialog und Rückfrage. Der eigene Dialog eines MCP-Clients
+  kann nur darum bitten: Sein Formular hat dann „ask the framework to stop asking for calls like this one“, was
+  diesen einen Aufruf ausführt und eine Anfrage ins Freigabefenster legt, die du bestätigst (eine offene Anfrage je
+  Aufrufer und Tool, 15 Minuten oder bis seine Sitzung endet; ein abgelehnter Rahmen wird 24 Stunden lang nicht erneut
+  angefragt). Bevor du bestätigst, zeigt das Fenster eine Warnung, die nennt, wer dann ohne Nachfrage handeln darf
+  (bei den lokalen stdio-Clients: alle, mit dem Befehl, der einem Client ein eigenes Token gibt), was die dauerhafte
+  Freigabe in einfachen Worten abdeckt, wie weit („this one only“ oder „any“, wo angeboten) und wie lange („until I
+  revoke it“, 30 Tage oder 24 Stunden; für alle lokalen stdio-Clients zusammen nur der engste Rahmen und höchstens 30
+  Tage). Der Rahmen kommt aus Fakten, die das Framework für den Aufruf nachgeschlagen hat, nie aus dem, was die KI
+  geschrieben hat; ein Aufruf außerhalb fragt wie bisher, und eine dauerhafte Freigabe hebt nie ein „verweigern“ auf,
+  deckt nie einen anderen Aufrufer ab und gilt nie für ein Tool, das du auf Bestätigung im Framework gestellt hast.
+  Pakete aus dem Zoo können eine bekommen für Wissens- und Rezept-Pakete mit Vertrauensstufe `verified` oder
+  `community` und für Target-Pakete mit `verified`, jeweils gebunden an genau die Paketart, die Vertrauensstufe und
+  den Signaturschlüssel des Index; Builds und Einzeldatei-Downloads nur für safetensors oder GGUF (nie Pickle-Gewichte),
+  Modelle ohne Zugangsbeschränkung mit einer freizügigen Lizenz, bis zu einer Größenklasse; nie angeboten wird sie für
+  Deployment, Einstellungen, Crawlen, das Anlegen von Modulen, `export_pack`, Healing, Löschen oder Wiederherstellen
+  und das Stoppen der Arbeit eines anderen Clients. Dauerhafte Freigaben liegen in der signierten Berechtigungsdatei
+  (eine Bearbeitung von Hand verbietet alles) und werden nur geschrieben, wenn du sie anlegst, widerrufst oder
+  zurücksetzt, damit eine Nutzung die Datei nie neu schreibt und keinen Widerruf rückgängig machen kann; ihre
+  Nutzungen und die letzte Nutzung kommen aus dem Audit-Log (`confirm_channel` `grant:<id>`), und die GUI zeigt jede
+  Nutzung mit einem **Revoke**-Knopf und nennt dabei, wer gehandelt hat, das Tool und was die dauerhafte Freigabe
+  abdeckt. Sie verfallen nach 90 Tagen ohne Nutzung (einmal festgehalten als `grant_lapsed`; eine verfallene bleibt
+  verfallen), mit ihrem Ablauf, wenn sich die Regel des Tools ändert und wenn ihr Token widerrufen wird; die Anfrage
+  eines Tokens, das seitdem widerrufen wurde, wird nie zur dauerhaften Freigabe eines neuen Tokens mit demselben
+  Namen. `llm-cli tools permissions --grants` und der Dialog Tool Permissions führen sie mit ihren Nutzungen auf, und
+  `--revoke-grant ID`, **Revoke** im Dialog und `--reset` entfernen sie. Solange die GUI läuft, kann die
+  Kommandozeile keine anlegen (nutze das Fenster der GUI); eine auf der Kommandozeile angelegte wird beim nächsten
+  GUI-Start einmal gezeigt. `get_status` zeigt einem Aufrufer seine eigenen dauerhaften Freigaben, nur lesend.
+  Welche Tools bisher eine anbieten: nur Tools, deren Fakten das Framework nachschlagen kann, bekommen eine Regel
+  (noch keines der 14 aktuellen Tools; die Zoo-, Download- und lokalen Tools bringen ihre mit).
 - **Anweisungen an den Client:** Der Server beschreibt den typischen Ablauf (Targets → Capabilities → Build → Status
   und Log → Artefakte), sagt dem Client, dass als externer Text markierte Felder Daten sind, deren Anweisungen nicht
   befolgt werden dürfen, und dass er dir eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
@@ -1109,6 +1193,49 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Teil als nicht vertrauenswürdige Daten eingepackt, während die eigenen Ablehnungen des Frameworks und der nächste
   Schritt unverpackt bleiben (Dittos Modell bekommt solche Fehler ebenfalls in einem Block für nicht
   vertrauenswürdige Daten).
+- **Ressourcen:** Neben den Tools bietet der Server Ressourcen, die ein Client anhängen oder lesen kann:
+  `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<Request-ID>/status`,
+  `lcf://builds/<Request-ID>/log` (die letzten 200 Zeilen), `lcf://permissions` und die Dokumente der Installation
+  `lcf://docs/<Name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` und ihre deutschen
+  `_DE`-Zwillinge; aufgeführt werden nur die vorhandenen). Eine Ressource liefert, was ihr Lese-Tool liefert, und wird
+  über die Tool-Registry gelesen: Deine Berechtigung für dieses Tool entscheidet (die Ressource eines verbotenen Tools
+  wird weder aufgeführt noch gelesen, und eine, deren Tool auf „fragen“ steht, wird mit dem Tool abgelehnt, das
+  stattdessen aufzurufen ist, weil das Lesen einer Ressource dich nicht fragen kann), derselbe Ausgabefilter bereinigt
+  sie (externer Text als nicht vertrauenswürdige Daten eingepackt, daher kommen diese Ressourcen als Text), und jedes
+  Lesen landet als `read_resource:<URI>` im Audit-Log. Eine unbekannte ID, ein Dokument außerhalb der Liste oder ein
+  Parameter mit `..`, einem absoluten Pfad oder einem NUL-Byte ist ein Fehler wegen ungültiger Parameter (-32602),
+  ebenfalls im Audit-Log, auch wenn der Server ihn ablehnt, bevor eine Ressource läuft (eine unbekannte URI oder ein
+  anderes Schema). Ein Dokument, das sich nicht lesen lässt, wird ohne seinen Pfad abgelehnt.
+- **Änderungsereignisse:** Ein Client mit Protokoll 2026-07-28 kann auf Änderungen hören (`subscriptions/listen`):
+  Die Listen der Tools, Prompts und Ressourcen ändern sich, wenn sich deine Berechtigungen oder die eines Tokens
+  ändern, und die Status- und Log-Ressourcen eines Builds melden jede Änderung, nur an den Aufrufer, der den Build
+  gestartet hat. Der Server veröffentlicht sie über seinen eigenen Ereignisbus; er prüft jede Sekunde auf Änderungen.
+  Auf den älteren Handshake-Revisionen kündigt er keine Änderungsmeldungen an, daher sehen diese Clients eine
+  geänderte Berechtigung bei ihrer nächsten Sitzung.
+- **Prompts:** Dittos Aufgaben für einen Client, der Dittos Arbeit übernimmt, mit demselben Aufgabentext und
+  demselben Wissenskontext, den Ditto bekommt (die meisten Clients zeigen sie als Slash-Befehle):
+  `ask_about_framework` (eine Frage; Auszüge aus der Wissensbasis und die Dokumentationsressourcen),
+  `convert_model_for_board` (Modell, Target, Board; die Capabilities des Targets und die Schritte von der Prüfung bis
+  zum gebauten Modell), `recommend_build_settings` (Modell, Target, Board, `use_knowledge`; die Formate und
+  Quantisierungstypen, die das Target für das Board anbietet) und `diagnose_build_failure` (ein Build-Request; sein
+  Zustand, das Ende seines Logs und drei Auszüge aus der Wissensbasis). `add_board` und `deploy_to_board` sind fertig
+  und werden angeboten, sobald es die Tools gibt, zu denen sie führen (ein Target-Modul anlegen, Pakete bauen und
+  übertragen). Ein Prompt gewährt nichts: Jeder Schritt läuft weiter über die Tools und deine Berechtigungen. Seine
+  erste Nachricht ist der eigene Text des Frameworks, bei jedem Aufruf derselbe; die zweite enthält den Kontext, in dem
+  jeder Wert von außerhalb des Frameworks (auch deine Argumente) als nicht vertrauenswürdige Daten eingepackt ist,
+  Secrets geschwärzt sind und der ganze Prompt auf 24.000 Zeichen begrenzt ist. Jeder Prompt trägt die Regel für das
+  ehrliche „kann ich nicht“ (siehe [Ditto](#ehrliches-kann-ich-nicht-und-ungetestete-hardware)). Ein Prompt wird wie
+  ein Lese-Tool gelesen: Deine Leseberechtigung entscheidet, ein unbekanntes Argument wird mit den gültigen Namen
+  abgelehnt (nie verworfen), und jeder Abruf landet als `get_prompt:<Name>` im Audit-Log. Ein Prompt zeigt nichts,
+  was ein Lese-Tool nicht darf: Einer, dessen Kontext enthält, was ein Lese-Tool liefert (Zustand und Log eines
+  Builds bei `diagnose_build_failure`, die Capabilities eines Targets bei `convert_model_for_board` und
+  `recommend_build_settings`), wird weder aufgeführt noch geliefert, solange du dieses Tool verbietest, und mit dem
+  aufzurufenden Tool abgelehnt, solange es auf „fragen“ steht; Auszüge aus der Wissensbasis kommen nur, solange
+  `search_knowledge` erlaubt ist. Die eigenen Texte des Targets (Format-Bezeichnungen und Hinweise aus
+  `target.yml`) sind ebenfalls externer Text.
+- **Vervollständigung:** Clients, die Argumente vervollständigen (VS Code), bekommen Target-IDs, die Boards eines
+  Targets, Dokumentnamen und die eigenen Build-Requests des Aufrufers, nur für Prompts und Ressourcen, die der
+  Aufrufer nutzen darf.
 - **Lokale Dateien für KI-Clients:** MCP-Clients und Ditto nennen nie einen Pfad. Ein lokales Modell oder ein
   Kalibrierungsdatensatz wird als `<Label>:<relativer Pfad>` in einem Ordner genannt, den die KI nutzen darf, zum
   Beispiel `models:qwen2.5-0.5b-instruct` oder `datasets:calib/de.txt`, oder über die Datei-ID (`lf_` und 16
@@ -1134,7 +1261,11 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Datei für Datei eingebunden. Dasselbe gilt für den Ordner einer RKNN-Beispielliste, deshalb wird eine Liste direkt
   in einem Label-Ordner abgelehnt. Eine Hugging-Face-Repo-ID von einem KI-Client wird immer heruntergeladen, nie als
   Ordner auf diesem Rechner nachgeschlagen. Ablehnungen nennen das Label, nie den echten Pfad. GUI- und CLI-Builds,
-  die du selbst startest, nehmen weiterhin jeden Pfad.
+  die du selbst startest, nehmen weiterhin jeden Pfad. Was ein KI-Client zurückliest, nennt ein solches Modell
+  ebenfalls beim Label, nie bei den Ordnern auf diesem Rechner: der Stufentext des Builds ("Building
+  models:qwen/model.gguf for Rockchip"), der Kontext der Selbstheilung, `model_source` im Build-Manifest und
+  `list_artifacts` (ein Host-Pfad, den ein älteres Manifest festhielt, erscheint als `<label>:<relativer Pfad>`, wenn
+  er in einem Ordner liegt, den die KI nutzen darf, sonst nur als Dateiname).
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je
@@ -1159,8 +1290,13 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). Über HTTP schickt jeder Client sein
   eigenes benanntes Token als `Authorization: Bearer <Token>`; eine Anfrage mit `Origin`-Header (eine Webseite, auch
   ein CORS-Preflight) wird abgelehnt, der `Host`-Header muss eine Loopback-Adresse mit dem Port des Servers nennen
-  (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Eine
-  Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet hat.
+  (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen, höchstens 4 je Token (damit ein Client die
+  anderen nicht aussperren kann), schließt eine Sitzung nach 10 Minuten ohne Anfrage und nimmt höchstens 1 MiB pro
+  Anfrage an. Eine Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet
+  hat (nach einer Rotation öffnet der Client eine neue Sitzung). Eine noch offene Anfrage (ein Warten, ein
+  Ereignisstrom, ein Listen-Strom) wird geschlossen, sobald ihr Token widerrufen oder rotiert wird, und ebenso die
+  Sitzungen dieses Tokens, sodass sie keinen Platz belegen. Was außerhalb einer vom Server geprüften Anfrage läuft,
+  bekommt keinerlei Berechtigungen, über stdio wie über HTTP.
 - **Benannte Tokens:** `llm-cli mcp token add NAME` legt ein Token für einen Client an und zeigt es einmal; das
   Framework behält nur seinen SHA-256 in `~/.llm-framework/mcp_tokens.json` (Modus 0600; solange andere Benutzer
   die Datei lesen oder ändern können oder sie einem anderen Benutzer gehört, wird kein Token angenommen und der
@@ -1171,11 +1307,16 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   einem anderen Rechner; eine Änderung an Dittos Berechtigungen gilt sofort auch dafür). `rotate` ersetzt ein Token,
   `revoke` löscht es mit seinen Berechtigungen; beides wirkt sofort, auch für einen laufenden Server, und die
   Aufrufe, die ein widerrufener stdio-Client noch schickt, werden abgelehnt und protokolliert. Ein
-  stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag: Der
-  Server liest sie einmal beim Start, entfernt sie aus seiner Umgebung und startet nicht mit einem Wert, der kein
-  gültiges Token ist. Ohne sie teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen
-  Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal: Kein Tool kann sie anlegen, lesen oder ändern,
-  und kein Token erscheint in einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag.
+  stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag:
+  `llm-cli` nimmt sie aus seiner Umgebung, bevor irgendein Befehl läuft (kein Befehl und kein Kindprozess erbt sie),
+  und gibt sie nur an `mcp serve` weiter, das nicht mit einem Wert startet, der kein gültiges Token ist. Ohne sie
+  teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen Berechtigungen. Tokens verwaltet nur
+  ein Mensch, an einem Terminal oder in der GUI (Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens“:
+  auflisten, anlegen mit einmal gezeigtem Token, rotieren, widerrufen und die eigenen Berechtigungen jedes Tokens;
+  protokolliert mit dem Akteur `gui`): Kein Tool kann sie anlegen, lesen oder ändern, und kein Token erscheint in
+  einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag. Der Server liest den Token-Speicher bei jeder Prüfung
+  und merkt ihn sich anhand des SHA-256 der Dateibytes, sodass er eine Änderung auch dann sieht, wenn sie Größe und
+  Zeitstempel der Datei beibehält.
 - **Arbeitsordner:** Der Server liest nie Einstellungen und importiert nie Code aus dem Ordner, in dem er gestartet
   wird (der Client startet ihn mit `python -P`), und unter Windows startet er von dort keine Programme wie `docker`
   oder `git`. Ein Projektordner kann sein Verhalten nicht ändern.
@@ -1187,7 +1328,7 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   `mcp:<Name>` des benannten Tokens, nie das Token selbst) und die Fähigkeiten, die er erklärt hat, zum Beispiel
   `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
   capabilities: elicitation, roots`. `elicitation none` heißt, dass der Client dich nicht fragen kann; ein Tool auf
-  „fragen“ wird dort abgelehnt. Text vom Client wird zuerst von allem befreit, was wie ein Schlüssel oder Token
+  „fragen“ wird dann zu einer wartenden Freigabe im Framework. Text vom Client wird zuerst von allem befreit, was wie ein Schlüssel oder Token
   aussieht, dann escapet und auf 64 Zeichen gekürzt; er ist eine Beschriftung, nie eine Berechtigung.
 
 Was die Clients unterstützen, laut der Dokumentation ihrer Hersteller (2026-10-11). „Nicht dokumentiert“ heißt, dass
@@ -1201,7 +1342,8 @@ der Hersteller nichts dazu sagt; die stderr-Zeile oben zeigt, was ein Client wir
 | VS Code (GitHub Copilot) | ja, Modi nicht dokumentiert | nicht dokumentiert | ja, mit Vorlagen | ja | nicht dokumentiert |
 
 Von Claude-Desktop-Chat und Cowork wird erwartet, dass sie keine Elicitation erklären (eine Quelle eines Dritten
-sagt das): Dort wird jedes Tool auf „fragen“ abgelehnt, erlaubte Tools funktionieren.
+sagt das): Dort wird jedes Tool auf „fragen“ zu einer wartenden Freigabe im Framework, erlaubte Tools
+funktionieren.
 
 **Claude-Abonnenten:** Das ist der Weg, das Framework mit einem Claude-Abo zu nutzen. Anthropic erlaubt
 Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines Abos zu verwenden; Ditto selbst braucht deshalb einen
@@ -1240,7 +1382,8 @@ Verfügung.
 - **Neue Tools:** Die Berechtigungsdatei hält fest, welche Tools du gesehen hast; das Speichern der Einrichtung,
   `llm-cli tools permissions` oder der GUI-Dialog markiert jedes aufgeführte Tool. Ein später hinzugekommenes Tool
   nutzt seine eigene Vorgabe, nie eine lockerere Einstellung der Stufe, bis du es gesehen hast; `llm-cli tools list`
-  und der GUI-Dialog kennzeichnen es als neu. Eine Berechtigungsdatei aus 3.0.0 zählt ihre elf Tools als gesehen.
+  und der GUI-Dialog kennzeichnen es als neu. Eine gespeicherte Berechtigungsdatei ohne diese Liste zählt die elf
+  Tools von 3.0.0 als gesehen.
 - **Verweigerte Tools werden nicht aufgeführt**, weder MCP-Clients noch Ditto; ein Aufruf eines solchen Tools wird
   trotzdem abgelehnt und festgehalten. `get_status` führt jedes Tool mit Entscheidung und Grund auf, auch die
   ausgeblendeten, und die Handlungen, die kein Tool übernimmt, mit dem Ort, wo du sie erledigst, damit eine KI dir
@@ -1248,9 +1391,78 @@ Verfügung.
 - Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
   lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
   `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
+- **Nur du änderst die Berechtigungen.** `tool_policy.json` und der Token-Speicher `mcp_tokens.json` sind mit einem
+  Schlüssel signiert, der aus dem Audit-Schlüssel in deinem Schlüsselbund abgeleitet ist. Eine von Hand bearbeitete,
+  mit einem anderen Schlüssel signierte oder unsignierte Datei (auch eine von 3.0.0 gespeicherte Berechtigungsdatei)
+  verbietet jedes Tool, und der Token-Speicher nimmt dann kein Token an, bis du die Berechtigungen neu einrichtest
+  (`llm-cli tools permissions` oder der GUI-Dialog, der den Grund zeigt). Geändert werden sie nur in der GUI und mit
+  `llm-cli tools permissions` und `llm-cli ditto setup`, die ein Terminal brauchen (weitergeleitete Antworten werden
+  abgelehnt). Jedes Speichern wird im Audit-Log festgehalten (`policy_changed`, Akteur `cli` oder `gui`), mit den
+  alten und neuen Entscheidungen, bevor es wirkt; lässt sich der Eintrag nicht schreiben, ändert sich nichts. Jedes
+  Speichern erhöht eine Revisionsnummer unter einer Sperre, die GUI, CLI und MCP-Server teilen, und ein Speichern auf
+  Grundlage einer älteren Revision (ein Fenster, das vor einer anderen Änderung geöffnet wurde) wird abgelehnt, damit
+  es nie eine zwischenzeitliche Änderung rückgängig macht. Die neueste gespeicherte Revision beider Dateien steht
+  zusätzlich im Schlüsselbund: Eine ältere signierte Kopie, die über eine Datei zurückgelegt wird (sie brächte eine
+  widerrufene dauerhafte Freigabe, ein widerrufenes Token oder eine lockerere Berechtigung zurück), wird wie eine
+  Bearbeitung von Hand abgelehnt, und eine entfernte Berechtigungsdatei verbietet jedes Tool, statt auf die Vorgaben
+  zurückzufallen. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie die Audit-Kette) und `llm-cli doctor`
+  warnt; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt wird.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
   nicht lesen lässt, darf nicht einmal lesen.
+
+**Was eine Rückfrage zeigt** (Dittos GUI-Dialog und CLI-Abfrage, das Formular eines MCP-Clients), in dieser
+Reihenfolge: die Folge in einfachen Worten, aus dem, was das Framework nachgeschlagen hat, mit IDs, denen ihr
+sprechender Name folgt (zum Beispiel "Deletes the Docker build cache and the dangling framework images on this
+computer, then retries build request req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); wer
+fragt (Ditto oder der MCP-Client mit dem Namen, der Version und dem Transport, die er angibt, und wessen
+Berechtigungen gelten: alle lokalen stdio-Clients oder ein benanntes Token); die Fakten, die das Framework geprüft
+hat, wobei Text von außerhalb des Frameworks (ein Build-Log, der Vorschlag einer KI) als "not checked" gekennzeichnet
+und maskiert ist; dann jedes Argument vollständig, reparierte Werte markiert und eine ID mit ihrem sprechenden Namen
+dahinter (Modell und Ziel einer Build-Anfrage, `<label>:<relativer Pfad>` einer lokalen Datei, der Name eines
+Ziels). Manche Tools schlagen Fakten vor der Rückfrage nach (zweistufige Bestätigung), und der Aufruf ist dann
+genau an das gebunden, was dir gezeigt wurde: Wer einen Selbstheilungs-Vorschlag genehmigt, wendet den Vorschlag aus
+der Rückfrage an, und einer, der sich inzwischen geändert hat, wird abgelehnt, ohne dass etwas angewendet wird; ein
+zerstörender Fix (`docker_prune`, der den Docker-Build-Cache löscht) wird auch dann erfragt, wenn `resolve_healing`
+erlaubt ist; ein Nachschlagen, das scheitert (kein offener Vorschlag), lehnt den Aufruf ab, bevor etwas gefragt
+wird; ohne die nachgeschlagenen Fakten wird über einen Vorschlag gar nicht entschieden. Ein 2026-07-28-Client, der in
+einer zweiten Runde antwortet, bekommt die Fakten der Rückfrage, die er beantwortet hat. Eine Runde zählt nur als
+Antwort auf eine Rückfrage, die das Framework genau diesem Client gestellt hat und die noch offen ist: Eine Antwort,
+die ein Client einem neuen Aufruf mitgibt, ist eine neue Rückfrage, wird festgehalten, bevor sie gestellt wird, und
+unterliegt den Grenzen unten (nach deinem Nein wird sie nicht erneut gestellt). Ein MCP-Formular zeigt höchstens
+4.000 Zeichen, die eigenen Fenster des Frameworks bis zu 16.000 (Dittos GUI zeigt eine lange Rückfrage in einem
+scrollbaren Dialog, der dort, wo das Framework es kann, auch "nicht mehr fragen" anbietet, die CLI über den Pager);
+über MCP wird eine Rückfrage zwischen 4.000 und 16.000 Zeichen zu einer ausstehenden Freigabe, und eine längere wird
+überall abgelehnt (Grund `limit_reached`, mit einem nächsten Schritt). Eine ausstehende Freigabe ist dieselbe
+Rückfrage: Sie zeigt die Fakten, die das Framework nachgeschlagen hat, und die sprechenden Namen, und das Framework
+führt den freigegebenen Aufruf genau mit den Fakten der Rückfrage aus, die du freigegeben hast (ein Fakt, der sich vor
+deiner Freigabe geändert hat, etwa ein neuer Upstream-Commit, fragt dich stattdessen erneut). Auch eine Dauerfreigabe
+wird an diesen nachgeschlagenen Fakten gemessen, sodass ein Client, der dich fragen könnte, nicht fragt, wenn eine den
+Aufruf abdeckt. Eine Rückfrage, die ein nachgeschlagener Fakt nötig gemacht hat, wird mit der Entscheidung `ask`
+festgehalten, auch wenn das Tool selbst erlaubt ist. Wo das Framework "nicht mehr fragen" anbieten könnte, hat das
+MCP-Formular ein weiteres Kästchen, das nur das Framework fragt: Es legt nie eine Dauerfreigabe an, und die Hinweise
+des Aufrufs sagen das.
+
+**Grenzen** (je Client: Ditto, die lokalen stdio-Clients, jedes benannte Token; gezählt, solange der Prozess
+läuft): die lesenden Tools zusammen höchstens 20 Aufrufe in 10 Sekunden (40 auf einmal); `start_build` höchstens 3
+unfertige Builds und 20 gestartete Builds in 24 Stunden je Client (ein abgelehnter oder verweigerter Start, etwa
+wegen einer vollen Warteschlange, zählt nicht), und ein Framework-Prozess reiht höchstens 20 unfertige
+Build-Anfragen von KI-Aufrufern ein (deine eigenen GUI- und CLI-Builds zählen zu den 20, werden aber immer
+eingereiht: KI-Arbeit blockiert sie nie); höchstens 30 Rückfragen an dich pro Stunde, ausstehende Freigaben und
+Bitten, nicht mehr zu fragen, eingeschlossen, und höchstens 5 offene ausstehende Freigaben je Client. Wenn du einen
+ausstehenden Aufruf freigibst, werden seine Kontingente vor dem Ausführen noch einmal geprüft (die unfertigen Builds
+des Clients können inzwischen mehr geworden sein). Nach deinem Nein, im Dialog des Clients oder im Freigabefenster,
+wird derselbe Aufruf (dasselbe Tool mit denselben Argumenten nach der Reparatur, ein anders geschriebener
+Aufruf ist also derselbe) 10 Minuten lang ohne Rückfrage abgelehnt, und drei Nein zu einem Tool innerhalb von 30
+Minuten pausieren die Rückfragen dazu für 30 Minuten; ein geschlossener Dialog ist kein Nein. Ein Aufruf, den die
+Wiederholungssperre abgelehnt hat (derselbe scheiternde Aufruf zum dritten Mal), darf 10 Minuten nach seinem letzten
+Scheitern wieder laufen. Jede Grenze ist eine protokollierte Ablehnung (`rate_limited`, Grund `limit_reached` oder
+nach deinem Nein `declined`), die sagt, wann es wieder geht, und sie zählt nie als gescheiterter Aufruf, für Ditto wie
+für MCP-Clients. Dittos Chat hört nach drei gescheiterten Aufrufen in Folge ohne Fortschritt (jedes Mal dasselbe Tool,
+derselbe Grund und dasselbe Feld; das Framework nennt das Feld, um das es bei einem Eingabefehler geht) oder einer
+abgelehnten Wiederholung auf, Tools aufzurufen, und antwortet innerhalb von höchstens zwei weiteren Runden mit dem,
+was er versucht hat, was gescheitert ist und warum; einen Eingabefehler nach dem anderen zu beheben ist Fortschritt,
+und solange Ditto einen behebt, bekommt er bis zu 4 Schritte mehr als seine 8.
 
 **Audit-Log** (`~/.llm-framework/audit.db`, SQLite): Jeder Tool-Aufruf wird mit Zeit, Akteur, Tool, Entscheidung, ob
 ein Mensch bestätigt hat, und Ergebnis festgehalten. Argumente werden geschwärzt und gekürzt gespeichert, dazu ein
@@ -1269,8 +1481,10 @@ gescheiterte Schreibversuch wird protokolliert. Eine Frage an dich wird als `con
 des Fragetexts festgehalten, bevor sie gestellt wird; eine Frage zu einer Änderung, die sich nicht festhalten lässt,
 wird nicht gestellt. Jedes Ende wird festgehalten: `ok`, `error`, `denied`, `not_confirmed` mit der Antwort
 (`accepted`, `declined`, `cancelled`, `unavailable`, wenn niemand gefragt werden konnte, `unanswered`),
-`confirmation_timeout` (eine MCP-Frage während des Aufrufs wartet höchstens 5 Minuten) und `cancelled` (der Client
-hat den Aufruf aufgegeben). Eine Frage des Protokolls 2026-07-28, die an den Client zurückgeht und nie beantwortet
+`confirmation_timeout` (eine MCP-Frage während des Aufrufs wartet höchstens 5 Minuten; Grund `needs_person`, und eine
+Frage, die der Client nicht zeigen konnte, hat den Grund `failed`, beide mit einem nächsten Schritt) und `cancelled`
+(der Client hat den Aufruf aufgegeben). Eine Frage des Protokolls 2026-07-28, die an den Client zurückgeht und nie
+beantwortet
 wird, wird nach 15 Minuten als `unanswered` festgehalten, solange der Server läuft; der Eintrag
 `confirmation_requested` ist der bleibende Nachweis. Bricht ein Client einen laufenden Aufruf ab, wird der Abbruch
 sofort festgehalten und an den laufenden Aufruf weitergegeben; was schon läuft, endet, und sein Abschlusseintrag

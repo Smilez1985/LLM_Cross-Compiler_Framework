@@ -123,7 +123,9 @@ def spec_named(title="Start a build"):
 
 
 def shown_keys(message):
-    return [line.split(":", 1)[0].strip() for line in message.splitlines()[1:]]
+    """The argument names of a question, in the order shown (the lines after '... wants to run ... with:'; the
+    consequence, who asks and the looked-up facts come before them since confirmation text v2, design S5)."""
+    return [line.split(":", 1)[0].strip() for line in confirmation.argument_lines(message)]
 
 
 # --- Confirmation text ----------------------------------------------------------------------------
@@ -152,13 +154,13 @@ class TestConfirmationText:
 
     def test_security_fields_come_first_whatever_order_the_client_sends(self):
         arguments = dict(reversed(list({**ATTACK, "board": "rk3588", "request_id": "b1"}.items())))
-        keys = shown_keys(mcp_server.describe_call(spec_named(), arguments))
+        keys = shown_keys(confirmation.describe_call(spec_named(), arguments))
         assert keys[:8] == ["model", "dataset_path", "use_gpu", "target", "format", "board", "quantization",
                             "request_id"]
         assert keys[8:] == ["max_context_length", "use_imatrix"], "the rest keeps the client's order"
 
     def test_none_is_left_out_but_false_zero_and_empty_are_shown(self):
-        keys = shown_keys(mcp_server.describe_call(spec_named(), {"board": None, "use_gpu": False,
+        keys = shown_keys(confirmation.describe_call(spec_named(), {"board": None, "use_gpu": False,
                                                                    "count": 0, "note": ""}))
         assert keys == ["use_gpu", "count", "note"]
 
@@ -182,11 +184,11 @@ class TestTooLong:
 
     def test_limit_is_inclusive(self):
         spec = spec_named("Write")
-        head = len(mcp_server.describe_call(spec, {"text": ""}))
-        fits = mcp_server.describe_call(spec, {"text": "x" * (confirmation.MAX_DESCRIPTION - head)})
+        head = len(confirmation.describe_call(spec, {"text": ""}))
+        fits = confirmation.describe_call(spec, {"text": "x" * (confirmation.MAX_DESCRIPTION - head)})
         assert len(fits) == confirmation.MAX_DESCRIPTION and fits.endswith("x")
-        with pytest.raises(mcp_server.CallTooLong, match="too long"):
-            mcp_server.describe_call(spec, {"text": "x" * (confirmation.MAX_DESCRIPTION - head + 1)})
+        with pytest.raises(confirmation.CallTooLong, match="too long"):
+            confirmation.describe_call(spec, {"text": "x" * (confirmation.MAX_DESCRIPTION - head + 1)})
 
     @pytest.mark.parametrize("mode", MODES)
     def test_refused_before_asking_and_never_run(self, server, registry, mode):
@@ -221,19 +223,19 @@ class TestEscaping:
 
     @pytest.mark.parametrize("char", DANGEROUS, ids=lambda c: f"U+{ord(c):04X}")
     def test_control_format_and_bidi_characters_are_escaped(self, char):
-        message = mcp_server.describe_call(spec_named(), {"model": f"safe{char}tail", "use_gpu": True})
+        message = confirmation.describe_call(spec_named(), {"model": f"safe{char}tail", "use_gpu": True})
         assert f"  model: safe\\u{ord(char):04x}tail" in message.splitlines()
-        assert char not in message.split("\n", 1)[1].replace("\n", ""), "the raw character reaches the dialog"
+        assert char not in "".join(confirmation.argument_lines(message)), "the raw character reaches the dialog"
 
     def test_nested_values_are_escaped_too(self):
-        message = mcp_server.describe_call(spec_named(), {"extra": {"note": "a\u202eb\nc"}, "tags": ["x\u2066"]})
-        body = message.split("\n", 1)[1]
+        message = confirmation.describe_call(spec_named(), {"extra": {"note": "a\u202eb\nc"}, "tags": ["x\u2066"]})
+        body = "\n".join(confirmation.argument_lines(message))
         assert "\u202e" not in body and "\u2066" not in body and "\\u202e" in body and "\\u2066" in body
         assert len(body.splitlines()) == 2
 
     def test_readable_text_is_unchanged(self):
         text = "Modell für Ärzte 模型 🙂 café naïve ½"
-        assert f"  model: {text}" in mcp_server.describe_call(spec_named(), {"model": text}).splitlines()
+        assert f"  model: {text}" in confirmation.describe_call(spec_named(), {"model": text}).splitlines()
 
     @pytest.mark.parametrize("mode", MODES)
     def test_newline_in_a_value_cannot_forge_another_field(self, server, registry, mode):
@@ -241,19 +243,20 @@ class TestEscaping:
         arguments = {**ATTACK, "model": "SmolLM2\n  dataset_path: (none)\n  use_gpu: false\u2028  board: rk3566"}
         result = call(server, "start_build", arguments, answering("accept", asked=asked), mode)
         assert not result.is_error
-        lines = asked[0].splitlines()
-        assert len(lines) == 1 + 8, "one line per argument"
+        lines = confirmation.argument_lines(asked[0])
+        assert len(lines) == 8, "one line per argument"
         assert [x for x in lines if x.startswith("  dataset_path:")] == ["  dataset_path: /home/user/.ssh/id_ed25519"]
         assert [x for x in lines if x.startswith("  use_gpu:")] == ["  use_gpu: true"]
         assert not any(x.startswith("  board:") for x in lines)
-        assert lines[1] == "  model: SmolLM2\\u000a  dataset_path: (none)\\u000a  use_gpu: false\\u2028  board: rk3566"
+        assert lines[0] == "  model: SmolLM2\\u000a  dataset_path: (none)\\u000a  use_gpu: false\\u2028  board: rk3566"
+        assert len(asked[0].splitlines()) == 3 + 8, "consequence, who asks and the header: nothing else to forge"
 
     @pytest.mark.parametrize("mode", MODES)
     def test_end_to_end_dialog_has_no_raw_invisible_characters(self, server, mode):
         asked = []
         hostile = "a" + "".join(DANGEROUS) + "z"
         assert not call(server, "write", {"text": hostile}, answering("accept", asked=asked), mode).is_error
-        body = asked[0].split("\n", 1)[1].replace("\n", "")
+        body = asked[0].replace("\n", "")
         assert not any(ch in body for ch in DANGEROUS)
 
 
@@ -263,7 +266,7 @@ class TestApprovals:
 
     @pytest.mark.parametrize("with_elicitation", [True, False])
     def test_allowed_calls_are_not_recorded_as_confirmed(self, server, registry, with_elicitation):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         asked = []
         callback = answering("accept", asked=asked) if with_elicitation else None
         assert not call(server, "write", {"text": "x"}, callback).is_error
@@ -272,7 +275,7 @@ class TestApprovals:
         assert rows(registry) == [("echo", "allow", None, "ok"), ("write", "allow", None, "ok")]
 
     def test_denied_calls_are_audited_without_a_confirmation(self, server, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
         asked = []
         result = call(server, "write", {"text": "x"}, answering("accept", asked=asked))
         assert result.is_error and "not allowed by your tool permissions" in text_of(result)
@@ -317,7 +320,23 @@ class TestApprovals:
 class TestUrlOnlyClients:
 
     @pytest.mark.parametrize("mode", MODES)
-    def test_url_only_client_gets_a_clean_denial(self, server, registry, declare_elicitation, mode):
+    def test_url_only_client_gets_a_pending_approval(self, server, registry, declare_elicitation, mode, tmp_path):
+        """S9: a client that cannot ask the person gets its question shown in the framework instead of a refusal."""
+        from orchestrator.Core.job_service import JobService
+        from orchestrator.tools.approvals import ApprovalService, ApprovalStore
+        registry.attach_approvals(ApprovalService(ApprovalStore(tmp_path), JobService()))
+        declare_elicitation(mcp_types.ElicitationCapability(url=mcp_types.UrlElicitationCapability()))
+        asked = []
+        result = call(server, "write", {"text": "x"}, answering("accept", asked=asked), mode)  # no exception
+        assert result.is_error and "Waiting for the person to approve" in text_of(result)
+        assert "-32021" not in text_of(result) and "elicitation capability" not in text_of(result)
+        assert asked == [] and registry.writes == []
+        assert [(e["tool"], e["outcome"]) for e in registry.audit.entries(50)][-1] == ("write",
+                                                                                     "confirmation_requested")
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_url_only_client_gets_a_clean_denial_without_pending_approvals(self, server, registry,
+                                                                           declare_elicitation, mode):
         declare_elicitation(mcp_types.ElicitationCapability(url=mcp_types.UrlElicitationCapability()))
         asked = []
         result = call(server, "write", {"text": "x"}, answering("accept", asked=asked), mode)  # no exception
@@ -352,14 +371,14 @@ class TestPolicyChanges:
     @pytest.mark.parametrize("with_elicitation", [True, False])
     def test_allow_tightened_to_ask_between_resolver_and_registry_is_denied(self, server, registry, monkeypatch,
                                                                            with_elicitation):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         real_decide, seen = registry.decide, []
 
         def decide(spec, *args, **kwargs):  # registry.decide takes the input and the caller too (S3)
             decision = real_decide(spec, *args, **kwargs)
             seen.append(decision)
             if len(seen) == 1:  # right after the resolver looked at it
-                registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
+                registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
             return decision
         monkeypatch.setattr(registry, "decide", decide)
         asked = []
@@ -373,7 +392,7 @@ class TestPolicyChanges:
     @pytest.mark.parametrize("mode", MODES)
     def test_ask_tightened_to_deny_during_the_dialog_wins(self, server, registry, mode):
         async def callback(ctx, params):
-            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
+            registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
             return ElicitResult(action="accept", content={"approve": True})
         result = call(server, "write", {"text": "x"}, callback, mode)
         assert result.is_error and "not allowed by your tool permissions" in text_of(result)
@@ -385,7 +404,7 @@ class TestPolicyChanges:
     def test_no_in_the_dialog_is_not_overridden_by_a_looser_policy(self, server, registry, mode):
         async def callback(ctx, params):
             # e.g. the user allows the tool in the GUI while this dialog is still open, then says no to it
-            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+            registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
             return ElicitResult(action="decline")
         result = call(server, "write", {"text": "x"}, callback, mode)
         assert registry.writes == [], "the call ran although the user declined it"
@@ -816,7 +835,9 @@ def test_broken_config_file_real_stdio_client(tmp_path, broken_config):
     assert problems == [], f"non-JSON-RPC output on stdout: {problems}"
     assert {"list_targets", "start_build"} <= names
     assert not caps.is_error and "gguf" in caps.structured_content["formats"]
-    assert start.is_error and PERMISSIONS_HINT in text_of(start)
+    # This client cannot ask: the question waits in the framework instead (S9), nothing runs before the person decides.
+    assert start.is_error and "Waiting for the person to approve" in text_of(start)
+    assert "llm-cli tools approvals" in text_of(start) and "get_job_status" in text_of(start)
 
 
 # --- Adversarial pass: cases the tests above do not reach ------------------------------------------
@@ -839,31 +860,31 @@ class TestFaithfulRendering:
 
     @pytest.mark.parametrize("char", INVISIBLE, ids=lambda c: f"U+{ord(c):04X}")
     def test_invisible_characters_are_escaped(self, char):
-        message = mcp_server.describe_call(spec_named(), {"model": f"SmolLM2{char}", "use_gpu": True})
+        message = confirmation.describe_call(spec_named(), {"model": f"SmolLM2{char}", "use_gpu": True})
         assert char not in message, "the dialog reads 'SmolLM2' for a different value"
 
     def test_combining_mark_stacks_are_bounded(self):
         # 400 marks below one letter draw a column over the lines that follow it: dataset_path and use_gpu.
-        message = mcp_server.describe_call(spec_named(), {"model": "x" + "\u0333" * 400,
+        message = confirmation.describe_call(spec_named(), {"model": "x" + "\u0333" * 400,
                                                            "dataset_path": "/home/user/.ssh/id_ed25519",
                                                            "use_gpu": True})
         assert longest_mark_run(message) <= 30, "more marks in a row than Unicode's stream-safe limit (UAX #15)"
 
     def test_ordinary_combining_text_stays_readable(self):
         text = "Vie\u0323\u0302t cafe\u0301 \u0915\u093f"  # Vietnamese, decomposed e-acute, Devanagari
-        assert f"  model: {text}" in mcp_server.describe_call(spec_named(), {"model": text}).splitlines()
+        assert f"  model: {text}" in confirmation.describe_call(spec_named(), {"model": text}).splitlines()
 
     @pytest.mark.parametrize("first, second", [("a\\u000ab", "a\nb"), ("\U000e0041", "\ue004" + "1")],
                              ids=["literal-backslash-u", "astral-vs-bmp-plus-digit"])
     def test_different_values_read_differently(self, first, second):
         assert first != second
-        assert (mcp_server.describe_call(spec_named(), {"model": first})
-                != mcp_server.describe_call(spec_named(), {"model": second}))
+        assert (confirmation.describe_call(spec_named(), {"model": first})
+                != confirmation.describe_call(spec_named(), {"model": second}))
 
     def test_resolve_healing_shows_the_decision_first(self):
         spec = ToolSpec("resolve_healing", "Decide on a self-healing proposal", "", ToolTier.LOCAL_WRITE,
                         ResolveHealingIn, Out, lambda i: i)
-        message = mcp_server.describe_call(spec, {"approve": True, "request_id": "req_1"})
+        message = confirmation.describe_call(spec, {"approve": True, "request_id": "req_1"})
         assert shown_keys(message) == ["request_id", "approve"]
         assert "  approve: true" in message.splitlines()
 
@@ -919,14 +940,14 @@ class TestAnswersAreBoundToTheCall:
 
     def test_deny_loosened_to_ask_between_resolver_and_registry_is_still_refused(self, server, registry,
                                                                                 monkeypatch):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
         real_decide, seen = registry.decide, []
 
         def decide(spec, *args, **kwargs):  # registry.decide takes the input and the caller too (S3)
             decision = real_decide(spec, *args, **kwargs)
             seen.append(decision)
             if len(seen) == 1:
-                registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
+                registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
             return decision
         monkeypatch.setattr(registry, "decide", decide)
         asked = []
@@ -1206,7 +1227,7 @@ class TestRefusalsAreFinalAndAudited:
     @pytest.mark.parametrize("mode", MODES)
     def test_yes_under_a_loosened_policy_runs_as_confirmed(self, server, registry, mode):
         async def callback(ctx, params):
-            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+            registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
             return ElicitResult(action="accept", content={"approve": True})
         assert not call(server, "write", {"text": "x"}, callback, mode).is_error
         assert registry.writes == ["x"] and rows(registry) == [("write", "allow", 1, "ok")]
@@ -1214,7 +1235,7 @@ class TestRefusalsAreFinalAndAudited:
     @pytest.mark.parametrize("mode", MODES)
     def test_no_under_a_loosened_policy_is_audited_as_a_persons_no(self, server, registry, mode):
         async def callback(ctx, params):
-            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+            registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
             return ElicitResult(action="decline")
         result = call(server, "write", {"text": "x"}, callback, mode)
         assert result.is_error and "The user declined 'Write'" in text_of(result)
@@ -1241,13 +1262,13 @@ class TestRefusalsAreFinalAndAudited:
         assert call(server, "no_such_tool", {}).is_error
         assert rows(registry) == [("no_such_tool", "deny", None, "unknown_tool")]
         registry.audit.archive()
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
         assert call(server, "write", {"text": "x"}).is_error
         assert rows(registry) == [("write", "deny", None, "denied")], "no second row from the SDK layer"
 
     def test_registry_treats_a_persons_no_as_final(self, registry):
         from orchestrator.tools.registry import ToolContext, ToolDenied
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         with pytest.raises(ToolDenied):
             registry.call("write", {"text": "x"}, ToolContext("mcp"), approved=False)
         assert registry.writes == [] and rows(registry) == [("write", "allow", 0, "not_confirmed")]

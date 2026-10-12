@@ -888,6 +888,13 @@ Voreinstellung auf, der höchsten Entscheidung, die eine Einstellung ihm geben k
 letzten Durchgang neu ist und ob eine Bestätigung eine dauerhafte Freigabe anbieten darf; das Speichern zählt jedes
 aufgeführte Tool als gesehen. Der GUI-Dialog zeigt dieselben Angaben.
 
+Es braucht eine Person an einem Terminal, mit und ohne `--reset` (wie `ditto setup`): Weitergeleitete Antworten werden
+mit dem Exit-Code 2 abgelehnt. Jedes Speichern wird mit dem Akteur `cli` und den alten und neuen Entscheidungen
+festgehalten, bevor es wirkt, und abgelehnt (Exit-Code 1, nichts geändert), wenn sich der Audit-Eintrag nicht
+schreiben lässt oder die Berechtigungen anderswo gespeichert wurden (GUI, ein anderes Terminal), während du
+geantwortet hast. Eine Berechtigungsdatei, die beschädigt, von Hand bearbeitet oder nicht signiert ist (auch eine von
+3.0.0 gespeicherte), verbietet jedes Tool, bis du das hier erneut ausführst; die Fragen beginnen dann mit "deny".
+
 | Option | Bedeutung |
 |---|---|
 | `--caller ditto\|mcp` | Die Berechtigungen eines Aufrufers setzen (Ditto oder lokale MCP-Clients über stdio) statt der gemeinsamen. Die ersten Berechtigungen eines Aufrufers beginnen mit den gemeinsamen, samt den Einstellungen für einzelne Tools. |
@@ -897,15 +904,19 @@ aufgeführte Tool als gesehen. Der GUI-Dialog zeigt dieselben Angaben.
 ### tools audit
 
 ```
-llm-cli tools audit [--limit N] [--verify] [--archive]
+llm-cli tools audit [--limit N] [--details] [--verify] [--archive]
 ```
 
-Zeigt die letzten Tool-Aufrufe: Zeit, Akteur (`ditto`, `mcp`, `mcp:<Token-Name>` oder `cli` für eine Änderung an
-den benannten Tokens), Tool, Entscheidung, ob ein Mensch bestätigt hat, und das Ergebnis.
+Zeigt die letzten Tool-Aufrufe: Zeit, wer aufgerufen hat (in Worten: Ditto, alle lokalen stdio-Clients, das
+MCP-Token '<Name>' oder du in der CLI oder GUI, mit dem Namen, den der Client selbst angegeben hat), das Tool mit
+seinem Titel (und dem Namen, den die KI geschrieben hat, wenn das eine Schreibvariante war), die Entscheidung, ob ein
+Mensch bestätigt hat, das Ergebnis, den Grundcode und wie der Mensch gefragt wurde, mit seiner Antwort (zum Beispiel
+`elicitation: declined`).
 
 | Option | Bedeutung |
 |---|---|
 | `--limit INTEGER` | Anzahl der Einträge (Standard 30). |
+| `--details` | Zusätzlich, was die narrensichere Schicht repariert hat (Art und Feld), die Dauer, SHA-256 und Größe des Ergebnisses, Verweise auf frühere Einträge und den Sitzungs-Hash. |
 | `--verify` | Stattdessen die Kette prüfen: geänderte oder entfernte Einträge und das Entfernen der neuesten Einträge (Anker-Datei). Exit-Code 0, wenn intakt, sonst 1. |
 | `--archive` | Das Log und seinen Anker beiseitelegen (aufbewahrt als `audit.db.<UTC-Zeit>` und `audit.db.<UTC-Zeit>.anchor` im persönlichen Ordner) und mit dem nächsten Tool-Aufruf ein neues Log beginnen. Nutze es, wenn `--verify` oder `llm-cli doctor` ein Problem mit dem Log meldet. Lässt sich das Log nicht beiseitelegen (zum Beispiel, weil es gerade benutzt wird), endet der Befehl mit Exit-Code 1; schließe die GUI und die KI-Clients und versuche es erneut. |
 
@@ -914,6 +925,42 @@ llm-cli tools audit --limit 100
 llm-cli tools audit --verify
 llm-cli tools audit --archive
 ```
+
+### tools approvals
+
+```
+llm-cli tools approvals [list]
+llm-cli tools approvals show ID
+llm-cli tools approvals approve ID
+llm-cli tools approvals decline ID
+```
+
+Aufrufe von KI-Clients, die dich nicht selbst fragen konnten (der Client hat keine Formular-Elicitation, die Frage ist
+länger als 4.000 Zeichen, oder du hast das Tool mit `tools permissions --confirm-in-framework TOOL` gesetzt). `list`
+(auch ohne Unterbefehl) zeigt jeden wartenden Aufruf mit ID, Tool, Aufruferklasse, dem selbst angegebenen Namen des
+Clients und der verbleibenden Zeit; `show` gibt die vollständige Frage aus; `approve` und `decline` zeigen sie erneut
+und fragen „Approve this call?“ oder „Decline this call?“, bevor etwas entschieden wird. Bei der Freigabe führt das
+Framework den Aufruf für den Client aus, unter dem Aufrufer des Clients; der Client liest das Ergebnis mit
+`get_job_status`. Jeder Unterbefehl braucht ein Terminal (sonst Exit-Code 2); eine Entscheidung wird abgelehnt
+(Exit-Code 1), wenn die Freigabe verfallen ist (15 Minuten), schon entschieden wurde, die Sitzung ihres Clients
+beendet ist, sich ihre Frage inzwischen geändert hat oder das Audit-Log die Entscheidung nicht festhalten kann. Auf
+einem Rechner ohne Bildschirm, etwa im Docker-Image, führst du es dort in einem Terminal aus
+(`docker exec -it <container> llm-cli tools approvals`). Die GUI zeigt dieselben Aufrufe unter
+**Tools > Pending Approvals...**.
+
+`approve ID --always [--width this|any] [--duration revoke|30d|24h]` gibt den Aufruf frei und speichert eine
+dauerhafte Freigabe („nicht mehr fragen“) im Rahmen, den das Framework dafür angeboten hat, nachdem Rahmen und
+Warnung gezeigt wurden; `list` kennzeichnet die Aufrufe, bei denen sie angeboten wird, und die Anfragen, die der
+Dialog eines Clients geschickt hat („asks to stop asking“), die nur mit einem Rahmen freigegeben werden. `--always`
+wird abgelehnt, solange eine GUI-Sitzung des Frameworks läuft: Nutze ihr Freigabefenster. Für alle lokalen
+stdio-Clients zusammen gibt es nur `--width this` und `--duration 30d` oder `24h`.
+
+| Option von `tools permissions` | Bedeutung |
+|---|---|
+| `--confirm-in-framework TOOL` | Fragen zu diesem Tool immer im Framework stellen (im Freigabefenster oder mit diesem Befehl), nie im eigenen Dialog des KI-Clients. Wiederholbar; mit `--caller` für einen Aufrufer. Braucht ein Terminal; wird festgehalten. |
+| `--confirm-anywhere TOOL` | `--confirm-in-framework` für dieses Tool zurücknehmen. |
+| `--grants` | Die dauerhaften Freigaben jedes Aufrufers auflisten: was jede abdeckt, ihren Zustand (active, expired, lapsed, outdated), wann und wie sie angelegt wurde, ihre Nutzungen und letzte Nutzung (aus dem Audit-Log) und ihren Ablauf. |
+| `--revoke-grant ID` | Eine dauerhafte Freigabe sofort widerrufen (braucht ein Terminal; wird festgehalten). `--reset` löscht alle, `--reset --caller` die dieses Aufrufers; das Widerrufen eines Tokens entfernt seine eigenen. |
 
 ### tools folders
 
@@ -965,7 +1012,8 @@ llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT]
 
 Betreibt den MCP-Server. Normalerweise startet ihn der KI-Client für dich (siehe `mcp config`). stdout trägt das
 Protokoll, Logs gehen nach stderr. Sind die Tool-Berechtigungen noch nicht eingerichtet, funktionieren nur lesende
-Tools ohne Nachfrage, alles andere fragt (oder wird abgelehnt, wenn der Client nicht fragen kann).
+Tools ohne Nachfrage, alles andere fragt (kann der Client nicht fragen, wartet die Frage im Framework: siehe
+[tools approvals](#tools-approvals)).
 
 | Option | Bedeutung |
 |---|---|
@@ -978,14 +1026,18 @@ Mit `--transport http` lauscht der Server auf `http://<Host>:<Port>/mcp`, und je
 und kein Token wird angenommen (und der Server startet nicht), solange andere Benutzer die Token-Datei lesen oder
 ändern können oder sie einem anderen Benutzer gehört. Anfragen mit `Origin`-Header (Webseiten, CORS-Preflights)
 werden abgelehnt, der `Host`-Header muss `127.0.0.1`, `localhost` oder `[::1]` mit dem Port des Servers sein, und der
-Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Die alte gemeinsame Token-Datei
+Server hält höchstens 8 Sitzungen, davon höchstens 4 je Token (damit ein Client die anderen nicht aussperren kann;
+darüber hinaus wird eine neue Sitzung mit Status 503 abgelehnt), schließt eine Sitzung nach 10 Minuten ohne Anfrage
+und nimmt höchstens 1 MiB pro Anfrage an. Eine noch offene Anfrage (ein Warten, ein Ereignisstrom) wird geschlossen,
+sobald ihr Token widerrufen oder rotiert wird, und ebenso die Sitzungen dieses Tokens (eine Sitzung gehört dem
+Token-Wert, der sie geöffnet hat; nach `rotate` öffnet der Client eine neue). Die alte gemeinsame Token-Datei
 `mcp_http_token` wird nicht mehr akzeptiert.
 
 Über stdio macht die Umgebungsvariable `LCF_MCP_TOKEN` im Server-Eintrag des Clients den Client zum Aufrufer dieses
-benannten Tokens (`mcp:<Name>`, mit den Berechtigungen des Tokens) statt zum gemeinsamen Aufrufer `mcp`. Der Server
-liest sie einmal, entfernt sie aus seiner Umgebung (Kindprozesse erben sie nicht) und endet mit Exit-Code 2, wenn der
-Wert kein gültiges Token ist; ein laufender Server antwortet nicht mehr, sobald sein Token widerrufen oder rotiert
-wird.
+benannten Tokens (`mcp:<Name>`, mit den Berechtigungen des Tokens) statt zum gemeinsamen Aufrufer `mcp`. `llm-cli`
+nimmt sie aus seiner Umgebung, bevor irgendein Befehl läuft, gleich welcher (kein Befehl und kein Kindprozess erbt
+sie), und gibt sie nur an `mcp serve` weiter, das mit Exit-Code 2 endet, wenn der Wert kein gültiges Token ist; ein
+laufender Server antwortet nicht mehr, sobald sein Token widerrufen oder rotiert wird.
 
 ```bash
 llm-cli mcp serve --transport http --port 8765
@@ -1029,7 +1081,8 @@ einmal gezeigt, wenn es angelegt oder rotiert wird; das Framework behält nur se
 `~/.llm-framework/mcp_tokens.json` (Modus 0600). Sein Name (1-32 Kleinbuchstaben, Ziffern und Bindestriche) ist der
 Aufrufer `mcp:<Name>` im Audit-Log, und es hat eigene Berechtigungen. `add`, `rotate` und `revoke` brauchen einen
 Menschen an einem Terminal (`add` und `rotate` geben außerdem nur auf ein Terminal aus) und werden mit dem Akteur
-`cli` protokolliert, ohne das Token. Kein Tool kann Tokens anlegen, auflisten, ändern oder lesen.
+`cli` protokolliert, ohne das Token. Kein Tool kann Tokens anlegen, auflisten, ändern oder lesen. Die GUI kann
+dasselbe unter Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens“ (protokolliert mit dem Akteur `gui`).
 
 | Befehl / Option | Bedeutung |
 |---|---|

@@ -1414,7 +1414,8 @@ class BuildEngine:
         multi_file = len(preferred) > 1 or bool(primary and primary.lower().endswith((".safetensors", ".bin")))
         info.update({
             "build_id": config.build_id,
-            "model_source": config.model_source,
+            # A local model an AI caller pinned is recorded by its label, never its host path (it reaches AI callers)
+            "model_source": getattr(getattr(config.local_inputs, "model", None), "ref", None) or config.model_source,
             "target": config.target_arch,
             "board": config.target_board or info.get("board"),
             "format": config.target_format.value,

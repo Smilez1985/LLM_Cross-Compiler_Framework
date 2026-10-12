@@ -674,6 +674,31 @@ class LocalFiles:
         self._remember(pin)
         return pin
 
+    def ref_of(self, file_id: str) -> Optional[str]:
+        """The `<label>:<relative path>` a file id was listed as (for a person's question), without resolving it;
+        None for an unknown id."""
+        entry = self._load_index().get(file_id) if FILE_ID_RE.fullmatch(file_id or "") else None
+        ref = entry.get("ref") if isinstance(entry, dict) else None
+        return ref if isinstance(ref, str) else None
+
+    def label_for(self, path: str) -> Optional[str]:
+        """A host path as `<label>:<relative path>` when it lies in a usable labelled folder (for showing a path an
+        older manifest recorded; a display name only, never a decision about access); None otherwise."""
+        try:
+            real = Path(path).resolve()
+        except (OSError, RuntimeError, ValueError):
+            return None
+        for folder in self.folders():
+            if folder.problem or folder.real_path is None:
+                continue
+            try:
+                relative = real.relative_to(folder.real_path)
+            except ValueError:
+                continue
+            if relative.parts:
+                return f"{folder.label}:{relative.as_posix()}"
+        return None
+
     def _index_path(self) -> Optional[Path]:
         return self.state_dir / self.INDEX_FILE if self.state_dir is not None else None
 

@@ -351,7 +351,7 @@ class FakeOrchestrator:
 def framework(booted_framework):
     booted_framework.orchestrator = FakeOrchestrator()
     registry = booted_framework.tool_registry
-    registry.policy_store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW}))
+    registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW}))
     return booted_framework
 
 

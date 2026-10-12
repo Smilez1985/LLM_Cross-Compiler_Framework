@@ -74,7 +74,7 @@ def outcomes(registry):
 
 
 def allow(registry, *names):
-    registry.policy_store.save(ToolPolicy(configured=True, overrides={n: Decision.ALLOW for n in names}))
+    registry.policy_store.replace(ToolPolicy(configured=True, overrides={n: Decision.ALLOW for n in names}))
 
 
 def break_the_audit_log(tmp_path):
@@ -210,13 +210,18 @@ class TestQuestions:
         assert end["question_sha256"] == requested["question_sha256"]
 
     def test_an_unanswered_question_of_the_rounds_era_expires_as_unanswered(self, server, registry):
+        expired = []
+
         async def go():
             async with Client(server, elicitation_callback=answering("accept"), mode="auto") as client:
-                return await client.session.call_tool("write", {"text": "x"}, allow_input_required=True)
+                first = await client.session.call_tool("write", {"text": "x"}, allow_input_required=True)
+                # While the client is still connected (its session's end records an open question itself).
+                expired.append(server.open_questions.expire())
+                expired.append(server.open_questions.expire(time.monotonic() + mcp_server.QUESTION_EXPIRY + 1))
+                return first
         first = asyncio.run(go())
         assert isinstance(first, mcp_types.InputRequiredResult)
-        assert server.open_questions.expire() == 0, "not yet"
-        assert server.open_questions.expire(time.monotonic() + mcp_server.QUESTION_EXPIRY + 1) == 1
+        assert expired == [0, 1], "not yet, then once"
         requested, end = entries(registry)
         assert requested["outcome"] == "confirmation_requested"
         assert (end["outcome"], end["answer"]) == ("not_confirmed", "unanswered")

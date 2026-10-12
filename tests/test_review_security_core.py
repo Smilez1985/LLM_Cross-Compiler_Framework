@@ -1306,8 +1306,9 @@ class TestRegistryErrors:
         with pytest.raises(ToolError) as exc:
             registry.call("probe", {"text": "x"}, ToolContext("mcp"))
 
-        message = str(exc.value)
-        assert message == "Probe failed (internal error; details are in the framework log)."
+        message = str(exc.value)  # with the next step since every 'failed' refusal names one
+        assert exc.value.message == "Probe failed (internal error; details are in the framework log)."
+        assert exc.value.next and exc.value.next in message
         assert "validation error" not in message.lower() and "pydantic" not in message
         errors = [r for r in registry.logger.records if r[0] == "error"]
         assert errors and errors[0][2].get("exc_info") is True and "probe" in errors[0][1]
@@ -1429,11 +1430,11 @@ class TestApprovalAuditing:
         assert (entry["outcome"], entry["approved"]) == ("ok", 1)
 
     def test_allow_and_deny_are_not_recorded_as_approvals(self, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"probe": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"probe": Decision.ALLOW}))
         registry.call("probe", {"text": "x"}, ToolContext("mcp"))
         assert (last_entry(registry)["decision"], self.approved_column(registry)) == ("allow", (None, 1))
 
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"probe": Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"probe": Decision.DENY}))
         with pytest.raises(ToolDenied):
             registry.call("probe", {"text": "x"}, ToolContext("mcp"), approved=True)
         entry = last_entry(registry)

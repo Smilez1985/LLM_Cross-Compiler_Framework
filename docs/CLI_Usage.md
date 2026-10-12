@@ -858,6 +858,12 @@ set in the GUI are kept. It first lists every tool with its own default, the hig
 it (`at most`), whether it is new since the last review and whether a confirmation may offer a standing approval;
 saving counts every listed tool as reviewed. The GUI dialog shows the same facts.
 
+It needs a person at a terminal, with and without `--reset` (as does `ditto setup`): piped answers are refused with
+exit code 2. Every save is audited with actor `cli` and the old and new decisions before it takes effect, and is
+refused (exit code 1, nothing changed) when the audit entry cannot be written or when the permissions were saved
+elsewhere (the GUI, another terminal) while you answered. A permission file that is damaged, edited by hand or not
+signed (one saved by 3.0.0, too) denies every tool until you run this again; the questions then start from "deny".
+
 | Option | Meaning |
 |---|---|
 | `--caller ditto\|mcp` | Set the permissions of one caller (Ditto, or local MCP clients over stdio) instead of the shared ones. A caller's first permissions start from the shared ones, including the settings for single tools. |
@@ -867,15 +873,18 @@ saving counts every listed tool as reviewed. The GUI dialog shows the same facts
 ### tools audit
 
 ```
-llm-cli tools audit [--limit N] [--verify] [--archive]
+llm-cli tools audit [--limit N] [--details] [--verify] [--archive]
 ```
 
-Shows the most recent tool calls: time, actor (`ditto`, `mcp`, `mcp:<token name>`, or `cli` for a change to the
-named tokens), tool, decision, whether a person confirmed it, and the outcome.
+Shows the most recent tool calls: time, who called (in words: Ditto, all local stdio clients, the MCP token
+'<name>', or you in the CLI or GUI, with the client's name as it reported itself), the tool by its title (and the
+name the AI wrote when that was a spelling variant), the decision, whether a person confirmed it, the outcome, the
+reason code and how the person was asked with their answer (for example `elicitation: declined`).
 
 | Option | Meaning |
 |---|---|
 | `--limit INTEGER` | Number of entries (default 30). |
+| `--details` | Also show what the fool-proof layer repaired (kind and field), the duration, the SHA-256 and size of the result, links to earlier entries and the session hash. |
 | `--verify` | Check the chain instead: changed or removed entries, and removal of the newest entries (anchor file). Exit code 0 if intact, otherwise 1. |
 | `--archive` | Move the log and its anchor aside (kept as `audit.db.<UTC time>` and `audit.db.<UTC time>.anchor` in the personal folder) and start a new log with the next tool call. Use it when `--verify` or `llm-cli doctor` reports a problem with the log. If the log cannot be moved (for example because it is busy), the command exits with code 1; close the GUI and AI clients and try again. |
 
@@ -884,6 +893,40 @@ llm-cli tools audit --limit 100
 llm-cli tools audit --verify
 llm-cli tools audit --archive
 ```
+
+### tools approvals
+
+```
+llm-cli tools approvals [list]
+llm-cli tools approvals show ID
+llm-cli tools approvals approve ID
+llm-cli tools approvals decline ID
+```
+
+Calls of AI clients that could not ask you themselves (the client has no form elicitation, the question is longer
+than 4,000 characters, or you set the tool with `tools permissions --confirm-in-framework TOOL`). `list` (also
+without a subcommand) shows each waiting call with its id, tool, caller class, the client's self-reported name and
+the time left; `show` prints the full question; `approve` and `decline` show it again and ask "Approve this call?"
+or "Decline this call?" before anything is decided. On approval the framework runs the call for the client, under
+the client's caller; the client reads the result with `get_job_status`. Every subcommand needs a terminal (exit code
+2 otherwise); a decision is refused (exit code 1) when the approval has expired (15 minutes), was already decided,
+its client's session has ended, its question changed meanwhile, or the audit log cannot record the decision. On a
+headless machine, such as the Docker image, run it in a terminal there (`docker exec -it <container> llm-cli tools
+approvals`). The GUI shows the same calls under **Tools > Pending Approvals...**.
+
+`approve ID --always [--width this|any] [--duration revoke|30d|24h]` approves the call and saves a standing
+approval ("do not ask again") within the scope the framework offered for it, after showing the scope and the
+warning; `list` marks the calls where it is offered and the requests a client's dialog sent ("asks to stop
+asking"), which are approved only with a scope. `--always` is refused while a GUI session of the framework runs:
+use its approval window. For all local stdio clients together only `--width this` and `--duration 30d` or `24h`
+exist.
+
+| Option of `tools permissions` | Meaning |
+|---|---|
+| `--confirm-in-framework TOOL` | Always put this tool's questions to you in the framework (the approval window or this command), never in the AI client's own dialog. Repeatable; with `--caller` for one caller. Needs a terminal; audited. |
+| `--confirm-anywhere TOOL` | Undo `--confirm-in-framework` for this tool. |
+| `--grants` | List the standing approvals of every caller: what each covers, its state (active, expired, lapsed, outdated), when and how it was created, its uses and last use (from the audit log) and its expiry. |
+| `--revoke-grant ID` | Revoke one standing approval at once (needs a terminal; audited). `--reset` clears them all, `--reset --caller` those of that caller; revoking a token removes its own. |
 
 ### tools folders
 
@@ -932,8 +975,8 @@ llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT]
 ```
 
 Runs the MCP server. Normally the AI client starts it for you (see `mcp config`). stdout carries the protocol;
-logs go to stderr. If the tool permissions are not set up yet, read-only tools work and everything else asks (or is
-denied when the client cannot ask).
+logs go to stderr. If the tool permissions are not set up yet, read-only tools work and everything else asks (when
+the client cannot ask, the question waits in the framework: see [tools approvals](#tools-approvals)).
 
 | Option | Meaning |
 |---|---|
@@ -946,12 +989,17 @@ With `--transport http` the server listens on `http://<host>:<port>/mcp`, and ev
 no token is accepted (nor does the server start) while other users can read or change the token file or it belongs
 to another user. Requests with an `Origin` header (web pages, CORS preflights) are refused,
 the `Host` header must be `127.0.0.1`, `localhost` or `[::1]` with the server's port, and the server keeps at most
-8 sessions and takes at most 1 MiB per request. The old shared token file `mcp_http_token` is no longer accepted.
+8 sessions, at most 4 of them per token (so one client cannot lock the others out; beyond that a new session is
+refused with status 503), closes a session after 10 minutes without a request, and takes at most 1 MiB per request.
+A request that is still open (a wait, an event stream) is closed as soon as its token is revoked or rotated, and so
+are that token's sessions (a session belongs to the token value that opened it; after `rotate` the client opens a
+new one). The old shared token file `mcp_http_token` is no longer accepted.
 
 Over stdio, the environment variable `LCF_MCP_TOKEN` in the client's server entry makes the client the caller of
-that named token (`mcp:<name>`, with the token's permissions) instead of the shared caller `mcp`. The server reads
-it once, removes it from its environment (child processes do not inherit it) and exits with code 2 if the value is
-not a valid token; a running server stops answering when its token is revoked or rotated.
+that named token (`mcp:<name>`, with the token's permissions) instead of the shared caller `mcp`. `llm-cli` takes it
+out of its environment before any command runs, whatever the command (no command and no child process inherits it),
+and hands it only to `mcp serve`, which exits with code 2 if the value is not a valid token; a running server stops
+answering when its token is revoked or rotated.
 
 ```bash
 llm-cli mcp serve --transport http --port 8765
@@ -993,7 +1041,8 @@ Named tokens, one per client that connects over HTTP or over stdio with `LCF_MCP
 when it is created or rotated; the framework keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode
 0600). Its name (1-32 lower-case letters, digits and hyphens) is the caller `mcp:<name>` in the audit log, and it has
 its own permissions. `add`, `rotate` and `revoke` need a person at a terminal (`add` and `rotate` also print only to
-a terminal) and are audited with actor `cli`, without the token. No tool can create, list, change or read tokens.
+a terminal) and are audited with actor `cli`, without the token. No tool can create, list, change or read tokens. The
+GUI does the same in Tools > Tool Permissions (Ditto / MCP), section "MCP tokens" (audited with actor `gui`).
 
 | Command / option | Meaning |
 |---|---|
