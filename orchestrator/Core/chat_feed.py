@@ -33,6 +33,7 @@ import re
 import secrets
 import sqlite3
 import stat
+import sys
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -321,6 +322,10 @@ class FeedEntry(_Model):
             raise ValueError("an AI's decision names its answer and comes from the AI that decided")
         if self.sender.role == "person" and self.kind not in ("person_message", "relay_question", "person_action"):
             raise ValueError(f"the person does not write {self.kind} rows")
+        if self.sender.role == "person" and self.program not in ("gui", "cli"):
+            # The person has no caller id: a row in the person's name comes only from the person's own windows,
+            # never from a process that serves an AI or from Ditto.
+            raise ValueError("the person writes only in the GUI or at the terminal")
         return self
 
     def canonical(self) -> str:
@@ -808,9 +813,9 @@ class FeedStore:
                                  arguments={"rows": plan.rows, "bytes": plan.size_bytes, "up_to": plan.up_to_id,
                                             "hidden_records": plan.hidden_records, "plan_sha256": plan.sha256()},
                                  detail=f"{plan.rows} chat rows deleted, {plan.hidden_records} records hidden")
-                except Exception as e:
+                except Exception as e:   # the reason without a host path (an OSError's text names its file)
                     raise FeedWriteError("audit", f"The audit log cannot record the clear "
-                                                  f"({redact_secrets(str(e))}); nothing was deleted.") from None
+                                                  f"({redact_secrets(_reason(e))}); nothing was deleted.") from None
                 deleted = db.execute(_SQL_DELETE_CONVERSATION, (plan.up_to_id,)).rowcount
                 floor = self._cleared_before(db, self._refuse())
                 self._meta_set(db, META_CLEARED, str(max(floor, plan.up_to_id)))
@@ -890,10 +895,20 @@ def _one_line(text: str, limit: int) -> str:
     return flat if len(flat) <= limit else flat[:limit - 1] + "…"
 
 
+def _cut(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[:limit] + "\n[... truncated ...]"
+
+
+def _outside(text: str) -> str:
+    """Outside text normalized and cleaned of invisible characters, whole: cutting it here, before the redaction,
+    would split a key in two and leave its first part readable (secrets are redacted before anything is cut)."""
+    return sanitize_untrusted(text or "", max_len=sys.maxsize)
+
+
 def clean_ai_text(text: str, limit: int = MAX_AI_TEXT) -> str:
     """AI text as the feed keeps it: invisible characters removed and normalized first (so a secret spelled with
-    look-alike characters is redacted too), then secrets redacted, then capped."""
-    return redact_secrets(sanitize_untrusted(text or "", max_len=limit))
+    look-alike characters is redacted too), then secrets redacted, and only then capped."""
+    return _cut(redact_secrets(_outside(text)), limit)
 
 
 def reason_sha256(text: str) -> str:
@@ -926,7 +941,7 @@ class FeedWriter:
         for name, value in (params or {}).items():   # names that would carry a tool's output: FeedEntry refuses them
             text = str(value)
             if name in external:
-                text = sanitize_untrusted(text, max_len=4 * MAX_PARAM_CHARS)
+                text = _outside(text)
             cleaned[name] = _one_line(redact_secrets(text), MAX_PARAM_CHARS)
             origin[name] = "external" if name in external else "framework"
         unknown = external - set(cleaned)
@@ -935,19 +950,25 @@ class FeedWriter:
         return cleaned, origin
 
     @staticmethod
-    def _facts(facts: Iterable[Any]) -> List[FeedFact]:
+    def _facts(facts: Iterable[Any], *, for_ai: bool = False) -> List[FeedFact]:
+        """`for_ai`: the facts a model-bound context may use (facts_ai, SEC-M1). A fact the framework marked
+        person_only (a full path, user@address, a fingerprint) is left out of them, whoever built the list."""
         out = []
         for fact in facts:
             if isinstance(fact, FeedFact):
-                label, value, source = fact.label, fact.value, fact.source
+                label, value, source, person_only = fact.label, fact.value, fact.source, False
             elif isinstance(fact, Mapping):
                 label, value, source = fact.get("label", ""), fact.get("value", ""), fact.get("source", "")
-            else:  # the tools' own Fact (label, value, source)
+                person_only = bool(fact.get("person_only", False))
+            else:  # the tools' own Fact (label, value, source, person_only)
                 label, value, source = (getattr(fact, "label", ""), getattr(fact, "value", ""),
                                         getattr(fact, "source", ""))
+                person_only = bool(getattr(fact, "person_only", False))
+            if for_ai and person_only:
+                continue
             value = str(value)
             if source:
-                value = sanitize_untrusted(value, max_len=4000)
+                value = _outside(value)
             out.append(FeedFact(label=_one_line(redact_secrets(str(label)), 200),
                                 value=redact_secrets(value)[:2000],
                                 source=_one_line(redact_secrets(str(source or "")), 200)))
@@ -960,14 +981,13 @@ class FeedWriter:
               refs: Optional[Any] = None) -> FeedEntry:
         """The cleaned row (not written yet); ValueError for what a row may not hold."""
         cleaned, origin = self._params(params, external)
-        person = (person_text or "")
-        if len(person) > MAX_PERSON_TEXT:
-            person = person[:MAX_PERSON_TEXT] + "\n[... truncated ...]"
+        person = _cut(redact_secrets(person_text or ""), MAX_PERSON_TEXT)   # redacted before it is cut
         text = clean_ai_text(ai_text) if ai_text else ""
         return FeedEntry(
             entry_id=new_entry_id(), ts=_now(), kind=kind, sender=sender, text_key=text_key, params=cleaned,
-            param_origin=origin, facts_person=self._facts(facts_person), facts_ai=self._facts(facts_ai),
-            ai_text=text, ai_text_kind=ai_text_kind if text else "", person_text=redact_secrets(person), answer=answer,
+            param_origin=origin, facts_person=self._facts(facts_person),
+            facts_ai=self._facts(facts_ai, for_ai=True),
+            ai_text=text, ai_text_kind=ai_text_kind if text else "", person_text=person, answer=answer,
             warnings_decided=[w if isinstance(w, WarningRow) else WarningRow.model_validate(w)
                               for w in warnings_decided],
             warnings_for_person=[w if isinstance(w, WarningRow) else WarningRow.model_validate(w)
@@ -1012,7 +1032,10 @@ class FeedWriter:
 
 def import_chat_history(store: FeedStore, history: Any, *, program: Literal["gui", "cli"] = "gui") -> int:
     """Takes Ditto's transcript (ChatHistory) into the feed once, marked as migrated; later calls, from any process,
-    import nothing. Ditto's API conversation stays in its own file. Returns the number of imported rows."""
+    import nothing. Ditto's API conversation stays in its own file. Returns the number of imported rows.
+
+    The transcript file was never signed, and a tool note can quote a handler's error (a server reply, a log line),
+    so its tool notes and notices are kept as outside text, never as the framework's own words."""
     writer = FeedWriter(store, program)
     entries: List[FeedEntry] = []
     for item in list(getattr(history, "transcript", None) or []):
@@ -1026,10 +1049,10 @@ def import_chat_history(store: FeedStore, history: Any, *, program: Literal["gui
                                  ai_text_kind="answer")
         elif role == "tool":
             entry = writer.entry("ditto_tool_note", FeedSender(role="ditto", caller="ditto"),
-                                 text_key="chat.history.line", params={"text": text})
+                                 text_key="chat.history.line", params={"text": text}, external=["text"])
         elif role == "notice":
             entry = writer.entry("notice", FeedSender(role="framework"), text_key="chat.history.line",
-                                 params={"text": text})
+                                 params={"text": text}, external=["text"])
         else:
             continue
         entries.append(entry.model_copy(update={"migrated": True}))
@@ -1087,7 +1110,8 @@ def framework_explanation(entry: FeedEntry, lang: str = "en", *,
     """The record of an AI's decision in framework words, built from the row alone (no model is asked): who decided,
     when, what, the answer, the warnings it weighed and those left for the person, the facts the framework had (the
     person's view), and the recorded reason as the AI's own words. `warning_text` renders a warning for the person
-    (the facts catalogue's texts); without it the code is shown in words."""
+    (the facts catalogue's texts); without it the code is shown in words. It is for the person only: it holds the
+    person's view of the facts (full paths may be among them) and never goes to a model, which gets facts_ai."""
     render = warning_text or _warning_words
     who = caller_words(entry.sender, lang)
     lines = [feed_text("chat.explain.who", lang, who=who), feed_text("chat.explain.when", lang, when=_when(entry.ts))]
@@ -1108,8 +1132,12 @@ def framework_explanation(entry: FeedEntry, lang: str = "en", *,
     if entry.facts_person:
         lines.append(feed_text("chat.explain.facts", lang))
         for fact in entry.facts_person:
-            lines.append("  " + (feed_text("chat.explain.external", lang, label=fact.label, value=fact.value,
-                                           source=fact.source) if fact.source else f"{fact.label}: {fact.value}"))
+            # One line each, and an outside value quoted: a value with line breaks (a licence or model-card text)
+            # could otherwise add lines that read as the framework's own (design 5.2 R2).
+            label, value = _one_line(fact.label, 200), _one_line(fact.value, 2000)
+            lines.append("  " + (feed_text("chat.explain.external", lang, label=label, value=f"'{value}'",
+                                           source=_one_line(fact.source, 200))
+                                 if fact.source else f"{label}: {value}"))
     # An AI app's decision waits for that app (the message box); Ditto's own decisions Ditto explains once set up.
     waits = bool(entry.ai_text) and entry.sender.role == "client"
     return Explanation(header=feed_text("chat.explain.framework", lang), lines=lines,
