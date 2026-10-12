@@ -166,8 +166,9 @@ NO_TOOL_ACTIONS = [
     ("trust_device", "Trust a device's SSH host key or pair it with a password: the GUI's Deployment window or "
                      "'llm-cli deploy run' (only a person compares a fingerprint)."),
     ("deploy_to_device", "Deploy to a device: the GUI's Deployment window or 'llm-cli deploy run' (no tool yet)."),
-    ("deep_ingest_notice", "Acknowledge the Deep Ingest notice and crawl documentation sites: the GUI "
-                                 "(Tools > Create Hardware Module...)."),
+    ("deep_ingest_notice", "Acknowledge the one-time Deep Ingest notice (before crawl_docs_site can run): the GUI "
+                           "(Tools > Create Hardware Module..., Deep Ingest) or 'llm-cli tools crawl-notice' (only a "
+                           "person reads it)."),
     ("publish_pull_request", "Publish a community pull request: 'llm-cli zoo export --pr' (not for AI clients)."),
     ("install_pack_from_file", "Install a pack from a file: the Community Hub in the GUI or "
                                "'llm-cli zoo install --file' (unreviewed code an AI could write itself)."),
@@ -506,6 +507,10 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     register_knowledge_tools(registry, framework)
     register_healing_tools(registry, framework, request_id["request_id"])
     register_hf_tools(registry, framework, jobs)
+    from orchestrator.tools.tools_crawl import register_crawl_tools  # Deep Ingest (T7)
+    register_crawl_tools(registry, framework, jobs)
+    from orchestrator.tools.tools_community import register_community_tools  # community zoo (T9)
+    register_community_tools(registry, framework, jobs)
     return registry
 
 

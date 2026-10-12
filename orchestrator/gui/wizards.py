@@ -587,7 +587,9 @@ Setup commands:
         def speak(text: str):
             announce(text, lang=lang, config=cfg)
 
-        show_crawl_notice_once(self, cfg, announcer=speak)  # before the first crawl, again when its text changes
+        # before the first crawl, again when its text changes; audited, since AI clients may crawl only after it
+        show_crawl_notice_once(self, cfg, announcer=speak,
+                               registry=getattr(self.framework_manager, "tool_registry", None))
         history = input_history.for_config(cfg)
         dlg = URLInputDialog(self, recent=history.get("url") if history else (), config=cfg)
         if dlg.exec() == QDialog.Accepted:

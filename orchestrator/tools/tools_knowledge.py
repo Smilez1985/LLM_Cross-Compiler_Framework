@@ -39,7 +39,7 @@ NOT_CACHED_NEXT = ("Tell the person: asking Ditto one question in the GUI or wit
                    "once (offline mode must be off for that); then search again.")
 TRUST_NOTE = {
     "framework": "the framework's own code and documentation",
-    "crawled": "a page the person added by Deep Ingest (third-party text)",
+    "crawled": "a page added by Deep Ingest, by the person or by a crawl they confirmed (third-party text)",
     "verified": "a knowledge pack from the signed index, trust verified",
     "community": "a knowledge pack from the signed index, trust community (not reviewed)",
     "local": "a knowledge pack installed from a file",

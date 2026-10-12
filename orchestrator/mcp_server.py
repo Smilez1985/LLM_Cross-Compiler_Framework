@@ -782,6 +782,8 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
                 confirm_channel="elicitation" if data.answer == "timeout" else "none",
                 decision=Decision(state.decision) if state.decision else None))
             state.audited = True
+            if getattr(spec, "discard", None) is not None:  # never runs: drop what prepare staged
+                await anyio.to_thread.run_sync(registry.discard_staged, spec, _parsed(spec, kwargs), tool_ctx)
             raise _audited(MCPToolError(data.refused))
         if isinstance(data, NotAsked):
             approved, asked, can_ask = None, False, data.can_ask
