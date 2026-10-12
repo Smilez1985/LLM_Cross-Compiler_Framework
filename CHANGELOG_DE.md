@@ -380,7 +380,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `llm-cli module generate-ai` zeigen das Basis-Image offen, bevor das Modul angelegt wird: Registry, Digest,
   offizielles Image oder fertiges Image einer anderen Registry, Netzwerkzugriff des Image-Builds und den Grund der KI.
 
+- **MCP-Tokens in der GUI**: Der Dialog Tool Permissions (Tools > Tool Permissions (Ditto / MCP)) hat einen
+  Abschnitt „MCP tokens“, der die Tokens auflistet und eines anlegt (einmal gezeigt; nur lesend, eine Kopie der
+  Berechtigungen der lokalen stdio-Clients oder Dittos, oder an Dittos gebunden), rotiert, widerruft und die eigenen
+  Berechtigungen jedes Tokens festlegt, protokolliert mit dem Akteur `gui`, nie mit dem Token.
+
 ### Geändert
+- **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
+  eine Sitzung schließt nach 10 Minuten ohne Anfrage (die Vorgabe des SDK sind 30); eine noch offene Anfrage, wenn ihr
+  Token widerrufen oder rotiert wird (ein Warten, ein Ereignisstrom, ein Listen-Strom), wird sofort geschlossen.
 - **Dittos Aufgabentexte** (Chat mit Tools, Healing-Analyse, Modulvorschlag, Build-Empfehlung) stehen in einem Modul,
   `orchestrator/llm/task_prompts.py`, das sie mit den MCP-Prompts teilen, und jeder trägt die Regel für das ehrliche
   „kann ich nicht“: den konkreten Grund nennen, nie ein Ergebnis behaupten, das man nicht bekommen hat, und
@@ -694,6 +702,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   beiden Wegen angenommen, und unbekannte Tool-Namen werden im Audit-Log festgehalten (bisher auf keinem Weg).
 
 ### Sicherheit
+- `LCF_MCP_TOKEN` nimmt `llm-cli` selbst aus der Umgebung, bevor irgendein Befehl läuft, und gibt es nur an
+  `mcp serve` weiter; vorher entfernte es nur `mcp serve`, sodass jeder andere Befehl und seine Kindprozesse es erbten.
+- MCP-Server: Was außerhalb einer vom Server geprüften Anfrage läuft, bekommt den Aufrufer ohne jede Berechtigung,
+  auch auf einem stdio-Server, der vorher auf seinen eigenen Aufrufer zurückfiel.
+- Der MCP-Token-Speicher wird anhand des SHA-256 der Dateibytes zwischengespeichert statt anhand von Identität, Größe
+  und Änderungszeit der Datei, sodass ein laufender Server ein widerrufenes oder rotiertes Token nach einer Änderung
+  gleicher Größe innerhalb der Auflösung des Zeitstempels nicht weiter annehmen kann.
 - Ditto verwirft einen Healing-Fix oder eine Build-Empfehlung, die einen gefährlichen Befehl enthält (einen
   Download, der direkt in eine Shell geleitet wird, das Löschen des Wurzel- oder Home-Ordners, Schreibrechte für
   alle, das Überschreiben eines Datenträgers), ganz gleich, welche Anweisungen ein Build-Log oder ein

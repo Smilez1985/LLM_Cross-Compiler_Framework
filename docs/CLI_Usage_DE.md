@@ -901,14 +901,17 @@ Mit `--transport http` lauscht der Server auf `http://<Host>:<Port>/mcp`, und je
 und kein Token wird angenommen (und der Server startet nicht), solange andere Benutzer die Token-Datei lesen oder
 ändern können oder sie einem anderen Benutzer gehört. Anfragen mit `Origin`-Header (Webseiten, CORS-Preflights)
 werden abgelehnt, der `Host`-Header muss `127.0.0.1`, `localhost` oder `[::1]` mit dem Port des Servers sein, und der
-Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Die alte gemeinsame Token-Datei
-`mcp_http_token` wird nicht mehr akzeptiert.
+Server hält höchstens 8 Sitzungen, davon höchstens 4 je Token (damit ein Client die anderen nicht aussperren kann;
+darüber hinaus wird eine neue Sitzung mit Status 503 abgelehnt), schließt eine Sitzung nach 10 Minuten ohne Anfrage
+und nimmt höchstens 1 MiB pro Anfrage an. Eine noch offene Anfrage (ein Warten, ein Ereignisstrom) wird geschlossen,
+sobald ihr Token widerrufen oder rotiert wird. Die alte gemeinsame Token-Datei `mcp_http_token` wird nicht mehr
+akzeptiert.
 
 Über stdio macht die Umgebungsvariable `LCF_MCP_TOKEN` im Server-Eintrag des Clients den Client zum Aufrufer dieses
-benannten Tokens (`mcp:<Name>`, mit den Berechtigungen des Tokens) statt zum gemeinsamen Aufrufer `mcp`. Der Server
-liest sie einmal, entfernt sie aus seiner Umgebung (Kindprozesse erben sie nicht) und endet mit Exit-Code 2, wenn der
-Wert kein gültiges Token ist; ein laufender Server antwortet nicht mehr, sobald sein Token widerrufen oder rotiert
-wird.
+benannten Tokens (`mcp:<Name>`, mit den Berechtigungen des Tokens) statt zum gemeinsamen Aufrufer `mcp`. `llm-cli`
+nimmt sie aus seiner Umgebung, bevor irgendein Befehl läuft, gleich welcher (kein Befehl und kein Kindprozess erbt
+sie), und gibt sie nur an `mcp serve` weiter, das mit Exit-Code 2 endet, wenn der Wert kein gültiges Token ist; ein
+laufender Server antwortet nicht mehr, sobald sein Token widerrufen oder rotiert wird.
 
 ```bash
 llm-cli mcp serve --transport http --port 8765
@@ -952,7 +955,8 @@ einmal gezeigt, wenn es angelegt oder rotiert wird; das Framework behält nur se
 `~/.llm-framework/mcp_tokens.json` (Modus 0600). Sein Name (1-32 Kleinbuchstaben, Ziffern und Bindestriche) ist der
 Aufrufer `mcp:<Name>` im Audit-Log, und es hat eigene Berechtigungen. `add`, `rotate` und `revoke` brauchen einen
 Menschen an einem Terminal (`add` und `rotate` geben außerdem nur auf ein Terminal aus) und werden mit dem Akteur
-`cli` protokolliert, ohne das Token. Kein Tool kann Tokens anlegen, auflisten, ändern oder lesen.
+`cli` protokolliert, ohne das Token. Kein Tool kann Tokens anlegen, auflisten, ändern oder lesen. Die GUI kann
+dasselbe unter Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens“ (protokolliert mit dem Akteur `gui`).
 
 | Befehl / Option | Bedeutung |
 |---|---|

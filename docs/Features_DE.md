@@ -1000,8 +1000,12 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). Über HTTP schickt jeder Client sein
   eigenes benanntes Token als `Authorization: Bearer <Token>`; eine Anfrage mit `Origin`-Header (eine Webseite, auch
   ein CORS-Preflight) wird abgelehnt, der `Host`-Header muss eine Loopback-Adresse mit dem Port des Servers nennen
-  (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Eine
-  Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet hat.
+  (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen, höchstens 4 je Token (damit ein Client die
+  anderen nicht aussperren kann), schließt eine Sitzung nach 10 Minuten ohne Anfrage und nimmt höchstens 1 MiB pro
+  Anfrage an. Eine Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet
+  hat. Eine noch offene Anfrage (ein Warten, ein Ereignisstrom, ein Listen-Strom) wird geschlossen, sobald ihr Token
+  widerrufen oder rotiert wird. Was außerhalb einer vom Server geprüften Anfrage läuft, bekommt keinerlei
+  Berechtigungen, über stdio wie über HTTP.
 - **Benannte Tokens:** `llm-cli mcp token add NAME` legt ein Token für einen Client an und zeigt es einmal; das
   Framework behält nur seinen SHA-256 in `~/.llm-framework/mcp_tokens.json` (Modus 0600; solange andere Benutzer
   die Datei lesen oder ändern können oder sie einem anderen Benutzer gehört, wird kein Token angenommen und der
@@ -1012,11 +1016,16 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   einem anderen Rechner; eine Änderung an Dittos Berechtigungen gilt sofort auch dafür). `rotate` ersetzt ein Token,
   `revoke` löscht es mit seinen Berechtigungen; beides wirkt sofort, auch für einen laufenden Server, und die
   Aufrufe, die ein widerrufener stdio-Client noch schickt, werden abgelehnt und protokolliert. Ein
-  stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag: Der
-  Server liest sie einmal beim Start, entfernt sie aus seiner Umgebung und startet nicht mit einem Wert, der kein
-  gültiges Token ist. Ohne sie teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen
-  Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal: Kein Tool kann sie anlegen, lesen oder ändern,
-  und kein Token erscheint in einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag.
+  stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag:
+  `llm-cli` nimmt sie aus seiner Umgebung, bevor irgendein Befehl läuft (kein Befehl und kein Kindprozess erbt sie),
+  und gibt sie nur an `mcp serve` weiter, das nicht mit einem Wert startet, der kein gültiges Token ist. Ohne sie
+  teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen Berechtigungen. Tokens verwaltet nur
+  ein Mensch, an einem Terminal oder in der GUI (Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens“:
+  auflisten, anlegen mit einmal gezeigtem Token, rotieren, widerrufen und die eigenen Berechtigungen jedes Tokens;
+  protokolliert mit dem Akteur `gui`): Kein Tool kann sie anlegen, lesen oder ändern, und kein Token erscheint in
+  einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag. Der Server liest den Token-Speicher bei jeder Prüfung
+  und merkt ihn sich anhand des SHA-256 der Dateibytes, sodass er eine Änderung auch dann sieht, wenn sie Größe und
+  Zeitstempel der Datei beibehält.
 - **Arbeitsordner:** Der Server liest nie Einstellungen und importiert nie Code aus dem Ordner, in dem er gestartet
   wird (der Client startet ihn mit `python -P`), und unter Windows startet er von dort keine Programme wie `docker`
   oder `git`. Ein Projektordner kann sein Verhalten nicht ändern.

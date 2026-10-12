@@ -370,7 +370,8 @@ du Claude Desktop neu.
   braucht jeder Client sein eigenes benanntes Token: `llm-cli mcp token add NAME` zeigt es einmal, und der Client
   schickt es als `Authorization: Bearer <Token>`. Webseiten (Anfragen mit `Origin`-Header) werden abgewiesen.
 - **Ein Token pro Client:** Ein benanntes Token ist der Aufrufer im Audit-Log (`mcp:<Name>`) und hat eigene
-  Berechtigungen; ein neues darf nur lesen, bis du mehr erlaubst (`llm-cli tools permissions --token NAME`). Ein
+  Berechtigungen; ein neues darf nur lesen, bis du mehr erlaubst (`llm-cli tools permissions --token NAME`, oder in
+  der GUI unter Tools > Tool Permissions (Ditto / MCP), wo Tokens auch angelegt, rotiert und widerrufen werden). Ein
   stdio-Client bekommt sein eigenes Token mit `LCF_MCP_TOKEN` in seinem Server-Eintrag; ohne es teilen sich alle
   lokalen stdio-Clients deine eigenen Berechtigungen.
 - **Ressourcen:** Die Targets, die Capabilities eines Targets, Status und Log eines Builds, deine

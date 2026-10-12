@@ -37,6 +37,7 @@ ENV_VAR = "LCF_MCP_TOKEN"      # the token of a stdio client, read once by `llm-
 LINK_TARGETS = ("ditto",)      # callers whose policy a token may use by reference
 NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
 _SHA256_RE = r"^[0-9a-f]{64}$"
+MAX_STORE_BYTES = 4 * 1024 * 1024  # far more than any token store; a larger file is refused unread
 
 
 def read_only_policy() -> ToolPolicy:
@@ -92,8 +93,8 @@ class TokenStoreError(Exception):
 
 class TokenStore:
     """The named tokens in the per-user folder (`mcp_tokens.json`, mode 0600), changed under a cross-process lock.
-    Reads are cached by the file's identity, so the HTTP server can check every request cheaply and sees a revoke
-    or rotate at once."""
+    The parsed tokens are cached by the SHA-256 of the file's bytes, so the HTTP server can check every request
+    cheaply and sees a revoke or rotate at once."""
 
     FILE_NAME = "mcp_tokens.json"
     LOCK_NAME = ".mcp_tokens.lock"
@@ -101,15 +102,18 @@ class TokenStore:
     def __init__(self, state_dir: Path):
         self.path = Path(state_dir) / self.FILE_NAME
         self.lock_path = Path(state_dir) / self.LOCK_NAME
-        self._cache: Optional[Tuple[tuple, Dict[str, TokenRecord]]] = None
+        self._cache: Optional[Tuple[str, Dict[str, TokenRecord]]] = None  # (sha256 of the bytes, tokens)
         self._cache_lock = threading.Lock()
 
     # --- reading ------------------------------------------------------------------------------------
 
     def _read(self) -> Dict[str, TokenRecord]:
-        """All tokens by name. TokenStoreError when the file exists but cannot be used (nothing is accepted then)."""
+        """All tokens by name. TokenStoreError when the file exists but cannot be used (nothing is accepted then).
+        The file is read on every call and the parsed tokens are cached by the SHA-256 of its bytes: a cache by
+        file identity, size and modification time would keep a token that was replaced within the time stamp's
+        resolution (or by a same-size write that kept the time)."""
         try:
-            st = os.stat(self.path)
+            fd = os.open(self.path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
         except FileNotFoundError:
             if os.path.lexists(self.path):
                 raise TokenStoreError(f"{self.path} is a link to a missing file; no MCP token is accepted until "
@@ -117,19 +121,31 @@ class TokenStore:
             return {}
         except OSError as e:
             raise TokenStoreError(f"{self.path} cannot be read ({e}); no MCP token is accepted.") from None
-        # On every read, before the cache answers (chmod keeps size and mtime): a running server must stop accepting
-        # tokens as soon as someone else could have written the file.
-        problem = self._problem_of(st)
-        if problem:
-            raise TokenStoreError(problem)
-        key = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+        try:
+            # On every read, before the cache answers (chmod keeps the bytes): a running server must stop accepting
+            # tokens as soon as someone else could have written the file. Checked on the file that is read.
+            problem = self._problem_of(os.fstat(fd))
+            if problem:
+                raise TokenStoreError(problem)
+            raw = b""
+            while len(raw) <= MAX_STORE_BYTES:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                raw += chunk
+        except OSError as e:
+            raise TokenStoreError(f"{self.path} cannot be read ({e}); no MCP token is accepted.") from None
+        finally:
+            os.close(fd)
+        if len(raw) > MAX_STORE_BYTES:
+            raise TokenStoreError(f"{self.path} is larger than any token store ({MAX_STORE_BYTES // 1024} KiB); no "
+                                  "MCP token is accepted. Remove the file and create the tokens again.")
+        key = hashlib.sha256(raw).hexdigest()
         with self._cache_lock:
             if self._cache is not None and self._cache[0] == key:
                 return self._cache[1]
         try:
-            data = TokenFile.model_validate(json.loads(self.path.read_text(encoding="utf-8")))
-        except OSError as e:
-            raise TokenStoreError(f"{self.path} cannot be read ({e}); no MCP token is accepted.") from None
+            data = TokenFile.model_validate(json.loads(raw.decode("utf-8")))
         except (ValueError, ValidationError, RecursionError) as e:
             raise TokenStoreError(f"{self.path} is damaged ({str(e).splitlines()[0][:200]}); no MCP token is "
                                   "accepted. Remove the file and create the tokens again.") from None

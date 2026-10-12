@@ -333,7 +333,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   module is created: registry, digest, official image or another registry's prebuilt image, network access of the
   image build, and the AI's reason.
 
+- **MCP tokens in the GUI**: the Tool Permissions dialog (Tools > Tool Permissions (Ditto / MCP)) has a section
+  "MCP tokens" that lists the tokens and adds one (shown once; read only, a copy of the local stdio clients' or Ditto's
+  permissions, or linked to Ditto's), rotates, revokes and sets each token's own permissions, audited with actor
+  `gui`, never with the token.
+
 ### Changed
+- **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
+  closes after 10 minutes without a request (the SDK's default is 30); a request still open when its token is revoked
+  or rotated (a wait, an event stream, a listen stream) is closed at once.
 - **Ditto's task texts** (chat with tools, healing analysis, module proposal, build recommendation) live in one
   module, `orchestrator/llm/task_prompts.py`, shared with the MCP prompts, and each carries the honest-"cannot" rule:
   name the specific reason, never claim a result you did not get, and untested hardware is no reason to refuse. The
@@ -616,6 +624,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (before: on neither path).
 
 ### Security
+- `LCF_MCP_TOKEN` is taken out of the environment by `llm-cli` itself before any command runs and handed only to
+  `mcp serve`; before, only `mcp serve` removed it, so every other command and its child processes inherited it.
+- MCP server: whatever runs outside a request that the server checked gets the deny-all caller, also on a stdio
+  server, which before fell back to its own caller.
+- The MCP token store is cached by the SHA-256 of the file's bytes instead of its identity, size and modification
+  time, so a running server cannot keep accepting a revoked or rotated token after a same-size change within the time
+  stamp's resolution.
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
   into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
   build log or a model name told the model.

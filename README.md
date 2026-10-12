@@ -354,7 +354,8 @@ Python (see [Calling `llm-cli`](#calling-llm-cli)). After `--write claude-deskto
   every client needs its own named token: `llm-cli mcp token add NAME` shows it once, and the client sends it as
   `Authorization: Bearer <token>`. Web pages (requests with an `Origin` header) are refused.
 - **One token per client:** a named token is the caller in the audit log (`mcp:<name>`) and has its own
-  permissions; a new one can only read until you allow more (`llm-cli tools permissions --token NAME`). A stdio
+  permissions; a new one can only read until you allow more (`llm-cli tools permissions --token NAME`, or in the
+  GUI under Tools > Tool Permissions (Ditto / MCP), where tokens are also added, rotated and revoked). A stdio
   client gets its own token with `LCF_MCP_TOKEN` in its server entry; without it, all local stdio clients share your
   own permissions.
 - **Resources:** the targets, a target's capabilities, a build's status and log, your tool permissions and the
