@@ -39,9 +39,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Digest gepinntes Basis-Image außerhalb der Docker Official Images zählt, sobald ein Build mit genau diesem Image
   bestätigt wurde; ein Tag nie. Die Regelversion des Build-Dauerauftrags ist jetzt 2, Daueraufträge nach der
   engeren Regel verfallen.
-- **Dittos MCP-Client-Modus in der GUI** (MCP-Entwurf T12): Configure AI Agent (Ditto) hat einen Abschnitt
-  „Ditto's tools“ mit Tool-Quelle, einem Befehl (stdio) oder einer Serveradresse (HTTP, nur https oder Loopback),
-  einem Namen und dem benannten Token, das im Tresor für Zugangsdaten landet und nie wieder angezeigt wird; den Modus
+- **Ditto und das Framework auf einem anderen Computer, in der GUI** (MCP-Entwurf T12, Entwurf 6.1): Configure AI
+  Agent (Ditto) hat einen Abschnitt „Another computer (optional)“, standardmäßig aus, der in einfachen Worten sagt,
+  dass das andere Framework dasselbe Programm auf einem zweiten Computer ist und dass Docker nicht nötig ist (SSH oder
+  eine Serveradresse genügt): dieser Computer oder das Framework auf einem anderen Computer, ein Befehl (stdio, zum
+  Beispiel über SSH) oder eine Serveradresse (HTTP, nur https oder Loopback, zum Beispiel über einen SSH-Tunnel), ein
+  Name und das benannte Token, das im Tresor für Zugangsdaten landet und nie wieder angezeigt wird; die Verbindung
   ohne Token, mit einem nicht lesbaren Befehl oder mit einer Adresse zu speichern, die das Token im Klartext senden
   würde, wird abgelehnt und speichert nichts. Dittos GUI-Bestätigung bietet „Allow and ask it to stop asking...“ für
   die Rückfrage eines entfernten Frameworks nur an, wenn das Formular jenes Servers es anbietet, mit einer Warnung
@@ -63,10 +66,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   dafür wartet, nachdem sich der Build geändert hat und wenn der Ordner nicht der ist, den die Frage nannte. Eine
   Wiederherstellung sichert immer zuerst die aktuelle Wissensbasis (`pre_restore_<Zeit>`), auch außerhalb von MCP,
   und räumt den wiederherzustellenden Snapshot nie auf.
-- **Ditto als MCP-Client eines anderen Frameworks** (MCP-Entwurf T12; Ditto ist hybrid): `llm-cli ditto remote set`
-  richtet Ditto auf den MCP-Server eines Frameworks aus, das anderswo läuft, zum Beispiel im Headless-Docker-Image
-  (stdio über einen Befehl wie `docker exec -i <container> llm-cli mcp serve` oder HTTP an eine https- oder
-  Loopback-Adresse). Es gelten Registry, Berechtigungen, narrensichere Schicht, Rückfragen und Audit-Log jenes
+- **Ditto und das Framework auf einem anderen Computer** (MCP-Entwurf T12; Ditto ist hybrid; Entwurf 6.1):
+  `llm-cli ditto remote set` richtet Ditto auf den MCP-Server des Frameworks aus, das auf einem zweiten Computer
+  installiert ist (ein Build-PC, ein Server; dasselbe Programm, kein anderes). Docker ist nicht nötig: SSH erreicht
+  es, als Tunnel zu seiner Loopback-HTTP-Adresse oder als stdio-Befehl (`ssh -T -o SendEnv=LCF_MCP_TOKEN
+  benutzer@build-box llm-cli mcp serve`); ein Framework-Container, den du selbst gebaut hast, ist eine Alternative
+  (`docker exec -i <container> llm-cli mcp serve`). Es gelten Registry, Berechtigungen, narrensichere Schicht, Rückfragen und Audit-Log jenes
   Servers; Dittos Identität dort ist ein benanntes Token, angelegt mit `llm-cli mcp token add NAME --link ditto`,
   sodass Dittos eigene Berechtigungen in beiden Modi zugleich gelten und das Audit-Log dort `mcp:NAME` zeigt. Das
   Token liegt in Dittos Tresor für Zugangsdaten und erreicht den Server nur als `LCF_MCP_TOKEN` oder als
@@ -75,6 +80,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Bestätigung nennt den Server. `llm-cli ditto remote show|test|off`. `llm-cli mcp serve --transport http --container`
   bindet nur innerhalb eines Containers dessen Schnittstellen (benanntes Token, Host- und Origin-Prüfung unverändert;
   den Port auf dem Loopback des Hosts veröffentlichen).
+- **Das Framework in einem Container, auf deinem eigenen Computer gebaut** (Runde 5 h): Kein Framework-Image wird
+  veröffentlicht oder geladen. `scripts/build_container_image.sh` (`make build`) prüft Docker, BuildKit und den
+  Klon, stellt genau die Dateien bereit, die das Repository ausliefert, und baut `Docker Setup/Dockerfile` mit einem
+  lokalen Tag (`lcf-framework:local`; ein Name mit Registry wird abgelehnt); danach zeigt es, wie du es startest. Das
+  Dockerfile führt dieselbe Installation aus wie auf dem Rechner selbst (`install.sh`, das mit
+  `LCF_CONTAINER_BUILD=1` nur die Docker-Engine und die Gruppe `docker` weglässt und `runuser` nutzt, wo `sudo`
+  fehlt), auf Debian 13 slim per Digest, für einen Benutzer ohne Root-Rechte mit deinen IDs, mit den Quellen als nur
+  lesbarer Build-Einbindung (kein Geheimnis in einer Schicht) und allem Persönlichen im Volume `/data`;
+  standardmäßig CLI und MCP-Server ohne Oberfläche, die Desktop-Bibliotheken der GUI nur mit `--gui`. Ein Build aus
+  dem Repository-Ordner selbst wird abgelehnt. Die Compose-Datei lädt das Image nie (`pull_policy: never`),
+  veröffentlicht keinen Port und entzieht alle Capabilities; KI-Clients erreichen den MCP-Server über stdio
+  (`docker exec -i lcf-framework llm-cli mcp serve`, von einem anderen Computer per SSH zum Host). `docker.registry`
+  und `docker.tags` der Target-Dateien sind als nur lokale Image-Namen beschrieben. Anleitung:
+  `docs/Container_Setup_DE.md`.
 - **Gemeinsamer Build-Zustand** (MCP-Entwurf T11): Jedes Programm des Frameworks (die GUI, ein CLI-Aufruf, jeder
   MCP-Server) schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner (`build_requests/`), sodass die
   Statusleiste der GUI, `llm-cli build status`, `list_build_requests` und `get_build_status` dieselben Builds sehen,
@@ -1185,7 +1204,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   ausliefert: mit dem Modul-Assistenten oder `llm-cli module create` erstellte Targets, installierte Community-Packs
   sowie Builds, Cache, Modelle und `configs/config.yml`. Lässt sich die Liste nicht erstellen, bricht er ab, bevor
   etwas kopiert oder entfernt wird; ein veralteter Link wird selbst entfernt, nie die Datei, auf die er zeigt; und
-  die Kopie von `install.sh` in `/opt` kopiert und entfernt nichts.
+  die Kopie von `install.sh` in `/opt` kopiert und entfernt nichts. Aus einem Ordner ohne Versionsverwaltung (ein
+  entpacktes Archiv) installiert, überspringt er nur die Ordner `build/` und `dist/` der obersten Ebene, nicht mehr
+  jeden Ordner namens `build` (darunter das frameworkeigene `orchestrator/runtime/build/`).
+- `make build`, `make up`, `make gui`, `make down` und `Docker Setup/docker-compose.yml` funktionieren: Die
+  Compose-Datei baute aus einer `orchestrator/Dockerfile`, die es nie gab, und das Makefile rief damit das alte
+  `docker-compose` und das fehlende `scripts/setup_linux.sh` auf. Das Makefile nutzt `docker compose` (v2) und den
+  Builder; `make setup` und `make test-container` sind weg (sie brauchten die fehlenden Dateien; Tests laufen mit
+  `make test`), ebenso die Compose-Dienste mit nicht festgelegten Fremd-Images und dem Docker-Socket (Socket-Proxy,
+  ctop, Trivy). `make audit` prüft ein Archiv des Images mit der festgelegten Trivy-Version, ohne den Docker-Socket.
+  `make clean` löscht das Datenvolume, `output/` und `cache/` nicht mehr ohne Nachfrage: Es entfernt die gestoppten
+  Container und zeigt, was Daten enthält.
 - Deployment-Pakete übernehmen Benutzerprofile, Sprachvorlagen und Prompts nur aus dem Einstellungsordner, nie aus
   einem Ordner `config/` im Arbeitsverzeichnis.
 - Der Hugging-Face-Modellbrowser lässt sich wieder öffnen: **Tools > Hugging Face Model Browser...** (kein Menü

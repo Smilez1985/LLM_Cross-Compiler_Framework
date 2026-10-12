@@ -137,6 +137,22 @@ The installer checks for Python (installs Python 3.13 with `winget` if none is f
 
 Conversions on a Windows host have not been verified yet (see [Known gaps](#known-gaps)).
 
+### In a container (server, NAS, Proxmox)
+
+No framework image is published or pulled: you build the image on your own computer, and it runs the same
+installation inside the container as above (`install.sh`), from exactly the files the repository ships. It is
+headless (CLI and MCP server); the GUI is an explicit option.
+
+```bash
+make build      # scripts/build_container_image.sh: checks Docker, builds lcf-framework:local here, prints how to run it
+make up         # starts the container lcf-framework; your data lives in the volume lcf-data
+docker exec -it lcf-framework llm-cli doctor
+```
+
+AI clients reach its MCP server over stdio (`docker exec -i lcf-framework llm-cli mcp serve`, from another computer
+over SSH to the host). The container builds no models itself (it has no Docker inside). Setup, the credential vault,
+data, the GUI and updates: [docs/Container_Setup.md](docs/Container_Setup.md).
+
 ### Calling `llm-cli`
 
 The installers do not put `llm-cli` on your PATH. Use the framework's Python from the installation folder:
@@ -477,11 +493,15 @@ provider's sign-in methods with Check, Save and Sign out. On a headless machine,
 enough; `--kind retrieval` grades the knowledge-base search instead. Details and measurements:
 [docs/Features.md](docs/Features.md#ditto-evaluation).
 
-**Ditto for a framework running elsewhere** (for example the headless Docker image): create a token there with
-`llm-cli mcp token add ditto-laptop --link ditto`, then here `llm-cli ditto remote set --transport stdio --command
-"docker exec -i <container> llm-cli mcp serve"` (the token is asked without echo). Ditto then uses that framework's
-tools with its own permissions there; `llm-cli ditto remote off` switches back. In the GUI the same is set in
-Configure AI Agent (Ditto) under "Ditto's tools" (the token is stored in the vault and never shown again). Details:
+**Ditto and the framework on another computer** (optional): if the framework is installed on a second computer
+too (a stronger build PC, a server), Ditto can use it through that installation's MCP server. Docker is not needed;
+SSH is enough. Create a token there with `llm-cli mcp token add ditto-laptop --link ditto` and start
+`llm-cli mcp serve --transport http` there; here open a tunnel with `ssh -N -L 8765:127.0.0.1:8765 user@build-box`
+and run `llm-cli ditto remote set --transport http --url http://127.0.0.1:8765/mcp` (the token is asked without
+echo). Ditto then uses that computer's tools with its own permissions there; this computer's files stay as they are,
+and `llm-cli ditto remote off` switches back. In the GUI the same is set in Configure AI Agent (Ditto) under
+"Another computer (optional)" (the token is stored in the vault and never shown again). Details:
+[docs/Features.md](docs/Features.md#ditto-and-a-framework-on-another-computer) and
 [docs/CLI_Usage.md](docs/CLI_Usage.md#ditto-remote).
 
 ---
@@ -654,10 +674,9 @@ The knowledge-base, Deep Ingest and community settings are explained in [docs/Fe
 
 ## Known gaps
 
-- **Docker setup of the framework itself:** `Docker Setup/` and the Makefile targets `make setup`, `make build`,
-  `make up`, `make gui` and `make test-container` do not work (the referenced `scripts/setup_linux.sh` and
-  `orchestrator/Dockerfile` do not exist). A hardened headless image for the CLI and the MCP server is being built
-  ([roadmap](docs/BLUEPRINT.md#roadmap)). Conversions themselves run in Docker and are not affected.
+- **The framework in a container builds no models:** the image you build with `make build` has no Docker inside,
+  so conversions run on a computer where the framework is installed directly
+  ([docs/Container_Setup.md](docs/Container_Setup.md#8-limits)).
 - **Windows hosts:** the test suite runs on Windows in CI, but conversions on a Windows host have not been
   verified.
 - **Browser and cloud sign-in** (OAuth, AWS, Google Cloud, Azure) are not available yet; Ditto signs in with API
@@ -675,7 +694,7 @@ The roadmap lists what is planned; finished items move to the [CHANGELOG](CHANGE
 
 - **In progress:** the remaining sign-in methods per access type, browser sign-in and cloud platforms (API keys,
   local engines and the `ant` profile work in the GUI and with `llm-cli ditto login`; the Claude-subscription
-  provider is removed, and Claude subscribers use MCP or an API key); a hardened headless Docker image for the CLI and the MCP server; a new
+  provider is removed, and Claude subscribers use MCP or an API key); a new
   Ditto evaluation run with the improved prompts; the self-built llama.cpp runtime on the board (the command line
   works; the GUI, the MCP tools and a run on a real board follow).
 - **Planned:** targets for NVIDIA GPUs and AMD (Ryzen Z1 Extreme), more formats, LoRA and large models, and
@@ -693,6 +712,7 @@ Full list: [docs/BLUEPRINT.md](docs/BLUEPRINT.md#roadmap).
 | [docs/Features.md](docs/Features.md) | Features in detail: build pipeline, sandbox, Ditto, evaluation, local runtime, knowledge base, Deep Ingest, MCP, community zoo |
 | [docs/BLUEPRINT.md](docs/BLUEPRINT.md) | Architecture and roadmap |
 | [docs/Module_Developer_Guide.md](docs/Module_Developer_Guide.md) | Adding a new hardware target |
+| [docs/Container_Setup.md](docs/Container_Setup.md) | The framework in a container you build yourself (server, NAS, Proxmox) |
 | [CHANGELOG.md](CHANGELOG.md) | What changed in each version |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, tests, conventions |
 | [configs/SSOT_ARCHITECTURE.md](configs/SSOT_ARCHITECTURE.md) | Project sources (single source of truth) |

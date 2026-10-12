@@ -399,7 +399,8 @@ cloud provider, personal details are replaced by placeholders.
 6. **History.** The finished turn is appended to `chat_history.json`. A long conversation is summarized and
    continued as a new conversation; earlier turns are never edited.
 7. **MCP-client mode** (`llm-cli ditto remote set`). Instead of the in-process registry, the tools come from the MCP
-   server of a framework running elsewhere, with a named token linked to Ditto's permissions there (`--link ditto`):
+   server of the framework installed on another computer (the same program; Docker is not needed, SSH or a server
+   address is enough), with a named token linked to Ditto's permissions there (`--link ditto`):
    that server decides, asks and audits (actor `mcp:<token name>`). One tool source per conversation; every remote
    result, error and question is untrusted data; Ditto's dialog names the server. Without a token the mode does not
    start. Ditto's tasks (build advice, module proposal, analysis of a remote build) take their context from that
@@ -792,11 +793,9 @@ threat, the protection and where it is implemented.
 
 These are real limitations of the current state. Most are scheduled in the [roadmap](#roadmap).
 
-- **Docker setup for the framework itself is broken.** `Docker Setup/docker-compose.yml` builds from
-  `orchestrator/Dockerfile`, which has never existed, so the Makefile targets `build`, `up`, `gui`,
-  `test-container` and `audit` fail; `build`, `up` and `gui` also call the missing `scripts/setup_linux.sh`.
-  Install the framework on the host instead. A hardened headless image (CLI and MCP server) is being built for
-  3.1.0.
+- **The framework in a container builds no models.** The image you build with `make build`
+  ([Container setup](Container_Setup.md)) has no Docker inside, so conversions run on a computer where the framework
+  is installed directly; giving the container the host's Docker socket is not offered.
 - **Sign-in covers API keys, local engines and the `ant` profile so far** (the GUI's sign-in panel and
   `llm-cli ditto login`). There is no browser sign-in and no cloud credential chain yet. For Anthropic an
   `ant auth login` profile is used only when you choose it. The remaining sign-in methods are being built for
@@ -926,7 +925,7 @@ When a version is released, its done items leave the roadmap and appear in the c
 | **Ditto evaluation.** `llm-cli ditto eval` with fixed cases graded by rules, per provider or local model tier. The first measurement found gaps in Ditto's prompts; they are fixed, and a new measurement is running. | done |
 | **Sign-in per access type** for all common cloud and API providers and for local engines (details below). | in progress |
 | **Removal of the `claude_code` provider.** Anthropic does not allow third-party apps to use Claude subscription logins. Claude subscribers use the framework from Claude Code or Claude Desktop through the MCP server (`llm-cli mcp config` prints the setup), or give Ditto an Anthropic API key; Max and Team plans include monthly API credits. | done |
-| **Hardened headless Docker image** for the CLI and the MCP server, with a working compose file and Makefile targets; replaces the broken `Docker Setup/`. | in progress |
+| **The framework in a container, built locally.** No framework image is published or pulled: `scripts/build_container_image.sh` (`make build`) builds the image on your computer by running the same installation as on bare metal (`install.sh`) from the shipped files; headless CLI and MCP server by default, the GUI only as an option; a working compose file and Makefile targets, and a build guide ([Container setup](Container_Setup.md)). | done |
 | **Documentation in English and German** for every document. | in progress |
 | **Crawler that checks the site's own signals.** A user cannot know whether a site may be evaluated, so the crawler checks the machine-readable opt-outs itself (robots.txt per RFC 9309, the `X-Robots-Tag` header, robots meta tags including `noai` and its own bot name, the TDM Reservation Protocol) and skips reserved pages, naming them in the log; any reservation wins, and no check can be switched off. Instead of a legal confirmation, a one-time notice (per user, again when its text changes) explains what is read and kept, with a spoken announcement through the operating system's speech engine (the technique of the rag4ll USB watcher); a Stop button keeps what was stored, the progress shows "Page N of M", the result says success, partial or failure honestly, and the crawler reports its real version. A person starts Deep Ingest in the GUI or confirms an AI client's `crawl_docs_site` (unreleased). | done |
 | **Input history**: recent models, targets, boards, URLs, devices and datasets offered in the GUI fields, per user, without secrets; Tools > Clear Input History... forgets them. | done |

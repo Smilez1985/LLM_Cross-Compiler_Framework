@@ -372,6 +372,12 @@ against its schema, but no build reads it. The other blocks in the Rockchip `tar
 four-module chain ([section 10](#10-legacy-files)), and `docker.build_args` only repeats the pin for builds outside
 the framework.
 
+`docker.image_name`, `docker.registry` and `docker.tags` are **local image names only**. No framework image is
+published or pulled: the build engine builds each target's image on your computer and tags it locally as
+`llm-framework/<target>:<build id>`, and nothing reads `registry` or `tags` (the `ghcr.io` and `latest`/`v1.0.0`
+values in the Rockchip file and the template are leftovers that only describe a name). Do not push target images to
+a registry from the framework, and do not rely on these keys for anything.
+
 ## 5. The Dockerfile
 
 The build context the engine stages looks like this, so the Dockerfile copies from these paths:
