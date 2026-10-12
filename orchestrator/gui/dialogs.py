@@ -387,7 +387,8 @@ class AIConfigurationDialog(QDialog):
         self.txt_mcp_command.setPlaceholderText("ssh -T -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve")
         self.txt_mcp_command.setToolTip("The command that starts the framework's MCP server on the other computer, "
                                         "for example over SSH (the SSH server there must accept the variable: "
-                                        "AcceptEnv LCF_MCP_TOKEN). For a framework container you built yourself: "
+                                        "AcceptEnv LCF_MCP_TOKEN, and llm-cli must be a command there, not only an "
+                                        "alias). For a framework container you built yourself: "
                                         "docker exec -i <container> llm-cli mcp serve. The token reaches the server "
                                         "as the environment variable LCF_MCP_TOKEN, never on the command line.")
         form.addRow("Command:", self.txt_mcp_command)

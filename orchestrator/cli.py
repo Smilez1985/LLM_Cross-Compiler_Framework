@@ -1676,7 +1676,8 @@ def _remote_settings_text(config) -> List[str]:
 @click.option('--command', 'command', default=None,
               help='stdio: the command that starts the MCP server on the other computer, e.g. "ssh -T -o '
                    'SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve" (the SSH server there needs AcceptEnv '
-                   'LCF_MCP_TOKEN); for a framework container you built yourself "docker exec -i lcf llm-cli mcp '
+                   'LCF_MCP_TOKEN, and llm-cli must be a command there, not only an alias); for a framework '
+                   'container you built yourself "docker exec -i lcf llm-cli mcp '
                    'serve"')
 @click.option('--url', default=None, help='http: the server address (https, or http on a loopback address such as '
               'an SSH tunnel: ssh -N -L 8765:127.0.0.1:8765 user@build-box, then http://127.0.0.1:8765/mcp)')

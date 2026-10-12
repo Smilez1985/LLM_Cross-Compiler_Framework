@@ -599,7 +599,8 @@ to both modes at once), and the audit log there shows `mcp:NAME`. `set` stores t
 credential vault (asked without echo, or read from stdin with `--with-token`) and the connection in Ditto's AI
 settings; the token never passes through a tool, a result or a command line. Over stdio Ditto starts `--command`
 (for example `ssh -T -o BatchMode=yes -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve`, which needs
-`AcceptEnv LCF_MCP_TOKEN` in the SSH server's configuration there; or, for a framework container you built yourself,
+`AcceptEnv LCF_MCP_TOKEN` in the SSH server's configuration there and `llm-cli` as a command there, not only an
+alias, see [Calling `llm-cli`](../README.md#calling-llm-cli); or, for a framework container you built yourself,
 `docker exec -i lcf llm-cli mcp serve`) with the token in `LCF_MCP_TOKEN`. `docker exec` and `podman exec` do not
 pass their environment into the container, so Ditto adds `-e LCF_MCP_TOKEN` (the name only, never the value) to such
 a command; and when the server it reached names the shared local caller `mcp` instead of the token (for example over

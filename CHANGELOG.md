@@ -79,11 +79,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   metal (`install.sh`, which leaves out only the Docker engine and the `docker` group with `LCF_CONTAINER_BUILD=1`
   and uses `runuser` where `sudo` is missing) on Debian 13 slim pinned by digest, for a non-root user with your ids,
   with the sources as a read-only build mount (no secret in any layer) and everything personal in the volume
-  `/data`; headless CLI and MCP server by default, the GUI's desktop libraries only with `--gui`. A build from the
-  repository folder itself is refused. The compose file never pulls the image (`pull_policy: never`), publishes no
-  port and drops all capabilities; AI clients reach the MCP server over stdio (`docker exec -i lcf-framework llm-cli
-  mcp serve`, from another computer over SSH to the host). The target files' `docker.registry` and `docker.tags` are
-  documented as local image names only. Guide: `docs/Container_Setup.md`.
+  `/data` (settings, vault, audit log, tokens, models, builds, datasets, logs); headless CLI and MCP server by
+  default (with the GLib library Qt's core needs, which the CLI imports), the GUI's desktop libraries only with
+  `--gui` (everything Qt's xcb platform plugin loads); a group with your group id that Debian has already is reused.
+  The build ends with a check that the command line imports and every system library Qt loads is there, and stops
+  naming what is missing. A build from the repository folder itself is refused. The compose file never pulls the image (`pull_policy:
+  never`), and every `docker run` the builder prints or the CI runs says `--pull never`; it publishes no port and
+  drops all capabilities; AI clients reach the MCP server over stdio (`docker exec -i lcf-framework llm-cli mcp
+  serve`, from another computer over SSH to the host). Targets you create and packs you install stay in the
+  container's program folder: `make down` only stops, and `make up`, `make gui` and `make clean` never replace or
+  remove a container that holds files of yours outside the volume; they list each one with full path, file name,
+  size and what it is (`make kept-files`, `scripts/container_kept_files.sh`). The target files' `docker.registry`
+  and `docker.tags` are documented as local image names only. Guide: `docs/Container_Setup.md`.
 - **Shared build state** (MCP design T11): every framework program (the GUI, a CLI call, each MCP server) writes a
   summary of each build request into the per-user folder (`build_requests/`), so the GUI status bar, `llm-cli build
   status`, `list_build_requests` and `get_build_status` see the same builds whichever program started them, also a
@@ -1062,14 +1069,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   A list that cannot be made stops it before anything is copied or removed, a stale link is removed itself, never
   the file it points to, and the copy of `install.sh` in `/opt` copies and removes nothing. Installed from a folder
   without version control (an unpacked archive), it skips only the top-level `build/` and `dist/` folders, no longer
-  every folder named `build` (among them the framework's own `orchestrator/runtime/build/`).
+  every folder named `build` (among them the framework's own `orchestrator/runtime/build/`). When the Python
+  environment cannot be set up (no `venv` module, a pinned package the index does not offer), it stops with a
+  message; before, it reported the installation as finished with an empty environment.
 - `make build`, `make up`, `make gui`, `make down` and `Docker Setup/docker-compose.yml` work: the compose file built
   from an `orchestrator/Dockerfile` that never existed, and the Makefile called the old `docker-compose` with it and
   the missing `scripts/setup_linux.sh`. The Makefile uses `docker compose` (v2) and the builder; `make setup` and
   `make test-container` are gone (they needed the missing files; tests run with `make test`), and so are the compose
   services with unpinned third-party images and the Docker socket (socket proxy, ctop, Trivy). `make audit` scans an
   archive of the image with the pinned Trivy version, without the Docker socket. `make clean` no longer deletes the
-  data volume, `output/` and `cache/` without asking: it removes the stopped containers and shows what holds data.
+  data volume, `output/` and `cache/` without asking: it removes only containers that hold nothing of yours outside
+  the volume and shows what holds data.
 - Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
   `config/` folder in the working directory.
 - The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).

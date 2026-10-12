@@ -327,9 +327,9 @@ class RemoteConnection:
     def _check_identity(self) -> None:
         """A stdio server that did not receive the token (a command that does not pass the environment on, such as
         ssh without -o SendEnv=LCF_MCP_TOKEN or a container runtime without -e LCF_MCP_TOKEN) runs as the shared
-        local caller "mcp" with another policy than Ditto's: the mode refuses that. Checked with the server's own get_status (permissions section,
-        which names the caller); when the server does not offer it, nothing can be checked here. Over HTTP a server
-        refuses a request without a valid token anyway."""
+        local caller "mcp" with another policy than Ditto's: the mode refuses that. Checked with the server's own
+        get_status (permissions section, which names the caller); when the server does not offer it, nothing can be
+        checked here. Over HTTP a server refuses a request without a valid token anyway."""
         if self.server.transport != "stdio":
             return
         try:

@@ -56,9 +56,9 @@ jobs:
 
       - name: Smoke test (non-root user, CLI, data folder, no Docker engine inside)
         run: |
-          test "$(docker run --rm lcf-framework:local id -u)" != 0
-          docker run --rm lcf-framework:local llm-cli --version
-          docker run --rm lcf-framework:local sh -c 'test ! -e /usr/bin/dockerd && test -d /data && test -w /data'
-          docker run --rm lcf-framework:local sh -c 'test -x /opt/llm-conversion-framework/.venv/bin/python'
+          test "$(docker run --rm --pull never lcf-framework:local id -u)" != 0
+          docker run --rm --pull never lcf-framework:local llm-cli --version
+          docker run --rm --pull never lcf-framework:local sh -c 'test ! -e /usr/bin/dockerd && test -d /data && test -w /data'
+          docker run --rm --pull never lcf-framework:local sh -c 'test -x /opt/llm-conversion-framework/.venv/bin/python'
           # No keyring in a container and nothing chosen for the person: a vault in memory for this check only.
-          docker run --rm -e LLM_SECRET_STORAGE=ephemeral lcf-framework:local llm-cli targets list
+          docker run --rm --pull never -e LLM_SECRET_STORAGE=ephemeral lcf-framework:local llm-cli targets list

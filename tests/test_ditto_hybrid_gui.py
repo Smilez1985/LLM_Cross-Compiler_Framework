@@ -60,6 +60,8 @@ def test_the_section_is_off_by_default_and_says_docker_is_not_needed(qapp, gui):
     tooltip = dlg.txt_mcp_command.toolTip()
     assert tooltip.index("SSH") < tooltip.index("docker exec"), "Docker only as one alternative, after SSH"
     assert "built yourself" in tooltip
+    # Over SSH the command runs without a login shell: the README's alias does not exist there.
+    assert "not only an alias" in tooltip
     assert "SSH tunnel" in dlg.txt_mcp_url.toolTip()
 
 
@@ -90,6 +92,7 @@ def test_the_cli_and_the_connection_errors_name_ssh_first():
     assert "Docker is not needed" in text and "SSH" in text
     text = " ".join(runner.invoke(cli, ["ditto", "remote", "set", "--help"]).output.split())
     assert text.index("ssh -T") < text.index("docker exec"), "SSH first, Docker as one alternative"
+    assert "not only an alias" in text, "over SSH llm-cli must be a command, the README's alias is not there"
 
     config = SimpleNamespace(get=lambda key, default=None: {"ai_ditto_tool_source": "mcp",
                                                             "ai_ditto_mcp_transport": "stdio"}.get(key, default))
