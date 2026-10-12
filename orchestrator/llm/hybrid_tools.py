@@ -30,6 +30,7 @@ its object lives).
 import copy
 import dataclasses
 import hashlib
+import ipaddress
 import json
 import os
 import re
@@ -55,7 +56,9 @@ LOCAL_KEY = "this_computer"
 FALLBACK_KEY = "other_computer"
 FALLBACK_LABEL = "the other computer"
 PLACE_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,23}$")
-RESERVED_KEYS = frozenset({"this_computer", "local", "here", "remote"})
+# "both" is the place index's mark for an id known on both computers: a computer named so would make every id of its
+# results ambiguous.
+RESERVED_KEYS = frozenset({"this_computer", "local", "here", "remote", "both"})
 # The model APIs' tool name pattern: a remote name that fails it is left out with a notice (HF9).
 PROVIDER_NAME_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 # An id the framework issued (job_..., req_..., a_..., lf_...): the only values that route a call.
@@ -106,12 +109,21 @@ def place_key(name: Any) -> str:
     return text
 
 
+def _is_address(text: str) -> bool:
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return False
+    return True
+
+
 def place_label(name: Any) -> str:
     """The other computer's label as a model and the person read it: the person's own name when it is a plain short
-    name (letters, digits, spaces and . ( ) + - _), otherwise "the other computer", so a login, an address or a path
-    typed as the name never reaches a model."""
+    name (letters, digits, spaces and . ( ) + - _), otherwise "the other computer", so a login, an IP address or a path
+    typed as the name never reaches a model, and neither does a name that means this computer ("this_computer")."""
     text = " ".join(str(name or "").split())
-    if not text or not _LABEL_RE.fullmatch(text) or text.lower() in _LOCAL_WORDS:
+    spoken = " ".join(text.lower().replace("_", " ").replace("-", " ").split())
+    if not text or not _LABEL_RE.fullmatch(text) or spoken in _LOCAL_WORDS or _is_address(text):
         return FALLBACK_LABEL
     return text
 
@@ -285,7 +297,8 @@ def _with_place(schema: Dict[str, Any], values: Sequence[str], required: bool, d
 @dataclass(frozen=True)
 class ListedTool:
     """A tool the other computer lists for Ditto's token: its name, its input schema without texts (strip_schema),
-    its read-only hint (this computer's catalogue decides first) and the internal mark. No description is kept."""
+    its read-only hint (only shown; this computer's catalogue alone decides whether a call is a read) and the
+    internal mark. No description is kept."""
     name: str
     schema: Dict[str, Any] = field(default_factory=dict)
     read_only: bool = False
@@ -335,20 +348,24 @@ class ListingCache:
             return None
         try:
             raw = json.loads(self.path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        except (OSError, ValueError, RecursionError):
             return None
-        if not isinstance(raw, dict) or raw.get("version") != 1 or raw.get("server") != server:
-            return None
+        if not isinstance(raw, dict) or raw.get("version") != 1 or raw.get("server") != server \
+                or not isinstance(raw.get("tools"), list):
+            return None   # damaged: a turn never stops for it (HF3), the tools are simply not cached
         tools = []
-        for item in raw.get("tools") or []:
+        for item in raw["tools"]:
             if not isinstance(item, dict):
                 continue
             name, schema = item.get("name"), item.get("schema")
             if not isinstance(name, str) or not PROVIDER_NAME_RE.fullmatch(name) or not isinstance(schema, dict):
                 continue
-            schema = strip_schema(schema)
-            if item.get("schema_key") != schema_key(schema):
-                continue  # edited or damaged: not used
+            try:
+                schema = strip_schema(schema)
+                if item.get("schema_key") != schema_key(schema):
+                    continue  # edited or damaged: not used
+            except RecursionError:
+                continue
             tools.append(ListedTool(name, schema, read_only=item.get("read_only") is True))
         return RemoteListing(tuple(tools), cached=True)
 
@@ -534,7 +551,8 @@ class PlaceIndex:
 @dataclass(frozen=True)
 class ToolRoute:
     """Where an offered tool can run. `local` and `remote` name the tool on each computer (None: not offered there);
-    `fields` are the offered schema's property names; `read_only` comes from this computer's catalogue first."""
+    `fields` are the offered schema's property names; `read_only` comes from this computer's catalogue only (a tool
+    this computer does not have is never a read)."""
     offered: str
     local: Optional[str] = None
     remote: Optional[str] = None
@@ -591,11 +609,12 @@ class HybridToolSet:
             spec = registered.get(name)
             return getattr(spec, "title", "") or name
 
-        def read_only(name: str, hint: bool = False) -> bool:
+        def read_only(name: str) -> bool:
+            # This computer's catalogue decides; a tool it does not have counts as one that changes something, so
+            # its call is not sent without this computer's write-ahead entry (fail closed): the other computer's own
+            # read-only hint never decides that.
             spec = registered.get(name)
-            if spec is not None:
-                return getattr(getattr(spec, "tier", None), "value", "") == "read"
-            return hint
+            return spec is not None and getattr(getattr(spec, "tier", None), "value", "") == "read"
 
         specs: List[ToolSpecLLM] = []
         routes: Dict[str, ToolRoute] = {}
@@ -667,7 +686,7 @@ class HybridToolSet:
             offer(ToolSpecLLM(name=separate, description=description[:2048],
                               input_schema=_with_place(safe, [key], True, only_text)),
                   ToolRoute(separate, remote=name, place_field=True, place_required=True,
-                            read_only=read_only(name, tool.read_only), title=title(name)))
+                            read_only=read_only(name), title=title(name)))
             skewed.append(name)
             counts["separately"] += 1
         for name in sorted(set(remote_tools) - set(local)):
@@ -690,7 +709,7 @@ class HybridToolSet:
             offer(ToolSpecLLM(name=name, description=f"{away}Only on {label}: {text}"[:2048],
                               input_schema=_with_place(safe, [key], True, only_text)),
                   ToolRoute(name, remote=name, place_field=True, place_required=True,
-                            read_only=read_only(name, tool.read_only), title=title(name)))
+                            read_only=read_only(name), title=title(name)))
             counts["only_there"] += 1
         if skewed:
             shown = ", ".join(skewed[:5]) + (" and more" if len(skewed) > 5 else "")
@@ -997,6 +1016,19 @@ class HybridRouter:
                             code="place_unreachable", next=next_step) from None
         self.remote_used = True
         self._taint()
+        if result.is_error and result.unanswered and result.code == "declined":
+            # Nobody here answered that computer's question (no dialog could ask, or it failed): the framework there
+            # reports a cancelled question as "declined", but nobody said no (6.7, SEC-H8). Its words are left out,
+            # since they claim the person's "no".
+            record_remote_call(self.audit, self.ctx, tool, label, route.read_only, args, "end", outcome="cancelled",
+                               reason_code="needs_person", answer="unanswered",
+                               detail=f"not run on {label}: nobody answered its question", remote_server=place.server,
+                               started=started)
+            self._note(offered, title, False, "nobody answered its question", label)
+            raise ToolError(f"{label} did not run {title}: nobody answered its question (Ditto's dialog could not ask "
+                            "the person), so this is not the person's no.", code="needs_person",
+                            next=f"Tell the person that the question of {label} could not be shown here; call it "
+                                 "again only if they want it.")
         if result.is_error:
             code = result.code or "failed"
             record_remote_call(self.audit, self.ctx, tool, label, route.read_only, args, "end",

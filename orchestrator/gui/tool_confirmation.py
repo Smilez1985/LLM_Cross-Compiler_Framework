@@ -85,7 +85,15 @@ class _Question:
         self.offer = offer  # "do not ask again" the framework may offer for this call (grants.GrantOffer)
         self.remote = remote  # a remote framework's question that offers "stop asking": the framework's name
         self.answer = False
+        self.failed = False  # the dialog could not be shown: nobody answered
         self.done = threading.Event()
+
+
+def _not_answered(spec: Any):
+    """What a question nobody answered gives: for the framework on another computer RemoteAnswer(answered=False),
+    which cancels its question there (never the person's "no"); for a question of this computer "no", as before."""
+    from orchestrator.llm.remote_tools import RemoteAnswer, RemoteQuestion
+    return RemoteAnswer(False, answered=False) if isinstance(spec, RemoteQuestion) else False
 
 
 class ToolConfirmation(QObject):
@@ -102,16 +110,18 @@ class ToolConfirmation(QObject):
 
     def confirm(self, spec: Any, inp: Any):
         """The user's answer for one tool call: title and every argument are shown. Blocks until answered. True,
-        False, or grants.GrantChoice for "allow and do not ask again" (offered where the framework can)."""
+        False, or grants.GrantChoice for "allow and do not ask again" (offered where the framework can). A question of
+        the framework on another computer that the person never saw (the window closed, the dialog failed) is no
+        answer (RemoteAnswer answered=False): it is cancelled there, never sent as the person's "no" (SEC-H8)."""
         if self._closed.is_set():
-            return False
+            return _not_answered(spec)
         try:
             # The registry's question (with repaired values marked) when it asks; it is what the audit log hashes.
             text = current_question() or describe_call(spec, inp.model_dump(mode="json"), actor=self.actor,
                                                        limit=MAX_FRAMEWORK)
         except CallTooLong as e:
             logger.warning(str(e))
-            return False
+            return _not_answered(spec)
         offer = current_grant_offer()
         # A question of the framework Ditto uses in MCP-client mode (remote_tools.RemoteQuestion): only when that
         # server's form offers it, "stop asking" can be requested there (never a standing approval here).
@@ -123,7 +133,9 @@ class ToolConfirmation(QObject):
         self._asked.emit(question)
         while not question.done.wait(0.1):
             if self._closed.is_set():
-                return False
+                return _not_answered(spec)
+        if question.failed:
+            return _not_answered(spec)
         return question.answer
 
     def _show(self, question: _Question) -> None:  # GUI thread
@@ -132,7 +144,7 @@ class ToolConfirmation(QObject):
                 question.answer = self._ask(question.title, question.text, question.offer, question.remote)
         except Exception as e:
             logger.error(f"Confirmation dialog failed: {e}")
-            question.answer = False
+            question.answer, question.failed = False, True
         finally:
             question.done.set()
 
@@ -199,7 +211,8 @@ class ToolConfirmation(QObject):
         return GrantChoice(*choice) if choice else self.ask_user(title, text, None)
 
     def close(self) -> None:
-        """Answers open and later questions with "no" (e.g. when the window closes)."""
+        """Answers open and later questions with "no" (e.g. when the window closes); a question of the framework on
+        another computer is cancelled there instead (nobody answered it)."""
         self._closed.set()
 
 

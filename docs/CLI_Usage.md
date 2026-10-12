@@ -565,8 +565,10 @@ llm-cli ditto ask QUESTION [--no-tools] [--provider TEXT] [--model TEXT]
 ```
 
 Asks Ditto one question. Ditto may use the framework tools within your permissions; tools set to "ask" show the
-tool and every argument and need your confirmation in the terminal (without a terminal they are denied). The
-answer goes to stdout, tool notes and errors to stderr. Nothing is saved to the chat history.
+tool and every argument and need your confirmation in the terminal (without a terminal they are denied). Without a
+terminal Ditto also tells the framework on another computer that nobody can answer its questions here, so that
+framework keeps them for its own approval window; nothing is ever sent there as your "no". The answer goes to stdout,
+tool notes and errors to stderr. Nothing is saved to the chat history.
 
 | Option | Meaning |
 |---|---|

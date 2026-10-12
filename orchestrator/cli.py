@@ -412,6 +412,12 @@ def _ditto_confirm(spec, inp) -> bool:
         click.echo(str(e), err=True)
         return False
     if not sys.stdin.isatty():
+        from orchestrator.llm.remote_tools import RemoteAnswer, RemoteQuestion
+        if isinstance(spec, RemoteQuestion):
+            # The other computer's question: nobody can answer it here, so it is cancelled there, never sent as the
+            # person's "no" (SEC-H8). Its text stays out of the output another program may read.
+            click.echo(f"{spec.title}: no terminal to answer it, so it is cancelled there (not declined).", err=True)
+            return RemoteAnswer(False, answered=False)
         # Nobody may sit here and another program (an AI app running this command) may read it: the call and its
         # arguments only, never the facts the framework's question shows the person alone (full paths, logins).
         try:
@@ -457,6 +463,22 @@ def _ditto_confirm(spec, inp) -> bool:
 
 
 _ditto_confirm.confirm_channel = "framework-cli"  # recorded in the audit log
+
+
+def _ditto_no_terminal(spec, inp) -> bool:
+    """_ditto_confirm for a command run without a terminal: it cannot reach a person (person_facing False), so Ditto
+    connects to the framework on another computer without the ability to ask (that framework keeps its question for
+    its own approval window, or refuses), and a local question is denied as before (SEC-H8)."""
+    return _ditto_confirm(spec, inp)
+
+
+_ditto_no_terminal.confirm_channel = "framework-cli"
+_ditto_no_terminal.person_facing = False
+
+
+def _ditto_dialog():
+    """Ditto's confirmation for this command: the terminal prompt, or the one that cannot reach a person."""
+    return _ditto_confirm if sys.stdin.isatty() else _ditto_no_terminal
 
 
 @module.command('generate-ai')
@@ -2234,7 +2256,7 @@ def ditto_ask(ctx: FrameworkContext, question: str, no_tools: bool, provider: Op
         err.print(f"[dim]{escape(tool_note(use))}[/dim]" if use.ok else f"[yellow]{escape(tool_note(use))}[/yellow]")
 
     try:
-        reply = ditto.chat(question, confirm=_ditto_confirm, use_tools=not no_tools, on_tool=tool_used)
+        reply = ditto.chat(question, confirm=_ditto_dialog(), use_tools=not no_tools, on_tool=tool_used)
     except DittoError as e:
         err.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)

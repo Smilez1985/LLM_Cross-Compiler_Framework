@@ -695,7 +695,8 @@ its reason code.
 **This computer's audit log records every remote call.** Each call Ditto sends to the other computer gets a `started`
 entry here first and an end entry linked to it, with actor `ditto`, tier `remote`, `place` `remote:<name>` and
 `remote_server` (your name for it and the host, never the token, never a login). A call that changes something is not
-sent when that entry cannot be written; a read still goes. Calls on this computer in the same turn are recorded with
+sent when that entry cannot be written; a read still goes (this computer's own catalogue decides what is a read: a
+tool this computer does not have counts as a change, whatever the other computer says about it). Calls on this computer in the same turn are recorded with
 `place` `this_computer`, and a turn that received a result from the other computer is marked (`taint`). The other
 computer still decides, asks and audits every call there itself.
 
@@ -714,7 +715,9 @@ kept across turns and closes after 10 idle minutes. Ditto cannot check the other
 text and prompt from it reaches Ditto's model as untrusted data. Its questions are answered only by you, in Ditto's
 confirmation dialog or prompt, which names the server ("Question from the framework at <name>"); a turn without a
 dialog connects without the ability to ask, so that framework keeps the question for its own approval window, and a
-question nobody could answer is cancelled, never sent as your "no". A "do not ask again" from there (CLI answer `r`,
+question nobody could answer is cancelled, never sent as your "no" (this computer's audit log records it as
+`cancelled`, answer `unanswered`, even though that framework reports a cancelled question as "declined"; `llm-cli
+ditto ask` without a terminal connects without the ability to ask). A "do not ask again" from there (CLI answer `r`,
 GUI button "Allow and ask it to stop asking...", offered only when that server's question offers it, with a warning
 first) only asks that framework, where the person confirms it in its own approval window. `llm-cli ditto remote test`
 also says how its tools join this computer's (offered once, only there, separately).
@@ -757,7 +760,8 @@ code change):
 **Grading** is done by fixed rules, not by another model: expected words or patterns, forbidden words (for example
 an injected command), expected fields, tools that must or must not be called. Chat cases use the real tool
 definitions over a stand-in build service that validates against the real target capabilities and returns canned
-builds, logs and artifacts. The knowledge base is off during the evaluation, so answers come from the case alone.
+builds, logs and artifacts. The knowledge base is off during the evaluation, so answers come from the case alone,
+and the framework on another computer is never used (a case's fixed answers never reach its tools or questions).
 
 **Running it:**
 

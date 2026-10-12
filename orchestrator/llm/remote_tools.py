@@ -220,10 +220,17 @@ class _Empty:
         return {}
 
 
+def person_facing(confirm: Optional[Callable]) -> bool:
+    """Whether `confirm` can put a question to a person: not None and not marked `person_facing = False` (a prompt
+    without a terminal, which nobody may read)."""
+    return confirm is not None and getattr(confirm, "person_facing", True) is not False
+
+
 def ask_person(confirm: Optional[Callable], question: RemoteQuestion) -> RemoteAnswer:
-    """Puts the remote server's question to the person through Ditto's own dialog or prompt. No dialog, or a dialog
-    that fails, approves nothing and is not an answer (answered=False): nobody said no."""
-    if confirm is None:
+    """Puts the remote server's question to the person through Ditto's own dialog or prompt. No dialog (or one that
+    cannot reach a person), a dialog that fails, or a dialog that says nobody answered (RemoteAnswer answered=False)
+    approves nothing and is not an answer (answered=False): nobody said no."""
+    if not person_facing(confirm):
         return RemoteAnswer(False, answered=False)
     from orchestrator.tools import registry as tool_registry
     token = tool_registry._QUESTION.set(question.text())
@@ -234,6 +241,8 @@ def ask_person(confirm: Optional[Callable], question: RemoteQuestion) -> RemoteA
     finally:
         tool_registry._QUESTION.reset(token)
     if isinstance(reply, RemoteAnswer):
+        if reply.answered is False:
+            return RemoteAnswer(False, answered=False)
         return RemoteAnswer(reply.approve, reply.stop_asking and question.offers_request and reply.approve)
     return RemoteAnswer(bool(reply))
 
@@ -249,12 +258,15 @@ class _Listed:
 class RemoteResult:
     """One remote call's result, as the server sent it: `text` is the server's text (untrusted: whoever shows it to a
     model wraps it), `structured` its structured content (untrusted too; only id-shaped values are ever learned from
-    it), `code` and `field` the reason code and argument of a refused call from its structured error."""
+    it), `code` and `field` the reason code and argument of a refused call from its structured error. `unanswered`:
+    the server asked a question during the call that nobody here answered (cancelled), so a "declined" it reports is
+    not the person's "no"."""
     text: str
     structured: Any = None
     is_error: bool = False
     code: str = ""
     field: str = ""
+    unanswered: bool = False
 
 
 @dataclass
@@ -274,6 +286,7 @@ class RemoteConnection:
     confirm: Optional[Callable] = None
     client_factory: Optional[Callable[[Any], Any]] = None
     elicitation: Optional[bool] = None
+    _unanswered: int = field(default=0, init=False, repr=False)   # questions of the server nobody here answered
     _loop: Optional[asyncio.AbstractEventLoop] = field(default=None, init=False, repr=False)
     _thread: Optional[threading.Thread] = field(default=None, init=False, repr=False)
     _client: Any = field(default=None, init=False, repr=False)
@@ -303,7 +316,7 @@ class RemoteConnection:
 
     def wants_elicitation(self) -> bool:
         """Whether this connection tells the server it can ask the person (see `elicitation`)."""
-        return self.confirm is not None if self.elicitation is None else bool(self.elicitation)
+        return person_facing(self.confirm) if self.elicitation is None else bool(self.elicitation)
 
     async def _elicit(self, _ctx, params) -> Any:
         from mcp_types import ElicitResult
@@ -313,9 +326,11 @@ class RemoteConnection:
         question = RemoteQuestion(self.server.label(), str(getattr(params, "message", "") or ""),
                                   offers_request="stop_asking" in properties)
         if "approve" not in properties:  # a form Ditto does not know: never filled in on the person's behalf
+            self._unanswered += 1         # nobody was asked: a "declined" it causes is not the person's
             return ElicitResult(action="decline")
         answer = await anyio.to_thread.run_sync(ask_person, self.confirm, question)
         if not answer.answered:  # no dialog bound now, or it failed: nobody said no
+            self._unanswered += 1
             return ElicitResult(action="cancel")
         content: Dict[str, Any] = {"approve": answer.approve}
         if question.offers_request:
@@ -459,12 +474,13 @@ class RemoteConnection:
         from orchestrator.tools.registry import ToolError
         if not isinstance(arguments, dict):
             raise ToolError("Tool arguments must be an object.", code="invalid_value")
+        before = self._unanswered   # one call at a time per turn: a question nobody answered belongs to this call
         result = self._run(self._client.call_tool(name, dict(arguments)), CALL_TIMEOUT)
         text = _result_text(result)
         structured = getattr(result, "structured_content", None)
         if getattr(result, "is_error", False):
             code, field_name = structured_error(result, self._listed.get(name))
-            return RemoteResult(text, structured, True, code, field_name)
+            return RemoteResult(text, structured, True, code, field_name, unanswered=self._unanswered > before)
         return RemoteResult(text, structured)
 
     def call(self, name: str, arguments: Dict[str, Any]) -> str:
