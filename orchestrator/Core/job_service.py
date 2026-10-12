@@ -73,7 +73,7 @@ class Job:
     total: Optional[float] = None
     message: str = ""
     result: Optional[Dict[str, Any]] = None
-    error: Optional[Dict[str, str]] = None   # code, message, next
+    error: Optional[Dict[str, Any]] = None   # code, message, next; notes (a list) for an approved call
     note: str = ""
     version: int = 0
     cancel_event: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -167,7 +167,7 @@ class JobService:
         return job
 
     def update(self, job_id: str, *, state: Optional[str] = None, progress=None,
-               result: Optional[Dict[str, Any]] = None, error: Optional[Dict[str, str]] = None,
+               result: Optional[Dict[str, Any]] = None, error: Optional[Dict[str, Any]] = None,
                note: Optional[str] = None) -> Job:
         with self._lock:
             job = self._get(job_id)
@@ -184,8 +184,9 @@ class JobService:
                 job.message = redact_secrets(str(message or ""))[:500]
             if result is not None:
                 job.result = result
-            if error is not None:
-                job.error = {k: redact_secrets(str(v))[:2000] for k, v in error.items()}
+            if error is not None:  # text only; `notes` (the call's repairs, of a pending approval) stays a list
+                job.error = {k: [redact_secrets(str(n))[:500] for n in v][:20] if k == "notes" and isinstance(v, list)
+                             else redact_secrets(str(v))[:2000] for k, v in error.items()}
             if note is not None:
                 job.note = note
             self._touch(job)

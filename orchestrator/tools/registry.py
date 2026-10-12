@@ -19,7 +19,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Type, Union
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -29,8 +29,8 @@ from orchestrator.tools.grants import NEVER_GRANT
 from orchestrator.tools.limits import Limiter, wait_text
 from orchestrator.tools.normalize import (NormalizeError, Repair, check_names_distinct, list_item_literal,
                                           normalize_arguments, resolve_name)
-from orchestrator.tools.output import (MAX_RESULT_BYTES, UNTRUSTED_CHARS, ResultTooLarge, check_size, filtered_result,
-                                       has_untrusted)
+from orchestrator.tools.output import (MAX_RESULT_BYTES, UNTRUSTED_CHARS, ResultTooLarge, check_size, clean_note,
+                                       filtered_result, has_untrusted, notes_text)
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStore, TokenStoreError
 from orchestrator.tools.policy import (TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier,
                                        restrictive_policy, stricter)
@@ -58,14 +58,19 @@ class ToolError(Exception):
     ...), `next` the next step; the text a model sees is "<message> Next: <next>". `quoted` is the end of the
     message that quotes external text (a handler's error can carry a server reply, a log line or a name from a
     pack): it is cleaned like external text, and an MCP client gets it marked as untrusted data. `field` names the
-    argument an input error is about (Ditto's loop tells a fix from a repeat by it)."""
+    argument an input error is about (Ditto's loop tells a fix from a repeat by it). `notes` are the framework's notes
+    about the call, set by the registry (with_repairs): the repairs the fool-proof layer made (a declared alias, a
+    spelling variant of the tool name), the same notes a successful result carries, shown after the text
+    ("<message> Next: <next> Notes: ...") on every path, so a refused call teaches the right argument name as a
+    successful one does. `repairs` are the repairs a tool's look-up made before it refused (a file name matched in
+    another letter case, normalize.Repair): the registry names them in the notes and records them."""
     code = "failed"
     quoted = ""
     field = ""
 
     def __init__(self, message: str = "", code: Optional[str] = None, next: str = "",
                  allowed: Optional[List[str]] = None, suggestions: Optional[List[str]] = None, quoted: str = "",
-                 field: str = ""):
+                 field: str = "", notes: Optional[List[str]] = None):
         super().__init__(message)
         self.message = message
         if code:
@@ -76,12 +81,18 @@ class ToolError(Exception):
         self.quoted = quoted if quoted and message.endswith(quoted) else ""
         if field:
             self.field = field
+        self.notes: List[str] = list(notes or [])
+        self.repairs: List[Any] = []
 
-    def __str__(self) -> str:
+    def text(self) -> str:
+        """The message and the next step, without the notes (the MCP server adds them to every refusal itself)."""
         return f"{self.message} Next: {self.next}" if self.next else self.message
 
+    def __str__(self) -> str:
+        return self.text() + notes_text(self.notes)
+
     def with_text(self, message: str, next: Optional[str] = None) -> "ToolError":
-        """The same kind of error with the same code and another text."""
+        """The same kind of error with the same code and notes and another text."""
         try:
             copy = type(self)(message)
         except Exception:  # a subclass with its own constructor
@@ -90,7 +101,21 @@ class ToolError(Exception):
         copy.allowed, copy.suggestions = list(self.allowed), list(self.suggestions)
         copy.field = self.field
         copy.quoted = self.quoted if self.quoted and message.endswith(self.quoted) else ""
+        copy.notes = list(self.notes)
+        copy.repairs = list(getattr(self, "repairs", []))
         return copy
+
+
+def repair_notes(repairs: List[Repair]) -> List[str]:
+    """The notes of the repairs a call got (the same words as in a successful result's `notes`)."""
+    return [clean_note(r.note()) for r in repairs]
+
+
+def with_repairs(error: ToolError, repairs: List[Repair]) -> ToolError:
+    """The error with the notes of the call's repairs, set by the registry only: whatever a handler's error carried
+    there is replaced (its own words stay in the message, cleaned like external text). Returns the error."""
+    error.notes = repair_notes(repairs)
+    return error
 
 
 def external_error_text(text: str) -> str:
@@ -425,6 +450,19 @@ def _merge(*groups: List[Repair]) -> List[Repair]:
             if repair not in merged:
                 merged.append(repair)
     return merged
+
+
+def repairs_of(error: BaseException) -> List[Repair]:
+    """The repairs a refusal carries (a look-up's ToolError, a NormalizeError): only real Repair objects."""
+    return [r for r in (getattr(error, "repairs", None) or ()) if isinstance(r, Repair)]
+
+
+def call_repairs(ctx: "ToolContext", extra: Sequence[Repair] = ()) -> List[Repair]:
+    """Every repair of a call: the fool-proof layer's (ctx.repairs), then the tool's look-up's (ctx.facts.repairs, a
+    file name matched in another letter case), then `extra` (those a refusing look-up carried). The notes of a result
+    and of every refusal and the audit entries name the same ones."""
+    looked = [r for r in (getattr(getattr(ctx, "facts", None), "repairs", None) or ()) if isinstance(r, Repair)]
+    return _merge(list(ctx.repairs or []), looked, [r for r in extra if isinstance(r, Repair)])
 
 
 def _args_key(arguments: Any) -> str:
@@ -791,9 +829,10 @@ class ToolRegistry:
             return None
         fields = {"client": ctx.client,
                   "session": f"{ctx.session}:{ctx.request_id}" if ctx.request_id else ctx.session, **extra}
-        if ctx.repairs:
-            fields.setdefault("repairs", [r.audit() for r in ctx.repairs])
-            renamed = next((r for r in ctx.repairs if r.kind == "name"), None)
+        repairs = call_repairs(ctx)
+        if repairs:
+            fields.setdefault("repairs", [r.audit() for r in repairs])
+            renamed = next((r for r in repairs if r.kind == "name"), None)
             if renamed is not None:
                 fields.setdefault("name_requested", str(renamed.wrote)[:64])
         try:
@@ -903,9 +942,16 @@ class ToolRegistry:
                                UnknownTool(str(e), next=e.next, suggestions=e.suggestions)) from None
         repairs = _merge(ctx.repairs, [renamed] if renamed else [])
         work = dataclasses.replace(ctx, repairs=repairs)
+        try:
+            return self._prepare_call(spec, arguments, work)
+        except ToolError as e:  # a refusal after a repair names the repair, as a successful result would
+            with_repairs(e, call_repairs(work))
+            raise
 
+    def _prepare_call(self, spec: ToolSpec, arguments: Any, work: ToolContext) -> Prepared:
+        """prepare() once the tool is known; `work.repairs` holds the repairs so far (also when it refuses)."""
         def decision() -> Decision:  # only for the audit entry of a refusal: a successful prepare decides nothing
-            return self.decide(spec, caller=ctx.actor)
+            return self.decide(spec, caller=work.actor)
 
         def refuse_repeat(args: Any) -> None:
             refusal = self._repeat_refusal(work, spec.name, args)
@@ -913,14 +959,18 @@ class ToolRegistry:
                 self._audit(work, spec, decision(), "repeat_refused", args, detail=refusal.message,
                             reason_code="repeat_refused")
                 raise refusal
-        refuse_repeat(arguments)  # the same raw call (e.g. the same unknown argument) a third time
+        failure: Optional[NormalizeError] = None
         try:
             normalized = normalize_arguments(spec, arguments)
-        except NormalizeError as e:
-            error = ToolInputError(str(e), code=e.code, next=e.next, allowed=e.allowed, suggestions=e.suggestions,
-                                   field=e.field)
+            work.repairs = _merge(work.repairs, normalized.repairs)
+        except NormalizeError as e:  # its repairs (a declared alias read before an invalid value) are shown too
+            failure = e
+            work.repairs = _merge(work.repairs, e.repairs)
+        refuse_repeat(arguments)  # the same raw call (e.g. the same unknown argument) a third time
+        if failure is not None:
+            error = ToolInputError(str(failure), code=failure.code, next=failure.next, allowed=failure.allowed,
+                                   suggestions=failure.suggestions, field=failure.field)
             raise self._input_failed(work, spec, decision, arguments, error) from None
-        work.repairs = _merge(repairs, normalized.repairs)
         args = normalized.arguments
         if args != arguments:
             refuse_repeat(args)
@@ -1165,12 +1215,14 @@ class ToolRegistry:
         except ToolError as e:
             message = external_error_text(e.message)
             error = e.with_text(message, redact_secrets(e.next))
-            error.quoted = message
+            error.quoted = message  # with_text keeps its repairs: a repair before the refusal is named by it
             raise error from None
         except ValueError as e:  # a service's refusal (BuildServiceError carries code and next)
             message = external_error_text(str(e))
-            raise ToolError(message, code=getattr(e, "code", None) or "failed",
-                            next=redact_secrets(getattr(e, "next", "") or "") or FAILED_NEXT, quoted=message) from e
+            error = ToolError(message, code=getattr(e, "code", None) or "failed",
+                              next=redact_secrets(getattr(e, "next", "") or "") or FAILED_NEXT, quoted=message)
+            error.repairs = repairs_of(e)
+            raise error from e
         except Exception as e:
             self.logger.error(f"Looking up the facts for {spec.name} failed: {e}", exc_info=True)
             message = external_error_text(str(e))
@@ -1201,16 +1253,24 @@ class ToolRegistry:
         the end entry names the outcome, the duration, a hash of the result and the `started` entry it belongs
         to. Reads stay available when the audit log cannot be written (the failure is logged)."""
         began = time.monotonic()
-        prepared = self.prepare(name, arguments, ctx)
+        prepared = self.prepare(name, arguments, ctx)  # its refusals name the repairs already
         if not ctx.limits_checked:  # the MCP server counts a call before its question
-            self.enforce_limits(prepared, dataclasses.replace(ctx, repairs=prepared.repairs))
+            limited = dataclasses.replace(ctx, repairs=prepared.repairs)
+            try:
+                self.enforce_limits(prepared, limited)
+            except ToolError as e:
+                with_repairs(e, call_repairs(limited))
+                raise
         spec, inp, arguments = prepared.spec, prepared.input, prepared.arguments
         # per call: Ditto reuses one context
         ctx = dataclasses.replace(ctx, repairs=prepared.repairs, notes=[])
         try:
             result = self._run(spec, inp, arguments, ctx, approved, began)
         except ToolError as e:
-            error = self._failed(ctx, spec.name, prepared.key, e)
+            # Every refusal and error after a repair names it, as a successful result's notes would (a denied call,
+            # a look-up that found too little disk space, a "no", a handler's failure): the fool-proof layer's
+            # repairs and the look-up's (ctx.facts, set by _run on this very context, or carried by its refusal).
+            error = with_repairs(self._failed(ctx, spec.name, prepared.key, e), call_repairs(ctx, repairs_of(e)))
             if error is e:
                 raise
             raise error from None
@@ -1253,8 +1313,8 @@ class ToolRegistry:
             try:
                 ctx.facts = self.look_up(spec, inp, ctx)
             except ToolError as e:
-                self._audit(ctx, spec, decision, "error", arguments, detail=f"{e.message} {e.next}".strip(),
-                            reason_code=e.code)
+                self._audit(dataclasses.replace(ctx, repairs=call_repairs(ctx, repairs_of(e))), spec, decision,
+                            "error", arguments, detail=f"{e.message} {e.next}".strip(), reason_code=e.code)
                 raise
         decision = self.capped(decision, ctx.facts)
         if ctx.metadata.get("grant_requested"):
@@ -1365,7 +1425,7 @@ class ToolRegistry:
         token = _CALL.set((self, ctx.actor))
         try:
             raw = spec.handler(inp, ctx) if spec.takes_context else spec.handler(inp)
-            result = self._output(spec, raw, [r.note(spec.name) for r in ctx.repairs] + list(ctx.notes))
+            result = self._output(spec, raw, [r.note(spec.name) for r in call_repairs(ctx)] + list(ctx.notes))
         except ResultTooLarge as e:
             end("error", str(e), reason_code="limit_reached")
             raise ToolError(f"{spec.title}: {e}", code="limit_reached") from None
