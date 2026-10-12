@@ -1210,7 +1210,17 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   „Standardzweig, Commit unbekannt“ und dass die Downloadgröße unbekannt ist. Ein angenommener Build reserviert
   seinen Speicherplatz in `~/.llm-framework/disk_reservations.json` (gemeinsam für GUI, CLI und jeden MCP-Server),
   bis seine Anfrage endet; verlässt der Build die Warteschlange, wird das Laufwerk erneut geprüft, und ein Build, der
-  nicht mehr passt, scheitert mit den Zahlen, bevor etwas heruntergeladen wird. `optimization` (`fast`, `balanced`,
+  nicht mehr passt, scheitert mit den Zahlen, bevor etwas heruntergeladen wird. `download_hf_file` reserviert seine
+  Datei im selben Verzeichnis, sodass ein Download und ein Build nie mit demselben freien Platz rechnen. Der Build
+  stellt das Modell über den Hugging-Face-Abrufer des Frameworks bereit: Datei für Datei, jede aus ihrer
+  `.part`-Datei fortsetzbar und gegen Größe und sha256 geprüft, die der Hub nennt, und durch einen Abbruch binnen
+  Sekunden gestoppt. Ein Laufwerkswächter stoppt das Bereitstellen und die Konvertierungs-Container, wenn das
+  Cache-Laufwerk unter die halbe Reserve fällt (Grund `insufficient_resources`). Ein Dauerauftrag („ja, und nicht mehr
+  fragen“) wird angeboten für Builds auf mitgelieferten oder verifizierten Targets mit safetensors- oder
+  GGUF-Gewichten, einem nicht zugangsbeschränkten Modell, dessen Basismodell es auch nicht ist, einer Lizenz auf der
+  Liste freizügiger Lizenzen (oder einer lokalen Datei), einem offiziellen Basis-Image, bis zur gewählten
+  Größenklasse und nur, wenn das Laufwerk die größere Reserve von 20 GiB oder 10 % behält; Hugging-Face-Abfragen von
+  `check_build_request` zählen zur Hugging-Face-Rate von 30 pro Stunde. `optimization` (`fast`, `balanced`,
   `size`, `speed`, `aggressive`) wird an den Build weitergegeben. `check_build_request` liefert denselben Plan
   (normalisierte Anfrage, Commit, Größen, Laufwerke, Passung, Einbindungen, Vertrauen, Image-Build, was deine
   Berechtigungen tun würden), ohne etwas zu starten; seine Probleme tragen Grundcodes.

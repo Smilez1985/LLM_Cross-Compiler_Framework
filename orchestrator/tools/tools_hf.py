@@ -172,6 +172,14 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         factory = getattr(framework, "hf_api_factory", None)  # tests give a stand-in for the Hub
         return HubClient(framework, api_factory=factory)
 
+    def ledger():
+        """The disk reservation ledger every process of this user shares (builds and downloads); None without a
+        per-user folder (a stand-in framework)."""
+        from orchestrator.Core.build_plan import state_dir
+        from orchestrator.Core.disk_plan import ReservationLedger
+        folder = state_dir(framework)
+        return ReservationLedger(folder) if folder is not None else None
+
     def models_dir() -> Path:
         from orchestrator.tools.local_files import LocalFiles
         try:
@@ -243,7 +251,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         dest = models_dir() / "hf" / folder_name(inp.model) / facts.commit[:12] / name
         part = dest.with_name(dest.name + ".part")
         have = part.stat().st_size if part.is_file() else 0
-        disk = disk_check(models_dir(), max(file.size - have, 0))
+        disk = disk_check(models_dir(), max(file.size - have, 0), ledger())
         if not disk["fits"]:
             raise HubError(f"Not enough disk space for {name}: {_size(disk['needed'])} needed, {_size(disk['free'])} "
                            f"free, {_size(disk['reserve'])} kept free as a reserve"
@@ -287,7 +295,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         return CallFacts(consequence=consequence, facts=tuple(lines), bound=bound)
 
     def download_hf_file(inp: DownloadIn, ctx: ToolContext) -> DownloadStartedOut:
-        from orchestrator.Core.hf_hub import HubFetcher, HubFile, Reservation
+        from orchestrator.Core.hf_hub import HubFetcher, HubFile
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
         if not bound.get("commit") or bound.get("model") != inp.model:
             raise ToolError("The download is not bound to what the person was shown; nothing was downloaded.",
@@ -297,7 +305,7 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         dest = models_dir() / "hf" / folder_name(repo) / commit[:12] / name
         token = hub().token()
         stop = threading.Event()
-        reservation = Reservation(f"{repo}/{commit}/{name}", file.size)
+        reservation = take_reservation(repo, commit, name, file.size, dest, ctx.owner)
 
         def work(handle) -> Dict[str, Any]:
             from orchestrator.tools.local_files import LocalFiles
@@ -333,6 +341,30 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
             with _ACTIVE_LOCK:
                 _ACTIVE[job.job_id] = thread
         return DownloadStartedOut(job_id=job.job_id, state=job.state, commit=commit, size_bytes=file.size)
+
+    def take_reservation(repo: str, commit: str, name: str, size: int, dest: Path, owner: str):
+        """The disk space of an accepted download, in the ledger builds use (checked again under its lock: two
+        downloads or a download and a build prepared together cannot both take the same space); released when the
+        job ends, fails or is cancelled. Without a ledger, this process's reservation."""
+        from orchestrator.Core.disk_plan import DiskNeed, InsufficientSpace
+        from orchestrator.Core.hf_hub import Reservation
+        book = ledger()
+        part = dest.with_name(dest.name + ".part")
+        need = max(int(size) - (part.stat().st_size if part.is_file() else 0), 0)
+        if book is None or not need:
+            return Reservation(f"{repo}/{commit}/{name}", need)
+        from orchestrator.Core import hf_hub as _hf_hub
+        try:
+            rid, _ = book.reserve([DiskNeed("models", models_dir(), need, f"download {name}")], owner,
+                                  f"{repo}/{name}", disk_usage=lambda p: _hf_hub.shutil.disk_usage(p))
+        except InsufficientSpace as e:
+            raise HubError(f"Not enough disk space for {name} any more: {e}", code="insufficient_resources",
+                           next=e.next) from None
+
+        class LedgerReservation:
+            def release(self):
+                book.release(rid)
+        return LedgerReservation()
 
     def download_grant_facts(inp, ctx) -> Optional[Dict[str, Any]]:
         bound = getattr(getattr(ctx, "facts", None), "bound", None) or {}

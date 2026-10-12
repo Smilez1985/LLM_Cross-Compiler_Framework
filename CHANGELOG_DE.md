@@ -624,6 +624,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Person hinweggeht, nie eine Ablehnung; ein vorgebautes llama.cpp bleibt abgelehnt.
 
 ### Geändert
+- **Builds und Downloads teilen eine Speicherplatz-Reservierung; Bereitstellung über den Abrufer des Frameworks**
+  (Reste von MCP-Phase T, Runde 1): `download_hf_file` reserviert seinen Speicherplatz in dem prozessübergreifenden
+  Verzeichnis, das Builds nutzen. Ein Build stellt sein Hugging-Face-Modell über den Abrufer des Frameworks bereit
+  (fortsetzbare `.part`-Dateien, jede Datei gegen Größe und sha256 des Hubs geprüft, durch einen Abbruch binnen
+  Sekunden gestoppt) statt über `hf_hub_download` und lehnt ab, wenn sich der Commit nicht ermitteln lässt. Ein
+  Laufwerkswächter stoppt das Bereitstellen und die Konvertierungs-Container, wenn das Cache-Laufwerk unter die halbe
+  Reserve fällt. `start_build` bietet einen Dauerauftrag im Rahmen des Entwurfs an (mitgeliefertes oder verifiziertes
+  Target, safetensors oder GGUF, nicht zugangsbeschränktes Modell und Basismodell, freizügige Lizenz, offizielles
+  Basis-Image, Größenklasse), nur wenn das Laufwerk die größere Reserve behält. `report_cannot_do` zählt nur die
+  Aufrufe der laufenden Sitzung, und Hugging-Face-Abfragen von `check_build_request` zählen zur Rate von 30 pro Stunde.
 - **Eine Hugging-Face-Einordnung für Builds und Downloads**: `check_build_request` und `start_build` lesen Lizenz, Zugangsbeschränkung und Dateien eines Modells jetzt nach denselben Regeln wie `get_hf_model_info` und `download_hf_file` (Lizenzen wie GPL, DeepSeek oder Qwen Research waren auf dem Build-Weg „unbekannt“ und auf dem Download-Weg „einschränkend“), und beide halten dieselbe Speicherreserve frei.
 - **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
   eine Sitzung schließt nach 10 Minuten ohne Anfrage (die Vorgabe des SDK sind 30); eine noch offene Anfrage, wenn ihr

@@ -427,15 +427,21 @@ def standing_reserve_bytes(total: int) -> int:
     return reserve_for(int(total), standing=True)
 
 
-def disk_check(folder: Path, needed: int) -> Dict[str, int]:
-    """Free space, reserve and space other accepted downloads reserved on the file system of `folder`. `fits`: the
-    normal reserve is left; `fits_standing`: the larger reserve of a standing approval is left too."""
+def disk_check(folder: Path, needed: int, ledger: Any = None) -> Dict[str, int]:
+    """Free space, reserve and space other accepted calls reserved on the file system of `folder`: with `ledger`
+    (disk_plan.ReservationLedger in the per-user folder) every process's downloads and builds, the same ledger builds
+    use; without one only this process's downloads. `fits`: the normal reserve is left; `fits_standing`: the larger
+    reserve of a standing approval is left too."""
     probe = Path(folder)
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
     usage = shutil.disk_usage(probe)
-    with _RESERVED_LOCK:
-        others = sum(_RESERVED.values())
+    if ledger is not None:
+        from orchestrator.Core.disk_plan import device_of
+        others = ledger.outstanding(device_of(probe))
+    else:
+        with _RESERVED_LOCK:
+            others = sum(_RESERVED.values())
     left = int(usage.free) - others - int(needed)
     return {"free": int(usage.free), "reserve": reserve_bytes(int(usage.total)), "reserved": others,
             "needed": int(needed), "fits": left >= reserve_bytes(int(usage.total)),
