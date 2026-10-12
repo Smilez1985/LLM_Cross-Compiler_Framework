@@ -162,14 +162,15 @@ class TestOneCallerIdentity:
             assert "abcdef" not in entry["client"], (padding, entry["client"])
 
     def test_an_http_server_never_falls_back_to_your_own_permissions(self, framework):
-        """Without a caller that ClientTracker checked (no request, so no middleware ran), an HTTP-built server uses
-        a caller no token can be, which gets nothing; a stdio server uses its own caller."""
+        """Without a caller that ClientTracker checked (no request, so no middleware ran), a server uses a caller no
+        token can be, which gets nothing: an HTTP-built server, and (S12 leftover: the default fails closed) a stdio
+        server too, which no longer falls back to its own caller."""
         registry = framework.tool_registry
         assert registry.decide(registry.get("list_targets"), caller=mcp_server.UNCHECKED_CALLER) == Decision.DENY
         http = mcp_server.build_mcp_server(framework, transport="http")
         stdio = mcp_server.build_mcp_server(framework)
         assert run(http.list_tools()) == []
-        assert "list_targets" in {tool.name for tool in run(stdio.list_tools())}
+        assert run(stdio.list_tools()) == []
 
     def test_waits_are_counted_per_client_over_one_connection(self, framework, monkeypatch):
         """Over HTTP the server lifespan is shared: the cap of 4 running waits holds per token, not per server."""

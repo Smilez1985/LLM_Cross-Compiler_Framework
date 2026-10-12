@@ -925,8 +925,11 @@ framework never sees it.
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). Over HTTP every client sends its own named token as
   `Authorization: Bearer <token>`; a request with an `Origin` header (a web page, also a CORS preflight) is refused,
   the `Host` header must name a loopback address with the server's port (against DNS rebinding), and the server
-  keeps at most 8 sessions and takes at most 1 MiB per request. A session, and a pending question round of the
-  2026-07-28 protocol, belongs to the token that opened it.
+  keeps at most 8 sessions, at most 4 per token (so one client cannot lock the others out), closes a session after
+  10 minutes without a request, and takes at most 1 MiB per request. A session, and a pending question round of the
+  2026-07-28 protocol, belongs to the token that opened it. A request that is still open (a wait, an event stream, a
+  listen stream) is closed as soon as its token is revoked or rotated. Anything that runs outside a request the
+  server checked gets no permissions at all, over stdio as over HTTP.
 - **Named tokens:** `llm-cli mcp token add NAME` creates a token for one client and shows it once; the framework
   keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode 0600; while other users can read or change
   it, or it belongs to another user, no token is accepted and the server does not start). The token's name is the caller in the audit log (`mcp:<name>`), and it has its own permissions: a
@@ -935,10 +938,14 @@ framework never sees it.
   computer; a change to Ditto's permissions applies to it at once). `rotate` replaces a token, `revoke` deletes it
   with its permissions; both take effect at once, also for a running server, and the calls a revoked stdio client
   still sends are refused and audited. A stdio client gets its own token
-  through the environment variable `LCF_MCP_TOKEN` in its server entry: the server reads it once at the start,
-  removes it from its environment and does not start with a value that is not a valid token. Without it, all local
-  stdio clients share the caller `mcp` and your own permissions. Only a person at a terminal manages tokens: no tool
-  can create, read or change them, and no token appears in a tool result, log line or audit entry.
+  through the environment variable `LCF_MCP_TOKEN` in its server entry: `llm-cli` takes it out of its environment
+  before any command runs (no command and no child process inherits it) and hands it only to `mcp serve`, which does
+  not start with a value that is not a valid token. Without it, all local stdio clients share the caller `mcp` and
+  your own permissions. Only a person manages tokens, at a terminal or in the GUI (Tools > Tool Permissions (Ditto /
+  MCP), section "MCP tokens": list, add with the token shown once, rotate, revoke and each token's own permissions;
+  audited with actor `gui`): no tool can create, read or change them, and no token appears in a tool result, log line
+  or audit entry. The server reads the token store on every check and caches it by the SHA-256 of the file's bytes,
+  so a change is seen even when it keeps the file's size and time.
 - **Working folder:** the server never reads settings or imports code from the folder it is started in (the client
   starts it with `python -P`), and on Windows it does not run programs such as `docker` or `git` from there. A
   project folder cannot change its behaviour.

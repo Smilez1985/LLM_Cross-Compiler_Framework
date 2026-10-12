@@ -24,8 +24,10 @@ Security model
   A person's "no" is final for that call, even if the policy is loosened while the dialog is open.
 - stdio is the default transport. Streamable HTTP binds to loopback only, refuses requests from web
   pages (any Origin header) and Host names other than loopback with its port, and requires a named
-  token per client (`llm-cli mcp token`). The token's name is the caller (`mcp:<name>`) for the
-  policy and the audit; over stdio LCF_MCP_TOKEN does the same, otherwise the caller is `mcp`.
+  token per client (`llm-cli mcp token`, or the GUI's Tool Permissions dialog). The token's name is the caller
+  (`mcp:<name>`) for the policy and the audit; over stdio LCF_MCP_TOKEN does the same, otherwise the caller is
+  `mcp`. A token holds at most 4 of the 8 sessions, an idle session closes after 10 minutes, and a request still
+  open when its token is revoked or rotated is closed. Outside a checked request the caller may do nothing.
 - What a client says about itself (clientInfo, protocol version, capabilities) is written to stderr once
   per client (ClientTracker). It is a label for people, never a reason to allow anything.
 - Each connection owns the builds and jobs it starts, together with its caller (one stdio session; over HTTP
@@ -173,9 +175,10 @@ def _client_label_text(ctx) -> str:
 def _tool_context(ctx, caller: str = "mcp", instance: str = "") -> ToolContext:
     """The registry context of an MCP request, the same identity for the policy, the audit log, the owner of builds
     and jobs and the per-client waits: the caller ClientTracker checked for this request (`mcp`, `mcp:<token>`;
-    `caller` when no request was seen), the client's self-reported label, a hash that groups the calls of one client
+    UNCHECKED_CALLER, which may do nothing, when no request was seen), the client's self-reported label, a hash that
+    groups the calls of one client
     (_session_seed, for the repeat guard) and the connection that owns the builds and jobs the caller starts."""
-    actor = current_caller() or caller
+    actor = current_caller()
     client, session = "", ""
     with contextlib.suppress(Exception):
         client = _client_label_text(ctx)
@@ -355,12 +358,12 @@ def current_client() -> Optional[ClientLabel]:
 
 # Who calls, for the policy and the audit: "mcp" (the local stdio clients, which share one policy) or
 # "mcp:<token name>" for a named token, checked by the framework (HTTP bearer header, LCF_MCP_TOKEN over stdio).
-# Never taken from what the client says about itself. Empty outside a request that ClientTracker saw; the tool
-# functions then use the server's own caller, which for an HTTP server is UNCHECKED_CALLER: a token name no token
-# can have, so it gets no permissions at all (fail closed).
+# Never taken from what the client says about itself. Outside a request that ClientTracker saw it is
+# UNCHECKED_CALLER, over stdio as over HTTP: a token name no token can have, so whatever runs there gets no
+# permissions at all (fail closed, deny-all), never the server's own caller.
 CALLER_SCOPE_KEY = "lcf.mcp_caller"  # set by TokenAuth on each HTTP request whose token it checked
 UNCHECKED_CALLER = ACTOR_PREFIX + "-unchecked-"  # never a valid token name (NAME_RE)
-_CALLER: "contextvars.ContextVar[str]" = contextvars.ContextVar("lcf_mcp_caller", default="")
+_CALLER: "contextvars.ContextVar[str]" = contextvars.ContextVar("lcf_mcp_caller", default=UNCHECKED_CALLER)
 
 
 def current_caller() -> str:
@@ -677,7 +680,7 @@ def _audit_rejection(registry: ToolRegistry, name: str, arguments: Any, error: B
         registry.get(name)
     except ToolError:
         return  # not a registry tool, nothing to record
-    ctx = ctx or ToolContext(current_caller() or "mcp")
+    ctx = ctx or ToolContext(current_caller())
     cause = error.__cause__
     if not isinstance(error, Exception):  # cancelled by the client (or the server stopping) before it ran
         state = _call_state()
@@ -1019,14 +1022,12 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
         async def list_tools(self):
             """The tools this caller may use, each with its tool's own closed input schema (the schema Ditto's
             model sees too), not the looser one the SDK derives from the function signature."""
-            listed = {spec.name: spec for spec in await anyio.to_thread.run_sync(registry.visible,
-                                                                                  current_caller() or caller)}
+            listed = {spec.name: spec for spec in await anyio.to_thread.run_sync(registry.visible, current_caller())}
             return [tool.model_copy(update={"input_schema": closed_schema(listed[tool.name].input_model)})
                     for tool in await super().list_tools() if tool.name in listed]
 
         async def _readable(self) -> set:
-            return {spec.uri for spec in await anyio.to_thread.run_sync(registry.resources,
-                                                                         current_caller() or caller)}
+            return {spec.uri for spec in await anyio.to_thread.run_sync(registry.resources, current_caller())}
 
         async def list_resources(self):
             """The resources this caller may read (a denied read tool hides the resources that mirror it)."""
@@ -1041,7 +1042,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
             """The prompts offered to this caller (every tool a prompt leads to is registered, its permission
             allows it); straight from the registry, so their arguments are the registry's own."""
             from mcp_types import Prompt as MCPPrompt, PromptArgument as MCPPromptArgument
-            specs = await anyio.to_thread.run_sync(registry.prompts, current_caller() or caller)
+            specs = await anyio.to_thread.run_sync(registry.prompts, current_caller())
             return [MCPPrompt(name=s.name, title=s.title, description=s.description,
                               arguments=[MCPPromptArgument(name=a.name, description=a.description, required=a.required)
                                          for a in s.arguments]) for s in specs]
@@ -1071,7 +1072,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                 # The fool-proof layer runs on the raw arguments, before the SDK's argument model could drop an
                 # unknown key: the same name resolution, normalization and checks as Ditto's path.
                 ctx = (_tool_context(context, caller, instance) if context is not None
-                       else ToolContext(current_caller() or caller))
+                       else ToolContext(current_caller()))
                 try:
                     prepared = await anyio.to_thread.run_sync(registry.prepare, name, arguments, ctx)
                 except ToolError as e:
@@ -1083,7 +1084,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
             except BaseException as e:
                 if not state.audited:
                     ctx = (_tool_context(context, caller, instance) if context is not None
-                           else ToolContext(current_caller() or caller))
+                           else ToolContext(current_caller()))
                     ctx.repairs = list(state.repairs)
                     try:
                         with anyio.CancelScope(shield=True):  # a cancelled call is recorded as well
@@ -1140,6 +1141,8 @@ def _add_completions(server, registry: ToolRegistry, caller: str, instance: str)
 # --- Streamable HTTP: loopback, a named token per client, no web pages ------------------------------
 
 MAX_HTTP_SESSIONS = 8           # concurrent sessions (the SDK allows 10,000)
+MAX_SESSIONS_PER_TOKEN = MAX_HTTP_SESSIONS // 2  # one client's share: it can never lock the others out
+HTTP_SESSION_IDLE_TIMEOUT = 10 * 60  # seconds a session may be idle (the SDK's default is 30 minutes)
 MAX_HTTP_BODY = 1024 * 1024     # bytes per request body (the SDK allows 4 MiB)
 
 
@@ -1156,12 +1159,28 @@ class TokenAuth:
     - `Authorization: Bearer <token>` must be a named token from the token store (401 otherwise; a revoked or
       rotated token stops working at once). The token's name becomes the caller (`mcp:<name>`) of this request,
       and the SDK binds each session and each pending question round to it, so one token cannot use another
-      token's session or answer the question another token was asked."""
+      token's session or answer the question another token was asked;
+    - a token may hold at most MAX_SESSIONS_PER_TOKEN sessions (503 beyond), so one client cannot take every slot;
+    - a request that is still open (a long-poll, a server-sent event stream, a listen stream) is ended as soon as its
+      token is revoked or rotated: it is checked every CHECK_SECONDS while the request runs."""
 
-    def __init__(self, app, tokens: TokenStore, hosts: List[str]):
+    CHECK_SECONDS = 1.0
+
+    def __init__(self, app, tokens: TokenStore, hosts: List[str], sessions_of: Optional[Callable[[str], int]] = None):
         self.app = app
         self.tokens = tokens
         self.hosts = frozenset(hosts)
+        self.sessions_of = sessions_of  # caller -> the sessions it holds now (the SDK's session manager)
+
+    @staticmethod
+    def _opens_session(scope, headers) -> bool:
+        """A request that may open a session (handshake protocols): a POST without a session id, not on the
+        2026-07-28 protocol (which keeps no sessions)."""
+        from mcp_types.version import MODERN_PROTOCOL_VERSIONS
+        if scope.get("method") != "POST" or any(name == b"mcp-session-id" for name, _ in headers):
+            return False
+        versions = [value.decode("latin-1") for name, value in headers if name == b"mcp-protocol-version"]
+        return not (versions and versions[0] in MODERN_PROTOCOL_VERSIONS)
 
     @staticmethod
     async def _reject(send, status: int, message: str, extra=()) -> None:
@@ -1187,36 +1206,65 @@ class TokenAuth:
             await self._reject(send, 421, "this server answers only on its loopback address")
             return
         auth = [value for name, value in headers if name == b"authorization"]
-        record = None
+        record, presented = None, ""
         if len(auth) == 1 and auth[0][:7].lower() == b"bearer ":
-            record = self.tokens.find(auth[0][7:].strip().decode("latin-1"))
+            presented = auth[0][7:].strip().decode("latin-1")
+            record = self.tokens.find(presented)
         if record is None:
             await self._reject(send, 401, "unauthorized", [(b"www-authenticate", b"Bearer")])
             return
+        import anyio
+        import anyio.to_thread
         from mcp.server.auth.middleware.auth_context import auth_context_var
         from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
         from mcp.server.auth.provider import AccessToken
         caller = ACTOR_PREFIX + record.name
+        if (self.sessions_of is not None and self._opens_session(scope, headers)
+                and self.sessions_of(caller) >= MAX_SESSIONS_PER_TOKEN):
+            await self._reject(send, 503, f"this token already holds its share of {MAX_SESSIONS_PER_TOKEN} open "
+                                          "sessions; close one (or let it idle out) before opening another")
+            return
+        name, digest = record.name, token_digest(presented)
         # The SDK binds a session (handshake protocols) to the principal that opened it ("user"), and the sealed
         # requestState of a 2026-07-28 question round to the principal in its auth context; never the token itself.
         user = AuthenticatedUser(AccessToken(token=caller, client_id=caller, scopes=[]))
         bound = auth_context_var.set(user)
         try:
-            await self.app({**scope, CALLER_SCOPE_KEY: caller, "user": user}, receive, send)
+            async with anyio.create_task_group() as tasks:
+                async def revoked() -> None:  # an open request ends when its token does
+                    while True:
+                        await anyio.sleep(self.CHECK_SECONDS)
+                        if not await anyio.to_thread.run_sync(self.tokens.holds, name, digest):
+                            logger.info(f"MCP token '{name}' was revoked or rotated; its open request is closed.")
+                            tasks.cancel_scope.cancel()
+                            return
+                tasks.start_soon(revoked)
+                await self.app({**scope, CALLER_SCOPE_KEY: caller, "user": user}, receive, send)
+                tasks.cancel_scope.cancel()
         finally:
             auth_context_var.reset(bound)
 
 
 def http_app(server, tokens: TokenStore, host: str = "127.0.0.1", port: int = 8765):
     """The ASGI app for `server` over HTTP: TokenAuth in front, and the SDK's own checks with an explicit
-    Host allowlist (numeric port), no allowed Origin, at most 8 sessions and 1 MiB per request body."""
+    Host allowlist (numeric port), no allowed Origin, at most 8 sessions (4 per token) idling out after 10 minutes,
+    and 1 MiB per request body."""
     from mcp.server.transport_security import TransportSecuritySettings
     hosts = allowed_hosts(port)
     security = TransportSecuritySettings(enable_dns_rebinding_protection=True, allowed_hosts=hosts,
                                          allowed_origins=[])
     app = server.streamable_http_app(host=host, transport_security=security, max_sessions=MAX_HTTP_SESSIONS,
-                                     max_request_body_size=MAX_HTTP_BODY)
-    return TokenAuth(app, tokens, hosts)
+                                     max_request_body_size=MAX_HTTP_BODY,
+                                     session_idle_timeout=HTTP_SESSION_IDLE_TIMEOUT)
+
+    def sessions_of(caller: str) -> int:
+        """The sessions `caller` holds: the SDK records the principal that opened each one (2.3.0
+        `_session_owners`); without that record nothing is counted and only the server-wide limit applies."""
+        owners = getattr(getattr(server, "session_manager", None), "_session_owners", None) or {}
+        return sum(1 for owner in list(owners.values())
+                   if (owner.get("client_id") if isinstance(owner, dict) else getattr(owner, "client_id", None))
+                   == caller)
+    return TokenAuth(app, tokens, hosts, sessions_of=sessions_of)
 
 
 def _token_store(framework) -> TokenStore:

@@ -875,12 +875,16 @@ With `--transport http` the server listens on `http://<host>:<port>/mcp`, and ev
 no token is accepted (nor does the server start) while other users can read or change the token file or it belongs
 to another user. Requests with an `Origin` header (web pages, CORS preflights) are refused,
 the `Host` header must be `127.0.0.1`, `localhost` or `[::1]` with the server's port, and the server keeps at most
-8 sessions and takes at most 1 MiB per request. The old shared token file `mcp_http_token` is no longer accepted.
+8 sessions, at most 4 of them per token (so one client cannot lock the others out; beyond that a new session is
+refused with status 503), closes a session after 10 minutes without a request, and takes at most 1 MiB per request.
+A request that is still open (a wait, an event stream) is closed as soon as its token is revoked or rotated. The old
+shared token file `mcp_http_token` is no longer accepted.
 
 Over stdio, the environment variable `LCF_MCP_TOKEN` in the client's server entry makes the client the caller of
-that named token (`mcp:<name>`, with the token's permissions) instead of the shared caller `mcp`. The server reads
-it once, removes it from its environment (child processes do not inherit it) and exits with code 2 if the value is
-not a valid token; a running server stops answering when its token is revoked or rotated.
+that named token (`mcp:<name>`, with the token's permissions) instead of the shared caller `mcp`. `llm-cli` takes it
+out of its environment before any command runs, whatever the command (no command and no child process inherits it),
+and hands it only to `mcp serve`, which exits with code 2 if the value is not a valid token; a running server stops
+answering when its token is revoked or rotated.
 
 ```bash
 llm-cli mcp serve --transport http --port 8765
@@ -922,7 +926,8 @@ Named tokens, one per client that connects over HTTP or over stdio with `LCF_MCP
 when it is created or rotated; the framework keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode
 0600). Its name (1-32 lower-case letters, digits and hyphens) is the caller `mcp:<name>` in the audit log, and it has
 its own permissions. `add`, `rotate` and `revoke` need a person at a terminal (`add` and `rotate` also print only to
-a terminal) and are audited with actor `cli`, without the token. No tool can create, list, change or read tokens.
+a terminal) and are audited with actor `cli`, without the token. No tool can create, list, change or read tokens. The
+GUI does the same in Tools > Tool Permissions (Ditto / MCP), section "MCP tokens" (audited with actor `gui`).
 
 | Command / option | Meaning |
 |---|---|
