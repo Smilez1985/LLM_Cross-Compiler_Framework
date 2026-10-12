@@ -209,9 +209,16 @@ def person_summary(facts: Any, lang: Optional[str] = None, *, title: str = "", w
     what = _localized(f"summary.what.{tool}", lang, values) if tool else ""
     lines.append(what or _localized("summary.what", lang, {"title": visible(title or tool or "?")}))
     amounts = []
-    for key, number in (("summary.download", "download_bytes"), ("summary.disk", "needed_bytes")):
-        value = numbers.get(number)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+
+    def whole(value: Any) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool)
+
+    # what is still to download: the commit's bytes less what is staged for it already
+    rest = numbers.get("download_bytes")
+    if whole(rest) and whole(numbers.get("cached_bytes")):
+        rest = max(0, rest - numbers["cached_bytes"])
+    for key, value in (("summary.download", rest), ("summary.disk", numbers.get("needed_bytes"))):
+        if whole(value) and value > 0:
             amounts.append(_localized(key, lang, {"gb": round(value / 1000 ** 3, 1)}))
     minutes = numbers.get("est_minutes")
     if isinstance(minutes, int) and not isinstance(minutes, bool) and minutes > 0:
