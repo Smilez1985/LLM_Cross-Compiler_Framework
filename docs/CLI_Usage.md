@@ -670,6 +670,9 @@ llm-cli ditto eval --kind retrieval --case retr-en-rknn-onnx-convert --case retr
 
 The managed llama.cpp server for Ditto's offline mode. These commands work without Docker and without the keyring.
 Files: `~/.llm-framework/runtime/llama.cpp/` (builds and state) and `~/.llm-framework/logs/llama-server.log`.
+The optional MCP tools `build_local_runtime`, `start_local_runtime`, `stop_local_runtime` and `run_benchmark` do the
+same for an AI client once you enable them ([details](Features.md#local-runtime-tools-for-ai-clients-optional));
+`install --prebuilt` and installing toolchain parts stay commands for you only.
 
 #### ditto runtime status
 
@@ -1395,6 +1398,10 @@ Runs the checks of step 4 again on the active build, `current` (also with `--ben
 
 What is deployed (build, time, start script or systemd, result of the checks) and whether it is still the build the
 board's profile, the pin and the recipe call for; if not, build and deploy again.
+
+For a [trusted device](#deploy-devices), the optional MCP tools `probe_remote_device`, `deploy_device_runtime` and
+`run_device_benchmark` run `scan --device`, `device runtime build` with `deploy`, and `device runtime verify
+--bench-model` for an AI client, each confirmed by you; the deploy settings are always yours (`device settings`).
 
 ```bash
 llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W"

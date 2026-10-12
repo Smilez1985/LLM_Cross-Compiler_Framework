@@ -537,6 +537,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   device you trusted before (terminal only, never a new key, never a password). Only these devices can be named by AI
   tools, and only while the framework's `known_hosts` still holds that key; no tool writes a record.
 
+- **Optional runtime tools for AI clients** (MCP tools `build_local_runtime`, `start_local_runtime`,
+  `stop_local_runtime`, `run_benchmark`, `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark`;
+  resource `lcf://runtime/catalog`; prompt `set_up_offline_assistant`): registered with their runtime packages and
+  hidden until you enable them, also when the whole tier is allowed. The local server is always self-built from the
+  pinned commit (no prebuilt option, no CMake option or command as input); a missing toolchain part is refused with
+  `needs_person` and `llm-cli ditto runtime install`; only a verified build is started and no result holds its address
+  or key; a cancelled install is never activated and a cancelled model download keeps its `.part`. An untrusted model
+  is benchmarked natively only after your consent in the framework's own window, written to the audit log first, or in
+  the Docker sandbox. The board tools reach only trusted devices with the trusted host key, are always asked and never
+  covered by a standing approval.
+- **Benchmark runs of this computer** (`~/.llm-framework/benchmarks/`): `llama-bench` results of the self-built build
+  (prompt and generation speed, peak memory) with the model's sha256 and the build id; `get_status` shows the newest.
+
 ### Changed
 - **One Hugging Face classification for builds and downloads**: `check_build_request` and `start_build` now read a model's licence, gating and files with the same rules as `get_hf_model_info` and `download_hf_file` (licences such as GPL, DeepSeek or Qwen research were "unknown" on the build path and "restrictive" on the download path), and both keep the same disk reserve.
 - **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
