@@ -10,6 +10,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Ditto as an MCP client of another framework** (MCP design T12; Ditto is hybrid): `llm-cli ditto remote set`
+  points Ditto at the MCP server of a framework running elsewhere, for example the headless Docker image (stdio
+  through a command such as `docker exec -i <container> llm-cli mcp serve`, or HTTP to an https or loopback address).
+  That server's registry, permissions, fool-proof layer, questions and audit log apply; Ditto's identity there is a
+  named token made with `llm-cli mcp token add NAME --link ditto`, so Ditto's own permissions apply in both modes at
+  once and the audit log there shows `mcp:NAME`. The token is kept in Ditto's credential vault and reaches the server
+  only as `LCF_MCP_TOKEN` or as bearer header; the mode does not start without it. One tool source per conversation;
+  every remote result, error, prompt and tool description is untrusted data for Ditto's model; Ditto's confirmation
+  names the server. `llm-cli ditto remote show|test|off`. `llm-cli mcp serve --transport http --container` binds the
+  container's interfaces inside a container only (named token, Host and Origin checks unchanged; publish the port to
+  the host's loopback).
 - **Shared build state** (MCP design T11): every framework program (the GUI, a CLI call, each MCP server) writes a
   summary of each build request into the per-user folder (`build_requests/`), so the GUI status bar, `llm-cli build
   status`, `list_build_requests` and `get_build_status` see the same builds whichever program started them, also a

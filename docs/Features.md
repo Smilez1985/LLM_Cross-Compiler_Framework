@@ -576,6 +576,25 @@ questions about targets and builds from the tools rather than from memory, and t
 
 ---
 
+### Ditto as an MCP client of another framework
+
+Ditto is hybrid: besides its own tools in this process it can use the tools of a framework running elsewhere (for
+example the headless Docker image) through that framework's MCP server (`llm-cli ditto remote set`, settings
+`ai_ditto_*`, which only you change in the GUI or CLI; no AI can read or write them). The registry, the permissions,
+the fool-proof layer (an unknown argument is refused with a suggestion, never dropped), the questions and the audit
+log are that server's. Ditto's identity there is a named token made with `llm-cli mcp token add NAME --link ditto`,
+so the server applies Ditto's own permissions and standing approvals by reference: denying `start_build` for Ditto
+denies it in both modes at once. The audit actor there is `mcp:NAME`, never `ditto`; a new token without the link
+may only read. The token is kept in Ditto's credential vault and reaches the server only as `LCF_MCP_TOKEN` of the
+started process (stdio) or as bearer header (HTTP, https or loopback only); the mode does not start without it.
+One tool source per conversation: in MCP-client mode no tool of this framework is listed, and switching the source
+starts a new conversation. Ditto cannot check a remote server, so every result, error text, prompt and tool
+description from it reaches Ditto's model as untrusted data, and the confirmation dialog or prompt names the server
+("Question from the framework at <name>"). A "do not ask again" from there (CLI answer `r`) only asks that framework,
+where the person confirms it in its own approval window.
+
+---
+
 ## Ditto evaluation
 
 `llm-cli ditto eval` is a tool to measure how well a provider and model work for Ditto, for example whether a
