@@ -423,6 +423,22 @@ class TestDownload:
             env.registry.look_up(spec, spec.input_model(model=REPO, filename="big.gguf"), ToolContext("mcp"))
         assert info_error.value.code == "insufficient_resources" and "145.00 GB needed" in info_error.value.message
 
+    def test_a_standing_approval_needs_the_larger_reserve_or_the_person_is_asked(self, env, monkeypatch):
+        """Design 6.5: a call under a standing approval must leave 20 GiB or 10 % free, or it asks instead."""
+        gib = 1024 ** 3
+        usage = SimpleNamespace(total=100 * gib, used=0, free=15 * gib)  # normal reserve 2 GiB: fits; 20 GiB: no
+        monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: usage)
+        spec = env.registry.get("download_hf_file")
+        ctx = ToolContext("mcp")
+        ctx.facts = env.registry.look_up(spec, spec.input_model(model=REPO, filename="tiny-q4_k_m.gguf"), ctx)
+        assert spec.grant.facts(None, ctx) is None, "outside every standing approval: the person is asked"
+        usage.total, usage.free = 1000 * gib, 150 * gib  # 10 % of 1000 GiB = 100 GiB kept free: fits
+        ctx.facts = env.registry.look_up(spec, spec.input_model(model=REPO, filename="tiny-q4_k_m.gguf"), ctx)
+        assert DOWNLOAD_RULE.scope(spec.grant.facts(None, ctx), "this") is not None
+        usage.free = 90 * gib  # less than the 10 % reserve
+        ctx.facts = env.registry.look_up(spec, spec.input_model(model=REPO, filename="tiny-q4_k_m.gguf"), ctx)
+        assert spec.grant.facts(None, ctx) is None
+
     def test_one_download_at_a_time(self, env):
         release = threading.Event()
 

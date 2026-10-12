@@ -419,16 +419,25 @@ def reserve_bytes(total: int) -> int:
     return max(2 * GIB, int(total * 0.02))
 
 
+def standing_reserve_bytes(total: int) -> int:
+    """The larger reserve a call under a standing approval must leave: 20 GiB or 10 %, whichever is larger (design
+    6.5); a call that does not leave it asks the person instead."""
+    return max(20 * GIB, int(total * 0.10))
+
+
 def disk_check(folder: Path, needed: int) -> Dict[str, int]:
-    """Free space, reserve and space other accepted downloads reserved on the file system of `folder`."""
+    """Free space, reserve and space other accepted downloads reserved on the file system of `folder`. `fits`: the
+    normal reserve is left; `fits_standing`: the larger reserve of a standing approval is left too."""
     probe = Path(folder)
     while not probe.exists() and probe != probe.parent:
         probe = probe.parent
     usage = shutil.disk_usage(probe)
     with _RESERVED_LOCK:
         others = sum(_RESERVED.values())
+    left = int(usage.free) - others - int(needed)
     return {"free": int(usage.free), "reserve": reserve_bytes(int(usage.total)), "reserved": others,
-            "needed": int(needed), "fits": int(usage.free) - others - reserve_bytes(int(usage.total)) >= needed}
+            "needed": int(needed), "fits": left >= reserve_bytes(int(usage.total)),
+            "fits_standing": left >= standing_reserve_bytes(int(usage.total))}
 
 
 class Reservation:

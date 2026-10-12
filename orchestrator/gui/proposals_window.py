@@ -34,6 +34,16 @@ def proposal_text(proposals: List) -> str:
     return "\n\n".join(blocks)
 
 
+def proposal_notice(p) -> str:
+    """The status bar line for a new proposal: the build by its speaking name, who proposed it (the client's own name
+    cleaned and on one line), marked as AI-generated."""
+    def line(value) -> str:
+        return " ".join(sanitize_untrusted(str(value), 200).split())
+    build = line(p.request) if getattr(p, "request", "") else p.request_id
+    return (f"An AI client proposed a fix for the build {build} (proposed by {line(p.who())}, AI-generated): "
+            "Tools > Fix Proposals from AI Clients.")
+
+
 class ClientProposalsDialog(QDialog):
     """Read-only list of the kept proposals."""
 

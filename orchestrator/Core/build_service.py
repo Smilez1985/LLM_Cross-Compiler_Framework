@@ -478,7 +478,11 @@ class BuildService:
         folder, so the GUI and `llm-cli build status` show it with who proposed it. Never applied."""
         from orchestrator.Core.client_proposals import ClientProposal, ProposalLimit, new_proposal_id
         from orchestrator.Core.ditto_manager import HealingAnalysis, dangerous_command
+        from orchestrator.utils.untrusted import sanitize_untrusted
         state = self._state(request_id)
+        # Kept as the person will read it (cleaned), so the text the filter checked is the text that is shown.
+        summary, root_cause, manual_step = (sanitize_untrusted(str(t or ""), 4000)
+                                            for t in (summary, root_cause, manual_step))
         try:
             analysis = HealingAnalysis(summary=summary, root_cause=root_cause, fix_command=manual_step,
                                        confidence=confidence, target=where)

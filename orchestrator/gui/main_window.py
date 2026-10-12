@@ -521,10 +521,8 @@ class MainOrchestrator(QMainWindow):
             return
         new = [p for p in proposals if p.proposal_id not in seen]
         if new:
-            latest = new[-1]
-            self.status.showMessage(f"An AI client proposed a fix for build {latest.request_id} (proposed by "
-                                    f"{latest.proposed_by}, AI-generated): Tools > Fix Proposals from AI Clients.",
-                                    15000)
+            from orchestrator.gui.proposals_window import proposal_notice
+            self.status.showMessage(proposal_notice(new[-1]), 15000)
 
     def _open_client_proposals(self):
         from orchestrator.gui.proposals_window import ClientProposalsDialog

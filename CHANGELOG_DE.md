@@ -971,6 +971,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   freigegebenen Aufrufs werden vor dem Ausführen noch einmal geprüft.
 
 ### Sicherheit
+- **Der Filter für gefährliche Befehle lässt sich nicht mehr mit unsichtbaren Zeichen oder Zeichen in voller
+  Breite umgehen** (Healing-Analysen und Empfehlungen von Ditto sowie Korrekturvorschläge von KI-Clients): Er
+  prüft den Text auch so, wie GUI und CLI ihn zeigen (normalisiert, unsichtbare Zeichen und Verbinder entfernt),
+  sodass `r<Leerzeichen ohne Breite>m -rf ~` oder Buchstaben in voller Breite nicht mehr durchkommen und dann als
+  lesbarer Befehl erscheinen. Der Vorschlag eines Clients wird in dieser bereinigten Form aufbewahrt; der Hinweis
+  in der Statusleiste der GUI nennt den Build bei seinem sprechenden Namen und zeigt den Namen des Clients
+  bereinigt.
 - **KI-Clients sehen nie den Host-Pfad eines lokalen Modells, das sie benannt haben** (MCP-Clients und Ditto): Der
   Stufentext des Builds, der Kontext der Selbstheilung, `model_source` im Build-Manifest und `list_artifacts` nennen
   es bei seinem `<label>:<relativer Pfad>` (den Host-Pfad eines älteren Manifests beim Label, sonst nur beim
