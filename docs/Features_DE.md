@@ -1012,7 +1012,13 @@ ganze Stufe erlaubt hast.
   geladen wird; mit `sandbox: true` läuft es stattdessen in der Docker-Sandbox. Die Modelldatei wird einmal geöffnet
   und über diese offene Datei gehasht; llama-bench liest genau diese Datei (nativ über den geerbten Deskriptor, in
   der Sandbox über einen privaten Hardlink darauf), so dass sie zwischen Prüfung und Lauf nicht ausgetauscht werden
-  kann. Ergebnisse liegen in
+  kann. Der private Link der Sandbox liegt neben dem Modell oder, wenn dieser Ordner schreibgeschützt ist, im Cache-
+  oder Zustandsordner des Frameworks auf demselben Dateisystem; wo kein Link möglich ist, ist es eine Kopie, die aus
+  der offenen Datei gelesen und erneut gehasht wird (sie muss den geprüften sha256 haben). Er wird entfernt, wenn der
+  Lauf endet, auch bei einem Fehler und bei `cancel_job` (das auch den Sandbox-Container beendet, eine noch laufende
+  Kopie anhält und nach dem Abbruch keinen Container mehr startet); lässt sich keine private Datei anlegen, scheitert
+  der Job mit dem Grund (`insufficient_resources` oder `needs_person`). Ergebnisse
+  liegen in
   `~/.llm-framework/benchmarks/` (`runs/<Lauf-ID>.json`, `index.jsonl`); `get_status` (Abschnitt `local_runtime`)
   zeigt die neuesten Läufe.
 - **Board-Tools** (Stufe `external`, immer mit Frage, nie von einer Daueranfrage abgedeckt, nur für ein
@@ -1633,9 +1639,15 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Laufzeit-Tools, ist auch die Fehlermeldung der Satz des Frameworks: Was das Gerät oder `llama-bench` ausgegeben hat
   (`llama-bench` gibt die Metadaten des geladenen Modells aus), kommt in `external_text` zurück; Pfade in einer
   solchen Meldung erscheinen als Ordner-Bezeichnungen des Frameworks (`state:...`, `output:...`) oder nur als
-  Dateiname, nie als Pfad des Rechners oder `~/...`. Endet der Deploy-Job, bekommt das Audit-Log einen eigenen
-  Abschlusseintrag (erledigt, gescheitert oder abgebrochen, mit Job, Gerätenamen und Gerätezustand), verknüpft mit dem
-  `started`-Eintrag des Aufrufs. Der Prompt `deploy_to_board` führt durch dieselben Schritte.
+  Dateiname, nie als Pfad des Rechners oder `~/...`, auch wenn ein Pfad Leerzeichen enthält (ein Pfad in
+  Anführungszeichen, die Ordner des Frameworks und der Home-Ordner, auch unter seinem echten Pfad, werden als Ganzes
+  ersetzt, auch weiter hinten in einer Pfadliste). Endet der Deploy-Job,
+  bekommt das Audit-Log einen eigenen Abschlusseintrag (erledigt, gescheitert oder abgebrochen, mit Job, Gerätenamen
+  und Gerätezustand), verknüpft mit dem `started`-Eintrag des Aufrufs; er wird auf jedem Weg aus dem Job geschrieben,
+  auch wenn die Geräteliste das Deployment nicht eintragen kann (das Ergebnis hat dann eine `note`). Die Jobs von
+  `create_deploy_package`, der Board-Tools und der lokalen Laufzeit-Tools schreiben ebenfalls einen solchen
+  Abschlusseintrag (ok, Fehler mit seinem Grundcode oder abgebrochen; Geräte und Modelle unter ihren Bezeichnungen).
+  Der Prompt `deploy_to_board` führt durch dieselben Schritte.
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je
@@ -2295,7 +2307,9 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
   die Downloadgröße, das Laufwerk, die
   Hardware-Schätzung, Lizenz, Zugangsbeschränkung und Image-Build; dieselbe Speicherreservierung und dieselben
   Kontingente). `dataset_path` nur, wenn das Rezept einen Kalibrierungsdatensatz nennt, und dann muss es genau diese
-  Datei sein (sha256). Ein nach der Frage in irgendeinem Feld geändertes Rezept wird nicht gebaut. „Ja, und nicht mehr fragen“ hat den
+  Datei sein (sha256): Der Build kopiert die Datei in seinen eigenen Ordner, während er sie hasht, und benutzt nur
+  diese Kopie, sodass eine nach der Frage ausgetauschte Datei nie benutzt wird. Ein nach der Frage in irgendeinem
+  Feld geändertes Rezept wird nicht gebaut. „Ja, und nicht mehr fragen“ hat den
   Umfang von `start_build`; ein unter einem Dauerauftrag installiertes Rezept ist erst abgedeckt, nachdem du einen
   Build davon bestätigt hast. Die Ressource `lcf://packs/index` zeigt den zwischengespeicherten Index und die
   installierten Packs (wie `list_packs`, nie aktualisiert).

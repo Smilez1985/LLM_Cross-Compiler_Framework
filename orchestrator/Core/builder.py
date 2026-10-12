@@ -196,6 +196,10 @@ class BuildConfiguration:
     use_gpu: bool = False
     use_imatrix: bool = False # New flag for IMatrix generation
     dataset_path: Optional[str] = None
+    # The sha256 the calibration dataset must have (a recipe pins it): the build copies the file into its own folder
+    # while hashing it and uses only that copy (_stage_dataset), so what was checked is what is used.
+    dataset_sha256: Optional[str] = None
+    dataset_source: Optional[str] = None  # the file the staged copy was made from (set by _stage_dataset)
 
     # Recorded during the build for build_info.json (recipes are written from it)
     model_revision: Optional[str] = None      # Hugging Face commit the downloaded files belong to
@@ -627,6 +631,7 @@ class BuildEngine:
 
             # 2. Prepare Environment
             self._prepare_build_environment(config, prog, target_path)
+            self._stage_dataset(config, prog)
             
             # 3. Generate Dockerfile
             df_path = self._generate_dockerfile(config, prog, target_path)
@@ -1241,6 +1246,45 @@ class BuildEngine:
         else:
             config.dataset_path = str(path.resolve())
 
+    def _stage_dataset(self, config: BuildConfiguration, progress: BuildProgress) -> None:
+        """A calibration dataset pinned by sha256 (a recipe's): the file is opened once (never through a link), its
+        bytes are copied into the build's own folder while they are hashed, and the copy is used only when its sha256
+        is the pinned one. From here on the build reads only that copy, so a file swapped after the check (at the
+        question, at the start) is never used."""
+        import hmac
+        if not config.dataset_sha256 or not config.dataset_path:
+            return
+        source = Path(config.dataset_path)
+        folder = self.cache_dir / "builds" / config.build_id / "dataset"
+        folder.mkdir(parents=True, exist_ok=True)
+        folder.chmod(0o700)
+        target = folder / (source.name or "dataset.txt")
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+        try:
+            fd = os.open(str(source), flags)
+        except OSError:
+            raise ValueError(f"The calibration dataset {source.name} cannot be opened; nothing was built.") from None
+        h = hashlib.sha256()
+        try:
+            import stat
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise ValueError(f"The calibration dataset {source.name} is not a regular file; nothing was built.")
+            with os.fdopen(os.dup(fd), "rb") as src, open(target, "xb") as dst:
+                for chunk in iter(lambda: src.read(1024 * 1024), b""):
+                    h.update(chunk)
+                    dst.write(chunk)
+        except BaseException:
+            target.unlink(missing_ok=True)
+            raise
+        finally:
+            os.close(fd)
+        if not hmac.compare_digest(h.hexdigest(), str(config.dataset_sha256)):
+            target.unlink(missing_ok=True)
+            raise ValueError(f"The calibration dataset {source.name} is not the file that was checked (its sha256 "
+                             f"differs from {str(config.dataset_sha256)[:16]}...); nothing was built.")
+        config.dataset_source, config.dataset_path = str(source), str(target)
+        progress.add_log(f"Calibration dataset {source.name} copied into the build (sha256 checked).")
+
     def _dataset_mount(self, config: BuildConfiguration,
                        staged_volumes: Optional[Dict[str, Dict[str, str]]] = None) -> Tuple[Dict[str, Dict[str, str]], Optional[str]]:
         """Volumes and in-container path for the calibration dataset (none if no dataset is set).
@@ -1250,6 +1294,8 @@ class BuildEngine:
         host path, so a second bind of the same folder would replace the first."""
         if not config.dataset_path:
             return {}, None
+        if config.dataset_source:
+            return self._staged_dataset_mount(config, staged_volumes)
         pin = getattr(config.local_inputs, "dataset", None)
         path = pin.verify() if pin is not None else Path(config.dataset_path).expanduser().resolve()
         if not path.is_file():
@@ -1269,6 +1315,34 @@ class BuildEngine:
         suffix = path.suffix.lower() if path.suffix.lower() in (".txt", ".json") else ".txt"
         inner = f"/build-cache/dataset{suffix}"
         return {str(path): {"bind": inner, "mode": "ro"}}, inner
+
+    def _staged_dataset_mount(self, config: BuildConfiguration, staged_volumes: Optional[Dict[str, Dict[str, str]]]
+                              ) -> Tuple[Dict[str, Dict[str, str]], Optional[str]]:
+        """The mount of a dataset copied into the build (_stage_dataset): always the checked copy. An RKNN sample list
+        names files relative to its folder, so that folder is mounted as before and the checked copy is laid over the
+        list's own name in it."""
+        copy = Path(str(config.dataset_path))
+        if not copy.is_file() or copy.is_symlink():
+            raise ValueError(f"The checked copy of the calibration dataset {copy.name} is gone; nothing was run.")
+        if config.target_format != ModelFormat.RKNN:
+            suffix = copy.suffix.lower() if copy.suffix.lower() in (".txt", ".json") else ".txt"
+            inner = f"/build-cache/dataset{suffix}"
+            return {str(copy): {"bind": inner, "mode": "ro"}}, inner
+        pin = getattr(config.local_inputs, "dataset", None)
+        original = pin.verify() if pin is not None else Path(str(config.dataset_source)).expanduser().resolve()
+        for host, bind in (staged_volumes or {}).items():
+            if not Path(host).is_dir():
+                continue
+            try:
+                rel = original.relative_to(Path(host).resolve())
+            except ValueError:
+                continue
+            inner = f"{bind['bind'].rstrip('/')}/{rel.as_posix()}"
+            return {str(copy): {"bind": inner, "mode": "ro"}}, inner
+        folder = local_files.dataset_folder(pin) if pin is not None else original.parent
+        inner = f"/build-cache/dataset/{original.name}"
+        return {str(folder): {"bind": "/build-cache/dataset", "mode": "ro"},
+                str(copy): {"bind": inner, "mode": "ro"}}, inner
 
     @staticmethod
     def _verify_local_inputs(config: BuildConfiguration) -> None:

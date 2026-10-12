@@ -1111,6 +1111,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   commits of one model shared a staging folder** (and `a/b__c` and `a__b/c` collided, G38).
 - **A full disk always proposed pruning Docker** (G40): the proposal is now a manual step naming the framework's
   folders on the full disk with their sizes, and pruning Docker is proposed only when Docker's data root is full.
+- **A sandbox benchmark of a model in a read-only folder failed with a generic error**: `run_benchmark` with
+  `sandbox=true` made its private link of the checked model only next to the model. It now falls back to a private
+  folder in the framework's own cache or state folder on the same file system, else to a copy read from the checked
+  open file and hashed again (its sha256 must be the checked one); only when nothing works does it refuse, with the
+  reason (`insufficient_resources` or `needs_person`). The private folder is removed when the run ends, also on
+  failure and on `cancel_job`, which now also kills the sandbox container, stops a copy that is still being written
+  and starts no container after the cancel; a folder a crash left behind is removed by a later run.
+- **Job ends in the audit log**: when recording a finished deploy in the device list failed, `deploy_to_device` wrote
+  no end entry although the deploy had happened; the end entry is now written on every way out of the job (the
+  result then says that the device list did not record it). `create_deploy_package`, the board runtime jobs
+  (`probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark`) and the local runtime jobs
+  (`build_local_runtime`, `start_local_runtime`, `run_benchmark`) now write job-end entries too (ok, error with its
+  reason code, or cancelled), linked to the call's started entry and naming devices and models by their labels. The
+  deploy and runtime tools reach built models through the public `BuildService.artifact_entry` instead of a private
+  method.
 
 ### Security
 - **`run_benchmark` runs the very file it hashed**: the model is opened once, hashed through the open file and
@@ -1374,6 +1389,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   with the reason, a missing pinned image is pulled by its digest only, and a failed export stops the package.
 - **Deploys never forward the MCP protocol stream**: without paramiko, `ssh` and `scp` ran with the framework's
   stdin, which over MCP stdio is the protocol stream (G25); they now get `stdin=DEVNULL`.
+- **A recipe's calibration dataset is checked and used as one**: `start_recipe_build` checked the dataset's sha256
+  when the call was committed, but the build opened the path again later, so a file swapped in between was used. The
+  build engine now opens the file once (never through a link), copies its bytes into the build's own folder while it
+  hashes them, and uses only that copy, and only when its sha256 is the one the recipe pins (an RKNN sample list keeps
+  its folder, with the checked list laid over its own name).
+- **Paths with spaces in errors toward an AI or the person**: a path with a space (a folder such as `My Models`, or a
+  home folder whose user name holds one) was cut at the first space, so the label was wrong and a piece of the user
+  name or of the host path could remain. Quoted paths, the framework's folders and the home folder (also by its real
+  path when it is a link) are now replaced whole, a known folder further on in a path list (`/usr/bin:/home/...`) or
+  in a quoted text with more than one path starts a path of its own, and a space continues a path when the next word
+  is clearly part of it (or, inside a known folder, the longer path exists), so the error names a label or the file
+  name only.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
