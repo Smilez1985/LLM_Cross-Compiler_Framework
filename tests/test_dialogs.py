@@ -1279,7 +1279,7 @@ class TestMainWindowWiring:
                                       "Hugging Face Model Browser...",
                                       "Open Community Hub", "Tool Permissions (Ditto / MCP)...",
                                       "Folders the AI May Use...", "Pending Approvals...",
-                                      "Fix Proposals from AI Clients...",
+                                      "Fix Proposals from AI Clients...", "Knowledge Snapshots...",
                                       "Spoken Announcements", "Clear Input History..."]
             # The audio switch is a persisted setting, on by default.
             assert win.act_audio.isCheckable() and win.act_audio.isChecked()

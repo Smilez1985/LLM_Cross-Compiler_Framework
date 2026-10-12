@@ -64,7 +64,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and its arguments. A deletion is refused outside the output folder, while a build of any
   framework program writes into the folder or is queued for it, after the build changed, and when the folder is not
   the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
-  outside MCP, and never prunes the snapshot it restores.
+  outside MCP, and deletes no snapshot; it stays outside every standing approval and delegation until the trash and
+  the framework's deletion dialog exist.
 - **Ditto and the framework on another computer** (MCP design T12; Ditto is hybrid; design 6.1): `llm-cli ditto
   remote set` points Ditto at the MCP server of the framework installed on a second computer (a build PC, a server;
   the same program, not a different one). Docker is not needed: SSH reaches it, as a tunnel to its loopback HTTP
@@ -118,6 +119,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   replaced by stable placeholders that are mapped back locally in the answer.
 - **Local knowledge base** on local embeddings (FastEmbed, ONNX on the CPU) and an embedded Qdrant store: no
   vector-database server and no cloud embeddings needed, and it works offline once its models are downloaded.
+  Before every ingest and every restore it saves a snapshot in `knowledge_snapshots/` of the per-user folder; none
+  is ever deleted by itself, on any channel (round 5 f). With more than five, `llm-cli doctor` and a chat notice
+  remind you, and `llm-cli knowledge snapshots` (in the GUI: Tools > Knowledge Snapshots...) lists each one with its
+  full path, name, size and what it is, so you decide which to delete.
 - **The knowledge base Ditto uses, for AI clients** (MCP tools `list_knowledge_sources` and
   `read_knowledge_source`, resource `lcf://knowledge/sources/<source id>`): a client that does Ditto's job sees what
   the knowledge base holds and reads one source's excerpts in order. `search_knowledge` now gives every excerpt its
@@ -922,6 +927,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- **`llm-cli doctor --fix --tier 2` no longer deletes without a list** (released in 3.0.0; round 5 f): it cleared
+  the whole build cache of the Docker daemon, other projects' too, and deleted the framework's dangling images
+  without showing them. The build cache is no longer touched (it cannot be limited to the framework). Tier 2 now
+  lists the framework's dangling build images, each with its name, image id, size and what it is, and deletes
+  exactly that list, by image id and without a prune, only after your yes at a terminal (the default answer is no).
+  Without a terminal and with `--json` it only lists them; the deletion is audited first and refused when the list
+  changed in between. No tool, resource or prompt reaches it, so an AI app or Ditto can neither run it nor get it
+  under a delegation. The disk findings say what tier 2 lists instead of promising a cleanup.
 - **A repair is named however the call ends** (finding of a real Claude Code 2.1.296 run over stdio, protocol
   2026-07-28): a declared alias the call used (`quant` read as `quantization`) was recorded in the audit log, but a
   call refused before or instead of the question (too little disk space found by the look-up, a limit, an invalid
@@ -1194,6 +1207,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   method.
 
 ### Security
+- **`run_doctor` gives AI clients no host path** (released in 3.0.0): the findings an AI read named the per-user
+  folder, the audit log, pack folders, the disk folders and whatever path a crashed check's error quoted, user name
+  included. What an AI reads now names the framework's folders by label (`state:audit.db`, "the state folder",
+  `targets:<pack>`) and any other path by its file name only, secrets redacted; `llm-cli doctor` (also `--json`)
+  keeps the full paths for you.
 - **`run_benchmark` runs the very file it hashed**: the model is opened once, hashed through the open file and
   handed to llama-bench as that open file (an inherited descriptor natively, a private hard link in the sandbox),
   so a catalog model cannot be swapped for an untrusted one between the check and a native run without consent.

@@ -570,8 +570,9 @@ what it is; the AI sees labels and sizes only. `delete_artifact` takes the id an
 it is refused for a folder outside the output folder (also through a link), while a build of any framework program
 writes into it or is queued for it, when the model file's sha256 changed since, and when the folder is no longer the
 one the question named. `restore_knowledge_snapshot` saves the current knowledge base as a snapshot
-`pre_restore_<time>` first and does not restore without that backup; the same backup rule now holds for every restore of a snapshot, and the
-snapshot being restored is never pruned by it.
+`pre_restore_<time>` first and does not restore without that backup; the same backup rule now holds for every restore of a snapshot, and no
+snapshot is deleted by it (the framework deletes no snapshot by itself, see [Knowledge base](#knowledge-base-rag)).
+It stays outside every standing approval and delegation until the trash and the framework's deletion dialog exist.
 
 How a question with tools runs:
 
@@ -1027,7 +1028,10 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
   stay whole unless they are larger than the model's context ([Large code blocks and
   tables](#large-code-blocks-and-tables)).
 - **Snapshots:** before every crawl the knowledge base is saved as a snapshot in
-  `~/.llm-framework/knowledge_snapshots` (the newest 5 are kept). Restoring a snapshot is not available from the GUI
+  `~/.llm-framework/knowledge_snapshots`. The framework deletes none of them by itself (unreleased; before, only the
+  newest 5 were kept, on every channel): with more than five, `llm-cli doctor` and the chat remind you, and
+  **Tools > Knowledge Snapshots...** in the GUI or `llm-cli knowledge snapshots` lists each one with its full path,
+  name, size and what it is, so you decide which to delete. A trash and a deletion dialog in the framework follow. Restoring a snapshot is not available from the GUI
   or the CLI yet.
 - **Search:** hybrid. Dense vectors find meaning, BM25 finds exact terms such as error codes and compiler flags; both
   rankings are fused with Reciprocal Rank Fusion. The same text from several sources is returned once. A
@@ -1911,11 +1915,19 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key); the chat feed can be written and its newest entries verify (changed or foreign entries, no key; unreleased) |
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
+| Knowledge | more knowledge snapshots than the usual five (information, a reminder; nothing is deleted; unreleased) |
 | Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
 
-`--fix` applies the automatic fixes up to `--tier` (1: makes the personal folder private; 2: also removes dangling
-framework images and the Docker build cache) and checks again. Exit codes: 0 OK, 1 warnings, 2 errors; `--json`
-for scripts.
+`--fix` applies the automatic fixes up to `--tier` and checks again. Tier 1 makes the personal folder private. Tier 2
+deletes nothing by itself: it lists the framework's dangling build images (name, image id, size and what each is),
+and only your yes at a terminal deletes exactly that list (default no; without a terminal, and with `--json`, it
+only lists them). The Docker build cache is never cleared, because it cannot be limited to the framework: before,
+tier 2 cleared the whole build cache of the Docker daemon, other projects' too. Nothing an AI app or Ditto can call
+reaches this deletion. Exit codes: 0 OK, 1 warnings, 2 errors; `--json` for scripts.
+
+What an AI reads (`run_doctor`): the same findings, with the framework's folders named by label (`state:audit.db`,
+"the state folder", `targets:<pack>`) and any other path by its file name only, also in the message of a check that
+crashed; your own output (`llm-cli doctor`, also `--json`) keeps the full paths.
 
 ---
 

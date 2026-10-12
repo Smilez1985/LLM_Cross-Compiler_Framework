@@ -166,6 +166,8 @@ class MainOrchestrator(QMainWindow):
         act_proposals.triggered.connect(self._open_client_proposals)
         tools_menu.addAction(act_proposals)
 
+        self._add_knowledge_snapshots_action(tools_menu)
+
         # Spoken announcements are extra (everything is also shown); e.g. screen-reader users switch them off.
         self.act_audio = QAction(self.i18n.t("menu.audio", "Spoken Announcements"), self)
         self.act_audio.setCheckable(True)
@@ -440,6 +442,19 @@ class MainOrchestrator(QMainWindow):
             return
         if ToolPermissionsDialog(registry, self, first_run=first_run).exec():
             self.status.showMessage("Tool permissions saved.", 5000)
+
+    def _add_knowledge_snapshots_action(self, menu):
+        """Tools > Knowledge Snapshots...: the snapshots with full path, name and size; it deletes nothing."""
+        self.act_snapshots = QAction("Knowledge Snapshots...", self)
+        self.act_snapshots.triggered.connect(self._open_knowledge_snapshots)
+        menu.addAction(self.act_snapshots)
+
+    def _open_knowledge_snapshots(self):
+        from orchestrator.gui.knowledge_snapshots_window import KnowledgeSnapshotsDialog
+        try:
+            KnowledgeSnapshotsDialog(self.framework.config.user_state_dir, self).exec()
+        except Exception as e:  # e.g. no per-user folder
+            QMessageBox.critical(self, "Knowledge Snapshots", str(e))
 
     def _open_ai_folders(self):
         from orchestrator.gui.dialogs import AIFoldersDialog
