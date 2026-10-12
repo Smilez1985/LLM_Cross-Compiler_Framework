@@ -189,6 +189,9 @@ class ToolSpec:
     prepare: Optional[Callable[[BaseModel, "ToolContext"], CallFacts]] = None
     # The question's first line in plain words, for a tool without a prepare (a prepare gives its own).
     consequence: str = ""
+    # discard(input, ctx): drops what prepare staged (a quarantined pack) when the call is not confirmed (a "no", nobody
+    # could be asked, a pending approval declined or expired). It must never raise; it runs no handler code.
+    discard: Optional[Callable[[BaseModel, "ToolContext"], None]] = None
 
     def annotations(self) -> Dict[str, Any]:
         """MCP tool annotations (hints for clients; the registry enforces the policy itself)."""
@@ -1210,6 +1213,15 @@ class ToolRegistry:
         self._succeeded(ctx, spec.name, prepared.key)
         return result
 
+    def discard_staged(self, spec: ToolSpec, inp: Optional[BaseModel], ctx: ToolContext) -> None:
+        """Lets the tool drop what its prepare staged for a call that will not run (ToolSpec.discard)."""
+        if spec.discard is None or inp is None:
+            return
+        try:
+            spec.discard(inp, ctx)
+        except Exception as e:  # noqa: BLE001 - cleaning up never fails a refusal
+            self.logger.warning(f"Discarding the staged work of {spec.name} failed: {redact_secrets(str(e))}")
+
     def _run(self, spec: ToolSpec, inp: BaseModel, arguments: Dict[str, Any], ctx: ToolContext,
              approved: Optional[bool], began: float) -> BaseModel:
         decision = self.decide(spec, inp, ctx)
@@ -1234,6 +1246,8 @@ class ToolRegistry:
             grant = self.matching_grant(spec, inp, ctx)  # read anew right before the handler
             if grant is not None:
                 approved, channel, answer, question = True, f"grant:{grant.id}", "accepted", ""
+                # the handler sees which standing approval ran it (a pack installed under one is marked so)
+                ctx = dataclasses.replace(ctx, confirm_channel=channel)
         # A person's "no" is final, even if the policy was loosened to "allow" while they were asked.
         if decision == Decision.ASK or approved is False:
             if approved is None and ctx.confirm is not None:
@@ -1295,6 +1309,7 @@ class ToolRegistry:
                                 next="Do not call this tool again; the framework runs it when approved.")
             if not approved:
                 # approved stays None when nobody could be asked; False is a person's "no"
+                self.discard_staged(spec, inp, ctx)
                 code = "declined" if approved is False else "needs_person"
                 if approved is False and (answer or "declined") == "declined":  # not a dismissed dialog
                     self.declined(spec, inp, ctx)

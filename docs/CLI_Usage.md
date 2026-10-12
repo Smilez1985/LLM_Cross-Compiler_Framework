@@ -1445,6 +1445,10 @@ came out. The framework never uploads anything by itself; sharing is always a st
 then `zoo list` shows only installed packs, installing by ID and `zoo export --pr` stop with a message, and packs
 are shared as files (`zoo install --file`).
 
+AI clients and Ditto use the same zoo through the tools `list_packs`, `add_pack_from_index` (signed index only,
+always asked) and `export_pack` (to a local file, always asked); they cannot install a pack from a file, open a pull
+request or create your keys ([details](Features.md#packs-for-ai-clients)).
+
 How packs are protected:
 
 - A pack is a zip file with a manifest (`pack.json`: sha256, size and mode of every file) and usually an Ed25519

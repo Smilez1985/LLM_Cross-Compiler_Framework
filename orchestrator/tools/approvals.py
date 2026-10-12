@@ -560,6 +560,13 @@ class ApprovalService:
         with self._lock:
             if self._waiting.pop(item.approval_id, None) is None:
                 return
+        try:  # what the tool staged for the question (a quarantined pack) is dropped: the call never runs
+            import dataclasses
+            spec = self.registry.get(item.tool)
+            self.registry.discard_staged(spec, self.registry.validate_input(spec, item.arguments),
+                                         dataclasses.replace(item.ctx, facts=item.facts))
+        except Exception as e:
+            logger.warning(f"Could not discard the staged work of approval {item.approval_id}: {redact_secrets(str(e))}")
         if how == "declined":
             self._refuse(item, "not_confirmed", "The person declined it in the framework.", "declined")
             try:  # a "no" in the framework's window counts like any other: the same call is not asked again soon

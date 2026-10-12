@@ -509,6 +509,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     register_hf_tools(registry, framework, jobs)
     from orchestrator.tools.tools_crawl import register_crawl_tools  # Deep Ingest (T7)
     register_crawl_tools(registry, framework, jobs)
+    from orchestrator.tools.tools_community import register_community_tools  # community zoo (T9)
+    register_community_tools(registry, framework, jobs)
     return registry
 
 
