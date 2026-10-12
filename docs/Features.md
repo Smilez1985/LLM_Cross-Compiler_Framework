@@ -1008,9 +1008,12 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   (piped answers are refused). Every save is recorded in the audit log (`policy_changed`, actor `cli` or `gui`) with
   the old and new decisions before it takes effect; if the entry cannot be written, nothing changes. Each save
   raises a revision number under a lock shared by the GUI, the CLI and MCP servers, and a save based on an older
-  revision (a window opened before another change) is refused, so it never undoes a change made meanwhile. Without
-  a keyring the signature has no key (as for the audit chain) and `llm-cli doctor` warns; such a file is refused
-  while the audit log is kept with a key.
+  revision (a window opened before another change) is refused, so it never undoes a change made meanwhile. The
+  newest saved revision of both files is kept in the keyring too: an older signed copy put back over a file (it
+  would bring back a revoked standing approval, a revoked token or a looser permission) is refused like a hand edit,
+  and a removed permission file denies every tool instead of falling back to the defaults. Without a keyring the
+  signature has no key (as for the audit chain) and `llm-cli doctor` warns; such a file is refused while the audit
+  log is kept with a key.
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
   unknown or revoked token, or a token file that cannot be read, may not even read.
 

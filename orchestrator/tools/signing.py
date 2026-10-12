@@ -13,16 +13,26 @@ a careless edit, but anyone who can write the file can recompute it, as with the
 doctor` reports it. A reader that has a key never accepts an unkeyed signature, and a reader without a key refuses
 one too while the audit log is kept with a key (so a process started without the keyring cannot be made to accept
 a file someone edited).
+
+A signature only says that the framework wrote a file at some time. So the newest revision saved of the permissions
+and of the token store is also kept in the OS keyring (RevisionAnchor): an older signed copy put back over the file
+(to bring back a revoked standing approval, a revoked token or a looser permission) is refused like a hand edit, and a
+removed permission file denies everything instead of falling back to the defaults.
 """
 
 import hashlib
 import hmac
 import json
+import logging
+import os
+import threading
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 SIGNATURE_FIELD = "signature"
 UNKEYED = "unkeyed"
 KINDS = ("tool_policy", "mcp_tokens", "tool_approvals")
+_UNSEEN = object()
 
 
 class SignatureError(ValueError):
@@ -108,3 +118,59 @@ def verify(kind: str, data: Any, key: Optional[bytes],
     if not hmac.compare_digest(stored_mac.encode("utf-8", "replace"), expected.encode("ascii")):
         raise SignatureError("invalid", "its signature does not match its content (edited by hand or damaged)")
     return body
+
+
+class RevisionAnchor:
+    """The newest revision of a signed file that the framework saved, kept outside the per-user folder (in the OS
+    keyring, next to the audit key). A valid signature only says that the framework wrote the file at some time; an
+    older copy put back over the current file would bring back a revoked standing approval, a revoked token or a looser
+    permission, and a removed file would fall back to the defaults. With the anchor both are refused like a hand edit.
+
+    `read()` returns the stored text (None when nothing is stored yet) and `write(text)` stores it; either may raise.
+    The value only ever grows, and this process keeps the highest one it has seen, so a keyring that cannot be read for
+    a moment or an entry someone removed never lowers it. It is read again only when the file changed since the last
+    look (a cheap stat), so checking it costs nothing on the many reads of an unchanged file."""
+
+    def __init__(self, read: Callable[[], Optional[str]], write: Callable[[str], None]):
+        self._read_value, self._write_value = read, write
+        self._known = 0
+        self._seen: Any = _UNSEEN   # the identity of the file the known value was last read for
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _identity(path: Any) -> Optional[tuple]:
+        try:
+            st = os.stat(path)
+        except OSError:
+            return None
+        return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns
+
+    def current(self, path: Any) -> int:
+        """The highest revision the framework saved of the file at `path` (0 when it never saved one)."""
+        identity = self._identity(path)
+        with self._lock:
+            if identity == self._seen:
+                return self._known
+            try:
+                raw = self._read_value()
+            except Exception:  # unreachable for now: keep the value known and look again next time
+                return self._known
+            text = str(raw or "").strip()
+            if text.isdigit() and len(text) <= 18:
+                self._known = max(self._known, int(text))
+            self._seen = identity
+            return self._known
+
+    def saved(self, path: Any, revision: int) -> None:
+        """Records the revision just written to `path` (the file is replaced before the anchor moves, so another
+        process that reads in between sees a file newer than the anchor, never an older one)."""
+        with self._lock:
+            self._known = max(self._known, int(revision))
+            self._seen = self._identity(path)
+            value = self._known
+        try:
+            self._write_value(str(value))
+        except Exception as e:  # the file is saved; only the protection against an older copy lags behind
+            logging.getLogger("SignedFiles").warning(f"The revision of {Path(str(path)).name} could not be kept in the "
+                                                     f"keyring ({type(e).__name__}); an older copy put back would not "
+                                                     "be noticed until the next save.")

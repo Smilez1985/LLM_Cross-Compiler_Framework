@@ -24,6 +24,7 @@ from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, un
 from orchestrator.tools.policy import Decision, PolicyStore, ToolTier
 from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, ToolSpec, current_actor,
                                          current_registry)
+from orchestrator.tools.signing import RevisionAnchor
 from orchestrator.tools.spec import Choices, FieldMeta
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.untrusted import sanitize_untrusted
@@ -539,16 +540,29 @@ def _audit_key(framework, state_dir: Optional[Path] = None) -> Optional[bytes]:
         return None
 
 
+def _revision_anchor(kind: str) -> RevisionAnchor:
+    """Where the newest saved revision of a signed per-user file is kept: the OS keyring, next to the audit key, so
+    an older copy put back into the per-user folder (or a removed file) is noticed although its signature is genuine."""
+    import keyring
+    from orchestrator.Core.secrets_manager import SecretsManager
+    service, name = SecretsManager.SERVICE_ID, f"{kind}-revision"
+    return RevisionAnchor(lambda: keyring.get_password(service, name),
+                          lambda value: keyring.set_password(service, name, value))
+
+
 def build_tool_registry(framework) -> ToolRegistry:
     """The registry with the user's policy, the audit log and all framework tools."""
     state_dir = Path(framework.config.user_state_dir)
     key = _audit_key(framework, state_dir)
     audit = AuditLog(state_dir / "audit.db", key=key)
     # The permissions and the tokens are signed with a key derived from the audit key; without a keyring an unkeyed
-    # signature is accepted only while the audit log is not kept with a key either.
+    # signature is accepted only while the audit log is not kept with a key either. With the keyring, the newest saved
+    # revision of each is kept there too (an older signed copy or a removed permission file then denies everything).
     refuse_unkeyed = None if key else audit.kept_with_key
-    registry = ToolRegistry(PolicyStore(state_dir, key=key, audit=audit, refuse_unkeyed=refuse_unkeyed), audit,
-                            tokens=TokenStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed))
+    registry = ToolRegistry(PolicyStore(state_dir, key=key, audit=audit, refuse_unkeyed=refuse_unkeyed,
+                                        anchor=_revision_anchor("tool_policy") if key else None), audit,
+                            tokens=TokenStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed,
+                                              anchor=_revision_anchor("mcp_tokens") if key else None))
     register_framework_tools(registry, framework)
     # Pending approvals: a client that cannot ask gets its question shown in the framework instead (design 6.9).
     from orchestrator.tools.approvals import ApprovalService, ApprovalStore

@@ -865,8 +865,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (Akteur `cli` oder `gui`) im Audit-Log festgehalten, bevor sie wirkt, und abgelehnt, wenn sich der Eintrag nicht
   schreiben lässt. Speichern bekommt eine Revisionsnummer unter einer Sperre, die GUI, CLI und MCP-Server teilen; ein
   Speichern auf Grundlage einer älteren Revision wird abgelehnt, damit ein früher geöffnetes Fenster eine
-  zwischenzeitliche Änderung nicht mehr rückgängig machen kann. Ohne Schlüsselbund hat die Signatur keinen Schlüssel,
-  wie die Audit-Kette; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt wird.
+  zwischenzeitliche Änderung nicht mehr rückgängig machen kann. Die neueste gespeicherte Revision jeder Datei steht
+  zusätzlich im Schlüsselbund, daher verbieten auch eine ältere signierte Kopie, die darüber zurückgelegt wird (eine
+  widerrufene dauerhafte Freigabe oder ein widerrufenes Token käme zurück), und eine entfernte Berechtigungsdatei
+  alles. Ohne Schlüsselbund hat die Signatur keinen Schlüssel, wie die Audit-Kette; eine solche Datei wird abgelehnt,
+  solange das Audit-Log mit Schlüssel geführt wird.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

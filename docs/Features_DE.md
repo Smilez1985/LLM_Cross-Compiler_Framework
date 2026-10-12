@@ -1092,9 +1092,12 @@ Verfügung.
   alten und neuen Entscheidungen, bevor es wirkt; lässt sich der Eintrag nicht schreiben, ändert sich nichts. Jedes
   Speichern erhöht eine Revisionsnummer unter einer Sperre, die GUI, CLI und MCP-Server teilen, und ein Speichern auf
   Grundlage einer älteren Revision (ein Fenster, das vor einer anderen Änderung geöffnet wurde) wird abgelehnt, damit
-  es nie eine zwischenzeitliche Änderung rückgängig macht. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie
-  die Audit-Kette) und `llm-cli doctor` warnt; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel
-  geführt wird.
+  es nie eine zwischenzeitliche Änderung rückgängig macht. Die neueste gespeicherte Revision beider Dateien steht
+  zusätzlich im Schlüsselbund: Eine ältere signierte Kopie, die über eine Datei zurückgelegt wird (sie brächte eine
+  widerrufene dauerhafte Freigabe, ein widerrufenes Token oder eine lockerere Berechtigung zurück), wird wie eine
+  Bearbeitung von Hand abgelehnt, und eine entfernte Berechtigungsdatei verbietet jedes Tool, statt auf die Vorgaben
+  zurückzufallen. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie die Audit-Kette) und `llm-cli doctor`
+  warnt; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt wird.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
   nicht lesen lässt, darf nicht einmal lesen.

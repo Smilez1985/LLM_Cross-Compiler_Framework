@@ -761,9 +761,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   allow every tool or add a token, and nothing noticed. Every change of the permissions is recorded in the audit log
   with the old and new decisions (actor `cli` or `gui`) before it takes effect, and is refused when the entry cannot
   be written. Saves take a revision number under a lock shared by the GUI, the CLI and MCP servers; a save based on
-  an older revision is refused, so a window opened earlier can no longer undo a change made meanwhile. Without a
-  keyring the signature has no key, as for the audit chain; such a file is refused while the audit log is kept with
-  a key.
+  an older revision is refused, so a window opened earlier can no longer undo a change made meanwhile. The newest
+  saved revision of each file is kept in the keyring as well, so an older signed copy put back over it (a revoked
+  standing approval or token would return) and a removed permission file deny everything too. Without a keyring the
+  signature has no key, as for the audit chain; such a file is refused while the audit log is kept with a key.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real
