@@ -810,12 +810,12 @@ def _resource_reader(spec: ResourceSpec, registry: ToolRegistry, caller: str, in
         tool_ctx = _tool_context(mcp_ctx, caller, instance)  # static resources have no Context: the caller's label
         try:
             text, _ = await anyio.to_thread.run_sync(registry.read_resource, spec.uri, dict(params), tool_ctx)
-        except ResourceUnknown as e:
-            raise _mcp_error(INVALID_PARAMS, error_text(spec.uri, e)) from None
+        except ResourceUnknown as e:  # each refusal below is in the audit log already (read_resource audits it)
+            raise _audited(_mcp_error(INVALID_PARAMS, error_text(spec.uri, e))) from None
         except ToolDenied as e:
-            raise _mcp_error(INVALID_REQUEST, error_text(spec.uri, e)) from None
+            raise _audited(_mcp_error(INVALID_REQUEST, error_text(spec.uri, e))) from None
         except ToolError as e:
-            raise _mcp_error(INTERNAL_ERROR, error_text(spec.uri, e)) from None
+            raise _audited(_mcp_error(INTERNAL_ERROR, error_text(spec.uri, e))) from None
         return text
     return read
 
@@ -1037,6 +1037,19 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
         async def list_resource_templates(self):
             readable = await self._readable()
             return [t for t in await super().list_resource_templates() if t.uri_template in readable]
+
+        async def read_resource(self, uri, context=None):
+            """resources/read; a read the SDK refuses before any resource runs (an unknown URI, another scheme, a
+            parameter with `..`) is audited too, as an unknown tool name is."""
+            try:
+                return await super().read_resource(uri, context)
+            except BaseException as e:
+                if isinstance(e, Exception) and not getattr(e, "audited", False):
+                    detail = redact_secrets(str(e))[:300]
+                    with contextlib.suppress(Exception), anyio.CancelScope(shield=True):
+                        await anyio.to_thread.run_sync(registry.refuse_resource, str(uri),
+                                                       _tool_context(context, caller, instance), detail)
+                raise
 
         async def list_prompts(self):
             """The prompts offered to this caller (every tool a prompt leads to is registered, its permission

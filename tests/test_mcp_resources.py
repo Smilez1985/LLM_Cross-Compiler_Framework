@@ -325,3 +325,46 @@ class TestEvents:
                         await anyio.sleep(0.05)
         run(go())
         assert closed == [1]
+
+
+class TestRefusedReadsAreAudited:
+    """Every read is audited, also one the SDK refuses before any resource function runs (an unknown URI, a parameter
+    with `..`, another scheme): a client probing for files leaves a trace, as an unknown tool name does."""
+
+    @pytest.mark.parametrize("uri", ["lcf://nope", "lcf://things/../x", "file:///etc/passwd", "lcf://docs/..%2F..%2Fx"])
+    def test_a_read_refused_before_any_resource_is_audited(self, registry, uri):
+        before = len(registry.audit.entries(1000))
+        assert code_of(read_error(server_for(registry, events=False), uri)) == -32602
+        entries = registry.audit.entries(1000)
+        assert len(entries) == before + 1, "exactly one entry for the refused read"
+        entry = entries[0]
+        assert (entry["actor"], entry["tier"], entry["outcome"]) == ("mcp", "read", "invalid_input")
+        assert entry["tool"].startswith("read_resource:") and "unknown_id" in json.dumps(entry)
+
+    def test_a_refusal_the_registry_recorded_is_not_recorded_twice(self, registry):
+        before = len(registry.audit.entries(1000))
+        assert code_of(read_error(server_for(registry, events=False), "lcf://things/req_gone")) == -32602
+        entries = registry.audit.entries(1000)
+        assert len(entries) == before + 1 and entries[0]["tool"] == "read_resource:lcf://things/{request_id}"
+
+    def test_a_secret_in_a_refused_uri_is_not_recorded(self, registry):
+        read_error(server_for(registry, events=False), f"lcf://nope/{secret()}")
+        assert secret() not in json.dumps(registry.audit.entries(5), default=str)
+
+
+def test_an_unreadable_document_names_no_path(booted_framework, monkeypatch):
+    """A document that cannot be read is refused without the file's real path (no folder of the person's computer
+    reaches the AI)."""
+    from pathlib import Path
+    from orchestrator.tools.framework_resources import docs_folder
+    real = Path.read_text
+
+    def refuse(self, *args, **kwargs):
+        if self.name == "Features.md":
+            raise PermissionError(13, "Permission denied", str(self))
+        return real(self, *args, **kwargs)
+    monkeypatch.setattr(Path, "read_text", refuse)
+    err = read_error(mcp_server.build_mcp_server(booted_framework, events=False), "lcf://docs/Features")
+    folder = str(docs_folder(booted_framework))
+    assert "Features" in str(err) and folder not in str(err) and "Errno" not in str(err)
+    assert folder not in json.dumps(booted_framework.tool_registry.audit.entries(3), default=str)

@@ -873,6 +873,19 @@ class ToolRegistry:
         self._resources[spec.uri] = spec
         return spec
 
+    def refuse_resource(self, uri: Any, ctx: ToolContext, detail: str = "") -> None:
+        """Audits a resource read refused before it reached a resource (an unknown URI, another scheme, a parameter
+        the SDK rejects, such as `..`), like an unknown tool name: the URI as written, cut and redacted."""
+        if self.audit is None:
+            return
+        shown = redact_secrets("".join(ch if ch.isprintable() else "?" for ch in str(uri))[:64])
+        try:
+            self.audit.record(ctx.actor, f"read_resource:{shown}", ToolTier.READ.value, Decision.DENY.value,
+                              "invalid_input", arguments={"uri": str(uri)[:500]}, detail=detail,
+                              extra={"client": ctx.client, "session": ctx.session, "reason_code": "unknown_id"})
+        except Exception as e:  # reads and refusals never fail on the audit log
+            self.logger.warning(f"Audit write failed: {redact_secrets(str(e))}")
+
     def _decider(self, spec: ResourceSpec) -> Any:
         """What the policy decides a resource as: the read tool it mirrors, or a read-tier pseudo-tool."""
         return self._tools[spec.tool] if spec.tool else _Surface(spec.audit_name, spec.title)

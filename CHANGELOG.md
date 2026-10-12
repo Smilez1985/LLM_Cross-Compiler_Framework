@@ -313,7 +313,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the tool registry like the read tool it mirrors: that tool's permission decides (a denied tool hides its
   resources, "ask" refuses with the tool to call), the same output filter cleans the result and wraps external text
   as untrusted data, and every read is audited as `read_resource:<uri>`. Unknown ids, documents outside the list and
-  parameters with `..`, an absolute path or a NUL byte are invalid params (-32602). Clients on protocol 2026-07-28
+  parameters with `..`, an absolute path or a NUL byte are invalid params (-32602) and audited too, also an unknown
+  URI or another scheme the server refuses before any resource runs. Clients on protocol 2026-07-28
   can listen for changes: the tool, prompt and resource lists change with the permissions, and a build's status and
   log resources report each change to the caller that started the build, from the server's own event bus.
 - **MCP prompts**: Ditto's tasks for a client that does Ditto's job, with the same task text and knowledge context:

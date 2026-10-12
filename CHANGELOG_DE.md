@@ -358,10 +358,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   verbotenes Tool verbirgt seine Ressourcen, „fragen“ lehnt mit dem aufzurufenden Tool ab), derselbe Ausgabefilter
   bereinigt das Ergebnis und packt externen Text als nicht vertrauenswürdige Daten ein, und jedes Lesen landet als
   `read_resource:<URI>` im Audit-Log. Unbekannte IDs, Dokumente außerhalb der Liste und Parameter mit `..`, einem
-  absoluten Pfad oder einem NUL-Byte sind ungültige Parameter (-32602). Clients mit Protokoll 2026-07-28 können auf
-  Änderungen hören: Die Listen der Tools, Prompts und Ressourcen ändern sich mit den Berechtigungen, und die Status-
-  und Log-Ressourcen eines Builds melden jede Änderung an den Aufrufer, der den Build gestartet hat, über den eigenen
-  Ereignisbus des Servers.
+  absoluten Pfad oder einem NUL-Byte sind ungültige Parameter (-32602) und landen ebenfalls im Audit-Log, auch eine
+  unbekannte URI oder ein anderes Schema, die der Server ablehnt, bevor eine Ressource läuft. Clients mit Protokoll
+  2026-07-28 können auf Änderungen hören: Die Listen der Tools, Prompts und Ressourcen ändern sich mit den
+  Berechtigungen, und die Status- und Log-Ressourcen eines Builds melden jede Änderung an den Aufrufer, der den Build
+  gestartet hat, über den eigenen Ereignisbus des Servers.
 - **MCP-Prompts**: Dittos Aufgaben für einen Client, der Dittos Arbeit übernimmt, mit demselben Aufgabentext und
   Wissenskontext: `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings`,
   `diagnose_build_failure`, dazu `add_board` und `deploy_to_board`, die angeboten werden, sobald es die Tools gibt, zu

@@ -859,7 +859,9 @@ framework never sees it.
   one whose tool is set to "ask" is refused with the tool to call instead, because reading a resource cannot ask
   you), the same output filter cleans it (external text wrapped as untrusted data, so these resources come as
   text), and every read is audited as `read_resource:<uri>`. An unknown id, a document outside the list or a
-  parameter with `..`, an absolute path or a NUL byte is an invalid-params error (-32602).
+  parameter with `..`, an absolute path or a NUL byte is an invalid-params error (-32602), audited as well, also
+  when the server refuses it before any resource runs (an unknown URI or another scheme). A document that cannot
+  be read is refused without its path.
 - **Change events:** a client on protocol 2026-07-28 can listen for changes (`subscriptions/listen`): the tool,
   prompt and resource lists change when your permissions or a token's permissions change, and the status and log
   resources of a build report each change, only to the caller that started the build. The server publishes them on
