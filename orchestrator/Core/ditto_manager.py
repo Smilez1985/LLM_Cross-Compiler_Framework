@@ -34,6 +34,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Sequence, Type,
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, create_model, field_validator, model_validator
 
 from orchestrator.Core.module_generator import ARCHITECTURES, MODULE_NAME_RE, ModuleGenerator
+from orchestrator.schemas.modules import PackageSourceIn, PinnedDownloadIn
 from orchestrator.llm import (AuthFailed, BadRequest, BillingError, ChatRequest, InvalidOutput, LLMClient, LLMError,
                               Message, NotConfigured, PermissionDenied, ProviderTimeout, ProviderUnavailable,
                               RateLimited, Refused, Truncated, Usage, make_registry_executor, run_tool_loop,
@@ -243,7 +244,8 @@ class DittoCannot(DittoError):
 # send every field); they are never used.
 _CANNOT_PLACEHOLDERS = {"module_name": "cannot", "architecture": "aarch64", "sdk": "none",
                         "base_os": "debian:bookworm-slim", "packages": [], "cpu_flags": "", "cmake_flags": "",
-                        "setup_commands": "", "quantization_logic": "", "assumptions": [], "base_image_reason": ""}
+                        "setup_commands": "", "quantization_logic": "", "assumptions": [], "base_image_reason": "",
+                        "package_sources": [], "pip_packages": [], "pip_index_url": "", "pinned_downloads": []}
 
 
 class ModuleDefinition(BaseModel):
@@ -269,6 +271,17 @@ class ModuleDefinition(BaseModel):
                                                "documentation, each with what to check first; at most 10")
     base_image_reason: str = Field(default="", description="Why this base image; required when base_os is not a "
                                                            "Docker Official Image (e.g. a vendor image)")
+    package_sources: List[PackageSourceIn] = Field(default_factory=list, max_length=20,
+                                                   description="Vendor apt repositories with their signing key "
+                                                               "(usually at most 3)")
+    pip_packages: List[str] = Field(default_factory=list, max_length=200,
+                                    description="Vendor Python packages, each pinned as name==version (usually at "
+                                                "most 30)")
+    pip_index_url: str = Field(default="", max_length=300,
+                               description="One https Python package index for pip_packages; empty: PyPI")
+    pinned_downloads: List[PinnedDownloadIn] = Field(default_factory=list, max_length=50,
+                                                     description="Vendor files with https address, size and sha256 "
+                                                                 "(usually at most 5); never llama.cpp")
     cannot: Optional[CannotAnswer] = Field(default=None, description="Only when there is nothing to base a module "
                                                                      "on; untested hardware is no reason")
 
@@ -347,6 +360,11 @@ def proposal_facts(definition: Union["ModuleDefinition", Dict[str, Any]]) -> str
     if assumptions:
         lines.append("Guessed by the AI (check these first):")
         lines += [f"  - {a}" for a in assumptions]
+    from orchestrator.Core.module_generator import vendor_fact_lines
+    vendor = [sanitize_untrusted(line, 600) for line in vendor_fact_lines(data)]
+    if vendor:
+        lines.append("Vendor software the image build adds (written by the AI; installed with network access):")
+        lines += [f"  - {line}" for line in vendor]
     lines.append("The module is untested on real hardware: it is created with support level community.")
     return "\n".join(lines)
 
@@ -780,27 +798,11 @@ class DittoCoder:
         build recipe's plan from it. The proposal's cpu_flags and cmake_flags are kept there as advisory text and
         never applied (decision D20). A proposal never opts in to a prebuilt nvidia/cuda image (decision D6)."""
         data = definition.model_dump() if isinstance(definition, BaseModel) else dict(definition)
-        packages = data.get("packages", [])
-        if isinstance(packages, str):
-            packages = packages.split()
         if PREBUILT_CUDA_IMAGE.search(str(data.get("base_os") or "")):
             raise ValueError(f"base_os: {PREBUILT_CUDA_REFUSAL}")
-        name = module_name or data.get("module_name") or "Custom_Target"
-        generator_input = {
-            "module_name": name,
-            "architecture": data.get("architecture", "aarch64"),
-            "sdk": data.get("sdk", "none"),
-            "description": ai_module_description(name, data.get("assumptions") or []),
-            "base_os": data.get("base_os", "debian:bookworm-slim"),
-            "packages": packages,
-            "cpu_flags": data.get("cpu_flags", ""),
-            "cmake_flags": data.get("cmake_flags", ""),
-            "quantization_logic": data.get("quantization_logic", ""),
-            "setup_commands": data.get("setup_commands", ""),
-            "detection_commands": "lscpu",
-            "supported_boards": [name],
-        }
-        return ModuleGenerator(Path(targets_dir)).generate_module(generator_input, self.framework, profile=profile)
+        from orchestrator.Core.module_generator import generator_input
+        return ModuleGenerator(Path(targets_dir)).generate_module(generator_input(data, module_name), self.framework,
+                                                                  profile=profile)
 
     # --- chat ---------------------------------------------------------------------------------------------
     def _context_limit(self) -> int:

@@ -248,7 +248,21 @@ def build_trust_check(target_path: Path, cache_dir: Optional[Path]) -> Optional[
     if trust == TrustLevel.LOCAL:
         return (f"Target {target_path.name} was imported from a file that is not in the signed community index "
                 "(trust: local); nobody reviewed its scripts.")
+    if trust is None and ai_generated_target(target_path):
+        return (f"Target {target_path.name} was created by an AI and is untested on real hardware (support level "
+                "community); its build image is built with network access on this computer, from the base image and "
+                "vendor sources its Dockerfile names.")
     return None
+
+
+def ai_generated_target(target_path: Path) -> bool:
+    """Whether a target folder's target.yml marks it as AI-generated (create_target_module, Ditto's proposal)."""
+    try:
+        meta = yaml.safe_load((Path(target_path) / "target.yml").read_text(encoding="utf-8")) or {}
+    except (OSError, yaml.YAMLError):
+        return False
+    return isinstance(meta, dict) and isinstance(meta.get("metadata"), dict) and \
+        meta["metadata"].get("provenance") == "ai-generated"
 
 
 class CommunityManager:

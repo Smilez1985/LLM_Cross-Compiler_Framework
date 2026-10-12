@@ -38,6 +38,10 @@ ENV PATH="/root/.local/bin:$PATH"
 ENV CUDA_HOME=/usr/local/cuda
 ENV CUDA_RUNTIME_DIR=/opt/cuda-runtime
 
+# Vendor apt sources of the module (package_sources): the framework writes this block; each signing key is
+# checked against its fingerprint before the source is added (empty when the module has none).
+# [VENDOR_SOURCES]
+
 # System Dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -142,6 +146,12 @@ RUN python3 -m pip install --no-cache-dir \
         tqdm psutil pyyaml requests \
     && python3 -m pip install --no-cache-dir "${LLAMA_CPP_PATH}/gguf-py"
 
+# Vendor Python packages of the module (pip_packages, each pinned name==version; empty when it has none)
+# [PIP_PACKAGES]
+
+# Vendor downloads of the module (pinned_downloads: https, size and sha256 checked; empty when it has none)
+# [PINNED_DOWNLOADS]
+
 # --- llama.cpp conversion tools: the build (after the venvs, so a new LLAMA_CMAKE_ARGS rebuilds only this layer) ---
 # Every build: no option that downloads at configure or build time, no subprocess support in llama.cpp, no FetchContent
 # download (FETCHCONTENT_FULLY_DISCONNECTED), the build number and commit for --version. These come after
@@ -217,6 +227,7 @@ RUN printf '%s\n' /opt/cuda-runtime/lib > /etc/ld.so.conf.d/cuda-runtime.conf &&
 # Copy Python Env and the llama.cpp tools (source tree with build/bin) from Builder
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /usr/src/llama.cpp /usr/src/llama.cpp
+# [PINNED_DOWNLOADS_COPY]
 ENV VIRTUAL_ENV=/opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 

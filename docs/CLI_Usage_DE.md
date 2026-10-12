@@ -130,7 +130,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `mcp serve` / `mcp config` | Den MCP-Server betreiben / zeigen, wie man KI-Clients verbindet |
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
 | `module create` / `module generate-ai` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei |
-| `scan` | Die Hardware-Probe auf diesem Rechner oder mit `--device` auf einem Board per SSH ausführen und das Profil speichern |
+| `scan` | Die Hardware-Probe auf diesem Rechner oder mit `--device` auf einem Board per SSH ausführen, oder mit `--import` die Probe-Datei eines Boards ablegen, und ihre Probe-ID zeigen |
 | `device list` / `device settings` | Die untersuchten Boards / wie die Laufzeit auf einem Board installiert wird (Startskript oder systemd), vor einem Deployment entschieden |
 | `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
@@ -1238,6 +1238,7 @@ llm-cli module generate-ai target_hardware_config.txt --provider local
 llm-cli scan [--output TEXT] [--json] [--script]
 llm-cli scan --device HOST --user TEXT [--port N] [--password TEXT] [--trust-fingerprint TEXT] [--label TEXT]
              [--output TEXT] [--json]
+llm-cli scan --import DATEI [--label TEXT]
 ```
 
 Führt die Hardware-Probe aus und behält ihr Ergebnis, das Hardware-Profil (Schema 2, beschrieben im
@@ -1259,6 +1260,19 @@ den Rechner geplant, auf dem das Modell läuft, deshalb läuft die Probe auf die
   `--output` geschrieben und unter der ID des Boards gespeichert (`~/.llm-framework/hardware/devices/<ID>.txt`; die ID
   kommt aus dem Hostschlüssel des Boards), mit deiner Bezeichnung und seiner Adresse. Der SSH-Benutzer wird zum
   Deploy-Benutzer des Boards für [`device runtime deploy`](#device), wenn noch keiner gesetzt ist (nie root).
+- **Die Probe-Datei eines Boards** (`--import DATEI`): Eine `target_hardware_config.txt`, die du von einem Board
+  kopiert hast (dort von `scripts/hardware_probe.sh` oder `llm-cli scan` geschrieben), wird wie jede Probe-Datei von
+  außen geprüft, unter einer neuen zufälligen ID mit deiner Bezeichnung gespeichert (Standard: das Board-Modell aus
+  der Datei), und die CLI zeigt diese **Probe-ID** und das passende Target (über den SoC als Board eines Targets,
+  dann über den Hersteller von SoC oder NPU, bei gleicher Architektur). Eine ältere Datei nach Schema 1 wird
+  umgewandelt; was das Schema nicht kennt, darunter der Hostname, fällt weg. KI-Clients und Ditto nennen die Probe
+  eines Boards nur über diese ID (`get_hardware_probe`, der Prompt `add_board`); kein Tool liest eine Probe über
+  einen Pfad.
+
+Auf diesem Rechner läuft die Probe ohne Terminal: Das Ersatzskript bekommt seine Eingabe aus `/dev/null`,
+`NON_INTERACTIVE=true` und einen eigenen Arbeitsordner (`~/.llm-framework/hardware/work`, nie den aktuellen Ordner),
+und eine Probe, die länger als 120 Sekunden braucht, wird beendet. Derselbe Dienst führt die Probe für das MCP-Tool
+`probe_local_hardware` aus.
 
 Die Probes fragen nie nach, installieren nichts und verlangen keine Administratorrechte. Exit-Code 1, wenn die Probe
 scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
@@ -1273,7 +1287,8 @@ scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
 | `--port N` | SSH-Port des Boards (Standard 22). |
 | `--password TEXT` | Nur für die erste Verbindung: wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu installieren, und nie gespeichert (wird abgefragt, wenn es fehlt). |
 | `--trust-fingerprint TEXT` | Einem neuen Board ohne Nachfrage vertrauen, wenn sein Hostschlüssel diesen SHA256-Fingerabdruck hat. |
-| `--label TEXT` | Deine Bezeichnung für das Board im Profilspeicher. |
+| `--label TEXT` | Deine Bezeichnung für das Board im Profilspeicher (mit `--device` oder `--import`). |
+| `--import DATEI` | Die Probe-Datei eines Boards im Probe-Speicher ablegen und ihre Probe-ID zeigen (nicht zusammen mit `--device`). |
 
 Ein Rechner ohne Netzzugang führt eine Probe von Hand aus, und du importierst ihre Datei
 ([README](../README_DE.md#die-hardware-des-boards-untersuchen)). In der GUI importiert **Scan / Import...** eine
@@ -1283,6 +1298,7 @@ Probe-Datei, untersucht ein Board per SSH (mit derselben entfernten Probe, also 
 ```bash
 llm-cli scan                                        # dieser Rechner, gespeichert als „local“
 llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W" --output zero3w.txt
+llm-cli scan --import zero3w.txt --label "ZERO 3W"   # eine von einem Board kopierte Probe-Datei
 ```
 
 ---
