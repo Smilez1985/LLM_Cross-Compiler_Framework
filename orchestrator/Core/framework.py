@@ -89,6 +89,7 @@ class FrameworkManager:
         self.build_service: Optional[BuildService] = None
         self.job_service: Optional[JobService] = None
         self.tool_registry = None
+        self.chat_feed = None  # Core.chat_feed.FeedStore: what arrives in the chat panel
         self.updater: Optional[UpdateManager] = None
 
         self._initialized = False
@@ -171,7 +172,15 @@ class FrameworkManager:
             except Exception as e:
                 self.tool_registry = None
                 self.logger.error(f"AI tools unavailable (tool permissions/audit log in the per-user folder): {e}")
-            
+            # The chat feed (messages, AI decisions with their reasons), signed with the permissions' key; opened on
+            # first use, so a damaged file never stops the boot (`llm-cli doctor` reports it).
+            try:
+                from orchestrator.Core.chat_feed import open_chat_feed
+                self.chat_feed = open_chat_feed(self)
+            except Exception as e:
+                self.chat_feed = None
+                self.logger.error(f"The chat feed is unavailable (per-user folder): {e}")
+
             # === DEPENDENCY INJECTION ===
             # Connect the Guardian (Self-Healing, which asks Ditto) to the Orchestrator
             self.orchestrator.inject_self_healing(self.self_healing_manager)
@@ -259,6 +268,7 @@ class FrameworkManager:
             "build_service": self.build_service,
             "job_service": self.job_service,
             "tool_registry": self.tool_registry,
+            "chat_feed": self.chat_feed,
             "docker_client": getattr(getattr(self.docker_manager, "builder", None), "docker_client", None)
         }
         return components.get(name)
@@ -274,5 +284,7 @@ class FrameworkManager:
                 approvals.close()
             except Exception as e:
                 self.logger.warning(f"Pending approvals not closed: {e}")
+        if self.chat_feed is not None:
+            self.chat_feed.close()
         self._stop_loop()
         self.logger.info("Shutdown complete.")
