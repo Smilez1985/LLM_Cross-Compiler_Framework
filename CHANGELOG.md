@@ -635,6 +635,22 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   covered by a standing approval.
 - **Benchmark runs of this computer** (`~/.llm-framework/benchmarks/`): `llama-bench` results of the self-built build
   (prompt and generation speed, peak memory) with the model's sha256 and the build id; `get_status` shows the newest.
+- **The chat feed store with signed rows** (`chat_feed.sqlite` in the per-user folder, mode 0600; delegation design
+  5.3): the one store for what the coming chat panel shows - your messages, Ditto's answers, notices, questions that
+  wait, decisions an AI made with its reason (the audit log keeps only the reason's hash), results of work an AI
+  started. Every framework process appends to it in its own transaction; each row is signed with a key derived from
+  the audit key (`sign_row`/`verify_row`), and a row that was changed, is unsigned or was written with another key is
+  never shown (the reader learns how many were skipped; rows of a newer framework version are counted apart). Every
+  string is redacted before it is stored, AI text is cleaned of invisible characters first, a row has no field for a
+  tool's output or raw arguments, parameters are one line and marked as framework or outside text, and who a row is
+  from comes from the caller id. A write an AI's decision depends on raises when it cannot be written (a full disk
+  included), every other write fails open, and reads never wait longer than their short timeout. Clearing the chat is
+  a person's action only: it needs the accepted plan (full path, file name, size, what it is), is audited before
+  anything is deleted, overwrites the deleted text and hides the records of what AIs did instead of deleting them.
+  Ditto's earlier chat is taken over once; without an AI the framework explains a decision from its record alone.
+  Speaking names (`Core/speaking_names.py`) show exact framework ids and masked values in AI text by name at display
+  time, never inside code and never for a near match, and keep the original words; `llm-cli doctor` checks that the
+  feed can be written and its newest rows verify. Nothing removes rows by itself yet.
 
 ### Changed
 - **Refused MCP calls carry their reason code as structured content** (`{"error": {"code", "field"}}`, framework

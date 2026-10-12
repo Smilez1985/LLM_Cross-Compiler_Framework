@@ -148,7 +148,8 @@ llm-cli doctor [--json] [--fix] [--tier 1|2]
 
 Prüft Python, den Docker-Daemon und buildx, den freien Speicherplatz für den Cache- und den Ausgabeordner,
 die Targets und ihre Capabilities, ob der persönliche Ordner privat ist, den Secrets-Speicher und den
-Schlüsselbund, die Tool-Berechtigungen, das Audit-Log, die mitgelieferten Kalibrierungsdaten und die installierten
+Schlüsselbund, die Tool-Berechtigungen, das Audit-Log, den Chat-Verlauf (unveröffentlicht: er lässt sich
+schreiben, seine neuesten Einträge stimmen), die mitgelieferten Kalibrierungsdaten und die installierten
 Community-Pakete (zurückgezogen, verändert oder aus einer Datei importiert). Zu jedem Befund gibt es einen Hinweis,
 wie du ihn behebst.
 

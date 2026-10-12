@@ -1871,7 +1871,7 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | Disk | free space for the cache and output folders (warning below 20 GB, error below 5 GB) |
 | Targets | targets found, capabilities readable |
 | Security | personal folder private, secrets store usable, keyring protects secrets |
-| AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key) |
+| AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key); the chat feed can be written and its newest entries verify (changed or foreign entries, no key; unreleased) |
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
 | Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
