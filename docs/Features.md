@@ -607,6 +607,12 @@ How a question with tools runs:
   share one until named tokens tell them apart).
 - What was repaired is marked in the confirmation question, listed in the result's `notes` and recorded in the
   audit log (`name_requested`, `repairs`). Ditto's confirmation shows exactly the framework's question.
+- A refused or failed call names its repairs too, in the same words as a successful result's `notes`: the text ends
+  with "Notes: argument 'quant' read as 'quantization'.", and over MCP the structured error carries them as well
+  (`{"error": {"code": ..., "field": ..., "notes": [...]}}`). This holds however the call ends: an invalid value, a
+  limit, a denied permission, too little disk space found before the question, a "no", a question nobody answered
+  in time, the repeat guard. So a model learns the right argument name even from a refusal, on Ditto's own path, as
+  an MCP client and with Ditto as an MCP client of another framework.
 - MCP clients get each tool's own closed input schema (`additionalProperties: false`), the one Ditto's model sees.
 - Tool arguments a local model sends with a code fence or in Python notation (single quotes, `True`, `None`, a
   trailing comma) are read once more as such; anything else stays an error.
@@ -1540,6 +1546,12 @@ framework never sees it.
   capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask"
   becomes a pending approval in the framework. Client text is cleared of anything that looks like a key or token first, then escaped and cut
   to 64 characters; it is a label, never a permission.
+- **Testing with a real client:** `scripts/mcp_client_smoke.sh` runs Claude Code (`claude -p`) against the server in
+  a throw-away environment and checks from the isolated audit log that the client is recorded, `get_status` works,
+  an unknown argument is refused with a suggestion, a declared alias is recorded and shown in a result and in a
+  refusal, and a call that needs your confirmation does not run without an answer. It uses the claude command's own
+  sign-in and never touches its credentials; without a signed-in claude command it is skipped. See
+  [the real-client smoke test](../CONTRIBUTING.md#the-real-client-smoke-test).
 
 What the clients support, from their vendors' documentation (2026-10-11). "Not documented" means the vendor does
 not say; the stderr line above shows what a client really declares.

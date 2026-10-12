@@ -152,11 +152,24 @@ def has_untrusted(model_type: Type[BaseModel]) -> bool:
     return walk(model_type.model_json_schema())
 
 
+def clean_note(note: str) -> str:
+    """One framework note as a result's `notes` carry it (secrets redacted, capped); a refusal's notes too."""
+    return _clean_text(str(note), None)
+
+
+def notes_text(notes: List[str]) -> str:
+    """The framework's notes at the end of a refusal's or an error's text (" Notes: a; b."), the same notes a
+    successful result carries in `notes`: a declared alias the call used ("argument 'quant' read as
+    'quantization'") is named however the call ends, so a model learns the right argument name."""
+    shown = [n.strip().rstrip(".") for n in notes if n and n.strip()]
+    return f" Notes: {'; '.join(shown)}." if shown else ""
+
+
 def filtered_result(result: BaseModel, notes: List[str]) -> BaseModel:
     """The filtered result with the framework's notes (whatever the handler put into `notes` is dropped)."""
     data = filter_model(result)
     if "notes" in type(result).model_fields:
-        data["notes"] = [_clean_text(n, None) for n in notes]
+        data["notes"] = [clean_note(n) for n in notes]
     return type(result).model_validate(data)
 
 

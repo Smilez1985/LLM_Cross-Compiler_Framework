@@ -74,11 +74,11 @@ from pydantic import BaseModel, Field, ValidationError
 
 from orchestrator.tools.confirmation import MAX_ELICITATION, CallTooLong
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, ENV_VAR, TokenStore, TokenStoreError, token_digest
-from orchestrator.tools.output import has_untrusted
+from orchestrator.tools.output import has_untrusted, notes_text
 from orchestrator.tools.policy import Decision
 from orchestrator.tools.registry import (TOO_LONG_NEXT, AuditUnavailable, LimitHit, ResourceSpec, ResourceUnknown,
                                          ToolContext, ToolDenied, ToolError, ToolRegistry, ToolSpec, arguments_key,
-                                         text_sha256)
+                                         repair_notes, text_sha256)
 from orchestrator.tools.spec import CallFacts
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -450,15 +450,18 @@ def _model_parameters(model: type) -> list:
     return params
 
 
-def error_text(tool: str, error: ToolError) -> str:
+def error_text(tool: str, error: ToolError, notes: bool = True) -> str:
     """The text an MCP client gets for a refused or failed call: the framework's own words plain, the part that
-    quotes external text (a handler's error) wrapped as untrusted data, then the next step."""
+    quotes external text (a handler's error) wrapped as untrusted data, then the next step and the framework's notes
+    (`notes=False` for a tools/call: AuditedServer._handle_call_tool adds the call's repair notes to every refusal
+    itself, whichever way it was refused)."""
     quoted = getattr(error, "quoted", "")
+    suffix = notes_text(getattr(error, "notes", [])) if notes else ""
     if not quoted or not error.message.endswith(quoted):
-        return str(error)
+        return error.text() + suffix
     text = error.message[:-len(quoted)] + wrap_untrusted(quoted, source=f"tool error:{tool}",
                                                          max_len=len(quoted) + 1)
-    return f"{text} Next: {error.next}" if error.next else text
+    return (f"{text} Next: {error.next}" if error.next else text) + suffix
 
 
 def _audited(error: Exception) -> Exception:
@@ -470,6 +473,39 @@ def _audited(error: Exception) -> Exception:
 # The reason code (and field) of the tools/call being answered, for the structured error of an is_error result.
 _ERROR_FACTS: "contextvars.ContextVar[Optional[Dict[str, str]]]" = contextvars.ContextVar("lcf_mcp_error",
                                                                                         default=None)
+# The repair notes of the tools/call being answered (filled once the registry normalized its arguments, also when
+# it refused them): every refused or failed result carries them, as a successful result's `notes` do.
+_REPAIR_NOTES: "contextvars.ContextVar[Optional[List[str]]]" = contextvars.ContextVar("lcf_mcp_repairs",
+                                                                                     default=None)
+
+
+def _note_repairs(notes: List[str]) -> None:
+    """Remembers the repair notes of the tools/call being answered (see _REPAIR_NOTES)."""
+    box = _REPAIR_NOTES.get()
+    if box is not None:
+        box[:] = [n for n in notes if isinstance(n, str) and n]
+
+
+def with_repair_notes(result, notes: List[str]):
+    """A refused or failed tools/call result with the call's repair notes: in the structured error
+    ({"error": {"code", "field", "notes"}}) and at the end of the text, in the words of a successful result's notes,
+    so a model learns the right argument name however the call ended (a refusal before or instead of the question:
+    too little disk space, a limit, an invalid value, a denied permission, a timeout)."""
+    if not notes or not getattr(result, "is_error", False):
+        return result
+    from mcp_types import TextContent
+    data = result.structured_content if isinstance(result.structured_content, dict) else {}
+    error = data.get("error")
+    error = dict(error) if isinstance(error, dict) else {"code": "failed"}
+    error["notes"] = list(notes)
+    content = list(result.content or [])
+    suffix = notes_text(notes)
+    last = max((i for i, c in enumerate(content) if isinstance(c, TextContent)), default=None)
+    if last is None:
+        content.append(TextContent(type="text", text=suffix.strip()))
+    elif not content[last].text.endswith(suffix):
+        content[last] = TextContent(type="text", text=content[last].text + suffix)
+    return result.model_copy(update={"structured_content": {**data, "error": error}, "content": content})
 _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -868,7 +904,7 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             raise
         except ToolError as e:
             state.audited = True
-            message = error_text(spec.name, e)
+            message = error_text(spec.name, e, notes=False)  # the repair notes come with every refusal
             code = e.code
             if asked and not approved:
                 message = f"The user declined '{spec.title}'. Do not retry it unless they ask for it."
@@ -1344,13 +1380,17 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
             the text stays as it was), so a client takes the reason code from it instead of the words."""
             from mcp_types import CallToolResult
             box: Dict[str, str] = {}
-            token = _ERROR_FACTS.set(box)
+            notes: List[str] = []
+            token, noted = _ERROR_FACTS.set(box), _REPAIR_NOTES.set(notes)
             try:
                 result = await super()._handle_call_tool(ctx, params)
             finally:
+                _REPAIR_NOTES.reset(noted)
                 _ERROR_FACTS.reset(token)
             if isinstance(result, CallToolResult) and result.is_error and result.structured_content is None:
                 result = result.model_copy(update={"structured_content": {"error": dict(box or {"code": "failed"})}})
+            if isinstance(result, CallToolResult) and result.is_error:
+                result = with_repair_notes(result, notes)  # however it was refused, the repairs are named
             return result
 
         async def call_tool(self, name, arguments, context=None):
@@ -1366,8 +1406,11 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                     prepared = await anyio.to_thread.run_sync(registry.prepare, name, arguments, ctx)
                 except ToolError as e:
                     state.audited = True
-                    raise _coded(_audited(MCPToolError(error_text(str(name), e))), e.code, e.field) from None
+                    _note_repairs(e.notes)  # a refusal after a repair names it (_handle_call_tool adds them)
+                    raise _coded(_audited(MCPToolError(error_text(str(name), e, notes=False))), e.code,
+                                 e.field) from None
                 state.repairs = prepared.repairs
+                _note_repairs(repair_notes(prepared.repairs))
                 audit_name, audit_arguments = prepared.spec.name, prepared.arguments
                 # The rate and quotas before the policy and the question (an audited refusal that says when).
                 ctx.repairs = list(prepared.repairs)
@@ -1375,7 +1418,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                     await anyio.to_thread.run_sync(registry.enforce_limits, prepared, ctx)
                 except ToolError as e:
                     state.audited = True
-                    error = _audited(MCPToolError(error_text(prepared.spec.name, e)))
+                    error = _audited(MCPToolError(error_text(prepared.spec.name, e, notes=False)))
                     raise _coded(error, e.code, e.field) from None
                 state.limits_checked = True
                 return await super().call_tool(prepared.spec.name, prepared.arguments, context)

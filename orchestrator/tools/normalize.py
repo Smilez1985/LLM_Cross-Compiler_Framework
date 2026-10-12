@@ -65,6 +65,9 @@ class NormalizeError(ValueError):
         self.allowed = list(allowed or [])
         self.suggestions = list(suggestions or [])
         self.field = field
+        # The repairs made before the refusal (a declared alias read before an invalid value): the error shows
+        # them as notes, as a successful result would, and the audit records them.
+        self.repairs: List["Repair"] = []
 
 
 @dataclass(frozen=True)
@@ -306,7 +309,17 @@ def _field_list(spec) -> str:
 
 def normalize_arguments(spec, raw: Any) -> Normalized:
     """The arguments as the tool means them (canonical names and values) and the repairs made. Raises
-    NormalizeError for anything it may not repair."""
+    NormalizeError for anything it may not repair; the error carries the repairs made before it (`repairs`), so a
+    refusal names a declared alias it read as clearly as a successful result does."""
+    repairs: List[Repair] = []
+    try:
+        return _normalize(spec, raw, repairs)
+    except NormalizeError as e:
+        e.repairs = list(repairs)
+        raise
+
+
+def _normalize(spec, raw: Any, repairs: List[Repair]) -> Normalized:
     if raw is None:
         raw = {}
     if not isinstance(raw, dict):
@@ -314,7 +327,6 @@ def normalize_arguments(spec, raw: Any) -> Normalized:
                              next=f"Call {spec.name} with named arguments ({_field_list(spec)}).")
     fields = spec.input_model.model_fields
     renamed: Dict[str, Tuple[str, Any]] = {}  # field -> (key written, value)
-    repairs: List[Repair] = []
     unknown: List[str] = []
     for key, value in raw.items():
         if not isinstance(key, str):
