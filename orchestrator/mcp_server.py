@@ -15,9 +15,12 @@ Security model
 - Results go through the registry's output filter (secrets redacted, external text cleaned and marked as
   untrusted in the output schema); the text block starts with one sentence of framework facts and wraps the
   JSON as untrusted data.
-- "Ask" permissions become an MCP elicitation (the client shows the question to the user). A client
-  without elicitation support cannot confirm, so such calls are denied with a hint on how to allow them.
-  A person's "no" is final for that call, even if the policy is loosened while the dialog is open.
+- "Ask" permissions become an MCP elicitation (the client shows the question to the user). When the client
+  cannot ask (no form elicitation), the question is too long for an elicitation, or the person wants the tool
+  confirmed in the framework, the question becomes a pending approval in the framework instead (GUI notice,
+  `llm-cli tools approvals`); the framework runs the call once the person approves it there, and the client reads
+  the result with get_job_status. A person's "no" is final for that call, even if the policy is loosened while the
+  dialog is open.
 - stdio is the default transport. Streamable HTTP binds to loopback only, refuses requests from web
   pages (any Origin header) and Host names other than loopback with its port, and requires a named
   token per client (`llm-cli mcp token`). The token's name is the caller (`mcp:<name>`) for the
@@ -88,6 +91,13 @@ class Confirmation(BaseModel):
     approve: bool = Field(description="Allow this action?")
 
 
+class ConfirmationWithRequest(Confirmation):
+    """The form for a tool that may get a standing approval: the extra choice only asks the framework, where the person
+    confirms it again in the framework's own window. An answer here never creates a standing approval."""
+    stop_asking: bool = Field(default=False, description="Ask the framework to stop asking for calls like this one "
+                                                         "(you confirm that in the framework itself)")
+
+
 class NotAsked(Confirmation):
     """Resolver outcome when nobody was asked: the policy decided, or the client cannot ask.
     The registry then decides on its own and records the call as not confirmed by a person.
@@ -97,6 +107,7 @@ class NotAsked(Confirmation):
     refused: str = ""
     outcome: str = "not_confirmed"
     answer: str = ""
+    pending: bool = False  # nobody can be asked through the client: the registry puts it to the person in the framework
 
 
 INPUT_REQUIRED_VERSION = "2026-07-28"  # elicitation as input_required rounds instead of a request mid-call
@@ -516,25 +527,43 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         answered = rounds and decision == Decision.ALLOW and bool(ctx.input_responses)
         if decision != Decision.ASK and not answered:
             return NotAsked(approve=False)  # the registry applies allow/deny itself
+        if spec.grant is not None and not answered and hasattr(registry, "matching_grant"):
+            # A standing approval covers the call: no question; the registry applies it and checks it again right
+            # before the handler (a revocation in between stops the call).
+            covered = await anyio.to_thread.run_sync(registry.matching_grant, spec, _parsed(spec, arguments),
+                                                     _tool_context(ctx, caller, instance))
+            if covered is not None:
+                return NotAsked(approve=False)
         capabilities = ctx.client_capabilities
         elicitation = getattr(capabilities, "elicitation", None) if capabilities is not None else None
+        # Pending approvals (design 6.9): the question appears in the framework when the client cannot ask the person.
+        pending = getattr(registry, "approvals", None) is not None and not answered
+        tool_ctx = _tool_context(ctx, caller, instance)
+        if pending and await anyio.to_thread.run_sync(registry.framework_channel_required, spec, tool_ctx.actor):
+            return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=True)
         # Same rule as the SDK: a bare `elicitation: {}` means form support, url-only does not.
         if elicitation is None or (getattr(elicitation, "form", None) is None
                                    and getattr(elicitation, "url", None) is not None):
-            return NotAsked(approve=False, can_ask=False, answer="unavailable")
+            return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=pending)
         state = _call_state()
         marks, renamed = repair_marks(state.repairs)
         try:
             message = describe_call(spec, arguments, marks=marks, renamed=renamed)
         except CallTooLong as e:
+            if pending:  # longer than an elicitation may be: the framework's window shows up to 16,000 characters
+                return NotAsked(approve=False, can_ask=False, answer="unavailable", pending=True)
             return NotAsked(approve=False, refused=str(e))
-        tool_ctx = _tool_context(ctx, caller, instance)
         tool_ctx.confirm_channel = "elicitation"
+        # The form offers "ask the framework to stop asking" only where the framework could offer a standing approval.
+        offer = None
+        if spec.grant is not None and getattr(registry, "approvals", None) is not None:
+            offer = await anyio.to_thread.run_sync(registry.grant_offer, spec, _parsed(spec, arguments), tool_ctx)
+        form = ConfirmationWithRequest if offer is not None else Confirmation
         await anyio.to_thread.run_sync(questions.expire)
         if rounds and ctx.input_responses:
             state.question_sha256 = text_sha256(message)
             questions.answered(spec.name, state.question_sha256)
-            return Elicit(message, Confirmation)
+            return Elicit(message, form)
         # The question is recorded before it is asked; for a change that cannot be recorded it is not asked.
         try:
             state.question_sha256 = await anyio.to_thread.run_sync(registry.record_question, spec.name,
@@ -543,12 +572,12 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             return NotAsked(approve=False, refused=str(e), outcome="audit_unavailable")
         if rounds:
             questions.asked(spec.name, state.question_sha256, arguments, tool_ctx)
-            return Elicit(message, Confirmation)
+            return Elicit(message, form)
         # Classic transport: ask here, so a failed request is an audited refusal, not a protocol error.
         state.asking = True
         try:
             with anyio.fail_after(ELICITATION_TIMEOUT):
-                return await ctx.elicit(message, Confirmation)
+                return await ctx.elicit(message, form)
         except TimeoutError:
             minutes = max(1, round(ELICITATION_TIMEOUT / 60))
             return NotAsked(approve=False, outcome="confirmation_timeout", answer="timeout",
@@ -585,11 +614,18 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         if isinstance(data, NotAsked):
             approved, asked, can_ask = None, False, data.can_ask
             tool_ctx.answer = data.answer
+            tool_ctx.pending_approvals = data.pending
         else:
             approved, asked, can_ask = bool(data is not None and data.approve), True, True
             tool_ctx.confirm_channel, tool_ctx.question_sha256 = "elicitation", state.question_sha256
             tool_ctx.answer = ("accepted" if approved else "cancelled" if isinstance(outcome, CancelledElicitation)
                                else "declined")
+        if approved and getattr(data, "stop_asking", False) is True and getattr(registry, "approvals", None):
+            # Only a request: the person confirms "do not ask again" in the framework's own window, or not at all.
+            try:
+                await anyio.to_thread.run_sync(registry.approvals.request_grant, spec, _parsed(spec, kwargs), tool_ctx)
+            except Exception as e:  # never stops the call the person just confirmed
+                logger.warning(f"Could not record the request to stop asking for '{spec.name}': {e}")
         if spec.long_poll is not None and approved is not False and can_ask:  # only a call that will run waits
             await _long_poll(spec, registry, kwargs, tool_ctx, ctx)
         try:
@@ -730,9 +766,15 @@ def end_session(framework, registry: Optional[ToolRegistry], session: McpSession
 
     service = getattr(framework, "build_service", None)
     jobs = getattr(framework, "job_service", None)
+    approvals = getattr(registry, "approvals", None)
     cancelled = []
     for owner in sorted({session.owner} | set(session.owners)):
         actor = owner.rsplit("#", 1)[0]
+        if approvals is not None:  # its requests to stop asking end with it (its pending approvals end with the jobs)
+            try:
+                approvals.end_owner(owner)
+            except Exception as e:
+                logger.warning(f"Could not withdraw the requests of a closed MCP session: {e}")
         for rid in (service.active_requests(owner) if hasattr(service, "active_requests") else []):
             try:
                 service.cancel(rid)

@@ -864,11 +864,68 @@ Konto oder Schlüssel an; das Framework sieht das nie.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine
-  Frage, die länger als 4000 Zeichen würde, wird abgelehnt statt gekürzt. Nur eine echte Antwort des Benutzers zählt
+  Frage, die länger als 4000 Zeichen würde, wird zu einer wartenden Freigabe (unten) statt gekürzt. Nur eine echte
+  Antwort des Benutzers zählt
   als Zustimmung, und ein „Nein“ gilt für diesen Aufruf endgültig, auch wenn die Berechtigungen gelockert werden,
   während die Frage offen ist. Abgelehnte und abgebrochene Aufrufe sowie Aufrufe, die abgewiesen werden, bevor sie
-  laufen (ungültige Argumente, eine gescheiterte Bestätigung), landen ebenfalls im Audit-Log. Ein Client, der nicht
-  fragen kann, bekommt eine Ablehnung mit einem Hinweis, wie du das Tool erlaubst.
+  laufen (ungültige Argumente, eine gescheiterte Bestätigung), landen ebenfalls im Audit-Log.
+- **Wartende Freigaben:** Kann ein Client dich nicht fragen (er hat keine Formular-Elicitation erklärt), ist die
+  Frage länger, als eine Elicitation sein darf, oder hast du das Tool auf Bestätigung im Framework gestellt
+  (`llm-cli tools permissions --confirm-in-framework TOOL` oder „Ask in the framework“ im Dialog Tool Permissions;
+  nützlich für Tools, die du jedes Mal im Framework sehen willst), wird der Aufruf nicht abgelehnt. Der Client bekommt
+  den Fehler `waiting_for_approval` mit einer Job-ID („poll get_job_status with wait_seconds=50; do not call this
+  tool again“), und die Frage wartet auf dich: ein Hinweis in der Statusleiste der GUI (und eine
+  Desktop-Benachrichtigung, wo das System eine anbietet), der **Tools > Pending Approvals...** öffnet, und
+  `llm-cli tools approvals` in einem Terminal. Das Fenster zeigt zuerst die Aufruferklasse („all local stdio clients“
+  oder den Namen des Tokens), dann den eigenen Namen des Clients, gekennzeichnet als selbst angegeben, die
+  vollständige Frage (bis zu 16.000 Zeichen; eine längere wird überall abgelehnt) und die verbleibende Zeit, mit
+  **Approve once** und **Decline**. Bei der Freigabe baut das Framework die Frage neu: Lautet sie anders (ein Fakt
+  dahinter hat sich geändert), läuft nichts und du wirst erneut gefragt; sonst führt das Framework den Aufruf selbst
+  aus, unter dem ursprünglichen Aufrufer (`confirm_channel` `approval:<id>` im Audit-Log), und der Client liest das
+  Ergebnis mit `get_job_status`. Derselbe Aufruf, wiederholt während er wartet, bekommt denselben Job, eine Freigabe
+  läuft einmal und nur für den Aufrufer, das Tool und die Argumente, für die gefragt wurde, sie verfällt nach 15
+  Minuten (festgehalten als `unanswered`) und endet mit der Sitzung des Clients, wenn der Client seinen Job abbricht
+  oder wenn das Framework beendet wird. Ein Client hat höchstens 5 offene Freigaben. Das Fenster setzt nie einen
+  anderen Aufruf an die Stelle dessen, den du gerade liest: Wird er zurückgezogen, läuft er ab oder wird er anderswo
+  entschieden, ist nichts ausgewählt; wird er mit neuen Fakten erneut gefragt, ist seine neue Frage gekennzeichnet und
+  die Freigabe wartet einen Moment, damit ein Klick, der dem alten Text galt, nicht den neuen freigibt. Deine
+  Entscheidung wird festgehalten (`approval_decided`, Akteur `gui` oder `cli`), bevor sie gespeichert wird; scheitert
+  das, wird nichts entschieden. Die Freigaben liegen in `~/.llm-framework/tool_approvals.json`, signiert wie die
+  Berechtigungen, damit eine Bearbeitung von Hand nichts entscheidet; kein Tool kann eine anlegen, auflisten,
+  freigeben oder ablehnen, und nur der Client, der gefragt hat, sieht das Ergebnis. Ditto im Framework fragt immer in
+  seinem eigenen Dialog oder seiner Rückfrage und braucht nie eine.
+- **Dauerhafte Freigaben („ja, und nicht mehr fragen“):** ein begrenztes „erlauben“ für einen Aufrufer, das nur du im
+  eigenen Fenster des Frameworks anlegst: **Approve and do not ask again...** im Freigabefenster,
+  `llm-cli tools approvals approve ID --always` oder Dittos Dialog und Rückfrage. Der eigene Dialog eines MCP-Clients
+  kann nur darum bitten: Sein Formular hat dann „ask the framework to stop asking for calls like this one“, was
+  diesen einen Aufruf ausführt und eine Anfrage ins Freigabefenster legt, die du bestätigst (eine offene Anfrage je
+  Aufrufer und Tool, 15 Minuten oder bis seine Sitzung endet; ein abgelehnter Rahmen wird 24 Stunden lang nicht erneut
+  angefragt). Bevor du bestätigst, zeigt das Fenster eine Warnung, die nennt, wer dann ohne Nachfrage handeln darf
+  (bei den lokalen stdio-Clients: alle, mit dem Befehl, der einem Client ein eigenes Token gibt), was die dauerhafte
+  Freigabe in einfachen Worten abdeckt, wie weit („this one only“ oder „any“, wo angeboten) und wie lange („until I
+  revoke it“, 30 Tage oder 24 Stunden; für alle lokalen stdio-Clients zusammen nur der engste Rahmen und höchstens 30
+  Tage). Der Rahmen kommt aus Fakten, die das Framework für den Aufruf nachgeschlagen hat, nie aus dem, was die KI
+  geschrieben hat; ein Aufruf außerhalb fragt wie bisher, und eine dauerhafte Freigabe hebt nie ein „verweigern“ auf,
+  deckt nie einen anderen Aufrufer ab und gilt nie für ein Tool, das du auf Bestätigung im Framework gestellt hast.
+  Pakete aus dem Zoo können eine bekommen für Wissens- und Rezept-Pakete mit Vertrauensstufe `verified` oder
+  `community` und für Target-Pakete mit `verified`, jeweils gebunden an genau die Paketart, die Vertrauensstufe und
+  den Signaturschlüssel des Index; Builds und Einzeldatei-Downloads nur für safetensors oder GGUF (nie Pickle-Gewichte),
+  Modelle ohne Zugangsbeschränkung mit einer freizügigen Lizenz, bis zu einer Größenklasse; nie angeboten wird sie für
+  Deployment, Einstellungen, Crawlen, das Anlegen von Modulen, `export_pack`, Healing, Löschen oder Wiederherstellen
+  und das Stoppen der Arbeit eines anderen Clients. Dauerhafte Freigaben liegen in der signierten Berechtigungsdatei
+  (eine Bearbeitung von Hand verbietet alles) und werden nur geschrieben, wenn du sie anlegst, widerrufst oder
+  zurücksetzt, damit eine Nutzung die Datei nie neu schreibt und keinen Widerruf rückgängig machen kann; ihre
+  Nutzungen und die letzte Nutzung kommen aus dem Audit-Log (`confirm_channel` `grant:<id>`), und die GUI zeigt jede
+  Nutzung mit einem **Revoke**-Knopf und nennt dabei, wer gehandelt hat, das Tool und was die dauerhafte Freigabe
+  abdeckt. Sie verfallen nach 90 Tagen ohne Nutzung (einmal festgehalten als `grant_lapsed`; eine verfallene bleibt
+  verfallen), mit ihrem Ablauf, wenn sich die Regel des Tools ändert und wenn ihr Token widerrufen wird; die Anfrage
+  eines Tokens, das seitdem widerrufen wurde, wird nie zur dauerhaften Freigabe eines neuen Tokens mit demselben
+  Namen. `llm-cli tools permissions --grants` und der Dialog Tool Permissions führen sie mit ihren Nutzungen auf, und
+  `--revoke-grant ID`, **Revoke** im Dialog und `--reset` entfernen sie. Solange die GUI läuft, kann die
+  Kommandozeile keine anlegen (nutze das Fenster der GUI); eine auf der Kommandozeile angelegte wird beim nächsten
+  GUI-Start einmal gezeigt. `get_status` zeigt einem Aufrufer seine eigenen dauerhaften Freigaben, nur lesend.
+  Welche Tools bisher eine anbieten: nur Tools, deren Fakten das Framework nachschlagen kann, bekommen eine Regel
+  (noch keines der 14 aktuellen Tools; die Zoo-, Download- und lokalen Tools bringen ihre mit).
 - **Anweisungen an den Client:** Der Server beschreibt den typischen Ablauf (Targets → Capabilities → Build → Status
   und Log → Artefakte), sagt dem Client, dass als externer Text markierte Felder Daten sind, deren Anweisungen nicht
   befolgt werden dürfen, und dass er dir eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
@@ -967,7 +1024,7 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   `mcp:<Name>` des benannten Tokens, nie das Token selbst) und die Fähigkeiten, die er erklärt hat, zum Beispiel
   `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
   capabilities: elicitation, roots`. `elicitation none` heißt, dass der Client dich nicht fragen kann; ein Tool auf
-  „fragen“ wird dort abgelehnt. Text vom Client wird zuerst von allem befreit, was wie ein Schlüssel oder Token
+  „fragen“ wird dann zu einer wartenden Freigabe im Framework. Text vom Client wird zuerst von allem befreit, was wie ein Schlüssel oder Token
   aussieht, dann escapet und auf 64 Zeichen gekürzt; er ist eine Beschriftung, nie eine Berechtigung.
 
 Was die Clients unterstützen, laut der Dokumentation ihrer Hersteller (2026-10-11). „Nicht dokumentiert“ heißt, dass
@@ -981,7 +1038,8 @@ der Hersteller nichts dazu sagt; die stderr-Zeile oben zeigt, was ein Client wir
 | VS Code (GitHub Copilot) | ja, Modi nicht dokumentiert | nicht dokumentiert | ja, mit Vorlagen | ja | nicht dokumentiert |
 
 Von Claude-Desktop-Chat und Cowork wird erwartet, dass sie keine Elicitation erklären (eine Quelle eines Dritten
-sagt das): Dort wird jedes Tool auf „fragen“ abgelehnt, erlaubte Tools funktionieren.
+sagt das): Dort wird jedes Tool auf „fragen“ zu einer wartenden Freigabe im Framework, erlaubte Tools
+funktionieren.
 
 **Claude-Abonnenten:** Das ist der Weg, das Framework mit einem Claude-Abo zu nutzen. Anthropic erlaubt
 Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines Abos zu verwenden; Ditto selbst braucht deshalb einen
@@ -1020,7 +1078,8 @@ Verfügung.
 - **Neue Tools:** Die Berechtigungsdatei hält fest, welche Tools du gesehen hast; das Speichern der Einrichtung,
   `llm-cli tools permissions` oder der GUI-Dialog markiert jedes aufgeführte Tool. Ein später hinzugekommenes Tool
   nutzt seine eigene Vorgabe, nie eine lockerere Einstellung der Stufe, bis du es gesehen hast; `llm-cli tools list`
-  und der GUI-Dialog kennzeichnen es als neu. Eine Berechtigungsdatei aus 3.0.0 zählt ihre elf Tools als gesehen.
+  und der GUI-Dialog kennzeichnen es als neu. Eine gespeicherte Berechtigungsdatei ohne diese Liste zählt die elf
+  Tools von 3.0.0 als gesehen.
 - **Verweigerte Tools werden nicht aufgeführt**, weder MCP-Clients noch Ditto; ein Aufruf eines solchen Tools wird
   trotzdem abgelehnt und festgehalten. `get_status` führt jedes Tool mit Entscheidung und Grund auf, auch die
   ausgeblendeten, und die Handlungen, die kein Tool übernimmt, mit dem Ort, wo du sie erledigst, damit eine KI dir
@@ -1028,6 +1087,22 @@ Verfügung.
 - Eine beschädigte oder unlesbare Berechtigungsdatei oder ein Link auf eine fehlende verbietet jedes Tool, statt auf
   lockerere Standardwerte zurückzufallen; eine beschädigte Datei bleibt als `tool_policy.json.bad` erhalten, und
   `llm-cli doctor`, `llm-cli tools list` und `llm-cli mcp serve` weisen darauf hin.
+- **Nur du änderst die Berechtigungen.** `tool_policy.json` und der Token-Speicher `mcp_tokens.json` sind mit einem
+  Schlüssel signiert, der aus dem Audit-Schlüssel in deinem Schlüsselbund abgeleitet ist. Eine von Hand bearbeitete,
+  mit einem anderen Schlüssel signierte oder unsignierte Datei (auch eine von 3.0.0 gespeicherte Berechtigungsdatei)
+  verbietet jedes Tool, und der Token-Speicher nimmt dann kein Token an, bis du die Berechtigungen neu einrichtest
+  (`llm-cli tools permissions` oder der GUI-Dialog, der den Grund zeigt). Geändert werden sie nur in der GUI und mit
+  `llm-cli tools permissions` und `llm-cli ditto setup`, die ein Terminal brauchen (weitergeleitete Antworten werden
+  abgelehnt). Jedes Speichern wird im Audit-Log festgehalten (`policy_changed`, Akteur `cli` oder `gui`), mit den
+  alten und neuen Entscheidungen, bevor es wirkt; lässt sich der Eintrag nicht schreiben, ändert sich nichts. Jedes
+  Speichern erhöht eine Revisionsnummer unter einer Sperre, die GUI, CLI und MCP-Server teilen, und ein Speichern auf
+  Grundlage einer älteren Revision (ein Fenster, das vor einer anderen Änderung geöffnet wurde) wird abgelehnt, damit
+  es nie eine zwischenzeitliche Änderung rückgängig macht. Die neueste gespeicherte Revision beider Dateien steht
+  zusätzlich im Schlüsselbund: Eine ältere signierte Kopie, die über eine Datei zurückgelegt wird (sie brächte eine
+  widerrufene dauerhafte Freigabe, ein widerrufenes Token oder eine lockerere Berechtigung zurück), wird wie eine
+  Bearbeitung von Hand abgelehnt, und eine entfernte Berechtigungsdatei verbietet jedes Tool, statt auf die Vorgaben
+  zurückzufallen. Ohne Schlüsselbund hat die Signatur keinen Schlüssel (wie die Audit-Kette) und `llm-cli doctor`
+  warnt; eine solche Datei wird abgelehnt, solange das Audit-Log mit Schlüssel geführt wird.
 - Ein [benanntes MCP-Token](#mcp-server) hat eigene Berechtigungen, gesetzt mit
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
   nicht lesen lässt, darf nicht einmal lesen.

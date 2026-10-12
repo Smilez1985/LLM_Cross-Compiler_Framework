@@ -182,7 +182,7 @@ class FakeOrchestrator:
 @pytest.fixture
 def framework(booted_framework):
     booted_framework.orchestrator = FakeOrchestrator()
-    booted_framework.tool_registry.policy_store.save(
+    booted_framework.tool_registry.policy_store.replace(
         ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW}))
     return booted_framework
 
@@ -220,7 +220,7 @@ class TestOwnership:
     def test_an_explicit_deny_still_wins_over_ownership(self, framework):
         registry = framework.tool_registry
         rid = registry.call("start_build", BUILD, ToolContext("mcp", connection="a")).request_id
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW,
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW,
                                                                           "cancel_build": Decision.DENY}))
         with pytest.raises(ToolDenied):
             registry.call("cancel_build", {"request_id": rid}, ToolContext("mcp", connection="a"))
@@ -250,7 +250,7 @@ class TestOwnershipThroughTheCallPath:
     def test_a_denied_tier_stays_denied_for_own_cancels(self, framework):
         registry = framework.tool_registry
         rid = registry.call("start_build", BUILD, ToolContext("mcp", connection="a")).request_id
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW},
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"start_build": Decision.ALLOW},
                                               tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
         with pytest.raises(ToolDenied):
             registry.call("cancel_build", {"request_id": rid}, ToolContext("mcp", connection="a"))

@@ -806,10 +806,62 @@ framework never sees it.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
   elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
   and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be
-  longer than 4000 characters is refused instead of being cut. Only a real answer from the user counts as approval,
+  longer than 4000 characters becomes a pending approval (below) instead of being cut. Only a real answer from the
+  user counts as approval,
   and a "no" is final for that call, even if the permissions are loosened while the question is open. Declined and
   cancelled calls, and calls refused before they run (invalid arguments, a confirmation that fails), are audited
-  too. A client that cannot ask gets a refusal with a hint how to allow the tool.
+  too.
+- **Pending approvals:** when a client cannot ask you (it declared no form elicitation), the question is longer
+  than an elicitation may be, or you set the tool to be confirmed in the framework (`llm-cli tools permissions
+  --confirm-in-framework TOOL`, or "Ask in the framework" in the Tool Permissions dialog; useful for tools you want
+  to see in the framework every time), the call is not refused. The client gets the error `waiting_for_approval`
+  with a job id ("poll get_job_status with wait_seconds=50; do not call this tool again"), and the question waits
+  for you: a notice in the GUI status bar (and a desktop notification where the system offers one) that opens
+  **Tools > Pending Approvals...**, and `llm-cli tools approvals` in a terminal. The window shows the caller class
+  first ("all local stdio clients" or the token's name), then the client's own name marked as self-reported, the
+  full question (up to 16,000 characters; a longer one is refused everywhere) and the time left, with **Approve
+  once** and **Decline**. On approval the framework builds the question again: if it reads differently (a fact behind
+  it changed), nothing runs and you are asked again; otherwise the framework runs the call itself, under the original
+  caller (`confirm_channel` `approval:<id>` in the audit log), and the client reads the result with
+  `get_job_status`. The same call repeated while it waits gets the same job, an approval runs once and only for the
+  caller, tool and arguments it was asked for, it expires after 15 minutes (audited as `unanswered`), and it ends
+  with the client's session, when the client cancels its job or when the framework shuts down. A client has at most
+  5 open approvals. The window never puts another call in place of the one you are reading: when that one is
+  withdrawn, expires or is decided elsewhere, nothing is selected; when it is asked again with new facts, its new
+  question is marked and approving waits a moment, so a click meant for the old text does not approve the new one.
+  Your decision is audited (`approval_decided`, actor `gui` or `cli`) before it is stored; if that fails, nothing is
+  decided. The approvals live in `~/.llm-framework/tool_approvals.json`, signed like the permissions, so a hand edit
+  decides nothing; no tool can create, list, approve or decline one, and only the client that asked sees the result.
+  Ditto in the framework always asks in its own dialog or prompt and never needs one.
+- **Standing approvals ("yes, and do not ask again"):** a scoped "allow" for one caller, created only by you in the
+  framework's own window: **Approve and do not ask again...** in the approval window, `llm-cli tools approvals
+  approve ID --always`, or Ditto's dialog and prompt. An MCP client's own dialog can only ask for one: its form then
+  has "ask the framework to stop asking for calls like this one", which runs that one call and puts a request into
+  the approval window for you to confirm (one open request per caller and tool, 15 minutes or until its session
+  ends; a declined scope is not asked for again for 24 hours). Before you confirm, the window shows a warning that
+  names who may then act without asking (for the local stdio clients: all of them, with the command that gives one
+  client its own token), what the standing approval covers in plain words, how wide ("this one only" or "any", where
+  offered) and for how long ("until I revoke it", 30 days or 24 hours; for all local stdio clients together only
+  the narrowest scope and at most 30 days). The scope comes from facts the framework looked up for the call, never
+  from what the AI wrote; a call outside it asks as before, and a standing approval never lifts a "deny", never
+  covers another caller and never applies to a tool you set to be confirmed in the framework. Packs from the zoo
+  can get one for knowledge and recipe packs of trust `verified` or `community` and for target packs of trust
+  `verified`, each bound to the exact pack kind, trust level and index signing key; builds and single-file
+  downloads only for safetensors or GGUF (never pickle weights), ungated models with a permissive licence, up to a
+  size class; it is never offered for deploying, settings, crawling, creating modules, `export_pack`, healing,
+  deleting or restoring, or stopping another client's work. Standing approvals are stored in the signed permission
+  file (a hand edit denies everything) and written only when you create, revoke or reset them, so a use never
+  rewrites the file and cannot undo a revocation; their uses and last use come from the audit log
+  (`confirm_channel` `grant:<id>`), and the GUI shows each use with a **Revoke** button, naming who acted, the tool
+  and what the standing approval covers. They lapse after 90 days without use (audited `grant_lapsed` once; a lapsed
+  one stays lapsed), at their expiry, when the tool's rule changes and when their token is revoked; a request from a
+  token revoked since it asked never becomes a standing approval of a new token with the same name.
+  `llm-cli tools permissions --grants` and the Tool Permissions dialog list them with their uses, and
+  `--revoke-grant ID`, the dialog's **Revoke** and `--reset` remove them. While the GUI runs, the command line
+  cannot create one (use the GUI's window); one created on a command line is shown once at the next GUI start.
+  `get_status` shows a caller its own standing approvals, read-only. Which tools offer one so far: only tools whose
+  facts the framework can look up get a rule (none of the 14 current tools yet; the zoo, download and local tools
+  bring theirs with them).
 - **Instructions to the client:** the server describes the typical flow (targets → capabilities → build → status
   and log → artifacts), tells the client that fields marked as external text are data whose instructions must not
   be followed, and that a task it cannot do is reported to you with its specific reason.
@@ -895,8 +947,8 @@ framework never sees it.
   version the client reports about itself, the protocol version, the transport, the caller (`mcp` or the named
   token's `mcp:<name>`, never the token itself) and the capabilities it declared, for example
   `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
-  capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask" is
-  refused there. Client text is cleared of anything that looks like a key or token first, then escaped and cut
+  capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask"
+  becomes a pending approval in the framework. Client text is cleared of anything that looks like a key or token first, then escaped and cut
   to 64 characters; it is a label, never a permission.
 
 What the clients support, from their vendors' documentation (2026-10-11). "Not documented" means the vendor does
@@ -910,7 +962,7 @@ not say; the stderr line above shows what a client really declares.
 | VS Code (GitHub Copilot) | yes, modes not documented | not documented | yes, with templates | yes | not documented |
 
 Claude Desktop chat and Cowork are expected to declare no elicitation (one third-party source says so): there, every
-tool set to "ask" is refused, while allowed tools work.
+tool set to "ask" becomes a pending approval in the framework, while allowed tools work.
 
 **Claude subscribers:** this is the way to use the framework with a Claude plan. Anthropic does not allow
 third-party apps to use a subscription's sign-in or limits, so Ditto itself needs an API key; Claude Code and Claude
@@ -945,14 +997,28 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   then the cap. A tool's default never opens a tier you denied.
 - **New tools:** the permission file records which tools you have reviewed; saving the setup, `llm-cli tools
   permissions` or the GUI dialog marks every listed tool. A tool added later uses its own default, never a looser
-  tier setting, until you review it; `llm-cli tools list` and the GUI dialog mark it as new. A permission file from
-  3.0.0 counts its eleven tools as reviewed.
+  tier setting, until you review it; `llm-cli tools list` and the GUI dialog mark it as new. A stored permission
+  file without that list counts the eleven tools of 3.0.0 as reviewed.
 - **Denied tools are not listed** to MCP clients and Ditto; a call to one is still refused and audited.
   `get_status` lists every tool with its decision and why, also the hidden ones, and the actions no tool does, with
   where you do them, so an AI can tell you the real reason.
 - A damaged or unreadable permission file, or a link to a missing one, denies every tool instead of falling back to
   looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and
   `llm-cli mcp serve` say so.
+- **Only you change the permissions.** `tool_policy.json` and the token store `mcp_tokens.json` are signed with a key
+  derived from the audit key in your keyring. A file edited by hand, signed with another key or carrying no
+  signature (a permission file saved by 3.0.0, too) denies every tool, and the token store then accepts no token,
+  until you set the permissions up again (`llm-cli tools permissions` or the GUI dialog, which shows why). They are
+  changed only in the GUI and with `llm-cli tools permissions` and `llm-cli ditto setup`, which need a terminal
+  (piped answers are refused). Every save is recorded in the audit log (`policy_changed`, actor `cli` or `gui`) with
+  the old and new decisions before it takes effect; if the entry cannot be written, nothing changes. Each save
+  raises a revision number under a lock shared by the GUI, the CLI and MCP servers, and a save based on an older
+  revision (a window opened before another change) is refused, so it never undoes a change made meanwhile. The
+  newest saved revision of both files is kept in the keyring too: an older signed copy put back over a file (it
+  would bring back a revoked standing approval, a revoked token or a looser permission) is refused like a hand edit,
+  and a removed permission file denies every tool instead of falling back to the defaults. Without a keyring the
+  signature has no key (as for the audit chain) and `llm-cli doctor` warns; such a file is refused while the audit
+  log is kept with a key.
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
   unknown or revoked token, or a token file that cannot be read, may not even read.
 

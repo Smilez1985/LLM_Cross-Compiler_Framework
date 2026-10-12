@@ -233,6 +233,19 @@ def check_tool_policy(framework) -> List[Finding]:
                                 "else asks).", "Run 'llm-cli ditto setup' or use Tools > Tool Permissions in the GUI."))
     else:
         findings.append(_ok("ai", "tools.permissions", "Tool permissions set up"))
+    store = registry.policy_store
+    if not problem and getattr(store, "key", b"") is None and store.path.exists():
+        findings.append(Finding("ai", "tools.permissions.signature", Severity.WARN,
+                                "The tool permissions are signed without a key (no OS keyring), so a hand edit of "
+                                f"{store.path.name} by anyone who can write the per-user folder is not detected.",
+                                "Make an OS keyring available to the framework; the next save signs with a key."))
+    tokens = getattr(registry, "tokens", None)
+    if tokens is not None:
+        try:
+            tokens.list()
+        except Exception as e:  # TokenStoreError: damaged, unsigned, open to others
+            findings.append(Finding("ai", "tools.tokens", Severity.ERROR, str(e),
+                                    "Remove the file and create the tokens again ('llm-cli mcp token add NAME')."))
     if registry.audit is not None:
         archive = ("'llm-cli tools audit --archive' moves it and its anchor aside (kept with a timestamp) and "
                    "starts a new log.")

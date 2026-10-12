@@ -383,7 +383,29 @@ def _ditto_confirm(spec, inp) -> bool:
     if not sys.stdin.isatty():
         click.echo("No terminal to confirm in: denied. Allow the tool with 'llm-cli tools permissions'.", err=True)
         return False
-    return click.confirm("Allow this?", default=False, err=True)
+    from orchestrator.tools.registry import current_grant_offer, current_registry
+    offer = current_grant_offer()
+    if offer is None:
+        return click.confirm("Allow this?", default=False, err=True)
+    answer = click.prompt("Allow this? y = once, a = and do not ask again, n = no",
+                          type=click.Choice(["y", "a", "n"]), default="n", err=True)
+    if answer != "a":
+        return answer == "y"
+    from orchestrator.tools.grants import DURATION_LABELS, GrantChoice, gui_running
+    registry = current_registry()
+    if registry is not None and gui_running(registry.policy_store.path.parent):
+        click.echo("A GUI session is running: use its approval window for 'do not ask again'.", err=True)
+        return click.confirm("Allow this once?", default=False, err=True)
+    width = offer.default_width()
+    if len(offer.scopes) > 1:
+        width = click.prompt("For " + " or ".join(f"{w} ({offer.summaries[w]})" for w in offer.scopes),
+                             type=click.Choice(list(offer.scopes)), default=width, err=True)
+    duration = click.prompt("For how long: " + "; ".join(f"{d} = {DURATION_LABELS[d]}" for d in offer.durations),
+                            type=click.Choice(offer.durations), default=offer.default_duration(), err=True)
+    click.echo(offer.warning, err=True)
+    if not click.confirm("Allow this and do not ask again within this scope?", default=False, err=True):
+        return click.confirm("Allow this once?", default=False, err=True)
+    return GrantChoice(width, duration)
 
 
 _ditto_confirm.confirm_channel = "framework-cli"  # recorded in the audit log
@@ -855,8 +877,10 @@ def tools_list(ctx: FrameworkContext, caller: Optional[str]):
 def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for: str = ""):
     """Interactive questions for the tool permissions (one per tier), for one caller or the shared ones. Every
     registered tool counts as reviewed afterwards: the questions apply to the tools listed above them. `shown_for`:
-    whose tool facts to list (a named token's, whose own policy `current` is), else `caller`'s."""
+    whose tool facts to list (a named token's, whose own policy `current` is), else `caller`'s. Needs a person at a
+    terminal: piped answers (an AI client with a shell) are refused."""
     from orchestrator.tools.policy import TIER_LABELS, CallerPolicy, Decision, ToolTier
+    _require_terminal("llm-cli tools permissions")
     section = current.callers.get(caller) if caller else None
     base_tiers = section.tiers if section is not None else current.tiers
     # A caller's new section starts from the shared settings, so creating it never loosens a per-tool setting.
@@ -886,35 +910,127 @@ def _ask_tool_policy(registry, current, caller: Optional[str] = None, shown_for:
                                       "reviewed": reviewed})
 
 
+def _save_policy(registry, policy=None, change=None):
+    """Saves the tool permissions a person set here (audited with actor cli). A change saved elsewhere meanwhile, or
+    an audit log that cannot record it, is reported and nothing is saved."""
+    from orchestrator.tools.policy import PolicyStoreError
+    try:
+        if change is not None:
+            return registry.policy_store.update(change, actor="cli")
+        return registry.policy_store.save(policy, actor="cli")
+    except PolicyStoreError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+
+
+def _print_grants(registry) -> None:
+    """Each caller's standing approvals: scope in plain words, state, created (and how), uses and last use (from the
+    audit log), expiry."""
+    from orchestrator.tools.approvals import caller_label, tool_title
+    rows = registry.grant_rows()
+    if not rows:
+        console.print("No standing approvals.")
+        return
+    console.print("[bold]Standing approvals (\"do not ask again\")[/bold]")
+    for row in rows:
+        grant = row["grant"]
+        console.print(f"  {escape(grant.id)}  {escape(tool_title(registry, grant.tool))} for "
+                      f"{escape(caller_label(row['caller']))}: {escape(grant.summary)}")
+        console.print(f"      {row['state']}; created {escape(grant.created)} via {grant.created_via}; used "
+                      f"{row['uses']} times" + (f", last {escape(row['last_use'])}" if row["last_use"] else "")
+                      + (f"; until {escape(grant.expires)}" if grant.expires else "; until revoked"))
+    console.print("Revoke one with 'llm-cli tools permissions --revoke-grant ID'; --reset clears them all.")
+
+
+def _set_framework_only(registry, caller: Optional[str], add: Tuple[str, ...], remove: Tuple[str, ...]) -> None:
+    from orchestrator.tools.policy import CallerPolicy
+    known = {spec.name for spec in registry.list()}
+    unknown = sorted((set(add) | set(remove)) - known)
+    if unknown:
+        console.print(f"[red]Unknown tools: {escape(', '.join(unknown))} ('llm-cli tools list' shows them).[/red]")
+        sys.exit(2)
+
+    def change(current):
+        section = current.callers.get(caller) if caller else current
+        if caller and section is None:  # a caller's first own section starts from the shared permissions
+            section = CallerPolicy(tiers=dict(current.tiers), overrides=dict(current.overrides),
+                                   reviewed=current.reviewed, framework_only=list(current.framework_only))
+        tools = sorted((set(section.framework_only) | set(add)) - set(remove))
+        if caller:
+            return current.model_copy(update={"callers": {**current.callers,
+                                                          caller: section.model_copy(update={"framework_only": tools})}})
+        return current.model_copy(update={"framework_only": tools})
+    policy = _save_policy(registry, change=change)
+    tools = policy.framework_only_for(caller)
+    console.print(f"[green]Asked in the framework only, for {escape(CALLER_LABELS[caller])}: "
+                  f"{escape(', '.join(tools) or 'none')}[/green]")
+
+
 @tools.command('permissions')
 @click.option('--caller', type=CALLER_CHOICE, default=None,
               help="Set the permissions of one caller (ditto or mcp) instead of the shared ones")
 @click.option('--token', 'token_name', help='Set the permissions of this named MCP token (with --reset: read only)')
 @click.option('--reset', is_flag=True, help='Back to the recommended defaults (asks again at the next setup); '
                                             'with --caller: that caller uses the shared permissions again')
+@click.option('--confirm-in-framework', 'framework_only', multiple=True, metavar='TOOL',
+              help="Always put this tool's questions to you in the framework (approval window or 'tools approvals'), "
+                   "never in the AI client's own dialog (repeatable)")
+@click.option('--confirm-anywhere', 'anywhere', multiple=True, metavar='TOOL',
+              help='Undo --confirm-in-framework for this tool (repeatable)')
+@click.option('--grants', 'show_grants', is_flag=True, help='List the standing approvals ("do not ask again") and exit')
+@click.option('--revoke-grant', 'revoke_grant', metavar='ID', help='Revoke one standing approval (needs a terminal)')
 @pass_context
-def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: Optional[str], reset: bool):
-    """Set which tool calls are allowed, need confirmation, or are denied"""
+def tools_permissions(ctx: FrameworkContext, caller: Optional[str], token_name: Optional[str], reset: bool,
+                      framework_only: Tuple[str, ...] = (), anywhere: Tuple[str, ...] = (), show_grants: bool = False,
+                      revoke_grant: Optional[str] = None):
+    """Set which tool calls are allowed, need confirmation, or are denied (needs a terminal)"""
     from orchestrator.tools.policy import ToolPolicy
     registry = _tool_registry(ctx)
+    if show_grants:
+        _print_grants(registry)
+        return
+    if revoke_grant:
+        _require_terminal("llm-cli tools permissions --revoke-grant")
+        from orchestrator.tools.policy import PolicyStoreError
+        try:
+            revoked = registry.revoke_grant(revoke_grant, "cli")
+        except PolicyStoreError as e:
+            console.print(f"[red]{escape(str(e))}[/red]")
+            sys.exit(1)
+        if not revoked:
+            console.print(f"[red]There is no standing approval '{escape(revoke_grant)}' ('llm-cli tools permissions "
+                          "--grants').[/red]")
+            sys.exit(1)
+        console.print(f"[green]Standing approval {escape(revoke_grant)} revoked: those calls ask again.[/green]")
+        return
     if token_name is not None:
         if caller:
             console.print("[red]Use either --caller or --token.[/red]")
             sys.exit(2)
         _token_permissions(registry, token_name, reset)
         return
+    if framework_only or anywhere:
+        _require_terminal("llm-cli tools permissions --confirm-in-framework")
+        _set_framework_only(registry, caller, framework_only, anywhere)
+        return
     if reset:
+        _require_terminal("llm-cli tools permissions --reset")
         if caller:
-            current = registry.policy()
-            callers = {name: section for name, section in current.callers.items() if name != caller}
-            registry.policy_store.save(current.model_copy(update={"callers": callers}))
+            _save_policy(registry, change=lambda current: current.model_copy(update={
+                "callers": {name: section for name, section in current.callers.items() if name != caller},
+                "grants": {name: grants for name, grants in current.grants.items() if name != caller}}))
             console.print(f"[yellow]{CALLER_LABELS[caller]} use the shared tool permissions again.[/yellow]")
             return
-        registry.policy_store.save(ToolPolicy())
+        _save_policy(registry, change=lambda current: ToolPolicy())
         console.print("[yellow]Tool permissions reset to the recommended defaults.[/yellow]")
         return
     console.print(f"Tool permissions for {CALLER_LABELS[caller]}.")
-    policy = registry.policy_store.save(_ask_tool_policy(registry, registry.policy(), caller))
+    current = registry.policy()
+    if registry.policy_store.problem:  # e.g. not signed: the questions start from "deny"
+        console.print(f"[yellow]{escape(registry.policy_store.problem)}[/yellow]")
+    if current.grants:
+        _print_grants(registry)
+    policy = _save_policy(registry, _ask_tool_policy(registry, current, caller))
     console.print(f"[green]Saved to {registry.policy_store.path}[/green]")
     tiers = policy.callers[caller].tiers if caller else policy.tiers
     for tier, decision in tiers.items():
@@ -968,6 +1084,172 @@ def tools_audit(ctx: FrameworkContext, limit: int, verify: bool, archive: bool):
     console.print(table)
 
 
+# Pending approvals: questions of AI clients that could not ask you themselves (design 6.9).
+
+def _approval_store(registry):
+    service = getattr(registry, "approvals", None)
+    if service is None:
+        console.print("[red]Pending approvals are not available.[/red]")
+        sys.exit(1)
+    return service.store
+
+
+def _show_approval(record) -> None:
+    left = record.seconds_left()
+    console.print(f"[bold]{escape(record.id)}[/bold]  {escape(record.title)} ({escape(record.tool)}), "
+                  f"{left // 60} min {left % 60:02d} s left")
+    console.print(f"Caller: {escape(record.caller_class)}")
+    console.print(f"Client: {escape(record.client or 'unnamed client')} (self-reported)")
+    click.echo("")
+    click.echo(record.question)  # escaped by the framework (visible()), shown as plain text
+    click.echo("")
+
+
+@tools.group('approvals', invoke_without_command=True)
+@click.pass_context
+def tools_approvals(click_ctx):
+    """Calls of AI clients waiting for your approval (needs a terminal)"""
+    if click_ctx.invoked_subcommand is None:
+        click_ctx.invoke(tools_approvals_list)
+
+
+@tools_approvals.command('list')
+@pass_context
+def tools_approvals_list(ctx: FrameworkContext):
+    """The calls waiting for your approval"""
+    _require_terminal("llm-cli tools approvals")
+    store = _approval_store(_tool_registry(ctx))
+    pending = store.pending()
+    if store.problem:
+        console.print(f"[red]{escape(store.problem)}[/red]")
+    if not pending:
+        console.print("No call is waiting for your approval.")
+        return
+    console.print("[bold]Calls waiting for your approval[/bold]")
+    for record in pending:  # one line each: ids stay whole in a narrow terminal
+        left = record.seconds_left()
+        what = "asks to stop asking" if record.kind == "grant_request" else \
+            ("call, 'do not ask again' possible" if record.grant is not None else "call")
+        console.print(f"  {escape(record.id)}  {escape(record.title)} ({what})  caller: {escape(record.caller_class)}  "
+                      f"client: {escape(record.client or 'unnamed')} (self-reported)  {left // 60} min left")
+    console.print("Show one with 'llm-cli tools approvals show ID', then approve or decline it.")
+
+
+def _pending_record(store, approval_id: str):
+    record = store.get(approval_id)
+    if record is None:
+        console.print(f"[red]There is no approval '{escape(approval_id)}' ('llm-cli tools approvals' lists "
+                      "them).[/red]")
+        sys.exit(1)
+    return record
+
+
+@tools_approvals.command('show')
+@click.argument('approval_id')
+@pass_context
+def tools_approvals_show(ctx: FrameworkContext, approval_id: str):
+    """Show the full question of a waiting call"""
+    _require_terminal("llm-cli tools approvals show")
+    record = _pending_record(_approval_store(_tool_registry(ctx)), approval_id)
+    _show_approval(record)
+    if record.state != "pending":
+        console.print(f"State: {escape(record.state)}")
+
+
+def _grant_choice(registry, record, width: Optional[str], duration: Optional[str]):
+    """The person's "do not ask again" for this record: refused while a GUI session runs (its window is the stronger
+    channel), only within what the framework offered, shown with its warning."""
+    from orchestrator.tools.grants import DURATION_LABELS, gui_running
+    offer = record.grant
+    if offer is None:
+        console.print("[red]'Do not ask again' is not offered for this call.[/red]")
+        sys.exit(1)
+    if gui_running(registry.policy_store.path.parent):
+        console.print("[red]A GUI session of the framework is running: use its approval window (Tools > Pending "
+                      "Approvals...) for 'do not ask again'.[/red]")
+        sys.exit(1)
+    width = width or offer.default_width()
+    duration = duration or offer.default_duration()
+    if width not in offer.scopes or duration not in offer.durations:
+        console.print(f"[red]Offered here: width {escape(', '.join(offer.scopes))}; duration "
+                      f"{escape(', '.join(offer.durations))}.[/red]")
+        sys.exit(2)
+    click.echo(f"Do not ask again for: {offer.summaries[width]}")
+    click.echo(f"For how long: {DURATION_LABELS[duration]}")
+    click.echo("")
+    click.echo(offer.warning)
+    click.echo("")
+    return width, duration
+
+
+def _decide_approval(ctx: FrameworkContext, approval_id: str, approve: bool, always: bool = False,
+                     width: Optional[str] = None, duration: Optional[str] = None) -> None:
+    from orchestrator.tools.approvals import ApprovalStoreError, apply_decision
+    registry = _tool_registry(ctx)
+    store = _approval_store(registry)
+    record = _pending_record(store, approval_id)
+    _show_approval(record)
+    choice = None
+    if approve and (always or record.kind == "grant_request"):
+        choice = _grant_choice(registry, record, width, duration)
+    if record.kind == "grant_request":
+        question = "Stop asking for such calls within this scope?" if approve else "Decline this request?"
+    elif choice is not None:
+        question = "Approve this call and do not ask again within this scope?"
+    else:
+        question = "Approve this call? The framework then runs it for the AI client." if approve else \
+            "Decline this call?"
+    if not click.confirm(question, default=False):
+        console.print("Nothing decided.")
+        sys.exit(1)
+
+    def audit(decided):
+        apply_decision(registry, decided, "cli")
+    try:
+        store.decide(approval_id, approve, "cli", expected_question=record.question_sha256, record_decision=audit,
+                     choice=choice)
+    except (ApprovalStoreError, ValueError) as e:  # ValueError: "do not ask again" cannot be saved for it
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    except Exception as e:  # the audit log cannot record it: nothing was decided
+        console.print(f"[red]The audit log could not record your decision ({escape(str(e))}); nothing was "
+                      "decided.[/red]")
+        sys.exit(1)
+    if choice is not None:
+        console.print("[green]Standing approval saved; revoke it with 'llm-cli tools permissions --revoke-grant ID' "
+                      "(the IDs: 'llm-cli tools permissions --grants').[/green]")
+    if record.kind == "grant_request":
+        return
+    console.print(f"[green]Approved: the framework runs '{escape(record.title)}' now.[/green]" if approve else
+                  f"[yellow]Declined: '{escape(record.title)}' does not run.[/yellow]")
+
+
+@tools_approvals.command('approve')
+@click.argument('approval_id')
+@click.option('--always', is_flag=True, help="Approve and do not ask again for calls within the offered scope "
+                                             "(refused while a GUI session runs: use its approval window)")
+@click.option('--width', type=click.Choice(['this', 'any']), help="With --always: this model or repository only "
+                                                                  "(default), or any")
+@click.option('--duration', type=click.Choice(['revoke', '30d', '24h']),
+              help="With --always: until you revoke it (default; it lapses after 90 days without use), 30 days or "
+                   "24 hours (all local stdio clients together: 30 days at most)")
+@pass_context
+def tools_approvals_approve(ctx: FrameworkContext, approval_id: str, always: bool, width: Optional[str],
+                            duration: Optional[str]):
+    """Approve a waiting call; the framework runs it for the AI client"""
+    _require_terminal("llm-cli tools approvals approve")
+    _decide_approval(ctx, approval_id, True, always=always, width=width, duration=duration)
+
+
+@tools_approvals.command('decline')
+@click.argument('approval_id')
+@pass_context
+def tools_approvals_decline(ctx: FrameworkContext, approval_id: str):
+    """Decline a waiting call"""
+    _require_terminal("llm-cli tools approvals decline")
+    _decide_approval(ctx, approval_id, False)
+
+
 @tools.group('folders')
 def tools_folders():
     """Folders the AI may use for local model and dataset files"""
@@ -982,7 +1264,7 @@ def _local_files(ctx: FrameworkContext):
 
 def _require_terminal(command: str) -> None:
     """Changes to what an AI may do are a person's decision: no piped answers (an AI client with a shell)."""
-    if not (sys.stdin is not None and sys.stdin.isatty()):
+    if not _interactive():
         console.print(f"[red]'{escape(command)}' needs a terminal: run it yourself, not through a pipe or an AI "
                       "client.[/red]")
         sys.exit(2)
@@ -1351,7 +1633,7 @@ def ditto_setup(ctx: FrameworkContext):
         "Decide once what they may do on their own, what needs your confirmation, and what is never allowed.\n"
         "Tools that reach other devices or delete data always ask (you can deny them, never allow them unasked).",
         title="Ditto setup - tool permissions"))
-    policy = registry.policy_store.save(_ask_tool_policy(registry, registry.policy()))
+    policy = _save_policy(registry, _ask_tool_policy(registry, registry.policy()))
     console.print(f"[green]Permissions saved ({registry.policy_store.path}).[/green]")
     console.print("Change them later with: llm-cli tools permissions")
     return policy
@@ -2455,7 +2737,15 @@ def mcp_token_revoke(ctx: FrameworkContext, name: str):
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     _audit_person(registry, "mcp_token.revoke", {"token": name})
-    console.print(f"[green]Token '{escape(name)}' and its permissions are deleted.[/green]")
+    from orchestrator.tools.mcp_tokens import ACTOR_PREFIX
+    if registry.policy().grants.get(ACTOR_PREFIX + name):
+        try:  # a new token of the same name would not inherit them anyway (they name the token's creation time)
+            registry.policy_store.update(lambda p: p.model_copy(update={"grants": {
+                c: g for c, g in p.grants.items() if c != ACTOR_PREFIX + name}}), actor="cli")
+        except Exception as e:
+            console.print(f"[yellow]Its standing approvals could not be removed ({escape(str(e))}); they no longer "
+                          "apply.[/yellow]")
+    console.print(f"[green]Token '{escape(name)}', its permissions and its standing approvals are deleted.[/green]")
 
 
 def _token_permissions(registry, name: str, reset: bool) -> None:

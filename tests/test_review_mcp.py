@@ -263,7 +263,7 @@ class TestApprovals:
 
     @pytest.mark.parametrize("with_elicitation", [True, False])
     def test_allowed_calls_are_not_recorded_as_confirmed(self, server, registry, with_elicitation):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         asked = []
         callback = answering("accept", asked=asked) if with_elicitation else None
         assert not call(server, "write", {"text": "x"}, callback).is_error
@@ -272,7 +272,7 @@ class TestApprovals:
         assert rows(registry) == [("echo", "allow", None, "ok"), ("write", "allow", None, "ok")]
 
     def test_denied_calls_are_audited_without_a_confirmation(self, server, registry):
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
         asked = []
         result = call(server, "write", {"text": "x"}, answering("accept", asked=asked))
         assert result.is_error and "not allowed by your tool permissions" in text_of(result)
@@ -317,7 +317,23 @@ class TestApprovals:
 class TestUrlOnlyClients:
 
     @pytest.mark.parametrize("mode", MODES)
-    def test_url_only_client_gets_a_clean_denial(self, server, registry, declare_elicitation, mode):
+    def test_url_only_client_gets_a_pending_approval(self, server, registry, declare_elicitation, mode, tmp_path):
+        """S9: a client that cannot ask the person gets its question shown in the framework instead of a refusal."""
+        from orchestrator.Core.job_service import JobService
+        from orchestrator.tools.approvals import ApprovalService, ApprovalStore
+        registry.attach_approvals(ApprovalService(ApprovalStore(tmp_path), JobService()))
+        declare_elicitation(mcp_types.ElicitationCapability(url=mcp_types.UrlElicitationCapability()))
+        asked = []
+        result = call(server, "write", {"text": "x"}, answering("accept", asked=asked), mode)  # no exception
+        assert result.is_error and "Waiting for the person to approve" in text_of(result)
+        assert "-32021" not in text_of(result) and "elicitation capability" not in text_of(result)
+        assert asked == [] and registry.writes == []
+        assert [(e["tool"], e["outcome"]) for e in registry.audit.entries(50)][-1] == ("write",
+                                                                                     "confirmation_requested")
+
+    @pytest.mark.parametrize("mode", MODES)
+    def test_url_only_client_gets_a_clean_denial_without_pending_approvals(self, server, registry,
+                                                                           declare_elicitation, mode):
         declare_elicitation(mcp_types.ElicitationCapability(url=mcp_types.UrlElicitationCapability()))
         asked = []
         result = call(server, "write", {"text": "x"}, answering("accept", asked=asked), mode)  # no exception
@@ -352,14 +368,14 @@ class TestPolicyChanges:
     @pytest.mark.parametrize("with_elicitation", [True, False])
     def test_allow_tightened_to_ask_between_resolver_and_registry_is_denied(self, server, registry, monkeypatch,
                                                                            with_elicitation):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         real_decide, seen = registry.decide, []
 
         def decide(spec, *args, **kwargs):  # registry.decide takes the input and the caller too (S3)
             decision = real_decide(spec, *args, **kwargs)
             seen.append(decision)
             if len(seen) == 1:  # right after the resolver looked at it
-                registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
+                registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
             return decision
         monkeypatch.setattr(registry, "decide", decide)
         asked = []
@@ -373,7 +389,7 @@ class TestPolicyChanges:
     @pytest.mark.parametrize("mode", MODES)
     def test_ask_tightened_to_deny_during_the_dialog_wins(self, server, registry, mode):
         async def callback(ctx, params):
-            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
+            registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
             return ElicitResult(action="accept", content={"approve": True})
         result = call(server, "write", {"text": "x"}, callback, mode)
         assert result.is_error and "not allowed by your tool permissions" in text_of(result)
@@ -385,7 +401,7 @@ class TestPolicyChanges:
     def test_no_in_the_dialog_is_not_overridden_by_a_looser_policy(self, server, registry, mode):
         async def callback(ctx, params):
             # e.g. the user allows the tool in the GUI while this dialog is still open, then says no to it
-            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+            registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
             return ElicitResult(action="decline")
         result = call(server, "write", {"text": "x"}, callback, mode)
         assert registry.writes == [], "the call ran although the user declined it"
@@ -816,7 +832,9 @@ def test_broken_config_file_real_stdio_client(tmp_path, broken_config):
     assert problems == [], f"non-JSON-RPC output on stdout: {problems}"
     assert {"list_targets", "start_build"} <= names
     assert not caps.is_error and "gguf" in caps.structured_content["formats"]
-    assert start.is_error and PERMISSIONS_HINT in text_of(start)
+    # This client cannot ask: the question waits in the framework instead (S9), nothing runs before the person decides.
+    assert start.is_error and "Waiting for the person to approve" in text_of(start)
+    assert "llm-cli tools approvals" in text_of(start) and "get_job_status" in text_of(start)
 
 
 # --- Adversarial pass: cases the tests above do not reach ------------------------------------------
@@ -919,14 +937,14 @@ class TestAnswersAreBoundToTheCall:
 
     def test_deny_loosened_to_ask_between_resolver_and_registry_is_still_refused(self, server, registry,
                                                                                 monkeypatch):
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.DENY}))
         real_decide, seen = registry.decide, []
 
         def decide(spec, *args, **kwargs):  # registry.decide takes the input and the caller too (S3)
             decision = real_decide(spec, *args, **kwargs)
             seen.append(decision)
             if len(seen) == 1:
-                registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
+                registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ASK}))
             return decision
         monkeypatch.setattr(registry, "decide", decide)
         asked = []
@@ -1206,7 +1224,7 @@ class TestRefusalsAreFinalAndAudited:
     @pytest.mark.parametrize("mode", MODES)
     def test_yes_under_a_loosened_policy_runs_as_confirmed(self, server, registry, mode):
         async def callback(ctx, params):
-            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+            registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
             return ElicitResult(action="accept", content={"approve": True})
         assert not call(server, "write", {"text": "x"}, callback, mode).is_error
         assert registry.writes == ["x"] and rows(registry) == [("write", "allow", 1, "ok")]
@@ -1214,7 +1232,7 @@ class TestRefusalsAreFinalAndAudited:
     @pytest.mark.parametrize("mode", MODES)
     def test_no_under_a_loosened_policy_is_audited_as_a_persons_no(self, server, registry, mode):
         async def callback(ctx, params):
-            registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+            registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
             return ElicitResult(action="decline")
         result = call(server, "write", {"text": "x"}, callback, mode)
         assert result.is_error and "The user declined 'Write'" in text_of(result)
@@ -1241,13 +1259,13 @@ class TestRefusalsAreFinalAndAudited:
         assert call(server, "no_such_tool", {}).is_error
         assert rows(registry) == [("no_such_tool", "deny", None, "unknown_tool")]
         registry.audit.archive()
-        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, tiers={ToolTier.LOCAL_WRITE: Decision.DENY}))
         assert call(server, "write", {"text": "x"}).is_error
         assert rows(registry) == [("write", "deny", None, "denied")], "no second row from the SDK layer"
 
     def test_registry_treats_a_persons_no_as_final(self, registry):
         from orchestrator.tools.registry import ToolContext, ToolDenied
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"write": Decision.ALLOW}))
         with pytest.raises(ToolDenied):
             registry.call("write", {"text": "x"}, ToolContext("mcp"), approved=False)
         assert registry.writes == [] and rows(registry) == [("write", "allow", 0, "not_confirmed")]

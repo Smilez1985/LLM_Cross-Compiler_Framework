@@ -24,6 +24,7 @@ from orchestrator.tools.output import ToolOutput, UntrustedText, count, fact, un
 from orchestrator.tools.policy import Decision, PolicyStore, ToolTier
 from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, ToolSpec, current_actor,
                                          current_registry)
+from orchestrator.tools.signing import RevisionAnchor
 from orchestrator.tools.spec import Choices, FieldMeta
 from orchestrator.utils.file_lock import file_lock
 from orchestrator.utils.untrusted import sanitize_untrusted
@@ -144,6 +145,18 @@ class ToolPermission(BaseModel):
     standing_approval: bool = Field(description="Whether a confirmation may offer 'yes, and do not ask again'")
 
 
+class StandingApprovalOut(BaseModel):
+    id: str
+    tool: str
+    scope: str = Field(description="What it covers, in plain words")
+    state: Literal["active", "expired", "lapsed", "outdated"]
+    created: str
+    created_via: str
+    expires: Optional[str] = None
+    uses: int
+    last_use: Optional[str] = None
+
+
 class NoToolAction(BaseModel):
     action: str
     where: str
@@ -155,6 +168,8 @@ class PermissionsStatus(BaseModel):
     damaged: bool = Field(description="The permission file is damaged or unreadable: every tool is denied")
     listed: int
     tools: List[ToolPermission]
+    # This caller's own standing approvals, read-only (only the person creates or revokes them, in the framework).
+    standing_approvals: List[StandingApprovalOut] = Field(default_factory=list)
     no_tool_actions: List[NoToolAction]
     warning: str = ""
 
@@ -270,9 +285,11 @@ def _wait_seconds(requested: int, notes: List[str]) -> int:
 
 def _job_out(job, ctx: ToolContext) -> JobStatusOut:
     error = JobErrorOut(**{k: job.error.get(k, "") for k in ("code", "message", "next")}) if job.error else None
+    # An approved call's result belongs to the caller that asked for it.
+    result = job.result if job.kind != "approval" or job.owner == ctx.owner else None
     return JobStatusOut(job_id=job.job_id, kind=job.kind, state=job.state,
                         progress=JobProgress(done=job.done, total=job.total, message=job.message),
-                        result=job.result, error=error, owner=job_service.owner_actor(job.owner),
+                        result=result, error=error, owner=job_service.owner_actor(job.owner),
                         yours=job.owner == ctx.owner, created=job.created, updated=job.updated, note=job.note)
 
 
@@ -341,11 +358,17 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         # loaded after permissions(): the damage flag below belongs to this load; a token's own permissions for it
         policy = running.policy(caller) if caller else running.policy()
         listed = sum(1 for r in rows if r["listed"])
+        grant_caller = running._grant_caller(caller)[0] if caller else ""
+        standing = [StandingApprovalOut(id=g["grant"].id, tool=g["grant"].tool, scope=g["grant"].summary,
+                                        state=g["state"], created=g["grant"].created,
+                                        created_via=g["grant"].created_via, expires=g["grant"].expires,
+                                        uses=g["uses"], last_use=g["last_use"])
+                    for g in (running.grant_rows(grant_caller) if grant_caller else [])]
         return StatusOut(permissions=PermissionsStatus(
             caller=caller or "framework", configured=policy.configured,
             damaged=bool(getattr(running.policy_store, "problem", None)), listed=listed,
             tools=[ToolPermission(**{k: r[k] for k in ToolPermission.model_fields}) for r in rows],
-            no_tool_actions=[NoToolAction(action=a, where=w) for a, w in NO_TOOL_ACTIONS],
+            standing_approvals=standing, no_tool_actions=[NoToolAction(action=a, where=w) for a, w in NO_TOOL_ACTIONS],
             warning=(f"{listed} tools are listed; some clients take at most {MAX_LISTED_TOOLS}."
                      if listed > MAX_LISTED_TOOLS else "")))
 
@@ -517,9 +540,32 @@ def _audit_key(framework, state_dir: Optional[Path] = None) -> Optional[bytes]:
         return None
 
 
+def _revision_anchor(kind: str) -> RevisionAnchor:
+    """Where the newest saved revision of a signed per-user file is kept: the OS keyring, next to the audit key, so
+    an older copy put back into the per-user folder (or a removed file) is noticed although its signature is genuine."""
+    import keyring
+    from orchestrator.Core.secrets_manager import SecretsManager
+    service, name = SecretsManager.SERVICE_ID, f"{kind}-revision"
+    return RevisionAnchor(lambda: keyring.get_password(service, name),
+                          lambda value: keyring.set_password(service, name, value))
+
+
 def build_tool_registry(framework) -> ToolRegistry:
     """The registry with the user's policy, the audit log and all framework tools."""
     state_dir = Path(framework.config.user_state_dir)
-    audit = AuditLog(state_dir / "audit.db", key=_audit_key(framework, state_dir))
-    registry = ToolRegistry(PolicyStore(state_dir), audit, tokens=TokenStore(state_dir))
-    return register_framework_tools(registry, framework)
+    key = _audit_key(framework, state_dir)
+    audit = AuditLog(state_dir / "audit.db", key=key)
+    # The permissions and the tokens are signed with a key derived from the audit key; without a keyring an unkeyed
+    # signature is accepted only while the audit log is not kept with a key either. With the keyring, the newest saved
+    # revision of each is kept there too (an older signed copy or a removed permission file then denies everything).
+    refuse_unkeyed = None if key else audit.kept_with_key
+    registry = ToolRegistry(PolicyStore(state_dir, key=key, audit=audit, refuse_unkeyed=refuse_unkeyed,
+                                        anchor=_revision_anchor("tool_policy") if key else None), audit,
+                            tokens=TokenStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed,
+                                              anchor=_revision_anchor("mcp_tokens") if key else None))
+    register_framework_tools(registry, framework)
+    # Pending approvals: a client that cannot ask gets its question shown in the framework instead (design 6.9).
+    from orchestrator.tools.approvals import ApprovalService, ApprovalStore
+    registry.attach_approvals(ApprovalService(ApprovalStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed),
+                                              framework.job_service))
+    return registry

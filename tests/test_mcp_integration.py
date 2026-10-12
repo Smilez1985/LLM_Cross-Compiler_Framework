@@ -207,7 +207,7 @@ class TestOneCallerIdentity:
 
     def test_get_status_shows_a_tokens_own_permissions(self, framework):
         registry = framework.tool_registry
-        registry.policy_store.save(ToolPolicy(configured=True))
+        registry.policy_store.replace(ToolPolicy(configured=True))
         registry.tokens.add("fresh")
         out = registry.call("get_status", {}, ToolContext("mcp:fresh"))
         assert out.permissions.caller == "mcp:fresh" and out.permissions.configured is False
@@ -247,7 +247,7 @@ class TestOneCallerIdentity:
         permissions deny (S3's new-token rule with S12's token store)."""
         registry = framework.tool_registry
         registry.tokens.add("fresh")
-        registry.policy_store.save(ToolPolicy(configured=True, overrides={"read_build_log": Decision.DENY}))
+        registry.policy_store.replace(ToolPolicy(configured=True, overrides={"read_build_log": Decision.DENY}))
         assert registry.decide(registry.get("list_targets"), caller="mcp:fresh") == Decision.ALLOW
         assert registry.decide(registry.get("read_build_log"), caller="mcp:fresh") == Decision.DENY
         assert registry.decide(registry.get("start_build"), caller="mcp:fresh") == Decision.DENY
@@ -258,7 +258,7 @@ class TestOneCallerIdentity:
         from orchestrator.tools.policy import CallerPolicy, ToolTier
         registry = framework.tool_registry
         reviewed = [s.name for s in registry.list()]
-        registry.policy_store.save(ToolPolicy(configured=True, reviewed=reviewed, callers={
+        registry.policy_store.replace(ToolPolicy(configured=True, reviewed=reviewed, callers={
             "mcp": CallerPolicy(tiers={ToolTier.LOCAL_WRITE: Decision.ALLOW}, reviewed=reviewed)}))
         copied = registry.policy("mcp")
         assert copied.tiers[ToolTier.LOCAL_WRITE] == Decision.ALLOW and copied.reviewed == reviewed

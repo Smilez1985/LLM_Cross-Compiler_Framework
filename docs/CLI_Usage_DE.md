@@ -811,6 +811,13 @@ Voreinstellung auf, der höchsten Entscheidung, die eine Einstellung ihm geben k
 letzten Durchgang neu ist und ob eine Bestätigung eine dauerhafte Freigabe anbieten darf; das Speichern zählt jedes
 aufgeführte Tool als gesehen. Der GUI-Dialog zeigt dieselben Angaben.
 
+Es braucht eine Person an einem Terminal, mit und ohne `--reset` (wie `ditto setup`): Weitergeleitete Antworten werden
+mit dem Exit-Code 2 abgelehnt. Jedes Speichern wird mit dem Akteur `cli` und den alten und neuen Entscheidungen
+festgehalten, bevor es wirkt, und abgelehnt (Exit-Code 1, nichts geändert), wenn sich der Audit-Eintrag nicht
+schreiben lässt oder die Berechtigungen anderswo gespeichert wurden (GUI, ein anderes Terminal), während du
+geantwortet hast. Eine Berechtigungsdatei, die beschädigt, von Hand bearbeitet oder nicht signiert ist (auch eine von
+3.0.0 gespeicherte), verbietet jedes Tool, bis du das hier erneut ausführst; die Fragen beginnen dann mit "deny".
+
 | Option | Bedeutung |
 |---|---|
 | `--caller ditto\|mcp` | Die Berechtigungen eines Aufrufers setzen (Ditto oder lokale MCP-Clients über stdio) statt der gemeinsamen. Die ersten Berechtigungen eines Aufrufers beginnen mit den gemeinsamen, samt den Einstellungen für einzelne Tools. |
@@ -837,6 +844,42 @@ llm-cli tools audit --limit 100
 llm-cli tools audit --verify
 llm-cli tools audit --archive
 ```
+
+### tools approvals
+
+```
+llm-cli tools approvals [list]
+llm-cli tools approvals show ID
+llm-cli tools approvals approve ID
+llm-cli tools approvals decline ID
+```
+
+Aufrufe von KI-Clients, die dich nicht selbst fragen konnten (der Client hat keine Formular-Elicitation, die Frage ist
+länger als 4.000 Zeichen, oder du hast das Tool mit `tools permissions --confirm-in-framework TOOL` gesetzt). `list`
+(auch ohne Unterbefehl) zeigt jeden wartenden Aufruf mit ID, Tool, Aufruferklasse, dem selbst angegebenen Namen des
+Clients und der verbleibenden Zeit; `show` gibt die vollständige Frage aus; `approve` und `decline` zeigen sie erneut
+und fragen „Approve this call?“ oder „Decline this call?“, bevor etwas entschieden wird. Bei der Freigabe führt das
+Framework den Aufruf für den Client aus, unter dem Aufrufer des Clients; der Client liest das Ergebnis mit
+`get_job_status`. Jeder Unterbefehl braucht ein Terminal (sonst Exit-Code 2); eine Entscheidung wird abgelehnt
+(Exit-Code 1), wenn die Freigabe verfallen ist (15 Minuten), schon entschieden wurde, die Sitzung ihres Clients
+beendet ist, sich ihre Frage inzwischen geändert hat oder das Audit-Log die Entscheidung nicht festhalten kann. Auf
+einem Rechner ohne Bildschirm, etwa im Docker-Image, führst du es dort in einem Terminal aus
+(`docker exec -it <container> llm-cli tools approvals`). Die GUI zeigt dieselben Aufrufe unter
+**Tools > Pending Approvals...**.
+
+`approve ID --always [--width this|any] [--duration revoke|30d|24h]` gibt den Aufruf frei und speichert eine
+dauerhafte Freigabe („nicht mehr fragen“) im Rahmen, den das Framework dafür angeboten hat, nachdem Rahmen und
+Warnung gezeigt wurden; `list` kennzeichnet die Aufrufe, bei denen sie angeboten wird, und die Anfragen, die der
+Dialog eines Clients geschickt hat („asks to stop asking“), die nur mit einem Rahmen freigegeben werden. `--always`
+wird abgelehnt, solange eine GUI-Sitzung des Frameworks läuft: Nutze ihr Freigabefenster. Für alle lokalen
+stdio-Clients zusammen gibt es nur `--width this` und `--duration 30d` oder `24h`.
+
+| Option von `tools permissions` | Bedeutung |
+|---|---|
+| `--confirm-in-framework TOOL` | Fragen zu diesem Tool immer im Framework stellen (im Freigabefenster oder mit diesem Befehl), nie im eigenen Dialog des KI-Clients. Wiederholbar; mit `--caller` für einen Aufrufer. Braucht ein Terminal; wird festgehalten. |
+| `--confirm-anywhere TOOL` | `--confirm-in-framework` für dieses Tool zurücknehmen. |
+| `--grants` | Die dauerhaften Freigaben jedes Aufrufers auflisten: was jede abdeckt, ihren Zustand (active, expired, lapsed, outdated), wann und wie sie angelegt wurde, ihre Nutzungen und letzte Nutzung (aus dem Audit-Log) und ihren Ablauf. |
+| `--revoke-grant ID` | Eine dauerhafte Freigabe sofort widerrufen (braucht ein Terminal; wird festgehalten). `--reset` löscht alle, `--reset --caller` die dieses Aufrufers; das Widerrufen eines Tokens entfernt seine eigenen. |
 
 ### tools folders
 
@@ -888,7 +931,8 @@ llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT]
 
 Betreibt den MCP-Server. Normalerweise startet ihn der KI-Client für dich (siehe `mcp config`). stdout trägt das
 Protokoll, Logs gehen nach stderr. Sind die Tool-Berechtigungen noch nicht eingerichtet, funktionieren nur lesende
-Tools ohne Nachfrage, alles andere fragt (oder wird abgelehnt, wenn der Client nicht fragen kann).
+Tools ohne Nachfrage, alles andere fragt (kann der Client nicht fragen, wartet die Frage im Framework: siehe
+[tools approvals](#tools-approvals)).
 
 | Option | Bedeutung |
 |---|---|
