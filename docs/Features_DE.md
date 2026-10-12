@@ -1037,9 +1037,10 @@ Verfügung.
   nicht lesen lässt, darf nicht einmal lesen.
 
 **Was eine Rückfrage zeigt** (Dittos GUI-Dialog und CLI-Abfrage, das Formular eines MCP-Clients), in dieser
-Reihenfolge: die Folge in einfachen Worten, aus dem, was das Framework nachgeschlagen hat (zum Beispiel "Deletes the
-Docker build cache and the dangling framework images on this computer, then retries build request req_1a2b3c4d
-once."); wer fragt (Ditto oder der MCP-Client mit dem Namen, der Version und dem Transport, die er angibt, und wessen
+Reihenfolge: die Folge in einfachen Worten, aus dem, was das Framework nachgeschlagen hat, mit IDs, denen ihr
+sprechender Name folgt (zum Beispiel "Deletes the Docker build cache and the dangling framework images on this
+computer, then retries build request req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); wer
+fragt (Ditto oder der MCP-Client mit dem Namen, der Version und dem Transport, die er angibt, und wessen
 Berechtigungen gelten: alle lokalen stdio-Clients oder ein benanntes Token); die Fakten, die das Framework geprüft
 hat, wobei Text von außerhalb des Frameworks (ein Build-Log, der Vorschlag einer KI) als "not checked" gekennzeichnet
 und maskiert ist; dann jedes Argument vollständig, reparierte Werte markiert und eine ID mit ihrem sprechenden Namen
@@ -1049,11 +1050,17 @@ genau an das gebunden, was dir gezeigt wurde: Wer einen Selbstheilungs-Vorschlag
 der Rückfrage an, und einer, der sich inzwischen geändert hat, wird abgelehnt, ohne dass etwas angewendet wird; ein
 zerstörender Fix (`docker_prune`, der den Docker-Build-Cache löscht) wird auch dann erfragt, wenn `resolve_healing`
 erlaubt ist; ein Nachschlagen, das scheitert (kein offener Vorschlag), lehnt den Aufruf ab, bevor etwas gefragt
-wird. Ein 2026-07-28-Client, der in einer zweiten Runde antwortet, bekommt die Fakten der Rückfrage, die er
-beantwortet hat. Ein MCP-Formular zeigt höchstens 4.000 Zeichen, die eigenen Fenster des Frameworks bis zu 16.000
-(Dittos GUI zeigt eine lange Rückfrage in einem scrollbaren Dialog, die CLI über den Pager); eine längere Rückfrage
-wird abgelehnt, und über MCP auch eine zwischen 4.000 und 16.000 Zeichen, bis es ausstehende Freigaben im Framework
-gibt. Ein Tool, das "nicht mehr fragen" anbieten kann, bekommt im MCP-Formular ein weiteres Kästchen, das nur das
+wird; ohne die nachgeschlagenen Fakten wird über einen Vorschlag gar nicht entschieden. Ein 2026-07-28-Client, der in
+einer zweiten Runde antwortet, bekommt die Fakten der Rückfrage, die er beantwortet hat. Eine Runde zählt nur als
+Antwort auf eine Rückfrage, die das Framework genau diesem Client gestellt hat und die noch offen ist: Eine Antwort,
+die ein Client einem neuen Aufruf mitgibt, ist eine neue Rückfrage, wird festgehalten, bevor sie gestellt wird, und
+unterliegt den Grenzen unten (nach deinem Nein wird sie nicht erneut gestellt). Ein MCP-Formular zeigt höchstens
+4.000 Zeichen, die eigenen Fenster des Frameworks bis zu 16.000 (Dittos GUI zeigt eine lange Rückfrage in einem
+scrollbaren Dialog, die CLI über den Pager); eine längere Rückfrage wird abgelehnt (Grund `limit_reached`, mit einem
+nächsten Schritt), und über MCP auch eine zwischen 4.000 und 16.000 Zeichen, bis es ausstehende Freigaben im
+Framework gibt. Eine Rückfrage, die ein nachgeschlagener Fakt nötig gemacht hat, wird mit der Entscheidung `ask`
+festgehalten, auch wenn das Tool selbst erlaubt ist. Ein Tool, das "nicht mehr fragen" anbieten kann, bekommt im
+MCP-Formular ein weiteres Kästchen, das nur das
 Framework fragt: Es legt nie eine Dauerfreigabe an, und die Hinweise des Aufrufs sagen das.
 
 **Grenzen** (je Client: Ditto, die lokalen stdio-Clients, jedes benannte Token; gezählt, solange der Prozess

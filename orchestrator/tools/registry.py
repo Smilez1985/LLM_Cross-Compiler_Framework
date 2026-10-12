@@ -123,6 +123,8 @@ DENIED_HINT = ("Tell the person it is not allowed by their tool permissions; onl
 UNASKED_HINT = ("The person can allow it with 'llm-cli tools permissions' or in the GUI (Tools > Tool Permissions "
                 "(Ditto / MCP)), or use a client that can ask them.")
 REPEAT_WARN = "This exact call already failed. "
+# The next step of a question too long for the channel that would show it (an MCP form or the framework's windows).
+TOO_LONG_NEXT = "Make the call smaller (fewer or shorter values), or tell the person why it cannot be confirmed."
 # The next step of a failure nobody can fix by changing the call (the framework's or a service's own problem).
 FAILED_NEXT = ("Tell the person what failed and why; 'llm-cli doctor' and the framework log show the cause. Do not "
                "retry the same call unchanged.")
@@ -785,13 +787,14 @@ class ToolRegistry:
             self.logger.warning(f"Audit write failed: {redact_secrets(str(e))}")
 
     def record_question(self, name: str, arguments: Optional[Dict[str, Any]], ctx: ToolContext,
-                        question: str) -> str:
+                        question: str, decision: Optional[Decision] = None) -> str:
         """Records that a question about a call is put to the person (before it is asked) and returns the hash of
-        its text. For a call that changes something the question is not asked when it cannot be recorded
-        (AuditUnavailable)."""
+        its text. `decision`: the one the question is asked under (a looked-up fact can make an allowed call ask);
+        otherwise the policy's. For a call that changes something the question is not asked when it cannot be
+        recorded (AuditUnavailable)."""
         spec = self.get(name)
         digest = text_sha256(question)
-        self._audit(ctx, spec, self.decide(spec, caller=ctx.actor), "confirmation_requested", arguments,
+        self._audit(ctx, spec, decision or self.decide(spec, caller=ctx.actor), "confirmation_requested", arguments,
                     required=spec.tier != ToolTier.READ, confirm_channel=ctx.confirm_channel or "elicitation",
                     question_sha256=digest)
         self.asked(ctx)
@@ -930,9 +933,7 @@ class ToolRegistry:
                 except CallTooLong as e:  # nobody could be shown it: not a person's "no"
                     self._audit(ctx, spec, decision, "not_confirmed", arguments, detail=str(e),
                                 confirm_channel=channel, answer="unavailable", reason_code="limit_reached")
-                    raise ToolDenied(str(e), code="limit_reached",
-                                     next="Make the call smaller (fewer or shorter values), or tell the person why "
-                                          "it cannot be confirmed.") from None
+                    raise ToolDenied(str(e), code="limit_reached", next=TOO_LONG_NEXT) from None
                 question = text_sha256(text)
                 # Recorded before it is asked; a question about a change that cannot be recorded is not asked.
                 self._audit(ctx, spec, decision, "confirmation_requested", arguments, required=writes,
