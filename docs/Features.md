@@ -825,11 +825,14 @@ framework never sees it.
   caller (`confirm_channel` `approval:<id>` in the audit log), and the client reads the result with
   `get_job_status`. The same call repeated while it waits gets the same job, an approval runs once and only for the
   caller, tool and arguments it was asked for, it expires after 15 minutes (audited as `unanswered`), and it ends
-  with the client's session or when the client cancels its job. A client has at most 5 open approvals. Your decision
-  is audited (`approval_decided`, actor `gui` or `cli`) before it is stored; if that fails, nothing is decided. The
-  approvals live in `~/.llm-framework/tool_approvals.json`, signed like the permissions, so a hand edit decides
-  nothing; no tool can create, list, approve or decline one, and only the client that asked sees the result. Ditto
-  in the framework always asks in its own dialog or prompt and never needs one.
+  with the client's session, when the client cancels its job or when the framework shuts down. A client has at most
+  5 open approvals. The window never puts another call in place of the one you are reading: when that one is
+  withdrawn, expires or is decided elsewhere, nothing is selected; when it is asked again with new facts, its new
+  question is marked and approving waits a moment, so a click meant for the old text does not approve the new one.
+  Your decision is audited (`approval_decided`, actor `gui` or `cli`) before it is stored; if that fails, nothing is
+  decided. The approvals live in `~/.llm-framework/tool_approvals.json`, signed like the permissions, so a hand edit
+  decides nothing; no tool can create, list, approve or decline one, and only the client that asked sees the result.
+  Ditto in the framework always asks in its own dialog or prompt and never needs one.
 - **Standing approvals ("yes, and do not ask again"):** a scoped "allow" for one caller, created only by you in the
   framework's own window: **Approve and do not ask again...** in the approval window, `llm-cli tools approvals
   approve ID --always`, or Ditto's dialog and prompt. An MCP client's own dialog can only ask for one: its form then

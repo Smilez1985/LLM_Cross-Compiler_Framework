@@ -884,13 +884,16 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   aus, unter dem ursprünglichen Aufrufer (`confirm_channel` `approval:<id>` im Audit-Log), und der Client liest das
   Ergebnis mit `get_job_status`. Derselbe Aufruf, wiederholt während er wartet, bekommt denselben Job, eine Freigabe
   läuft einmal und nur für den Aufrufer, das Tool und die Argumente, für die gefragt wurde, sie verfällt nach 15
-  Minuten (festgehalten als `unanswered`) und endet mit der Sitzung des Clients oder wenn der Client seinen Job
-  abbricht. Ein Client hat höchstens 5 offene Freigaben. Deine Entscheidung wird festgehalten (`approval_decided`,
-  Akteur `gui` oder `cli`), bevor sie gespeichert wird; scheitert das, wird nichts entschieden. Die Freigaben liegen
-  in `~/.llm-framework/tool_approvals.json`, signiert wie die Berechtigungen, damit eine Bearbeitung von Hand nichts
-  entscheidet; kein Tool kann eine anlegen, auflisten, freigeben oder ablehnen, und nur der Client, der gefragt hat,
-  sieht das Ergebnis. Ditto im Framework fragt immer in seinem eigenen Dialog oder seiner Rückfrage und braucht nie
-  eine.
+  Minuten (festgehalten als `unanswered`) und endet mit der Sitzung des Clients, wenn der Client seinen Job abbricht
+  oder wenn das Framework beendet wird. Ein Client hat höchstens 5 offene Freigaben. Das Fenster setzt nie einen
+  anderen Aufruf an die Stelle dessen, den du gerade liest: Wird er zurückgezogen, läuft er ab oder wird er anderswo
+  entschieden, ist nichts ausgewählt; wird er mit neuen Fakten erneut gefragt, ist seine neue Frage gekennzeichnet und
+  die Freigabe wartet einen Moment, damit ein Klick, der dem alten Text galt, nicht den neuen freigibt. Deine
+  Entscheidung wird festgehalten (`approval_decided`, Akteur `gui` oder `cli`), bevor sie gespeichert wird; scheitert
+  das, wird nichts entschieden. Die Freigaben liegen in `~/.llm-framework/tool_approvals.json`, signiert wie die
+  Berechtigungen, damit eine Bearbeitung von Hand nichts entscheidet; kein Tool kann eine anlegen, auflisten,
+  freigeben oder ablehnen, und nur der Client, der gefragt hat, sieht das Ergebnis. Ditto im Framework fragt immer in
+  seinem eigenen Dialog oder seiner Rückfrage und braucht nie eine.
 - **Dauerhafte Freigaben („ja, und nicht mehr fragen“):** ein begrenztes „erlauben“ für einen Aufrufer, das nur du im
   eigenen Fenster des Frameworks anlegst: **Approve and do not ask again...** im Freigabefenster,
   `llm-cli tools approvals approve ID --always` oder Dittos Dialog und Rückfrage. Der eigene Dialog eines MCP-Clients

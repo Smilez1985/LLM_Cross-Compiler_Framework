@@ -315,9 +315,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   client gets `waiting_for_approval` with a job id; once you approve, the framework runs the call itself under the
   client's caller, unless its question would read differently by then (then you are asked again), and the client
   reads the result with `get_job_status`. An approval is bound to the caller, tool, argument hash and question hash,
-  runs once, expires after 15 minutes and ends with the client's session or `cancel_job`; a client has at most 5
-  open; the question shows the caller class first and the client's name as self-reported, up to 16,000 characters.
-  Decisions are audited before they are stored, and the approval file is signed like the permissions.
+  runs once, expires after 15 minutes and ends with the client's session, `cancel_job` or the framework's shutdown;
+  a client has at most 5 open; the question shows the caller class first and the client's name as self-reported, up
+  to 16,000 characters. The window never puts another call in place of the one you are reading, and after that
+  call's question changed, approving waits a moment. Decisions are audited before they are stored, and the approval
+  file is signed like the permissions.
 - **Standing approvals: "yes, and do not ask again"** (MCP server, Ditto). Created only by you in the framework's own
   window (the approval window, `llm-cli tools approvals approve ID --always`, Ditto's dialog and prompt), after a
   warning that names who may then act without asking, what is covered in plain words, how wide and for how long.
