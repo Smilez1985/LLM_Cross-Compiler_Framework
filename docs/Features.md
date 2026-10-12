@@ -961,8 +961,9 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   unknown or revoked token, or a token file that cannot be read, may not even read.
 
 **What a question shows** (Ditto's GUI dialog and CLI prompt, an MCP client's form), in this order: the
-consequence in plain words, from what the framework looked up (for example "Deletes the Docker build cache and the
-dangling framework images on this computer, then retries build request req_1a2b3c4d once."); who asks (Ditto, or the
+consequence in plain words, from what the framework looked up, with ids followed by their speaking names (for example
+"Deletes the Docker build cache and the dangling framework images on this computer, then retries build request
+req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); who asks (Ditto, or the
 MCP client with the name, version and transport it reports, and whose permissions apply: all local stdio clients or
 a named token); the facts the framework checked, where text from outside the framework (a build log, an AI's
 proposal) is labelled "not checked" and escaped; then every argument, complete, repaired values marked, and an id
@@ -971,10 +972,15 @@ target's name). Some tools look facts up before the question (two-phase confirma
 to exactly what you were shown: approving a self-healing proposal applies the proposal in the question, and one that
 changed meanwhile is refused with nothing applied; a destructive fix (`docker_prune`, which deletes the Docker build
 cache) is asked even when `resolve_healing` is allowed; a lookup that fails (no pending proposal) refuses the call
-before anything is asked. A 2026-07-28 client that answers in a second round gets the facts of the question it
-answered. An MCP form shows at most 4,000 characters, the framework's own windows up to 16,000 (Ditto's GUI shows a
-long question in a scrollable dialog, the CLI through the pager); a longer question is refused, and over MCP so is a
-question between 4,000 and 16,000 characters until pending approvals in the framework exist. A tool that may offer
+before anything is asked; without the looked-up facts a decision on a proposal is not made at all. A 2026-07-28
+client that answers in a second round gets the facts of the question it answered. A round counts as an answer only
+to a question the framework asked that client and that is still open: an answer a client sends along with a new call
+is a new question, recorded before it is asked and subject to the limits below (after your "no" it is not asked
+again). An MCP form shows at most 4,000 characters, the framework's own windows up to 16,000 (Ditto's GUI shows a
+long question in a scrollable dialog, the CLI through the pager); a longer question is refused (reason
+`limit_reached`, with a next step), and over MCP so is a question between 4,000 and 16,000 characters until pending
+approvals in the framework exist. A question that a looked-up fact made necessary is recorded with the decision
+`ask`, also when the tool itself is allowed. A tool that may offer
 "do not ask again" gets one more box in the MCP form, which only asks the framework: it never creates a standing
 approval, and the call's notes say so.
 

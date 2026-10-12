@@ -461,6 +461,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   further request arrives, and the ones still open when a session ends are recorded as `client_disconnected`; the
   permission check of a long-poll no longer reads the policy file on the server's event loop; every refusal with
   the reason `failed` now carries a next step, and the build service's input refusals carry their own reason code.
+- Two-phase confirmation, the same on both paths: an MCP question too long for a form is recorded with reason
+  `limit_reached` and answer `unavailable` and names a next step, as in Ditto's windows; a question that a looked-up
+  fact made necessary is recorded with the decision `ask` (it said `allow`); `resolve_healing` decides nothing
+  without the facts of its question, and the first line of its question names the build, not only its id; a local
+  model or dataset an AI named that vanished before the build is named by its label in the refusal, never by its
+  real path.
 - MCP server: a client that disconnects no longer leaves its builds running with nobody to clean up. The builds
   and jobs its session started are cancelled, each with an audit entry ("client disconnected"), the server waits
   up to 30 seconds for their containers to stop, and `llm-cli mcp serve` then shuts the framework down. A SIGTERM
@@ -604,6 +610,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **AI clients never see the host path of a local model they named** (MCP clients and Ditto): the build's stage
   text, the self-healing context, the build manifest's `model_source` and `list_artifacts` name it by its
   `<label>:<relative path>` (an older manifest's host path by its label, else by the file name only).
+- **An MCP client can no longer skip a question's record and limits by sending an answer along with its call**
+  (2026-07-28 rounds): a round counts as an answer only to a question the framework asked that client and that is
+  still open. Before, any call that carried some answer was asked without the write-ahead `confirmation_requested`
+  entry and without the 10-minute wait after a "no", the pause after three "no" and the questions-per-hour count.
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
   into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
   build log or a model name told the model.

@@ -158,8 +158,8 @@ class BuildService:
                                         next=MODEL_NEXT)
             return str(local)
         if ".." in model or not HF_REPO_ID.match(model):
-            raise BuildServiceError(f"'{model}' is neither an existing local model nor a Hugging Face repo id "
-                                    "(owner/name).", code="invalid_value", next=MODEL_NEXT)
+            raise BuildServiceError(f"'{shown or model}' is neither an existing local model nor a Hugging Face repo "
+                                    "id (owner/name).", code="invalid_value", next=MODEL_NEXT)
         return model
 
     # --- queries ----------------------------------------------------------------------------
@@ -348,8 +348,9 @@ class BuildService:
         dataset = None
         if request.dataset_path:
             path = Path(request.dataset_path).expanduser()
-            if not path.is_file():
-                raise BuildServiceError(f"Calibration dataset '{request.dataset_path}' not found.",
+            if not path.is_file():  # an AI caller's dataset by its label, never its real path
+                shown = getattr(getattr(inputs, "dataset", None), "ref", None) or request.dataset_path
+                raise BuildServiceError(f"Calibration dataset '{shown}' not found.",
                                         code="invalid_value",
                                         next="Name an existing dataset file as <label>:<relative path>.")
             dataset = str(path.resolve())

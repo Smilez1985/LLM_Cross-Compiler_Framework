@@ -277,12 +277,13 @@ def healing_facts(service, request_id: str, approve: bool) -> CallFacts:
     fingerprint, to which the decision is bound. A destructive strategy is asked even when the tool is allowed."""
     proposal = service.healing_proposal(request_id, approve)
     strategy = proposal["strategy"]
+    # The build by its speaking name too: the first line is what the person reads first (DECISIONS round 4 item 1).
+    named = f"{request_id} ({proposal['request']})" if proposal.get("request") else request_id
     if approve:
         consequence = HEALING_CONSEQUENCES.get(strategy, "Applies the proposed fix and retries build request {rid} "
-                                                         "once.").format(rid=request_id)
+                                                         "once.").format(rid=named)
     else:
-        consequence = (f"Dismisses the self-healing proposal of build request {request_id}; the failed build is not "
-                       "retried.")
+        consequence = f"Dismisses the self-healing proposal of build request {named}; the failed build is not retried."
     source = "written by an AI" if proposal["ai_generated"] else "from the build log analysis"
     facts = []
     if proposal.get("request"):
@@ -365,6 +366,15 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         if seconds and not ctx.metadata.get("waited"):
             jobs.wait(inp.job_id, seconds)
         return _job_out(jobs.get(inp.job_id), ctx)
+
+    def resolve_healing(inp: ResolveHealingIn, ctx: ToolContext) -> BuildStatusOut:
+        """Bound to the proposal the question showed (its fingerprint in the looked-up facts): a changed proposal is
+        refused with nothing applied, and without those facts nothing is decided at all."""
+        expect = ctx.facts.bound.get("proposal") if ctx.facts is not None else None
+        if not expect:
+            raise ToolError("The decision is not bound to a proposal the person was shown; nothing was applied.",
+                            code="failed", next="Call resolve_healing again through the framework's tool registry.")
+        return service.resolve_healing(inp.request_id, inp.approve, expect=expect)
 
     def cancel_job(inp: JobIn, ctx: ToolContext) -> CancelJobOut:
         before = jobs.get(inp.job_id).state
@@ -504,10 +514,7 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
         ToolSpec("resolve_healing", "Decide on a self-healing proposal",
                  "Approves (applies the automatic fix and retries the build) or dismisses a pending proposal. The "
                  "person is shown the proposal from the framework's own state; a destructive fix is always asked.",
-                 ToolTier.LOCAL_WRITE, ResolveHealingIn, BuildStatusResult,
-                 # bound to the proposal the question showed: a changed proposal is refused, nothing applied
-                 lambda i, ctx: service.resolve_healing(
-                     i.request_id, i.approve, expect=(ctx.facts.bound.get("proposal") if ctx.facts else None)),
+                 ToolTier.LOCAL_WRITE, ResolveHealingIn, BuildStatusResult, resolve_healing,
                  takes_context=True, summary=_status_summary,
                  prepare=lambda i, ctx: healing_facts(service, i.request_id, i.approve),
                  # destructive: the docker_prune strategy deletes the Docker build cache
