@@ -207,11 +207,14 @@ setup_venv() {
     local as_user=(sudo -u "$REAL_USER")
     if ! command -v sudo &> /dev/null; then as_user=(runuser -u "$REAL_USER" --); fi
     
-    "${as_user[@]}" bash <<EOF
+    # Scheitert ein Schritt (kein venv, ein Paket nicht erreichbar), bricht die Installation ab: Sonst meldete sie
+    # "abgeschlossen" mit einer leeren Umgebung, und ein Container-Image würde trotzdem gebaut.
+    if ! "${as_user[@]}" bash <<EOF
+    set -e
     cd "$INSTALL_DIR"
     python3 -m venv .venv
-    ./.venv/bin/pip install --upgrade pip > /dev/null
-    
+    ./.venv/bin/pip install --upgrade pip > /dev/null || echo "⚠️ pip ließ sich nicht aktualisieren; weiter mit der vorhandenen Version."
+
     echo "Installiere Abhängigkeiten..."
     if [ -f requirements.txt ]; then
         ./.venv/bin/pip install -r requirements.txt > /dev/null
@@ -220,6 +223,9 @@ setup_venv() {
         ./.venv/bin/pip install pyyaml requests psutil > /dev/null
     fi
 EOF
+    then
+        log_error "Die Python-Umgebung in $INSTALL_DIR/.venv ließ sich nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Proxy oder eigener Spiegel: sudo -E ./install.sh bzw. PIP_INDEX_URL."
+    fi
 }
 
 # --- SCHRITT 4: KONFIGURATION & LAUNCHER ---

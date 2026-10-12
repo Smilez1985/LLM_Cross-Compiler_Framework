@@ -50,14 +50,18 @@ Was passiert:
 3. Docker baut [`Docker Setup/Dockerfile`](../Docker%20Setup/Dockerfile) aus diesem Ordner:
    - Basis: Debian 13 slim, per Digest festgelegt;
    - ein Benutzer `lcf` mit deiner Benutzer- und Gruppen-ID (nie 0, root), damit Dateien in einem eingebundenen
-     Datenordner dir gehören;
+     Datenordner dir gehören; gibt es deine Gruppen-ID in Debian schon (etwa 100, `users`), wird diese Gruppe genutzt;
    - `install.sh` läuft wie auf einem Debian-Computer, als hätte `lcf` es mit `sudo` gestartet: Es installiert Python
      mit `apt`, kopiert das Programm nach `/opt/llm-conversion-framework`, legt dort `.venv` mit der festgelegten
      `requirements.txt` an und schreibt den Starter `llm-framework`. Nur die Docker-Engine und die Gruppe `docker`
      fallen weg (`LCF_CONTAINER_BUILD=1`);
    - `llm-cli` liegt im PATH;
    - die Quellen sind während des Builds nur lesbar eingebunden und werden nie zu einer Image-Schicht; in keiner
-     Schicht steht ein Geheimnis.
+     Schicht steht ein Geheimnis;
+   - am Ende prüft der Build die Installation: Die Befehlszeile muss sich importieren lassen, und jede
+     Systembibliothek, die Qt lädt, muss da sein (mit `--gui` auch die des Desktops und des X11-Plattform-Plugins).
+     Sonst bricht der Build ab und nennt, was fehlt, statt ein Image zu liefern, dessen `llm-cli` beim ersten Befehl
+     scheitert. Kann `pip` die festgelegten Pakete nicht installieren, bricht `install.sh` den Build ebenfalls ab.
 4. Das Image bekommt das lokale Tag `lcf-framework:local`, und der Builder zeigt, wie du es startest.
 
 Ein Build aus dem Repository-Ordner selbst (`docker build -f "Docker Setup/Dockerfile" .`) wird abgelehnt, bevor
@@ -83,21 +87,25 @@ und entzieht alle Capabilities. Danach einmal:
    Framework wählt nichts für dich: Bis du wählst, brechen Befehle, die das Framework brauchen, mit einer Meldung ab,
    die die Möglichkeiten nennt.
    - **Eine Schlüsseldatei, die der Container als Docker-Secret bekommt** (empfohlen auf einem Server). Lege eine
-     Datei an, die nur du lesen kannst, etwa mit
-     `head -c 32 /dev/urandom | base64 > ~/lcf-vault-key && chmod 600 ~/lcf-vault-key`, und daneben eine eigene
-     Compose-Datei (`~/lcf-compose.override.yml`):
+     Datei an, die nur du lesen kannst, etwa mit `(umask 077 && head -c 32 /dev/urandom | base64 > ~/lcf-vault-key)`
+     (die Datei ist nie für andere lesbar, auch nicht für einen Moment), und daneben eine eigene Compose-Datei
+     (`~/lcf-compose.override.yml`):
 
      ```yaml
      services:
        framework:
+         secrets: [lcf_vault_key]
+       gui:                             # nur, wenn du make gui nutzt
          secrets: [lcf_vault_key]
      secrets:
        lcf_vault_key:
          file: /pfad/zu/lcf-vault-key   # der absolute Pfad deiner Schlüsseldatei
      ```
 
-     Der Container-Benutzer hat deine Benutzer-ID und kann die Datei deshalb lesen. Starte mit
-     `make up LCF_COMPOSE_OVERRIDE=~/lcf-compose.override.yml`, dann
+     Der Container-Benutzer hat deine Benutzer-ID und kann die Datei deshalb lesen. Jeder `make`-Aufruf braucht diese
+     Datei ab jetzt: Ohne sie ersetzt `make up` den Container durch einen ohne das Secret, und das Framework bricht ab,
+     bis du sie wieder angibst. Setze die Variable deshalb einmal in deinem Shell-Profil (etwa `~/.profile`) und
+     öffne ein neues Terminal: `export LCF_COMPOSE_OVERRIDE="$HOME/lcf-compose.override.yml"`. Dann `make up` und
      `docker exec -it lcf-framework llm-cli ditto auth storage --use helper --helper "cat /run/secrets/lcf_vault_key"`.
    - **`--use insecure`**: eine Schlüsseldatei neben dem Tresor im Datenvolume. Wer das Volume lesen kann, kann deine
      Zugangsdaten lesen.
@@ -138,15 +146,25 @@ Alles Persönliche liegt im Docker-Volume `lcf-data`, eingebunden unter `/data`:
 | `/data/home` | Persönlicher Zustand: Tool-Berechtigungen, Audit-Log, Tresor für Zugangsdaten, SSH-Schlüssel und bekannte Geräte, MCP-Tokens, Chatverlauf, Wissensbasis | `LLM_FRAMEWORK_HOME` |
 | `/data/config` | `config.yml` | `LLM_FRAMEWORK_CONFIG_DIR` |
 | `/data/output`, `/data/cache`, `/data/models` | Builds, Cache, heruntergeladene Modelle | `LLM_FRAMEWORK_OUTPUT_DIR`, `..._CACHE_DIR`, `..._MODELS_DIR` |
+| `/data/datasets`, `/data/logs` | Kalibrierungsdatensätze, Logdateien | `LLM_FRAMEWORK_DATASETS_DIR`, `..._LOGS_DIR` |
 | `/data/huggingface`, `/data/xdg-cache` | Downloads von Hugging Face und andere Caches | `HF_HOME`, `XDG_CACHE_HOME` |
 
-`make down` und `make clean` stoppen und entfernen die Container und behalten das Volume; `make clean` zeigt, was
-Daten enthält und wie du es selbst entfernst. Sichere das Volume wie jedes Docker-Volume.
+Sichere das Volume wie jedes Docker-Volume.
 
 Der Programmordner `/opt/llm-conversion-framework` gehört `lcf`, so wie er auf dem Rechner selbst deinem Benutzer
 gehört. Targets, die du mit dem Modul-Assistenten oder `llm-cli module create` anlegst, und Community-Packs, die du
-installierst, landen dort; sie überstehen Neustarts, aber keinen Neubau des Containers
-([Aktualisieren](#7-aktualisieren)).
+installierst, landen dort. Sie liegen damit im Container selbst, nicht im Volume, und gehen verloren, wenn der
+Container entfernt oder ersetzt wird. Die Make-Ziele entfernen oder ersetzen deshalb nie einen Container, der Dateien
+von dir außerhalb des Volumes enthält:
+
+- `make down` stoppt die Container und entfernt keinen.
+- `make up` und `make gui` starten einen Container mit Dateien von dir so, wie er ist (ein neues Image oder geänderte
+  Einstellungen brauchen dann einen neuen Container, siehe [Aktualisieren](#7-aktualisieren)); ein Container ohne
+  solche Dateien wird wie gewohnt ersetzt.
+- `make clean` entfernt nur Container, die nichts von dir enthalten. Für jeden anderen listet es jede Datei auf
+  (vollständiger Pfad, Dateiname, Größe und was sie ist) und nennt den Befehl, mit dem du den Container selbst
+  entfernst; das Volume entfernt es nie.
+- `make kept-files` zeigt diese Dateien jederzeit ([`scripts/container_kept_files.sh`](../scripts/container_kept_files.sh)).
 
 ## 6. Die GUI (optional)
 
@@ -167,13 +185,15 @@ hast. Wayland-Desktops funktionieren über XWayland.
 ```bash
 git pull
 make build
-make down && make up
+make up
 ```
 
-Das Datenvolume bleibt. Targets und Community-Packs im Programmordner des alten Containers werden nicht übernommen:
-Exportiere ein eigenes Target vorher als Pack ins Datenvolume
-(`llm-cli zoo export target NAME --author "<dein Name>" --out /data/packs`, siehe
-[CLI_Usage_DE.md](CLI_Usage_DE.md#zoo-export)) und installiere es danach wieder.
+Das Datenvolume bleibt. `make up` ersetzt den Container durch das neue Image, wenn er außerhalb des Volumes nichts von
+dir enthält. Sonst lässt es den alten Container weiterlaufen, listet diese Dateien auf und sagt, was zu tun ist:
+Kopiere sie zuerst ins Volume (ein eigenes Target als Pack:
+`docker exec lcf-framework llm-cli zoo export target NAME --author "<dein Name>" --out /data/packs`, siehe
+[CLI_Usage_DE.md](CLI_Usage_DE.md#zoo-export)), entferne den alten Container selbst (`docker rm -f lcf-framework`),
+führe `make up` erneut aus und installiere die Packs wieder.
 
 ## 8. Grenzen
 
@@ -181,7 +201,8 @@ Exportiere ein eigenes Target vorher als Pack ins Datenvolume
   Computer, der konvertiert. Baue auf einem Computer, auf dem das Framework direkt installiert ist. Den Docker-Socket
   des Hosts in den Container zu geben wird nicht angeboten: Der Container bekäme damit Rechte wie Root auf dem Host.
 - **Kein Schlüsselbund:** siehe Schritt 1 unter [Starten und einmal einrichten](#3-starten-und-einmal-einrichten).
-- **Targets und Community-Packs** im Programmordner überstehen keinen Neubau (oben).
+- **Targets und Community-Packs** liegen im Programmordner des Containers, nicht im Volume: Der Wechsel zu einem
+  neuen Image braucht vorher einen Export ([Aktualisieren](#7-aktualisieren)).
 - **Gesprochene Ansagen** sind aus (`LLM_FRAMEWORK_NO_AUDIO=1`).
 - Das Image wird in der CI gebaut und mit Rauchtests geprüft (`.github/workflows/framework-container.yml`); auf
   Proxmox oder einem NAS ist es noch nicht getestet.
@@ -191,8 +212,9 @@ Exportiere ein eigenes Target vorher als Pack ins Datenvolume
 | Datei | Zweck |
 |---|---|
 | [`scripts/build_container_image.sh`](../scripts/build_container_image.sh) | Der Builder: prüft, stellt die ausgelieferten Dateien bereit, baut mit lokalem Tag, zeigt, wie du es startest |
+| [`scripts/container_kept_files.sh`](../scripts/container_kept_files.sh) | Listet die Dateien von dir auf, die ein Container außerhalb des Datenvolumes enthält; die Make-Ziele entfernen oder ersetzen einen solchen Container nie |
 | [`Docker Setup/Dockerfile`](../Docker%20Setup/Dockerfile) | Das Image: Debian 13 slim per Digest, `install.sh`, Benutzer `lcf`, `/data`, standardmäßig ohne Oberfläche |
 | [`Docker Setup/Dockerfile.dockerignore`](../Docker%20Setup/Dockerfile.dockerignore) | Hält große und persönliche Ordner aus einem Build-Kontext heraus, der aus dem Repository-Ordner selbst entsteht |
 | [`Docker Setup/docker-compose.yml`](../Docker%20Setup/docker-compose.yml) | Die Dienste `framework` und `gui` (Profil `gui`), das Volume `lcf-data`, `pull_policy: never` |
-| [`Makefile`](../Makefile) | `make build`, `build-gui`, `up`, `gui`, `down`, `doctor`, `shell`, `clean`, `audit` (Trivy prüft ein Archiv des Images; der Scanner bekommt nie den Docker-Socket) |
+| [`Makefile`](../Makefile) | `make build`, `build-gui`, `up`, `gui`, `down`, `kept-files`, `doctor`, `shell`, `clean`, `audit` (Trivy prüft ein Archiv des Images; der Scanner bekommt nie den Docker-Socket) |
 | `Docker Setup/pyproject.toml` | Eine alte Kopie der Projektdatei (Version 1.6.0), die nichts nutzt; die Projektdatei ist [`pyproject.toml`](../pyproject.toml) oben im Repository |

@@ -15,6 +15,9 @@ import os
 import re
 import shutil
 import subprocess
+import sys
+import tarfile
+import textwrap
 from pathlib import Path
 
 import pytest
@@ -51,10 +54,38 @@ def _logical_lines(text: str):
 
 # --- no published or pulled framework image ------------------------------------------------------------------------
 
-PUSH = re.compile(r"\b(docker|podman|nerdctl)\s+(image\s+)?push\b|\bbuildx\b[^\n]*--push\b|\bcompose\b[^\n]*\bpush\b"
-                  r"|\bskopeo\s+copy\b|\bcrane\s+push\b|\bdocker/login-action\b|\bdocker\s+login\b", re.I)
+PUSH = re.compile(r"\b(docker|podman|nerdctl|buildah)\s+(image\s+)?push\b|\bbuildx\b[^\n]*--push\b"
+                  r"|\bcompose\b[^\n]*\bpush\b|\bskopeo\s+copy\b|\bcrane\s+push\b|\boras\s+push\b"
+                  r"|\bregctl\s+image\s+copy\b|\bctr\b[^\n]*\bimages?\s+push\b|\bdocker/login-action\b"
+                  r"|\b(docker|podman|buildah)\s+login\b", re.I)
 PULL = re.compile(r"\b(docker|podman|nerdctl)\s+(image\s+)?pull\b[^\n]*" + FRAMEWORK_IMAGE
                   + r"|\bimages\.pull\([^)]*" + FRAMEWORK_IMAGE, re.I)
+# `docker run` and `docker create` pull a missing image by themselves. A framework image is local only, and a name
+# such as llm-framework/rockchip:ci or acme/lcf:local also names a repository of someone else on Docker Hub, so every
+# run of a framework image says --pull never.
+RUNS_IMAGE = re.compile(r"\b(docker|podman|nerdctl)\s+(container\s+)?(run|create)\b[^\n`|;&]*?"
+                        r"(\blcf-framework\b|\bllm-framework/|\bsmilez1985/|\$tag\b)", re.I)
+PULL_NEVER = re.compile(r"--pull[= ]never\b")
+
+
+def _implicit_pull(line: str) -> bool:
+    return bool(RUNS_IMAGE.search(line)) and not PULL_NEVER.search(line)
+
+
+def _command_lines(text: str):
+    """(first line number, line) with backslash continuations joined: a `docker run` whose image or --pull option
+    stands on a continuation line is checked as one command."""
+    start, current = None, ""
+    for number, line in enumerate(text.splitlines(), 1):
+        if start is None:
+            start = number
+        if line.rstrip().endswith("\\"):
+            current += line.rstrip()[:-1] + " "
+            continue
+        yield start, current + line
+        start, current = None, ""
+    if current:
+        yield start, current
 
 
 def _checked_files():
@@ -82,10 +113,11 @@ def test_no_workflow_makefile_script_or_doc_pushes_or_pulls_a_framework_image():
         if not path.is_file():
             continue
         text = path.read_text(encoding="utf-8", errors="replace")
-        for number, line in enumerate(text.splitlines(), 1):
-            if PUSH.search(line) or PULL.search(line):
+        for number, line in _command_lines(text):
+            if PUSH.search(line) or PULL.search(line) or _implicit_pull(line):
                 found.append(f"{rel}:{number}: {line.strip()[:120]}")
-    assert not found, "a framework image is pushed or pulled:\n  " + "\n  ".join(found)
+    assert not found, ("a framework image is pushed or pulled (a docker run of it needs --pull never):\n  "
+                       + "\n  ".join(found))
 
 
 def test_every_workflow_build_has_push_false():
@@ -101,11 +133,21 @@ def test_every_workflow_build_has_push_false():
 def test_the_guard_finds_a_push_and_a_framework_pull():
     for line in ["docker push lcf-framework:local", "docker buildx build --push -t x .", "docker image push x",
                  "docker compose push", "uses: docker/login-action@v3", "docker pull ghcr.io/smilez1985/llm-runtime",
-                 "podman pull llm-framework/orchestrator:1.3.0"]:
-        assert PUSH.search(line) or PULL.search(line), line
+                 "podman pull llm-framework/orchestrator:1.3.0", "buildah push lcf-framework:local docker://x",
+                 "oras push registry.example/x:1 file", "regctl image copy a b", "ctr -n k8s.io images push x",
+                 "podman login ghcr.io", "docker run --rm lcf-framework:local llm-cli --version",
+                 "docker run --rm llm-framework/rockchip:ci status", "  docker run --rm -v lcf-data:/data $tag llm-cli"]:
+        assert PUSH.search(line) or PULL.search(line) or _implicit_pull(line), line
     for line in ["python scripts/secret_scan.py --push", "docker pull debian:13-slim", "git push origin main",
-                 "push: false"]:
-        assert not (PUSH.search(line) or PULL.search(line)), line
+                 "push: false", "docker run --rm --pull never lcf-framework:local id -u",
+                 "docker run --pull=never --rm llm-framework/rockchip:ci test", "docker run --rm aquasec/trivy:0.75.0"]:
+        assert not (PUSH.search(line) or PULL.search(line) or _implicit_pull(line)), line
+    # A command over several lines is one command: the image on a continuation line is found, and so is the option.
+    missing = "docker run -d --name box \\\n    -v lcf-data:/data $tag sleep infinity\n"
+    assert [line for _, line in _command_lines(missing) if _implicit_pull(line)]
+    given = "docker run -d --pull never --name box \\\n    -v lcf-data:/data $tag sleep infinity\n"
+    assert not [line for _, line in _command_lines(given) if _implicit_pull(line)]
+    assert [number for number, _ in _command_lines("a\nb \\\nc\nd")] == [1, 2, 4]
 
 
 # --- the Dockerfile --------------------------------------------------------------------------------------------------
@@ -143,6 +185,165 @@ def test_the_image_is_headless_by_default_and_the_gui_is_an_explicit_option():
     cmd = re.findall(r"^CMD\s+(.+)$", text, re.M)
     assert cmd == ['["llm-cli", "--help"]'], "the default command is the CLI, never the GUI"
     assert re.search(r'^VOLUME \["/data"\]$', text, re.M) and "LLM_FRAMEWORK_HOME=/data/home" in text
+
+
+# Which Debian package gives a system library the Qt wheel does not bundle: directly, or as a hard dependency of a
+# package the Dockerfile installs (checked on packages.debian.org for trixie; no recommended packages are installed).
+# "base" is in debian:13-slim itself.
+BASE = "base"
+SYSTEM_LIBRARIES = {
+    "libc.so.6": BASE, "libm.so.6": BASE, "libdl.so.2": BASE, "libpthread.so.0": BASE, "librt.so.1": BASE,
+    "ld-linux-x86-64.so.2": BASE, "ld-linux-aarch64.so.1": BASE, "libstdc++.so.6": BASE, "libgcc_s.so.1": BASE,
+    "libz.so.1": BASE, "libzstd.so.1": BASE,
+    "libglib-2.0.so.0": "libglib2.0-0t64", "libgthread-2.0.so.0": "libglib2.0-0t64",
+    "libEGL.so.1": "libegl1", "libGL.so.1": "libgl1", "libOpenGL.so.0": "libopengl0",
+    "libX11-xcb.so.1": "libx11-xcb1", "libX11.so.6": "libx11-xcb1", "libxcb.so.1": "libx11-xcb1",
+    "libdbus-1.so.3": "libdbus-1-3", "libfontconfig.so.1": "fontconfig", "libfreetype.so.6": "fontconfig",
+    "libxcb-cursor.so.0": "libxcb-cursor0", "libxcb-icccm.so.4": "libxcb-icccm4", "libxcb-image.so.0": "libxcb-image0",
+    "libxcb-shm.so.0": "libxcb-image0", "libxcb-util.so.1": "libxcb-image0", "libxcb-keysyms.so.1": "libxcb-keysyms1",
+    "libxcb-randr.so.0": "libxcb-randr0", "libxcb-render-util.so.0": "libxcb-render-util0",
+    "libxcb-render.so.0": "libxcb-render-util0", "libxcb-shape.so.0": "libxcb-shape0", "libxcb-sync.so.1": "libxcb-sync1",
+    "libxcb-xfixes.so.0": "libxcb-xfixes0", "libxcb-xkb.so.1": "libxcb-xkb1", "libxcb-xinerama.so.0": "libxcb-xinerama0",
+    "libxkbcommon-x11.so.0": "libxkbcommon-x11-0", "libxkbcommon.so.0": "libxkbcommon0",
+}
+
+
+def _apt_packages(text: str):
+    """The packages of the Dockerfile's apt step: (always installed, only with WITH_GUI=1)."""
+    run = next(line for line in _logical_lines(text) if "apt-get install" in line and "WITH_GUI" in line)
+    always, gui = run.split('if [ "$WITH_GUI" = "1" ]', 1)
+    pick = re.compile(r"apt-get install -y --no-install-recommends ([^;&]+)")
+    return ({p for m in pick.findall(always) for p in m.split()}, {p for m in pick.findall(gui) for p in m.split()})
+
+
+def _qt_modules(gui: bool):
+    """The Qt modules the code imports: without the GUI (orchestrator/gui, orchestrator/main.py), or all of them."""
+    found = set()
+    for path in (REPO_ROOT / "orchestrator").rglob("*.py"):
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        if not gui and (rel.startswith("orchestrator/gui/") or rel == "orchestrator/main.py"):
+            continue
+        found |= set(re.findall(r"^\s*(?:from|import)\s+PySide6\.(Qt\w+)", path.read_text(encoding="utf-8"), re.M))
+    return found
+
+
+def _system_libraries(files):
+    """The libraries the given ELF files need that the PySide6 wheel does not bundle (readelf, closure in the wheel)."""
+    import PySide6
+    import shiboken6
+    package = Path(PySide6.__file__).parent
+    bundled = {p.name: p for root in (package, package / "Qt" / "lib", Path(shiboken6.__file__).parent)
+               for p in root.glob("*.so*")}
+    seen, system, todo = set(), set(), list(files)
+    while todo:
+        path = todo.pop()
+        if path in seen:
+            continue
+        seen.add(path)
+        dynamic = subprocess.run(["readelf", "-d", str(path)], capture_output=True, text=True).stdout
+        for name in re.findall(r"\(NEEDED\)\s+Shared library: \[([^\]]+)\]", dynamic):
+            if name in bundled:
+                todo.append(bundled[name])
+            else:
+                system.add(name)
+    return system
+
+
+needs_qt_elf = pytest.mark.skipif(not sys.platform.startswith("linux") or not shutil.which("readelf"),
+                                  reason="reads the Linux Qt wheel's libraries with readelf")
+
+
+@needs_qt_elf
+@pytest.mark.parametrize("gui", [False, True], ids=["headless", "gui"])
+def test_the_image_installs_every_system_library_qt_needs(gui):
+    """The CLI imports PySide6.QtCore (docker_manager, localization), whose Qt library needs libglib: without it every
+    llm-cli command of the headless image fails at import. The GUI image needs everything QtGui, QtWidgets and the
+    xcb platform plugin load, or Qt stops with "could not load the Qt platform plugin xcb"."""
+    pytest.importorskip("PySide6")
+    import PySide6
+    package = Path(PySide6.__file__).parent
+    modules = _qt_modules(gui)
+    assert modules and (gui or modules == {"QtCore"}), modules
+    files = [package / f"{module}.abi3.so" for module in sorted(modules)]
+    if gui:
+        files.append(package / "Qt" / "plugins" / "platforms" / "libqxcb.so")
+    files = [f for f in files if f.exists()]
+    if not files:
+        pytest.skip("this PySide6 wheel has no Linux libraries")
+    always, gui_only = _apt_packages(DOCKERFILE.read_text(encoding="utf-8"))
+    installed = always | (gui_only if gui else set())
+    unknown = sorted(name for name in _system_libraries(files) if name not in SYSTEM_LIBRARIES)
+    assert not unknown, f"add the Debian package of {unknown} to SYSTEM_LIBRARIES and to the Dockerfile"
+    missing = sorted({SYSTEM_LIBRARIES[name] for name in _system_libraries(files)} - installed - {BASE})
+    assert not missing, f"the {'GUI' if gui else 'headless'} image lacks {missing}"
+
+
+def _build_check(install_dir: Path) -> str:
+    """The Dockerfile's check after install.sh, as a bash script for a fake installation in install_dir."""
+    lines = _logical_lines(DOCKERFILE.read_text(encoding="utf-8"))
+    run = next((line for line in lines if line.startswith("RUN ") and "import orchestrator.cli" in line), None)
+    assert run, "the Dockerfile checks the installation after install.sh"
+    install_at = next(i for i, line in enumerate(lines) if "/src/install.sh" in line)
+    assert lines.index(run) > install_at
+    return "set -o pipefail\n" + run[4:].replace("/opt/llm-conversion-framework", str(install_dir))
+
+
+@needs_bash
+@pytest.mark.parametrize("case", ["ok", "ok-gui", "import-fails", "library-missing", "gui-library-missing",
+                                  "plugin-missing"])
+def test_the_build_fails_when_the_installation_does_not_work(tmp_path, case):
+    """Before, a failed pip install or a missing system library still gave a "built" image whose llm-cli failed at
+    the first command. The build now imports the CLI and resolves every library Qt loads (ldd), and stops if not."""
+    install = tmp_path / "opt"
+    qt = install / ".venv" / "lib" / "python3.13" / "site-packages" / "PySide6"
+    (qt / "Qt" / "plugins" / "platforms").mkdir(parents=True)
+    for rel in ("QtCore.abi3.so", "QtGui.abi3.so", "QtWidgets.abi3.so", "Qt/plugins/platforms/libqxcb.so"):
+        if not (case == "plugin-missing" and rel.endswith("libqxcb.so")):
+            (qt / rel).write_text("elf")
+    python = install / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_text("#!/bin/sh\n" + ('echo "ModuleNotFoundError: yaml" >&2; exit 1\n' if case == "import-fails"
+                                        else "exit 0\n"))
+    python.chmod(0o755)
+    stubs = tmp_path / "bin"
+    stubs.mkdir()
+    missing_in = {"library-missing": "QtCore", "gui-library-missing": "libqxcb"}.get(case, "NOTHING_IS_MISSING")
+    (stubs / "ldd").write_text('#!/bin/sh\necho "\tlibc.so.6 => /lib/libc.so.6"\n'
+                               f'case "$1" in *{missing_in}*) echo "\tlibglib-2.0.so.0 => not found" ;; esac\n')
+    (stubs / "ldd").chmod(0o755)
+    gui = "1" if case in ("ok-gui", "gui-library-missing", "plugin-missing") else "0"
+    run = subprocess.run(["/bin/bash", "-c", _build_check(install)], capture_output=True, text=True, timeout=60,
+                         env={"PATH": f"{stubs}:/usr/bin:/bin", "WITH_GUI": gui, "HOME": str(tmp_path)})
+    if case.startswith("ok"):
+        assert run.returncode == 0, run.stdout + run.stderr
+        return
+    assert run.returncode != 0, f"{case}: the image would count as built"
+    if "library-missing" in case:
+        assert "libglib-2.0.so.0 => not found" in run.stderr and "apt step" in run.stderr
+    if case == "plugin-missing":
+        assert "libqxcb.so" in run.stderr
+
+
+def test_the_container_user_reuses_a_group_that_exists_already():
+    """The builder passes your ids. A primary group such as 100 (users, openSUSE) or 20 (Docker Desktop on a Mac)
+    exists in Debian already, and groupadd --gid would stop the build: the existing group is used instead."""
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    run = next(line for line in _logical_lines(text) if "useradd" in line)
+    assert re.search(r'getent group "\$LCF_GID"', run) and "groupadd" in run
+    assert run.index("getent group") < run.index("groupadd"), "groupadd only when the group does not exist yet"
+    assert '--gid "$LCF_GID"' in run.split("useradd", 1)[1], "the user gets the group by its id, whatever its name"
+    assert not re.search(r"-g lcf\b|:lcf\b|--gid lcf\b", text), "no command relies on a group named lcf"
+
+
+def test_every_data_folder_lives_in_the_data_volume():
+    """Folders the framework writes the person's data to must be in /data: what lies in the container's own layer is
+    lost when the container is replaced. targets_dir stays in the program folder (it holds the shipped targets too)."""
+    from orchestrator.tools.tools_status import FOLDER_KEYS
+    text = DOCKERFILE.read_text(encoding="utf-8")
+    env = dict(re.findall(r"\b(LLM_FRAMEWORK_[A-Z_]+)=(\S+)", text))
+    for key in sorted(k for k in FOLDER_KEYS if k.endswith("_dir") and k != "targets_dir"):
+        assert env.get(f"LLM_FRAMEWORK_{key.upper()}", "").startswith("/data/"), f"{key} is not in /data"
+    assert env.get("LLM_FRAMEWORK_HOME") == "/data/home" and env.get("LLM_FRAMEWORK_CONFIG_DIR") == "/data/config"
 
 
 def test_the_build_context_ignore_file_keeps_personal_folders_out_but_no_tracked_file():
@@ -187,9 +388,198 @@ def test_the_makefile_uses_compose_v2_and_the_builder_and_deletes_no_data():
         assert (REPO_ROOT / script).is_file(), f"the Makefile calls the missing {script}"
     body = re.search(r"^clean:\n((?:\t.*\n)+)", text, re.M).group(1)
     commands = re.sub(r'"[^"]*"', '""', body)  # what is only printed (echo "...") is not run
-    assert not re.search(r"\brm\b|\s-v\b|--volumes|\bprune\b", commands), "make clean deletes nothing: it only shows how"
+    # No rm -rf of folders, no volume removal; a container goes only through compose rm after the check of
+    # scripts/container_kept_files.sh (TestMakeNeverRemovesYourFiles runs it).
+    assert not re.search(r"\brm\s+-[A-Za-z]|\s-v\b|--volumes|\bprune\b", commands), "make clean deletes no data"
+    assert "$(KEPT)" in commands and commands.index("$(KEPT)") < commands.index("rm --stop --force")
+    # An orphan (a container of this project from an earlier LCF_COMPOSE_OVERRIDE) was never checked for your files.
+    assert "--remove-orphans" not in commands and "--rmi" not in commands
     assert "docker volume rm lcf-data" in body, "it says how to remove the data volume yourself"
     assert "docker.sock" not in text, "make audit scans an archive, never with the Docker socket"
+
+
+def _recipe(text: str, target: str) -> str:
+    return re.search(rf"^{re.escape(target)}:.*\n((?:\t.*\n)+)", text, re.M).group(1)
+
+
+def test_make_down_stops_the_containers_and_removes_none():
+    """docker compose down removes the containers, and with them what they hold outside the data volume (targets
+    you created, packs you installed): make down only stops them."""
+    body = _recipe(MAKEFILE.read_text(encoding="utf-8"), "down")
+    assert re.search(r"\$\(COMPOSE\)[^\n]* stop\b", body) and not re.search(r"\bdown\b|\brm\b", body)
+
+
+# --- what a container holds outside the data volume --------------------------------------------------------------
+
+KEPT = REPO_ROOT / "scripts" / "container_kept_files.sh"
+PROGRAM = "/opt/llm-conversion-framework"
+
+FAKE_ENGINE = r"""#!/bin/bash
+# A fake docker for the containers lcf-framework and lcf-framework-gui; $FAKE holds their state.
+echo "ARGV: $*" >> "$LOG"
+case "$1" in
+  info) exit "${DOCKER_INFO_EXIT:-0}" ;;
+  container)
+    name="${@: -1}"
+    [ -f "$FAKE/exists-$name" ] || exit 1
+    if [ "$3" = "-f" ]; then cat "$FAKE/image-$name"; fi
+    exit 0 ;;
+  image) echo "${FAKE_IMAGE_ID:-sha256:new}"; exit 0 ;;
+  diff) cat "$FAKE/diff-$2"; exit 0 ;;
+  cp) key=$(printf '%s' "${2#*:}" | tr '/' '_'); cat "$FAKE/cp$key.tar" ;;
+  compose) exit 0 ;;
+esac
+exit 0
+"""
+
+
+def _tar(path: Path, members):
+    """A tar stream as `docker cp CONTAINER:SRC -` writes it: members relative to the parent of SRC."""
+    import io
+    with tarfile.open(path, "w") as archive:
+        for name, size in members:
+            info = tarfile.TarInfo(name.rstrip("/"))
+            if name.endswith("/"):
+                info.type, info.mode = tarfile.DIRTYPE, 0o755
+                archive.addfile(info)
+            else:
+                info.size, info.mode = size, 0o644
+                archive.addfile(info, io.BytesIO(b"x" * size))
+
+
+def _engine(tmp_path: Path, holds_files: bool, image: str = "sha256:old") -> dict:
+    fake = tmp_path / "fake"
+    fake.mkdir()
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "docker").write_text(FAKE_ENGINE)
+    (bin_dir / "docker").chmod(0o755)
+    (fake / "exists-lcf-framework").write_text("")
+    (fake / "image-lcf-framework").write_text(image + "\n")
+    noise = [f"C {PROGRAM}", f"A {PROGRAM}/orchestrator/__pycache__", f"A {PROGRAM}/orchestrator/__pycache__/x.pyc",
+             "A /tmp/build.lock", "C /home/lcf", "A /home/lcf/.bash_history"]
+    mine = [f"C {PROGRAM}/targets", f"A {PROGRAM}/targets/my_board", f"A {PROGRAM}/targets/my_board/target.yml",
+            f"A {PROGRAM}/targets/my_board/modules", f"A {PROGRAM}/targets/my_board/modules/build.sh",
+            f"C {PROGRAM}/targets/Rockchip", f"C {PROGRAM}/targets/Rockchip/target.yml", "A /home/lcf/notes.txt"]
+    (fake / "diff-lcf-framework").write_text("\n".join(noise + (mine if holds_files else [])) + "\n")
+    _tar(fake / f"cp{PROGRAM.replace('/', '_')}_targets_my_board.tar",
+         [("my_board/", 0), ("my_board/target.yml", 2048), ("my_board/modules/", 0),
+          ("my_board/modules/build.sh", 300)])
+    _tar(fake / f"cp{PROGRAM.replace('/', '_')}_targets_Rockchip_target.yml.tar", [("target.yml", 5000)])
+    _tar(fake / "cp_home_lcf_notes.txt.tar", [("notes.txt", 12)])
+    log = tmp_path / "docker.log"
+    return {"PATH": f"{bin_dir}:/usr/bin:/bin", "FAKE": str(fake), "LOG": str(log), "HOME": str(tmp_path)}
+
+
+def _kept(env, container="lcf-framework"):
+    return subprocess.run(["/bin/bash", str(KEPT), container], env=env, capture_output=True, text=True, timeout=60)
+
+
+@needs_bash
+class TestKeptFiles:
+
+    def test_it_lists_every_file_of_yours_with_full_path_name_size_and_what_it_is(self, tmp_path):
+        env = _engine(tmp_path, holds_files=True)
+        run = _kept(env)
+        assert run.returncode == 3, run.stdout + run.stderr
+        lines = [line.strip() for line in run.stdout.splitlines() if line.strip()]
+        assert len(lines) == 4, lines
+        target = next(line for line in lines if line.startswith(f"{PROGRAM}/targets/my_board/target.yml "))
+        assert "target.yml" in target and "2.0KB" in target and "target" in target.split(":", 1)[1]
+        assert any(line.startswith(f"{PROGRAM}/targets/my_board/modules/build.sh ") and "300B" in line
+                   for line in lines)
+        assert any(line.startswith(f"{PROGRAM}/targets/Rockchip/target.yml ") and "4.9KB" in line for line in lines)
+        assert any(line.startswith("/home/lcf/notes.txt ") and "home folder" in line for line in lines)
+        assert not [line for line in lines if "__pycache__" in line or "/tmp/" in line or "bash_history" in line]
+        assert "cp lcf-framework:/opt/llm-conversion-framework " not in Path(env["LOG"]).read_text(), \
+            "a changed folder is never copied whole"
+
+    def test_what_cannot_be_read_counts_as_yours_and_a_folder_detail_change_does_not(self, tmp_path):
+        """Fail closed: an entry of yours that docker cp cannot read is listed (size unknown), so make keeps the
+        container; a folder whose own details changed (a file made and removed again) holds nothing to lose."""
+        env = _engine(tmp_path, holds_files=False)
+        fake = Path(env["FAKE"])
+        with (fake / "diff-lcf-framework").open("a") as diff:
+            diff.write(f"C {PROGRAM}/community\nA {PROGRAM}/targets/broken\n")
+        _tar(fake / f"cp{PROGRAM.replace('/', '_')}_community.tar",
+             [("community/", 0), ("community/knowledge/", 0), ("community/knowledge/.gitkeep", 0)])
+        run = _kept(env)
+        assert run.returncode == 3, run.stdout + run.stderr
+        assert f"{PROGRAM}/targets/broken (broken, size unknown" in run.stdout
+        assert "community" not in run.stdout
+        (fake / "diff-lcf-framework").write_text(f"C {PROGRAM}/community\n")
+        assert _kept(env).returncode == 0
+
+    def test_nothing_of_yours_or_no_container_means_exit_0(self, tmp_path):
+        env = _engine(tmp_path, holds_files=False)
+        run = _kept(env)
+        assert run.returncode == 0 and run.stdout == "", run.stdout + run.stderr
+        run = _kept(env, "lcf-framework-gui")
+        assert run.returncode == 0 and run.stdout == ""
+
+    def test_an_unreachable_docker_is_an_error_not_an_empty_list(self, tmp_path):
+        env = _engine(tmp_path, holds_files=True)
+        run = _kept({**env, "DOCKER_INFO_EXIT": "1"}, "lcf-framework-gui")
+        assert run.returncode == 2 and "not reachable" in run.stderr
+
+    def test_shellcheck_finds_no_problem(self):
+        shellcheck = shutil.which("shellcheck")
+        if not shellcheck:
+            pytest.skip("shellcheck is not installed")
+        run = subprocess.run([shellcheck, str(KEPT)], capture_output=True, text=True)
+        assert run.returncode == 0, run.stdout
+
+
+def _make(env, *targets):
+    return subprocess.run(["make", "--no-print-directory", "-C", str(REPO_ROOT), *targets], env=env,
+                          capture_output=True, text=True, timeout=120)
+
+
+needs_make = pytest.mark.skipif(not shutil.which("make"), reason="needs make")
+
+
+@needs_bash
+@needs_make
+class TestMakeNeverRemovesYourFiles:
+
+    def test_clean_keeps_a_container_that_holds_files_of_yours_and_lists_them(self, tmp_path):
+        env = _engine(tmp_path, holds_files=True)
+        run = _make(env, "clean")
+        assert run.returncode == 0, run.stdout + run.stderr
+        calls = Path(env["LOG"]).read_text()
+        assert not re.search(r"compose .*\brm\b.*\bframework\b", calls), "the container with your files stays"
+        assert not re.search(r"compose .* down\b", calls)
+        assert f"{PROGRAM}/targets/my_board/target.yml" in run.stdout and "docker rm -f lcf-framework" in run.stdout
+
+    def test_clean_removes_containers_that_hold_nothing_of_yours(self, tmp_path):
+        env = _engine(tmp_path, holds_files=False)
+        run = _make(env, "clean")
+        assert run.returncode == 0, run.stdout + run.stderr
+        calls = Path(env["LOG"]).read_text()
+        assert re.search(r"compose .*\brm --stop --force framework\b", calls)
+        assert re.search(r"compose .* down$", calls, re.M), "only the project network goes; no orphan is removed"
+
+    def test_up_never_replaces_a_container_that_holds_files_of_yours(self, tmp_path):
+        env = _engine(tmp_path, holds_files=True)
+        run = _make(env, "up")
+        assert run.returncode == 0, run.stdout + run.stderr
+        calls = Path(env["LOG"]).read_text()
+        assert re.search(r"compose .* up -d --no-recreate framework\b", calls)
+        assert f"{PROGRAM}/targets/my_board/target.yml" in run.stdout and "docker rm -f lcf-framework" in run.stdout
+
+    def test_up_replaces_a_container_that_holds_nothing_of_yours(self, tmp_path):
+        env = _engine(tmp_path, holds_files=False)
+        run = _make(env, "up")
+        assert run.returncode == 0, run.stdout + run.stderr
+        calls = Path(env["LOG"]).read_text()
+        assert re.search(r"compose .* up -d framework\b", calls) and "--no-recreate" not in calls
+
+    def test_down_only_stops(self, tmp_path):
+        env = _engine(tmp_path, holds_files=True)
+        run = _make(env, "down")
+        assert run.returncode == 0, run.stdout + run.stderr
+        calls = Path(env["LOG"]).read_text()
+        assert re.search(r"compose .* stop\b", calls) and not re.search(r"\b(down|rm)\b", calls)
 
 
 # --- the builder script ----------------------------------------------------------------------------------------------
@@ -265,6 +655,8 @@ class TestBuilder:
         assert not re.search(r"\b(push|pull|login)\b", calls), "nothing is pushed or pulled"
         assert "docker exec -i lcf-framework llm-cli mcp serve" in run.stdout
         assert "Nothing was pushed" in run.stdout
+        runs = [line for line in run.stdout.splitlines() if "docker run" in line]
+        assert runs and all("--pull never" in line for line in runs), "a missing image is never pulled by docker run"
         assert not list(tmp_path.glob("lcf-container-*")), "the staged context is removed"
 
     def test_the_gui_is_an_option_with_its_own_tag_and_root_becomes_1000(self, tmp_path):
@@ -362,6 +754,39 @@ class TestInstallShInAContainer:
         expected = "sudo -u lcf bash" if with_sudo else "runuser -u lcf -- bash"
         assert calls.splitlines() == [expected]
 
+    @pytest.mark.parametrize("failing", ["pip", "venv", None])
+    def test_a_failed_python_environment_stops_the_installation(self, tmp_path, failing):
+        """Before, a pip install that could not reach the index (or a missing venv module) still ended with
+        "Installation abgeschlossen", and the container builder reported a built image with an empty .venv."""
+        stubs = tmp_path / "bin"
+        stubs.mkdir()
+        # runuser -u lcf -- bash: runs the script it gets on stdin, as the installer's own user here.
+        (stubs / "runuser").write_text('#!/bin/sh\nshift 3\nexec "$@"\n')
+        (stubs / "python3").write_text(
+            '#!/bin/sh\n'
+            f'[ "{failing}" = venv ] && {{ echo "No module named venv" >&2; exit 1; }}\n'
+            'mkdir -p .venv/bin\n'
+            f'printf \'#!/bin/sh\\ncase "$*" in *"-r requirements.txt"*) [ "{failing}" = pip ] && '
+            '{ echo "No matching distribution found" >&2; exit 1; } ;; esac\\nexit 0\\n\' > .venv/bin/pip\n'
+            'chmod +x .venv/bin/pip\n')
+        for name in ("runuser", "python3"):
+            (stubs / name).chmod(0o755)
+        install_dir = tmp_path / "opt"
+        install_dir.mkdir()
+        (install_dir / "requirements.txt").write_text("pyyaml==6.0.3\n")
+        env = {"PATH": f"{stubs}:/usr/bin:/bin", "HOME": str(tmp_path), "SUDO_USER": "lcf"}
+        # No sudo on this PATH, so the installer takes runuser.
+        script = ('source "$1"; INSTALL_DIR="$2"; command() { if [ "$2" = sudo ]; then return 1; fi; '
+                  'builtin command "$@"; }; setup_venv; echo "AFTER setup_venv"')
+        run = subprocess.run(["/bin/bash", "-c", script, "test", str(INSTALL_SH), str(install_dir)], env=env,
+                             capture_output=True, text=True, timeout=60)
+        if failing is None:
+            assert run.returncode == 0 and "AFTER setup_venv" in run.stdout, run.stdout + run.stderr
+            return
+        assert run.returncode != 0, run.stdout + run.stderr
+        assert "AFTER setup_venv" not in run.stdout, "the installer went on as if the environment existed"
+        assert ".venv ließ sich nicht einrichten" in run.stdout
+
     @needs_git
     def test_the_listing_without_git_keeps_nested_build_folders(self, tmp_path):
         repo = tmp_path / "unpacked"
@@ -379,6 +804,56 @@ class TestInstallShInAContainer:
                 "configs/llm_providers.yml"} <= listed
         assert not {"build/lib/old.py", "dist/pkg.whl", "configs/config.yml"} & listed
 
+
+
+# --- ports: only the loopback ------------------------------------------------------------------------------------
+
+PUBLISH = re.compile(r"(?:(?<![\w-])-p|--publish)[ =]\"?([^\s\"`)]+:[0-9]+)\b")
+
+
+def _published_beyond_loopback(line: str):
+    return [value for value in PUBLISH.findall(line)
+            if not re.match(r"(127\.0\.0\.1|\[::1\]|localhost):", value)]
+
+
+def test_no_document_script_or_compose_file_publishes_a_port_beyond_the_loopback():
+    """The MCP server's HTTP transport inside a container (--container) binds the container's interfaces: what the
+    framework tells you to publish must stay on the host's loopback (-p 127.0.0.1:PORT:PORT), and compose publishes
+    nothing."""
+    found = []
+    for rel in _checked_files():
+        path = REPO_ROOT / rel
+        if not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            if _published_beyond_loopback(line):
+                found.append(f"{rel}:{number}: {line.strip()[:120]}")
+    assert not found, "a port is published beyond the loopback:\n  " + "\n  ".join(found)
+    for doc in ("docs/Container_Setup.md", "docs/Container_Setup_DE.md"):
+        assert "-p 127.0.0.1:8765:8765" in (REPO_ROOT / doc).read_text(encoding="utf-8")
+
+
+def test_the_port_guard_finds_a_publish_beyond_the_loopback():
+    for line in ["docker run -p 8765:8765 lcf", "  --publish 0.0.0.0:8765:8765", "docker run -p=8765:8765 x",
+                 "use `-p 192.0.2.10:8765:8765`"]:
+        assert _published_beyond_loopback(line), line
+    for line in ["publish to the host's loopback (`-p 127.0.0.1:8765:8765`)", "llama-bench -p 64 -n 16",
+                 "docker run -p [::1]:8765:8765 x", "ssh -N -L 8765:127.0.0.1:8765 user@build-box"]:
+        assert not _published_beyond_loopback(line), line
+
+
+def test_the_guide_keeps_the_vault_secret_for_every_make_call():
+    """The Docker secret with the vault key comes from your own compose file: a make up without it replaces the
+    container by one without the secret, and the framework stops. The guide says to set LCF_COMPOSE_OVERRIDE once in
+    the shell profile and gives the secret to the GUI service too."""
+    for doc in ("docs/Container_Setup.md", "docs/Container_Setup_DE.md"):
+        text = (REPO_ROOT / doc).read_text(encoding="utf-8")
+        assert 'export LCF_COMPOSE_OVERRIDE="$HOME/lcf-compose.override.yml"' in text, doc
+        block = re.search(r"```yaml\n(.*?)```", text, re.S).group(1)
+        example = yaml.safe_load(textwrap.dedent(block))
+        assert set(example["services"]) == {"framework", "gui"}, doc
+        assert all(service["secrets"] == ["lcf_vault_key"] for service in example["services"].values()), doc
+        assert "lcf_vault_key" in example["secrets"], doc
 
 # --- the docs --------------------------------------------------------------------------------------------------------
 

@@ -87,12 +87,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Dockerfile führt dieselbe Installation aus wie auf dem Rechner selbst (`install.sh`, das mit
   `LCF_CONTAINER_BUILD=1` nur die Docker-Engine und die Gruppe `docker` weglässt und `runuser` nutzt, wo `sudo`
   fehlt), auf Debian 13 slim per Digest, für einen Benutzer ohne Root-Rechte mit deinen IDs, mit den Quellen als nur
-  lesbarer Build-Einbindung (kein Geheimnis in einer Schicht) und allem Persönlichen im Volume `/data`;
-  standardmäßig CLI und MCP-Server ohne Oberfläche, die Desktop-Bibliotheken der GUI nur mit `--gui`. Ein Build aus
-  dem Repository-Ordner selbst wird abgelehnt. Die Compose-Datei lädt das Image nie (`pull_policy: never`),
-  veröffentlicht keinen Port und entzieht alle Capabilities; KI-Clients erreichen den MCP-Server über stdio
-  (`docker exec -i lcf-framework llm-cli mcp serve`, von einem anderen Computer per SSH zum Host). `docker.registry`
-  und `docker.tags` der Target-Dateien sind als nur lokale Image-Namen beschrieben. Anleitung:
+  lesbarer Build-Einbindung (kein Geheimnis in einer Schicht) und allem Persönlichen im Volume `/data`
+  (Einstellungen, Tresor, Audit-Log, Tokens, Modelle, Builds, Datensätze, Logs); standardmäßig CLI und MCP-Server
+  ohne Oberfläche (mit der GLib-Bibliothek, die der Kern von Qt braucht und die die CLI importiert), die
+  Desktop-Bibliotheken der GUI nur mit `--gui` (alles, was das xcb-Plattform-Plugin von Qt lädt); eine Gruppe mit
+  deiner Gruppen-ID, die Debian schon hat, wird weiterverwendet. Der Build endet mit einer Prüfung, dass sich die
+  Befehlszeile importieren lässt und jede Systembibliothek da ist, die Qt lädt, und bricht sonst mit dem Namen des
+  Fehlenden ab. Ein Build aus dem Repository-Ordner selbst wird abgelehnt. Die Compose-Datei lädt das Image nie (`pull_policy: never`), und jedes `docker run`, das der Builder
+  zeigt oder die CI ausführt, sagt `--pull never`; sie veröffentlicht keinen Port und entzieht alle Capabilities;
+  KI-Clients erreichen den MCP-Server über stdio (`docker exec -i lcf-framework llm-cli mcp serve`, von einem
+  anderen Computer per SSH zum Host). Targets, die du anlegst, und Packs, die du installierst, bleiben im
+  Programmordner des Containers: `make down` stoppt nur, und `make up`, `make gui` und `make clean` ersetzen oder
+  entfernen nie einen Container, der außerhalb des Volumes Dateien von dir enthält; sie listen jede mit
+  vollständigem Pfad, Dateiname, Größe und was sie ist (`make kept-files`, `scripts/container_kept_files.sh`).
+  `docker.registry` und `docker.tags` der Target-Dateien sind als nur lokale Image-Namen beschrieben. Anleitung:
   `docs/Container_Setup_DE.md`.
 - **Gemeinsamer Build-Zustand** (MCP-Entwurf T11): Jedes Programm des Frameworks (die GUI, ein CLI-Aufruf, jeder
   MCP-Server) schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner (`build_requests/`), sodass die
@@ -1206,15 +1214,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   etwas kopiert oder entfernt wird; ein veralteter Link wird selbst entfernt, nie die Datei, auf die er zeigt; und
   die Kopie von `install.sh` in `/opt` kopiert und entfernt nichts. Aus einem Ordner ohne Versionsverwaltung (ein
   entpacktes Archiv) installiert, überspringt er nur die Ordner `build/` und `dist/` der obersten Ebene, nicht mehr
-  jeden Ordner namens `build` (darunter das frameworkeigene `orchestrator/runtime/build/`).
+  jeden Ordner namens `build` (darunter das frameworkeigene `orchestrator/runtime/build/`). Lässt sich die
+  Python-Umgebung nicht einrichten (kein Modul `venv`, ein festgelegtes Paket, das der Index nicht anbietet), bricht
+  er mit einer Meldung ab; vorher meldete er die Installation mit leerer Umgebung als abgeschlossen.
 - `make build`, `make up`, `make gui`, `make down` und `Docker Setup/docker-compose.yml` funktionieren: Die
   Compose-Datei baute aus einer `orchestrator/Dockerfile`, die es nie gab, und das Makefile rief damit das alte
   `docker-compose` und das fehlende `scripts/setup_linux.sh` auf. Das Makefile nutzt `docker compose` (v2) und den
   Builder; `make setup` und `make test-container` sind weg (sie brauchten die fehlenden Dateien; Tests laufen mit
   `make test`), ebenso die Compose-Dienste mit nicht festgelegten Fremd-Images und dem Docker-Socket (Socket-Proxy,
   ctop, Trivy). `make audit` prüft ein Archiv des Images mit der festgelegten Trivy-Version, ohne den Docker-Socket.
-  `make clean` löscht das Datenvolume, `output/` und `cache/` nicht mehr ohne Nachfrage: Es entfernt die gestoppten
-  Container und zeigt, was Daten enthält.
+  `make clean` löscht das Datenvolume, `output/` und `cache/` nicht mehr ohne Nachfrage: Es entfernt nur Container,
+  die außerhalb des Volumes nichts von dir enthalten, und zeigt, was Daten enthält.
 - Deployment-Pakete übernehmen Benutzerprofile, Sprachvorlagen und Prompts nur aus dem Einstellungsordner, nie aus
   einem Ordner `config/` im Arbeitsverzeichnis.
 - Der Hugging-Face-Modellbrowser lässt sich wieder öffnen: **Tools > Hugging Face Model Browser...** (kein Menü

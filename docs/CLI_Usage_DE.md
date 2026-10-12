@@ -619,7 +619,8 @@ gilt für beide Modi zugleich), und das Audit-Log dort zeigt `mcp:NAME`. `set` s
 Zugangsdaten dieses Computers (ohne Echo abgefragt oder mit `--with-token` von stdin gelesen) und die Verbindung in
 Dittos KI-Einstellungen; das Token läuft nie durch ein Tool, ein Ergebnis oder eine Befehlszeile. Über stdio startet
 Ditto `--command` (zum Beispiel `ssh -T -o BatchMode=yes -o SendEnv=LCF_MCP_TOKEN benutzer@build-box llm-cli mcp
-serve`, das `AcceptEnv LCF_MCP_TOKEN` in der Konfiguration des SSH-Servers dort braucht; oder, für einen
+serve`, das `AcceptEnv LCF_MCP_TOKEN` in der Konfiguration des SSH-Servers dort braucht und `llm-cli` dort als Befehl,
+nicht nur als Alias, siehe [`llm-cli` aufrufen](../README_DE.md#llm-cli-aufrufen); oder, für einen
 Framework-Container, den du selbst gebaut hast, `docker exec -i lcf llm-cli mcp serve`) mit dem Token in
 `LCF_MCP_TOKEN`. `docker exec` und `podman exec` geben ihre Umgebung nicht in den Container weiter, darum ergänzt
 Ditto bei einem solchen Befehl `-e LCF_MCP_TOKEN` (nur den Namen, nie den Wert); und nennt der erreichte Server statt
