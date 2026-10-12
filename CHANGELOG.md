@@ -970,6 +970,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   folders on the full disk with their sizes, and pruning Docker is proposed only when Docker's data root is full.
 
 ### Security
+- **Ditto's MCP-client mode no longer runs as the shared local caller when the token does not reach the server**
+  (MCP design T12): `docker exec` and `podman exec` do not pass their environment into the container, so the
+  documented `docker exec -i <container> llm-cli mcp serve` started the server there without `LCF_MCP_TOKEN`, as the
+  caller `mcp` with another policy than Ditto's. Ditto now adds `-e LCF_MCP_TOKEN` (the name only, never the value)
+  to such a command, and refuses a stdio server whose `get_status` names a caller other than its token (for example
+  over `ssh`, which drops the environment), with the next step.
+- **A cancelled `restore_knowledge_snapshot` job no longer replaces the knowledge base** (MCP design T10): a cancel
+  (`cancel_job`, or the end of the session) marked the job cancelled at once while the restore went on. The restore
+  now checks for the cancel after the backup and before the knowledge base is replaced, and leaves it as it was.
+- **A local model folder with pickle weights is no longer matched by a build standing approval** (design 6.10):
+  pickle files beside a safetensors file (the whole folder is mounted into the build) counted as safetensors. Pickle
+  weights anywhere in the folder now make it "pickle", so the person is asked.
+- **Every base model of a merged model is checked for gating** (design 6.10): a card naming several base models had
+  only the first one looked up, so a gated second base model did not keep the build or download out of a standing
+  approval. Each one is looked up now; a gated one, or one that cannot be looked up, keeps it out.
 - **The dangerous-command filter can no longer be bypassed with invisible or full-width characters** (Ditto's
   healing analyses and recommendations, and fix proposals of AI clients): it checks the text also as the GUI and
   the CLI show it (normalized, invisible characters and joiners removed), so `r<zero-width space>m -rf ~` or

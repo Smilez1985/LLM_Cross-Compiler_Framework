@@ -89,6 +89,9 @@ class ModelFacts:
         return all(f.size is not None for f in self.staged)
 
 
+MAX_BASE_MODELS = 8  # base models looked up for gating; a card naming more is outside every standing approval
+
+
 def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any = None) -> ModelFacts:
     """The facts of a build's Hugging Face model. `token`: the token stored in the framework, or None (then
     token=False goes to every call: never an implicit token). HubLookupError with a reason code when the repository
@@ -127,7 +130,8 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
                              if isinstance(t, str) and t.startswith("license:")), None)
     shown, klass = license_class(license_name)
     base = get("base_model", None)
-    base = base[0] if isinstance(base, (list, tuple)) and base else base
+    bases = [b for b in (base if isinstance(base, (list, tuple)) else [base]) if b is not None]
+    base = bases[0] if bases else None
     files = [HubFile(s.rfilename, getattr(s, "size", None),
                      getattr(getattr(s, "lfs", None), "sha256", None) if getattr(s, "lfs", None) else None)
              for s in (getattr(info, "siblings", None) or [])]
@@ -143,11 +147,21 @@ def look_up(repo: str, revision: Optional[str], token: Optional[str], api: Any =
                        gated=gated, license=str(shown)[:200], license_class=klass,
                        parameters=int(parameters) if isinstance(parameters, int) and parameters > 0 else None,
                        base_model=str(base)[:200] if isinstance(base, str) else None)
-    if facts.base_model and facts.base_model != repo:
-        try:
-            facts.base_gated = gating(getattr(api.model_info(facts.base_model, token=auth), "gated", False)) != "false"
-        except Exception:  # noqa: BLE001 - unknown: outside every standing approval
-            facts.base_gated = None
+    # Every base model the card names (a merge names several): one gated or unknown one is enough to keep the call
+    # outside every standing approval.
+    others = [b for b in bases if b != repo]
+    if any(not isinstance(b, str) for b in others) or len(others) > MAX_BASE_MODELS:
+        facts.base_gated = None
+    else:
+        for name in others:
+            try:
+                gated_base = gating(getattr(api.model_info(str(name)[:200], token=auth), "gated", False)) != "false"
+            except Exception:  # noqa: BLE001 - unknown: outside every standing approval
+                facts.base_gated = None
+                break
+            if gated_base:
+                facts.base_gated = True
+                break
     if gated != "false":
         if not token:
             facts.token_access = "no_token"

@@ -44,6 +44,11 @@ class ThingOut(ToolOutput):
     value: str = ""
 
 
+class StatusIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    sections: list = []
+
+
 class Remote:
     """The framework 'elsewhere': its own registry, a token store with a token linked to Ditto, and its MCP server
     as the stdio server started with LCF_MCP_TOKEN would run it (caller mcp:<token name>)."""
@@ -178,6 +183,48 @@ class TestStart:
         assert params.env == {"LCF_MCP_TOKEN": TOKEN}
         assert TOKEN not in " ".join([params.command, *params.args])
         assert TOKEN not in RemoteServer("http", url="http://127.0.0.1:1/mcp").label()
+
+    def test_a_container_runtime_gets_the_token_passed_on_by_name(self, remote):
+        # docker/podman exec do not hand their environment to the process in the container: without -e the server
+        # there would run as the shared caller "mcp". The name-only form keeps the value off the command line.
+        connection = RemoteConnection(RemoteServer("stdio", command=("docker", "exec", "-i", "lcf", "llm-cli", "mcp",
+                                                                     "serve")), TOKEN)
+        params = connection._make_client(lambda *a: None).server
+        assert [params.command, *params.args] == ["docker", "exec", "-e", "LCF_MCP_TOKEN", "-i", "lcf", "llm-cli",
+                                                  "mcp", "serve"]
+        assert params.env == {"LCF_MCP_TOKEN": TOKEN}
+        assert remote_tools.with_token_env(("/usr/bin/podman", "container", "exec", "-i", "c", "x")) == (
+            "/usr/bin/podman", "container", "exec", "-e", "LCF_MCP_TOKEN", "-i", "c", "x")
+        given = ("docker", "exec", "-i", "--env", "LCF_MCP_TOKEN", "lcf", "llm-cli", "mcp", "serve")
+        assert remote_tools.with_token_env(given) == given, "already passed on: unchanged"
+        assert remote_tools.with_token_env(("llm-cli", "mcp", "serve")) == ("llm-cli", "mcp", "serve")
+        assert remote_tools.with_token_env(("docker", "run", "-i", "img")) == ("docker", "run", "-i", "img")
+
+    def test_a_server_that_did_not_get_the_token_is_refused(self, tmp_path):
+        # e.g. ssh or a runtime that drops the environment: the server would treat Ditto as the shared caller "mcp"
+        # with another policy; the mode refuses that before any tool is offered to the model.
+        class PermissionsOut(ToolOutput):
+            permissions: dict
+
+        shared = Remote(tmp_path, token_name="other")
+        shared.caller = "mcp"
+        shared.registry.register(ToolSpec("get_status", "Status", "The status.", ToolTier.READ, StatusIn,
+                                          PermissionsOut, lambda i: PermissionsOut(permissions={"caller": "mcp"}),
+                                          idempotent=True))
+        with pytest.raises(RemoteSetupError) as exc:
+            shared.connection().open()
+        assert "LCF_MCP_TOKEN" in str(exc.value) and "-e LCF_MCP_TOKEN" in str(exc.value)
+
+    def test_a_server_that_names_the_token_caller_is_used(self, remote):
+        class PermissionsOut(ToolOutput):
+            permissions: dict
+
+        remote.registry.register(ToolSpec("get_status", "Status", "The status.", ToolTier.READ, StatusIn,
+                                          PermissionsOut,
+                                          lambda i: PermissionsOut(permissions={"caller": "mcp:ditto-laptop"}),
+                                          idempotent=True))
+        with remote.connection() as connection:
+            assert connection.call("read_thing", {"thing_id": "a"})
 
     def test_ditto_settings_are_never_readable_or_writable_by_an_ai(self):
         # Which server Ditto talks to (and the command it starts) is the person's choice: GUI or CLI only.

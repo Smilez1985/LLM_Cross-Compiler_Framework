@@ -518,8 +518,9 @@ class TestEveryToolRefusesUnknownArguments:
         refuses an unknown one with a suggestion, and Ditto gets that refusal (as untrusted text), never a call
         with the argument dropped."""
         from orchestrator.llm.remote_tools import RemoteConnection, RemoteServer
+        # The caller Ditto is on that server: its named token (the mode refuses a server that names the shared "mcp")
         server = mcp_server.build_mcp_server(SimpleNamespace(info=SimpleNamespace(version="t"),
-                                                             tool_registry=env.registry))
+                                                             tool_registry=env.registry), caller="mcp:ditto-box")
         connection = RemoteConnection(RemoteServer("stdio", command=("lcf",), name="box"), "unused",
                                       confirm=lambda q, i: True,
                                       client_factory=lambda elicit: Client(server, elicitation_callback=elicit))

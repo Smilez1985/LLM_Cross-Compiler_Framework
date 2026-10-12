@@ -646,7 +646,7 @@ verworfen), Rückfragen und Audit-Log sind die jenes Servers. Dittos Identität 
 mit `llm-cli mcp token add NAME --link ditto`, sodass der Server Dittos eigene Berechtigungen und Daueraufträge per
 Verweis anwendet: Wird `start_build` für Ditto verboten, gilt das in beiden Modi zugleich. Der Audit-Akteur dort ist
 `mcp:NAME`, nie `ditto`; ein neues Token ohne Verknüpfung darf nur lesen. Das Token liegt in Dittos Tresor für
-Zugangsdaten und erreicht den Server nur als `LCF_MCP_TOKEN` des gestarteten Prozesses (stdio) oder als
+Zugangsdaten und erreicht den Server nur als `LCF_MCP_TOKEN` des gestarteten Prozesses (stdio; bei `docker exec` oder `podman exec` ergänzt Ditto `-e LCF_MCP_TOKEN`, nur den Namen, und es lehnt einen Server ab, der den gemeinsamen lokalen Aufrufer `mcp` meldet, das Token also nicht angekommen ist) oder als
 Bearer-Header (HTTP, nur https oder Loopback); ohne Token startet der Modus nicht. Eine Tool-Quelle pro Unterhaltung:
 Im MCP-Client-Modus wird kein Tool dieses Frameworks angeboten, und ein Wechsel der Quelle beginnt eine neue
 Unterhaltung. Ditto kann einen entfernten Server nicht prüfen, darum erreichen jedes Ergebnis, jeder Fehlertext,

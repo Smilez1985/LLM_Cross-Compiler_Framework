@@ -685,11 +685,13 @@ class RAGManager:
     def list_snapshots(self) -> List[str]:
         return [p.name[:-len(".jsonl.gz")] for p in self._snapshot_files()]
 
-    def restore_snapshot(self, snapshot_name: str, backup: Optional[str] = None) -> bool:
+    def restore_snapshot(self, snapshot_name: str, backup: Optional[str] = None,
+                         proceed: Optional[Callable[[], bool]] = None) -> bool:
         """Replaces the active collection with a snapshot of the same embedding model. The current content is saved
         first as the snapshot `backup` (default pre_restore_<time>); without that backup nothing is restored (an
         empty knowledge base needs none). last_backup, last_restored_chunks and last_restore_problem tell what
-        happened."""
+        happened. `proceed` is asked after the backup, right before the knowledge base is replaced: False (the job was
+        cancelled) leaves the knowledge base as it was."""
         self.last_backup, self.last_restored_chunks, self.last_restore_problem = None, 0, ""
         path = self.snapshot_dir / f"{sanitize_filename(snapshot_name)}.jsonl.gz"
         if not path.is_file():
@@ -709,6 +711,9 @@ class RAGManager:
                 self.last_restore_problem = "the backup of the current knowledge base could not be written"
                 self.logger.error(f"Snapshot {snapshot_name} not restored: {self.last_restore_problem}.")
                 return False
+        if proceed is not None and not proceed():
+            self.last_restore_problem = "cancelled before the knowledge base was replaced"
+            return False
         try:
             self._sources = None
             count = self._with_store(lambda store: store.restore_file(path))

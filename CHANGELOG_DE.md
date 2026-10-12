@@ -1095,6 +1095,25 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   vorgeschlagen, wenn Dockers Datenverzeichnis voll ist.
 
 ### Sicherheit
+- **Dittos MCP-Client-Modus läuft nicht mehr als gemeinsamer lokaler Aufrufer, wenn das Token den Server nicht
+  erreicht** (MCP-Entwurf T12): `docker exec` und `podman exec` geben ihre Umgebung nicht in den Container weiter,
+  darum startete das dokumentierte `docker exec -i <Container> llm-cli mcp serve` den Server dort ohne
+  `LCF_MCP_TOKEN`, als Aufrufer `mcp` mit anderen Berechtigungen als Dittos. Ditto ergänzt bei einem solchen Befehl
+  jetzt `-e LCF_MCP_TOKEN` (nur den Namen, nie den Wert) und lehnt einen stdio-Server ab, dessen `get_status` einen
+  anderen Aufrufer als sein Token nennt (zum Beispiel über `ssh`, das die Umgebung verwirft), mit dem nächsten
+  Schritt.
+- **Ein abgebrochener Job von `restore_knowledge_snapshot` ersetzt die Wissensbasis nicht mehr** (MCP-Entwurf T10):
+  Ein Abbruch (`cancel_job` oder das Ende der Sitzung) markierte den Job sofort als abgebrochen, während die
+  Wiederherstellung weiterlief. Sie prüft den Abbruch jetzt nach der Sicherung und bevor die Wissensbasis ersetzt
+  wird, und lässt sie dann, wie sie war.
+- **Ein lokaler Modellordner mit Pickle-Gewichten fällt nicht mehr unter einen Dauerauftrag für Builds**
+  (Entwurf 6.10): Pickle-Dateien neben einer safetensors-Datei (der ganze Ordner wird in den Build eingebunden)
+  zählten als safetensors. Pickle-Gewichte irgendwo im Ordner machen ihn jetzt zu „pickle“, also wird die Person
+  gefragt.
+- **Jedes Basismodell eines zusammengeführten Modells wird auf Zugangsbeschränkung geprüft** (Entwurf 6.10): Nannte
+  eine Modellkarte mehrere Basismodelle, wurde nur das erste nachgeschlagen, sodass ein beschränktes zweites
+  Basismodell den Build oder Download nicht aus einem Dauerauftrag heraushielt. Jetzt wird jedes nachgeschlagen; ein
+  beschränktes oder nicht nachschlagbares hält ihn heraus.
 - **Der Filter für gefährliche Befehle lässt sich nicht mehr mit unsichtbaren Zeichen oder Zeichen in voller
   Breite umgehen** (Healing-Analysen und Empfehlungen von Ditto sowie Korrekturvorschläge von KI-Clients): Er
   prüft den Text auch so, wie GUI und CLI ihn zeigen (normalisiert, unsichtbare Zeichen und Verbinder entfernt),

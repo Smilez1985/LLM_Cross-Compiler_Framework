@@ -252,16 +252,32 @@ def _cached_bytes(cache_dir: Path, repo: str, commit: Optional[str], facts: Mode
     return total
 
 
+MAX_LOCAL_NAMES = 10000  # files looked at in a local model folder; more: "other" (outside every standing approval)
+
+
 def _local_weights(path: Path) -> str:
-    """safetensors, gguf, pickle or other for a local model file or folder (never read beyond its names)."""
-    names = [path.name] if path.is_file() else [p.name for p in path.iterdir() if p.is_file()] if path.is_dir() else []
+    """safetensors, gguf, pickle or other for a local model file or folder (never read beyond its names). A folder is
+    mounted whole into the build, so pickle weights anywhere in it make it "pickle", even beside safetensors (design
+    6.10: never pickle weights under a standing approval)."""
+    from orchestrator.tools.grants import PICKLE_SUFFIXES
+    if path.is_file():
+        names = [path.name]
+    elif path.is_dir():
+        names = []
+        for p in path.rglob("*"):
+            if len(names) >= MAX_LOCAL_NAMES:
+                return "other"
+            if p.is_file() or p.is_symlink():
+                names.append(p.name)
+    else:
+        names = []
     lowered = [n.lower() for n in names]
+    if any(n.endswith(PICKLE_SUFFIXES) for n in lowered):
+        return "pickle"
     if any(n.endswith(".safetensors") for n in lowered):
         return "safetensors"
     if any(n.endswith(".gguf") for n in lowered):
         return "gguf"
-    if any(n.endswith((".bin", ".pt", ".pth", ".ckpt")) for n in lowered):
-        return "pickle"
     return "other"
 
 

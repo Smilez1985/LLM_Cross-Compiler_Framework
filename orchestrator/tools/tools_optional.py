@@ -147,7 +147,10 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
 
         def work(handle) -> dict:
             handle.progress(0, 2, "taking the backup snapshot")
-            result = rag.restore_snapshot(inp.snapshot, backup=bound["backup"])
+            # A cancel (cancel_job, or the session ending) after the backup leaves the knowledge base as it was: a job
+            # marked cancelled must not have replaced it.
+            result = rag.restore_snapshot(inp.snapshot, backup=bound["backup"], proceed=lambda: not handle.cancelled)
+            handle.check_cancelled()
             if not result:
                 problem = getattr(rag, "last_restore_problem", "") or "the knowledge base could not be restored"
                 raise ToolError(f"Restore of {inp.snapshot} failed: {problem}.", code="failed",
