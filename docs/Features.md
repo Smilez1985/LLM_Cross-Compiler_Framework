@@ -1015,7 +1015,8 @@ when they are recorded. Read-only calls stay available, and the failed write is 
 as `confirmation_requested` with the SHA-256 of the question text before it is asked; a question about a change that
 cannot be recorded is not asked. Every end is recorded: `ok`, `error`, `denied`, `not_confirmed` with the answer
 (`accepted`, `declined`, `cancelled`, `unavailable` when nobody could be asked, `unanswered`), `confirmation_timeout`
-(an MCP question asked during the call waits at most 5 minutes) and `cancelled` (the client gave up on the call). A
+(an MCP question asked during the call waits at most 5 minutes; reason `needs_person`, and a question the client
+could not show has reason `failed`, both with a next step) and `cancelled` (the client gave up on the call). A
 question of the 2026-07-28 protocol that is returned to the client and never answered is recorded as `unanswered`
 after 15 minutes while the server runs; the `confirmation_requested` entry is the lasting record. When a client
 cancels a running call, the cancellation is recorded at once and passed to the running call; what already runs

@@ -460,7 +460,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   another client's identical question), an unanswered one is recorded as `unanswered` by a timer also when no
   further request arrives, and the ones still open when a session ends are recorded as `client_disconnected`; the
   permission check of a long-poll no longer reads the policy file on the server's event loop; every refusal with
-  the reason `failed` now carries a next step, and the build service's input refusals carry their own reason code.
+  the reason `failed` now carries a next step, and the build service's input refusals carry their own reason code;
+  an MCP confirmation that failed or got no answer in time is recorded with a reason code (`failed`,
+  `needs_person`) and its refusal names a next step.
 - Two-phase confirmation, the same on both paths: an MCP question too long for a form is recorded with reason
   `limit_reached` and answer `unavailable` and names a next step, as in Ditto's windows; a question that a looked-up
   fact made necessary is recorded with the decision `ask` (it said `allow`); `resolve_healing` decides nothing

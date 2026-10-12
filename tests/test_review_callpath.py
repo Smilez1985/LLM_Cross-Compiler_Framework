@@ -387,3 +387,31 @@ def test_a_model_that_ignores_the_stop_gets_two_more_turns_not_the_whole_budget(
     loop = ditto_loop(modules, [{**GOOD, "name": "A A"}] * 3 + [GOOD] * 6)
     not_run = [m for m in loop.new_messages if m.role == "tool" and m.content.startswith("Not run")]
     assert loop.steps == 5 and len(not_run) == 2 and modules.created == [], "nothing runs after the stop"
+
+
+# --- round-1 leftover: a confirmation that failed or timed out names a reason code and a next step -------------------
+
+class TestFailedConfirmationsNameAReasonAndANextStep:
+
+    def test_a_failed_confirmation_request(self, registry):
+        import mcp_types
+
+        async def closed(ctx, params):
+            return mcp_types.ErrorData(code=-32603, message="the confirmation window was closed")
+        result, = session(registry, [("change_item", {"item_id": "a"}, None)], closed, "legacy")
+        assert result.is_error and registry.ran == [] and "Next:" in text_of(result)
+        end = outcomes(registry, "change_item")[-1]
+        assert (end["outcome"], end["reason_code"]) == ("not_confirmed", "failed")
+
+    def test_a_timed_out_confirmation(self, registry, monkeypatch):
+        import anyio
+        monkeypatch.setattr(mcp_server, "ELICITATION_TIMEOUT", 0.3)
+
+        async def never(ctx, params):
+            await anyio.sleep(5)
+            return ElicitResult(action="accept", content={"approve": True})
+        result, = session(registry, [("change_item", {"item_id": "a"}, None)], never, "legacy")
+        assert result.is_error and registry.ran == [] and "Next:" in text_of(result)
+        end = outcomes(registry, "change_item")[-1]
+        assert (end["outcome"], end["answer"], end["reason_code"]) == ("confirmation_timeout", "timeout",
+                                                                         "needs_person")
