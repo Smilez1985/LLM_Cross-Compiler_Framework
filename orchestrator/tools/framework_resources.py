@@ -113,6 +113,25 @@ def register_framework_resources(registry: ToolRegistry, framework) -> ToolRegis
                      "(the permissions section of get_status).", "application/json", tool="get_status",
                      arguments=lambda params: {"sections": ["permissions"]}),
     ]
+    if "get_artifact_details" in {s.name for s in registry.list()}:
+        def artifact_ids(_args, _ctx) -> List[str]:
+            try:
+                return [a.artifact_id for a in service.list_artifacts().artifacts]
+            except Exception:  # noqa: BLE001 - a completion is a hint
+                return []
+
+        artifact = {"artifact_id": artifact_ids}
+        args = (lambda params: {"artifact_id": params.get("artifact_id", "")})
+        specs += [
+            ResourceSpec("lcf://artifacts/{artifact_id}/manifest", "artifact-manifest", "Built model manifest",
+                         "The build manifest (build_info.json) of a built model with its files, every string value "
+                         "marked as external text (as get_artifact_details).", "text/plain",
+                         tool="get_artifact_details", arguments=args, completions=artifact),
+            ResourceSpec("lcf://artifacts/{artifact_id}/model-card", "artifact-model-card", "Built model card",
+                         "The model card of a built model, wrapped as untrusted data (as get_artifact_details, "
+                         "whose model_card field holds it).", "text/plain", tool="get_artifact_details",
+                         arguments=args, completions=artifact),
+        ]
     for spec in specs:
         registry.register_resource(spec)
     return registry

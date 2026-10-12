@@ -13,10 +13,12 @@ Updates v2.4.0:
 - Removed placeholders in apply_fix (implemented safe execution paths).
 """
 
+import os
 import re
-import logging
-from typing import Optional, Dict, Any, List, Tuple
-from dataclasses import dataclass, field
+import shutil
+from pathlib import Path
+from typing import Optional, List, Tuple
+from dataclasses import dataclass
 from enum import Enum
 
 from orchestrator.utils.logging import get_logger
@@ -24,6 +26,9 @@ from orchestrator.utils.logging import get_logger
 # ============================================================================
 # DATA MODELS
 # ============================================================================
+
+DISK_FULL_PATTERN = r"No space left on device|Disk quota exceeded"
+
 
 class HealingStrategy(Enum):
     """Definiert die Art der Reparaturmaßnahme."""
@@ -77,7 +82,9 @@ class SelfHealingManager:
                 "HOST"
             ),
             (
-                r"No space left on device", 
+                # Which disk is full decides the proposal (_disk_full_proposal): pruning Docker frees only Docker's
+                # data root, never the model cache or the output folder (G40).
+                DISK_FULL_PATTERN,
                 "Disk full.",
                 "Remove dangling framework images and the Docker build cache, then retry.",
                 HealingStrategy.DOCKER_PRUNE,
@@ -147,6 +154,8 @@ class SelfHealingManager:
                 if "CMake Error" in log and "Could not find" in log:
                     return None # Let AI handle specific package names
                 
+                if pattern == DISK_FULL_PATTERN:
+                    return self._disk_full_proposal()
                 return HealingProposal(
                     summary=f"Detected known issue: {cause}",
                     root_cause=cause,
@@ -157,6 +166,102 @@ class SelfHealingManager:
                     is_ai_generated=False
                 )
         return None
+
+    # --- a full disk: which one? ----------------------------------------------------------------------------------
+
+    def _config(self, key: str, default=None):
+        config = getattr(self.framework, "config", None)
+        get = getattr(config, "get", None)
+        try:
+            return get(key, default) if callable(get) else default
+        except Exception:
+            return default
+
+    def _folders(self) -> List[Tuple[str, Path]]:
+        """The framework's data folders by label (never shown as paths)."""
+        resolve = getattr(self.framework, "resolve_path", None)
+        found = []
+        for label, key in (("model cache", "cache_dir"), ("models folder", "models_dir"), ("output folder", "output_dir")):
+            value = self._config(key)
+            if not value:
+                continue
+            try:
+                path = Path(resolve(value)) if callable(resolve) else Path(str(value)).expanduser()
+            except Exception:
+                continue
+            found.append((label, path))
+        return found
+
+    def _docker_root(self) -> Optional[Path]:
+        getter = getattr(self.framework, "get_component", None)
+        client = getter("docker_client") if callable(getter) else None
+        try:
+            root = client.info().get("DockerRootDir") if client is not None else None
+        except Exception:  # a remote daemon or no permission: unknown
+            return None
+        return Path(root) if isinstance(root, str) and root else None
+
+    @staticmethod
+    def _folder_size(path: Path, limit: int = 200000) -> Optional[int]:
+        total, seen = 0, 0
+        try:
+            for root, _dirs, files in os.walk(path):
+                for name in files:
+                    seen += 1
+                    if seen > limit:
+                        return None
+                    try:
+                        total += os.lstat(os.path.join(root, name)).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            return None
+        return total
+
+    def _disk_full_proposal(self) -> HealingProposal:
+        """A full disk: pruning Docker is proposed only when Docker's data root is the full disk; otherwise a manual
+        step names the framework's folders on the full disk with their sizes (G40)."""
+        from orchestrator.Core.disk_plan import device_of, gb, reserve_for
+
+        def short(path: Path) -> Optional[Tuple[bool, int]]:
+            probe = path
+            while not probe.exists() and probe.parent != probe:
+                probe = probe.parent
+            try:
+                usage = shutil.disk_usage(probe)
+            except OSError:
+                return None
+            return usage.free < reserve_for(usage.total), usage.free
+
+        root = self._docker_root()
+        docker = short(root) if root is not None else None
+        rows, full_devices = [], set()
+        for label, path in self._folders():
+            state = short(path)
+            if state is None:
+                continue
+            if state[0]:
+                full_devices.add(device_of(path))
+                size = self._folder_size(path) if path.exists() else 0
+                rows.append(f"{label}: {gb(size) if size is not None else 'size unknown'} (its disk has "
+                            f"{gb(state[1])} free)")
+        if docker is not None and docker[0] and (not full_devices or device_of(root) in full_devices):
+            return HealingProposal(
+                summary="Detected known issue: Disk full (Docker's data root).",
+                root_cause=f"The disk with Docker's data root is full ({gb(docker[1])} free).",
+                fix_command="Remove dangling framework images and the Docker build cache, then retry.",
+                confidence=1.0, strategy=HealingStrategy.DOCKER_PRUNE, target_scope="HOST")
+        where = "; ".join(rows) if rows else "the full disk could not be determined"
+        return HealingProposal(
+            summary="Detected known issue: Disk full.",
+            root_cause=f"A disk the build writes to is full. {where}.",
+            fix_command=("Free space on that disk by hand: remove built models you no longer need from the output "
+                         "folder, models from the models folder, or old downloads from the model cache (the framework "
+                         "deletes none of them by itself), then start the build again. Pruning Docker would not help: "
+                         "Docker's data root is not the full disk." if rows else
+                         "Free space on the disks of the model cache, the output folder and Docker's data root by "
+                         "hand, then start the build again."),
+            confidence=0.9, strategy=HealingStrategy.MANUAL_INTERVENTION, target_scope="HOST")
 
     def _analyze_via_ai(self, ditto, log: str, context: str) -> Optional[HealingProposal]:
         """Asks Ditto for a validated analysis. AI proposals are always a manual step for the user."""

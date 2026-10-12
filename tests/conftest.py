@@ -219,6 +219,27 @@ def no_network_llama_source(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_network_build_plan(monkeypatch):
+    """start_build and check_build_request look up the model on Hugging Face, probe this computer and read the free
+    disk space before the question (MCP design T1). Tests never reach huggingface.co: the look-up returns a small
+    ungated model, the disk is roomy and the hardware unknown, unless a test injects its own (tests/test_build_tools)."""
+    from orchestrator.Core import hf_lookup
+    from orchestrator.Core.build_service import BuildService
+
+    def canned(repo, revision, token, api=None):
+        files = [hf_lookup.HubFile("config.json", 700), hf_lookup.HubFile("model.safetensors", 988_000_000, "0" * 64)]
+        return hf_lookup.ModelFacts(repo=repo, commit=revision or "c" * 40, files=files, staged=files,
+                                    weights="safetensors", gated="false", license="apache-2.0",
+                                    license_class="permissive", token_access="not_needed")
+
+    monkeypatch.setattr(hf_lookup, "look_up", canned)
+    monkeypatch.setattr(BuildService, "host_hardware", lambda self: None)
+    monkeypatch.setattr(BuildService, "disk_usage",
+                        staticmethod(lambda path: shutil._ntuple_diskusage(1000 * 10 ** 9, 400 * 10 ** 9,
+                                                                           600 * 10 ** 9)))
+
+
+@pytest.fixture(autouse=True)
 def sdk_debug_logging_off():
     """A CLI or GUI test with --debug-http must not leave the SDK loggers at DEBUG, with a stderr handler, for
     the tests after it (the choice is process-wide and kept by later setup_logging() calls)."""

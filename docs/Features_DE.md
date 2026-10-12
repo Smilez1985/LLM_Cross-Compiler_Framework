@@ -519,16 +519,21 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 |---|---|---|
 | `list_targets` | lesen | Targets mit Boards, Formaten und Quantisierungen |
 | `get_target_capabilities` | lesen | Was ein Target bauen kann |
-| `list_build_requests` | lesen | Build-Anfragen dieser Sitzung |
+| `list_build_requests` | lesen | Build-Anfragen mit Status, 50 pro Seite; die anderer Framework-Prozesse nur lesbar |
 | `get_build_status` | lesen | Status, Fortschritt, Fehler, ein offener Self-Healing-Vorschlag; mit `wait_seconds` (höchstens 50) wartet es auf eine Änderung |
-| `read_build_log` | lesen | Die letzten Zeilen eines Build-Logs (Geheimnisse geschwärzt) |
-| `list_artifacts` | lesen | Fertige Builds aus ihren Manifesten |
+| `read_build_log` | lesen | Die letzten Zeilen eines Build-Logs (Geheimnisse geschwärzt; höchstens 1000, zurückblättern mit `before_line`) |
+| `list_artifacts` | lesen | Fertige Builds mit ID und Label (nie ein Host-Pfad), mit Größe und Hash |
+| `get_artifact_details` | lesen | Manifest, Model Card und Dateien eines gebauten Modells (externer Text) |
+| `check_build_request` | lesen | Probelauf von `start_build`: Commit, Downloadgröße, Speicherplatz, Hardware-Schätzung, Lizenz, Zugangsbeschränkung; startet nichts |
 | `run_doctor` | lesen | Der Gesundheitscheck, ohne Korrekturen |
 | `search_knowledge` | lesen | In der Wissensbasis suchen |
-| `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen) |
+| `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
-| `get_status` | lesen | Deine Tool-Berechtigungen für diesen Aufrufer: jedes Tool mit Entscheidung und Grund (auch die ausgeblendeten) und was kein Tool tut, mit dem Ort, wo du es tust |
+| `get_status` | lesen | Der Zustand des Frameworks in Abschnitten (Framework, Rechner, lokale Laufzeit, Wissensbasis, KI-Zugang, deine Tool-Berechtigungen mit dem, was kein Tool tut, deine eigenen Audit-Einträge); nie ein Geheimnis oder ein Host-Pfad |
+| `get_settings` | lesen | Die Einstellungen, die eine KI lesen darf (Adressen als Schema und Host, Ordner als Labels), und welche sie ändern darf |
+| `update_settings` | lokal schreiben | Gewöhnliche Einstellungen ändern (mit Frage); Grenzen dessen, was eine KI darf, nur verschärfen; nie Berechtigungen, Geheimnisse oder den Tresor |
+| `report_cannot_do` | lesen | Melden, dass eine Aufgabe nicht machbar ist, mit Grund; das Framework prüft den Grund an seinem eigenen Zustand |
 | `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
 | `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |
 
@@ -1108,6 +1113,71 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Berechtigungen, Bestätigung, Audit-Log (Akteur `mcp` für lokale stdio-Clients, `mcp:<Name>` für ein benanntes
   Token), genau wie für Ditto ([wie Namen und Werte abgeglichen werden](#dittos-tools)). Tool-Annotationen (nur
   lesend, idempotent) sind nur Hinweise für den Client.
+- **Builds (`start_build`, `check_build_request`):** Bevor du gefragt wirst, schlägt das Framework nach, was der Build
+  tun würde, und zeigt es in der Frage: den Hugging-Face-Commit, auf den der Standardzweig jetzt zeigt (der Build holt
+  dann genau diesen Commit, auch wenn der Zweig sich ändert, während du liest), die Downloadgröße, die Art der
+  Gewichte (safetensors, GGUF oder Pickle-Dateien, die im Build-Container Code ausführen können und so benannt
+  werden), die Lizenz (Text aus dem Repository, so gekennzeichnet), die Zugangsbeschränkung und ob das im Framework
+  gespeicherte Hugging-Face-Token Zugriff hat, den Speicherplatz auf jedem Laufwerk, auf das der Build schreibt, eine
+  Schätzung, ob dieser Rechner es konvertieren und das Board es ausführen kann, was eingebunden wird (Labels, nie
+  Pfade), Vertrauen und Support-Stufe des Targets und dass zuerst ein Docker-Image mit Netzwerkzugang gebaut werden
+  kann. Es gibt keine Größengrenze für Downloads: Ein 72B-Modell wird gebaut, wenn die Laufwerke es fassen. Vor der
+  Frage abgelehnt wird ein Build nur, wenn ein Laufwerk den Download, die Konvertierungsreserve (etwa noch einmal der
+  Download) und die Ausgabe dreifach (Build-Cache, bereitgestellte Kopie, ZIP) plus eine Reserve von 2 GiB oder 2 %
+  des Laufwerks und den Platz, den andere angenommene Builds reserviert und noch nicht geschrieben haben, nicht fasst
+  (Grund `insufficient_resources`, mit den Zahlen); wenn bei einem zugangsbeschränkten Modell der Zugriff fehlt
+  (`needs_person` ohne gespeichertes Token, `permission_denied`, wenn das gespeicherte Token keinen Zugriff hat); wenn
+  die Build-Sandbox aus ist (`build_sandbox`, `needs_person`); und im Offline-Modus. Die Hardware-Schätzung ist nie
+  eine Ablehnung: „passt nicht“ wird gezeigt, und du entscheidest. Ist Hugging Face nicht erreichbar, sagt die Frage
+  „Standardzweig, Commit unbekannt“ und dass die Downloadgröße unbekannt ist. Ein angenommener Build reserviert
+  seinen Speicherplatz in `~/.llm-framework/disk_reservations.json` (gemeinsam für GUI, CLI und jeden MCP-Server),
+  bis seine Anfrage endet; verlässt der Build die Warteschlange, wird das Laufwerk erneut geprüft, und ein Build, der
+  nicht mehr passt, scheitert mit den Zahlen, bevor etwas heruntergeladen wird. `optimization` (`fast`, `balanced`,
+  `size`, `speed`, `aggressive`) wird an den Build weitergegeben. `check_build_request` liefert denselben Plan
+  (normalisierte Anfrage, Commit, Größen, Laufwerke, Passung, Einbindungen, Vertrauen, Image-Build, was deine
+  Berechtigungen tun würden), ohne etwas zu starten; seine Probleme tragen Grundcodes.
+- **Build-Abfragen:** `list_build_requests` (50 pro Seite, Filter nach Status) listet auch Builds, die ein anderer
+  Framework-Prozess gestartet hat (GUI, CLI, ein anderer MCP-Server), aus ihren Build-Records, markiert mit
+  `process: other` und nur lesbar (gestoppt werden sie dort, wo sie gestartet wurden; ein Build, dessen Prozess
+  endete, ist `interrupted`). `get_build_status` ergänzt, was die Anfrage baut (`request`: Modell als Repo-ID oder
+  Label, Target, Format, Board, Quantisierung, Optimierung, Commit). `read_build_log` liefert höchstens 1000 Zeilen
+  (Standard 200), 2000 Zeichen pro Zeile und 48.000 insgesamt, mit `first_line` und `before_line` zum
+  Zurückblättern. `list_artifacts` benennt gebaute Modelle mit einer ID (`a_` und 16 Hex-Zeichen) und einem Label
+  (`output:<relativer Pfad>`) mit Größe und Hash, 50 pro Seite, gefiltert nach Target und Format;
+  `get_artifact_details` liefert Manifest (jeder Text als externer Text gekennzeichnet, der Pfad eines lokalen
+  Modells als sein Label), Model Card und Dateien eines Modells. Die Ressourcen
+  `lcf://artifacts/{artifact_id}/manifest` und `lcf://artifacts/{artifact_id}/model-card` lesen dasselbe.
+- **Status, Einstellungen und ein ehrliches „kann nicht“ (`get_status`, `get_settings`, `update_settings`,
+  `report_cannot_do`):** `get_status` zeigt den Zustand des Frameworks in Abschnitten: `framework` (Version, Docker,
+  Targets, Offline-Modus, Wissensbasis, laufende Builds, ob die Berechtigungen eingerichtet oder beschädigt sind),
+  `host` (Betriebssystem, Architektur, RAM, GPUs und der empfohlene Build und die Modellstufe der lokalen Laufzeit),
+  `local_runtime` (der selbst gebaute llama.cpp-Server: Herkunft, Build-ID, Commit, Backend, Prüfung, läuft, Stufe;
+  ein per Opt-in geladenes vorgebautes Archiv heißt „nicht selbst gebaut“; nie seine Adresse oder sein Schlüssel),
+  `knowledge` (an oder aus, verbunden, Vektoren, Speicherort als „der persönliche Ordner“ oder Schema und Host,
+  Embedding-Modell, Snapshots), `ai_access` (je Anbieter Anmeldestatus, Verfahren und woher die Zugangsdaten kommen,
+  und ob ein Hugging-Face-Token gespeichert ist; nie ein Schlüsselteil, Konto oder Endpunkt), `permissions` (wie
+  bisher) und `audit` (die letzten 30 Einträge dieses Aufrufers und ob die Kette intakt ist). `get_settings` liest
+  eine feste Liste von Einstellungen: Adressen nur als Schema und Host, Ordner als Labels (`models:`), nie
+  `secret_helper`, `secret_storage` oder die Einstellungen des KI-Anbieters über eine Zusammenfassung hinaus.
+  `update_settings` ändert gewöhnliche Einstellungen (Sprache, GUI-Thema, Kalibrierungssprache, Crawler-Sprachen und
+  PDFs, Reranking als Standard, Leerlaufzeit der Modelle, Ansagen, `build_jobs`, Chat-Kontext, Importance Matrix als
+  Standard); du wirst mit altem und neuem Wert gefragt, und jede Änderung wird in der `config.yml` gespeichert.
+  Einstellungen, die begrenzen, was eine KI oder ein Build darf, lassen sich nur verschärfen (`offline_mode`,
+  `enable_security_scan` und `build_sandbox` auf true, `enable_telemetry` und `enable_rag_knowledge` auf false,
+  Seiten- und Tiefengrenzen und Container-Grenzen niedriger, die Pause beim Crawlen länger; ein Speicherlimit von 0
+  bedeutet für Docker gar keins und zählt daher als Lockerung); nur solche Aufrufe
+  dürfen auf „erlauben“ gestellt werden. Berechtigungen, Geheimnisse, der Tresor, Einstellungen des KI-Anbieters,
+  Adressen, Image-Referenzen, Ordner und die lockernde Richtung werden vor der Frage abgelehnt, und kein Wert wird je
+  als „Standard“ gelesen. `report_cannot_do` ist für eine Aufgabe, die die KI wirklich nicht erledigen kann: Sie nennt
+  den Grund (`missing_information`, `not_supported`, `no_tool`, `permission_denied`, `declined`, `needs_person`,
+  `hardware_unavailable`, `insufficient_resources`, `limit_reached`, `failed`; ein „ungetestet“ gibt es nicht), und
+  das Framework prüft ihn an seinem eigenen Zustand (deine Berechtigungen, die Audit-Einträge und Grenzen dieser
+  Sitzung, das Laufwerk, die Aktionen, die kein Tool tut) und antwortet `confirmed`, `contradicted`, `premature`
+  (noch nichts versucht, mit den Tools, die zu versuchen sind) oder `unchecked`, mit Fakten und einem Satz für dich,
+  der nur aus diesen Fakten gebaut ist (ein Tool steht dort nur mit seinem registrierten Namen, nie so, wie die KI
+  ihn geschrieben hat). „Die Hardware ist nicht verfügbar“ wird für jedes Tool widersprochen, das
+  kein Gerät nutzt: Ungetestete Hardware ist kein Grund abzulehnen. Jede Meldung wird protokolliert
+  (`cannot_reported`); `llm-cli tools audit --summary` zählt sie je Aufrufer.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine

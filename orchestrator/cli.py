@@ -1121,8 +1121,11 @@ def _audit_rows(registry, entries, details: bool = False):
               help='Check the chain: changed or removed entries, and removal of the newest entries (anchor)')
 @click.option('--archive', is_flag=True,
               help='Move the log and its anchor aside (kept with a timestamp) and start a new log')
+@click.option('--summary', is_flag=True,
+              help='Counts per caller: calls, refusals, and the reports that a task cannot be done by how the '
+                   'framework checked them (confirmed, contradicted, premature, unchecked)')
 @pass_context
-def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, archive: bool):
+def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, archive: bool, summary: bool):
     """Show the audit log of tool calls"""
     import sqlite3
     registry = _tool_registry(ctx)
@@ -1141,6 +1144,21 @@ def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, 
         else:
             console.print(f"[green]Audit log moved to {escape(str(target))}; the next tool call starts a new "
                           "log.[/green]")
+        return
+    if summary:
+        try:
+            rows = _audit_summary(registry.audit.entries(100000))
+        except (sqlite3.Error, OSError) as e:
+            console.print(f"[red]The audit log {escape(str(registry.audit.path))} cannot be read: "
+                          f"{escape(str(e))}[/red]")
+            sys.exit(1)
+        table = Table(title="Tool calls per caller")
+        for column in ("Who", "Calls", "Refused", "Cannot reported", "confirmed", "contradicted", "premature",
+                       "unchecked"):
+            table.add_column(column)
+        for row in rows:
+            table.add_row(*(escape(str(cell)) for cell in row))
+        console.print(table)
         return
     try:
         if verify:
@@ -1161,6 +1179,31 @@ def tools_audit(ctx: FrameworkContext, limit: int, details: bool, verify: bool, 
     for row in _audit_rows(registry, entries, details):
         table.add_row(*(escape(cell) for cell in row))
     console.print(table)
+
+
+CANNOT_CHECKS = ("confirmed", "contradicted", "premature", "unchecked")
+REFUSED_OUTCOMES = ("denied", "not_confirmed", "rate_limited", "repeat_refused", "invalid_input", "unknown_tool")
+
+
+def _audit_summary(entries) -> list:
+    """Rows per caller: calls (end entries), refusals, report_cannot_do reports and how they were checked (design
+    6.11 D14: the honest "cannot" in use)."""
+    per: dict = {}
+    for entry in entries:
+        actor = str(entry.get("actor") or "?")
+        row = per.setdefault(actor, {"calls": 0, "refused": 0, "cannot": 0, **{c: 0 for c in CANNOT_CHECKS}})
+        outcome = str(entry.get("outcome") or "")
+        if outcome == "cannot_reported":
+            row["cannot"] += 1
+            check = str(entry.get("detail") or "").split(":")[-1].split("\n")[0].strip()
+            if check in CANNOT_CHECKS:
+                row[check] += 1
+        elif outcome in REFUSED_OUTCOMES:
+            row["refused"] += 1
+        elif outcome in ("ok", "error", "cancelled"):
+            row["calls"] += 1
+    return [[actor, r["calls"], r["refused"], r["cannot"], *(r[c] for c in CANNOT_CHECKS)]
+            for actor, r in sorted(per.items())]
 
 
 # Pending approvals: questions of AI clients that could not ask you themselves (design 6.9).

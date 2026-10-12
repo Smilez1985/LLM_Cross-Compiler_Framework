@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Inputs and outputs of the build service (also the schemas of the matching MCP / Ditto tools)."""
 
-from typing import List, Optional
+from typing import Annotated, Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from orchestrator.schemas.targets import BoardInfo, SupportLevel
-from orchestrator.tools.output import UntrustedText, untrusted_text
+from orchestrator.tools.output import Untrusted, UntrustedText, untrusted_text
 
 # Fields with external text are marked (UntrustedText): build logs and stage names come from the build container,
 # healing proposals from pattern matching on logs or from an AI, and build manifests are written by the container
@@ -38,6 +38,22 @@ class BuildRequestIn(BaseModel):
     max_context_length: Optional[int] = Field(default=None, ge=256, le=1_048_576)
 
 
+OPTIMIZATION_LEVELS = ("fast", "balanced", "size", "speed", "aggressive")
+
+
+class StartBuildIn(BuildRequestIn):
+    """start_build and check_build_request: a build request plus the optimization level (the GUI and the CLI offer
+    the same five; the default is balanced)."""
+    optimization: Literal["fast", "balanced", "size", "speed", "aggressive"] = Field(
+        default="balanced", description="Optimization level of the conversion: fast, balanced, size, speed or "
+                                        "aggressive (default balanced)")
+
+
+class CheckBuildIn(StartBuildIn):
+    include_download_size: bool = Field(default=True, description="Look up the download size and commit on Hugging "
+                                                                  "Face (default true)")
+
+
 class BuildHandle(BaseModel):
     request_id: str
     status: str
@@ -50,6 +66,17 @@ class PendingHealing(BaseModel):
     manual_step_text: UntrustedText
     automatic: bool = Field(description="True if approving makes the framework apply the fix and retry")
     ai_generated: bool
+
+
+class RequestSummary(BaseModel):
+    """What a build request builds (the model as the caller named it: a repo id or a label, never a host path)."""
+    model: Optional[untrusted_text(512)] = None
+    target: Optional[untrusted_text(64)] = None
+    format: Optional[untrusted_text(32)] = None
+    board: Optional[untrusted_text(64)] = None
+    quantization: Optional[untrusted_text(32)] = None
+    optimization: Optional[str] = None
+    revision: Optional[str] = None
 
 
 class BuildStatusOut(BaseModel):
@@ -66,15 +93,24 @@ class BuildStatusOut(BaseModel):
     pending_healing: Optional[PendingHealing] = None
     owner: Optional[str] = Field(default=None, description="Caller that started it through a tool (mcp, "
                                                            "mcp:<token name>, ditto); empty for the GUI and the CLI")
+    request: Optional[RequestSummary] = None
+    process: Literal["this", "other"] = Field(default="this", description="'other': started by another framework "
+                                                                          "process (GUI, CLI, another MCP server); "
+                                                                          "shown from its build record, read-only")
 
 
 class BuildList(BaseModel):
     builds: List[BuildStatusOut]
+    page: int = 1
+    more: bool = False
 
 
 class ArtifactOut(BaseModel):
-    """One finished build, from its manifest (written by the build container first)."""
-    path: untrusted_text(1000)
+    """One finished build, from its manifest (written by the build container first). Named by its id and its label
+    under the output folder, never by a host path."""
+    artifact_id: str = Field(description="Id of the built model (a_ and 16 hex characters)")
+    label: untrusted_text(1000) = Field(description="Where it lies under the output folder, as output:<relative path>")
+    size_bytes: Optional[int] = None
     model: Optional[UntrustedText] = None
     format: Optional[untrusted_text(200)] = None
     quantization: Optional[untrusted_text(200)] = None
@@ -87,6 +123,26 @@ class ArtifactOut(BaseModel):
 
 class ArtifactList(BaseModel):
     artifacts: List[ArtifactOut]
+    page: int = 1
+    more: bool = False
+
+
+class ArtifactFile(BaseModel):
+    name: untrusted_text(300)
+    size: int
+    sha256: Optional[untrusted_text(64)] = None
+
+
+class ArtifactDetails(BaseModel):
+    """One built model: its manifest (written by the build container first, so every string is external text), its
+    model card and its files."""
+    artifact_id: str
+    label: untrusted_text(1000)
+    manifest: Annotated[Dict[str, Any], Untrusted(2000)] = Field(
+        default_factory=dict, json_schema_extra={"untrusted": True},
+        description="build_info.json; every string value is external text")
+    model_card: untrusted_text(20000) = ""
+    files: List[ArtifactFile] = Field(default_factory=list)
 
 
 class FormatSummary(BaseModel):
@@ -117,3 +173,7 @@ class BoardOut(BoardInfo):
 class LogTail(BaseModel):
     request_id: str
     lines: List[untrusted_text(2000)]
+    first_line: int = Field(default=1, description="Line number (from 1) of the first line returned")
+    total_lines: int = 0
+    truncated: bool = Field(default=False, description="Older lines exist (page back with before_line=first_line) "
+                                                       "or lines were cut to fit")
