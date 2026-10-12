@@ -322,7 +322,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `add_board` and `deploy_to_board`, which are offered once the tools they lead to exist. The first message is the
   framework's constant text, the second the context with every outside value (the arguments too) wrapped as untrusted
   data, secrets redacted, at most 24,000 characters. A prompt is read like a read tool: the read permission decides,
-  an unknown argument is refused with the valid names, every get is audited as `get_prompt:<name>`. Completions
+  an unknown argument is refused with the valid names, every get is audited as `get_prompt:<name>`. A prompt whose
+  context holds what a read tool returns (a build's state and log, a target's capabilities) follows that tool's
+  permission too (hidden while denied, refused while "ask"), and knowledge excerpts come only while
+  `search_knowledge` is allowed. Completions
   (VS Code) offer target ids, boards, document names and the caller's own build requests.
 - **Honest "cannot" for Ditto's module proposals and build recommendations**: the model may answer `cannot` with a
   reason code (missing information, not supported, no tool, permission, needs a person, hardware, resources, limit;
@@ -348,7 +351,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   name the specific reason, never claim a result you did not get, and untested hardware is no reason to refuse. The
   module task no longer limits base images to `debian:*` and `ubuntu:*`: it prefers a Docker Official Image with the
   vendor's packages and gives its reason for any other image. A module Ditto proposed says in its description that it
-  is untested on real hardware and names the assumptions.
+  is untested on real hardware and names the assumptions, also one created in the module wizard from Ditto's
+  proposal.
 - **Ditto runs on the new provider layer** (official anthropic and openai SDKs) instead of LiteLLM, and the
   built-in Transformers model for offline mode is gone (offline mode uses local providers: Ollama, the
   managed llama-server, a server on your network). Healing analyses, module proposals and build
@@ -480,8 +484,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ### Fixed
 - Module wizard: a base image Ditto proposed was replaced by `debian:bookworm-slim` or `ubuntu:22.04` when its name
   merely contained "debian" or "ubuntu" (for example a vendor image on `nvcr.io`), so another image than the proposed
-  one would have been built. The proposed image is now kept as it is and shown with its registry, and the message
-  with the AI's text is shown as plain text instead of rich text.
+  one would have been built. The proposed image is now kept as it is and shown with its registry, and the messages
+  with the AI's text (also Ditto's errors and refusals) are shown as plain text instead of rich text.
 - MCP server: on protocol 2026-07-28 it advertised change notifications for tools, prompts and resources and
   resource subscriptions, but never sent one. It now advertises them only together with the events it publishes,
   and without events it is built with subscriptions turned off.
@@ -625,6 +629,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (before: on neither path).
 
 ### Security
+- Ditto's build recommendation and the `recommend_build_settings` prompt give the model the target's formats,
+  quantization types and format notes (text from `target.yml`, which a community target pack installs) inside an
+  untrusted block; before, they stood as plain text next to the instructions.
 - `LCF_MCP_TOKEN` is taken out of the environment by `llm-cli` itself before any command runs and handed only to
   `mcp serve`; before, only `mcp serve` removed it, so every other command and its child processes inherited it.
 - MCP server: whatever runs outside a request that the server checked gets the deny-all caller, also on a stdio

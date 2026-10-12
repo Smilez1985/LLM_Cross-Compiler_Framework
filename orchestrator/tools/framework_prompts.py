@@ -8,17 +8,20 @@ messages: first its instructions, a constant written by the framework (no argume
 the context the server put together, where every value from outside the framework (the arguments, target texts,
 build logs, probes, knowledge excerpts) is inside a wrap_untrusted block. Every prompt carries the honest-"cannot"
 rule. A prompt is listed only when every tool it leads to is registered, so it never sends a model to a tool that
-does not exist (add_board waits for create_target_module, deploy_to_board for the deploy tools).
+does not exist (add_board waits for create_target_module, deploy_to_board for the deploy tools). Like a resource, a
+prompt shows nothing a read tool may not: one whose context holds what a read tool returns (PromptSpec.reads) follows
+that tool's permission, and knowledge excerpts come only while search_knowledge is allowed for the caller.
 """
 
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from orchestrator.llm.task_prompts import (CANNOT_RULE, FRAMEWORK, HEALING_TASK, MODULE_TASK, OPTIMIZER_TASK,
                                            format_listing, healing_parts, healing_query, knowledge_excerpts,
                                            module_parts, module_query, optimizer_parts)
 from orchestrator.tools.framework_resources import existing_docs
-from orchestrator.tools.registry import PromptArg, PromptSpec, ResourceUnknown, ToolContext, ToolRegistry
+from orchestrator.tools.policy import Decision
+from orchestrator.tools.registry import PromptArg, PromptSpec, ResourceUnknown, ToolContext, ToolError, ToolRegistry
 from orchestrator.utils.untrusted import UNTRUSTED_RULE, wrap_untrusted
 
 CLIENT_ROLE = ("You are connected to the LLM Cross-Compiler Framework over MCP and do this task for the user, as the "
@@ -67,14 +70,23 @@ def _block(label: str, text: str, source: str, max_len: int = 4000) -> str:
     return f"{label}:\n" + wrap_untrusted(text, source, max_len=max_len)
 
 
-def _knowledge_on(framework) -> Any:
-    """The knowledge base Ditto would use (None when the person switched it off)."""
+# Said instead of the excerpts when the caller may not search the knowledge base without a question: a prompt shows
+# nothing the read tool search_knowledge may not (framework text, outside any untrusted block).
+NO_KNOWLEDGE = ("Knowledge-base excerpts are left out: your tool permissions do not allow search_knowledge without a "
+                "question.")
+
+
+def _knowledge_enabled(framework) -> bool:
     config = getattr(framework, "config", None)
     try:
-        enabled = bool(config.get("enable_rag_knowledge", False)) if config is not None else False
+        return bool(config.get("enable_rag_knowledge", False)) if config is not None else False
     except Exception:
-        enabled = False
-    if not enabled:
+        return False
+
+
+def _knowledge_on(framework) -> Any:
+    """The knowledge base Ditto would use (None when the person switched it off)."""
+    if not _knowledge_enabled(framework):
         return None
     ensure = getattr(framework, "ensure_rag_manager", None)
     try:
@@ -102,14 +114,30 @@ def register_framework_prompts(registry: ToolRegistry, framework,
     def caps_text(caps) -> str:
         return json.dumps(caps.model_dump(mode="json"), ensure_ascii=False)
 
+    def knowledge(ctx: ToolContext, query: str, **kwargs: Any) -> Tuple[str, str]:
+        """(excerpts, note): the knowledge context Ditto gets, only while this caller may use search_knowledge
+        without a question; otherwise no excerpts and a note that says why."""
+        if not _knowledge_enabled(framework):
+            return "", ""
+        try:
+            allowed = registry.decide(registry.get("search_knowledge"), None, ctx) == Decision.ALLOW
+        except ToolError:  # no such tool in this registry: nothing to follow, so nothing is shown
+            allowed = False
+        if not allowed:
+            return "", NO_KNOWLEDGE
+        return knowledge_excerpts(_knowledge_on(framework), query, **kwargs), ""
+
+    def with_note(parts: List[str], note: str) -> str:
+        return "\n\n".join(parts + ([note] if note else []))
+
     def ask(args: Dict[str, str], ctx: ToolContext) -> str:
         docs = ", ".join(f"lcf://docs/{name}" for name in existing_docs(framework)) or "none in this installation"
         parts = [_block("The user's question", args["question"], "question", 2000),
                  f"Documentation resources of this installation: {docs}"]
-        known = knowledge_excerpts(_knowledge_on(framework), args["question"])
+        known, note = knowledge(ctx, args["question"])
         if known:
             parts.append("Knowledge-base excerpts:\n" + known)
-        return "\n\n".join(parts)
+        return with_note(parts, note)
 
     def convert(args: Dict[str, str], ctx: ToolContext) -> str:
         tid, caps = capabilities(args["target"])
@@ -126,12 +154,10 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    if not board or board in caps.boards_for(fmt)}
         notes = {fmt: f"{cap.label}; input: {', '.join(cap.input)}" + (f"; {cap.notes}" if cap.notes else "")
                  for fmt, cap in caps.formats.items()}
-        known = ""
+        known, note = "", ""
         if _yes(args.get("use_knowledge")):
-            known = knowledge_excerpts(_knowledge_on(framework),
-                                       f"{tid} {board or ''} {args['model']} quantization performance", rerank=True)
-        listing = format_listing(options, notes) or "(none for this board)"
-        return "\n\n".join(optimizer_parts(args["model"], tid, board, listing, known))
+            known, note = knowledge(ctx, f"{tid} {board or ''} {args['model']} quantization performance", rerank=True)
+        return with_note(optimizer_parts(args["model"], tid, board, format_listing(options, notes), known), note)
 
     def diagnose(args: Dict[str, str], ctx: ToolContext) -> str:
         status = service.get_status(args["request_id"])
@@ -139,8 +165,8 @@ def register_framework_prompts(registry: ToolRegistry, framework,
         context = json.dumps({k: v for k, v in status.model_dump(mode="json").items()
                               if k in ("request_id", "status", "stage", "errors", "warnings", "pending_healing")},
                              ensure_ascii=False)
-        known = knowledge_excerpts(_knowledge_on(framework), healing_query(log), limit=3, rerank=False)
-        return "\n\n".join(healing_parts(log, context, known))
+        known, note = knowledge(ctx, healing_query(log), limit=3, rerank=False)
+        return with_note(healing_parts(log, context, known), note)
 
     def add_board(args: Dict[str, str], ctx: ToolContext) -> str:
         probe = ""
@@ -150,8 +176,9 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                 raise ResourceUnknown(f"There is no probe '{args['probe_id']}'.",
                                       next="Import the board's probe with 'llm-cli scan --import FILE' or in the GUI, "
                                            "or name the board and its SoC.")
-        known = knowledge_excerpts(_knowledge_on(framework), module_query(probe, args.get("board", "")))
-        return "\n\n".join(module_parts(probe, args.get("board", ""), known))
+        # As Ditto's generate_module: never reranked (the cross-encoder dropped the relevant excerpts for this query).
+        known, note = knowledge(ctx, module_query(probe, args.get("board", "")), rerank=False)
+        return with_note(module_parts(probe, args.get("board", ""), known), note)
 
     def deploy(args: Dict[str, str], ctx: ToolContext) -> str:
         parts = [_block("Built model", args["artifact_id"], "artifact id", 200)]
@@ -193,20 +220,21 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    (model, target, board), convert,
                    tools=("list_targets", "get_target_capabilities", "start_build", "get_build_status",
                           "resolve_healing", "list_artifacts"),
-                   completions={"target": targets, "board": boards}),
+                   completions={"target": targets, "board": boards}, reads=("get_target_capabilities",)),
         PromptSpec("recommend_build_settings", "Recommend build settings",
                    "Recommends format, quantization and optimization for a model on a target (Ditto's optimizer task).",
                    RECOMMEND_INSTRUCTIONS,
                    (model, target, board, PromptArg("use_knowledge", "yes to add knowledge-base excerpts (default no)",
                                                     max_chars=8)), recommend,
                    tools=("get_target_capabilities", "start_build"),
-                   completions={"target": targets, "board": boards, "use_knowledge": lambda a, c: ["yes", "no"]}),
+                   completions={"target": targets, "board": boards, "use_knowledge": lambda a, c: ["yes", "no"]},
+                   reads=("get_target_capabilities",)),
         PromptSpec("diagnose_build_failure", "Diagnose a failed build",
                    "Analyzes a failed build with its log and knowledge excerpts and proposes one fix as a manual step "
                    "(Ditto's self-healing task).", DIAGNOSE_INSTRUCTIONS,
                    (PromptArg("request_id", "The build request, e.g. req_1a2b3c4d", required=True, max_chars=64),),
                    diagnose, tools=("get_build_status", "read_build_log", "resolve_healing"),
-                   completions={"request_id": own_builds}),
+                   completions={"request_id": own_builds}, reads=("get_build_status", "read_build_log")),
         PromptSpec("add_board", "Add a board",
                    "Proposes a target module for a board from its probe or from its name and SoC (Ditto's module "
                    "task).", ADD_BOARD_INSTRUCTIONS,

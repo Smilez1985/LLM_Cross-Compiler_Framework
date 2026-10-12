@@ -239,3 +239,116 @@ class TestCompletions:
             free = [a for a in spec.arguments if a.max_chars > 512]
             assert all(spec.arguments[-1] is a for a in free), f"{spec.name}: free text must be the last argument"
             assert all(isinstance(a, PromptArg) for a in spec.arguments)
+
+
+class TestPromptsFollowTheReadTools:
+    """A prompt's context holds what read tools return (a build's state and log, a target's capabilities, knowledge
+    excerpts): it shows nothing those tools may not, as a resource does. Without this, a person who denied
+    read_build_log to a client would still hand it the log through diagnose_build_failure."""
+
+    LOG_LINE = "LOG-LINE-THE-PERSON-DID-NOT-SHARE"
+    KNOWLEDGE = "KNOWLEDGE-THE-PERSON-DID-NOT-SHARE"
+
+    @staticmethod
+    def set_policy(registry, **overrides):
+        registry.policy_store.save(ToolPolicy(configured=True, tiers={ToolTier.READ: Decision.ALLOW},
+                                              overrides={t: Decision(d) for t, d in overrides.items()},
+                                              reviewed=[s.name for s in registry.list()]))
+
+    def failed_build(self, framework, monkeypatch):
+        service = framework.build_service
+        status = BuildStatusOut(request_id="req_1", status="failed", stage="convert", progress_percent=40,
+                                total_builds=1, completed_builds=0, failed_builds=1, errors=["exit 2"])
+        monkeypatch.setattr(service, "get_status", lambda rid: status)
+        monkeypatch.setattr(service, "log_tail", lambda rid, lines: LogTail(request_id=rid, lines=[self.LOG_LINE]))
+
+    @pytest.mark.parametrize("denied", ["read_build_log", "get_build_status"])
+    def test_a_denied_read_tool_hides_and_refuses_the_prompt_that_holds_its_data(self, framework, registry,
+                                                                                 monkeypatch, denied):
+        self.failed_build(framework, monkeypatch)
+        self.set_policy(registry, **{denied: "deny"})
+        assert "diagnose_build_failure" not in {p.name for p in registry.prompts("mcp")}
+        err = error(server_for(framework), "diagnose_build_failure", {"request_id": "req_1"})
+        assert err.error.code == -32600 and denied in str(err) and self.LOG_LINE not in str(err)
+        entry = registry.audit.entries(1)[0]
+        assert (entry["tool"], entry["outcome"]) == ("get_prompt:diagnose_build_failure", "denied")
+
+    def test_the_capabilities_follow_get_target_capabilities(self, framework, registry):
+        self.set_policy(registry, get_target_capabilities="deny")
+        offered = {p.name for p in registry.prompts("mcp")}
+        assert not offered & {"convert_model_for_board", "recommend_build_settings"}
+        assert "ask_about_framework" in offered
+        err = error(server_for(framework), "recommend_build_settings", {"model": "m", "target": "Rockchip"})
+        assert err.error.code == -32600 and "get_target_capabilities" in str(err)
+
+    def test_ask_refuses_and_names_the_tool_that_can_ask(self, framework, registry, monkeypatch):
+        self.failed_build(framework, monkeypatch)
+        self.set_policy(registry, read_build_log="ask")
+        assert "diagnose_build_failure" in {p.name for p in registry.prompts("mcp")}
+        err = error(server_for(framework), "diagnose_build_failure", {"request_id": "req_1"})
+        assert err.error.code == -32600 and "read_build_log" in str(err) and self.LOG_LINE not in str(err)
+        assert registry.audit.entries(1)[0]["outcome"] == "not_confirmed"
+
+    def test_knowledge_excerpts_only_while_search_knowledge_is_allowed(self, framework, registry, monkeypatch):
+        class Rag:
+            def search(self, query, limit=5, rerank=None):
+                return [SimpleNamespace(source="https://docs.example/x",
+                                        content=TestPromptsFollowTheReadTools.KNOWLEDGE)]
+        framework.config.set("enable_rag_knowledge", True)
+        monkeypatch.setattr(framework, "ensure_rag_manager", lambda: Rag(), raising=False)
+        self.failed_build(framework, monkeypatch)
+        for decision in ("deny", "ask"):
+            self.set_policy(registry, search_knowledge=decision)
+            for name, arguments in (("ask_about_framework", {"question": "What is RKLLM?"}),
+                                    ("recommend_build_settings", {"model": "m", "target": "Rockchip",
+                                                                  "use_knowledge": "yes"}),
+                                    ("diagnose_build_failure", {"request_id": "req_1"})):
+                text = get(server_for(framework), name, arguments).messages[1].content.text
+                assert self.KNOWLEDGE not in text and "search_knowledge" in text, (decision, name)
+        self.set_policy(registry)
+        text = get(server_for(framework), "ask_about_framework", {"question": "What is RKLLM?"}).messages[1]
+        assert self.KNOWLEDGE in text.content.text
+
+    def test_every_prompt_names_the_read_tools_its_context_holds(self, registry):
+        """Registry-wide: reads are among the tools a prompt leads to (so they exist when it is offered) and are read
+        tools."""
+        names = {s.name for s in registry.list()}
+        for spec in registry.prompts():
+            assert set(spec.reads) <= set(spec.tools), spec.name
+            for tool in set(spec.reads) & names:
+                assert registry.get(tool).tier == ToolTier.READ, (spec.name, tool)
+        reads = {s.name: set(s.reads) for s in registry.prompts()}
+        assert reads["diagnose_build_failure"] >= {"get_build_status", "read_build_log"}
+        assert "get_target_capabilities" in reads["convert_model_for_board"] & reads["recommend_build_settings"]
+
+
+def test_add_board_gets_dittos_knowledge_context(framework, registry, monkeypatch):
+    """The same knowledge context as Ditto's module task: never reranked (Ditto's generate_module passes rerank=False
+    because the cross-encoder dropped the relevant excerpts for this keyword query)."""
+    from orchestrator.tools.framework_tools import NoInput, StatusOut
+    searched = []
+
+    class Rag:
+        def search(self, query, limit=5, rerank=None):
+            searched.append((query, limit, rerank))
+            return []
+    framework.config.set("enable_rag_knowledge", True)
+    monkeypatch.setattr(framework, "ensure_rag_manager", lambda: Rag(), raising=False)
+    registry.register(ToolSpec("create_target_module", "Create a target module", "stub", ToolTier.LOCAL_WRITE,
+                               NoInput, StatusOut, lambda i: StatusOut()))
+    get(server_for(framework), "add_board", {"board": "Hailo-8L on a Raspberry Pi 5 (BCM2712)"})
+    assert searched and searched[0][1:] == (5, False)
+
+
+def test_the_targets_own_texts_stay_in_untrusted_blocks(framework, monkeypatch):
+    """Format labels and notes come from target.yml, which a community target pack installs: in the recommendation
+    prompt they are external text like any other."""
+    service = framework.build_service
+    caps = service.capabilities(service.resolve_target("Rockchip"))
+    fmt = next(iter(caps.formats))
+    changed = caps.formats[fmt].model_copy(update={"notes": INJECTION, "label": INJECTION})
+    hacked = caps.model_copy(update={"formats": {**caps.formats, fmt: changed}})
+    monkeypatch.setattr(service, "capabilities", lambda tid: hacked)
+    text = get(server_for(framework), "recommend_build_settings",
+               {"model": "Qwen/x", "target": "Rockchip"}).messages[1].content.text
+    assert INJECTION in text and INJECTION not in blocks_removed(text)
