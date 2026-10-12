@@ -492,7 +492,10 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `start_build` | local write | Start a build (must match the target's capabilities); the question shows commit, size, disk and hardware estimate |
 | `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
-| `get_status` | read | Your tool permissions for this caller: every tool with its decision and why (also the hidden ones), and what no tool does, with where you do it |
+| `get_status` | read | The framework's state in sections (framework, host, local runtime, knowledge base, AI access, your tool permissions with what no tool does, your own audit entries); never a secret or a host path |
+| `get_settings` | read | The settings an AI may read (addresses as scheme and host, folders as labels) and which it may change |
+| `update_settings` | local write | Change ordinary settings (asked); limits on what an AI may do only tightened; never permissions, secrets or the vault |
+| `report_cannot_do` | read | Report that a task cannot be done, with the reason; the framework checks the reason against its own state |
 | `get_job_status` | read | State, progress and result of a long operation other than a build (a job); waits with `wait_seconds` |
 | `cancel_job` | local write | Stop a job (its own jobs without a question, another caller's only after one) |
 
@@ -1055,6 +1058,32 @@ framework never sees it.
   `get_artifact_details` returns one model's manifest (every string marked as external text, a local model's path
   as its label), model card and files. The resources `lcf://artifacts/{artifact_id}/manifest` and
   `lcf://artifacts/{artifact_id}/model-card` read the same.
+- **Status, settings and an honest "cannot" (`get_status`, `get_settings`, `update_settings`, `report_cannot_do`):**
+  `get_status` shows the framework's state in sections: `framework` (version, Docker, targets, offline mode,
+  knowledge base, active builds, whether the permissions are configured or damaged), `host` (operating system,
+  architecture, RAM, GPUs and the recommended local runtime build and model tier), `local_runtime` (the self-built
+  llama.cpp server: origin, build id, commit, backend, verification, running, tier; an opted-in prebuilt archive is
+  labelled "not self-built"; never its address or key), `knowledge` (on or off, connected, vectors, storage as "the
+  per-user folder" or scheme and host, embedding model, snapshots), `ai_access` (per provider the sign-in state,
+  method and where the credential comes from, and whether a Hugging Face token is stored; never a key fragment,
+  account or endpoint), `permissions` (as before) and `audit` (this caller's last 30 entries and whether the chain is
+  intact). `get_settings` reads an explicit list of settings: addresses as scheme and host only, folders as labels
+  (`models:`), never `secret_helper`, `secret_storage` or the AI provider's settings beyond a summary.
+  `update_settings` changes ordinary settings (language, GUI theme, calibration language, crawler languages and
+  PDFs, reranking by default, model idle time, announcements, `build_jobs`, chat context, importance matrix by
+  default); you are asked with the old and new value, and each change is saved in `config.yml`. Settings that limit
+  what an AI or a build may do can only be tightened (`offline_mode` and `enable_security_scan` and `build_sandbox`
+  to true, `enable_telemetry` and `enable_rag_knowledge` to false, page and depth limits and container limits lower,
+  the crawl delay higher); only such calls may be set to "allow". Permissions, secrets, the vault, AI provider
+  settings, addresses, image references, folders and the loosening direction are refused before the question, and
+  no value is ever read as "default". `report_cannot_do` is for a task the AI really cannot do: it names the reason
+  (`missing_information`, `not_supported`, `no_tool`, `permission_denied`, `declined`, `needs_person`,
+  `hardware_unavailable`, `insufficient_resources`, `limit_reached`, `failed`; there is no "untested"), and the
+  framework checks it against its own state (your permissions, this session's audit entries and limits, the disk,
+  the actions no tool does) and answers `confirmed`, `contradicted`, `premature` (nothing was tried yet, with the
+  tools to try) or `unchecked`, with facts and one sentence for you built only from those facts. "The hardware is
+  not available" is contradicted for every tool that does not use a device: untested hardware is no reason to
+  refuse. Every report is audited (`cannot_reported`); `llm-cli tools audit --summary` counts them per caller.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
   elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
   and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be

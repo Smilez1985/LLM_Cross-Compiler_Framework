@@ -530,7 +530,10 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
-| `get_status` | lesen | Deine Tool-Berechtigungen für diesen Aufrufer: jedes Tool mit Entscheidung und Grund (auch die ausgeblendeten) und was kein Tool tut, mit dem Ort, wo du es tust |
+| `get_status` | lesen | Der Zustand des Frameworks in Abschnitten (Framework, Rechner, lokale Laufzeit, Wissensbasis, KI-Zugang, deine Tool-Berechtigungen mit dem, was kein Tool tut, deine eigenen Audit-Einträge); nie ein Geheimnis oder ein Host-Pfad |
+| `get_settings` | lesen | Die Einstellungen, die eine KI lesen darf (Adressen als Schema und Host, Ordner als Labels), und welche sie ändern darf |
+| `update_settings` | lokal schreiben | Gewöhnliche Einstellungen ändern (mit Frage); Grenzen dessen, was eine KI darf, nur verschärfen; nie Berechtigungen, Geheimnisse oder den Tresor |
+| `report_cannot_do` | lesen | Melden, dass eine Aufgabe nicht machbar ist, mit Grund; das Framework prüft den Grund an seinem eigenen Zustand |
 | `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
 | `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |
 
@@ -1144,6 +1147,35 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   `get_artifact_details` liefert Manifest (jeder Text als externer Text gekennzeichnet, der Pfad eines lokalen
   Modells als sein Label), Model Card und Dateien eines Modells. Die Ressourcen
   `lcf://artifacts/{artifact_id}/manifest` und `lcf://artifacts/{artifact_id}/model-card` lesen dasselbe.
+- **Status, Einstellungen und ein ehrliches „kann nicht“ (`get_status`, `get_settings`, `update_settings`,
+  `report_cannot_do`):** `get_status` zeigt den Zustand des Frameworks in Abschnitten: `framework` (Version, Docker,
+  Targets, Offline-Modus, Wissensbasis, laufende Builds, ob die Berechtigungen eingerichtet oder beschädigt sind),
+  `host` (Betriebssystem, Architektur, RAM, GPUs und der empfohlene Build und die Modellstufe der lokalen Laufzeit),
+  `local_runtime` (der selbst gebaute llama.cpp-Server: Herkunft, Build-ID, Commit, Backend, Prüfung, läuft, Stufe;
+  ein per Opt-in geladenes vorgebautes Archiv heißt „nicht selbst gebaut“; nie seine Adresse oder sein Schlüssel),
+  `knowledge` (an oder aus, verbunden, Vektoren, Speicherort als „der persönliche Ordner“ oder Schema und Host,
+  Embedding-Modell, Snapshots), `ai_access` (je Anbieter Anmeldestatus, Verfahren und woher die Zugangsdaten kommen,
+  und ob ein Hugging-Face-Token gespeichert ist; nie ein Schlüsselteil, Konto oder Endpunkt), `permissions` (wie
+  bisher) und `audit` (die letzten 30 Einträge dieses Aufrufers und ob die Kette intakt ist). `get_settings` liest
+  eine feste Liste von Einstellungen: Adressen nur als Schema und Host, Ordner als Labels (`models:`), nie
+  `secret_helper`, `secret_storage` oder die Einstellungen des KI-Anbieters über eine Zusammenfassung hinaus.
+  `update_settings` ändert gewöhnliche Einstellungen (Sprache, GUI-Thema, Kalibrierungssprache, Crawler-Sprachen und
+  PDFs, Reranking als Standard, Leerlaufzeit der Modelle, Ansagen, `build_jobs`, Chat-Kontext, Importance Matrix als
+  Standard); du wirst mit altem und neuem Wert gefragt, und jede Änderung wird in der `config.yml` gespeichert.
+  Einstellungen, die begrenzen, was eine KI oder ein Build darf, lassen sich nur verschärfen (`offline_mode`,
+  `enable_security_scan` und `build_sandbox` auf true, `enable_telemetry` und `enable_rag_knowledge` auf false,
+  Seiten- und Tiefengrenzen und Container-Grenzen niedriger, die Pause beim Crawlen länger); nur solche Aufrufe
+  dürfen auf „erlauben“ gestellt werden. Berechtigungen, Geheimnisse, der Tresor, Einstellungen des KI-Anbieters,
+  Adressen, Image-Referenzen, Ordner und die lockernde Richtung werden vor der Frage abgelehnt, und kein Wert wird je
+  als „Standard“ gelesen. `report_cannot_do` ist für eine Aufgabe, die die KI wirklich nicht erledigen kann: Sie nennt
+  den Grund (`missing_information`, `not_supported`, `no_tool`, `permission_denied`, `declined`, `needs_person`,
+  `hardware_unavailable`, `insufficient_resources`, `limit_reached`, `failed`; ein „ungetestet“ gibt es nicht), und
+  das Framework prüft ihn an seinem eigenen Zustand (deine Berechtigungen, die Audit-Einträge und Grenzen dieser
+  Sitzung, das Laufwerk, die Aktionen, die kein Tool tut) und antwortet `confirmed`, `contradicted`, `premature`
+  (noch nichts versucht, mit den Tools, die zu versuchen sind) oder `unchecked`, mit Fakten und einem Satz für dich,
+  der nur aus diesen Fakten gebaut ist. „Die Hardware ist nicht verfügbar“ wird für jedes Tool widersprochen, das
+  kein Gerät nutzt: Ungetestete Hardware ist kein Grund abzulehnen. Jede Meldung wird protokolliert
+  (`cannot_reported`); `llm-cli tools audit --summary` zählt sie je Aufrufer.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine

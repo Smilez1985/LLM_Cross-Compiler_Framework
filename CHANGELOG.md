@@ -629,6 +629,20 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   a cancel stops the download before the next file, and the download stops when the cache disk falls below half
   its reserve. A full disk is reported as `insufficient_resources` with the free space.
 
+- **MCP: framework status and settings** (design T2, DECISIONS round 1 item 4): `get_status` shows the sections
+  framework, host, local runtime (a prebuilt archive labelled "not self-built"), knowledge base, AI access (states
+  only, never a key fragment, account or endpoint), permissions and this caller's audit entries; new `get_settings`
+  (an explicit read list, addresses as scheme and host, folders as labels) and `update_settings` (ordinary settings
+  with a question showing old and new value, saved in `config.yml`; settings that limit an AI only tightened, and
+  only those may be allowed without a question; permissions, secrets, vault, AI provider settings, addresses and
+  folders refused before the question; no value is read as "default").
+- **MCP: honest "cannot" checked by the framework** (DECISIONS round 3): new `report_cannot_do` takes a reason code
+  (no "untested") and what is missing, checks it against the caller's permissions, this session's audit entries and
+  limits, the disk and the actions no tool does, and answers confirmed, contradicted, premature (with the tools to
+  try first) or unchecked, with a sentence built only from framework facts; "the hardware is not available" is
+  contradicted for every tool that uses no device. Reports are audited as `cannot_reported`;
+  `llm-cli tools audit --summary` counts them per caller.
+
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
   list. Use the hidden prompt or `--with-token`.
