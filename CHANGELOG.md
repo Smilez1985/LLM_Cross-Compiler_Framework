@@ -140,7 +140,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   took 195 s.
 - **Builds of Ditto's server move between machines**: `llm-cli ditto runtime export FILE` writes the self-built
   build in use, and `llm-cli ditto runtime import FILE` on another machine of the same kind checks it against the pin
-  and its manifest, asks before any of its programs runs, verifies it there and makes it the active build.
+  and its manifest, asks before any of its programs runs, verifies it there and makes it the active build. A build
+  made with `-march=native` is refused, before anything runs, on a CPU of another vendor or without one of the CPU
+  features of the CPU that built it (it would stop with SIGILL at the first computation); `runtime start` and the
+  perplexity check skip such a build too, for example in a home folder shared between machines.
   `llm-cli ditto runtime prune` removes old builds and always keeps the active build, the CPU fallback and the build a
   running server uses.
 - `llm-cli doctor` checks the local llama.cpp runtime: a self-built build in use that was changed (error) or is older
@@ -535,11 +538,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   with `runtime install --prebuilt`) is verified the same way, installed atomically, and never offered on musl or on
   an older glibc than the one it was built against.
 - One launch policy for every llama.cpp program the framework starts (`orchestrator/runtime/server_policy.py`):
-  Ditto's server, the build checks and the perplexity check share one list of forbidden options and a cleared
-  environment, and a server listens on 127.0.0.1 only and reads its key from a private file, checked again right
-  before the start. `runtime start` starts only a build that passed its verification on this machine, still matches
-  its manifest and is of the pinned commit (else its CPU fallback, else nothing); a self-built build that cannot be
-  used never falls back to the prebuilt archive on its own.
+  Ditto's server, the build checks and the perplexity check share one list of forbidden options (tools, agent mode,
+  MCP, web UI, remote compute, downloads, a prompt log on disk, a key or token on the command line, in every spelling
+  llama.cpp accepts, also `--a_b` for `--a-b`) and a cleared environment, and a server listens on 127.0.0.1 only and
+  reads its key from a private file, checked again right before the start. `runtime start` starts only a build that
+  passed its verification on this machine, still matches its manifest and is of the pinned commit (else its CPU
+  fallback, else nothing); a self-built build that cannot be used never falls back to the prebuilt archive on its
+  own, and an official archive an earlier version downloaded is used only after `runtime install --prebuilt` (which
+  takes it without downloading it again).
 - Deep Ingest reads robots.txt as RFC 9309 describes it, with one cautious deviation. Rules with `*` or `$` (such
   as `Disallow: /*.pdf$`), an `Allow` listed before a longer `Disallow`, every `User-agent: *` group after the
   first and a file that starts with a byte order mark used to be ignored, so the crawler fetched pages the site had

@@ -198,6 +198,23 @@ def _read_json(path: Path) -> Optional[dict]:
     return data if isinstance(data, dict) else None
 
 
+_RE_PLATFORM_PART = re.compile(r"^[a-z0-9_]{1,16}$", re.ASCII)
+_RE_TIMESTAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?$", re.ASCII)
+
+
+def _platform_of(value: Any) -> Dict[str, str]:
+    """{"os", "arch"} of a build host as a manifest records it; a manifest of an imported build is unsigned data, so
+    anything but a short plain name becomes "unknown" (it is shown, logged and written into labels)."""
+    value = value if isinstance(value, dict) else {}
+    return {k: v if isinstance(v, str) and _RE_PLATFORM_PART.fullmatch(v) else "unknown"
+            for k, v in (("os", value.get("os")), ("arch", value.get("arch")))}
+
+
+def _timestamp_of(value: Any) -> Optional[str]:
+    """An ISO 8601 time as a manifest records it, else None (unsigned data, see _platform_of)."""
+    return value if isinstance(value, str) and _RE_TIMESTAMP.fullmatch(value) else None
+
+
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind((LOOPBACK, 0))
@@ -529,12 +546,26 @@ class LocalLLMRuntime:
                     f"is {machine[0]}/{machine[1]}")
         if build.purpose != "host-runtime" or "llama-server" not in (build.manifest.get("files") or {}):
             return f"the {what} {build.build_id[:16]} has no llama-server"
+        cpu = self._cpu_problem(build.plan)
+        if cpu:
+            return f"the {what} {build.build_id[:16]} cannot run on this CPU: {cpu}"
         from orchestrator.runtime.build.verify import VerifyError
         try:
             build.binary("llama-server")
         except VerifyError as e:
             return f"the {what} {build.build_id[:16]}: {e}"
         return None
+
+    def _cpu_problem(self, plan: Any) -> Optional[str]:
+        """Why a -march=native build of another CPU cannot run here (build/host.py cpu_problem), or None. A probe that
+        fails decides nothing: the build passed its verification, and this check only adds what that cannot see."""
+        from orchestrator.runtime.build.host import cpu_problem
+        try:
+            profile = self.profile()
+        except Exception as e:  # the probe could not run; the start itself still fails loudly on a wrong CPU
+            self.logger.warning(f"Could not probe the CPU for the build check ({e.__class__.__name__})")
+            return None
+        return cpu_problem(plan, profile)
 
     def _from_store(self, build, role: str, notes: List[str]) -> InstalledRuntime:
         manifest = build.manifest
@@ -545,21 +576,23 @@ class LocalLLMRuntime:
                 devices = [str(d.get("name")) for d in (check.get("data") or {}).get("devices") or []
                            if isinstance(d, dict)][:16]
         host = (manifest.get("imported") or {}).get("built_on") or manifest.get("build_host") or {}
-        built_on = f"{host.get('os')}/{host.get('arch')}" if isinstance(host, dict) and host else None
+        built_on = "/".join(_platform_of(host).values()) if isinstance(host, dict) and host else None
         duration = manifest.get("duration_s")
+        placement = manifest.get("placement")
         return InstalledRuntime(
             build=self.build, variant=build.backend, backend=build.backend, path=build.path,
             server=build.binary("llama-server"), files=dict(manifest.get("files") or {}), origin=build.origin,
-            build_id=build.build_id, commit=build.commit, role=role, placement=manifest.get("placement"),
-            built_on=built_on, built_at=build.built_at or None, verified_at=manifest.get("verified_at"),
+            build_id=build.build_id, commit=build.commit, role=role,
+            placement=placement if placement in ("native", "container") else None,
+            built_on=built_on, built_at=_timestamp_of(build.built_at), verified_at=manifest.get("verified_at"),
             duration_s=float(duration) if isinstance(duration, (int, float)) else None, devices=devices, notes=notes)
 
     def resolve_installed(self) -> Tuple[Optional[InstalledRuntime], List[str]]:
         """(the build start() uses, problems). A self-built or imported build of the store is used when it passed its
         verification on this machine and still matches its manifest: the active build, else the CPU fallback. The
-        prebuilt archive is used only after `install_prebuilt` (the opt-in of decision D1), or when it was installed
-        before self-built builds existed and nothing was built since; a self-built build that cannot be used never
-        falls back to it."""
+        prebuilt archive is used only after `install_prebuilt` (the opt-in of decision D1): an archive an earlier
+        version downloaded without that request is reported, not used, and a self-built build that cannot be used
+        never falls back to it."""
         data = _read_json(self.active_file) or {}
         use = data.get("use")
         problems: List[str] = []
@@ -584,9 +617,20 @@ class LocalLLMRuntime:
             return None, problems
         inst = self._read_manifest(self.root / f"{self.build}-{variant}")
         if inst is not None and use != "prebuilt":
-            inst.notes.append("installed before self-built builds; llm-cli ditto runtime install builds llama-server "
-                              "from the pinned source")
+            # Downloaded by an earlier version's `runtime install`, never asked for: decision D1 allows the prebuilt
+            # archive only as the explicit opt-in, so it is not chosen here.
+            backend = f" --backend {inst.backend}" if inst.backend != "cpu" else ""
+            problems.append(f"the official archive {inst.asset_id} ({PREBUILT_LABEL}) that an earlier version "
+                            "installed is used only on explicit request: llm-cli ditto runtime install --prebuilt"
+                            f"{backend} uses it (an installed archive is not downloaded again), llm-cli ditto runtime "
+                            "install builds llama-server from the pinned source")
+            return None, problems
         return inst, problems
+
+    def prebuilt_installed(self, asset: RuntimeAsset) -> bool:
+        """Whether exactly this official archive is unpacked already (install_prebuilt then only switches to it)."""
+        current = self._read_manifest(self.install_dir(asset))
+        return current is not None and current.files == {f.name: f.sha256 for f in asset.files}
 
     # --- self-built runtime (orchestrator/runtime/build/host.py) --------------------------------------------------
     def plan_install(self, backend: str = "auto", placement: str = "auto"):
@@ -656,7 +700,14 @@ class LocalLLMRuntime:
         def ask(info: Dict[str, Any]) -> bool:
             if "llama-server" not in (info.get("files") or []):
                 raise StoreError("the build has no llama-server (a build for Ditto's server is needed)")
-            return bool(confirm(info))
+            cpu = self._cpu_problem(info.get("plan") or {})
+            if cpu:  # before the user is asked and before any of its programs runs
+                raise StoreError(f"the build cannot run on this CPU: {cpu}")
+            # What the archive says about where and when it was built is shown to the user: only plain values.
+            shown = {k: v for k, v in info.items() if k != "plan"}
+            shown["built_on"] = _platform_of(info.get("built_on"))
+            shown["built_at"] = _timestamp_of(info.get("built_at"))
+            return bool(confirm(shown))
 
         try:
             build = store.import_build(Path(archive), pin=pin, verifier=self._verifier or Verifier(), confirm=ask,

@@ -1070,8 +1070,12 @@ def runtime_install(ctx: FrameworkContext, backend: str, placement: str, jobs: O
             sys.exit(1)
         console.print(f"llama.cpp {escape(rt.build)} - {escape(choice.asset.id)} ([yellow]{PREBUILT_LABEL}[/yellow]): "
                       f"{escape(choice.reason)}")
-        if not yes and not click.confirm(f"Download the official archive ({_gib(choice.asset.download_size)}) into "
-                                         f"{rt.root}?", default=True):
+        if rt.prebuilt_installed(choice.asset) and not force:
+            question = (f"This official archive is already installed in {rt.root}. Use it for Ditto's server "
+                        f"({PREBUILT_LABEL})?")
+        else:
+            question = f"Download the official archive ({_gib(choice.asset.download_size)}) into {rt.root}?"
+        if not yes and not click.confirm(question, default=True):
             return
         bar, update = _download_progress()
         try:

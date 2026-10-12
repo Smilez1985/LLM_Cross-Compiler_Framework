@@ -110,9 +110,9 @@ class DatasetManager:
 
     def __init__(self, framework_manager, *, store: Any = None, runner: Optional[Runner] = None,
                  engine: Any = None, audit: Any = None, catalog: Any = None,
-                 platform: Optional[Tuple[str, str]] = None):
-        """store (BuildStore), runner, engine (ContainerEngine), audit (AuditLog), catalog and platform ((os, arch))
-        replace the framework's (tests)."""
+                 platform: Optional[Tuple[str, str]] = None, profile: Any = None):
+        """store (BuildStore), runner, engine (ContainerEngine), audit (AuditLog), catalog, platform ((os, arch)) and
+        profile (this machine's HardwareProfile) replace the framework's (tests)."""
         self.logger = get_logger(__name__)
         self.framework = framework_manager
         self.config = getattr(framework_manager, "config", None)
@@ -122,6 +122,7 @@ class DatasetManager:
         self._audit = audit
         self._catalog = catalog
         self._platform = platform
+        self._profile = profile
 
     # --- datasets ---
     def detect_domain(self, model_path: str) -> Optional[str]:
@@ -185,6 +186,19 @@ class DatasetManager:
             self._platform = normalize_platform()
         return self._platform
 
+    def _cpu_problem(self, plan: Any) -> Optional[str]:
+        """Why a -march=native build of another CPU cannot run on this one (build/host.py cpu_problem), or None; a
+        probe that fails decides nothing."""
+        from orchestrator.runtime.build.host import cpu_problem
+        if self._profile is None:
+            try:
+                from orchestrator.runtime.hardware import local_profile
+                self._profile = local_profile()
+            except Exception as e:
+                self.logger.warning(f"Could not probe the CPU for the build check ({e.__class__.__name__})")
+                return None
+        return cpu_problem(plan, self._profile)
+
     def trusted_sha256(self) -> Dict[str, str]:
         """sha256 -> name of the models that run natively without asking: the catalog's pinned models."""
         catalog = self._catalog_obj()
@@ -197,8 +211,8 @@ class DatasetManager:
     def perplexity_build(self, *, sandbox: bool = False):
         """(StoredBuild, path of llama-perplexity): the self-built llama-perplexity of this machine. The active build
         first, then the CPU fallback, then any other stored build; each must have passed its verification here, match
-        its manifest, be of the pinned commit and be built for this machine. The sandbox needs a build made in the
-        builder container (it runs in that image)."""
+        its manifest, be of the pinned commit and be built for this machine (OS, architecture, and the CPU of a
+        -march=native build). The sandbox needs a build made in the builder container (it runs in that image)."""
         from orchestrator.runtime.build.verify import VerifyError
         store = self._store_obj()
         pin = self._catalog_obj().llama_cpp.source
@@ -217,6 +231,8 @@ class DatasetManager:
             if pin is None or build.commit != pin.commit or (target.get("os"), target.get("arch")) != machine:
                 continue
             if sandbox and not build.manifest.get("builder_image"):
+                continue
+            if self._cpu_problem(build.plan):
                 continue
             if store.check_files(build):
                 continue

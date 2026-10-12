@@ -695,7 +695,7 @@ derselben Build-ID wird wiederverwendet, nicht neu gebaut. Ein laufender Server 
 | `--backend [auto\|cpu\|vulkan\|cuda\|rocm\|metal]` | GPU-Backend, das nach dem CPU-Build gebaut wird (Standard `auto`: das Bau-Rezept wählt; `cpu`: nur der CPU-Build). Mit `--prebuilt`: das zu installierende Archiv. |
 | `--placement [auto\|native\|container]` | Wo der Build läuft (Standard `auto`: nativ, wenn die Toolchain vollständig ist, sonst im Builder-Container). |
 | `--jobs INTEGER RANGE` | Parallele Compiler-Jobs, 1 bis 256. Standard: aus den CPUs und dem freien Speicher. |
-| `--prebuilt` | Stattdessen das offizielle vorgebaute Archiv von upstream herunterladen (Größe und sha256 vor dem Entpacken geprüft). Nur auf diese Anforderung, immer als „prebuilt, not self-built“ angezeigt. Linux-Archive brauchen glibc 2.35 oder 2.39; bei musl wird keines angeboten. |
+| `--prebuilt` | Stattdessen das offizielle vorgebaute Archiv von upstream herunterladen (Größe und sha256 vor dem Entpacken geprüft). Nur auf diese Anforderung, immer als „prebuilt, not self-built“ angezeigt. Ein schon installiertes Archiv, auch eines, das eine frühere Version heruntergeladen hat (es wird ohne diese Anforderung nicht genutzt), wird übernommen, ohne es neu herunterzuladen. Linux-Archive brauchen glibc 2.35 oder 2.39; bei musl wird keines angeboten. |
 | `--force` | Mit `--prebuilt`: erneut herunterladen und entpacken, auch wenn es installiert ist. |
 | `-y, --yes` | Vor dem Bauen, dem Holen des Quellcodes oder dem Download nicht fragen. |
 
@@ -709,7 +709,9 @@ Importiert einen `llama-server`-Build, der mit `ditto runtime export` auf einem 
 wurde (gleiches Betriebssystem und gleiche Architektur, und eine mindestens so neue C-Bibliothek). Das Archiv wird
 sicher entpackt (die Größe wird vorher begrenzt), jede Datei gegen sein Manifest geprüft, die Build-ID gegen seinen
 Plan, der Plan gegen die Bauregeln (keine Download-Option, keine Subprozess-Unterstützung) und der Commit gegen die
-Festlegung. Dann zeigt der Befehl, wo der Build gemacht wurde, und fragt, bevor eines seiner Programme läuft; danach
+Festlegung. Ein mit `-march=native` gemachter Build wird abgelehnt, wenn diese CPU von einem anderen Hersteller ist
+oder ihr eine CPU-Funktion der bauenden CPU fehlt (etwa AVX-512): Er bräche bei der ersten Rechnung mit SIGILL ab.
+Dann zeigt der Befehl, wo der Build gemacht wurde, und fragt, bevor eines seiner Programme läuft; danach
 wird der Build hier wie ein lokaler geprüft und wird der aktive Build (ein CPU-Build auch der Ersatz). Importiere nur
 Builds, die du selbst gemacht hast.
 

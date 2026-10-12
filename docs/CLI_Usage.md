@@ -672,7 +672,7 @@ running server keeps running; the next `runtime start` uses the new build.
 | `--backend [auto\|cpu\|vulkan\|cuda\|rocm\|metal]` | GPU backend built after the CPU build (default `auto`: the build recipe chooses; `cpu`: only the CPU build). With `--prebuilt`: the archive to install. |
 | `--placement [auto\|native\|container]` | Where the build runs (default `auto`: natively when the toolchain is complete, else in the builder container). |
 | `--jobs INTEGER RANGE` | Parallel compile jobs, 1 to 256. Default: from the CPUs and the free memory. |
-| `--prebuilt` | Download upstream's official prebuilt archive instead (size and sha256 checked before unpacking). Only on this request, always shown as "prebuilt, not self-built". Linux archives need glibc 2.35 or 2.39; none is offered on musl. |
+| `--prebuilt` | Download upstream's official prebuilt archive instead (size and sha256 checked before unpacking). Only on this request, always shown as "prebuilt, not self-built". An archive that is already installed, also one an earlier version downloaded (which is not used without this request), is taken without downloading it again. Linux archives need glibc 2.35 or 2.39; none is offered on musl. |
 | `--force` | With `--prebuilt`: download and unpack again even if it is installed. |
 | `-y, --yes` | Do not ask before building, fetching the source or downloading. |
 
@@ -685,9 +685,11 @@ llm-cli ditto runtime import FILE [-y]
 Imports a `llama-server` build made with `ditto runtime export` on another machine of the same kind (same OS and
 architecture, and a C library at least as new). The archive is unpacked safely (size limited first), every file is
 checked against its manifest, the build ID against its plan, the plan against the build rules (no download option,
-no subprocess support) and the commit against the pin. Then it shows where the build was made and asks before any of
-its programs runs; after that the build is verified here like a local one and becomes the active build (a CPU build
-also the fallback). Import only builds you made yourself.
+no subprocess support) and the commit against the pin. A build made with `-march=native` is refused when this CPU is
+of another vendor or lacks a CPU feature of the CPU that built it (AVX-512, for example): it would stop with SIGILL at
+the first computation. Then it shows where the build was made and asks before any of its programs runs; after that
+the build is verified here like a local one and becomes the active build (a CPU build also the fallback). Import only
+builds you made yourself.
 
 | Option | Meaning |
 |---|---|

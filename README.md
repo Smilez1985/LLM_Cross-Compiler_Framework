@@ -448,11 +448,13 @@ machine before it is kept (version and commit of the pin, the devices it finds, 
 tools), and `runtime start` starts nothing else.
 
 - **Air-gapped machines:** `llm-cli ditto runtime export-source FILE` and `import-source FILE` carry the source;
-  `llm-cli ditto runtime export FILE.tar.gz` on a machine of the same kind and `llm-cli ditto runtime import
-  FILE.tar.gz` here carry a finished build. An imported build is checked against the pin and its own manifest, you
-  confirm it, and it is verified here before it is used.
+  `llm-cli ditto runtime export FILE.tar.gz` on a machine of the same kind (same OS and architecture, and a CPU of
+  the same vendor with at least the CPU features of that machine, since the build uses `-march=native`) and
+  `llm-cli ditto runtime import FILE.tar.gz` here carry a finished build. An imported build is checked against the
+  pin and its own manifest, you confirm it, and it is verified here before it is used.
 - **Official prebuilt archive:** `llm-cli ditto runtime install --prebuilt` downloads upstream's archive instead (size
-  and sha256 checked). It is only used when you ask for it and is always shown as "prebuilt, not self-built". On
+  and sha256 checked). It is only used when you ask for it, also an archive an earlier version downloaded (then
+  `--prebuilt` takes it without downloading it again), and is always shown as "prebuilt, not self-built". On
   Linux it needs the glibc it was built for (2.35 or 2.39); on musl systems such as Alpine only the self-built server
   runs. Until the Windows and macOS builds land, this is the way to run the local model there.
 - `llm-cli ditto runtime prune` removes old builds; the active build, its CPU fallback and the build a running server

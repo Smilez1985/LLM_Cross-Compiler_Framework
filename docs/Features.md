@@ -548,10 +548,11 @@ recommendation.
 
 - **Only verified builds:** `runtime start` starts the active self-built (or imported) build only when it passed its
   verification on this machine, every file still matches its manifest, it is of the pinned commit and it is built
-  for this machine; otherwise the CPU fallback build, and otherwise nothing, with the reason. The prebuilt archive is
-  started only after `install --prebuilt` (an archive installed before self-built builds existed keeps working, shown
-  as prebuilt, until `runtime install` builds the server); a self-built build that cannot be used never switches to
-  it on its own.
+  for this machine (OS and architecture, and for a `-march=native` build a CPU of the same vendor with every CPU
+  feature of the CPU it was built on); otherwise the CPU fallback build, and otherwise nothing, with the reason. The
+  prebuilt archive is started only after `install --prebuilt`. An archive an earlier version downloaded without that
+  request is not used: `runtime status` names it, and `install --prebuilt` switches to it without downloading it
+  again. A self-built build that cannot be used never switches to it on its own.
 - **One launch policy:** the forbidden options, the cleared environment, loopback and the key file come from one
   module, `orchestrator/runtime/server_policy.py`, which every launcher uses: Ditto's server, the build verification
   and the perplexity check (and the device runtime's start script).
@@ -560,7 +561,9 @@ recommendation.
 - **Isolation:** `llama-server` listens on 127.0.0.1 only, on a free port. A new random API key per start reaches it
   only through a key file readable by you, and the framework checks that the server refuses requests without the
   key. The web UI and the slots endpoint are off, and the server runs with `--offline`. Options that would give the
-  model its own tools, agent mode, MCP servers, remote computing or a key on the command line are refused. The
+  model its own tools, agent mode, MCP servers or remote computing, that download (Hugging Face, URLs), write the
+  prompts to disk, run programs from a folder, or put a key or token on the command line are refused, in every
+  spelling llama.cpp accepts (its aliases, and `--a_b` for `--a-b`). The
   server starts with a cleared environment: besides your home folder, a fixed `PATH` and the C locale it only gets
   the variables that choose GPUs or locate GPU drivers (`CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`,
   `ROCR_VISIBLE_DEVICES`, `GGML_VK_VISIBLE_DEVICES`, `HSA_OVERRIDE_GFX_VERSION`, the Vulkan driver variables,
@@ -616,7 +619,10 @@ official prebuilt download stays only as the explicit choice `--prebuilt`, shown
   server uses and the two newest others. A build made on another of your machines can be imported: every file is
   checked against its manifest, the build ID against its plan and the commit against the pin, you confirm before any
   of its programs runs, and then it is verified like a local build. The version it must report comes from the pin,
-  not from the archive, and every program in it is checked, also one the archive does not list.
+  not from the archive, and every program in it is checked, also one the archive does not list. Ditto's import
+  (`ditto runtime import`) refuses a `-march=native` build of a CPU of another vendor or with a CPU feature this CPU
+  lacks (AVX-512, for example) before anything runs: such a build would stop with SIGILL at the first computation,
+  which the checks cannot reach while no smoke-test model is pinned.
 - **Measured** on a 4-core x86-64 virtual machine (GCC 13.3, `-j4`): `llama-server` and `llama-bench` at the pin in
   189 seconds including the checks, 28 MB of binaries; `ditto runtime install` with Ditto's CPU build
   (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 seconds including the checks.
