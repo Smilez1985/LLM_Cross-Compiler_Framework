@@ -641,13 +641,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   started. Every framework process appends to it in its own transaction; each row is signed with a key derived from
   the audit key (`sign_row`/`verify_row`), and a row that was changed, is unsigned or was written with another key is
   never shown (the reader learns how many were skipped; rows of a newer framework version are counted apart). Every
-  string is redacted before it is stored, AI text is cleaned of invisible characters first, a row has no field for a
-  tool's output or raw arguments, parameters are one line and marked as framework or outside text, and who a row is
-  from comes from the caller id. A write an AI's decision depends on raises when it cannot be written (a full disk
-  included), every other write fails open, and reads never wait longer than their short timeout. Clearing the chat is
-  a person's action only: it needs the accepted plan (full path, file name, size, what it is), is audited before
-  anything is deleted, overwrites the deleted text and hides the records of what AIs did instead of deleting them.
-  Ditto's earlier chat is taken over once; without an AI the framework explains a decision from its record alone.
+  string is redacted before it is stored and before anything is cut (a key split by a length limit leaves no part
+  behind), AI text is cleaned of invisible characters first, a row has no field for a tool's output or raw arguments,
+  facts marked for the person only never enter the facts an AI may use, parameters are one line and marked as
+  framework or outside text, and who a row is from comes from the caller id (only the GUI and the terminal write in
+  the person's name). A write an AI's decision depends on raises when it cannot be written (a full disk included),
+  every other write fails open, and reads never wait longer than their short timeout. Clearing the chat is a person's
+  action only (no code an AI can reach calls it): it needs the accepted plan (full path, file name, size, what it is),
+  is audited before anything is deleted, overwrites the deleted text and hides the records of what AIs did instead of
+  deleting them. Ditto's earlier chat is taken over once (its tool notes and notices as outside text); without an AI
+  the framework explains a decision from its record alone, an outside fact on one quoted line.
   Speaking names (`Core/speaking_names.py`) show exact framework ids and masked values in AI text by name at display
   time, never inside code and never for a near match, and keep the original words; `llm-cli doctor` checks that the
   feed can be written and its newest rows verify. Nothing removes rows by itself yet.
