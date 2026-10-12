@@ -31,7 +31,9 @@ from typing import Any, Callable, Dict, Optional
 
 SIGNATURE_FIELD = "signature"
 UNKEYED = "unkeyed"
-KINDS = ("tool_policy", "mcp_tokens", "tool_approvals")
+# confirmed_builds: the builds the person confirmed (orchestrator/Core/confirmed_builds.py), which open build standing
+# approvals for packs an AI installed.
+KINDS = ("tool_policy", "mcp_tokens", "tool_approvals", "confirmed_builds")
 _UNSEEN = object()
 
 

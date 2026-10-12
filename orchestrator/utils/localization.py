@@ -13,7 +13,7 @@ Updates v2.3.0:
 - Enhanced fallback mechanism.
 """
 
-from typing import Any, Optional
+from typing import Any, Dict, Optional, Sequence
 
 from PySide6.QtCore import QObject, Signal
 
@@ -560,3 +560,42 @@ def ui_text(key: str, lang: Optional[str] = None, **values: Any) -> str:
     table = LocalizationManager.TRANSLATIONS
     text = table.get(lang or current_language(), {}).get(key) or table["en"].get(key, key)
     return text.format(**values) if values else text
+
+
+# The texts of newer parts live in modules of their own, so parallel work never edits this file at the same place:
+# warnings and blockers (l10n_facts), the chat panel (l10n_chat). Each holds a plain `TEXTS = {"en": {...}, "de":
+# {...}}` and imports nothing from the framework. A module that does not exist yet is skipped.
+TEXT_MODULES = ("orchestrator.utils.l10n_facts", "orchestrator.utils.l10n_chat")
+
+
+def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,
+                       modules: Sequence[str] = TEXT_MODULES) -> Dict[str, Dict[str, str]]:
+    """Merges the TEXTS of `modules` into `table` (default: LocalizationManager.TRANSLATIONS) and returns it. A key
+    that already exists, a language the table does not have or a value that is not text is refused (ValueError): a
+    text is never replaced silently."""
+    import importlib
+    table = LocalizationManager.TRANSLATIONS if table is None else table
+    for name in modules:
+        try:
+            module = importlib.import_module(name)
+        except ModuleNotFoundError as e:
+            if e.name != name:  # the module exists, but something it imports does not
+                raise
+            continue
+        texts = getattr(module, "TEXTS", None)
+        if not isinstance(texts, dict):
+            raise ValueError(f"{name} has no TEXTS table")
+        for lang, entries in texts.items():  # checked completely before anything is merged
+            if lang not in table or not isinstance(entries, dict):
+                raise ValueError(f"{name}: unknown language {lang!r}")
+            for key, text in entries.items():
+                if not isinstance(key, str) or not isinstance(text, str):
+                    raise ValueError(f"{name}: {key!r} in {lang} is not text")
+                if key in table[lang]:
+                    raise ValueError(f"{name}: the text {key!r} in {lang} exists already")
+        for lang, entries in texts.items():
+            table[lang].update(entries)
+    return table
+
+
+merge_text_modules()

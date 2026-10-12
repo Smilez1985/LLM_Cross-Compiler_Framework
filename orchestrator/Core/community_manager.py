@@ -148,9 +148,10 @@ class Provenance(Strict):
     signer: Optional[str] = None   # author key id (provenance only)
     sender: Optional[str] = None   # key id of the sender of an encrypted pack
     installed_at: str
-    # "grant:<id>" when an AI client installed it under a standing approval (MCP add_pack_from_index): builds of it
-    # stay outside every build standing approval until the person confirmed one build of it.
-    installed_via: Optional[str] = Field(default=None, pattern=r"^grant:g_[0-9a-f]{16}$")
+    # "grant:<id>" or "delegation:<id>" when an AI client installed it without the person answering the question
+    # (MCP add_pack_from_index under a standing approval or a delegation): builds of it stay outside every build
+    # standing approval until the person confirmed one build of it.
+    installed_via: Optional[str] = Field(default=None, pattern=r"^(grant:g_|delegation:d_)[0-9a-f]{16}$")
 
 
 @dataclass

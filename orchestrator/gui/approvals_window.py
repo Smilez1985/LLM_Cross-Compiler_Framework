@@ -16,6 +16,7 @@ from PySide6.QtCore import QObject, Qt, QTimer, Signal
 from PySide6.QtWidgets import (QComboBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QListWidget,
                                QListWidgetItem, QMessageBox, QPlainTextEdit, QPushButton, QRadioButton, QVBoxLayout)
 
+from orchestrator.Core.confirmed_builds import unattended_parts
 from orchestrator.utils.logging import get_logger
 
 logger = get_logger("ApprovalsWindow")
@@ -85,13 +86,13 @@ class GrantUseWatcher(QObject):
             if row["id"] <= self.last_id:
                 continue
             self.last_id = row["id"]
-            channel = str(row.get("confirm_channel") or "")
-            if channel.startswith("grant:") and row.get("outcome") in ("ok", "error"):
+            kind, grant_id = unattended_parts(row.get("confirm_channel"))
+            if kind == "grant" and row.get("outcome") in ("ok", "error"):
                 repairs = row.get("repairs") or []
                 detail = ("; values the framework repaired or filled in: "
                           + ", ".join(str(r.get("field") or r.get("kind")) for r in repairs if isinstance(r, dict))
                           if repairs else "")
-                self.used.emit(str(row["tool"]), channel[len("grant:"):], str(row["actor"]), detail)
+                self.used.emit(str(row["tool"]), grant_id, str(row["actor"]), detail)
                 seen += 1
         return seen
 

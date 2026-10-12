@@ -569,3 +569,99 @@ class TestAuditKeyLock:
         blocker.write_text("")
         key = framework_tools._audit_key(SimpleNamespace(secrets_manager=None), blocker / "state")
         assert key and len(key) >= 32
+
+
+# --- delegations, the chat feed and the hybrid (delegation design 3.11, WP1) -----------------------------------------
+
+D_ID = "d_" + "0123456789abcdef"
+
+
+def test_new_extra_fields_and_channel(tmp_path):
+    """The new outcomes, answers, the delegation channel and the new fields are recorded and bound to the chain; each
+    field takes only its documented values (anything else is a caller's bug, refused like an unknown field)."""
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    entry = log.record("mcp:laptop", "start_build", "local_write", "ask", "ai_answered", arguments={"a": 1},
+                       extra={"confirm_channel": "approval:ap_0123456789abcdef", "answer": "escalated",
+                              "answered_by": "ai", "delegation": D_ID, "reason_sha256": "a" * 64,
+                              "facts_sha256": "b" * 64, "warnings": ["disk_tight"], "version": 2,
+                              "feed_entry": "fe_" + "1" * 16, "taint": False, "place": "build box",
+                              "remote_server": "build box", "transfer": "tf_" + "2" * 16,
+                              "deletion_sha256": "c" * 64})
+    started = log.record("mcp:laptop", "start_build", "local_write", "ask", "started",
+                         extra={"confirm_channel": f"delegation:{D_ID}", "answered_by": "ai", "delegation": D_ID,
+                                "links": [entry]})
+    for outcome in ("delegation_lapsed", "trash_restored", "trash_emptied", "snapshots_pruned", "feed_cleared",
+                    "relay_question"):
+        log.record("gui", "trash", "framework", "person", outcome)
+    log.record("ditto", "start_build", "local_write", "ask", "not_confirmed", extra={"answer": "withdrawn"})
+    assert log.check().intact
+    rows = {r["id"]: r for r in log.entries(20)}
+    assert rows[entry]["answered_by"] == "ai" and rows[entry]["delegation"] == D_ID
+    assert rows[entry]["warnings"] == ["disk_tight"] and rows[entry]["version"] == 2
+    assert rows[started]["confirm_channel"] == f"delegation:{D_ID}"
+    bad = [{"answered_by": "client"}, {"delegation": "d_123"}, {"delegation": "g_" + "0" * 16},
+           {"reason_sha256": "not-a-hash"}, {"facts_sha256": "A" * 64}, {"version": 0}, {"version": True},
+           {"warnings": "disk_tight"}, {"warnings": ["Disk tight!"]}, {"feed_entry": "fe_1"},
+           {"taint": "yes"}, {"place": "line\nbreak"}, {"confirm_channel": "delegation:d_123"},
+           {"confirm_channel": "delegation:" + "0" * 16}, {"answer": "maybe"},
+           # "$" alone also matches before a final newline: a channel is matched as a whole
+           {"confirm_channel": f"delegation:{D_ID}\n"}, {"confirm_channel": "grant:g_0123456789abcdef\n"}]
+    for extra in bad:
+        with pytest.raises(ValueError):
+            log.record("mcp", "start_build", "local_write", "ask", "ok", extra=extra)
+    with pytest.raises(ValueError):
+        log.record("mcp", "start_build", "local_write", "ask", "delegation_used")
+    # a use of a delegation is read from the audit (its started entries), never stored in the delegation file
+    assert log.delegation_uses(D_ID) == (1, rows[started]["ts"])
+    assert log.delegation_uses("d_" + "f" * 16) == (0, None) and log.delegation_uses("not an id") == (0, None)
+
+
+def test_warnings_must_be_catalogue_codes_once_the_catalogue_exists(tmp_path, monkeypatch):
+    from orchestrator.tools import spec as spec_module
+    monkeypatch.setattr(spec_module, "_catalog", lambda: SimpleNamespace(WARNINGS={"disk_tight": object()}))
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    log.record("mcp", "start_build", "local_write", "ask", "ok", extra={"warnings": ["disk_tight"]})
+    with pytest.raises(ValueError, match="unknown warning codes"):
+        log.record("mcp", "start_build", "local_write", "ask", "ok", extra={"warnings": ["made_up"]})
+
+
+def test_truncation_keeps_delegation_fields(tmp_path):
+    """Extra fields too long for an entry are cut, but never what ties it to its decision: who answered, under which
+    delegation, the reason and facts hashes, the feed row, the place and the deletion plan (SEC-M4)."""
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    kept = {"answered_by": "ai", "delegation": D_ID, "reason_sha256": "a" * 64, "facts_sha256": "b" * 64,
+            "feed_entry": "fe_" + "1" * 16, "place": "build box", "deletion_sha256": "c" * 64,
+            "confirm_channel": f"delegation:{D_ID}", "answer": "accepted"}
+    entry = log.record("mcp:laptop", "start_build", "local_write", "ask", "started",
+                       extra={**kept, "repairs": [{"field": "x" * 50, "kind": "alias"}] * 60})
+    row = next(r for r in log.entries(5) if r["id"] == entry)
+    assert "repairs" in row["truncated"] and "repairs" not in audit_module.extra_fields(row)
+    for key, value in kept.items():
+        assert row[key] == value, key
+    assert log.check().intact
+
+
+def test_entries_after_is_an_id_cursor(tmp_path):
+    """A watcher reads every entry after the last one it saw, oldest first: a burst never hides one (SEC-M4)."""
+    log = filled_log(tmp_path / "audit.db", n=5)
+    first = log.entries_after(0, limit=2)
+    assert [json.loads(r["args_preview"])["i"] for r in first] == [0, 1]
+    rest = log.entries_after(first[-1]["id"], limit=100)
+    assert [json.loads(r["args_preview"])["i"] for r in rest] == [2, 3, 4]
+    assert log.entries_after(rest[-1]["id"]) == []
+    assert AuditLog(tmp_path / "none.db").entries_after(0) == []
+    assert not (tmp_path / "none.db").exists(), "reading never creates a log"
+
+
+def test_an_unaudited_field_stays_out_of_the_preview_but_is_covered_by_the_hash(tmp_path):
+    """FieldMeta(audit=False) (a transfer's data chunk): the preview never holds the value; args_sha256 still covers
+    exactly what was sent."""
+    log = AuditLog(tmp_path / "audit.db", key=KEY)
+    arguments = {"transfer_id": "tf_1", "data_b64": "QUJD" * 100}
+    entry = log.record("mcp", "put_transfer_chunk", "local_write", "allow", "ok", arguments=arguments,
+                       omit=("data_b64",))
+    row = next(r for r in log.entries(1) if r["id"] == entry)
+    assert "QUJD" not in row["args_preview"] and "not recorded" in row["args_preview"] and "tf_1" in row["args_preview"]
+    full = json.dumps(arguments, ensure_ascii=False, sort_keys=True, default=str)
+    assert row["args_sha256"] == hashlib.sha256(full.encode("utf-8")).hexdigest()
+    assert log.check().intact

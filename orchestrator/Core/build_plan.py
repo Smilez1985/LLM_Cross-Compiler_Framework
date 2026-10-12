@@ -361,17 +361,17 @@ def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[P
         if any(not c.fits for c in standing):
             return None
     record = record or confirm_record(plan, framework, target_folder)
+    from orchestrator.Core.confirmed_builds import ConfirmedBuilds, unattended
     store = None
     state = state_dir(framework)
     if state is not None:
-        from orchestrator.Core.confirmed_builds import ConfirmedBuilds
-        store = ConfirmedBuilds(state)
-    # a pack installed under a standing approval counts only after the person confirmed one build of it
+        store = ConfirmedBuilds.for_framework(framework, state)
+    # a pack installed unattended (standing approval, delegation) counts only after the person confirmed one build of it
     parts = [("target", record["target"], record["installed_via"], record["pack_sha256"])]
     if record.get("recipe"):
         r = record["recipe"]
         parts.append(("recipe", r["id"], r["installed_via"], r["pack_sha256"]))
-    pending = [p for p in parts if str(p[2]).startswith("grant:")
+    pending = [p for p in parts if unattended(p[2])
                and not (store is not None and store.confirmed(p[0], p[1], installed_via=p[2], pack_sha256=p[3]))]
     images = record["base_images"]
     official = bool(images) and all(

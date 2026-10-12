@@ -7,7 +7,8 @@ marked destructive, denied by default and therefore hidden until the person enab
 "allow the whole tier" setting never enables them: their own default comes first), capped at "ask" (every call is
 put to the person) and never get a standing approval (design 6.10). Both are two-phase: the question shows what the
 framework looked up (the built model by its label, size and hash; the snapshot and the backup taken first), and the
-handler acts on exactly that.
+handler acts on exactly that. `delete_artifact` deletes (round 5 f): the person alone confirms it, in the framework's
+own window, never through a client's form or under a delegation.
 """
 
 from datetime import datetime
@@ -170,6 +171,9 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
                  ToolTier.EXTERNAL, DeleteArtifactIn, DeleteArtifactOut, delete_artifact, takes_context=True,
                  destructive=True, idempotent=True, default_decision=Decision.DENY, max_decision=Decision.ASK,
                  prepare=prepare_delete,
+                 # round 5 f: only the person decides a deletion, in the framework's own window (a pending approval
+                 # for an MCP client, Ditto's dialog or prompt); never a client's form, a grant or a delegation
+                 deletes=True, channels=("framework",),
                  fields={"artifact_id": FieldMeta(kind="id", list_tool="list_artifacts"),
                          "expect_sha256": FieldMeta(kind="trust")},
                  examples=({"artifact_id": "a_0123456789abcdef", "expect_sha256": "0" * 64},),

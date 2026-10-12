@@ -196,6 +196,29 @@ class TestClientConfiguration:
         assert path.read_text() == "{not json"
 
 
+def test_session_seed_is_unique_per_connection():
+    """The calls of one client are grouped (repeat guard, audit session) by a random id per connection, never by a
+    memory address: a later connection that gets the same address must not inherit the first one's failures
+    (SEC-L3)."""
+    class Connection:
+        session_id = None
+        protocol_version = "2025-06-18"  # a handshake client: grouped per connection
+
+    def ctx_for(connection):
+        return SimpleNamespace(request_context=SimpleNamespace(session=SimpleNamespace(_connection=connection)),
+                               protocol_version="2025-06-18")
+    seeds, addresses = set(), set()
+    for _ in range(40):
+        connection = Connection()
+        addresses.add(id(connection))
+        seed = mcp_server._session_seed(ctx_for(connection), "server-1")
+        assert seed == mcp_server._session_seed(ctx_for(connection), "server-1"), "stable while it lives"
+        seeds.add(seed)
+        del connection
+    assert len(addresses) < 40, "addresses were reused (an id()-based seed would have repeated)"
+    assert len(seeds) == 40
+
+
 def test_real_stdio_server_with_framework_tools(tmp_path):
     """`llm-cli mcp serve` started like a client does it: from another directory, over stdin/stdout."""
     from mcp import StdioServerParameters

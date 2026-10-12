@@ -94,24 +94,38 @@ def consequence_line(spec: Any) -> str:
 
 def describe_call(spec: Any, arguments: Dict[str, Any], actor: str = "The AI client",
                   marks: Optional[Dict[str, str]] = None, renamed: str = "", *, requester: str = "",
-                  facts: Any = None, names: Optional[Dict[str, str]] = None, limit: int = MAX_ELICITATION) -> str:
+                  facts: Any = None, names: Optional[Dict[str, str]] = None, limit: int = MAX_ELICITATION,
+                  person_view: bool = False) -> str:
     """The question for one call. For MCP the text is part of the elicitation's identity, so an answer can only
     ever confirm exactly these values. `marks`: values the framework repaired, with what the AI wrote; `renamed`:
     the tool name as the AI wrote it, when it was a spelling variant; `requester`: who asks, for people; `facts`:
     the tool's looked-up CallFacts (consequence and facts); `names`: speaking names of id values (field -> name);
-    `limit`: what the channel shows (CallTooLong above it)."""
+    `limit`: what the channel shows (CallTooLong above it). `person_view`: the text is shown only in the framework's
+    own window, so it holds the facts only the person may see and a deletion's full paths; without it (a client's
+    form, which an AI may read) those are left out and a deletion is listed by label and size only."""
     marks, names = marks or {}, names or {}
     shown = {k: v for k, v in arguments.items() if v is not None}
     order = [k for k in PRIORITY_FIELDS if k in shown] + [k for k in shown if k not in PRIORITY_FIELDS]
     lines = [visible(getattr(facts, "consequence", "") or consequence_line(spec))]
     if requester:
         lines.append(f"Requested by {_plain(requester)}.")
-    checked = list(getattr(facts, "facts", ()) or ())
+    checked = [f for f in (getattr(facts, "facts", ()) or ()) if person_view or not getattr(f, "person_only", False)]
     if checked:
         lines.append("Checked by the framework:")
         for fact in checked:
             label = f"{fact.label} ({fact.source}, not checked)" if fact.source else fact.label
             lines.append(f"  {visible(label)}: {visible(fact.value)}")
+    plan = getattr(facts, "deletion", None)
+    if plan is not None:
+        lines.append("Would be deleted:")
+        for item in plan.items:
+            lines.append(f"  {visible(item.speaking_name)}")
+            if person_view and item.full_path:
+                lines.append(f"    {visible(item.full_path)}")
+            if person_view:
+                lines.append(f"    {visible(item.file_name)}, {item.size_bytes} bytes: {visible(item.what)}")
+            else:
+                lines.append(f"    {item.kind}, {item.size_bytes} bytes")
     arguments_lines = [f"  {visible(k)}: {visible(shown[k])}"
                        + (f" (that is: {visible(names[k])})" if names.get(k) else "")
                        + (f" (repaired; the AI wrote {visible(marks[k])})" if k in marks else "") for k in order]
