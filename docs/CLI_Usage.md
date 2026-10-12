@@ -1515,7 +1515,8 @@ then `zoo list` shows only installed packs, installing by ID and `zoo export --p
 are shared as files (`zoo install --file`).
 
 AI clients and Ditto use the same zoo through the tools `list_packs`, `add_pack_from_index` (signed index only,
-always asked) and `export_pack` (to a local file, always asked); they cannot install a pack from a file, open a pull
+always asked), `start_recipe_build` (an installed recipe, exactly as pinned, with the question of `start_build`)
+and `export_pack` (to a local file, always asked); they cannot install a pack from a file, open a pull
 request or create your keys ([details](Features.md#packs-for-ai-clients)).
 
 How packs are protected:

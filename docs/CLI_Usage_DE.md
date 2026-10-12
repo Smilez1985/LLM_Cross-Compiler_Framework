@@ -1576,7 +1576,8 @@ Herausgeber-Schlüssel. Bis dahin zeigt `zoo list` nur installierte Pakete, Inst
 `zoo export --pr` brechen mit einer Meldung ab, und Pakete werden als Dateien geteilt (`zoo install --file`).
 
 KI-Clients und Ditto nutzen denselben Zoo über die Tools `list_packs`, `add_pack_from_index` (nur signierter Index,
-immer gefragt) und `export_pack` (in eine lokale Datei, immer gefragt); sie können kein Paket aus einer Datei
+immer gefragt), `start_recipe_build` (ein installiertes Rezept, genau wie festgelegt, mit der Frage von
+`start_build`) und `export_pack` (in eine lokale Datei, immer gefragt); sie können kein Paket aus einer Datei
 installieren, keinen Pull Request öffnen und deine Schlüssel nicht anlegen
 ([Details](Features_DE.md#packs-für-ki-clients)).
 
