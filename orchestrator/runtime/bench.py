@@ -85,6 +85,57 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
+def open_pinned(model: Path, sha256: str, label: str) -> int:
+    """Opens the model file once (never following a link), hashes exactly that open file and returns its descriptor
+    when the hash is `sha256`; BenchError otherwise. The run then reads this descriptor, never the path again, so the
+    file cannot be swapped between the check and the run (a catalog model's hash decides that it runs natively without
+    a question)."""
+    import hmac
+    import os
+    import stat
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
+    try:
+        fd = os.open(str(model), flags)
+    except OSError:
+        raise BenchError(f"{label} cannot be opened.", code="failed") from None
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise BenchError(f"{label} is not a regular file.", code="not_supported")
+        h = hashlib.sha256()
+        offset = 0
+        while True:
+            chunk = os.pread(fd, 1 << 20, offset) if hasattr(os, "pread") else _read_at(fd, offset)
+            if not chunk:
+                break
+            h.update(chunk)
+            offset += len(chunk)
+        if not sha256 or not hmac.compare_digest(h.hexdigest(), str(sha256)):
+            raise BenchError(f"{label} changed after it was checked (its sha256 differs); nothing ran.",
+                             code="failed", next="Call run_benchmark again; the person is asked again.")
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _read_at(fd: int, offset: int) -> bytes:  # pragma: no cover - systems without pread (Windows)
+    import os
+    os.lseek(fd, offset, os.SEEK_SET)
+    return os.read(fd, 1 << 20)
+
+
+def fd_path(fd: int) -> Optional[str]:
+    """A path a child process opens to reach exactly the open file `fd` it inherited (Linux /proc/self/fd, other
+    Unix systems /dev/fd); None where there is none (Windows)."""
+    import os
+    if os.name == "nt":  # pragma: no cover - Windows keeps an open file from being replaced or removed
+        return None
+    for base in ("/proc/self/fd", "/dev/fd"):
+        if os.path.isdir(base):
+            return f"{base}/{fd}"
+    return None
+
+
 def _tail(text: str, limit: int = 400) -> str:
     clean = " ".join("".join(ch if ch.isprintable() else " " for ch in (text or "")).split())
     return clean[-limit:] if clean else "no output"
@@ -181,18 +232,25 @@ class BenchRunner:
 
     def run(self, model: Path, *, kind: str, label: str, trusted: bool, sha256: str, sandbox: bool = False,
             stop: Optional[threading.Event] = None) -> BenchRun:
-        """Runs llama-bench on `model` (sha256 checked by the caller; `trusted` says whether it is a catalog model).
-        An untrusted model runs natively only when the caller has the person's consent on record; this method does
-        not ask. Raises BenchError."""
+        """Runs llama-bench on `model` with the sha256 `sha256` (`trusted` says whether it is a catalog model). The
+        file is opened once and hashed through that open file, and llama-bench reads exactly that file (the inherited
+        descriptor natively, a private hard link of it in the sandbox), so it cannot be swapped between the check and
+        the run. An untrusted model runs natively only when the caller has the person's consent on record; this method
+        does not ask. Raises BenchError."""
+        import os
         model = Path(model)
         if not model.is_file() or model.is_symlink() or model.suffix.lower() != ".gguf":
             raise BenchError(f"{label} is not a GGUF model file.", code="not_supported")
         build, binary = self.bench_build(sandbox=sandbox)
-        started = time.monotonic()
-        if sandbox:
-            output, peak = self._run_sandbox(build, model), None
-        else:
-            output, peak = self._run_native(binary, model, build, stop)
+        fd = open_pinned(model, sha256, label)
+        try:
+            started = time.monotonic()
+            if sandbox:
+                output, peak = self._run_sandbox(build, model, fd=fd), None
+            else:
+                output, peak = self._run_native(binary, model, build, stop, fd=fd)
+        finally:
+            os.close(fd)
         from orchestrator.runtime.build.verify import parse_bench_json
         try:
             records = parse_bench_json(output)
@@ -216,9 +274,14 @@ class BenchRunner:
             argv += ["-ngl", "99"]
         return argv
 
-    def _run_native(self, binary: Path, model: Path, build: Any, stop: Optional[threading.Event]):
+    def _run_native(self, binary: Path, model: Path, build: Any, stop: Optional[threading.Event],
+                    fd: Optional[int] = None):
+        """`fd`: the open, checked model file; llama-bench gets it inherited and opens it through its descriptor path,
+        never the model's path (on Windows the open file cannot be replaced or removed while it is open)."""
         from orchestrator.runtime.server_policy import check_command, cleared_env
-        argv = self._argv(str(binary), str(model.resolve()), build)
+        through = fd_path(fd) if fd is not None else None
+        argv = self._argv(str(binary), through or str(model.resolve()), build)
+        extra = {"pass_fds": (fd,)} if through else {}
         check_command(argv)
         with tempfile.TemporaryDirectory(prefix="llm-bench-") as tmp:
             home = Path(tmp) / "home"
@@ -227,7 +290,7 @@ class BenchRunner:
             with open(out_path, "wb") as out, open(err_path, "wb") as err:
                 try:
                     proc = self._popen(argv, cwd=tmp, env=cleared_env(home), stdin=subprocess.DEVNULL, stdout=out,
-                                       stderr=err)
+                                       stderr=err, **extra)
                 except OSError as e:
                     raise BenchError(f"llama-bench could not start: {e}") from None
                 peak = self._watch(proc, stop)
@@ -267,7 +330,28 @@ class BenchRunner:
             time.sleep(0.2)
         return peak // (1024 * 1024) if peak else None
 
-    def _run_sandbox(self, build: Any, model: Path) -> str:
+    @staticmethod
+    def _pinned_copy(model: Path, fd: int, folder: Path) -> Path:
+        """A file in the private folder `folder` that is exactly the open, checked model: a hard link of the open file
+        where the system allows it (Linux, through its descriptor path; no copy), else a copy read from it."""
+        import os
+        import shutil
+        target = folder / "model.gguf"
+        through = fd_path(fd)
+        if through and through.startswith("/proc/"):
+            try:
+                os.link(through, target, follow_symlinks=True)
+                if os.stat(target).st_ino == os.fstat(fd).st_ino:
+                    return target
+                target.unlink()
+            except OSError:
+                target.unlink(missing_ok=True)
+        with os.fdopen(os.dup(fd), "rb") as src, open(target, "xb") as dst:
+            src.seek(0)
+            shutil.copyfileobj(src, dst, 1 << 20)
+        return target
+
+    def _run_sandbox(self, build: Any, model: Path, fd: Optional[int] = None) -> str:
         import re
         from orchestrator.runtime.build.executor import DockerEngine, Mount
         from orchestrator.runtime.server_policy import check_command
@@ -288,9 +372,12 @@ class BenchRunner:
         options = container_sandbox(sandbox_user(), working_dir=CONTAINER_TMP)
         if options.get("network_mode") != "none":  # pragma: no cover - guarded by the sandbox module's tests
             raise BenchError("the sandbox must have no network")
-        mounts = [Mount(build.bin_dir, "/opt/llama/bin", True), Mount(model.resolve(), "/models/model.gguf", True)]
         env = {"HOME": CONTAINER_TMP, "LANG": "C", "LC_ALL": "C"}
-        with tempfile.TemporaryDirectory(prefix="llm-bench-") as tmp:
+        # the mounted file is exactly the checked open file: a private hard link (or copy) next to the model
+        with tempfile.TemporaryDirectory(prefix=".llm-bench-", dir=str(model.parent)) as pinned, \
+                tempfile.TemporaryDirectory(prefix="llm-bench-") as tmp:
+            source = self._pinned_copy(model, fd, Path(pinned)) if fd is not None else model.resolve()
+            mounts = [Mount(build.bin_dir, "/opt/llama/bin", True), Mount(source, "/models/model.gguf", True)]
             log = Path(tmp) / "bench.log"
             rc = engine.run(image, command, mounts=mounts, env=env, options=options, log=log, timeout=RUN_TIMEOUT)
             try:

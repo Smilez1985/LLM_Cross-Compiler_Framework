@@ -1319,6 +1319,10 @@ class ToolRegistry:
                 raise ToolDenied(f"'{spec.title}' needs your confirmation, which was not given.", code=code,
                                  next=("Do not retry it unless the person asks for it." if code == "declined" else
                                        "Nobody could be asked. " + UNASKED_HINT))
+        if approved and channel and channel != ctx.confirm_channel:
+            # the handler sees how this call was confirmed (a build the person confirmed in the framework's own
+            # window is recorded, design 6.10)
+            ctx = dataclasses.replace(ctx, confirm_channel=channel, answer=answer or "accepted")
         confirmation = {"confirm_channel": channel or "none", "question_sha256": question, "answer": answer}
 
         started = None

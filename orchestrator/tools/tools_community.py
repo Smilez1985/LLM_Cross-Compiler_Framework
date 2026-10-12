@@ -474,8 +474,52 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
 
     # -- add_pack_from_index ---------------------------------------------------------------------------------------
 
+    def ledger():
+        """The disk reservation ledger every process of this user shares (builds, downloads, pack imports); None
+        without a per-user folder."""
+        from orchestrator.Core.build_plan import state_dir
+        from orchestrator.Core.disk_plan import ReservationLedger
+        folder = state_dir(framework)
+        return ReservationLedger(folder) if folder is not None else None
+
+    def pack_needs(kind: str, size: int):
+        from orchestrator.Core.disk_plan import DiskNeed
+        return [DiskNeed("packs", Path(community()._install_root(kind)), 2 * int(size),
+                         "quarantine and installed copy")]
+
+    def pack_disk(kind: str, size: int, standing: bool = False):
+        """The disk check of a pack import (twice its size: quarantine and installed copy) beside what other calls
+        of any process reserved; None when the disk cannot be read."""
+        from orchestrator.Core.disk_plan import check_disk
+        try:
+            checks = check_disk(pack_needs(kind, size), ledger(), standing=standing,
+                                disk_usage=lambda p: shutil.disk_usage(p))
+        except OSError:
+            return None
+        return checks[0] if checks and checks[0].total else None
+
+    def reserve_pack(bound: Dict[str, Any], owner: str, standing: bool):
+        """Takes the pack's disk reservation in the shared ledger, checked again under its lock (under a standing
+        approval with the larger reserve, design 6.5); returns a release function."""
+        from orchestrator.Core.disk_plan import InsufficientSpace
+        book = ledger()
+        if book is None or not bound.get("size"):
+            return lambda: None
+        try:
+            rid, _ = book.reserve(pack_needs(bound["kind"], int(bound["size"])), owner,
+                                  f"{bound['kind']} pack {bound['pack_id']}", standing=standing,
+                                  disk_usage=lambda p: shutil.disk_usage(p))
+        except InsufficientSpace as e:
+            if standing:
+                from orchestrator.tools.tools_builds import STANDING_RESERVE_TEXT
+                raise ToolError(f"{STANDING_RESERVE_TEXT}; nothing was installed. {e}", code="insufficient_resources",
+                                next="Call it again once: outside the standing approval the person is asked, with "
+                                     "the disk numbers.") from None
+            raise ToolError(f"Not enough disk space for the pack any more: {e}", code="insufficient_resources",
+                            next="Tell the person how much space is needed.") from None
+        return lambda: book.release(rid)
+
     def prepare_add(inp: AddPackIn, ctx: ToolContext) -> CallFacts:
-        from orchestrator.Core.disk_plan import reserve_for
         cm = community()
         if offline():
             raise ToolError("Offline mode is on: no pack can be downloaded.", code="not_supported",
@@ -496,14 +540,12 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         if revoked is not None:
             raise ToolError(f"The {inp.kind} pack {entry.id} {entry.version} was revoked by the signed index.",
                             code="not_supported", next="Choose another pack; a revoked pack is never installed.")
-        root = cm._install_root(inp.kind)
-        try:
-            usage = shutil.disk_usage(root if Path(root).exists() else Path(root).parent)
-        except OSError:
-            usage = None
-        if usage is not None and usage.free < 2 * entry.size + reserve_for(usage.total):
+        disk = pack_disk(inp.kind, entry.size)
+        if disk is not None and not disk.fits:
             raise ToolError(f"Not enough disk space for the pack: {2 * entry.size} bytes needed (quarantine and "
-                            f"installed copy) plus a reserve, {usage.free} bytes free.", code="insufficient_resources",
+                            f"installed copy) plus a reserve of {disk.reserve} bytes, {disk.free} bytes free"
+                            + (f", {disk.reserved_by_others} bytes reserved by other calls" if disk.reserved_by_others
+                               else "") + ".", code="insufficient_resources",
                             next="Tell the person how much space is needed.")
         key = Quarantine.key(inp.kind, entry.id, entry.sha256)
         prepared = quarantine.get(key)
@@ -549,11 +591,12 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
             for file, image in images:
                 facts.append(Fact(f"Base image ({file})", base_image_line(image), PACK_TEXT))
         bound = {"kind": m.kind, "pack_id": m.id, "version": m.version, "sha256": prepared.provenance.pack_sha256,
-                 "trust": prepared.trust.value, "base_images": [i for _, i in images],
+                 "trust": prepared.trust.value, "base_images": [i for _, i in images], "size": int(entry.size),
                  # the facts a standing approval is matched against (grants.PACK_RULE), never the AI's words
                  "grant": {"source": "index", "kind": m.kind, "trust": prepared.trust.value,
                            "signing_key": getattr(state, "signer", "") or ""}}
-        if usage is None or usage.free < 2 * entry.size + reserve_for(usage.total, standing=True):
+        standing = pack_disk(inp.kind, entry.size, standing=True)
+        if standing is None or not standing.fits:
             # design 6.5: under a standing approval the larger reserve (20 GiB or 10 %) must stay free, else it asks
             bound["grant"] = None
         return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound)
@@ -564,14 +607,16 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
             raise ToolError("The installation is not bound to what the person was shown; nothing was installed.",
                             code="failed", next="Call add_pack_from_index again through the framework's tool registry.")
         cm = community()
+        channel = ctx.confirm_channel or ""
+        release = reserve_pack(bound, ctx.owner, channel.startswith("grant:"))
         key = Quarantine.key(bound["kind"], bound["pack_id"], bound["sha256"])
         prepared = quarantine.take(key)
         if prepared is None or prepared.provenance.pack_sha256 != bound["sha256"]:
+            release()
             if prepared is not None:
                 cm.discard(prepared)
             raise ToolError("The checked copy the person was shown is no longer there; nothing was installed.",
                             code="failed", next="Call add_pack_from_index again; the person is asked again.")
-        channel = ctx.confirm_channel or ""
         if channel.startswith("grant:"):
             prepared.provenance.installed_via = channel
 
@@ -581,6 +626,8 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                 dest = cm.finish_install(prepared)
             except PackError as e:
                 raise ValueError(_no_paths(str(e))) from None
+            finally:
+                release()
             if prepared.manifest.kind == "target":
                 tm = getattr(framework, "target_manager", None)
                 if tm is not None and hasattr(tm, "initialize"):
@@ -601,6 +648,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         try:
             job = jobs.start("pack_import", ctx.owner, work)
         except Exception:
+            release()
             cm.discard(prepared)
             raise
         m = prepared.manifest

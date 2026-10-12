@@ -305,7 +305,8 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         dest = models_dir() / "hf" / folder_name(repo) / commit[:12] / name
         token = hub().token()
         stop = threading.Event()
-        reservation = take_reservation(repo, commit, name, file.size, dest, ctx.owner)
+        reservation = take_reservation(repo, commit, name, file.size, dest, ctx.owner,
+                                       standing=str(ctx.confirm_channel or "").startswith("grant:"))
 
         def work(handle) -> Dict[str, Any]:
             from orchestrator.tools.local_files import LocalFiles
@@ -342,10 +343,12 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
                 _ACTIVE[job.job_id] = thread
         return DownloadStartedOut(job_id=job.job_id, state=job.state, commit=commit, size_bytes=file.size)
 
-    def take_reservation(repo: str, commit: str, name: str, size: int, dest: Path, owner: str):
+    def take_reservation(repo: str, commit: str, name: str, size: int, dest: Path, owner: str,
+                         standing: bool = False):
         """The disk space of an accepted download, in the ledger builds use (checked again under its lock: two
         downloads or a download and a build prepared together cannot both take the same space); released when the
-        job ends, fails or is cancelled. Without a ledger, this process's reservation."""
+        job ends, fails or is cancelled. `standing`: under a standing approval the larger reserve (20 GiB or 10 %)
+        must stay free, checked under the same lock (design 6.5). Without a ledger, this process's reservation."""
         from orchestrator.Core.disk_plan import DiskNeed, InsufficientSpace
         from orchestrator.Core.hf_hub import Reservation
         book = ledger()
@@ -356,8 +359,15 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         from orchestrator.Core import hf_hub as _hf_hub
         try:
             rid, _ = book.reserve([DiskNeed("models", models_dir(), need, f"download {name}")], owner,
-                                  f"{repo}/{name}", disk_usage=lambda p: _hf_hub.shutil.disk_usage(p))
+                                  f"{repo}/{name}", standing=standing,
+                                  disk_usage=lambda p: _hf_hub.shutil.disk_usage(p))
         except InsufficientSpace as e:
+            if standing:
+                from orchestrator.tools.tools_builds import STANDING_RESERVE_TEXT
+                raise HubError(f"{STANDING_RESERVE_TEXT}; nothing was downloaded. {e}",
+                               code="insufficient_resources",
+                               next="Call it again once: outside the standing approval the person is asked, with the "
+                                    "disk numbers.") from None
             raise HubError(f"Not enough disk space for {name} any more: {e}", code="insufficient_resources",
                            next=e.next) from None
 

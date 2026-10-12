@@ -578,6 +578,7 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `list_packs` | lesen | Community-Packs des signierten Index und die installierten mit Vertrauensstufe; Details, Prüfung installierter Packs ([Details](#packs-für-ki-clients)) |
 | `add_pack_from_index` | extern | Ein Wissens-, Target- oder Rezept-Pack aus dem signierten Index hinzufügen, als Job; immer gefragt mit der geprüften Zusammenfassung und jedem Basis-Image eines Target-Packs |
 | `export_pack` | lokal schreiben | Ein Target-, Rezept- oder Wissens-Pack in eine lokale Datei exportieren, mit deinem Schlüssel signiert; immer gefragt, nichts wird hochgeladen |
+| `start_recipe_build` | lokal schreiben | Ein installiertes Community-Rezept genau wie festgelegt bauen (Modell-Commit, Target, Format, Board, Quantisierung), mit der Frage und den Prüfungen von `start_build` |
 | `crawl_docs_site` | lokal schreiben | Deep Ingest von 1 bis 5 öffentlichen Dokumentations-Websites in die Wissensbasis, als Job; immer gefragt mit jeder Startadresse, erst nachdem eine Person den Hinweis gelesen hat ([Details](#deep-ingest-durch-einen-ki-client)) |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
@@ -977,7 +978,10 @@ ganze Stufe erlaubt hast.
   (Laufzeit-Entscheidung D23): Es läuft nativ nur nach deiner Zustimmung, die im eigenen Fenster des Frameworks
   erfragt wird (Dittos Dialog, die ausstehenden Freigaben der GUI oder `llm-cli tools approvals`, nie der Dialog eines
   Clients), auch dann erfragt wird, wenn das Tool erlaubt ist, und ins Audit-Log geschrieben wird, bevor das Modell
-  geladen wird; mit `sandbox: true` läuft es stattdessen in der Docker-Sandbox. Ergebnisse liegen in
+  geladen wird; mit `sandbox: true` läuft es stattdessen in der Docker-Sandbox. Die Modelldatei wird einmal geöffnet
+  und über diese offene Datei gehasht; llama-bench liest genau diese Datei (nativ über den geerbten Deskriptor, in
+  der Sandbox über einen privaten Hardlink darauf), so dass sie zwischen Prüfung und Lauf nicht ausgetauscht werden
+  kann. Ergebnisse liegen in
   `~/.llm-framework/benchmarks/` (`runs/<Lauf-ID>.json`, `index.jsonl`); `get_status` (Abschnitt `local_runtime`)
   zeigt die neuesten Läufe.
 - **Board-Tools** (Stufe `external`, immer mit Frage, nie von einer Daueranfrage abgedeckt, nur für ein
@@ -1327,8 +1331,15 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Cache-Laufwerk unter die halbe Reserve fällt (Grund `insufficient_resources`). Ein Dauerauftrag („ja, und nicht mehr
   fragen“) wird angeboten für Builds auf mitgelieferten oder verifizierten Targets mit safetensors- oder
   GGUF-Gewichten, einem nicht zugangsbeschränkten Modell, dessen Basismodell es auch nicht ist, einer Lizenz auf der
-  Liste freizügiger Lizenzen (oder einer lokalen Datei), einem offiziellen Basis-Image, bis zur gewählten
-  Größenklasse und nur, wenn das Laufwerk die größere Reserve von 20 GiB oder 10 % behält; Hugging-Face-Abfragen von
+  Liste freizügiger Lizenzen (oder einer lokalen Datei), Docker Official Images als Basis (oder einem per Digest
+  gepinnten Basis-Image, das du in einem Build dieses Targets schon bestätigt hast), bis zur gewählten Größenklasse
+  und nur, wenn das Laufwerk die größere Reserve von 20 GiB oder 10 % behält. Diese größere Reserve wird beim Start
+  des Builds erneut geprüft, im Reservierungsbuch, das alle Framework-Prozesse teilen, und unter seiner Sperre, so
+  dass eine inzwischen von einem anderen Prozess genommene Reservierung mitzählt; reicht sie nicht mehr, startet
+  nichts und der nächste Aufruf fragt dich. Ein Target- oder Rezept-Pack, das eine KI unter einem Dauerauftrag
+  installiert hat, ist erst abgedeckt, nachdem du einen Build davon im eigenen Fenster des Frameworks bestätigt
+  hast (Dittos Dialog oder Abfrage oder eine ausstehende Freigabe; eine Antwort im Formular des Clients zählt
+  nicht); das Framework vermerkt diesen Build und deckt die folgenden ab; Hugging-Face-Abfragen von
   `check_build_request` zählen zur Hugging-Face-Rate von 30 pro Stunde. `optimization` (`fast`, `balanced`,
   `size`, `speed`, `aggressive`) wird an den Build weitergegeben. `check_build_request` liefert denselben Plan
   (normalisierte Anfrage, Commit, Größen, Laufwerke, Passung, Einbindungen, Vertrauen, Image-Build, was deine
@@ -1463,7 +1474,8 @@ Konto oder Schlüssel an; das Framework sieht das nie.
 - **Ressourcen:** Neben den Tools bietet der Server Ressourcen, die ein Client anhängen oder lesen kann:
   `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<Request-ID>/status`,
   `lcf://builds/<Request-ID>/log` (die letzten 200 Zeilen), `lcf://permissions`,
-  `lcf://knowledge/sources/<Quellen-ID>` (die ersten Auszüge einer Wissensquelle, wie `read_knowledge_source`) und die
+  `lcf://knowledge/sources/<Quellen-ID>` (die ersten Auszüge einer Wissensquelle, wie `read_knowledge_source`),
+  `lcf://packs/index` (der zwischengespeicherte Community-Index und die installierten Packs, wie `list_packs`) und die
   Dokumente der Installation
   `lcf://docs/<Name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` und ihre deutschen
   `_DE`-Zwillinge; aufgeführt werden nur die vorhandenen). Eine Ressource liefert, was ihr Lese-Tool liefert, und wird
@@ -2229,7 +2241,18 @@ signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbs
   erscheint als Hinweis in der GUI; ein solches Pack ist in seiner `.lcf-provenance.json` und in `list_packs` mit
   `installed_via: grant:<id>` markiert. Für alle lokalen stdio-Clients gemeinsam werden nur der engste Umfang und
   höchstens 30 Tage angeboten. Eine Installation darunter muss die größere Speicherreserve einer dauerhaften Freigabe
-  frei lassen (20 GiB oder 10 %), sonst wird gefragt.
+  frei lassen (20 GiB oder 10 %), sonst wird gefragt. Jeder Import nimmt eine Reservierung (die doppelte Pack-Größe)
+  im gemeinsamen Reservierungsbuch, die beim Start des Imports unter dessen Sperre erneut geprüft wird.
+- **`start_recipe_build`** (lokal schreiben): baut ein installiertes Rezept genau so, wie es festgelegt ist: sein
+  Hugging-Face-Modell beim Commit des Rezepts, Target, Format, Board, Quantisierung, Importance-Matrix und
+  Kontextlänge. Es geht denselben zweistufigen Weg wie `start_build` (die Frage zeigt das Rezept, ob das
+  installierte Target das ist, mit dem das Rezept entstand, den Commit, die Downloadgröße, das Laufwerk, die
+  Hardware-Schätzung, Lizenz, Zugangsbeschränkung und Image-Build; dieselbe Speicherreservierung und dieselben
+  Kontingente). `dataset_path` nur, wenn das Rezept einen Kalibrierungsdatensatz nennt, und dann muss es genau diese
+  Datei sein (sha256). Ein nach der Frage geändertes Rezept wird nicht gebaut. „Ja, und nicht mehr fragen“ hat den
+  Umfang von `start_build`; ein unter einem Dauerauftrag installiertes Rezept ist erst abgedeckt, nachdem du einen
+  Build davon bestätigt hast. Die Ressource `lcf://packs/index` zeigt den zwischengespeicherten Index und die
+  installierten Packs (wie `list_packs`, nie aktualisiert).
 - **`export_pack`** (lokal schreiben, immer gefragt, nie „nicht mehr fragen“): ein Target- (über die Target-ID),
   Rezept- (über die `artifact_id` eines fertigen Builds) oder Wissens-Pack, mit Datenschutz-Bereinigung und mit
   deinem Community-Schlüssel signiert, nach `community/contributions/`. Die erste Zeile der Frage sagt „Creates a pack
