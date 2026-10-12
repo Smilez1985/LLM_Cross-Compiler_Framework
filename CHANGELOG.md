@@ -610,9 +610,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **The tests no longer touch the real home folder.** A test run had written SSH and Hugging Face files there
   (`~/.ssh`, `~/.cache/huggingface`). Before anything imports the framework, `tests/conftest.py` now points `HOME`,
   `USERPROFILE`, the `XDG_*` folders, `HF_HOME`, `HF_TOKEN_PATH` and the other per-user folder variables into a
-  temporary folder (each test gets its own), removes credentials such as `HF_TOKEN` and `SSH_AUTH_SOCK` from the
-  environment, and fails the run when the real home's key, token, keyring or framework folders changed (it compares
-  their listings and never opens a file).
+  temporary folder (each test gets its own), removes credentials such as `HF_TOKEN` and `SSH_AUTH_SOCK` and the
+  desktop session bus from the environment, gives every test a keyring file in its own home instead of the operating
+  system's keyring (Secret Service, macOS Keychain, Windows Credential Manager), and fails the run when the real
+  home's key, token, keyring or framework folders changed (it compares their listings and never opens a file).
 
 ### Security
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped

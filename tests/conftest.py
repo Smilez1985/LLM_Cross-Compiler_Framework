@@ -31,9 +31,23 @@ def _real_homes():
     return sorted(Path(h) for h in homes if h and os.path.isabs(h))
 
 
-# Credentials a developer's shell may hold; a test must never use them.
+# Credentials a developer's shell may hold; a test must never use them. Without the session bus no test reaches the
+# desktop's keyring (Secret Service, KWallet) either.
 CREDENTIAL_VARIABLES = ("HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "SSH_AUTH_SOCK", "SSH_AGENT_PID", "GH_TOKEN",
-                        "GITHUB_TOKEN", "DOCKER_AUTH_CONFIG")
+                        "GITHUB_TOKEN", "DOCKER_AUTH_CONFIG", "DBUS_SESSION_BUS_ADDRESS")
+
+
+def session_keyring_backend() -> str:
+    """The keyring every test uses unless it installs its own (memory_keyring): never the operating system's store
+    (Secret Service, macOS Keychain, Windows Credential Manager), which outlives the temporary home. A file keyring
+    below the test's home (its XDG data folder) when keyrings.alt is installed, else one that keeps nothing."""
+    import importlib.util
+    try:
+        alt = importlib.util.find_spec("keyrings.alt.file") is not None
+    except (ImportError, ValueError):
+        alt = False
+    return "keyrings.alt.file.PlaintextKeyring" if alt else "keyring.backends.null.Keyring"
+
 
 
 def home_variables(home: Path):
@@ -58,6 +72,7 @@ def redirect_home(environ, home: Path) -> None:
         environ[name] = value
     for name in CREDENTIAL_VARIABLES:
         environ.pop(name, None)
+    environ["PYTHON_KEYRING_BACKEND"] = session_keyring_backend()
 
 
 # What the guard compares, relative to the real home: SSH and GnuPG keys, the framework's per-user folder, the Hugging
