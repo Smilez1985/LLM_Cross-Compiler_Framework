@@ -74,13 +74,19 @@ def _sha256(path: Path) -> Optional[str]:
 
 
 class ArtifactStore:
-    """Built models of one output folder. `artifacts()` gives (id, label, manifest) like BuildService._artifacts;
+    """Built models of one output folder. `artifacts()` gives (id, label, manifest) like BuildService.artifact_entries;
     `busy_folders()` the output folders unfinished build requests write into (every process)."""
 
     def __init__(self, output_dir: Path, artifacts, busy_folders):
         self.output_dir = Path(output_dir)
         self._artifacts = artifacts
         self._busy = busy_folders
+
+    @classmethod
+    def for_service(cls, service: Any) -> "ArtifactStore":
+        """The store of a BuildService, through its public methods only (output_folder, artifact_entries,
+        busy_output_folders), so a change inside the service cannot bypass what the store checks."""
+        return cls(service.output_folder(), service.artifact_entries, service.busy_output_folders)
 
     def resolve(self, artifact_id: str, expect_sha256: Optional[str] = None) -> ArtifactTarget:
         found = next((item for item in self._artifacts() if item[0] == artifact_id), None)

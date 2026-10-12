@@ -26,6 +26,22 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Digest gepinntes Basis-Image außerhalb der Docker Official Images zählt, sobald ein Build mit genau diesem Image
   bestätigt wurde; ein Tag nie. Die Regelversion des Build-Dauerauftrags ist jetzt 2, Daueraufträge nach der
   engeren Regel verfallen.
+- **Dittos MCP-Client-Modus in der GUI** (MCP-Entwurf T12): Configure AI Agent (Ditto) hat einen Abschnitt
+  „Ditto's tools“ mit Tool-Quelle, einem Befehl (stdio) oder einer Serveradresse (HTTP, nur https oder Loopback),
+  einem Namen und dem benannten Token, das im Tresor für Zugangsdaten landet und nie wieder angezeigt wird; den Modus
+  ohne Token, mit einem nicht lesbaren Befehl oder mit einer Adresse zu speichern, die das Token im Klartext senden
+  würde, wird abgelehnt und speichert nichts. Dittos GUI-Bestätigung bietet „Allow and ask it to stop asking...“ für
+  die Rückfrage eines entfernten Frameworks nur an, wenn das Formular jenes Servers es anbietet, mit einer Warnung
+  vorab; es ist nur eine Anfrage, die eine Person im eigenen Freigabefenster jenes Frameworks bestätigt.
+- **Dittos Aufgaben nutzen die Aufgaben-Prompts des entfernten Frameworks** (MCP-Entwurf 4.3, T12): Im
+  MCP-Client-Modus holen Build-Empfehlung, Modulvorschlag und die Analyse eines entfernten Builds über seine
+  Request-ID ihren Kontext (Formate des Targets, Build-Log, Auszüge aus Dokumentation und Wissensbasis) aus den
+  MCP-Prompts `recommend_build_settings`, `add_board` und `diagnose_build_failure` jenes Frameworks, unter Dittos
+  eigenem Aufgabentext, als nicht vertrauenswürdige Daten; ein Prompt, den der Server nicht anbietet, wird mit dem
+  nächsten Schritt genannt.
+- **Das Ende eines Deployments im Audit-Log**: Endet ein `deploy_to_device`-Job (erledigt, gescheitert oder
+  abgebrochen), wird ein eigener Abschlusseintrag mit Job, Gerätenamen und Gerätezustand geschrieben, verknüpft mit dem
+  `started`-Eintrag des Aufrufs.
 - **Optionale Tools `delete_artifact` und `restore_knowledge_snapshot`** (MCP-Entwurf T10): ein gebautes Modell
   (Ordner und Golden-ZIP) per ID und sha256 löschen oder die Wissensbasis als Job durch einen früheren Snapshot
   ersetzen. Beide zerstören etwas: standardmäßig verboten und verborgen, bis du sie freigibst (die ganze Klasse
@@ -698,6 +714,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `get_status` zeigt die neuesten.
 
 ### Geändert
+- **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field"}}`, nur
+  Fakten des Frameworks, der Text unverändert). Ditto im MCP-Client-Modus liest Code und Feld daraus, statt sie aus
+  den Worten des entfernten Servers zu raten; ein unbekannter Code ist `failed`, ein Feld außerhalb des Schemas des
+  Tools wird verworfen.
+- **`ArtifactStore` (`delete_artifact`) nutzt nur öffentliche Methoden von `BuildService`** (`output_folder`,
+  `artifact_entries`, `busy_output_folders`, `ArtifactStore.for_service`).
 - **Der Deep-Ingest-Hinweis hält wieder fest, wer ihn gelesen hat**: Seine Zustandsdatei speichert, wo er bestätigt
   wurde (`via`: `gui` oder `cli`), und das Lesen landet im Audit-Log (Akteur `gui` oder `cli`). Nur eine Person
   bestätigt ihn; `CrawlNotice.acknowledge` lehnt jeden anderen Weg ab.
@@ -968,6 +990,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   der Docker Official Images zieht.
 - **GitHub-CLI und git der Pull-Request-Übergabe lesen nie stdin** (`stdin=DEVNULL`, G25): über stdio ist stdin
   des MCP-Servers der Protokollstrom.
+- **Der KI-Import des Modul-Assistenten und die Modelllisten der KI-Einstellungen geben ihre Ergebnisse über das eine
+  Worker-Relay an die GUI**: Der Assistent sendet nicht mehr aus einem einfachen Thread über ein selbst erzeugtes
+  `WizardSignals`-Objekt ohne Eltern (ein geschlossener Assistent konnte es mitnehmen), und das eigene Relay der
+  KI-Einstellungen ist in `WorkerRelay` aufgegangen.
+- **Stopp-Texte von Deep Ingest** (Schaltfläche, Tooltip und die Meldung `crawl.stopping` auf Englisch und Deutsch)
+  sagen, dass Stoppen auch eine Seite verwirft, die noch ankommt, statt „nach der aktuellen Seite“.
+- **Ein beschädigtes `authors.json` verliert die beim ersten Kontakt festgehaltenen Autorenschlüssel nicht mehr**:
+  Es bleibt als `authors.json.bad` erhalten, die Zusammenfassung der Installation warnt, dass der Schlüssel nicht
+  verglichen werden konnte, und kein Schlüssel wird festgehalten (die Datei wird nie überschrieben), bis sie
+  repariert oder entfernt ist.
 - **Per Digest festgelegte Images in einem Deployment-Paket starten auf einem Board ohne Netz**: Ein über seinen
   Digest gezogenes Image hat kein Tag, wurde deshalb ohne Namen gespeichert, kam nach `docker load` als `<none>`
   zurück, und `deploy.sh` konnte es ohne Registry nicht über seine Digest-Referenz starten. Es wird jetzt unter
@@ -1204,6 +1236,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Datei gehasht und llama-bench als genau diese offene Datei übergeben (nativ ein geerbter Deskriptor, in der
   Sandbox ein privater Hardlink), so dass ein Katalogmodell zwischen Prüfung und einem nativen Lauf ohne Zustimmung
   nicht gegen ein nicht vertrauenswürdiges ausgetauscht werden kann.
+- **Fehler der Board- und lokalen Laufzeit-Tools nennen keinen Pfad des Rechners**: Pfade in ihren Meldungen
+  erscheinen als Ordner-Bezeichnungen des Frameworks (`state:...`, `cache:...`, `output:...`, `models:...`) oder nur
+  als Dateiname, nie als Pfad des Rechners oder `~/...`.
 - **robots.txt lässt sich nicht mehr über Crawl-Optionen abschalten**: Der Crawler nimmt nur seine eigenen
   Optionsschlüssel (Seiten, Tiefe, Pause, PDFs, Sprachen) und übergeht jeden anderen Schlüssel, auch
   `respect_robots`, mit einer Log-Zeile; der Schalter für Tests mit einem nachgebildeten Web ist ein eigener

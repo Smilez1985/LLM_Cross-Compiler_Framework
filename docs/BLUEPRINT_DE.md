@@ -418,7 +418,10 @@ Cloud-Anbieter geht, werden persönliche Angaben durch Platzhalter ersetzt.
    MCP-Server eines Frameworks, das anderswo läuft, mit einem benannten Token, das dort mit Dittos Berechtigungen
    verknüpft ist (`--link ditto`): Jener Server entscheidet, fragt und protokolliert (Akteur `mcp:<Token-Name>`).
    Eine Tool-Quelle pro Unterhaltung; jedes entfernte Ergebnis, jeder Fehler und jede Rückfrage sind nicht
-   vertrauenswürdige Daten; Dittos Dialog nennt den Server. Ohne Token startet der Modus nicht.
+   vertrauenswürdige Daten; Dittos Dialog nennt den Server. Ohne Token startet der Modus nicht. Dittos Aufgaben
+   (Build-Empfehlung, Modulvorschlag, Analyse eines entfernten Builds) holen ihren Kontext aus den Aufgaben-Prompts
+   jenes Servers unter Dittos eigenem Aufgabentext, und der Grund-Code eines abgelehnten Aufrufs kommt aus dem
+   strukturierten Fehler des Servers, nie aus seinen Worten.
 
 ### Freigabe beim Self-Healing
 

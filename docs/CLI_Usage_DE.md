@@ -621,7 +621,8 @@ Unterhaltung: Ein Wechsel beginnt eine neue Unterhaltung, und im MCP-Client-Modu
 angeboten. Jedes Ergebnis, jeder Fehler und jede Rückfrage des entfernten Frameworks erreicht Dittos Modell als
 nicht vertrauenswürdige Daten, und Dittos Bestätigung nennt den Server. `test` verbindet sich und listet die Tools
 und Aufgaben-Prompts, die der Server Ditto anbietet; `show` zeigt die Einstellungen (nie das Token); `off` schaltet
-zurück auf Dittos eigene Tools.
+zurück auf Dittos eigene Tools. Die KI-Einstellungen der GUI („Ditto's tools“) setzen dieselben Werte; auch dort
+landet das Token im Tresor und wird nie wieder angezeigt.
 
 ```bash
 llm-cli ditto remote set --transport stdio --command "docker exec -i lcf llm-cli mcp serve" --name "Build-Rechner"

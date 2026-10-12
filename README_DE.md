@@ -503,7 +503,9 @@ Messungen: [docs/Features_DE.md](docs/Features_DE.md#ditto-evaluation).
 **Ditto für ein Framework, das anderswo läuft** (zum Beispiel im Headless-Docker-Image): Lege dort ein Token mit
 `llm-cli mcp token add ditto-laptop --link ditto` an, dann hier `llm-cli ditto remote set --transport stdio --command
 "docker exec -i <container> llm-cli mcp serve"` (das Token wird ohne Echo abgefragt). Ditto nutzt dann die Tools jenes
-Frameworks mit seinen eigenen Berechtigungen dort; `llm-cli ditto remote off` schaltet zurück. Einzelheiten:
+Frameworks mit seinen eigenen Berechtigungen dort; `llm-cli ditto remote off` schaltet zurück. In der GUI wird
+dasselbe unter Configure AI Agent (Ditto) im Abschnitt „Ditto's tools“ eingestellt (das Token landet im Tresor und
+wird nie wieder angezeigt). Einzelheiten:
 [docs/CLI_Usage_DE.md](docs/CLI_Usage_DE.md#ditto-remote).
 
 ---
