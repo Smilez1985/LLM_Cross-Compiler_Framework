@@ -41,8 +41,14 @@ from orchestrator.Core import build_records
 from orchestrator.tools import local_files
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
+from orchestrator.utils.download import FileLock as DownloadLock
 from orchestrator.utils.llama_pin import pinned_source
 from orchestrator.utils.sandbox import FALLBACK_USER, container_sandbox, hand_over, sandbox_user
+
+class StagingLock(DownloadLock):
+    """The lock of one staging folder (a Hugging Face model's commit); its message names no path."""
+    busy = "Another build is staging the same model commit and did not finish within 15 minutes; try again later."
+
 
 # Files a build may produce that are models (data to install), never programs to execute.
 MODEL_FILE_SUFFIXES = (".gguf", ".rkllm", ".rknn", ".onnx", ".safetensors", ".bin")
@@ -649,12 +655,35 @@ class BuildEngine:
                 return self._end_cancelled(config, prog)
             self._discard_staged(config, prog)
             prog.end_time = datetime.now()
-            prog.add_error(str(e))
+            prog.add_error(self._disk_full_text(e) or str(e))
             self.logger.error(f"Build {bid} failed: {e}", exc_info=True)
             # Try cleanup even on failure
             try: self.cleanup_build(bid)
             except Exception: pass
             return BuildStatus.FAILED
+
+    def _disk_full_text(self, error: BaseException) -> Optional[str]:
+        """A full disk (ENOSPC, EDQUOT, or the message a tool printed) as reason insufficient_resources with the free
+        space of the build's folders, by label (G40); None for any other error."""
+        import errno
+        text = str(error)
+        full = (isinstance(error, OSError) and error.errno in (errno.ENOSPC, getattr(errno, "EDQUOT", -1))) or \
+            "No space left on device" in text or "Disk quota exceeded" in text or \
+            getattr(error, "code", "") == "insufficient_resources"
+        if not full:
+            return None
+        from orchestrator.Core.disk_plan import gb
+        free = []
+        output = self.base_dir / Path(str(self._get_conf("output_dir", "output"))).expanduser()
+        for label, folder in (("cache", Path(self.cache_dir)), ("output", output)):
+            try:
+                free.append(f"{label} disk {gb(shutil.disk_usage(folder if folder.exists() else folder.parent).free)} "
+                            "free")
+            except (OSError, ValueError):
+                continue
+        where = f" ({', '.join(free)})" if free else ""
+        detail = text if "No space left on device" in text else f"{text} (No space left on device)"
+        return f"insufficient_resources: the disk ran full during the build{where}. {detail}"
 
     def _end_cancelled(self, config: BuildConfiguration, prog: "BuildProgress") -> "BuildStatus":
         self._discard_staged(config, prog)
@@ -868,7 +897,9 @@ class BuildEngine:
         for key, value in (labels or {}).items():
             cmd += ["--label", f"{key}={value}"]
         cmd.append(str(dockerfile.parent))
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+        # stdin=DEVNULL: over stdio the MCP server's stdin is the protocol stream; a child must never read it (G25)
+        proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, errors="replace")
         with self._lock:
             self._active_processes[progress.build_id] = proc  # cancel_build terminates it
         try:
@@ -1000,30 +1031,64 @@ class BuildEngine:
         if not HF_REPO_ID.match(source) or ".." in source:
             raise ValueError(f"Model '{source}' is neither an existing local path nor a HuggingFace repo id (owner/name).")
 
-        from huggingface_hub import HfApi, snapshot_download
-        token = self._hf_token()
-        api = HfApi(token=token)
+        from huggingface_hub import HfApi, hf_hub_download
+        from orchestrator.Core.hf_lookup import staged_files
+        # The token stored in the framework, or none at all: never an implicit token (HF_TOKEN, the Hugging Face home
+        # folder's token file) the person did not give the framework (G37).
+        auth = self._hf_token() or False
+        api = HfApi()
         revision = config.model_branch or None
-        commit = self._model_commit(api, source, revision)
+        commit = self._model_commit(api, source, revision, auth)
         if commit:
             revision = config.model_revision = commit  # listing and download see the same commit
-        files = api.list_repo_files(source, revision=revision)
-        ignore = ["*.gguf", "*.onnx", "*.onnx_data", "*.h5", "*.msgpack", "*.ot", "*.tflite", "original/*", "onnx/*"]
-        if any(f.endswith(".safetensors") for f in files):
-            ignore += ["*.bin", "*.pt", "*.pth"]  # same weights twice otherwise
+        files = api.list_repo_files(source, revision=revision, token=auth)
+        keep = staged_files(list(files))
+        dest = self.staging_folder(source, commit, revision)
+        progress.add_log(f"Downloading {source} ({len(keep)} files, commit {commit or 'unknown'}) from Hugging Face ...")
+        # One folder per commit, under a lock: two builds of different commits never mix files, and two builds of
+        # the same commit fetch it once (G38). File by file, so a cancel stops the staging between two files and the
+        # disk watchdog can stop it before the disk is full (G39 in part: a file already being fetched finishes).
+        with StagingLock(dest.parent / f".{dest.name}.lock"):
+            for name in keep:
+                self._check_cancelled(progress)
+                self._check_staging_space(dest, progress)
+                hf_hub_download(repo_id=source, filename=name, revision=revision, local_dir=str(dest), token=auth)
+        self._check_cancelled(progress)
+        inner = "/build-cache/input-model"
+        return inner, {str(dest): {"bind": inner, "mode": "ro"}}
 
-        dest = self.cache_dir / "models" / "hf" / source.replace("/", "__")
-        progress.add_log(f"Downloading {source} from Hugging Face to {dest} ...")
-        snapshot_download(repo_id=source, revision=revision, local_dir=str(dest), token=token, ignore_patterns=ignore)
-        return f"/build-cache/models/hf/{dest.name}", {}
+    def staging_folder(self, source: str, commit: Optional[str], revision: Optional[str]) -> Path:
+        """<cache>/models/hf/<owner>--<name>/<commit>/: Hugging Face forbids '--' in repo ids, so the encoding never
+        collides (with '__', 'a/b__c' and 'a__b/c' shared one folder). Without a known commit, a folder per branch."""
+        owner, name = source.split("/", 1)
+        leaf = commit if commit and COMMIT_ID.fullmatch(commit) else \
+            "branch-" + (re.sub(r"[^A-Za-z0-9._-]+", "_", revision or "main")[:64] or "main")
+        return self.cache_dir / "models" / "hf" / f"{owner}--{name}" / leaf
+
+    def _check_staging_space(self, folder: Path, progress: BuildProgress) -> None:
+        """Disk watchdog for staging: stops it when the file system falls below half the reserve, so the per-user
+        folder (audit log, permissions) always keeps room to record what happened."""
+        from orchestrator.Core.disk_plan import InsufficientSpace, gb, reserve_for
+        probe = folder
+        while not probe.exists() and probe.parent != probe:
+            probe = probe.parent
+        try:
+            usage = shutil.disk_usage(probe)
+        except OSError:
+            return
+        floor = reserve_for(usage.total) // 2
+        if usage.free < floor:
+            raise InsufficientSpace(f"Staging stopped: the cache disk has only {gb(usage.free)} free, less than half "
+                                    f"of the {gb(floor * 2)} that must stay free. No space left on device for the "
+                                    "rest of the model.")
 
     @staticmethod
-    def _model_commit(api, source: str, revision: Optional[str]) -> Optional[str]:
+    def _model_commit(api, source: str, revision: Optional[str], token: Any = False) -> Optional[str]:
         """The commit a branch or tag points to (None when it cannot be found out)."""
         if revision and COMMIT_ID.fullmatch(revision):
             return revision
         try:
-            sha = getattr(api.model_info(source, revision=revision), "sha", None)
+            sha = getattr(api.model_info(source, revision=revision, token=token), "sha", None)
         except Exception:
             return None
         return sha if isinstance(sha, str) and COMMIT_ID.fullmatch(sha) else None
@@ -1182,7 +1247,7 @@ class BuildEngine:
         sandbox, sandbox_env, sandbox_vols = self._sandbox(config, build_temp)
         vols = {
             str(imatrix_dir): {"bind": "/build-cache/imatrix", "mode": "rw"},
-            str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "ro" if sandbox.get("read_only") else "rw"},
+            # the model arrives through staged[1]: only its own folder (one commit of a Hugging Face model) or file
         }
         self._verify_local_inputs(config)
         dataset_vols, dataset_inner = self._dataset_mount(config, staged[1])
@@ -1235,7 +1300,8 @@ class BuildEngine:
         # 1. Volume Setup
         vols = {
             str(build_temp / "output"): {"bind": "/build-cache/output", "mode": "rw"},
-            str(self.cache_dir / "models"): {"bind": "/build-cache/models", "mode": "ro" if sandbox.get("read_only") else "rw"},
+            # The model arrives through staged[1]: only its own folder (one commit of a Hugging Face model) or file,
+            # never the whole model cache with other models and commits.
             # modules/ are not mounted: the image was built from this target's staged context and
             # already contains them executable; a host mount would hide that copy (mode 644 on Linux).
         }

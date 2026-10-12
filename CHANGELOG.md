@@ -610,6 +610,40 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the first start and says why; `llm-cli tools permissions`). `llm-cli tools permissions`, also with `--reset`, and
   `llm-cli ditto setup` need a person at a terminal: piped answers are refused.
 
+- **MCP: builds are asked about with what the framework looked up** (design T1, DECISIONS round 2 item 8):
+  `start_build` shows the Hugging Face commit it will build (and builds exactly that commit), the download size,
+  weights type, licence, gating and the stored token's access, the space on each disk with the conversion margin and
+  the output counted three times, an estimate whether this computer and the board can take it, mounts, target trust
+  and the image build. No size cap: a build is refused only when a disk cannot hold it beside a reserve and the space
+  other accepted builds reserved (`insufficient_resources`, with the numbers); reservations are kept in
+  `~/.llm-framework/disk_reservations.json` and checked again when a build leaves the queue. New read tool
+  `check_build_request`: the same plan as a dry run. `start_build` takes `optimization`.
+- **MCP: build reads by id and label**: `list_artifacts` names built models by an id and `output:<relative path>`
+  with size and hash (paged, filtered), new `get_artifact_details` returns the manifest (external text), model card
+  and files, with the resources `lcf://artifacts/{id}/manifest` and `/model-card`; `list_build_requests` (paged)
+  and `get_build_status` also show builds of other framework processes from their build records, read-only;
+  `get_build_status` says what the request builds; `read_build_log` returns at most 1000 lines and pages back with
+  `before_line`.
+- **Hugging Face models are staged one folder per commit**, `<cache_dir>/models/hf/<owner>--<name>/<commit>/`, file
+  by file under a lock; only that folder is mounted into the build containers (no longer the whole model cache),
+  a cancel stops the download before the next file, and the download stops when the cache disk falls below half
+  its reserve. A full disk is reported as `insufficient_resources` with the free space.
+
+- **MCP: framework status and settings** (design T2, DECISIONS round 1 item 4): `get_status` shows the sections
+  framework, host, local runtime (a prebuilt archive labelled "not self-built"), knowledge base, AI access (states
+  only, never a key fragment, account or endpoint), permissions and this caller's audit entries; new `get_settings`
+  (an explicit read list, addresses as scheme and host, folders as labels) and `update_settings` (ordinary settings
+  with a question showing old and new value, saved in `config.yml`; settings that limit an AI only tightened, and
+  only those may be allowed without a question, and a container memory limit of 0, which Docker reads as none,
+  counts as loosening; permissions, secrets, vault, AI provider settings, addresses and folders refused before the
+  question; no value is read as "default").
+- **MCP: honest "cannot" checked by the framework** (DECISIONS round 3): new `report_cannot_do` takes a reason code
+  (no "untested") and what is missing, checks it against the caller's permissions, this session's audit entries and
+  limits, the disk and the actions no tool does, and answers confirmed, contradicted, premature (with the tools to
+  try first) or unchecked, with a sentence built only from framework facts (a tool only by its registered name); "the hardware is not available" is
+  contradicted for every tool that uses no device. Reports are audited as `cannot_reported`;
+  `llm-cli tools audit --summary` counts them per caller.
+
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
   list. Use the hidden prompt or `--with-token`.
@@ -830,6 +864,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   the call), Ditto's scrollable dialog for long questions also offers "do not ask again", and an approved call's
   quotas are checked again before it runs.
 
+- **`start_build` over MCP ignored the optimization level** (always balanced, G26), and **two builds of different
+  commits of one model shared a staging folder** (and `a/b__c` and `a__b/c` collided, G38).
+- **A full disk always proposed pruning Docker** (G40): the proposal is now a manual step naming the framework's
+  folders on the full disk with their sizes, and pruning Docker is proposed only when Docker's data root is full.
+
 ### Security
 - **AI clients never see the host path of a local model they named** (MCP clients and Ditto): the build's stage
   text, the self-healing context, the build manifest's `model_source` and `list_artifacts` name it by its
@@ -1026,6 +1065,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   and counts toward pausing the tool, as a "no" in the client's dialog does; a recent "no", a paused tool or a used-up
   hour refuses a new pending approval; and the limit of 5 open pending approvals is an audited refusal that never
   counts as a failed call. Before, a client that could not ask could queue questions without these limits.
+
+- **No implicit Hugging Face token**: builds sent `token=None` to huggingface_hub when no token was stored, so a token
+  from `HF_TOKEN` or the Hugging Face home folder was used without the person giving it to the framework (G37).
+  Every Hugging Face call of a build now sends the stored token or `token=False`.
+- **Image builds never read the MCP protocol stream**: `docker buildx build` ran with the server's stdin, which over
+  stdio is the protocol stream (G25); it now gets `stdin=DEVNULL`.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

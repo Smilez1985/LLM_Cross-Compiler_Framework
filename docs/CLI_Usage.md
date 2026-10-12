@@ -241,7 +241,15 @@ Behaviour:
 - Results: `<output folder>/<target>/<model>/<quantization>/` with the model file, `build_info.json` and
   `Model_Card.md`, and a ZIP of them next to that folder. They appear there only when the build has completed; a
   cancelled or failed build leaves no files there.
-- Gated Hugging Face models need a token: `llm-cli secrets set hf_token`.
+- Gated Hugging Face models need a token: `llm-cli secrets set hf_token`. Only the token stored in the framework is
+  sent; a token in `HF_TOKEN` or from `hf auth login` is never used.
+- A Hugging Face model is downloaded into `<cache_dir>/models/hf/<owner>--<name>/<commit>/`, one folder per commit,
+  file by file; only that folder is mounted into the build containers. A second build of the same commit reuses
+  it, and a build of another commit never mixes files with it. Ctrl+C stops the download before its next file.
+- A full disk is reported as `insufficient_resources` with the free space of the cache and output disks, and
+  the download stops when the cache disk falls below half of the space that must stay free (2 GiB or 2 % of the
+  disk). The self-healing proposal for a full disk names the framework's folders on that disk with their sizes
+  as a manual step; pruning Docker is proposed only when Docker's data root is the full disk.
 - A local model file is mounted into the build containers alone, never the folder it lies in; a model that needs
   files next to it (for example ONNX external data) is given as its folder. Ditto and MCP clients cannot name a path
   at all: they use `<label>:<relative path>` inside the [folders the AI may use](#tools-folders).
@@ -873,7 +881,7 @@ signed (one saved by 3.0.0, too) denies every tool until you run this again; the
 ### tools audit
 
 ```
-llm-cli tools audit [--limit N] [--details] [--verify] [--archive]
+llm-cli tools audit [--limit N] [--details] [--verify] [--archive] [--summary]
 ```
 
 Shows the most recent tool calls: time, who called (in words: Ditto, all local stdio clients, the MCP token
@@ -886,11 +894,13 @@ reason code and how the person was asked with their answer (for example `elicita
 | `--limit INTEGER` | Number of entries (default 30). |
 | `--details` | Also show what the fool-proof layer repaired (kind and field), the duration, the SHA-256 and size of the result, links to earlier entries and the session hash. |
 | `--verify` | Check the chain instead: changed or removed entries, and removal of the newest entries (anchor file). Exit code 0 if intact, otherwise 1. |
+| `--summary` | Counts per caller instead: calls, refusals, and the reports that a task cannot be done (`report_cannot_do`) by how the framework checked them: confirmed, contradicted, premature, unchecked. |
 | `--archive` | Move the log and its anchor aside (kept as `audit.db.<UTC time>` and `audit.db.<UTC time>.anchor` in the personal folder) and start a new log with the next tool call. Use it when `--verify` or `llm-cli doctor` reports a problem with the log. If the log cannot be moved (for example because it is busy), the command exits with code 1; close the GUI and AI clients and try again. |
 
 ```bash
 llm-cli tools audit --limit 100
 llm-cli tools audit --verify
+llm-cli tools audit --summary
 llm-cli tools audit --archive
 ```
 
@@ -1362,6 +1372,11 @@ inside a setting (`password`, `api_key`). The command needs neither the credenti
 ```bash
 llm-cli -q config show | jq '.models_dir'
 ```
+
+AI clients read settings with the MCP tool `get_settings` (an explicit list; addresses as scheme and host, folders
+as labels) and change ordinary ones with `update_settings`, which asks you with the old and new value and saves
+the change in `config.yml`. Settings that limit what an AI may do can only be tightened that way; permissions,
+secrets, the vault, AI provider settings, addresses and folders are changed only by you, here or in the GUI.
 
 ### config repos
 

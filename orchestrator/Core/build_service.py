@@ -9,6 +9,8 @@ requests are validated once, against the target's declared capabilities, and res
 
 import hashlib
 import json
+import re
+import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -19,9 +21,9 @@ from orchestrator.Core.job_service import owner_actor
 from orchestrator.Core.deployment_manager import list_builds
 from orchestrator.Core.orchestrator import (BuildQueueFull, BuildRequest, OrchestrationStatus, PriorityLevel,
                                             WorkflowState, WorkflowType)
-from orchestrator.schemas.build import (ArtifactList, ArtifactOut, BuildHandle, BuildList, BuildRequestIn,
-                                        BuildStatusOut, FormatSummary, LogTail, PendingHealing, TargetList,
-                                        TargetOut)
+from orchestrator.schemas.build import (ArtifactDetails, ArtifactFile, ArtifactList, ArtifactOut, BuildHandle,
+                                        BuildList, BuildRequestIn, BuildStatusOut, FormatSummary, LogTail,
+                                        PendingHealing, RequestSummary, TargetList, TargetOut)
 from orchestrator.schemas.targets import TargetCapabilities
 from orchestrator.tools.local_files import (LocalFileError, LocalFiles, LocalInputs, is_path, labels_hint,
                                             looks_like_reference, split_reference)
@@ -32,6 +34,21 @@ AUTOMATIC_STRATEGIES = {"config_adjustment", "docker_prune", "retry_build"}
 MODEL_NEXT = ("Give a Hugging Face repo id (owner/name), or a local model file or a folder with config.json as "
               "<label>:<relative path>.")
 BUILD_FINISHED = frozenset({"completed", "error", "cancelled"})
+PAGE_SIZE = 50  # entries per page of a list (design 6.5)
+LOG_MAX_LINES = 1000
+LOG_LINE_CHARS = 2000
+LOG_TOTAL_CHARS = 48000  # so Claude Code keeps a log inline (it files results over 50,000 characters)
+ARTIFACT_ID = re.compile(r"^a_[0-9a-f]{16}$")
+MAX_CARD_CHARS = 20000
+MAX_ARTIFACT_FILES = 200
+# Engine statuses of a build record (another process's build) as request statuses
+RECORD_STATUS = {"failed": "error", "queued": "queued", "completed": "completed", "cancelled": "cancelled",
+                 "interrupted": "interrupted"}
+
+
+def artifact_id(relative: str) -> str:
+    """A built model's id: stable for its folder under the output folder, never the folder's path."""
+    return "a_" + hashlib.sha256(relative.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 def proposal_fingerprint(proposal: Any) -> str:
@@ -205,20 +222,87 @@ class BuildService:
             completed_builds=state.completed_builds, failed_builds=state.failed_builds,
             artifacts=list(state.artifacts), errors=[redact_secrets(e) for e in state.errors],
             warnings=[redact_secrets(w) for w in state.warnings], pending_healing=pending,
-            owner=owner_actor(getattr(state, "owner", "")) or None)
+            owner=owner_actor(getattr(state, "owner", "")) or None,
+            request=RequestSummary(**getattr(state, "summary", {})) if getattr(state, "summary", None) else None)
 
     def _state(self, request_id: str) -> WorkflowState:
         state = self._orchestrator._workflows.get(request_id)
         if state is None:
+            if self._record_of(request_id) is not None:
+                raise BuildServiceError(f"Build request '{request_id}' was started by another framework process (the "
+                                        "GUI, the CLI or another MCP server); only its status can be read here.",
+                                        code="not_supported", next="Read it with get_build_status; the person "
+                                                                   "stops it where it was started.")
             raise BuildServiceError(f"Unknown build request '{request_id}'.", code="unknown_id",
                                     next="Call list_build_requests for the ids you can use.")
         return state
 
     def get_status(self, request_id: str) -> BuildStatusOut:
+        try:
+            state = self._orchestrator._workflows.get(request_id)
+        except BuildServiceError:
+            state = None
+        if state is None:
+            record = self._record_of(request_id)
+            if record is not None:
+                return record
         return self._status_of(self._state(request_id))
 
-    def list_requests(self) -> BuildList:
-        return BuildList(builds=[self._status_of(s) for s in list(self._orchestrator._workflows.values())])
+    # --- builds of other processes (their build records, design T11) ---------------------------------------------
+
+    def _records(self) -> List[Dict[str, Any]]:
+        try:
+            from orchestrator.Core.build_records import read_records, records_dir
+            return read_records(records_dir(self.framework.resolve_path(self._config_get("cache_dir", "cache"))))
+        except Exception:  # noqa: BLE001 - no cache folder (a stand-in framework): nothing to show
+            return []
+
+    def _other_builds(self) -> Dict[str, BuildStatusOut]:
+        """Build requests of other framework processes from their build records (newest attempt per request),
+        read-only: model as a repo id or label, never a host path; errors as external text."""
+        try:
+            own = set(self._orchestrator._workflows)
+        except BuildServiceError:
+            own = set()
+        found: Dict[str, BuildStatusOut] = {}
+        for record in self._records():  # newest first
+            rid = str(record.get("request_id") or record.get("build_id") or "")
+            if not rid or rid in own or rid in found or not re.fullmatch(r"[\w.-]{1,64}", rid):
+                continue
+            status = RECORD_STATUS.get(str(record.get("status")), "building")
+            error = record.get("error")
+            try:
+                progress = int(record.get("progress") or 0)
+            except (TypeError, ValueError):
+                progress = 0
+            found[rid] = BuildStatusOut(
+                request_id=rid, status=status, stage=str(record.get("stage") or ""), progress_percent=progress,
+                total_builds=1, completed_builds=1 if status == "completed" else 0,
+                failed_builds=1 if status in ("error", "interrupted") else 0,
+                errors=[redact_secrets(str(error))] if error else [],
+                warnings=(["The process that ran this build ended before the build finished."]
+                          if status == "interrupted" else []),
+                request=RequestSummary(model=self._shown_model(record.get("model")), target=record.get("target"),
+                                       format=record.get("format"), board=record.get("board"),
+                                       quantization=record.get("quantization")),
+                process="other")
+        return found
+
+    def _record_of(self, request_id: str) -> Optional[BuildStatusOut]:
+        return self._other_builds().get(request_id)
+
+    def list_requests(self, status: Optional[str] = None, page: int = 1) -> BuildList:
+        """This process's build requests, then those of other processes (from their records), 50 per page."""
+        try:
+            own = [self._status_of(s) for s in list(self._orchestrator._workflows.values())]
+        except BuildServiceError:
+            own = []
+        builds = own + list(self._other_builds().values())
+        if status:
+            builds = [b for b in builds if b.status.lower() == status.lower()]
+        page = max(1, int(page))
+        start = (page - 1) * PAGE_SIZE
+        return BuildList(builds=builds[start:start + PAGE_SIZE], page=page, more=len(builds) > start + PAGE_SIZE)
 
     def request_label(self, request_id: str) -> Optional[str]:
         """The speaking name of a build request for a person: the model (a local model by its label) and the
@@ -305,26 +389,98 @@ class BuildService:
             label = None
         return label or Path(text).name
 
-    def list_artifacts(self) -> ArtifactList:
+    def _artifacts(self) -> List[Tuple[str, str, Dict[str, Any]]]:
+        """(artifact id, output:<relative path>, manifest) of every finished build under the output folder."""
+        out = self._output_dir()
+        found = []
+        for info in list_builds(out):
+            try:
+                relative = Path(info["path"]).resolve().relative_to(out.resolve()).as_posix()
+            except (ValueError, OSError):
+                relative = Path(info["path"]).name  # a linked subfolder elsewhere: its name only
+            found.append((artifact_id(relative), f"output:{relative}", info))
+        return found
+
+    def list_artifacts(self, target: Optional[str] = None, format: Optional[str] = None,
+                       page: int = 1) -> ArtifactList:
         def text(value):
             return None if value is None else str(value)
 
         items = []
-        for info in list_builds(self._output_dir()):
+        for aid, label, info in self._artifacts():
+            if target and str(info.get("target") or "").lower() != target.lower():
+                continue
+            if format and str(info.get("format") or "").lower() != format.lower():
+                continue
             primary = info.get("primary")
             artifacts = info.get("artifacts") if isinstance(info.get("artifacts"), list) else []
-            digest = next((a.get("sha256") for a in artifacts if isinstance(a, dict) and a.get("file") == primary), None)
+            entry = next((a for a in artifacts if isinstance(a, dict) and a.get("file") == primary), {})
+            size = None
+            if primary:
+                try:
+                    # never through a link: the container writes this folder and could point it at any host file
+                    file = Path(info["path"]) / primary
+                    size = file.lstat().st_size if file.is_file() and not file.is_symlink() else None
+                except OSError:
+                    size = entry.get("size") if isinstance(entry.get("size"), int) else None
             try:
-                items.append(ArtifactOut(path=info["path"],
+                items.append(ArtifactOut(artifact_id=aid, label=label, size_bytes=size,
                                          model=self._shown_model(info.get("model") or info.get("model_source")),
                                          format=text(info.get("format")), quantization=text(info.get("quantization")),
                                          board=text(info.get("board")), target=text(info.get("target")),
-                                         created=text(info.get("created")), primary=text(primary), sha256=text(digest)))
+                                         created=text(info.get("created")), primary=text(primary),
+                                         sha256=text(entry.get("sha256"))))
             except ValueError as e:  # one odd manifest must not hide every other build
-                self.logger.warning(f"Skipping the build manifest in {info.get('path')}: {e}")
-        return ArtifactList(artifacts=items)
+                self.logger.warning(f"Skipping the build manifest of {label}: {e}")
+        page = max(1, int(page))
+        start = (page - 1) * PAGE_SIZE
+        return ArtifactList(artifacts=items[start:start + PAGE_SIZE], page=page, more=len(items) > start + PAGE_SIZE)
 
-    def log_tail(self, request_id: str, lines: int = 200) -> LogTail:
+    def _artifact(self, aid: str) -> Tuple[str, str, Dict[str, Any]]:
+        if ARTIFACT_ID.fullmatch(aid or ""):
+            for item in self._artifacts():
+                if item[0] == aid:
+                    return item
+        raise BuildServiceError(f"Unknown built model '{aid}'.", code="unknown_id",
+                                next="Call list_artifacts for the ids you can use.")
+
+    def artifact_details(self, aid: str) -> ArtifactDetails:
+        """Manifest (every string external text, model_source as a label), model card and files of one build. Only
+        regular files directly inside the build's folder are listed; links are skipped."""
+        _, label, info = self._artifact(aid)
+        folder = Path(info["path"])
+        manifest = {k: v for k, v in info.items() if k not in ("path",)}
+        for key in ("model_source", "model"):
+            if key in manifest:
+                manifest[key] = self._shown_model(manifest[key])
+        if isinstance(manifest.get("dataset"), dict) and manifest["dataset"].get("path"):
+            manifest["dataset"] = dict(manifest["dataset"], path=self._shown_model(manifest["dataset"]["path"]))
+        hashes = {a.get("file"): a.get("sha256") for a in (info.get("artifacts") or []) if isinstance(a, dict)}
+        files, card = [], ""
+        try:
+            entries = sorted(folder.iterdir(), key=lambda p: p.name)
+        except OSError:
+            entries = []
+        for entry in entries[:MAX_ARTIFACT_FILES]:
+            try:
+                if entry.is_symlink() or not entry.is_file():
+                    continue
+                files.append(ArtifactFile(name=entry.name, size=entry.stat().st_size,
+                                          sha256=hashes.get(entry.name)))
+            except OSError:
+                continue
+        card_path = folder / "Model_Card.md"
+        if card_path.is_file() and not card_path.is_symlink():
+            try:
+                with open(card_path, "r", encoding="utf-8", errors="replace") as f:
+                    card = f.read(MAX_CARD_CHARS)
+            except OSError:
+                card = ""
+        return ArtifactDetails(artifact_id=aid, label=label, manifest=manifest, model_card=card, files=files)
+
+    def log_tail(self, request_id: str, lines: int = 200, before_line: Optional[int] = None) -> LogTail:
+        """The last `lines` lines (at most 1,000), or those before line `before_line` (paging back). Each line is cut
+        at 2,000 characters and the whole tail at 48,000; `truncated` says older lines exist or lines were cut."""
         state = self._state(request_id)
         engine = self._orchestrator.build_engine
         collected: List[str] = []
@@ -335,8 +491,74 @@ class BuildService:
                 if len(build_ids) > 1:
                     collected.append(f"===== {build_id} =====")
                 collected.extend(progress.logs)
-        lines = max(1, min(int(lines), 2000))
-        return LogTail(request_id=request_id, lines=[redact_secrets(line) for line in collected[-lines:]])
+        lines = max(1, min(int(lines), LOG_MAX_LINES))
+        total = len(collected)
+        end = total if before_line is None else max(0, min(total, int(before_line) - 1))
+        begin = max(0, end - lines)
+        chosen, size, cut = [], 0, False
+        for line in reversed(collected[begin:end]):  # newest first, so a cut drops the oldest lines
+            text = redact_secrets(line)
+            if len(text) > LOG_LINE_CHARS:
+                text, cut = text[:LOG_LINE_CHARS] + " [... cut ...]", True
+            if size + len(text) > LOG_TOTAL_CHARS:
+                cut = True
+                break
+            chosen.append(text)
+            size += len(text)
+        chosen.reverse()
+        first = end - len(chosen) + 1 if chosen else end + 1
+        return LogTail(request_id=request_id, lines=chosen, first_line=first, total_lines=total,
+                       truncated=cut or first > 1)
+
+    # --- the plan of a build (check_build_request, start_build's question) ------------------------------------
+
+    def hf_token(self) -> Optional[str]:
+        """The Hugging Face token stored in the framework (read inside the framework only), or None."""
+        sm = getattr(self.framework, "secrets_manager", None)
+        try:
+            token = sm.get_secret("hf_token") if sm is not None else None
+        except Exception:  # noqa: BLE001 - a locked vault: no token
+            return None
+        return token or None
+
+    def hub_facts(self, repo: str, revision: Optional[str]):
+        from orchestrator.Core.hf_lookup import look_up
+        return look_up(repo, revision, self.hf_token())
+
+    def host_hardware(self):
+        from orchestrator.Core.build_plan import host_hardware
+        return host_hardware(self.framework)
+
+    @staticmethod
+    def disk_usage(path: str):
+        return shutil.disk_usage(path)
+
+    def disk_ledger(self):
+        from orchestrator.Core.build_plan import state_dir
+        from orchestrator.Core.disk_plan import ReservationLedger
+        folder = state_dir(self.framework)
+        return ReservationLedger(folder) if folder is not None else None
+
+    def plan(self, request, look_up_hub: bool = True):
+        from orchestrator.Core.build_plan import plan_build
+        return plan_build(self, request, look_up_hub=look_up_hub, ledger=self.disk_ledger())
+
+    def reserve_disk(self, bound: Dict[str, Any], owner: str, label: str) -> str:
+        """Takes the disk reservation for an accepted build from the sizes its question showed; InsufficientSpace
+        when the disk no longer holds it beside what others reserved. "" when there is no ledger (no per-user
+        folder) or nothing lands on disk."""
+        from orchestrator.Core.build_plan import folder
+        from orchestrator.Core import disk_plan
+        ledger = self.disk_ledger()
+        size = int(bound.get("download") or 0) or int(bound.get("local_bytes") or 0)
+        if ledger is None or not size:
+            return ""
+        cached = int(bound.get("cached") or 0) if bound.get("download") else size
+        needs = disk_plan.build_needs(size, str(bound.get("format") or ""), bound.get("quantization"),
+                                      folder(self.framework, "cache_dir", "cache"),
+                                      folder(self.framework, "output_dir", "output"), cached=cached)
+        rid, _ = ledger.reserve(needs, owner, label, disk_usage=self.disk_usage)
+        return rid
 
     # --- actions ----------------------------------------------------------------------------
 
@@ -380,8 +602,16 @@ class BuildService:
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model}), inputs
 
-    def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "") -> BuildHandle:
-        """Validates and queues a build. `owner` is the tool caller that starts it (ToolContext.owner)."""
+    def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "",
+                    optimization: str = "balanced", disk_reservation: str = "") -> BuildHandle:
+        """Validates and queues a build. `owner` is the tool caller that starts it (ToolContext.owner);
+        `disk_reservation` the reservation an AI caller's accepted build took (released when the request ends)."""
+        try:
+            level = OptimizationLevel(str(optimization or "balanced").lower())
+        except ValueError:
+            raise BuildServiceError(f"Unknown optimization level '{optimization}'.", code="invalid_value",
+                                    next="Use one of: fast, balanced, size, speed, aggressive.",
+                                    field="optimization") from None
         req, inputs = self._validated(request, local_paths)
         build_request = BuildRequest(
             request_id="",
@@ -391,7 +621,7 @@ class BuildService:
             model_revision=req.revision,
             targets=[req.target],
             target_formats=[ModelFormat(req.format)],
-            optimization_level=OptimizationLevel.BALANCED,
+            optimization_level=level,
             quantization_options=[req.quantization] if req.quantization else [],
             parallel_builds=False,
             output_base_dir=str(self._output_dir()),
@@ -403,7 +633,10 @@ class BuildService:
             max_context_length=req.max_context_length,
             local_inputs=inputs,
             owner=owner,
+            disk_reservation=disk_reservation,
         )
+        if disk_reservation:
+            self._orchestrator.disk_ledger = self.disk_ledger()
         try:
             request_id = self.framework.run_coroutine(self._orchestrator.submit_build_request(build_request),
                                                       timeout=30)
