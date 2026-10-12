@@ -321,10 +321,9 @@ class TestStartOnlyVerified:
         (folder / "runtime.json").write_text(json.dumps({"build": rt.build, "asset_id": "linux-x64-cpu",
                                                          "variant": "cpu", "backend": "cpu",
                                                          "server": "llama-server", "files": {}}))
-        rt._update_active(variant="cpu", asset_id="linux-x64-cpu")
-        legacy = rt.installed()
-        assert legacy.origin == "prebuilt" and legacy.label == PREBUILT_LABEL and legacy.notes, \
-            "an installation from before self-built builds is still used, labelled"
+        rt._update_active(variant="cpu", asset_id="linux-x64-cpu", use="prebuilt")  # what `install --prebuilt` writes
+        opted_in = rt.installed()
+        assert opted_in.origin == "prebuilt" and opted_in.label == PREBUILT_LABEL
         build = _stored(rt)
         rt.store.activate(build.build_id)
         rt._update_active(use="self-built")
@@ -533,6 +532,7 @@ class TestStatusAndCli:
         folder = rt.root / f"{rt.build}-cpu"
         folder.mkdir(parents=True)
         (folder / "runtime.json").write_text("{}")
+        rt._update_active(use="prebuilt")  # what `install --prebuilt` writes
         framework = type("F", (), {"config": type("C", (), {"user_state_dir": rt.data_dir})()})()
         found = {f.code: f for f in doctor.check_runtime(framework)}
         assert "Ditto's local model server is the official prebuilt" in found["runtime.prebuilt"].message
@@ -587,3 +587,160 @@ class TestOneLaunchPolicy:
         assert path.read_text().strip() == key and len(key) >= 40
         second, other = server_policy.write_key_file(tmp_path / "rt")
         assert second != path and other != key
+
+
+# --- review: the prebuilt archive of an earlier version, every spelling of a forbidden option, the CPU of a build ---
+
+def _legacy_archive(rt, asset_id="linux-x64-cpu", variant="cpu"):
+    """An official archive as an earlier version installed it: `runtime install` downloaded it without --prebuilt,
+    so active.json names its variant but has no "use"."""
+    asset = next(a for a in rt.catalog.llama_cpp.assets if a.id == asset_id)
+    folder = rt.root / f"{rt.build}-{variant}"
+    folder.mkdir(parents=True)
+    (folder / "llama-server").write_text("#!/bin/sh\n")
+    (folder / "runtime.json").write_text(json.dumps({"build": rt.build, "asset_id": asset.id, "variant": variant,
+                                                     "backend": asset.backend, "server": "llama-server",
+                                                     "files": {f.name: f.sha256 for f in asset.files}}))
+    rt._update_active(variant=variant, asset_id=asset.id)
+    return asset
+
+
+class NoNetwork:
+    """A requests session that fails the test on any request."""
+    trust_env = False
+
+    def get(self, *a, **k):
+        raise AssertionError("nothing may be downloaded")
+
+    head = request = get
+
+
+class TestPrebuiltOnlyAfterTheOptIn:
+
+    def test_an_archive_an_earlier_version_downloaded_is_not_started_without_the_opt_in(self, tmp_path):
+        rt = runtime(tmp_path, hw=machine([]))
+        _legacy_archive(rt)
+        inst, problems = rt.resolve_installed()
+        assert inst is None, "decision D1: the prebuilt archive is never chosen without --prebuilt"
+        assert any(PREBUILT_LABEL in p and "install --prebuilt" in p for p in problems), problems
+        rt._popen = lambda *a, **k: pytest.fail("the prebuilt archive was started without the opt-in")
+        with pytest.raises(LocalRuntimeError, match="install --prebuilt"):
+            rt.start(tier="small")
+
+    def test_the_opt_in_takes_the_installed_archive_without_downloading_it_again(self, tmp_path):
+        rt = runtime(tmp_path, hw=machine([]), session=NoNetwork())
+        asset = _legacy_archive(rt)
+        assert rt.select_backend().asset.id == asset.id and rt.prebuilt_installed(asset)
+        inst = rt.install_prebuilt()
+        assert inst.origin == "prebuilt" and inst.label == PREBUILT_LABEL
+        assert json.loads(rt.active_file.read_text())["use"] == "prebuilt" and rt.installed().origin == "prebuilt"
+
+    def test_the_cli_asks_to_use_an_installed_archive_instead_of_offering_a_download(self, tmp_path, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli as cli_module
+        rt = runtime(tmp_path, hw=machine([]), session=NoNetwork())
+        _legacy_archive(rt)
+        monkeypatch.setattr(cli_module, "_local_runtime", lambda ctx: rt)
+        result = CliRunner().invoke(cli_module.cli, ["-q", "ditto", "runtime", "install", "--prebuilt"], input="y\n")
+        assert result.exit_code == 0, result.output
+        assert "Download" not in result.output and "already installed" in result.output
+        assert rt.installed().origin == "prebuilt"
+
+    def test_doctor_does_not_call_an_archive_without_the_opt_in_the_server_in_use(self, tmp_path, monkeypatch):
+        from orchestrator.Core import doctor
+        from orchestrator.runtime.build import toolchain as tc
+        monkeypatch.setattr(tc, "detect_toolchain", lambda full=True: toolchain())
+        rt = runtime(tmp_path, hw=machine([]))
+        _legacy_archive(rt)
+        framework = type("F", (), {"config": type("C", (), {"user_state_dir": rt.data_dir})()})()
+        finding = {f.code: f for f in doctor.check_runtime(framework)}["runtime.prebuilt"]
+        assert "not in use" in finding.message and "--prebuilt" in finding.fix_hint
+
+
+class TestEverySpellingOfAForbiddenOption:
+
+    @pytest.mark.parametrize("args", [
+        ["-hfr", "user/model"],              # the third spelling of --hf-repo
+        ["--hf_repo", "user/model"],         # llama.cpp reads --a_b as --a-b
+        ["--api_key", "k"], ["--tools_runtime", "x"], ["--mcp_servers_json", "{}"],
+        ["-hff", "x.gguf"], ["--hf-file", "x.gguf"],
+        ["-hft", "t"], ["--hf-token", "t"],  # a token on the command line
+        ["-mmu", "https://x.invalid/p.gguf"], ["--mmproj-url", "https://x.invalid/p.gguf"],
+        ["--spec-draft-hf", "u/m"], ["-hfd", "u/m"], ["-hfrd", "u/m"], ["--hf-repo-draft", "u/m"],
+        ["--log-prompts-dir", "prompts"],    # writes every prompt to disk
+        ["--video-ffmpeg-dir", "/opt/x"],    # runs programs from that folder
+    ])
+    def test_refused(self, args):
+        assert server_policy.forbidden_in(["llama-server", *args]), args
+        with pytest.raises(server_policy.PolicyError):
+            server_policy.check_command(["llama-server", *args])
+
+    def test_a_second_port_or_key_file_in_another_spelling_is_refused(self, tmp_path):
+        cmd = server_policy.server_command(Path("/b/llama-server"), Path("/m/x.gguf"), port=4000,
+                                           key_file=tmp_path / "server-a.key", alias="x")
+        for extra in (["--api_key_file", str(tmp_path / "other.key")], ["--port", "4001"]):
+            with pytest.raises(server_policy.PolicyError):
+                server_policy.check_server_command(cmd + extra)
+
+
+def _z1_without(*keys):
+    """The Z1 Extreme profile with CPU features turned off: another, older CPU of the same vendor."""
+    from orchestrator.runtime.profile import parse_profile
+    text = (PROBES / "schema2_linux_z1_extreme.txt").read_text(encoding="utf-8")
+    for key in keys:
+        assert f"{key}=ON" in text, key
+        text = text.replace(f"{key}=ON", f"{key}=OFF")
+    return parse_profile(text)
+
+
+class TestTheCpuOfANativeBuild:
+
+    def test_a_build_that_needs_instructions_this_cpu_lacks_is_not_imported(self, tmp_path, no_source):
+        made = runtime(tmp_path / "pc")
+        made.install(backend="cpu")
+        archive = made.export_build(tmp_path / "llama-build.tar.gz")
+        older = _z1_without("SUPPORTS_AVX512", "SUPPORTS_AVX512_VBMI", "SUPPORTS_AVX512_VNNI", "SUPPORTS_AVX512_BF16")
+        verifier = FakeVerifier()
+        laptop = runtime(tmp_path / "laptop", profile=older, verifier=verifier)
+        asked = []
+        with pytest.raises(LocalRuntimeError, match="AVX512"):
+            laptop.import_build(archive, confirm=lambda info: asked.append(info) or True)
+        assert asked == [] and verifier.calls == 0, "refused before the user is asked and before anything runs"
+        assert laptop.installed() is None
+        with pytest.raises(LocalRuntimeError, match="CPU vendor"):
+            runtime(tmp_path / "intel", profile=IVY).import_build(archive, confirm=lambda info: True)
+
+    def test_what_an_archive_says_about_its_build_host_is_shown_only_as_plain_values(self, tmp_path, no_source):
+        import tarfile
+        made = runtime(tmp_path / "pc")
+        made.install(backend="cpu")
+        archive = made.export_build(tmp_path / "llama-build.tar.gz")
+        unpacked = tmp_path / "unpacked"
+        with tarfile.open(archive) as tar:
+            tar.extractall(unpacked, filter="data")
+        manifest = json.loads((unpacked / "manifest.json").read_text())
+        manifest["build_host"] = {"os": "linux\x1b[2J\nFAKE", "arch": "x86_64"}  # not part of the build ID
+        manifest["built_at"] = "\x1b]8;;evil\x07now"
+        (unpacked / "manifest.json").write_text(json.dumps(manifest))
+        forged = tmp_path / "forged.tar.gz"
+        with tarfile.open(forged, "w:gz") as tar:
+            for item in ("build.json", "manifest.json", "bin"):
+                tar.add(unpacked / item, arcname=item)
+        asked = []
+        inst = runtime(tmp_path / "laptop").import_build(forged, confirm=lambda info: asked.append(info) or True)
+        assert asked[0]["built_on"] == {"os": "unknown", "arch": "x86_64"} and asked[0]["built_at"] is None
+        assert "plan" not in asked[0]
+        assert inst.built_on == "unknown/x86_64" and "\x1b" not in inst.label
+
+    def test_a_stored_build_for_another_cpu_is_not_started(self, tmp_path):
+        rt = runtime(tmp_path)
+        build = _stored(rt)  # built with -march=native on the Z1 Extreme (AVX-512)
+        rt.store.activate(build.build_id)
+        rt._update_active(use="self-built")
+        assert rt.installed() is not None
+        moved = runtime(tmp_path, profile=_z1_without("SUPPORTS_AVX512"))  # e.g. the same home folder on another PC
+        started = []
+        moved._popen = lambda *a, **k: started.append(a) or pytest.fail("started on a CPU it was not built for")
+        with pytest.raises(LocalRuntimeError, match="AVX512"):
+            moved.start(tier="small")
+        assert started == []

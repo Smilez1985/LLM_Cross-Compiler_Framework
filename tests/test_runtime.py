@@ -939,7 +939,8 @@ def fake_runtime(tmp_path):
         (folder / "runtime.json").write_text(json.dumps({"build": "b1", "asset_id": "linux-x64-cpu",
                                                          "variant": "cpu", "backend": "cpu",
                                                          "server": "llama-server", "files": {}}))
-        rt._update_active(variant="cpu", asset_id="linux-x64-cpu")
+        # As `ditto runtime install --prebuilt` leaves it: the archive is used only after that opt-in (D1).
+        rt._update_active(variant="cpu", asset_id="linux-x64-cpu", use="prebuilt")
         rt.models_dir.mkdir(parents=True, exist_ok=True)
         rt.model_path(rt.catalog.model("tiny")).write_bytes(model_bytes)
         made.append(rt)

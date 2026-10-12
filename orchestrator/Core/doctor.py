@@ -341,11 +341,19 @@ def check_runtime(framework) -> List[Finding]:
             use = json.loads(store.active_file.read_text(encoding="utf-8")).get("use")
         except (OSError, ValueError, AttributeError):
             use = None
-        if use == "prebuilt" or (use is None and "active" not in refs):
+        if use == "prebuilt":
             findings.append(Finding("runtime", "runtime.prebuilt", Severity.INFO,
                                     f"Ditto's local model server is the official prebuilt llama.cpp archive "
                                     f"({', '.join(prebuilt)}): not self-built.",
                                     "llm-cli ditto runtime install builds the server from the pinned source."))
+        elif "active" not in refs:
+            # Downloaded by an earlier version without --prebuilt: used only after the opt-in (decision D1).
+            findings.append(Finding("runtime", "runtime.prebuilt", Severity.INFO,
+                                    f"An official prebuilt llama.cpp archive ({', '.join(prebuilt)}, not self-built) "
+                                    "from an earlier version is installed but not in use: it is used only on "
+                                    "explicit request.",
+                                    "llm-cli ditto runtime install builds the server from the pinned source; "
+                                    "llm-cli ditto runtime install --prebuilt uses the archive instead."))
         else:
             findings.append(Finding("runtime", "runtime.prebuilt", Severity.INFO,
                                     f"An official prebuilt llama.cpp archive ({', '.join(prebuilt)}, not self-built) "

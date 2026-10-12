@@ -467,14 +467,17 @@ wird (Version und Commit der Festlegung, die gefundenen Geräte, und dass der Se
 `runtime start` startet nichts anderes.
 
 - **Rechner ohne Netzwerk:** `llm-cli ditto runtime export-source DATEI` und `import-source DATEI` tragen den
-  Quellcode; `llm-cli ditto runtime export DATEI.tar.gz` auf einem Rechner derselben Art und `llm-cli ditto runtime
-  import DATEI.tar.gz` hier tragen einen fertigen Build. Ein importierter Build wird gegen die Festlegung und sein
-  eigenes Manifest geprüft, du bestätigst ihn, und er wird hier geprüft, bevor er genutzt wird.
+  Quellcode; `llm-cli ditto runtime export DATEI.tar.gz` auf einem Rechner derselben Art (gleiches Betriebssystem und
+  gleiche Architektur, und eine CPU desselben Herstellers mit mindestens den CPU-Funktionen dieses Rechners, weil der
+  Build `-march=native` nutzt) und `llm-cli ditto runtime import DATEI.tar.gz` hier tragen einen fertigen Build. Ein
+  importierter Build wird gegen die Festlegung und sein eigenes Manifest geprüft, du bestätigst ihn, und er wird hier
+  geprüft, bevor er genutzt wird.
 - **Offizielles vorgebautes Archiv:** `llm-cli ditto runtime install --prebuilt` lädt stattdessen das Archiv von
-  upstream herunter (Größe und sha256 geprüft). Es wird nur genutzt, wenn du es verlangst, und immer als „prebuilt,
-  not self-built“ (vorgebaut, nicht selbst gebaut) angezeigt. Unter Linux braucht es die glibc, für die es gebaut
-  wurde (2.35 oder 2.39); auf musl-Systemen wie Alpine läuft nur der selbst gebaute Server. Bis die Windows- und
-  macOS-Builds kommen, ist das dort der Weg zum lokalen Modell.
+  upstream herunter (Größe und sha256 geprüft). Es wird nur genutzt, wenn du es verlangst, auch ein Archiv, das
+  eine frühere Version heruntergeladen hat (dann übernimmt `--prebuilt` es, ohne es neu herunterzuladen), und immer
+  als „prebuilt, not self-built“ (vorgebaut, nicht selbst gebaut) angezeigt. Unter Linux braucht es die glibc, für
+  die es gebaut wurde (2.35 oder 2.39); auf musl-Systemen wie Alpine läuft nur der selbst gebaute Server. Bis die
+  Windows- und macOS-Builds kommen, ist das dort der Weg zum lokalen Modell.
 - `llm-cli ditto runtime prune` entfernt alte Builds; der aktive Build, sein CPU-Ersatz und der Build, aus dem ein
   laufender Server gestartet wurde, bleiben immer erhalten. `runtime status` sagt, wann ein neuer Build nötig (die
   Festlegung hat sich geändert) oder empfohlen ist (der Bauplan dieses Rechners hat sich geändert).

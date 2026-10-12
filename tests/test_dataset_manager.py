@@ -115,6 +115,7 @@ def model_file(tmp_path, data=b"GGUF untrusted conversion"):
 
 
 def manager(tmp_path, store, catalog=CATALOG, **kw):
+    kw.setdefault("profile", Z1)  # this machine is the Z1 Extreme the builds were made on
     return DatasetManager(Framework(), store=store, catalog=catalog, platform=("linux", "x86_64"), **kw)
 
 
@@ -196,7 +197,7 @@ class TestNative:
             audit = AuditLog(tmp_path / "audit.db")
 
         m = DatasetManager(Framework(Registry()), store=store, catalog=CATALOG, platform=("linux", "x86_64"),
-                           runner=Runner())
+                           runner=Runner(), profile=Z1)
         m.measure_perplexity(model, text, consent=lambda info: True)
         entry = Registry.audit.entries(5)[0]
         assert entry["tool"] == dm.AUDIT_TOOL and entry["approved"] == 1 and entry["outcome"] == "approved"
@@ -215,6 +216,18 @@ class TestNative:
         (build.bin_dir / "llama-perplexity").write_text("#!/bin/sh\necho changed\n")
         with pytest.raises(PerplexityError, match="no self-built llama-perplexity"):
             manager(tmp_path, store, catalog=trusting(model), runner=Runner()).measure_perplexity(model, text)
+
+    def test_a_native_build_of_another_cpu_is_not_used(self, tmp_path):
+        from orchestrator.runtime.profile import parse_profile
+        store, _ = stored(tmp_path)  # -march=native on the Z1 Extreme (AVX-512)
+        model, text = model_file(tmp_path)
+        text_z1 = (ROOT / "tests" / "fixtures" / "hardware_probe" / "schema2_linux_z1_extreme.txt").read_text()
+        older = parse_profile(text_z1.replace("SUPPORTS_AVX512=ON", "SUPPORTS_AVX512=OFF"))
+        runner = Runner()
+        with pytest.raises(PerplexityError, match="no self-built llama-perplexity"):
+            manager(tmp_path, store, catalog=trusting(model), runner=runner, profile=older).measure_perplexity(
+                model, text)
+        assert runner.calls == [], "a program that would stop with SIGILL on this CPU is not run"
 
     def test_failures_are_explicit(self, tmp_path):
         store, _ = stored(tmp_path)

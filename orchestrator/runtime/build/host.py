@@ -20,12 +20,14 @@ never installs one or accepts a licence, decision D5), start Docker, or build on
 import the build (`ditto runtime export` / `ditto runtime import`).
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Mapping, Optional, Tuple
 
 from orchestrator.runtime.build.executor import BuildExecutor, ContainerEngine
-from orchestrator.runtime.build.recipe import BACKENDS, BuildPlan, PlanError, ToolchainInfo, choose_backend, plan_build
+from orchestrator.runtime.build.recipe import (ARM_FEATURES, BACKENDS, X86_FEATURES, BuildPlan, PlanError,
+                                               ToolchainInfo, choose_backend, plan_build)
 from orchestrator.runtime.build.store import DEFAULT_KEEP, BuildFailed, BuildStore, StoredBuild, StoreError
 from orchestrator.runtime.build.toolchain import DetectedToolchain
 from orchestrator.runtime.build.verify import SmokeModelFile, Verifier
@@ -38,6 +40,9 @@ WAYS_OUT = ("install the missing tools with your package manager (on Debian or U
             "ninja-build), or start Docker to build in the framework's builder container, or build on another "
             "machine of the same kind and import it (llm-cli ditto runtime export there, llm-cli ditto runtime import "
             "here). `llm-cli ditto runtime install --prebuilt` installs the official archive instead (not self-built)")
+# The form of a CPU_VENDOR value (configs/hardware_probe_schema.yml: intel, amd, arm, ...); anything else in a plan is
+# not compared.
+_RE_VENDOR = re.compile(r"^[a-z]{2,16}$", re.ASCII)
 
 
 class HostBuildError(RuntimeError):
@@ -290,6 +295,32 @@ def rebuild_advice(build: StoredBuild, plan: Optional[HostPlan], pin: Optional[L
     return None
 
 
+def cpu_problem(plan: Mapping[str, Any], profile: HardwareProfile) -> Optional[str]:
+    """Why a build made with GGML_NATIVE (-march=native or -mcpu=native on the CPU that built it) cannot run on the CPU
+    `profile` describes, or None. Such a build may use every instruction of the CPU it was built on; on a CPU without
+    them it stops with SIGILL at the first computation, which the verification (--version, --list-devices, the
+    --tools check) does not reach while no smoke-test model is pinned. So a native build runs only on a CPU of the same
+    vendor that has every CPU feature the building CPU had (a build moved to another machine with `ditto runtime
+    import`, or a home folder shared between machines). The plan may come from an imported archive: only the known
+    feature keys and vendor names are read."""
+    toolchain = plan.get("toolchain") if isinstance(plan, Mapping) else None
+    native = toolchain.get("native") if isinstance(toolchain, Mapping) else None
+    if not isinstance(native, Mapping):
+        return None
+    built_vendor, vendor = native.get("CPU_VENDOR"), profile.get("CPU_VENDOR")
+    vendors = [v for v in (built_vendor, vendor) if isinstance(v, str) and _RE_VENDOR.fullmatch(v) and v != "other"]
+    if len(vendors) == 2 and built_vendor != vendor:
+        return (f"it was built with -march=native on a CPU by {built_vendor}, and this machine's CPU is by {vendor} "
+                "(another CPU vendor): build it on this machine (llm-cli ditto runtime install)")
+    features = native.get("features") if isinstance(native.get("features"), Mapping) else {}
+    missing = sorted(key[len("SUPPORTS_"):] for key in {**X86_FEATURES, **ARM_FEATURES}
+                     if features.get(key) == "ON" and profile.flag(key) == "OFF")
+    if missing:
+        return (f"it was built with -march=native on a CPU with {', '.join(missing)}, which this machine's CPU lacks: "
+                "build it on this machine (llm-cli ditto runtime install)")
+    return None
+
+
 def planned_backend(profile: HardwareProfile, toolchain: ToolchainInfo, catalog: RuntimeCatalog,
                     placement: str) -> Tuple[str, str]:
     """(backend, reason) the install would make active on this machine: the recipe's GPU backend when this executor
@@ -311,5 +342,5 @@ def planned_backend(profile: HardwareProfile, toolchain: ToolchainInfo, catalog:
     return chosen, reason
 
 
-__all__ = ["HostBuildError", "HostInstallResult", "HostPlan", "PlannedBuild", "choose_placement",
+__all__ = ["HostBuildError", "HostInstallResult", "HostPlan", "PlannedBuild", "choose_placement", "cpu_problem",
            "install_host_runtime", "plan_host_runtime", "planned_backend", "rebuild_advice"]

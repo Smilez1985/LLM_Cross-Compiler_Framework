@@ -157,8 +157,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Builds von Dittos Server wechseln den Rechner**: `llm-cli ditto runtime export DATEI` schreibt den genutzten
   selbst gebauten Build, und `llm-cli ditto runtime import DATEI` auf einem anderen Rechner derselben Art prüft ihn
   gegen den Pin und sein Manifest, fragt, bevor eines seiner Programme läuft, prüft ihn dort und macht ihn zum aktiven
-  Build. `llm-cli ditto runtime prune` entfernt alte Builds und behält immer den aktiven Build, den CPU-Ersatz und den
-  Build, aus dem ein laufender Server gestartet wurde.
+  Build. Ein mit `-march=native` gemachter Build wird abgelehnt, bevor irgendetwas läuft, auf einer CPU eines anderen
+  Herstellers oder ohne eine der CPU-Funktionen der CPU, die ihn gebaut hat (er bräche bei der ersten Rechnung mit
+  SIGILL ab); `runtime start` und die Perplexity-Prüfung überspringen einen solchen Build ebenso, etwa in einem
+  Benutzerordner, den sich mehrere Rechner teilen. `llm-cli ditto runtime prune` entfernt alte Builds und behält immer
+  den aktiven Build, den CPU-Ersatz und den Build, aus dem ein laufender Server gestartet wurde.
 - `llm-cli doctor` prüft die lokale llama.cpp-Laufzeit: einen genutzten selbst gebauten Build, der verändert wurde
   (Fehler) oder älter als der Pin ist (Warnung), das genutzte vorgefertigte Archiv (Information: nicht selbst gebaut)
   und ob dieser Rechner Compiler, CMake und Ninja für einen nativen Build hat (Information, mit dem Builder-Container
@@ -601,12 +604,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Archiv mit dem Server-Programm (nur mit `runtime install --prebuilt`) wird genauso geprüft, atomar installiert und
   nie auf musl oder einer älteren glibc angeboten als der, gegen die es gebaut wurde.
 - Eine Startregel für jedes llama.cpp-Programm, das das Framework startet (`orchestrator/runtime/server_policy.py`):
-  Dittos Server, die Prüfungen nach dem Build und die Perplexity-Prüfung teilen eine Liste verbotener Optionen und
-  eine geleerte Umgebung, und ein Server lauscht nur auf 127.0.0.1 und liest seinen Schlüssel aus einer privaten
-  Datei, unmittelbar vor dem Start noch einmal geprüft. `runtime start` startet nur einen Build, der seine Prüfung auf
-  diesem Rechner bestanden hat, noch zu seinem Manifest passt und vom gepinnten Commit ist (sonst seinen CPU-Ersatz,
-  sonst nichts); ein selbst gebauter Build, der nicht genutzt werden kann, weicht nie von selbst auf das vorgebaute
-  Archiv aus.
+  Dittos Server, die Prüfungen nach dem Build und die Perplexity-Prüfung teilen eine Liste verbotener Optionen (Tools,
+  Agentenmodus, MCP, Weboberfläche, entferntes Rechnen, Downloads, ein Prompt-Protokoll auf der Platte, ein Schlüssel
+  oder Token auf der Befehlszeile, in jeder Schreibweise, die llama.cpp annimmt, auch `--a_b` für `--a-b`) und eine
+  geleerte Umgebung, und ein Server lauscht nur auf 127.0.0.1 und liest seinen Schlüssel aus einer privaten Datei,
+  unmittelbar vor dem Start noch einmal geprüft. `runtime start` startet nur einen Build, der seine Prüfung auf diesem
+  Rechner bestanden hat, noch zu seinem Manifest passt und vom gepinnten Commit ist (sonst seinen CPU-Ersatz, sonst
+  nichts); ein selbst gebauter Build, der nicht genutzt werden kann, weicht nie von selbst auf das vorgebaute Archiv
+  aus, und ein offizielles Archiv, das eine frühere Version heruntergeladen hat, wird erst nach
+  `runtime install --prebuilt` genutzt (das es übernimmt, ohne es neu herunterzuladen).
 - Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt, mit einer vorsichtigen Abweichung. Regeln mit `*`
   oder `$` (etwa `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach
   der ersten und eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler

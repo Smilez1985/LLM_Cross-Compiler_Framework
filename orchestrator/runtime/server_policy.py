@@ -6,7 +6,10 @@ Every launcher the framework has (Ditto's server, the build verification, and la
 systemd unit and the Docker command) takes the forbidden flags and the environment rules from here:
 
 - FORBIDDEN_FLAGS: llama-server options that give the model its own tools, file or shell access, MCP clients, a web
-  UI, remote compute (RPC), state endpoints or a key on the command line. None of them may reach a command line.
+  UI, remote compute (RPC), state endpoints, downloads (Hugging Face, URLs), a prompt log on disk, programs run from
+  a folder, or a key or token on the command line. None of them may reach a command line, in any spelling llama.cpp
+  accepts: every alias, and `--a_b` for `--a-b` (common/arg.cpp at the pin replaces the underscores of long options),
+  so the check reads them the same way (option_name).
   Self-built servers are also compiled without subprocess support (LLAMA_SUBPROCESS=OFF), so even a forbidden
   --tools would fail; the list is still needed for the in-process file tools and the other options.
 - Environment variables are a second way to set every llama-server option (LLAMA_ARG_*, LLAMA_API_KEY), and
@@ -33,6 +36,11 @@ FORBIDDEN_FLAGS = frozenset({
     "--ui-mcp-proxy", "--webui-mcp-proxy", "--ui", "--webui", "--api-key", "--props", "--media-path",
     "--slot-save-path", "--models-dir", "--models-preset", "--path", "-hf", "--hf-repo", "-mu", "--model-url",
     "--rpc", "--slots", "--metrics",
+    # Every other spelling of the downloads (common/arg.cpp at the pin: -hf/-hfr/--hf-repo, the draft model's
+    # Hugging Face repository, the multimodal projector's URL), the Hugging Face token, the prompt log on disk and the
+    # folder llama.cpp runs ffmpeg and ffprobe from.
+    "-hfr", "-hff", "--hf-file", "-hft", "--hf-token", "-mmu", "--mmproj-url", "--spec-draft-hf", "-hfd", "-hfrd",
+    "--hf-repo-draft", "--log-prompts-dir", "--video-ffmpeg-dir",
 })
 # What Ditto's server may still take from the caller's environment (decision D22: a cleared environment for every
 # launcher): GPU selection of the CUDA, ROCm and Vulkan backends and where the GPU drivers and the Vulkan loader's
@@ -58,11 +66,18 @@ class PolicyError(ValueError):
     """A command line that breaks the launch policy; the message names the options."""
 
 
+def option_name(arg: str) -> str:
+    """The option an argument names, as llama.cpp reads it: `--a_b` is `--a-b` (common/arg.cpp replaces the
+    underscores of long options), and a `--name=value` spelling is taken by its name."""
+    name = str(arg).split("=", 1)[0]
+    return name.replace("_", "-") if name.startswith("--") else name
+
+
 def forbidden_in(cmd: Sequence[str]) -> List[str]:
-    """The forbidden options in an argument list (also in the --name=value spelling), sorted."""
+    """The forbidden options in an argument list (also spelled --name=value or with underscores), sorted."""
     bad = set()
     for arg in list(cmd)[1:]:
-        name = str(arg).split("=", 1)[0]
+        name = option_name(arg)
         if name in FORBIDDEN_FLAGS:
             bad.add(name)
     return sorted(bad)
@@ -113,14 +128,18 @@ KEY_FILE_PREFIX = "server-"
 
 
 def _values(cmd: Sequence[str], option: str) -> List[str]:
-    """Every value of `option` in an argument list, in both spellings (`--host X` and `--host=X`)."""
+    """Every value of `option` in an argument list, in every spelling llama.cpp reads as that option (`--host X`,
+    `--api_key_file X`; `--host=X`, which llama.cpp refuses, counts too): llama.cpp takes the last one, so a second
+    one in another spelling must count."""
     args = [str(a) for a in list(cmd)[1:]]
     found = []
     for i, arg in enumerate(args):
-        if arg == option:
+        if option_name(arg) != option:
+            continue
+        if "=" in arg:
+            found.append(arg.split("=", 1)[1])
+        else:
             found.append(args[i + 1] if i + 1 < len(args) else "")
-        elif arg.startswith(option + "="):
-            found.append(arg[len(option) + 1:])
     return found
 
 
@@ -137,7 +156,8 @@ def check_server_command(cmd: Sequence[str]) -> None:
     keys = _values(cmd, "--api-key-file")
     if len(keys) != 1 or not keys[0]:
         raise PolicyError("llama-server needs exactly one --api-key-file (the key is never given on the command line)")
-    missing = [opt for opt in SERVER_FIXED if opt not in cmd]
+    names = {option_name(a) for a in list(cmd)[1:]}
+    missing = [opt for opt in SERVER_FIXED if opt not in names]
     if missing:
         raise PolicyError(f"llama-server must be started with {', '.join(missing)}")
 

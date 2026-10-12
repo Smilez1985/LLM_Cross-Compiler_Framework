@@ -581,9 +581,11 @@ deshalb zählt bei ihnen nur der RAM. `runtime start --model <Stufe>` überstimm
 
 - **Nur geprüfte Builds:** `runtime start` startet den aktiven selbst gebauten (oder importierten) Build nur, wenn er
   seine Prüfung auf diesem Rechner bestanden hat, jede Datei noch zu seinem Manifest passt, er vom festgelegten
-  Commit ist und für diesen Rechner gebaut wurde; sonst den CPU-Ersatz-Build, und sonst nichts, mit dem Grund. Das
-  vorgebaute Archiv wird nur nach `install --prebuilt` gestartet (ein Archiv, das installiert wurde, bevor es selbst
-  gebaute Builds gab, funktioniert weiter, angezeigt als vorgebaut, bis `runtime install` den Server baut); ein selbst
+  Commit ist und für diesen Rechner gebaut wurde (Betriebssystem und Architektur, und bei einem `-march=native`-Build
+  eine CPU desselben Herstellers mit jeder CPU-Funktion der CPU, auf der er gebaut wurde); sonst den
+  CPU-Ersatz-Build, und sonst nichts, mit dem Grund. Das vorgebaute Archiv wird nur nach `install --prebuilt`
+  gestartet. Ein Archiv, das eine frühere Version ohne diese Bitte heruntergeladen hat, wird nicht genutzt:
+  `runtime status` nennt es, und `install --prebuilt` wechselt darauf, ohne es neu herunterzuladen. Ein selbst
   gebauter Build, der nicht genutzt werden kann, wechselt nie von selbst darauf.
 - **Eine Startregel:** Die verbotenen Optionen, die geleerte Umgebung, Loopback und die Schlüsseldatei kommen aus
   einem Modul, `orchestrator/runtime/server_policy.py`, das jeder Starter nutzt: Dittos Server, die Prüfung nach dem
@@ -594,8 +596,10 @@ deshalb zählt bei ihnen nur der RAM. `runtime start --model <Stufe>` überstimm
 - **Abschottung:** `llama-server` lauscht nur auf 127.0.0.1, auf einem freien Port. Ein neuer, zufälliger
   API-Schlüssel pro Start erreicht ihn nur über eine Schlüsseldatei, die nur du lesen kannst, und das Framework
   prüft, dass der Server Anfragen ohne Schlüssel ablehnt. Weboberfläche und Slots-Endpunkt sind aus, und der Server
-  läuft mit `--offline`. Optionen, die dem Modell eigene Tools, einen Agentenmodus, MCP-Server, entferntes Rechnen
-  oder einen Schlüssel auf der Befehlszeile geben würden, werden abgelehnt. Der Server startet mit geleerter
+  läuft mit `--offline`. Optionen, die dem Modell eigene Tools, einen Agentenmodus, MCP-Server oder entferntes
+  Rechnen geben würden, die etwas herunterladen (Hugging Face, URLs), die Prompts auf die Platte schreiben, Programme
+  aus einem Ordner starten oder einen Schlüssel oder Token auf die Befehlszeile bringen, werden abgelehnt, in jeder
+  Schreibweise, die llama.cpp annimmt (seine Kurzformen, und `--a_b` für `--a-b`). Der Server startet mit geleerter
   Umgebung: Außer deinem Benutzerordner, einem festen `PATH` und der C-Locale bekommt er nur die Variablen, die GPUs
   auswählen oder GPU-Treiber finden (`CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`, `ROCR_VISIBLE_DEVICES`,
   `GGML_VK_VISIBLE_DEVICES`, `HSA_OVERRIDE_GFX_VERSION`, die Vulkan-Treibervariablen, `LD_LIBRARY_PATH` und wenige
@@ -658,7 +662,11 @@ self-built“.
   einem deiner anderen Rechner kann importiert werden: Jede Datei wird gegen sein Manifest geprüft, die Build-ID
   gegen seinen Bauplan und der Commit gegen den Pin, du bestätigst, bevor eines seiner Programme läuft, und danach
   wird er wie ein lokaler Build geprüft. Die Version, die er melden muss, kommt aus dem Pin, nicht aus dem Archiv,
-  und jedes Programm darin wird geprüft, auch eines, das das Archiv nicht aufführt.
+  und jedes Programm darin wird geprüft, auch eines, das das Archiv nicht aufführt. Dittos Import
+  (`ditto runtime import`) lehnt einen `-march=native`-Build ab, der auf einer CPU eines anderen Herstellers oder mit
+  einer CPU-Funktion gebaut wurde, die dieser CPU fehlt (etwa AVX-512), bevor irgendetwas läuft: Ein solcher Build
+  bräche bei der ersten Rechnung mit SIGILL ab, und das erreichen die Prüfungen nicht, solange kein Smoke-Test-Modell
+  festgelegt ist.
 - **Gemessen** auf einer virtuellen x86-64-Maschine mit 4 Kernen (GCC 13.3, `-j4`): `llama-server` und `llama-bench`
   am Pin in 189 Sekunden samt Prüfungen, 28 MB Programme; `ditto runtime install` mit dem CPU-Build für Ditto
   (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 Sekunden samt Prüfungen.
