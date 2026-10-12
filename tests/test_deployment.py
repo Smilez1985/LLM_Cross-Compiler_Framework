@@ -8,7 +8,6 @@ import shlex
 import shutil
 import subprocess
 import zipfile
-from pathlib import Path
 
 import pytest
 
@@ -255,6 +254,18 @@ class TestSSHDeployment:
         cmd = DeploymentManager._remote_install_cmd("/tmp/llm_deploy", "evil; rm -rf ~.zip")
         tokens = shlex.split(cmd)
         assert "evil; rm -rf ~.zip" in tokens
+
+    def test_deploy_script_runs_through_sh_also_where_tmp_is_noexec(self, config, tmp_path):
+        """The package is unpacked in /tmp/llm_deploy.*: executing ./deploy.sh there fails on boards that mount /tmp
+        noexec (and on boards without bash); sh reads the script instead of executing it."""
+        cmd = DeploymentManager._remote_install_cmd("/tmp/llm_deploy.x", "pkg.zip")
+        assert "./deploy.sh" not in cmd and "chmod +x" not in cmd and cmd.endswith("&& sh deploy.sh")
+        script = DeploymentManager(FakeFramework(config))._generate_deploy_script("model.gguf", "", False)
+        assert script.startswith("#!/bin/sh\n")
+        path = tmp_path / "deploy.sh"
+        path.write_text(script)
+        dash = shutil.which("dash") or shutil.which("sh")
+        assert subprocess.run([dash, "-n", str(path)]).returncode == 0
 
     def test_system_ssh_fallback_never_prompts_or_accepts_keys(self, config, tmp_path, monkeypatch):
         dm = DeploymentManager(FakeFramework(config))

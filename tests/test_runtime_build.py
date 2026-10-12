@@ -370,8 +370,10 @@ class TestNativeExecutor:
 # --- the executor: builder container ---------------------------------------------------------------------------------
 
 class FakeEngine(ContainerEngine):
-    def __init__(self, gcc="12.2.0", reason=None, have_image=False, configure_lines=(), fail=None, tamper=None):
+    def __init__(self, gcc="12.2.0", reason=None, have_image=False, configure_lines=(), fail=None, tamper=None,
+                 libdir="/usr/lib/gcc-cross/aarch64-linux-gnu/12/../../../../aarch64-linux-gnu/lib/"):
         self.gcc, self.reason, self.have_image = gcc, reason, have_image
+        self.libdir = libdir  # None: the toolchain has no runtime library (gcc prints the bare name back)
         self.configure_lines, self.fail = configure_lines, fail
         self.tamper = tamper  # what a hostile build does with the folders it may write (mounts by target)
         self.built: List[dict] = []
@@ -393,6 +395,14 @@ class FakeEngine(ContainerEngine):
         build = next(m.source for m in mounts if m.target == "/work/build")
         if command[-1] == "-dumpfullversion":
             Path(log).write_text(self.gcc + "\n")
+            return 0
+        if command[-1].startswith("-print-file-name="):  # where the toolchain keeps a runtime library
+            lib = command[-1].split("=", 1)[1]
+            Path(log).write_text((self.libdir + lib if self.libdir else lib) + "\n")
+            return 0
+        if command[0] == "cp":  # copying it into the build's bin/ (a fake ELF file of the target)
+            assert command[1] == "-L" and command[3].startswith("/work/build/bin/")
+            (Path(build) / "bin" / command[3].rsplit("/", 1)[1]).write_bytes(b"\x7fELF fake runtime library")
             return 0
         if self.fail and self.fail in command:
             Path(log).write_text("error: boom\n")
@@ -424,7 +434,8 @@ class TestContainerExecutor:
         assert image["args"]["CROSS_TRIPLE"] == "aarch64-linux-gnu" and image["args"]["LIBC"] == "glibc"
         assert image["tag"] == builder_image_tag(plan) and not image["tag"].endswith(":latest")
         assert image["dockerfile"].startswith("# Builder image for self-built llama.cpp")
-        assert [r["command"][0] for r in engine.runs] == ["aarch64-linux-gnu-gcc", "cmake", "cmake"]
+        assert [r["command"][0] for r in engine.runs] == ["aarch64-linux-gnu-gcc", "cmake", "cmake",
+                                                         "aarch64-linux-gnu-gcc", "cp"]
         for run in engine.runs:
             o = run["options"]
             assert o["network_mode"] == "none" and o["cap_drop"] == ["ALL"] and o["read_only"] is True
@@ -443,7 +454,34 @@ class TestContainerExecutor:
         assert configure[-1] == "-DCMAKE_TOOLCHAIN_FILE=/work/config/toolchain.cmake"
         assert (tmp_path / "w" / "config" / "toolchain.cmake").read_text() == plan.steps[0].toolchain_file
         assert engine.runs[2]["command"][-len(plan.targets):] == list(plan.targets)
-        assert result.builder_image == image["tag"] and sorted(result.files) == sorted(plan.targets)
+        # The OpenMP runtime of the board comes from the cross toolchain that linked the programs (decision D7).
+        assert engine.runs[3]["command"] == ["aarch64-linux-gnu-gcc", "-print-file-name=libgomp.so.1"]
+        assert engine.runs[4]["command"][:2] == ["cp", "-L"]
+        assert engine.runs[4]["command"][2].endswith("/aarch64-linux-gnu/lib/libgomp.so.1")
+        assert engine.runs[4]["command"][3] == "/work/build/bin/libgomp.so.1"
+        assert result.builder_image == image["tag"]
+        assert sorted(result.files) == sorted([*plan.targets, "libgomp.so.1"])
+
+    def test_a_toolchain_without_the_runtime_library_fails_the_build(self, tmp_path, source):
+        engine = FakeEngine(libdir=None)  # gcc prints the bare name back when it has no such library
+        with pytest.raises(BuildError, match="has no libgomp.so.1"):
+            BuildExecutor(engine=engine).build(self.cross_plan(), source=source, work=tmp_path / "w", jobs=1)
+        assert engine.runs[-1]["command"][-1] == "-print-file-name=libgomp.so.1"
+
+    def test_only_known_runtime_libraries_are_copied(self, tmp_path, source):
+        plan = self.cross_plan()
+        hostile = replace(plan, verify={**plan.verify, "runtime_libs": ["../../etc/shadow"]})
+        with pytest.raises(BuildError, match="not one this executor copies"):
+            BuildExecutor(engine=FakeEngine()).build(hostile, source=source, work=tmp_path / "w", jobs=1)
+
+    def test_a_native_architecture_container_build_takes_the_library_from_gcc(self, tmp_path, source):
+        plan = plan_build(RK3566, purpose="device-runtime", placement="cross", catalog=CATALOG,
+                          toolchain=ToolchainInfo(host_os="linux", host_arch="arm64"))
+        assert plan.steps[0].toolchain_file is None and plan.verify["runtime_libs"] == ["libgomp.so.1"]
+        engine = FakeEngine(libdir="/usr/lib/aarch64-linux-gnu/")
+        result = BuildExecutor(engine=engine).build(plan, source=source, work=tmp_path / "w", jobs=1)
+        assert ["gcc", "-print-file-name=libgomp.so.1"] in [r["command"] for r in engine.runs]
+        assert "libgomp.so.1" in result.files
 
     @pytest.mark.skipif(os.name != "posix", reason="symlinks")
     def test_a_hostile_build_cannot_hand_the_host_files_from_outside_its_folder(self, tmp_path, source):
