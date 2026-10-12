@@ -146,8 +146,13 @@ class JobService:
                 self._finish(job.job_id, "cancelled")
                 return
             except ValueError as e:
+                # Text from outside the framework that explains a failure (a device's or a program's own words,
+                # `external_text` on the error) never goes into the message: get_job_status returns it marked.
+                external = getattr(e, "external_text", None)
+                extra = ({"result": {EXTERNAL_KEY: [redact_secrets(str(line)) for line in external][-100:]}}
+                         if isinstance(external, (list, tuple)) and external else {})
                 self._finish(job.job_id, "failed", error={"code": getattr(e, "code", "failed"),
-                                                          "message": redact_secrets(str(e))})
+                                                          "message": redact_secrets(str(e))}, **extra)
                 return
             except Exception as e:  # never hand an unexpected exception's text to an AI client
                 logger.error(f"Job {job.job_id} ({kind}) failed: {e!r}", exc_info=True)

@@ -262,7 +262,10 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   liegt hier und wurde nie gezogen); ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte
   `...:latest`, wird mit Grund abgelehnt, bevor etwas kopiert wird. Ein per Digest festgelegtes Image, das hier fehlt,
   wird über seinen Digest gezogen, nie über ein Tag, und ein fehlgeschlagener Export bricht das Paket ab, statt das
-  Image wegzulassen.
+  Image wegzulassen. Ein per Digest festgelegtes Image wird unter dem lokalen Namen
+  `<Repository>:lcf-<erste 12 Hex-Zeichen des Digests>` eingepackt (`docker load` stellt Registry-Digests nicht
+  wieder her), und `deploy.sh` startet jedes eingepackte Image mit `--pull never`: Das Board führt genau das
+  eingepackte Image aus, und ein Board, auf dem es fehlt, bricht ab, statt eines aus einer Registry zu ziehen.
 - **Vertraute Geräte:** Nach einer erfolgreichen Anmeldung an einem Board, dessen Host-Schlüssel du bestätigt hast
   (ein Deployment in der GUI oder mit `llm-cli deploy run`, eine Prüfung mit `llm-cli scan --device`, ein
   `device runtime deploy`), trägt das Framework es in `~/.llm-framework/devices.json` ein: deinen Namen dafür,
@@ -1495,8 +1498,11 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   nie auf „erlauben“ stellen), nie von einer Daueranfrage abgedeckt, läuft eins je Gerät zur Zeit und sechs je Stunde
   je Client. `cancel_job` schließt die SSH-Sitzung, und der Job sagt, dass der Zustand des Geräts unbekannt ist;
   nichts wird wiederholt. Das Job-Ergebnis enthält `success`, `exit_status`, `device_state` (`ok`, `failed`,
-  `unknown`) und die letzten 100 Zeilen, die das Gerät ausgegeben hat, in `external_text`, als externer Text markiert.
-  Der Prompt `deploy_to_board` führt durch dieselben Schritte.
+  `unknown`) und die letzten 100 Zeilen, die das Gerät ausgegeben hat, in `external_text`, als externer Text markiert;
+  `reason` ist immer der eigene Satz des Frameworks, ohne Pfade des Rechners. Scheitert ein Job der Geräte- oder
+  Laufzeit-Tools, ist auch die Fehlermeldung der Satz des Frameworks: Was das Gerät oder `llama-bench` ausgegeben hat
+  (`llama-bench` gibt die Metadaten des geladenen Modells aus), kommt in `external_text` zurück. Der Prompt
+  `deploy_to_board` führt durch dieselben Schritte.
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je

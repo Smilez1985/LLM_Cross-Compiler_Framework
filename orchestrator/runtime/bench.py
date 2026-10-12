@@ -44,11 +44,14 @@ AUDIT_TOOL = "benchmark.untrusted_model_native"
 
 
 class BenchError(RuntimeError):
-    """A benchmark that could not run; the message says why, `code` is a tool reason code, `next` what helps."""
+    """A benchmark that could not run; the message says why, `code` is a tool reason code, `next` what helps.
+    `external_text` holds what llama-bench printed (it prints the metadata of the model it loads, which an untrusted
+    GGUF controls): never part of the message, returned to AI callers marked as external text."""
 
-    def __init__(self, message: str, code: str = "failed", next: str = ""):
+    def __init__(self, message: str, code: str = "failed", next: str = "", external_text: Optional[List[str]] = None):
         super().__init__(message)
         self.code, self.next = code, next
+        self.external_text = list(external_text or [])
 
 
 class BenchStopped(BenchError):
@@ -234,7 +237,8 @@ class BenchRunner:
         if stop is not None and stop.is_set():
             raise BenchStopped()
         if rc != 0:
-            raise BenchError(f"llama-bench failed (exit {rc}): {_tail(errors or output)}")
+            raise BenchError(f"llama-bench failed (exit {rc}); its last output is kept apart as external text.",
+                             external_text=[_tail(errors or output)])
         return output, peak
 
     @staticmethod
@@ -294,7 +298,8 @@ class BenchRunner:
             except OSError:
                 output = ""
         if rc != 0:
-            raise BenchError(f"llama-bench failed in the sandbox (exit {rc}): {_tail(output)}")
+            raise BenchError(f"llama-bench failed in the sandbox (exit {rc}); its last output is kept apart as "
+                             "external text.", external_text=[_tail(output)])
         return output
 
     # --- results ---

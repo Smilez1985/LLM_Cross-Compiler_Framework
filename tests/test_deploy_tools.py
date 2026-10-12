@@ -392,7 +392,9 @@ class TestDeploy:
 # --- the record is the person's -------------------------------------------------------------------------------------
 
 AI_REACHABLE = ["orchestrator/mcp_server.py", "orchestrator/tools", "orchestrator/llm",
-                "orchestrator/Core/ditto_manager.py"]
+                "orchestrator/Core/ditto_manager.py",
+                # the board and benchmark steps the runtime tools call
+                "orchestrator/runtime/device/service.py", "orchestrator/runtime/bench.py"]
 WRITERS = {"record_trusted_device", "trust_host_key", "trust_host", "install_public_key"}
 
 

@@ -763,6 +763,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- **Digest-pinned images in a deployment package start on an air-gapped board**: an image pulled by its digest has
+  no tag, so it was saved without a name, came back as `<none>` after `docker load`, and `deploy.sh` could not start
+  it by its digest reference without a registry. It is now packed under `<repository>:lcf-<12 hex of the digest>`
+  and started by that name (an image built here keeps its own tag), and `deploy.sh` starts every packed image with
+  `--pull never`, so a board where an image is missing stops instead of pulling one from a registry.
 - **Hugging Face look-ups no longer hide failures**: the model manager behind the GUI's Hugging Face browser returned
   an empty search result, an empty file list or a "not restrictive" licence when Hugging Face could not be reached;
   it now reports the error. A licence counts as permissive only on a fixed allowlist: `other`, custom, list-valued
@@ -968,6 +973,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   folders on the full disk with their sizes, and pruning Docker is proposed only when Docker's data root is full.
 
 ### Security
+- **Device and benchmark failures no longer carry outside text or host paths into an AI's context**: when a job of
+  `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark` or `run_benchmark` failed, the error message
+  held the device's stderr or `llama-bench`'s last output (which prints the metadata of the GGUF it loads, text an
+  untrusted model controls) unmarked; a failed mktemp on the device put its stderr into `deploy_to_device`'s plain
+  `reason`; and a packaging or deploy failure could name the build folder, the output folder or the home folder. The
+  message and `reason` are now the framework's own sentences without host paths, and what the device or the program
+  printed is returned in `get_job_status.external_text`, marked as external text (also for failed jobs).
 - **The dangerous-command filter can no longer be bypassed with invisible or full-width characters** (Ditto's
   healing analyses and recommendations, and fix proposals of AI clients): it checks the text also as the GUI and
   the CLI show it (normalized, invisible characters and joiners removed), so `r<zero-width space>m -rf ~` or

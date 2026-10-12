@@ -867,6 +867,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- **Per Digest festgelegte Images in einem Deployment-Paket starten auf einem Board ohne Netz**: Ein über seinen
+  Digest gezogenes Image hat kein Tag, wurde deshalb ohne Namen gespeichert, kam nach `docker load` als `<none>`
+  zurück, und `deploy.sh` konnte es ohne Registry nicht über seine Digest-Referenz starten. Es wird jetzt unter
+  `<Repository>:lcf-<12 Hex-Zeichen des Digests>` eingepackt und unter diesem Namen gestartet (ein hier gebautes Image
+  behält sein eigenes Tag), und `deploy.sh` startet jedes eingepackte Image mit `--pull never`, sodass ein Board, auf
+  dem ein Image fehlt, abbricht, statt eines aus einer Registry zu ziehen.
 - **Hugging-Face-Abfragen verbergen keine Fehler mehr**: Der Modellmanager hinter dem Hugging-Face-Browser der GUI
   lieferte ein leeres Suchergebnis, eine leere Dateiliste oder eine „nicht einschränkende“ Lizenz, wenn Hugging Face
   nicht erreichbar war; jetzt meldet er den Fehler. Eine Lizenz gilt nur auf einer festen Positivliste als
@@ -1093,6 +1099,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   vorgeschlagen, wenn Dockers Datenverzeichnis voll ist.
 
 ### Sicherheit
+- **Fehler von Geräten und Benchmarks tragen keinen fremden Text und keine Pfade des Rechners mehr in den Kontext
+  einer KI**: Scheiterte ein Job von `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark` oder
+  `run_benchmark`, enthielt die Fehlermeldung unmarkiert die Fehlerausgabe des Geräts oder die letzte Ausgabe von
+  `llama-bench` (das die Metadaten des geladenen GGUF ausgibt, Text, den ein nicht vertrauenswürdiges Modell
+  bestimmt); ein gescheitertes mktemp auf dem Gerät setzte dessen Fehlerausgabe in das schlichte `reason` von
+  `deploy_to_device`; und ein Fehler beim Paketieren oder Deployen konnte den Build-Ordner, den Ausgabeordner oder den
+  Home-Ordner nennen. Meldung und `reason` sind jetzt die eigenen Sätze des Frameworks ohne Pfade des Rechners, und
+  was das Gerät oder das Programm ausgegeben hat, kommt in `get_job_status.external_text` zurück, als externer Text
+  markiert (auch bei gescheiterten Jobs).
 - **Der Filter für gefährliche Befehle lässt sich nicht mehr mit unsichtbaren Zeichen oder Zeichen in voller
   Breite umgehen** (Healing-Analysen und Empfehlungen von Ditto sowie Korrekturvorschläge von KI-Clients): Er
   prüft den Text auch so, wie GUI und CLI ihn zeigen (normalisiert, unsichtbare Zeichen und Verbinder entfernt),
