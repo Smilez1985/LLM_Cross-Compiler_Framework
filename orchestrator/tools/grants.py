@@ -201,10 +201,11 @@ def _weights_ok(name: Any) -> bool:
 
 
 def _build_scope(facts: Dict[str, Any], width: str) -> Optional[Dict[str, Any]]:
+    from orchestrator.Core.confirmed_builds import unattended
     if facts.get("target_trust") not in ("shipped", "verified"):
         return None
-    if str(facts.get("installed_via") or "").startswith("grant:") and not facts.get("confirmed_build"):
-        return None  # installed under a standing approval: one build of it is confirmed by the person first
+    if unattended(facts.get("installed_via")) and not facts.get("confirmed_build"):
+        return None  # installed unattended (standing approval, delegation): the person confirms one build of it first
     if facts.get("weights_format") not in ("safetensors", "gguf") or facts.get("image_base_official") is not True:
         return None
     source = facts.get("source")

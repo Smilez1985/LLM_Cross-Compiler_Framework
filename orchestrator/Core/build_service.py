@@ -677,7 +677,7 @@ class BuildService:
         state = state_dir(self.framework)
         if not isinstance(record, dict) or state is None or not person_confirmed(channel):
             return False
-        store = ConfirmedBuilds(state)
+        store = ConfirmedBuilds.for_framework(self.framework, state)  # signed with the permission file's key
         try:
             done = store.record("target", str(record.get("target") or ""),
                                 installed_via=str(record.get("installed_via") or ""),

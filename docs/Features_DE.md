@@ -606,10 +606,14 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 
 `delete_artifact` und `restore_knowledge_snapshot` zerstören etwas, darum sind sie standardmäßig verboten und werden nicht angeboten, bis
 du sie in den Tool-Berechtigungen freigibst (die ganze Klasse „extern“ zu erlauben gibt sie nicht frei); jeder
-Aufruf wird erfragt, und sie bekommen nie einen Dauerauftrag. `delete_artifact` nimmt die ID und das sha256, das
-`list_artifacts` zeigt; abgelehnt wird ein Ordner außerhalb des Ausgabeordners (auch über einen Link), solange ein
-Build irgendeines Programms des Frameworks hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256
-der Modelldatei seither geändert hat und wenn der Ordner nicht mehr der ist, den die Frage nannte.
+Aufruf wird erfragt, und sie bekommen nie einen Dauerauftrag. Über ein Löschen entscheidest nur du, im eigenen
+Fenster des Frameworks: Dittos Dialog oder Eingabeaufforderung, bei einem MCP-Client eine wartende Freigabe in der GUI
+oder in `llm-cli tools approvals`; das Formular des Clients wird dafür nie benutzt. Die Frage dort nennt jedes Teil
+(den Modellordner und sein Golden-ZIP) mit vollem Pfad, Dateinamen, Größe und was es ist; die KI sieht nur
+Bezeichnungen und Größen. `delete_artifact` nimmt die ID und das sha256, das `list_artifacts` zeigt; abgelehnt wird
+ein Ordner außerhalb des Ausgabeordners (auch über einen Link), solange ein Build irgendeines Programms des Frameworks
+hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256 der Modelldatei seither geändert hat und
+wenn der Ordner nicht mehr der ist, den die Frage nannte.
 `restore_knowledge_snapshot` sichert die aktuelle Wissensbasis zuerst als Snapshot `pre_restore_<Zeit>` und stellt
 ohne diese Sicherung nichts wieder her; dieselbe Regel gilt jetzt für jede Wiederherstellung eines Snapshots, und
 der wiederherzustellende Snapshot wird dabei nie aufgeräumt.
@@ -1405,14 +1409,15 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   bisher) und `audit` (die letzten 30 Einträge dieses Aufrufers und ob die Kette intakt ist). `get_settings` liest
   eine feste Liste von Einstellungen: Adressen nur als Schema und Host, Ordner als Labels (`models:`), nie
   `secret_helper`, `secret_storage` oder die Einstellungen des KI-Anbieters über eine Zusammenfassung hinaus.
-  `update_settings` ändert gewöhnliche Einstellungen (Sprache, GUI-Thema, Kalibrierungssprache, Crawler-Sprachen und
-  PDFs, Reranking als Standard, Leerlaufzeit der Modelle, Ansagen, `build_jobs`, Chat-Kontext, Importance Matrix als
-  Standard); du wirst mit altem und neuem Wert gefragt, und jede Änderung wird in der `config.yml` gespeichert.
-  Einstellungen, die begrenzen, was eine KI oder ein Build darf, lassen sich nur verschärfen (`offline_mode`,
-  `enable_security_scan` und `build_sandbox` auf true, `enable_telemetry` und `enable_rag_knowledge` auf false,
-  Seiten- und Tiefengrenzen und Container-Grenzen niedriger, die Pause beim Crawlen länger; ein Speicherlimit von 0
-  bedeutet für Docker gar keins und zählt daher als Lockerung); nur solche Aufrufe
-  dürfen auf „erlauben“ gestellt werden. Berechtigungen, Geheimnisse, der Tresor, Einstellungen des KI-Anbieters,
+  `update_settings` ändert gewöhnliche Einstellungen (Sprache, GUI-Thema, Kalibrierungssprache, Crawler-Sprachen,
+  Reranking als Standard, Leerlaufzeit der Modelle, `build_jobs`, Chat-Kontext, Importance Matrix als Standard); du
+  wirst mit altem und neuem Wert gefragt, und jede Änderung wird in der `config.yml` gespeichert. Einstellungen, die
+  begrenzen, was eine KI oder ein Build darf, lassen sich nur verschärfen (`offline_mode`, `enable_security_scan` und
+  `build_sandbox` auf true, `enable_telemetry`, `enable_rag_knowledge` und `crawler_download_pdfs` auf false, Seiten-
+  und Tiefengrenzen und Container-Grenzen niedriger, die Pause beim Crawlen länger; ein Speicherlimit von 0 bedeutet
+  für Docker gar keins und zählt daher als Lockerung); nur solche Aufrufe dürfen auf „erlauben“ gestellt werden.
+  Einstellungen, die dich darüber informieren, was KIs tun (gesprochene Ansagen), kann keine KI ändern, in keine
+  Richtung. Berechtigungen, Geheimnisse, der Tresor, Einstellungen des KI-Anbieters,
   Adressen, Image-Referenzen, Ordner und die lockernde Richtung werden vor der Frage abgelehnt, und kein Wert wird je
   als „Standard“ gelesen. `report_cannot_do` ist für eine Aufgabe, die die KI wirklich nicht erledigen kann: Sie nennt
   den Grund (`missing_information`, `not_supported`, `no_tool`, `permission_denied`, `declined`, `needs_person`,

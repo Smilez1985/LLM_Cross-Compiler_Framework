@@ -260,8 +260,9 @@ class PackOut(BaseModel):
     recipe: Optional[Dict[str, untrusted_text(500)]] = Field(
         default=None, description="An installed recipe's pinned values (model, commit, target, format, board, "
                                   "quantization)")
-    installed_via: Optional[str] = Field(default=None, description="grant:<id> when installed under a standing "
-                                                                   "approval")
+    installed_via: Optional[str] = Field(default=None, description="grant:<id> or delegation:<id> when an AI "
+                                                                   "installed it under a standing approval or a "
+                                                                   "delegation")
 
 
 class VerificationOut(BaseModel):
@@ -606,9 +607,12 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
         if not bound.get("sha256") or bound.get("kind") != inp.kind:
             raise ToolError("The installation is not bound to what the person was shown; nothing was installed.",
                             code="failed", next="Call add_pack_from_index again through the framework's tool registry.")
+        from orchestrator.Core.confirmed_builds import unattended
         cm = community()
         channel = ctx.confirm_channel or ""
-        release = reserve_pack(bound, ctx.owner, channel.startswith("grant:"))
+        # a standing approval or a delegation: the larger reserve, and the pack is marked as installed unattended
+        nobody_asked = unattended(channel)
+        release = reserve_pack(bound, ctx.owner, nobody_asked)
         key = Quarantine.key(bound["kind"], bound["pack_id"], bound["sha256"])
         prepared = quarantine.take(key)
         if prepared is None or prepared.provenance.pack_sha256 != bound["sha256"]:
@@ -617,7 +621,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                 cm.discard(prepared)
             raise ToolError("The checked copy the person was shown is no longer there; nothing was installed.",
                             code="failed", next="Call add_pack_from_index again; the person is asked again.")
-        if channel.startswith("grant:"):
+        if nobody_asked:
             prepared.provenance.installed_via = channel
 
         def work(handle) -> Dict[str, Any]:
@@ -641,7 +645,7 @@ def register_community_tools(registry: ToolRegistry, framework, jobs) -> ToolReg
                     result["knowledge_pages"] = len(pages) if isinstance(pages, list) else 0
                 except (OSError, ValueError):
                     result["knowledge_pages"] = 0
-            if channel.startswith("grant:"):
+            if nobody_asked:
                 result["installed_via"] = channel
             return result
 
