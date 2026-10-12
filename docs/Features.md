@@ -612,7 +612,11 @@ How a question with tools runs:
   (`{"error": {"code": ..., "field": ..., "notes": [...]}}`). This holds however the call ends: an invalid value, a
   limit, a denied permission, too little disk space found before the question, a "no", a question nobody answered
   in time, the repeat guard. So a model learns the right argument name even from a refusal, on Ditto's own path, as
-  an MCP client and with Ditto as an MCP client of another framework.
+  an MCP client and with Ditto as an MCP client of another framework. A repair the tool's look-up makes before the
+  question is named the same way and recorded as a repair (kind and field only): `download_hf_file` with a file
+  name in other letter case ("filename: model.gguf (you wrote MODEL.gguf)"), also when the disk then turns out too
+  small. A pending approval that you decline, or that is refused once you approved it, ends its job with the same
+  notes in `get_job_status` (`error.notes`).
 - MCP clients get each tool's own closed input schema (`additionalProperties: false`), the one Ditto's model sees.
 - Tool arguments a local model sends with a code fence or in Python notation (single quotes, `True`, `None`, a
   trailing comma) are read once more as such; anything else stays an error.

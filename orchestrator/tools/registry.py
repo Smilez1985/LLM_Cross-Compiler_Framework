@@ -19,7 +19,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Tuple, Type, Union
 
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -62,7 +62,8 @@ class ToolError(Exception):
     about the call, set by the registry (with_repairs): the repairs the fool-proof layer made (a declared alias, a
     spelling variant of the tool name), the same notes a successful result carries, shown after the text
     ("<message> Next: <next> Notes: ...") on every path, so a refused call teaches the right argument name as a
-    successful one does."""
+    successful one does. `repairs` are the repairs a tool's look-up made before it refused (a file name matched in
+    another letter case, normalize.Repair): the registry names them in the notes and records them."""
     code = "failed"
     quoted = ""
     field = ""
@@ -81,6 +82,7 @@ class ToolError(Exception):
         if field:
             self.field = field
         self.notes: List[str] = list(notes or [])
+        self.repairs: List[Any] = []
 
     def text(self) -> str:
         """The message and the next step, without the notes (the MCP server adds them to every refusal itself)."""
@@ -100,6 +102,7 @@ class ToolError(Exception):
         copy.field = self.field
         copy.quoted = self.quoted if self.quoted and message.endswith(self.quoted) else ""
         copy.notes = list(self.notes)
+        copy.repairs = list(getattr(self, "repairs", []))
         return copy
 
 
@@ -447,6 +450,19 @@ def _merge(*groups: List[Repair]) -> List[Repair]:
             if repair not in merged:
                 merged.append(repair)
     return merged
+
+
+def repairs_of(error: BaseException) -> List[Repair]:
+    """The repairs a refusal carries (a look-up's ToolError, a NormalizeError): only real Repair objects."""
+    return [r for r in (getattr(error, "repairs", None) or ()) if isinstance(r, Repair)]
+
+
+def call_repairs(ctx: "ToolContext", extra: Sequence[Repair] = ()) -> List[Repair]:
+    """Every repair of a call: the fool-proof layer's (ctx.repairs), then the tool's look-up's (ctx.facts.repairs, a
+    file name matched in another letter case), then `extra` (those a refusing look-up carried). The notes of a result
+    and of every refusal and the audit entries name the same ones."""
+    looked = [r for r in (getattr(getattr(ctx, "facts", None), "repairs", None) or ()) if isinstance(r, Repair)]
+    return _merge(list(ctx.repairs or []), looked, [r for r in extra if isinstance(r, Repair)])
 
 
 def _args_key(arguments: Any) -> str:
@@ -813,9 +829,10 @@ class ToolRegistry:
             return None
         fields = {"client": ctx.client,
                   "session": f"{ctx.session}:{ctx.request_id}" if ctx.request_id else ctx.session, **extra}
-        if ctx.repairs:
-            fields.setdefault("repairs", [r.audit() for r in ctx.repairs])
-            renamed = next((r for r in ctx.repairs if r.kind == "name"), None)
+        repairs = call_repairs(ctx)
+        if repairs:
+            fields.setdefault("repairs", [r.audit() for r in repairs])
+            renamed = next((r for r in repairs if r.kind == "name"), None)
             if renamed is not None:
                 fields.setdefault("name_requested", str(renamed.wrote)[:64])
         try:
@@ -928,7 +945,7 @@ class ToolRegistry:
         try:
             return self._prepare_call(spec, arguments, work)
         except ToolError as e:  # a refusal after a repair names the repair, as a successful result would
-            with_repairs(e, work.repairs)
+            with_repairs(e, call_repairs(work))
             raise
 
     def _prepare_call(self, spec: ToolSpec, arguments: Any, work: ToolContext) -> Prepared:
@@ -1198,12 +1215,14 @@ class ToolRegistry:
         except ToolError as e:
             message = external_error_text(e.message)
             error = e.with_text(message, redact_secrets(e.next))
-            error.quoted = message
+            error.quoted = message  # with_text keeps its repairs: a repair before the refusal is named by it
             raise error from None
         except ValueError as e:  # a service's refusal (BuildServiceError carries code and next)
             message = external_error_text(str(e))
-            raise ToolError(message, code=getattr(e, "code", None) or "failed",
-                            next=redact_secrets(getattr(e, "next", "") or "") or FAILED_NEXT, quoted=message) from e
+            error = ToolError(message, code=getattr(e, "code", None) or "failed",
+                              next=redact_secrets(getattr(e, "next", "") or "") or FAILED_NEXT, quoted=message)
+            error.repairs = repairs_of(e)
+            raise error from e
         except Exception as e:
             self.logger.error(f"Looking up the facts for {spec.name} failed: {e}", exc_info=True)
             message = external_error_text(str(e))
@@ -1236,10 +1255,11 @@ class ToolRegistry:
         began = time.monotonic()
         prepared = self.prepare(name, arguments, ctx)  # its refusals name the repairs already
         if not ctx.limits_checked:  # the MCP server counts a call before its question
+            limited = dataclasses.replace(ctx, repairs=prepared.repairs)
             try:
-                self.enforce_limits(prepared, dataclasses.replace(ctx, repairs=prepared.repairs))
+                self.enforce_limits(prepared, limited)
             except ToolError as e:
-                with_repairs(e, prepared.repairs)
+                with_repairs(e, call_repairs(limited))
                 raise
         spec, inp, arguments = prepared.spec, prepared.input, prepared.arguments
         # per call: Ditto reuses one context
@@ -1248,8 +1268,9 @@ class ToolRegistry:
             result = self._run(spec, inp, arguments, ctx, approved, began)
         except ToolError as e:
             # Every refusal and error after a repair names it, as a successful result's notes would (a denied call,
-            # a look-up that found too little disk space, a "no", a handler's failure).
-            error = with_repairs(self._failed(ctx, spec.name, prepared.key, e), prepared.repairs)
+            # a look-up that found too little disk space, a "no", a handler's failure): the fool-proof layer's
+            # repairs and the look-up's (ctx.facts, set by _run on this very context, or carried by its refusal).
+            error = with_repairs(self._failed(ctx, spec.name, prepared.key, e), call_repairs(ctx, repairs_of(e)))
             if error is e:
                 raise
             raise error from None
@@ -1292,8 +1313,8 @@ class ToolRegistry:
             try:
                 ctx.facts = self.look_up(spec, inp, ctx)
             except ToolError as e:
-                self._audit(ctx, spec, decision, "error", arguments, detail=f"{e.message} {e.next}".strip(),
-                            reason_code=e.code)
+                self._audit(dataclasses.replace(ctx, repairs=call_repairs(ctx, repairs_of(e))), spec, decision,
+                            "error", arguments, detail=f"{e.message} {e.next}".strip(), reason_code=e.code)
                 raise
         decision = self.capped(decision, ctx.facts)
         if ctx.metadata.get("grant_requested"):
@@ -1404,7 +1425,7 @@ class ToolRegistry:
         token = _CALL.set((self, ctx.actor))
         try:
             raw = spec.handler(inp, ctx) if spec.takes_context else spec.handler(inp)
-            result = self._output(spec, raw, [r.note(spec.name) for r in ctx.repairs] + list(ctx.notes))
+            result = self._output(spec, raw, [r.note(spec.name) for r in call_repairs(ctx)] + list(ctx.notes))
         except ResultTooLarge as e:
             end("error", str(e), reason_code="limit_reached")
             raise ToolError(f"{spec.title}: {e}", code="limit_reached") from None

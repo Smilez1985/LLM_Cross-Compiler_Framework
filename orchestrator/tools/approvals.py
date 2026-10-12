@@ -576,7 +576,7 @@ class ApprovalService:
                 logger.warning(f"Could not record the 'no' to approval {item.approval_id}: {redact_secrets(str(e))}")
             self.jobs.update(item.job_id, state="failed", error={
                 "code": "declined", "message": "The person declined this call in the framework.",
-                "next": "Do not retry it unless the person asks for it."})
+                "next": "Do not retry it unless the person asks for it.", "notes": self._notes(item)})
         else:
             self.store.update(item.approval_id, state="expired")
             minutes = max(1, round(self.ttl / 60))
@@ -603,7 +603,7 @@ class ApprovalService:
         except Exception as e:  # the call is no longer valid (a tool changed, a fact is gone): it cannot run
             code = getattr(e, "code", "") or "failed"
             self._fail(item, code if isinstance(code, str) else "failed",
-                       f"The approved call can no longer be checked ({redact_secrets(str(e))}).")
+                       f"The approved call can no longer be checked ({redact_secrets(str(e))}).", error=e)
             return
         digest = question_sha256(question)
         if digest != record.question_sha256 or digest != item.question_sha256:
@@ -652,7 +652,7 @@ class ApprovalService:
         except ToolError as e:
             self.store.update(item.approval_id, state="failed")
             self.jobs.update(item.job_id, state="failed", error={"code": e.code, "message": e.message,
-                                                                 "next": e.next})
+                                                                 "next": e.next, "notes": list(e.notes)})
         except Exception as e:  # never hand an unexpected exception's text to the client
             logger.error(f"Running approved call {item.approval_id} failed: {e!r}", exc_info=True)
             self.store.update(item.approval_id, state="failed")
@@ -666,11 +666,25 @@ class ApprovalService:
             with self._lock:
                 self._waiting.pop(item.approval_id, None)
 
-    def _fail(self, item: _Waiting, code: str, message: str) -> None:
+    def _fail(self, item: _Waiting, code: str, message: str, error: Optional[BaseException] = None) -> None:
         with self._lock:
             self._waiting.pop(item.approval_id, None)
         self.store.update(item.approval_id, state="failed", note=message[:500])
-        self.jobs.update(item.job_id, state="failed", error={"code": code, "message": message})
+        self.jobs.update(item.job_id, state="failed", error={"code": code, "message": message,
+                                                             "notes": self._notes(item, error)})
+
+    @staticmethod
+    def _notes(item: _Waiting, error: Optional[BaseException] = None) -> List[str]:
+        """The notes of the repairs of the call this approval holds (the fool-proof layer's, the look-up's, those a
+        refusing look-up carried): a failed job names them as the call's result would."""
+        import dataclasses
+
+        from orchestrator.tools.registry import call_repairs, repair_notes, repairs_of
+        try:
+            ctx = dataclasses.replace(item.ctx, facts=item.facts) if item.facts is not None else item.ctx
+            return repair_notes(call_repairs(ctx, repairs_of(error) if error is not None else ()))
+        except Exception:  # noqa: BLE001 - a note is a help, never a reason to lose the refusal
+            return []
 
     def waiting_ids(self) -> List[str]:
         with self._lock:

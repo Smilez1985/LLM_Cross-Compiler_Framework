@@ -291,7 +291,11 @@ def _wait_seconds(requested: int, notes: List[str]) -> int:
 
 
 def _job_out(job, ctx: ToolContext) -> JobStatusOut:
-    error = JobErrorOut(**{k: job.error.get(k, "") for k in ("code", "message", "next")}) if job.error else None
+    error = None
+    if job.error:
+        notes = job.error.get("notes")
+        error = JobErrorOut(**{k: job.error.get(k, "") for k in ("code", "message", "next")},
+                            notes=[str(n) for n in notes] if isinstance(notes, list) else [])
     # An approved call's result belongs to the caller that asked for it.
     result = job.result if job.kind != "approval" or job.owner == ctx.owner else None
     # A job's external text (job_service.EXTERNAL_KEY, e.g. a device's output) goes into the marked field.

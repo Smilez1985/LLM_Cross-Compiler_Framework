@@ -461,6 +461,140 @@ class TestDownload:
             spec.handler(spec.input_model(model=REPO, filename="tiny-q4_k_m.gguf"), ToolContext("mcp"))
 
 
+def mcp_call(env, name, arguments):
+    """One call by an MCP client of the framework's server over this registry."""
+    pytest.importorskip("mcp")
+    import asyncio
+
+    from mcp import Client
+
+    from orchestrator import mcp_server
+    server = mcp_server.build_mcp_server(SimpleNamespace(info=SimpleNamespace(version="t"),
+                                                         tool_registry=env.registry), caller="mcp")
+
+    async def go():
+        async with Client(server) as client:
+            return await client.call_tool(name, arguments)
+    return asyncio.run(go())
+
+
+FILENAME_NOTE = "filename: tiny-q4_k_m.gguf (you wrote TINY-Q4_K_M.gguf)"
+
+
+class TestTheFileNameRepairIsNamed:
+    """Review finding (client feedback 79): the one repair the look-up makes, a file name matched in another letter
+    case, was a plain note of the look-up. Over MCP the look-up runs before the question with a context of its own,
+    so a successful result lost the note; a refusal after it (too little disk space) never named it on any path;
+    and the audit log did not record it as a repair."""
+
+    WRITTEN = {"model": REPO, "filename": "TINY-Q4_K_M.gguf"}
+
+    def full_disk(self, monkeypatch):
+        monkeypatch.setattr(hf_hub.shutil, "disk_usage", lambda p: SimpleNamespace(total=10 ** 9, used=0, free=10))
+
+    def test_a_successful_call_names_it_on_both_paths(self, env):
+        started = call(env, "download_hf_file", self.WRITTEN)
+        assert started.notes.count(FILENAME_NOTE) == 1, started.notes
+        wait_job(env, started.job_id)
+        result = mcp_call(env, "download_hf_file", self.WRITTEN)
+        assert not result.is_error, result.content
+        assert result.structured_content["notes"].count(FILENAME_NOTE) == 1, result.structured_content
+        wait_job(env, result.structured_content["job_id"])
+
+    def test_a_refusal_after_it_names_it_on_both_paths(self, env, monkeypatch):
+        self.full_disk(monkeypatch)
+        with pytest.raises(ToolError) as refused:
+            call(env, "download_hf_file", self.WRITTEN)
+        assert refused.value.code == "insufficient_resources"
+        assert refused.value.notes == [FILENAME_NOTE] and str(refused.value).endswith(f"Notes: {FILENAME_NOTE}.")
+        result = mcp_call(env, "download_hf_file", self.WRITTEN)
+        assert result.is_error and result.structured_content["error"]["code"] == "insufficient_resources"
+        assert result.structured_content["error"]["notes"] == [FILENAME_NOTE]
+        assert " ".join(c.text for c in result.content).endswith(f"Notes: {FILENAME_NOTE}.")
+
+    def test_a_framework_refusal_of_the_look_up_names_it_too(self, env):
+        """The look-up's own ToolError (the Hub lists no size for the file) after the repair, not only a service's."""
+        env.hub.models[REPO] = info(files=[Sibling(rfilename="tiny-q4_k_m.gguf", size=None, lfs=None)])
+        with pytest.raises(ToolError) as refused:
+            call(env, "download_hf_file", self.WRITTEN)
+        assert refused.value.code == "not_supported" and refused.value.notes == [FILENAME_NOTE], str(refused.value)
+
+    def test_it_is_audited_as_a_repair_without_the_names(self, env, monkeypatch):
+        """Kind and field only (design 6.7: values only for enum fields), on a call that ran and on a refusal."""
+        started = call(env, "download_hf_file", self.WRITTEN)
+        wait_job(env, started.job_id)
+        self.full_disk(monkeypatch)
+        with pytest.raises(ToolError):
+            call(env, "download_hf_file", self.WRITTEN)
+        rows = [e for e in env.registry.audit.entries(50) if e["tool"] == "download_hf_file"]
+        by_outcome = {e["outcome"]: e for e in rows}
+        for outcome in ("started", "ok", "error"):
+            assert by_outcome[outcome].get("repairs") == [{"kind": "filename", "field": "filename"}], (outcome, rows)
+
+    def ask(self, env):
+        env.registry.policy_store.replace(ToolPolicy(configured=True, reviewed=[s.name for s in env.registry.list()]))
+
+    def test_a_question_nobody_answered_names_it_and_audits_it(self, env, monkeypatch):
+        """Over MCP the look-up runs before the question: a refusal there (no answer in time) names its repair."""
+        pytest.importorskip("mcp")
+        import asyncio
+
+        from mcp import Client
+
+        from orchestrator import mcp_server
+        self.ask(env)
+        monkeypatch.setattr(mcp_server, "ELICITATION_TIMEOUT", 0.05)
+        server = mcp_server.build_mcp_server(SimpleNamespace(info=SimpleNamespace(version="t"),
+                                                             tool_registry=env.registry), caller="mcp")
+
+        async def slow(ctx, params):
+            await asyncio.sleep(2)
+
+        async def go():
+            async with Client(server, elicitation_callback=slow, mode="legacy") as client:
+                return await client.call_tool("download_hf_file", self.WRITTEN)
+        result = asyncio.run(go())
+        assert result.is_error and "got no answer within" in " ".join(c.text for c in result.content)
+        assert result.structured_content["error"]["notes"] == [FILENAME_NOTE]
+        [end] = [e for e in env.registry.audit.entries(50) if e["outcome"] == "confirmation_timeout"]
+        assert end["repairs"] == [{"kind": "filename", "field": "filename"}]
+
+    def test_a_question_the_client_abandoned_audits_it(self, env):
+        pytest.importorskip("mcp")
+        import asyncio
+
+        import anyio
+        from mcp import Client
+
+        from orchestrator import mcp_server
+        self.ask(env)
+        server = mcp_server.build_mcp_server(SimpleNamespace(info=SimpleNamespace(version="t"),
+                                                             tool_registry=env.registry), caller="mcp")
+        opened = threading.Event()
+
+        async def hang(ctx, params):
+            opened.set()
+            await anyio.sleep(30)
+
+        async def go():
+            async with Client(server, elicitation_callback=hang, mode="legacy") as client:
+                with anyio.move_on_after(0.5):
+                    await client.call_tool("download_hf_file", self.WRITTEN)
+        asyncio.run(go())
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not [e for e in env.registry.audit.entries(50)
+                                                   if e["outcome"] == "cancelled"]:
+            time.sleep(0.02)
+        assert opened.is_set()
+        [end] = [e for e in env.registry.audit.entries(50) if e["outcome"] == "cancelled"]
+        assert end["repairs"] == [{"kind": "filename", "field": "filename"}], end
+
+    def test_an_exact_name_has_no_note(self, env):
+        started = call(env, "download_hf_file", {"model": REPO, "filename": "tiny-q4_k_m.gguf"})
+        assert not [n for n in started.notes if n.startswith("filename:")]
+        wait_job(env, started.job_id)
+
+
 # --- list_local_files ----------------------------------------------------------------------------------------------------
 
 class TestLocalFiles:

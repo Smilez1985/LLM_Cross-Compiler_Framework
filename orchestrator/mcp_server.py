@@ -78,7 +78,7 @@ from orchestrator.tools.output import has_untrusted, notes_text
 from orchestrator.tools.policy import Decision
 from orchestrator.tools.registry import (TOO_LONG_NEXT, AuditUnavailable, LimitHit, ResourceSpec, ResourceUnknown,
                                          ToolContext, ToolDenied, ToolError, ToolRegistry, ToolSpec, arguments_key,
-                                         repair_notes, text_sha256)
+                                         call_repairs, repair_notes, text_sha256)
 from orchestrator.tools.spec import CallFacts
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -506,6 +506,8 @@ def with_repair_notes(result, notes: List[str]):
     elif not content[last].text.endswith(suffix):
         content[last] = TextContent(type="text", text=content[last].text + suffix)
     return result.model_copy(update={"structured_content": {**data, "error": error}, "content": content})
+
+
 _FIELD_NAME = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 
 
@@ -851,6 +853,8 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
         tool_ctx.repairs = list(state.repairs)
         tool_ctx.facts = state.facts  # what the question showed: the handler is bound to exactly these
         tool_ctx.limits_checked = state.limits_checked
+        # The look-up's repairs (a file name in another letter case) join the normalizer's in every refusal below.
+        _note_repairs(repair_notes(call_repairs(tool_ctx)))
         kept.drop(spec, kwargs, tool_ctx)
         # The call has reached its decision (an answer, a refusal, the policy): a question about it is closed, also
         # when a policy tightened meanwhile refuses it now (that refusal is its record).
@@ -904,6 +908,8 @@ def make_tool_function(spec: ToolSpec, registry: ToolRegistry, questions: Option
             raise
         except ToolError as e:
             state.audited = True
+            if e.notes:  # the registry's notes of this call: also the repairs of a look-up that refused
+                _note_repairs(e.notes)
             message = error_text(spec.name, e, notes=False)  # the repair notes come with every refusal
             code = e.code
             if asked and not approved:
@@ -1426,7 +1432,7 @@ def build_mcp_server(framework, registry: Optional[ToolRegistry] = None, lifespa
                 if not state.audited:
                     ctx = (_tool_context(context, caller, instance) if context is not None
                            else ToolContext(current_caller()))
-                    ctx.repairs = list(state.repairs)
+                    ctx.repairs, ctx.facts = list(state.repairs), state.facts  # with the look-up's repairs
                     try:
                         with anyio.CancelScope(shield=True):  # a cancelled call is recorded as well
                             await anyio.to_thread.run_sync(_audit_rejection, registry, audit_name, audit_arguments,

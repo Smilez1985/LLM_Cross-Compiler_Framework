@@ -158,14 +158,16 @@ LCF_SMOKE_PYTHON=.venv/bin/python scripts/mcp_client_smoke.sh
 - `scripts/mcp_smoke_check.py` then checks the outcomes from the isolated audit database, never from the model's
   answer: the client line, `get_status` ran, an unknown argument was refused with a suggestion, the declared alias
   `quant` was recorded on a call that ran and on one that was refused, and a call that needs a confirmation
-  (`update_settings`) did not run without an answer. Whether the client was shown the repair note in the result and
-  in the refusal is read from the tool results in the client's JSON output.
+  (`update_settings`) did not run without an answer: it was asked, or it ended for want of an answer; a refusal
+  before any question (a denied permission, say) fails this check, because it tests nothing. Whether the client was
+  shown the repair note in the result and in the refusal is read from the tool results in the client's JSON output.
 - Exit codes: 0 all checks passed, 1 a check failed, 2 a setup problem (for example a Python without the
   framework's dependencies), 77 skipped because the claude command is missing or not signed in.
 - The claude command signs in by itself: the script never reads, copies or passes Claude credentials or tokens.
-  The client's cache, where it logs the server's stderr, is in the temporary folder too, which is removed at the
-  end (`LCF_SMOKE_KEEP=1` keeps it); the claude command updates its own settings file as on every run. No Docker
-  is needed. `LCF_SMOKE_CLAUDE` names another claude command, `LCF_SMOKE_TIMEOUT` the seconds per prompt (300).
+  The client's cache, where it logs the server's stderr, and its temporary files (`TMPDIR`) are in the temporary
+  folder too, which is removed at the end (`LCF_SMOKE_KEEP=1` keeps it); the claude command updates its own
+  settings file as on every run. No Docker is needed. `LCF_SMOKE_CLAUDE` names another claude command,
+  `LCF_SMOKE_TIMEOUT` the seconds per prompt (300).
 - `tests/test_mcp_smoke_check.py` tests the checker with fixture databases, the isolation of the server's
   environment, the skip rules and the script end to end with a stand-in client.
 

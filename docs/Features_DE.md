@@ -661,7 +661,12 @@ So läuft eine Frage mit Tools ab:
   wie auch immer der Aufruf endet: ein ungültiger Wert, ein Limit, eine verweigerte Berechtigung, zu wenig
   Speicherplatz schon vor der Frage, ein „Nein“, eine Frage, die niemand rechtzeitig beantwortet, die
   Wiederholungssperre. So lernt ein Modell den richtigen Argumentnamen auch aus einer Ablehnung, auf Dittos eigenem
-  Weg, als MCP-Client und mit Ditto als MCP-Client eines anderen Frameworks.
+  Weg, als MCP-Client und mit Ditto als MCP-Client eines anderen Frameworks. Eine Reparatur, die die Vorabprüfung
+  des Tools vor der Frage macht, wird genauso genannt und als Reparatur festgehalten (nur Art und Feld):
+  `download_hf_file` mit einem Dateinamen in anderer Groß- und Kleinschreibung („filename: model.gguf (you wrote
+  MODEL.gguf)“), auch wenn sich danach der Speicherplatz als zu klein herausstellt. Eine wartende Freigabe, die du
+  ablehnst oder die nach deiner Freigabe abgelehnt wird, beendet ihren Job mit denselben Hinweisen in
+  `get_job_status` (`error.notes`).
 - MCP-Clients bekommen das eigene geschlossene Eingabeschema jedes Tools (`additionalProperties: false`), dasselbe,
   das Dittos Modell sieht.
 - Tool-Argumente, die ein lokales Modell mit Codeblock-Zäunen oder in Python-Schreibweise schickt (einfache

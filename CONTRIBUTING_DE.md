@@ -163,15 +163,17 @@ LCF_SMOKE_PYTHON=.venv/bin/python scripts/mcp_client_smoke.sh
 - `scripts/mcp_smoke_check.py` prüft danach die Ergebnisse aus der isolierten Audit-Datenbank, nie aus der Antwort
   des Modells: die Client-Zeile, `get_status` lief, ein unbekanntes Argument wurde mit Vorschlag abgelehnt, der
   erklärte Alias `quant` wurde bei einem Aufruf, der lief, und bei einem abgelehnten festgehalten, und ein Aufruf,
-  der eine Bestätigung braucht (`update_settings`), lief ohne Antwort nicht. Ob der Client den Reparaturhinweis im
-  Ergebnis und in der Ablehnung gezeigt bekam, liest er aus den Tool-Ergebnissen in der JSON-Ausgabe des Clients.
+  der eine Bestätigung braucht (`update_settings`), lief ohne Antwort nicht: Er wurde gefragt, oder er endete mangels
+  Antwort; eine Ablehnung vor jeder Frage (etwa eine verweigerte Berechtigung) lässt diese Prüfung scheitern, weil sie
+  nichts prüft. Ob der Client den Reparaturhinweis im Ergebnis und in der Ablehnung gezeigt bekam, liest er aus den
+  Tool-Ergebnissen in der JSON-Ausgabe des Clients.
 - Exit-Codes: 0 alle Prüfungen bestanden, 1 eine Prüfung fehlgeschlagen, 2 ein Problem der Umgebung (etwa ein Python
   ohne die Abhängigkeiten des Frameworks), 77 übersprungen, weil der claude-Befehl fehlt oder nicht angemeldet ist.
 - Der claude-Befehl meldet sich selbst an: Das Skript liest, kopiert oder übergibt nie Claude-Zugangsdaten oder
-  Tokens. Der Cache des Clients, in dem er das stderr des Servers protokolliert, liegt ebenfalls im temporären
-  Ordner, der am Ende gelöscht wird (`LCF_SMOKE_KEEP=1` behält ihn); der claude-Befehl aktualisiert seine eigene
-  Einstellungsdatei wie bei jedem Lauf. Docker wird nicht gebraucht. `LCF_SMOKE_CLAUDE` nennt einen anderen
-  claude-Befehl, `LCF_SMOKE_TIMEOUT` die Sekunden je Prompt (300).
+  Tokens. Der Cache des Clients, in dem er das stderr des Servers protokolliert, und seine temporären Dateien
+  (`TMPDIR`) liegen ebenfalls im temporären Ordner, der am Ende gelöscht wird (`LCF_SMOKE_KEEP=1` behält ihn); der
+  claude-Befehl aktualisiert seine eigene Einstellungsdatei wie bei jedem Lauf. Docker wird nicht gebraucht.
+  `LCF_SMOKE_CLAUDE` nennt einen anderen claude-Befehl, `LCF_SMOKE_TIMEOUT` die Sekunden je Prompt (300).
 - `tests/test_mcp_smoke_check.py` testet die Prüfung mit Fixture-Datenbanken, die Isolation der Server-Umgebung, die
   Regeln fürs Überspringen und das Skript von Anfang bis Ende mit einem Ersatz-Client.
 
