@@ -55,12 +55,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - Modelle der Wissensbasis werden nach 10 Minuten ohne Nutzung entladen und bei der nächsten Suche wieder geladen
   (Einstellung `rag_model_idle_minutes`, 0 hält sie geladen, höchstens 7 Tage). Die Zeit läuft ab dem Ende der
   letzten Suche oder des letzten Imports, nie währenddessen.
-- **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install|start|stop|status`
-  betreibt einen gepinnten llama.cpp-`llama-server` auf 127.0.0.1 (Build passend zur Hardware, die die
-  Hardware-Probe findet, wobei freier RAM und VRAM bei jedem Start neu gelesen werden: CUDA, Vulkan, Metal oder CPU,
-  ROCm auf Wunsch; API-Schlüssel je Start in einer privaten Datei; eine geleerte Umgebung, die nur die Variablen
-  behält, die GPUs auswählen oder ihre Treiber finden, sodass keine `LLAMA_*`-Option und keine
-  `GGML_BACKEND_PATH`-Bibliothek den Server erreicht), und `llm-cli ditto models list|download`
+- **Verwaltetes lokales Modell** für Dittos Offline-Modus: `llm-cli ditto runtime install` baut `llama-server` auf
+  deinem Rechner aus dem gepinnten llama.cpp-Commit, zuerst den CPU-Build (ein paar Minuten, danach funktioniert
+  `runtime start`) und dann den GPU-Build, den das Bau-Rezept für Betriebssystem, Architektur und C-Bibliothek des
+  Rechners wählt (in dieser Version Vulkan unter Linux; CUDA-, ROCm-, Windows- und macOS-Builds folgen), jeder auf
+  diesem Rechner geprüft, bevor er genutzt wird; es baut nativ mit deinem Compiler, CMake und Ninja oder im
+  Builder-Container des Frameworks, installiert nie eine Toolchain für dich und nennt die Auswege, wenn beides nicht
+  geht. `llm-cli ditto runtime start|stop|status` betreibt den Server auf 127.0.0.1 (freier RAM und VRAM werden bei
+  jedem Start neu gelesen; API-Schlüssel je Start in einer privaten Datei; eine geleerte Umgebung, die nur die
+  Variablen behält, die GPUs auswählen oder ihre Treiber finden, sodass keine `LLAMA_*`-Option und keine
+  `GGML_BACKEND_PATH`-Bibliothek den Server erreicht); `status` zeigt, ob der genutzte Build selbst gebaut,
+  importiert oder „prebuilt, not self-built“ ist, seine Build-ID, seinen Commit und seine Prüfung, und ob ein neuer
+  Build nötig oder empfohlen ist. Das offizielle vorgebaute Archiv von upstream ist nur die ausdrückliche Wahl
+  `runtime install --prebuilt`. `llm-cli ditto models list|download`
   lädt Qwen3.5-Modelle in gepinnten Revisionen in den Ordner `ditto/` des eingestellten Modellordners
   (`models_dir`, den Ditto nutzt; die Laufzeit nimmt ihn auch, wenn sie keinen Ordner bekommt) und prüft sie
   anhand von Größe und sha256. Die Modellstufen reichen bis zu 2-Bit-Modellen für schwache Hardware (3 GB RAM).
@@ -147,9 +154,17 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   laufender Server gestartet wurde. Ein Build von einem deiner anderen Rechner kann importiert werden: Seine Dateien
   werden gegen das Manifest geprüft, seine Build-ID gegen seinen Bauplan und sein Commit gegen den Pin, und du
   bestätigst, bevor eines seiner Programme läuft; danach muss jedes seiner Programme die Version des Pins melden,
-  nicht die, die das Archiv erwartet. `runtime install` von Ditto lädt weiterhin das vorgefertigte Archiv, bis Ditto
-  auf diesen Build wechselt. Ein CPU-Build von `llama-server` und `llama-bench` am Pin dauerte auf einer virtuellen
-  Maschine mit 4 Kernen 189 s und ergab 28 MB Programme.
+  nicht die, die das Archiv erwartet. `runtime install` von Ditto baut darüber. Ein CPU-Build von `llama-server` und
+  `llama-bench` am Pin dauerte auf einer virtuellen Maschine mit 4 Kernen 189 s und ergab 28 MB Programme; Dittos
+  CPU-Build mit zusätzlich `llama-cli` und `llama-perplexity` dauerte 195 s.
+- **Builds von Dittos Server wechseln den Rechner**: `llm-cli ditto runtime export DATEI` schreibt den genutzten
+  selbst gebauten Build, und `llm-cli ditto runtime import DATEI` auf einem anderen Rechner derselben Art prüft ihn
+  gegen den Pin und sein Manifest, fragt, bevor eines seiner Programme läuft, prüft ihn dort und macht ihn zum aktiven
+  Build. Ein mit `-march=native` gemachter Build wird abgelehnt, bevor irgendetwas läuft, auf einer CPU eines anderen
+  Herstellers oder ohne eine der CPU-Funktionen der CPU, die ihn gebaut hat (er bräche bei der ersten Rechnung mit
+  SIGILL ab); `runtime start` und die Perplexity-Prüfung überspringen einen solchen Build ebenso, etwa in einem
+  Benutzerordner, den sich mehrere Rechner teilen. `llm-cli ditto runtime prune` entfernt alte Builds und behält immer
+  den aktiven Build, den CPU-Ersatz und den Build, aus dem ein laufender Server gestartet wurde.
 - `llm-cli doctor` prüft die lokale llama.cpp-Laufzeit: einen genutzten selbst gebauten Build, der verändert wurde
   (Fehler) oder älter als der Pin ist (Warnung), das genutzte vorgefertigte Archiv (Information: nicht selbst gebaut)
   und ob dieser Rechner Compiler, CMake und Ninja für einen nativen Build hat (Information, mit dem Builder-Container
@@ -466,6 +481,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nennt das Startskript der selbst gebauten Geräte-Laufzeit, wenn sie installiert ist, und sonst, wie man sie
   deployt (`llm-cli device runtime build` und `deploy`). `llm-cli scan --device` merkt sich den SSH-Benutzer als
   Deploy-Benutzer des Boards (nie root).
+- Die Perplexity-Prüfung des Dataset-Managers nutzt das selbst gebaute `llama-perplexity` dieses Rechners, statt
+  `ghcr.io/smilez1985/llm-runtime` zu holen: Katalogmodelle nativ; jedes andere Modell nativ nur nach deiner
+  Zustimmung, die zuerst ins Tool-Audit-Log geschrieben wird; die Docker-Sandbox (das eigene, lokal gebaute Image des
+  Builds, ohne Netzwerk) auf Wunsch. Eine gescheiterte Messung ist ein Fehler mit Grund statt der Werte 999.99 oder
+  888.88.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -649,8 +669,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   alle, das Überschreiben eines Datenträgers), ganz gleich, welche Anweisungen ein Build-Log oder ein
   Modellname dem Modell gegeben hat.
 - Anfragen an lokale Modellserver auf 127.0.0.1 laufen nie über einen HTTP(S)-Proxy aus der Umgebung.
-- Downloads lokaler Modelle werden abgelehnt, wenn Größe und sha256 nicht gepinnt sind; das Archiv mit dem
-  Server-Programm wird genauso geprüft und atomar installiert.
+- Downloads lokaler Modelle werden abgelehnt, wenn Größe und sha256 nicht gepinnt sind; das offizielle vorgebaute
+  Archiv mit dem Server-Programm (nur mit `runtime install --prebuilt`) wird genauso geprüft, atomar installiert und
+  nie auf musl oder einer älteren glibc angeboten als der, gegen die es gebaut wurde.
+- Eine Startregel für jedes llama.cpp-Programm, das das Framework startet (`orchestrator/runtime/server_policy.py`):
+  Dittos Server, die Prüfungen nach dem Build und die Perplexity-Prüfung teilen eine Liste verbotener Optionen (Tools,
+  Agentenmodus, MCP, Weboberfläche, entferntes Rechnen, Downloads, ein Prompt-Protokoll auf der Platte, ein Schlüssel
+  oder Token auf der Befehlszeile, in jeder Schreibweise, die llama.cpp annimmt, auch `--a_b` für `--a-b`) und eine
+  geleerte Umgebung, und ein Server lauscht nur auf 127.0.0.1 und liest seinen Schlüssel aus einer privaten Datei,
+  unmittelbar vor dem Start noch einmal geprüft. `runtime start` startet nur einen Build, der seine Prüfung auf diesem
+  Rechner bestanden hat, noch zu seinem Manifest passt und vom gepinnten Commit ist (sonst seinen CPU-Ersatz, sonst
+  nichts); ein selbst gebauter Build, der nicht genutzt werden kann, weicht nie von selbst auf das vorgebaute Archiv
+  aus, und ein offizielles Archiv, das eine frühere Version heruntergeladen hat, wird erst nach
+  `runtime install --prebuilt` genutzt (das es übernimmt, ohne es neu herunterzuladen).
 - Deep Ingest liest robots.txt so, wie RFC 9309 es beschreibt, mit einer vorsichtigen Abweichung. Regeln mit `*`
   oder `$` (etwa `Disallow: /*.pdf$`), ein `Allow` vor einem längeren `Disallow`, jede Gruppe `User-agent: *` nach
   der ersten und eine Datei, die mit einer Byte Order Mark beginnt, wurden bisher ignoriert, sodass der Crawler

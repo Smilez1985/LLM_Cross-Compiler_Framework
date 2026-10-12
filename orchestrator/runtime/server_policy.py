@@ -2,26 +2,41 @@
 """
 The one policy for starting llama.cpp binaries (decision D22, design P13).
 
-Every launcher the framework has (Ditto's server, the build verification, the device start script and the systemd
-unit of the device runtime, and later the Docker command) takes the forbidden flags and the environment rules from
-here:
+Every launcher the framework has takes the forbidden flags, the environment rules and the server options from here:
+Ditto's server (llama_server.py: server_command, server_env), the build verification (build/verify.py: check_command,
+cleared_env, server_tools_check_command), the dataset manager's perplexity check (check_command, cleared_env), the
+device runtime's start script and systemd unit (device/launcher.py: SERVER_FIXED, START_SCRIPT_OPTIONS,
+check_server_command, posix_cleared_env) and the checks on a board over SSH (device/remote.py: check_command,
+posix_cleared_env); later the Docker command.
 
 - FORBIDDEN_FLAGS: llama-server options that give the model its own tools, file or shell access, MCP clients, a web
-  UI, remote compute (RPC), state endpoints or a key on the command line. None of them may reach a command line, in
-  any spelling llama.cpp accepts: it reads `--a_b` as `--a-b` (common/arg.cpp at the pin), so the check does too.
+  UI, remote compute (RPC), state endpoints, downloads (Hugging Face, URLs, Docker Hub), a prompt log on disk,
+  programs run from a folder, or a key or token on the command line. None of them may reach a command line, in any
+  spelling llama.cpp accepts: every alias, and `--a_b` for `--a-b` (common/arg.cpp at the pin replaces the
+  underscores of long options), so the check reads them the same way (option_name).
   Self-built servers are also compiled without subprocess support (LLAMA_SUBPROCESS=OFF), so even a forbidden
   --tools would fail; the list is still needed for the in-process file tools and the other options.
 - Environment variables are a second way to set every llama-server option (LLAMA_ARG_*, LLAMA_API_KEY), and
   llama.cpp reads more of them: GGML_BACKEND_PATH loads a library into the server, AIP_MODE/AIP_HTTP_PORT move its
-  port. So every launcher starts from a cleared environment (cleared_env: HOME, a fixed PATH, the C locale);
-  server_env() for Ditto's server adds only the variables of SERVER_ENV_PASS from the caller's environment (which GPUs
-  the server sees and where the GPU drivers are), nothing else: no LLAMA_*, no proxy, no token.
+  port. So every launcher starts from a cleared environment (cleared_env on this machine, posix_cleared_env written
+  out for a board: HOME, a fixed PATH, the C locale); server_env() for Ditto's server adds only the variables of
+  SERVER_ENV_PASS from the caller's environment (which GPUs the server sees and where the GPU drivers are), nothing
+  else: no LLAMA_*, no proxy, no token.
+- Every other llama.cpp program the framework runs (llama-bench and llama-perplexity of the build verification, of
+  the checks on a board and of the dataset manager's perplexity check) goes through check_command() and the cleared
+  environment as well.
+- A llama-server listens on the loopback address only and reads its API key from a file only its user can read: the
+  key never appears on a command line or in a process listing, and the server never answers on another interface.
+  check_server_command() holds every server command line to that (exactly one --host LOOPBACK, one --port, one
+  --api-key-file, and the options of SERVER_FIXED: no web UI, no /slots, the chat template engine, offline);
+  server_command() builds Ditto's, write_key_file() writes its key, and the device start script is generated from
+  the same constants and checked with the same function.
 
-SERVER_TOOLS_CHECK is the one deliberate exception: the build verification starts a freshly built llama-server with
---tools once, with a model path that does not exist and a cleared environment, and requires it to refuse.
+SERVER_TOOLS_CHECK is the one deliberate exception: the build verification (and the checks on a board) start a
+freshly built llama-server with --tools once, with a model path that does not exist and a cleared environment, and
+require it to refuse.
 
-The device runtime's start script (orchestrator/runtime/device/launcher.py) is generated from DEVICE_SERVER_FIXED
-(loopback, the key file, no web UI, no slots, offline) and START_SCRIPT_OPTIONS, the few tuning options it passes on;
+The device runtime's start script passes on only the few tuning options of START_SCRIPT_OPTIONS (with checked values);
 it refuses every option of FORBIDDEN_FLAGS by name and every other option that is not in START_SCRIPT_OPTIONS.
 """
 
@@ -34,10 +49,12 @@ FORBIDDEN_FLAGS = frozenset({
     "--ui-mcp-proxy", "--webui-mcp-proxy", "--ui", "--webui", "--api-key", "--props", "--media-path",
     "--slot-save-path", "--models-dir", "--models-preset", "--path", "-hf", "--hf-repo", "-mu", "--model-url",
     "--rpc", "--slots", "--metrics",
-    # The other names of -hf at the pin (common/arg.cpp), and the options next to it that download a model, a draft
-    # model or a projector, or put a token on the command line. Every launcher also passes --offline.
+    # The other names of the downloads at the pin (common/arg.cpp: -hf/-hfr/--hf-repo, the model file and the token
+    # of Hugging Face, a model from Docker Hub, the draft model's Hugging Face repository, the multimodal projector's
+    # URL), the prompt log on disk and the folder llama.cpp runs ffmpeg and ffprobe from. Every launcher also passes
+    # --offline.
     "-hfr", "-hff", "--hf-file", "-hft", "--hf-token", "-dr", "--docker-repo", "-mmu", "--mmproj-url",
-    "--spec-draft-hf", "-hfd", "-hfrd", "--hf-repo-draft",
+    "--spec-draft-hf", "-hfd", "-hfrd", "--hf-repo-draft", "--log-prompts-dir", "--video-ffmpeg-dir",
 })
 # What Ditto's server may still take from the caller's environment (decision D22: a cleared environment for every
 # launcher): GPU selection of the CUDA, ROCm and Vulkan backends and where the GPU drivers and the Vulkan loader's
@@ -59,12 +76,16 @@ _WINDOWS_PASS = ("SYSTEMROOT", "SystemRoot", "WINDIR", "TEMP", "TMP")
 SERVER_TOOLS_CHECK = ("--tools", "all")
 SERVER_TOOLS_REFUSAL = "subprocess is not enabled on this build"
 
-# --- the device runtime (start script and systemd unit) ---
+# --- every llama-server: loopback, key file, fixed options ---
 LOOPBACK = "127.0.0.1"
+# Options every server gets after -m, --host, --port and --api-key-file (Ditto's server and the device start script
+# alike): no web UI, no /slots (it shows the prompts), the chat template engine (tool calls need it), and never a
+# download (the model is a local file).
+SERVER_FIXED = ("--no-ui", "--no-slots", "--jinja", "--offline")
+KEY_FILE_PREFIX = "server-"
+
+# --- the device runtime (start script and systemd unit) ---
 DEVICE_DEFAULT_PORT = 8080
-# Every server the start script starts gets these options after `-m MODEL --host 127.0.0.1 --port PORT
-# --api-key-file KEY`: no web UI, no /slots (it shows the prompts), the chat template engine, and never a download.
-DEVICE_SERVER_FIXED = ("--no-ui", "--no-slots", "--jinja", "--offline")
 # The tuning options the start script passes on, each with the kind of value it accepts (checked in the script:
 # uint digits, sint optional minus and digits, hex a CPU mask, bit 0 or 1, layers digits/auto/all, switch
 # on/off/auto, loadmode one of llama.cpp's load modes, name letters, digits and ._:-). Names as at the pin
@@ -148,5 +169,67 @@ def server_tools_check_command(server: Path, missing_model: Path, port: int, key
     that does not exist, so even a server that accepted the tools would stop before it serves anything."""
     if Path(missing_model).exists():
         raise PolicyError("the --tools check needs a model path that does not exist")
-    return [str(server), *SERVER_TOOLS_CHECK, "-m", str(missing_model), "--host", "127.0.0.1", "--port", str(port),
+    return [str(server), *SERVER_TOOLS_CHECK, "-m", str(missing_model), "--host", LOOPBACK, "--port", str(port),
             "--api-key-file", str(key_file), "--no-ui", "--offline"]
+
+
+# --- a llama-server command line ---------------------------------------------------------------------------------------
+
+def _values(cmd: Sequence[str], option: str) -> List[str]:
+    """Every value of `option` in an argument list, in every spelling llama.cpp reads as that option (`--host X`,
+    `--api_key_file X`; `--host=X`, which llama.cpp refuses, counts too): llama.cpp takes the last one, so a second
+    one in another spelling must count."""
+    args = [str(a) for a in list(cmd)[1:]]
+    found = []
+    for i, arg in enumerate(args):
+        if option_name(arg) != option:
+            continue
+        if "=" in arg:
+            found.append(arg.split("=", 1)[1])
+        else:
+            found.append(args[i + 1] if i + 1 < len(args) else "")
+    return found
+
+
+def check_server_command(cmd: Sequence[str]) -> None:
+    """Raises PolicyError unless a llama-server command line keeps the policy: no forbidden option, exactly one --host
+    and it is the loopback address, exactly one --port, exactly one --api-key-file (so the key is read from a file and
+    never given on the command line), and every option of SERVER_FIXED."""
+    check_command(cmd)
+    hosts = _values(cmd, "--host")
+    if hosts != [LOOPBACK]:
+        raise PolicyError(f"llama-server must listen on {LOOPBACK} only (found --host {hosts or 'missing'})")
+    if len(_values(cmd, "--port")) != 1:
+        raise PolicyError("llama-server needs exactly one --port")
+    keys = _values(cmd, "--api-key-file")
+    if len(keys) != 1 or not keys[0]:
+        raise PolicyError("llama-server needs exactly one --api-key-file (the key is never given on the command line)")
+    names = {option_name(a) for a in list(cmd)[1:]}
+    missing = [opt for opt in SERVER_FIXED if opt not in names]
+    if missing:
+        raise PolicyError(f"llama-server must be started with {', '.join(missing)}")
+
+
+def server_command(server: Path, model: Path, *, port: int, key_file: Path, alias: str,
+                   extra: Sequence[str] = ()) -> List[str]:
+    """The llama-server command line of a server on this machine: the model and its alias, loopback, the port, the key
+    file and the fixed options, then `extra` (context, cache, GPU layers, idle time). Checked before it is returned."""
+    cmd = [str(server), "-m", str(model), "--alias", str(alias), "--host", LOOPBACK, "--port", str(int(port)),
+           "--api-key-file", str(key_file), *SERVER_FIXED, *[str(a) for a in extra]]
+    check_server_command(cmd)
+    return cmd
+
+
+def write_key_file(folder: Path) -> Tuple[Path, str]:
+    """A new random API key in <folder>/server-<random>.key, created with mode 0600 (never readable by others, not even
+    briefly) and never replacing an existing file. Returns (path, key)."""
+    import secrets
+
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    key = secrets.token_urlsafe(32)
+    path = folder / f"{KEY_FILE_PREFIX}{secrets.token_hex(8)}.key"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+        f.write(key + "\n")
+    return path, key

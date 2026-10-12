@@ -123,7 +123,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `ditto setup` | Die Tool-Berechtigungen festlegen (dieselbe Auswahl wie im Dialog beim ersten Start der GUI) |
 | `ditto ask` | Ditto eine Frage stellen |
 | `ditto eval` | Ditto anhand fester Testfälle bewerten, oder die Suche der Wissensbasis |
-| `ditto runtime install/start/status/stop` | Der verwaltete lokale Modellserver (llama.cpp) für den Offline-Modus |
+| `ditto runtime install/start/status/stop/import/export/prune` | Der verwaltete lokale Modellserver (llama.cpp, auf diesem Rechner gebaut) für den Offline-Modus |
 | `ditto runtime export-source/import-source` | Den festgelegten llama.cpp-Quelltext als Git-Bundle auf einen Rechner ohne Netz tragen (am Commit geprüft) |
 | `ditto models list/download` | Die Modellstufen für den Offline-Modus |
 | `tools list` / `tools permissions` / `tools audit` | Die Tools des Frameworks, ihre Berechtigungen und das Audit-Log |
@@ -651,27 +651,96 @@ Schlüsselbund. Dateien: `~/.llm-framework/runtime/llama.cpp/` (Builds und Zusta
 llm-cli ditto runtime status [--json]
 ```
 
-Zeigt die erkannte Hardware, den empfohlenen llama.cpp-Build und warum, ob ein Build installiert ist, ob der Server
-läuft (Adresse, Prozess, Modell, Kontext), das empfohlene Modell und warum, und die Log-Datei.
+Zeigt die erkannte Hardware; den genutzten Build mit seiner Herkunft (`self-built`, `imported` oder `prebuilt, not
+self-built`), Build-ID, llama.cpp-Commit, Backend, wo und wie lange er gebaut wurde, wann er geprüft wurde und welche
+Geräte er gefunden hat; warum ein gespeicherter Build nicht genutzt werden kann; ob ein neuer Build nötig (die
+Festlegung hat sich geändert) oder empfohlen ist (der Bauplan dieses Rechners hat sich geändert); das GPU-Backend,
+das das Bau-Rezept für diesen Rechner wählt, und warum; welches offizielle vorgebaute Archiv `--prebuilt`
+installieren würde und warum (oder warum keines passt, zum Beispiel bei musl oder einer älteren glibc); ob der Server
+läuft (Adresse, Prozess, Modell, Kontext); das empfohlene Modell und warum; und die Log-Datei. Die Prüfung auf einen
+neuen Build erkennt die Toolchain (sie kompiliert nichts).
 
 | Option | Bedeutung |
 |---|---|
-| `--json` | Maschinenlesbare Ausgabe. |
+| `--json` | Maschinenlesbare Ausgabe (`installed`, `problems`, `rebuild`, `recommended_backend`, `prebuilt_option`, ...). |
 
 #### ditto runtime install
 
 ```
-llm-cli ditto runtime install [--backend auto|cpu|vulkan|cuda|rocm|metal] [--force] [-y]
+llm-cli ditto runtime install [--backend auto|cpu|vulkan|cuda|rocm|metal] [--placement auto|native|container]
+                              [--jobs N] [--prebuilt] [--force] [-y]
 ```
 
-Lädt den festgelegten llama.cpp-Build für diesen Rechner herunter, prüft Größe und sha256 vor dem Entpacken und
-installiert ihn.
+Baut `llama-server` (mit `llama-cli`, `llama-bench` und `llama-perplexity`) auf diesem Rechner aus dem festgelegten
+llama.cpp-Commit (`configs/llama_runtime.yml`, `llama_cpp.source`). Es untersucht den Rechner, erkennt die Toolchain,
+zeigt die geplanten Builds und fragt. Der CPU-Build wird zuerst gebaut, geprüft und aktiv gemacht (er bleibt der
+Ersatz); danach wird der GPU-Build gebaut, den das Rezept wählt, und aktiv, sobald er geprüft ist. Ein GPU-Build, der
+hier noch nicht gebaut werden kann oder scheitert, lässt den CPU-Build aktiv und wird gemeldet. Jeder Build wird auf
+diesem Rechner geprüft, bevor er behalten wird: `--version` nennt die festgelegte Build-Nummer und den Commit,
+`--list-devices` zeigt das geplante Gerät, und der Server lehnt `--tools` ab. Ein schon gespeicherter Build mit
+derselben Build-ID wird wiederverwendet, nicht neu gebaut. Ein laufender Server läuft weiter; der nächste
+`runtime start` nutzt den neuen Build.
+
+- **Toolchain:** GCC oder Clang, CMake 3.15 oder neuer und Ninja (Debian/Ubuntu: `build-essential cmake
+  ninja-build`). Ohne sie läuft der Build im Builder-Container des Frameworks (Docker, `--network none`). Ohne beides
+  nennt der Befehl die Auswege und endet mit 1. Für dich wird nichts installiert.
+- **Quellcode:** Der festgelegte Commit wird einmal geholt (etwa 40 MB Download, 215 MB auf der Platte), nachdem du
+  zugestimmt hast, und über seinen Commit geprüft; auf einem Rechner ohne Netzwerk importiere ihn vorher
+  (`ditto runtime import-source`). Konfiguration und Build laufen ohne Netzwerk.
+- **Backends in dieser Version:** CPU und Vulkan unter Linux. CUDA- und ROCm-Builds sowie Windows und macOS folgen;
+  auf einem Rechner mit NVIDIA-GPU läuft bis dahin der CPU-Build (`--backend vulkan` baut einen Vulkan-Server für
+  die GPU).
+- **Exit-Code 1** auch, wenn ein ausdrücklich verlangtes GPU-Backend nicht gebaut werden konnte (der CPU-Build ist
+  aktiv).
 
 | Option | Bedeutung |
 |---|---|
-| `--backend [auto\|cpu\|vulkan\|cuda\|rocm\|metal]` | Zu installierender Build (Standard `auto`). ROCm wird nur genutzt, wenn er hier gewählt wird. |
-| `--force` | Erneut herunterladen und entpacken, auch wenn er installiert ist. |
-| `-y, --yes` | Vor dem Download nicht fragen. |
+| `--backend [auto\|cpu\|vulkan\|cuda\|rocm\|metal]` | GPU-Backend, das nach dem CPU-Build gebaut wird (Standard `auto`: das Bau-Rezept wählt; `cpu`: nur der CPU-Build). Mit `--prebuilt`: das zu installierende Archiv. |
+| `--placement [auto\|native\|container]` | Wo der Build läuft (Standard `auto`: nativ, wenn die Toolchain vollständig ist, sonst im Builder-Container). |
+| `--jobs INTEGER RANGE` | Parallele Compiler-Jobs, 1 bis 256. Standard: aus den CPUs und dem freien Speicher. |
+| `--prebuilt` | Stattdessen das offizielle vorgebaute Archiv von upstream herunterladen (Größe und sha256 vor dem Entpacken geprüft). Nur auf diese Anforderung, immer als „prebuilt, not self-built“ angezeigt. Ein schon installiertes Archiv, auch eines, das eine frühere Version heruntergeladen hat (es wird ohne diese Anforderung nicht genutzt), wird übernommen, ohne es neu herunterzuladen. Linux-Archive brauchen glibc 2.35 oder 2.39; bei musl wird keines angeboten. |
+| `--force` | Mit `--prebuilt`: erneut herunterladen und entpacken, auch wenn es installiert ist. |
+| `-y, --yes` | Vor dem Bauen, dem Holen des Quellcodes oder dem Download nicht fragen. |
+
+#### ditto runtime import
+
+```
+llm-cli ditto runtime import DATEI [-y]
+```
+
+Importiert einen `llama-server`-Build, der mit `ditto runtime export` auf einem anderen Rechner derselben Art gemacht
+wurde (gleiches Betriebssystem und gleiche Architektur, und eine mindestens so neue C-Bibliothek). Das Archiv wird
+sicher entpackt (die Größe wird vorher begrenzt), jede Datei gegen sein Manifest geprüft, die Build-ID gegen seinen
+Plan, der Plan gegen die Bauregeln (keine Download-Option, keine Subprozess-Unterstützung) und der Commit gegen die
+Festlegung. Ein mit `-march=native` gemachter Build wird abgelehnt, wenn diese CPU von einem anderen Hersteller ist
+oder ihr eine CPU-Funktion der bauenden CPU fehlt (etwa AVX-512): Er bräche bei der ersten Rechnung mit SIGILL ab.
+Dann zeigt der Befehl, wo der Build gemacht wurde, und fragt, bevor eines seiner Programme läuft; danach
+wird der Build hier wie ein lokaler geprüft und wird der aktive Build (ein CPU-Build auch der Ersatz). Importiere nur
+Builds, die du selbst gemacht hast.
+
+| Option | Bedeutung |
+|---|---|
+| `-y, --yes` | Nicht fragen, bevor die importierten Programme für die Prüfung laufen. |
+
+#### ditto runtime export
+
+```
+llm-cli ditto runtime export DATEI
+```
+
+Schreibt den genutzten selbst gebauten Build nach `DATEI` (`.tar.gz`: seine Programme, `build.json` und
+`manifest.json`, keine Logs) für `ditto runtime import` auf einem anderen Rechner derselben Art. Das vorgebaute
+Archiv wird nie exportiert.
+
+#### ditto runtime prune
+
+```
+llm-cli ditto runtime prune [--keep N]
+```
+
+Entfernt alte selbst gebaute Builds. Der aktive Build, der CPU-Ersatz und der Build, aus dem ein laufender Server
+gestartet wurde, bleiben immer erhalten, dazu die `N` neuesten anderen (Standard 2). `runtime install` tut dasselbe
+nach jedem Build.
 
 #### ditto runtime start
 
@@ -679,9 +748,13 @@ installiert ihn.
 llm-cli ditto runtime start [--model STUFE] [--ctx N] [--sleep-idle SEKUNDEN]
 ```
 
-Startet `llama-server` auf 127.0.0.1 mit einem freien Port und einem neuen API-Schlüssel in einer privaten Datei. Der
-Server läuft weiter, nachdem der Befehl zurückkehrt, bis `llm-cli ditto runtime stop`. Läuft dasselbe Modell schon,
-wird es weiterverwendet.
+Startet `llama-server` auf 127.0.0.1 mit einem freien Port und einem neuen API-Schlüssel in einer privaten Datei, mit
+einer geleerten Umgebung und ohne die Optionen, die die gemeinsame Startregel verbietet. Gestartet wird nur ein Build,
+der seine Prüfung auf diesem Rechner bestanden hat, noch zu seinem Manifest passt und vom festgelegten Commit ist (der
+aktive Build, sonst sein CPU-Ersatz), oder das vorgebaute Archiv nach `install --prebuilt`; ein selbst gebauter
+Build, der nicht genutzt werden kann, weicht nie auf das vorgebaute Archiv aus. Der Server läuft weiter, nachdem der
+Befehl zurückkehrt, bis `llm-cli ditto runtime stop`. Läuft dasselbe Modell schon aus demselben Build, wird es
+weiterverwendet.
 
 | Option | Bedeutung |
 |---|---|

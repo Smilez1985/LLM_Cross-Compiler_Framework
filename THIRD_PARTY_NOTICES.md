@@ -11,10 +11,13 @@ Source: https://github.com/ggml-org/llama.cpp, pinned by commit in `configs/llam
 The framework contains no llama.cpp code. It fetches the pinned commit and builds it on the user's machine
 (`orchestrator/runtime/build/`); the builds it makes (Ditto's local server, the conversion tools in target
 images, device runtimes) are llama.cpp binaries under llama.cpp's MIT licence, so the notice below goes with
-them wherever they are passed on. Compilers, CMake, Ninja, the packages of the builder image's base and, later, GPU
-toolkits are installed by the user from their vendors under the vendors' own licences; the framework never
-accepts a licence on the user's behalf. The GPU target template downloads NVIDIA's CUDA components (CUDA Toolkit
-licence, LICENSE in each archive) while the user builds that image; the framework ships none of them.
+them wherever they are passed on. A build imported from another machine of the user is the same. Upstream's
+official prebuilt archives are downloaded only when the user asks for them (`llm-cli ditto runtime install
+--prebuilt`), from upstream's release page, under the same licence. Compilers, CMake, Ninja, the packages of the
+builder image's base and, later, GPU toolkits are installed by the user from their vendors under the vendors' own
+licences; the framework never accepts a licence on the user's behalf. The GPU target template downloads NVIDIA's
+CUDA components (CUDA Toolkit licence, LICENSE in each archive) while the user builds that image; the framework ships
+none of them.
 
 A device tarball (`llm-cli device runtime build`) carries this notice as `LICENSE-llama.cpp`. A tarball of an
 OpenMP build also holds `lib/libgomp.so.1`, the OpenMP runtime from the GCC packages of the builder image's base

@@ -570,9 +570,14 @@ The managed runtime gives Ditto a local model without any cloud account. It is c
 [`configs/llama_runtime.yml`](../configs/llama_runtime.yml) is data: a newer build or another model is added there,
 not in code.
 
-- **llama.cpp build b11429** (version 0.6.0) for Linux x86-64 (CPU, Vulkan, CUDA 13.4, CUDA 12.8, ROCm on request),
+- **llama.cpp commit** `d8123504` (tag b11429, version 0.6.0): `ditto runtime install` builds the server from exactly
+  this commit (see [How the runtime is built](#how-the-runtime-is-built-self-built-llamacpp)).
+- **Official prebuilt archives** of b11429, only for the explicit opt-in `ditto runtime install --prebuilt` and
+  always shown as "prebuilt, not self-built": Linux x86-64 (CPU, Vulkan, CUDA 13.4, CUDA 12.8, ROCm on request),
   Linux arm64 (CPU, Vulkan, CUDA 13.4), Windows x86-64 (CPU, Vulkan, CUDA 13.4, CUDA 12.4, ROCm on request),
-  Windows arm64 (CPU) and macOS (Metal on Apple Silicon, CPU on Intel).
+  Windows arm64 (CPU) and macOS (Metal on Apple Silicon, CPU on Intel). Each Linux archive names the glibc it was
+  built against (2.35 for x86-64 CPU and Vulkan, 2.39 for the others, read from upstream's release workflow); a
+  machine with an older glibc, or with musl, is offered none.
 - **Models** at fixed Hugging Face commits, all Apache-2.0:
 
 | Tier | File | Size | Note |
@@ -585,24 +590,35 @@ not in code.
 | `large-iq2` | Qwen3.5-9B-UD-IQ2_M.gguf | 3.4 GiB | 2-bit, only on request; noticeably less accurate |
 | `granite` | granite-4.2-3b-Q4_K_M.gguf | 2.1 GiB | IBM Granite 4.2 3B, other model family, only on request |
 
-Every file has a pinned size and sha256 and is checked before it is unpacked or loaded; entries without both are
-refused. Downloads resume after an interruption, and a build is installed atomically next to the previous one.
+Every download has a pinned size and sha256 and is checked before it is unpacked or loaded; entries without both
+are refused. Downloads resume after an interruption, and a prebuilt archive is installed atomically next to the
+previous one.
 
 ### Which build
 
-`llm-cli ditto runtime status` shows the decision and the reason:
+The self-built server: the build recipe chooses the GPU backend from the machine's hardware profile, following its
+OS, architecture and C library (`recipe.choose_backend`). The CPU build is always built first and stays the
+fallback. A GPU on which Vulkan beats the CPU (every dedicated GPU, AMD Radeon GPUs and APUs such as the Ryzen Z1
+Extreme, Intel Arc) gets a Vulkan build; Mali GPUs on boards only after `llama-bench` shows that Vulkan is faster.
+NVIDIA GPUs will get a CUDA build matched to every GPU and the driver once the CUDA toolkit provisioning lands; until
+then the CPU build runs there, `runtime status` says so, and `--backend vulkan` builds a Vulkan server that also uses
+NVIDIA GPUs. The model tier and the context then follow the build that actually runs.
 
-1. An explicit `--backend` wins (ROCm is only ever used this way; on Linux it needs an installed HIP runtime and a
+The prebuilt opt-in (`--prebuilt`): `llm-cli ditto runtime status` shows which archive it would install and why:
+
+1. Archives whose C library does not fit the machine are never offered (musl, an unknown C library, or an older
+   glibc than the archive's).
+2. An explicit `--backend` wins (ROCm is only ever used this way; on Linux it needs an installed HIP runtime and a
    supported GPU).
-2. Apple Silicon gets the Metal build.
-3. An NVIDIA GPU gets the newest CUDA build that suits every NVIDIA GPU in the machine and its driver. GPUs for which
+3. Apple Silicon gets the Metal build.
+4. An NVIDIA GPU gets the newest CUDA build that suits every NVIDIA GPU in the machine and its driver. GPUs for which
    the build only contains PTX code need the toolkit's own driver: for example an RTX 2080 Ti (compute capability
    7.5) needs driver 570.26 on Linux for the CUDA 12.8 build and branch R615 for CUDA 13.4 (on Windows 551.61 for
    CUDA 12.4). With an older driver the next option is used, and the reason says that a newer driver enables CUDA.
-4. Vulkan, when a Vulkan driver is found and the GPU is worth it: every dedicated GPU, AMD Radeon GPUs and APUs
+5. Vulkan, when a Vulkan driver is found and the GPU is worth it: every dedicated GPU, AMD Radeon GPUs and APUs
    (for example the Ryzen Z1 Extreme) and Intel Arc. Older Intel graphics are usually slower than the CPU and are
    only used with `--backend vulkan`.
-5. Otherwise the CPU build.
+6. Otherwise the CPU build.
 
 ### Which model
 
@@ -623,12 +639,24 @@ recommendation.
 
 ### How the server runs
 
+- **Only verified builds:** `runtime start` starts the active self-built (or imported) build only when it passed its
+  verification on this machine, every file still matches its manifest, it is of the pinned commit and it is built
+  for this machine (OS and architecture, and for a `-march=native` build a CPU of the same vendor with every CPU
+  feature of the CPU it was built on); otherwise the CPU fallback build, and otherwise nothing, with the reason. The
+  prebuilt archive is started only after `install --prebuilt`. An archive an earlier version downloaded without that
+  request is not used: `runtime status` names it, and `install --prebuilt` switches to it without downloading it
+  again. A self-built build that cannot be used never switches to it on its own.
+- **One launch policy:** the forbidden options, the cleared environment, loopback and the key file come from one
+  module, `orchestrator/runtime/server_policy.py`, which every launcher uses: Ditto's server, the build verification
+  and the perplexity check (and the device runtime's start script).
 - **Context length:** computed from the free memory next to the model (free GPU memory, or free RAM on CPUs, Apple
   Silicon and integrated GPUs), rounded to 256 tokens, at least 4096 and at most 32768 (`--ctx` sets it).
 - **Isolation:** `llama-server` listens on 127.0.0.1 only, on a free port. A new random API key per start reaches it
   only through a key file readable by you, and the framework checks that the server refuses requests without the
   key. The web UI and the slots endpoint are off, and the server runs with `--offline`. Options that would give the
-  model its own tools, agent mode, MCP servers, remote computing or a key on the command line are refused. The
+  model its own tools, agent mode, MCP servers or remote computing, that download (Hugging Face, URLs), write the
+  prompts to disk, run programs from a folder, or put a key or token on the command line are refused, in every
+  spelling llama.cpp accepts (its aliases, and `--a_b` for `--a-b`). The
   server starts with a cleared environment: besides your home folder, a fixed `PATH` and the C locale it only gets
   the variables that choose GPUs or locate GPU drivers (`CUDA_VISIBLE_DEVICES`, `HIP_VISIBLE_DEVICES`,
   `ROCR_VISIBLE_DEVICES`, `GGML_VK_VISIBLE_DEVICES`, `HSA_OVERRIDE_GFX_VERSION`, the Vulkan driver variables,
@@ -644,9 +672,11 @@ recommendation.
 
 ### How the runtime is built (self-built llama.cpp)
 
-`llm-cli ditto runtime install` still downloads the official prebuilt archive described above. The framework can
-also build llama.cpp itself from the pinned source; Ditto moves to that build in a later step, and the prebuilt
-download then stays only as an explicit choice, shown as "not self-built".
+`llm-cli ditto runtime install` builds llama.cpp on this machine from the pinned source: it probes the machine,
+detects the toolchain, plans the CPU build and the GPU build, shows them and asks, fetches and checks the source
+once, builds and verifies the CPU build and makes it active, then does the same for the GPU build. A build of
+another machine of the same kind can be imported (`ditto runtime export` there, `ditto runtime import` here). The
+official prebuilt download stays only as the explicit choice `--prebuilt`, shown as "prebuilt, not self-built".
 
 - **One recipe:** the hardware profile of the machine that will run the binaries becomes a build plan: the pinned
   commit, every download-capable option of llama.cpp off, the server without subprocess support
@@ -682,9 +712,31 @@ download then stays only as an explicit choice, shown as "not self-built".
   server uses and the two newest others. A build made on another of your machines can be imported: every file is
   checked against its manifest, the build ID against its plan and the commit against the pin, you confirm before any
   of its programs runs, and then it is verified like a local build. The version it must report comes from the pin,
-  not from the archive, and every program in it is checked, also one the archive does not list.
+  not from the archive, and every program in it is checked, also one the archive does not list. Ditto's import
+  (`ditto runtime import`) refuses a `-march=native` build of a CPU of another vendor or with a CPU feature this CPU
+  lacks (AVX-512, for example) before anything runs: such a build would stop with SIGILL at the first computation,
+  which the checks cannot reach while no smoke-test model is pinned.
 - **Measured** on a 4-core x86-64 virtual machine (GCC 13.3, `-j4`): `llama-server` and `llama-bench` at the pin in
-  189 seconds including the checks, 28 MB of binaries.
+  189 seconds including the checks, 28 MB of binaries; `ditto runtime install` with Ditto's CPU build
+  (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 seconds including the checks.
+
+### Perplexity check of converted models
+
+The dataset manager (`orchestrator/Core/dataset_manager.py`) measures the perplexity of a GGUF model on a text file
+with the self-built `llama-perplexity` of this machine, which `ditto runtime install` builds together with the server.
+No prebuilt runtime image is pulled and no `llama-perplexity` from `PATH` is used: only a stored build that passed its
+verification here, still matches its manifest and is of the pinned commit.
+
+- **Catalog models** (pinned by sha256) run natively.
+- **Every other model** (your conversions, downloads) is untrusted. It runs natively, without Docker overhead, only
+  after your explicit consent, and that consent is written to the tool audit log (`llm-cli tools audit`) before the
+  run; without consent, or when the audit log cannot be written, nothing runs.
+- **Docker sandbox (opt-in):** the run happens in the build's own builder image (only a build made in the builder
+  container has one; it is built locally and never pulled) without network, without capabilities, with a read-only
+  root file system and your user; the program, the model and the text are mounted read-only.
+- Every run uses the shared launch policy (no forbidden option, a cleared environment). Failures are errors with the
+  reason (for example a text too short for the context), never placeholder values.
+- In this version nothing in the GUI or CLI calls the check yet; the benchmark and auto-tune work of the roadmap will.
 
 ---
 
@@ -1095,7 +1147,7 @@ Details: [Module_Developer_Guide.md](Module_Developer_Guide.md).
 | AI | tool permissions set up and readable, audit log intact (changed, removed, wrong key, missing anchor, no key) |
 | Data | shipped calibration data intact (checksums) |
 | Community | installed community packs against the cached index: revoked (error), changed since installation (warning), trust `local` (information) |
-| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning); the prebuilt archive in use, labelled not self-built (information); whether this machine has the toolchain for a native build (information) |
+| Runtime | the self-built llama.cpp build in use: changed files (error), older than the pin (warning); the prebuilt archive, labelled not self-built, in use or installed but not in use (information); whether this machine has the toolchain for a native build (information) |
 
 `--fix` applies the automatic fixes up to `--tier` (1: makes the personal folder private; 2: also removes dangling
 framework images and the Docker build cache) and checks again. Exit codes: 0 OK, 1 warnings, 2 errors; `--json`

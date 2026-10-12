@@ -143,12 +143,14 @@ A change that only works on one Python version is not ready. Typical differences
 
 ## 4. The local model and the evaluation
 
-Tests never download models. To try Ditto's offline mode by hand, use a separate `LLM_FRAMEWORK_HOME` (models go
-to the `models/ditto/` folder of the installation, which is ignored by git):
+Tests never download models, and they never fetch or build llama.cpp: a fixture in `tests/conftest.py` refuses a
+network fetch of the llama.cpp source, so a test of the install uses fakes for the toolchain, the executor and the
+verifier (see `tests/test_runtime_selfbuilt.py`). To try Ditto's offline mode by hand, use a separate
+`LLM_FRAMEWORK_HOME` (models go to the `models/ditto/` folder of the installation, which is ignored by git):
 
 ```bash
 llm-cli ditto runtime status
-llm-cli ditto runtime install
+llm-cli ditto runtime install      # builds llama-server from the pinned commit (a few minutes for the CPU build)
 llm-cli ditto models download small
 llm-cli ditto runtime start --model small
 llm-cli ditto ask "Which formats can the Rockchip target build?"
