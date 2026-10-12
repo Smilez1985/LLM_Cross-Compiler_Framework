@@ -232,9 +232,11 @@ class TestFrameworkTools:
         out = tools.call("search_knowledge", {"query": "rk3588 flags"}, ToolContext("mcp"))
         assert out.results == [] and out.notes == [framework_tools.EMPTY_SEARCH_NOTE]
 
-    def test_build_list_says_what_it_cannot_see(self, tools):
+    def test_build_list_has_no_only_this_process_note(self, tools):
+        # T11: the shared build state shows every process's builds; the note only explains builds of another process
         out = tools.call("list_build_requests", {}, ToolContext("mcp"))
-        assert out.notes == [framework_tools.VISIBILITY_NOTE]
+        assert all(b.process == "this" for b in out.builds)
+        assert out.notes == [] and not any("only" in n for n in out.notes)
 
     def test_structured_content_matches_the_output_schema(self, tools, framework):
         tool, result = mcp_call(framework, "get_build_status", {"request_id": "req-1"})

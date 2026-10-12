@@ -513,6 +513,31 @@ class TestEveryToolRefusesUnknownArguments:
             assert result.is_error and text_of(result) == str(error), spec.name
             assert env.calls == calls, f"{spec.name} ran"
 
+    def test_every_registered_tool_on_dittos_mcp_client_path(self, env):
+        """T12: Ditto as an MCP client of a framework elsewhere sends the model's arguments unchanged; the server
+        refuses an unknown one with a suggestion, and Ditto gets that refusal (as untrusted text), never a call
+        with the argument dropped."""
+        from orchestrator.llm.remote_tools import RemoteConnection, RemoteServer
+        # The caller Ditto is on that server: its named token (the mode refuses a server that names the shared "mcp")
+        server = mcp_server.build_mcp_server(SimpleNamespace(info=SimpleNamespace(version="t"),
+                                                             tool_registry=env.registry), caller="mcp:ditto-box")
+        connection = RemoteConnection(RemoteServer("stdio", command=("lcf",), name="box"), "unused",
+                                      confirm=lambda q, i: True,
+                                      client_factory=lambda elicit: Client(server, elicitation_callback=elicit))
+        specs = env.registry.list()
+        with connection:
+            for spec in specs:
+                fields = list(spec.input_model.model_fields)
+                raw = {**self.valid_call(spec), (fields[0].upper() if fields else "verbose"): "x"}
+                calls = list(env.calls)
+                with pytest.raises(ToolError) as exc:
+                    connection.call(spec.name, raw)
+                text = str(exc.value)
+                assert exc.value.code == "unknown_argument", (spec.name, text)
+                assert (f"Did you mean '{fields[0]}'?" in text if fields else "takes no arguments" in text), spec.name
+                assert "<untrusted_data" in text, "a remote refusal is untrusted on Ditto's side"
+                assert env.calls == calls, f"{spec.name} ran"
+
     def test_an_input_model_without_forbid_is_closed_at_registration(self, tmp_path):
         class Open(BaseModel):
             text: str = ""

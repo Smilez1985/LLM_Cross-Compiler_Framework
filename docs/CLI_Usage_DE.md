@@ -293,9 +293,11 @@ $ echo $?
 llm-cli build status [REQUEST_ID] [-a|--all]
 ```
 
-Zeigt Builds aus den Build-Einträgen im Cache-Ordner (`<cache_dir>/build_records/`): Jedes Programm, das baut
-(CLI, GUI, MCP-Server), schreibt je Build einen Eintrag mit Request, Modell, Target, Format, Quantisierung, Status,
-Stufe und Fortschritt, deshalb erscheinen auch Builds, die ein anderer Prozess gestartet hat. Ohne ID: eine Tabelle
+Zeigt Builds aus dem gemeinsamen Build-Zustand: Jedes Programm, das baut (CLI, GUI, MCP-Server), schreibt eine
+Zusammenfassung jeder Build-Anfrage in den Benutzerordner (`build_requests/`) und je Build einen Eintrag in den
+Cache-Ordner (`<cache_dir>/build_records/`) mit Request, Modell, Target, Format, Quantisierung, Status, Stufe und
+Fortschritt, deshalb erscheinen auch Builds, die ein anderer Prozess gestartet hat, einschließlich Anfragen, die
+noch in seiner Warteschlange warten (Spalte `Where`: das Programm, das sie ausführt). Ohne ID: eine Tabelle
 der 20 neuesten Builds; mit einer Request-ID (`req_...`) oder einer Build-ID: die Einzelheiten jedes Versuchs,
 einschließlich des Fehlers eines gescheiterten Builds (Zugangsdaten geschwärzt). Ein Build, dessen Prozess endete,
 bevor der Build fertig war, erscheint als `interrupted`. Exit-Code 1, wenn die ID nicht gefunden wird. Der Befehl
@@ -598,6 +600,33 @@ llm-cli ditto ask "Erkläre IQ4_XS" --no-tools --provider local
 
 Ohne Einrichtung erklärt der Befehl, was fehlt, zum Beispiel „the local model server is not running. Start it with:
 llm-cli ditto runtime start“.
+
+### ditto remote
+
+```
+llm-cli ditto remote set --transport stdio|http [--command "..."] [--url URL] [--name TEXT] [--with-token]
+llm-cli ditto remote show | test | off
+```
+
+Dittos MCP-Client-Modus: Ditto nutzt statt seiner eigenen Tools die Tools eines Frameworks, das anderswo läuft (zum
+Beispiel im Headless-Docker-Image), über dessen MCP-Server. Es gelten Registry, Berechtigungen, Rückfragen und
+Audit-Log jenes Servers. Lege zuerst auf dem Rechner des Frameworks das Token mit `llm-cli mcp token add NAME --link
+ditto` an: Das Token nutzt dort Dittos eigene Berechtigungen (eine Änderung daran gilt für beide Modi zugleich), und
+das Audit-Log dort zeigt `mcp:NAME`. `set` speichert das Token im Tresor für Zugangsdaten dieses Rechners (ohne Echo
+abgefragt oder mit `--with-token` von stdin gelesen) und den Server in Dittos KI-Einstellungen; das Token läuft nie
+durch ein Tool, ein Ergebnis oder eine Befehlszeile. Über stdio startet Ditto `--command` (zum Beispiel `docker exec
+-i lcf llm-cli mcp serve`) mit dem Token in `LCF_MCP_TOKEN`. `docker exec` und `podman exec` geben ihre Umgebung nicht in den Container weiter, darum ergänzt Ditto bei einem solchen Befehl `-e LCF_MCP_TOKEN` (nur den Namen, nie den Wert); und nennt der erreichte Server statt des Tokens den gemeinsamen lokalen Aufrufer `mcp` (zum Beispiel über `ssh`, das die Umgebung verwirft), nutzt Ditto ihn nicht und sagt, wie die Variable weitergegeben wird. Über HTTP sendet es das Token als Bearer-Header an
+`--url`, das https oder eine Loopback-Adresse sein muss. Ohne Token startet der Modus nicht. Eine Tool-Quelle pro
+Unterhaltung: Ein Wechsel beginnt eine neue Unterhaltung, und im MCP-Client-Modus wird kein Tool dieses Frameworks
+angeboten. Jedes Ergebnis, jeder Fehler und jede Rückfrage des entfernten Frameworks erreicht Dittos Modell als
+nicht vertrauenswürdige Daten, und Dittos Bestätigung nennt den Server. `test` verbindet sich und listet die Tools
+und Aufgaben-Prompts, die der Server Ditto anbietet; `show` zeigt die Einstellungen (nie das Token); `off` schaltet
+zurück auf Dittos eigene Tools.
+
+```bash
+llm-cli ditto remote set --transport stdio --command "docker exec -i lcf llm-cli mcp serve" --name "Build-Rechner"
+llm-cli ditto remote test
+```
 
 ### ditto eval
 
@@ -1075,7 +1104,7 @@ einer Änderung seines Textes muss er erneut gelesen werden.
 ### mcp serve
 
 ```
-llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT]
+llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT] [--container]
 ```
 
 Betreibt den MCP-Server. Normalerweise startet ihn der KI-Client für dich (siehe `mcp config`). stdout trägt das
@@ -1088,6 +1117,7 @@ Tools ohne Nachfrage, alles andere fragt (kann der Client nicht fragen, wartet d
 | `--transport [stdio\|http]` | `stdio` (Standard): vom Client gestartet. `http`: lokales Streamable HTTP mit einem benannten Token je Client. |
 | `--host TEXT` | Nur HTTP; nur Loopback-Adressen (Standard `127.0.0.1`; außerdem `::1`, `localhost`). |
 | `--port INTEGER` | Nur HTTP (Standard 8765). |
+| `--container` | Nur HTTP in einem Container (Docker, Podman): bindet die Schnittstellen des Containers statt Loopback; außerhalb eines Containers abgelehnt. Veröffentliche den Port nur auf dem Loopback des Hosts (`-p 127.0.0.1:8765:8765`); benanntes Token, `Host`- und `Origin`-Prüfung gelten wie ohne die Option. |
 
 Mit `--transport http` lauscht der Server auf `http://<Host>:<Port>/mcp`, und jede Anfrage braucht
 `Authorization: Bearer <Token>` mit einem [benannten Token](#mcp-token); der Server startet nicht, bevor es eins gibt,

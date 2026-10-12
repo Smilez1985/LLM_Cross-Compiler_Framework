@@ -125,10 +125,13 @@ Weiteres Verhalten:
   Schritt kann den Abbruch rückgängig machen; Schaltfläche und Strg+C warten, bis der Build angehalten hat, und
   sagen das. Ist ein Build gescheitert oder verschiebt er gerade seine Dateien in den Ausgabeordner, lässt er sich
   nicht mehr abbrechen und läuft von selbst zu Ende.
-- **Build-Status über Programme hinweg:** Jedes Programm, das baut, schreibt je Build einen Eintrag nach
-  `<cache_dir>/build_records/`, deshalb listet `llm-cli build status` auch Builds, die die GUI, der MCP-Server oder
-  ein anderer CLI-Aufruf gestartet hat; ein Build, dessen Programm endete, bevor er fertig war, erscheint als
-  unterbrochen.
+- **Build-Status über Programme hinweg (gemeinsamer Build-Zustand):** Jedes Programm, das baut (die GUI, ein
+  CLI-Aufruf, jeder MCP-Server), schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner
+  (`build_requests/`: Modell als Repo-ID oder Label, Target, Format, Quantisierung, Status, Stufe, Fortschritt, wer
+  sie gestartet hat und in welchem Programm; kein Host-Pfad, kein Geheimnis) und je Build einen Eintrag nach
+  `<cache_dir>/build_records/`. So sehen die Statusleiste der GUI, `llm-cli build status`, `list_build_requests` und
+  `get_build_status` dieselben Builds, auch eine Anfrage, die noch in der Warteschlange eines anderen Programms
+  wartet; eine Anfrage, deren Programm endete, bevor sie fertig war, erscheint als unterbrochen.
 - **Build-Slots:** In einem Programm laufen höchstens `max_concurrent_builds` Builds gleichzeitig (Einstellung, 1
   bis 10, Vorgabe 2); ein weiterer Build wartet auf einen freien Slot (seine Stufe zeigt „Waiting for a free build
   slot“), statt zu scheitern. Ein abgebrochener Build behält seinen Slot, bis sein Container gestoppt ist.
@@ -597,6 +600,18 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `start_local_runtime` / `stop_local_runtime` | lokal schreiben | Optional, verborgen bis zur Freigabe: Dittos lokalen Server starten (ein Job) oder stoppen; nie seine Adresse oder sein Schlüssel |
 | `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf einem Katalogmodell oder einem gebauten GGUF-Modell; ein nicht vertrauenswürdiges Modell nativ nur nach Zustimmung im Framework, oder in der Sandbox |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
+| `delete_artifact` | extern, optional | Ein gebautes Modell löschen (seinen Ordner unter dem Ausgabeordner und sein Golden-ZIP); verborgen, bis du es freigibst, immer mit Frage |
+| `restore_knowledge_snapshot` | extern, optional | Die Wissensbasis durch einen früheren Snapshot ersetzen, nach einer Sicherung des aktuellen Inhalts (ein Job); verborgen, bis du es freigibst, immer mit Frage |
+
+`delete_artifact` und `restore_knowledge_snapshot` zerstören etwas, darum sind sie standardmäßig verboten und werden nicht angeboten, bis
+du sie in den Tool-Berechtigungen freigibst (die ganze Klasse „extern“ zu erlauben gibt sie nicht frei); jeder
+Aufruf wird erfragt, und sie bekommen nie einen Dauerauftrag. `delete_artifact` nimmt die ID und das sha256, das
+`list_artifacts` zeigt; abgelehnt wird ein Ordner außerhalb des Ausgabeordners (auch über einen Link), solange ein
+Build irgendeines Programms des Frameworks hineinschreibt oder dafür in der Warteschlange steht, wenn sich das sha256
+der Modelldatei seither geändert hat und wenn der Ordner nicht mehr der ist, den die Frage nannte.
+`restore_knowledge_snapshot` sichert die aktuelle Wissensbasis zuerst als Snapshot `pre_restore_<Zeit>` und stellt
+ohne diese Sicherung nichts wieder her; dieselbe Regel gilt jetzt für jede Wiederherstellung eines Snapshots, und
+der wiederherzustellende Snapshot wird dabei nie aufgeräumt.
 
 So läuft eine Frage mit Tools ab:
 
@@ -649,6 +664,26 @@ Dittos Prompts weisen es an, vor einem Build die Capabilities des Targets zu pr�
 abzubrechen, wenn du im Gespräch darum gebeten hast, über Self-Healing nur mit deiner ausdrücklichen Entscheidung zu
 entscheiden, Fragen zu Targets und Builds aus den Tools statt aus dem Gedächtnis zu beantworten und nur zu berichten,
 was die Tools zurückgegeben haben.
+
+---
+
+### Ditto als MCP-Client eines anderen Frameworks
+
+Ditto ist hybrid: Neben seinen eigenen Tools in diesem Prozess kann es die Tools eines Frameworks nutzen, das
+anderswo läuft (zum Beispiel im Headless-Docker-Image), über dessen MCP-Server (`llm-cli ditto remote set`,
+Einstellungen `ai_ditto_*`, die nur du in GUI oder CLI änderst; keine KI kann sie lesen oder schreiben). Registry,
+Berechtigungen, die narrensichere Schicht (ein unbekanntes Argument wird mit einem Vorschlag abgelehnt, nie
+verworfen), Rückfragen und Audit-Log sind die jenes Servers. Dittos Identität dort ist ein benanntes Token, angelegt
+mit `llm-cli mcp token add NAME --link ditto`, sodass der Server Dittos eigene Berechtigungen und Daueraufträge per
+Verweis anwendet: Wird `start_build` für Ditto verboten, gilt das in beiden Modi zugleich. Der Audit-Akteur dort ist
+`mcp:NAME`, nie `ditto`; ein neues Token ohne Verknüpfung darf nur lesen. Das Token liegt in Dittos Tresor für
+Zugangsdaten und erreicht den Server nur als `LCF_MCP_TOKEN` des gestarteten Prozesses (stdio; bei `docker exec` oder `podman exec` ergänzt Ditto `-e LCF_MCP_TOKEN`, nur den Namen, und es lehnt einen Server ab, der den gemeinsamen lokalen Aufrufer `mcp` meldet, das Token also nicht angekommen ist) oder als
+Bearer-Header (HTTP, nur https oder Loopback); ohne Token startet der Modus nicht. Eine Tool-Quelle pro Unterhaltung:
+Im MCP-Client-Modus wird kein Tool dieses Frameworks angeboten, und ein Wechsel der Quelle beginnt eine neue
+Unterhaltung. Ditto kann einen entfernten Server nicht prüfen, darum erreichen jedes Ergebnis, jeder Fehlertext,
+jeder Prompt und jede Tool-Beschreibung von dort Dittos Modell als nicht vertrauenswürdige Daten, und Dialog oder
+Abfrage der Bestätigung nennen den Server („Question from the framework at <Name>“). Ein „nicht mehr fragen“ von
+dort (CLI-Antwort `r`) fragt nur jenes Framework an, wo die Person es in dessen eigenem Freigabefenster bestätigt.
 
 ---
 
@@ -1284,14 +1319,24 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   „Standardzweig, Commit unbekannt“ und dass die Downloadgröße unbekannt ist. Ein angenommener Build reserviert
   seinen Speicherplatz in `~/.llm-framework/disk_reservations.json` (gemeinsam für GUI, CLI und jeden MCP-Server),
   bis seine Anfrage endet; verlässt der Build die Warteschlange, wird das Laufwerk erneut geprüft, und ein Build, der
-  nicht mehr passt, scheitert mit den Zahlen, bevor etwas heruntergeladen wird. `optimization` (`fast`, `balanced`,
+  nicht mehr passt, scheitert mit den Zahlen, bevor etwas heruntergeladen wird. `download_hf_file` reserviert seine
+  Datei im selben Verzeichnis, sodass ein Download und ein Build nie mit demselben freien Platz rechnen. Der Build
+  stellt das Modell über den Hugging-Face-Abrufer des Frameworks bereit: Datei für Datei, jede aus ihrer
+  `.part`-Datei fortsetzbar und gegen Größe und sha256 geprüft, die der Hub nennt, und durch einen Abbruch binnen
+  Sekunden gestoppt. Ein Laufwerkswächter stoppt das Bereitstellen und die Konvertierungs-Container, wenn das
+  Cache-Laufwerk unter die halbe Reserve fällt (Grund `insufficient_resources`). Ein Dauerauftrag („ja, und nicht mehr
+  fragen“) wird angeboten für Builds auf mitgelieferten oder verifizierten Targets mit safetensors- oder
+  GGUF-Gewichten, einem nicht zugangsbeschränkten Modell, dessen Basismodell es auch nicht ist, einer Lizenz auf der
+  Liste freizügiger Lizenzen (oder einer lokalen Datei), einem offiziellen Basis-Image, bis zur gewählten
+  Größenklasse und nur, wenn das Laufwerk die größere Reserve von 20 GiB oder 10 % behält; Hugging-Face-Abfragen von
+  `check_build_request` zählen zur Hugging-Face-Rate von 30 pro Stunde. `optimization` (`fast`, `balanced`,
   `size`, `speed`, `aggressive`) wird an den Build weitergegeben. `check_build_request` liefert denselben Plan
   (normalisierte Anfrage, Commit, Größen, Laufwerke, Passung, Einbindungen, Vertrauen, Image-Build, was deine
   Berechtigungen tun würden), ohne etwas zu starten; seine Probleme tragen Grundcodes.
 - **Build-Abfragen:** `list_build_requests` (50 pro Seite, Filter nach Status) listet auch Builds, die ein anderer
-  Framework-Prozess gestartet hat (GUI, CLI, ein anderer MCP-Server), aus ihren Build-Records, markiert mit
-  `process: other` und nur lesbar (gestoppt werden sie dort, wo sie gestartet wurden; ein Build, dessen Prozess
-  endete, ist `interrupted`). `get_build_status` ergänzt, was die Anfrage baut (`request`: Modell als Repo-ID oder
+  Framework-Prozess gestartet hat (GUI, CLI, ein anderer MCP-Server), aus dem gemeinsamen Build-Zustand, markiert
+  mit `process: other` und `started_in` und nur lesbar (gestoppt werden sie dort, wo sie gestartet wurden; ein Build,
+  dessen Prozess endete, ist `interrupted`); der Hinweis, nur Builds dieses Prozesses seien sichtbar, entfällt. `get_build_status` ergänzt, was die Anfrage baut (`request`: Modell als Repo-ID oder
   Label, Target, Format, Board, Quantisierung, Optimierung, Commit). `read_build_log` liefert höchstens 1000 Zeilen
   (Standard 200), 2000 Zeichen pro Zeile und 48.000 insgesamt, mit `first_line` und `before_line` zum
   Zurückblättern. `list_artifacts` benennt gebaute Modelle mit einer ID (`a_` und 16 Hex-Zeichen) und einem Label

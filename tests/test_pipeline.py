@@ -59,19 +59,19 @@ class TestModelStaging:
             def __init__(self, token=None):
                 pass
 
-            def model_info(self, repo, revision=None, token=None):
-                return type("Info", (), {"sha": "c" * 40})()
+            def model_info(self, repo, revision=None, token=None, files_metadata=False):
+                names = ["config.json", "model.safetensors", "pytorch_model.bin", "model.gguf", "tokenizer.json"]
+                return type("Info", (), {"sha": "c" * 40, "siblings": [
+                    type("S", (), {"rfilename": n, "size": 1, "lfs": None})() for n in names]})()
 
-            def list_repo_files(self, repo, revision=None, token=None):
-                return ["config.json", "model.safetensors", "pytorch_model.bin", "model.gguf", "tokenizer.json"]
-
-        def fake_download(**kwargs):
-            calls.setdefault("files", []).append(kwargs["filename"])
-            calls.update(kwargs)
-            return kwargs["local_dir"]
+        class FakeFetcher:
+            def fetch_file(self, repo, commit, file, dest, progress=None):
+                calls.setdefault("files", []).append(file.name)
+                calls.update(repo_id=repo, local_dir=str(Path(dest).parent))
+                return dest, "0" * 64
 
         monkeypatch.setattr(huggingface_hub, "HfApi", FakeApi)
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", fake_download)
+        monkeypatch.setattr(type(engine), "_hub_fetcher", staticmethod(lambda token, stop: FakeFetcher()))
 
         path, volumes = engine._stage_model(make_config(), BuildProgress("b1", BuildStatus.QUEUED, ""))
 

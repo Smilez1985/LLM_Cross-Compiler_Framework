@@ -287,9 +287,11 @@ $ echo $?
 llm-cli build status [REQUEST_ID] [-a|--all]
 ```
 
-Shows builds from the build records in the cache folder (`<cache_dir>/build_records/`): every program that builds
-(CLI, GUI, MCP server) writes one record per build with its request, model, target, format, quantization, status,
-stage and progress, so builds that another process started are listed too. Without an ID: a table of the 20 newest
+Shows builds from the shared build state: every program that builds (CLI, GUI, MCP server) writes a summary of each
+build request into the per-user folder (`build_requests/`) and one record per build into the cache folder
+(`<cache_dir>/build_records/`) with its request, model, target, format, quantization, status, stage and progress,
+so builds that another process started are listed too, including requests still waiting in its queue (column
+`Where`: the program that runs it). Without an ID: a table of the 20 newest
 builds; with a request ID (`req_...`) or a build ID: the details of each attempt, including the error of a failed
 build (credentials redacted). A build whose process has ended before the build finished is shown as `interrupted`.
 Exit code 1 if the ID is not found. The command needs neither the credential vault nor Docker. On Linux and macOS
@@ -579,6 +581,32 @@ llm-cli ditto ask "Explain IQ4_XS" --no-tools --provider local
 
 Without setup the command explains what is missing, for example "the local model server is not running. Start it
 with: llm-cli ditto runtime start".
+
+### ditto remote
+
+```
+llm-cli ditto remote set --transport stdio|http [--command "..."] [--url URL] [--name TEXT] [--with-token]
+llm-cli ditto remote show | test | off
+```
+
+Ditto's MCP-client mode: Ditto uses the tools of a framework running elsewhere (for example the headless Docker
+image) through that framework's MCP server, instead of its own tools. That server's registry, permissions, questions
+and audit log apply. Create the token on the framework's machine first with `llm-cli mcp token add NAME --link ditto`:
+the token then uses Ditto's own permissions there (a change to them applies to both modes at once), and the audit log
+there shows `mcp:NAME`. `set` stores the token in this computer's credential vault (asked without echo, or read from
+stdin with `--with-token`) and the server in Ditto's AI settings; the token never passes through a tool, a result or
+a command line. Over stdio Ditto starts `--command` (for example `docker exec -i lcf llm-cli mcp serve`) with the
+token in `LCF_MCP_TOKEN`. `docker exec` and `podman exec` do not pass their environment into the container, so Ditto adds `-e LCF_MCP_TOKEN` (the name only, never the value) to such a command; and when the server it reached names the shared local caller `mcp` instead of the token (for example over `ssh`, which drops the environment), Ditto does not use it and says how to pass the variable on. Over HTTP it sends the token as bearer header to `--url`, which must be https or a loopback
+address. The mode does not start without a token. One tool source per conversation: switching starts a new
+conversation, and in MCP-client mode no tool of this framework is listed. Every result, error and question of the
+remote framework is shown to Ditto's model as untrusted data, and Ditto's confirmation names the server. `test`
+connects and lists the tools and task prompts the server offers Ditto; `show` prints the settings (never the token);
+`off` switches back to Ditto's own tools.
+
+```bash
+llm-cli ditto remote set --transport stdio --command "docker exec -i lcf llm-cli mcp serve" --name "build box"
+llm-cli ditto remote test
+```
 
 ### ditto eval
 
@@ -1034,7 +1062,7 @@ is shown and nothing changes; after its text changes it must be read again.
 ### mcp serve
 
 ```
-llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT]
+llm-cli mcp serve [--transport stdio|http] [--host HOST] [--port PORT] [--container]
 ```
 
 Runs the MCP server. Normally the AI client starts it for you (see `mcp config`). stdout carries the protocol;
@@ -1046,6 +1074,7 @@ the client cannot ask, the question waits in the framework: see [tools approvals
 | `--transport [stdio\|http]` | `stdio` (default): started by the client. `http`: local Streamable HTTP with a named token per client. |
 | `--host TEXT` | HTTP only; loopback addresses only (default `127.0.0.1`; also `::1`, `localhost`). |
 | `--port INTEGER` | HTTP only (default 8765). |
+| `--container` | HTTP inside a container only (Docker, Podman): binds the container's interfaces instead of loopback; refused outside a container. Publish the port to the host's loopback only (`-p 127.0.0.1:8765:8765`); the named token, the `Host` and the `Origin` checks apply as without it. |
 
 With `--transport http` the server listens on `http://<host>:<port>/mcp`, and every request needs
 `Authorization: Bearer <token>` with a [named token](#mcp-token); the server does not start before one exists, and

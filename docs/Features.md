@@ -120,9 +120,12 @@ Further behaviour:
   including a running security scan or image build, and a later step can never undo it; the button and Ctrl+C wait
   until the build has stopped and say so. Once a build has failed or is moving its files into the output folder,
   it can no longer be cancelled and finishes on its own.
-- **Build status across programs:** every program that builds writes one record per build into
-  `<cache_dir>/build_records/`, so `llm-cli build status` also lists builds that the GUI, the MCP server or another
-  CLI call started; a build whose program has ended before it finished is shown as interrupted.
+- **Build status across programs (shared build state):** every program that builds (the GUI, a CLI call, each MCP
+  server) writes a summary of each build request into the per-user folder (`build_requests/`: model as repo id or
+  label, target, format, quantization, status, stage, progress, who started it and in which program; no host path,
+  no secret) and one record per build into `<cache_dir>/build_records/`. So the GUI status bar, `llm-cli build
+  status`, `list_build_requests` and `get_build_status` see the same builds, also a request that still waits in
+  another program's queue; a request whose program has ended before it finished is shown as interrupted.
 - **Build slots:** at most `max_concurrent_builds` builds (setting, 1 to 10, default 2) run at the same time in one
   program; a further build waits for a free slot (its stage shows "Waiting for a free build slot") instead of
   failing. A cancelled build keeps its slot until its container has stopped.
@@ -554,6 +557,17 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `start_local_runtime` / `stop_local_runtime` | local write | Optional, hidden until enabled: start (a job) or stop Ditto's local server; never its address or key |
 | `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on a catalog model or a built GGUF model; an untrusted model natively only after consent in the framework, or in the sandbox |
 | `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
+| `delete_artifact` | external, optional | Delete one built model (its folder below the output folder and its golden ZIP); hidden until you enable it, always asked |
+| `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |
+
+`delete_artifact` and `restore_knowledge_snapshot` destroy something, so they are denied by default and not listed until you enable them in
+Tool Permissions (allowing the whole "external" class does not enable them), every call is asked, and they never get
+a standing approval. `delete_artifact` takes the id and the sha256 `list_artifacts` shows; it is refused for a
+folder outside the output folder (also through a link), while a build of any framework program writes into it or
+is queued for it, when the model file's sha256 changed since, and when the folder is no longer the one the question
+named. `restore_knowledge_snapshot` saves the current knowledge base as a snapshot `pre_restore_<time>` first and
+does not restore without that backup; the same backup rule now holds for every restore of a snapshot, and the
+snapshot being restored is never pruned by it.
 
 How a question with tools runs:
 
@@ -599,6 +613,25 @@ How a question with tools runs:
 Ditto's prompts tell it to check a target's capabilities before starting a build, to start or cancel builds only
 when you asked for it in the conversation, to decide on self-healing only with your explicit decision, to answer
 questions about targets and builds from the tools rather than from memory, and to report only what tools returned.
+
+---
+
+### Ditto as an MCP client of another framework
+
+Ditto is hybrid: besides its own tools in this process it can use the tools of a framework running elsewhere (for
+example the headless Docker image) through that framework's MCP server (`llm-cli ditto remote set`, settings
+`ai_ditto_*`, which only you change in the GUI or CLI; no AI can read or write them). The registry, the permissions,
+the fool-proof layer (an unknown argument is refused with a suggestion, never dropped), the questions and the audit
+log are that server's. Ditto's identity there is a named token made with `llm-cli mcp token add NAME --link ditto`,
+so the server applies Ditto's own permissions and standing approvals by reference: denying `start_build` for Ditto
+denies it in both modes at once. The audit actor there is `mcp:NAME`, never `ditto`; a new token without the link
+may only read. The token is kept in Ditto's credential vault and reaches the server only as `LCF_MCP_TOKEN` of the
+started process (stdio; for `docker exec` or `podman exec` Ditto adds `-e LCF_MCP_TOKEN`, the name only, and it refuses a server that reports the shared local caller `mcp`, which means the token did not arrive) or as bearer header (HTTP, https or loopback only); the mode does not start without it.
+One tool source per conversation: in MCP-client mode no tool of this framework is listed, and switching the source
+starts a new conversation. Ditto cannot check a remote server, so every result, error text, prompt and tool
+description from it reaches Ditto's model as untrusted data, and the confirmation dialog or prompt names the server
+("Question from the framework at <name>"). A "do not ask again" from there (CLI answer `r`) only asks that framework,
+where the person confirms it in its own approval window.
 
 ---
 
@@ -1182,12 +1215,21 @@ framework never sees it.
   and that the download size is unknown. An accepted build reserves its disk space in
   `~/.llm-framework/disk_reservations.json` (shared by GUI, CLI and every MCP server) until its request ends; when
   the build leaves the queue the disk is checked again, and a build that no longer fits fails with the numbers
-  before anything is downloaded. `optimization` (`fast`, `balanced`, `size`, `speed`, `aggressive`) is passed to
-  the build. `check_build_request` returns the same plan (normalized request, commit, sizes, disks, fit, mounts,
+  before anything is downloaded. `download_hf_file` reserves its file in the same ledger, so a download and a build
+  never count on the same free space. The build stages the model through the framework's Hugging Face fetcher: one
+  file after another, each resumable from its `.part` file and checked against the size and sha256 the Hub lists, and
+  stopped within seconds by a cancel. A disk watchdog stops the staging and the conversion containers when the cache
+  disk falls below half the reserve (reason `insufficient_resources`). A standing approval ("yes, and do not ask
+  again") is offered for builds on shipped or verified targets with safetensors or GGUF weights, an ungated model
+  whose base model is not gated either, a licence on the permissive allowlist (or a local file), an official base
+  image, up to the size class you choose, and only when the disk keeps the larger reserve of 20 GiB or 10 %; Hugging
+  Face look-ups of `check_build_request` count toward the 30 per hour Hugging Face rate. `optimization` (`fast`,
+  `balanced`, `size`, `speed`, `aggressive`) is passed to the build. `check_build_request` returns the same plan (normalized request, commit, sizes, disks, fit, mounts,
   trust, image build, what your permissions would do) without starting anything; its problems carry reason codes.
 - **Build reads:** `list_build_requests` (50 per page, filter by status) also lists builds another framework process
-  started (GUI, CLI, another MCP server), from their build records, marked `process: other` and read-only (they are
-  stopped where they were started; a build whose process ended is `interrupted`). `get_build_status` adds what the
+  started (GUI, CLI, another MCP server), from the shared build state, marked `process: other` with `started_in`
+  and read-only (they are stopped where they were started; a build whose process ended is `interrupted`); the note
+  that only this process's builds are visible is gone. `get_build_status` adds what the
   request builds (`request`: model as repo id or label, target, format, board, quantization, optimization, commit).
   `read_build_log` returns at most 1000 lines (200 by default), 2000 characters per line and 48,000 in all, with
   `first_line` and `before_line` for paging back. `list_artifacts` names built models by an id (`a_` and 16 hex

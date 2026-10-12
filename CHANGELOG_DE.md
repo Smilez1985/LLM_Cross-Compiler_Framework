@@ -10,6 +10,35 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Optionale Tools `delete_artifact` und `restore_knowledge_snapshot`** (MCP-Entwurf T10): ein gebautes Modell
+  (Ordner und Golden-ZIP) per ID und sha256 löschen oder die Wissensbasis als Job durch einen früheren Snapshot
+  ersetzen. Beide zerstören etwas: standardmäßig verboten und verborgen, bis du sie freigibst (die ganze Klasse
+  „extern“ zu erlauben genügt nicht), jeder Aufruf mit Frage, nie ein Dauerauftrag. Ein Löschen wird abgelehnt
+  außerhalb des Ausgabeordners, solange ein Build irgendeines Programms des Frameworks in den Ordner schreibt oder
+  dafür wartet, nachdem sich der Build geändert hat und wenn der Ordner nicht der ist, den die Frage nannte. Eine
+  Wiederherstellung sichert immer zuerst die aktuelle Wissensbasis (`pre_restore_<Zeit>`), auch außerhalb von MCP,
+  und räumt den wiederherzustellenden Snapshot nie auf.
+- **Ditto als MCP-Client eines anderen Frameworks** (MCP-Entwurf T12; Ditto ist hybrid): `llm-cli ditto remote set`
+  richtet Ditto auf den MCP-Server eines Frameworks aus, das anderswo läuft, zum Beispiel im Headless-Docker-Image
+  (stdio über einen Befehl wie `docker exec -i <container> llm-cli mcp serve` oder HTTP an eine https- oder
+  Loopback-Adresse). Es gelten Registry, Berechtigungen, narrensichere Schicht, Rückfragen und Audit-Log jenes
+  Servers; Dittos Identität dort ist ein benanntes Token, angelegt mit `llm-cli mcp token add NAME --link ditto`,
+  sodass Dittos eigene Berechtigungen in beiden Modi zugleich gelten und das Audit-Log dort `mcp:NAME` zeigt. Das
+  Token liegt in Dittos Tresor für Zugangsdaten und erreicht den Server nur als `LCF_MCP_TOKEN` oder als
+  Bearer-Header; ohne Token startet der Modus nicht. Eine Tool-Quelle pro Unterhaltung; jedes entfernte Ergebnis,
+  jeder Fehler, Prompt und jede Tool-Beschreibung sind für Dittos Modell nicht vertrauenswürdige Daten; Dittos
+  Bestätigung nennt den Server. `llm-cli ditto remote show|test|off`. `llm-cli mcp serve --transport http --container`
+  bindet nur innerhalb eines Containers dessen Schnittstellen (benanntes Token, Host- und Origin-Prüfung unverändert;
+  den Port auf dem Loopback des Hosts veröffentlichen).
+- **Gemeinsamer Build-Zustand** (MCP-Entwurf T11): Jedes Programm des Frameworks (die GUI, ein CLI-Aufruf, jeder
+  MCP-Server) schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner (`build_requests/`), sodass die
+  Statusleiste der GUI, `llm-cli build status`, `list_build_requests` und `get_build_status` dieselben Builds sehen,
+  gleich welches Programm sie gestartet hat, auch eine Anfrage, die noch in der Warteschlange eines anderen Programms
+  wartet. Jede Zusammenfassung nennt das Modell mit Repo-ID oder Label (nie einen Host-Pfad), die Aufruferklasse, die
+  sie gestartet hat (nie einen MCP-Sitzungsschlüssel), und das Programm, das sie ausführt (`started_in`, Spalte
+  `Where`); Fehler sind geschwärzt. Eine Anfrage, deren Programm endete, bevor sie fertig war, erscheint als
+  unterbrochen. Builds eines anderen Programms bleiben nur lesbar. Der Hinweis, nur Builds dieses Prozesses seien
+  sichtbar, entfällt.
 - **Ditto nutzt die Tools des Frameworks**: Im Chat (GUI) und mit `llm-cli ditto ask "<Frage>"` kann Ditto
   Targets auflisten, Capabilities prüfen, Builds starten und abbrechen, Logs lesen, die Wissensbasis durchsuchen
   und den Doctor ausführen, immer im Rahmen deiner Tool-Berechtigungen. Tools, die eine Bestätigung brauchen,
@@ -659,6 +688,16 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Ein Target-Pack übernimmt nie den Namen eines anderen Targets**: Ein Target-Pack, dessen ID (oder angegebene
   Target-ID) ohne Rücksicht auf Groß- und Kleinschreibung und Trennzeichen der eines vorhandenen Targets gleicht, wird
   abgelehnt, im Community Hub, in der CLI und über MCP.
+- **Builds und Downloads teilen eine Speicherplatz-Reservierung; Bereitstellung über den Abrufer des Frameworks**
+  (Reste von MCP-Phase T, Runde 1): `download_hf_file` reserviert seinen Speicherplatz in dem prozessübergreifenden
+  Verzeichnis, das Builds nutzen. Ein Build stellt sein Hugging-Face-Modell über den Abrufer des Frameworks bereit
+  (fortsetzbare `.part`-Dateien, jede Datei gegen Größe und sha256 des Hubs geprüft, durch einen Abbruch binnen
+  Sekunden gestoppt) statt über `hf_hub_download` und lehnt ab, wenn sich der Commit nicht ermitteln lässt. Ein
+  Laufwerkswächter stoppt das Bereitstellen und die Konvertierungs-Container, wenn das Cache-Laufwerk unter die halbe
+  Reserve fällt. `start_build` bietet einen Dauerauftrag im Rahmen des Entwurfs an (mitgeliefertes oder verifiziertes
+  Target, safetensors oder GGUF, nicht zugangsbeschränktes Modell und Basismodell, freizügige Lizenz, offizielles
+  Basis-Image, Größenklasse), nur wenn das Laufwerk die größere Reserve behält. `report_cannot_do` zählt nur die
+  Aufrufe der laufenden Sitzung, und Hugging-Face-Abfragen von `check_build_request` zählen zur Rate von 30 pro Stunde.
 - **Eine Hugging-Face-Einordnung für Builds und Downloads**: `check_build_request` und `start_build` lesen Lizenz, Zugangsbeschränkung und Dateien eines Modells jetzt nach denselben Regeln wie `get_hf_model_info` und `download_hf_file` (Lizenzen wie GPL, DeepSeek oder Qwen Research waren auf dem Build-Weg „unbekannt“ und auf dem Download-Weg „einschränkend“), und beide halten dieselbe Speicherreserve frei.
 - **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
   eine Sitzung schließt nach 10 Minuten ohne Anfrage (die Vorgabe des SDK sind 30); eine noch offene Anfrage, wenn ihr
@@ -1146,6 +1185,25 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Home-Ordner nennen. Meldung und `reason` sind jetzt die eigenen Sätze des Frameworks ohne Pfade des Rechners, und
   was das Gerät oder das Programm ausgegeben hat, kommt in `get_job_status.external_text` zurück, als externer Text
   markiert (auch bei gescheiterten Jobs).
+- **Dittos MCP-Client-Modus läuft nicht mehr als gemeinsamer lokaler Aufrufer, wenn das Token den Server nicht
+  erreicht** (MCP-Entwurf T12): `docker exec` und `podman exec` geben ihre Umgebung nicht in den Container weiter,
+  darum startete das dokumentierte `docker exec -i <Container> llm-cli mcp serve` den Server dort ohne
+  `LCF_MCP_TOKEN`, als Aufrufer `mcp` mit anderen Berechtigungen als Dittos. Ditto ergänzt bei einem solchen Befehl
+  jetzt `-e LCF_MCP_TOKEN` (nur den Namen, nie den Wert) und lehnt einen stdio-Server ab, dessen `get_status` einen
+  anderen Aufrufer als sein Token nennt (zum Beispiel über `ssh`, das die Umgebung verwirft), mit dem nächsten
+  Schritt.
+- **Ein abgebrochener Job von `restore_knowledge_snapshot` ersetzt die Wissensbasis nicht mehr** (MCP-Entwurf T10):
+  Ein Abbruch (`cancel_job` oder das Ende der Sitzung) markierte den Job sofort als abgebrochen, während die
+  Wiederherstellung weiterlief. Sie prüft den Abbruch jetzt nach der Sicherung und bevor die Wissensbasis ersetzt
+  wird, und lässt sie dann, wie sie war.
+- **Ein lokaler Modellordner mit Pickle-Gewichten fällt nicht mehr unter einen Dauerauftrag für Builds**
+  (Entwurf 6.10): Pickle-Dateien neben einer safetensors-Datei (der ganze Ordner wird in den Build eingebunden)
+  zählten als safetensors. Pickle-Gewichte irgendwo im Ordner machen ihn jetzt zu „pickle“, also wird die Person
+  gefragt.
+- **Jedes Basismodell eines zusammengeführten Modells wird auf Zugangsbeschränkung geprüft** (Entwurf 6.10): Nannte
+  eine Modellkarte mehrere Basismodelle, wurde nur das erste nachgeschlagen, sodass ein beschränktes zweites
+  Basismodell den Build oder Download nicht aus einem Dauerauftrag heraushielt. Jetzt wird jedes nachgeschlagen; ein
+  beschränktes oder nicht nachschlagbares hält ihn heraus.
 - **Der Filter für gefährliche Befehle lässt sich nicht mehr mit unsichtbaren Zeichen oder Zeichen in voller
   Breite umgehen** (Healing-Analysen und Empfehlungen von Ditto sowie Korrekturvorschläge von KI-Clients): Er
   prüft den Text auch so, wie GUI und CLI ihn zeigen (normalisiert, unsichtbare Zeichen und Verbinder entfernt),

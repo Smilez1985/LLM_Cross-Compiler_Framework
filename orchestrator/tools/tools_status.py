@@ -556,15 +556,16 @@ def audit_section(registry, caller: str) -> AuditSection:
 # --- the honest "cannot" check -------------------------------------------------------------------------------------
 
 def session_entries(registry, ctx) -> List[Dict[str, Any]]:
-    """This caller's audit entries of this session (newest first), without report_cannot_do itself."""
-    if registry.audit is None:
+    """This caller's audit entries of this session (newest first), without report_cannot_do itself. A call without a
+    session has no "this session": nothing of the caller's earlier sessions counts for it."""
+    if registry.audit is None or not ctx.session:
         return []
     out = []
     for entry in registry.audit.entries(1000):
         session = str(entry.get("session") or "")
         if entry.get("actor") != ctx.actor or entry.get("tool") == "report_cannot_do":
             continue
-        if ctx.session and session != ctx.session and not session.startswith(ctx.session + ":"):
+        if session != ctx.session and not session.startswith(ctx.session + ":"):
             continue
         out.append(entry)
     return out

@@ -112,7 +112,10 @@ class BuildStatusOut(BaseModel):
     request: Optional[RequestSummary] = None
     process: Literal["this", "other"] = Field(default="this", description="'other': started by another framework "
                                                                           "process (GUI, CLI, another MCP server); "
-                                                                          "shown from its build record, read-only")
+                                                                          "shown from the shared build state, "
+                                                                          "read-only")
+    started_in: Optional[Literal["GUI", "CLI", "MCP server", "API server", "framework process"]] = Field(
+        default=None, description="For process 'other': the program that runs it, where the person can stop it")
 
 
 class BuildList(BaseModel):

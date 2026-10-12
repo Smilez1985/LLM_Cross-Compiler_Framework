@@ -477,6 +477,12 @@ provider's sign-in methods with Check, Save and Sign out. On a headless machine,
 enough; `--kind retrieval` grades the knowledge-base search instead. Details and measurements:
 [docs/Features.md](docs/Features.md#ditto-evaluation).
 
+**Ditto for a framework running elsewhere** (for example the headless Docker image): create a token there with
+`llm-cli mcp token add ditto-laptop --link ditto`, then here `llm-cli ditto remote set --transport stdio --command
+"docker exec -i <container> llm-cli mcp serve"` (the token is asked without echo). Ditto then uses that framework's
+tools with its own permissions there; `llm-cli ditto remote off` switches back. Details:
+[docs/CLI_Usage.md](docs/CLI_Usage.md#ditto-remote).
+
 ---
 
 ## Offline mode: the managed local model

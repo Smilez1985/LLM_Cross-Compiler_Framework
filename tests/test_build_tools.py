@@ -12,6 +12,7 @@ import asyncio
 import json
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -320,31 +321,38 @@ def config(**kw):
 
 
 class FakeHub:
-    def __init__(self, commit=COMMIT_A, on_file=None):
-        self.commit, self.on_file, self.calls = commit, on_file, []
+    """The Hub for the build engine's staging: model_info with the commit's files (sizes, LFS sha256) and the
+    framework's Hugging Face fetcher (T6) replaced by one that writes each file and records the token it got."""
 
-    def install(self, monkeypatch):
+    FILES = ["config.json", "model-1.safetensors", "model-2.safetensors", "pytorch_model.bin"]
+
+    def __init__(self, commit=COMMIT_A, on_file=None):
+        self.commit, self.on_file, self.calls, self.stops = commit, on_file, [], []
+
+    def install(self, monkeypatch, engine=None):
         import huggingface_hub
         hub = self
 
         class Api:
-            def model_info(self, repo, revision=None, token=None):
+            def model_info(self, repo, revision=None, token=None, files_metadata=False):
                 hub.calls.append(("model_info", token))
-                return SimpleNamespace(sha=hub.commit)
+                siblings = [SimpleNamespace(rfilename=n, size=1, lfs=None) for n in hub.FILES]
+                return SimpleNamespace(sha=hub.commit, siblings=siblings)
 
-            def list_repo_files(self, repo, revision=None, token=None):
-                hub.calls.append(("list", revision, token))
-                return ["config.json", "model-1.safetensors", "model-2.safetensors", "pytorch_model.bin"]
+        class Fetcher:
+            def __init__(self, token, stop):
+                self.token, self.stop = token, stop
+                hub.stops.append(stop)
 
-        def download(repo_id, filename, revision=None, local_dir=None, token=None):
-            hub.calls.append(("download", filename, revision, token))
-            Path(local_dir).mkdir(parents=True, exist_ok=True)
-            (Path(local_dir) / filename).write_text("w")
-            if hub.on_file:
-                hub.on_file(filename)
-            return str(Path(local_dir) / filename)
+            def fetch_file(self, repo, commit, file, dest, progress=None):
+                hub.calls.append(("download", file.name, commit, self.token))
+                Path(dest).parent.mkdir(parents=True, exist_ok=True)
+                Path(dest).write_text("w")
+                if hub.on_file:
+                    hub.on_file(file.name)
+                return Path(dest), "0" * 64
         monkeypatch.setattr(huggingface_hub, "HfApi", Api)
-        monkeypatch.setattr(huggingface_hub, "hf_hub_download", download)
+        monkeypatch.setattr(BuildEngine, "_hub_fetcher", staticmethod(lambda token, stop: Fetcher(token, stop)))
         return self
 
 
@@ -358,7 +366,8 @@ class TestStaging:
         assert path == "/build-cache/input-model"
         assert sorted(p.name for p in folder.iterdir() if not p.name.startswith(".")) == \
             ["config.json", "model-1.safetensors", "model-2.safetensors"]
-        assert all(c[-1] is False for c in hub.calls), "G37: token=False on every call without a stored token"
+        assert all(c[-1] is False for c in hub.calls if c[0] == "model_info"), "G37: token=False without a stored token"
+        assert all(c[-1] is None for c in hub.calls if c[0] == "download"), "the fetcher sends no token at all"
 
     def test_two_commits_never_share_a_folder_and_the_encoding_cannot_collide(self, engine):
         a = engine.staging_folder("a/b__c", COMMIT_A, None)
@@ -371,6 +380,113 @@ class TestStaging:
         engine.secrets_manager = SimpleNamespace(get_secret=lambda key: "stored-value" if key == "hf_token" else None)
         engine._stage_model(config(), BuildProgress("b1", BuildStatus.QUEUED, ""))
         assert {c[-1] for c in hub.calls} == {"stored-value"}
+
+    def test_staging_uses_the_framework_fetcher_with_the_hubs_sizes_and_hashes(self, engine, monkeypatch):
+        """Round-1 leftover: staging goes through the Hugging Face fetcher of T6 (cancellable, resumable, each file
+        checked against the size and sha256 the Hub lists), never hf_hub_download."""
+        import huggingface_hub
+        got = []
+        monkeypatch.setattr(huggingface_hub, "hf_hub_download", lambda **kw: got.append(kw))
+
+        class Api:
+            def model_info(self, repo, revision=None, token=None, files_metadata=False):
+                assert files_metadata and revision == COMMIT_A
+                return SimpleNamespace(sha=COMMIT_A, siblings=[
+                    SimpleNamespace(rfilename="config.json", size=7, lfs=None),
+                    SimpleNamespace(rfilename="model.safetensors", size=99, lfs=SimpleNamespace(sha256="A" * 64))])
+        monkeypatch.setattr(huggingface_hub, "HfApi", Api)
+        seen = []
+        monkeypatch.setattr(BuildEngine, "_hub_fetcher", staticmethod(lambda token, stop: SimpleNamespace(
+            fetch_file=lambda repo, commit, file, dest, progress=None: seen.append((file.name, file.size, file.sha256))
+            or (dest, "0"))))
+        engine._stage_model(config(model_branch=COMMIT_A), BuildProgress("b1", BuildStatus.QUEUED, ""))
+        assert seen == [("config.json", 7, None), ("model.safetensors", 99, "a" * 64)] and got == []
+
+    def test_a_commit_that_cannot_be_resolved_downloads_nothing(self, engine, monkeypatch):
+        hub = FakeHub(commit=None).install(monkeypatch)
+        with pytest.raises(ValueError, match="commit"):
+            engine._stage_model(config(), BuildProgress("b1", BuildStatus.QUEUED, ""))
+        assert not [c for c in hub.calls if c[0] == "download"]
+
+    def test_cancel_stops_a_running_file_download_and_keeps_its_part(self, engine, monkeypatch, tmp_path):
+        """The watcher sets the fetcher's stop event when the build is cancelled, so a large file stops between two
+        chunks (the real HubFetcher keeps its .part file)."""
+        from orchestrator.Core import builder
+        from orchestrator.Core.builder import BuildCancelled
+        from orchestrator.Core.hf_hub import DownloadStopped
+        monkeypatch.setattr(builder, "STAGING_WATCH_EVERY", 0.01)
+        FakeHub().install(monkeypatch)
+        progress = BuildProgress("b1", BuildStatus.QUEUED, "")
+
+        class Slow:
+            def __init__(self, token, stop):
+                self.stop = stop
+
+            def fetch_file(self, repo, commit, file, dest, progress_cb=None):
+                Path(str(dest) + ".part").parent.mkdir(parents=True, exist_ok=True)
+                Path(str(dest) + ".part").write_text("half")
+                progress.status = BuildStatus.CANCELLED
+                if not self.stop.wait(5):
+                    raise AssertionError("the stop event was never set")
+                raise DownloadStopped("stopped")
+        monkeypatch.setattr(BuildEngine, "_hub_fetcher", staticmethod(lambda token, stop: Slow(token, stop)))
+        started = time.monotonic()
+        with pytest.raises(BuildCancelled):
+            engine._stage_model(config(), progress)
+        assert time.monotonic() - started < 5
+        assert list((engine.cache_dir / "models" / "hf").rglob("*.part")), "the part already downloaded is kept"
+
+    def test_the_watchdog_stops_a_running_file_download_when_the_disk_fills(self, engine, monkeypatch):
+        from orchestrator.Core import builder
+        from orchestrator.Core.hf_hub import DownloadStopped
+        monkeypatch.setattr(builder, "STAGING_WATCH_EVERY", 0.01)
+        FakeHub().install(monkeypatch)
+        free = {"value": 900 * GB}
+        monkeypatch.setattr("orchestrator.Core.builder.shutil.disk_usage", lambda p: usage(free["value"]))
+
+        class Filling:
+            def __init__(self, token, stop):
+                self.stop = stop
+
+            def fetch_file(self, repo, commit, file, dest, progress=None):
+                free["value"] = 5 * 10 ** 8  # another program filled the disk meanwhile
+                if not self.stop.wait(5):
+                    raise AssertionError("the watchdog never stopped the download")
+                raise DownloadStopped("stopped")
+        monkeypatch.setattr(BuildEngine, "_hub_fetcher", staticmethod(lambda token, stop: Filling(token, stop)))
+        with pytest.raises(disk_plan.InsufficientSpace) as exc:
+            engine._stage_model(config(), BuildProgress("b1", BuildStatus.QUEUED, ""))
+        assert "Staging stopped" in str(exc.value)
+
+    def test_the_watchdog_stops_a_conversion_container_when_the_disk_fills(self, engine, monkeypatch):
+        import threading
+        from orchestrator.Core import builder
+        monkeypatch.setattr(builder, "CONTAINER_WATCH_EVERY", 0.01)
+        monkeypatch.setattr("orchestrator.Core.builder.shutil.disk_usage", lambda p: usage(5 * 10 ** 8))
+        engine._lock, engine._active_containers, engine.default_timeout = threading.Lock(), {}, 60
+        killed = threading.Event()
+
+        class Container:
+            def start(self):
+                pass
+
+            def logs(self, stream=True, follow=True):
+                return iter([])
+
+            def wait(self, timeout=None):
+                killed.wait(5)
+                return {"StatusCode": 137}
+
+            def kill(self):
+                killed.set()
+
+            def remove(self, force=True):
+                pass
+        progress = BuildProgress("b1", BuildStatus.BUILDING, "")
+        with pytest.raises(disk_plan.InsufficientSpace) as exc:
+            engine._run_container(config(build_timeout=60), progress, Container(), "Build: ")
+        assert killed.is_set() and "No space left on device" in str(exc.value)
+        assert engine._disk_full_text(exc.value).startswith("insufficient_resources:")
 
     def test_cancel_during_staging_stops_before_the_next_file(self, engine, monkeypatch):
         progress = BuildProgress("b1", BuildStatus.QUEUED, "")

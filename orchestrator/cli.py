@@ -16,7 +16,7 @@ import re
 import time
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 
 import click
@@ -189,6 +189,8 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     # no command and no child process ever inherits it; only `mcp serve` gets it, through the context.
     from orchestrator.tools.mcp_tokens import ENV_VAR
     ctx.mcp_token = os.environ.pop(ENV_VAR, None)
+    from orchestrator.Core.request_store import set_program
+    set_program("cli")  # shown with this process's builds in the shared build state
     # ConfigManager reads this file (and reports it on stderr if it cannot be read) wherever settings are needed.
     ctx.config_path = config
     ctx.log_level = "DEBUG" if verbose else ("ERROR" if quiet else log_level)
@@ -418,6 +420,12 @@ def _ditto_confirm(spec, inp) -> bool:
         click.echo_via_pager(text + "\n")
     else:
         click.echo(text, err=True)
+    if getattr(spec, "offers_request", False):  # a remote framework's question (Ditto's MCP-client mode)
+        from orchestrator.llm.remote_tools import RemoteAnswer
+        answer = click.prompt(f"Allow this? y = once, r = and ask the framework at {spec.server} to stop asking "
+                              "(you confirm that there), n = no", type=click.Choice(["y", "r", "n"]), default="n",
+                              err=True)
+        return RemoteAnswer(answer != "n", stop_asking=answer == "r")
     from orchestrator.tools.registry import current_grant_offer, current_registry
     offer = current_grant_offer()
     if offer is None:
@@ -752,42 +760,94 @@ STATUS_ROWS = 20  # builds `build status` lists without --all
 @click.option('--all', '-a', is_flag=True, help=f'Show every kept build (default: the {STATUS_ROWS} newest)')
 @pass_context
 def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
-    """Status of builds, including those the GUI, the MCP server or another CLI call started (read from the build
-    records in the cache folder). REQUEST_ID: a request id (req_...) or a build id."""
+    """Status of builds, including those the GUI, the MCP server or another CLI call started (the shared build state
+    in the per-user folder, and the build records in the cache folder). REQUEST_ID: a request id (req_...) or a
+    build id."""
     from orchestrator.Core.build_records import read_records, records_dir
     config, resolve = _settings(ctx)
     folder = records_dir(resolve(config.get("cache_dir", "cache")))
     records = read_records(folder)
+    requests = _shared_requests(config)
+    by_request = {r.get("request_id"): r for r in requests}
+    with_builds = {r.get("request_id") for r in records}
+    # Requests without a build record yet (queued, preparing, or ended before a build ran)
+    waiting = [r for r in requests if r.get("request_id") not in with_builds]
     if request_id:
         matches = [r for r in records if request_id in (r.get("request_id"), r.get("build_id"))]
-        if not matches:
+        request = by_request.get(request_id)
+        if not matches and request is None:
             console.print(f"[red]Build '{escape(request_id)}' not found in {escape(str(folder))}.[/red]")
             sys.exit(1)
+        if request is not None:
+            _print_request_summary(request)
         for record in reversed(matches):  # attempts in order
             _print_build_record(record)
-        for rid in dict.fromkeys(r.get("request_id") for r in matches if r.get("request_id")):
+        for rid in dict.fromkeys([r.get("request_id") for r in matches if r.get("request_id")]
+                                 + ([request_id] if request is not None else [])):
             _print_client_proposals(_client_proposals(config, rid))
         return
-    if not records:
+    if not records and not waiting:
         console.print(f"[yellow]No builds found in {escape(str(folder))}.[/yellow]")
         return
-    shown = records if all else records[:STATUS_ROWS]
+    rows = sorted([("b", r) for r in records] + [("r", r) for r in waiting],
+                  key=lambda pair: str(pair[1].get("started") or ""), reverse=True)
+    shown = rows if all else rows[:STATUS_ROWS]
     table = Table(title="Builds")
     for column in ("Request", "Build", "Status", "Progress", "Target", "Format", "Quantization", "Model",
-                   "Started"):
+                   "Started", "Where"):
         table.add_column(column)
-    for r in shown:
+    for kind, r in shown:
+        if kind == "r":
+            summary = r.get("summary") if isinstance(r.get("summary"), dict) else {}
+            table.add_row(escape(str(r.get("request_id"))), "-", escape(str(r.get("status"))),
+                          f"{r.get('progress') or 0}%", escape(str(summary.get("target") or "-")),
+                          escape(str(summary.get("format") or "-")), escape(str(summary.get("quantization") or "-")),
+                          escape(str(summary.get("model") or "-")), escape(str(r.get("started") or "-")),
+                          escape(str(r.get("program") or "-")))
+            continue
+        where = (by_request.get(r.get("request_id")) or {}).get("program") or "-"
         table.add_row(escape(str(r.get("request_id") or "-")), escape(str(r.get("build_id"))),
                       escape(str(r.get("status"))), f"{r.get('progress') or 0}%", escape(str(r.get("target") or "-")),
                       escape(str(r.get("format") or "-")), escape(str(r.get("quantization") or "-")),
-                      escape(str(r.get("model") or "-")), escape(str(r.get("started") or "-")))
+                      escape(str(r.get("model") or "-")), escape(str(r.get("started") or "-")), escape(str(where)))
     console.print(table)
-    if len(records) > len(shown):
-        console.print(f"{len(records) - len(shown)} older builds: llm-cli build status --all")
+    if len(rows) > len(shown):
+        console.print(f"{len(rows) - len(shown)} older builds: llm-cli build status --all")
     proposed = sorted({p.request_id for p in _client_proposals(config)})
     if proposed:
         console.print(f"[magenta]AI clients proposed fixes for {len(proposed)} failed build(s): "
                       f"llm-cli build status {escape(proposed[-1])}[/magenta]")
+
+
+def _shared_requests(config) -> list:
+    """The build request summaries every framework process writes into the per-user folder (request_store)."""
+    from orchestrator.Core.request_store import for_config
+    try:
+        store = for_config(config)
+        return store.read() if store is not None else []
+    except OSError:
+        return []
+
+
+def _print_request_summary(r: dict) -> None:
+    summary = r.get("summary") if isinstance(r.get("summary"), dict) else {}
+    rows = [("Request", r.get("request_id")), ("Status", r.get("status")), ("Stage", r.get("stage")),
+            ("Progress", f"{r.get('progress') or 0}%"), ("Model", summary.get("model")),
+            ("Target", summary.get("target")), ("Board", summary.get("board")), ("Format", summary.get("format")),
+            ("Quantization", summary.get("quantization")), ("Optimization", summary.get("optimization")),
+            ("Started by", r.get("owner") or "the person"), ("Where", r.get("program")),
+            ("Started", r.get("started")), ("Ended", r.get("ended"))]
+    for label, value in rows:
+        if value not in (None, ""):
+            console.print(f"[bold]{label}:[/bold] {escape(str(value))}")
+    for error in r.get("errors") or []:
+        console.print(f"[bold]Error:[/bold] {escape(str(error))}")
+    if r.get("status") == "interrupted":
+        console.print("[yellow]The process that ran this request has ended before it finished.[/yellow]")
+    elif r.get("awaiting_decision"):
+        console.print(f"[yellow]Waits for a decision on a self-healing proposal in the {escape(str(r.get('program')))}"
+                      " that started it.[/yellow]")
+    console.print("")
 
 
 def _client_proposals(config, request_id: Optional[str] = None) -> list:
@@ -1588,6 +1648,131 @@ def _runtime_failure(error) -> None:
     if getattr(error, "log_tail", ""):
         console.print(Panel(escape(error.log_tail), title="llama-server log (last lines)"))
     sys.exit(1)
+
+
+@ditto.group('remote')
+def ditto_remote():
+    """Ditto's MCP-client mode: use the tools of a framework running elsewhere (for example the headless Docker
+    image) through its MCP server, with a named token linked to Ditto's permissions there"""
+    pass
+
+
+def _remote_settings_text(config) -> List[str]:
+    from orchestrator.llm.remote_tools import (COMMAND_SETTING, NAME_SETTING, SOURCE_SETTING, TRANSPORT_SETTING,
+                                               URL_SETTING)
+    return [f"Tool source: {config.get(SOURCE_SETTING, 'local') or 'local'}",
+            f"Transport: {config.get(TRANSPORT_SETTING, 'stdio') or 'stdio'}",
+            f"Command (stdio): {' '.join(config.get(COMMAND_SETTING, []) or []) or '-'}",
+            f"Address (http): {config.get(URL_SETTING, '') or '-'}",
+            f"Name: {config.get(NAME_SETTING, '') or '-'}"]
+
+
+@ditto_remote.command('set')
+@click.option('--transport', type=click.Choice(['stdio', 'http']), required=True,
+              help='stdio: Ditto starts the server command (with LCF_MCP_TOKEN); http: Ditto connects to the address '
+                   'with the token as bearer header')
+@click.option('--command', 'command', default=None,
+              help='stdio: the command that starts the server, e.g. "docker exec -i lcf llm-cli mcp serve"')
+@click.option('--url', default=None, help='http: the server address (https, or http on a loopback address)')
+@click.option('--name', default='', help='Your name for that framework, shown in Ditto\'s dialogs')
+@click.option('--with-token', is_flag=True, help='Read the named token from stdin instead of asking for it')
+@pass_context
+def ditto_remote_set(ctx: FrameworkContext, transport: str, command: Optional[str], url: Optional[str], name: str,
+                     with_token: bool):
+    """Switch Ditto to the tools of another framework's MCP server. Create the token there first:
+    llm-cli mcp token add NAME --link ditto (its permissions are then Ditto's own permissions on that framework)."""
+    import shlex
+    from orchestrator.llm.remote_tools import (COMMAND_SETTING, NAME_SETTING, SOURCE_SETTING, TOKEN_SECRET,
+                                               TRANSPORT_SETTING, URL_SETTING, RemoteSetupError, check_url)
+    if not with_token:
+        _require_terminal("llm-cli ditto remote set")
+    argv: List[str] = []
+    try:
+        if transport == 'stdio':
+            argv = shlex.split(command or "")
+            if not argv:
+                _usage("--command is required for --transport stdio.")
+        else:
+            check_url(url or "")
+    except RemoteSetupError as e:
+        _usage(str(e))
+    except ValueError as e:
+        _usage(f"--command cannot be read: {e}")
+    ctx.require_framework()
+    sm = ctx.framework_manager.secrets_manager
+    if sm is None:
+        console.print("[red]The credential vault is not available; the token cannot be stored.[/red]")
+        sys.exit(1)
+    token = sys.stdin.read().strip() if with_token else click.prompt("Named MCP token", hide_input=True)
+    if not token:
+        _usage("No token given.")
+    if not sm.set_secret(TOKEN_SECRET, token):
+        console.print("[red]The token could not be stored.[/red]")
+        sys.exit(1)
+    config = ctx.framework_manager.config
+    for key, value in ((SOURCE_SETTING, "mcp"), (TRANSPORT_SETTING, transport), (COMMAND_SETTING, argv),
+                       (URL_SETTING, url or ""), (NAME_SETTING, name)):
+        config.set(key, value)
+    if not config.save_user_config():
+        console.print("[red]The settings could not be saved.[/red]")
+        sys.exit(1)
+    console.print("[green]Ditto now uses the tools of that framework (MCP-client mode); the token is in the "
+                  "credential vault.[/green]")
+    console.print("Check the connection with: llm-cli ditto remote test")
+
+
+@ditto_remote.command('off')
+@pass_context
+def ditto_remote_off(ctx: FrameworkContext):
+    """Back to Ditto's own tools in this framework (the stored token is kept; remove it with
+    llm-cli secrets delete ditto_mcp_token)."""
+    from orchestrator.llm.remote_tools import SOURCE_SETTING
+    config, _ = _settings(ctx)
+    config.set(SOURCE_SETTING, "local")
+    if not config.save_user_config():
+        console.print("[red]The settings could not be saved.[/red]")
+        sys.exit(1)
+    console.print("[green]Ditto uses its own tools again.[/green]")
+
+
+@ditto_remote.command('show')
+@pass_context
+def ditto_remote_show(ctx: FrameworkContext):
+    """Ditto's tool source and the remote server settings (never the token)"""
+    config, _ = _settings(ctx)
+    for line in _remote_settings_text(config):
+        console.print(escape(line))
+
+
+@ditto_remote.command('test')
+@pass_context
+def ditto_remote_test(ctx: FrameworkContext):
+    """Connect to the remote framework with the stored token and list the tools and task prompts it offers Ditto"""
+    from orchestrator.llm.remote_tools import RemoteConnection, RemoteSetupError, TOKEN_NEXT, remote_server, \
+        stored_token
+    ctx.require_framework()
+    try:
+        server = remote_server(ctx.framework_manager.config)
+    except RemoteSetupError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if server is None:
+        console.print("Ditto uses its own tools (no remote server set): llm-cli ditto remote set ...")
+        return
+    token = stored_token(ctx.framework_manager.secrets_manager)
+    if not token:
+        console.print(f"[red]No named MCP token is stored. {escape(TOKEN_NEXT)}[/red]")
+        sys.exit(1)
+    try:
+        with RemoteConnection(server, token, _ditto_confirm) as remote:
+            tools, prompts = remote.tools(), remote.prompts()
+    except RemoteSetupError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"Framework at {escape(server.label())}: {len(tools)} tools Ditto may use there, "
+                  f"{len(prompts)} task prompts.")
+    for spec in tools:
+        console.print(f"  {escape(spec.name)}")
 
 
 @ditto.group('runtime')
@@ -2868,13 +3053,18 @@ def mcp():
               help='stdio: started by the client (default). http: local Streamable HTTP with a named token per client.')
 @click.option('--host', default='127.0.0.1', show_default=True, help='HTTP only; loopback addresses only')
 @click.option('--port', default=8765, show_default=True, type=int, help='HTTP only')
+@click.option('--container', is_flag=True,
+              help='HTTP inside a container only: bind the container\'s interfaces (publish the port to the host\'s '
+                   'loopback: -p 127.0.0.1:PORT:PORT); a named token and the origin check still apply')
 @pass_context
-def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
+def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int, container: bool):
     """Run the MCP server (stdout carries the protocol; logs go to stderr)"""
     import contextlib
     from orchestrator import mcp_server
     from orchestrator.tools.mcp_tokens import ENV_VAR
     mcp_server.no_programs_from_the_working_directory()
+    from orchestrator.Core.request_store import set_program
+    set_program("mcp")
     # Taken from the environment by the cli() group before anything ran (the token must not be inherited).
     token = getattr(ctx, "mcp_token", None)
     if token is None:
@@ -2898,7 +3088,8 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
                                        "Run 'llm-cli ditto setup'.[/yellow]")
     stdio_token = {"stdio_token": token} if token is not None and transport == 'stdio' else {}
     try:
-        mcp_server.serve(ctx.framework_manager, transport=transport, host=host, port=port, **stdio_token)
+        mcp_server.serve(ctx.framework_manager, transport=transport, host=host, port=port, **stdio_token,
+                         **({"container": True} if container else {}))
     except ValueError as e:
         Console(stderr=True).print(f"[red]{escape(str(e))}[/red]")
         sys.exit(2)

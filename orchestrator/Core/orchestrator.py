@@ -135,6 +135,19 @@ class WorkflowState:
         if self.total_builds == 0: return 0
         return int((self.completed_builds / self.total_builds) * 100)
 
+    def __setattr__(self, name, value):
+        object.__setattr__(self, name, value)
+        # A change other processes see (design T11): the orchestrator's listener writes the request's summary into
+        # the per-user folder. Not set while the dataclass initializes itself.
+        listener = self.__dict__.get("_listener")
+        if listener is not None and name in WATCHED_FIELDS:
+            listener(self)
+
+
+# WorkflowState fields whose change is written to the shared build state (request_store)
+WATCHED_FIELDS = frozenset({"status", "current_stage", "total_builds", "completed_builds", "failed_builds",
+                            "end_time"})
+
 class BuildQueueFull(RuntimeError):
     """The build queue holds MAX_UNFINISHED_REQUESTS unfinished requests; a tool caller's new one is refused, not
     queued."""
@@ -214,6 +227,15 @@ class LLMOrchestrator:
         # Disk reservations of accepted AI builds (disk_plan.ReservationLedger), set by the build service
         self.disk_ledger = None
 
+        # The shared build state (request_store.RequestStore in the per-user folder): every request's summary, so
+        # the GUI, the CLI and every MCP server see the same builds. None without a per-user folder.
+        from orchestrator.Core.request_store import for_config
+        try:
+            self.request_store = for_config(config_manager)
+        except OSError as e:
+            self.logger.warning(f"Shared build state not available: {e}")
+            self.request_store = None
+
         # Pending healing approvals (request_id -> event set by resolve_healing from the GUI/CLI thread)
         self._healing_events: Dict[str, asyncio.Event] = {}
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -249,7 +271,14 @@ class LLMOrchestrator:
                 summary=request_summary(request),
             )
             self._workflows[request.request_id] = state
-            
+            self._share(state)
+            state._listener = self._share
+            if self.request_store is not None:
+                try:
+                    self.request_store.prune()
+                except OSError as e:
+                    self.logger.debug(f"Old build request summaries not pruned: {e}")
+
             # In Queue packen (Priorität beachten: Negativ, da PriorityQueue min-heap ist)
             # Tuple: (priority_int, timestamp, request)
             await self._queue.put((-request.priority.value, datetime.now().timestamp(), request))
@@ -297,6 +326,17 @@ class LLMOrchestrator:
         state.end_time = state.end_time or datetime.now()
         return True
 
+    def _share(self, state: "WorkflowState") -> None:
+        """Writes the request's summary into the shared build state; a summary that cannot be written never stops
+        a build."""
+        store = getattr(self, "request_store", None)
+        if store is None:
+            return
+        try:
+            store.save(state)
+        except (OSError, TypeError, ValueError) as e:
+            self.logger.debug(f"Summary of {state.request_id} not shared: {e}")
+
     # --- DEPENDENCY INJECTION ---
 
     def inject_self_healing(self, manager):
@@ -336,6 +376,8 @@ class LLMOrchestrator:
                 self._workflows[request.request_id].errors.append(str(e))
         finally:
             self._release_disk(request)
+            if request.request_id in self._workflows:
+                self._share(self._workflows[request.request_id])  # errors and warnings added at the end
             self._active_tasks.pop(request.request_id, None)
             self._queue.task_done()
             self._ensure_worker_running()
