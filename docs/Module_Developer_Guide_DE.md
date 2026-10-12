@@ -117,13 +117,17 @@ Es gibt drei Wege; alle enden im selben Modulgenerator (`orchestrator/Core/modul
   ([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)) und „Export for community after creating“
   ([Abschnitt 9.2](#92-ein-target-für-die-community-exportieren)).
 - **CLI, interaktiv:** `llm-cli module create` fragt nach Name, Architektur (`aarch64`, `x86_64`, `armv7l`,
-  `riscv64`), SDK, Basis-Image, Beschreibung, Paketen und CPU-Flags. Führe den Befehl im Installationsordner aus:
-  Anders als die übrigen Befehle löst er ein relatives `targets_dir` gegen den aktuellen Ordner auf.
+  `riscv64`), SDK, Basis-Image, Beschreibung, Paketen und CPU-Flags (nur als Hinweis, siehe
+  [Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)). Mit `--probe <Probe-Datei>` (dem Profil, das
+  `llm-cli scan --device` schreibt) wird der `runtime:`-Block des Moduls aus der Probe des Boards geplant; eine Datei,
+  die kein Probe-Profil ist, wird abgelehnt. Führe den Befehl im Installationsordner aus: Anders als die übrigen
+  Befehle löst er ein relatives `targets_dir` gegen den aktuellen Ordner auf.
 - **CLI mit Ditto:** `llm-cli module generate-ai target_hardware_config.txt` (auf Wunsch mit `--provider` und
   `--model` für diesen Lauf). Ditto liefert einen strukturierten Vorschlag (Architektur, SDK, Basis-Image, Pakete,
   CPU- und CMake-Flags, Einrichtungsbefehle, Quantisierungsblock). Ist die Wissensbasis eingeschaltet, zieht es
   vorher passende Dokumentationsauszüge hinzu. Der Vorschlag wird vollständig angezeigt; geschrieben wird erst nach
-  deiner Bestätigung. Leerzeichen im Modulnamen werden zu Unterstrichen.
+  deiner Bestätigung. Leerzeichen im Modulnamen werden zu Unterstrichen. Ist die Probe-Datei ein Probe-Profil, wird
+  der `runtime:`-Block daraus geplant, wie bei der im Assistenten eingelesenen Probe-Datei.
 
 ### 3.3 Was der Generator prüft
 
@@ -134,9 +138,13 @@ Vorlage ausgefüllt wird:
   Ordnername ist der kleingeschriebene Name mit Unterstrichen (aus `My Board` wird `targets/my_board/`).
 - **Architektur:** eine von `aarch64`, `x86_64`, `armv7l`, `riscv64`.
 - **Basis-Image:** muss per Digest festgelegt sein (`image@sha256:...`), außer es beginnt mit `debian:`, `ubuntu:`,
-  `nvidia/cuda:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` oder `python:`.
+  `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` oder `python:`. Die vorgebauten CUDA-Images von NVIDIA sind nicht
+  ausgenommen: Für die GPU-Vorlage ist ein per Digest festgelegtes `nvidia/cuda:<Version>-devel-ubuntu22.04`-Image
+  der ausdrückliche Opt-in aus [Abschnitt 5.2](#52-cuda-in-der-gpu-vorlage); jedes andere `nvidia/cuda`-Image wird
+  abgelehnt. Ein vorgebautes llama.cpp-Image wird ebenfalls abgelehnt.
 - **Pakete:** gültige Debian-Paketnamen. **Flags:** einfache Compiler- oder CMake-Optionen wie `-mcpu=cortex-a76`
-  oder `-DGGML_CUDA=ON`.
+  oder `-DGGML_CUDA=ON`. Sie sind nur Hinweise: Das Modul vermerkt sie in seinem `runtime:`-Block, und kein Build
+  wendet sie je an.
 - **Shell-Code** (Einrichtungsbefehle, Quantisierungsblock): keine Downloads (`curl`, `wget`, ...), kein `sudo`,
   kein Löschen von `/`, kein `chmod 777`, kein Schreiben auf Rohgeräte, kein Docker-Socket und kein `docker run`,
   kein Ausführen erzeugten Codes; keine Steuerzeichen. Jedes erzeugte Skript muss `bash -n` bestehen.
@@ -149,7 +157,7 @@ Vorlage ausgefüllt wird:
 ### 3.4 Was der Generator schreibt und was du ergänzt
 
 Der Generator schreibt `target.yml` (Metadaten, `supported_boards`, `docker`, `modules`, `optimization_profiles`,
-`requirements` und einen Block `capabilities:`), ein `Dockerfile` (aus dem `Dockerfile.gpu` der Vorlage, wenn das
+`requirements`, einen Block `capabilities:` und einen Block `runtime:`), ein `Dockerfile` (aus dem `Dockerfile.gpu` der Vorlage, wenn das
 SDK „cuda“ oder das Basis-Image „nvidia“ enthält), `modules/build.sh`, `modules/config_module.sh`,
 `modules/source_module.sh`, `modules/rkllm_module.sh`, `modules/rknn_module.sh`, `modules/benchmark_module.sh`,
 Platzhalter für `convert_module.sh` und `target_module.sh`, `generate_profile.sh` und die `scripts/` der Vorlage.
@@ -186,6 +194,51 @@ capabilities:
   eine Schreibweise im Block: Anfragen werden ohne Beachtung der Groß- und Kleinschreibung zugeordnet, und andere
   Namen gehören in `aliases` (zum Beispiel `INT8: Q8_0`).
 
+**Der Runtime-Block.** Die Hardware-Probe läuft auf dem Target, und das Build-Rezept
+(`orchestrator/runtime/build/recipe.py`) leitet daraus ab, wie die llama.cpp-Laufzeit des Boards (`llama-server`,
+`llama-cli`, `llama-bench`, `llama-perplexity`) aus dem festgelegten Commit gebaut wird. Der Generator schreibt eine
+Zusammenfassung dieses Plans in `target.yml`. Mit der Probe eines Radxa ZERO 3W (RK3566, DietPi) und den Flags, die
+ein Assistent vorgeschlagen hat, sieht er so aus:
+
+```yaml
+runtime:
+  schema_version: 1
+  built_from: source
+  recipe: orchestrator/runtime/build/recipe.py
+  purpose: device-runtime
+  arch: arm64
+  os: linux
+  profile_perf_key: 2beb8057d73cf1dcc0a5db4f830650d61814ef9b953159f42733c224929fd833
+  libc: glibc
+  libc_min: glibc-2.36
+  placement: cross
+  builder_base: debian-12
+  cpu: explicit
+  cpu_arm_arch: armv8.2-a+dotprod+fp16
+  backends: [cpu]
+  targets: [llama-server, llama-cli, llama-bench, llama-perplexity]
+  advisory:
+    cpu_flags: -mcpu=cortex-a55
+    cmake_flags: -DGGML_NEON=ON
+    note: "proposed in the module wizard or by an AI; never applied: ..."
+```
+
+- **Woher die Probe kommt:** die im Assistenten eingelesene Probe-Datei, die Probe-Datei von `module generate-ai`
+  oder `llm-cli module create --probe <Datei>`. Ohne Probe enthält der Block die Architektur, `backends: [cpu]` und
+  einen Hinweis, dass die Laufzeit beim Bauen aus der Probe des Boards geplant wird (`llm-cli scan --device`).
+- **Was die Felder bedeuten:** `libc_min` ist die C-Bibliothek des Geräts, der Cross-Build nutzt also eine
+  Builder-Basis, die nicht neuer ist (`builder_base`, aus `build_bases` in `configs/llama_runtime.yml`);
+  `cpu_arm_arch` (ARM) oder `cpu_features` (x86) sind die CPU-Optionen aus der Probe, `cpu: all-variants` heißt, die
+  Probe konnte es nicht sagen und jede CPU-Variante wird gebaut, `cpu: native` ein Build auf dem Gerät selbst;
+  `backends` die Builds, die sich lohnen (der CPU-Build zuerst); `profile_perf_key` kennzeichnet die Probe für
+  Benchmark-Ergebnisse; `notes` sagen, was das Rezept weggelassen hat und warum.
+- **Eine Aufzeichnung, keine Eingabe:** Die Geräte-Laufzeit wird beim Bauen immer neu aus der eigenen Probe des
+  Geräts geplant; ein geänderter Block, auch einer in einem Community-Paket, ändert also keinen Build. Der Block eines
+  Pakets muss trotzdem zum Schema passen (`TargetRuntime` in `orchestrator/schemas/targets.py`).
+- **Flags sind nur Hinweise:** CPU- und CMake-Flags aus dem Assistenten oder aus Dittos Vorschlag bleiben unter
+  `advisory` lesbar und werden nie angewendet; das alte `config_module.sh` bekommt sie weiterhin
+  (Abschnitt [10](#10-altlasten)).
+
 **Wissens-Schnappschuss (nur auf Wunsch).** Auf der letzten Seite des Assistenten ist das Kästchen „Attach the
 knowledge crawled for this target (Deep Ingest, privacy scrub applied)“ standardmäßig aus und lässt sich erst
 einschalten, wenn in diesem Assistenten Deep Ingest gelaufen ist. Dann exportiert der Generator nur die Seiten, die
@@ -211,10 +264,11 @@ Das Ergebnis ist ein **Gerüst**, noch kein funktionierendes Target:
   Quantisierungsblocks laufen zuerst; ein Zweig kann `build_gguf <TYP>` aufrufen, und jeder andere Typ läuft über
   `build_gguf`, das Typen ablehnt, die llama-quantize nicht kennt. Nichts wird unverändert durchkopiert, und ein
   Build, der kein Artefakt schreibt, scheitert.
-- **Das Vorlagen-Dockerfile baut llama.cpp noch nicht**, ein Build des unveränderten Gerüsts bricht also mit
-  „llama.cpp converter not found“ oder „llama-quantize not found“ ab. Übernimm den llama.cpp-Build aus
-  `targets/Rockchip/dockerfile` (den festgelegten Tag nach `/usr/src/llama.cpp` klonen, `llama-quantize` und
-  `llama-imatrix` bauen, die Abhängigkeiten des Konverters installieren).
+- **Das Vorlagen-Dockerfile baut die Konvertierungswerkzeuge von llama.cpp** mit denselben Schritten wie
+  `targets/Rockchip/dockerfile` ([Abschnitt 5.1](#51-llamacpp-im-image-rezepte-keine-binärdateien)): den
+  festgelegten Commit in `/usr/src/llama.cpp`, `llama-quantize`, `llama-imatrix`, `llama-perplexity`,
+  `llama-completion` und `llama-bench`, abgestimmt auf den Build-Rechner, und die Abhängigkeiten des Konverters.
+  Behalte diese Schritte, wenn du das Dockerfile änderst.
 
 ## 4. target.yml und der Capabilities-Block
 
@@ -321,8 +375,12 @@ Mit dem Rockchip-Block:
 Die Build-Pipeline liest nur `metadata` und `capabilities`. Ein optionaler Block `hardware:` (`cpu.architecture`,
 `gpu.vendor`, `gpu.vendor_id`, `npu.vendor`, `npu.vendor_id`) wird an zwei Stellen genutzt: um beim Einlesen einer
 Probe-Datei im Build-Reiter ein passendes Target vorzuschlagen, und für Geräteoptionen in den Startbefehlen eines
-Deployment-Pakets mit Docker-Images. Die übrigen Blöcke in der Rockchip-`target.yml` (`supported_boards`, `docker`,
-`modules`, `optimization_profiles`, `requirements` usw.) sind beschreibend.
+Deployment-Pakets mit Docker-Images. Der Block `runtime:` erzeugter Module
+([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)) zeichnet den Plan des Rezepts auf und wird gegen
+sein Schema geprüft, aber kein Build liest ihn. Die übrigen Blöcke in der Rockchip-`target.yml` (`supported_boards`,
+`docker`, `modules`, `requirements` usw.) sind beschreibend; `optimization_profiles` ist eine Altlast, die nur die
+Kette aus vier Modulen liest ([Abschnitt 10](#10-altlasten)), und `docker.build_args` wiederholt nur den Pin für
+Builds außerhalb des Frameworks.
 
 ## 5. Das Dockerfile
 
@@ -340,9 +398,13 @@ Build-Argumente, die die Engine übergibt:
 
 | Argument | Wert |
 |---|---|
-| `LLAMA_CPP_TAG` | die Einstellung `llama_cpp_version` (Vorgabe: der Tag des llama.cpp-Pins in `configs/llama_runtime.yml`, `b11429`) |
+| `LLAMA_CPP_TAG`, `LLAMA_CPP_COMMIT` | der llama.cpp-Pin in `configs/llama_runtime.yml` (`b11429`, `d81235049384534c167caea52b85a694f6103d14`). Die Einstellung `llama_cpp_version` kann sie nicht verschieben: Ein anderer Wert ergibt nur eine Warnung im Build-Log |
+| `LLAMA_CMAKE_ARGS` | nur wenn das Dockerfile `ARG LLAMA_CMAKE_ARGS` deklariert: der Plan des Build-Rezepts für die Konvertierungswerkzeuge auf diesem Rechner, als `-DNAME=WERT`-Wörter ([Abschnitt 5.1](#51-llamacpp-im-image-rezepte-keine-binärdateien)) |
 | `BUILD_JOBS` | die Einstellung `build_jobs`, nur wenn sie größer als 0 ist; das Self-Healing senkt sie auf 1, wenn einem Compiler der Speicher ausging |
 | `USER_ID`, `GROUP_ID` | die IDs des Host-Benutzers (Linux und macOS, wenn der Host-Benutzer nicht root ist) |
+
+Die drei llama.cpp-Argumente kommen nur aus dem Pin und dem Rezept: Build-Argumente, die ein Build-Auftrag
+mitbringt, können sie nicht ersetzen.
 
 Was das Image bieten muss (siehe `targets/Rockchip/dockerfile`):
 
@@ -359,6 +421,61 @@ Was das Image bieten muss (siehe `targets/Rockchip/dockerfile`):
 - **Ein venv je Werkzeugkette**, wenn sich ihre Abhängigkeiten widersprechen (Rockchip: `/opt/venv`,
   `/opt/venv-rkllm`, `/opt/venv-rknn`).
 - Keine Binärdateien im Repository: Wheels und Bibliotheken im Dockerfile herunterladen und ihre Hashes prüfen.
+
+### 5.1 llama.cpp im Image: Rezepte, keine Binärdateien
+
+Das Framework teilt Rezepte, nie fertig gebaute Images oder Programme. Ein Target baut llama.cpp aus dem Quelltext mit
+den gemeinsamen Schritten aus `targets/Rockchip/dockerfile`, die die Vorlage unverändert übernimmt:
+
+1. **Per Commit holen.** `LLAMA_CPP_COMMIT` (40 Hex-Zeichen) und `LLAMA_CPP_TAG` (`b` und eine Zahl) werden geprüft,
+   der Commit wird mit `git fetch --depth 1 origin <Commit>` geholt (der Tag nur, wo ein Server das ablehnt), und der
+   Build bricht ab, wenn `git rev-parse HEAD` nicht genau diesen Commit zurückgibt. Ein verschobener Tag stoppt den
+   Build also. `.git` wird danach entfernt; `.llama_cpp_tag` und `.llama_cpp_commit` halten den Pin im Image fest.
+2. **Mit dem Plan konfigurieren.** Jedes Wort von `LLAMA_CMAKE_ARGS` muss wie `-DNAME=WERT` aussehen (nur Buchstaben,
+   Ziffern und `. _ : + / $ ; -`), `GGML_NATIVE` muss gesetzt sein, und Optionen, die bei jedem Setzen etwas
+   herunterladen (`LLAMA_BUILD_BORINGSSL`, `GGML_CUDA_CCCL_VERSION` und die übrigen des Rezepts), werden abgelehnt.
+   Nach diesen Wörtern setzt die Befehlszeile, was jeder Build hat: Tests, Beispiele, die App, den Server, die
+   Web-Oberfläche, llguidance, KleidiAI und den OpenMP-Download aus, `LLAMA_OPENSSL=OFF`, `LLAMA_SUBPROCESS=OFF`,
+   `FETCHCONTENT_FULLY_DISCONNECTED=ON` sowie Build-Nummer und Commit für `--version`. CMake nimmt den letzten Wert,
+   diese gewinnen also immer. Ein Konfigurationsprotokoll, das einen Download meldet, stoppt den Build.
+3. **Bauen und prüfen.** `llama-quantize`, `llama-imatrix`, `llama-perplexity`, `llama-completion` und `llama-bench`
+   werden gebaut, und `llama-bench --version` muss den festgelegten Build und Commit melden.
+
+**Abgestimmt auf den Build-Rechner.** Das Image läuft auf dem Rechner, der es baut, deshalb übergibt die Engine den
+Plan des Rezepts für den Zweck `host-tools` aus einer Probe dieses Rechners, unmittelbar vor dem Image-Build erstellt
+(oder, wenn das scheitert, aus dem Profil, das `llm-cli scan` gespeichert hat): die CPU-Merkmale ausgeschrieben (etwa
+`-DGGML_AVX512=ON` nur, wo die CPU AVX-512 hat), oder alle CPU-Varianten, von denen zur Laufzeit die beste gewählt
+wird, wenn die Probe nicht jedes Merkmal erkennen konnte. Ohne Probe, oder wenn der Docker-Daemon auf einem anderen
+Rechner läuft, entfällt das Argument und die Vorgabe des Dockerfiles gilt: die feste x86-64-Basis, die diese Werkzeuge
+immer hatten (AVX2, FMA, F16C, kein AVX-512), statisch gelinkt, ausgeschrieben. Das Build-Log sagt, was gilt, und
+`build_info.json` hält es unter `llama_cpp_tools` fest (Tag, Commit, Abstimmung, ID und Wörter des Plans). CPU- und
+CMake-Flags aus dem Modul-Assistenten oder von einer KI erreichen diesen Build nie.
+
+**Was die Prüfungen ablehnen** ([Abschnitt 9.1](#91-was-die-prüfungen-verlangen)): ein Image, das nach llama.cpp oder
+`llama-server` benannt ist (auch per Digest festgelegt), oder eines der früheren Laufzeit-Images des Frameworks,
+llama.cpp-Programme, die aus einem anderen Image kopiert werden, Downloads von llama.cpp-Release-Archiven oder
+-Programmen, Paketquellen mit vorgebauten `llama-cpp-python`-Wheels und llama.cpp-Pakete einer Distribution
+(`apt-get install llama.cpp` und Ähnliches).
+
+### 5.2 CUDA in der GPU-Vorlage
+
+`targets/_template/Dockerfile.gpu` baut in beiden Stufen auf `ubuntu:22.04`, per Digest festgelegt, und nimmt CUDA
+12.9.1 aus den Redist-Archiven von NVIDIA: `redistrib_12.9.1.json` ist über seine sha256 festgelegt (die Werte von
+`cuda.toolkits` in `configs/llama_runtime.yml`), und jede Komponente (`cuda_nvcc`, `cuda_cudart`, `cuda_cccl`,
+`libcublas`) wird gegen die sha256 aus dem Manifest geprüft, bevor sie nach `/usr/local/cuda` entpackt wird. Die
+Laufzeitstufe bekommt die CUDA-Laufzeitbibliotheken (cudart, cuBLAS). Die Komponenten stehen unter der Lizenz des
+CUDA Toolkit von NVIDIA (LICENSE in jedem Archiv); der Bau des Images lädt sie für deinen eigenen Gebrauch herunter.
+Die llama.cpp-Konvertierungswerkzeuge bleiben CPU-Builds; GPU-Werkzeuge sind ein späterer Schritt des Rezepts.
+
+Das vorgebaute Entwicklungs-Image von NVIDIA ist ein ausdrücklicher Opt-in: Wähle
+`nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8` (oder
+ein anderes per Digest festgelegtes `-devel-ubuntu22.04`-Image) selbst als Basis-Image im Assistenten oder bei
+`module create`. Dittos Vorschläge enthalten nie ein `nvidia/cuda`-Image: Ein Vorschlag mit einem solchen geht einmal
+an Ditto zurück und wird sonst abgelehnt, weil eine Probe-Datei den Vorschlag lenken könnte. Der Generator nutzt das
+Image dann für die Builder-Stufe und setzt `CUDA_SOURCE=prebuilt-image`, das das Image als Label
+`org.llm-framework.cuda-source` trägt; das Toolkit wird dann nicht aus dem festgelegten Manifest bereitgestellt, und
+das Log des Generators und das Log des Image-Builds sagen „not self-built“. Die Laufzeitstufe bleibt auf dem
+festgelegten Ubuntu 22.04, weil die Python-Umgebung von einer Stufe in die andere kopiert wird.
 
 ## 6. Das Build-Skript
 
@@ -562,7 +679,9 @@ seiner Datei und bei Skripten mit seiner Zeile gemeldet.
 | Prüfung | Regel |
 |---|---|
 | Capabilities | `target.yml` existiert und hat einen Block `capabilities:`, den das Schema annimmt ([Abschnitt 4.2](#42-capabilities)). |
-| Festgelegte Images | In jeder Datei, deren Name in beliebiger Schreibweise mit `dockerfile` beginnt (`Dockerfile`, `dockerfile`, `Dockerfile.gpu`), muss jedes Image, das `FROM`, `COPY --from=` oder `RUN --mount=...,from=` verwendet, per Digest festgelegt sein (`name@sha256:` und 64 Hex-Ziffern). Ausgenommen sind offizielle Basis-Images mit Tag (Namen, die mit `debian:`, `ubuntu:`, `nvidia/cuda:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` oder `python:` beginnen), eine frühere Build-Stufe (`FROM ... AS builder`, danach `COPY --from=builder`) und eine Stufennummer (`--from=0`). Kommentarzeilen werden übersprungen. Eine Variable wie `FROM ${BASE_IMAGE}` wird abgelehnt, weil sie keine Image-Angabe ist. |
+| Runtime-Block | Hat `target.yml` einen Block `runtime:`, passt er zu seinem Schema: bekannte Architekturen, Backends und Programme, `built_from: source`, einfache Hinweis-Flags, keine weiteren Schlüssel ([Abschnitt 3.4](#34-was-der-generator-schreibt-und-was-du-ergänzt)). |
+| Festgelegte Images | In jeder Datei, deren Name in beliebiger Schreibweise mit `dockerfile` beginnt (`Dockerfile`, `dockerfile`, `Dockerfile.gpu`), muss jedes Image, das `FROM`, `COPY --from=` oder `RUN --mount=...,from=` verwendet, per Digest festgelegt sein (`name@sha256:` und 64 Hex-Ziffern). Ausgenommen sind offizielle Basis-Images mit Tag (Namen, die mit `debian:`, `ubuntu:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` oder `python:` beginnen), eine frühere Build-Stufe (`FROM ... AS builder`, danach `COPY --from=builder`) und eine Stufennummer (`--from=0`). Die `nvidia/cuda`-Images von NVIDIA brauchen einen Digest. Kommentarzeilen werden übersprungen. Eine Variable wie `FROM ${BASE_IMAGE}` wird abgelehnt, weil sie keine Image-Angabe ist. |
+| Kein vorgebautes llama.cpp | Das Framework teilt Rezepte, keine Binärdateien ([Abschnitt 5.1](#51-llamacpp-im-image-rezepte-keine-binärdateien)). In Dockerfiles: kein Image, dessen Name `llama.cpp`, `llama-cpp`, `llamacpp` oder `llama-server` enthält, und keines der früheren Laufzeit-Images des Frameworks (`ghcr.io/smilez1985/llm-runtime`, `ghcr.io/llm-framework/builder`, `ghcr.io/llm-framework/inference-node`), auch nicht per Digest festgelegt; kein `COPY --from=` (oder `RUN --mount=...,from=`) von llama.cpp-Programmen aus einem anderen Image, auch nicht über eine Build-Stufe, die nur dieses Image nennt (`FROM acme/tools@sha256:... AS tools`, dann `COPY --from=tools /usr/bin/llama-server ...`). Eine Stufe, deren `RUN`-Schritt mit CMake kompiliert oder die die Programme aus einer solchen Stufe kopiert hat, baut sie aus dem Quelltext. In Dockerfiles, Skripten (`.sh`, `.py`, `.ps1`, `.bat`, `.cmd` und jede Datei, deren erste Zeile mit `#!` beginnt) und YAML-Dateien: kein Download eines llama.cpp-Releases (`.../llama.cpp/releases/download/...`, Namen von Release-Archiven wie `llama-b11429-bin-...`), kein Download eines llama.cpp-Programms (`curl`, `wget`, `ADD` und Ähnliches mit `llama-server`, `llama-quantize`, `libllama` und den anderen Werkzeugnamen im selben Befehl; eine Pipeline wie `curl ... \| tar -x ... llama-server` ist ein Befehl), keine Paketquelle mit vorgebauten `llama-cpp-python`-Wheels und keine Installation eines llama.cpp-Pakets (`apt-get install llama.cpp`, `apk add`, `conda install` und andere). Kommentarzeilen werden übersprungen; der Wissens-Schnappschuss wird nicht geprüft. |
 | Shell-Sperrliste | Jede Zeile jeder `*.sh`-Datei, Kommentare eingeschlossen, außer die gleiche Zeile steht in der Datei der Vorlage mit demselben Pfad (für `modules/build.sh`: `targets/_template/modules/build.sh`). Abgelehnt werden: Downloads (`curl`, `wget`, `aria2c` und `fetch` als Wort, also auch `git fetch`), das Löschen von `/` (`rm -rf /`), `chmod 777`, `sudo`, `mkfs` und `dd if=`, der Docker-Socket oder `docker run`, `eval`, `source` oder `.` mit dem Ergebnis von `$(...)`, `sh -c "$(...)"` und Prozess-Substitution `<(...)`, außer als reine Eingabe (`done < <(grep ...)`). Downloads gehören festgelegt ins Dockerfile. |
 | Shell-Syntax | Jede `*.sh`-Datei besteht `bash -n` (entfällt, wo bash nicht installiert ist). |
 | Nur Text | Keine Datei enthält ein NUL-Byte: Binärdateien werden abgelehnt. Beim Export muss außerdem jede Datei UTF-8-Text sein. |

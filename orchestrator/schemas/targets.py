@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
-Machine-readable target capabilities (the `capabilities:` block of a target's target.yml).
+Machine-readable target capabilities (the `capabilities:` block of a target's target.yml), and the `runtime:`
+block: what the build recipe planned for the target's device runtime (a record, never an input to a build).
 
 One place says which boards a target has, which formats it can produce for which board, which
 quantizations each format accepts and what calibration data it needs. GUI, CLI, the build service,
 Ditto and the MCP server derive their choices and their request validation from it.
 """
 
+import re
 from enum import Enum
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Annotated, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -191,3 +193,55 @@ class TargetCapabilities(BaseModel):
         if dataset and cap.dataset == "none" and not cap.imatrix:
             problems.append(f"The {fmt} format does not use a calibration dataset.")
         return problems
+
+
+# --- the runtime: block (orchestrator/runtime/build/target_runtime.py writes it) ---------------------------------
+
+_FLAG_TOKEN = re.compile(r"^-[A-Za-z][\w.=+,:/-]*$")
+_NoteText = Annotated[str, Field(max_length=300)]
+
+
+class RuntimeAdvisory(BaseModel):
+    """Compiler and CMake flags from the module wizard or an AI: shown to the reader, never applied (decision D20)."""
+    model_config = ConfigDict(extra="forbid")
+
+    cpu_flags: str = Field(default="", max_length=500)
+    cmake_flags: str = Field(default="", max_length=500)
+    note: Optional[_NoteText] = None
+
+    @model_validator(mode="after")
+    def _plain_flags(self):
+        bad = [t for t in (self.cpu_flags + " " + self.cmake_flags).split() if not _FLAG_TOKEN.fullmatch(t)]
+        if bad:
+            raise ValueError(f"advisory flags must be plain options like -mcpu=cortex-a76: {', '.join(bad[:3])}")
+        return self
+
+
+class TargetRuntime(BaseModel):
+    """The `runtime:` block of a target.yml: what the build recipe planned for the target's device runtime from the
+    target's probe. A record for the reader; a device runtime is always planned again from the device's own probe, so
+    the block never feeds a build."""
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[1] = 1
+    built_from: Literal["source"] = "source"     # llama.cpp from the pinned commit; never a prebuilt image or binary
+    recipe: Literal["orchestrator/runtime/build/recipe.py"] = "orchestrator/runtime/build/recipe.py"
+    purpose: Literal["device-runtime"] = "device-runtime"
+    # The probe's values (configs/hardware_probe_schema.yml) and the module generator's architecture names.
+    os: Optional[Literal["linux", "windows", "macos", "freebsd", "android"]] = None
+    arch: Literal["x86_64", "x86", "arm64", "armv7", "armv7l", "armv6", "riscv64", "ppc64le", "s390x", "loongarch64",
+                  "other"]
+    libc: Optional[Literal["glibc", "musl", "uclibc", "bionic", "ucrt", "libsystem", "bsdlibc"]] = None
+    libc_min: Optional[str] = Field(default=None, pattern=r"^(glibc|musl)-\d{1,3}(\.\d{1,5}){1,3}$")
+    placement: Optional[Literal["native", "cross", "on-device"]] = None
+    builder_base: Optional[str] = Field(default=None, pattern=r"^[a-z0-9][a-z0-9._-]{0,63}$")
+    cpu: Optional[Literal["native", "explicit", "all-variants"]] = None
+    cpu_arm_arch: Optional[str] = Field(default=None, pattern=r"^armv8(\.[1-9])?-a(\+[a-z0-9]{2,12}){0,8}$")
+    cpu_features: List[Annotated[str, Field(pattern=r"^GGML_[A-Z0-9_]{2,24}$")]] = Field(default_factory=list,
+                                                                                         max_length=20)
+    backends: List[Literal["cpu", "cuda", "vulkan", "rocm", "metal"]] = Field(default_factory=list, max_length=5)
+    targets: List[Literal["llama-server", "llama-cli", "llama-bench", "llama-perplexity"]] = Field(
+        default_factory=list, max_length=4)
+    profile_perf_key: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    notes: List[_NoteText] = Field(default_factory=list, max_length=12)
+    advisory: Optional[RuntimeAdvisory] = None

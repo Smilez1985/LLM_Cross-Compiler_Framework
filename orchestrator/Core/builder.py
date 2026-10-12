@@ -40,7 +40,7 @@ from orchestrator import __version__
 from orchestrator.Core import build_records
 from orchestrator.utils.logging import get_logger
 from orchestrator.utils.build_context import stage_build_context
-from orchestrator.utils.llama_pin import pinned_tag
+from orchestrator.utils.llama_pin import pinned_source
 from orchestrator.utils.sandbox import FALLBACK_USER, container_sandbox, hand_over, sandbox_user
 
 # Files a build may produce that are models (data to install), never programs to execute.
@@ -191,6 +191,7 @@ class BuildConfiguration:
     target_pack_sha256: Optional[str] = None  # content digest of the target folder used
     target_version: Optional[str] = None      # metadata.version of its target.yml
     toolchain_image: Optional[str] = None     # id of the image that ran the conversion
+    llama_cpp_tools: Optional[Dict[str, Any]] = None  # pin and recipe plan of the image's llama.cpp conversion tools
     request_id: Optional[str] = None  # the orchestrator request the build belongs to (shown by `build status`)
 
 @dataclass
@@ -729,15 +730,18 @@ class BuildEngine:
         progress.add_log(f"Building Docker Image: {tag}")
         
         try:
-            llama_tag = str(self._get_conf("llama_cpp_version", "") or pinned_tag())
-            if not llama_tag:
-                raise RuntimeError("No llama.cpp tag: llama_cpp.source in configs/llama_runtime.yml is missing or "
-                                   "broken, and the setting llama_cpp_version is empty")
-            buildargs = {"LLAMA_CPP_TAG": llama_tag}
+            from orchestrator.runtime.build.host_tools import PINNED_BUILD_ARGS
+            buildargs: Dict[str, str] = {}
             build_jobs = int(self._get_conf("build_jobs", 0) or 0)
             if build_jobs > 0:
                 buildargs["BUILD_JOBS"] = str(build_jobs)  # lowered by self-healing after an OOM
-            buildargs.update(config.build_args)
+            given = dict(getattr(config, "build_args", None) or {})
+            pinned = sorted(set(given) & set(PINNED_BUILD_ARGS))
+            if pinned:
+                progress.add_warning(f"Build arguments {', '.join(pinned)} come only from the llama.cpp pin and the "
+                                     "build recipe; the values given for this build are not used.")
+            buildargs.update({k: v for k, v in given.items() if k not in PINNED_BUILD_ARGS})
+            buildargs.update(self._llama_cpp_args(config, progress, path))
             # uid/gid 0 already exist in the image (root); the entrypoint maps the user at runtime anyway.
             if sys.platform != "win32" and os.getuid() != 0:
                 buildargs["USER_ID"] = str(os.getuid())
@@ -767,6 +771,78 @@ class BuildEngine:
             
         except Exception as e:
             raise RuntimeError(f"Image build failed: {e}\n{self._log_tail(progress, 'BUILD: ')}")
+
+    def _llama_cpp_args(self, config: BuildConfiguration, progress: BuildProgress, dockerfile: Path) -> Dict[str, str]:
+        """LLAMA_CPP_TAG and LLAMA_CPP_COMMIT from the pin, and LLAMA_CMAKE_ARGS from the build recipe's plan for the
+        conversion tools (purpose host-tools) on this machine, when the target's Dockerfile takes it. The image runs
+        on the build host, so the tools are tuned to the build host's probe (design 4.3). Without a usable probe the
+        Dockerfile keeps its default, the fixed x86-64 baseline. Options typed into the module wizard or proposed by
+        an AI never reach this: only the recipe's plan does."""
+        from orchestrator.runtime.build.host_tools import dockerfile_base, dockerfile_takes_cmake_args, host_tools
+        source = pinned_source()
+        if not source:
+            raise RuntimeError("No llama.cpp pin: llama_cpp.source in configs/llama_runtime.yml is missing or broken")
+        setting = str(self._get_conf("llama_cpp_version", "") or "").strip()
+        if setting and setting != source["tag"]:
+            progress.add_warning(f"The setting llama_cpp_version ({setting}) is not the llama.cpp pin "
+                                 f"({source['tag']}): target images build the pinned commit {source['commit'][:12]}. "
+                                 "Another llama.cpp version is a change of the pin in configs/llama_runtime.yml.")
+        args = {"LLAMA_CPP_TAG": source["tag"], "LLAMA_CPP_COMMIT": source["commit"]}
+        try:
+            text = dockerfile.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            text = ""
+        if not dockerfile_takes_cmake_args(text):
+            progress.add_log("The target's Dockerfile takes no LLAMA_CMAKE_ARGS: its llama.cpp build, if it has one, "
+                             "does not follow the build recipe.")
+            config.llama_cpp_tools = {"tag": source["tag"], "commit": source["commit"], "tuning": "not-recipe"}
+            return args
+        profile, why = self._build_host_profile(progress)
+        try:
+            from orchestrator.runtime.catalog import load_catalog
+            catalog = load_catalog()
+        except Exception as e:  # a broken catalog leaves the Dockerfile's baseline; the pin above still applies
+            self.logger.warning(f"Runtime catalog not readable: {e}")
+            catalog = None
+        tools = host_tools(profile, pin=source, catalog=catalog, base_image=dockerfile_base(text),
+                           why_no_profile=why)
+        progress.add_log(tools.reason)
+        for note in tools.notes:
+            progress.add_log(f"llama.cpp plan: {note}")
+        config.llama_cpp_tools = tools.record()
+        args.update(tools.build_args())
+        return args
+
+    def _build_host_profile(self, progress: BuildProgress) -> Tuple[Any, str]:
+        """(profile, reason when there is none) of the machine whose CPU runs the image: a probe now (a fraction of a
+        second), else this machine's stored profile. None when the Docker daemon is on another machine."""
+        if self._docker_daemon_is_remote():
+            return None, "the Docker daemon runs on another machine, which this machine's probe does not describe"
+        try:
+            from orchestrator.runtime.hardware import local_profile
+            return local_profile(), ""
+        except Exception as e:  # the stored profile is the fallback
+            self.logger.debug(f"Hardware probe for the conversion tools failed: {e}")
+        try:
+            from orchestrator.runtime.profile import ProfileStore
+            state = getattr(self.config, "user_state_dir", None)
+            stored = (ProfileStore(state) if state else ProfileStore()).load_local()
+        except Exception as e:
+            self.logger.debug(f"Stored profile of this machine not readable: {e}")
+            stored = None
+        if stored is not None:
+            progress.add_log("The hardware probe failed; the conversion tools follow this machine's stored profile.")
+            return stored, ""
+        return None, "the hardware probe of this machine failed and no profile of it is stored (llm-cli scan)"
+
+    def _docker_daemon_is_remote(self) -> bool:
+        """True when images are built by a Docker daemon on another machine (DOCKER_HOST or the client's address)."""
+        host = os.environ.get("DOCKER_HOST", "").strip()
+        if host and not host.startswith(("unix://", "npipe://")):
+            return True
+        base = str(getattr(getattr(self.docker_client, "api", None), "base_url", "") or "")
+        return bool(base) and not base.startswith(("http+docker://localhost", "http+docker://localnpipe",
+                                                   "http+unix://"))
 
     def _buildkit_available(self) -> bool:
         """BuildKit (docker buildx) caches better than the legacy builder behind docker-py's api.build,
@@ -1322,6 +1398,7 @@ class BuildEngine:
             "target_pack_sha256": config.target_pack_sha256,
             "target_version": config.target_version,
             "toolchain_image": config.toolchain_image,
+            "llama_cpp_tools": config.llama_cpp_tools,
             "max_context_length": config.max_context_length,
             "dataset": self._dataset_ref(config, progress),
             "lcf_version": __version__,

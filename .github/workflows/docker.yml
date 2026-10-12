@@ -88,6 +88,13 @@ jobs:
           docker run --rm --entrypoint /opt/venv-rknn/bin/python llm-framework/rockchip:ci \
             -c "from rknn.api import RKNN; print('rknn venv ok')"
 
+      - name: Smoke test (llama.cpp conversion tools from the pinned commit)
+        run: |
+          commit="$(docker run --rm --entrypoint cat llm-framework/rockchip:ci /usr/src/llama.cpp/.llama_cpp_commit)"
+          grep -q "commit: ${commit}" configs/llama_runtime.yml
+          docker run --rm --entrypoint /usr/src/llama.cpp/build/bin/llama-bench llm-framework/rockchip:ci --version \
+            2>&1 | grep -F "commit ${commit:0:8})"
+
       - name: Smoke test (container setup as used by BuildEngine)
         # BuildEngine starts containers as root with read-only files under /build-cache; the
         # entrypoint must fix permissions, drop to llmbuilder and keep the venv on PATH.

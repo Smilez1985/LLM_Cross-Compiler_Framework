@@ -115,13 +115,17 @@ There are three ways; all of them end in the same module generator (`orchestrato
   ([section 3.4](#34-what-the-generator-writes-and-what-you-add)) and "Export for community after creating"
   ([section 9.2](#92-exporting-a-target-for-the-community)).
 - **CLI, interactive:** `llm-cli module create` asks for name, architecture (`aarch64`, `x86_64`, `armv7l`,
-  `riscv64`), SDK, base image, description, packages and CPU flags. Run it from the installation folder: unlike the
-  other commands, it resolves a relative `targets_dir` against the current folder.
+  `riscv64`), SDK, base image, description, packages and CPU flags (advisory, see
+  [section 3.4](#34-what-the-generator-writes-and-what-you-add)). With `--probe <probe file>` (the profile
+  `llm-cli scan --device` writes) the module's `runtime:` block is planned from the board's probe; a file that is not
+  a probe profile is refused. Run it from the installation folder: unlike the other commands, it resolves a relative
+  `targets_dir` against the current folder.
 - **CLI with Ditto:** `llm-cli module generate-ai target_hardware_config.txt` (optionally `--provider` and
   `--model` for this run). Ditto returns a structured proposal (architecture, SDK, base image, packages, CPU and
   CMake flags, setup commands, quantization block). If the knowledge base is enabled, it adds matching
   documentation excerpts first. The proposal is printed in full; nothing is written until you confirm. Spaces in
-  the module name become underscores.
+  the module name become underscores. When the probe file is a probe profile, the `runtime:` block is planned from
+  it, as with the wizard's imported probe file.
 
 ### 3.3 What the generator checks
 
@@ -131,9 +135,13 @@ Every value ends up in a Dockerfile, YAML or a shell script, so it is checked be
   the lower-case name with underscores (`My Board` becomes `targets/my_board/`).
 - **Architecture:** one of `aarch64`, `x86_64`, `armv7l`, `riscv64`.
 - **Base image:** must be pinned by digest (`image@sha256:...`) unless it starts with `debian:`, `ubuntu:`,
-  `nvidia/cuda:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` or `python:`.
+  `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` or `python:`. NVIDIA's prebuilt CUDA images are not exempt: for the GPU
+  template an `nvidia/cuda:<version>-devel-ubuntu22.04` image pinned by digest is the explicit opt-in described in
+  [section 5.2](#52-cuda-in-the-gpu-template); any other `nvidia/cuda` image is refused. A prebuilt llama.cpp image
+  is refused as well.
 - **Packages:** valid Debian package names. **Flags:** plain compiler or CMake options such as
-  `-mcpu=cortex-a76` or `-DGGML_CUDA=ON`.
+  `-mcpu=cortex-a76` or `-DGGML_CUDA=ON`. They are advisory: the module keeps them in its `runtime:` block and no
+  build ever applies them.
 - **Shell code** (setup commands, quantization block): no downloads (`curl`, `wget`, ...), no `sudo`, no deleting
   `/`, no `chmod 777`, no raw device writes, no Docker socket or `docker run`, no evaluation of generated code; no
   control characters. Every generated script must pass `bash -n`.
@@ -146,8 +154,8 @@ Every value ends up in a Dockerfile, YAML or a shell script, so it is checked be
 ### 3.4 What the generator writes, and what you add
 
 The generator writes `target.yml` (metadata, `supported_boards`, `docker`, `modules`, `optimization_profiles`,
-`requirements` and a `capabilities:` block), a `Dockerfile` (from `Dockerfile.gpu` of the template if the SDK
-contains "cuda" or the base image contains "nvidia"), `modules/build.sh`, `modules/config_module.sh`,
+`requirements`, a `capabilities:` block and a `runtime:` block), a `Dockerfile` (from `Dockerfile.gpu` of the
+template if the SDK contains "cuda" or the base image contains "nvidia"), `modules/build.sh`, `modules/config_module.sh`,
 `modules/source_module.sh`, `modules/rkllm_module.sh`, `modules/rknn_module.sh`, `modules/benchmark_module.sh`,
 placeholders for `convert_module.sh` and `target_module.sh`, `generate_profile.sh` and the template's `scripts/`.
 
@@ -181,6 +189,50 @@ capabilities:
   written, so `Q4_K_M|q4_k_m)` lists both spellings. Keep one spelling in the block: requests are matched without
   regard to case, and other names go into `aliases` (for example `INT8: Q8_0`).
 
+**The runtime block.** The hardware probe runs on the target, and the build recipe
+(`orchestrator/runtime/build/recipe.py`) derives from it how the board's llama.cpp runtime (`llama-server`,
+`llama-cli`, `llama-bench`, `llama-perplexity`) is built from the pinned commit. The generator writes a summary of
+that plan into `target.yml`. With the probe of a Radxa ZERO 3W (RK3566, DietPi) and the flags a wizard suggested it
+looks like this:
+
+```yaml
+runtime:
+  schema_version: 1
+  built_from: source
+  recipe: orchestrator/runtime/build/recipe.py
+  purpose: device-runtime
+  arch: arm64
+  os: linux
+  profile_perf_key: 2beb8057d73cf1dcc0a5db4f830650d61814ef9b953159f42733c224929fd833
+  libc: glibc
+  libc_min: glibc-2.36
+  placement: cross
+  builder_base: debian-12
+  cpu: explicit
+  cpu_arm_arch: armv8.2-a+dotprod+fp16
+  backends: [cpu]
+  targets: [llama-server, llama-cli, llama-bench, llama-perplexity]
+  advisory:
+    cpu_flags: -mcpu=cortex-a55
+    cmake_flags: -DGGML_NEON=ON
+    note: "proposed in the module wizard or by an AI; never applied: ..."
+```
+
+- **Where the probe comes from:** the probe file imported in the wizard, the probe file of `module generate-ai`, or
+  `llm-cli module create --probe <file>`. Without one, the block has the architecture, `backends: [cpu]` and a note
+  that the runtime is planned from the board's probe when it is built (`llm-cli scan --device`).
+- **What the fields mean:** `libc_min` is the C library the device has, so the cross build uses a builder base that
+  is not newer (`builder_base`, from `build_bases` in `configs/llama_runtime.yml`); `cpu_arm_arch` (ARM) or
+  `cpu_features` (x86) are the CPU options from the probe, `cpu: all-variants` means the probe could not tell and
+  every CPU variant is built, `cpu: native` a build on the device itself; `backends` the builds worth making (the CPU
+  build first); `profile_perf_key` identifies the probe for benchmark results; `notes` say what the recipe left out
+  and why.
+- **A record, not an input:** the device runtime is always planned again from the device's own probe when it is
+  built, so editing the block, or a block in a community pack, changes no build. A pack's block must still match
+  the schema (`TargetRuntime` in `orchestrator/schemas/targets.py`).
+- **Flags are advisory:** CPU and CMake flags from the wizard or Ditto's proposal stay readable under `advisory` and
+  are never applied; the legacy `config_module.sh` still receives them (section [10](#10-legacy-files)).
+
 **Knowledge snapshot (opt-in).** On the wizard's last page, the check box "Attach the knowledge crawled for this
 target (Deep Ingest, privacy scrub applied)" is off by default and can only be switched on after Deep Ingest ran in
 this wizard. Then the generator exports only the pages crawled from the URLs you entered in this wizard,
@@ -204,10 +256,11 @@ The result is a **skeleton**, not a working target yet:
   type lists and importance-matrix rules, and the `imatrix` job. The branches of your quantization block run first;
   a branch can call `build_gguf <TYPE>`, and every other type goes through `build_gguf`, which refuses types
   llama-quantize does not know. Nothing is copied through unchanged, and a build that writes no artifact fails.
-- **The template Dockerfile does not build llama.cpp yet**, so a build of the unchanged skeleton stops with
-  "llama.cpp converter not found" or "llama-quantize not found". Add the llama.cpp build from
-  `targets/Rockchip/dockerfile` (clone the pinned tag to `/usr/src/llama.cpp`, build `llama-quantize` and
-  `llama-imatrix`, install the converter's requirements).
+- **The template Dockerfile builds llama.cpp's conversion tools** with the same steps as
+  `targets/Rockchip/dockerfile` ([section 5.1](#51-llamacpp-in-the-image-recipes-not-binaries)): the pinned commit
+  in `/usr/src/llama.cpp`, `llama-quantize`, `llama-imatrix`, `llama-perplexity`, `llama-completion` and
+  `llama-bench` tuned to the build host, and the converter's requirements. Keep these steps when you change the
+  Dockerfile.
 
 ## 4. target.yml and the capabilities block
 
@@ -312,8 +365,12 @@ With the Rockchip block:
 The build pipeline reads only `metadata` and `capabilities`. An optional `hardware:` block (`cpu.architecture`,
 `gpu.vendor`, `gpu.vendor_id`, `npu.vendor`, `npu.vendor_id`) is used in two places: to suggest a matching target
 when a probe file is imported in the build tab, and for device options in the run commands of a deployment package
-that includes Docker images. The other blocks in the Rockchip `target.yml` (`supported_boards`, `docker`,
-`modules`, `optimization_profiles`, `requirements` and so on) are descriptive.
+that includes Docker images. The `runtime:` block of generated modules
+([section 3.4](#34-what-the-generator-writes-and-what-you-add)) is a record of the recipe's plan and is checked
+against its schema, but no build reads it. The other blocks in the Rockchip `target.yml` (`supported_boards`,
+`docker`, `modules`, `requirements` and so on) are descriptive; `optimization_profiles` is legacy, read only by the
+four-module chain ([section 10](#10-legacy-files)), and `docker.build_args` only repeats the pin for builds outside
+the framework.
 
 ## 5. The Dockerfile
 
@@ -331,9 +388,13 @@ Build arguments the engine passes:
 
 | Argument | Value |
 |---|---|
-| `LLAMA_CPP_TAG` | the setting `llama_cpp_version` (default: the tag of the llama.cpp pin in `configs/llama_runtime.yml`, `b11429`) |
+| `LLAMA_CPP_TAG`, `LLAMA_CPP_COMMIT` | the llama.cpp pin in `configs/llama_runtime.yml` (`b11429`, `d81235049384534c167caea52b85a694f6103d14`). The setting `llama_cpp_version` cannot move them: a different value only gives a warning in the build log |
+| `LLAMA_CMAKE_ARGS` | only when the Dockerfile declares `ARG LLAMA_CMAKE_ARGS`: the build recipe's plan for the conversion tools on this machine, as `-DNAME=VALUE` words ([section 5.1](#51-llamacpp-in-the-image-recipes-not-binaries)) |
 | `BUILD_JOBS` | the setting `build_jobs`, only if it is greater than 0; self-healing lowers it to 1 after a compiler ran out of memory |
 | `USER_ID`, `GROUP_ID` | the host user's ids (Linux and macOS, when the host user is not root) |
+
+The three llama.cpp arguments come only from the pin and the recipe: build arguments a build request carries
+cannot replace them.
 
 What the image must provide (see `targets/Rockchip/dockerfile`):
 
@@ -348,6 +409,59 @@ What the image must provide (see `targets/Rockchip/dockerfile`):
 - **One venv per toolchain** if their dependencies conflict (Rockchip: `/opt/venv`, `/opt/venv-rkllm`,
   `/opt/venv-rknn`).
 - No binaries in the repository: download wheels and libraries in the Dockerfile and check their hashes.
+
+### 5.1 llama.cpp in the image: recipes, not binaries
+
+The framework shares recipes, never compiled images or binaries. A target builds llama.cpp from source with the
+shared steps of `targets/Rockchip/dockerfile`, which the template copies unchanged:
+
+1. **Fetch by commit.** `LLAMA_CPP_COMMIT` (40 hex characters) and `LLAMA_CPP_TAG` (`b` and a number) are checked,
+   the commit is fetched with `git fetch --depth 1 origin <commit>` (the tag only where a server refuses that), and
+   the build stops unless `git rev-parse HEAD` gives back the commit. A moved tag therefore stops the build. `.git`
+   is removed afterwards; `.llama_cpp_tag` and `.llama_cpp_commit` record the pin in the image.
+2. **Configure with the plan.** Every word of `LLAMA_CMAKE_ARGS` must look like `-DNAME=VALUE` (letters, digits and
+   `. _ : + / $ ; -` only), `GGML_NATIVE` must be set, and options that download whenever they are set
+   (`LLAMA_BUILD_BORINGSSL`, `GGML_CUDA_CCCL_VERSION` and the others of the recipe) are refused. After these words
+   the command line sets what every build has: tests, examples, the app, the server, the web UI, llguidance,
+   KleidiAI and the OpenMP download off, `LLAMA_OPENSSL=OFF`, `LLAMA_SUBPROCESS=OFF`,
+   `FETCHCONTENT_FULLY_DISCONNECTED=ON`, and the build number and commit for `--version`. CMake takes the last
+   value, so they always win. A configure log that reports a download stops the build.
+3. **Build and check.** `llama-quantize`, `llama-imatrix`, `llama-perplexity`, `llama-completion` and `llama-bench`
+   are built, and `llama-bench --version` must report the pinned build and commit.
+
+**Tuned to the build host.** The image runs on the machine that builds it, so the engine passes the recipe's plan
+for purpose `host-tools` from a probe of that machine, taken right before the image build (or, if that fails, the
+profile `llm-cli scan` stored): the CPU features written out (for example `-DGGML_AVX512=ON` only where the CPU has
+AVX-512), or all CPU variants with the best one chosen at run time when the probe could not tell every feature.
+Without a probe, or when the Docker daemon runs on another machine, the argument is left out and the Dockerfile's
+default applies: the fixed x86-64 baseline these tools always had (AVX2, FMA, F16C, no AVX-512), static, written
+out. The build log says which, and `build_info.json` records it under `llama_cpp_tools` (tag, commit, tuning, the
+plan's ID and words). CPU and CMake flags from the module wizard or an AI never reach this build.
+
+**What the validators refuse** ([section 9.1](#91-what-the-validators-check)): an image named after llama.cpp or
+`llama-server` (also pinned by digest) or one of the framework's former runtime images, llama.cpp binaries copied
+out of another image, downloads of llama.cpp release archives or binaries, prebuilt `llama-cpp-python` wheel
+indexes, and distribution packages of llama.cpp (`apt-get install llama.cpp` and the like).
+
+### 5.2 CUDA in the GPU template
+
+`targets/_template/Dockerfile.gpu` builds on `ubuntu:22.04`, pinned by digest, in both stages and takes CUDA
+12.9.1 from NVIDIA's redist archives: `redistrib_12.9.1.json` is pinned by its sha256 (the values of `cuda.toolkits`
+in `configs/llama_runtime.yml`), and each component (`cuda_nvcc`, `cuda_cudart`, `cuda_cccl`, `libcublas`) is checked
+against the sha256 the manifest lists before it is unpacked into `/usr/local/cuda`. The runtime stage gets the CUDA
+runtime libraries (cudart, cuBLAS). The components come under NVIDIA's CUDA Toolkit licence (LICENSE in each
+archive); building the image downloads them for your own use. The llama.cpp conversion tools stay CPU builds; GPU
+tools are a later step of the recipe.
+
+NVIDIA's prebuilt development image is an explicit opt-in: choose
+`nvidia/cuda:12.9.1-devel-ubuntu22.04@sha256:bd4e2680a261c212f1e2fea241606f71497dc67a417f73175d794ec8212b5ba8` (or
+another `-devel-ubuntu22.04` image pinned by digest) as the base image yourself, in the wizard or `module create`.
+Ditto's proposals never carry an `nvidia/cuda` image: one that does is sent back to Ditto once and otherwise refused,
+because a probe file could steer the proposal. The generator then uses the image for the builder stage and sets
+`CUDA_SOURCE=prebuilt-image`, which the image carries as the label `org.llm-framework.cuda-source`; the toolkit is
+then not provisioned from the pinned manifest, and the generator's log and the image build's log say "not
+self-built". The runtime stage stays on the pinned Ubuntu 22.04, because the Python environment is copied from one
+stage to the other.
 
 ## 6. The build script
 
@@ -548,7 +662,9 @@ and, for scripts, its line.
 | Check | Rule |
 |---|---|
 | Capabilities | `target.yml` exists and has a `capabilities:` block the schema accepts ([section 4.2](#42-capabilities)). |
-| Pinned images | In every file whose name starts with `dockerfile` in any case (`Dockerfile`, `dockerfile`, `Dockerfile.gpu`), every image that `FROM`, `COPY --from=` or `RUN --mount=...,from=` uses must be pinned by digest (`name@sha256:` and 64 hex digits). Exempt are official base images with a tag (names starting with `debian:`, `ubuntu:`, `nvidia/cuda:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` or `python:`), an earlier build stage (`FROM ... AS builder`, then `COPY --from=builder`) and a stage number (`--from=0`). Comment lines are skipped. A variable such as `FROM ${BASE_IMAGE}` is refused, because it is not an image reference. |
+| Runtime block | If `target.yml` has a `runtime:` block, it matches its schema: known architectures, backends and binaries, `built_from: source`, plain advisory flags, no other keys ([section 3.4](#34-what-the-generator-writes-and-what-you-add)). |
+| Pinned images | In every file whose name starts with `dockerfile` in any case (`Dockerfile`, `dockerfile`, `Dockerfile.gpu`), every image that `FROM`, `COPY --from=` or `RUN --mount=...,from=` uses must be pinned by digest (`name@sha256:` and 64 hex digits). Exempt are official base images with a tag (names starting with `debian:`, `ubuntu:`, `rocm/dev-ubuntu-`, `rocm/rocm-terminal:` or `python:`), an earlier build stage (`FROM ... AS builder`, then `COPY --from=builder`) and a stage number (`--from=0`). NVIDIA's `nvidia/cuda` images need a digest. Comment lines are skipped. A variable such as `FROM ${BASE_IMAGE}` is refused, because it is not an image reference. |
+| No prebuilt llama.cpp | The framework shares recipes, not binaries ([section 5.1](#51-llamacpp-in-the-image-recipes-not-binaries)). In Dockerfiles: no image whose name contains `llama.cpp`, `llama-cpp`, `llamacpp` or `llama-server`, and none of the framework's former runtime images (`ghcr.io/smilez1985/llm-runtime`, `ghcr.io/llm-framework/builder`, `ghcr.io/llm-framework/inference-node`), also when pinned by digest; no `COPY --from=` (or `RUN --mount=...,from=`) of llama.cpp binaries out of another image, also not through a build stage that only names that image (`FROM acme/tools@sha256:... AS tools`, then `COPY --from=tools /usr/bin/llama-server ...`). A stage whose `RUN` step compiles with CMake, or that copied the binaries from such a stage, builds them from source. In Dockerfiles, scripts (`.sh`, `.py`, `.ps1`, `.bat`, `.cmd`, and any file whose first line starts with `#!`) and YAML files: no download of a llama.cpp release (`.../llama.cpp/releases/download/...`, release archive names such as `llama-b11429-bin-...`), no download of a llama.cpp binary (`curl`, `wget`, `ADD` and similar with `llama-server`, `llama-quantize`, `libllama` and the other tool names in the same command; a pipeline such as `curl ... \| tar -x ... llama-server` is one command), no prebuilt `llama-cpp-python` wheel index and no installation of a llama.cpp package (`apt-get install llama.cpp`, `apk add`, `conda install` and others). Comment lines are skipped; the knowledge snapshot is not checked. |
 | Shell deny-list | Every line of every `*.sh` file, comments included, unless the same line is in the template's file with the same path (for `modules/build.sh`: `targets/_template/modules/build.sh`). Refused: downloads (`curl`, `wget`, `aria2c`, and `fetch` as a word, which includes `git fetch`), deleting `/` (`rm -rf /`), `chmod 777`, `sudo`, `mkfs` and `dd if=`, the Docker socket or `docker run`, `eval`, `source` or `.` of a `$(...)` result, `sh -c "$(...)"`, and process substitution `<(...)` except as plain input (`done < <(grep ...)`). Downloads belong in the Dockerfile, pinned. |
 | Shell syntax | Every `*.sh` file passes `bash -n` (skipped where bash is not installed). |
 | Text only | No file contains a NUL byte: binary files are refused. On export every file must also be UTF-8 text. |

@@ -35,9 +35,11 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from orchestrator.runtime.catalog import BuildBase, CudaToolkit, RuntimeCatalog, version_tuple
 from orchestrator.runtime.profile import HardwareProfile
 
-RECIPE_VERSION = 2  # bump when the same inputs give different options: every build ID changes with it
+RECIPE_VERSION = 3  # bump when the same inputs give different options: every build ID changes with it
 # 2: Linux Clang builds use OpenMP only with a usable libomp; ARM CPU variants need a compiler that knows +sme;
 #    the CPU variant modules of device builds link the C++ runtime statically too
+# 3: conversion tools (host-tools, built in the target's image) get the build host's CPU features as explicit
+#    options instead of GGML_NATIVE
 
 PURPOSES = ("host-runtime", "host-tools", "device-runtime")
 PLACEMENTS = ("native", "container", "cross", "on-device")
@@ -648,10 +650,16 @@ def _variants_supported(target: _Target) -> bool:
     return target.arch == "x86_64" or (target.arch == "arm64" and target.os in ("linux", "macos"))
 
 
-def _cpu_mode(profile: HardwareProfile, target: _Target, placement: str, backend_dl: bool) -> str:
+def _cpu_mode(profile: HardwareProfile, target: _Target, placement: str, backend_dl: bool,
+              purpose: str = "host-runtime") -> str:
     """native: GGML_NATIVE on the machine that runs the binaries (a container build runs on the build host's CPU).
-    explicit: the probe's features. variants: all CPU variants, chosen at run time, when the probe could not tell."""
-    on_machine = placement in ("native", "on-device", "container")
+    explicit: the probe's features. variants: all CPU variants, chosen at run time, when the probe could not tell.
+
+    Conversion tools are compiled inside the image build of the target's toolchain image (design 4.3). They run on
+    the build host, but get its CPU features as explicit options: the options are then part of the image build's
+    arguments, so the layer cache and the plan say what the tools were built for, and nothing depends on what
+    -march=native gives inside the image build."""
+    on_machine = placement in ("native", "on-device") or (placement == "container" and purpose != "host-tools")
     if on_machine and not (backend_dl and target.arch == "x86_64"):
         return "native"  # GGML_NATIVE is not compatible with GGML_BACKEND_DL on x86 (ggml-cpu/CMakeLists.txt:413)
     features = X86_FEATURES if target.arch == "x86_64" else ARM_FEATURES
@@ -871,7 +879,7 @@ def plan_build(profile: HardwareProfile, *, purpose: str, placement: str, backen
 
     leaves = _leaves_userland(target, purpose, placement)
     windows_cuda = target.os == "windows" and backend == "cuda"
-    mode = _cpu_mode(profile, target, placement, backend_dl=windows_cuda)
+    mode = _cpu_mode(profile, target, placement, backend_dl=windows_cuda, purpose=purpose)
     if profile.needs_reprobe and mode == "explicit":
         notes.append("CPU features the probe could not tell are left out (treated as OFF)")
 

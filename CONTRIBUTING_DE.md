@@ -182,8 +182,10 @@ Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läu
    `llama_cpp.build` (dieselbe Bezeichnung). Die offiziellen vorgebauten Archive dieses Releases tragen die
    Bezeichnung aus `build`: Ihre Namen, Größen und SHA256-Werte neu festlegen, wie es der Kommentar am Anfang der
    Datei beschreibt.
-3. Die Stellen ändern, die den Katalog nicht lesen können: das `ARG LLAMA_CPP_TAG` in `targets/Rockchip/dockerfile`,
-   `docker.build_args.LLAMA_CPP_TAG` in `targets/*/target.yml` und `inference_backends.llama_cpp.commit` in
+3. Die Stellen ändern, die den Katalog nicht lesen können: `ARG LLAMA_CPP_TAG` und `ARG LLAMA_CPP_COMMIT` in
+   `targets/Rockchip/dockerfile`, `targets/_template/Dockerfile` und `targets/_template/Dockerfile.gpu` (die Vorgaben
+   für Image-Builds außerhalb des Frameworks; das Framework übergibt den Pin selbst), `docker.build_args.LLAMA_CPP_TAG`
+   und `LLAMA_CPP_COMMIT` in `targets/*/target.yml` und `inference_backends.llama_cpp.commit` in
    `configs/project_sources.yml` (danach `python ../scripts/sync_ssot.py --write` in `configs/`). Die Einstellung
    `llama_cpp_version` folgt dem Katalog von selbst.
 4. Prüfen, dass der Commit von Upstream stammt: `python scripts/llama_cpp_pin.py check`. Es ruft
@@ -195,6 +197,8 @@ Commit legt den Inhalt fest; ein Tag lässt sich verschieben. Eine Anhebung läu
    in `orchestrator/runtime/build/recipe.py` nennen jede Option mit Datei und Zeilen; den neuen Baum nach
    `FetchContent_Declare`, `ExternalProject_Add` und `file(DOWNLOAD` durchsuchen und jede neue ergänzen. Ebenso die
    Regeln für CUDA-Architekturen (`ggml/src/ggml-cuda/CMakeLists.txt`) und welche Ziele `tools/CMakeLists.txt` baut.
+   Die Target-Dockerfiles wiederholen beide Listen in ihrem llama.cpp-Bauschritt (die zuletzt gesetzten Optionen und
+   die, die sie ablehnen); `tests/test_target_dockerfiles.py` schlägt fehl, bis sie wieder zum Rezept passen.
 6. Die Golden-Pläne neu erzeugen und den Unterschied durchsehen:
    `LLM_FRAMEWORK_UPDATE_GOLDEN=1 QT_QPA_PLATFORM=offscreen python -m pytest tests/test_build_recipe.py`. Ohne
    Änderung am Rezept ändern sich nur der Commit, die Build-Nummer und die Build-IDs.

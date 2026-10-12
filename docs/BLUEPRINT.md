@@ -244,9 +244,11 @@ records hashes and lets you install the result on your device.
 4. **Build context and image.** The engine copies the target's `modules/`, `scripts/` and the shared
    `entrypoint.sh` into a fresh build context and builds the image `llm-framework/<target>:<build id>` with
    `docker buildx build` (BuildKit), or with the Docker API if BuildKit is missing. This step needs network: it
-   downloads llama.cpp (tag from `llama_cpp_version`, default `b11429`, the tag of the commit pin in
-   `configs/llama_runtime.yml`) and the Python toolchains. The number of parallel compile jobs comes from
-   `build_jobs` (0 means all cores).
+   fetches the llama.cpp commit pinned in `configs/llama_runtime.yml` (`b11429`; the build stops unless it got
+   exactly that commit) and the Python toolchains. The llama.cpp conversion tools are built with the build recipe's
+   options for this machine (`LLAMA_CMAKE_ARGS`, from a probe taken right before the image build), behind the
+   options every build has (nothing downloaded at configure time, no subprocess support). The number of parallel
+   compile jobs comes from `build_jobs` (0 means all cores).
 5. **Staging on the host.** The model is made available before any conversion code runs: a local folder or file
    is mounted read-only; a Hugging Face repo is downloaded on the host into `cache/models/hf/`, using your stored
    `hf_token` if needed. The token never enters a container.
@@ -628,8 +630,8 @@ expired, so a revocation never stops applying because the framework was not upda
    install folder.
 3. It is read as described above and must match its index entry (kind, id and version).
 4. Validators: a target must pass the same checks as a generated module (capabilities, every image a Dockerfile
-   pulls pinned by digest unless it is an official base image, the shell deny-list, `bash -n`, no template
-   placeholders, no binary files); a recipe must match its schema and the capabilities of its target if that is
+   pulls pinned by digest unless it is an official base image, no prebuilt llama.cpp, the shell deny-list, `bash -n`,
+   no template placeholders, no binary files); a recipe must match its schema and the capabilities of its target if that is
    installed; knowledge must be a list of entries that each keep their source. A recipe or knowledge pack may hold
    only its `recipe.yml` or `knowledge.json` and a `README.md`.
 5. A summary in plain text shows kind, id, version, author, licence, trust level, source, files and destination,
@@ -712,7 +714,7 @@ threat, the protection and where it is implemented.
 | A hostile site fills the memory or holds the crawl with an endless, huge or dripping response | Every response body is read up to a limit for its type (HTML pages 8 MiB, PDFs 64 MiB, robots.txt 500 KiB, `tdmrep.json` 1 MiB; counted after decompression) and every request, headers and body together, has a deadline (60 s, PDFs 180 s), because the HTTP timeout only bounds each socket read. The request runs in a worker thread, so neither the deadline nor Stop waits for a socket read. A page over its limit is skipped and one over its deadline fails, each named in the crawl log; a robots.txt that does not arrive in time means "disallow everything". | `_guarded_get`, `BODY_LIMITS` in `orchestrator/Core/crawler_manager.py`; `TestCrawlerLimits` in `tests/test_security.py` |
 | Pages whose owner reserved text and data mining end up in the knowledge base, or an AI is steered into crawling | The crawler checks robots.txt (RFC 9309), the `X-Robots-Tag` header, robots meta tags (also for its own bot name) and the TDM Reservation Protocol (site file, header, meta tag, PDF metadata) before and after each request. A reservation from any source wins, and no check can be switched off. Skipped pages are named in the crawl log. Crawls start only from the GUI; no tool takes a URL, and a test fails if the MCP server, Ditto, the tools or the provider layer reach the crawler. | `CrawlerManager` in `orchestrator/Core/crawler_manager.py`; `TestCrawlsStayWithTheUser` in `tests/test_security.py` |
 | Instructions hidden in external text steer a language model (prompt injection) | Web pages, knowledge-base hits, build logs, hardware probes, tool results and conversation summaries never go into a system prompt. They are normalized, stripped of invisible characters and HTML comments, shortened and wrapped in a block with a random id; the system prompt tells the model to treat such blocks as data. MCP tool descriptions and server instructions mark logs and search results as untrusted. Ditto's healing analyses, module proposals and build recommendations are validated structured answers; a healing fix or recommendation with a dangerous command (a download piped into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk) is discarded. Chat output is HTML-escaped; links open only after confirmation. | `orchestrator/utils/untrusted.py`, `orchestrator/Core/ditto_manager.py`, `orchestrator/llm/tool_loop.py`, `orchestrator/gui/chat_window.py`, `orchestrator/mcp_server.py` |
-| A generated or shared target module contains harmful code | Before any template is rendered, names, architecture, Debian package names, compiler/CMake flags and the detection command are checked against strict patterns; base images must be pinned by digest unless they are official base images (`debian:`, `ubuntu:`, `nvidia/cuda:`, `rocm/dev-ubuntu-*`, `rocm/rocm-terminal:`, `python:`). Shell code fields must pass a fixed deny-list (downloads, `sudo`, deleting `/`, `chmod 777`, raw device writes, Docker socket or `docker run`, evaluating generated code) and every generated script must pass `bash -n`. New targets stay inside `targets/`, never overwrite an existing target and are removed again if generation fails. The wizard and `llm-cli module generate-ai` show the proposal for review. Generated modules, community exports and community target packs in quarantine also pass `validate_target_folder`: valid capabilities, every image a Dockerfile pulls (`FROM`, `COPY --from`, `RUN --mount=...,from=`) pinned by digest unless it is an official base image, the deny-list on every script line that is not from the shipped template, `bash -n`, no template placeholders and no binary files. | `validate_module_data`, `validate_target_folder`, `ModuleGenerator` in `orchestrator/Core/module_generator.py` |
+| A generated or shared target module contains harmful code | Before any template is rendered, names, architecture, Debian package names, compiler/CMake flags and the detection command are checked against strict patterns; base images must be pinned by digest unless they are official base images (`debian:`, `ubuntu:`, `rocm/dev-ubuntu-*`, `rocm/rocm-terminal:`, `python:`); NVIDIA's prebuilt CUDA images are only an opt-in of the GPU template, pinned by digest, and a prebuilt llama.cpp image is refused. Shell code fields must pass a fixed deny-list (downloads, `sudo`, deleting `/`, `chmod 777`, raw device writes, Docker socket or `docker run`, evaluating generated code) and every generated script must pass `bash -n`. New targets stay inside `targets/`, never overwrite an existing target and are removed again if generation fails. The wizard and `llm-cli module generate-ai` show the proposal for review. Generated modules, community exports and community target packs in quarantine also pass `validate_target_folder`: valid capabilities, every image a Dockerfile pulls (`FROM`, `COPY --from`, `RUN --mount=...,from=`) pinned by digest unless it is an official base image, no prebuilt llama.cpp (images named after it, its binaries copied out of another image, release or binary downloads, prebuilt wheel indexes, distribution packages: the framework shares recipes, not binaries), a `runtime:` block that matches its schema, the deny-list on every script line that is not from the shipped template, `bash -n`, no template placeholders and no binary files. | `validate_module_data`, `validate_target_folder`, `ModuleGenerator` in `orchestrator/Core/module_generator.py` |
 | An AI client or Ditto does something you did not want | Four risk tiers; the registry enforces your stored permissions on every call, whatever the client's tool annotations say. `forbidden` tools cannot be registered; `external` tools can only be allowed one by one, never as a whole tier; a damaged permission file denies every tool. Confirmations show every argument in full (MCP elicitation, Ditto's dialog or prompt). Every call is recorded in an audit log whose entries are chained with an HMAC; the key is a separate entry in the OS keyring, not next to the database (without a keyring the chain is unkeyed, and the doctor says so). An anchor file (`audit.db.anchor`) also reveals removed newest entries. | `orchestrator/tools/` |
 | Other local programs or websites talk to the MCP server | stdio is the default. Streamable HTTP binds only to loopback addresses, requires a per-user bearer token (compared in constant time, file `mcp_http_token`, mode 0600) and uses the SDK's Host/Origin checks against DNS rebinding. | `orchestrator/mcp_server.py` |
 | Personal data reaches a cloud AI provider | The privacy filter runs on everything sent to a cloud provider: system prompt, messages, tool results and tool arguments. `OFF`: only secrets are redacted (always). `BALANCED`: also IP and MAC addresses, e-mail addresses, `user@host` logins and user names in home paths. `STRICT` (default): also host names from probe files, serial numbers, UUIDs and the folders of absolute paths. Placeholders come from an HMAC with a per-install key and are mapped back locally. Local providers (loopback, private network, `*.local`) are never filtered. Offline mode uses local providers only, and the knowledge base computes embeddings locally. | `orchestrator/llm/privacy.py`, `orchestrator/llm/client.py` |
@@ -742,9 +744,10 @@ These are real limitations of the current state. Most are scheduled in the [road
 - **The privacy filter works with patterns.** It recognizes the formats listed above, not every personal detail
   in free text, such as a name in a sentence. Use a local provider for sensitive material.
 - **Generated targets are skeletons.** The module generator writes a `capabilities:` block (support level
-  community: the boards, and GGUF with the types the build script handles), and the template `build.sh` follows the
-  Rockchip dispatcher, but the template Dockerfile does not build llama.cpp yet, so a generated target needs that
-  part from `targets/Rockchip/dockerfile` before it can build. See the
+  community: the boards, and GGUF with the types the build script handles) and a `runtime:` block, the template
+  `build.sh` follows the Rockchip dispatcher, and the template Dockerfile builds llama.cpp's conversion tools with the
+  same recipe as `targets/Rockchip/dockerfile`. The boards, formats and quantizations are still a starting point,
+  and a generated GPU target is untested on real hardware. See the
   [Module Developer Guide](Module_Developer_Guide.md).
 - **The community zoo has no published index yet.** The community repository, its signed index and the
   maintainer's key are not published: `configs/community_keys.yml` lists no key, and `community_index_url` and
@@ -757,9 +760,10 @@ These are real limitations of the current state. Most are scheduled in the [road
   module proposal's, it drops relevant excerpts too.
 - **Trivy and the Docker socket.** The scanner container gets the Docker socket; mounting it read-only does not
   limit what the Docker API allows. Planned for 3.4.0: Trivy pinned by digest, without the socket.
-- **Pins inside images.** Base images are pinned by tag (`debian:bookworm-slim`), llama.cpp by tag (`b11429`; the
-  commit pin in `configs/llama_runtime.yml` is not verified inside the image yet), and the venvs inside the image
-  have no hashed lock files. Planned for 3.4.0.
+- **Pins inside images.** The Rockchip image and the CPU template use base images pinned by tag
+  (`debian:bookworm-slim`; the GPU template pins Ubuntu 22.04 by digest), and the venvs inside the images have no
+  hashed lock files. Planned for 3.4.0. llama.cpp is fetched by the commit of `configs/llama_runtime.yml`, which the
+  image checks.
 - **Image builds have network access.** This is by design (they download toolchains); only the conversion stages
   are offline.
 - **The project-sources catalogue** (`configs/project_sources.yml`) is not read at runtime; it is a reference for
@@ -923,8 +927,8 @@ Not planned: airllm. It is a runtime, not a converter, and does not belong in th
 | **CycloneDX SBOM** and artifact provenance. | planned |
 | **Dependabot cooldown** for LLM SDKs. | planned |
 | **A second secret scanner in CI** (the gitleaks binary, pinned and checksum-verified) and GitHub push protection. | planned |
-| **Signed updates** of the framework itself (`orchestrator/utils/updater.py`, in development: update check, update and restart; not wired yet), finished as verified updates of a signed release instead of a plain `git pull`. The settings `docker_registry` and `docker_namespace` name the framework's own toolchain images once they are published and signed. | planned |
-| **Clean-up**: removal of the legacy four-module scripts, and a template Dockerfile that builds llama.cpp (the template `build.sh` already matches the current pipeline: GGUF through llama.cpp, intermediates in the work folder). | planned |
+| **Signed updates** of the framework itself (`orchestrator/utils/updater.py`, in development: update check, update and restart; not wired yet), finished as verified updates of a signed release instead of a plain `git pull`. Toolchain images are not part of it: the framework shares recipes, never compiled images, so they stay built on your machine from the target's Dockerfile; the settings `docker_registry` and `docker_namespace`, which nothing reads, are kept. | planned |
+| **Clean-up**: removal of the legacy four-module scripts (the template `build.sh` and Dockerfile already follow the current pipeline: GGUF through llama.cpp built from the recipe, intermediates in the work folder). | planned |
 | **SSOT corrections** for the project-sources catalogue and its scripts. | done |
 
 ### Later (planned)
