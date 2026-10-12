@@ -925,7 +925,9 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   stattdessen aufzurufen ist, weil das Lesen einer Ressource dich nicht fragen kann), derselbe Ausgabefilter bereinigt
   sie (externer Text als nicht vertrauenswürdige Daten eingepackt, daher kommen diese Ressourcen als Text), und jedes
   Lesen landet als `read_resource:<URI>` im Audit-Log. Eine unbekannte ID, ein Dokument außerhalb der Liste oder ein
-  Parameter mit `..`, einem absoluten Pfad oder einem NUL-Byte ist ein Fehler wegen ungültiger Parameter (-32602).
+  Parameter mit `..`, einem absoluten Pfad oder einem NUL-Byte ist ein Fehler wegen ungültiger Parameter (-32602),
+  ebenfalls im Audit-Log, auch wenn der Server ihn ablehnt, bevor eine Ressource läuft (eine unbekannte URI oder ein
+  anderes Schema). Ein Dokument, das sich nicht lesen lässt, wird ohne seinen Pfad abgelehnt.
 - **Änderungsereignisse:** Ein Client mit Protokoll 2026-07-28 kann auf Änderungen hören (`subscriptions/listen`):
   Die Listen der Tools, Prompts und Ressourcen ändern sich, wenn sich deine Berechtigungen oder die eines Tokens
   ändern, und die Status- und Log-Ressourcen eines Builds melden jede Änderung, nur an den Aufrufer, der den Build

@@ -15,7 +15,7 @@ exist are listed.
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from orchestrator.tools.registry import ResourceSpec, ResourceUnknown, ToolRegistry
+from orchestrator.tools.registry import ResourceSpec, ResourceUnknown, ToolError, ToolRegistry
 
 # The documents an AI client may read, without the language suffix; each also exists as <name>_DE.
 DOC_NAMES = ("CLI_Usage", "Features", "Module_Developer_Guide", "BLUEPRINT")
@@ -63,7 +63,11 @@ def register_framework_resources(registry: ToolRegistry, framework) -> ToolRegis
         if path is None:
             shown = ", ".join(existing_docs(framework)) or "none in this installation"
             raise ResourceUnknown(f"There is no document '{name}' to read.", next=f"Read one of: {shown}.")
-        return path.read_text(encoding="utf-8", errors="replace")
+        try:
+            return path.read_text(encoding="utf-8", errors="replace")
+        except OSError:  # the OS message names the file's real path, which never reaches the AI
+            raise ToolError(f"The document '{name}' cannot be read in this installation.", code="failed",
+                            next="Tell the person; 'llm-cli doctor' checks the installation.") from None
 
     service = getattr(framework, "build_service", None)
 
