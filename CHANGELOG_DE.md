@@ -10,6 +10,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Ditto als MCP-Client eines anderen Frameworks** (MCP-Entwurf T12; Ditto ist hybrid): `llm-cli ditto remote set`
+  richtet Ditto auf den MCP-Server eines Frameworks aus, das anderswo läuft, zum Beispiel im Headless-Docker-Image
+  (stdio über einen Befehl wie `docker exec -i <container> llm-cli mcp serve` oder HTTP an eine https- oder
+  Loopback-Adresse). Es gelten Registry, Berechtigungen, narrensichere Schicht, Rückfragen und Audit-Log jenes
+  Servers; Dittos Identität dort ist ein benanntes Token, angelegt mit `llm-cli mcp token add NAME --link ditto`,
+  sodass Dittos eigene Berechtigungen in beiden Modi zugleich gelten und das Audit-Log dort `mcp:NAME` zeigt. Das
+  Token liegt in Dittos Tresor für Zugangsdaten und erreicht den Server nur als `LCF_MCP_TOKEN` oder als
+  Bearer-Header; ohne Token startet der Modus nicht. Eine Tool-Quelle pro Unterhaltung; jedes entfernte Ergebnis,
+  jeder Fehler, Prompt und jede Tool-Beschreibung sind für Dittos Modell nicht vertrauenswürdige Daten; Dittos
+  Bestätigung nennt den Server. `llm-cli ditto remote show|test|off`. `llm-cli mcp serve --transport http --container`
+  bindet nur innerhalb eines Containers dessen Schnittstellen (benanntes Token, Host- und Origin-Prüfung unverändert;
+  den Port auf dem Loopback des Hosts veröffentlichen).
 - **Gemeinsamer Build-Zustand** (MCP-Entwurf T11): Jedes Programm des Frameworks (die GUI, ein CLI-Aufruf, jeder
   MCP-Server) schreibt eine Zusammenfassung jeder Build-Anfrage in den Benutzerordner (`build_requests/`), sodass die
   Statusleiste der GUI, `llm-cli build status`, `list_build_requests` und `get_build_status` dieselben Builds sehen,

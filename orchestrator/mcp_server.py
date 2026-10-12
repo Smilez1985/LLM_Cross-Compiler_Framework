@@ -85,6 +85,29 @@ from orchestrator.utils.untrusted import wrap_untrusted
 
 SERVER_NAME = "llm-cross-compiler"
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+CONTAINER_HOST = "0.0.0.0"  # nosec B104 - only inside a container (http_bind): its own network namespace
+CONTAINER_MARKERS = ("/.dockerenv", "/run/.containerenv")
+
+
+def in_container() -> bool:
+    """Whether this process runs in a container (Docker, Podman): only there may the HTTP server leave loopback."""
+    return any(os.path.exists(marker) for marker in CONTAINER_MARKERS)
+
+
+def http_bind(host: str, container: bool, inside: Optional[bool] = None) -> str:
+    """The address the HTTP server binds: loopback only, or with `container` (mcp serve --container) the container's
+    interfaces, and only inside a container, where nothing outside reaches them unless the person publishes the port
+    (documented as -p 127.0.0.1:PORT:PORT, the host's loopback). A named token and the origin check apply either way.
+    ValueError otherwise."""
+    if not container:
+        if host not in LOOPBACK_HOSTS:
+            raise ValueError("The HTTP transport only binds to loopback (127.0.0.1, ::1, localhost); inside a "
+                             "container use --container.")
+        return host
+    if not (in_container() if inside is None else inside):
+        raise ValueError("--container is only for a framework running inside a container (Docker, Podman); on "
+                         "this computer the HTTP transport binds to loopback.")
+    return CONTAINER_HOST
 # Static (no external text), and under 2048 characters, where Claude Code cuts server instructions.
 INSTRUCTIONS = (
     "Tools of the LLM Cross-Compiler Framework, which converts and quantizes language models for edge "
@@ -1679,7 +1702,7 @@ def _sigterm_ends_the_session():
 
 
 def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765,
-          stdio_token: Optional[str] = None) -> None:
+          stdio_token: Optional[str] = None, container: bool = False) -> None:
     """Runs the server until the client (stdio) or the process (HTTP) ends it. The session's builds and jobs are
     cancelled by the lifespan; afterwards the framework is shut down, so nothing is left without an owner.
     `stdio_token`: the value of LCF_MCP_TOKEN (read and removed from the environment by the CLI before the framework
@@ -1701,8 +1724,7 @@ def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: in
             return
         if transport != "http":
             raise ValueError(f"Unknown transport '{transport}' (stdio, http)")
-        if host not in LOOPBACK_HOSTS:
-            raise ValueError("The HTTP transport only binds to loopback (127.0.0.1, ::1, localhost).")
+        host = http_bind(host, container)
         tokens = _token_store(framework)
         state_dir = tokens.path.parent
         problem = http_problem(tokens, state_dir)
@@ -1714,6 +1736,9 @@ def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: in
 
         print(f"MCP server on http://{host}:{port}/mcp - each client sends its own named token "
               f"('llm-cli mcp token list').{_legacy_token_note(state_dir)}", file=sys.stderr)
+        if container:
+            print(f"Container mode: publish the port to the host's loopback only (docker run -p "
+                  f"127.0.0.1:{port}:{port} ...) and connect to http://127.0.0.1:{port}/mcp.", file=sys.stderr)
         config = uvicorn.Config(http_app(server, tokens, host, port), host=host, port=port, log_level="warning")
         anyio.run(uvicorn.Server(config).serve)
     finally:

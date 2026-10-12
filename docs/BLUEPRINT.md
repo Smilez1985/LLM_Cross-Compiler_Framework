@@ -393,6 +393,11 @@ cloud provider, personal details are replaced by placeholders.
    answer.
 6. **History.** The finished turn is appended to `chat_history.json`. A long conversation is summarized and
    continued as a new conversation; earlier turns are never edited.
+7. **MCP-client mode** (`llm-cli ditto remote set`). Instead of the in-process registry, the tools come from the MCP
+   server of a framework running elsewhere, with a named token linked to Ditto's permissions there (`--link ditto`):
+   that server decides, asks and audits (actor `mcp:<token name>`). One tool source per conversation; every remote
+   result, error and question is untrusted data; Ditto's dialog names the server. Without a token the mode does not
+   start.
 
 ### Self-healing approval
 

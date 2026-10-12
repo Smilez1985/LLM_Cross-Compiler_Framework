@@ -16,7 +16,7 @@ import re
 import time
 import shutil
 from pathlib import Path
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, List, Tuple
 from datetime import datetime
 
 import click
@@ -420,6 +420,12 @@ def _ditto_confirm(spec, inp) -> bool:
         click.echo_via_pager(text + "\n")
     else:
         click.echo(text, err=True)
+    if getattr(spec, "offers_request", False):  # a remote framework's question (Ditto's MCP-client mode)
+        from orchestrator.llm.remote_tools import RemoteAnswer
+        answer = click.prompt(f"Allow this? y = once, r = and ask the framework at {spec.server} to stop asking "
+                              "(you confirm that there), n = no", type=click.Choice(["y", "r", "n"]), default="n",
+                              err=True)
+        return RemoteAnswer(answer != "n", stop_asking=answer == "r")
     from orchestrator.tools.registry import current_grant_offer, current_registry
     offer = current_grant_offer()
     if offer is None:
@@ -1611,6 +1617,131 @@ def _runtime_failure(error) -> None:
     if getattr(error, "log_tail", ""):
         console.print(Panel(escape(error.log_tail), title="llama-server log (last lines)"))
     sys.exit(1)
+
+
+@ditto.group('remote')
+def ditto_remote():
+    """Ditto's MCP-client mode: use the tools of a framework running elsewhere (for example the headless Docker
+    image) through its MCP server, with a named token linked to Ditto's permissions there"""
+    pass
+
+
+def _remote_settings_text(config) -> List[str]:
+    from orchestrator.llm.remote_tools import (COMMAND_SETTING, NAME_SETTING, SOURCE_SETTING, TRANSPORT_SETTING,
+                                               URL_SETTING)
+    return [f"Tool source: {config.get(SOURCE_SETTING, 'local') or 'local'}",
+            f"Transport: {config.get(TRANSPORT_SETTING, 'stdio') or 'stdio'}",
+            f"Command (stdio): {' '.join(config.get(COMMAND_SETTING, []) or []) or '-'}",
+            f"Address (http): {config.get(URL_SETTING, '') or '-'}",
+            f"Name: {config.get(NAME_SETTING, '') or '-'}"]
+
+
+@ditto_remote.command('set')
+@click.option('--transport', type=click.Choice(['stdio', 'http']), required=True,
+              help='stdio: Ditto starts the server command (with LCF_MCP_TOKEN); http: Ditto connects to the address '
+                   'with the token as bearer header')
+@click.option('--command', 'command', default=None,
+              help='stdio: the command that starts the server, e.g. "docker exec -i lcf llm-cli mcp serve"')
+@click.option('--url', default=None, help='http: the server address (https, or http on a loopback address)')
+@click.option('--name', default='', help='Your name for that framework, shown in Ditto\'s dialogs')
+@click.option('--with-token', is_flag=True, help='Read the named token from stdin instead of asking for it')
+@pass_context
+def ditto_remote_set(ctx: FrameworkContext, transport: str, command: Optional[str], url: Optional[str], name: str,
+                     with_token: bool):
+    """Switch Ditto to the tools of another framework's MCP server. Create the token there first:
+    llm-cli mcp token add NAME --link ditto (its permissions are then Ditto's own permissions on that framework)."""
+    import shlex
+    from orchestrator.llm.remote_tools import (COMMAND_SETTING, NAME_SETTING, SOURCE_SETTING, TOKEN_SECRET,
+                                               TRANSPORT_SETTING, URL_SETTING, RemoteSetupError, check_url)
+    if not with_token:
+        _require_terminal("llm-cli ditto remote set")
+    argv: List[str] = []
+    try:
+        if transport == 'stdio':
+            argv = shlex.split(command or "")
+            if not argv:
+                _usage("--command is required for --transport stdio.")
+        else:
+            check_url(url or "")
+    except RemoteSetupError as e:
+        _usage(str(e))
+    except ValueError as e:
+        _usage(f"--command cannot be read: {e}")
+    ctx.require_framework()
+    sm = ctx.framework_manager.secrets_manager
+    if sm is None:
+        console.print("[red]The credential vault is not available; the token cannot be stored.[/red]")
+        sys.exit(1)
+    token = sys.stdin.read().strip() if with_token else click.prompt("Named MCP token", hide_input=True)
+    if not token:
+        _usage("No token given.")
+    if not sm.set_secret(TOKEN_SECRET, token):
+        console.print("[red]The token could not be stored.[/red]")
+        sys.exit(1)
+    config = ctx.framework_manager.config
+    for key, value in ((SOURCE_SETTING, "mcp"), (TRANSPORT_SETTING, transport), (COMMAND_SETTING, argv),
+                       (URL_SETTING, url or ""), (NAME_SETTING, name)):
+        config.set(key, value)
+    if not config.save_user_config():
+        console.print("[red]The settings could not be saved.[/red]")
+        sys.exit(1)
+    console.print("[green]Ditto now uses the tools of that framework (MCP-client mode); the token is in the "
+                  "credential vault.[/green]")
+    console.print("Check the connection with: llm-cli ditto remote test")
+
+
+@ditto_remote.command('off')
+@pass_context
+def ditto_remote_off(ctx: FrameworkContext):
+    """Back to Ditto's own tools in this framework (the stored token is kept; remove it with
+    llm-cli secrets delete ditto_mcp_token)."""
+    from orchestrator.llm.remote_tools import SOURCE_SETTING
+    config, _ = _settings(ctx)
+    config.set(SOURCE_SETTING, "local")
+    if not config.save_user_config():
+        console.print("[red]The settings could not be saved.[/red]")
+        sys.exit(1)
+    console.print("[green]Ditto uses its own tools again.[/green]")
+
+
+@ditto_remote.command('show')
+@pass_context
+def ditto_remote_show(ctx: FrameworkContext):
+    """Ditto's tool source and the remote server settings (never the token)"""
+    config, _ = _settings(ctx)
+    for line in _remote_settings_text(config):
+        console.print(escape(line))
+
+
+@ditto_remote.command('test')
+@pass_context
+def ditto_remote_test(ctx: FrameworkContext):
+    """Connect to the remote framework with the stored token and list the tools and task prompts it offers Ditto"""
+    from orchestrator.llm.remote_tools import RemoteConnection, RemoteSetupError, TOKEN_NEXT, remote_server, \
+        stored_token
+    ctx.require_framework()
+    try:
+        server = remote_server(ctx.framework_manager.config)
+    except RemoteSetupError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    if server is None:
+        console.print("Ditto uses its own tools (no remote server set): llm-cli ditto remote set ...")
+        return
+    token = stored_token(ctx.framework_manager.secrets_manager)
+    if not token:
+        console.print(f"[red]No named MCP token is stored. {escape(TOKEN_NEXT)}[/red]")
+        sys.exit(1)
+    try:
+        with RemoteConnection(server, token, _ditto_confirm) as remote:
+            tools, prompts = remote.tools(), remote.prompts()
+    except RemoteSetupError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        sys.exit(1)
+    console.print(f"Framework at {escape(server.label())}: {len(tools)} tools Ditto may use there, "
+                  f"{len(prompts)} task prompts.")
+    for spec in tools:
+        console.print(f"  {escape(spec.name)}")
 
 
 @ditto.group('runtime')
@@ -2891,8 +3022,11 @@ def mcp():
               help='stdio: started by the client (default). http: local Streamable HTTP with a named token per client.')
 @click.option('--host', default='127.0.0.1', show_default=True, help='HTTP only; loopback addresses only')
 @click.option('--port', default=8765, show_default=True, type=int, help='HTTP only')
+@click.option('--container', is_flag=True,
+              help='HTTP inside a container only: bind the container\'s interfaces (publish the port to the host\'s '
+                   'loopback: -p 127.0.0.1:PORT:PORT); a named token and the origin check still apply')
 @pass_context
-def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
+def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int, container: bool):
     """Run the MCP server (stdout carries the protocol; logs go to stderr)"""
     import contextlib
     from orchestrator import mcp_server
@@ -2923,7 +3057,8 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
                                        "Run 'llm-cli ditto setup'.[/yellow]")
     stdio_token = {"stdio_token": token} if token is not None and transport == 'stdio' else {}
     try:
-        mcp_server.serve(ctx.framework_manager, transport=transport, host=host, port=port, **stdio_token)
+        mcp_server.serve(ctx.framework_manager, transport=transport, host=host, port=port, **stdio_token,
+                         **({"container": True} if container else {}))
     except ValueError as e:
         Console(stderr=True).print(f"[red]{escape(str(e))}[/red]")
         sys.exit(2)
