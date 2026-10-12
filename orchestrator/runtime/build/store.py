@@ -327,14 +327,17 @@ class BuildStore:
             return set()
         return {b.build_id for b in self.list_builds() if LocalLLMRuntime._uses(proc, b.path)}
 
-    def prune(self, keep_last: int = DEFAULT_KEEP, keep: Iterable[str] = ()) -> List[str]:
+    def prune(self, keep_last: int = DEFAULT_KEEP, keep: Iterable[str] = (), *,
+              purpose: Optional[str] = None) -> List[str]:
         """Removes old builds: keeps the active build, the CPU fallback, the builds in `keep`, the build a running
-        server uses, and the `keep_last` newest others. Also removes leftovers of interrupted builds. Returns the
-        removed IDs."""
+        server uses, and the `keep_last` newest others. With `purpose`, only builds of that purpose are candidates:
+        Ditto's retention ("host-runtime") never touches the cross builds of the device runtime, which share this
+        store. Also removes leftovers of interrupted builds. Returns the removed IDs."""
         removed: List[str] = []
         with self._lock(".lock", timeout=60):
             protected = set(self.references().values()) | set(keep) | self.running_build_ids()
-            others = [b for b in self.list_builds() if b.build_id not in protected]
+            others = [b for b in self.list_builds()
+                      if b.build_id not in protected and (purpose is None or b.purpose == purpose)]
             for build in others[max(0, int(keep_last)):]:
                 remove_tree(build.path)
                 removed.append(build.build_id)

@@ -740,11 +740,13 @@ class LocalLLMRuntime:
             raise LocalRuntimeError(str(e)) from None
 
     def prune(self, keep_last: int = 2) -> List[str]:
-        """Removes old self-built builds: never the active build, the CPU fallback or the build a running server
-        uses."""
+        """Removes old self-built builds of Ditto's server: never the active build, the CPU fallback or the build a
+        running server uses, and never a build of the device runtime (llm-cli device runtime build), which shares the
+        build store."""
+        from orchestrator.runtime.build.host import PURPOSE
         from orchestrator.runtime.build.store import StoreError
         try:
-            return self.store.prune(keep_last=keep_last)
+            return self.store.prune(keep_last=keep_last, purpose=PURPOSE)
         except StoreError as e:
             raise LocalRuntimeError(str(e)) from None
 

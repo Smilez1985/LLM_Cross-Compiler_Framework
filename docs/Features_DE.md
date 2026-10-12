@@ -692,9 +692,11 @@ deshalb zählt bei ihnen nur der RAM. `runtime start --model <Stufe>` überstimm
   gestartet. Ein Archiv, das eine frühere Version ohne diese Bitte heruntergeladen hat, wird nicht genutzt:
   `runtime status` nennt es, und `install --prebuilt` wechselt darauf, ohne es neu herunterzuladen. Ein selbst
   gebauter Build, der nicht genutzt werden kann, wechselt nie von selbst darauf.
-- **Eine Startregel:** Die verbotenen Optionen, die geleerte Umgebung, Loopback und die Schlüsseldatei kommen aus
-  einem Modul, `orchestrator/runtime/server_policy.py`, das jeder Starter nutzt: Dittos Server, die Prüfung nach dem
-  Build und die Perplexity-Prüfung (und das Startskript der Geräte-Laufzeit).
+- **Eine Startregel:** Die verbotenen Optionen, die geleerte Umgebung, Loopback, die Schlüsseldatei und die festen
+  Server-Optionen kommen aus einem Modul, `orchestrator/runtime/server_policy.py`, das jeder Starter nutzt: Dittos
+  Server, die Prüfung nach dem Build, die Perplexity-Prüfung und auf einem Board das Startskript, die systemd-Unit und
+  die Prüfungen dort. Die Server-Zeile des Startskripts wird mit derselben Prüfung gehalten wie Dittos Befehlszeile,
+  und die `--tools`-Prüfung des Servers ist hier und auf einem Board derselbe Befehl.
 - **Kontextlänge:** aus dem freien Speicher neben dem Modell berechnet (freier GPU-Speicher, oder freier RAM bei
   CPUs, Apple Silicon und integrierten GPUs), auf 256 Tokens gerundet, mindestens 4096 und höchstens 32768 (`--ctx`
   legt sie fest).
@@ -702,7 +704,7 @@ deshalb zählt bei ihnen nur der RAM. `runtime start --model <Stufe>` überstimm
   API-Schlüssel pro Start erreicht ihn nur über eine Schlüsseldatei, die nur du lesen kannst, und das Framework
   prüft, dass der Server Anfragen ohne Schlüssel ablehnt. Weboberfläche und Slots-Endpunkt sind aus, und der Server
   läuft mit `--offline`. Optionen, die dem Modell eigene Tools, einen Agentenmodus, MCP-Server oder entferntes
-  Rechnen geben würden, die etwas herunterladen (Hugging Face, URLs), die Prompts auf die Platte schreiben, Programme
+  Rechnen geben würden, die etwas herunterladen (Hugging Face, URLs, Docker Hub), die Prompts auf die Platte schreiben, Programme
   aus einem Ordner starten oder einen Schlüssel oder Token auf die Befehlszeile bringen, werden abgelehnt, in jeder
   Schreibweise, die llama.cpp annimmt (seine Kurzformen, und `--a_b` für `--a-b`). Der Server startet mit geleerter
   Umgebung: Außer deinem Benutzerordner, einem festen `PATH` und der C-Locale bekommt er nur die Variablen, die GPUs

@@ -513,7 +513,7 @@ wird (Version und Commit der Festlegung, die gefundenen Geräte, und dass der Se
   die es gebaut wurde (2.35 oder 2.39); auf musl-Systemen wie Alpine läuft nur der selbst gebaute Server. Bis die
   Windows- und macOS-Builds kommen, ist das dort der Weg zum lokalen Modell.
 - `llm-cli ditto runtime prune` entfernt alte Builds; der aktive Build, sein CPU-Ersatz und der Build, aus dem ein
-  laufender Server gestartet wurde, bleiben immer erhalten. `runtime status` sagt, wann ein neuer Build nötig (die
+  laufender Server gestartet wurde, bleiben immer erhalten, ebenso die Builds deiner Boards. `runtime status` sagt, wann ein neuer Build nötig (die
   Festlegung hat sich geändert) oder empfohlen ist (der Bauplan dieses Rechners hat sich geändert).
 
 Wähle danach in den KI-Einstellungen **Local model (managed llama-server)** (Anbieter `local`). Schalte zusätzlich

@@ -25,7 +25,8 @@ import shlex
 from typing import Dict, List, Mapping, Tuple
 
 from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, FORBIDDEN_FLAGS, LOOPBACK, POSIX_CLEARED_PATH,
-                                                SERVER_FIXED, START_SCRIPT_OPTIONS, check_command, posix_cleared_env)
+                                                SERVER_FIXED, START_SCRIPT_OPTIONS, check_command,
+                                                check_server_command, posix_cleared_env)
 
 START_SCRIPT = "llama-server.sh"
 UNIT_NAME = "llm-llama-server.service"
@@ -68,6 +69,17 @@ def _env_words() -> str:
     for key, value in posix_cleared_env("$HOME").items():
         words.append(f'{key}="$HOME"' if key == "HOME" else f"{key}={shlex.quote(value)}")
     return " ".join(words)
+
+
+def _server_words() -> str:
+    """The server's part of the script's exec line, `"$SERVER" -m "$model" --host 127.0.0.1 --port "$port"
+    --api-key-file "$KEY" --no-ui --no-slots --jinja --offline`: built from the shared policy and held to the same
+    check_server_command as Ditto's server (loopback only, one port, the key file, the fixed options, nothing of the
+    forbidden list), with the shell variables standing in for the values the script checks at run time."""
+    argv = ["$SERVER", "-m", "$model", "--host", LOOPBACK, "--port", "$port", "--api-key-file", "$KEY",
+            *SERVER_FIXED]
+    check_server_command(argv)
+    return " ".join(f'"{word}"' if word.startswith("$") else word for word in argv)
 
 
 _SCRIPT = r'''#!/bin/sh
@@ -176,7 +188,7 @@ run_server() {
   done
   [ "$mode" = exec ] || return 0
   [ -s "$KEY" ] || keygen
-  exec env -i @ENV@ "$SERVER" -m "$model" --host @LOOPBACK@ --port "$port" --api-key-file "$KEY" @FIXED@ "$@"
+  exec env -i @ENV@ @SERVER_ARGS@ "$@"
 }
 
 running() {
@@ -238,8 +250,7 @@ def render_start_script(default_port: int = DEVICE_DEFAULT_PORT) -> str:
     by_kind = _options_by_kind(START_SCRIPT_OPTIONS)
     cases = "\n".join(f"      {_pattern(names)}) kind={kind} ;;" for kind, names in by_kind.items())
     allowed = ", ".join(["--port"] + [names[-1] for names in START_SCRIPT_OPTIONS])
-    fixed = list(SERVER_FIXED)
-    check_command(["llama-server", *fixed])  # the shared list (D22): none of the fixed options may be forbidden
+    server_args = _server_words()
     allowed_names = [n for names in START_SCRIPT_OPTIONS for n in names]
     if set(allowed_names) & FORBIDDEN_FLAGS:  # pragma: no cover - the policy's own constants
         raise LauncherError("an allowed option is on the forbidden list")
@@ -247,7 +258,7 @@ def render_start_script(default_port: int = DEVICE_DEFAULT_PORT) -> str:
     for token, value in (("@PORT@", str(default_port)), ("@PATH@", POSIX_CLEARED_PATH), ("@KEY_REL@", KEY_REL),
                          ("@STATE_REL@", STATE_REL), ("@FORBIDDEN@", _pattern(FORBIDDEN_FLAGS)),
                          ("@ALLOWED_CASES@", cases), ("@ALLOWED_TEXT@", allowed), ("@ENV@", _env_words()),
-                         ("@LOOPBACK@", LOOPBACK), ("@FIXED@", " ".join(fixed))):
+                         ("@SERVER_ARGS@", server_args)):
         text = text.replace(token, value)
     if re.search(r"@[A-Z_]+@", text):  # pragma: no cover - template check
         raise LauncherError("the start script template has an unfilled placeholder")

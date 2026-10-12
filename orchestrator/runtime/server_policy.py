@@ -164,13 +164,23 @@ def cleared_env(home: Path, *, path: Optional[str] = None) -> Dict[str, str]:
     return env
 
 
+def tools_check_args(server: str, missing_model: str, port: int, key_file: str) -> List[str]:
+    """The argument list of the --tools check, on this machine (server_tools_check_command) or written out for a
+    board (device/remote.py): `--tools all` and a model path that does not exist, and otherwise exactly the server
+    rules of check_server_command (loopback, one port, the key file, SERVER_FIXED), so even a server that accepted the
+    tools would stop before it serves anything."""
+    cmd = [str(server), *SERVER_TOOLS_CHECK, "-m", str(missing_model), "--host", LOOPBACK, "--port", str(int(port)),
+           "--api-key-file", str(key_file), *SERVER_FIXED]
+    check_server_command([cmd[0], *cmd[1 + len(SERVER_TOOLS_CHECK):]])  # everything but --tools keeps the rules
+    return cmd
+
+
 def server_tools_check_command(server: Path, missing_model: Path, port: int, key_file: Path) -> List[str]:
-    """The command of the build verification's --tools check: loopback, a key file, no UI, offline, and a model path
-    that does not exist, so even a server that accepted the tools would stop before it serves anything."""
+    """The command of the build verification's --tools check on this machine (tools_check_args), refused when the
+    model path exists."""
     if Path(missing_model).exists():
         raise PolicyError("the --tools check needs a model path that does not exist")
-    return [str(server), *SERVER_TOOLS_CHECK, "-m", str(missing_model), "--host", LOOPBACK, "--port", str(port),
-            "--api-key-file", str(key_file), "--no-ui", "--offline"]
+    return tools_check_args(str(server), str(missing_model), port, str(key_file))
 
 
 # --- a llama-server command line ---------------------------------------------------------------------------------------

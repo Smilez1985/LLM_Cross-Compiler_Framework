@@ -37,8 +37,8 @@ from orchestrator.runtime.build.verify import Check, VerifyReport, parse_bench_j
 from orchestrator.runtime.device.launcher import (KEY_REL, START_SCRIPT, UNIT_NAME, UNIT_PATH, install_root,
                                                   render_systemd_unit)
 from orchestrator.runtime.device.settings import DeploySettings
-from orchestrator.runtime.server_policy import (SERVER_TOOLS_CHECK, SERVER_TOOLS_REFUSAL, check_command,
-                                                posix_cleared_env)
+from orchestrator.runtime.server_policy import (POSIX_CLEARED_PATH, SERVER_TOOLS_REFUSAL, check_command,
+                                                posix_cleared_env, tools_check_args)
 
 COMMAND_TIMEOUT = 120
 UPLOAD_TIMEOUT = 1800
@@ -426,7 +426,7 @@ def _run_program(shell: RemoteShell, home: str, argv: Sequence[str], timeout: fl
     env = " ".join(f"{k}={_q(v)}" for k, v in posix_cleared_env(home).items())
     script = (f"cd {_q(home)} && exec env -i {env} " + " ".join(_q(a) for a in argv) + " </dev/null"
               + (" 2>&1" if merge else ""))
-    return shell.run(f"PATH=/usr/bin:/bin; export PATH; {script}", timeout=timeout)
+    return shell.run(f"PATH={POSIX_CLEARED_PATH}; export PATH; {script}", timeout=timeout)
 
 
 def model_sha256(shell: RemoteShell, path: str) -> Optional[str]:
@@ -499,8 +499,7 @@ def verify_on_device(shell: RemoteShell, *, home: str, plan_verify: Mapping[str,
     # The server refuses --tools (built without subprocess support): the one deliberate use of a forbidden option,
     # with a model path that does not exist, loopback and the key file.
     missing_model = f"{root}/.no-model-{secrets.token_hex(4)}.gguf"
-    argv = [_program(folder, "llama-server"), *SERVER_TOOLS_CHECK, "-m", missing_model, "--host", "127.0.0.1",
-            "--port", str(int(port)), "--api-key-file", f"{home}/{KEY_REL}", "--no-ui", "--offline"]
+    argv = tools_check_args(_program(folder, "llama-server"), missing_model, port, f"{home}/{KEY_REL}")
     r = _run_program(shell, home, argv, VERSION_TIMEOUT, checked=False)
     if r.status != 0 and SERVER_TOOLS_REFUSAL in r.out:
         report.checks.append(Check("server-tools", True, "llama-server refuses --tools (built without subprocess "

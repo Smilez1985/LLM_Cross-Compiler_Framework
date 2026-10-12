@@ -646,15 +646,17 @@ recommendation.
   prebuilt archive is started only after `install --prebuilt`. An archive an earlier version downloaded without that
   request is not used: `runtime status` names it, and `install --prebuilt` switches to it without downloading it
   again. A self-built build that cannot be used never switches to it on its own.
-- **One launch policy:** the forbidden options, the cleared environment, loopback and the key file come from one
-  module, `orchestrator/runtime/server_policy.py`, which every launcher uses: Ditto's server, the build verification
-  and the perplexity check (and the device runtime's start script).
+- **One launch policy:** the forbidden options, the cleared environment, loopback, the key file and the fixed server
+  options come from one module, `orchestrator/runtime/server_policy.py`, which every launcher uses: Ditto's server,
+  the build verification, the perplexity check, and on a board the start script, the systemd unit and the checks
+  there. The start script's server line is held to the same check as Ditto's command line, and the server's
+  `--tools` check is the same command here and on a board.
 - **Context length:** computed from the free memory next to the model (free GPU memory, or free RAM on CPUs, Apple
   Silicon and integrated GPUs), rounded to 256 tokens, at least 4096 and at most 32768 (`--ctx` sets it).
 - **Isolation:** `llama-server` listens on 127.0.0.1 only, on a free port. A new random API key per start reaches it
   only through a key file readable by you, and the framework checks that the server refuses requests without the
   key. The web UI and the slots endpoint are off, and the server runs with `--offline`. Options that would give the
-  model its own tools, agent mode, MCP servers or remote computing, that download (Hugging Face, URLs), write the
+  model its own tools, agent mode, MCP servers or remote computing, that download (Hugging Face, URLs, Docker Hub), write the
   prompts to disk, run programs from a folder, or put a key or token on the command line are refused, in every
   spelling llama.cpp accepts (its aliases, and `--a_b` for `--a-b`). The
   server starts with a cleared environment: besides your home folder, a fixed `PATH` and the C locale it only gets

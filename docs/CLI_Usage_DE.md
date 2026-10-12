@@ -738,9 +738,10 @@ Archiv wird nie exportiert.
 llm-cli ditto runtime prune [--keep N]
 ```
 
-Entfernt alte selbst gebaute Builds. Der aktive Build, der CPU-Ersatz und der Build, aus dem ein laufender Server
-gestartet wurde, bleiben immer erhalten, dazu die `N` neuesten anderen (Standard 2). `runtime install` tut dasselbe
-nach jedem Build.
+Entfernt alte selbst gebaute Builds von Dittos Server. Der aktive Build, der CPU-Ersatz und der Build, aus dem ein
+laufender Server gestartet wurde, bleiben immer erhalten, dazu die `N` neuesten anderen (Standard 2).
+`runtime install` tut dasselbe nach jedem Build. Die Builds deiner Boards (`llm-cli device runtime build`) liegen im
+selben Build-Speicher und werden hier nie entfernt.
 
 #### ditto runtime start
 
