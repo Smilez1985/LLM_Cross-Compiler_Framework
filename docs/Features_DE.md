@@ -753,14 +753,15 @@ dort wird in Worten des Frameworks mit ihrem Grund-Code genannt.
 schickt, bekommt hier zuerst einen Eintrag `started` und danach einen damit verknüpften Abschlusseintrag, mit Akteur
 `ditto`, Stufe `remote`, `place` `remote:<Name>` und `remote_server` (dein Name dafür und der Host, nie das Token,
 nie ein Login). Ein Aufruf, der etwas ändert, wird nicht geschickt, wenn dieser Eintrag nicht geschrieben werden kann;
-ein Lesezugriff geht trotzdem. Aufrufe auf diesem Computer in derselben Runde werden mit `place` `this_computer`
+ein Lesezugriff geht trotzdem (was ein Lesezugriff ist, entscheidet der eigene Katalog dieses Computers: Ein Tool, das
+dieser Computer nicht hat, zählt als Änderung, was immer der andere Computer darüber sagt). Aufrufe auf diesem Computer in derselben Runde werden mit `place` `this_computer`
 festgehalten, und eine Runde, die ein Ergebnis vom anderen Computer bekommen hat, wird markiert (`taint`). Der andere
 Computer entscheidet, fragt und protokolliert jeden Aufruf dort weiterhin selbst.
 
 **Was dort gilt.** Die Einstellungen sind `ai_ditto_*`, die nur du in GUI oder CLI änderst; keine KI kann sie lesen
 oder schreiben. Registry, Berechtigungen, die narrensichere Schicht (ein unbekanntes Argument wird mit einem Vorschlag
 abgelehnt, nie verworfen), Rückfragen und Audit-Log eines Aufrufs, der dort läuft, sind die des Frameworks auf dem
-anderen Computer; nichts wird in einer Richtung weiter (ein Erlauben hier startet nie ein Tool dort, ein Ergebnis von
+anderen Computer; in keiner Richtung wird etwas erweitert (ein Erlauben hier startet nie ein Tool dort, ein Ergebnis von
 dort beantwortet nie eine Rückfrage hier). Dittos Identität dort ist ein benanntes Token, dort angelegt mit
 `llm-cli mcp token add NAME --link ditto`, sodass jenes Framework Dittos eigene Berechtigungen und Daueraufträge per
 Verweis anwendet: Wird `start_build` dort für Ditto verboten, gilt das für Dittos Aufrufe dort. Der Audit-Akteur dort
@@ -774,7 +775,9 @@ jeder Fehlertext und jeder Prompt von dort Dittos Modell als nicht vertrauenswü
 beantwortest nur du, in Dittos Bestätigungsdialog oder -abfrage, die den Server nennt („Question from the framework at
 <Name>“); eine Runde ohne Dialog verbindet sich ohne die Fähigkeit zu fragen, sodass jenes Framework die Rückfrage für
 sein eigenes Freigabefenster behält, und eine Rückfrage, die niemand beantworten konnte, wird abgebrochen, nie als
-dein „Nein“ geschickt. Ein „nicht mehr fragen“ von dort (CLI-Antwort `r`, GUI-Schaltfläche „Allow and ask it to stop
+dein „Nein“ geschickt (das Audit-Log dieses Computers hält sie als `cancelled` mit der Antwort `unanswered` fest, auch
+wenn jenes Framework eine abgebrochene Rückfrage als „declined“ meldet; `llm-cli ditto ask` ohne Terminal verbindet
+sich ohne die Fähigkeit zu fragen). Ein „nicht mehr fragen“ von dort (CLI-Antwort `r`, GUI-Schaltfläche „Allow and ask it to stop
 asking...“, nur angeboten, wenn die Rückfrage jenes Servers es anbietet, mit einer Warnung vorab) fragt nur jenes
 Framework an, wo die Person es in dessen eigenem Freigabefenster bestätigt. `llm-cli ditto remote test` sagt auch,
 wie seine Tools zu denen dieses Computers kommen (einmal angeboten, nur dort, getrennt).
@@ -820,7 +823,8 @@ Fälle brauchen keine Codeänderung):
 (zum Beispiel ein eingeschleuster Befehl), erwartete Felder, Tools, die aufgerufen oder nicht aufgerufen werden
 müssen. Chat-Fälle nutzen die echten Tool-Definitionen über einem Ersatz-Build-Dienst, der gegen die echten
 Target-Capabilities prüft und vorbereitete Builds, Logs und Artefakte zurückgibt. Die Wissensbasis ist während der
-Evaluation aus, damit die Antworten nur aus dem Fall kommen.
+Evaluation aus, damit die Antworten nur aus dem Fall kommen, und das Framework auf einem anderen Computer wird nie
+genutzt (die festen Antworten eines Falls erreichen nie seine Tools oder Rückfragen).
 
 **Ausführen:**
 

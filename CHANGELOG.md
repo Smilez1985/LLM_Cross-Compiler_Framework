@@ -66,15 +66,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   (`wrong_place`), objects on both computers too (`needs_transfer`); nothing is copied between the computers by
   itself. Every remote call gets this computer's write-ahead `started` entry and a linked end entry (`place`,
   `remote_server`; never the token or a login), and a call that changes something is not sent when that entry cannot
-  be written; a local call of the same turn is recorded with `place` `this_computer`, and a turn that received a
-  remote result is marked (`taint`). That server's registry, permissions, fool-proof layer, questions and audit log
+  be written (this computer's own catalogue decides what is a read: a tool it does not have counts as a change); a
+  local call of the same turn is recorded with `place` `this_computer`, and a turn that received a remote result is
+  marked (`taint`). That server's registry, permissions, fool-proof layer, questions and audit log
   decide each call there; Ditto's identity there is a named token made with `llm-cli mcp token add NAME --link
   ditto` (Ditto's own permissions there, audit actor `mcp:NAME`), kept in Ditto's credential vault and sent only as
   `LCF_MCP_TOKEN` or as bearer header; without it the other computer is not used. Every remote result starts with a
   framework line before its untrusted block, and a refusal from there is named in framework words with its reason
   code. That server's questions are answered only in Ditto's dialog or prompt, which names the server; a turn without
-  one connects without the ability to ask, and a question nobody could answer is cancelled, never sent as the
-  person's "no". A computer that cannot be reached never stops a turn or resets the conversation (tools from the
+  one (also `llm-cli ditto ask` without a terminal) connects without the ability to ask, and a question nobody could
+  answer (a dialog that failed, a closed chat window) is cancelled, never sent as the person's "no", and this
+  computer records it as cancelled and unanswered, even though that framework reports it as "declined";
+  `llm-cli ditto eval` never uses the other computer. A computer that cannot be reached never stops a turn or resets the conversation (tools from the
   cached list say "Not reachable now"; `llm-cli ditto ask` prints the note on stderr, the chat shows it), and the
   connection is kept across turns for up to 10 idle minutes. Build advice, a module proposal and the analysis of a
   remote build by its request id still take their context from that framework's MCP prompts

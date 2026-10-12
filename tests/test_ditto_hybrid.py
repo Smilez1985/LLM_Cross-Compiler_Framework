@@ -550,6 +550,76 @@ class TestLocalAudit:
         (entry,) = [e for e in world.here.entries() if e["tool"] == "list_targets"]
         assert entry["place"] == LOCAL_KEY and entry["tier"] == "read"
 
+    @staticmethod
+    def remote_asks(world):
+        """The other computer asks the person before start_build (its policy for Ditto's token says "ask")."""
+        names = [s.name for s in world.remote.registry.list()]
+        world.remote.registry.policy_store.replace(ToolPolicy(configured=True, reviewed=names, callers={
+            "ditto": CallerPolicy(overrides={"start_build": Decision.ASK}, reviewed=names)}))
+
+    def test_an_unanswered_remote_question_is_never_recorded_as_declined_here(self, world):
+        # The dialog could not ask the person (it failed): the question is cancelled there, and the framework there
+        # reports a cancelled question as "declined". This computer knows nobody answered: its audit, Ditto's model
+        # and the person's note never call it the person's "no" (hybrid design 6.7, SEC-H8).
+        self.remote_asks(world)
+
+        def broken(question, inp):
+            raise RuntimeError("the window was closed")
+        model = Model(call("start_build", model="m/m", place="build_box"), "Not started.")
+        reply = world.ditto(model).chat("Build it there", confirm=broken)
+        (text,) = model.tool_texts()
+        assert "declined" not in text and "nobody answered" in text, text
+        end = [e for e in world.here.entries() if e["tier"] == "remote" and e["outcome"] != "started"]
+        assert [(e["outcome"], e.get("reason_code"), e.get("answer")) for e in end] == [
+            ("cancelled", "needs_person", "unanswered")]
+        assert "declined" not in reply.tools[0].detail and "nobody answered" in reply.tools[0].detail
+        assert world.remote.ran == []
+
+        # The person's own "no" stays a "no".
+        model = Model(call("start_build", model="m/m", place="build_box"), "Not started.")
+        world.ditto(model).chat("Build it there", confirm=lambda question, inp: False)
+        end = [e for e in world.here.entries() if e["tier"] == "remote" and e["outcome"] != "started"]
+        assert (end[-1]["outcome"], end[-1]["reason_code"]) == ("not_confirmed", "declined")
+        assert "the person declined it" in model.tool_texts()[0]
+
+    def test_a_turn_without_a_person_facing_dialog_never_lets_the_other_computer_ask(self, world):
+        # `llm-cli ditto ask` without a terminal: its prompt cannot ask anyone. The connection then tells the other
+        # computer that it cannot ask (it keeps the question for its own approval window, or refuses), so nobody's
+        # "no" is ever sent from here (SEC-H8).
+        self.remote_asks(world)
+        asked = []
+
+        def no_terminal(question, inp):
+            asked.append(question)
+            return False
+        no_terminal.person_facing = False
+        model = Model(call("start_build", model="m/m", place="build_box"), "Not started.")
+        world.ditto(model).chat("Build it there", confirm=no_terminal)
+        answers = [e.get("answer") for e in world.remote.entries() if e["tool"] == "start_build" and e.get("answer")]
+        assert answers == ["unavailable"], "that computer was told nobody can ask here (no question was sent)"
+        assert asked == [] and world.remote.ran == []
+        # Even a question that arrives anyway never reaches such a prompt: it is cancelled, never answered "no".
+        from orchestrator.llm.remote_tools import RemoteQuestion, ask_person
+        answer = ask_person(no_terminal, RemoteQuestion("build box", "Start?"))
+        assert answer.answered is False and asked == []
+
+    def test_a_tool_this_computer_does_not_have_is_never_taken_as_a_read(self, world, monkeypatch):
+        # Whether a remote call may go without this computer's write-ahead entry is decided by this computer's
+        # catalogue, never by the other computer's own read-only hint (fail closed).
+        listing = RemoteListing((ListedTool("read_build_log", mcp_server.closed_schema(StatusIn), read_only=True),))
+        toolset = HybridToolSet.build(world.here.registry, listing=listing,
+                                      remote=Place("build_box", "build box", "remote"))
+        assert toolset.routes["read_build_log"].read_only is False
+        assert toolset.routes["get_build_status"].read_only is True, "this computer's own read tool stays a read"
+
+        def broken(*args, **kwargs):
+            raise OSError("disk full")
+        model = Model(call("read_build_log", request_id=REMOTE_REQ, place="build_box"), "Not read.")
+        coder = world.ditto(model)
+        monkeypatch.setattr(world.here.registry.audit, "record", broken)
+        coder.chat("Read the log there")
+        assert "audit log cannot be written" in model.tool_texts()[0] and world.remote.ran == []
+
     def test_a_routing_refusal_is_audited_and_nothing_runs(self, world):
         index = PlaceIndex()
         index.learn(LOCAL_KEY, {"file_id": FILE_HERE})
@@ -644,6 +714,29 @@ class TestConversation:
         assert world.here.ran == [("list_targets", {})] and world.remote.ran == []
         assert "cannot be reached now" in model.requests[0].system
 
+    def test_a_damaged_setting_or_cache_never_stops_a_local_turn(self, world):
+        # A hand-edited command with an open quote, a damaged cached tool list: the turn goes on here (HF3).
+        model = Model(call("list_targets"), "Rockchip.")
+        reply = world.ditto(model, Config(ai_ditto_mcp_command='ssh -T "build-host')).chat("Targets?")
+        assert reply.remote_state == "not_set_up" and reply.notices and world.here.ran == [("list_targets", {})]
+        from orchestrator.llm.remote_tools import remote_server, server_fingerprint
+        state = world.tmp / "state"
+        state.mkdir()
+        (state / "remote_listing.json").write_text(json.dumps({"version": 1, "tools": 5,
+                                                               "server": server_fingerprint(remote_server(Config()))}))
+        world.remote.fail = True
+        reply = world.ditto(Model(call("list_targets"), "Rockchip."), state=state).chat("Targets?")
+        assert reply.remote_state == "unreachable" and world.here.ran[-1] == ("list_targets", {})
+
+    def test_a_tool_list_that_cannot_be_combined_keeps_this_computers_tools(self, world, monkeypatch):
+        def boom(*args, **kwargs):
+            raise RecursionError("a schema nested too deep")
+        monkeypatch.setattr(hybrid_tools, "safe_remote_schema", boom)
+        model = Model(call("list_targets"), "Rockchip.")
+        reply = world.ditto(model).chat("Targets?")
+        assert "list_targets" in model.tools() and world.here.ran == [("list_targets", {})]
+        assert any("could not be combined" in n for n in reply.notices)
+
     def test_without_a_token_the_turn_goes_on_with_this_computers_tools(self, world):
         model = Model(call("list_targets"), "Rockchip.")
         reply = world.ditto(model, token=False).chat("Targets?")
@@ -688,13 +781,22 @@ class TestPlaces:
     @pytest.mark.parametrize("name, key", [("build box", "build_box"), ("Lab-PC 2", "lab_pc_2"), ("2nd box", "nd_box"),
                                            ("this computer", FALLBACK_KEY), ("local", FALLBACK_KEY),
                                            ("Remote", FALLBACK_KEY), ("", FALLBACK_KEY), ("äöü", "aou"),
-                                           ("x" * 40, "x" * 24)])
+                                           ("x" * 40, "x" * 24), ("both", FALLBACK_KEY), ("Both", FALLBACK_KEY)])
     def test_place_key(self, name, key):
+        # "both" is the place index's mark for an id known on both computers: never a computer's key.
         assert place_key(name) == key
 
-    @pytest.mark.parametrize("name", ["someone@build-host", "/home/someone/box", "C:\\Users\\someone", "box:22", ""])
+    @pytest.mark.parametrize("name", ["someone@build-host", "/home/someone/box", "C:\\Users\\someone", "box:22", "",
+                                      "192.168.1.20", "10.0.0.7", "this_computer", "This-Computer"])
     def test_a_name_that_is_not_a_plain_name_never_reaches_the_model(self, name):
         assert place_label(name) == FALLBACK_LABEL
+
+    def test_a_remote_named_both_never_makes_its_ids_ambiguous(self, world):
+        place = remote_place(RemoteServer("stdio", command=("ssh", "build-host"), name="both"))
+        assert place.key == FALLBACK_KEY
+        index = PlaceIndex()
+        index.learn(place.key, {"request_id": REMOTE_REQ})
+        assert index.where(REMOTE_REQ) == FALLBACK_KEY
 
     def test_the_audit_names_the_host_never_the_login(self):
         server = RemoteServer("stdio", command=("ssh", "-T", "-p", "2222", "-o", "SendEnv=LCF_MCP_TOKEN",

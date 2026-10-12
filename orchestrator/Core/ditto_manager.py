@@ -1045,11 +1045,11 @@ class DittoCoder:
         cached list ("Not reachable now"), and the turn goes on with this computer's tools (HF3). The kept connection
         declares the elicitation capability only for a turn with a person-facing dialog (SEC-H8)."""
         from orchestrator.llm.hybrid_tools import remote_place
-        from orchestrator.llm.remote_tools import (TOKEN_NEXT, RemoteSession, RemoteSetupError, remote_server,
-                                                   server_fingerprint, stored_token)
+        from orchestrator.llm.remote_tools import (TOKEN_NEXT, RemoteSession, RemoteSetupError, person_facing,
+                                                   remote_server, server_fingerprint, stored_token)
         try:
             server = remote_server(self.config)
-        except RemoteSetupError as e:
+        except (RemoteSetupError, ValueError) as e:  # ValueError: a hand-edited command that cannot be read
             self.close()
             return RemoteTurn(None, "not_set_up", [f"The other computer is not used: {e}"], None, None)
         if server is None:
@@ -1063,7 +1063,9 @@ class DittoCoder:
             self.close()
             return RemoteTurn(None, "not_set_up", [f"{place.label} is not used: no named MCP token is stored. "
                                                    + TOKEN_NEXT], None, None)
-        elicitation = confirm is not None
+        # Only a dialog that reaches a person may answer that computer's questions; a prompt without a terminal
+        # (person_facing False) connects without the ability to ask, so nobody's "no" is ever sent from here.
+        elicitation = person_facing(confirm)
         session = self._remote_session
         if session is not None and not session.matches(server, token, elicitation):
             self.close()
@@ -1082,7 +1084,7 @@ class DittoCoder:
                                                     f"computer's tools. ({reason})"], place,
                               self._listing_cache().load(cache_key))
         self._listing_cache().save(cache_key, listing)
-        session.bind(confirm)
+        session.bind(confirm if elicitation else None)
         return RemoteTurn(session, "connected", [], place, listing)
 
     def _remote_connection(self, confirm: Optional[Confirm]):
@@ -1170,7 +1172,8 @@ class DittoCoder:
                 toolset = HybridToolSet.build(registry, "ditto", listing=remote.listing if hybrid else None,
                                               remote=remote.place if hybrid else None,
                                               reachable=remote.session is not None, local_specs=local)
-            except ValueError as e:  # a guard of the combined list: never offered half-checked
+            except Exception as e:  # noqa: BLE001 - a guard of the combined list, or a listing that breaks it: never
+                # offered half-checked, and this computer's tools always stay
                 self.logger.warning(f"The other computer's tools could not be combined: {e}")
                 notices.append("The other computer's tools could not be combined with this computer's; Ditto "
                                "works with this computer's tools.")

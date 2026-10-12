@@ -584,8 +584,10 @@ llm-cli ditto ask FRAGE [--no-tools] [--provider TEXT] [--model TEXT]
 
 Stellt Ditto eine Frage. Ditto darf die Tools des Frameworks im Rahmen deiner Berechtigungen nutzen; Tools, die auf
 „ask“ stehen, zeigen das Tool und jedes Argument und brauchen deine Bestätigung im Terminal (ohne Terminal werden sie
-abgelehnt). Die Antwort geht nach stdout, Tool-Hinweise und Fehler nach stderr. Nichts wird im Chatverlauf
-gespeichert.
+abgelehnt). Ohne Terminal sagt Ditto auch dem Framework auf einem anderen Computer, dass hier niemand seine
+Rückfragen beantworten kann, sodass jenes Framework sie für sein eigenes Freigabefenster behält; nichts wird je als
+dein „Nein“ dorthin geschickt. Die Antwort geht nach stdout, Tool-Hinweise und Fehler nach stderr. Nichts wird im
+Chatverlauf gespeichert.
 
 | Option | Bedeutung |
 |---|---|

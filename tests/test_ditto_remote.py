@@ -143,6 +143,12 @@ def call(name, **arguments):
     return ToolCall(id=f"c-{name}", name=name, arguments=arguments)
 
 
+def local_registry(tmp):
+    """This computer's registry with its audit log and no tools: a tool only the other computer has counts as one
+    that changes something, so its call goes out only with this computer's write-ahead entry."""
+    return ToolRegistry(PolicyStore(tmp / "local"), AuditLog(tmp / "local" / "audit.db"))
+
+
 def tool_messages(model):
     return [m for r in model.requests for m in r.messages if m.role == "tool"]
 
@@ -347,9 +353,9 @@ class TestDittoSide:
             "type": "object", "properties": {"password": {"type": "string"}}})
         assert asyncio.run(connection._elicit(None, params)).action == "decline"
 
-    def test_a_remote_instruction_reaches_the_model_only_inside_an_untrusted_block(self, remote):
+    def test_a_remote_instruction_reaches_the_model_only_inside_an_untrusted_block(self, remote, tmp_path):
         model = Model(call("read_knowledge_source", thing_id="n", place="build_box"), "Done.")
-        reply = ditto(remote, model).chat("Read thing n")
+        reply = ditto(remote, model, registry=local_registry(tmp_path)).chat("Read thing n")
         (result,) = tool_messages(model)
         text = result.content if isinstance(result.content, str) else str(result.content)
         assert INJECTION in text
@@ -358,9 +364,9 @@ class TestDittoSide:
         assert 'source="remote:build box:read_knowledge_source"' in before
         assert reply.places == ["this computer", "build box"] and reply.remote_state == "connected"
 
-    def test_a_remote_error_is_untrusted_too(self, remote):
+    def test_a_remote_error_is_untrusted_too(self, remote, tmp_path):
         model = Model(call("read_knowledge_source", THING="x", place="build_box"), "Sorry.")
-        ditto(remote, model).chat("Read")
+        ditto(remote, model, registry=local_registry(tmp_path)).chat("Read")
         (result,) = tool_messages(model)
         assert result.is_error and "<untrusted_data" in str(result.content)
         assert "build box did not run" in str(result.content).split("<untrusted_data")[0], "framework words first"
@@ -438,6 +444,62 @@ class TestDittoSide:
         monkeypatch.setattr(cli.click, "echo", lambda *a, **k: None)
         answer = remote_tools.ask_person(cli._ditto_confirm, RemoteQuestion("box", "Allow?", offers_request=True))
         assert answer.approve and answer.stop_asking
+
+    def test_without_a_terminal_a_remote_question_is_cancelled_never_answered_no(self, monkeypatch):
+        # `llm-cli ditto ask` run by another program: nobody can answer the other computer's question here, so it is
+        # cancelled (answered=False), never sent as the person's "no" (SEC-H8); a local call is still denied.
+        from orchestrator import cli
+        monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: False, raising=False)
+        monkeypatch.setattr(cli.click, "echo", lambda *a, **k: None)
+        answer = remote_tools.ask_person(cli._ditto_confirm, RemoteQuestion("box", "Allow?"))
+        assert not answer.approve and answer.answered is False
+        local = ToolSpec("start_build", "Start a build", "Starts a build.", ToolTier.LOCAL_WRITE, ThingIn, ThingOut,
+                         lambda i: ThingOut())
+        assert cli._ditto_confirm(local, ThingIn()) is False, "a local question without a terminal stays a no"
+
+    def test_ask_person_keeps_a_dialogs_no_answer(self):
+        answer = remote_tools.ask_person(lambda q, i: RemoteAnswer(False, answered=False), RemoteQuestion("box", "?"))
+        assert answer.answered is False and not answer.approve
+        assert remote_tools.ask_person(lambda q, i: RemoteAnswer(False), RemoteQuestion("box", "?")).answered is True
+
+    def test_ditto_ask_without_a_terminal_gives_no_person_facing_dialog(self, monkeypatch):
+        from click.testing import CliRunner
+        from orchestrator import cli
+        given = []
+
+        class FakeDitto:
+            client = SimpleNamespace(catalog=SimpleNamespace(get=lambda p: object(), ids=lambda: ["ollama"]))
+
+            def chat(self, question, confirm=None, use_tools=True, on_tool=None):
+                given.append(confirm)
+                return SimpleNamespace(text="ok", notices=[])
+
+            def close(self):
+                pass
+        framework = SimpleNamespace(config=SimpleNamespace(get=lambda k, d=None: d, set=lambda k, v: None),
+                                    get_component=lambda name: FakeDitto())
+
+        def require(self):
+            self.framework_manager = framework
+            return self
+        monkeypatch.setattr(cli.FrameworkContext, "require_framework", require)
+        result = CliRunner().invoke(cli.cli, ["-q", "ditto", "ask", "Build it there"])
+        assert result.exit_code == 0, result.output
+        (confirm,) = given
+        assert confirm is not None and getattr(confirm, "person_facing", True) is False
+        assert getattr(confirm, "confirm_channel", "") == "framework-cli"
+
+    def test_a_closed_chat_window_never_answers_a_remote_question_no(self, qapp):
+        pytest.importorskip("PySide6")
+        from orchestrator.gui.tool_confirmation import ToolConfirmation
+        confirmation = ToolConfirmation()
+        confirmation.close()
+        answer = remote_tools.ask_person(confirmation.confirm, RemoteQuestion("box", "Allow?"))
+        assert answer.answered is False and not answer.approve
+        local = ToolSpec("start_build", "Start a build", "Starts a build.", ToolTier.LOCAL_WRITE, ThingIn, ThingOut,
+                         lambda i: ThingOut())
+        assert confirmation.confirm(local, ThingIn()) is False, "a local question stays a no"
+        confirmation.deleteLater()
 
 
 # --- container mode for the HTTP server --------------------------------------------------------------------------

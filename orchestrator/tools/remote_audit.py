@@ -46,14 +46,15 @@ def _label(text: str) -> str:
 def record_remote_call(audit: Any, ctx: ToolContext, tool: str, place_label: str, read_only: bool,
                        arguments: Optional[Dict[str, Any]], phase: Literal["started", "end"], outcome: str = "",
                        reason_code: str = "", detail: str = "", remote_server: str = "",
-                       repairs: Optional[List[Dict[str, Any]]] = None, started: Optional[int] = None
-                       ) -> Optional[int]:
+                       repairs: Optional[List[Dict[str, Any]]] = None, started: Optional[int] = None,
+                       answer: str = "") -> Optional[int]:
     """Writes one entry of a remote call and returns its id.
 
     phase "started": the write-ahead entry. When it cannot be written, a call that is not `read_only` raises
     AuditUnavailable (the call must not be sent); a read gets None and goes on.
     phase "end": the end entry (`outcome` ok, error, denied, not_confirmed or cancelled), linked to `started`. A failed
-    write is logged: the call has already happened there."""
+    write is logged: the call has already happened there. `answer` "unanswered": the other computer asked and nobody
+    here could answer (never recorded as the person's "no")."""
     if audit is None:
         if phase == "started" and not read_only:
             raise AuditUnavailable(f"There is no audit log on this computer, so '{tool}' was not sent to "
@@ -66,6 +67,8 @@ def record_remote_call(audit: Any, ctx: ToolContext, tool: str, place_label: str
                              "session": ctx.session, "client": ctx.client}
     if reason_code:
         extra["reason_code"] = reason_code
+    if answer:
+        extra["answer"] = answer
     if repairs:
         extra["repairs"] = list(repairs)
     taint = ctx.metadata.get("taint") if isinstance(ctx.metadata, dict) else None

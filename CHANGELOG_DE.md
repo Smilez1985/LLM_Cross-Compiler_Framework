@@ -74,7 +74,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   widerspricht, wird abgelehnt (`wrong_place`), Objekte auf beiden Computern ebenso (`needs_transfer`); nichts wird
   von selbst zwischen den Computern kopiert. Jeder entfernte Aufruf bekommt den vorab geschriebenen Eintrag `started`
   dieses Computers und einen verknüpften Abschlusseintrag (`place`, `remote_server`; nie das Token oder ein Login),
-  und ein Aufruf, der etwas ändert, wird nicht geschickt, wenn dieser Eintrag nicht geschrieben werden kann; ein
+  und ein Aufruf, der etwas ändert, wird nicht geschickt, wenn dieser Eintrag nicht geschrieben werden kann (was ein
+  Lesezugriff ist, entscheidet der eigene Katalog dieses Computers: Ein Tool, das er nicht hat, zählt als Änderung); ein
   lokaler Aufruf derselben Runde wird mit `place` `this_computer` festgehalten, und eine Runde, die ein entferntes
   Ergebnis bekommen hat, wird markiert (`taint`). Registry, Berechtigungen, narrensichere Schicht, Rückfragen und
   Audit-Log jenes Servers entscheiden jeden Aufruf dort; Dittos Identität dort ist ein benanntes Token, angelegt mit
@@ -83,8 +84,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   wird der andere Computer nicht genutzt. Jedes entfernte Ergebnis beginnt vor seinem nicht vertrauenswürdigen Block
   mit einer Zeile des Frameworks, und eine Ablehnung von dort wird in Worten des Frameworks mit ihrem Grund-Code
   genannt. Rückfragen jenes Servers werden nur in Dittos Dialog oder Eingabeaufforderung beantwortet, die den Server
-  nennen; eine Runde ohne beides verbindet sich ohne die Fähigkeit zu fragen, und eine Rückfrage, die niemand
-  beantworten konnte, wird abgebrochen, nie als „Nein“ der Person geschickt. Ein nicht erreichbarer Computer hält nie
+  nennen; eine Runde ohne beides (auch `llm-cli ditto ask` ohne Terminal) verbindet sich ohne die Fähigkeit zu fragen,
+  und eine Rückfrage, die niemand beantworten konnte (ein Dialog, der fehlschlug, ein geschlossenes Chatfenster), wird
+  abgebrochen, nie als „Nein“ der Person geschickt, und dieser Computer hält sie als abgebrochen und unbeantwortet
+  fest, auch wenn jenes Framework sie als „declined“ meldet; `llm-cli ditto eval` nutzt den anderen Computer nie. Ein
+  nicht erreichbarer Computer hält nie
   eine Runde an und setzt nie die Unterhaltung zurück (Tools aus der zwischengespeicherten Liste sagen „Not reachable
   now“; `llm-cli ditto ask` gibt den Hinweis auf stderr aus, der Chat zeigt ihn), und die Verbindung bleibt über
   Runden hinweg bis zu 10 Minuten ohne Aufruf offen. Build-Empfehlung, Modulvorschlag und die Analyse eines entfernten
