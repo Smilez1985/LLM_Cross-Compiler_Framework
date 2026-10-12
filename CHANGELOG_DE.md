@@ -1236,7 +1236,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   aus, sonst auf eine Kopie, die aus der geprüften offenen Datei gelesen und erneut gehasht wird (ihr sha256 muss der
   geprüfte sein); nur wenn nichts davon geht, lehnt es ab, mit dem Grund (`insufficient_resources` oder
   `needs_person`). Der private Ordner wird entfernt, wenn der Lauf endet, auch bei einem Fehler und bei `cancel_job`,
-  das jetzt auch den Sandbox-Container beendet; einen Ordner, den ein Absturz zurückließ, entfernt ein späterer Lauf.
+  das jetzt auch den Sandbox-Container beendet, eine noch laufende Kopie anhält und nach dem Abbruch keinen Container
+  mehr startet; einen Ordner, den ein Absturz zurückließ, entfernt ein späterer Lauf.
 - **Job-Enden im Audit-Log**: Wenn das Eintragen eines fertigen Deployments in die Geräteliste scheiterte, schrieb
   `deploy_to_device` keinen End-Eintrag, obwohl das Deployment stattgefunden hatte; der End-Eintrag wird jetzt auf
   jedem Weg aus dem Job geschrieben (das Ergebnis sagt dann, dass die Geräteliste es nicht eingetragen hat).
@@ -1560,9 +1561,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Pfade mit Leerzeichen in Fehlern an eine KI oder die Person**: Ein Pfad mit einem Leerzeichen (ein Ordner wie
   `My Models` oder ein Home-Ordner, dessen Benutzername eines enthält) wurde am ersten Leerzeichen abgeschnitten,
   sodass die Bezeichnung falsch war und ein Stück des Benutzernamens oder des Host-Pfads übrig bleiben konnte. Pfade
-  in Anführungszeichen, die Ordner des Frameworks und der Home-Ordner werden jetzt als Ganzes ersetzt, und ein
-  Leerzeichen setzt einen Pfad fort, wenn das nächste Wort klar dazugehört (oder, in einem bekannten Ordner, der
-  längere Pfad existiert), sodass der Fehler nur eine Bezeichnung oder den Dateinamen nennt.
+  in Anführungszeichen, die Ordner des Frameworks und der Home-Ordner (auch unter seinem echten Pfad, wenn er ein
+  Link ist) werden jetzt als Ganzes ersetzt, ein bekannter Ordner weiter hinten in einer Pfadliste
+  (`/usr/bin:/home/...`) oder in einem Text in Anführungszeichen mit mehr als einem Pfad beginnt einen eigenen Pfad,
+  und ein Leerzeichen setzt einen Pfad fort, wenn das nächste Wort klar dazugehört (oder, in einem bekannten Ordner,
+  der längere Pfad existiert), sodass der Fehler nur eine Bezeichnung oder den Dateinamen nennt.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

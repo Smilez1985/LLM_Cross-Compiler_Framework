@@ -1003,8 +1003,9 @@ ganze Stufe erlaubt hast.
   kann. Der private Link der Sandbox liegt neben dem Modell oder, wenn dieser Ordner schreibgeschützt ist, im Cache-
   oder Zustandsordner des Frameworks auf demselben Dateisystem; wo kein Link möglich ist, ist es eine Kopie, die aus
   der offenen Datei gelesen und erneut gehasht wird (sie muss den geprüften sha256 haben). Er wird entfernt, wenn der
-  Lauf endet, auch bei einem Fehler und bei `cancel_job` (das auch den Sandbox-Container beendet); lässt sich keine
-  private Datei anlegen, scheitert der Job mit dem Grund (`insufficient_resources` oder `needs_person`). Ergebnisse
+  Lauf endet, auch bei einem Fehler und bei `cancel_job` (das auch den Sandbox-Container beendet, eine noch laufende
+  Kopie anhält und nach dem Abbruch keinen Container mehr startet); lässt sich keine private Datei anlegen, scheitert
+  der Job mit dem Grund (`insufficient_resources` oder `needs_person`). Ergebnisse
   liegen in
   `~/.llm-framework/benchmarks/` (`runs/<Lauf-ID>.json`, `index.jsonl`); `get_status` (Abschnitt `local_runtime`)
   zeigt die neuesten Läufe.
@@ -1627,7 +1628,8 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   (`llama-bench` gibt die Metadaten des geladenen Modells aus), kommt in `external_text` zurück; Pfade in einer
   solchen Meldung erscheinen als Ordner-Bezeichnungen des Frameworks (`state:...`, `output:...`) oder nur als
   Dateiname, nie als Pfad des Rechners oder `~/...`, auch wenn ein Pfad Leerzeichen enthält (ein Pfad in
-  Anführungszeichen, die Ordner des Frameworks und der Home-Ordner werden als Ganzes ersetzt). Endet der Deploy-Job,
+  Anführungszeichen, die Ordner des Frameworks und der Home-Ordner, auch unter seinem echten Pfad, werden als Ganzes
+  ersetzt, auch weiter hinten in einer Pfadliste). Endet der Deploy-Job,
   bekommt das Audit-Log einen eigenen Abschlusseintrag (erledigt, gescheitert oder abgebrochen, mit Job, Gerätenamen
   und Gerätezustand), verknüpft mit dem `started`-Eintrag des Aufrufs; er wird auf jedem Weg aus dem Job geschrieben,
   auch wenn die Geräteliste das Deployment nicht eintragen kann (das Ergebnis hat dann eine `note`). Die Jobs von
