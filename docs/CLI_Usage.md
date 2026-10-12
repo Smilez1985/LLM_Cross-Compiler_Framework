@@ -123,7 +123,7 @@ stays below the given share.
 | `ditto setup` | Set the tool permissions (the same choices as the GUI's first-start dialog) |
 | `ditto ask` | Ask Ditto one question |
 | `ditto eval` | Grade Ditto on fixed test cases, or the knowledge-base search |
-| `ditto runtime install/start/status/stop` | The managed local model server (llama.cpp) for offline mode |
+| `ditto runtime install/start/status/stop/import/export/prune` | The managed local model server (llama.cpp, built on this machine) for offline mode |
 | `ditto runtime export-source/import-source` | Carry the pinned llama.cpp source to an air-gapped machine as a git bundle (checked by its commit) |
 | `ditto models list/download` | The model tiers for offline mode |
 | `tools list` / `tools permissions` / `tools audit` | The framework tools, their permissions and the audit log |
@@ -632,26 +632,89 @@ Files: `~/.llm-framework/runtime/llama.cpp/` (builds and state) and `~/.llm-fram
 llm-cli ditto runtime status [--json]
 ```
 
-Shows the detected hardware, the recommended llama.cpp build and why, whether a build is installed, whether the
-server runs (address, process, model, context), the recommended model and why, and the log file.
+Shows the detected hardware; the build in use with its origin (`self-built`, `imported` or `prebuilt, not
+self-built`), build ID, llama.cpp commit, backend, where and how long it was built, when it was verified and which
+devices it found; why a stored build cannot be used; whether a rebuild is required (the pin changed) or recommended
+(this machine's build plan changed); the GPU backend the build recipe chooses for this machine and why; which
+official prebuilt archive `--prebuilt` would install and why (or why none fits, for example on musl or an older
+glibc); whether the server runs (address, process, model, context); the recommended model and why; and the log
+file. Checking the rebuild detects the toolchain (it compiles nothing).
 
 | Option | Meaning |
 |---|---|
-| `--json` | Machine-readable output. |
+| `--json` | Machine-readable output (`installed`, `problems`, `rebuild`, `recommended_backend`, `prebuilt_option`, ...). |
 
 #### ditto runtime install
 
 ```
-llm-cli ditto runtime install [--backend auto|cpu|vulkan|cuda|rocm|metal] [--force] [-y]
+llm-cli ditto runtime install [--backend auto|cpu|vulkan|cuda|rocm|metal] [--placement auto|native|container]
+                              [--jobs N] [--prebuilt] [--force] [-y]
 ```
 
-Downloads the pinned llama.cpp build for this machine, checks size and sha256 before unpacking, and installs it.
+Builds `llama-server` (with `llama-cli`, `llama-bench` and `llama-perplexity`) on this machine from the pinned
+llama.cpp commit (`configs/llama_runtime.yml`, `llama_cpp.source`). It probes the machine, detects the toolchain,
+shows the builds it plans and asks. The CPU build is built first, verified and made active (it stays the fallback);
+then the GPU build the recipe chooses is built and becomes active once it is verified. A GPU build that cannot be
+built here yet or fails leaves the CPU build active and is reported. Every build is verified on this machine before
+it is kept: `--version` gives the pinned build number and commit, `--list-devices` shows the planned device, and the
+server refuses `--tools`. A build that is already stored with the same build ID is reused, not built again. A
+running server keeps running; the next `runtime start` uses the new build.
+
+- **Toolchain:** GCC or Clang, CMake 3.15 or newer and Ninja (Debian/Ubuntu: `build-essential cmake ninja-build`).
+  Without them the build runs in the framework's builder container (Docker, `--network none`). Without either, the
+  command names the ways out and exits with 1. Nothing is installed for you.
+- **Source:** the pinned commit is fetched once (about 40 MB to download, 215 MB on disk) after you confirm, and
+  checked by its commit; on a machine without network import it first (`ditto runtime import-source`). Configure and
+  build run without network.
+- **Backends in this version:** CPU and Vulkan on Linux. CUDA and ROCm builds, and Windows and macOS, follow; on an
+  NVIDIA machine the CPU build runs until then (`--backend vulkan` builds a Vulkan server for the GPU).
+- **Exit code 1** also when an explicitly requested GPU backend could not be built (the CPU build is active).
 
 | Option | Meaning |
 |---|---|
-| `--backend [auto\|cpu\|vulkan\|cuda\|rocm\|metal]` | Build to install (default `auto`). ROCm is only used when chosen here. |
-| `--force` | Download and unpack again even if it is installed. |
-| `-y, --yes` | Do not ask before downloading. |
+| `--backend [auto\|cpu\|vulkan\|cuda\|rocm\|metal]` | GPU backend built after the CPU build (default `auto`: the build recipe chooses; `cpu`: only the CPU build). With `--prebuilt`: the archive to install. |
+| `--placement [auto\|native\|container]` | Where the build runs (default `auto`: natively when the toolchain is complete, else in the builder container). |
+| `--jobs INTEGER RANGE` | Parallel compile jobs, 1 to 256. Default: from the CPUs and the free memory. |
+| `--prebuilt` | Download upstream's official prebuilt archive instead (size and sha256 checked before unpacking). Only on this request, always shown as "prebuilt, not self-built". An archive that is already installed, also one an earlier version downloaded (which is not used without this request), is taken without downloading it again. Linux archives need glibc 2.35 or 2.39; none is offered on musl. |
+| `--force` | With `--prebuilt`: download and unpack again even if it is installed. |
+| `-y, --yes` | Do not ask before building, fetching the source or downloading. |
+
+#### ditto runtime import
+
+```
+llm-cli ditto runtime import FILE [-y]
+```
+
+Imports a `llama-server` build made with `ditto runtime export` on another machine of the same kind (same OS and
+architecture, and a C library at least as new). The archive is unpacked safely (size limited first), every file is
+checked against its manifest, the build ID against its plan, the plan against the build rules (no download option,
+no subprocess support) and the commit against the pin. A build made with `-march=native` is refused when this CPU is
+of another vendor or lacks a CPU feature of the CPU that built it (AVX-512, for example): it would stop with SIGILL at
+the first computation. Then it shows where the build was made and asks before any of its programs runs; after that
+the build is verified here like a local one and becomes the active build (a CPU build also the fallback). Import only
+builds you made yourself.
+
+| Option | Meaning |
+|---|---|
+| `-y, --yes` | Do not ask before running the imported programs for the check. |
+
+#### ditto runtime export
+
+```
+llm-cli ditto runtime export FILE
+```
+
+Writes the self-built build in use to `FILE` (`.tar.gz`: its programs, `build.json` and `manifest.json`, no logs)
+for `ditto runtime import` on another machine of the same kind. The prebuilt archive is never exported.
+
+#### ditto runtime prune
+
+```
+llm-cli ditto runtime prune [--keep N]
+```
+
+Removes old self-built builds. The active build, the CPU fallback and the build a running server was started from
+are always kept, plus the `N` newest others (default 2). `runtime install` does the same after every build.
 
 #### ditto runtime start
 
@@ -659,8 +722,12 @@ Downloads the pinned llama.cpp build for this machine, checks size and sha256 be
 llm-cli ditto runtime start [--model TIER] [--ctx N] [--sleep-idle SECONDS]
 ```
 
-Starts `llama-server` on 127.0.0.1 with a free port and a new API key in a private file. The server keeps running
-after the command returns, until `llm-cli ditto runtime stop`. If the same model already runs, it is reused.
+Starts `llama-server` on 127.0.0.1 with a free port and a new API key in a private file, with a cleared environment
+and none of the options the shared launch policy forbids. Only a build that passed its verification on this machine,
+still matches its manifest and is of the pinned commit is started (the active build, else its CPU fallback), or the
+prebuilt archive after `install --prebuilt`; a self-built build that cannot be used never falls back to the prebuilt
+archive. The server keeps running after the command returns, until `llm-cli ditto runtime stop`. If the same model
+already runs from the same build, it is reused.
 
 | Option | Meaning |
 |---|---|

@@ -259,6 +259,16 @@ class BuildExecutor:
 
     # --- shared ---
     @staticmethod
+    def refusal(plan: BuildPlan) -> Optional[str]:
+        """Why this executor will not run the plan (a later work package, a plan that breaks the build rules), or None.
+        Asked before a build is started, so the user hears it before anything is fetched or built."""
+        try:
+            BuildExecutor._check_plan(plan)
+        except BuildError as e:
+            return str(e)
+        return None
+
+    @staticmethod
     def _check_plan(plan: BuildPlan) -> None:
         if not _RE_BUILD_ID.fullmatch(plan.build_id or ""):
             raise BuildError("the plan has no build ID")

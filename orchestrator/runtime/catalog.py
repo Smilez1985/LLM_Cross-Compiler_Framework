@@ -64,7 +64,10 @@ class RuntimeAsset(_Strict):
     native_compute_caps: List[float] = Field(default_factory=list)
     min_compute_cap: Optional[float] = None
     gpu_targets: List[str] = Field(default_factory=list)  # ROCm: the gfx targets the build was compiled for
-    opt_in: bool = False
+    # Linux archives: the glibc they were built against (the Ubuntu release of upstream's release job). A machine with
+    # an older glibc, or with musl, cannot start them (hardware.select_backend refuses them there).
+    glibc_min: Optional[str] = Field(default=None, pattern=r"^\d{1,2}\.\d{1,3}$")
+    opt_in: bool = False  # never chosen automatically, only when the backend is asked for
     files: List[AssetFile] = Field(min_length=1)
 
     @field_validator("min_driver", "jit_min_driver", mode="before")

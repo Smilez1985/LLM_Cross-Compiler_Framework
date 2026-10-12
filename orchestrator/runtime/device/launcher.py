@@ -24,9 +24,8 @@ import re
 import shlex
 from typing import Dict, List, Mapping, Tuple
 
-from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, DEVICE_SERVER_FIXED, FORBIDDEN_FLAGS, LOOPBACK,
-                                                POSIX_CLEARED_PATH, START_SCRIPT_OPTIONS, check_command,
-                                                posix_cleared_env)
+from orchestrator.runtime.server_policy import (DEVICE_DEFAULT_PORT, FORBIDDEN_FLAGS, LOOPBACK, POSIX_CLEARED_PATH,
+                                                SERVER_FIXED, START_SCRIPT_OPTIONS, check_command, posix_cleared_env)
 
 START_SCRIPT = "llama-server.sh"
 UNIT_NAME = "llm-llama-server.service"
@@ -239,7 +238,7 @@ def render_start_script(default_port: int = DEVICE_DEFAULT_PORT) -> str:
     by_kind = _options_by_kind(START_SCRIPT_OPTIONS)
     cases = "\n".join(f"      {_pattern(names)}) kind={kind} ;;" for kind, names in by_kind.items())
     allowed = ", ".join(["--port"] + [names[-1] for names in START_SCRIPT_OPTIONS])
-    fixed = list(DEVICE_SERVER_FIXED)
+    fixed = list(SERVER_FIXED)
     check_command(["llama-server", *fixed])  # the shared list (D22): none of the fixed options may be forbidden
     allowed_names = [n for names in START_SCRIPT_OPTIONS for n in names]
     if set(allowed_names) & FORBIDDEN_FLAGS:  # pragma: no cover - the policy's own constants

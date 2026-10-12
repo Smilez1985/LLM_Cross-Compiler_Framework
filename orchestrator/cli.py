@@ -977,23 +977,48 @@ def ditto_runtime():
     pass
 
 
+def _installed_json(inst) -> Optional[dict]:
+    if inst is None:
+        return None
+    data = inst.model_dump(mode="json", include={"origin", "build_id", "commit", "backend", "variant", "asset_id",
+                                                 "role", "placement", "built_on", "built_at", "verified_at",
+                                                 "duration_s", "devices", "notes"})
+    data["label"] = inst.label
+    data["path"] = str(inst.path)
+    return data
+
+
+def _installed_line(inst) -> str:
+    """origin label, build, backend and commit of the build in use (escaped for rich)."""
+    if inst.build_id:
+        role = ", CPU fallback" if inst.role == "fallback" else ""
+        text = (f"{inst.label}: build {inst.build_id[:16]} ({inst.backend}{role}), llama.cpp {inst.build} commit "
+                f"{(inst.commit or '')[:8]}")
+    else:
+        text = f"{inst.label}: {inst.asset_id} ({inst.backend})"
+    return escape(text)
+
+
 @ditto_runtime.command('status')
 @click.option('--json', 'as_json', is_flag=True, help='Machine-readable output')
 @pass_context
 def runtime_status(ctx: FrameworkContext, as_json: bool):
-    """Hardware, recommended build and model, and whether the server is running"""
+    """Hardware, the build in use (self-built, imported or prebuilt), the recommended model, and the server"""
     rt = _local_runtime(ctx)
-    with console.status("Checking the hardware ..."):
-        status = rt.status()
+    with console.status("Checking the hardware and the builds ..."):
+        status = rt.status(check_rebuild=True)
         hardware = rt.hardware()
-        choice = rt.select_backend()
+        backend, backend_reason = rt.recommend_backend()
+        prebuilt = rt.select_backend()
         model, why = rt.choose_tier()
     preferred = rt.preferred_tier()
+    inst = status.installed
     if as_json:
         click.echo(json.dumps({
             "build": status.build, "hardware": hardware.model_dump(mode="json"),
-            "recommended_build": choice.asset.id if choice.asset else None, "build_reason": choice.reason,
-            "installed": status.installed.asset_id if status.installed else None,
+            "installed": _installed_json(inst), "problems": status.problems, "rebuild": status.rebuild,
+            "recommended_backend": backend, "backend_reason": backend_reason,
+            "prebuilt_option": prebuilt.asset.id if prebuilt.asset else None, "prebuilt_reason": prebuilt.reason,
             "running": status.running, "healthy": status.healthy, "base_url": status.base_url, "pid": status.pid,
             "model": status.model, "tier": status.tier, "ctx": status.ctx,
             "recommended_tier": model.tier, "tier_reason": why, "preferred_tier": preferred,
@@ -1003,10 +1028,33 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
     table.add_column("", style="cyan")
     table.add_column("")
     table.add_row("Hardware", escape(hardware.summary()))
-    table.add_row("Recommended build", escape(f"{choice.asset.id if choice.asset else '-'}: {choice.reason}"))
-    inst = status.installed
-    table.add_row("Installed", escape(f"{inst.asset_id} ({inst.path})") if inst else
-                  "[yellow]no[/yellow] (llm-cli ditto runtime install)")
+    if inst is not None:
+        style = "yellow" if inst.origin == "prebuilt" else "green"
+        table.add_row("In use", f"[{style}]{_installed_line(inst)}[/{style}]")
+        if inst.build_id:
+            built = [f"{inst.placement or '?'} build"]
+            if inst.duration_s is not None:
+                built.append(f"{inst.duration_s:.0f} s")
+            if inst.built_on and inst.origin == "imported":
+                built.append(f"on {inst.built_on}")
+            if inst.built_at:
+                built.append(inst.built_at)
+            table.add_row("Built", escape(", ".join(built)))
+            devices = ", ".join(inst.devices) or "CPU only"
+            table.add_row("Verified", escape(f"{inst.verified_at or '?'}; devices: {devices}"))
+        for note in inst.notes:
+            table.add_row("Note", f"[yellow]{escape(note)}[/yellow]")
+    else:
+        table.add_row("In use", "[yellow]nothing[/yellow] (llm-cli ditto runtime install builds llama-server)")
+    for problem in status.problems:
+        if inst is None or problem not in inst.notes:
+            table.add_row("Problem", f"[red]{escape(problem)}[/red]")
+    if status.rebuild:
+        table.add_row("Rebuild", f"[yellow]{escape(status.rebuild)}[/yellow]")
+    table.add_row("Self-built plan", escape(f"{backend}: {backend_reason}" if backend == "cpu" or not backend_reason
+                                            else f"CPU build, then {backend}: {backend_reason}"))
+    table.add_row("Prebuilt opt-in", escape(f"{prebuilt.asset.id if prebuilt.asset else '-'} (--prebuilt, not "
+                                            f"self-built): {prebuilt.reason}"))
     if status.running:
         health = "[green]ready[/green]" if status.healthy else "[yellow]starting / not answering[/yellow]"
         table.add_row("Server", f"{health} {escape(str(status.base_url))} (pid {status.pid}, "
@@ -1022,28 +1070,142 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
 
 @ditto_runtime.command('install')
 @click.option('--backend', type=click.Choice(['auto', 'cpu', 'vulkan', 'cuda', 'rocm', 'metal']), default='auto',
-              show_default=True, help='Build to install (ROCm only when chosen here)')
-@click.option('--force', is_flag=True, help='Download and unpack again even if it is installed')
-@click.option('--yes', '-y', is_flag=True, help='Do not ask before downloading')
+              show_default=True, help='GPU backend to build after the CPU build (auto: the build recipe chooses; '
+              'cpu: only the CPU build)')
+@click.option('--placement', type=click.Choice(['auto', 'native', 'container']), default='auto', show_default=True,
+              help="Where the build runs: with this machine's toolchain, or in the framework's builder container "
+              "(Docker, no network during the build)")
+@click.option('--jobs', type=click.IntRange(1, 256), default=None,
+              help='Parallel compile jobs (default: from the CPUs and the free memory)')
+@click.option('--prebuilt', is_flag=True,
+              help="Download the official prebuilt llama.cpp archive instead (not self-built; size and sha256 "
+              "verified)")
+@click.option('--force', is_flag=True, help='With --prebuilt: download and unpack again even if it is installed')
+@click.option('--yes', '-y', is_flag=True, help='Do not ask before building or downloading')
 @pass_context
-def runtime_install(ctx: FrameworkContext, backend: str, force: bool, yes: bool):
-    """Download the pinned llama.cpp build (size and sha256 verified before unpacking)"""
-    from orchestrator.runtime.llama_server import LocalRuntimeError
+def runtime_install(ctx: FrameworkContext, backend: str, placement: str, jobs: Optional[int], prebuilt: bool,
+                    force: bool, yes: bool):
+    """Build llama-server on this machine from the pinned llama.cpp commit (CPU build first, then the GPU build)"""
+    from orchestrator.runtime.llama_server import PREBUILT_LABEL, LocalRuntimeError
     rt = _local_runtime(ctx)
-    choice = rt.select_backend(backend)
-    if choice.asset is None:
-        console.print(f"[red]{escape(choice.reason)}[/red]")
-        sys.exit(1)
-    console.print(f"llama.cpp {escape(rt.build)} - {escape(choice.asset.id)}: {escape(choice.reason)}")
-    if not yes and not click.confirm(f"Download {_gib(choice.asset.download_size)} into {rt.root}?", default=True):
+    if prebuilt:
+        choice = rt.select_backend(backend)
+        if choice.asset is None:
+            console.print(f"[red]{escape(choice.reason)}[/red]")
+            sys.exit(1)
+        console.print(f"llama.cpp {escape(rt.build)} - {escape(choice.asset.id)} ([yellow]{PREBUILT_LABEL}[/yellow]): "
+                      f"{escape(choice.reason)}")
+        if rt.prebuilt_installed(choice.asset) and not force:
+            question = (f"This official archive is already installed in {rt.root}. Use it for Ditto's server "
+                        f"({PREBUILT_LABEL})?")
+        else:
+            question = f"Download the official archive ({_gib(choice.asset.download_size)}) into {rt.root}?"
+        if not yes and not click.confirm(question, default=True):
+            return
+        bar, update = _download_progress()
+        try:
+            with bar:
+                inst = rt.install_prebuilt(prefer=backend, force=force, progress=update)
+        except LocalRuntimeError as e:
+            _runtime_failure(e)
+        console.print(f"[green]Installed {escape(str(inst.asset_id))} in {escape(str(inst.path))}[/green] "
+                      f"([yellow]{PREBUILT_LABEL}[/yellow])")
         return
-    bar, update = _download_progress()
+    if force:
+        console.print("[dim]--force applies to --prebuilt: a self-built build is reused by its build ID and built "
+                      "again when its files no longer match its manifest.[/dim]")
     try:
-        with bar:
-            inst = rt.install(prefer=backend, force=force, progress=update)
+        with console.status("Probing this machine and planning the build ..."):
+            plan = rt.plan_install(backend=backend, placement=placement)
     except LocalRuntimeError as e:
         _runtime_failure(e)
-    console.print(f"[green]Installed {escape(inst.asset_id)} in {escape(str(inst.path))}[/green]")
+    for line in plan.describe():
+        console.print(escape(line))
+    for note in plan.notes:
+        console.print(f"[dim]{escape(note)}[/dim]")
+    if plan.needs_source and not yes and not click.confirm(
+            "Build now? The CPU build takes a few minutes, a GPU build longer.", default=True):
+        return
+
+    def fetch_ok() -> bool:
+        pin = rt.catalog.llama_cpp.source
+        return yes or click.confirm(f"The pinned llama.cpp source ({pin.tag}, commit {pin.commit[:12]}, about 215 MB) "
+                                    "is not cached yet. Fetch it now?", default=True)
+
+    try:
+        result = rt.install(plan, jobs=jobs, log=lambda msg: console.print(escape(msg)), fetch_source=fetch_ok)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    active, fallback = result.active, result.fallback
+    console.print(f"[green]Self-built llama-server ready:[/green] {escape(active.backend)} build "
+                  f"{escape(active.build_id[:16])} (verified on this machine)" +
+                  (f", CPU fallback {escape(fallback.build_id[:16])}" if fallback.build_id != active.build_id else ""))
+    for problem in result.problems:
+        console.print(f"[yellow]{escape(problem)}[/yellow]")
+    if result.removed:
+        console.print(f"[dim]Removed {len(result.removed)} old build(s).[/dim]")
+    if rt.endpoint() is not None:
+        console.print("The running server keeps running; the next start uses the new build "
+                      "(llm-cli ditto runtime start).")
+    if result.requested_missing:
+        sys.exit(1)
+
+
+@ditto_runtime.command('import')
+@click.argument('file', type=click.Path(exists=True, dir_okay=False, path_type=Path))
+@click.option('--yes', '-y', is_flag=True, help='Do not ask before running the imported programs for the check')
+@pass_context
+def runtime_import(ctx: FrameworkContext, file: Path, yes: bool):
+    """Import a llama-server build made on another machine of the same kind (checked against the pin, then verified)"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    rt = _local_runtime(ctx)
+
+    def confirm(info: dict) -> bool:
+        built_on = info.get("built_on") or {}
+        console.print(f"Build {escape(str(info.get('build_id', ''))[:16])} of llama.cpp {escape(str(info.get('tag')))} "
+                      f"(commit {escape(str(info.get('commit', ''))[:12])}), built on "
+                      f"{escape(str(built_on.get('os')))}/{escape(str(built_on.get('arch')))} at "
+                      f"{escape(str(info.get('built_at')))}; programs: {escape(', '.join(info.get('files') or []))}")
+        return yes or click.confirm("Its files match its manifest and the pin. Run its programs here to verify it? "
+                                    "Import only builds you made yourself.", default=False)
+
+    try:
+        with console.status("Checking the build ..."):
+            inst = rt.import_build(file, confirm)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    console.print(f"[green]Imported and verified:[/green] {_installed_line(inst)}")
+
+
+@ditto_runtime.command('export')
+@click.argument('file', type=click.Path(dir_okay=False, path_type=Path))
+@pass_context
+def runtime_export(ctx: FrameworkContext, file: Path):
+    """Write the self-built build in use to FILE (.tar.gz) for another machine of the same kind"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    if not file.name.endswith((".tar.gz", ".tgz")):
+        console.print("[red]FILE must end with .tar.gz[/red]")
+        sys.exit(2)
+    try:
+        path = _local_runtime(ctx).export_build(file)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    console.print(f"[green]Wrote {escape(str(path))}[/green]. On the other machine: llm-cli ditto runtime import "
+                  f"{escape(path.name)}")
+
+
+@ditto_runtime.command('prune')
+@click.option('--keep', type=click.IntRange(0, 50), default=2, show_default=True,
+              help='Other builds to keep besides the active build, the CPU fallback and the running one')
+@pass_context
+def runtime_prune(ctx: FrameworkContext, keep: int):
+    """Remove old self-built builds (never the active build, the CPU fallback or the running one)"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    try:
+        removed = _local_runtime(ctx).prune(keep_last=keep)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    console.print(f"Removed {len(removed)} build(s)." if removed else "Nothing to remove.")
 
 
 @ditto_runtime.command('start')

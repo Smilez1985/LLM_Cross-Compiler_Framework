@@ -49,11 +49,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - Knowledge-base models are unloaded after 10 minutes without use and loaded again on the next search
   (setting `rag_model_idle_minutes`, 0 keeps them loaded, at most 7 days). The time counts from the end of the
   last search or import, never during one.
-- **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install|start|stop|status` runs a
-  pinned llama.cpp `llama-server` on 127.0.0.1 (build chosen for the hardware the hardware probe finds, with free
-  RAM and VRAM read again at every start: CUDA, Vulkan, Metal or CPU; ROCm on request; per-start API key in a
-  private file; a cleared environment that keeps only the variables choosing GPUs or locating their drivers, so no
-  `LLAMA_*` option or `GGML_BACKEND_PATH` library reaches the server), and `llm-cli ditto models list|download`
+- **Managed local model** for Ditto's offline mode: `llm-cli ditto runtime install` builds `llama-server` on your
+  computer from the pinned llama.cpp commit, the CPU build first (a few minutes, then `runtime start` works) and then
+  the GPU build the build recipe chooses for the machine's OS, architecture and C library (Vulkan on Linux in this
+  version; CUDA, ROCm, Windows and macOS builds follow), each verified on this machine before it is used; it builds
+  natively with your compiler, CMake and Ninja or in the framework's builder container, never installs a toolchain
+  for you, and names the ways out when neither works. `llm-cli ditto runtime start|stop|status` runs the server on
+  127.0.0.1 (free RAM and VRAM read again at every start; per-start API key in a private file; a cleared environment
+  that keeps only the variables choosing GPUs or locating their drivers, so no `LLAMA_*` option or
+  `GGML_BACKEND_PATH` library reaches the server); `status` shows whether the build in use is self-built, imported
+  or "prebuilt, not self-built", its build ID, commit and verification, and whether a rebuild is required or
+  recommended. Upstream's official prebuilt archive is only the explicit choice `runtime install --prebuilt`.
+  `llm-cli ditto models list|download`
   fetches Qwen3.5 models at pinned revisions into the `ditto/` folder of the configured models folder (`models_dir`,
   the one Ditto uses; the runtime also takes it when it is given no folder), checked by size and sha256. Model
   tiers go down to 2-bit models for weak hardware (3 GB RAM). The "local" provider follows the running server
@@ -131,8 +138,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   build a running server uses. A build from another of your machines can be imported: its files are checked against
   the manifest, its build ID against its plan and its commit against the pin, and you confirm before any of its
   programs runs; then every program in it must report the pin's version, not the one the archive expects. Ditto's
-  `runtime install` still downloads the prebuilt archive until it moves to this build. A CPU build of
-  `llama-server` and `llama-bench` at the pin took 189 s on a 4-core virtual machine and gave 28 MB of binaries.
+  `runtime install` builds through it. A CPU build of `llama-server` and `llama-bench` at the pin took 189 s on a
+  4-core virtual machine and gave 28 MB of binaries; Ditto's CPU build with `llama-cli` and `llama-perplexity` as well
+  took 195 s.
+- **Builds of Ditto's server move between machines**: `llm-cli ditto runtime export FILE` writes the self-built
+  build in use, and `llm-cli ditto runtime import FILE` on another machine of the same kind checks it against the pin
+  and its manifest, asks before any of its programs runs, verifies it there and makes it the active build. A build
+  made with `-march=native` is refused, before anything runs, on a CPU of another vendor or without one of the CPU
+  features of the CPU that built it (it would stop with SIGILL at the first computation); `runtime start` and the
+  perplexity check skip such a build too, for example in a home folder shared between machines.
+  `llm-cli ditto runtime prune` removes old builds and always keeps the active build, the CPU fallback and the build a
+  running server uses.
 - `llm-cli doctor` checks the local llama.cpp runtime: a self-built build in use that was changed (error) or is older
   than the pin (warning), the prebuilt archive in use (information: not self-built), and whether this machine has the
   compiler, CMake and Ninja for a native build (information, with the builder container as the alternative).
@@ -410,6 +426,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   script of the self-built device runtime when that is installed, and otherwise how to deploy it
   (`llm-cli device runtime build` and `deploy`). `llm-cli scan --device` keeps the SSH user as the board's deploy
   user (never root).
+- The perplexity check of the dataset manager runs the self-built `llama-perplexity` of this machine instead of
+  pulling `ghcr.io/smilez1985/llm-runtime`: catalog models natively; every other model natively only after your
+  consent, which is written to the tool audit log first; the Docker sandbox (the build's own locally built image, no
+  network) as the opt-in. A failed measurement is an error with the reason instead of the values 999.99 or 888.88.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -577,8 +597,18 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
   build log or a model name told the model.
 - Requests to local model servers on 127.0.0.1 never go through an HTTP(S) proxy from the environment.
-- Local model downloads are refused unless size and sha256 are pinned; the server binary archive is verified
-  the same way and installed atomically.
+- Local model downloads are refused unless size and sha256 are pinned; the official prebuilt server archive (only
+  with `runtime install --prebuilt`) is verified the same way, installed atomically, and never offered on musl or on
+  an older glibc than the one it was built against.
+- One launch policy for every llama.cpp program the framework starts (`orchestrator/runtime/server_policy.py`):
+  Ditto's server, the build checks and the perplexity check share one list of forbidden options (tools, agent mode,
+  MCP, web UI, remote compute, downloads, a prompt log on disk, a key or token on the command line, in every spelling
+  llama.cpp accepts, also `--a_b` for `--a-b`) and a cleared environment, and a server listens on 127.0.0.1 only and
+  reads its key from a private file, checked again right before the start. `runtime start` starts only a build that
+  passed its verification on this machine, still matches its manifest and is of the pinned commit (else its CPU
+  fallback, else nothing); a self-built build that cannot be used never falls back to the prebuilt archive on its
+  own, and an official archive an earlier version downloaded is used only after `runtime install --prebuilt` (which
+  takes it without downloading it again).
 - Deep Ingest reads robots.txt as RFC 9309 describes it, with one cautious deviation. Rules with `*` or `$` (such
   as `Disallow: /*.pdf$`), an `Allow` listed before a longer `Disallow`, every `User-agent: *` group after the
   first and a file that starts with a byte order mark used to be ignored, so the crawler fetched pages the site had

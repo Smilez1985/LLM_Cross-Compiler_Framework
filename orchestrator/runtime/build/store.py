@@ -398,7 +398,8 @@ class BuildStore:
                     return existing
                 info = {"origin": "imported", "build_id": build["build_id"], "commit": pin.commit, "tag": pin.tag,
                         "built_on": manifest.get("build_host"), "built_at": manifest.get("built_at"),
-                        "built_by_origin": manifest.get("origin"), "files": sorted(manifest["files"])}
+                        "built_by_origin": manifest.get("origin"), "files": sorted(manifest["files"]),
+                        "plan": build["plan"]}  # checked above (its hash is the build ID); for the caller's checks
                 if not confirm(info):
                     raise StoreError("the import was not confirmed; nothing was run or stored")
                 report = verifier.verify(_import_checks(build["plan"], pin), staging / "bin", run_binaries=True,
