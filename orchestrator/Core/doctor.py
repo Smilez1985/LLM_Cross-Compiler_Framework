@@ -9,6 +9,7 @@ run only when the user asks for that tier. After fixing, everything is checked a
 still there is reported as not fixable automatically.
 """
 
+import json
 import os
 import shutil
 import subprocess
@@ -336,9 +337,19 @@ def check_runtime(framework) -> List[Finding]:
                                 (f" ({len(stored)} stored, none active)." if stored else ".")))
     prebuilt = sorted(p.parent.name for p in store.root.glob("b*-*/runtime.json"))
     if prebuilt:
-        findings.append(Finding("runtime", "runtime.prebuilt", Severity.INFO,
-                                f"Ditto's local model server is the official prebuilt llama.cpp archive "
-                                f"({', '.join(prebuilt)}): not self-built."))
+        try:
+            use = json.loads(store.active_file.read_text(encoding="utf-8")).get("use")
+        except (OSError, ValueError, AttributeError):
+            use = None
+        if use == "prebuilt" or (use is None and "active" not in refs):
+            findings.append(Finding("runtime", "runtime.prebuilt", Severity.INFO,
+                                    f"Ditto's local model server is the official prebuilt llama.cpp archive "
+                                    f"({', '.join(prebuilt)}): not self-built.",
+                                    "llm-cli ditto runtime install builds the server from the pinned source."))
+        else:
+            findings.append(Finding("runtime", "runtime.prebuilt", Severity.INFO,
+                                    f"An official prebuilt llama.cpp archive ({', '.join(prebuilt)}, not self-built) "
+                                    "is installed but not in use: Ditto uses the self-built server."))
     try:
         detected = detect_toolchain(full=False)
     except ToolchainError as e:

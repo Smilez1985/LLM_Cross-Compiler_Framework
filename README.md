@@ -426,17 +426,38 @@ enough; `--kind retrieval` grades the knowledge-base search instead. Details and
 
 ## Offline mode: the managed local model
 
-Ditto can run without any cloud account on a local model. The framework downloads a pinned llama.cpp build and a
-pinned Qwen3.5 model and runs `llama-server` on your computer:
+Ditto can run without any cloud account on a local model. The framework builds `llama-server` on your computer from
+the pinned llama.cpp commit, downloads a pinned Qwen3.5 model and runs the server:
 
 ```bash
-llm-cli ditto runtime status       # hardware, recommended llama.cpp build and model, server state
-llm-cli ditto runtime install      # the pinned llama.cpp build for this machine
+llm-cli ditto runtime status       # hardware, the build in use, the recommended model, server state
+llm-cli ditto runtime install      # builds llama-server for this machine (CPU build first, then the GPU build)
 llm-cli ditto models list          # the model tiers, their size and whether they are downloaded
 llm-cli ditto models download      # the recommended model (or a tier, e.g. small-q2)
 llm-cli ditto runtime start        # starts llama-server; it keeps running until "runtime stop"
 llm-cli ditto runtime stop
 ```
+
+**The build.** `runtime install` shows what it will build and asks first. It needs a C/C++ compiler (GCC or Clang),
+CMake and Ninja (on Debian or Ubuntu: `build-essential cmake ninja-build`); without them it builds in the framework's
+builder container when Docker runs. The framework never installs a toolchain for you. The pinned source (about
+215 MB) is fetched once by its commit and checked; the build itself runs without network. The CPU build comes first
+and takes a few minutes, so `runtime start` works soon; a GPU build (Vulkan on Linux in this version; CUDA, ROCm,
+Windows and macOS builds follow) is built after it and used once it passed its checks. Every build is checked on this
+machine before it is kept (version and commit of the pin, the devices it finds, and that the server refuses its own
+tools), and `runtime start` starts nothing else.
+
+- **Air-gapped machines:** `llm-cli ditto runtime export-source FILE` and `import-source FILE` carry the source;
+  `llm-cli ditto runtime export FILE.tar.gz` on a machine of the same kind and `llm-cli ditto runtime import
+  FILE.tar.gz` here carry a finished build. An imported build is checked against the pin and its own manifest, you
+  confirm it, and it is verified here before it is used.
+- **Official prebuilt archive:** `llm-cli ditto runtime install --prebuilt` downloads upstream's archive instead (size
+  and sha256 checked). It is only used when you ask for it and is always shown as "prebuilt, not self-built". On
+  Linux it needs the glibc it was built for (2.35 or 2.39); on musl systems such as Alpine only the self-built server
+  runs. Until the Windows and macOS builds land, this is the way to run the local model there.
+- `llm-cli ditto runtime prune` removes old builds; the active build, its CPU fallback and the build a running server
+  uses are always kept. `runtime status` says when a rebuild is required (the pin changed) or recommended (this
+  machine's build plan changed).
 
 Then choose **Local model (managed llama-server)** in the AI settings (provider `local`). Turn on **Offline Mode**
 as well if Ditto should never use a cloud provider. Ditto finds the running server by itself. In this version the
@@ -452,14 +473,16 @@ server is controlled from the command line only.
 
 - `llm-cli ditto runtime start --model <tier>` picks a tier and remembers it; `--model auto` returns to the
   recommendation.
-- **Hardware:** NVIDIA GPUs get a CUDA build that matches GPU and driver; AMD Radeon GPUs and APUs (e.g. Ryzen Z1
-  Extreme) and Intel Arc use Vulkan (ROCm only with `runtime install --backend rocm`); Apple Silicon uses Metal;
-  everything else uses the CPU build. `runtime status` explains each choice.
-- **Verified downloads:** every build and model is pinned with size and sha256 in
-  [`configs/llama_runtime.yml`](configs/llama_runtime.yml) (models at a fixed Hugging Face commit) and checked
-  before it is unpacked or loaded; unpinned entries are refused.
+- **Hardware:** the build recipe follows the machine's OS, architecture and C library. AMD Radeon GPUs and APUs
+  (e.g. Ryzen Z1 Extreme) and Intel Arc get a Vulkan build; NVIDIA GPUs will get a CUDA build matched to GPU and
+  driver (until then the CPU build runs there, and `runtime install --backend vulkan` builds a Vulkan server that
+  also uses NVIDIA GPUs); everything else uses the CPU build. `runtime status` explains each choice.
+- **Verified downloads:** the llama.cpp commit, the prebuilt archives and every model are pinned in
+  [`configs/llama_runtime.yml`](configs/llama_runtime.yml) (archives and models with size and sha256, models at a
+  fixed Hugging Face commit) and checked before they are used; unpinned entries are refused.
 - **Isolation:** the server listens on 127.0.0.1 only, on a free port, with a new API key per start that is
-  passed in a file only you can read. Its web UI, its own tools and its MCP client stay off.
+  passed in a file only you can read, and with a cleared environment. Its web UI, its own tools and its MCP client
+  stay off; the self-built server is compiled without its shell tool at all.
 - **Effort:** with effort "low" the local model answers without thinking first (much faster on a CPU); "medium"
   and higher let it think.
 

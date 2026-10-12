@@ -147,12 +147,15 @@ Version noch fehlen.
 
 ## 4. Das lokale Modell und die Evaluation
 
-Tests laden nie Modelle herunter. Um Dittos Offline-Modus von Hand auszuprobieren, nutze ein eigenes
-`LLM_FRAMEWORK_HOME` (Modelle landen im Ordner `models/ditto/` der Installation, den git ignoriert):
+Tests laden nie Modelle herunter, und sie holen oder bauen nie llama.cpp: Eine Fixture in `tests/conftest.py` lehnt
+ein Holen des llama.cpp-Quellcodes über das Netzwerk ab, also nutzt ein Test der Installation Attrappen für
+Toolchain, Executor und Prüfung (siehe `tests/test_runtime_selfbuilt.py`). Um Dittos Offline-Modus von Hand
+auszuprobieren, nutze ein eigenes `LLM_FRAMEWORK_HOME` (Modelle landen im Ordner `models/ditto/` der Installation,
+den git ignoriert):
 
 ```bash
 llm-cli ditto runtime status
-llm-cli ditto runtime install
+llm-cli ditto runtime install      # baut llama-server aus dem festgelegten Commit (einige Minuten für den CPU-Build)
 llm-cli ditto models download small
 llm-cli ditto runtime start --model small
 llm-cli ditto ask "Welche Formate kann das Rockchip-Target bauen?"

@@ -11,9 +11,11 @@ Source: https://github.com/ggml-org/llama.cpp, pinned by commit in `configs/llam
 The framework contains no llama.cpp code. It fetches the pinned commit and builds it on the user's machine
 (`orchestrator/runtime/build/`); the builds it makes (Ditto's local server, the conversion tools in target
 images, device runtimes) are llama.cpp binaries under llama.cpp's MIT licence, so the notice below goes with
-them wherever they are passed on. Compilers, CMake, Ninja, the packages of the builder image's base and, later, GPU
-toolkits are installed by the user from their vendors under the vendors' own licences; the framework never
-accepts a licence on the user's behalf.
+them wherever they are passed on. A build imported from another machine of the user is the same. Upstream's
+official prebuilt archives are downloaded only when the user asks for them (`llm-cli ditto runtime install
+--prebuilt`), from upstream's release page, under the same licence. Compilers, CMake, Ninja, the packages of the
+builder image's base and, later, GPU toolkits are installed by the user from their vendors under the vendors' own
+licences; the framework never accepts a licence on the user's behalf.
 
 ```
 MIT License
