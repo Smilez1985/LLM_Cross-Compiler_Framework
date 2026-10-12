@@ -122,6 +122,65 @@ def verify(kind: str, data: Any, key: Optional[bytes],
     return body
 
 
+# --- signed rows ---------------------------------------------------------------------------------------------------
+# Rows of a database that many framework processes append to (the chat feed, design 5.3) are signed one by one: a
+# file signature would make every append rewrite the whole file. A row's kind is never a file kind, its MAC key is
+# derived apart from the files' key, and its payload has its own prefix, so a row MAC can never stand in for a file's
+# signature, an audit entry or a row of another kind. The same key rules as for files apply: a reader with a key never
+# accepts an unkeyed row, a reader without one never accepts a keyed row, and refuse_unkeyed decides the rest.
+
+ROW_KINDS = ("chat_feed", "chat_feed_meta")
+
+
+def _row_mac(kind: str, data: str, key: Optional[bytes]) -> str:
+    if kind not in ROW_KINDS:
+        raise ValueError(f"unknown signed row kind {kind!r}")
+    if not isinstance(data, str):
+        raise TypeError("a signed row is text")
+    payload = f"lcf-signed-row:{kind}:v1\n".encode("ascii") + data.encode("utf-8", "surrogatepass")
+    if key:
+        return hmac.new(hmac.new(key, b"lcf-signed-row-v1", hashlib.sha256).digest(), payload,
+                        hashlib.sha256).hexdigest()
+    return hashlib.sha256(payload).hexdigest()
+
+
+def sign_row(kind: str, data: str, key: Optional[bytes]) -> str:
+    """The signature of one row's text: "<key id>:<mac>" (the key id names the key, never the key itself)."""
+    return f"{key_id(key)}:{_row_mac(kind, data, key)}"
+
+
+def verify_row(kind: str, data: str, signature: Any, key: Optional[bytes],
+               refuse_unkeyed: Optional[Callable[[], bool]] = None) -> None:
+    """Returns when `signature` (from sign_row) verifies `data` for this reader; SignatureError otherwise, with the
+    reasons of verify()."""
+    if not isinstance(signature, str) or signature.count(":") != 1:
+        raise SignatureError("unsigned" if not signature else "invalid", "the row carries no valid signature")
+    stored_id, stored_mac = signature.split(":")
+    if key:
+        if stored_id == UNKEYED:
+            raise SignatureError("unkeyed_refused", "the row carries only an unkeyed signature, but this computer "
+                                                    "has a signing key")
+        if not hmac.compare_digest(stored_id.encode("utf-8", "replace"), key_id(key).encode("ascii")):
+            raise SignatureError("other_key", "the row was signed with another key")
+    elif stored_id != UNKEYED:
+        raise SignatureError("no_key", "the row was signed with a key from the OS keyring, which this process "
+                                       "cannot reach")
+    elif refuse_unkeyed is not None:
+        try:
+            refused = bool(refuse_unkeyed())
+        except Exception:  # cannot tell: fail closed
+            refused = True
+        if refused:
+            raise SignatureError("unkeyed_refused", "the row carries only an unkeyed signature, while the audit log "
+                                                    "is kept with a key")
+    try:
+        expected = _row_mac(kind, data, key)
+    except (TypeError, ValueError) as e:
+        raise SignatureError("invalid", f"the row cannot be checked ({e})") from None
+    if not hmac.compare_digest(stored_mac.encode("utf-8", "replace"), expected.encode("ascii")):
+        raise SignatureError("invalid", "the row's signature does not match its content (edited or damaged)")
+
+
 class RevisionAnchor:
     """The newest revision of a signed file that the framework saved, kept outside the per-user folder (in the OS
     keyring, next to the audit key). A valid signature only says that the framework wrote the file at some time; an

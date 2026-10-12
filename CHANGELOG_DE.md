@@ -735,6 +735,30 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Benchmark-Läufe dieses Rechners** (`~/.llm-framework/benchmarks/`): `llama-bench`-Ergebnisse des selbst gebauten
   Builds (Prompt- und Erzeugungsgeschwindigkeit, höchster Speicherbedarf) mit dem sha256 des Modells und der Build-ID;
   `get_status` zeigt die neuesten.
+- **Der Chat-Verlauf mit signierten Zeilen** (`chat_feed.sqlite` im Benutzerordner, Modus 0600; Delegations-Entwurf
+  5.3): der eine Speicher für das, was das kommende Chat-Panel zeigt - deine Nachrichten, Dittos Antworten, Hinweise,
+  wartende Fragen, Entscheidungen einer KI mit ihrer Begründung (das Audit-Log behält nur den Hash der Begründung),
+  Ergebnisse von Arbeit, die eine KI gestartet hat. Jeder Prozess des Frameworks hängt in einer eigenen Transaktion an;
+  jede Zeile ist mit einem vom Audit-Schlüssel abgeleiteten Schlüssel signiert (`sign_row`/`verify_row`), und eine
+  Zeile, die geändert wurde, nicht signiert ist oder mit einem anderen Schlüssel geschrieben wurde, wird nie angezeigt
+  (der Leser erfährt, wie viele übersprungen wurden; Zeilen einer neueren Framework-Version werden getrennt gezählt).
+  Jeder Text wird vor dem Speichern und vor jedem Kürzen geschwärzt (ein Schlüssel, den eine Längengrenze teilt, lässt
+  keinen Rest zurück), KI-Text vorher von unsichtbaren Zeichen bereinigt, eine Zeile hat kein Feld für die Ausgabe
+  eines Tools oder rohe Argumente, Fakten nur für den Menschen kommen nie in die Fakten, die eine KI nutzen darf,
+  Parameter sind einzeilig und als Framework- oder Fremdtext markiert, und von wem eine Zeile stammt, kommt aus der
+  Aufrufer-Kennung (im Namen des Menschen schreiben nur die GUI und das Terminal). Ein Schreiben, von dem die
+  Entscheidung einer KI abhängt, löst einen Fehler aus, wenn es nicht gelingt (auch bei voller Platte), jedes andere
+  schlägt offen fehl, und Lesen wartet nie länger als seine kurze Zeitgrenze. Den Chat leeren kann nur der Mensch (kein
+  Code, den eine KI erreicht, ruft es auf): dafür braucht es den angenommenen Plan (vollständiger Pfad, Dateiname,
+  Größe, was es ist), das Leeren wird mit dem Hash des Plans (`deletion_sha256`) vor jedem Löschen protokolliert, der
+  gelöschte Text wird überschrieben, und die Einträge darüber, was KIs getan haben, werden ausgeblendet statt gelöscht.
+  Dittos bisheriger Chat wird einmal übernommen (seine Werkzeug-Hinweise und Hinweise als Fremdtext); ohne KI erklärt
+  das Framework eine Entscheidung allein aus ihrem Eintrag, eine fremde Angabe in einer Zeile und in
+  Anführungszeichen. Warnungszeilen nutzen das gemeinsame Vokabular der Warnungen (Codes, die Arten aus dem Katalog,
+  geschlossene Zahlenwerte). Sprechende Namen (`Core/speaking_names.py`) zeigen genaue Framework-IDs und maskierte
+  Werte in KI-Text bei der Anzeige mit Namen, nie in Code und nie bei einer bloßen Ähnlichkeit, und behalten die
+  ursprünglichen Worte; `llm-cli doctor` prüft, dass sich der Verlauf schreiben lässt und seine neuesten Zeilen
+  stimmen. Noch entfernt nichts Zeilen von selbst.
 
 ### Geändert
 - **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field"}}`, nur

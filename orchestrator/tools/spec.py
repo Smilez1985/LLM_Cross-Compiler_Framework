@@ -98,7 +98,10 @@ class Fact:
 # The three kinds of warnings (design 4.1): an AI with a delegation may decide a situation warning itself; security
 # and legal warnings always go to the person.
 WARNING_KINDS = ("situation", "security", "legal")
-_WARNING_CODE = re.compile(r"^[a-z][a-z0-9_]{1,47}$")
+WarningKind = Literal[WARNING_KINDS]  # type: ignore[valid-type]
+# A warning code as the catalogue, the audit log (`warnings`) and the chat feed's warning rows write it.
+WARNING_CODE_RE = r"^[a-z][a-z0-9_]{1,47}$"
+_WARNING_CODE = re.compile(WARNING_CODE_RE)
 _NUMBER_KEY = re.compile(r"^[a-z][a-z0-9_]{0,39}$")
 # A closed enum value (a size class, "tight", "does_not_fit", a format), never free text.
 _NUMBER_TEXT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.+-]{0,39}$")

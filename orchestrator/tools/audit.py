@@ -408,13 +408,16 @@ class AuditLog:
         if "version" in fields and (isinstance(fields["version"], bool) or not isinstance(fields["version"], int)
                                     or not 1 <= fields["version"] <= 99):
             raise ValueError("version must be a whole number from 1 to 99")
-        if "feed_entry" in fields and not re.fullmatch(r"fe_[0-9a-f]{16}", str(fields["feed_entry"])):
-            raise ValueError("feed_entry must be a feed entry id (fe_<16 hex>)")
+        if "feed_entry" in fields:
+            from orchestrator.Core.chat_feed import ENTRY_ID_RE   # the feed owns its entry ids
+            if not re.fullmatch(ENTRY_ID_RE, str(fields["feed_entry"])):
+                raise ValueError("feed_entry must be a feed entry id (fe_<16 hex>)")
         if "warnings" in fields:
+            from orchestrator.tools.spec import WARNING_CODE_RE, _catalog   # the shared warning vocabulary
             codes = fields["warnings"]
-            if not isinstance(codes, list) or not all(isinstance(c, str) and _CODE.fullmatch(c) for c in codes):
+            if not isinstance(codes, list) or not all(isinstance(c, str) and re.fullmatch(WARNING_CODE_RE, c)
+                                                      for c in codes):
                 raise ValueError("warnings must be a list of warning codes")
-            from orchestrator.tools.spec import _catalog
             catalog = _catalog()
             known = getattr(catalog, "WARNINGS", None) if catalog is not None else None
             unknown = sorted(c for c in codes if known is not None and c not in known)

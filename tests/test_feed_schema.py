@@ -2,17 +2,16 @@
 
 The delegation package owns the id format `d_<16 hex>` (`orchestrator.tools.delegation.DELEGATION_ID_RE`); the audit log
 (the channel `delegation:<id>` and the field `delegation`), the installed-pack provenance (`installed_via`) and the
-chat feed's references (`FeedRefs.delegation_id`) all take exactly the ids it takes. The feed itself comes with its
-own work package (WP3); until it is there, a model declared the way the design declares `FeedRefs` stands in for it.
+chat feed's references (`FeedRefs.delegation_id`, WP3) all take exactly the ids it takes.
 """
 
-import importlib
 import re
-from typing import Optional
 
 import pytest
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import ValidationError
 
+from orchestrator.Core import chat_feed
+from orchestrator.Core.chat_feed import FeedRefs
 from orchestrator.Core.community_manager import Provenance
 from orchestrator.tools.audit import _CHANNEL, AuditLog
 from orchestrator.tools.delegation import DELEGATION_ID_RE, delegation_id_ok
@@ -22,26 +21,14 @@ BAD = ["d_0123456789ABCDEF", "d_123", "d_" + "0" * 17, "g_0123456789abcdef", "dg
        " d_0123456789abcdef", "d_0123456789abcdef\n", "", "delegation:d_0123456789abcdef"]
 
 
-class _DesignFeedRefs(BaseModel):
-    """FeedRefs as design 5.3 declares its delegation reference (used until the feed store exists)."""
-    model_config = ConfigDict(extra="forbid")
-    delegation_id: Optional[str] = Field(None, pattern=DELEGATION_ID_RE)
-
-
-def feed_refs():
-    try:
-        module = importlib.import_module("orchestrator.Core.chat_feed")
-    except ModuleNotFoundError as e:
-        if e.name != "orchestrator.Core.chat_feed":
-            raise
-        return _DesignFeedRefs
-    return module.FeedRefs
+def test_the_feed_uses_the_delegation_packages_own_pattern():
+    assert chat_feed.DELEGATION_ID_RE is DELEGATION_ID_RE
 
 
 @pytest.mark.parametrize("value", GOOD + BAD)
 def test_feed_refs_accept_delegation_ids(value, tmp_path):
     good = value in GOOD
-    refs = feed_refs()
+    refs = FeedRefs
     if good:
         assert refs(delegation_id=value).delegation_id == value
     else:
