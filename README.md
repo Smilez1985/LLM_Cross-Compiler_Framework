@@ -275,10 +275,11 @@ llm-cli device runtime deploy 192.168.1.50          # install it over SSH and ch
   models/model.gguf` chooses a systemd unit that starts the server at boot. It needs systemd on the board and your
   confirmation, given right there, that deployments may run `sudo -n` on it; a deployment itself never asks.
   Boards without systemd (OpenRC on Alpine, SysV init) use the start script.
-- **Checked on the board:** after the installation the programs run as your user: the version must be the pinned
-  one, the devices are listed, and the server must refuse `--tools`. `--bench-model models/model.gguf` adds a short
-  `llama-bench` run; a model that is not one of the framework's catalog models runs only after your consent, which
-  is written to the audit log.
+- **Checked on the board before it is used:** the new build's programs run as your user: the version must be the
+  pinned one, the devices are listed, and the server must refuse `--tools`. `--bench-model models/model.gguf` adds a
+  short `llama-bench` run; a model that is not one of the framework's catalog models runs only after your consent,
+  which is written to the audit log. Only a build that passes becomes the active one (and the systemd unit's); a
+  build that fails is removed again and the previous build stays active.
 
 Not yet tested on a real board; the GUI and the MCP tools for it follow.
 

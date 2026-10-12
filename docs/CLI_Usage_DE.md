@@ -1083,7 +1083,7 @@ ein Deployment fragt nie.
 | `--install user` | Das Startskript in deinem Home auf dem Board (die Vorgabe). Mit ihm startest du den Server. |
 | `--install systemd` | Zusätzlich eine systemd-Unit, die den Server beim Booten startet. Nur für Boards, deren Probe `INIT_SYSTEM=systemd` meldet; sie braucht `--model` und deine Bestätigung, gleich hier, dass Deployments auf dem Board `sudo -n` ausführen dürfen (am Terminal abgefragt oder `--confirm-sudo`; wird ins Audit-Log geschrieben). Wählst du wieder `user`, verfällt die Bestätigung. |
 | `--user NAME` | Der SSH-Benutzer auf dem Board; der Server und jede Prüfung laufen als dieser Benutzer. root wird abgelehnt. |
-| `--port N` | Der Loopback-Port des Servers der systemd-Unit (1024-65535, Vorgabe 8080). |
+| `--port N` | Der Loopback-Port des Servers der systemd-Unit (1024-65535, Vorgabe 8080). Das Startskript lauscht auf 8080, solange es kein `--port` bekommt; der Startbefehl, den ein Deployment ausgibt, enthält diesen Port. |
 | `--model PFAD` | Die Modelldatei auf dem Board, die die systemd-Unit bereitstellt (relative Pfade liegen im Home des Benutzers). |
 | `--confirm-sudo` | Mit `--install systemd`: ohne Nachfrage bestätigen. |
 
@@ -1117,20 +1117,26 @@ aus `--user`.
 
 1. Das Board wird untersucht: Benutzer-ID (root wird abgelehnt), Home-Ordner, Architektur (sie muss zum Build
    passen), Init-System und die Werkzeuge, die das Deployment braucht. Mit der systemd-Einstellung muss `sudo -n
-   true` funktionieren; sonst wird nichts geändert.
+   true` funktionieren; sonst wird nichts geändert. Mit `--bench-model PFAD` wird das Modell auf dem Board an seiner
+   sha256 erkannt: ein Katalogmodell läuft sofort, jedes andere nur, wenn du zustimmst (am Terminal oder
+   `--allow-untrusted-model`), und das wird ins Audit-Log geschrieben. Das wird hier gefragt, bevor sich auf dem
+   Board etwas ändert.
 2. Der Tarball kommt über den SSH-Kanal in einen privaten Staging-Ordner in
    `~/.local/share/llm-framework/llama.cpp/`, wird gegen seine sha256 und jede Datei gegen `SHA256SUMS` geprüft, nur
-   für dich lesbar gemacht und wird zu `current`. Der vorige Build bleibt; ältere werden entfernt, außer ein
-   laufendes Programm nutzt sie.
+   für dich lesbar gemacht und neben den aktiven Build gelegt.
 3. Das Startskript erzeugt den Schlüssel `~/.config/llm-framework/llama-server.key` auf dem Board (umask 077).
-4. Mit der systemd-Einstellung wird die Unit `llm-llama-server.service` mit `sudo -n` geschrieben und aktiviert und
+4. Der neue Build wird in seinem eigenen Ordner geprüft, als dein Benutzer: `--version` gegen den Pin,
+   `--list-devices`, und `llama-server` muss `--tools` ablehnen; mit `--bench-model` auch ein kurzer
+   `llama-bench`-Lauf mit diesem Modell.
+5. Nur ein Build, der besteht, wird zu `current`. Ein Build, der scheitert (zum Beispiel mit `SIGILL`, weil die
+   CPU-Grundlage nicht zum Board passt), wird wieder entfernt, der vorige Build bleibt aktiv, und sonst ändert sich
+   nichts. Nach dem Umschalten bleibt der vorige Build; ältere werden entfernt, außer ein laufendes Programm nutzt
+   sie.
+6. Mit der systemd-Einstellung wird die Unit `llm-llama-server.service` mit `sudo -n` geschrieben und aktiviert und
    gestartet, sobald das Modell da ist.
-5. Die Prüfungen laufen auf dem Board als dein Benutzer: `--version` gegen den Pin, `--list-devices`, und
-   `llama-server` muss `--tools` ablehnen. `--bench-model PFAD` ergänzt einen kurzen `llama-bench`-Lauf mit diesem
-   Modell auf dem Board; ein Modell, das kein Katalogmodell ist, läuft nur, wenn du zustimmst (am Terminal oder
-   `--allow-untrusted-model`), und das wird ins Audit-Log geschrieben.
 
-Das Ergebnis liegt in `device/<ID>/deployed.json`. Exit-Code 1, wenn ein Schritt oder eine Prüfung scheitert.
+Das Ergebnis liegt in `device/<ID>/deployed.json` (ein gescheitertes Deployment ändert es nicht). Exit-Code 1, wenn
+ein Schritt oder eine Prüfung scheitert.
 
 Auf dem Board startet das Startskript den Server:
 
@@ -1148,8 +1154,8 @@ Vordergrund, `keygen` erzeugt den Schlüssel, `version` gibt die Version des Ser
 
 ### device runtime verify
 
-Führt die Prüfungen aus Schritt 5 erneut für den deployten Build aus (auch mit `--bench-model`) und aktualisiert den
-Eintrag.
+Führt die Prüfungen aus Schritt 4 erneut für den aktiven Build `current` aus (auch mit `--bench-model`) und
+aktualisiert den Eintrag.
 
 ### device runtime status
 

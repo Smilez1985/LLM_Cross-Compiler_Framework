@@ -2866,9 +2866,10 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     """Install the built runtime on the device over SSH as the deploy settings say, then check it there"""
     from orchestrator.runtime.build.store import BuildStore
     from orchestrator.runtime.device.devices import split_address
-    from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, deploy_runtime, start_script_path,
-                                                    verify_on_device)
+    from orchestrator.runtime.device.remote import (RemoteError, RemoteShell, deploy_runtime, read_facts,
+                                                    start_script_path, verify_on_device)
     from orchestrator.runtime.device.settings import SettingsError
+    from orchestrator.runtime.server_policy import DEVICE_DEFAULT_PORT
     state_dir, store, device_id, profile = _device_context(ctx, device_name)
     settings = _deploy_settings(store, device_id)
     if ssh_user is not None:
@@ -2903,20 +2904,38 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
     client = _connect_device(state_dir, device_id, host, port, settings.ssh_user, password)
     try:
         shell = RemoteShell(client)
+        facts = read_facts(shell)
+        if facts.uid == 0:
+            console.print("[red]The SSH user on the device is root: the runtime never runs as root. Deploy as an "
+                          "unprivileged user (llm-cli device settings DEVICE --user NAME).[/red]")
+            sys.exit(1)
+        # Asked before anything changes on the device (decision D23: an untrusted model only after consent).
+        model_path, allowed = _bench_choice(ctx, shell, facts.home, bench_model, allow_untrusted_model, device_id,
+                                            settings.ssh_user)
+
+        def check_new_build(home: str, folder: str):
+            # Design 3.8 and P6: the new build is checked in its own folder and becomes current only if it passes.
+            return verify_on_device(shell, home=home, folder=folder, plan_verify=build.plan.get("verify") or {},
+                                    pin_build=source.build_number, pin_commit=source.commit, port=settings.port,
+                                    bench_model=model_path, bench_allowed=allowed)
+
         result = deploy_runtime(shell, tarball=packaged.path, tarball_sha256=packaged.sha256,
                                 build_id=build.build_id, arch=str(plan.target["arch"]), settings=settings,
-                                say=lambda msg: console.print(escape(msg)))
-        model_path, allowed = _bench_choice(ctx, shell, result.home, bench_model, allow_untrusted_model, device_id,
-                                            settings.ssh_user)
-        console.print("Checking the runtime on the device ...")
-        report = verify_on_device(shell, home=result.home, plan_verify=build.plan.get("verify") or {},
-                                  pin_build=source.build_number, pin_commit=source.commit, port=settings.port,
-                                  bench_model=model_path, bench_allowed=allowed)
+                                check=check_new_build, say=lambda msg: console.print(escape(msg)))
     except RemoteError as e:
         console.print(f"[red]{escape(str(e))}[/red]")
         sys.exit(1)
     finally:
         client.close()
+    report = result.report
+    if not result.activated or report is None or not report.ok:
+        console.print(f"[red]Build {build.build_id[:16]} did not pass its checks on the device; it was not "
+                      "activated.[/red]")
+        if report is not None:
+            _print_report(report)
+        for note in result.notes:
+            console.print(f"[yellow]{escape(note)}[/yellow]")
+        sys.exit(1)
     now = _utc_stamp()
     devices.save_record({"build_id": build.build_id, "deployed_at": now, "install": settings.install,
                          "ssh_user": settings.ssh_user, "previous": result.previous, "perf_key": profile.perf_key(),
@@ -2933,11 +2952,11 @@ def device_runtime_deploy(ctx: FrameworkContext, device_name: str, ssh_user: Opt
         console.print(f"systemd unit: {'started' if result.unit_started else 'enabled'}; the server listens on "
                       f"127.0.0.1:{settings.port} with the key in ~/.config/llm-framework/llama-server.key")
     else:
-        console.print(f"Start it on the device: sh {escape(script)} start MODEL.gguf (127.0.0.1:{settings.port}, key "
-                      "in ~/.config/llm-framework/llama-server.key; stop, status, serve for the foreground)")
-    if not report.ok:
-        console.print("[red]The runtime did not pass its checks on the device.[/red]")
-        sys.exit(1)
+        # The start script listens on its default port unless --port is given.
+        port_option = f" --port {settings.port}" if settings.port != DEVICE_DEFAULT_PORT else ""
+        console.print(f"Start it on the device: sh {escape(script)} start MODEL.gguf{port_option} "
+                      f"(127.0.0.1:{settings.port}, key in ~/.config/llm-framework/llama-server.key; stop, status, "
+                      "serve for the foreground)")
 
 
 @device_runtime.command('verify')

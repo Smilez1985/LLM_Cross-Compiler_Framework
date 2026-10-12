@@ -196,8 +196,9 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
 - **Paket:** eine ZIP-Datei mit der Modelldatei, Manifest und Model Card des Builds, `checksums.sha256` und einem
   erzeugten `deploy.sh`. Übertragen werden nur Modelldateien (`.gguf`, `.rkllm`, `.rknn`, `.onnx`, `.safetensors`,
   `.bin`); ein Build mit mehreren Gewichtsdateien wird abgelehnt.
-- **Auf dem Board:** Das Paket kommt in einen privaten temporären Ordner (`mktemp -d`), `deploy.sh` prüft jede
-  Prüfsumme mit `sha256sum -c`, kopiert das Modell nach `~/models` (oder `$MODEL_DIR`), und der temporäre Ordner wird
+- **Auf dem Board:** Das Paket kommt in einen privaten temporären Ordner (`mktemp -d`), `deploy.sh` (mit `sh`
+  ausgeführt, also auch auf Boards, die `/tmp` mit `noexec` einhängen oder kein bash haben) prüft jede Prüfsumme mit
+  `sha256sum -c`, kopiert das Modell nach `~/models` (oder `$MODEL_DIR`), und der temporäre Ordner wird
   gelöscht. Für GGUF gibt es aus, wie du das Modell mit dem Startskript der
   [selbst gebauten Laufzeit](#laufzeit-auf-dem-board-selbst-gebautes-llamacpp) startest, wenn sie auf dem Board
   installiert ist (auf 127.0.0.1 mit dem Schlüssel des Boards), sonst, wie du sie deployst; auf einen
@@ -236,9 +237,12 @@ installierst du selbst.
   Benutzer-ID, Architektur, fehlende Werkzeuge), werden geprüft, bevor sie verwendet werden. Der Tarball kommt über
   die Standardeingabe des Befehls in einen privaten Staging-Ordner in `~/.local/share/llm-framework/llama.cpp/` (nie
   `/tmp`, das `noexec` sein kann), wird gegen seine sha256 und jede Datei gegen `SHA256SUMS` geprüft, nur für den
-  Benutzer lesbar gemacht und wird zu `current`. Der vorige Build bleibt; ältere werden entfernt, außer ein laufendes
-  Programm nutzt sie. Den Schlüssel in `~/.config/llm-framework/llama-server.key` erzeugt das Startskript auf dem
-  Board unter umask 077; er verlässt das Board nie.
+  Benutzer lesbar gemacht und neben den aktiven Build gelegt. Dann werden die Programme des neuen Builds auf dem
+  Board geprüft (unten), und nur ein Build, der besteht, wird zu `current`; einer, der scheitert, wird wieder
+  entfernt, und der vorige Build bleibt aktiv (Design 3.8: ein gescheiterter Build wird nie aktiviert). Nach dem
+  Umschalten bleibt der vorige Build; ältere werden entfernt, außer ein laufendes Programm nutzt sie. Den Schlüssel
+  in `~/.config/llm-framework/llama-server.key` erzeugt das Startskript auf dem Board unter umask 077; er verlässt
+  das Board nie.
 - **Startskript** (`llama-server.sh serve|start|stop|status|keygen|version`): POSIX-sh, getestet mit dash und bash. Es
   startet `llama-server` aus seinem eigenen Ordner (nie aus `PATH`) mit `env -i` (HOME, ein fester PATH, die
   C-Locale), `--host 127.0.0.1`, `--api-key-file`, `--no-ui`, `--no-slots`, `--jinja` und `--offline`. Es reicht nur
@@ -250,8 +254,9 @@ installierst du selbst.
   Startskript im Home des Benutzers (die Vorgabe) oder eine systemd-Unit. Die Unit ist nur wählbar, wenn die Probe
   des Boards `INIT_SYSTEM=systemd` meldet, braucht das Modell, das sie bereitstellt, und deine Bestätigung, gegeben
   bei der Wahl, dass Deployments auf dem Board `sudo -n` ausführen dürfen; die Bestätigung wird ins Audit-Log
-  geschrieben. Das Deployment schreibt `/etc/systemd/system/llm-llama-server.service` mit `sudo -n` (das scheitert,
-  statt zu fragen), aktiviert die Unit und startet sie, sobald das Modell da ist. Die Unit führt `serve` des
+  geschrieben. Hat der neue Build seine Prüfungen bestanden, schreibt das Deployment
+  `/etc/systemd/system/llm-llama-server.service` mit `sudo -n` (das scheitert, statt zu fragen), aktiviert die Unit
+  und startet sie, sobald das Modell da ist. Die Unit führt `serve` des
   Startskripts als der Benutzer aus, ohne `Environment=`, mit `NoNewPrivileges`, schreibgeschütztem System und Home
   sowie `IPAddressDeny=any` mit `IPAddressAllow=localhost`. Boards mit OpenRC oder SysV-Init nutzen das Startskript.
   Ein Deployment stellt nie eine Frage.
@@ -260,9 +265,10 @@ installierst du selbst.
   muss die geplanten Geräte zeigen, und `llama-server --tools all` muss abgelehnt werden. Mit `--bench-model` läuft ein
   kurzes `llama-bench -p 64 -n 16 -r 1` auf einem Modell auf dem Board: ein Katalogmodell (an seiner sha256 erkannt)
   sofort, jedes andere Modell erst nach deiner Zustimmung, die ins Audit-Log geschrieben wird (Entscheidung D23). Ein
-  `SIGILL` heißt, dass die CPU-Grundstufe des Builds nicht zum Board passt. Das Ergebnis liegt in
-  `device/<Geräte-ID>/deployed.json`; `llm-cli device runtime status` sagt, ob der deployte Build noch der ist, den
-  Profil und Pin verlangen.
+  `SIGILL` heißt, dass die CPU-Grundstufe des Builds nicht zum Board passt. Ein Deployment führt diese Prüfungen am
+  neuen Build aus, bevor er zu `current` wird; ein Build, der sie nicht besteht, läuft also nie als Server des
+  Boards. Das Ergebnis liegt in `device/<Geräte-ID>/deployed.json`; `llm-cli device runtime status` sagt, ob der
+  deployte Build noch der ist, den Profil und Pin verlangen.
 - **Gemessen** mit echten Programmen statt eines Boards: `llama-server` und `llama-bench`, nativ mit den Optionen des
   Geräte-Bauplans für einen x86-64-Rechner gebaut (GCC 13.3, `-j4`, etwa 8 Minuten auf 4 geteilten Kernen), ergaben
   30 MB Programme und einen Tarball von 11,6 MB; die Formatprüfung (glibc 2.38 nötig, keine geteilte C++-Laufzeit),
