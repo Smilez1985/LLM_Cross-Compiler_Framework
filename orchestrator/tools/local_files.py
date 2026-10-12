@@ -567,6 +567,59 @@ def record_folder_change(audit, actor: str, action: str, entry: dict) -> None:
                  approved=True)
 
 
+# --- listing (list_local_files) ------------------------------------------------------------------------------
+
+LIST_PAGE = 50
+MAX_LIST_SCAN = 20000
+MODEL_SUFFIXES = {".gguf": "gguf", ".onnx": "onnx", ".tflite": "tflite", ".pt": "pytorch", ".pth": "pytorch",
+                  ".bin": "pytorch", ".safetensors": "safetensors"}
+DATASET_SUFFIXES = {".txt": "text", ".json": "json", ".jsonl": "jsonl", ".csv": "csv"}
+SKIP_SUFFIXES = (".part", ".lock", ".tmp", ".incomplete")
+SKIP_TOP = {"models": ("embeddings",)}  # the knowledge base's own model cache is not a model to convert
+
+
+def _candidates(root: Path, label: str):
+    """(relative path, is a model folder) below `root`, without following links into folders; a folder with
+    config.json and weights (a Hugging Face model) is one entry and is not descended into."""
+    skip_top = set(SKIP_TOP.get(label, ()))
+    for current, dirs, files in os.walk(root, followlinks=False):
+        here = Path(current)
+        rel_here = here.relative_to(root)
+        if rel_here.parts and (here / "config.json").is_file() and any(
+                Path(f).suffix.lower() in (".safetensors", ".bin", ".pt", ".pth") for f in files):
+            dirs[:] = []
+            yield rel_here.as_posix(), True
+            continue
+        dirs[:] = sorted(d for d in dirs if not d.startswith(".") and not (not rel_here.parts and d in skip_top))
+        for name in sorted(files):
+            if name.startswith(".") or name.endswith(SKIP_SUFFIXES):
+                continue
+            yield (rel_here / name).as_posix(), False
+
+
+def _classify(path: Path, is_dir: bool, folder_kind: str) -> Tuple[Optional[str], str]:
+    """(model or dataset, format) of a candidate; (None, "") for anything else."""
+    if is_dir:
+        return ("model", "huggingface") if folder_kind != "dataset" else (None, "")
+    suffix = path.suffix.lower()
+    if folder_kind != "dataset" and suffix in MODEL_SUFFIXES:
+        return "model", MODEL_SUFFIXES[suffix]
+    if folder_kind != "model" and suffix in DATASET_SUFFIXES:
+        return "dataset", DATASET_SUFFIXES[suffix]
+    return None, ""
+
+
+def _folder_size(folder: Path) -> int:
+    total = 0
+    for current, _dirs, files in os.walk(folder, followlinks=False):
+        for name in files:
+            try:
+                total += os.stat(Path(current) / name).st_size
+            except OSError:
+                continue
+    return total
+
+
 # --- the resolver -------------------------------------------------------------------------------------------
 
 class LocalFiles:
@@ -673,6 +726,45 @@ class LocalFiles:
                            tuple(str(p) for p in self.data_folders()))
         self._remember(pin)
         return pin
+
+    def list(self, kind: str = "any", query: str = "", page: int = 1,
+             page_size: int = LIST_PAGE) -> Tuple[List[Dict[str, object]], List[AllowedFolder], int]:
+        """The model and dataset files of the usable folders (list_local_files): each resolved like a reference
+        (inside its folder, outside every denied folder, one hard link), so a listed id always resolves. A Hugging
+        Face model folder (with config.json) is one entry. Links are not followed into other folders, hidden files,
+        unfinished downloads and the framework's own embedding cache are left out. Returns (entries of the page, the
+        folders, how many entries match). Each entry: file_id, ref, kind, format, pickle, size_bytes, modified."""
+        query = (query or "").strip().lower()
+        folders = [f for f in self.folders() if not f.problem and f.real_path is not None]
+        found: List[Dict[str, object]] = []
+        scanned = 0
+        for folder in folders:
+            for relative, is_dir in _candidates(folder.real_path, folder.label):
+                scanned += 1
+                if scanned > MAX_LIST_SCAN:
+                    break
+                entry_kind, fmt = _classify(folder.real_path / relative, is_dir, folder.kind)
+                if entry_kind is None or (kind != "any" and entry_kind != kind):
+                    continue
+                ref = f"{folder.label}:{relative}"
+                if query and query not in ref.lower():
+                    continue
+                found.append({"ref": ref, "kind": entry_kind, "format": fmt, "is_dir": is_dir})
+        total = len(found)
+        start = (max(1, int(page)) - 1) * page_size
+        entries = []
+        for item in found[start:start + page_size]:
+            try:
+                pin = self.resolve(str(item["ref"]))
+                st = os.stat(pin.path)
+            except (LocalFileError, OSError):
+                continue  # refused (a link out of the folder, a hard link, a denied folder): never listed
+            size = _folder_size(Path(pin.path)) if pin.is_dir else int(st.st_size)
+            entries.append({"file_id": pin.file_id, "ref": pin.ref, "kind": item["kind"], "format": item["format"],
+                            "pickle": item["format"] == "pytorch", "size_bytes": size,
+                            "modified": datetime.fromtimestamp(st.st_mtime, timezone.utc).isoformat(
+                                timespec="seconds")})
+        return entries, folders, total
 
     def ref_of(self, file_id: str) -> Optional[str]:
         """The `<label>:<relative path>` a file id was listed as (for a person's question), without resolving it;

@@ -44,6 +44,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `get_build_status`, `llm-cli build status <Request>` und der GUI (**Tools > Fix Proposals from AI Clients...**)
   angezeigt. Das Framework führt ihn nie aus, und `resolve_healing` lehnt ab, ihn anzuwenden. Der Prompt
   `diagnose_build_failure` führt zu dem Tool.
+- **Hugging Face und lokale Dateien für KI-Clients** (MCP-Tools `search_hf_models`, `get_hf_model_info`,
+  `download_hf_file`, `list_local_files`): Die Suche filtert zugangsbeschränkte Modelle standardmäßig mit
+  `gated: free` (`any`, `gated`) und sagt, was sie weggelassen hat; die Modelldetails zeigen die Lizenz (freizügig nur
+  auf einer Positivliste; `other` mit Name und Link; Lizenz und Zugangsbeschränkung des Basismodells), die Art der
+  Zugangsbeschränkung, ob dein gespeichertes Token das Repository lesen kann (im Framework geprüft), Parameter,
+  Commit, Dateien und Größe; `download_hf_file` lädt eine Datei als Job nach `models/hf/<owner>--<name>/<commit>/`,
+  auf den Commit festgelegt und gegen das sha256 des Hubs geprüft, bevor sie ihren Namen bekommt, fortsetzbar, von
+  `cancel_job` angehalten (der Teil bleibt), ohne Größengrenze, aber mit Plattenprüfung; `list_local_files` listet die
+  Modell- und Datensatzdateien in den Ordnern, die die KI nutzen darf, über ID und Label. KI-Aufrufe senden nur das
+  gespeicherte Token oder gar keins (nie `HF_TOKEN` oder das Token des Hugging-Face-Home-Ordners), und nur an
+  huggingface.co; das Token erscheint nie in Eingaben, Ergebnissen oder dem Audit-Log. Der Prompt
+  `convert_model_for_board` führt zu diesen Tools.
 - **Reranking der Ergebnisse der Wissensbasis**: Ein lokaler mehrsprachiger Cross-Encoder (FastEmbed/ONNX, etwa
   120 MB, beim ersten Gebrauch heruntergeladen, nie im Offline-Modus) liest die Frage zusammen mit jedem
   Kandidaten und verwirft die unter einer Relevanzschwelle, sodass Ditto lieber keinen Auszug bekommt als
@@ -748,6 +760,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- **Hugging-Face-Abfragen verbergen keine Fehler mehr**: Der Modellmanager hinter dem Hugging-Face-Browser der GUI
+  lieferte ein leeres Suchergebnis, eine leere Dateiliste oder eine „nicht einschränkende“ Lizenz, wenn Hugging Face
+  nicht erreichbar war; jetzt meldet er den Fehler. Eine Lizenz gilt nur auf einer festen Positivliste als
+  freizügig: `other`, eigene, listenförmige und unbekannte Lizenzen werden als unbekannt gezeigt, und der Browser
+  fragt vor dem Download eines solchen Modells nach. Eine Datei, die der Browser herunterlädt, kommt aus dem Commit,
+  den er zuerst ermittelt hat, nicht aus einem Branch, der sich inzwischen bewegen kann.
 - Rückfragen des 2026-07-28-Protokolls werden je Aufrufer und Sitzung geführt (die Antwort eines Clients schließt die
   gleiche Rückfrage eines anderen Clients nicht mehr), eine unbeantwortete wird von einem Timer als `unanswered`
   festgehalten, auch wenn keine weitere Anfrage kommt, und die beim Ende einer Sitzung noch offenen als

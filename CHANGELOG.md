@@ -38,6 +38,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   self-reported name) in `get_build_status`, `llm-cli build status <request>` and the GUI (**Tools > Fix Proposals from
   AI Clients...**). The framework never runs it, and `resolve_healing` refuses to apply it. The prompt
   `diagnose_build_failure` leads to the tool.
+- **Hugging Face and local files for AI clients** (MCP tools `search_hf_models`, `get_hf_model_info`,
+  `download_hf_file`, `list_local_files`): the search filters gated models with `gated: free` by default (`any`,
+  `gated`) and says what it left out; the model details show the licence (permissive only on an allowlist; `other`
+  with its name and link; the base model's licence and gating), the gating mode, whether the token you stored can
+  read the repository (checked inside the framework), parameters, commit, files and size; `download_hf_file` fetches
+  one file into `models/hf/<owner>--<name>/<commit>/` as a job, pinned to the commit and checked against the Hub's
+  sha256 before it gets its name, resumable, stopped by `cancel_job` (the part is kept), with no size limit but a
+  disk check; `list_local_files` lists the model and dataset files in the folders the AI may use by id and label.
+  AI calls send only the stored token, or none at all (never `HF_TOKEN` or the Hugging Face home folder's token), and
+  only to huggingface.co; the token never appears in inputs, results or the audit log. The prompt
+  `convert_model_for_board` leads to these tools.
 - **Reranking of knowledge-base results**: a local multilingual cross-encoder (FastEmbed/ONNX, about 120 MB,
   downloaded on first use, never in offline mode) reads the question together with each candidate and drops the
   ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build recommendations use
@@ -657,6 +668,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- **Hugging Face look-ups no longer hide failures**: the model manager behind the GUI's Hugging Face browser returned
+  an empty search result, an empty file list or a "not restrictive" licence when Hugging Face could not be reached;
+  it now reports the error. A licence counts as permissive only on a fixed allowlist: `other`, custom, list-valued
+  and unknown licences are shown as unknown, and the browser asks before downloading such a model. A file the
+  browser downloads comes from the commit it resolved first, not from a branch that may move meanwhile.
 - MCP questions of the 2026-07-28 protocol are kept per caller and session (one client's answer no longer closes
   another client's identical question), an unanswered one is recorded as `unanswered` by a timer also when no
   further request arrives, and the ones still open when a session ends are recorded as `client_disconnected`; the

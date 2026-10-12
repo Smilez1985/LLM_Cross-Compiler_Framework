@@ -12,18 +12,10 @@ Updates v2.3.0:
 - License check improvements.
 """
 
-import os
-import sys
-import json
-import logging
-import shutil
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Union
-from dataclasses import dataclass, field
-from datetime import datetime
-import time
+from typing import Dict, List, Optional, Any
+from dataclasses import dataclass
 
-import requests
 from orchestrator.utils.logging import get_logger
 
 @dataclass
@@ -73,125 +65,69 @@ class ModelManager:
 
     # --- HUGGING FACE INTEGRATION ---
 
-    def search_huggingface_models(self, query: str, limit: int = 20) -> List[Dict[str, Any]]:
-        try:
-            from huggingface_hub import HfApi
-            api = HfApi()
-            # Expand tags to find license info if possible
-            models = api.list_models(
-                search=query, 
-                limit=limit, 
-                sort="downloads", 
-                direction=-1,
-                expand=["gated", "downloads", "likes", "tags"] 
-            )
-            
-            results = []
-            for m in models:
-                is_gated = getattr(m, "gated", False)
-                # Normalize gated status
-                if is_gated not in [False, None]: is_gated = True
-                else: is_gated = False
-                
-                # Extract license from tags (heuristik)
-                license_tag = "unknown"
-                if m.tags:
-                    for tag in m.tags:
-                        if tag.startswith("license:"):
-                            license_tag = tag.split(":")[1]
-                            break
-                    
-                results.append({
-                    "id": m.modelId,
-                    "downloads": m.downloads,
-                    "likes": m.likes,
-                    "gated": is_gated,
-                    "license": license_tag
-                })
-            return results
+    def search_huggingface_models(self, query: str, limit: int = 20,
+                                  gated: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """Models matching `query`, most downloaded first. gated: False only models that download without accepting
+        conditions, True only gated ones, None all. Each result keeps the gating mode (`gating`: false, auto,
+        manual) next to the plain `gated` flag. Raises on any failure: an error is never an empty list."""
+        from huggingface_hub import HfApi
+        from orchestrator.Core.hf_hub import gating
+        models = HfApi().list_models(search=query, limit=limit, sort="downloads", gated=gated,
+                                     expand=["gated", "downloads", "likes", "tags"])
+        results = []
+        for m in models:
+            mode = gating(getattr(m, "gated", False))
+            license_tag = "unknown"
+            for tag in (m.tags or []):
+                if tag.startswith("license:"):
+                    license_tag = tag.split(":", 1)[1]
+                    break
+            results.append({"id": m.id, "downloads": m.downloads, "likes": m.likes, "gated": mode != "false",
+                            "gating": mode, "license": license_tag})
+        return results
 
-        except ImportError:
-            self.logger.error("huggingface_hub not installed")
-            return []
-        except Exception as e:
-            self.logger.error(f"HF Search failed: {e}")
-            return []
-            
     # --- v2.3.0: ETHICS GATE (License Check) ---
     def check_license(self, model_id: str) -> Dict[str, Any]:
-        """
-        Checks the license of a model and returns warnings if restrictive.
-        Used by GUI before starting download/build.
-        """
+        """The licence of a model: `restrictive` is "false" only for a licence on the permissive allowlist, "true"
+        for a known restrictive one and "unknown" otherwise (`other`, custom, a list, none); `is_restrictive` is
+        True unless it is "false", so the GUI asks before such a download. Raises when the check fails: a failed
+        check never counts as "not restrictive"."""
+        from huggingface_hub import model_info
+        from orchestrator.Core.hf_hub import classify_license
         self.logger.info(f"Checking license for {model_id}...")
-        
-        try:
-            from huggingface_hub import model_info
-            info = model_info(model_id)
-            
-            # Try to find license in cardData or tags
-            license_name = "unknown"
-            if info.cardData and "license" in info.cardData:
-                license_name = info.cardData["license"]
-            elif info.tags:
-                for tag in info.tags:
-                    if tag.startswith("license:"):
-                        license_name = tag.split(":")[1]
-                        break
-            
-            # Analysis of restrictive keywords
-            restrictive_keywords = [
-                "non-commercial", "cc-by-nc", "research-only", 
-                "llama-2-community", "creativeml-openrail-m"
-            ]
-            is_restrictive = any(k in license_name.lower() for k in restrictive_keywords)
-            
-            result = {
-                "license": license_name,
-                "is_restrictive": is_restrictive,
-                "message": ""
-            }
-            
-            if is_restrictive:
-                result["message"] = f"⚠️ Warning: Model '{model_id}' has a restrictive license ({license_name}). Check usage rights!"
-                self.logger.warning(result["message"])
-            else:
-                result["message"] = f"✅ License seems permissible: {license_name}"
-                
-            return result
-
-        except Exception as e:
-            self.logger.warning(f"Could not verify license for {model_id}: {e}")
-            return {"license": "unknown", "is_restrictive": False, "message": "License check failed."}
+        info = model_info(model_id)
+        card = info.card_data
+        raw = card.get("license") if card is not None and hasattr(card, "get") else None
+        if raw is None:
+            raw = next((t.split(":", 1)[1] for t in (info.tags or []) if t.startswith("license:")), None)
+        license_name, restrictive = classify_license(raw)
+        result = {"license": license_name, "restrictive": restrictive, "is_restrictive": restrictive != "false"}
+        if restrictive == "true":
+            result["message"] = (f"Warning: model '{model_id}' has a restrictive license ({license_name}). Check "
+                                 "your usage rights!")
+        elif restrictive == "unknown":
+            result["message"] = (f"The license of '{model_id}' ({license_name}) is not on the list of permissive "
+                                 "licenses; read it before you use the model.")
+        else:
+            result["message"] = f"Permissive license: {license_name}"
+        return result
 
     def list_repo_files(self, repo_id: str, token: Optional[str] = None) -> List[str]:
-        """Fetches file list from a repository."""
-        try:
-            from huggingface_hub import HfApi
-            api = HfApi(token=token)
-            files = api.list_repo_files(repo_id=repo_id)
-            return files
-        except Exception as e:
-            self.logger.error(f"Failed to list files for {repo_id}: {e}")
-            return []
+        """The file list of a repository. Raises on any failure."""
+        from huggingface_hub import HfApi
+        return HfApi(token=token).list_repo_files(repo_id=repo_id)
 
-    def download_file(self, repo_id: str, filename: str, token: Optional[str] = None) -> Optional[str]:
-        """Downloads a specific file (GGUF/Bin) from HF."""
-        try:
-            from huggingface_hub import hf_hub_download
-            self.logger.info(f"Downloading {filename} from {repo_id}...")
-            
-            path = hf_hub_download(
-                repo_id=repo_id,
-                filename=filename,
-                cache_dir=str(self.models_dir),
-                token=token
-            )
-            self.logger.info(f"Download successful: {path}")
-            return path
-        except Exception as e:
-            self.logger.error(f"Download failed: {e}")
-            return None
+    def download_file(self, repo_id: str, filename: str, token: Optional[str] = None) -> str:
+        """Downloads one file for the GUI's Hugging Face browser (the person's own action). Raises on any failure.
+        AI callers use download_hf_file instead (orchestrator/Core/hf_hub.py: pinned commit, sha256, stop)."""
+        from huggingface_hub import HfApi, hf_hub_download
+        # The commit is resolved first and the file downloaded from exactly that commit (not a moving branch).
+        commit = HfApi(token=token).model_info(repo_id).sha
+        self.logger.info(f"Downloading {filename} from {repo_id} (commit {commit})...")
+        path = hf_hub_download(repo_id=repo_id, filename=filename, revision=commit, cache_dir=str(self.models_dir),
+                               token=token)
+        self.logger.info(f"Download successful: {path}")
+        return path
 
     def _detect_model_format(self, model_path: Path) -> str:
         if not model_path.exists(): return "unknown"

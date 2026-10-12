@@ -507,6 +507,10 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
 | `propose_healing_fix` | local write | Hand your own fix proposal for a failed build to the person, as a manual step (dangerous-command filter; never run) |
+| `search_hf_models` | read | Search Hugging Face models; `gated: free` (default) lists only models that download without accepting conditions |
+| `get_hf_model_info` | read | Licence (also the base model's), gating, access of your stored token, parameters, commit, files and size of one model |
+| `download_hf_file` | local write | Download one file of a Hugging Face repository into the models folder, pinned to the commit and checked against the Hub's sha256 (a job) |
+| `list_local_files` | read | Model and dataset files in the folders the AI may use, with id and `<label>:<relative path>` |
 | `get_status` | read | Your tool permissions for this caller: every tool with its decision and why (also the hidden ones), and what no tool does, with where you do it |
 | `get_job_status` | read | State, progress and result of a long operation other than a build (a job); waits with `wait_seconds` |
 | `cancel_job` | local write | Stop a job (its own jobs without a question, another caller's only after one) |
@@ -1192,6 +1196,31 @@ framework never sees it.
   Rockchip"), the self-healing context, the build manifest's `model_source` and `list_artifacts` (a host path an
   older manifest recorded is shown as `<label>:<relative path>` when it lies in a folder the AI may use, else as
   the file name only).
+- **Hugging Face and local files for AI clients:** `search_hf_models` lists models most downloaded first; its
+  filter `gated` is `free` by default (only models that download without accepting conditions, and the result says
+  that gated ones were left out), `any` or `gated`. `get_hf_model_info` shows one model: its licence (`permissive`
+  only for a licence on a fixed allowlist such as `apache-2.0` or `mit`; `restrictive` for known restrictive ones;
+  otherwise `unknown`, also for `other`, custom and list-valued licences, with `license_name` and `license_link` for
+  `other`), the base model's licence and gating (a GGUF re-upload of a gated model shows as such), the gating
+  (`false`, `auto`, `manual`), whether the Hugging Face token you stored in the framework can read it, the parameter
+  count, the commit, the files with their sizes and the total size. `download_hf_file` downloads one file (a GGUF
+  file, single weights, a tokenizer file) into `models/hf/<owner>--<name>/<commit>/` as a job: before you are asked
+  the framework pins the commit, size and sha256 the Hub lists, refuses a gated repository your stored token cannot
+  read (with the next step), and checks the disk. There is no size limit: a download is refused only when the models
+  folder's disk cannot hold it plus a reserve (2 GiB or 2 %) and what other downloads reserved; the question shows the
+  size, the free space after it, the licence and the gating. The framework's own fetcher writes a `.part` file that a
+  later run resumes, stops between two chunks on `cancel_job` (the part is kept), and names the file only after its
+  size and sha256 matched the Hub's (a small file stored without LFS is pinned by its size and the commit). One
+  download runs at a time, five a day per client; Hugging Face searches are limited to 30 an hour. A standing approval
+  can cover GGUF, safetensors and small text files of ungated repositories with a permissive licence and an ungated
+  base model, never pickle weights. Every Hugging Face call for an AI client sends only the token stored in the
+  framework (`llm-cli secrets set hf_token`), or none at all: never one from `HF_TOKEN` or the Hugging Face home
+  folder, and never to another host than huggingface.co (a redirect to the Hub's file storage carries no token). The
+  token never appears in a tool's input, result, notes, errors or the audit log. Offline mode refuses these tools,
+  and a network error is an error, never an empty list. `list_local_files` lists the model and dataset files in the
+  folders the AI may use (a Hugging Face model folder as one entry, PyTorch pickle weights flagged, links out of the
+  folder, hard-linked and hidden files and unfinished downloads left out; 50 per page), each with its file id and
+  `<label>:<relative path>`, which `start_build` takes; a downloaded file shows up there too.
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
   server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification
