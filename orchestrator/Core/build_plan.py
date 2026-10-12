@@ -62,6 +62,8 @@ class BuildPlan:
     sandbox: bool = True
     hub_problem: str = ""        # Hugging Face could not be asked (network): sizes and commit unknown
     grant: Optional[Dict[str, Any]] = None  # facts for grants.BUILD_RULE; None: outside every standing approval
+    # what a build the person confirmed records (confirmed_builds): the target and recipe as installed, base images
+    confirm_record: Optional[Dict[str, Any]] = None
     problems: List[Problem] = field(default_factory=list)
 
     # --- the question --------------------------------------------------------------------------------------------
@@ -144,7 +146,8 @@ class BuildPlan:
         return {"model": self.model, "revision": self.commit, "download": self.download, "cached": self.cached,
                 "local_bytes": self.local_bytes, "format": self.request.format,
                 "quantization": self.request.quantization, "optimization": self.optimization,
-                "target": self.request.target, "board": self.request.board, "grant": self.grant}
+                "target": self.request.target, "board": self.request.board, "grant": self.grant,
+                "confirm_record": self.confirm_record}
 
     def call_facts(self) -> CallFacts:
         return CallFacts(consequence=self.consequence(), facts=self.question_facts(), bound=self.bound())
@@ -281,21 +284,55 @@ def _local_weights(path: Path) -> str:
     return "other"
 
 
-def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[Path], pin, ledger) -> Optional[dict]:
+def _target_images(target_folder: Optional[Path]) -> List[str]:
+    """Every image the target's Dockerfiles build from (FROM, COPY --from, RUN --mount from), as the pack question
+    showed them; [] without a Dockerfile."""
+    if target_folder is None:
+        return []
+    try:
+        from orchestrator.tools.tools_community import pack_base_images
+        return list(dict.fromkeys(image for _, image in pack_base_images(Path(target_folder))))
+    except Exception:  # noqa: BLE001 - images that cannot be read are no official images
+        return ["?"]
+
+
+def confirm_record(plan: "BuildPlan", framework, target_folder: Optional[Path],
+                   recipe: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """What a confirmed build of this plan records (confirmed_builds.ConfirmedBuilds): the target (and recipe) as
+    installed, and the target's base images."""
+    installed_via, pack_sha = "", ""
+    try:
+        from orchestrator.Core.community_manager import read_provenance
+        provenance = read_provenance(target_folder) if target_folder is not None else None
+        if provenance is not None:
+            installed_via = str(getattr(provenance, "installed_via", "") or "")
+            pack_sha = str(getattr(provenance, "pack_sha256", "") or "")
+    except Exception:  # noqa: BLE001
+        pass
+    record = {"target": plan.request.target, "installed_via": installed_via, "pack_sha256": pack_sha,
+              "base_images": _target_images(target_folder)}
+    if recipe:
+        record["recipe"] = {"id": recipe.get("id"), "installed_via": recipe.get("installed_via") or "",
+                            "pack_sha256": recipe.get("pack_sha256") or ""}
+    return record
+
+
+def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[Path], pin, ledger,
+                record: Optional[Dict[str, Any]] = None) -> Optional[dict]:
     """What a standing approval for start_build is matched against (grants.BUILD_RULE, design 6.10): target trust
     (shipped: no pack provenance, not AI-generated, support level official; verified: a verified pack), how the target
-    was installed, the weights type, an official base image, the source with gating, base-model gating and licence, and
-    the download size. None (the person is asked) when the plan has a problem or the disk does not keep the larger
-    reserve of a standing approval (20 GiB or 10 %)."""
+    (and a recipe) was installed and whether the person has since confirmed a build of it, the weights type, the
+    base images (Docker Official Images, or a digest-pinned image the person confirmed in a build of this target
+    before), the source with gating, base-model gating and licence, and the download size. None (the person is asked)
+    when the plan has a problem or the disk does not keep the larger reserve of a standing approval (20 GiB or 10 %)."""
     if plan.problems:
         return None
-    trust, installed_via = "other", ""
+    trust = "other"
     try:
         from orchestrator.Core.community_manager import ai_generated_target, read_provenance
         provenance = read_provenance(target_folder) if target_folder is not None else None
         if provenance is not None:
             trust = "verified" if plan.target_trust == "verified" else plan.target_trust
-            installed_via = str(getattr(provenance, "installed_via", "") or "")
         elif target_folder is not None and not ai_generated_target(target_folder) and plan.support_level == "official":
             trust = "shipped"
     except Exception:  # noqa: BLE001 - trust that cannot be read is no trust
@@ -304,10 +341,29 @@ def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[P
         standing = disk_plan.check_disk(plan.needs, ledger, standing=True, disk_usage=service.disk_usage)
         if any(not c.fits for c in standing):
             return None
-    base = _base_image(target_folder)
-    facts = {"target": plan.request.target, "target_trust": trust, "installed_via": installed_via,
-             "confirmed_build": False, "image_base_official": bool(base) and registry_class(base) ==
-             "Docker Official Image", "source": plan.source, "model": plan.model}
+    record = record or confirm_record(plan, framework, target_folder)
+    store = None
+    state = state_dir(framework)
+    if state is not None:
+        from orchestrator.Core.confirmed_builds import ConfirmedBuilds
+        store = ConfirmedBuilds(state)
+    # a pack installed under a standing approval counts only after the person confirmed one build of it
+    parts = [("target", record["target"], record["installed_via"], record["pack_sha256"])]
+    if record.get("recipe"):
+        r = record["recipe"]
+        parts.append(("recipe", r["id"], r["installed_via"], r["pack_sha256"]))
+    pending = [p for p in parts if str(p[2]).startswith("grant:")
+               and not (store is not None and store.confirmed(p[0], p[1], installed_via=p[2], pack_sha256=p[3]))]
+    images = record["base_images"]
+    official = bool(images) and all(
+        registry_class(i) == "Docker Official Image" and "$" not in i or
+        (store is not None and store.image_confirmed(record["target"], i, installed_via=record["installed_via"],
+                                                     pack_sha256=record["pack_sha256"]))
+        for i in images)
+    facts = {"target": plan.request.target, "target_trust": trust,
+             "installed_via": pending[0][2] if pending else record["installed_via"],
+             "confirmed_build": not pending, "image_base_official": official, "source": plan.source,
+             "model": plan.model}
     if plan.source == "hf":
         f = plan.facts
         if f is None:
@@ -321,7 +377,8 @@ def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[P
 
 # --- the plan ------------------------------------------------------------------------------------------------------
 
-def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, standing: bool = False) -> BuildPlan:
+def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, standing: bool = False,
+               recipe: Optional[Dict[str, Any]] = None) -> BuildPlan:
     """The plan of an AI caller's build. Input problems (an unknown target, a format the target does not offer, a
     path instead of a local-file reference) raise like start_build does; problems that stop this build otherwise are
     collected in `problems`."""
@@ -431,7 +488,8 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         except disk_plan.InsufficientSpace as e:
             plan.problems.append(Problem("insufficient_resources", str(e), e.next))
 
-    plan.grant = grant_facts(plan, service, framework, target_folder, pin, ledger)
+    plan.confirm_record = confirm_record(plan, framework, target_folder, recipe)
+    plan.grant = grant_facts(plan, service, framework, target_folder, pin, ledger, plan.confirm_record)
 
     # hardware estimate (never a refusal)
     params, basis = disk_plan.parameters_from(size, plan.facts.parameters if plan.facts else None)

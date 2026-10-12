@@ -517,6 +517,12 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     register_crawl_tools(registry, framework, jobs)
     from orchestrator.tools.tools_community import register_community_tools  # community zoo (T9)
     register_community_tools(registry, framework, jobs)
+    # Building an installed recipe through start_build's two-phase path, and the cached index as a resource (T9).
+    from orchestrator.tools.tools_recipes import recipe_tool_specs, register_packs_index_resource
+    for spec in recipe_tool_specs(registry, service, fields, ToolLimits(
+            running=lambda ctx: len(service.active_requests(ctx.owner)), **BUILD_QUOTA), BuildHandleOut):
+        registry.register(spec)
+    register_packs_index_resource(registry)
     # Devices and deploy (design 2.7, T8): trusted devices by id, packages as jobs, deploys always asked.
     from orchestrator.tools.tools_deploy import register_deploy_tools
     register_deploy_tools(registry, framework, service=service, jobs=jobs, target_field=target_field)

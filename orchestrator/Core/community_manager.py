@@ -918,7 +918,8 @@ def submit_contribution(path: Path, repo: str, kind: str, *, runner: Callable = 
     note = ""
     if gh and git:
         try:
-            if runner([gh, "auth", "status"], capture_output=True, text=True, timeout=60).returncode == 0:
+            if runner([gh, "auth", "status"], capture_output=True, text=True, timeout=60,
+                      stdin=subprocess.DEVNULL).returncode == 0:
                 return _submit_with_gh(path, repo, kind, gh, git, runner)
             note = "The GitHub CLI is not logged in ('gh auth login'). "
         except (subprocess.SubprocessError, OSError) as e:
@@ -932,7 +933,8 @@ def submit_contribution(path: Path, repo: str, kind: str, *, runner: Callable = 
 
 def _submit_with_gh(path: Path, repo: str, kind: str, gh: str, git: str, runner: Callable) -> str:
     def run(cmd, cwd=None):
-        return runner(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, check=True)
+        # stdin=DEVNULL: over stdio the MCP server's stdin is the protocol stream; gh and git never read it (G25)
+        return runner(cmd, cwd=cwd, capture_output=True, text=True, timeout=600, check=True, stdin=subprocess.DEVNULL)
 
     work = Path(tempfile.mkdtemp(prefix="lcf-contribution-"))
     try:

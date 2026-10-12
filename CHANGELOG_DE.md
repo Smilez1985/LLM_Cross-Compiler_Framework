@@ -10,6 +10,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **`start_recipe_build` und die Ressource `lcf://packs/index`** (MCP-Design T9): ein KI-Client baut ein
+  installiertes Community-Rezept genau wie festgelegt (das Modell beim Commit des Rezepts, Target, Format, Board,
+  Quantisierung, Importance-Matrix, Kontextlänge) über den zweistufigen Weg von `start_build` (dieselbe Frage,
+  Speicherreservierung, Kontingente und derselbe Umfang für Daueraufträge; `BuildService.start_recipe`). Ein
+  Kalibrierungsdatensatz wird nur genommen, wenn das Rezept einen nennt, und muss genau diese Datei sein; ein nach
+  der Frage geändertes Rezept wird nicht gebaut. Die Ressource zeigt den zwischengespeicherten Index und die
+  installierten Packs wie `list_packs`, nie aktualisiert.
+- **Ein bestätigter Build gibt den Build-Dauerauftrag für Packs frei, die unter einem installiert wurden**
+  (MCP-Design 6.10): ein Target- oder Rezept-Pack, das eine KI unter einem Dauerauftrag installiert hat, wird
+  erfragt, bis die Person einen Build davon im eigenen Fenster des Frameworks bestätigt (eine Antwort per
+  Elicitation, die Nutzung eines Dauerauftrags oder „erlauben“ zählen nie); das Framework vermerkt diesen Build
+  (`confirmed_builds.json` im Benutzerordner), und der Build-Dauerauftrag deckt die folgenden Builds ab. Ein per
+  Digest gepinntes Basis-Image außerhalb der Docker Official Images zählt, sobald ein Build mit genau diesem Image
+  bestätigt wurde; ein Tag nie. Die Regelversion des Build-Dauerauftrags ist jetzt 2, Daueraufträge nach der
+  engeren Regel verfallen.
 - **Optionale Tools `delete_artifact` und `restore_knowledge_snapshot`** (MCP-Entwurf T10): ein gebautes Modell
   (Ordner und Golden-ZIP) per ID und sha256 löschen oder die Wissensbasis als Job durch einen früheren Snapshot
   ersetzen. Beide zerstören etwas: standardmäßig verboten und verborgen, bis du sie freigibst (die ganze Klasse
@@ -938,6 +953,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
+- **Die größere Speicherreserve eines Dauerauftrags wird unter der Sperre des Reservierungsbuchs geprüft** für
+  `start_build`, `start_recipe_build`, `download_hf_file` und `add_pack_from_index`: die Reservierung wird mit der
+  Reserve von 20 GiB / 10 % im Reservierungsbuch genommen, das alle Framework-Prozesse teilen, so dass eine
+  Reservierung, die ein anderer Prozess zwischen Frage und Start genommen hat, mitzählt (vorher nur eine Momentaufnahme
+  zur Zeit der Frage). `add_pack_from_index` nimmt jetzt überhaupt eine Reservierung und zählt die Reservierungen
+  anderer Aufrufe schon vor der Frage.
+- **GitHub-CLI und git der Pull-Request-Übergabe lesen nie stdin** (`stdin=DEVNULL`, G25): über stdio ist stdin
+  des MCP-Servers der Protokollstrom.
 - **Per Digest festgelegte Images in einem Deployment-Paket starten auf einem Board ohne Netz**: Ein über seinen
   Digest gezogenes Image hat kein Tag, wurde deshalb ohne Namen gespeichert, kam nach `docker load` als `<none>`
   zurück, und `deploy.sh` konnte es ohne Registry nicht über seine Digest-Referenz starten. Es wird jetzt unter
@@ -1170,6 +1193,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   vorgeschlagen, wenn Dockers Datenverzeichnis voll ist.
 
 ### Sicherheit
+- **`run_benchmark` startet genau die Datei, die es gehasht hat**: das Modell wird einmal geöffnet, über die offene
+  Datei gehasht und llama-bench als genau diese offene Datei übergeben (nativ ein geerbter Deskriptor, in der
+  Sandbox ein privater Hardlink), so dass ein Katalogmodell zwischen Prüfung und einem nativen Lauf ohne Zustimmung
+  nicht gegen ein nicht vertrauenswürdiges ausgetauscht werden kann.
 - **robots.txt lässt sich nicht mehr über Crawl-Optionen abschalten**: Der Crawler nimmt nur seine eigenen
   Optionsschlüssel (Seiten, Tiefe, Pause, PDFs, Sprachen) und übergeht jeden anderen Schlüssel, auch
   `respect_robots`, mit einer Log-Zeile; der Schalter für Tests mit einem nachgebildeten Web ist ein eigener

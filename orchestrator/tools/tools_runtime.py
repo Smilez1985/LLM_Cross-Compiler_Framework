@@ -513,7 +513,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 handle.progress(None, None, f"measuring {label}")
                 try:
                     run = BenchRunner(state_dir()).run(path, kind=inp.kind, label=label, trusted=trusted,
-                                                       sha256=digest, sandbox=bound["sandbox"], stop=stop)
+                                                       sha256=bound["sha256"], sandbox=bound["sandbox"], stop=stop)
                 except BenchStopped:
                     raise JobCancelled() from None
                 except BenchError as e:
