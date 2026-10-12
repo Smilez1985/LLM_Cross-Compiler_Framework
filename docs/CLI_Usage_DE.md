@@ -28,6 +28,7 @@ Zurück zur [README](../README_DE.md) · Funktionen im Detail: [Features_DE.md](
 - [secrets](#secrets): `set`, `list`
 - [module](#module): `create`, `generate-ai`
 - [scan](#scan): Hardware-Probe
+- [device](#device): `list`, `settings`, `runtime`
 - [config](#config): `show`, `repos`
 - [zoo](#zoo): `list`, `show`, `install`, `verify`, `export`, `keys`
 - [Bekannte Einschränkungen](#bekannte-einschränkungen)
@@ -122,7 +123,7 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `ditto setup` | Die Tool-Berechtigungen festlegen (dieselbe Auswahl wie im Dialog beim ersten Start der GUI) |
 | `ditto ask` | Ditto eine Frage stellen |
 | `ditto eval` | Ditto anhand fester Testfälle bewerten, oder die Suche der Wissensbasis |
-| `ditto runtime install/start/status/stop` | Der verwaltete lokale Modellserver (llama.cpp) für den Offline-Modus |
+| `ditto runtime install/start/status/stop/import/export/prune` | Der verwaltete lokale Modellserver (llama.cpp, auf diesem Rechner gebaut) für den Offline-Modus |
 | `ditto runtime export-source/import-source` | Den festgelegten llama.cpp-Quelltext als Git-Bundle auf einen Rechner ohne Netz tragen (am Commit geprüft) |
 | `ditto models list/download` | Die Modellstufen für den Offline-Modus |
 | `tools list` / `tools permissions` / `tools audit` | Die Tools des Frameworks, ihre Berechtigungen und das Audit-Log |
@@ -130,6 +131,8 @@ ein Lauf unter dem angegebenen Anteil bleibt.
 | `secrets set` / `secrets list` | Ein Token speichern (Hugging Face, GitHub) / die gespeicherten Namen auflisten |
 | `module create` / `module generate-ai` | Ein neues Hardware-Target anlegen, per Fragen oder mit Ditto aus einer Probe-Datei |
 | `scan` | Die Hardware-Probe auf diesem Rechner oder mit `--device` auf einem Board per SSH ausführen und das Profil speichern |
+| `device list` / `device settings` | Die untersuchten Boards / wie die Laufzeit auf einem Board installiert wird (Startskript oder systemd), vor einem Deployment entschieden |
+| `device runtime plan/build/deploy/verify/status` | Die selbst gebaute llama.cpp-Laufzeit eines Boards: aus seinem Profil planen, cross-kompilieren, per SSH installieren und dort prüfen |
 | `config show` / `config repos` | Die wirksamen Einstellungen und ihre Herkunft zeigen / Überschreibungen für Quell-Repositorys verwalten |
 | `zoo list` / `zoo show` | Den Community-Zoo und die installierten Pakete auflisten / einen Eintrag zeigen |
 | `zoo install` / `zoo verify` | Ein Community-Paket nach Prüfungen und deiner Bestätigung installieren / installierte Pakete oder eine Paketdatei prüfen |
@@ -652,27 +655,97 @@ Schlüsselbund. Dateien: `~/.llm-framework/runtime/llama.cpp/` (Builds und Zusta
 llm-cli ditto runtime status [--json]
 ```
 
-Zeigt die erkannte Hardware, den empfohlenen llama.cpp-Build und warum, ob ein Build installiert ist, ob der Server
-läuft (Adresse, Prozess, Modell, Kontext), das empfohlene Modell und warum, und die Log-Datei.
+Zeigt die erkannte Hardware; den genutzten Build mit seiner Herkunft (`self-built`, `imported` oder `prebuilt, not
+self-built`), Build-ID, llama.cpp-Commit, Backend, wo und wie lange er gebaut wurde, wann er geprüft wurde und welche
+Geräte er gefunden hat; warum ein gespeicherter Build nicht genutzt werden kann; ob ein neuer Build nötig (die
+Festlegung hat sich geändert) oder empfohlen ist (der Bauplan dieses Rechners hat sich geändert); das GPU-Backend,
+das das Bau-Rezept für diesen Rechner wählt, und warum; welches offizielle vorgebaute Archiv `--prebuilt`
+installieren würde und warum (oder warum keines passt, zum Beispiel bei musl oder einer älteren glibc); ob der Server
+läuft (Adresse, Prozess, Modell, Kontext); das empfohlene Modell und warum; und die Log-Datei. Die Prüfung auf einen
+neuen Build erkennt die Toolchain (sie kompiliert nichts).
 
 | Option | Bedeutung |
 |---|---|
-| `--json` | Maschinenlesbare Ausgabe. |
+| `--json` | Maschinenlesbare Ausgabe (`installed`, `problems`, `rebuild`, `recommended_backend`, `prebuilt_option`, ...). |
 
 #### ditto runtime install
 
 ```
-llm-cli ditto runtime install [--backend auto|cpu|vulkan|cuda|rocm|metal] [--force] [-y]
+llm-cli ditto runtime install [--backend auto|cpu|vulkan|cuda|rocm|metal] [--placement auto|native|container]
+                              [--jobs N] [--prebuilt] [--force] [-y]
 ```
 
-Lädt den festgelegten llama.cpp-Build für diesen Rechner herunter, prüft Größe und sha256 vor dem Entpacken und
-installiert ihn.
+Baut `llama-server` (mit `llama-cli`, `llama-bench` und `llama-perplexity`) auf diesem Rechner aus dem festgelegten
+llama.cpp-Commit (`configs/llama_runtime.yml`, `llama_cpp.source`). Es untersucht den Rechner, erkennt die Toolchain,
+zeigt die geplanten Builds und fragt. Der CPU-Build wird zuerst gebaut, geprüft und aktiv gemacht (er bleibt der
+Ersatz); danach wird der GPU-Build gebaut, den das Rezept wählt, und aktiv, sobald er geprüft ist. Ein GPU-Build, der
+hier noch nicht gebaut werden kann oder scheitert, lässt den CPU-Build aktiv und wird gemeldet. Jeder Build wird auf
+diesem Rechner geprüft, bevor er behalten wird: `--version` nennt die festgelegte Build-Nummer und den Commit,
+`--list-devices` zeigt das geplante Gerät, und der Server lehnt `--tools` ab. Ein schon gespeicherter Build mit
+derselben Build-ID wird wiederverwendet, nicht neu gebaut. Ein laufender Server läuft weiter; der nächste
+`runtime start` nutzt den neuen Build.
+
+- **Toolchain:** GCC oder Clang, CMake 3.15 oder neuer und Ninja (Debian/Ubuntu: `build-essential cmake
+  ninja-build`). Ohne sie läuft der Build im Builder-Container des Frameworks (Docker, `--network none`). Ohne beides
+  nennt der Befehl die Auswege und endet mit 1. Für dich wird nichts installiert.
+- **Quellcode:** Der festgelegte Commit wird einmal geholt (etwa 40 MB Download, 215 MB auf der Platte), nachdem du
+  zugestimmt hast, und über seinen Commit geprüft; auf einem Rechner ohne Netzwerk importiere ihn vorher
+  (`ditto runtime import-source`). Konfiguration und Build laufen ohne Netzwerk.
+- **Backends in dieser Version:** CPU und Vulkan unter Linux. CUDA- und ROCm-Builds sowie Windows und macOS folgen;
+  auf einem Rechner mit NVIDIA-GPU läuft bis dahin der CPU-Build (`--backend vulkan` baut einen Vulkan-Server für
+  die GPU).
+- **Exit-Code 1** auch, wenn ein ausdrücklich verlangtes GPU-Backend nicht gebaut werden konnte (der CPU-Build ist
+  aktiv).
 
 | Option | Bedeutung |
 |---|---|
-| `--backend [auto\|cpu\|vulkan\|cuda\|rocm\|metal]` | Zu installierender Build (Standard `auto`). ROCm wird nur genutzt, wenn er hier gewählt wird. |
-| `--force` | Erneut herunterladen und entpacken, auch wenn er installiert ist. |
-| `-y, --yes` | Vor dem Download nicht fragen. |
+| `--backend [auto\|cpu\|vulkan\|cuda\|rocm\|metal]` | GPU-Backend, das nach dem CPU-Build gebaut wird (Standard `auto`: das Bau-Rezept wählt; `cpu`: nur der CPU-Build). Mit `--prebuilt`: das zu installierende Archiv. |
+| `--placement [auto\|native\|container]` | Wo der Build läuft (Standard `auto`: nativ, wenn die Toolchain vollständig ist, sonst im Builder-Container). |
+| `--jobs INTEGER RANGE` | Parallele Compiler-Jobs, 1 bis 256. Standard: aus den CPUs und dem freien Speicher. |
+| `--prebuilt` | Stattdessen das offizielle vorgebaute Archiv von upstream herunterladen (Größe und sha256 vor dem Entpacken geprüft). Nur auf diese Anforderung, immer als „prebuilt, not self-built“ angezeigt. Ein schon installiertes Archiv, auch eines, das eine frühere Version heruntergeladen hat (es wird ohne diese Anforderung nicht genutzt), wird übernommen, ohne es neu herunterzuladen. Linux-Archive brauchen glibc 2.35 oder 2.39; bei musl wird keines angeboten. |
+| `--force` | Mit `--prebuilt`: erneut herunterladen und entpacken, auch wenn es installiert ist. |
+| `-y, --yes` | Vor dem Bauen, dem Holen des Quellcodes oder dem Download nicht fragen. |
+
+#### ditto runtime import
+
+```
+llm-cli ditto runtime import DATEI [-y]
+```
+
+Importiert einen `llama-server`-Build, der mit `ditto runtime export` auf einem anderen Rechner derselben Art gemacht
+wurde (gleiches Betriebssystem und gleiche Architektur, und eine mindestens so neue C-Bibliothek). Das Archiv wird
+sicher entpackt (die Größe wird vorher begrenzt), jede Datei gegen sein Manifest geprüft, die Build-ID gegen seinen
+Plan, der Plan gegen die Bauregeln (keine Download-Option, keine Subprozess-Unterstützung) und der Commit gegen die
+Festlegung. Ein mit `-march=native` gemachter Build wird abgelehnt, wenn diese CPU von einem anderen Hersteller ist
+oder ihr eine CPU-Funktion der bauenden CPU fehlt (etwa AVX-512): Er bräche bei der ersten Rechnung mit SIGILL ab.
+Dann zeigt der Befehl, wo der Build gemacht wurde, und fragt, bevor eines seiner Programme läuft; danach
+wird der Build hier wie ein lokaler geprüft und wird der aktive Build (ein CPU-Build auch der Ersatz). Importiere nur
+Builds, die du selbst gemacht hast.
+
+| Option | Bedeutung |
+|---|---|
+| `-y, --yes` | Nicht fragen, bevor die importierten Programme für die Prüfung laufen. |
+
+#### ditto runtime export
+
+```
+llm-cli ditto runtime export DATEI
+```
+
+Schreibt den genutzten selbst gebauten Build nach `DATEI` (`.tar.gz`: seine Programme, `build.json` und
+`manifest.json`, keine Logs) für `ditto runtime import` auf einem anderen Rechner derselben Art. Das vorgebaute
+Archiv wird nie exportiert.
+
+#### ditto runtime prune
+
+```
+llm-cli ditto runtime prune [--keep N]
+```
+
+Entfernt alte selbst gebaute Builds von Dittos Server. Der aktive Build, der CPU-Ersatz und der Build, aus dem ein
+laufender Server gestartet wurde, bleiben immer erhalten, dazu die `N` neuesten anderen (Standard 2).
+`runtime install` tut dasselbe nach jedem Build. Die Builds deiner Boards (`llm-cli device runtime build`) liegen im
+selben Build-Speicher und werden hier nie entfernt.
 
 #### ditto runtime start
 
@@ -680,9 +753,13 @@ installiert ihn.
 llm-cli ditto runtime start [--model STUFE] [--ctx N] [--sleep-idle SEKUNDEN]
 ```
 
-Startet `llama-server` auf 127.0.0.1 mit einem freien Port und einem neuen API-Schlüssel in einer privaten Datei. Der
-Server läuft weiter, nachdem der Befehl zurückkehrt, bis `llm-cli ditto runtime stop`. Läuft dasselbe Modell schon,
-wird es weiterverwendet.
+Startet `llama-server` auf 127.0.0.1 mit einem freien Port und einem neuen API-Schlüssel in einer privaten Datei, mit
+einer geleerten Umgebung und ohne die Optionen, die die gemeinsame Startregel verbietet. Gestartet wird nur ein Build,
+der seine Prüfung auf diesem Rechner bestanden hat, noch zu seinem Manifest passt und vom festgelegten Commit ist (der
+aktive Build, sonst sein CPU-Ersatz), oder das vorgebaute Archiv nach `install --prebuilt`; ein selbst gebauter
+Build, der nicht genutzt werden kann, weicht nie auf das vorgebaute Archiv aus. Der Server läuft weiter, nachdem der
+Befehl zurückkehrt, bis `llm-cli ditto runtime stop`. Läuft dasselbe Modell schon aus demselben Build, wird es
+weiterverwendet.
 
 | Option | Bedeutung |
 |---|---|
@@ -1036,12 +1113,12 @@ Neue Hardware-Targets. Die vollständige Anleitung: [Module_Developer_Guide_DE.m
 ### module create
 
 ```
-llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT]
+llm-cli module create [--name TEXT] [--arch aarch64|x86_64|armv7l|riscv64] [--sdk TEXT] [--probe DATEI]
 ```
 
 Legt ein neues Target per Fragen an: Name, Architektur und SDK (wenn nicht als Option angegeben), dann
 Docker-Basis-Image (Standard `debian:bookworm-slim`), Beschreibung, Systempakete (Standard
-`build-essential, cmake, git`) und Standard-CPU-Flags. Jeder Wert wird geprüft, bevor Dateien geschrieben werden, der
+`build-essential, cmake, git`) und CPU-Flags, die das Modul nur als Hinweis vermerkt und nie anwendet. Jeder Wert wird geprüft, bevor Dateien geschrieben werden, der
 fertige Ordner muss die Target-Prüfungen bestehen
 ([Leitfaden für Modulentwickler](Module_Developer_Guide_DE.md#91-was-die-prüfungen-verlangen)), und ein vorhandenes
 Target wird nie überschrieben.
@@ -1051,6 +1128,7 @@ Target wird nie überschrieben.
 | `--name TEXT` | Name des neuen Targets. |
 | `--arch [aarch64\|x86_64\|armv7l\|riscv64]` | CPU-Architektur. |
 | `--sdk TEXT` | Besonderes SDK, z. B. `CUDA`, `RKNN` (Standard `None`). |
+| `--probe DATEI` | Hardware-Probe des Targets (das Profil, das [`scan --device`](#scan) schreibt). Der Block `runtime:` der neuen `target.yml` ist dann der Plan des Build-Rezepts für die llama.cpp-Laufzeit des Boards daraus; eine Datei, die kein Probe-Profil ist, wird abgelehnt, bevor etwas geschrieben wird. |
 
 Das Target wird in den eingestellten Targets-Ordner geschrieben (Einstellung `targets_dir`; ein relativer Pfad
 gilt relativ zur Installation, nicht zum aktuellen Ordner). Seine `target.yml` hat einen Block `capabilities:` (Unterstützungsstufe `community`) mit dem Modulnamen als einzigem
@@ -1070,7 +1148,8 @@ Ditto schlägt ein Target-Modul aus einer Hardware-Probe-Datei vor (`target_hard
 eingestellten Targets-Ordner angelegt (und vom Modulgenerator erneut geprüft). Ditto nutzt die gespeicherte
 Anmeldung des Anbieters ([`llm-cli ditto login`](#ditto-login)); der Befehl fragt selbst nie nach einem Schlüssel.
 Weder `module create` noch `module generate-ai` hängt Seiten aus der Wissensbasis an; das ist eine Option auf der
-letzten Seite des GUI-Assistenten.
+letzten Seite des GUI-Assistenten. Ist die Probe-Datei ein Probe-Profil, wird der Block `runtime:` des Moduls daraus
+geplant; die CPU- und CMake-Flags des Vorschlags stehen dort als Hinweistext und werden nie angewendet.
 
 | Option | Bedeutung |
 |---|---|
@@ -1100,7 +1179,8 @@ den Rechner geplant, auf dem das Modell läuft, deshalb läuft die Probe auf die
   mit `--output` angegebene Datei geschrieben und als Profil dieses Rechners gespeichert
   (`~/.llm-framework/hardware/local.txt`, ohne flüchtige Werte wie den freien RAM). Kann die Python-Probe nicht
   laufen, sagt die CLI, warum, und führt stattdessen das Ersatzskript aus; `--script` nimmt das Skript direkt
-  (`scripts/hardware_probe.sh` unter Linux, `scripts/hardware_probe.ps1` unter Windows).
+  (`scripts/hardware_probe.sh` mit `sh` unter Linux, also auch auf Rechnern ohne bash wie Alpine oder BusyBox;
+  `scripts/hardware_probe.ps1` unter Windows).
 - **Ein Board per SSH** (`--device`): Beim ersten Kontakt zeigt die CLI den Fingerabdruck des SSH-Hostschlüssels und
   bittet dich, ihn zu bestätigen, wie bei `deploy run` (`--trust-fingerprint` bestätigt ihn ohne Nachfrage); ein
   Passwort wird einmal genutzt, um den SSH-Schlüssel des Frameworks zu installieren, und nicht gespeichert. Dann
@@ -1108,7 +1188,8 @@ den Rechner geplant, auf dem das Modell läuft, deshalb läuft die Probe auf die
   `hardware_probe.sh` an `sh` (jede POSIX-Shell, auch BusyBox). Das Skript kommt über den SSH-Kanal, also wird auf dem
   Board nichts installiert und nichts zurückgelassen. Das Ergebnis wird wie jede Probe-Datei von außen geprüft, nach
   `--output` geschrieben und unter der ID des Boards gespeichert (`~/.llm-framework/hardware/devices/<ID>.txt`; die ID
-  kommt aus dem Hostschlüssel des Boards), mit deiner Bezeichnung und seiner Adresse.
+  kommt aus dem Hostschlüssel des Boards), mit deiner Bezeichnung und seiner Adresse. Der SSH-Benutzer wird zum
+  Deploy-Benutzer des Boards für [`device runtime deploy`](#device), wenn noch keiner gesetzt ist (nie root).
 
 Die Probes fragen nie nach, installieren nichts und verlangen keine Administratorrechte. Exit-Code 1, wenn die Probe
 scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
@@ -1127,11 +1208,135 @@ scheitert oder ihre Datei nicht lesbar ist, 2 bei falschen Optionen.
 
 Ein Rechner ohne Netzzugang führt eine Probe von Hand aus, und du importierst ihre Datei
 ([README](../README_DE.md#die-hardware-des-boards-untersuchen)). In der GUI importiert **Scan / Import...** eine
-Probe-Datei, untersucht ein Board per SSH oder diesen PC.
+Probe-Datei, untersucht ein Board per SSH (mit derselben entfernten Probe, also auch auf Boards, die `/tmp` mit
+`noexec` einhängen) oder diesen PC.
 
 ```bash
 llm-cli scan                                        # dieser Rechner, gespeichert als „local“
 llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W" --output zero3w.txt
+```
+
+---
+
+## device
+
+Die Boards, die du mit `scan --device` untersucht hast, und die selbst gebaute llama.cpp-Laufzeit darauf
+([Funktionen](Features_DE.md#laufzeit-auf-dem-board-selbst-gebautes-llamacpp)). `GERÄT` ist die ID eines Boards
+(oder ihre ersten 4 oder mehr Zeichen), seine Bezeichnung oder seine gespeicherte Adresse, wie `device list` sie
+zeigt. Der Build braucht Docker auf deinem PC; das Board braucht SSH, `tar`, `gzip` und `sha256sum` (BusyBox hat
+sie) und einen unprivilegierten Benutzer.
+
+```
+llm-cli device list [--json]
+llm-cli device settings GERÄT [--install user|systemd] [--user NAME] [--port N] [--model PFAD] [--confirm-sudo]
+llm-cli device runtime plan GERÄT [--json]
+llm-cli device runtime build GERÄT [--jobs N] [--mirror URL] [--yes]
+llm-cli device runtime deploy GERÄT [--user NAME] [--password TEXT] [--bench-model PFAD] [--allow-untrusted-model]
+llm-cli device runtime verify GERÄT [--user NAME] [--bench-model PFAD] [--allow-untrusted-model]
+llm-cli device runtime status GERÄT [--json]
+```
+
+### device list
+
+Die gespeicherten Boards: ID, Bezeichnung, Adresse, System (OS, Version, Architektur, C-Bibliothek mit Version,
+Init-System), Deploy-Einstellungen und die deployte Laufzeit. `--json` für Skripte.
+
+### device settings
+
+Zeigt oder ändert, wie die Laufzeit auf dem Board installiert wird. Das wird hier entschieden, vor einem Deployment;
+ein Deployment fragt nie.
+
+| Option | Bedeutung |
+|---|---|
+| `--install user` | Das Startskript in deinem Home auf dem Board (die Vorgabe). Mit ihm startest du den Server. |
+| `--install systemd` | Zusätzlich eine systemd-Unit, die den Server beim Booten startet. Nur für Boards, deren Probe `INIT_SYSTEM=systemd` meldet; sie braucht `--model` und deine Bestätigung, gleich hier, dass Deployments auf dem Board `sudo -n` ausführen dürfen (am Terminal abgefragt oder `--confirm-sudo`; wird ins Audit-Log geschrieben). Wählst du wieder `user`, verfällt die Bestätigung. |
+| `--user NAME` | Der SSH-Benutzer auf dem Board; der Server und jede Prüfung laufen als dieser Benutzer. root wird abgelehnt. |
+| `--port N` | Der Loopback-Port des Servers der systemd-Unit (1024-65535, Vorgabe 8080). Das Startskript lauscht auf 8080, solange es kein `--port` bekommt; der Startbefehl, den ein Deployment ausgibt, enthält diesen Port. |
+| `--model PFAD` | Die Modelldatei auf dem Board, die die systemd-Unit bereitstellt (relative Pfade liegen im Home des Benutzers). |
+| `--confirm-sudo` | Mit `--install systemd`: ohne Nachfrage bestätigen. |
+
+Exit-Code 1, wenn das Board kein systemd hat oder die Bestätigung fehlt (dann wird nichts geändert), 2 bei einem
+falschen Wert.
+
+### device runtime plan
+
+Zeigt den Cross-Build, der aus dem eigenen Profil des Boards geplant wird: Architektur, C-Bibliothek mit Version,
+die Builder-Basis mit ihrem GCC, `GGML_CPU_ARM_ARCH` oder die x86-Merkmale, OpenMP und `libgomp.so.1`, die
+Programme, die Build-ID und ob er gebaut ist. `--json` gibt den ganzen Bauplan aus. Exit-Code 1, wenn sich kein
+Bauplan machen lässt (zum Beispiel für ein Board, dessen glibc älter ist als jede Builder-Basis, oder ein Profil ohne
+`LIBC_VERSION`: untersuche es erneut).
+
+### device runtime build
+
+Holt den festgelegten llama.cpp-Quelltext, wenn er nicht im Cache liegt (es fragt vorher; `--yes` fragt nicht,
+`--mirror` holt von einem Spiegel, `ditto runtime import-source` bringt ihn auf einen Rechner ohne Internet), baut
+den Bauplan im Builder-Container ohne Netz (`--jobs` setzt die parallelen Jobs; ohne richten sie sich nach dem
+Speicher), prüft das Format der Programme auf deinem PC und packt den Tarball nach
+`~/.llm-framework/runtime/llama.cpp/device/<ID>/llama-runtime-<Arch>-<Build-ID>.tar.gz`. Ein schon abgelegter Build
+wird nur neu gepackt. Exit-Code 1, wenn Docker nicht antwortet, der Build scheitert oder seine Prüfungen scheitern.
+
+### device runtime deploy
+
+Installiert die gebaute Laufzeit auf dem Board, wie die Deploy-Einstellungen es sagen, und prüft sie dort. Das Board
+muss das sein, mit dem das Profil erstellt wurde (derselbe Hostschlüssel; ein neues Board unter der alten Adresse
+wird abgelehnt), und ihm muss schon vertraut werden; `--password` koppelt ein Board, das noch keinen
+Framework-Schlüssel hat (einmal genutzt, nie gespeichert). Der SSH-Benutzer kommt aus den Deploy-Einstellungen oder
+aus `--user`.
+
+1. Das Board wird untersucht: Benutzer-ID (root wird abgelehnt), Home-Ordner, Architektur (sie muss zum Build
+   passen), Init-System und die Werkzeuge, die das Deployment braucht. Mit der systemd-Einstellung muss `sudo -n
+   true` funktionieren; sonst wird nichts geändert. Mit `--bench-model PFAD` wird das Modell auf dem Board an seiner
+   sha256 erkannt: ein Katalogmodell läuft sofort, jedes andere nur, wenn du zustimmst (am Terminal oder
+   `--allow-untrusted-model`), und das wird ins Audit-Log geschrieben. Das wird hier gefragt, bevor sich auf dem
+   Board etwas ändert.
+2. Der Tarball kommt über den SSH-Kanal in einen privaten Staging-Ordner in
+   `~/.local/share/llm-framework/llama.cpp/`, wird gegen seine sha256 und jede Datei gegen `SHA256SUMS` geprüft, nur
+   für dich lesbar gemacht und neben den aktiven Build gelegt.
+3. Das Startskript erzeugt den Schlüssel `~/.config/llm-framework/llama-server.key` auf dem Board (umask 077).
+4. Der neue Build wird in seinem eigenen Ordner geprüft, als dein Benutzer: `--version` gegen den Pin,
+   `--list-devices`, und `llama-server` muss `--tools` ablehnen; mit `--bench-model` auch ein kurzer
+   `llama-bench`-Lauf mit diesem Modell.
+5. Nur ein Build, der besteht, wird zu `current`. Ein Build, der scheitert (zum Beispiel mit `SIGILL`, weil die
+   CPU-Grundlage nicht zum Board passt), wird wieder entfernt, der vorige Build bleibt aktiv, und sonst ändert sich
+   nichts. Nach dem Umschalten bleibt der vorige Build; ältere werden entfernt, außer ein laufendes Programm nutzt
+   sie.
+6. Mit der systemd-Einstellung wird die Unit `llm-llama-server.service` mit `sudo -n` geschrieben und aktiviert und
+   gestartet, sobald das Modell da ist.
+
+Das Ergebnis liegt in `device/<ID>/deployed.json` (ein gescheitertes Deployment ändert es nicht). Exit-Code 1, wenn
+ein Schritt oder eine Prüfung scheitert.
+
+Auf dem Board startet das Startskript den Server:
+
+```bash
+~/.local/share/llm-framework/llama.cpp/current/llama-server.sh start ~/models/model.gguf -c 4096 -t 4
+~/.local/share/llm-framework/llama.cpp/current/llama-server.sh status
+~/.local/share/llm-framework/llama.cpp/current/llama-server.sh stop
+curl -s http://127.0.0.1:8080/health   # braucht keinen Schlüssel; jede andere Anfrage braucht "Authorization: Bearer <Schlüssel>"
+```
+
+Es lauscht auf 127.0.0.1 (Vorgabe-Port 8080, `--port` ab 1024) mit der Schlüsseldatei und einer geleerten Umgebung.
+Es reicht `-c`, `-t`, `-tb`, `-C`, `--cpu-strict`, `-b`, `-ub`, `-np`, `-ngl`, `-fa`, `-cram`, `-lm`, `-a` und
+`--sleep-idle-seconds` mit geprüften Werten weiter und lehnt jede andere Option ab (Exit-Code 2). `serve` läuft im
+Vordergrund, `keygen` erzeugt den Schlüssel, `version` gibt die Version des Servers aus.
+
+### device runtime verify
+
+Führt die Prüfungen aus Schritt 4 erneut für den aktiven Build `current` aus (auch mit `--bench-model`) und
+aktualisiert den Eintrag.
+
+### device runtime status
+
+Was deployt ist (Build, Zeit, Startskript oder systemd, Ergebnis der Prüfungen) und ob es noch der Build ist, den
+das Profil des Boards, der Pin und das Rezept verlangen; wenn nicht, erneut bauen und deployen.
+
+```bash
+llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W"
+llm-cli device runtime plan "ZERO 3W"
+llm-cli device runtime build "ZERO 3W" --yes
+llm-cli device runtime deploy "ZERO 3W" --bench-model models/qwen3.5-2b-q4_0.gguf
+# Die systemd-Unit statt des Startskripts, vor dem nächsten Deployment entschieden
+llm-cli device settings "ZERO 3W" --install systemd --model models/qwen3.5-2b-q4_0.gguf
 ```
 
 ---

@@ -1,6 +1,6 @@
 {
   "backend": "vulkan",
-  "build_id": "6bbb68b8dc09261c66320eb78a41d94b932783847f8200f51c5d9031c78eca5a",
+  "build_id": "0b670cececf14708bf0019570b904052ef99934c2ca37345d720e1c1f5b12ebf",
   "builder": {
     "kind": "native"
   },
@@ -10,7 +10,7 @@
   ],
   "placement": "native",
   "purpose": "host-runtime",
-  "recipe_version": 1,
+  "recipe_version": 3,
   "source": {
     "build_number": 11429,
     "commit": "d81235049384534c167caea52b85a694f6103d14",

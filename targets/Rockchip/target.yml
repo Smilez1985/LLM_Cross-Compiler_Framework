@@ -80,6 +80,7 @@ docker:
   # Build arguments
   build_args:
     LLAMA_CPP_TAG: "b11429"   # the llama.cpp pin of configs/llama_runtime.yml (llama_cpp.source.tag)
+    LLAMA_CPP_COMMIT: "d81235049384534c167caea52b85a694f6103d14"   # llama_cpp.source.commit, fetched and checked
     BUILD_JOBS: "4"
     PYTHON_VERSION: "3.11"
     
@@ -130,7 +131,8 @@ modules:
       inputs: ["model.fp16.gguf", "cmake_toolchain"]
       outputs: ["deployment_package.zip"]
 
-# Hardware optimization profiles
+# Hardware optimization profiles. Legacy: read only by the legacy four-module chain (modules/*_module.sh); the
+# active build takes llama.cpp's options from the build recipe (orchestrator/runtime/build/recipe.py).
 optimization_profiles:
   rk3566_default:
     cpu_flags: "-mcpu=cortex-a55 -mfpu=neon-fp-armv8"

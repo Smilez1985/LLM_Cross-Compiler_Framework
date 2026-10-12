@@ -1159,3 +1159,57 @@ class TestRuntimeHardware:
         given = llama_server.LocalLLMRuntime(data_dir=tmp_path / "s2", models_dir=tmp_path / "m2",
                                              hardware=rt.hardware())
         assert given._hardware_given
+
+
+class TestPackageCopy:
+    """The probe is a standalone file (sent to devices, run by hand) and also part of the installed package: a wheel
+    has no scripts/ folder, but detect_hardware() and the local runtime import the probe."""
+
+    def test_the_package_copy_is_identical(self):
+        package = REPO / "orchestrator" / "runtime" / "hardware_probe.py"
+        assert package.read_bytes() == PROBE_PY.read_bytes(), (
+            "orchestrator/runtime/hardware_probe.py differs from scripts/hardware_probe.py: edit the script, then "
+            "copy it (cp scripts/hardware_probe.py orchestrator/runtime/hardware_probe.py)")
+
+    def test_the_framework_imports_the_package_copy(self):
+        from orchestrator.runtime import hardware_probe
+        assert probe is hardware_probe and hardware.PROBE_PATH == Path(hardware_probe.__file__).resolve()
+        assert "scripts" not in Path(hardware_probe.__file__).resolve().relative_to(REPO).parts
+
+    def test_the_ssh_scan_sends_the_package_copy(self):
+        from orchestrator.runtime import remote_probe
+        assert remote_probe.PACKAGE_PROBE.read_bytes() == PROBE_PY.read_bytes()
+
+
+class TestMacOS:
+    """sysctl prints its errors ("unknown oid") on stderr; they must never become CPU flags or other values."""
+
+    @staticmethod
+    def fake_mac(answers):
+        def run(cmd, timeout):
+            key = " ".join(cmd)
+            if key in answers:
+                return answers[key]
+            return 1, "", f"sysctl: unknown oid '{cmd[-1]}'"
+        return run
+
+    def test_unknown_sysctl_names_do_not_become_cpu_flags(self, tmp_path):
+        run = self.fake_mac({
+            "sysctl -n hw.optional.arm64": (1, "", "sysctl: unknown oid 'hw.optional.arm64'"),
+            "sysctl -n machdep.cpu.brand_string": (0, "Intel(R) Core(TM) i7-4770HQ CPU @ 2.20GHz\n", ""),
+            "sysctl -n machdep.cpu.vendor": (0, "GenuineIntel\n", ""),
+            "sysctl -n machdep.cpu.features": (0, "FPU SSE SSE2 SSE3 SSE4.1 SSE4.2 AVX1.0 F16C\n", ""),
+            "sysctl -n hw.logicalcpu": (0, "8\n", ""),
+            "sysctl -n hw.physicalcpu": (0, "4\n", ""),
+        })
+        values = probe.collect(root=str(tmp_path), system="Darwin", machine="x86_64", run=run, sections=("cpu",))
+        flags = values.get("CPU_FLAGS_ALL", "")
+        assert flags and "sse4.2" in flags.split(",")
+        assert not any(word in flags for word in ("sysctl", "unknown", "oid")), flags
+        assert values["SUPPORTS_SSE42"] == "ON" and values["CPU_VENDOR"] == "intel"
+
+    def test_a_failing_sysctl_gives_no_value(self, tmp_path):
+        run = self.fake_mac({"sysctl -n hw.optional.arm64": (0, "1\n", "")})
+        values = probe.collect(root=str(tmp_path), system="Darwin", machine="arm64", run=run, sections=("cpu",))
+        assert "CPU_MODEL" not in values and "CPU_CORES_PHYSICAL" not in values
+        assert all(values[k] in ("OFF", "UNKNOWN") for k in values if k.startswith("SUPPORTS_"))

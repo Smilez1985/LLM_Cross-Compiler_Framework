@@ -14,7 +14,6 @@ Updates v2.4.0:
 import importlib.util
 import platform
 import subprocess
-import shlex
 from pathlib import Path
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -128,7 +127,7 @@ class LocalProbeWorker(QThread):
                 cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(self.script_path),
                        "-OutputFile", str(output_file)]
             else:
-                cmd = ["bash", str(self.script_path), "--output", str(output_file)]
+                cmd = ["sh", str(self.script_path), "--output", str(output_file)]  # POSIX sh, no bash needed
                 
             subprocess.run(cmd, check=True, capture_output=True, text=True)
             
@@ -141,15 +140,18 @@ class LocalProbeWorker(QThread):
             self.finished.emit(False, str(e), "")
 
 class SSHProbeWorker(QThread):
-    """Runs the hardware probe on a trusted device over SSH and downloads the result."""
+    """Runs the hardware probe on a trusted device over SSH, the way `llm-cli scan --device` does: the probe script
+    travels on the command's stdin (the Python probe with python3 -I when the device has Python 3.8 or newer, else
+    the shell probe), so nothing is written on the device, also where /tmp is mounted noexec. The profile is kept
+    under the device's ID (from its host key) and written to result_dir for the GUI."""
     finished = Signal(bool, str, str) # success, message, file_path
 
-    def __init__(self, ip, user, password, local_script_path, state_dir, result_dir):
+    def __init__(self, ip, user, password, state_dir, result_dir, port=22):
         super().__init__()
         self.ip = ip
         self.user = user
         self.password = password
-        self.script_path = Path(local_script_path)
+        self.port = port
         self.state_dir = Path(state_dir)
         self.result_dir = Path(result_dir)
 
@@ -157,36 +159,38 @@ class SSHProbeWorker(QThread):
         if not PARAMIKO_AVAILABLE:
             self.finished.emit(False, "Paramiko library missing. Cannot use SSH.", "")
             return
+        from orchestrator.Core.vault_key import write_private
+        from orchestrator.runtime.device.settings import remember_ssh_user
+        from orchestrator.runtime.profile import ProfileStore, device_id_for_host_key
+        from orchestrator.runtime.remote_probe import RemoteProbeError, probe_over_ssh, store_address, valid_host
         from orchestrator.utils import ssh_trust
+        if not valid_host(self.ip):
+            self.finished.emit(False, "Enter a host name or an IP address.", "")
+            return
         try:
-            ssh = ssh_trust.connect(self.ip, self.user, self.state_dir, password=self.password)
+            ssh = ssh_trust.connect(self.ip, self.user, self.state_dir, port=self.port, password=self.password)
         except Exception as e:
             self.finished.emit(False, f"SSH login failed: {e}", "")
             return
         try:
             if self.password:
                 ssh_trust.install_public_key(ssh, ssh_trust.client_key(self.state_dir)[1])
-            # A private folder on the device; a fixed /tmp path could be pre-created by another user.
-            _, out, _ = ssh.exec_command("mktemp -d /tmp/llm_probe.XXXXXXXX")
-            remote_dir = out.read().decode().strip()
-            # Checks mktemp's answer on the device; no local temp file is involved.
-            if not remote_dir.startswith("/tmp/llm_probe."):  # nosec B108
-                self.finished.emit(False, "Could not create a folder on the device.", "")
-                return
-            sftp = ssh.open_sftp()
-            remote_script = f"{remote_dir}/{self.script_path.name}"
-            sftp.put(str(self.script_path), remote_script)
-            _, stdout, stderr = ssh.exec_command(
-                f"cd {shlex.quote(remote_dir)} && chmod +x {shlex.quote(self.script_path.name)} && "
-                f"./{shlex.quote(self.script_path.name)}")
-            if stdout.channel.recv_exit_status() != 0:
-                self.finished.emit(False, f"Remote script failed: {stderr.read().decode(errors='replace')}", "")
-                return
+            result = probe_over_ssh(ssh)
+            key = ssh.get_transport().get_remote_server_key()
+            device_id = device_id_for_host_key(ssh_trust.fingerprint(key))
+            store = ProfileStore(self.state_dir)
+            store.save_device(device_id, result.profile, address=store_address(self.ip, self.port))
+            remember_ssh_user(store, device_id, self.user)  # the deploy user of the device runtime (never root)
             self.result_dir.mkdir(parents=True, exist_ok=True)
+            # valid_host() allows no path separators, so the name stays inside result_dir.
             local_output = self.result_dir / f"target_hardware_config_{self.ip.replace(':', '_')}.txt"
-            sftp.get(f"{remote_dir}/target_hardware_config.txt", str(local_output))
-            ssh.exec_command(f"rm -rf {shlex.quote(remote_dir)}")
-            self.finished.emit(True, f"Remote scan successful from {self.ip}", str(local_output))
+            write_private(local_output, result.profile.to_text())
+            tool = "Python probe" if result.tool == "python" else "shell probe"
+            notes = "".join(f" {note}." for note in result.notes)
+            self.finished.emit(True, f"Remote scan successful from {self.ip} ({tool}; stored as device "
+                                     f"{device_id}).{notes}", str(local_output))
+        except (RemoteProbeError, ssh_trust.HostKeyError) as e:
+            self.finished.emit(False, f"The probe on {self.ip} failed: {e}", "")
         except Exception as e:
             self.finished.emit(False, f"SSH Error: {e}", "")
         finally:
@@ -537,12 +541,10 @@ class BuilderTab(QWidget):
             self._log(f"Connecting to {user}@{ip}...")
             self.scan_btn.setEnabled(False)
             
-            script = self.app_root / "scripts" / "hardware_probe.sh"
-            
             config = self.framework.config
             state_dir = getattr(config, "user_state_dir", Path.home() / ".llm-framework")
             result_dir = probe_result_dir(self.framework)
-            self.probe_worker = SSHProbeWorker(ip, user, password or None, script, state_dir, result_dir)
+            self.probe_worker = SSHProbeWorker(ip, user, password or None, state_dir, result_dir)
             self.probe_worker.finished.connect(self._on_probe_finished)
             self.probe_worker.start()
 

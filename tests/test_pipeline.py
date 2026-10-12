@@ -10,7 +10,7 @@ import pytest
 from orchestrator.Core.builder import (BuildConfiguration, BuildEngine, BuildProgress, BuildStatus,
                                        ModelFormat, OptimizationLevel)
 from orchestrator.Core.config_manager import ConfigManager
-from orchestrator.utils.llama_pin import pinned_tag
+from orchestrator.utils.llama_pin import pinned_source, pinned_tag
 
 
 @pytest.fixture
@@ -372,8 +372,120 @@ class TestImageBuild:
         cmd = seen["cmd"]
         assert cmd[:4] == ["docker", "buildx", "build", "--load"]
         assert f"LLAMA_CPP_TAG={pinned_tag()}" in cmd and pinned_tag() == "b11429" and "EXTRA=1" in cmd
+        assert f"LLAMA_CPP_COMMIT={pinned_source()['commit']}" in cmd
+        # This Dockerfile builds no llama.cpp of the recipe: no plan, no probe.
+        assert not any(a.startswith("LLAMA_CMAKE_ARGS=") for a in cmd)
         assert cmd[-1] == str(dockerfile.parent)
         assert "No space left on device" in str(excinfo.value)
+
+
+RECIPE_DOCKERFILE = "FROM debian:bookworm-slim AS builder\nARG LLAMA_CPP_TAG=b1\nARG LLAMA_CMAKE_ARGS=\"-DGGML_NATIVE=OFF\"\n"
+
+
+class TestConversionToolsFromTheRecipe:
+    """The image build of a target passes the llama.cpp pin and the recipe's plan for the conversion tools on this
+    machine (purpose host-tools, design 4.3): tuned to the build host's probe, and nothing else can replace them."""
+
+    PROBES = Path(__file__).resolve().parent / "fixtures" / "hardware_probe"
+
+    @pytest.fixture
+    def capture(self, engine, monkeypatch, tmp_path):
+        """Runs _build_docker_image with BuildKit faked; returns (build args, progress, config) of one build."""
+        def build(dockerfile_text=RECIPE_DOCKERFILE, **config_values):
+            seen = {}
+            dockerfile = tmp_path / "ctx" / "Dockerfile"
+            dockerfile.parent.mkdir(exist_ok=True)
+            dockerfile.write_text(dockerfile_text)
+            monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
+            monkeypatch.setattr(engine, "_build_with_buildkit",
+                                lambda tag, path, args, progress, labels=None: seen.update(args))
+            monkeypatch.setattr(engine, "docker_client", SimpleNamespace(images=SimpleNamespace(get=lambda t: t)))
+            progress = BuildProgress("b1", BuildStatus.QUEUED, "")
+            config = make_config(**config_values)
+            engine._build_docker_image(config, progress, dockerfile)
+            return seen, progress, config
+        return build
+
+    def probe(self, monkeypatch, name):
+        from orchestrator.runtime.profile import read_profile
+        profile = read_profile(self.PROBES / name)
+        monkeypatch.setattr("orchestrator.runtime.hardware.local_profile", lambda **kw: profile)
+        return profile
+
+    def test_the_pin_and_the_plan_of_this_machine_are_passed(self, capture, monkeypatch):
+        from orchestrator.runtime.build.host_tools import cmake_args, plan_host_tools
+        from orchestrator.runtime.catalog import load_catalog
+        profile = self.probe(monkeypatch, "schema2_linux_ivybridge.txt")
+        args, progress, config = capture()
+        plan = plan_host_tools(profile, catalog=load_catalog(), base_image="debian:bookworm-slim")
+        assert args["LLAMA_CPP_TAG"] == pinned_tag() and args["LLAMA_CPP_COMMIT"] == pinned_source()["commit"]
+        assert args["LLAMA_CMAKE_ARGS"] == cmake_args(plan)
+        words = args["LLAMA_CMAKE_ARGS"].split()
+        assert "-DGGML_AVX=ON" in words and "-DGGML_AVX2=OFF" in words, "pre-Haswell: no AVX2, no SIGILL"
+        assert "-DLLAMA_SUBPROCESS=OFF" in words and "-DFETCHCONTENT_FULLY_DISCONNECTED=ON" in words
+        assert config.llama_cpp_tools == {"tag": pinned_tag(), "commit": pinned_source()["commit"],
+                                          "tuning": "explicit", "plan_id": plan.build_id, "cmake_args": words}
+        assert any("tuned to this machine" in line for line in progress.logs)
+
+    def test_build_args_of_a_build_cannot_replace_the_pinned_ones(self, capture, monkeypatch):
+        self.probe(monkeypatch, "schema2_pc_two_nvidia.txt")
+        args, progress, _ = capture(build_args={"LLAMA_CPP_COMMIT": "0" * 40, "LLAMA_CPP_TAG": "master",
+                                                "LLAMA_CMAKE_ARGS": "-DGGML_NATIVE=ON -DLLAMA_SUBPROCESS=ON",
+                                                "EXTRA": "1"})
+        assert args["LLAMA_CPP_COMMIT"] == pinned_source()["commit"] and args["LLAMA_CPP_TAG"] == pinned_tag()
+        assert "-DLLAMA_SUBPROCESS=OFF" in args["LLAMA_CMAKE_ARGS"].split() and args["EXTRA"] == "1"
+        assert any("LLAMA_CMAKE_ARGS, LLAMA_CPP_COMMIT, LLAMA_CPP_TAG come only from the llama.cpp pin" in w
+                   for w in progress.warnings)
+
+    def test_a_docker_daemon_on_another_machine_keeps_the_baseline(self, capture, monkeypatch):
+        monkeypatch.setenv("DOCKER_HOST", "tcp://192.0.2.10:2376")
+        monkeypatch.setattr("orchestrator.runtime.hardware.local_profile",
+                            lambda **kw: pytest.fail("this machine's probe does not describe the daemon's CPU"))
+        args, progress, config = capture()
+        assert "LLAMA_CMAKE_ARGS" not in args and args["LLAMA_CPP_COMMIT"] == pinned_source()["commit"]
+        assert config.llama_cpp_tools["tuning"] == "baseline"
+        assert any("Docker daemon runs on another machine" in line for line in progress.logs)
+
+    def test_a_failed_probe_falls_back_to_the_stored_profile(self, capture, engine, monkeypatch):
+        from orchestrator.runtime.profile import ProfileStore, read_profile
+        monkeypatch.setattr("orchestrator.runtime.hardware.local_profile",
+                            lambda **kw: (_ for _ in ()).throw(RuntimeError("no /proc")))
+        ProfileStore(engine.config.user_state_dir).save_local(read_profile(self.PROBES / "schema2_linux_ivybridge.txt"))
+        args, progress, _ = capture()
+        assert "-DGGML_AVX2=OFF" in args["LLAMA_CMAKE_ARGS"].split()
+        assert any("stored profile" in line for line in progress.logs)
+
+    def test_without_any_profile_the_dockerfile_default_stays(self, capture, monkeypatch):
+        monkeypatch.setattr("orchestrator.runtime.hardware.local_profile",
+                            lambda **kw: (_ for _ in ()).throw(RuntimeError("no /proc")))
+        args, progress, config = capture()
+        assert "LLAMA_CMAKE_ARGS" not in args and config.llama_cpp_tools["tuning"] == "baseline"
+        assert any("fixed x86-64 baseline" in line for line in progress.logs)
+
+    def test_the_legacy_builder_gets_the_same_arguments(self, engine, monkeypatch, tmp_path):
+        self.probe(monkeypatch, "schema2_pc_two_nvidia.txt")
+        seen = {}
+
+        def api_build(**kwargs):
+            seen.update(kwargs["buildargs"])
+            return iter([{"stream": "done"}])
+
+        dockerfile = tmp_path / "ctx" / "Dockerfile"
+        dockerfile.parent.mkdir()
+        dockerfile.write_text(RECIPE_DOCKERFILE)
+        monkeypatch.setattr(engine, "_buildkit_available", lambda: False)
+        monkeypatch.setattr(engine, "docker_client", SimpleNamespace(api=SimpleNamespace(build=api_build),
+                                                                     images=SimpleNamespace(get=lambda t: t)))
+        engine._build_docker_image(make_config(), BuildProgress("b1", BuildStatus.QUEUED, ""), dockerfile)
+        assert seen["LLAMA_CPP_COMMIT"] == pinned_source()["commit"] and "-DGGML_AVX2=ON" in seen["LLAMA_CMAKE_ARGS"]
+
+    def test_the_build_manifest_records_the_tools(self, engine, tmp_path):
+        config = make_config()
+        config.llama_cpp_tools = {"tag": "b11429", "commit": "d" * 40, "tuning": "explicit"}
+        out = tmp_path / "out"
+        out.mkdir()
+        info = engine._write_build_manifest(config, out, produced=[])
+        assert info["llama_cpp_tools"]["tuning"] == "explicit"
 
 
 class TestCalibrationData:

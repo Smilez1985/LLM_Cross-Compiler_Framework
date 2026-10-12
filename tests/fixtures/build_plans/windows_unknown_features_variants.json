@@ -1,6 +1,6 @@
 {
   "backend": "cpu",
-  "build_id": "4928bc536941e2dc1a52513e938728a0ff3c3577de4a38b84a20fc69c0e33c46",
+  "build_id": "85d97e51091f47c1f5700ee731350b1b0649df45db7a0f156b80cc9d8baca616",
   "builder": {
     "host": "another Windows PC",
     "kind": "native"
@@ -10,7 +10,7 @@
   ],
   "placement": "cross",
   "purpose": "device-runtime",
-  "recipe_version": 1,
+  "recipe_version": 3,
   "source": {
     "build_number": 11429,
     "commit": "d81235049384534c167caea52b85a694f6103d14",

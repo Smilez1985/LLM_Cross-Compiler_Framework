@@ -22,6 +22,8 @@ from typing import List, Optional, Tuple
 from orchestrator.runtime.profile import HardwareProfile, ProfileError, load_schema, parse_profile
 
 SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+# The Python probe also ships inside the package (a byte-identical copy of scripts/hardware_probe.py).
+PACKAGE_PROBE = Path(__file__).resolve().with_name("hardware_probe.py")
 MIN_PYTHON = (3, 8)
 # sshd runs every command through the device user's login shell. Each one is a single `sh -c '...'`, so the
 # redirections and && are parsed by sh and a login shell such as csh or fish (where `2>/dev/null` means something
@@ -118,7 +120,8 @@ def probe_over_ssh(client, scripts_dir: Optional[Path] = None, timeout: float = 
     version = device_python(client)
     if version is not None and version >= MIN_PYTHON:
         try:
-            profile = _run_probe(client, PYTHON_COMMAND, scripts / "hardware_probe.py", timeout, limit)
+            python_probe = scripts / "hardware_probe.py" if scripts_dir is not None else PACKAGE_PROBE
+            profile = _run_probe(client, PYTHON_COMMAND, python_probe, timeout, limit)
             return RemoteProbeResult(profile=profile, tool="python", notes=notes)
         except RemoteProbeError as e:
             notes.append(f"the Python probe failed ({e}); used hardware_probe.sh")
