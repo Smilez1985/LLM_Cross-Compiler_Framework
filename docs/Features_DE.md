@@ -1164,7 +1164,8 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Standard); du wirst mit altem und neuem Wert gefragt, und jede Änderung wird in der `config.yml` gespeichert.
   Einstellungen, die begrenzen, was eine KI oder ein Build darf, lassen sich nur verschärfen (`offline_mode`,
   `enable_security_scan` und `build_sandbox` auf true, `enable_telemetry` und `enable_rag_knowledge` auf false,
-  Seiten- und Tiefengrenzen und Container-Grenzen niedriger, die Pause beim Crawlen länger); nur solche Aufrufe
+  Seiten- und Tiefengrenzen und Container-Grenzen niedriger, die Pause beim Crawlen länger; ein Speicherlimit von 0
+  bedeutet für Docker gar keins und zählt daher als Lockerung); nur solche Aufrufe
   dürfen auf „erlauben“ gestellt werden. Berechtigungen, Geheimnisse, der Tresor, Einstellungen des KI-Anbieters,
   Adressen, Image-Referenzen, Ordner und die lockernde Richtung werden vor der Frage abgelehnt, und kein Wert wird je
   als „Standard“ gelesen. `report_cannot_do` ist für eine Aufgabe, die die KI wirklich nicht erledigen kann: Sie nennt
@@ -1173,7 +1174,8 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   das Framework prüft ihn an seinem eigenen Zustand (deine Berechtigungen, die Audit-Einträge und Grenzen dieser
   Sitzung, das Laufwerk, die Aktionen, die kein Tool tut) und antwortet `confirmed`, `contradicted`, `premature`
   (noch nichts versucht, mit den Tools, die zu versuchen sind) oder `unchecked`, mit Fakten und einem Satz für dich,
-  der nur aus diesen Fakten gebaut ist. „Die Hardware ist nicht verfügbar“ wird für jedes Tool widersprochen, das
+  der nur aus diesen Fakten gebaut ist (ein Tool steht dort nur mit seinem registrierten Namen, nie so, wie die KI
+  ihn geschrieben hat). „Die Hardware ist nicht verfügbar“ wird für jedes Tool widersprochen, das
   kein Gerät nutzt: Ungetestete Hardware ist kein Grund abzulehnen. Jede Meldung wird protokolliert
   (`cannot_reported`); `llm-cli tools audit --summary` zählt sie je Aufrufer.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client

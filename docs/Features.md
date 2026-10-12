@@ -1074,14 +1074,16 @@ framework never sees it.
   default); you are asked with the old and new value, and each change is saved in `config.yml`. Settings that limit
   what an AI or a build may do can only be tightened (`offline_mode` and `enable_security_scan` and `build_sandbox`
   to true, `enable_telemetry` and `enable_rag_knowledge` to false, page and depth limits and container limits lower,
-  the crawl delay higher); only such calls may be set to "allow". Permissions, secrets, the vault, AI provider
+  the crawl delay higher; a container memory limit of 0 means none to Docker, so it counts as loosening); only such
+  calls may be set to "allow". Permissions, secrets, the vault, AI provider
   settings, addresses, image references, folders and the loosening direction are refused before the question, and
   no value is ever read as "default". `report_cannot_do` is for a task the AI really cannot do: it names the reason
   (`missing_information`, `not_supported`, `no_tool`, `permission_denied`, `declined`, `needs_person`,
   `hardware_unavailable`, `insufficient_resources`, `limit_reached`, `failed`; there is no "untested"), and the
   framework checks it against its own state (your permissions, this session's audit entries and limits, the disk,
   the actions no tool does) and answers `confirmed`, `contradicted`, `premature` (nothing was tried yet, with the
-  tools to try) or `unchecked`, with facts and one sentence for you built only from those facts. "The hardware is
+  tools to try) or `unchecked`, with facts and one sentence for you built only from those facts (a tool is named
+  there only by its registered name, never as the AI spelled it). "The hardware is
   not available" is contradicted for every tool that does not use a device: untested hardware is no reason to
   refuse. Every report is audited (`cannot_reported`); `llm-cli tools audit --summary` counts them per caller.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP

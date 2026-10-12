@@ -418,7 +418,9 @@ class BuildService:
             size = None
             if primary:
                 try:
-                    size = (Path(info["path"]) / primary).stat().st_size
+                    # never through a link: the container writes this folder and could point it at any host file
+                    file = Path(info["path"]) / primary
+                    size = file.lstat().st_size if file.is_file() and not file.is_symlink() else None
                 except OSError:
                     size = entry.get("size") if isinstance(entry.get("size"), int) else None
             try:

@@ -721,13 +721,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Audit-Einträge dieses Aufrufers; neu sind `get_settings` (eine feste Leseliste, Adressen als Schema und Host, Ordner
   als Labels) und `update_settings` (gewöhnliche Einstellungen mit einer Frage, die alten und neuen Wert zeigt,
   gespeichert in der `config.yml`; Einstellungen, die eine KI begrenzen, nur verschärfbar, und nur solche dürfen ohne
-  Frage erlaubt werden; Berechtigungen, Geheimnisse, Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner vor
-  der Frage abgelehnt; kein Wert wird als „Standard“ gelesen).
+  Frage erlaubt werden, und ein Speicherlimit von 0, das Docker als keins liest, zählt als Lockerung; Berechtigungen,
+  Geheimnisse, Tresor, Einstellungen des KI-Anbieters, Adressen und Ordner vor der Frage abgelehnt; kein Wert wird als
+  „Standard“ gelesen).
 - **MCP: ehrliches „kann nicht“, vom Framework geprüft** (DECISIONS Runde 3): Das neue `report_cannot_do` nimmt einen
   Grundcode (kein „ungetestet“) und was fehlt, prüft ihn an den Berechtigungen des Aufrufers, den Audit-Einträgen und
   Grenzen dieser Sitzung, dem Laufwerk und den Aktionen, die kein Tool tut, und antwortet confirmed, contradicted,
   premature (mit den Tools, die zuerst zu versuchen sind) oder unchecked, mit einem Satz nur aus Fakten des
-  Frameworks; „die Hardware ist nicht verfügbar“ wird für jedes Tool widersprochen, das kein Gerät nutzt. Meldungen
+  Frameworks (ein Tool nur mit seinem registrierten Namen); „die Hardware ist nicht verfügbar“ wird für jedes Tool widersprochen, das kein Gerät nutzt. Meldungen
   werden als `cannot_reported` protokolliert; `llm-cli tools audit --summary` zählt sie je Aufrufer.
 
 ### Veraltet

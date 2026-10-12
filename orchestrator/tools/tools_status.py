@@ -53,6 +53,7 @@ FOLDER_KEYS = {"targets_dir": "targets", "models_dir": "models", "datasets_dir":
 READABLE = WRITABLE + READ_ONLY + URL_KEYS + tuple(FOLDER_KEYS)
 NOT_A_VALUE = ("", "default", "null", "none", "reset", "unset")
 SETTINGS_PER_HOUR = 10
+MIN_MEMORY_LIMIT = 6 * 1024 ** 2  # Docker refuses a smaller container memory limit
 
 ReadableKey = Literal[READABLE]  # type: ignore[valid-type]
 WritableKey = Literal[WRITABLE]  # type: ignore[valid-type]
@@ -322,7 +323,12 @@ def memory_bytes(value: Any) -> Optional[int]:
     if not match:
         raise ValueError(f"'{value}' is not a memory size (e.g. 16g or 512m)")
     factor = {"": 1, "b": 1, "k": 1024, "m": 1024 ** 2, "g": 1024 ** 3}[match.group(2)]
-    return int(float(match.group(1)) * factor)
+    value = int(float(match.group(1)) * factor)
+    if value == 0:
+        return None  # Docker reads a memory limit of 0 as no limit at all
+    if value < MIN_MEMORY_LIMIT:
+        raise ValueError(f"'{value}' bytes is below the smallest memory limit Docker accepts (6m)")
+    return value
 
 
 def parse_value(schema, key: str, text: str) -> Any:
@@ -369,7 +375,11 @@ def direction_problem(key: str, old: Any, new: Any) -> Optional[str]:
         return None if new is rule else (f"{key} may only be set to {str(rule).lower()} over MCP; the other "
                                          "direction widens what an AI may do and stays with the person")
     if key == "build_memory_limit":
-        old_b, new_b = memory_bytes(old), memory_bytes(new)
+        try:
+            old_b = memory_bytes(old)
+        except ValueError:
+            old_b = None  # an unreadable current value limits nothing a build can rely on
+        new_b = memory_bytes(new)
         if old_b is None or (new_b is not None and new_b <= old_b):
             return None
         return "build_memory_limit may only be lowered over MCP (a larger limit or none widens what builds may use)"
@@ -547,12 +557,21 @@ def check_cannot(inp: CannotIn, ctx, registry, framework, no_tool: Dict[str, str
             spec = registry.get(tool)
         except Exception:  # noqa: BLE001 - an unknown tool name
             spec = None
+    # Facts name a tool only by its registered name: the model's own spelling of `tool` (free text) never reaches
+    # facts or say_to_user, and neither does a name from an audit entry that is not a registered tool.
+    tool = spec.name if spec is not None else tool
+    said = tool if spec is not None else "the tool you named"
+
+    def name_of(entry: Dict[str, Any]) -> str:
+        value = str(entry.get("tool") or "")
+        return value if _known(registry, value) else "a call"
+
     of_tool = [e for e in entries if tool and e.get("tool") == tool]
     try_first = [t for t in TRY_FIRST.get(reason, ()) if _known(registry, t)]
 
     def premature() -> Tuple[str, List[str], List[str]]:
         return ("premature", ["This session made no call yet that could have found this out."
-                              if not entries else f"This session made no call to {tool or 'a tool that could help'}."],
+                              if not entries else f"This session made no call to {said if tool else 'a tool that could help'}."],
                 try_first)
 
     if reason == "hardware_unavailable":
@@ -568,12 +587,12 @@ def check_cannot(inp: CannotIn, ctx, registry, framework, no_tool: Dict[str, str
         if reason == "needs_person":
             asked = [e for e in entries if e.get("reason_code") == "needs_person"]
             if asked:
-                return "confirmed", [f"{asked[0].get('tool')} was refused with reason needs_person in this session."], []
+                return "confirmed", [f"{name_of(asked[0])} was refused with reason needs_person in this session."], []
         return "unchecked", ["The framework has no record that names this action."], []
     if reason == "permission_denied":
         if spec is None:
             return ("unchecked", ["No tool was named, so no permission could be checked."] if not tool else
-                    [f"There is no tool named {tool}."], [])
+                    ["The tool you named is not one of the framework's tools."], [])
         decision = registry.decide(spec, None, ctx).value
         if decision == "deny":
             return "confirmed", [f"Your tool permissions deny {tool}; only the person can change that (Tools > Tool "
@@ -586,27 +605,27 @@ def check_cannot(inp: CannotIn, ctx, registry, framework, no_tool: Dict[str, str
         declined = [e for e in of_tool or entries if e.get("answer") == "declined"
                     or e.get("reason_code") == "declined"]
         if declined:
-            return "confirmed", [f"The person declined {declined[0].get('tool')} in this session."], []
+            return "confirmed", [f"The person declined {name_of(declined[0])} in this session."], []
         return "contradicted", ["No question was declined in this session."], []
     if reason == "limit_reached":
         hits = [e for e in of_tool or entries if e.get("outcome") == "rate_limited"
                 or e.get("reason_code") == "limit_reached"]
         if hits:
             detail = str(hits[0].get("detail") or "").split("\n[extra")[0][:300]
-            return "confirmed", [f"A limit refused {hits[0].get('tool')}: {detail}"], []
+            return "confirmed", [f"A limit refused {name_of(hits[0])}: {detail}"], []
         return "contradicted", ["No call of this session was refused by a limit."], []
     if reason == "failed":
         failed = [e for e in of_tool or entries if e.get("outcome") == "error"]
         if failed:
             codes = sorted({str(e.get("reason_code") or "failed") for e in failed})
-            return "confirmed", [f"{failed[0].get('tool')} failed in this session (reason {', '.join(codes)})."], []
+            return "confirmed", [f"{name_of(failed[0])} failed in this session (reason {', '.join(codes)})."], []
         return ("premature" if tool and not of_tool else "contradicted"), [
             "No call of this session failed." if not (tool and not of_tool) else f"This session made no call to "
-                                                                                  f"{tool}."], try_first
+                                                                                  f"{said}."], try_first
     if reason == "insufficient_resources":
         full = [e for e in entries if e.get("reason_code") == "insufficient_resources"]
         if full:
-            return "confirmed", [f"{full[0].get('tool')} was refused for lack of disk space in this session."], []
+            return "confirmed", [f"{name_of(full[0])} was refused for lack of disk space in this session."], []
         return disk_fact(framework)
     if reason == "missing_information":
         seen = [e for e in entries if re.search(r'"(probe_id|board)":\s*"[^"]', str(e.get("args_preview") or ""))]
@@ -618,7 +637,7 @@ def check_cannot(inp: CannotIn, ctx, registry, framework, no_tool: Dict[str, str
     if reason == "not_supported":
         refused = [e for e in entries if e.get("reason_code") == "not_supported"]
         if refused:
-            return "confirmed", [f"{refused[0].get('tool')} was refused with reason not_supported in this session."], []
+            return "confirmed", [f"{name_of(refused[0])} was refused with reason not_supported in this session."], []
         return "unchecked", ["No call of this session was refused as not supported."], try_first
     return "unchecked", [], try_first
 
