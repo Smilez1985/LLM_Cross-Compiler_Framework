@@ -637,7 +637,7 @@ class TestCrawlerLanguages:
                                    text=body or "", content=(body or "").encode(), is_redirect=False)
 
         crawler = CrawlerManager(SimpleNamespace(config=config),
-                                 {"respect_robots": False, "request_delay": 0, **options})
+                                 {"request_delay": 0, **options}, _skip_robots_txt_for_tests=True)
         monkeypatch.setattr(crawler.session, "send", send)
         docs = crawler.crawl("http://93.184.215.14/")
         return {d.metadata["source"].rsplit("/", 1)[1] or "root": d.metadata.get("language") for d in docs}

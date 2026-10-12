@@ -24,8 +24,8 @@ CORE = {
 OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
             "stop_local_runtime", "run_benchmark"}
 LATER = {"probe_remote_device", "run_device_benchmark"}
-# Built by phase T so far (T1-T6); T7 (crawl), T8 (deploy) and T9 (community) add the rest of the core set.
-BUILT = CORE - {"crawl_docs_site", "list_devices", "create_deploy_package", "deploy_to_device", "list_packs",
+# Built by phase T so far (T1-T7); T8 (deploy) and T9 (community) add the rest of the core set.
+BUILT = CORE - {"list_devices", "create_deploy_package", "deploy_to_device", "list_packs",
                 "add_pack_from_index", "export_pack", "start_recipe_build"}
 
 

@@ -1016,6 +1016,20 @@ llm-cli tools folders list
 llm-cli tools folders remove mymodels
 ```
 
+### tools crawl-notice
+
+```
+llm-cli tools crawl-notice
+```
+
+Zeigt den einmaligen Deep-Ingest-Hinweis (was der Crawler liest, welche Opt-outs er beachtet, dass das Wissen auf
+diesem Rechner bleibt) und fragt, ob du ihn gelesen hast. KI-Clients und Ditto können erst dann darum bitten,
+Dokumentations-Websites zu crawlen (`crawl_docs_site`), wenn eine Person ihn gelesen hat, hier oder im Deep Ingest
+der GUI; kein Tool kann ihn bestätigen. Der Befehl braucht ein Terminal (weitergeleitete Antworten werden
+abgelehnt); die Bestätigung wird mit `via: cli` in `~/.llm-framework/crawl_notice.json` gespeichert und ins
+Audit-Log geschrieben (Akteur `cli`). Ist der Hinweis schon gelesen, wird er gezeigt und nichts ändert sich; nach
+einer Änderung seines Textes muss er erneut gelesen werden.
+
 ---
 
 ## mcp

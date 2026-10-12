@@ -1517,6 +1517,37 @@ def tools_folders_remove(ctx: FrameworkContext, label: str):
     console.print(f"[green]'{escape(label)}' removed.[/green]")
 
 
+@tools.command('crawl-notice')
+@pass_context
+def tools_crawl_notice(ctx: FrameworkContext):
+    """Read the one-time Deep Ingest notice (needs a terminal); AI clients may crawl only after a person read it"""
+    from orchestrator.utils.crawl_notice import CrawlNotice, notice_text
+    from orchestrator.utils.localization import current_language
+    _require_terminal("llm-cli tools crawl-notice")
+    ctx.require_framework()
+    notice = CrawlNotice(ctx.framework_manager.config.user_state_dir)
+    title, text = notice_text(current_language())
+    console.print(f"[bold]{escape(title)}[/bold]\n\n{escape(text)}\n")
+    if not notice.needed():
+        console.print(f"Already read (acknowledged in the {notice.acknowledged_via() or 'GUI or CLI'}).")
+        return
+    if not click.confirm("I have read the notice", default=False):
+        console.print("Not acknowledged: AI clients cannot crawl until a person has read it.")
+        sys.exit(1)
+    notice.acknowledge("cli")
+    registry = getattr(ctx.framework_manager, "tool_registry", None)
+    audit = getattr(registry, "audit", None)
+    if audit is not None:
+        try:
+            audit.record("cli", "crawl_notice_acknowledged", "framework", "person", "ok", arguments={"via": "cli"},
+                         approved=True)
+        except Exception as e:
+            console.print(f"[yellow]Acknowledged, but the audit log could not record it: {escape(str(e))}"
+                          "[/yellow]")
+    console.print("[green]Acknowledged. AI clients may now ask to crawl documentation sites (crawl_docs_site); "
+                  "you confirm every crawl.[/green]")
+
+
 @cli.group()
 def ditto():
     """Ditto, the AI assistant: sign-in (login, logout, auth), questions, evaluation and the local model"""

@@ -563,7 +563,7 @@ class RAGManager:
         if not self._connect():
             return {"success": False, "outcome": "failure",
                     "message": f"Knowledge base unavailable: {self.last_error}"}
-        self.create_snapshot(f"pre_ingest_{int(time.time())}")
+        snapshot = self.create_snapshot(f"pre_ingest_{int(time.time())}")  # None while the base is empty
 
         crawler, pages, chunks, error = None, 0, 0, None
         try:
@@ -582,7 +582,7 @@ class RAGManager:
         except Exception as e:
             error = redact_secrets(str(e))
             self.logger.error(f"Deep Ingest failed: {error}")
-        return self._crawl_result(crawler, pages, chunks, error)
+        return dict(self._crawl_result(crawler, pages, chunks, error), snapshot=snapshot)
 
     @staticmethod
     def _crawl_result(crawler: Any, pages: int, chunks: int, error: Optional[str]) -> Dict[str, Any]:

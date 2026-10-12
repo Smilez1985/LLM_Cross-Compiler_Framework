@@ -190,9 +190,10 @@ class TestCrawlerSecurity:
         from orchestrator.Core.crawler_manager import CrawlerManager
 
         def factory(pages, **options):
-            options.setdefault("respect_robots", False)
+            skip_robots = not options.pop("respect_robots", False)
             options.setdefault("request_delay", 0)
-            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)), options)
+            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)), options,
+                                     _skip_robots_txt_for_tests=skip_robots)
             web = FakeWeb(pages)
             monkeypatch.setattr(crawler.session, "send", web)
             return crawler, web
@@ -400,7 +401,7 @@ class TestConnectionPinning:
             monkeypatch.delenv("HTTP_PROXY", raising=False)
             monkeypatch.delenv("http_proxy", raising=False)
             crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)),
-                                     {"respect_robots": False, "request_delay": 0})
+                                     {"request_delay": 0}, _skip_robots_txt_for_tests=True)
 
             assert crawler.crawl(f"http://rebind.test:{port}/admin") == []
             assert hits == []
@@ -594,9 +595,10 @@ class TestCrawlerOptOuts:
         from orchestrator.Core.crawler_manager import CrawlerManager
 
         def factory(pages, **options):
-            options.setdefault("respect_robots", False)
+            skip_robots = not options.pop("respect_robots", False)
             options.setdefault("request_delay", 0)
-            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)), options)
+            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)), options,
+                                     _skip_robots_txt_for_tests=skip_robots)
             web = FakeWeb(pages)
             monkeypatch.setattr(crawler.session, "send", web)
             return crawler, web
@@ -986,9 +988,10 @@ class TestCrawlerLimits:
         from orchestrator.Core.crawler_manager import CrawlerManager
 
         def factory(pages, **options):
-            options.setdefault("respect_robots", False)
+            skip_robots = not options.pop("respect_robots", False)
             options.setdefault("request_delay", 0)
-            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)), options)
+            crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)), options,
+                                     _skip_robots_txt_for_tests=skip_robots)
             web = FakeWeb(pages)
             monkeypatch.setattr(crawler.session, "send", web)
             return crawler, web
@@ -1132,7 +1135,7 @@ class TestCrawlerLimits:
         site = f"http://docs.test:{server.server_address[1]}"
         try:
             crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)),
-                                     {"respect_robots": False, "request_delay": 0})
+                                     {"request_delay": 0}, _skip_robots_txt_for_tests=True)
             start = time_module.monotonic()
             docs = crawler.crawl(f"{site}/")
             elapsed = time_module.monotonic() - start
@@ -1170,51 +1173,101 @@ class TestCrawlerLimits:
 
 
 class TestCrawlsStayWithTheUser:
-    """Crawls start only from the GUI's Deep Ingest: MCP clients and Ditto have no way to start one, nor to
-    acknowledge the notice before the first crawl in the user's place."""
+    """Deep Ingest reaches AI callers in one way only (MCP design T7, DECISIONS round 1 item 1): the tool
+    crawl_docs_site, through CrawlJobService, asked every time. Nothing automated reaches the crawler any other way,
+    nothing automated acknowledges the one-time notice in the person's place, no tool but crawl_docs_site takes an
+    address to read, and no input or options dict switches an opt-out check off."""
 
     AUTOMATION = ["orchestrator/mcp_server.py", "orchestrator/Core/ditto_manager.py", "orchestrator/tools",
                   "orchestrator/llm"]
 
-    def test_automation_code_never_reaches_the_crawler(self):
+    @staticmethod
+    def names_in(path):
         import ast
-        from conftest import REPO_ROOT
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = []
+            if isinstance(node, ast.Attribute):
+                names.append(node.attr)
+            elif isinstance(node, ast.Name):
+                names.append(node.id)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                names.append(node.value)   # getattr(rag, "ingest_url")
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                names += [getattr(node, "module", None) or ""] + [a.name for a in node.names]
+            elif isinstance(node, ast.keyword) and node.arg:
+                names.append(node.arg)
+            for name in names:
+                yield getattr(node, "lineno", 0), name
 
+    def automation_files(self):
+        from conftest import REPO_ROOT
         files = []
         for entry in self.AUTOMATION:
             path = REPO_ROOT / entry
             files += sorted(path.rglob("*.py")) if path.is_dir() else [path]
-        offenders = []
-        for path in files:
-            for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-                names = []
-                if isinstance(node, ast.Attribute):
-                    names.append(node.attr)
-                elif isinstance(node, ast.Name):
-                    names.append(node.id)
-                elif isinstance(node, ast.Constant) and isinstance(node.value, str):
-                    names.append(node.value)   # getattr(rag, "ingest_url")
-                elif isinstance(node, (ast.Import, ast.ImportFrom)):
-                    names += [getattr(node, "module", None) or ""] + [a.name for a in node.names]
-                for name in names:
-                    if name in ("ingest_url", "crawl", "iter_crawl", "CrawlerManager", "CrawlNotice") or \
-                            "crawler_manager" in name or "crawl_notice" in name:
-                        offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}: {name}")
-        assert len(files) > 5 and offenders == []
+        assert len(files) > 5
+        return REPO_ROOT, files
 
-    def test_no_tool_crawls_or_takes_a_url(self, tmp_path):
+    def test_only_crawl_docs_site_reaches_the_crawler_and_only_through_the_job_service(self):
+        root, files = self.automation_files()
+        direct, service = [], []
+        for path in files:
+            rel = path.relative_to(root).as_posix()
+            for line, name in self.names_in(path):
+                if name in ("ingest_url", "crawl", "iter_crawl", "CrawlerManager") or "crawler_manager" in name:
+                    direct.append(f"{rel}:{line}: {name}")
+                if name == "CrawlJobService" or "crawl_jobs" in name:
+                    service.append(rel)
+        assert direct == []
+        assert set(service) == {"orchestrator/tools/tools_crawl.py"}
+        # The job service itself reaches the crawler through the knowledge base's ingest_url only.
+        names = {name for _, name in self.names_in(root / "orchestrator/Core/crawl_jobs.py")}
+        assert "ingest_url" in names and not names & {"CrawlerManager", "iter_crawl", "crawler_manager"}
+
+    def test_nothing_automated_acknowledges_the_notice(self):
+        root, files = self.automation_files()
+        offenders = []
+        for path in files + [root / "orchestrator/Core/crawl_jobs.py"]:
+            for line, name in self.names_in(path):
+                if name in ("acknowledge", "CrawlNotice") or "crawl_notice" in name:
+                    if path.name == "crawl_jobs.py" and name != "acknowledge":
+                        continue   # it reads CrawlNotice.needed(); it never acknowledges
+                    offenders.append(f"{path.relative_to(root)}:{line}: {name}")
+        assert offenders == []
+
+    def test_only_crawl_docs_site_takes_an_address_to_read(self, tmp_path):
         from unittest.mock import Mock
         from orchestrator.tools.framework_tools import register_framework_tools
         from orchestrator.tools.policy import PolicyStore
         from orchestrator.tools.registry import ToolRegistry
 
         registry = register_framework_tools(ToolRegistry(PolicyStore(tmp_path)), SimpleNamespace(build_service=Mock()))
-        assert registry.list()
+        assert "crawl_docs_site" in {s.name for s in registry.list()}
         for spec in registry.list():
-            assert not re.search(r"crawl|ingest|url|fetch", spec.name + spec.description, re.I), spec.name
-            # The one named exception (MCP design 2.6, DECISIONS round 4 item 4): create_target_module takes vendor
-            # addresses (a pip index; apt sources and downloads inside its lists) that only the person-approved image
-            # build fetches; the tool itself never fetches them (test_targets_modules.py, test_vendor_addresses_are_
-            # never_fetched_by_the_tool). Every other tool takes no address at all.
+            if spec.name != "crawl_docs_site":
+                assert not re.search(r"crawl|ingest|fetch", spec.name + spec.description, re.I), spec.name
+            # create_target_module takes vendor addresses (a pip index; apt sources and downloads inside its lists)
+            # that only the person-approved image build fetches (MCP design 2.6, DECISIONS round 4 item 4); the
+            # tool itself never fetches them (test_targets_modules.py). crawl_docs_site takes its start addresses.
             urls = [f for f in spec.input_model.model_fields if "url" in f.lower()]
-            assert not urls or (spec.name == "create_target_module" and urls == ["pip_index_url"]), spec.name
+            allowed = {"create_target_module": ["pip_index_url"], "crawl_docs_site": ["start_urls"]}
+            assert not urls or urls == allowed.get(spec.name), spec.name
+        crawl = registry.get("crawl_docs_site")
+        assert not {"respect_robots", "request_delay", "delay", "robots"} & set(crawl.input_model.model_fields)
+
+    def test_no_options_dict_switches_robots_txt_off(self, tmp_path):
+        from orchestrator.Core.config_manager import ConfigManager
+        from orchestrator.Core.crawler_manager import CrawlerManager
+
+        crawler = CrawlerManager(SimpleNamespace(config=ConfigManager(tmp_path)),
+                                 {"respect_robots": False, "max_pages": 3})
+        assert crawler.respect_robots is True and crawler.max_pages == 3
+
+    def test_no_product_code_uses_the_test_only_robots_switch(self):
+        from conftest import REPO_ROOT
+        offenders = []
+        for path in sorted((REPO_ROOT / "orchestrator").rglob("*.py")):
+            for line, name in self.names_in(path):
+                if name == "_skip_robots_txt_for_tests" and path.name != "crawler_manager.py":
+                    offenders.append(f"{path.relative_to(REPO_ROOT)}:{line}")
+        assert offenders == []
