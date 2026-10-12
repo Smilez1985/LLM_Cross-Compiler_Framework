@@ -737,7 +737,7 @@ class TestChatWindow:
         window._on_tool_used(use)  # shown while the turn runs
         window._on_ai_response(ChatReply(question="second?", text="answer", new_messages=turn, tools=[use]))
         assert window.history.messages == turn
-        assert "Used tool: List targets" in window.txt_display.toPlainText()
+        assert "Used tool: List targets" in window.feed_view.plain_text()
         saved = ChatHistory.load(window.history_file)
         assert [t.text for t in saved.transcript] == ["second?", "Used tool: List targets", "answer"]
         assert Path(window.history_file).parent == window.framework.config.user_state_dir
@@ -750,12 +750,18 @@ class TestChatWindow:
             '[{"role": "user", "content": "hi"}, {"role": "assistant", "content": null}]')
         win = chat_window.ChatWindow(framework)
         assert [m.text() for m in win.history.messages] == ["hi"]
-        assert "hi" in win.txt_display.toPlainText()
+        assert "hi" in win.feed_view.plain_text()
 
     def test_model_output_is_rendered_as_text(self, window):
-        window._add_message('<a href="https://evil.example">click</a><img src=x>', False)
-        assert "evil.example" in window.txt_display.toPlainText()
-        assert 'href="https://evil.example"' not in window.txt_display.toHtml()
+        # The chat tab moved into the panel (design 5.9); a model's answer is still never rich text there.
+        from PySide6.QtCore import Qt
+        from PySide6.QtWidgets import QLabel
+        markup = '<a href="https://evil.example">click</a><img src=x>'
+        window._on_ai_response(ChatReply(question="q", text=markup, new_messages=[]))
+        assert markup in window.feed_view.plain_text()
+        labels = [label for label in window.feed_view.findChildren(QLabel) if "evil.example" in label.text()]
+        assert labels and all(label.textFormat() == Qt.PlainText and not label.openExternalLinks()
+                              and not label.textInteractionFlags() & Qt.LinksAccessibleByMouse for label in labels)
 
 
 # --- no LiteLLM ---------------------------------------------------------------------------------------------------

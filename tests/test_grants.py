@@ -513,7 +513,8 @@ class TestLifecycle:
         assert dialog.grant_table.item(0, 1).text() == "the MCP token 'laptop'"
         assert dialog.grant_table.item(0, 2).text().startswith("Install a pack: ")
         shown = []
-        monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
+        from orchestrator.gui import plain   # the notice is a plain-text box (design 5.2 R1, SEC-M2)
+        monkeypatch.setattr(plain, "_exec", lambda box: shown.append(box.text()) or QMessageBox.Ok)
         MainOrchestrator._announce_cli_grants(window)
         assert "Install a pack for the MCP token 'laptop'" in shown[0] and "mcp:laptop" not in shown[0]
         listed = flat(cli(env.registry, "tools", "permissions", "--grants", terminal=False).output)
@@ -622,7 +623,8 @@ class TestLifecycle:
         grant = grant_for(env, "know-v", via="cli")
         assert grant.announced is False
         shown = []
-        monkeypatch.setattr(QMessageBox, "information", lambda *a, **k: shown.append(a[2]))
+        from orchestrator.gui import plain   # the notice is a plain-text box (design 5.2 R1, SEC-M2)
+        monkeypatch.setattr(plain, "_exec", lambda box: shown.append(box.text()) or QMessageBox.Ok)
         window = SimpleNamespace(framework=SimpleNamespace(tool_registry=env.registry),
                                  status=SimpleNamespace(showMessage=lambda *a, **k: None))
         MainOrchestrator._announce_cli_grants(window)

@@ -687,6 +687,17 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Speaking names (`Core/speaking_names.py`) show exact framework ids and masked values in AI text by name at display
   time, never inside code and never for a near match, and keep the original words; `llm-cli doctor` checks that the
   feed can be written and its newest rows verify. Nothing removes rows by itself yet.
+- **The chat panel on the right of the main window** (delegation design 5.1-5.9): a dock (F9 or **View > AI Chat
+  Panel**, Ctrl+Shift+C writes in it, a click on Ditto or the toolbar button **AI Chat (n)** shows it; movable to the
+  left, floatable) with your conversation with Ditto, notices and the records of what AI apps did, read once a second
+  from the signed chat feed of every framework process without ever waiting on it. Questions that wait come from the
+  pending approvals and stay under **Needs you** with who asks, what and the time left; a new one shows a hidden panel
+  without taking the keyboard focus (setting `chat_panel_auto_show`, which an AI cannot change). A filter (All, Needs
+  you, Decisions, Ditto chat), routine decisions of one app folded into one line, "New since you last looked" with a
+  summary counted from the entries, speaking names in AI text with "Show the original words", keyboard moves between
+  entries, screen-reader announcements (questions with priority) and English/German texts
+  (`orchestrator/utils/l10n_chat.py`). Where the panel sits, whether it is shown, its filter and the newest entry you
+  saw are kept in `gui_state.json` in the per-user folder (never in QSettings); a damaged file gives the defaults.
 
 ### Changed
 - **Refused MCP calls carry their reason code as structured content** (`{"error": {"code", "field"}}`, framework
@@ -888,6 +899,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **Packaging and deploying say why they failed**: `DeploymentManager` returns the reason (no Docker, an image not
   pinned, the host key changed, the exit status of `deploy.sh`) instead of `None` or `False` with a log line (G23);
   `llm-cli deploy package` prints it. A package is written under a temporary name and renamed when complete.
+
+- **The AI Chat tab moved into the chat panel**: the main window no longer has the tab; everything it did works in
+  the panel (Ditto's turns in a worker thread, the confirmation dialog of Ditto's tools, the access line, the saved
+  conversation in `chat_history.json`, which is taken into the chat feed once). `gui/chat_window.py` keeps
+  `ChatWorker`, `describe_access` and `ChatWindow` (now the panel) with the old attribute names. Enter sends, Shift+Enter
+  adds a line. The status-bar notices for a fix proposal of an AI client and for a use of a standing approval also
+  arrive in the chat.
+- **"Clear chat" lists what it deletes before it asks**: the former "Clear History" deleted Ditto's whole chat history
+  after a plain "Are you sure?". The question now lists, for Ditto's conversation (`chat_history.json`) and for the
+  conversation rows of the chat feed, the full path, the file name, the size and what it is, says how many records of
+  what AI apps did are only hidden (never deleted), and has "No, keep everything" as the default. Both parts are
+  written to the audit log (`feed_cleared`, with the hash of what was shown) before anything is deleted; without the
+  audit log, or when the chat changed while you were asked, nothing is deleted.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -1467,6 +1491,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   in a quoted text with more than one path starts a path of its own, and a space continues a path when the next word
   is clearly part of it (or, inside a known folder, the longer path exists), so the error names a label or the file
   name only.
+
+- **No rich text for untrusted text in the chat panel and the windows it touches** (design 5.2 R1-R7, SEC-M2): every
+  text of the panel is a plain-text label (no rich-text widget or call exists in `gui/chat_panel/`, a source test
+  checks it, also in the approvals window, the settings dialogs and the main window); hidden characters are shown as
+  escapes; a value from outside the framework is quoted and stays on its line, so a file name cannot pose as a line of
+  the framework's own text; nothing is clickable inline (an address opens only after a question showing it whole); an
+  app's look comes from its caller id, never from its own name, and an app calling itself Ditto, the framework or the
+  system is shown as calling itself so. Message boxes, tooltips, desktop notifications and button labels of the new
+  and touched windows go through `gui/plain.py` (plain-text boxes, escaped tooltips, notifications without markup
+  characters, no keyboard mnemonic from an "&" in a name); no key on a chat entry approves or clicks anything.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

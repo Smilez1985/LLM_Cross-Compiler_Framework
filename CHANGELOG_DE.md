@@ -786,6 +786,19 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Werte in KI-Text bei der Anzeige mit Namen, nie in Code und nie bei einer bloßen Ähnlichkeit, und behalten die
   ursprünglichen Worte; `llm-cli doctor` prüft, dass sich der Verlauf schreiben lässt und seine neuesten Zeilen
   stimmen. Noch entfernt nichts Zeilen von selbst.
+- **Der Chat-Bereich rechts im Hauptfenster** (Delegations-Entwurf 5.1-5.9): ein andockbarer Bereich (F9 oder
+  **Ansicht > KI-Chat-Bereich**, Strg+Umschalt+C schreibt hinein, ein Klick auf Ditto oder die Schaltfläche **KI-Chat
+  (n)** zeigt ihn; nach links verschiebbar, frei schwebend möglich) mit deinem Gespräch mit Ditto, Hinweisen und den
+  Einträgen darüber, was KI-Apps getan haben, einmal pro Sekunde aus dem signierten Chat-Verlauf aller Prozesse des
+  Frameworks gelesen, ohne je darauf zu warten. Wartende Fragen kommen aus den ausstehenden Freigaben und bleiben unter
+  **Braucht dich** mit wer fragt, was und wie viel Zeit bleibt; eine neue zeigt einen verborgenen Bereich, ohne den
+  Tastaturfokus zu nehmen (Einstellung `chat_panel_auto_show`, die keine KI ändern kann). Ein Filter (Alles, Braucht
+  dich, Entscheidungen, Chat mit Ditto), Routine-Entscheidungen einer App in einer Zeile zusammengefasst, „Neu, seit
+  du zuletzt geschaut hast“ mit einer aus den Einträgen gezählten Zusammenfassung, sprechende Namen in KI-Text mit
+  „Ursprüngliche Worte zeigen“, Tastaturwege zwischen den Einträgen, Ansagen für Bildschirmleser (Fragen mit Vorrang)
+  und englische/deutsche Texte (`orchestrator/utils/l10n_chat.py`). Wo der Bereich sitzt, ob er gezeigt wird, sein
+  Filter und der neueste gesehene Eintrag stehen in `gui_state.json` im Benutzerordner (nie in QSettings); eine
+  beschädigte Datei ergibt die Vorgaben.
 
 ### Geändert
 - **Abgelehnte MCP-Aufrufe tragen ihren Grund-Code als strukturierten Inhalt** (`{"error": {"code", "field"}}`, nur
@@ -1013,6 +1026,20 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Docker, ein nicht festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`) statt `None`
   oder `False` mit einer Logzeile (G23); `llm-cli deploy package` gibt ihn aus. Ein Paket wird unter einem vorläufigen
   Namen geschrieben und erst umbenannt, wenn es vollständig ist.
+
+- **Der Reiter „AI Chat“ ist in den Chat-Bereich umgezogen**: Das Hauptfenster hat den Reiter nicht mehr; alles,
+  was er konnte, funktioniert im Bereich (Dittos Runden in einem Worker-Thread, der Bestätigungsdialog für Dittos
+  Tools, die Zeile mit dem Zugang, das gespeicherte Gespräch in `chat_history.json`, das einmal in den Chat-Verlauf
+  übernommen wird). `gui/chat_window.py` behält `ChatWorker`, `describe_access` und `ChatWindow` (jetzt der Bereich)
+  mit den alten Attributnamen. Enter sendet, Umschalt+Enter fügt eine Zeile ein. Die Hinweise der Statusleiste zu einem
+  Korrekturvorschlag eines KI-Clients und zur Nutzung einer Dauerfreigabe kommen auch im Chat an.
+- **„Chat leeren“ zählt auf, was es löscht, bevor es fragt**: Das frühere „Clear History“ löschte Dittos ganzen
+  Chatverlauf nach einem bloßen „Sind Sie sicher?“. Die Frage nennt jetzt für Dittos Gespräch (`chat_history.json`)
+  und für die Gesprächszeilen des Chat-Verlaufs den vollständigen Pfad, den Dateinamen, die Größe und was es ist, sagt,
+  wie viele Einträge darüber, was KI-Apps getan haben, nur ausgeblendet (nie gelöscht) werden, und hat „Nein, alles
+  behalten“ als Vorgabe. Beide Teile werden ins Audit-Log geschrieben (`feed_cleared`, mit dem Hash des Gezeigten),
+  bevor etwas gelöscht wird; ohne Audit-Log, oder wenn sich der Chat geändert hat, während du gefragt wurdest, wird
+  nichts gelöscht.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -1671,6 +1698,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (`/usr/bin:/home/...`) oder in einem Text in Anführungszeichen mit mehr als einem Pfad beginnt einen eigenen Pfad,
   und ein Leerzeichen setzt einen Pfad fort, wenn das nächste Wort klar dazugehört (oder, in einem bekannten Ordner,
   der längere Pfad existiert), sodass der Fehler nur eine Bezeichnung oder den Dateinamen nennt.
+
+- **Kein Rich Text für nicht vertrauenswürdigen Text im Chat-Bereich und in den Fenstern, die er berührt**
+  (Entwurf 5.2 R1-R7, SEC-M2): Jeder Text des Bereichs ist ein Label mit reinem Text (in `gui/chat_panel/` gibt es kein
+  Rich-Text-Widget und keinen solchen Aufruf, ein Quelltext-Test prüft es, auch im Freigabe-Fenster, in den
+  Einstellungsdialogen und im Hauptfenster); versteckte Zeichen erscheinen als Escape-Folgen; ein Wert von außerhalb
+  des Frameworks steht in Anführungszeichen und bleibt in seiner Zeile, sodass ein Dateiname nicht als Zeile des
+  Frameworks auftreten kann; nichts ist inline anklickbar (eine Adresse öffnet sich nur nach einer Frage, die sie ganz
+  zeigt); das Aussehen einer App kommt aus ihrer Aufrufer-Kennung, nie aus ihrem eigenen Namen, und eine App, die sich
+  Ditto, das Framework oder das System nennt, wird als „nennt sich so“ gezeigt. Meldungsfenster, Tooltips,
+  Desktop-Benachrichtigungen und Beschriftungen von Schaltflächen der neuen und geänderten Fenster laufen über
+  `gui/plain.py` (Meldungsfenster mit reinem Text, maskierte Tooltips, Benachrichtigungen ohne Markup-Zeichen, kein
+  Tastenkürzel aus einem „&“ in einem Namen); keine Taste auf einem Chat-Eintrag gibt etwas frei oder klickt etwas.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit
