@@ -14,6 +14,7 @@ dataset is taken only when the recipe names one, and must be exactly the file it
 Recipe values (model, target, ids) come from a community pack: the question labels them as pack text.
 """
 
+import dataclasses
 from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -86,8 +87,14 @@ def recipe_tool_specs(registry, service, fields: Dict[str, Any], limits, handle_
         bound = dict(base.bound)
         bound["recipe_id"] = prov.id
         bound["recipe_sha256"] = service.recipe_digest(recipe)  # every field, checked again at commit
-        return CallFacts(consequence=f"Builds the community recipe {recipe.id}: " + base.consequence,
-                         facts=tuple(facts) + tuple(base.facts), bound=bound, cap=base.cap)
+        # The build plan's warnings, numbers and digest keys stay (first_build_unconfirmed covers the recipe pack too);
+        # the whole recipe is part of what a decision is bound to.
+        return dataclasses.replace(
+            base, consequence=f"Builds the community recipe {recipe.id}: " + base.consequence,
+            consequence_template=f"Builds the community recipe {recipe.id}: " + base.consequence_template,
+            facts=tuple(facts) + tuple(base.facts), bound=bound,
+            digest_keys=tuple(base.digest_keys) + ("recipe_id", "recipe_sha256"),
+            names={**dict(base.names), "recipe": recipe.id}, tool="")
 
     def target_match(recipe) -> str:
         """Whether the installed target's files are the ones the recipe was built with (a different result is

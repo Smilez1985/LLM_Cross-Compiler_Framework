@@ -9,6 +9,13 @@ the board, the mounts (by label), the target's trust, whether a Docker image is 
 build sandbox. check_build_request returns it as a dry run; start_build shows it in its question and builds exactly
 the commit it shows. Anything that stops the build is a `problem` with a reason code and a next step; the hardware
 estimate never is one by itself.
+
+The facts model of the delegation design (4.1-4.6, work package WP4): every problem names its blocker of the facts
+catalogue; the plan's warnings (situation: tight disk, large download, tight or too small memory; security and legal:
+pickle weights, a base image outside the Docker Official Images or not pinned, an unreviewed target, the first build
+of build code an AI made or installed, facts that could not be checked, gated models and licences) go with the
+question. Free space, exact byte counts and the hardware sentences are volatile, so they alone never make a question
+new: the decision digest covers the request, the size class, the warnings and what a confirmation binds.
 """
 
 import re
@@ -20,7 +27,8 @@ from typing import Any, Dict, List, Optional, Tuple
 from orchestrator.Core import disk_plan
 from orchestrator.Core.disk_plan import DiskCheck, DiskNeed, Fit, gb
 from orchestrator.Core.hf_lookup import HubLookupError, ModelFacts
-from orchestrator.tools.spec import CallFacts, Fact
+from orchestrator.tools import facts_catalog as catalog
+from orchestrator.tools.spec import CallFacts, CallWarning, Fact
 
 REPO_TEXT = "repository text from huggingface.co"
 TARGET_TEXT = "from the target's files"
@@ -33,6 +41,7 @@ class Problem:
     code: str
     message: str
     next: str = ""
+    blocker: str = ""            # the facts catalogue's blocker code (disk_full, offline_mode, ...)
 
 
 @dataclass
@@ -67,6 +76,14 @@ class BuildPlan:
     grant: Optional[Dict[str, Any]] = None  # facts for grants.BUILD_RULE; None: outside every standing approval
     # what a build the person confirmed records (confirmed_builds): the target and recipe as installed, base images
     confirm_record: Optional[Dict[str, Any]] = None
+    # the grant facts without the disk check of a standing approval: the decision digest covers them, never the free
+    # space that decides whether `grant` is set
+    grant_scope: Optional[Dict[str, Any]] = None
+    weights: str = ""            # safetensors, gguf, pickle, none or other (a local model's from its file names)
+    # build code an AI made or installed that the person has not confirmed a build of yet ([Q1]): (kind, id)
+    first_build: List[Tuple[str, str]] = field(default_factory=list)
+    # base images outside the Docker Official Images the person never confirmed in a build of this target
+    unconfirmed_images: List[str] = field(default_factory=list)
     problems: List[Problem] = field(default_factory=list)
 
     # --- the question --------------------------------------------------------------------------------------------
@@ -106,7 +123,7 @@ class BuildPlan:
             facts.append(Fact("Commit", self.commit_text()))
             facts.append(Fact("Download", f"{len(f.staged)} files, about {gb(self.download)}"
                               + (f" ({gb(self.cached)} already staged for this commit)" if self.cached else "")
-                              + ("" if self.download_known else "; some sizes unknown")))
+                              + ("" if self.download_known else "; some sizes unknown"), volatile=True))
             weights = {"safetensors": "safetensors", "gguf": "GGUF",
                        "pickle": "pickle files only (.bin/.pt): loading them can run code inside the build "
                                  "container; the build sandbox contains it", "none": "no weight files found"}
@@ -128,10 +145,12 @@ class BuildPlan:
                 facts.append(Fact("Hugging Face", self.hub_problem, "a reply from huggingface.co or the network"))
         elif self.source == "local":
             facts.append(Fact("Local model", f"{self.model}, {gb(self.local_bytes)}"))
+        # Free space and the estimates' numbers change while a question waits: shown, never part of the digest (their
+        # verdicts are, as warnings and as the fit numbers).
         for check in self.disk:
-            facts.append(Fact("Disk", check.sentence()))
-        facts.append(Fact("Hardware", self.host.sentence("conversion on this computer")))
-        facts.append(Fact("Hardware", self.target.sentence(f"running on {r.board or 'the board'}")))
+            facts.append(Fact("Disk", check.sentence(), volatile=True))
+        facts.append(Fact("Hardware", self.host.sentence("conversion on this computer"), volatile=True))
+        facts.append(Fact("Hardware", self.target.sentence(f"running on {r.board or 'the board'}"), volatile=True))
         if self.mounts:
             facts.append(Fact("Mounted into the build", ", ".join(self.mounts) + " (read-only)"))
         facts.append(Fact("Target", f"{self.target_trust}" + (f", support level {self.support_level}"
@@ -154,10 +173,133 @@ class BuildPlan:
                 "local_bytes": self.local_bytes, "format": self.request.format,
                 "quantization": self.request.quantization, "optimization": self.optimization,
                 "target": self.request.target, "board": self.request.board, "grant": self.grant,
-                "confirm_record": self.confirm_record}
+                "confirm_record": self.confirm_record, "size_class": catalog.size_class(self.size()),
+                "grant_scope": self.grant_scope, "weights": self.weights,
+                # False when the Hub could not be asked: under a standing approval or a delegation that is the blocker
+                # commit_required (tools_builds.require_commit), never a build of an unseen commit
+                "commit_resolved": self.source != "hf" or bool(self.facts is not None and self.facts.commit)}
+
+    # What a decision about the build is bound to (design 4.4): the request, the size class, the grant facts without
+    # the disk-derived flag, what a confirmed build records (target, recipe, module, base image digests) and the
+    # weights class; never the exact byte counts, the free space or the standing approval's disk check.
+    DIGEST_KEYS = ("model", "revision", "format", "quantization", "optimization", "target", "board", "size_class",
+                   "grant_scope", "confirm_record", "weights")
+
+    def size(self) -> int:
+        """The model's size: the download of the commit, or the local file or folder."""
+        return int(self.download if self.source == "hf" else self.local_bytes)
+
+    def consequence_template(self) -> str:
+        """The consequence with placeholders where volatile values stand (free space, sizes, the estimates)."""
+        r = self.request
+        what = f"{self.target_name or r.target}" + (f" {r.board}" if r.board else "")
+        build = (f"runs a Docker build for {what} ({r.format}" + (f" {r.quantization}" if r.quantization else "")
+                 + f", optimization {self.optimization}) that may take a long time")
+        if self.source == "hf":
+            first = f"Downloads {{download}} from huggingface.co ({self.commit_text()}) and {build}."
+        else:
+            first = f"Uses the local model {self.model} and {build}."
+        parts = [first] + (["Disk: {disk}."] if self.disk else [])
+        parts += ["Conversion on this computer: {host_fit}.", f"On {r.board or 'the board'}: {{target_fit}}."]
+        return " ".join(parts)
+
+    def warnings(self) -> Tuple[CallWarning, ...]:
+        """The warnings the person (or, for situation warnings, an AI with a delegation) weighs before this build."""
+        found: List[CallWarning] = []
+        tight = [c for c in self.disk if c.verdict == "tight"]
+        if tight:
+            worst = min(tight, key=lambda c: c.after - c.reserve)
+            found.append(catalog.warn("disk_tight", free_after_gb=catalog.gb_number(worst.after),
+                                      reserve_gb=catalog.gb_number(worst.reserve)))
+        if self.source == "hf" and self.download_known and self.download >= catalog.LARGE_DOWNLOAD_BYTES:
+            found.append(catalog.warn("download_large", download_gb=catalog.gb_number(self.download)))
+        for fit, prefix in ((self.host, "host_fit"), (self.target, "target_fit")):
+            if fit.state in ("tight", "does_not_fit"):
+                found.append(catalog.warn(f"{prefix}_{fit.state}", needed_gb=catalog.gb_number(fit.needed),
+                                          usable_gb=catalog.gb_number(fit.usable)))
+        unknown: List[str] = []
+        if self.source == "hf":
+            f = self.facts
+            if f is None:
+                unknown.append("huggingface")  # the Hub did not answer: licence, gating and format are unknown
+            else:
+                if f.weights == "pickle":
+                    found.append(catalog.warn("pickle_weights"))
+                if f.gated != "false":
+                    found.append(catalog.warn("gated_model"))
+                if f.base_gated is None:
+                    unknown.append("base_model")
+                elif f.base_gated:
+                    found.append(catalog.warn("base_model_gated"))
+                if f.license_class == "restrictive":
+                    found.append(catalog.warn("license_restrictive"))
+                elif f.license_class != "permissive":
+                    if (f.license or "unknown").strip().lower() == "unknown":
+                        unknown.append("licence")  # no licence named at all: unknown, never "no problem"
+                    else:
+                        found.append(catalog.warn("license_unknown"))
+        elif self.weights == "pickle":
+            found.append(catalog.warn("pickle_weights"))
+        elif self.weights not in ("safetensors", "gguf"):
+            unknown.append("weights_format")
+        if unknown:
+            found.append(catalog.facts_unknown(*unknown))
+        if self.unconfirmed_images:
+            found.append(catalog.warn("base_image_unofficial", registry=_registry_word(self.unconfirmed_images[0])))
+            if any(not _pinned_image(i) for i in self.unconfirmed_images):
+                found.append(catalog.warn("base_image_unpinned"))
+        if self.target_trust == "local":
+            found.append(catalog.warn("target_unreviewed"))
+        if self.first_build:
+            found.append(catalog.warn("first_build_unconfirmed"))
+        return tuple(found)
+
+    def numbers(self) -> Dict[str, Any]:
+        """Closed values for texts and rules (the stable and volatile keys of facts_catalog.NUMBER_KEYS)."""
+        numbers: Dict[str, Any] = {"size_class": catalog.size_class(self.size()), "host_fit": self.host.state,
+                                   "target_fit": self.target.state}
+        params = self.facts.parameters if self.facts is not None else None
+        if isinstance(params, int) and not isinstance(params, bool):
+            numbers["parameters"] = params
+        if self.source == "hf":
+            numbers.update(download_bytes=int(self.download), cached_bytes=int(self.cached))
+        if self.disk:
+            numbers["needed_bytes"] = sum(c.needed for c in self.disk)
+            worst = min(self.disk, key=lambda c: c.after - c.reserve)
+            numbers.update(free_after_bytes=int(worst.after), reserve_bytes=int(worst.reserve))
+        for fit, prefix in ((self.host, "host"), (self.target, "target")):
+            if fit.needed is not None:
+                numbers[f"{prefix}_needed_bytes"] = int(fit.needed)
+            if fit.usable is not None:
+                numbers[f"{prefix}_usable_bytes"] = int(fit.usable)
+        return numbers
+
+    def names(self) -> Dict[str, str]:
+        """Speaking names for the person's short summary."""
+        names = {"model": self.model, "target": self.target_name or self.request.target}
+        if self.request.board:
+            names["board"] = self.request.board
+        return names
 
     def call_facts(self) -> CallFacts:
-        return CallFacts(consequence=self.consequence(), facts=self.question_facts(), bound=self.bound())
+        return CallFacts(consequence=self.consequence(), facts=self.question_facts(), bound=self.bound(),
+                         warnings=self.warnings(), numbers=self.numbers(), scope={"size_bytes": self.size()},
+                         digest_keys=self.DIGEST_KEYS, consequence_template=self.consequence_template(),
+                         names=self.names())
+
+
+def _registry_word(image: str) -> str:
+    """The registry an image comes from, as a closed word for a warning's numbers (docker.io for Docker Hub)."""
+    ref = image.split("@", 1)[0]
+    first = ref.split("/", 1)[0]
+    host = first if "/" in ref and ("." in first or ":" in first or first == "localhost") else "docker.io"
+    word = re.sub(r"[^A-Za-z0-9_.+-]", "-", host).strip("-.+_")[:40]
+    return word or "unknown"
+
+
+def _pinned_image(image: str) -> bool:
+    from orchestrator.Core.confirmed_builds import pinned
+    return pinned(image)
 
 
 # --- helpers -------------------------------------------------------------------------------------------------------
@@ -330,6 +472,9 @@ def confirm_record(plan: "BuildPlan", framework, target_folder: Optional[Path],
     images = _target_images(target_folder, plan.base_images or None)
     record = {"target": plan.request.target, "installed_via": installed_via, "pack_sha256": pack_sha,
               "base_images": images}
+    module = module_record(target_folder)
+    if module:
+        record["module"] = module
     if recipe:
         record["recipe"] = {"id": recipe.get("id"), "installed_via": recipe.get("installed_via") or "",
                             "pack_sha256": recipe.get("pack_sha256") or ""}
@@ -344,6 +489,79 @@ def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[P
     base images (Docker Official Images, or a digest-pinned image the person confirmed in a build of this target
     before), the source with gating, base-model gating and licence, and the download size. None (the person is asked)
     when the plan has a problem or the disk does not keep the larger reserve of a standing approval (20 GiB or 10 %)."""
+    scope = grant_scope(plan, framework, target_folder, pin, record)
+    return scope if scope is not None and _standing_fits(plan, service, ledger) else None
+
+
+def _standing_fits(plan: "BuildPlan", service, ledger) -> bool:
+    """Whether every disk keeps the larger reserve of a standing approval (20 GiB or 10 %) for this build."""
+    if not plan.needs:
+        return True
+    standing = disk_plan.check_disk(plan.needs, ledger, standing=True, disk_usage=service.disk_usage)
+    return all(c.fits for c in standing)
+
+
+def module_record(target_folder: Optional[Path]) -> Optional[Dict[str, str]]:
+    """What binds a module an AI created without the person answering the question itself (under a delegation): the
+    channel it was created under and its definition's sha256 (target.yml metadata `created_under`,
+    `definition_sha256`); None for every other target."""
+    if target_folder is None:
+        return None
+    try:
+        import yaml
+        meta = yaml.safe_load((Path(target_folder) / "target.yml").read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 - no readable target.yml: no module record
+        return None
+    info = meta.get("metadata") if isinstance(meta, dict) else None
+    if not isinstance(info, dict) or not info.get("created_under"):
+        return None
+    return {"created_under": str(info.get("created_under"))[:80],
+            "definition_sha256": str(info.get("definition_sha256") or "")[:64]}
+
+
+def needs_first_confirmation(installed_via: Optional[str]) -> bool:
+    """Whether build code reached this computer without the person seeing it ([Q1]): installed or created under a
+    standing approval or a delegation, or transferred from another computer."""
+    from orchestrator.Core.confirmed_builds import unattended
+    return unattended(installed_via) or str(installed_via or "") == "transferred"
+
+
+def confirmation_state(framework, record: Dict[str, Any]) -> Tuple[List[Tuple[str, str, str]], List[str]]:
+    """(the target, recipe or module an AI made or installed that the person has not confirmed a build of, bound to its
+    pack sha256 or definition sha256, as (kind, id, channel); the base images outside the Docker Official Images the
+    person never confirmed in a build of exactly this installed target with exactly that pinned image)."""
+    from orchestrator.Core.confirmed_builds import ConfirmedBuilds
+    store = None
+    state = state_dir(framework)
+    if state is not None:
+        store = ConfirmedBuilds.for_framework(framework, state)
+    pending: List[Tuple[str, str, str]] = []
+    parts = [("target", record["target"], record.get("installed_via") or "", record.get("pack_sha256") or "")]
+    if record.get("recipe"):
+        r = record["recipe"]
+        parts.append(("recipe", r["id"], r.get("installed_via") or "", r.get("pack_sha256") or ""))
+    for kind, item_id, via, sha in parts:
+        if needs_first_confirmation(via) and not (store is not None and store.confirmed(
+                kind, item_id, installed_via=via, pack_sha256=sha)):
+            pending.append((kind, str(item_id), via))
+    module = record.get("module")
+    if isinstance(module, dict) and needs_first_confirmation(module.get("created_under")):
+        digest = str(module.get("definition_sha256") or "")
+        # a module is only ever confirmed for its content: recreated under the same name, it is asked again
+        if not (digest and store is not None and store.confirmed("module", record["target"],
+                                                                  definition_sha256=digest)):
+            pending.append(("module", str(record["target"]), str(module.get("created_under"))))
+    images = [i for i in record.get("base_images") or [] if not _official(i) and not (
+        store is not None and store.image_confirmed(record["target"], i,
+                                                    installed_via=record.get("installed_via") or "",
+                                                    pack_sha256=record.get("pack_sha256") or ""))]
+    return pending, images
+
+
+def grant_scope(plan: "BuildPlan", framework, target_folder: Optional[Path], pin,
+                record: Optional[Dict[str, Any]] = None) -> Optional[dict]:
+    """The facts of grant_facts without the disk check of a standing approval (None when the plan has a problem): the
+    part of a standing approval's facts a decision digest may cover, since free space never belongs to it."""
     if plan.problems:
         return None
     trust = "other"
@@ -356,29 +574,15 @@ def grant_facts(plan: "BuildPlan", service, framework, target_folder: Optional[P
             trust = "shipped"
     except Exception:  # noqa: BLE001 - trust that cannot be read is no trust
         trust = "other"
-    if plan.needs:
-        standing = disk_plan.check_disk(plan.needs, ledger, standing=True, disk_usage=service.disk_usage)
-        if any(not c.fits for c in standing):
-            return None
     record = record or confirm_record(plan, framework, target_folder)
-    from orchestrator.Core.confirmed_builds import ConfirmedBuilds, unattended
-    store = None
-    state = state_dir(framework)
-    if state is not None:
-        store = ConfirmedBuilds.for_framework(framework, state)
-    # a pack installed unattended (standing approval, delegation) counts only after the person confirmed one build of it
-    parts = [("target", record["target"], record["installed_via"], record["pack_sha256"])]
-    if record.get("recipe"):
-        r = record["recipe"]
-        parts.append(("recipe", r["id"], r["installed_via"], r["pack_sha256"]))
-    pending = [p for p in parts if unattended(p[2])
-               and not (store is not None and store.confirmed(p[0], p[1], installed_via=p[2], pack_sha256=p[3]))]
+    # build code installed or made unattended (standing approval, delegation) or transferred counts only after the
+    # person confirmed one build of exactly it ([Q1])
+    from orchestrator.Core.confirmed_builds import unattended
+    pending, unconfirmed = confirmation_state(framework, record)
+    if pending and not unattended(pending[0][2]):
+        trust = "other"  # transferred: outside every standing approval until the person confirmed a build of it
     images = record["base_images"]
-    official = bool(images) and all(
-        _official(i) or
-        (store is not None and store.image_confirmed(record["target"], i, installed_via=record["installed_via"],
-                                                     pack_sha256=record["pack_sha256"]))
-        for i in images)
+    official = bool(images) and not unconfirmed
     facts = {"target": plan.request.target, "target_trust": trust,
              "installed_via": pending[0][2] if pending else record["installed_via"],
              "confirmed_build": not pending, "image_base_official": official, "source": plan.source,
@@ -437,7 +641,8 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
                 if trust.value == "revoked":
                     plan.problems.append(Problem("not_supported", f"The target {req.target} was revoked by the "
                                                  f"community index ({reason}); it is not built.",
-                                                 "Tell the person; they remove the target in the Community Hub."))
+                                                 "Tell the person; they remove the target in the Community Hub.",
+                                                 "target_revoked"))
                 elif trust.value == "local":
                     plan.trust_note = "imported from a file that is not in the signed community index; nobody reviewed its scripts"
         except Exception:  # noqa: BLE001 - trust is shown when it can be read
@@ -457,7 +662,7 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         plan.problems.append(Problem("needs_person", "The build sandbox is switched off (setting build_sandbox); a "
                                      "build an AI starts runs only in the sandbox.",
                                      "Ask the person to switch build_sandbox on (update_settings can set it to true "
-                                     "with their confirmation, or they do it in the GUI or CLI)."))
+                                     "with their confirmation, or they do it in the GUI or CLI).", "sandbox_off"))
 
     # the model
     if pin is not None:
@@ -468,7 +673,7 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         if bool(_config(framework, "offline_mode", False)):
             plan.problems.append(Problem("needs_person", "Offline mode is on, so the framework does not contact "
                                          "huggingface.co.", "Use a local model (list_local_files), or ask the person "
-                                         "to switch offline mode off in the GUI or CLI."))
+                                         "to switch offline mode off in the GUI or CLI.", "offline_mode"))
         elif look_up_hub:
             try:
                 plan.facts = service.hub_facts(req.model, req.revision)
@@ -477,7 +682,9 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
                     plan.hub_problem = str(e)
                     plan.commit, plan.download_known = req.revision, False
                 else:  # gated without access, unknown repository: refused before the question
-                    plan.problems.append(Problem(e.code, str(e), e.next))
+                    blocker = ("gated_no_access" if e.code in ("needs_person", "permission_denied") else
+                               "unknown_repository" if e.code in ("invalid_value", "unknown_id") else "")
+                    plan.problems.append(Problem(e.code, str(e), e.next, blocker))
             if plan.facts is not None:
                 plan.commit = plan.facts.commit or req.revision
                 plan.download = plan.facts.download_bytes
@@ -491,7 +698,8 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
                                                  "(no safetensors or PyTorch files; GGUF-only repositories are not "
                                                  "converted by start_build).",
                                                  "Pick a repository with safetensors weights, or download a single "
-                                                 "file with download_hf_file when it is offered."))
+                                                 "file with download_hf_file when it is offered.",
+                                                 "no_convertible_weights"))
         else:
             plan.commit = req.revision
             plan.download_known = False
@@ -508,10 +716,15 @@ def plan_build(service, request, *, look_up_hub: bool = True, ledger=None, stand
         try:
             disk_plan.require(plan.disk)
         except disk_plan.InsufficientSpace as e:
-            plan.problems.append(Problem("insufficient_resources", str(e), e.next))
+            plan.problems.append(Problem("insufficient_resources", str(e), e.next, "disk_full"))
 
     plan.confirm_record = confirm_record(plan, framework, target_folder, recipe)
-    plan.grant = grant_facts(plan, service, framework, target_folder, pin, ledger, plan.confirm_record)
+    plan.weights = (plan.facts.weights if plan.facts is not None else "") if plan.source == "hf" else \
+        _local_weights(Path(pin.path))
+    pending, plan.unconfirmed_images = confirmation_state(framework, plan.confirm_record)
+    plan.first_build = [(kind, item) for kind, item, _via in pending]
+    plan.grant_scope = grant_scope(plan, framework, target_folder, pin, plan.confirm_record)
+    plan.grant = plan.grant_scope if plan.grant_scope is not None and _standing_fits(plan, service, ledger) else None
 
     # hardware estimate (never a refusal)
     params, basis = disk_plan.parameters_from(size, plan.facts.parameters if plan.facts else None)

@@ -687,6 +687,11 @@ class BuildService:
             if isinstance(recipe, dict) and recipe.get("id"):
                 done = store.record("recipe", str(recipe["id"]), installed_via=str(recipe.get("installed_via") or ""),
                                     pack_sha256=str(recipe.get("pack_sha256") or ""), channel=channel) and done
+            module = record.get("module")
+            if isinstance(module, dict) and module.get("definition_sha256"):
+                # a module an AI made unattended: confirmed for exactly this definition ([Q1], design 3.9)
+                done = store.record("module", str(record.get("target") or ""), channel=channel,
+                                    definition_sha256=str(module["definition_sha256"])) and done
             return done
         except Exception as e:  # noqa: BLE001 - the build runs; the next one is asked again
             self.logger.warning(f"Could not record the confirmed build: {redact_secrets(str(e))}")
@@ -939,9 +944,11 @@ class BuildService:
                                     next="Show the person the manual step (client_proposals in get_build_status); "
                                          "they do it themselves.")
         if proposal is None:
-            raise BuildServiceError(f"Build request '{request_id}' has no pending healing proposal.", code="failed",
-                                    next="Call get_build_status to see the build's state; only a build that waits "
-                                         "for a decision has a proposal.")
+            error = BuildServiceError(f"Build request '{request_id}' has no pending healing proposal.", code="failed",
+                                      next="Call get_build_status to see the build's state; only a build that waits "
+                                           "for a decision has a proposal.")
+            error.blocker = "proposal_missing"  # the facts catalogue's blocker (delegation design 4.2)
+            raise error
         return state, proposal
 
     def propose_fix(self, request_id: str, summary: str, root_cause: str, manual_step: str, confidence: float,

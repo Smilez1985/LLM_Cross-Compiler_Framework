@@ -1658,17 +1658,19 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   weggelassen; 50 je Seite), jede mit Datei-ID und `<Label>:<relativer Pfad>`, die `start_build` annimmt; eine
   heruntergeladene Datei erscheint dort auch.
 - **Geräte und Deployment (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` zeigt die
-  [vertrauten Geräte](#übertragen-auf-das-board-deployment) mit deinem Namen dafür, Adresse, Benutzer,
-  Fingerabdruck des Host-Schlüssels, ob das Gerät nutzbar ist (gekoppelt und sein Schlüssel noch der vertraute) und
-  dem letzten Deployment. `create_deploy_package` paketiert ein gebautes Modell (Artefakt-ID) für das Geräteprofil
-  eines Targets (Standard: das Target, für das es gebaut wurde) als Job; die Platte des Ausgabeordners muss das
-  Doppelte des Modells fassen, und `include_docker_images` wird abgelehnt, solange nicht jedes Image per Digest
+  [vertrauten Geräte](#übertragen-auf-das-board-deployment) mit deinem Namen dafür, Adresse, Fingerabdruck des
+  Host-Schlüssels, ob das Gerät nutzbar ist (gekoppelt und sein Schlüssel noch der vertraute) und dem letzten
+  Deployment; das Konto, mit dem sich das Framework anmeldet, steht dort als "device account", nie mit seinem Namen.
+  `create_deploy_package` paketiert ein gebautes Modell (Artefakt-ID) für das Geräteprofil eines Targets (Standard:
+  das Target, für das es gebaut wurde) als Job; die Platte des Ausgabeordners muss das Doppelte des Modells fassen,
+  und `include_docker_images` wird abgelehnt, solange nicht jedes Image per Digest
   festgelegt oder auf diesem Rechner gebaut ist. Das Ergebnis enthält die Paket-ID (`pkg_` und 16 Hex-Zeichen), Größe
   und sha256; eine Daueranfrage kann es nur ohne Docker-Images abdecken. `deploy_to_device` nimmt nur eine Paket-ID und
   eine Geräte-ID. Bevor du gefragt wirst, liest das Framework den Host-Schlüssel des Geräts (nur das Lesen des
   Schlüssels, keine Anmeldung) und lehnt einen unbekannten oder geänderten Schlüssel ab, ohne etwas zu schreiben
   (Grund `needs_person`); ein nicht gekoppeltes Gerät wird ebenfalls abgelehnt. Die Frage zeigt das Gerät mit deinem
-  Namen dafür, Benutzer und Adresse, den Fingerabdruck des Host-Schlüssels, den du bestätigt hast, Name, Größe und
+  Namen dafür (seine Anmeldung, Konto und Adresse, nur im eigenen Fenster des Frameworks, nie in einem Formular, das
+  eine KI lesen kann), den Fingerabdruck des Host-Schlüssels, den du bestätigt hast, Name, Größe und
   sha256 des Pakets, das gebaute Modell und das Vertrauen in sein Target. Das Deployment läuft dann als Job ohne
   Passwort und bricht ab, wenn das sha256 des Pakets (berechnet aus derselben geöffneten Datei, die hochgeladen
   wird) oder der Schlüssel des Geräts von dem abweicht, was dir gezeigt wurde. Es wird immer erfragt (es lässt sich
@@ -1925,6 +1927,58 @@ Eintrag `started` des Aufrufs. Diese Felder sind an die Hash-Kette gebunden (ihr
 verketteten Detailtexts des Eintrags), so dass Hinzufügen, Entfernen oder Ändern erkannt wird, während ein Eintrag den
 Hash behält, den 3.0.0 berechnet: Logs, die vor ihnen geschrieben wurden, bleiben prüfbar, und ein 3.0.0-Prozess, der
 neben dieser Version noch läuft, prüft dasselbe Log weiter und schreibt hinein.
+
+### Was das Framework vor einer Rückfrage prüft
+
+Bevor dir ein Aufruf vorgelegt wird, der etwas ändert, schlägt das Framework die Fakten dahinter nach und ordnet, was
+es findet, in drei Arten ein. Die Art jedes Befunds steht fest im Katalog des Frameworks; kein Tool und keine KI wählt
+sie:
+
+- **Harte Hindernisse** stoppen den Aufruf, bevor jemand gefragt wird, für eine KI genauso wie für dich: zu wenig
+  Speicherplatz, der Offline-Modus, ein Board, das nicht gekoppelt ist oder dessen Identität sich geändert hat, ein
+  Modell mit Bedingungen, das deine Hugging-Face-Anmeldung nicht öffnen kann, der noch nicht gelesene Hinweis zu Deep
+  Ingest, ein zurückgezogenes Paket. Die KI bekommt den Grund und ihren nächsten Schritt; das Framework zeigt dir
+  getrennt davon, was du tun kannst (etwa "Speicherplatz freigeben (alte Builds, den Modell-Cache, den Papierkorb)
+  oder ein kleineres Modell wählen"). Wenn eine KI ein Hindernis selbst beheben kann (Dittos Modellserver ist noch
+  nicht gebaut, ein Modell noch nicht heruntergeladen), nennt die Ablehnung das Tool, das es tut.
+- **Situationshinweise** sind abzuwägen, aber nicht gefährlich: Der Speicherplatz wird knapp, reicht aber, ein großer
+  Download, knapper Arbeitsspeicher für die Umwandlung oder zu wenig auf dem Board, viele Seiten für Deep Ingest, ein
+  Hardware-Modul, das noch niemand auf dem Board ausprobiert hat, die Laufzeit auf einem Board wird ersetzt. Später
+  darf eine KI, der du eine Vollmacht gibst, solche Hinweise selbst entscheiden.
+- **Sicherheits- und Rechtshinweise** bleiben immer bei dir: Modelldateien in einem alten Format, das versteckten Code
+  ausführen kann (pickle), eine Build-Umgebung von außerhalb der geprüften Docker-Sammlung oder nicht auf eine genaue
+  Version festgelegt, mehr Hersteller-Downloads als üblich, ein ungeprüftes oder ein Community-Hardware-Modul, ein
+  nicht vertrauenswürdiges Modell, das direkt auf deinem Computer läuft, ein Paket mit deinem Schlüssel signiert, ein
+  Modell mit Bedingungen, eine Lizenz, die die Nutzung einschränkt oder nicht auf der Liste bekannter freier Lizenzen
+  steht. Fakten, die sich nicht prüfen ließen (Hugging Face hat nicht geantwortet, keine Lizenz genannt, ein
+  Basismodell, das nicht nachgeschlagen werden konnte, ein unbekanntes Dateiformat), sind ebenfalls ein
+  Sicherheitshinweis: Unbekannt ist nie "kein Problem".
+- **Den ersten Build von Build-Code, den eine KI erstellt oder installiert hat, siehst du einmal selbst.** Ein Target-
+  oder Rezept-Paket, das unter einer Dauerfreigabe (später auch einer Vollmacht) installiert wurde, ein Hardware-Modul,
+  das eine KI ohne dein Ja erstellt hat, und ein Target von einem anderen Computer tragen den Sicherheitshinweis
+  "erster Build", bis du einen Build genau dieses Inhalts bestätigt hast (SHA-256 des Pakets oder Definition des
+  Moduls); ein aktualisiertes Paket oder ein unter demselben Namen neu erstelltes Modul wird dir erneut gezeigt.
+
+Eine Rückfrage im eigenen Fenster des Frameworks (Dittos Dialog, die CLI-Abfrage, das Freigabefenster) beginnt direkt
+nach ihrer ersten Zeile mit einer Kurzfassung in deiner Sprache: was passiert, mit den Namen, die du kennst, wie viel
+heruntergeladen wird und wie viel Speicherplatz nötig ist, "Braucht deine Entscheidung, weil: ..." mit jedem
+Sicherheits- und Rechtshinweis, was abzuwägen ist, eine sicherere Wahl, wo es eine gibt, und wer entscheiden darf.
+Die Kurzfassung entsteht nur aus Zahlen, die das Framework berechnet hat, den Hinweisen und den Namen, nie aus Text
+aus einem Repository, einem Log oder von einer KI. Nach den Fakten nennt jede Rückfrage (auch ein MCP-Formular) die
+Situationshinweise und getrennt davon die Sicherheits- und Rechtshinweise.
+
+Eine ausstehende Freigabe wird nicht mehr erneut gefragt, wenn sich nur der freie Speicherplatz geändert hat, während
+du sie gelesen hast: Eine Entscheidung ist an die Fakten gebunden, auf die es ankommt (die Anfrage, den Commit, die
+Größenklasse, die Hinweise, die Image-Digests, das Board und seinen Host-Key), nicht an freien Speicher oder
+Byte-Zahlen. Kommt ein Hinweis hinzu oder fällt einer weg, etwa weil der Speicher jetzt knapp ist, wirst du erneut
+gefragt. Unter einer Dauerfreigabe (und später einer Vollmacht) nutzt ein Build oder Download nur den Commit, den das
+Framework nachgeschlagen hat; konnte Hugging Face nicht gefragt werden, startet nichts ohne dich.
+
+**Board-Konten bleiben bei dir.** Das Konto, mit dem sich das Framework auf einem Board anmeldet (etwa `dietpi`), und
+Pfade auf dem Board erreichen nie eine KI: `list_devices` sagt "device account", die Anmeldung (Konto und Adresse)
+erscheint nur im eigenen Fenster des Frameworks, und alles, was ein Board antwortet (seine Ausgabe, Prüfergebnisse
+und Fehler, auch wenn alles geklappt hat), erreicht eine KI ohne den Namen des Kontos, seinen Home-Ordner und
+Board-Pfade.
 
 ---
 

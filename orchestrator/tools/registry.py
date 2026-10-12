@@ -1378,6 +1378,11 @@ class ToolRegistry:
             error = ToolError(message, code=getattr(e, "code", None) or "failed",
                               next=redact_secrets(getattr(e, "next", "") or "") or FAILED_NEXT, quoted=message)
             error.repairs = repairs_of(e)
+            blocker = getattr(e, "blocker", "")  # a service's refusal that names a blocker of the facts catalogue
+            if blocker:
+                from orchestrator.tools.facts_catalog import BLOCKERS, with_blocker
+                if blocker in BLOCKERS:
+                    with_blocker(error, blocker)
             raise error from e
         except Exception as e:
             self.logger.error(f"Looking up the facts for {spec.name} failed: {e}", exc_info=True)

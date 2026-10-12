@@ -38,6 +38,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.tools.facts_catalog import blocked, warn, with_blocker
 from orchestrator.tools.job_audit import audited_job
 from orchestrator.tools.output import ToolOutput, fact
 from orchestrator.tools.policy import Decision, ToolTier
@@ -305,6 +306,43 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
     return text
 
 
+# --- device accounts never reach an AI (study 6.2, D0) ---------------------------------------------------------------
+
+# What an AI reads instead of the account name the framework logs in with on a device ("dietpi", "orangepi", ...).
+DEVICE_ACCOUNT = "device account"
+_ACCOUNT = re.compile(r"^[a-z_][a-z0-9_.-]{0,31}$", re.IGNORECASE)
+_HOME_ROOTS = ("/home", "/Users", "/usr/home", "/var/home", "/export/home")
+_WORD_END = r"(?=$|[\s/'\"`:;,()\[\]{}<>|=@])"
+
+
+def device_text(text: Any, users: Sequence[str], roots: Optional[Dict[str, str]] = None) -> str:
+    """Text from or about a device (its answers, check output, errors, success tails) as an AI may see it: the device
+    account's home folder becomes '~' and every path is reduced to its file name (label_paths; this computer's own
+    folders by their labels), then the account name itself becomes "device account". Secrets are redacted and host
+    paths scrubbed as everywhere. The person's own window shows the real names."""
+    from orchestrator.tools.tools_status import _scrub_paths
+    out = str(text if text is not None else "")
+    names = sorted({u for u in users if isinstance(u, str) and _ACCOUNT.fullmatch(u)}, key=len, reverse=True)
+    for user in names:
+        u = re.escape(user)
+        out = re.sub("(?:" + "|".join(re.escape(r) for r in _HOME_ROOTS) + ")/" + u + _WORD_END, "~", out)
+        out = re.sub("~" + u + _WORD_END, "~", out)
+    out = label_paths(out, roots or {})
+    for user in names:
+        out = re.sub(r"(?<![\w.-])" + re.escape(user) + r"(?![\w-])", DEVICE_ACCOUNT, out)
+    return _scrub_paths(out)
+
+
+def device_users(device: Any, settings: Any = None) -> List[str]:
+    """Every account name a device's text may contain: the trusted login and the deploy settings' account."""
+    return [u for u in (getattr(device, "user", None), getattr(settings, "ssh_user", None)) if u]
+
+
+def _file_name(path: Optional[str]) -> str:
+    """A device path as an AI may see it: its file name only."""
+    return Path(str(path or "")).name or "the model file"
+
+
 # --- registration ---------------------------------------------------------------------------------------------------
 
 def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: Any, jobs: Any) -> ToolRegistry:
@@ -376,13 +414,15 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         from orchestrator.tools.tools_status import _scrub_paths
         return _scrub_paths(label_paths(str(text), folder_labels()))
 
-    def job_error(e: Exception) -> ValueError:
+    def job_error(e: Exception, users: Sequence[str] = ()) -> ValueError:
+        """A failed job's error as an AI may see it; `users`: the device's account names (D0), never shown."""
+        clean = (lambda t: device_text(t, users, folder_labels())) if users else scrub
         code = getattr(e, "code", "failed")
         nxt = getattr(e, "next", "")
-        err = ValueError(scrub(f"{e} Next: {nxt}" if nxt else str(e)))
+        err = ValueError(clean(f"{e} Next: {nxt}" if nxt else str(e)))
         err.code = code  # type: ignore[attr-defined]
         # A device's or llama-bench's own words: returned by get_job_status as external text, never in the message.
-        err.external_text = [scrub(line) for line in getattr(e, "external_text", None) or []]  # type: ignore
+        err.external_text = [clean(line) for line in getattr(e, "external_text", None) or []]  # type: ignore
         return err
 
     def audited(name: str, inp: BaseModel, ctx: ToolContext, work: Callable[[Any], Dict[str, Any]], what: str,
@@ -410,35 +450,35 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             try:
                 plan = rt.plan_install(backend=inp.backend, placement="auto")
             except LocalRuntimeError as e:
-                raise ToolError(scrub(f"llama.cpp cannot be built on this computer yet: {e}"), code="needs_person",
-                                next=INSTALL_NEXT) from None
+                raise blocked("toolchain_missing", scrub(f"llama.cpp cannot be built on this computer yet: {e}"),
+                              INSTALL_NEXT) from None
             if plan.cpu.refusal:
-                raise ToolError(scrub(f"The CPU build cannot be built here yet: {plan.cpu.refusal}"),
-                                code="needs_person", next=INSTALL_NEXT)
+                raise blocked("toolchain_missing", scrub(f"The CPU build cannot be built here yet: {plan.cpu.refusal}"),
+                              INSTALL_NEXT)
             gpu = plan.gpu
             if inp.backend not in ("auto", "cpu") and (gpu is None or gpu.refusal):
                 why = gpu.refusal if gpu is not None else "; ".join(plan.skipped) or "it cannot be planned here"
-                raise ToolError(scrub(f"The {inp.backend} build cannot be built here yet: {why}"), code="needs_person",
-                                next=INSTALL_NEXT)
+                raise blocked("toolchain_missing", scrub(f"The {inp.backend} build cannot be built here yet: {why}"),
+                              INSTALL_NEXT)
             pin = rt.catalog.llama_cpp.source
             cached = pin is not None and cached_source(pin, rt.data_dir) is not None
             model = model_of(inp.model_tier) if inp.model_tier else None
             if model is not None and not model.pinned:
-                raise ToolError(f"The catalog model {model.tier} has no pinned size and sha256.", code="not_supported",
-                                field="model_tier", next="Choose another tier.")
+                raise blocked("model_unpinned", f"The catalog model {model.tier} has no pinned size and sha256.",
+                              "Choose another tier.", field="model_tier")
             fetch_model = model is not None and not rt.model_ready(model)
             if offline() and (fetch_model or (plan.needs_source and not cached)):
-                raise ToolError("Offline mode is on, and this needs a download (the pinned source or the model).",
-                                code="needs_person", next="Ask the person to switch offline mode off, or to import "
-                                "the source with 'llm-cli ditto runtime import-source'.")
+                raise blocked("offline_mode", "Offline mode is on, and this needs a download (the pinned source or "
+                              "the model).", "Ask the person to switch offline mode off, or to import the source with "
+                              "'llm-cli ditto runtime import-source'.")
             to_build = [b for b in plan.builds if b.to_build]
             needed = (SOURCE_SIZE if plan.needs_source and not cached else 0) + BUILD_SIZE * len(to_build) + \
                 (int(model.size or 0) if fetch_model else 0)
             disk = disk_check(rt.data_dir, needed)
             if not disk["fits"]:
-                raise ToolError(f"Not enough disk space: about {_size(needed)} needed (estimate), "
-                                f"{_size(disk['free'])} free, {_size(disk['reserve'])} kept free as a reserve.",
-                                code="insufficient_resources", next="Tell the person how much space is needed.")
+                raise blocked("disk_full", f"Not enough disk space: about {_size(needed)} needed (estimate), "
+                              f"{_size(disk['free'])} free, {_size(disk['reserve'])} kept free as a reserve.",
+                              "Tell the person how much space is needed.")
             facts = [Fact("Plan", line) for line in plan.describe()]
             facts += [Fact("Note", scrub(n)) for n in plan.notes[:5]]
             facts.append(Fact("Source", "the pinned source is cached" if cached or not plan.needs_source else
@@ -448,7 +488,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 facts.append(Fact("Model", f"catalog tier {model.tier}: {model.file}, {_size(model.size)}, pinned by "
                                            "sha256" + ("; already downloaded" if not fetch_model else
                                                        "; downloaded from huggingface.co")))
-            facts.append(Fact("Disk", f"about {_size(needed)} needed (estimate), {_size(disk['free'])} free"))
+            facts.append(Fact("Disk", f"about {_size(needed)} needed (estimate), {_size(disk['free'])} free",
+                              volatile=True))
             facts.append(Fact("Origin", "self-built from the pinned commit; never a prebuilt archive"))
             what = (f"Builds llama.cpp's server for this computer from the pinned commit "
                     f"{pin.tag + ' (' + pin.commit[:12] + ')' if pin else ''}: "
@@ -459,7 +500,16 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             bound = {"backend": inp.backend, "placement": plan.placement,
                      "builds": [b.plan.build_id for b in to_build], "model_tier": inp.model_tier or "",
                      "model_sha256": (model.sha256 or "") if model is not None else ""}
-            return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound)
+            warnings = []
+            if disk.get("tight"):
+                warnings.append(warn("disk_tight", free_after_gb=round(disk["after"] / GB, 1),
+                                     reserve_gb=round(disk["reserve"] / GB, 1)))
+            if fetch_model and int(model.size or 0) >= 20 * GB:
+                warnings.append(warn("download_large", download_gb=round(int(model.size) / GB, 1)))
+            return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, warnings=tuple(warnings),
+                             numbers={"builds": len(to_build), "needed_bytes": int(needed),
+                                      "free_after_bytes": int(disk.get("after", 0))},
+                             consequence_template=consequence)
 
         def build_local_runtime(inp: BuildRuntimeIn, ctx: ToolContext) -> JobStartedOut:
             bound = dict(ctx.facts.bound) if ctx.facts is not None else {}
@@ -527,17 +577,16 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             rt = runtime()
             installed, problems = rt.resolve_installed()
             if installed is None:
-                raise ToolError("Ditto's local server is not built on this computer" +
-                                (f": {scrub('; '.join(problems))}" if problems else "."), code="needs_person",
-                                next=BUILD_NEXT)
+                raise blocked("runtime_not_built", "Ditto's local server is not built on this computer" +
+                              (f": {scrub('; '.join(problems))}" if problems else "."), BUILD_NEXT)
             try:
                 model, why = rt.resolve_model(inp.tier)
             except Exception as e:  # noqa: BLE001 - LocalRuntimeError: an unknown tier
                 raise ToolError(scrub(str(e)), code="invalid_value", field="tier",
                                 next="The lcf://runtime/catalog resource lists the tiers.") from None
             if not rt.model_path(model).is_file():
-                raise ToolError(f"The model of tier {model.tier} is not downloaded.", code="missing_information",
-                                field="tier", next=f"Fetch it with build_local_runtime(model_tier='{model.tier}').")
+                raise blocked("model_not_downloaded", f"The model of tier {model.tier} is not downloaded.",
+                              f"Fetch it with build_local_runtime(model_tier='{model.tier}').", field="tier")
             origin = installed.label
             facts = (Fact("Build", f"{installed.name} ({installed.backend}), {origin}"),
                      Fact("Model", f"tier {model.tier}: {model.file} ({why})"),
@@ -653,9 +702,9 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 rt = runtime()
                 path = rt.model_path(model)
                 if not rt.model_ready(model):
-                    raise ToolError(f"The model of tier {model.tier} is not downloaded and checked.",
-                                    code="missing_information", field="tier",
-                                    next=f"Fetch it with build_local_runtime(model_tier='{model.tier}').")
+                    raise blocked("model_not_downloaded", f"The model of tier {model.tier} is not downloaded and "
+                                  "checked.", f"Fetch it with build_local_runtime(model_tier='{model.tier}').",
+                                  field="tier")
                 return path, f"tier {model.tier} ({model.file})", model.sha256, True
             if not inp.artifact_id or inp.tier:
                 raise ToolError("artifact_speed takes an artifact_id (and no tier).", code="missing_argument",
@@ -670,8 +719,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 raise ToolError(scrub(str(e)), code=getattr(e, "code", "unknown_id"), field="artifact_id",
                                 next="Call list_artifacts for the ids you can use.") from None
             if path.suffix.lower() != ".gguf":
-                raise ToolError("Only GGUF models can be benchmarked with llama-bench.", code="not_supported",
-                                field="artifact_id", next="Choose a GGUF build (list_artifacts, format gguf).")
+                raise blocked("not_gguf", "Only GGUF models can be benchmarked with llama-bench.",
+                              "Choose a GGUF build (list_artifacts, format gguf).", field="artifact_id")
             digest = model_sha(path)
             return path, label, digest, digest in runner.trusted_sha256()
 
@@ -700,8 +749,11 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                      "label": label, "build_id": build.build_id,
                      # a standing approval never covers an untrusted model run natively (runtime decision D23)
                      "grant": {} if trusted or inp.sandbox else None}
-            return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound,
-                             cap=None if trusted or inp.sandbox else Decision.ASK.value)
+            # an untrusted model run natively is the person's alone (a security warning, runtime decision D23)
+            warnings = (warn("untrusted_model_native"),) if native and not trusted else ()
+            return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, warnings=warnings,
+                             cap=None if trusted or inp.sandbox else Decision.ASK.value,
+                             consequence_template=consequence)
 
         def run_benchmark(inp: BenchmarkIn, ctx: ToolContext) -> JobStartedOut:
             from orchestrator.runtime.bench import AUDIT_TOOL
@@ -797,17 +849,27 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                 code="unknown_id", field="device_id",
                                 next="Call list_devices for the ids you can use.")
             if not device.paired or store.key_status(device) != "known":
-                raise ToolError(f"The device {device.label} cannot be used now (not paired, or its trusted host key "
-                                "is no longer in the framework's known_hosts).", code="needs_person",
-                                field="device_id", next="Ask the person to trust and pair it again in the GUI or "
-                                                        "the CLI.")
+                status = store.key_status(device) if device.paired else "not_paired"
+                code = {"changed": "host_key_changed", "unknown": "host_key_unknown"}.get(status, "device_not_trusted")
+                raise blocked(code, f"The device {device.label} cannot be used now (not paired, or its trusted host "
+                              "key is no longer in the framework's known_hosts).",
+                              "Ask the person to trust and pair it again in the GUI or the CLI.", field="device_id")
             return device
 
-        def svc_error(e: Exception) -> ToolError:
-            return ToolError(scrub(str(e)), code=getattr(e, "code", "failed"), next=getattr(e, "next", ""))
+        def svc_error(e: Exception, users: Sequence[str] = ()) -> ToolError:
+            text = device_text(str(e), users, folder_labels()) if users else scrub(str(e))
+            error = ToolError(text, code=getattr(e, "code", "failed"), next=getattr(e, "next", ""))
+            reason = getattr(e, "code", "")
+            if reason == "hardware_unavailable":
+                with_blocker(error, "device_unreachable")
+            elif reason == "needs_person" and "host key" in str(e):
+                with_blocker(error, "host_key_changed")
+            return error
 
         def device_lines(device, fp: str) -> List[Fact]:
-            return [Fact("Device", f"{device.label}: {device.user}@{device.address}"),
+            # D0: the login (account and address) is the person's to see, never an AI's
+            return [Fact("Device", device.label),
+                    Fact("Login", f"{device.user}@{device.address}", person_only=True),
                     Fact("Host key", f"{device.key_type} {fp}, the key you trusted; read from the device just now")]
 
         def session_hooks():
@@ -835,9 +897,9 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             try:
                 fp = dev.read_key(device, state_dir())
             except dev.DeviceRuntimeError as e:
-                raise svc_error(e) from None
+                raise svc_error(e, device_users(device)) from None
             facts = device_lines(device, fp) + [Fact("On the device", "the framework's read-only hardware probe runs "
-                                                                      f"as {device.user}; nothing is installed")]
+                                                                      f"as the {DEVICE_ACCOUNT}; nothing is installed")]
             return CallFacts(consequence=f"Runs the hardware probe on the device {device.label} over SSH and stores "
                                          "the result under its device id.", facts=tuple(facts),
                              bound={"device_id": device.device_id, "fingerprint": fp}, cap=Decision.ASK.value)
@@ -859,7 +921,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set():
                         raise JobCancelled() from None
-                    raise job_error(e) from None
+                    raise job_error(e, device_users(device)) from None
                 return {**out, "next": f"Read the values with get_hardware_probe(probe_id='{device.device_id}')."}
 
             def probed(out: Dict[str, Any]):
@@ -872,17 +934,18 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
 
         def deploy_facts(inp: DeviceIn, ctx: ToolContext) -> CallFacts:
             from orchestrator.runtime.device import service as dev
+            from orchestrator.runtime.device.package import DeviceRuntimeStore
             device = trusted(inp.device_id)
             try:
                 profile = dev.device_profile(state_dir(), device)
                 settings = dev.deploy_settings(state_dir(), device, profile)
                 plan = dev.plan_facts(state_dir(), profile)
                 if offline() and not plan.built and not plan.source_cached:
-                    raise ToolError("Offline mode is on, and the build needs the pinned source.", code="needs_person",
-                                    next="Ask the person to switch offline mode off or import the source.")
+                    raise blocked("offline_mode", "Offline mode is on, and the build needs the pinned source.",
+                                  "Ask the person to switch offline mode off or import the source.")
                 fp = dev.read_key(device, state_dir())
             except dev.DeviceRuntimeError as e:
-                raise svc_error(e) from None
+                raise svc_error(e, device_users(device)) from None
             target = plan.target
             facts = device_lines(device, fp) + [
                 Fact("Runtime", f"llama.cpp for {target.get('os')}/{target.get('arch')} ({target.get('libc')} "
@@ -891,18 +954,24 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                    "built first in the builder container "
                                    f"{plan.builder.get('base')} (Docker, no network during the build)"
                                    + ("" if plan.source_cached else "; fetches the pinned source (about 215 MB)"))),
-                Fact("Install", f"as {settings.ssh_user} into ~/.local/share/llm-framework/llama.cpp"
+                Fact("Install", f"as the {DEVICE_ACCOUNT} into its llm-framework data folder"
                                 + (f", and the systemd unit with sudo -n (you confirmed it on "
                                    f"{settings.sudo_confirmed_at})" if settings.install == "systemd" else
                                    " with the start script (127.0.0.1 only)")),
+                # D0: the account name and the device path are the person's to see, never an AI's
+                Fact("Install as", f"{settings.ssh_user}@{device.address} into "
+                                   "~/.local/share/llm-framework/llama.cpp", person_only=True),
                 Fact("Checks", "the new build's programs are checked on the device before it becomes active; a "
                                "build that fails is removed and the previous one stays active")]
-            consequence = (f"Installs the self-built llama.cpp runtime on the device {device.label} "
-                           f"({settings.ssh_user}@{device.address})"
+            consequence = (f"Installs the self-built llama.cpp runtime on the device {device.label}"
                            + ("" if plan.built else ", building it first on this computer") + ".")
+            replaced = DeviceRuntimeStore(state_dir(), device.device_id).record()
+            warnings = (warn("device_runtime_replaced"),) if replaced else ()
             return CallFacts(consequence=consequence, facts=tuple(facts), cap=Decision.ASK.value,
                              bound={"device_id": device.device_id, "fingerprint": fp, "build_id": plan.build_id,
-                                    "user": settings.ssh_user, "install": settings.install})
+                                    "user": settings.ssh_user, "install": settings.install},
+                             warnings=warnings, scope={"device_id": device.device_id},
+                             consequence_template=consequence, names={"device": device.label})
 
         def deploy_device_runtime(inp: DeviceIn, ctx: ToolContext) -> JobStartedOut:
             from orchestrator.runtime.device import service as dev
@@ -921,16 +990,20 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     settings = dev.deploy_settings(state_dir(), device, profile)
                     if (settings.ssh_user, settings.install) != (bound["user"], bound["install"]):
                         raise ValueError("The deploy settings changed after the person was asked; nothing was done.")
+                    users = device_users(device, settings)
                     out = dev.deploy(state_dir(), device, profile, settings, bound["fingerprint"], bound["build_id"],
                                      on_client=on_client, cancelled=lambda: stop.is_set() or handle.cancelled,
-                                     say=lambda msg: handle.progress(None, None, scrub(msg)[:200]))
+                                     say=lambda msg: handle.progress(None, None, device_text(msg, users,
+                                                                                             folder_labels())[:200]))
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set() or handle.cancelled:
                         raise JobCancelled() from None
-                    raise job_error(e) from None
+                    raise job_error(e, device_users(device)) from None
                 checks = out.pop("checks")
                 notes = out.pop("notes")
-                lines = [f"{c['name']}: {c['result']} - {c['detail']}" for c in checks] + list(notes)
+                # the device's words also on success: its account and paths never reach an AI (D0)
+                lines = [device_text(f"{c['name']}: {c['result']} - {c['detail']}", users, folder_labels())
+                         for c in checks] + [device_text(n, users, folder_labels()) for n in notes]
                 return {**out, "checks_passed": sum(1 for c in checks if c["result"] == "passed"),
                         "checks_failed": sum(1 for c in checks if c["result"] == "failed"), EXTERNAL_KEY: lines}
 
@@ -955,27 +1028,32 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 profile = dev.device_profile(state_dir(), device)
                 settings = dev.deploy_settings(state_dir(), device, profile)
                 if not DeviceRuntimeStore(state_dir(), device.device_id).record():
-                    raise ToolError(f"No runtime is deployed to {device.label} yet.", code="missing_information",
-                                    next="Deploy it first with deploy_device_runtime.")
+                    raise blocked("no_device_runtime", f"No runtime is deployed to {device.label} yet.",
+                                  "Deploy it first with deploy_device_runtime.")
                 if settings.model is None:
-                    raise ToolError(f"No model on {device.label} is named for the benchmark.", code="needs_person",
-                                    next="Ask the person to name one with 'llm-cli device settings DEVICE --model "
-                                         "PATH'.")
+                    raise blocked("device_model_unset", f"No model on {device.label} is named for the benchmark.",
+                                  "Ask the person to name one with 'llm-cli device settings DEVICE --model PATH'.")
                 fp = dev.read_key(device, state_dir())
             except dev.DeviceRuntimeError as e:
-                raise svc_error(e) from None
+                raise svc_error(e, device_users(device)) from None
             facts = device_lines(device, fp) + [
-                Fact("Model", f"{settings.model} on the device (from its deploy settings)"),
-                Fact("On the device", f"the checks of the deployed runtime and a short llama-bench run, as "
-                                      f"{settings.ssh_user}, never with sudo"),
+                # D0: the model by its file name; its path on the device is the person's to see
+                Fact("Model", f"{_file_name(settings.model)} on the device (from its deploy settings)"),
+                Fact("Model path", f"{settings.model} on the device", person_only=True),
+                Fact("On the device", f"the checks of the deployed runtime and a short llama-bench run, as the "
+                                      f"{DEVICE_ACCOUNT}, never with sudo"),
                 Fact("Your consent", "if that file is not a catalog model (checked by its sha256 on the device), it is "
                                      "untrusted: approving this lets llama-bench load it natively on the device, not "
                                      "in a sandbox, and your consent is written to the audit log first")]
-            return CallFacts(consequence=f"Runs the runtime checks and a short benchmark on the device {device.label} "
-                                         f"with the model {settings.model}.", facts=tuple(facts),
-                             cap=Decision.ASK.value,
+            consequence = (f"Runs the runtime checks and a short benchmark on the device {device.label} with the "
+                           f"model {_file_name(settings.model)}.")
+            # whether the model on the device is a catalog model is known only there: the person's consent is asked
+            # for every run (an untrusted model runs natively), so the run is always the person's to decide
+            return CallFacts(consequence=consequence, facts=tuple(facts), cap=Decision.ASK.value,
                              bound={"device_id": device.device_id, "fingerprint": fp, "user": settings.ssh_user,
-                                    "model": settings.model})
+                                    "model": settings.model},
+                             warnings=(warn("untrusted_model_native"),), scope={"device_id": device.device_id},
+                             consequence_template=consequence, names={"device": device.label})
 
         def run_device_benchmark(inp: DeviceIn, ctx: ToolContext) -> JobStartedOut:
             from orchestrator.runtime.device import service as dev
@@ -1014,9 +1092,12 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set():
                         raise JobCancelled() from None
-                    raise job_error(e) from None
+                    raise job_error(e, device_users(device)) from None
                 checks = out.pop("checks")
-                return {**out, EXTERNAL_KEY: [f"{c['name']}: {c['result']} - {c['detail']}" for c in checks]}
+                users = device_users(device, settings)
+                # the device's words also on success: its account and paths never reach an AI (D0)
+                return {**out, EXTERNAL_KEY: [device_text(f"{c['name']}: {c['result']} - {c['detail']}", users,
+                                                          folder_labels()) for c in checks]}
 
             def checked(out: Dict[str, Any]):
                 ok = bool(out.get("ok"))
@@ -1033,9 +1114,10 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
         def device_name(value) -> Optional[str]:
+            """The device's label (a question for a client's form may reach an AI: never its login, D0)."""
             try:
                 d = TrustedDevices.for_framework(framework).get(str(value))
-                return f"{d.label} ({d.user}@{d.address})" if d else None
+                return d.label if d else None
             except Exception:  # noqa: BLE001
                 return None
 

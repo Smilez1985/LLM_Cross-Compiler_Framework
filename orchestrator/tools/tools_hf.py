@@ -22,11 +22,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.tools.facts_catalog import (LARGE_DOWNLOAD_BYTES, blocked, facts_unknown, gb_number, size_class,
+                                              warn)
 from orchestrator.tools.grants import DOWNLOAD_RULE
 from orchestrator.tools.output import ToolOutput, count, fact, untrusted_text
 from orchestrator.tools.policy import ToolTier
 from orchestrator.tools.registry import ToolContext, ToolError, ToolRegistry, ToolSpec
-from orchestrator.tools.spec import CallFacts, Fact, FieldMeta, GrantRule, Rate, ToolLimits
+from orchestrator.tools.spec import CallFacts, CallWarning, Fact, FieldMeta, GrantRule, Rate, ToolLimits
 
 REPO_PATTERN = r"^[A-Za-z0-9][\w.-]*/[\w.-]+$"
 COMMIT_PATTERN = r"^[0-9a-f]{40}$"
@@ -42,6 +44,38 @@ def _size(n: Optional[int]) -> str:
     if n is None:
         return "size unknown"
     return f"{n / GB:.2f} GB" if n >= 10 ** 8 else f"{n / 1000 ** 2:.1f} MB"
+
+
+def download_warnings(facts: Any, name: str, size: int, disk: Dict[str, Any]) -> tuple:
+    """The warnings before a single-file download (design 4.3): a tight disk and a large file (situation); pickle
+    weights and facts that could not be checked (security); a gated model or base model and a licence that is not on
+    the permissive list (legal). A licence or base model that could not be read is unknown, never "no problem"."""
+    found: List[CallWarning] = []
+    if disk.get("tight"):
+        found.append(warn("disk_tight", free_after_gb=gb_number(disk.get("after")),
+                          reserve_gb=gb_number(disk.get("reserve"))))
+    if size >= LARGE_DOWNLOAD_BYTES:
+        found.append(warn("download_large", download_gb=gb_number(size)))
+    if name.lower().endswith(PICKLE_SUFFIXES):
+        found.append(warn("pickle_weights"))
+    if facts.gated != "false":
+        found.append(warn("gated_model"))
+    unknown = []
+    if facts.base_model:
+        if facts.base_gated is None:
+            unknown.append("base_model")
+        elif facts.base_gated != "false":
+            found.append(warn("base_model_gated"))
+    if facts.license_restrictive == "true":
+        found.append(warn("license_restrictive"))
+    elif facts.license_restrictive != "false":
+        if (facts.license or "unknown").strip().lower() == "unknown":
+            unknown.append("licence")
+        else:
+            found.append(warn("license_unknown"))
+    if unknown:
+        found.append(facts_unknown(*unknown))
+    return tuple(found)
 
 
 # --- models ---------------------------------------------------------------------------------------------------------
@@ -227,17 +261,17 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         client = hub()
         facts = client.info(inp.model, inp.revision)
         if facts.gated != "false" and facts.token_access != "yes":
-            raise HubError(f"{inp.model} is gated and the token stored in the framework "
-                           + ("is missing." if facts.token_access == "no_token" else "has no access to it."),
-                           code="needs_person" if facts.token_access == "no_token" else "permission_denied",
-                           next="Ask the person to accept the model's conditions on huggingface.co with their "
-                                "account, then to store a token with 'llm-cli secrets set hf_token' or in the GUI.")
+            raise blocked("gated_no_access", f"{inp.model} is gated and the token stored in the framework "
+                          + ("is missing." if facts.token_access == "no_token" else "has no access to it."),
+                          "Ask the person to accept the model's conditions on huggingface.co with their account, then "
+                          "to store a token with 'llm-cli secrets set hf_token' or in the GUI.",
+                          reason="needs_person" if facts.token_access == "no_token" else "permission_denied")
         names = [x.name for x in facts.files]
         try:
             name, repair = match_filename(inp.filename, names, "filename")
         except NormalizeError as e:
-            raise ToolError(f"{inp.model} has no file '{inp.filename}' at commit {facts.commit[:12]}.",
-                            code="invalid_value", next="Call get_hf_model_info for the file names.") from e
+            raise blocked("file_not_in_repo", f"{inp.model} has no file '{inp.filename}' at commit "
+                          f"{facts.commit[:12]}.", "Call get_hf_model_info for the file names.") from e
         # The repair (a name in another letter case) is the look-up's: named in the result and in every refusal after
         # it, and audited (CallFacts.repairs; a refusal carries it as `repairs`).
         repairs = (repair,) if repair is not None else ()
@@ -251,11 +285,11 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         from orchestrator.Core.hf_hub import disk_check
         file = facts.file(name)
         if not safe_filename(name):
-            raise ToolError("That file name cannot be used as a file on this computer.", code="not_supported",
-                            next="Choose another file of the repository.")
+            raise blocked("unsafe_filename", "That file name cannot be used as a file on this computer.",
+                          "Choose another file of the repository.")
         if file is None or file.size is None:
-            raise ToolError(f"The Hub lists no size for '{name}'; it is not downloaded.", code="not_supported",
-                            next="Choose another file of the repository.")
+            raise blocked("size_unknown", f"The Hub lists no size for '{name}'; it is not downloaded.",
+                          "Choose another file of the repository.")
         dest = models_dir() / "hf" / folder_name(inp.model) / facts.commit[:12] / name
         part = dest.with_name(dest.name + ".part")
         have = part.stat().st_size if part.is_file() else 0
@@ -266,16 +300,17 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
                            + (f" and {_size(disk['reserved'])} reserved by other downloads" if disk["reserved"] else "")
                            + ".", code="insufficient_resources",
                            next="Tell the person how much space is needed; they can free disk space or choose a "
-                                "smaller file.")
+                                "smaller file.", blocker="disk_full")
         pickle = name.lower().endswith(PICKLE_SUFFIXES)
         source = "repository text, not checked"
         lines = [Fact("File", f"{name} ({_size(file.size)}" + (", sha256 listed by the Hub)" if file.sha256 else
                                                                ", a small file without LFS: pinned by size)"),
                       source),
                  Fact("Commit", facts.commit),
+                 # free space changes while a question waits: shown, never part of the decision digest
                  Fact("Disk", f"{_size(disk['free'])} free on the models folder's disk, "
                               f"{_size(disk['free'] - disk['needed'])} after the download"
-                              + (" (a part downloaded earlier is resumed)" if have else "")),
+                              + (" (a part downloaded earlier is resumed)" if have else ""), volatile=True),
                  Fact("Licence", f"{facts.license} ({LICENCE_WORDS.get(facts.license_restrictive, 'unknown: read it')})",
                       source)]
         if facts.license_name or facts.license_link:
@@ -300,7 +335,15 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
             bound["grant"] = None
         consequence = (f"Downloads {name} ({_size(file.size)}) of {inp.model} from huggingface.co (commit "
                        f"{facts.commit[:12]}) into the models folder.")
-        return CallFacts(consequence=consequence, facts=tuple(lines), bound=bound, repairs=repairs)
+        bound["size_class"] = size_class(int(file.size))
+        bound["commit_resolved"] = bool(facts.commit)
+        return CallFacts(consequence=consequence, facts=tuple(lines), bound=bound, repairs=repairs,
+                         warnings=download_warnings(facts, name, int(file.size), disk),
+                         numbers={"size_class": bound["size_class"], "size_bytes": int(file.size),
+                                  "free_after_bytes": int(disk.get("after", 0)), "reserve_bytes": int(disk["reserve"])},
+                         scope={"size_bytes": int(file.size)}, consequence_template=consequence,
+                         digest_keys=("model", "filename", "commit", "size", "sha256", "size_class"),
+                         names={"model": inp.model})
 
     def download_hf_file(inp: DownloadIn, ctx: ToolContext) -> DownloadStartedOut:
         from orchestrator.Core.confirmed_builds import unattended
@@ -309,6 +352,8 @@ def register_hf_tools(registry: ToolRegistry, framework, jobs) -> ToolRegistry:
         if not bound.get("commit") or bound.get("model") != inp.model:
             raise ToolError("The download is not bound to what the person was shown; nothing was downloaded.",
                             code="failed", next="Call download_hf_file again through the framework's tool registry.")
+        from orchestrator.tools.tools_builds import require_commit
+        require_commit(bound, ctx.confirm_channel)  # unattended: only the commit the look-up resolved
         repo, name, commit = bound["model"], bound["filename"], bound["commit"]
         file = HubFile(name, int(bound["size"]), bound.get("sha256") or None)
         dest = models_dir() / "hf" / folder_name(repo) / commit[:12] / name

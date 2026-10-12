@@ -190,6 +190,9 @@ def problem_error(problems) -> ToolError:
     """The first problem as the refusal before the question (its reason code and next step); the others follow."""
     first = problems[0]
     others = "".join(f" Also: {p.message}" for p in problems[1:3])
+    if getattr(first, "blocker", ""):  # a blocker of the facts catalogue: the person's action goes with it
+        from orchestrator.tools.facts_catalog import blocked
+        return blocked(first.blocker, first.message + others, first.next, reason=first.code)
     return ToolError(first.message + others, code=first.code, next=first.next)
 
 
@@ -199,6 +202,18 @@ def start_request(inp: StartBuildIn, bound: Dict[str, Any]) -> BuildRequestIn:
     data = inp.model_dump(exclude={"optimization", "include_download_size"})
     data["revision"] = bound.get("revision") or inp.revision
     return BuildRequestIn(**data)
+
+
+def require_commit(bound: Dict[str, Any], channel: str) -> None:
+    """Under a standing approval or a delegation a build or download uses only the commit its look-up resolved
+    (design 3.9, 4.6): when Hugging Face could not be asked, nobody saw which commit would be fetched, so it is the
+    blocker commit_required, not a build of whatever the default branch holds then."""
+    from orchestrator.Core.confirmed_builds import unattended
+    if unattended(channel) and bound.get("commit_resolved") is False:
+        from orchestrator.tools.facts_catalog import blocked
+        raise blocked("commit_required", "The exact commit of the model could not be found out (Hugging Face did not "
+                      "answer), so nothing is started without the person.",
+                      "Ask the person: they start it themselves, or call it again when Hugging Face answers.")
 
 
 STANDING_RESERVE_TEXT = ("Under the standing approval the larger disk reserve (20 GiB or 10 % of the disk) must stay "
@@ -215,6 +230,7 @@ def start_accepted(service, bound: Dict[str, Any], ctx, start):
     from orchestrator.Core.disk_plan import InsufficientSpace
     channel = str(getattr(ctx, "confirm_channel", "") or "")
     standing = unattended(channel)  # a standing approval or a delegation: nobody answered this call's question
+    require_commit(bound, channel)
     label = f"{bound.get('model')} for {bound.get('target')}"
     try:
         reservation = service.reserve_disk(bound, ctx.owner, label, standing=standing)
