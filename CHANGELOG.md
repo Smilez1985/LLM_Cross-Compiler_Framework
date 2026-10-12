@@ -24,6 +24,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   replaced by stable placeholders that are mapped back locally in the answer.
 - **Local knowledge base** on local embeddings (FastEmbed, ONNX on the CPU) and an embedded Qdrant store: no
   vector-database server and no cloud embeddings needed, and it works offline once its models are downloaded.
+- **The knowledge base Ditto uses, for AI clients** (MCP tools `list_knowledge_sources` and
+  `read_knowledge_source`, resource `lcf://knowledge/sources/<source id>`): a client that does Ditto's job sees what
+  the knowledge base holds and reads one source's excerpts in order. `search_knowledge` now gives every excerpt its
+  provenance (source id, address or pack, title, section, kind `web`/`pack`/`docs`, trust, date added, position) and
+  takes `kind` and `rerank`. Sources are named by ids, never by paths; all their text is marked untrusted. A tool call
+  never downloads the embedding or reranking model: without the embedding model the search is refused with the next
+  step instead of starting a download of about a gigabyte, and the refusal names no folder.
 - **Reranking of knowledge-base results**: a local multilingual cross-encoder (FastEmbed/ONNX, about 120 MB,
   downloaded on first use, never in offline mode) reads the question together with each candidate and drops the
   ones below a relevance floor, so Ditto gets no excerpt rather than irrelevant ones. Build recommendations use

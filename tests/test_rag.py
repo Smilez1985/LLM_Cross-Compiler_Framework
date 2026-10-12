@@ -875,9 +875,12 @@ class TestOfflineMode:
         fm.config.set("enable_rag_knowledge", True)
         fm.config.set("offline_mode", True)
 
-        with pytest.raises(ToolError, match="not in .* offline mode is on"):
+        with pytest.raises(ToolError, match="not on this computer yet") as info:
             fm.tool_registry.call("search_knowledge", {"query": "rk3588 compiler flags"}, ToolContext("cli"))
         assert no_network == []
+        # The refusal names the next step and never a folder of this computer (design T3).
+        assert info.value.code == "needs_person" and "ditto ask" in str(info.value)
+        assert str(fm.info.installation_path) not in str(info.value) and "/" not in info.value.message
 
     def test_mcp_tool_output_is_cleaned_of_hidden_instructions(self, booted_framework, monkeypatch):
         import orchestrator.Core.rag_manager as rm

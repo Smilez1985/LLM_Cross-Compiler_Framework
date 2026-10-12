@@ -524,7 +524,9 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `read_build_log` | lesen | Die letzten Zeilen eines Build-Logs (Geheimnisse geschwärzt) |
 | `list_artifacts` | lesen | Fertige Builds aus ihren Manifesten |
 | `run_doctor` | lesen | Der Gesundheitscheck, ohne Korrekturen |
-| `search_knowledge` | lesen | In der Wissensbasis suchen |
+| `search_knowledge` | lesen | In der Wissensbasis suchen; jeder Auszug mit Quellen-ID, Adresse oder Pack, Art (`web`, `pack`, `docs`), Vertrauensstufe, Aufnahmedatum und Position; `kind` grenzt die Suche ein |
+| `list_knowledge_sources` | lesen | Was die Wissensbasis enthält: jede Quelle mit ID, Titel, Art, Vertrauensstufe, Aufnahmedatum und Zahl der Auszüge (50 je Seite) |
+| `read_knowledge_source` | lesen | Die Auszüge einer Quelle in ihrer Reihenfolge, über die Quellen-ID (höchstens 20 je Aufruf) |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen) |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
@@ -905,6 +907,19 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
 - **Nutzung:** das Tool `search_knowledge` (Ditto, MCP-Clients); ohne Tools hängt Ditto passende Auszüge selbst an
   die Frage. Auch Healing-Analysen, Modulvorschläge und Build-Empfehlungen (Builder: **Use RAG Knowledge Base**)
   bekommen Auszüge. Ergebnisse gelten immer als nicht vertrauenswürdige Daten.
+- **Dieselbe Wissensbasis für KI-Clients:** Ein MCP-Client, der Dittos Aufgabe übernimmt, bekommt, was Ditto
+  bekommt. Jeder Treffer von `search_knowledge` nennt seine Quelle (`source_id`, die Adresse oder den Pack-Eintrag,
+  Titel, Abschnitt, Position in der Quelle), seine Art (`web`: eine Seite, die du per Deep Ingest aufgenommen hast;
+  `pack`: ein installiertes Wissens-Pack; `docs`: Code und Dokumente des Frameworks selbst) und seine
+  Vertrauensstufe (`crawled`, beim Pack dessen `verified`, `community` oder `local`, `framework`, oder `unknown` für
+  ein nicht mehr installiertes Pack). `list_knowledge_sources` listet die Quellen (Filter nach Art und Text, 50 je
+  Seite; die Liste wird eine Minute lang wiederverwendet und nach jedem Schreiben erneuert), und
+  `read_knowledge_source` liest die Auszüge einer Quelle der Reihe nach. Eine Quelle wird über ihre ID (`ks_` und
+  16 Hex-Zeichen) benannt, nie über einen Pfad; jeder Auszug, jede Adresse und jeder Titel wird bereinigt, auf 4000
+  Zeichen gekürzt und als nicht vertrauenswürdig markiert. Ein Tool-Aufruf lädt nie ein Modell herunter: Liegt das
+  Embedding-Modell noch nicht auf diesem Rechner, wird die Suche mit dem nächsten Schritt abgelehnt (Ditto einmal
+  in der GUI oder mit `llm-cli ditto ask` fragen, das lädt es einmal), und ein noch fehlendes Reranking-Modell wird
+  nur für diesen Aufruf übersprungen. Auflisten und Lesen brauchen kein Modell.
 - **Dokumentation aufnehmen:** [Deep Ingest](#deep-ingest) im Modul-Assistenten und
   [Wissens-Packs](#community-zoo) aus dem Community-Zoo.
 
@@ -1195,7 +1210,9 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   vertrauenswürdige Daten).
 - **Ressourcen:** Neben den Tools bietet der Server Ressourcen, die ein Client anhängen oder lesen kann:
   `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<Request-ID>/status`,
-  `lcf://builds/<Request-ID>/log` (die letzten 200 Zeilen), `lcf://permissions` und die Dokumente der Installation
+  `lcf://builds/<Request-ID>/log` (die letzten 200 Zeilen), `lcf://permissions`,
+  `lcf://knowledge/sources/<Quellen-ID>` (die ersten Auszüge einer Wissensquelle, wie `read_knowledge_source`) und die
+  Dokumente der Installation
   `lcf://docs/<Name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` und ihre deutschen
   `_DE`-Zwillinge; aufgeführt werden nur die vorhandenen). Eine Ressource liefert, was ihr Lese-Tool liefert, und wird
   über die Tool-Registry gelesen: Deine Berechtigung für dieses Tool entscheidet (die Ressource eines verbotenen Tools

@@ -486,7 +486,9 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `read_build_log` | read | The last lines of a build log (secrets redacted) |
 | `list_artifacts` | read | Finished builds from their manifests |
 | `run_doctor` | read | The health check, without fixes |
-| `search_knowledge` | read | Search the knowledge base |
+| `search_knowledge` | read | Search the knowledge base; every excerpt with its source id, address or pack, kind (`web`, `pack`, `docs`), trust, date added and position; `kind` narrows the search |
+| `list_knowledge_sources` | read | What the knowledge base holds: every source with id, title, kind, trust, date added and number of excerpts (50 per page) |
+| `read_knowledge_source` | read | One source's excerpts in their order, by source id (at most 20 per call) |
 | `start_build` | local write | Start a build (must match the target's capabilities) |
 | `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
@@ -834,6 +836,17 @@ Local Knowledge Base**). Nothing is loaded until it is first used.
 - **Use:** the `search_knowledge` tool (Ditto, MCP clients); without tools Ditto adds matching excerpts to the
   question itself. Healing analyses, module proposals and build recommendations (Builder: **Use RAG Knowledge
   Base**) also get excerpts. Results are always treated as untrusted data.
+- **The same knowledge base for AI clients:** an MCP client that does Ditto's job gets what Ditto gets. Every hit of
+  `search_knowledge` names its source (`source_id`, the address or pack entry, title, section, position in the
+  source), its kind (`web`: a page you added by Deep Ingest; `pack`: an installed knowledge pack; `docs`: the
+  framework's own code and documents) and its trust (`crawled`, the pack's `verified`, `community` or `local`,
+  `framework`, or `unknown` for a pack that is no longer installed). `list_knowledge_sources` lists the sources
+  (filter by kind and text, 50 per page; the list is reused for a minute and refreshed after every write) and
+  `read_knowledge_source` reads one source's excerpts in order. A source is named by its id (`ks_` and 16 hex
+  characters), never by a path; every excerpt, address and title is cleaned, capped at 4000 characters and marked as
+  untrusted. A tool call never downloads a model: if the embedding model is not on this computer yet, the search is
+  refused with the next step (ask Ditto one question in the GUI or with `llm-cli ditto ask`, which loads it once),
+  and a reranking model that is not there yet is skipped for that call only. Listing and reading need no model.
 - **Adding documentation:** [Deep Ingest](#deep-ingest) in the module wizard, and [knowledge packs](#community-zoo)
   from the community zoo.
 
@@ -1100,7 +1113,8 @@ framework never sees it.
   stay plain (Ditto's model gets such errors in an untrusted block too).
 - **Resources:** besides the tools, the server offers resources a client can attach or read:
   `lcf://targets`, `lcf://targets/<target>/capabilities`, `lcf://builds/<request id>/status`,
-  `lcf://builds/<request id>/log` (the last 200 lines), `lcf://permissions`, and the installation's documents
+  `lcf://builds/<request id>/log` (the last 200 lines), `lcf://permissions`, `lcf://knowledge/sources/<source id>`
+  (the first excerpts of one knowledge source, as `read_knowledge_source`), and the installation's documents
   `lcf://docs/<name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` and their German `_DE` twins;
   only the ones that exist are listed). A resource returns what its read tool returns and is read through the tool
   registry: your permission for that tool decides (a resource of a denied tool is neither listed nor readable, and
