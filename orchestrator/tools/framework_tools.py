@@ -507,6 +507,8 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     register_knowledge_tools(registry, framework)
     register_healing_tools(registry, framework, request_id["request_id"])
     register_hf_tools(registry, framework, jobs)
+    from orchestrator.tools.tools_optional import register_optional_tools  # T10: hidden until enabled
+    register_optional_tools(registry, framework, jobs)
     return registry
 
 

@@ -528,6 +528,17 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `report_cannot_do` | read | Report that a task cannot be done, with the reason; the framework checks the reason against its own state |
 | `get_job_status` | read | State, progress and result of a long operation other than a build (a job); waits with `wait_seconds` |
 | `cancel_job` | local write | Stop a job (its own jobs without a question, another caller's only after one) |
+| `delete_artifact` | external, optional | Delete one built model (its folder below the output folder and its golden ZIP); hidden until you enable it, always asked |
+| `restore_knowledge_snapshot` | external, optional | Replace the knowledge base with an earlier snapshot, after a backup of the current content (a job); hidden until you enable it, always asked |
+
+The two optional tools destroy something, so they are denied by default and not listed until you enable them in
+Tool Permissions (allowing the whole "external" class does not enable them), every call is asked, and they never get
+a standing approval. `delete_artifact` takes the id and the sha256 `list_artifacts` shows; it is refused for a
+folder outside the output folder (also through a link), while a build of any framework program writes into it or
+is queued for it, when the model file's sha256 changed since, and when the folder is no longer the one the question
+named. `restore_knowledge_snapshot` saves the current knowledge base as a snapshot `pre_restore_<time>` first and
+does not restore without that backup; the same backup rule now holds for every restore of a snapshot, and the
+snapshot being restored is never pruned by it.
 
 How a question with tools runs:
 

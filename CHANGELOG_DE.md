@@ -10,6 +10,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Optionale Tools `delete_artifact` und `restore_knowledge_snapshot`** (MCP-Entwurf T10): ein gebautes Modell
+  (Ordner und Golden-ZIP) per ID und sha256 löschen oder die Wissensbasis als Job durch einen früheren Snapshot
+  ersetzen. Beide zerstören etwas: standardmäßig verboten und verborgen, bis du sie freigibst (die ganze Klasse
+  „extern“ zu erlauben genügt nicht), jeder Aufruf mit Frage, nie ein Dauerauftrag. Ein Löschen wird abgelehnt
+  außerhalb des Ausgabeordners, solange ein Build irgendeines Programms des Frameworks in den Ordner schreibt oder
+  dafür wartet, nachdem sich der Build geändert hat und wenn der Ordner nicht der ist, den die Frage nannte. Eine
+  Wiederherstellung sichert immer zuerst die aktuelle Wissensbasis (`pre_restore_<Zeit>`), auch außerhalb von MCP,
+  und räumt den wiederherzustellenden Snapshot nie auf.
 - **Ditto als MCP-Client eines anderen Frameworks** (MCP-Entwurf T12; Ditto ist hybrid): `llm-cli ditto remote set`
   richtet Ditto auf den MCP-Server eines Frameworks aus, das anderswo läuft, zum Beispiel im Headless-Docker-Image
   (stdio über einen Befehl wie `docker exec -i <container> llm-cli mcp serve` oder HTTP an eine https- oder
