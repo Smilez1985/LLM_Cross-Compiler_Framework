@@ -21,6 +21,7 @@ import hashlib
 import json
 import math
 import re
+import shutil
 import tempfile
 import time
 from dataclasses import dataclass, field
@@ -224,21 +225,41 @@ class EvalBuildService(BuildService):
                                     next="Call list_build_requests for the ids you can use.")
         return self._requests[request_id]
 
-    def list_requests(self) -> BuildList:
-        return BuildList(builds=list(self._requests.values()))
+    def list_requests(self, status=None, page: int = 1) -> BuildList:
+        builds = [b for b in self._requests.values() if not status or b.status.lower() == status.lower()]
+        return BuildList(builds=builds)
 
-    def log_tail(self, request_id: str, lines: int = 200) -> LogTail:
+    def hub_facts(self, repo: str, revision=None):
+        """Canned Hugging Face facts (the evaluation never reaches huggingface.co): a small ungated model."""
+        from orchestrator.Core.hf_lookup import HubFile, ModelFacts
+        files = [HubFile("config.json", 700), HubFile("model.safetensors", 988_000_000, "0" * 64),
+                 HubFile("tokenizer.json", 7_000_000)]
+        return ModelFacts(repo=repo, commit=revision or "a" * 40, files=files, staged=files, weights="safetensors",
+                          gated="false", license="apache-2.0", license_class="permissive", token_access="not_needed",
+                          parameters=494_000_000)
+
+    def host_hardware(self):
+        return None
+
+    @staticmethod
+    def disk_usage(path: str):
+        """A canned disk with room (nothing is built here; the evaluation must not depend on this machine's disk)."""
+        return shutil._ntuple_diskusage(total=1000 * 10 ** 9, used=400 * 10 ** 9, free=600 * 10 ** 9)
+
+    def log_tail(self, request_id: str, lines: int = 200, before_line=None) -> LogTail:
         self.get_status(request_id)
         return LogTail(request_id=request_id, lines=EVAL_LOG[-max(1, min(int(lines), 2000)):]
                        if request_id == "req-7" else [])
 
-    def list_artifacts(self) -> ArtifactList:
+    def list_artifacts(self, target=None, format=None, page: int = 1) -> ArtifactList:
         return ArtifactList(artifacts=[ArtifactOut(
-            path="output/Qwen2.5-0.5B-Instruct_rk3588_Q4_K_M", model="Qwen/Qwen2.5-0.5B-Instruct", format="gguf",
+            artifact_id="a_" + "1" * 16, label="output:Rockchip/Qwen2.5-0.5B-Instruct/Q4_K_M", size_bytes=470_000_000,
+            model="Qwen/Qwen2.5-0.5B-Instruct", format="gguf",
             quantization="Q4_K_M", board="rk3588", target="Rockchip", created="2026-10-01T12:00:00Z",
             primary="model-Q4_K_M.gguf", sha256="0" * 64)])
 
-    def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "") -> BuildHandle:
+    def start_build(self, request: BuildRequestIn, *, local_paths: bool = False, owner: str = "",
+                    optimization: str = "balanced", disk_reservation: str = "") -> BuildHandle:
         req = self.validate(request, local_paths=local_paths)
         request_id = f"eval-{len(self.started) + 1}"
         self.started.append(req.model_dump())

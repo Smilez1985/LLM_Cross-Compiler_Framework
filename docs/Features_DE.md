@@ -519,13 +519,15 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 |---|---|---|
 | `list_targets` | lesen | Targets mit Boards, Formaten und Quantisierungen |
 | `get_target_capabilities` | lesen | Was ein Target bauen kann |
-| `list_build_requests` | lesen | Build-Anfragen dieser Sitzung |
+| `list_build_requests` | lesen | Build-Anfragen mit Status, 50 pro Seite; die anderer Framework-Prozesse nur lesbar |
 | `get_build_status` | lesen | Status, Fortschritt, Fehler, ein offener Self-Healing-Vorschlag; mit `wait_seconds` (höchstens 50) wartet es auf eine Änderung |
-| `read_build_log` | lesen | Die letzten Zeilen eines Build-Logs (Geheimnisse geschwärzt) |
-| `list_artifacts` | lesen | Fertige Builds aus ihren Manifesten |
+| `read_build_log` | lesen | Die letzten Zeilen eines Build-Logs (Geheimnisse geschwärzt; höchstens 1000, zurückblättern mit `before_line`) |
+| `list_artifacts` | lesen | Fertige Builds mit ID und Label (nie ein Host-Pfad), mit Größe und Hash |
+| `get_artifact_details` | lesen | Manifest, Model Card und Dateien eines gebauten Modells (externer Text) |
+| `check_build_request` | lesen | Probelauf von `start_build`: Commit, Downloadgröße, Speicherplatz, Hardware-Schätzung, Lizenz, Zugangsbeschränkung; startet nichts |
 | `run_doctor` | lesen | Der Gesundheitscheck, ohne Korrekturen |
 | `search_knowledge` | lesen | In der Wissensbasis suchen |
-| `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen) |
+| `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
 | `get_status` | lesen | Deine Tool-Berechtigungen für diesen Aufrufer: jedes Tool mit Entscheidung und Grund (auch die ausgeblendeten) und was kein Tool tut, mit dem Ort, wo du es tust |
@@ -1108,6 +1110,40 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Berechtigungen, Bestätigung, Audit-Log (Akteur `mcp` für lokale stdio-Clients, `mcp:<Name>` für ein benanntes
   Token), genau wie für Ditto ([wie Namen und Werte abgeglichen werden](#dittos-tools)). Tool-Annotationen (nur
   lesend, idempotent) sind nur Hinweise für den Client.
+- **Builds (`start_build`, `check_build_request`):** Bevor du gefragt wirst, schlägt das Framework nach, was der Build
+  tun würde, und zeigt es in der Frage: den Hugging-Face-Commit, auf den der Standardzweig jetzt zeigt (der Build holt
+  dann genau diesen Commit, auch wenn der Zweig sich ändert, während du liest), die Downloadgröße, die Art der
+  Gewichte (safetensors, GGUF oder Pickle-Dateien, die im Build-Container Code ausführen können und so benannt
+  werden), die Lizenz (Text aus dem Repository, so gekennzeichnet), die Zugangsbeschränkung und ob das im Framework
+  gespeicherte Hugging-Face-Token Zugriff hat, den Speicherplatz auf jedem Laufwerk, auf das der Build schreibt, eine
+  Schätzung, ob dieser Rechner es konvertieren und das Board es ausführen kann, was eingebunden wird (Labels, nie
+  Pfade), Vertrauen und Support-Stufe des Targets und dass zuerst ein Docker-Image mit Netzwerkzugang gebaut werden
+  kann. Es gibt keine Größengrenze für Downloads: Ein 72B-Modell wird gebaut, wenn die Laufwerke es fassen. Vor der
+  Frage abgelehnt wird ein Build nur, wenn ein Laufwerk den Download, die Konvertierungsreserve (etwa noch einmal der
+  Download) und die Ausgabe dreifach (Build-Cache, bereitgestellte Kopie, ZIP) plus eine Reserve von 2 GiB oder 2 %
+  des Laufwerks und den Platz, den andere angenommene Builds reserviert und noch nicht geschrieben haben, nicht fasst
+  (Grund `insufficient_resources`, mit den Zahlen); wenn bei einem zugangsbeschränkten Modell der Zugriff fehlt
+  (`needs_person` ohne gespeichertes Token, `permission_denied`, wenn das gespeicherte Token keinen Zugriff hat); wenn
+  die Build-Sandbox aus ist (`build_sandbox`, `needs_person`); und im Offline-Modus. Die Hardware-Schätzung ist nie
+  eine Ablehnung: „passt nicht“ wird gezeigt, und du entscheidest. Ist Hugging Face nicht erreichbar, sagt die Frage
+  „Standardzweig, Commit unbekannt“ und dass die Downloadgröße unbekannt ist. Ein angenommener Build reserviert
+  seinen Speicherplatz in `~/.llm-framework/disk_reservations.json` (gemeinsam für GUI, CLI und jeden MCP-Server),
+  bis seine Anfrage endet; verlässt der Build die Warteschlange, wird das Laufwerk erneut geprüft, und ein Build, der
+  nicht mehr passt, scheitert mit den Zahlen, bevor etwas heruntergeladen wird. `optimization` (`fast`, `balanced`,
+  `size`, `speed`, `aggressive`) wird an den Build weitergegeben. `check_build_request` liefert denselben Plan
+  (normalisierte Anfrage, Commit, Größen, Laufwerke, Passung, Einbindungen, Vertrauen, Image-Build, was deine
+  Berechtigungen tun würden), ohne etwas zu starten; seine Probleme tragen Grundcodes.
+- **Build-Abfragen:** `list_build_requests` (50 pro Seite, Filter nach Status) listet auch Builds, die ein anderer
+  Framework-Prozess gestartet hat (GUI, CLI, ein anderer MCP-Server), aus ihren Build-Records, markiert mit
+  `process: other` und nur lesbar (gestoppt werden sie dort, wo sie gestartet wurden; ein Build, dessen Prozess
+  endete, ist `interrupted`). `get_build_status` ergänzt, was die Anfrage baut (`request`: Modell als Repo-ID oder
+  Label, Target, Format, Board, Quantisierung, Optimierung, Commit). `read_build_log` liefert höchstens 1000 Zeilen
+  (Standard 200), 2000 Zeichen pro Zeile und 48.000 insgesamt, mit `first_line` und `before_line` zum
+  Zurückblättern. `list_artifacts` benennt gebaute Modelle mit einer ID (`a_` und 16 Hex-Zeichen) und einem Label
+  (`output:<relativer Pfad>`) mit Größe und Hash, 50 pro Seite, gefiltert nach Target und Format;
+  `get_artifact_details` liefert Manifest (jeder Text als externer Text gekennzeichnet, der Pfad eines lokalen
+  Modells als sein Label), Model Card und Dateien eines Modells. Die Ressourcen
+  `lcf://artifacts/{artifact_id}/manifest` und `lcf://artifacts/{artifact_id}/model-card` lesen dasselbe.
 - **Bestätigung:** Wo deine Berechtigung „fragen“ sagt, fragt der Server den Benutzer über den Client
   (MCP-Elicitation). Die Frage zeigt das Tool und jedes Argument vollständig, die sicherheitsrelevanten zuerst;
   Steuerzeichen, unsichtbare Zeichen und lange Stapel kombinierender Zeichen erscheinen als `\u`-Escapes. Eine

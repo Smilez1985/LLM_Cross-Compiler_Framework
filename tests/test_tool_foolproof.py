@@ -19,6 +19,7 @@ from mcp import Client  # noqa: E402
 
 from conftest import REPO_ROOT  # noqa: E402
 from orchestrator import mcp_server  # noqa: E402
+from orchestrator.Core.build_service import BuildServiceError  # noqa: E402
 from orchestrator.evals.ditto_eval import EvalEnvironment, tool_use_metrics  # noqa: E402
 from orchestrator.llm.providers.openai_compat import parse_arguments  # noqa: E402
 from orchestrator.llm.tool_loop import tool_specs_from_registry  # noqa: E402
@@ -226,7 +227,7 @@ class TestValues:
 
     def test_an_amount_to_return_is_reduced_with_a_note(self, env):
         out = ditto(env, "read_build_log", {"request_id": "req-7", "lines": 5000})
-        assert "lines reduced to 2000, the maximum (you asked for 5000)" in out.notes
+        assert "lines reduced to 1000, the maximum (you asked for 5000)" in out.notes
 
     def test_text_numbers_and_booleans_are_coerced(self, env):
         ditto(env, "start_build", {**BUILD, "use_imatrix": "yes", "max_context_length": "4096"})
@@ -454,10 +455,14 @@ class TestRepeatGuardOverMcp:
         assert "A valid call looks like: start_build" in texts[2]
 
     @pytest.mark.parametrize("approve", [True, False])
-    def test_a_write_that_failed_twice_is_not_put_to_the_person_again(self, env, approve):
+    def test_a_write_that_failed_twice_is_not_put_to_the_person_again(self, env, approve, monkeypatch):
         env.registry.policy_store.replace(ToolPolicy(configured=True, reviewed=[s.name for s in env.registry.list()]))
         asked = []
-        raw = {**BUILD, "format": "rkllm", "board": "rk3566"}  # refused by the build service: not_supported
+        raw = dict(BUILD)
+
+        def broken(*_a, **_k):  # fails after the question: the build service refuses to queue it
+            raise BuildServiceError("The build queue could not take the request.", code="failed")
+        monkeypatch.setattr(env.framework.build_service, "start_build", broken)
         results = mcp_session(env, [("start_build", raw)] * 3, answering("accept", approve=approve, asked=asked))
         # Since S8 a person's "no" is not asked again for 10 minutes (design 6.5), so a declined call is asked once.
         expected, refusal = (2, "Stop retrying this call") if approve else (1, "declined this exact call")
@@ -469,6 +474,17 @@ class TestRepeatGuardOverMcp:
             errors.append(exc.value)
         assert len(dittos) == expected, "the same on Ditto's path"
         assert refusal in str(errors[2]), "and the same answer on Ditto's path"
+
+    def test_a_request_the_target_cannot_build_is_refused_before_any_question(self, env):
+        """T1: start_build's look-up (two-phase) checks the request first, so the person is never asked about a
+        build the target cannot do; the repeat guard still stops the third identical call."""
+        env.registry.policy_store.replace(ToolPolicy(configured=True, reviewed=[s.name for s in env.registry.list()]))
+        asked = []
+        raw = {**BUILD, "format": "rkllm", "board": "rk3566"}  # not_supported: RKLLM does not run on rk3566
+        results = mcp_session(env, [("start_build", raw)] * 3, answering("accept", approve=True, asked=asked))
+        assert asked == [] and "not run on rk3566" in text_of(results[0])
+        assert "Stop retrying this call" in text_of(results[2])
+        assert built(env) == []
 
 
 class TestEveryToolRefusesUnknownArguments:

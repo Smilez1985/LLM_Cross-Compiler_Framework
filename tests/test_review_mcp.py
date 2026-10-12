@@ -816,7 +816,8 @@ def test_broken_config_file_real_stdio_client(tmp_path, broken_config):
     from mcp import StdioServerParameters
     params = StdioServerParameters(command=sys.executable,
                                    args=["-m", "orchestrator.cli", "-q", "-c", str(broken_config), "mcp", "serve"],
-                                   env=cli_env(tmp_path), cwd=str(tmp_path))
+                                   # no network in tests: the Hugging Face look-up fails, the question says "commit unknown"
+                                   env=cli_env(tmp_path, HF_HUB_OFFLINE="1"), cwd=str(tmp_path))
     problems = []
 
     async def handler(message):

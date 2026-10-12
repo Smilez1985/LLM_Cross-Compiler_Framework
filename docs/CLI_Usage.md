@@ -241,7 +241,15 @@ Behaviour:
 - Results: `<output folder>/<target>/<model>/<quantization>/` with the model file, `build_info.json` and
   `Model_Card.md`, and a ZIP of them next to that folder. They appear there only when the build has completed; a
   cancelled or failed build leaves no files there.
-- Gated Hugging Face models need a token: `llm-cli secrets set hf_token`.
+- Gated Hugging Face models need a token: `llm-cli secrets set hf_token`. Only the token stored in the framework is
+  sent; a token in `HF_TOKEN` or from `hf auth login` is never used.
+- A Hugging Face model is downloaded into `<cache_dir>/models/hf/<owner>--<name>/<commit>/`, one folder per commit,
+  file by file; only that folder is mounted into the build containers. A second build of the same commit reuses
+  it, and a build of another commit never mixes files with it. Ctrl+C stops the download before its next file.
+- A full disk is reported as `insufficient_resources` with the free space of the cache and output disks, and
+  the download stops when the cache disk falls below half of the space that must stay free (2 GiB or 2 % of the
+  disk). The self-healing proposal for a full disk names the framework's folders on that disk with their sizes
+  as a manual step; pruning Docker is proposed only when Docker's data root is the full disk.
 - A local model file is mounted into the build containers alone, never the folder it lies in; a model that needs
   files next to it (for example ONNX external data) is given as its folder. Ditto and MCP clients cannot name a path
   at all: they use `<label>:<relative path>` inside the [folders the AI may use](#tools-folders).

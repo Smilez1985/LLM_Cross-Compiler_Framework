@@ -244,7 +244,17 @@ Verhalten:
 - Ergebnisse: `<Ausgabeordner>/<Target>/<Modell>/<Quantisierung>/` mit der Modelldatei, `build_info.json` und
   `Model_Card.md`, dazu ein ZIP davon neben diesem Ordner. Sie erscheinen dort erst, wenn der Build abgeschlossen
   ist; ein abgebrochener oder gescheiterter Build hinterlässt dort keine Dateien.
-- Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token`.
+- Zugangsbeschränkte Hugging-Face-Modelle brauchen ein Token: `llm-cli secrets set hf_token`. Gesendet wird nur das
+  im Framework gespeicherte Token; ein Token in `HF_TOKEN` oder aus `hf auth login` wird nie verwendet.
+- Ein Hugging-Face-Modell wird nach `<cache_dir>/models/hf/<owner>--<name>/<commit>/` heruntergeladen, ein Ordner pro
+  Commit, Datei für Datei; nur dieser Ordner wird in die Build-Container eingebunden. Ein zweiter Build desselben
+  Commits verwendet ihn wieder, und ein Build eines anderen Commits vermischt nie Dateien damit. Strg+C stoppt den
+  Download vor seiner nächsten Datei.
+- Ein volles Laufwerk wird als `insufficient_resources` mit dem freien Platz der Cache- und Ausgabelaufwerke
+  gemeldet, und der Download stoppt, wenn das Cache-Laufwerk unter die Hälfte des Platzes fällt, der frei bleiben
+  muss (2 GiB oder 2 % des Laufwerks). Der Self-Healing-Vorschlag für ein volles Laufwerk nennt die Ordner des
+  Frameworks auf diesem Laufwerk mit ihrer Größe als manuellen Schritt; Docker aufzuräumen wird nur vorgeschlagen,
+  wenn Dockers Datenverzeichnis das volle Laufwerk ist.
 - Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nie der Ordner, in dem sie liegt; ein
   Modell, das Dateien daneben braucht (zum Beispiel externe ONNX-Daten), wird als Ordner angegeben. Ditto und
   MCP-Clients können gar keinen Pfad nennen: Sie verwenden `<Label>:<relativer Pfad>` in den
