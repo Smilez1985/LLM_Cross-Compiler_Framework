@@ -20,9 +20,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Seiten, ein ungetestetes Modul, eine ersetzte Board-Laufzeit) bringen eine Regel für eine KI mit; Sicherheits- und
   Rechtshinweise (Pickle-Gewichte, ein Basis-Image außerhalb der Docker Official Images oder nicht gepinnt,
   Hersteller-Downloads über der weichen Grenze, ein ungeprüftes oder Community-Target, der erste Build von KI-Build-
-  Code, ein nicht vertrauenswürdiges Modell nativ, Signieren als die Person, Modelle mit Bedingungen, Lizenzen)
-  bleiben immer bei der Person, und Fakten, die sich nicht prüfen ließen, sind der Sicherheitshinweis
-  `facts_unknown`, nie „kein Problem“. Builds, Rezept-Builds, Downloads, Pack-Importe und -Exporte, Deep Ingest,
+  Code, ein nicht vertrauenswürdiges Modell nativ oder in der Sandbox, die die Person nicht für KIs erlaubt hat
+  (`bench_untrusted_sandbox_ok`), Signieren als die Person, Modelle mit Bedingungen, Lizenzen) bleiben immer bei der
+  Person, ein Basis-Image außerhalb der Docker Official Images auch nach einem bestätigten Build damit, und Fakten,
+  die sich nicht prüfen ließen, sind der Sicherheitshinweis `facts_unknown`, nie „kein Problem“ (die Person liest in
+  klaren Worten, was nicht geprüft werden konnte, nie einen internen Code). Builds, Rezept-Builds, Downloads, Pack-Importe und -Exporte, Deep Ingest,
   Deployment-Pakete und Deployments, die Board-Tools, die lokale Laufzeit, Benchmarks, das Erstellen von Modulen und
   Einstellungen melden sie. Eine Entscheidung ist an den Entscheidungs-Digest der Fakten gebunden, der freien
   Speicher und Byte-Zahlen auslässt; ein Build oder Download unter einem Dauerauftrag (und später einer Vollmacht)
@@ -671,8 +673,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Terminal) funktioniert auf einem Rechner ohne Bildschirm. Der Client bekommt `waiting_for_approval` mit einer
   Job-ID; sobald du freigibst, führt das Framework den Aufruf selbst unter dem Aufrufer des Clients aus, außer ein
   Fakt, von dem die Entscheidung abhängt, hat sich inzwischen geändert (ein neuer Commit, ein neuer Hinweis wie ein
-  jetzt knapper Speicherplatz: dann wirst du erneut gefragt; freier Speicher oder Byte-Zahlen, die sich nur bewegt
-  haben, fragen nie erneut, der Aufruf läuft dann mit den Fakten von jetzt), und der Client liest das Ergebnis mit
+  jetzt knapper Speicherplatz: dann wirst du erneut gefragt; freier Speicher, Byte-Zahlen oder die Uhrzeit, nach der
+  ein Sicherungs-Snapshot benannt wird, die sich nur bewegt haben, fragen nie erneut, der Aufruf läuft dann mit den
+  Fakten von jetzt), und der Client liest das Ergebnis mit
   `get_job_status`. Eine Freigabe ist an Aufrufer, Tool, Argument-Hash und Fragen-Hash gebunden, läuft einmal,
   verfällt nach 15 Minuten und endet mit der Sitzung des Clients, `cancel_job` oder dem Beenden des Frameworks; ein
   Client hat höchstens 5 offen; die Frage zeigt zuerst die Aufruferklasse und den Namen des Clients als selbst
@@ -790,8 +793,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nativ nur nach deiner Zustimmung im eigenen Fenster des Frameworks gemessen, die zuerst ins Audit-Log geschrieben
   wird, oder in der Docker-Sandbox. Die Board-Tools erreichen nur vertraute Geräte mit dem vertrauten Host-Schlüssel,
   werden immer erfragt und nie von einer Daueranfrage abgedeckt; ihre Fakten, Folgen, Fortschritte, Prüfergebnisse und
-  Fehler (auch bei Erfolg) nennen nie das Gerätekonto oder einen Pfad auf dem Board (das Fenster der Person zeigt die
-  Anmeldung und den Pfad des Modells). Ist Dittos Server noch nicht gebaut oder das Modell einer Stufe noch nicht
+  Fehler (auch bei Erfolg) nennen nie das Gerätekonto (weder die gekoppelte Anmeldung noch das Konto, das die
+  Deploy-Einstellungen nennen) oder einen Pfad auf dem Board (das Fenster der Person zeigt die Anmeldung und den Pfad
+  des Modells). Ist Dittos Server noch nicht gebaut oder das Modell einer Stufe noch nicht
   heruntergeladen, lautet die Ablehnung `missing_information` und nennt `build_local_runtime`, das die KI selbst
   aufrufen kann.
 - **Benchmark-Läufe dieses Rechners** (`~/.llm-framework/benchmarks/`): `llama-bench`-Ergebnisse des selbst gebauten

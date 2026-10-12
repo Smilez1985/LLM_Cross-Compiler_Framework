@@ -52,7 +52,8 @@ TEXTS = {
         "warning.first_build_unconfirmed": "An AI made or installed this build code; you see its first build once.",
         "warning.preflight_error": "The check before the build found a problem ({check}); building anyway ignores it.",
         "warning.untrusted_model_native": "Runs a model that is not from the framework's list directly on your "
-                                          "computer, with your rights.",
+                                          "computer with your rights, or in the sandbox you have not allowed for "
+                                          "AIs.",
         "warning.signs_as_you": "The pack is signed with your personal key.",
         "warning.facts_unknown": "Some facts could not be checked ({unknown}), so the model may be unsafe or "
                                  "restricted.",
@@ -167,6 +168,16 @@ TEXTS = {
         "summary.delegated": "{who} may decide this itself under your delegation “{label}”.",
         "summary.recommends": "{who} recommends (its own words): {note}",
         "summary.you_decide": "You decide.",
+        # --- closed words inside a warning (facts_catalog.person_words): what could not be checked, which list ---
+        "unknown.huggingface": "Hugging Face did not answer",
+        "unknown.licence": "no licence is named",
+        "unknown.base_model": "the model it is based on",
+        "unknown.weights_format": "the format of the model files",
+        "unknown.other": "something else",
+        "vendor_list.package_sources": "vendor package sources",
+        "vendor_list.pip_packages": "Python packages",
+        "vendor_list.pinned_downloads": "vendor downloads",
+        "vendor_list.other": "vendor software",
     },
     "de": {
         # --- Situationshinweise ---
@@ -209,7 +220,8 @@ TEXTS = {
         "warning.preflight_error": "Die Prüfung vor dem Build hat ein Problem gefunden ({check}); trotzdem bauen "
                                    "übergeht es.",
         "warning.untrusted_model_native": "Führt ein Modell, das nicht aus der Liste des Frameworks stammt, direkt "
-                                          "auf deinem Computer mit deinen Rechten aus.",
+                                          "auf deinem Computer mit deinen Rechten aus, oder in der Sandbox, die du "
+                                          "für KIs nicht freigegeben hast.",
         "warning.signs_as_you": "Das Paket wird mit deinem persönlichen Schlüssel signiert.",
         "warning.facts_unknown": "Einiges konnte nicht geprüft werden ({unknown}); das Modell könnte unsicher oder "
                                  "eingeschränkt sein.",
@@ -333,5 +345,15 @@ TEXTS = {
         "summary.delegated": "{who} darf das mit deiner Vollmacht „{label}“ selbst entscheiden.",
         "summary.recommends": "{who} empfiehlt (eigene Worte): {note}",
         "summary.you_decide": "Du entscheidest.",
+        # --- feste Wörter in einer Warnung (facts_catalog.person_words): was nicht geprüft werden konnte, welche Liste
+        "unknown.huggingface": "Hugging Face hat nicht geantwortet",
+        "unknown.licence": "keine Lizenz angegeben",
+        "unknown.base_model": "das Modell, auf dem es beruht",
+        "unknown.weights_format": "das Format der Modelldateien",
+        "unknown.other": "etwas anderes",
+        "vendor_list.package_sources": "Paketquellen von Herstellern",
+        "vendor_list.pip_packages": "Python-Pakete",
+        "vendor_list.pinned_downloads": "Hersteller-Downloads",
+        "vendor_list.other": "Hersteller-Software",
     },
 }

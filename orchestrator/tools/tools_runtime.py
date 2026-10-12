@@ -361,6 +361,14 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         except Exception:  # noqa: BLE001
             return False
 
+    def sandbox_allowed() -> bool:
+        """Whether the person allowed the Docker sandbox for an AI's benchmark of an untrusted model (an oversight
+        setting: an AI never changes it; unreadable counts as not allowed)."""
+        try:
+            return framework.config.get("bench_untrusted_sandbox_ok", False) is True
+        except Exception:  # noqa: BLE001
+            return False
+
     def cache_folder() -> Optional[Path]:
         """The framework's cache folder (a sandbox benchmark's private model file may go there)."""
         try:
@@ -749,8 +757,10 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                      "label": label, "build_id": build.build_id,
                      # a standing approval never covers an untrusted model run natively (runtime decision D23)
                      "grant": {} if trusted or inp.sandbox else None}
-            # an untrusted model run natively is the person's alone (a security warning, runtime decision D23)
-            warnings = (warn("untrusted_model_native"),) if native and not trusted else ()
+            # an untrusted model run natively is the person's alone (a security warning, runtime decision D23); so is
+            # one in the Docker sandbox unless the person allowed that for AIs (bench_untrusted_sandbox_ok, an
+            # oversight setting no AI can change; design 4.3, SEC-M9)
+            warnings = (warn("untrusted_model_native"),) if not trusted and (native or not sandbox_allowed()) else ()
             return CallFacts(consequence=consequence, facts=tuple(facts), bound=bound, warnings=warnings,
                              cap=None if trusted or inp.sandbox else Decision.ASK.value,
                              consequence_template=consequence)
@@ -936,16 +946,18 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             from orchestrator.runtime.device import service as dev
             from orchestrator.runtime.device.package import DeviceRuntimeStore
             device = trusted(inp.device_id)
+            users = device_users(device)
             try:
                 profile = dev.device_profile(state_dir(), device)
                 settings = dev.deploy_settings(state_dir(), device, profile)
+                users = device_users(device, settings)
                 plan = dev.plan_facts(state_dir(), profile)
                 if offline() and not plan.built and not plan.source_cached:
                     raise blocked("offline_mode", "Offline mode is on, and the build needs the pinned source.",
                                   "Ask the person to switch offline mode off or import the source.")
                 fp = dev.read_key(device, state_dir())
             except dev.DeviceRuntimeError as e:
-                raise svc_error(e, device_users(device)) from None
+                raise svc_error(e, users) from None
             target = plan.target
             facts = device_lines(device, fp) + [
                 Fact("Runtime", f"llama.cpp for {target.get('os')}/{target.get('arch')} ({target.get('libc')} "
@@ -985,12 +997,14 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
 
             def work(handle) -> Dict[str, Any]:
                 from orchestrator.Core.job_service import EXTERNAL_KEY, JobCancelled
+                # the paired login, then also the deploy settings' account the deploy logs in with (D0)
+                users = device_users(device)
                 try:
                     profile = dev.device_profile(state_dir(), device)
                     settings = dev.deploy_settings(state_dir(), device, profile)
+                    users = device_users(device, settings)
                     if (settings.ssh_user, settings.install) != (bound["user"], bound["install"]):
                         raise ValueError("The deploy settings changed after the person was asked; nothing was done.")
-                    users = device_users(device, settings)
                     out = dev.deploy(state_dir(), device, profile, settings, bound["fingerprint"], bound["build_id"],
                                      on_client=on_client, cancelled=lambda: stop.is_set() or handle.cancelled,
                                      say=lambda msg: handle.progress(None, None, device_text(msg, users,
@@ -998,7 +1012,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set() or handle.cancelled:
                         raise JobCancelled() from None
-                    raise job_error(e, device_users(device)) from None
+                    raise job_error(e, users) from None
                 checks = out.pop("checks")
                 notes = out.pop("notes")
                 # the device's words also on success: its account and paths never reach an AI (D0)
@@ -1024,9 +1038,11 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             from orchestrator.runtime.device import service as dev
             from orchestrator.runtime.device.package import DeviceRuntimeStore
             device = trusted(inp.device_id)
+            users = device_users(device)
             try:
                 profile = dev.device_profile(state_dir(), device)
                 settings = dev.deploy_settings(state_dir(), device, profile)
+                users = device_users(device, settings)
                 if not DeviceRuntimeStore(state_dir(), device.device_id).record():
                     raise blocked("no_device_runtime", f"No runtime is deployed to {device.label} yet.",
                                   "Deploy it first with deploy_device_runtime.")
@@ -1035,7 +1051,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                   "Ask the person to name one with 'llm-cli device settings DEVICE --model PATH'.")
                 fp = dev.read_key(device, state_dir())
             except dev.DeviceRuntimeError as e:
-                raise svc_error(e, device_users(device)) from None
+                raise svc_error(e, users) from None
             facts = device_lines(device, fp) + [
                 # D0: the model by its file name; its path on the device is the person's to see
                 Fact("Model", f"{_file_name(settings.model)} on the device (from its deploy settings)"),
@@ -1081,9 +1097,12 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
 
             def work(handle) -> Dict[str, Any]:
                 from orchestrator.Core.job_service import EXTERNAL_KEY, JobCancelled
+                # the paired login, then also the deploy settings' account the checks log in with (D0)
+                users = device_users(device)
                 try:
                     profile = dev.device_profile(state_dir(), device)
                     settings = dev.deploy_settings(state_dir(), device, profile)
+                    users = device_users(device, settings)
                     if (settings.ssh_user, settings.model) != (bound["user"], bound["model"]):
                         raise ValueError("The deploy settings changed after the person was asked; nothing ran.")
                     handle.progress(None, None, f"checking the runtime on {device.label}")
@@ -1092,9 +1111,8 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 except dev.DeviceRuntimeError as e:
                     if stop.is_set():
                         raise JobCancelled() from None
-                    raise job_error(e, device_users(device)) from None
+                    raise job_error(e, users) from None
                 checks = out.pop("checks")
-                users = device_users(device, settings)
                 # the device's words also on success: its account and paths never reach an AI (D0)
                 return {**out, EXTERNAL_KEY: [device_text(f"{c['name']}: {c['result']} - {c['detail']}", users,
                                                           folder_labels()) for c in checks]}

@@ -148,13 +148,16 @@ def register_optional_tools(registry: ToolRegistry, framework, jobs) -> ToolRegi
                             + "; ".join(c.sentence() for c in short) + ".", code="insufficient_resources",
                             next="Tell the person how much space is missing; they free space first.")
         backup = f"pre_restore_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # The backup's name (the time of the look-up) and the free space move while a question waits: shown, never
+        # part of the decision, which is the snapshot (delegation design 4.4, F3)
         facts = (Fact("Snapshot", f"{inp.snapshot} ({_gb(path.stat().st_size)})"),
                  Fact("Backup", f"the current knowledge base is saved first as the snapshot {backup}; the restore "
-                                "does not start without it (an empty knowledge base needs none)"),
-                 Fact("Disk", "; ".join(c.sentence() for c in checks) or "nothing to write"))
-        return CallFacts(consequence=f"Replaces the whole knowledge base with the snapshot {inp.snapshot}; what was "
-                                     "added since is removed (kept in the backup snapshot).",
-                         facts=facts, bound={"snapshot": inp.snapshot, "backup": backup})
+                                "does not start without it (an empty knowledge base needs none)", volatile=True),
+                 Fact("Disk", "; ".join(c.sentence() for c in checks) or "nothing to write", volatile=True))
+        consequence = (f"Replaces the whole knowledge base with the snapshot {inp.snapshot}; what was added since is "
+                       "removed (kept in the backup snapshot).")
+        return CallFacts(consequence=consequence, facts=facts, bound={"snapshot": inp.snapshot, "backup": backup},
+                         digest_keys=("snapshot",), consequence_template=consequence)
 
     def restore_knowledge_snapshot(inp: RestoreSnapshotIn, ctx: ToolContext) -> RestoreStartedOut:
         bound = dict(ctx.facts.bound) if ctx.facts is not None else {}

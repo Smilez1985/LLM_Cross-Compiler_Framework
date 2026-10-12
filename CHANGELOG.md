@@ -18,9 +18,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Situation warnings (a tight disk, a large download, memory that is tight or too small, many pages, an untested
   module, a replaced board runtime) come with a rule for an AI; security and legal warnings (pickle weights, a base
   image outside the Docker Official Images or not pinned, vendor downloads above the soft cap, an unreviewed or
-  community target, the first build of AI-made build code, an untrusted model run natively, signing as the person,
-  gated models, licences) always stay with the person, and facts that could not be checked are the security warning
-  `facts_unknown`, never "no problem". Builds, recipe builds, downloads, pack imports and exports, Deep Ingest,
+  community target, the first build of AI-made build code, an untrusted model run natively or in the sandbox the
+  person has not allowed for AIs (`bench_untrusted_sandbox_ok`), signing as the person, gated models, licences)
+  always stay with the person, a base image outside the Docker Official Images also after a confirmed build with it,
+  and facts that could not be checked are the security warning `facts_unknown`, never "no problem" (the person reads
+  in plain words what could not be checked, never an internal code). Builds, recipe builds, downloads, pack imports and exports, Deep Ingest,
   deploy packages and deploys, board tools, the local runtime, benchmarks, module creation and settings raise them.
   A decision is bound to the facts' decision digest, which leaves out free space and byte counts; a build or download
   under a standing approval (and later a delegation) uses only the commit its look-up resolved (blocker
@@ -584,8 +586,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `llm-cli tools approvals` (`list`, `show`, `approve`, `decline`; needs a terminal) works on a headless machine. The
   client gets `waiting_for_approval` with a job id; once you approve, the framework runs the call itself under the
   client's caller, unless a fact the decision depends on changed by then (a new commit, a new warning such as a disk
-  that is now tight: then you are asked again; free space or byte counts that only moved never ask again, the call
-  then runs with the facts of now), and the client reads the result with `get_job_status`. An approval is bound to
+  that is now tight: then you are asked again; free space, byte counts or the time a backup snapshot is named after
+  that only moved never ask again, the call then runs with the facts of now), and the client reads the result with `get_job_status`. An approval is bound to
   the caller, tool, argument hash and question hash, runs once, expires after 15 minutes and ends with the client's
   session, `cancel_job` or the framework's shutdown;
   a client has at most 5 open; the question shows the caller class first and the client's name as self-reported, up
@@ -691,7 +693,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   is benchmarked natively only after your consent in the framework's own window, written to the audit log first, or in
   the Docker sandbox. The board tools reach only trusted devices with the trusted host key, are always asked and never
   covered by a standing approval; their facts, consequences, progress, check results and errors (also on success)
-  never name the device account or a path on the board (the person's window shows the login and the model's path).
+  never name the device account (the paired login nor the account the deploy settings name) or a path on the board
+  (the person's window shows the login and the model's path).
   Ditto's server that is not built yet, or a tier model not downloaded yet, is refused with `missing_information` and
   names `build_local_runtime`, which the AI can call itself.
 - **Benchmark runs of this computer** (`~/.llm-framework/benchmarks/`): `llama-bench` results of the self-built build

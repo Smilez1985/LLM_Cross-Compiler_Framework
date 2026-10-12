@@ -527,9 +527,13 @@ def register_deploy_tools(registry: ToolRegistry, framework: Any, *, service: An
                                                   cancelled=lambda: stop.is_set() or handle.cancelled)
             except JobCancelled:
                 raise
-            except Exception as e:  # the device's words, its account and its paths never reach an AI (D0)
+            except ValueError as e:
+                # a refusal meant for the AI: the device's words, its account and its paths never reach it (D0). Any
+                # other exception is left to the job service, which never hands an unexpected error's text to an AI.
                 err = ValueError(device_text(str(e), users, {str(path.parent): "output"}))
                 err.code = getattr(e, "code", "failed")  # type: ignore[attr-defined]
+                err.external_text = [device_text(line, users, {str(path.parent): "output"})  # type: ignore
+                                     for line in getattr(e, "external_text", None) or []]
                 raise err from None
             finally:
                 with active_lock:

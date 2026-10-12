@@ -194,7 +194,8 @@ WARNINGS: Dict[str, WarningSpec] = {
     "preflight_error": WarningSpec(
         "security", "The pre-flight check found an error ({check}); building anyway overrides it."),
     "untrusted_model_native": WarningSpec(
-        "security", "Runs a model that is not a catalog model natively, with the user's rights.",
+        "security", "Runs a model that is not a catalog model natively, with the user's rights, or in the Docker "
+                    "sandbox the person has not allowed for AIs.",
         safer="safer.sandbox"),
     "signs_as_you": WarningSpec("security", "The pack is signed with the person's community key."),
     "facts_unknown": WarningSpec(
@@ -419,10 +420,34 @@ def facts_unknown(*what: str) -> CallWarning:
     names = [w for w in UNKNOWN_FACTS if w in what]
     if not names or len(names) != len(set(what)):
         raise ValueError(f"facts_unknown names one or more of {', '.join(UNKNOWN_FACTS)}")
+    if "huggingface" in names:  # the Hub did not answer: its licence and base model are unknown with it
+        names = [w for w in names if w not in ("licence", "base_model")]
     return warn("facts_unknown", unknown="+".join(names))
 
 
+# Closed words in a warning's numbers and the text keys the person reads instead (orchestrator/utils/l10n_facts.py):
+# the AI keeps the word ("base_model+licence", "pip_packages"), the person never sees a code.
+PERSON_WORDS: Dict[str, Tuple[str, str]] = {"facts_unknown": ("unknown", "unknown."),
+                                            "vendor_soft_cap_exceeded": ("what", "vendor_list.")}
+
+
+def person_words(code: str, numbers: Mapping[str, Any], lang: Optional[str] = None) -> Dict[str, str]:
+    """The person's words for the closed words of a warning's numbers (CallWarning.person_text uses them): each word
+    of a '+'-joined value by its localized text, a word without one as "something else"; {} for every other code."""
+    entry = PERSON_WORDS.get(code)
+    value = numbers.get(entry[0]) if entry is not None else None
+    if not isinstance(value, str) or not value:
+        return {}
+    from orchestrator.utils.localization import ui_text
+    name, prefix = entry
+    words = []
+    for word in value.split("+"):
+        text = ui_text(prefix + word, lang)
+        words.append(text if text != prefix + word else ui_text(prefix + "other", lang))
+    return {name: ", ".join(dict.fromkeys(words))}
+
+
 __all__ = ["BLOCKERS", "BlockerSpec", "DELEGATION_RULES_VERSION", "LARGE_DOWNLOAD_BYTES", "LARGE_TRANSFER_BYTES",
-           "MANY_PAGES", "NUMBER_KEYS", "SECURITY_LEGAL", "TOOL_FACTS", "ToolFacts", "UNKNOWN_FACTS", "WARNINGS",
-           "WarningSpec", "blocked", "facts_unknown", "gb_number", "person_action_text", "size_class", "warn",
-           "warnings_of", "with_blocker"]
+           "MANY_PAGES", "NUMBER_KEYS", "PERSON_WORDS", "SECURITY_LEGAL", "TOOL_FACTS", "ToolFacts", "UNKNOWN_FACTS",
+           "WARNINGS", "WarningSpec", "blocked", "facts_unknown", "gb_number", "person_action_text", "person_words",
+           "size_class", "warn", "warnings_of", "with_blocker"]

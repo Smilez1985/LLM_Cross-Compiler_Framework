@@ -1770,9 +1770,12 @@ AI:
 - **Security and legal warnings** are always yours: model files in an old format that can run hidden code (pickle),
   a build environment from outside Docker's checked collection or not fixed to one exact version, more vendor
   downloads than usual, an unreviewed or community hardware module, an untrusted model run directly on your
-  computer, a pack signed with your key, a gated model, a licence that restricts use or is not on the list of known
-  free licences. Facts that could not be checked (Hugging Face did not answer, no licence named, a base model that
-  could not be looked up, an unknown file format) are a security warning too: unknown is never "no problem".
+  computer (or in the sandbox, unless you allowed that for AIs with the setting `bench_untrusted_sandbox_ok`, which no
+  AI can change), a pack signed with your key, a gated model, a licence that restricts use or is not on the list of
+  known free licences. Facts that could not be checked (Hugging Face did not answer, no licence named, a base model
+  that could not be looked up, an unknown file format) are a security warning too: unknown is never "no problem". A
+  build environment from outside Docker's checked collection stays a security warning on every build, also after
+  you confirmed a build with it once (a standing approval you chose may still cover that build).
 - **The first build of build code an AI made or installed is shown to you once.** A target or recipe pack installed
   under a standing approval (later also a delegation), a hardware module an AI created without your yes, and a
   target from another computer carry the security warning "first build" until you have confirmed one build of
@@ -1788,8 +1791,9 @@ the warnings and the names, never from text out of a repository, a log or an AI.
 
 A pending approval is no longer asked again when only the free space changed while you read it: a decision is bound
 to the facts that matter (the request, the commit, the size class, the warnings, the image digests, the board and its
-host key), not to free space or byte counts. If a warning appears or disappears, for example the disk is now tight,
-you are asked again. Under a standing approval (and later a delegation) a build or download uses only the commit the
+host key), not to free space, byte counts or the time a backup snapshot is named after. If a warning appears or
+disappears, for example the disk is now tight, you are asked again. Short texts in a question never show the
+framework's internal words: what could not be checked or which vendor list is meant is said in plain words. Under a standing approval (and later a delegation) a build or download uses only the commit the
 framework looked up; when Hugging Face could not be asked, nothing starts without you.
 
 **Board accounts stay with you.** The account the framework logs in with on a board (for example `dietpi`) and paths
