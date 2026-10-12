@@ -38,6 +38,7 @@ from typing import Any, Callable, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from orchestrator.tools.job_audit import audited_job
 from orchestrator.tools.output import ToolOutput, fact
 from orchestrator.tools.policy import Decision, ToolTier
 from orchestrator.tools.registry import ResourceSpec, ToolContext, ToolError, ToolRegistry, ToolSpec
@@ -138,37 +139,132 @@ class StopOut(ToolOutput):
     stopped_processes: int
 
 
-# A path in an error text: absolute (POSIX or a Windows drive) or starting with ~/; never part of a word or of a URL's
-# "//host/..." (a single slash after a colon is a path: "file:/home/...", "user@board:/home/...").
-_PATH_TOKEN = re.compile(r"(?<![\w/.~-])(?:~/|/(?!/)|[A-Za-z]:[\\/])[^\s'\"`,;()\[\]<>]+")
-_PATH_END = "[^\\s'\"`,;()\\[\\]<>]*"
+# Where a path in an error text begins: absolute (POSIX or a Windows drive) or starting with ~/; never inside a word or
+# a URL's "//host/..." (a single slash after a colon is a path: "file:/home/...", "user@board:/home/...").
+_PATH_START = re.compile(r"(?<![\w/.~-])(?:~/|/(?!/)|[A-Za-z]:[\\/])")
+# Characters that end a path's run of characters; a single space may still continue it (_path_end).
+_PATH_STOP = frozenset("'\"`,;()[]<>")
+_PATH_TRAILING = ".:!?"
+_PATH_SEP = re.compile(r"[/\\]")
+# A quoted path ("No such file or directory: '/home/u/My Models/x.gguf'"): the quotes say where it ends.
+_QUOTED_PATH = re.compile("|".join(f"{q}((?:~/|/|[A-Za-z]:[\\\\/])[^{q}\\n]*){q}" for q in ("'", '"', "`")))
+# Two plain lower-case words around one slash ("and/or", "os/arch") are prose, not the rest of a path.
+_WORD_PAIR = re.compile(r"[a-z]{1,16}/[a-z]{1,16}")
+_PATH_MAX_SPACES = 8
+
+
+def _run_end(text: str, i: int) -> int:
+    while i < len(text) and not text[i].isspace() and text[i] not in _PATH_STOP:
+        i += 1
+    return i
+
+
+def _path_exists(path: str) -> bool:
+    try:
+        return os.path.lexists(os.path.expanduser(path))
+    except (OSError, ValueError):
+        return False
+
+
+def _continues(word: str) -> bool:
+    """Whether the word after a space is clearly the rest of a path (a folder name with a space): it holds a separator
+    and is no address, URL, new path or pair of plain words."""
+    core = word.rstrip(_PATH_TRAILING + ",")
+    if not _PATH_SEP.search(core) or ":" in core or core[:1] in ("/", "\\", "~") or _WORD_PAIR.fullmatch(core):
+        return False
+    return True
+
+
+def _path_end(text: str, start: int, bases: List[str]) -> int:
+    """Where the path that begins at `start` ends. A known folder (`bases`, longest first; it may hold spaces, e.g. a
+    home folder 'C:\\Users\\Jane Doe') is taken whole. A single space continues the path when the next word is clearly
+    the rest of a path ('/home/u/My Models/x.gguf') or, inside a known folder, the longer path exists on this computer
+    (only there: text from outside cannot probe other folders)."""
+    n, end = len(text), None
+    for base in bases:
+        if text.startswith(base, start):
+            k = start + len(base)
+            if k == n or text[k] in "/\\" or text[k].isspace() or text[k] in _PATH_STOP or text[k] in _PATH_TRAILING:
+                end = k
+                break
+    if end is None:
+        end = _run_end(text, start)
+    elif end < n and text[end] in "/\\":
+        end = _run_end(text, end)
+    for _ in range(_PATH_MAX_SPACES):
+        if end >= n - 1 or text[end] != " ":
+            break
+        nxt = _run_end(text, end + 1)
+        if nxt == end + 1:
+            break
+        word = text[end + 1:nxt]
+        longer = text[start:end] + " " + _PATH_SEP.split(word, maxsplit=1)[0]
+        known = longer.startswith("~/") or any(longer.startswith(b.rstrip("/\\") + c) for b in bases for c in "/\\")
+        if not (_continues(word) or (known and _path_exists(longer))):
+            break
+        end = nxt
+    return end
 
 
 def label_paths(text: str, roots: Dict[str, str]) -> str:
     """Replaces every path in `text`: one inside a known folder becomes `<label>:<relative path>` (roots maps the
-    folder to its label), any other one, the home folder's ('~/...') included, its file name only. Ids and labels
-    instead of paths toward an AI (design 6.4)."""
-    ordered = sorted(((str(Path(k)), v) for k, v in roots.items() if k), key=lambda kv: -len(kv[0]))
+    folder to its label), any other one, the home folder's ('~/...') included, its file name only. Paths with spaces
+    are replaced whole (a quoted path by its quotes, a known folder and the home folder by their real names, a space
+    otherwise when the longer path exists or the next word is clearly part of it), so neither a user name nor a piece
+    of a host path is left. Ids and labels instead of paths toward an AI, readable names for the person (design 6.4,
+    DECISIONS round 4 item 1)."""
+    pairs = set()
+    for folder, label in roots.items():
+        if folder:
+            for form in (str(Path(folder)), os.path.realpath(folder)):
+                if form and form not in ("/", "\\"):
+                    pairs.add((form, label))
+    ordered = sorted(pairs, key=lambda kv: (-len(kv[0]), kv[0]))
+    home = str(Path.home())
+    home = home if home and home not in ("/", "\\") else ""
+    bases = sorted({root for root, _ in ordered} | ({home} if home else set()), key=lambda b: (-len(b), b))
 
-    def one(match: "re.Match[str]") -> str:
-        token = match.group(0)
+    def one(token: str) -> str:
         tail = ""
-        while token and token[-1] in ".:!?":
+        while token and token[-1] in _PATH_TRAILING:
             token, tail = token[:-1], token[-1] + tail
         for root, label in ordered:
             if token == root or token.startswith(root.rstrip("/\\") + os.sep) or token.startswith(root + "/"):
                 rel = token[len(root):].lstrip("/\\").replace("\\", "/")
                 return f"{label}:{rel}" + tail if rel else f"the {label} folder" + tail
-        name = re.split(r"[/\\]", token.rstrip("/\\"))[-1]
+        if home and token.rstrip("/\\") == home:
+            return "the home folder" + tail
+        name = _PATH_SEP.split(token.rstrip("/\\"))[-1]
         return (name or "a folder") + tail
 
-    text = _PATH_TOKEN.sub(one, text or "")
-    # What the token rule cannot see (a "file:///home/..." URL): any path left in the home folder, by its file name.
-    home = str(Path.home())
-    if home and home not in ("/", "\\"):
-        text = re.sub(re.escape(home) + r"(?:[/\\]" + _PATH_END + ")?",
-                      lambda m: (re.split(r"[/\\]", m.group(0).rstrip("/\\"))[-1] if m.group(0) != home
-                                 else "the home folder"), text)
+    def replace(text: str, find: Callable[[str, int], Optional[int]], known: List[str]) -> str:
+        out, pos = [], 0
+        while True:
+            start = find(text, pos)
+            if start is None:
+                break
+            end = max(_path_end(text, start, known), start + 1)
+            out += [text[pos:start], one(text[start:end])]
+            pos = end
+        return "".join(out) + text[pos:]
+
+    def quoted(m: "re.Match[str]") -> str:
+        inner = next(g for g in m.groups() if g is not None)
+        return m.group(0)[0] + one(inner) + m.group(0)[-1]
+
+    text = _QUOTED_PATH.sub(quoted, text or "")
+
+    def next_start(text: str, pos: int) -> Optional[int]:
+        m = _PATH_START.search(text, pos)
+        return m.start() if m else None
+
+    text = replace(text, next_start, bases)
+    # What the start rule cannot see (a "file:///home/..." URL): any path left in the home folder, by its file name.
+    if home:
+        def next_home(text: str, pos: int) -> Optional[int]:
+            k = text.find(home, pos)
+            return k if k >= 0 else None
+        text = replace(text, next_home, [home])
     return text
 
 
@@ -189,6 +285,15 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
             return bool(framework.config.get("offline_mode", False))
         except Exception:  # noqa: BLE001
             return False
+
+    def cache_folder() -> Optional[Path]:
+        """The framework's cache folder (a sandbox benchmark's private model file may go there)."""
+        try:
+            value = framework.config.get("cache_dir", None)
+            resolve = getattr(framework, "resolve_path", None)
+            return (Path(resolve(value)) if callable(resolve) else Path(value)) if value else None
+        except Exception:  # noqa: BLE001
+            return None
 
     def catalog():
         from orchestrator.runtime.catalog import load_catalog
@@ -242,6 +347,16 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
         # A device's or llama-bench's own words: returned by get_job_status as external text, never in the message.
         err.external_text = [scrub(line) for line in getattr(e, "external_text", None) or []]  # type: ignore
         return err
+
+    def audited(name: str, inp: BaseModel, ctx: ToolContext, work: Callable[[Any], Dict[str, Any]], what: str,
+                done: Optional[Callable[[Dict[str, Any]], tuple]] = None,
+                cancelled: Optional[Callable[[], str]] = None) -> Callable[[Any], Dict[str, Any]]:
+        """The job's work with its end in the audit log, linked to the call's started entry (design 6.7)."""
+        return audited_job(registry, name, inp.model_dump(mode="json"), ctx, work, what, done=done,
+                           cancelled=cancelled)
+
+    def speed(value: Any) -> str:
+        return f"{value:.1f} t/s" if isinstance(value, (int, float)) else "not measured"
 
     specs: List[ToolSpec] = []
     tier_field = FieldMeta(kind="choice", choices_from=tiers)
@@ -360,7 +475,14 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     out["model_tier"] = model.tier
                 return out
 
-            job = jobs.start("runtime_build", ctx.owner, work, on_cancel=stop.set)
+            def built(out: Dict[str, Any]):
+                return ("ok", f"built and verified {str(out.get('build_id'))[:16]} ({out.get('backend')})"
+                        + (f", catalog model {out['model_tier']} downloaded" if out.get("model_tier") else ""), "")
+
+            job = jobs.start("runtime_build", ctx.owner,
+                             audited("build_local_runtime", inp, ctx, work, f"backend {inp.backend}", done=built,
+                                     cancelled=lambda: "cancelled; a half-built runtime is never activated"),
+                             on_cancel=stop.set)
             ctx.notes.append("Follow the build with get_job_status (wait_seconds=50); a CPU build takes minutes.")
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
@@ -411,7 +533,15 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                         "origin": inst.label if inst is not None else None,
                         "build_id": inst.build_id if inst is not None else None}
 
-            job = jobs.start("runtime_start", ctx.owner, work)
+            def started(out: Dict[str, Any]):
+                ok = bool(out.get("running"))
+                return ("ok" if ok else "error", f"{'running' if ok else 'not running'}, healthy "
+                        f"{bool(out.get('healthy'))}, build {str(out.get('build_id') or '')[:16]}",
+                        "" if ok else "failed")
+
+            job = jobs.start("runtime_start", ctx.owner,
+                             audited("start_local_runtime", inp, ctx, work, f"model tier {bound['tier']}",
+                                     done=started))
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
         def stop_local_runtime(_inp: NoInput) -> StopOut:
@@ -495,7 +625,7 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                                 field="artifact_id", next="Call list_artifacts for the ids.")
             from orchestrator.Core.deployment_manager import resolve_model_artifact
             try:
-                _aid, label, info = service._artifact(inp.artifact_id)
+                _aid, label, info = service.artifact_entry(inp.artifact_id)
                 path = resolve_model_artifact(Path(info["path"]))
             except ToolError:
                 raise
@@ -567,8 +697,9 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 from orchestrator.runtime.bench import BenchError, BenchRunner, BenchStopped
                 handle.progress(None, None, f"measuring {label}")
                 try:
-                    run = BenchRunner(state_dir()).run(path, kind=inp.kind, label=label, trusted=trusted,
-                                                       sha256=bound["sha256"], sandbox=bound["sandbox"], stop=stop)
+                    run = BenchRunner(state_dir(), cache_dir=cache_folder()).run(
+                        path, kind=inp.kind, label=label, trusted=trusted, sha256=bound["sha256"],
+                        sandbox=bound["sandbox"], stop=stop)
                 except BenchStopped:
                     raise JobCancelled() from None
                 except BenchError as e:
@@ -577,13 +708,20 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                         "build_id": run.build_id, "backend": run.backend, "prompt_ts": run.prompt_ts,
                         "gen_ts": run.gen_ts, "peak_rss_mib": run.peak_rss_mib, "duration_s": run.duration_s}
 
-            job = jobs.start("benchmark", ctx.owner, work, on_cancel=stop.set)
+            def measured(out: Dict[str, Any]):
+                return ("ok", f"run {out.get('run_id')}: prompt {speed(out.get('prompt_ts'))}, generation "
+                              f"{speed(out.get('gen_ts'))}", "")
+
+            where = "in the Docker sandbox" if bound["sandbox"] else "natively"
+            job = jobs.start("benchmark", ctx.owner,
+                             audited("run_benchmark", inp, ctx, work, f"model {label} (sha256 {digest[:16]}), {where}",
+                                     done=measured), on_cancel=stop.set)
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
         def artifact_name(value) -> Optional[str]:
             """The built model's label for the person's question (speaking names), never its folder."""
             try:
-                return service._artifact(str(value))[1]
+                return service.artifact_entry(str(value))[1]
             except Exception:  # noqa: BLE001 - an unknown id: the question shows the id
                 return None
 
@@ -687,7 +825,12 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                     raise job_error(e) from None
                 return {**out, "next": f"Read the values with get_hardware_probe(probe_id='{device.device_id}')."}
 
-            job = jobs.start("probe", ctx.owner, work, on_cancel=cancel)
+            def probed(out: Dict[str, Any]):
+                return ("ok", f"probe stored under the device id, {out.get('warnings', 0)} warnings", "")
+
+            job = jobs.start("probe", ctx.owner,
+                             audited("probe_remote_device", inp, ctx, work, f"device {device.label}", done=probed,
+                                     cancelled=lambda: "cancelled; the SSH session was closed"), on_cancel=cancel)
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
         def deploy_facts(inp: DeviceIn, ctx: ToolContext) -> CallFacts:
@@ -754,7 +897,17 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 return {**out, "checks_passed": sum(1 for c in checks if c["result"] == "passed"),
                         "checks_failed": sum(1 for c in checks if c["result"] == "failed"), EXTERNAL_KEY: lines}
 
-            job = jobs.start("deploy", ctx.owner, work, on_cancel=cancel)
+            def installed(out: Dict[str, Any]):
+                ok = bool(out.get("activated"))
+                return ("ok" if ok else "error",
+                        f"{'activated' if ok else 'not activated'}: {out.get('checks_passed', 0)} checks passed, "
+                        f"{out.get('checks_failed', 0)} failed", "" if ok else "failed")
+
+            job = jobs.start("deploy", ctx.owner,
+                             audited("deploy_device_runtime", inp, ctx, work,
+                                     f"device {device.label}, build {str(bound['build_id'])[:16]}", done=installed,
+                                     cancelled=lambda: "cancelled; the SSH session was closed, the device state is "
+                                                       "unknown"), on_cancel=cancel)
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
         def bench_device_facts(inp: DeviceIn, ctx: ToolContext) -> CallFacts:
@@ -828,7 +981,18 @@ def register_runtime_tools(registry: ToolRegistry, framework: Any, *, service: A
                 checks = out.pop("checks")
                 return {**out, EXTERNAL_KEY: [f"{c['name']}: {c['result']} - {c['detail']}" for c in checks]}
 
-            job = jobs.start("benchmark", ctx.owner, work, on_cancel=cancel)
+            def checked(out: Dict[str, Any]):
+                ok = bool(out.get("ok"))
+                return ("ok" if ok else "error",
+                        f"checks {'passed' if ok else 'failed'}, model sha256 "
+                        f"{str(out.get('model_sha256') or '')[:16]} "
+                        f"({'catalog model' if out.get('trusted_model') else 'untrusted'}), prompt "
+                        f"{speed(out.get('prompt_ts'))}, generation {speed(out.get('gen_ts'))}",
+                        "" if ok else "failed")
+
+            job = jobs.start("benchmark", ctx.owner,
+                             audited("run_device_benchmark", inp, ctx, work, f"device {device.label}", done=checked,
+                                     cancelled=lambda: "cancelled; the SSH session was closed"), on_cancel=cancel)
             return JobStartedOut(job_id=job.job_id, kind=job.kind, state=job.state)
 
         def device_name(value) -> Optional[str]:
