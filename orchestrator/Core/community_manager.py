@@ -148,6 +148,9 @@ class Provenance(Strict):
     signer: Optional[str] = None   # author key id (provenance only)
     sender: Optional[str] = None   # key id of the sender of an encrypted pack
     installed_at: str
+    # "grant:<id>" when an AI client installed it under a standing approval (MCP add_pack_from_index): builds of it
+    # stay outside every build standing approval until the person confirmed one build of it.
+    installed_via: Optional[str] = Field(default=None, pattern=r"^grant:g_[0-9a-f]{16}$")
 
 
 @dataclass
@@ -155,6 +158,7 @@ class IndexState:
     index: CommunityIndex
     source: str     # "fetched" or "cached"
     note: str = ""
+    signer: str = ""  # key id of the trusted key that verified a fetched index ("" for a cached one)
 
 
 @dataclass
@@ -303,15 +307,21 @@ class CommunityManager:
         return {"target": self.targets_dir, "recipe": self.recipes_dir, "knowledge": self.knowledge_dir}[kind]
 
     # --- index ------------------------------------------------------------------------------------------------
+    @classmethod
+    def _verify_index(cls, data: bytes, sig: bytes, keys, now: Optional[datetime] = None) -> CommunityIndex:
+        return cls._verify_signed_index(data, sig, keys, now)[0]
+
     @staticmethod
-    def _verify_index(data: bytes, sig: bytes, keys, now: Optional[datetime] = None) -> CommunityIndex:
+    def _verify_signed_index(data: bytes, sig: bytes, keys,
+                             now: Optional[datetime] = None) -> Tuple[CommunityIndex, str]:
+        """The verified index and the key id of the trusted key that verified it."""
         try:
             signature = PackSignature.model_validate_json(sig)
         except ValidationError:
             raise PackError("index.json.sig is not a valid signature file.") from None
-        verify_index(data, signature, keys, now=now)  # before anything of the index is parsed
+        signer = verify_index(data, signature, keys, now=now)  # before anything of the index is parsed
         try:
-            return CommunityIndex.model_validate_json(data)
+            return CommunityIndex.model_validate_json(data), str(signer or "")
         except ValidationError as e:
             raise PackError(f"The community index is invalid: {e}") from None
 
@@ -361,7 +371,7 @@ class CommunityManager:
             if cached is not None:
                 return IndexState(cached, "cached", f"offline, using the cached index: {e}")
             raise PackError(str(e)) from None
-        index = self._verify_index(data, sig, keys)
+        index, signer = self._verify_signed_index(data, sig, keys)
         if cached is not None and index.version < cached.version:
             raise PackError(f"The downloaded community index (version {index.version}) is older than the cached one "
                             f"(version {cached.version}); it was refused.")
@@ -370,7 +380,7 @@ class CommunityManager:
             tmp = self.cache_dir / f".{name}.{secrets.token_hex(4)}"
             tmp.write_bytes(content)
             os.replace(tmp, self.cache_dir / name)
-        return IndexState(index, "fetched")
+        return IndexState(index, "fetched", signer=signer)
 
     # --- installed packs --------------------------------------------------------------------------------------
     def installed(self) -> List[Tuple[Path, Provenance]]:
@@ -504,6 +514,22 @@ class CommunityManager:
         root = self._install_root(m.kind)
         if any(p.name.casefold() == m.id.casefold() for p in root.iterdir() if p.name != ".quarantine"):
             raise PackError(f"{root / m.id} already exists; remove it first to install {m.id} {m.version}.")
+        if m.kind == "target":
+            # Target names resolve to the first match ignoring case (G43): a pack never captures another target's
+            # name, also not with other separators (my_board next to My-Board).
+            from orchestrator.Core.module_generator import target_name_collision
+            names = [m.id]
+            try:
+                meta = (yaml.safe_load((quarantine / "pack" / "target.yml").read_text(encoding="utf-8")) or {})
+                declared = (meta.get("metadata") or {}).get("id") if isinstance(meta, dict) else None
+                if isinstance(declared, str) and declared:
+                    names.append(declared)
+            except (OSError, yaml.YAMLError, AttributeError):
+                pass
+            taken = target_name_collision(root, *names)
+            if taken is not None:
+                raise PackError(f"The target pack {m.id} has the same name as the existing target {taken} (ignoring "
+                                "case and separators); it is not installed.")
         signature = contents.signature
         checked = signature is not None and signature.pubkey is not None  # verified in _author_note
         prov = Provenance(kind=m.kind, id=m.id, version=m.version, trust=trust.value, source=source[:1000],

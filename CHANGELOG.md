@@ -41,6 +41,16 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `cancel_job` stops after the current page and keeps what is stored; the result has counts and the skipped or
   failed addresses with reasons, never page text. New: `llm-cli tools crawl-notice` shows the notice in a terminal
   and records that you read it.
+- **The community zoo for AI clients** (MCP tools `list_packs`, `add_pack_from_index`, `export_pack`): a client lists
+  the signed index and the installed packs (details, verification; `refresh` once an hour), adds a knowledge, target
+  or recipe pack from the signed index (trust verified or community, never revoked, never from a file) after you
+  saw the summary checked in quarantine, for a target pack with every base image shown plainly (registry, digest or
+  "not pinned", Docker Official Image or another registry) and that its image build runs with network, and exports a
+  pack to a local file signed with your key (always asked; refused without an existing key; returns scrub counts,
+  never the removed text). A quarantined copy is reused for the same pack and hash and removed on a "no", a declined
+  or expired approval, or after 20 minutes. "Yes, and do not ask again" covers one pack kind, trust level and index
+  key (knowledge and recipe packs, `verified` target packs); packs installed under it are marked `installed_via`.
+  No tool publishes a pull request.
 - **Fix proposals from AI clients** (MCP tool `propose_healing_fix`): a client that analyses a failed build hands its
   summary, cause, manual step and confidence to the framework. It passes the same checks as Ditto's own analysis,
   including the dangerous-command filter, is confirmed by you like any local change, is accepted only for a failed
@@ -536,6 +546,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 - **The Deep Ingest notice records who read it again**: its state file stores where it was acknowledged (`via`:
   `gui` or `cli`), and reading it is written to the audit log (actor `gui` or `cli`). Only a person acknowledges it;
   `CrawlNotice.acknowledge` refuses any other channel.
+- **A target pack never takes another target's name**: installing a target pack whose id (or declared target id)
+  equals an existing target's ignoring case and separators is refused, in the Community Hub, the CLI and over MCP.
 - **One Hugging Face classification for builds and downloads**: `check_build_request` and `start_build` now read a model's licence, gating and files with the same rules as `get_hf_model_info` and `download_hf_file` (licences such as GPL, DeepSeek or Qwen research were "unknown" on the build path and "restrictive" on the download path), and both keep the same disk reserve.
 - **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
   closes after 10 minutes without a request (the SDK's default is 30); a request still open when its token is revoked

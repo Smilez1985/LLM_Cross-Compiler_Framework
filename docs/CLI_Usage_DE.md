@@ -1502,6 +1502,11 @@ Einstellungen `community_index_url` und `community_repo` sind leer, und `configs
 Herausgeber-Schlüssel. Bis dahin zeigt `zoo list` nur installierte Pakete, Installieren per ID und
 `zoo export --pr` brechen mit einer Meldung ab, und Pakete werden als Dateien geteilt (`zoo install --file`).
 
+KI-Clients und Ditto nutzen denselben Zoo über die Tools `list_packs`, `add_pack_from_index` (nur signierter Index,
+immer gefragt) und `export_pack` (in eine lokale Datei, immer gefragt); sie können kein Paket aus einer Datei
+installieren, keinen Pull Request öffnen und deine Schlüssel nicht anlegen
+([Details](Features_DE.md#packs-für-ki-clients)).
+
 So sind Pakete geschützt:
 
 - Ein Paket ist eine ZIP-Datei mit einem Manifest (`pack.json`: sha256, Größe und Modus jeder Datei) und meist einer

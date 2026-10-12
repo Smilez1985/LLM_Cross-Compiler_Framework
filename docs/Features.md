@@ -511,6 +511,9 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `search_knowledge` | read | Search the knowledge base; every excerpt with its source id, address or pack, kind (`web`, `pack`, `docs`), trust, date added and position; `kind` narrows the search |
 | `list_knowledge_sources` | read | What the knowledge base holds: every source with id, title, kind, trust, date added and number of excerpts (50 per page) |
 | `read_knowledge_source` | read | One source's excerpts in their order, by source id (at most 20 per call) |
+| `list_packs` | read | Community packs of the signed index and the installed ones with trust; details, verification of installed packs ([details](#packs-for-ai-clients)) |
+| `add_pack_from_index` | external | Add a knowledge, target or recipe pack from the signed index, as a job; always asked with the checked summary and every base image of a target pack |
+| `export_pack` | local write | Export a target, recipe or knowledge pack to a local file signed with your key; always asked, nothing uploaded |
 | `crawl_docs_site` | local write | Deep Ingest of 1 to 5 public documentation sites into the knowledge base, as a job; always asked with every start address, only after a person read the notice ([details](#deep-ingest-by-an-ai-client)) |
 | `start_build` | local write | Start a build (must match the target's capabilities); the question shows commit, size, disk and hardware estimate |
 | `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
@@ -1874,6 +1877,46 @@ encrypted to your key), and **Build** on an installed recipe fills in the Builde
   `gh` and `git` use their own stored credentials. Otherwise, or if that fails, the repository's upload page opens in
   the browser: drop the file there, and GitHub forks the repository for you.
 - Without `community_repo` (the default today) nothing is handed over; the pack stays ready in its folder.
+
+### Packs for AI clients
+
+MCP clients and Ditto use the zoo with three tools (decisions of 2026-10-11): packs come only from the signed index,
+and leave this computer only as a local file you publish yourself.
+
+- **`list_packs`** (read): the index entries and the installed packs with kind, id, version, title, author, licence,
+  trust (`verified`, `community`, `local`, `revoked`), installed version and the revocation reason. It reads the
+  cached index; `refresh` downloads the signed index anew (once an hour per client; not in offline mode).
+  `pack_id` adds one pack's description, download size and sha256, and for an installed recipe its pinned values;
+  `verify` adds the check of the installed packs (revoked, changed since installed). Titles, authors, descriptions
+  and recipes are external text; folders appear as labels only.
+- **`add_pack_from_index`** (external, always asked): a knowledge, target or recipe pack from the signed index with
+  trust `verified` or `community`, as a job. Never a revoked pack, never a pack from a file and never an encrypted
+  one (those stay in the Community Hub and `llm-cli zoo install --file`). Before you are asked the framework loads
+  the current index, checks the disk (twice the pack size plus the reserve), downloads the pinned pack into
+  quarantine and validates it; a refusal names its reason. The question shows the pack with author and licence
+  (marked as index text), the trust level, the sha256, the files, where it goes (`targets/<id>`,
+  `community/recipes/<id>`, `community/knowledge/<id>`), the pack's notes, and for a target pack that it adds build
+  scripts and a Dockerfile whose image build runs with network access, with every base image of every Dockerfile
+  shown plainly: registry, image, tag, digest or "not pinned by digest", and "Docker Official Image" or "other
+  registry: ...; prebuilt image made by its publisher, not checked by the framework". The job installs exactly the
+  quarantined copy with the sha256 shown. The copy is reused while the same pack and hash are asked about, and
+  removed when you say no, when a pending approval is declined or expires, or after 20 minutes without use. A target
+  pack whose id equals an existing target's ignoring case and separators (`my_board` next to `My-Board`) is refused,
+  in the Community Hub and the CLI too. 5 imports a day per client.
+- **"Yes, and do not ask again"** for packs, given only in the framework's own approval window: it covers one pack
+  kind, one trust level and the key that signed the index, for knowledge and recipe packs of both trust levels and
+  for `verified` target packs; a `community` target pack always asks. A new index signing key voids it. Each install
+  under it is audited with its id and shown as a GUI notice; such a pack is marked `installed_via: grant:<id>` in its
+  `.lcf-provenance.json` and in `list_packs`. For all local stdio clients together only the narrowest scope and at
+  most 30 days are offered.
+- **`export_pack`** (local write, always asked, never "do not ask again"): a target (by target id), recipe (by the
+  `artifact_id` of a finished build) or knowledge pack, privacy-scrubbed and signed with your community key, into
+  `community/contributions/`. The question's first line says "Creates a pack signed with your key <key id> as author
+  <author>". It refuses while no signing key exists (it never creates one; you do that with `llm-cli zoo keys`) and
+  for another author's community target. The author defaults to the one of your last export. The result has the
+  file as a label, the key id and per file how many lines the scrub changed, never the removed text. A knowledge
+  export runs as a job. It takes no recipients, passphrase, output folder or pull-request option: publishing stays
+  your step (`llm-cli zoo export --pr` or the hub).
 
 ### Maintainer tools
 

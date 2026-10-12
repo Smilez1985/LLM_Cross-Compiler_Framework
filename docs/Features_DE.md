@@ -552,6 +552,9 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `search_knowledge` | lesen | In der Wissensbasis suchen; jeder Auszug mit Quellen-ID, Adresse oder Pack, Art (`web`, `pack`, `docs`), Vertrauensstufe, Aufnahmedatum und Position; `kind` grenzt die Suche ein |
 | `list_knowledge_sources` | lesen | Was die Wissensbasis enthält: jede Quelle mit ID, Titel, Art, Vertrauensstufe, Aufnahmedatum und Zahl der Auszüge (50 je Seite) |
 | `read_knowledge_source` | lesen | Die Auszüge einer Quelle in ihrer Reihenfolge, über die Quellen-ID (höchstens 20 je Aufruf) |
+| `list_packs` | lesen | Community-Packs des signierten Index und die installierten mit Vertrauensstufe; Details, Prüfung installierter Packs ([Details](#packs-für-ki-clients)) |
+| `add_pack_from_index` | extern | Ein Wissens-, Target- oder Rezept-Pack aus dem signierten Index hinzufügen, als Job; immer gefragt mit der geprüften Zusammenfassung und jedem Basis-Image eines Target-Packs |
+| `export_pack` | lokal schreiben | Ein Target-, Rezept- oder Wissens-Pack in eine lokale Datei exportieren, mit deinem Schlüssel signiert; immer gefragt, nichts wird hochgeladen |
 | `crawl_docs_site` | lokal schreiben | Deep Ingest von 1 bis 5 öffentlichen Dokumentations-Websites in die Wissensbasis, als Job; immer gefragt mit jeder Startadresse, erst nachdem eine Person den Hinweis gelesen hat ([Details](#deep-ingest-durch-einen-ki-client)) |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
@@ -2053,6 +2056,50 @@ gesperrtes Pack zeigt eine abgeschaltete Schaltfläche **Revoked**.
   öffnet sich die Upload-Seite des Repositorys im Browser: Leg die Datei dort ab, und GitHub forkt das Repository für
   dich.
 - Ohne `community_repo` (heute der Standard) wird nichts übergeben; das Pack liegt fertig in seinem Ordner.
+
+### Packs für KI-Clients
+
+MCP-Clients und Ditto nutzen den Zoo mit drei Tools (Entscheidungen vom 11.10.2026): Packs kommen nur aus dem
+signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbst veröffentlichst.
+
+- **`list_packs`** (lesen): die Einträge des Index und die installierten Packs mit Art, ID, Version, Titel, Autor,
+  Lizenz, Vertrauensstufe (`verified`, `community`, `local`, `revoked`), installierter Version und dem Grund eines
+  Rückzugs. Es liest den zwischengespeicherten Index; `refresh` lädt den signierten Index neu (einmal pro Stunde je
+  Client; nicht im Offline-Modus). `pack_id` ergänzt die Beschreibung eines Packs, Downloadgröße und sha256 und bei
+  einem installierten Rezept seine festgelegten Werte; `verify` ergänzt die Prüfung der installierten Packs
+  (zurückgezogen, seit der Installation geändert). Titel, Autoren, Beschreibungen und Rezepte sind externer Text;
+  Ordner erscheinen nur als Labels.
+- **`add_pack_from_index`** (extern, immer gefragt): ein Wissens-, Target- oder Rezept-Pack aus dem signierten Index
+  mit Vertrauensstufe `verified` oder `community`, als Job. Nie ein zurückgezogenes Pack, nie ein Pack aus einer Datei
+  und nie ein verschlüsseltes (die bleiben im Community Hub und bei `llm-cli zoo install --file`). Bevor du gefragt
+  wirst, lädt das Framework den aktuellen Index, prüft den Speicherplatz (die doppelte Pack-Größe plus Reserve), lädt
+  das festgelegte Pack in die Quarantäne und prüft es; eine Ablehnung nennt ihren Grund. Die Frage zeigt das Pack mit
+  Autor und Lizenz (als Text aus dem Index markiert), die Vertrauensstufe, die sha256, die Dateien, wohin es kommt
+  (`targets/<id>`, `community/recipes/<id>`, `community/knowledge/<id>`), die Hinweise des Packs und bei einem
+  Target-Pack, dass es Build-Skripte und ein Dockerfile hinzufügt, dessen Image-Build mit Netzzugang läuft, mit jedem
+  Basis-Image jedes Dockerfiles klar benannt: Registry, Image, Tag, Digest oder „not pinned by digest“ und „Docker
+  Official Image“ oder „other registry: ...; prebuilt image made by its publisher, not checked by the framework“.
+  Der Job installiert genau die Kopie aus der Quarantäne mit der gezeigten sha256. Die Kopie wird wiederverwendet,
+  solange nach demselben Pack und Hash gefragt wird, und entfernt, wenn du nein sagst, wenn eine wartende Freigabe
+  abgelehnt wird oder abläuft, oder nach 20 Minuten ohne Nutzung. Ein Target-Pack, dessen ID ohne Rücksicht auf
+  Groß- und Kleinschreibung und Trennzeichen der eines vorhandenen Targets gleicht (`my_board` neben `My-Board`), wird
+  abgelehnt, auch im Community Hub und in der CLI. 5 Importe am Tag je Client.
+- **„Ja, und nicht mehr fragen“** für Packs, nur im eigenen Freigabefenster des Frameworks: Es gilt für eine Pack-Art,
+  eine Vertrauensstufe und den Schlüssel, der den Index signiert hat, für Wissens- und Rezept-Packs beider
+  Vertrauensstufen und für `verified`-Target-Packs; ein `community`-Target-Pack fragt immer. Ein neuer
+  Signaturschlüssel des Index macht es ungültig. Jede Installation darunter landet mit ihrer ID im Audit-Log und
+  erscheint als Hinweis in der GUI; ein solches Pack ist in seiner `.lcf-provenance.json` und in `list_packs` mit
+  `installed_via: grant:<id>` markiert. Für alle lokalen stdio-Clients gemeinsam werden nur der engste Umfang und
+  höchstens 30 Tage angeboten.
+- **`export_pack`** (lokal schreiben, immer gefragt, nie „nicht mehr fragen“): ein Target- (über die Target-ID),
+  Rezept- (über die `artifact_id` eines fertigen Builds) oder Wissens-Pack, mit Datenschutz-Bereinigung und mit
+  deinem Community-Schlüssel signiert, nach `community/contributions/`. Die erste Zeile der Frage sagt „Creates a pack
+  signed with your key <Schlüssel-ID> as author <Autor>“. Es lehnt ab, solange kein Signaturschlüssel existiert (es
+  legt nie einen an; das tust du mit `llm-cli zoo keys`), und für ein Community-Target eines anderen Autors. Der
+  Autor ist standardmäßig der deines letzten Exports. Das Ergebnis enthält die Datei als Label, die Schlüssel-ID und
+  je Datei, wie viele Zeilen die Bereinigung geändert hat, nie den entfernten Text. Ein Wissens-Export läuft als
+  Job. Es nimmt keine Empfänger, keine Passphrase, keinen Ausgabeordner und keine Pull-Request-Option: Veröffentlichen
+  bleibt dein Schritt (`llm-cli zoo export --pr` oder der Hub).
 
 ### Werkzeuge für Maintainer
 

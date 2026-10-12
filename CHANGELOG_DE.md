@@ -47,6 +47,18 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   behält, was gespeichert ist; das Ergebnis enthält Zahlen und die übersprungenen oder fehlgeschlagenen Adressen mit
   Gründen, nie Seitentext. Neu: `llm-cli tools crawl-notice` zeigt den Hinweis in einem Terminal und hält fest, dass
   du ihn gelesen hast.
+- **Der Community-Zoo für KI-Clients** (MCP-Tools `list_packs`, `add_pack_from_index`, `export_pack`): Ein Client
+  listet den signierten Index und die installierten Packs (Details, Prüfung; `refresh` einmal pro Stunde), fügt ein
+  Wissens-, Target- oder Rezept-Pack aus dem signierten Index hinzu (Vertrauensstufe verified oder community, nie
+  zurückgezogen, nie aus einer Datei), nachdem du die in der Quarantäne geprüfte Zusammenfassung gesehen hast, bei
+  einem Target-Pack mit jedem Basis-Image klar benannt (Registry, Digest oder „not pinned“, Docker Official Image
+  oder andere Registry) und dass sein Image-Build mit Netzzugang läuft, und exportiert ein Pack in eine lokale Datei,
+  mit deinem Schlüssel signiert (immer gefragt; ohne vorhandenen Schlüssel abgelehnt; liefert Zahlen der Bereinigung,
+  nie den entfernten Text). Eine Kopie in der Quarantäne wird für dasselbe Pack und denselben Hash wiederverwendet
+  und bei einem Nein, einer abgelehnten oder abgelaufenen Freigabe oder nach 20 Minuten entfernt. „Ja, und nicht mehr
+  fragen“ gilt für eine Pack-Art, Vertrauensstufe und einen Index-Schlüssel (Wissens- und Rezept-Packs,
+  `verified`-Target-Packs); darunter installierte Packs sind mit `installed_via` markiert. Kein Tool veröffentlicht
+  einen Pull Request.
 - **Korrekturvorschläge von KI-Clients** (MCP-Tool `propose_healing_fix`): Ein Client, der einen gescheiterten Build
   analysiert, übergibt dem Framework Zusammenfassung, Ursache, manuellen Schritt und Sicherheit. Der Vorschlag
   durchläuft dieselben Prüfungen wie Dittos eigene Analyse, einschließlich des Filters für gefährliche Befehle, wird
@@ -609,6 +621,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Der Deep-Ingest-Hinweis hält wieder fest, wer ihn gelesen hat**: Seine Zustandsdatei speichert, wo er bestätigt
   wurde (`via`: `gui` oder `cli`), und das Lesen landet im Audit-Log (Akteur `gui` oder `cli`). Nur eine Person
   bestätigt ihn; `CrawlNotice.acknowledge` lehnt jeden anderen Weg ab.
+- **Ein Target-Pack übernimmt nie den Namen eines anderen Targets**: Ein Target-Pack, dessen ID (oder angegebene
+  Target-ID) ohne Rücksicht auf Groß- und Kleinschreibung und Trennzeichen der eines vorhandenen Targets gleicht, wird
+  abgelehnt, im Community Hub, in der CLI und über MCP.
 - **Eine Hugging-Face-Einordnung für Builds und Downloads**: `check_build_request` und `start_build` lesen Lizenz, Zugangsbeschränkung und Dateien eines Modells jetzt nach denselben Regeln wie `get_hf_model_info` und `download_hf_file` (Lizenzen wie GPL, DeepSeek oder Qwen Research waren auf dem Build-Weg „unbekannt“ und auf dem Download-Weg „einschränkend“), und beide halten dieselbe Speicherreserve frei.
 - **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
   eine Sitzung schließt nach 10 Minuten ohne Anfrage (die Vorgabe des SDK sind 30); eine noch offene Anfrage, wenn ihr

@@ -66,6 +66,9 @@ def env(make_framework):
     registry = fm.tool_registry
     registry.approvals.poll = 0.05
     installed = []
+    # A stand-in for the real tool (tests/test_community_tools.py tests that one): the standing-approval mechanism
+    # with the index look-up replaced by fixed facts.
+    registry._tools.pop("add_pack_from_index", None)
     registry.register(ToolSpec(
         "add_pack_from_index", "Install a pack", "Installs a pack from the signed index", ToolTier.EXTERNAL, PackIn,
         PackOut, lambda i: installed.append(i.pack_id) or PackOut(installed=i.pack_id), open_world=True,
