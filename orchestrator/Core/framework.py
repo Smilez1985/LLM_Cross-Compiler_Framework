@@ -268,5 +268,11 @@ class FrameworkManager:
         self.logger.info("Shutting down Framework...")
         if self.rag_manager is not None:
             self.rag_manager.close()  # releases the lock on the embedded knowledge base storage
+        approvals = getattr(self.tool_registry, "approvals", None)
+        if approvals is not None:  # calls still waiting for the person end (audited); nothing runs after this
+            try:
+                approvals.close()
+            except Exception as e:
+                self.logger.warning(f"Pending approvals not closed: {e}")
         self._stop_loop()
         self.logger.info("Shutdown complete.")

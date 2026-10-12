@@ -319,6 +319,30 @@ Defaults per task come from [`configs/llm_providers.yml`](../configs/llm_provide
 `ai_model` and `ai_effort` for every task, or `ai_model_<task>` and `ai_effort_<task>` for one task. Effort levels
 are `low`, `medium`, `high`, `xhigh` and `max`; each provider maps them to what it understands.
 
+### Honest "cannot" and untested hardware
+
+The task texts live in one module (`orchestrator/llm/task_prompts.py`), which Ditto and the
+[MCP prompts](#mcp-server) share. Each of them tells the model: when it cannot do a task, it says so with the specific
+reason (which information is missing, which capability or tool does not exist, which permission is denied, which
+device or hardware is not available, which limit was reached) and never claims a result it did not get; not being
+able to test a result on real hardware is no reason to refuse. Module proposals and build recommendations may answer
+`cannot` with such a reason. When the framework's own check of the task input finds what the task needs (a probe or
+the board and its SoC; formats the target offers), Ditto asks the model once more, and a second `cannot` reaches you
+as "not confirmed by the framework". With neither a probe nor a board there is nothing to base a module on: Ditto
+says so itself and asks no model. The healing analysis has no `cannot`; an unclear cause comes with a low confidence.
+
+**Module proposals** may use any base image. Ditto prefers a Docker Official Image (`debian`, `ubuntu`) with the
+vendor's packages; for any other image, for example a vendor's toolchain image on `nvcr.io`, it must give its reason
+(`base_image_reason`). It lists the values it guessed in `assumptions` (at most 10). Before the module is created, the
+module wizard and `llm-cli module generate-ai` show the base image plainly: registry, image, digest (or, without
+one, either that the module uses the image by its tag, for the module generator's short list of base images, or
+that the generator refuses it until it is pinned),
+"Docker Official Image" or "other registry: ...; prebuilt image made by its publisher, not checked by the framework",
+that the image build runs with network access on this computer outside the build sandbox, and the AI's reason. The
+wizard keeps the proposed image as it is (an image with "debian" in its name is no longer replaced by
+`debian:bookworm-slim`). The created module says in its description that it is untested and names the assumptions;
+its support level is community.
+
 ### Providers
 
 | ID | Kind | Where it runs | Sign-in today |
@@ -1001,10 +1025,62 @@ framework never sees it.
 - **Confirmation:** where your permission says "ask", the server asks the user through the client (MCP
   elicitation). The question shows the tool and every argument in full, the security-relevant ones first; control
   and invisible characters and long stacks of combining marks are shown as `\u` escapes. A question that would be
-  longer than 4000 characters is refused instead of being cut. Only a real answer from the user counts as approval,
+  longer than 4000 characters becomes a pending approval (below) instead of being cut. Only a real answer from the
+  user counts as approval,
   and a "no" is final for that call, even if the permissions are loosened while the question is open. Declined and
   cancelled calls, and calls refused before they run (invalid arguments, a confirmation that fails), are audited
-  too. A client that cannot ask gets a refusal with a hint how to allow the tool.
+  too.
+- **Pending approvals:** when a client cannot ask you (it declared no form elicitation), the question is longer
+  than an elicitation may be, or you set the tool to be confirmed in the framework (`llm-cli tools permissions
+  --confirm-in-framework TOOL`, or "Ask in the framework" in the Tool Permissions dialog; useful for tools you want
+  to see in the framework every time), the call is not refused. The client gets the error `waiting_for_approval`
+  with a job id ("poll get_job_status with wait_seconds=50; do not call this tool again"), and the question waits
+  for you: a notice in the GUI status bar (and a desktop notification where the system offers one) that opens
+  **Tools > Pending Approvals...**, and `llm-cli tools approvals` in a terminal. The window shows the caller class
+  first ("all local stdio clients" or the token's name), then the client's own name marked as self-reported, the
+  full question (up to 16,000 characters; a longer one is refused everywhere) and the time left, with **Approve
+  once** and **Decline**. On approval the framework builds the question again: if it reads differently (a fact behind
+  it changed), nothing runs and you are asked again; otherwise the framework runs the call itself, under the original
+  caller (`confirm_channel` `approval:<id>` in the audit log), and the client reads the result with
+  `get_job_status`. The same call repeated while it waits gets the same job, an approval runs once and only for the
+  caller, tool and arguments it was asked for, it expires after 15 minutes (audited as `unanswered`), and it ends
+  with the client's session, when the client cancels its job or when the framework shuts down. A client has at most
+  5 open approvals. The window never puts another call in place of the one you are reading: when that one is
+  withdrawn, expires or is decided elsewhere, nothing is selected; when it is asked again with new facts, its new
+  question is marked and approving waits a moment, so a click meant for the old text does not approve the new one.
+  Your decision is audited (`approval_decided`, actor `gui` or `cli`) before it is stored; if that fails, nothing is
+  decided. The approvals live in `~/.llm-framework/tool_approvals.json`, signed like the permissions, so a hand edit
+  decides nothing; no tool can create, list, approve or decline one, and only the client that asked sees the result.
+  Ditto in the framework always asks in its own dialog or prompt and never needs one.
+- **Standing approvals ("yes, and do not ask again"):** a scoped "allow" for one caller, created only by you in the
+  framework's own window: **Approve and do not ask again...** in the approval window, `llm-cli tools approvals
+  approve ID --always`, or Ditto's dialog and prompt. An MCP client's own dialog can only ask for one: its form then
+  has "ask the framework to stop asking for calls like this one", which runs that one call and puts a request into
+  the approval window for you to confirm (one open request per caller and tool, 15 minutes or until its session
+  ends; a declined scope is not asked for again for 24 hours). Before you confirm, the window shows a warning that
+  names who may then act without asking (for the local stdio clients: all of them, with the command that gives one
+  client its own token), what the standing approval covers in plain words, how wide ("this one only" or "any", where
+  offered) and for how long ("until I revoke it", 30 days or 24 hours; for all local stdio clients together only
+  the narrowest scope and at most 30 days). The scope comes from facts the framework looked up for the call, never
+  from what the AI wrote; a call outside it asks as before, and a standing approval never lifts a "deny", never
+  covers another caller and never applies to a tool you set to be confirmed in the framework. Packs from the zoo
+  can get one for knowledge and recipe packs of trust `verified` or `community` and for target packs of trust
+  `verified`, each bound to the exact pack kind, trust level and index signing key; builds and single-file
+  downloads only for safetensors or GGUF (never pickle weights), ungated models with a permissive licence, up to a
+  size class; it is never offered for deploying, settings, crawling, creating modules, `export_pack`, healing,
+  deleting or restoring, or stopping another client's work. Standing approvals are stored in the signed permission
+  file (a hand edit denies everything) and written only when you create, revoke or reset them, so a use never
+  rewrites the file and cannot undo a revocation; their uses and last use come from the audit log
+  (`confirm_channel` `grant:<id>`), and the GUI shows each use with a **Revoke** button, naming who acted, the tool
+  and what the standing approval covers. They lapse after 90 days without use (audited `grant_lapsed` once; a lapsed
+  one stays lapsed), at their expiry, when the tool's rule changes and when their token is revoked; a request from a
+  token revoked since it asked never becomes a standing approval of a new token with the same name.
+  `llm-cli tools permissions --grants` and the Tool Permissions dialog list them with their uses, and
+  `--revoke-grant ID`, the dialog's **Revoke** and `--reset` remove them. While the GUI runs, the command line
+  cannot create one (use the GUI's window); one created on a command line is shown once at the next GUI start.
+  `get_status` shows a caller its own standing approvals, read-only. Which tools offer one so far: only tools whose
+  facts the framework can look up get a rule (none of the 14 current tools yet; the zoo, download and local tools
+  bring theirs with them).
 - **Instructions to the client:** the server describes the typical flow (targets → capabilities → build → status
   and log → artifacts), tells the client that fields marked as external text are data whose instructions must not
   be followed, and that a task it cannot do is reported to you with its specific reason.
@@ -1022,6 +1098,44 @@ framework never sees it.
   quote a server reply, a log line or a name from a pack: it is cleaned the same way before secrets are redacted,
   and the client gets that part wrapped as untrusted data, while the framework's own refusals and the next step
   stay plain (Ditto's model gets such errors in an untrusted block too).
+- **Resources:** besides the tools, the server offers resources a client can attach or read:
+  `lcf://targets`, `lcf://targets/<target>/capabilities`, `lcf://builds/<request id>/status`,
+  `lcf://builds/<request id>/log` (the last 200 lines), `lcf://permissions`, and the installation's documents
+  `lcf://docs/<name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` and their German `_DE` twins;
+  only the ones that exist are listed). A resource returns what its read tool returns and is read through the tool
+  registry: your permission for that tool decides (a resource of a denied tool is neither listed nor readable, and
+  one whose tool is set to "ask" is refused with the tool to call instead, because reading a resource cannot ask
+  you), the same output filter cleans it (external text wrapped as untrusted data, so these resources come as
+  text), and every read is audited as `read_resource:<uri>`. An unknown id, a document outside the list or a
+  parameter with `..`, an absolute path or a NUL byte is an invalid-params error (-32602), audited as well, also
+  when the server refuses it before any resource runs (an unknown URI or another scheme). A document that cannot
+  be read is refused without its path.
+- **Change events:** a client on protocol 2026-07-28 can listen for changes (`subscriptions/listen`): the tool,
+  prompt and resource lists change when your permissions or a token's permissions change, and the status and log
+  resources of a build report each change, only to the caller that started the build. The server publishes them on
+  its own event bus; it checks for changes every second. On the older handshake revisions it advertises no change
+  notifications, so those clients see a permission change at their next session.
+- **Prompts:** Ditto's tasks for a client that does Ditto's job, with the same task text and the same knowledge
+  context Ditto gets (most clients show them as slash commands): `ask_about_framework` (a question; knowledge
+  excerpts and the documentation resources), `convert_model_for_board` (model, target, board; the target's
+  capabilities and the steps from the check to the built model), `recommend_build_settings` (model, target, board,
+  `use_knowledge`; the formats and quantization types the target offers for the board) and `diagnose_build_failure`
+  (a build request; its state, the end of its log and three knowledge excerpts). `add_board` and `deploy_to_board`
+  are ready and are offered once the tools they lead to exist (creating a target module, packaging and deploying). A
+  prompt grants nothing: every step still goes through the tools and your permissions. Its first message is the
+  framework's own text, the same for every call; the second holds the context, where every value from outside the
+  framework (your arguments too) is wrapped as untrusted data, secrets are redacted, and the whole prompt is capped
+  at 24,000 characters. Each prompt carries the honest-"cannot" rule (see
+  [Ditto](#honest-cannot-and-untested-hardware)). A prompt is read like a read tool: your read permission decides,
+  an unknown argument is refused with the valid names (never dropped), and every get is audited as
+  `get_prompt:<name>`. A prompt shows nothing a read tool may not: one whose context holds what a read tool
+  returns (a build's state and log for `diagnose_build_failure`, a target's capabilities for
+  `convert_model_for_board` and `recommend_build_settings`) is neither listed nor served while you deny that tool,
+  and refused with the tool to call while it is set to "ask"; knowledge excerpts come only while
+  `search_knowledge` is allowed. The target's own texts (format labels and notes from `target.yml`) are external
+  text too.
+- **Completions:** clients that complete arguments (VS Code) get target ids, a target's boards, document names and
+  the caller's own build requests, only for prompts and resources the caller may use.
 - **Local files for AI clients:** MCP clients and Ditto never name a path. A local model or calibration dataset is
   named as `<label>:<relative path>` inside a folder the AI may use, for example `models:qwen2.5-0.5b-instruct` or
   `datasets:calib/de.txt`, or by the file id (`lf_` and 16 hex characters) the framework recorded for it. The
@@ -1044,7 +1158,11 @@ framework never sees it.
   socket, device or pipe); a Hugging Face cache snapshot is mounted file by file. The same holds for the folder of
   an RKNN sample list, so a list directly in a label folder is refused. A Hugging Face repo id from an AI client is
   always downloaded, never looked up as a folder on this computer. Refusals name the label, never the real path.
-  GUI and CLI builds you start yourself still take any path.
+  GUI and CLI builds you start yourself still take any path. What an AI client reads back names such a model by its
+  label too, never by the folders on this computer: the build's stage text ("Building models:qwen/model.gguf for
+  Rockchip"), the self-healing context, the build manifest's `model_source` and `list_artifacts` (a host path an
+  older manifest recorded is shown as `<label>:<relative path>` when it lies in a folder the AI may use, else as
+  the file name only).
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
   server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification
@@ -1066,8 +1184,12 @@ framework never sees it.
   (`--transport http`, default `http://127.0.0.1:8765/mcp`). Over HTTP every client sends its own named token as
   `Authorization: Bearer <token>`; a request with an `Origin` header (a web page, also a CORS preflight) is refused,
   the `Host` header must name a loopback address with the server's port (against DNS rebinding), and the server
-  keeps at most 8 sessions and takes at most 1 MiB per request. A session, and a pending question round of the
-  2026-07-28 protocol, belongs to the token that opened it.
+  keeps at most 8 sessions, at most 4 per token (so one client cannot lock the others out), closes a session after
+  10 minutes without a request, and takes at most 1 MiB per request. A session, and a pending question round of the
+  2026-07-28 protocol, belongs to the token that opened it (after a rotation the client opens a new session). A
+  request that is still open (a wait, an event stream, a listen stream) is closed as soon as its token is revoked
+  or rotated, and so are that token's sessions, so they hold no slot. Anything that runs outside a request the
+  server checked gets no permissions at all, over stdio as over HTTP.
 - **Named tokens:** `llm-cli mcp token add NAME` creates a token for one client and shows it once; the framework
   keeps only its SHA-256 in `~/.llm-framework/mcp_tokens.json` (mode 0600; while other users can read or change
   it, or it belongs to another user, no token is accepted and the server does not start). The token's name is the caller in the audit log (`mcp:<name>`), and it has its own permissions: a
@@ -1076,10 +1198,14 @@ framework never sees it.
   computer; a change to Ditto's permissions applies to it at once). `rotate` replaces a token, `revoke` deletes it
   with its permissions; both take effect at once, also for a running server, and the calls a revoked stdio client
   still sends are refused and audited. A stdio client gets its own token
-  through the environment variable `LCF_MCP_TOKEN` in its server entry: the server reads it once at the start,
-  removes it from its environment and does not start with a value that is not a valid token. Without it, all local
-  stdio clients share the caller `mcp` and your own permissions. Only a person at a terminal manages tokens: no tool
-  can create, read or change them, and no token appears in a tool result, log line or audit entry.
+  through the environment variable `LCF_MCP_TOKEN` in its server entry: `llm-cli` takes it out of its environment
+  before any command runs (no command and no child process inherits it) and hands it only to `mcp serve`, which does
+  not start with a value that is not a valid token. Without it, all local stdio clients share the caller `mcp` and
+  your own permissions. Only a person manages tokens, at a terminal or in the GUI (Tools > Tool Permissions (Ditto /
+  MCP), section "MCP tokens": list, add with the token shown once, rotate, revoke and each token's own permissions;
+  audited with actor `gui`): no tool can create, read or change them, and no token appears in a tool result, log line
+  or audit entry. The server reads the token store on every check and caches it by the SHA-256 of the file's bytes,
+  so a change is seen even when it keeps the file's size and time.
 - **Working folder:** the server never reads settings or imports code from the folder it is started in (the client
   starts it with `python -P`), and on Windows it does not run programs such as `docker` or `git` from there. A
   project folder cannot change its behaviour.
@@ -1090,8 +1216,8 @@ framework never sees it.
   version the client reports about itself, the protocol version, the transport, the caller (`mcp` or the named
   token's `mcp:<name>`, never the token itself) and the capabilities it declared, for example
   `MCP client: "claude-code" 2.1.295 (self-reported), protocol 2025-11-25, stdio, caller mcp, elicitation form+url,
-  capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask" is
-  refused there. Client text is cleared of anything that looks like a key or token first, then escaped and cut
+  capabilities: elicitation, roots`. `elicitation none` means the client cannot ask you, so a tool set to "ask"
+  becomes a pending approval in the framework. Client text is cleared of anything that looks like a key or token first, then escaped and cut
   to 64 characters; it is a label, never a permission.
 
 What the clients support, from their vendors' documentation (2026-10-11). "Not documented" means the vendor does
@@ -1105,7 +1231,7 @@ not say; the stderr line above shows what a client really declares.
 | VS Code (GitHub Copilot) | yes, modes not documented | not documented | yes, with templates | yes | not documented |
 
 Claude Desktop chat and Cowork are expected to declare no elicitation (one third-party source says so): there, every
-tool set to "ask" is refused, while allowed tools work.
+tool set to "ask" becomes a pending approval in the framework, while allowed tools work.
 
 **Claude subscribers:** this is the way to use the framework with a Claude plan. Anthropic does not allow
 third-party apps to use a subscription's sign-in or limits, so Ditto itself needs an API key; Claude Code and Claude
@@ -1140,16 +1266,76 @@ There are no `external` or `forbidden` tools yet; deploying and uploading are no
   then the cap. A tool's default never opens a tier you denied.
 - **New tools:** the permission file records which tools you have reviewed; saving the setup, `llm-cli tools
   permissions` or the GUI dialog marks every listed tool. A tool added later uses its own default, never a looser
-  tier setting, until you review it; `llm-cli tools list` and the GUI dialog mark it as new. A permission file from
-  3.0.0 counts its eleven tools as reviewed.
+  tier setting, until you review it; `llm-cli tools list` and the GUI dialog mark it as new. A stored permission
+  file without that list counts the eleven tools of 3.0.0 as reviewed.
 - **Denied tools are not listed** to MCP clients and Ditto; a call to one is still refused and audited.
   `get_status` lists every tool with its decision and why, also the hidden ones, and the actions no tool does, with
   where you do them, so an AI can tell you the real reason.
 - A damaged or unreadable permission file, or a link to a missing one, denies every tool instead of falling back to
   looser defaults; a damaged file is kept as `tool_policy.json.bad`, and `llm-cli doctor`, `llm-cli tools list` and
   `llm-cli mcp serve` say so.
+- **Only you change the permissions.** `tool_policy.json` and the token store `mcp_tokens.json` are signed with a key
+  derived from the audit key in your keyring. A file edited by hand, signed with another key or carrying no
+  signature (a permission file saved by 3.0.0, too) denies every tool, and the token store then accepts no token,
+  until you set the permissions up again (`llm-cli tools permissions` or the GUI dialog, which shows why). They are
+  changed only in the GUI and with `llm-cli tools permissions` and `llm-cli ditto setup`, which need a terminal
+  (piped answers are refused). Every save is recorded in the audit log (`policy_changed`, actor `cli` or `gui`) with
+  the old and new decisions before it takes effect; if the entry cannot be written, nothing changes. Each save
+  raises a revision number under a lock shared by the GUI, the CLI and MCP servers, and a save based on an older
+  revision (a window opened before another change) is refused, so it never undoes a change made meanwhile. The
+  newest saved revision of both files is kept in the keyring too: an older signed copy put back over a file (it
+  would bring back a revoked standing approval, a revoked token or a looser permission) is refused like a hand edit,
+  and a removed permission file denies every tool instead of falling back to the defaults. Without a keyring the
+  signature has no key (as for the audit chain) and `llm-cli doctor` warns; such a file is refused while the audit
+  log is kept with a key.
 - A [named MCP token](#mcp-server) has its own permissions, set with `llm-cli tools permissions --token NAME`; an
   unknown or revoked token, or a token file that cannot be read, may not even read.
+
+**What a question shows** (Ditto's GUI dialog and CLI prompt, an MCP client's form), in this order: the
+consequence in plain words, from what the framework looked up, with ids followed by their speaking names (for example
+"Deletes the Docker build cache and the dangling framework images on this computer, then retries build request
+req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); who asks (Ditto, or the
+MCP client with the name, version and transport it reports, and whose permissions apply: all local stdio clients or
+a named token); the facts the framework checked, where text from outside the framework (a build log, an AI's
+proposal) is labelled "not checked" and escaped; then every argument, complete, repaired values marked, and an id
+followed by its speaking name (a build request's model and target, a local file's `<label>:<relative path>`, a
+target's name). Some tools look facts up before the question (two-phase confirmation), and the call is then bound
+to exactly what you were shown: approving a self-healing proposal applies the proposal in the question, and one that
+changed meanwhile is refused with nothing applied; a destructive fix (`docker_prune`, which deletes the Docker build
+cache) is asked even when `resolve_healing` is allowed; a lookup that fails (no pending proposal) refuses the call
+before anything is asked; without the looked-up facts a decision on a proposal is not made at all. A 2026-07-28
+client that answers in a second round gets the facts of the question it answered. A round counts as an answer only
+to a question the framework asked that client and that is still open: an answer a client sends along with a new call
+is a new question, recorded before it is asked and subject to the limits below (after your "no" it is not asked
+again). An MCP form shows at most 4,000 characters, the framework's own windows up to 16,000 (Ditto's GUI shows a
+long question in a scrollable dialog, which also offers "do not ask again" where the framework can, the CLI through
+the pager); over MCP a question between 4,000 and 16,000 characters becomes a pending approval, and a longer one is
+refused everywhere (reason `limit_reached`, with a next step). A pending approval is the same question: it shows the
+facts the framework looked up and the speaking names, and the framework runs the approved call bound to exactly the
+facts of the question you approved (a fact that changed before you approved it, for example a new upstream commit,
+asks you again instead). A standing approval is matched on these looked-up facts too, so a client that could ask
+you is not asked when one covers the call. A question that a looked-up fact made necessary is recorded with the
+decision `ask`, also when the tool itself is allowed. Where the framework could offer "do not ask again", the MCP
+form has one more box, which only asks the framework: it never creates a standing approval, and the call's notes say
+so.
+
+**Limits** (per client: Ditto, the local stdio clients, each named token; counted while the process runs): the
+read tools together at most 20 calls per 10 seconds (40 at once); `start_build` at most 3 unfinished builds and 20
+started builds in 24 hours per client (a start that was declined or refused, for example by a full queue, does not
+count), and one framework process queues at most 20 unfinished build requests from AI callers (your own GUI and CLI
+builds count toward the 20 but are always queued: AI work never blocks them); at most 30 questions to you per hour,
+pending approvals and requests to stop asking included, and at most 5 open pending approvals per client. When you
+approve a pending call, its quotas are checked again before it runs (the client's unfinished builds may have grown
+meanwhile). After you say no, in the client's dialog or in the approval window, the same call (the same
+tool with the same arguments after repair, so a respelled call is the same call) is refused without asking for 10
+minutes, and three "no" to one tool within 30 minutes pause the questions about it for 30 minutes; a dismissed dialog
+is not a "no". A call the repeat guard refused (the same failing call a third time) may run again 10 minutes after
+its last failure. Each limit is an audited refusal (`rate_limited`, reason `limit_reached`, or `declined` after your
+"no") that says when to try again, and it never counts as a failed call, for Ditto as for MCP clients. Ditto's chat
+stops calling tools after three failed calls in a row without progress (the same tool, reason and field each time;
+the framework names the field an input error is about) or a refused repeat, and answers with what it tried, what
+failed and why, within at most two more turns; fixing one input error after another is progress, and while Ditto
+fixes one it gets up to 4 steps more than its 8.
 
 **Audit log** (`~/.llm-framework/audit.db`, SQLite): every tool call is recorded with time, actor, tool, decision,
 whether a person confirmed it, and the outcome. Arguments are stored redacted and shortened, plus a hash of the full
@@ -1166,7 +1352,8 @@ when they are recorded. Read-only calls stay available, and the failed write is 
 as `confirmation_requested` with the SHA-256 of the question text before it is asked; a question about a change that
 cannot be recorded is not asked. Every end is recorded: `ok`, `error`, `denied`, `not_confirmed` with the answer
 (`accepted`, `declined`, `cancelled`, `unavailable` when nobody could be asked, `unanswered`), `confirmation_timeout`
-(an MCP question asked during the call waits at most 5 minutes) and `cancelled` (the client gave up on the call). A
+(an MCP question asked during the call waits at most 5 minutes; reason `needs_person`, and a question the client
+could not show has reason `failed`, both with a next step) and `cancelled` (the client gave up on the call). A
 question of the 2026-07-28 protocol that is returned to the client and never answered is recorded as `unanswered`
 after 15 minutes while the server runs; the `confirmation_requested` entry is the lasting record. When a client
 cancels a running call, the cancellation is recorded at once and passed to the running call; what already runs

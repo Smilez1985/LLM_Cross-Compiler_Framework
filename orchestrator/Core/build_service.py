@@ -7,16 +7,18 @@ that is not the GUI's own widgets (MCP server, Ditto's tools, scripts) goes thro
 requests are validated once, against the target's declared capabilities, and results have one shape.
 """
 
+import hashlib
+import json
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from orchestrator.Core import job_service
 from orchestrator.Core.builder import HF_REPO_ID, MODEL_FILE_SUFFIXES, ModelFormat, OptimizationLevel
 from orchestrator.Core.job_service import owner_actor
 from orchestrator.Core.deployment_manager import list_builds
-from orchestrator.Core.orchestrator import (BuildRequest, OrchestrationStatus, PriorityLevel, WorkflowState,
-                                            WorkflowType)
+from orchestrator.Core.orchestrator import (BuildQueueFull, BuildRequest, OrchestrationStatus, PriorityLevel,
+                                            WorkflowState, WorkflowType)
 from orchestrator.schemas.build import (ArtifactList, ArtifactOut, BuildHandle, BuildList, BuildRequestIn,
                                         BuildStatusOut, FormatSummary, LogTail, PendingHealing, TargetList,
                                         TargetOut)
@@ -27,16 +29,29 @@ from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
 
 AUTOMATIC_STRATEGIES = {"config_adjustment", "docker_prune", "retry_build"}
+MODEL_NEXT = ("Give a Hugging Face repo id (owner/name), or a local model file or a folder with config.json as "
+              "<label>:<relative path>.")
 BUILD_FINISHED = frozenset({"completed", "error", "cancelled"})
+
+
+def proposal_fingerprint(proposal: Any) -> str:
+    """Identifies one pending healing proposal: its texts, strategy and origin, and the proposal itself (a new
+    proposal with the same text is another proposal). A question shows it; the decision must be about it."""
+    strategy = getattr(getattr(proposal, "strategy", None), "value", "")
+    data = [str(getattr(proposal, "summary", "")), str(getattr(proposal, "root_cause", "")),
+            str(getattr(proposal, "fix_command", "")), strategy, bool(getattr(proposal, "is_ai_generated", False)),
+            id(proposal)]
+    return hashlib.sha256(json.dumps(data, ensure_ascii=False).encode("utf-8", "surrogatepass")).hexdigest()
 
 
 class BuildServiceError(ValueError):
     """A request the service refuses, with a message meant for the user (or the calling model), a reason code
-    (the tool registry's codes, e.g. unknown_id, not_supported) and the next step."""
+    (the tool registry's codes, e.g. unknown_id, not_supported), the next step and, for an input refusal, the
+    argument it is about (Ditto's loop tells a fix of another argument from a repeat by it)."""
 
-    def __init__(self, message: str, code: str = "failed", next: str = ""):
+    def __init__(self, message: str, code: str = "failed", next: str = "", field: str = ""):
         super().__init__(message)
-        self.code, self.next = code, next
+        self.code, self.next, self.field = code, next, field
 
 
 class BuildService:
@@ -50,13 +65,13 @@ class BuildService:
     def _orchestrator(self):
         orch = getattr(self.framework, "orchestrator", None)
         if orch is None:
-            raise BuildServiceError("The framework is not initialized (no orchestrator).")
+            raise BuildServiceError("The framework is not initialized (no orchestrator).", next="Tell the person the framework is not ready; 'llm-cli doctor' shows why.")
         return orch
 
     def _targets(self):
         tm = getattr(self.framework, "target_manager", None)
         if tm is None:
-            raise BuildServiceError("The framework is not initialized (no target registry).")
+            raise BuildServiceError("The framework is not initialized (no target registry).", next="Tell the person the framework is not ready; 'llm-cli doctor' shows why.")
         return tm
 
     def _config_get(self, key: str, default=None):
@@ -92,7 +107,9 @@ class BuildService:
         caps = self._targets().get_capabilities(self.resolve_target(target))
         if caps is None:
             known = ", ".join(t.get("id", "?") for t in self._targets().list_targets()) or "none"
-            raise BuildServiceError(f"Target '{target}' is unknown or declares no capabilities (targets: {known}).")
+            raise BuildServiceError(f"Target '{target}' is unknown or declares no capabilities (targets: {known}).",
+                                    code="invalid_value", next="Call list_targets for the targets you can use.",
+                                    field="target")
         return caps
 
     def _confined(self, request: BuildRequestIn) -> Tuple[BuildRequestIn, Optional[LocalInputs]]:
@@ -107,20 +124,26 @@ class BuildService:
             files = files or LocalFiles.for_framework(self.framework)
             return files
 
-        model_pin = local().resolve(model) if looks_like_reference(model) else None
-        if model_pin is None and (".." in model or not HF_REPO_ID.match(model)):
-            try:
-                labels = [f.label for f in local().folders() if not f.problem]
-            except LocalFileError:
-                labels = []
-            if is_path(model):
-                split_reference(model, labels)  # refused with the reason: AI callers never name a path
-            raise LocalFileError(f"'{model}' is neither a Hugging Face repo id (owner/name) nor a local file "
-                                 "reference.", next_step=labels_hint(labels))
-        dataset_pin = local().resolve(dataset) if dataset else None
-        if dataset_pin is not None and dataset_pin.is_dir:
-            raise LocalFileError(f"{dataset_pin.ref} is a folder; a calibration dataset is a file (for RKNN the "
-                                 "sample list).", next_step="name the dataset file inside its folder.")
+        field = "model"  # the argument a refusal is about (Ditto's loop tells a fix from a repeat by it)
+        try:
+            model_pin = local().resolve(model) if looks_like_reference(model) else None
+            if model_pin is None and (".." in model or not HF_REPO_ID.match(model)):
+                try:
+                    labels = [f.label for f in local().folders() if not f.problem]
+                except LocalFileError:
+                    labels = []
+                if is_path(model):
+                    split_reference(model, labels)  # refused with the reason: AI callers never name a path
+                raise LocalFileError(f"'{model}' is neither a Hugging Face repo id (owner/name) nor a local file "
+                                     "reference.", next_step=labels_hint(labels))
+            field = "dataset_path"
+            dataset_pin = local().resolve(dataset) if dataset else None
+            if dataset_pin is not None and dataset_pin.is_dir:
+                raise LocalFileError(f"{dataset_pin.ref} is a folder; a calibration dataset is a file (for RKNN the "
+                                     "sample list).", next_step="name the dataset file inside its folder.")
+        except LocalFileError as e:
+            e.field = field
+            raise
         update = {"model": model_pin.path if model_pin else model,
                   "dataset_path": dataset_pin.path if dataset_pin else None}
         # Always present for an AI caller, also without pins: the build engine then never looks the model source up
@@ -137,12 +160,15 @@ class BuildService:
                 if not ((local / "config.json").is_file()
                         or any(f.name.lower().endswith(MODEL_FILE_SUFFIXES) for f in local.iterdir() if f.is_file())):
                     raise BuildServiceError(f"'{shown or local}' does not look like a model directory (no config.json "
-                                            "or model file).")
+                                            "or model file).", code="invalid_value", next=MODEL_NEXT,
+                                            field="model")
             elif not local.name.lower().endswith(MODEL_FILE_SUFFIXES):
-                raise BuildServiceError(f"'{shown or local.name}' is not a model file.")
+                raise BuildServiceError(f"'{shown or local.name}' is not a model file.", code="invalid_value",
+                                        next=MODEL_NEXT, field="model")
             return str(local)
         if ".." in model or not HF_REPO_ID.match(model):
-            raise BuildServiceError(f"'{model}' is neither an existing local model nor a Hugging Face repo id (owner/name).")
+            raise BuildServiceError(f"'{shown or model}' is neither an existing local model nor a Hugging Face repo "
+                                    "id (owner/name).", code="invalid_value", next=MODEL_NEXT, field="model")
         return model
 
     # --- queries ----------------------------------------------------------------------------
@@ -193,6 +219,15 @@ class BuildService:
 
     def list_requests(self) -> BuildList:
         return BuildList(builds=[self._status_of(s) for s in list(self._orchestrator._workflows.values())])
+
+    def request_label(self, request_id: str) -> Optional[str]:
+        """The speaking name of a build request for a person: the model (a local model by its label) and the
+        target, format and quantization; None for an unknown request."""
+        try:
+            state = self._orchestrator._workflows.get(request_id)
+        except BuildServiceError:
+            return None
+        return (getattr(state, "label", "") or None) if state is not None else None
 
     # --- ownership and waiting --------------------------------------------------------------------------------
 
@@ -255,6 +290,21 @@ class BuildService:
                     pass
         return False
 
+    def _shown_model(self, value: Any) -> Optional[str]:
+        """A manifest's model as an AI caller sees it: a Hugging Face repo id or a label as written; a host path (a
+        local model of an older build, or one a person built) as `<label>:<relative path>` when it lies in a folder
+        the AI may use, else as its file name only, never the folders above it."""
+        if value is None:
+            return None
+        text = str(value)
+        if not Path(text).is_absolute():
+            return text
+        try:
+            label = LocalFiles.for_framework(self.framework).label_for(text)
+        except (LocalFileError, OSError, AttributeError, TypeError):
+            label = None
+        return label or Path(text).name
+
     def list_artifacts(self) -> ArtifactList:
         def text(value):
             return None if value is None else str(value)
@@ -265,7 +315,8 @@ class BuildService:
             artifacts = info.get("artifacts") if isinstance(info.get("artifacts"), list) else []
             digest = next((a.get("sha256") for a in artifacts if isinstance(a, dict) and a.get("file") == primary), None)
             try:
-                items.append(ArtifactOut(path=info["path"], model=text(info.get("model") or info.get("model_source")),
+                items.append(ArtifactOut(path=info["path"],
+                                         model=self._shown_model(info.get("model") or info.get("model_source")),
                                          format=text(info.get("format")), quantization=text(info.get("quantization")),
                                          board=text(info.get("board")), target=text(info.get("target")),
                                          created=text(info.get("created")), primary=text(primary), sha256=text(digest)))
@@ -306,8 +357,12 @@ class BuildService:
         dataset = None
         if request.dataset_path:
             path = Path(request.dataset_path).expanduser()
-            if not path.is_file():
-                raise BuildServiceError(f"Calibration dataset '{request.dataset_path}' not found.")
+            if not path.is_file():  # an AI caller's dataset by its label, never its real path
+                shown = getattr(getattr(inputs, "dataset", None), "ref", None) or request.dataset_path
+                raise BuildServiceError(f"Calibration dataset '{shown}' not found.",
+                                        code="invalid_value",
+                                        next="Name an existing dataset file as <label>:<relative path>.",
+                                        field="dataset_path")
             dataset = str(path.resolve())
         problems = caps.check_request(fmt, board, quant, dataset=bool(dataset), imatrix=request.use_imatrix)
         if problems:
@@ -319,7 +374,9 @@ class BuildService:
         else:
             model = request.model  # a Hugging Face repo id: never looked up on disk for an AI caller
         if request.revision and Path(model).is_absolute():
-            raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.")
+            raise BuildServiceError("A revision applies to Hugging Face models only, not to a local model.",
+                                    code="invalid_value", next="Leave out the revision for a local model.",
+                                    field="revision")
         return request.model_copy(update={"target": target, "format": fmt, "board": board, "quantization": quant,
                                           "dataset_path": dataset, "model": model}), inputs
 
@@ -347,14 +404,21 @@ class BuildService:
             local_inputs=inputs,
             owner=owner,
         )
-        request_id = self.framework.run_coroutine(self._orchestrator.submit_build_request(build_request), timeout=30)
+        try:
+            request_id = self.framework.run_coroutine(self._orchestrator.submit_build_request(build_request),
+                                                      timeout=30)
+        except BuildQueueFull as e:
+            raise BuildServiceError(str(e), code="limit_reached",
+                                    next="Wait until a build finishes (get_build_status with wait_seconds) or cancel "
+                                         "one of your builds, then call start_build again.") from None
         self.logger.info(f"Build request {request_id} submitted ({req.model} -> {req.target}/{req.format}/{req.quantization})")
         return BuildHandle(request_id=request_id, status=OrchestrationStatus.QUEUED.value)
 
     def cancel(self, request_id: str) -> BuildStatusOut:
         self._state(request_id)
         if not self.framework.run_coroutine(self._orchestrator.cancel_request(request_id), timeout=60):
-            raise BuildServiceError(f"Build request '{request_id}' is not running.")
+            raise BuildServiceError(f"Build request '{request_id}' is not running.", code="failed",
+                                    next="It has already ended; get_build_status shows how.")
         return self.get_status(request_id)
 
     # A build id is added to the request just before the engine registers it (build_model runs in a worker thread,
@@ -389,13 +453,46 @@ class BuildService:
                 return "finished"
         return "cancelled"
 
-    def resolve_healing(self, request_id: str, approve: bool) -> BuildStatusOut:
+    def _pending_proposal(self, request_id: str):
         state = self._state(request_id)
-        if state.status != OrchestrationStatus.AWAITING_APPROVAL or state.healing_proposal is None:
-            raise BuildServiceError(f"Build request '{request_id}' has no pending healing proposal.")
+        proposal = state.healing_proposal if state.status == OrchestrationStatus.AWAITING_APPROVAL else None
+        if proposal is None:
+            raise BuildServiceError(f"Build request '{request_id}' has no pending healing proposal.", code="failed",
+                                    next="Call get_build_status to see the build's state; only a build that waits "
+                                         "for a decision has a proposal.")
+        return state, proposal
+
+    def healing_proposal(self, request_id: str, approve: bool) -> Dict[str, Any]:
+        """The pending healing proposal as the question about it shows it (texts redacted; they come from the
+        build log or an AI and are external text) with its fingerprint. Refuses an approval of a manual step
+        before anything is asked."""
+        state, proposal = self._pending_proposal(request_id)
+        pending = self._status_of(state).pending_healing
+        if approve and pending is not None and not pending.automatic:
+            raise BuildServiceError("This proposal is a manual step; it cannot be applied automatically.",
+                                    code="not_supported",
+                                    next="Dismiss it (approve: false) and show the person the manual step.")
+        return {"summary": redact_secrets(str(proposal.summary)), "root_cause": redact_secrets(str(proposal.root_cause)),
+                "fix": redact_secrets(str(proposal.fix_command)),
+                "strategy": getattr(getattr(proposal, "strategy", None), "value", "") or "unknown",
+                "automatic": bool(pending.automatic) if pending else False,
+                "ai_generated": bool(proposal.is_ai_generated), "fingerprint": proposal_fingerprint(proposal),
+                "request": getattr(state, "label", "") or ""}
+
+    def resolve_healing(self, request_id: str, approve: bool, expect: Optional[str] = None) -> BuildStatusOut:
+        """The decision on the pending proposal. `expect`: the fingerprint of the proposal the person was shown;
+        a different pending proposal is refused, nothing is applied."""
+        state, proposal = self._pending_proposal(request_id)
+        if expect is not None and proposal_fingerprint(proposal) != expect:
+            raise BuildServiceError(f"The self-healing proposal of '{request_id}' changed after the question was "
+                                    "asked; nothing was applied.", code="failed",
+                                    next="Call get_build_status for the new proposal and ask the person again.")
         status = self._status_of(state)
         if approve and status.pending_healing and not status.pending_healing.automatic:
-            raise BuildServiceError("This proposal is a manual step; it cannot be applied automatically. Dismiss it instead.")
-        if not self._orchestrator.resolve_healing(request_id, approve):
-            raise BuildServiceError(f"The healing proposal of '{request_id}' is no longer pending.")
+            raise BuildServiceError("This proposal is a manual step; it cannot be applied automatically.",
+                                    code="not_supported",
+                                    next="Dismiss it (approve: false) and show the person the manual step.")
+        if not self._orchestrator.resolve_healing(request_id, approve, expected=proposal):
+            raise BuildServiceError(f"The healing proposal of '{request_id}' is no longer pending; nothing was "
+                                    "applied.", code="failed", next="Call get_build_status to see the build's state.")
         return self.get_status(request_id)

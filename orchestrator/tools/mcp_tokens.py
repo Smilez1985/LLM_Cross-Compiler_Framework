@@ -29,6 +29,7 @@ from typing import Callable, Dict, List, Literal, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from orchestrator.tools.policy import Decision, ToolPolicy, ToolTier, restrictive_policy
+from orchestrator.tools.signing import SIGNATURE_FIELD, RevisionAnchor, SignatureError, sign, verify
 from orchestrator.utils.file_lock import file_lock
 
 ACTOR_PREFIX = "mcp:"          # the audit actor of a named token is "mcp:<name>"
@@ -37,6 +38,7 @@ ENV_VAR = "LCF_MCP_TOKEN"      # the token of a stdio client, read once by `llm-
 LINK_TARGETS = ("ditto",)      # callers whose policy a token may use by reference
 NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$")
 _SHA256_RE = r"^[0-9a-f]{64}$"
+MAX_STORE_BYTES = 4 * 1024 * 1024  # far more than any token store; a larger file is refused unread
 
 
 def read_only_policy() -> ToolPolicy:
@@ -64,6 +66,8 @@ class TokenRecord(BaseModel):
     rotated: Optional[str] = None
     link: Optional[Literal["ditto"]] = None  # uses that caller's policy by reference
     policy: Optional[ToolPolicy] = None      # its own policy (None when linked)
+    # Tells this token apart from an earlier one of the same name (its standing approvals name it); kept on rotation.
+    uid: Optional[str] = Field(default=None, pattern=r"^[0-9a-f]{16}$")
 
     @model_validator(mode="after")
     def _one_policy(self):
@@ -76,6 +80,8 @@ class TokenFile(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     version: Literal[1] = 1
+    # Counts the changes; an older copy put back (to bring back a revoked token) is refused (RevisionAnchor).
+    revision: int = Field(default=0, ge=0)
     tokens: List[TokenRecord] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -92,51 +98,96 @@ class TokenStoreError(Exception):
 
 class TokenStore:
     """The named tokens in the per-user folder (`mcp_tokens.json`, mode 0600), changed under a cross-process lock.
-    Reads are cached by the file's identity, so the HTTP server can check every request cheaply and sees a revoke
-    or rotate at once."""
+    The parsed tokens are cached by the SHA-256 of the file's bytes, so the HTTP server can check every request
+    cheaply and sees a revoke or rotate at once. The file is signed like the tool permissions
+    (orchestrator/tools/signing.py): a file edited by hand, damaged, unsigned or signed with another key accepts no
+    token at all."""
 
     FILE_NAME = "mcp_tokens.json"
     LOCK_NAME = ".mcp_tokens.lock"
+    KIND = "mcp_tokens"
 
-    def __init__(self, state_dir: Path):
+    def __init__(self, state_dir: Path, key: Optional[bytes] = None,
+                 refuse_unkeyed: Optional[Callable[[], bool]] = None, anchor: Optional[RevisionAnchor] = None):
+        """key, refuse_unkeyed and anchor: as for PolicyStore (the audit key from the OS keyring, None without one;
+        the newest saved revision, kept in the keyring, so an older copy put back is refused)."""
         self.path = Path(state_dir) / self.FILE_NAME
         self.lock_path = Path(state_dir) / self.LOCK_NAME
-        self._cache: Optional[Tuple[tuple, Dict[str, TokenRecord]]] = None
+        self.key = key
+        self.refuse_unkeyed = refuse_unkeyed
+        self.anchor = anchor
+        # (sha256 of the bytes, tokens, revision)
+        self._cache: Optional[Tuple[str, Dict[str, TokenRecord], int]] = None
         self._cache_lock = threading.Lock()
 
     # --- reading ------------------------------------------------------------------------------------
 
     def _read(self) -> Dict[str, TokenRecord]:
-        """All tokens by name. TokenStoreError when the file exists but cannot be used (nothing is accepted then)."""
+        """All tokens by name. TokenStoreError when the file exists but cannot be used (nothing is accepted then).
+        The file is read on every call and the parsed tokens are cached by the SHA-256 of its bytes: a cache by
+        file identity, size and modification time would keep a token that was replaced within the time stamp's
+        resolution (or by a same-size write that kept the time)."""
         try:
-            st = os.stat(self.path)
+            fd = os.open(self.path, os.O_RDONLY | getattr(os, "O_CLOEXEC", 0))
         except FileNotFoundError:
             if os.path.lexists(self.path):
                 raise TokenStoreError(f"{self.path} is a link to a missing file; no MCP token is accepted until "
                                       "it is back.") from None
-            return {}
+            with self._cache_lock:
+                self._cache = None
+            return {}  # no token is accepted (a removed file brings nothing back)
         except OSError as e:
             raise TokenStoreError(f"{self.path} cannot be read ({e}); no MCP token is accepted.") from None
-        # On every read, before the cache answers (chmod keeps size and mtime): a running server must stop accepting
-        # tokens as soon as someone else could have written the file.
-        problem = self._problem_of(st)
-        if problem:
-            raise TokenStoreError(problem)
-        key = (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+        try:
+            # On every read, before the cache answers (chmod keeps the bytes): a running server must stop accepting
+            # tokens as soon as someone else could have written the file. Checked on the file that is read.
+            problem = self._problem_of(os.fstat(fd))
+            if problem:
+                raise TokenStoreError(problem)
+            raw = b""
+            while len(raw) <= MAX_STORE_BYTES:
+                chunk = os.read(fd, 65536)
+                if not chunk:
+                    break
+                raw += chunk
+        except OSError as e:
+            raise TokenStoreError(f"{self.path} cannot be read ({e}); no MCP token is accepted.") from None
+        finally:
+            os.close(fd)
+        if len(raw) > MAX_STORE_BYTES:
+            raise TokenStoreError(f"{self.path} is larger than any token store ({MAX_STORE_BYTES // 1024} KiB); no "
+                                  "MCP token is accepted. Remove the file and create the tokens again.")
+        key = hashlib.sha256(raw).hexdigest()
         with self._cache_lock:
             if self._cache is not None and self._cache[0] == key:
                 return self._cache[1]
+        anchored = self.anchor.current(self.path) if self.anchor is not None else 0
         try:
-            data = TokenFile.model_validate(json.loads(self.path.read_text(encoding="utf-8")))
-        except OSError as e:
-            raise TokenStoreError(f"{self.path} cannot be read ({e}); no MCP token is accepted.") from None
+            parsed = json.loads(raw.decode("utf-8"))
+            if not isinstance(parsed, dict):
+                raise ValueError("not a JSON object")
+            data = TokenFile.model_validate({k: v for k, v in parsed.items() if k != SIGNATURE_FIELD})
         except (ValueError, ValidationError, RecursionError) as e:
             raise TokenStoreError(f"{self.path} is damaged ({str(e).splitlines()[0][:200]}); no MCP token is "
                                   "accepted. Remove the file and create the tokens again.") from None
+        try:
+            verify(self.KIND, parsed, self.key, self.refuse_unkeyed)
+        except SignatureError as e:
+            raise TokenStoreError(f"{self.path} cannot be trusted: {e}. No MCP token is accepted. Remove the file and "
+                                  "create the tokens again ('llm-cli mcp token add NAME').") from None
+        if data.revision < anchored:  # genuinely signed, but put back over a newer one (a revoked token returns)
+            raise TokenStoreError(f"{self.path} cannot be trusted: it is an older copy (revision {data.revision}; the "
+                                  f"framework saved revision {anchored} last). No MCP token is accepted. Remove the "
+                                  "file and create the tokens again ('llm-cli mcp token add NAME').")
         records = {t.name: t for t in data.tokens}
         with self._cache_lock:
-            self._cache = (key, records)
+            self._cache = (key, records, data.revision)
         return records
+
+    def _revision(self) -> int:
+        """The revision of the file _read() just read (0 when there is none)."""
+        with self._cache_lock:
+            return self._cache[2] if self._cache is not None else 0
 
     def list(self) -> List[TokenRecord]:
         return sorted(self._read().values(), key=lambda t: t.name)
@@ -204,13 +255,14 @@ class TokenStore:
 
     # --- changing (a person, through the CLI or the GUI) ---------------------------------------------
 
-    def _write(self, records: Dict[str, TokenRecord]) -> None:
-        data = TokenFile(tokens=sorted(records.values(), key=lambda t: t.name))
+    def _write(self, records: Dict[str, TokenRecord], revision: int = 0) -> None:
+        data = TokenFile(revision=revision, tokens=sorted(records.values(), key=lambda t: t.name))
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, prefix=".mcp_tokens.", suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(data.model_dump_json(indent=2, exclude_none=True))
+                f.write(json.dumps(sign(self.KIND, data.model_dump(mode="json", exclude_none=True), self.key),
+                                   indent=2, ensure_ascii=False))
                 f.flush()
                 os.fsync(f.fileno())
             os.chmod(tmp, 0o600)
@@ -225,8 +277,12 @@ class TokenStore:
     def _change(self, change: Callable[[Dict[str, TokenRecord]], object]):
         with file_lock(self.lock_path):
             records = dict(self._read())
+            anchored = self.anchor.current(self.path) if self.anchor is not None else 0
+            revision = max(self._revision(), anchored) + 1
             result = change(records)
-            self._write(records)
+            self._write(records, revision)
+            if self.anchor is not None:  # after the file, as for the permissions
+                self.anchor.saved(self.path, revision)
             return result
 
     @staticmethod
@@ -250,7 +306,8 @@ class TokenStore:
             if name in records:
                 raise TokenStoreError(f"A token named '{name}' exists already; rotate or revoke it.")
             records[name] = TokenRecord(name=name, sha256=token_digest(token), created=_now(), link=link,
-                                        policy=None if link else (policy or read_only_policy()))
+                                        policy=None if link else (policy or read_only_policy()),
+                                        uid=secrets.token_hex(8))
         self._change(change)
         return token
 
