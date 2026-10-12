@@ -1578,10 +1578,35 @@ The GUI's input fields offer what you used recently, newest first.
   Machines without network access run a probe by hand ([README](../README.md#probing-the-boards-hardware)).
 - **Ditto's local model** uses the same probe: the hardware its build and model choice are based on comes from a
   probe profile, and free RAM and free VRAM are read again at every start.
+- **Probes by id for AI clients and Ditto:** every probe the framework keeps has a probe id: `local` for this computer,
+  16 hex characters for a board (imported with `llm-cli scan --import FILE` or the GUI's **Import from File**, which
+  now also store the file, validated and without a host name, or probed with `scan --device`). The read tool
+  `get_hardware_probe` lists the newest probes with the target each matches, or shows one probe's values (external
+  text) and its match; the resource `lcf://probes/{probe_id}` shows the same. `probe_local_hardware` (asks first by
+  default) runs the probe on this computer as a job without a terminal, in its own folder, for at most 120 seconds,
+  and keeps the result as `local`. No tool reads a probe from a path.
+- **New target from an AI client (`create_target_module`):** an MCP client in Ditto's role, or Ditto, creates a
+  target module for a board nobody here may have tested, through the module generator's checks. Not being able to
+  test is no reason to refuse: the module gets support level `community`, provenance `ai-generated`, "untested" in its
+  description and the values the AI guessed (`assumptions`), and builds of it warn that it is untested and that its
+  image is built with network access. Any base image is allowed: a tag is resolved to the digest it points at when
+  you are asked (anonymously, refused in offline mode; a registry that needs a login needs you to give
+  `image@sha256:...`), and the module is written with exactly that digest. The question shows the registry, "Docker
+  Official Image" or plainly "other registry; prebuilt image made by its publisher, not checked by the framework",
+  that the image build runs with network access, the platforms in the image's manifest and whether one matches this
+  computer, the AI's reason for a non-official image (required), every vendor apt source with its key fingerprint,
+  every pinned pip package and download with address, size and sha256, and the `runtime:` block planned from the
+  board's probe (`probe_id`). Counts of sources (3), pip packages (30) and downloads (5) are soft limits: going above
+  one is a warning in the question that your approval overrides, never a refusal. The tool always asks (also when
+  you allowed it), never offers "do not ask again", refuses a name that reads like an existing target (case and
+  separators ignored) and never uses a prebuilt llama.cpp. A long definition becomes a pending approval in the
+  framework, shown up to 16,000 characters.
 - **New target by questions:** `llm-cli module create` or the wizard under **Tools > Create Hardware Module...**.
 - **New target from a probe:** `llm-cli module generate-ai <probe file>` or the wizard's AI analysis. Ditto proposes
-  architecture, SDK, base image, packages, CPU and CMake flags, setup commands and the quantization block of
-  `build.sh`; you see the whole proposal first.
+  architecture, SDK, base image, packages, vendor sources, pip packages and downloads, CPU and CMake flags, setup
+  commands and the quantization block of `build.sh`; you see the whole proposal first. `module generate-ai` pins the
+  base image to its digest before it asks, and the wizard passes on every field of the proposal; both record the
+  saved module in the audit log (`module_saved`, with the definition's sha256 and the base image).
 - **The device runtime in the module:** every new `target.yml` gets a `runtime:` block, the build recipe's plan for
   the board's llama.cpp runtime from the target's probe (the wizard's imported probe file, the probe file of
   `module generate-ai`, or `llm-cli module create --probe <file>`): architecture, OS, the C library the cross build

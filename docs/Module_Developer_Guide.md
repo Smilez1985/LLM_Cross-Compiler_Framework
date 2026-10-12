@@ -463,6 +463,39 @@ then not provisioned from the pinned manifest, and the generator's log and the i
 self-built". The runtime stage stays on the pinned Ubuntu 22.04, because the Python environment is copied from one
 stage to the other.
 
+### 5.3 Base images and vendor software of AI-created modules
+
+A module an AI proposes (Ditto in `module generate-ai` and the wizard, or an MCP client through
+`create_target_module`) may start from **any base image**, because some vendors ship their toolchain only as a
+container image (for example NVIDIA's Jetson/L4T images on `nvcr.io`). The rules:
+
+- **Pinned by digest.** A tag is resolved to the digest it points at when you are asked (anonymously through the
+  registry's public API; refused in offline mode; a registry that needs a login is not used, give the image as
+  `image@sha256:...`), and the Dockerfile's builder stage starts from exactly that digest; the generator checks that
+  the builder stage starts from the module's base image, also for the GPU template. Registries with a port
+  (`registry.example:5000/img@sha256:...`) are accepted.
+- **Shown plainly.** A Docker Official Image (`debian`, `ubuntu`, `python`, without a namespace) gets the normal
+  question. Any other image is shown as "other registry: <registry>; prebuilt image made by its publisher, not checked
+  by the framework", with "the image build runs with network access on this computer, outside the build sandbox",
+  the platforms in its manifest and whether one matches this computer (an arm64-only image on an x86_64 computer is
+  shown, not refused). Such an image needs `base_image_reason`; prefer an official image plus the vendor's sources.
+- **Vendor software**, rendered by the framework's Dockerfile template during the image build (the AI's shell fields
+  still may not download):
+  - `package_sources`: an https apt repository (`url`, `suite`, `components`) with its public signing key
+    (`signed_by_url`) and the key's full fingerprint (`signed_by_fingerprint`). The image build fetches the key,
+    stops when its fingerprint differs, and adds the source with `signed-by`; `packages` can then name its packages.
+  - `pip_packages`: Python packages pinned exactly as `name==version`, from PyPI or from one https index
+    (`pip_index_url`), installed into the image's Python environment.
+  - `pinned_downloads`: files with an https address, a file `name`, the exact `size_bytes` and the `sha256`; the image
+    build checks size and hash before the file gets its name in `/opt/vendor` (copied into the runtime stage), where
+    `setup_commands` can unpack it.
+  Security checks are hard (https, exact pins, size and sha256, 40-hex fingerprints, never a prebuilt llama.cpp
+  package, wheel index or binary). The counts are soft limits (3 sources, 30 pip packages, 5 downloads): going above
+  one is a warning in the question that the person's approval overrides, never a refusal.
+- **Untested is stated.** The new `target.yml` gets `metadata.provenance: ai-generated`, `metadata.untested: true`,
+  the AI's `assumptions` and `base_image_reason`, and support level `community`; builds of it warn. AI-created
+  modules never get a standing approval: every one is confirmed by the person.
+
 ## 6. The build script
 
 `modules/build.sh` is the only entry point. It runs once per stage, as `/app/modules/build.sh`, in the sandbox
@@ -853,5 +886,8 @@ A device ID is the first 16 hex characters of the sha256 of the device's SSH hos
 same when the IP address changes and contains no host name. A profile imported without SSH gets a random ID. Files
 are private to the user (mode 0600 in folders with mode 0700), volatile values are not stored, and stored files are
 checked like probe files when they are read back. `llm-cli scan` stores this computer's profile as `local`, and
-`llm-cli scan --device` stores a device's profile under its ID. The scans of the GUI build tab do not use the store
-yet; they write the probe file as described in [section 3.1](#31-probe-the-board).
+`llm-cli scan --device` stores a device's profile under its ID, and `llm-cli scan --import FILE` (or the GUI's
+**Import from File** and the wizard's imports) stores a board's probe file under a random ID. AI clients and Ditto
+name a stored profile by this probe id (`local` or the device ID; tools `get_hardware_probe` and
+`probe_local_hardware`, resource `lcf://probes/{probe_id}`), never by a path. The GUI build tab's local and SSH scans
+still write the probe file as described in [section 3.1](#31-probe-the-board).

@@ -531,21 +531,33 @@ def state_dir():
 
 class TestScan:
 
-    def fake_probe(self, monkeypatch, write=True):
-        from orchestrator import cli as cli_module
+    def fake_probe(self, monkeypatch, write=True, content="ARCH=aarch64\n"):
+        """The fallback script, faked where the probe service runs it (orchestrator/runtime/probe_service.py)."""
+        from orchestrator.runtime import probe_service
         calls = []
 
-        def run(cmd, check, cwd):
+        def run(cmd, **kwargs):
             calls.append(cmd)
+            self.kwargs = kwargs
             if write:
                 out = Path(cmd[cmd.index("--output") + 1])
-                out.write_text("ARCH=aarch64\n")
+                out.write_text(content)
             return SimpleNamespace(returncode=0)
 
-        monkeypatch.setattr(cli_module, "platform", SimpleNamespace(system=lambda: "Linux"))
-        monkeypatch.setattr(cli_module, "subprocess", SimpleNamespace(
-            run=run, CalledProcessError=subprocess.CalledProcessError))
+        monkeypatch.setattr(probe_service, "platform", SimpleNamespace(system=lambda: "Linux"))
+        monkeypatch.setattr(probe_service, "subprocess", SimpleNamespace(
+            run=run, CalledProcessError=subprocess.CalledProcessError, TimeoutExpired=subprocess.TimeoutExpired,
+            DEVNULL=subprocess.DEVNULL, PIPE=subprocess.PIPE))
         return calls
+
+    def test_the_script_runs_without_a_terminal_in_its_own_folder(self, tmp_path, monkeypatch):
+        """MCP design T5 (G25): over stdio the inherited stdin is the protocol stream, and the current folder is the
+        client's project; the script gets /dev/null, NON_INTERACTIVE=true, the probe's own folder and a time limit."""
+        self.fake_probe(monkeypatch)
+        monkeypatch.chdir(tmp_path)
+        assert invoke_plain("scan", "--script").code == 0
+        assert self.kwargs["stdin"] == subprocess.DEVNULL and self.kwargs["env"]["NON_INTERACTIVE"] == "true"
+        assert Path(self.kwargs["cwd"]) == state_dir() / "hardware" / "work" and self.kwargs["timeout"] == 120
 
     def test_output_reaches_the_probe(self, tmp_path, monkeypatch):
         calls = self.fake_probe(monkeypatch)
@@ -566,7 +578,6 @@ class TestScan:
         assert result.code == 1, result.out
 
     def test_python_probe_is_the_default_and_the_profile_is_stored_as_local(self, tmp_path, monkeypatch):
-        from orchestrator import cli as cli_module
         from orchestrator.runtime import hardware
         from orchestrator.runtime.profile import ProfileStore, read_profile
         seen = {}
@@ -576,7 +587,8 @@ class TestScan:
             return board_profile()
 
         monkeypatch.setattr(hardware, "local_profile", local_profile)
-        monkeypatch.setattr(cli_module, "subprocess", None)  # the script is not run
+        from orchestrator.runtime import probe_service
+        monkeypatch.setattr(probe_service, "subprocess", None)  # the script is not run
         monkeypatch.chdir(tmp_path)
         result = invoke_plain("scan", "--output", "probes/board.txt")
         assert result.code == 0, result.out
@@ -614,15 +626,7 @@ class TestScan:
         assert "run the probe again" in result.out
 
     def test_an_unreadable_script_result_exits_1(self, tmp_path, monkeypatch):
-        from orchestrator import cli as cli_module
-
-        def run(cmd, check, cwd):
-            Path(cmd[cmd.index("--output") + 1]).write_text("PROBE_SCHEMA=2\nOS=linux\nOS=linux\n")
-            return SimpleNamespace(returncode=0)
-
-        monkeypatch.setattr(cli_module, "platform", SimpleNamespace(system=lambda: "Linux"))
-        monkeypatch.setattr(cli_module, "subprocess", SimpleNamespace(
-            run=run, CalledProcessError=subprocess.CalledProcessError))
+        self.fake_probe(monkeypatch, content="PROBE_SCHEMA=2\nOS=linux\nOS=linux\n")
         monkeypatch.chdir(tmp_path)
         result = invoke_plain("scan", "--script")
         assert result.code == 1 and "cannot read" in result.out

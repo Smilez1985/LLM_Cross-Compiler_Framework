@@ -10,10 +10,8 @@ The version shown by --help, --version and the banner is orchestrator.__version_
 
 import sys
 import json
-import subprocess
 import asyncio
 import os
-import platform
 import re
 import time
 import shutil
@@ -476,6 +474,18 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
         console.print(f"[bold red]AI generation failed:[/bold red] {escape(str(e))}")
         sys.exit(1)
 
+    # The base image is pinned to the digest its tag points at now, before the question (DECISIONS round 3): the
+    # module is written with exactly the digest shown.
+    if "@sha256:" not in definition.base_os:
+        from orchestrator.utils.image_registry import ImageLookupError, inspect_image
+        try:
+            image = inspect_image(definition.base_os,
+                                  offline=bool(ctx.framework_manager.config.get("offline_mode", False)))
+        except ImageLookupError as e:
+            console.print(f"[red]The base image {escape(definition.base_os)} cannot be pinned: {escape(str(e))}[/red]")
+            console.print(escape(e.next))
+            sys.exit(1)
+        definition = definition.model_copy(update={"base_os": image.pinned})
     # The definition is shown in full before anything is written; the module generator checks it again.
     console.print("\n[bold green]AI analysis finished. Review the proposal:[/bold green]")
     click.echo(json.dumps(definition.model_dump(exclude={"cannot"}), indent=2, ensure_ascii=False))
@@ -493,6 +503,9 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     except ValueError as e:
         console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(str(e))}")
         sys.exit(1)
+    from orchestrator.Core.module_generator import generator_input
+    from orchestrator.tools.tools_targets import record_module_saved
+    record_module_saved(fm, "cli", generator_input(definition.model_dump(), module_name), path, "framework-cli")
     console.print(f"[bold green]✅ Module '{escape(module_name)}' created in {escape(str(path))}[/bold green]")
 
 
@@ -3262,38 +3275,6 @@ def _write_profile_file(profile, output_file: Path, as_json: bool) -> None:
     write_private(output_file, profile.to_json() + "\n" if as_json else profile.to_text())
 
 
-def _scan_with_script(output_file: Path):
-    """The fallback: scripts/hardware_probe.sh (Linux) or hardware_probe.ps1 (Windows) writes the file; it is read
-    back with the probe file parser. Exit code 1 if the script fails, writes nothing or writes an unusable file."""
-    from orchestrator.runtime.profile import ProfileError, read_profile
-    script_dir = Path(__file__).resolve().parents[1] / "scripts"
-    is_windows = platform.system() == "Windows"
-    script = script_dir / ("hardware_probe.ps1" if is_windows else "hardware_probe.sh")
-    if not script.exists():
-        console.print(f"[red]Probe script not found at {escape(str(script))}[/red]")
-        sys.exit(1)
-    if is_windows:
-        cmd = ["powershell", "-ExecutionPolicy", "Bypass", "-File", str(script), "-OutputFile", str(output_file)]
-    else:
-        cmd = ["sh", str(script), "--output", str(output_file)]  # POSIX sh: hosts without bash (Alpine, BusyBox)
-    try:
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-        output_file.unlink(missing_ok=True)  # a file of an earlier run must not count as this run's result
-        with console.status("Running the hardware probe script...", spinner="dots"):
-            subprocess.run(cmd, check=True, cwd=os.getcwd())
-    except (subprocess.CalledProcessError, OSError) as e:
-        console.print(f"[red]Probe execution failed: {escape(str(e))}[/red]")
-        sys.exit(1)
-    if not output_file.exists():
-        console.print(f"[red]Probe script ran, but {escape(str(output_file))} was not created.[/red]")
-        sys.exit(1)
-    try:
-        return read_profile(output_file)
-    except ProfileError as e:
-        console.print(f"[red]The probe wrote a file the framework cannot read: {escape(str(e))}[/red]")
-        sys.exit(1)
-
-
 def _trust_device(state_dir: Path, host: str, port: int, trust_fingerprint: Optional[str]):
     """The device's host key, trusted on first use but never silently (as for deploy run). Exits when refused."""
     from orchestrator.utils import ssh_trust
@@ -3390,48 +3371,94 @@ def _scan_device(store, state_dir: Path, output_file: Path, as_json: bool, host:
               "framework's SSH key, never stored (asked interactively when omitted)")
 @click.option('--trust-fingerprint', default=None,
               help="Trust a new device non-interactively if its host key has this SHA256 fingerprint")
-@click.option('--label', default=None, help="Your name for the device in the profile store (with --device)")
+@click.option('--label', default=None, help="Your name for the device in the profile store (with --device or "
+              "--import)")
+@click.option('--import', 'import_file', default=None, type=click.Path(exists=True, dir_okay=False),
+              help="Import a board's probe file (target_hardware_config.txt copied from the board) into the probe "
+                   "store and print its probe id, which AI clients and Ditto use")
 @pass_context
 def run_scan(ctx: FrameworkContext, output, as_json, use_script, device, user, port, password, trust_fingerprint,
-             label):
+             label, import_file):
     """Run the hardware probe on this computer, or with --device on a board over SSH, and store the profile
-    (exit code 1 if the probe fails or writes no file)."""
+    (exit code 1 if the probe fails or writes no file). With --import, store a board's probe file instead."""
+    from orchestrator.runtime.probe_service import HardwareProbes, ProbeError
     from orchestrator.runtime.profile import ProfileStore, default_state_dir
     config, _ = _settings(ctx)
     state_dir = Path(getattr(config, "user_state_dir", None) or default_state_dir())
     store = ProfileStore(state_dir)
+    probes = HardwareProbes(store=store)
     output_file = Path(output).expanduser().resolve()
+    if import_file and device:
+        raise click.UsageError("--import and --device exclude each other")
+    if import_file:
+        _scan_import(ctx, probes, import_file, label)
+        return
     if device:
         _scan_device(store, state_dir, output_file, as_json, device, user, port, password, trust_fingerprint, label)
         return
 
-    profile, how = None, "Python probe"
-    if not use_script:
-        try:
-            from orchestrator.runtime.hardware import local_profile
-            with console.status("Running the hardware probe...", spinner="dots"):
-                profile = local_profile(disk_path=str(state_dir) if state_dir.is_dir() else None)
-            _write_profile_file(profile, output_file, as_json)
-        except Exception as e:  # a missing or failing Python probe: the script fallback still works
-            console.print(f"[yellow]The Python probe failed ({escape(str(e))}); using the fallback script.[/yellow]")
-            profile = None
-    if profile is None:
-        how = "fallback script"
-        profile = _scan_with_script(output_file)
-        if as_json:
-            _write_profile_file(profile, output_file, True)
     try:
-        stored = store.save_local(profile)
-    except (OSError, ValueError) as e:
-        console.print(f"[red]The profile was written, but storing it as this computer's profile failed: "
-                      f"{escape(str(e))}[/red]")
+        with console.status("Running the hardware probe...", spinner="dots"):
+            # The script writes the --output file itself; the Python probe's result is written below.
+            profile, how = probes.run_local(use_script=use_script, output=output_file)
+    except ProbeError as e:
+        console.print(f"[red]Probe execution failed: {escape(str(e))}[/red]")
+        if e.next:
+            console.print(escape(e.next))
         sys.exit(1)
+    if how != "fallback script" or as_json:
+        try:
+            _write_profile_file(profile, output_file, as_json)
+        except OSError as e:
+            console.print(f"[red]The profile could not be written to {escape(str(output_file))}: "
+                          f"{escape(str(e))}[/red]")
+            sys.exit(1)
+    for note in probes.notes:
+        console.print(f"[yellow]{escape(note)}[/yellow]")
     console.print(f"[bold green]Probe successful ({how}). Config generated: {escape(str(output_file))}[/bold green]")
     for line in _profile_summary(profile):
         console.print(line)
     if profile.needs_reprobe:
         console.print("[yellow]This profile lacks facts a build needs; run the probe again before a build.[/yellow]")
-    console.print(f"Stored as this computer's profile: {escape(str(stored))}")
+    console.print(f"Stored as this computer's profile (probe id local): {escape(str(store.local_path()))}")
+
+
+def _scan_import(ctx: FrameworkContext, probes, import_file, label: Optional[str]) -> None:
+    """Copies a board's probe file, validated and without its host name, into the probe store and prints its probe
+    id (MCP design T5: AI clients and Ditto name a board's probe only by that id, never by a path)."""
+    from orchestrator.runtime.probe_service import ProbeError, match_target
+    if label is not None and not (1 <= len(" ".join(label.split())) <= 64 and label.isprintable()):
+        raise click.UsageError("--label takes 1 to 64 printable characters")
+    try:
+        probe_id = probes.import_file(import_file, label)
+        profile = probes.get(probe_id)
+    except ProbeError as e:
+        console.print(f"[red]{escape(str(e))}[/red]")
+        if e.next:
+            console.print(escape(e.next))
+        sys.exit(1)
+    info = probes.info(probe_id, profile)
+    console.print(f"[bold green]Imported as probe {probe_id} ({escape(info.label)}).[/bold green]")
+    for line in _profile_summary(profile):
+        console.print(line)
+    if profile.needs_reprobe:
+        console.print("[yellow]This probe was converted from an older probe file and lacks facts; probe the board "
+                      "again with the current script when you can.[/yellow]")
+    try:  # the targets only, without booting the framework: the match is a hint
+        from types import SimpleNamespace
+        from orchestrator.Core.framework import resolve_install_path
+        from orchestrator.Core.target_manager import TargetManager
+        config, _ = _settings(ctx)
+        target_manager = TargetManager(SimpleNamespace(config=config, resolve_path=resolve_install_path))
+    except Exception:  # noqa: BLE001
+        target_manager = None
+    match = match_target(profile, target_manager)
+    if match is not None:
+        console.print(f"Matching target: {escape(match.target)}" + (f", board {escape(match.board)}" if match.board
+                                                                   else "") + f" ({escape(match.reason)}).")
+    else:
+        console.print("No target matches this probe yet: an AI client or Ditto can propose a module for it "
+                      f"(MCP prompt add_board with probe_id {probe_id}).")
 
 
 # ============================================================================

@@ -524,6 +524,13 @@ class BuilderTab(QWidget):
         path, _ = QFileDialog.getOpenFileName(self, "Import Hardware Config", "", "Config Files (*.txt);;All Files (*)")
         if path:
             self._log(f"Importing config from {path}...")
+            # A copy in the probe store (validated, no host name): AI clients and Ditto name it by its id (design T5).
+            try:
+                from orchestrator.runtime.probe_service import HardwareProbes
+                probe_id = HardwareProbes.for_framework(self.framework).import_file(path)
+                self._log(f"Stored as probe {probe_id}: AI clients and Ditto can use the board's probe by this id.")
+            except Exception as e:  # not a probe file the framework can read: the match below still runs
+                self._log(f"Not stored as a probe: {e}")
             self._load_probe_config(Path(path))
 
     def _open_ssh_dialog(self):
@@ -581,6 +588,14 @@ class BuilderTab(QWidget):
         if tm:
             data = tm.import_hardware_profile(config_path)
             match = tm.find_matching_target(data)
+            if not match:  # a schema-2 probe: its SoC, vendor and architecture against the targets
+                try:
+                    from orchestrator.runtime.probe_service import match_target
+                    from orchestrator.runtime.profile import read_profile
+                    found = match_target(read_profile(config_path), tm)
+                    match = found.target if found else None
+                except Exception:
+                    match = None
             
             cpu_model = data.get('CPU_MODEL', 'Unknown')
             self._log(f"Detected Hardware: {cpu_model}")
