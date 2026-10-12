@@ -971,7 +971,11 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Datei für Datei eingebunden. Dasselbe gilt für den Ordner einer RKNN-Beispielliste, deshalb wird eine Liste direkt
   in einem Label-Ordner abgelehnt. Eine Hugging-Face-Repo-ID von einem KI-Client wird immer heruntergeladen, nie als
   Ordner auf diesem Rechner nachgeschlagen. Ablehnungen nennen das Label, nie den echten Pfad. GUI- und CLI-Builds,
-  die du selbst startest, nehmen weiterhin jeden Pfad.
+  die du selbst startest, nehmen weiterhin jeden Pfad. Was ein KI-Client zurückliest, nennt ein solches Modell
+  ebenfalls beim Label, nie bei den Ordnern auf diesem Rechner: der Stufentext des Builds ("Building
+  models:qwen/model.gguf for Rockchip"), der Kontext der Selbstheilung, `model_source` im Build-Manifest und
+  `list_artifacts` (ein Host-Pfad, den ein älteres Manifest festhielt, erscheint als `<label>:<relativer Pfad>`, wenn
+  er in einem Ordner liegt, den die KI nutzen darf, sonst nur als Dateiname).
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je
@@ -1107,6 +1111,59 @@ Verfügung.
   `llm-cli tools permissions --token NAME`; ein unbekanntes oder widerrufenes Token, oder eine Token-Datei, die sich
   nicht lesen lässt, darf nicht einmal lesen.
 
+**Was eine Rückfrage zeigt** (Dittos GUI-Dialog und CLI-Abfrage, das Formular eines MCP-Clients), in dieser
+Reihenfolge: die Folge in einfachen Worten, aus dem, was das Framework nachgeschlagen hat, mit IDs, denen ihr
+sprechender Name folgt (zum Beispiel "Deletes the Docker build cache and the dangling framework images on this
+computer, then retries build request req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); wer
+fragt (Ditto oder der MCP-Client mit dem Namen, der Version und dem Transport, die er angibt, und wessen
+Berechtigungen gelten: alle lokalen stdio-Clients oder ein benanntes Token); die Fakten, die das Framework geprüft
+hat, wobei Text von außerhalb des Frameworks (ein Build-Log, der Vorschlag einer KI) als "not checked" gekennzeichnet
+und maskiert ist; dann jedes Argument vollständig, reparierte Werte markiert und eine ID mit ihrem sprechenden Namen
+dahinter (Modell und Ziel einer Build-Anfrage, `<label>:<relativer Pfad>` einer lokalen Datei, der Name eines
+Ziels). Manche Tools schlagen Fakten vor der Rückfrage nach (zweistufige Bestätigung), und der Aufruf ist dann
+genau an das gebunden, was dir gezeigt wurde: Wer einen Selbstheilungs-Vorschlag genehmigt, wendet den Vorschlag aus
+der Rückfrage an, und einer, der sich inzwischen geändert hat, wird abgelehnt, ohne dass etwas angewendet wird; ein
+zerstörender Fix (`docker_prune`, der den Docker-Build-Cache löscht) wird auch dann erfragt, wenn `resolve_healing`
+erlaubt ist; ein Nachschlagen, das scheitert (kein offener Vorschlag), lehnt den Aufruf ab, bevor etwas gefragt
+wird; ohne die nachgeschlagenen Fakten wird über einen Vorschlag gar nicht entschieden. Ein 2026-07-28-Client, der in
+einer zweiten Runde antwortet, bekommt die Fakten der Rückfrage, die er beantwortet hat. Eine Runde zählt nur als
+Antwort auf eine Rückfrage, die das Framework genau diesem Client gestellt hat und die noch offen ist: Eine Antwort,
+die ein Client einem neuen Aufruf mitgibt, ist eine neue Rückfrage, wird festgehalten, bevor sie gestellt wird, und
+unterliegt den Grenzen unten (nach deinem Nein wird sie nicht erneut gestellt). Ein MCP-Formular zeigt höchstens
+4.000 Zeichen, die eigenen Fenster des Frameworks bis zu 16.000 (Dittos GUI zeigt eine lange Rückfrage in einem
+scrollbaren Dialog, der dort, wo das Framework es kann, auch "nicht mehr fragen" anbietet, die CLI über den Pager);
+über MCP wird eine Rückfrage zwischen 4.000 und 16.000 Zeichen zu einer ausstehenden Freigabe, und eine längere wird
+überall abgelehnt (Grund `limit_reached`, mit einem nächsten Schritt). Eine ausstehende Freigabe ist dieselbe
+Rückfrage: Sie zeigt die Fakten, die das Framework nachgeschlagen hat, und die sprechenden Namen, und das Framework
+führt den freigegebenen Aufruf genau mit den Fakten der Rückfrage aus, die du freigegeben hast (ein Fakt, der sich vor
+deiner Freigabe geändert hat, etwa ein neuer Upstream-Commit, fragt dich stattdessen erneut). Auch eine Dauerfreigabe
+wird an diesen nachgeschlagenen Fakten gemessen, sodass ein Client, der dich fragen könnte, nicht fragt, wenn eine den
+Aufruf abdeckt. Eine Rückfrage, die ein nachgeschlagener Fakt nötig gemacht hat, wird mit der Entscheidung `ask`
+festgehalten, auch wenn das Tool selbst erlaubt ist. Wo das Framework "nicht mehr fragen" anbieten könnte, hat das
+MCP-Formular ein weiteres Kästchen, das nur das Framework fragt: Es legt nie eine Dauerfreigabe an, und die Hinweise
+des Aufrufs sagen das.
+
+**Grenzen** (je Client: Ditto, die lokalen stdio-Clients, jedes benannte Token; gezählt, solange der Prozess
+läuft): die lesenden Tools zusammen höchstens 20 Aufrufe in 10 Sekunden (40 auf einmal); `start_build` höchstens 3
+unfertige Builds und 20 gestartete Builds in 24 Stunden je Client (ein abgelehnter oder verweigerter Start, etwa
+wegen einer vollen Warteschlange, zählt nicht), und ein Framework-Prozess reiht höchstens 20 unfertige
+Build-Anfragen von KI-Aufrufern ein (deine eigenen GUI- und CLI-Builds zählen zu den 20, werden aber immer
+eingereiht: KI-Arbeit blockiert sie nie); höchstens 30 Rückfragen an dich pro Stunde, ausstehende Freigaben und
+Bitten, nicht mehr zu fragen, eingeschlossen, und höchstens 5 offene ausstehende Freigaben je Client. Wenn du einen
+ausstehenden Aufruf freigibst, werden seine Kontingente vor dem Ausführen noch einmal geprüft (die unfertigen Builds
+des Clients können inzwischen mehr geworden sein). Nach deinem Nein, im Dialog des Clients oder im Freigabefenster,
+wird derselbe Aufruf (dasselbe Tool mit denselben Argumenten nach der Reparatur, ein anders geschriebener
+Aufruf ist also derselbe) 10 Minuten lang ohne Rückfrage abgelehnt, und drei Nein zu einem Tool innerhalb von 30
+Minuten pausieren die Rückfragen dazu für 30 Minuten; ein geschlossener Dialog ist kein Nein. Ein Aufruf, den die
+Wiederholungssperre abgelehnt hat (derselbe scheiternde Aufruf zum dritten Mal), darf 10 Minuten nach seinem letzten
+Scheitern wieder laufen. Jede Grenze ist eine protokollierte Ablehnung (`rate_limited`, Grund `limit_reached` oder
+nach deinem Nein `declined`), die sagt, wann es wieder geht, und sie zählt nie als gescheiterter Aufruf, für Ditto wie
+für MCP-Clients. Dittos Chat hört nach drei gescheiterten Aufrufen in Folge ohne Fortschritt (jedes Mal dasselbe Tool,
+derselbe Grund und dasselbe Feld; das Framework nennt das Feld, um das es bei einem Eingabefehler geht) oder einer
+abgelehnten Wiederholung auf, Tools aufzurufen, und antwortet innerhalb von höchstens zwei weiteren Runden mit dem,
+was er versucht hat, was gescheitert ist und warum; einen Eingabefehler nach dem anderen zu beheben ist Fortschritt,
+und solange Ditto einen behebt, bekommt er bis zu 4 Schritte mehr als seine 8.
+
 **Audit-Log** (`~/.llm-framework/audit.db`, SQLite): Jeder Tool-Aufruf wird mit Zeit, Akteur, Tool, Entscheidung, ob
 ein Mensch bestätigt hat, und Ergebnis festgehalten. Argumente werden geschwärzt und gekürzt gespeichert, dazu ein
 Hash des vollständigen Texts. Jeder Eintrag enthält den Hash des vorherigen; mit dem Schlüssel aus dem Schlüsselbund
@@ -1124,8 +1181,10 @@ gescheiterte Schreibversuch wird protokolliert. Eine Frage an dich wird als `con
 des Fragetexts festgehalten, bevor sie gestellt wird; eine Frage zu einer Änderung, die sich nicht festhalten lässt,
 wird nicht gestellt. Jedes Ende wird festgehalten: `ok`, `error`, `denied`, `not_confirmed` mit der Antwort
 (`accepted`, `declined`, `cancelled`, `unavailable`, wenn niemand gefragt werden konnte, `unanswered`),
-`confirmation_timeout` (eine MCP-Frage während des Aufrufs wartet höchstens 5 Minuten) und `cancelled` (der Client
-hat den Aufruf aufgegeben). Eine Frage des Protokolls 2026-07-28, die an den Client zurückgeht und nie beantwortet
+`confirmation_timeout` (eine MCP-Frage während des Aufrufs wartet höchstens 5 Minuten; Grund `needs_person`, und eine
+Frage, die der Client nicht zeigen konnte, hat den Grund `failed`, beide mit einem nächsten Schritt) und `cancelled`
+(der Client hat den Aufruf aufgegeben). Eine Frage des Protokolls 2026-07-28, die an den Client zurückgeht und nie
+beantwortet
 wird, wird nach 15 Minuten als `unanswered` festgehalten, solange der Server läuft; der Eintrag
 `confirmation_requested` ist der bleibende Nachweis. Bricht ein Client einen laufenden Aufruf ab, wird der Abbruch
 sofort festgehalten und an den laufenden Aufruf weitergegeben; was schon läuft, endet, und sein Abschlusseintrag

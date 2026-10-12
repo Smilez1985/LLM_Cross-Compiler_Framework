@@ -827,15 +827,19 @@ geantwortet hast. Eine Berechtigungsdatei, die beschädigt, von Hand bearbeitet 
 ### tools audit
 
 ```
-llm-cli tools audit [--limit N] [--verify] [--archive]
+llm-cli tools audit [--limit N] [--details] [--verify] [--archive]
 ```
 
-Zeigt die letzten Tool-Aufrufe: Zeit, Akteur (`ditto`, `mcp`, `mcp:<Token-Name>` oder `cli` für eine Änderung an
-den benannten Tokens), Tool, Entscheidung, ob ein Mensch bestätigt hat, und das Ergebnis.
+Zeigt die letzten Tool-Aufrufe: Zeit, wer aufgerufen hat (in Worten: Ditto, alle lokalen stdio-Clients, das
+MCP-Token '<Name>' oder du in der CLI oder GUI, mit dem Namen, den der Client selbst angegeben hat), das Tool mit
+seinem Titel (und dem Namen, den die KI geschrieben hat, wenn das eine Schreibvariante war), die Entscheidung, ob ein
+Mensch bestätigt hat, das Ergebnis, den Grundcode und wie der Mensch gefragt wurde, mit seiner Antwort (zum Beispiel
+`elicitation: declined`).
 
 | Option | Bedeutung |
 |---|---|
 | `--limit INTEGER` | Anzahl der Einträge (Standard 30). |
+| `--details` | Zusätzlich, was die narrensichere Schicht repariert hat (Art und Feld), die Dauer, SHA-256 und Größe des Ergebnisses, Verweise auf frühere Einträge und den Sitzungs-Hash. |
 | `--verify` | Stattdessen die Kette prüfen: geänderte oder entfernte Einträge und das Entfernen der neuesten Einträge (Anker-Datei). Exit-Code 0, wenn intakt, sonst 1. |
 | `--archive` | Das Log und seinen Anker beiseitelegen (aufbewahrt als `audit.db.<UTC-Zeit>` und `audit.db.<UTC-Zeit>.anchor` im persönlichen Ordner) und mit dem nächsten Tool-Aufruf ein neues Log beginnen. Nutze es, wenn `--verify` oder `llm-cli doctor` ein Problem mit dem Log meldet. Lässt sich das Log nicht beiseitelegen (zum Beispiel, weil es gerade benutzt wird), endet der Befehl mit Exit-Code 1; schließe die GUI und die KI-Clients und versuche es erneut. |
 

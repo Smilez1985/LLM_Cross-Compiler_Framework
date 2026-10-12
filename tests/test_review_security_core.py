@@ -1306,8 +1306,9 @@ class TestRegistryErrors:
         with pytest.raises(ToolError) as exc:
             registry.call("probe", {"text": "x"}, ToolContext("mcp"))
 
-        message = str(exc.value)
-        assert message == "Probe failed (internal error; details are in the framework log)."
+        message = str(exc.value)  # with the next step since every 'failed' refusal names one
+        assert exc.value.message == "Probe failed (internal error; details are in the framework log)."
+        assert exc.value.next and exc.value.next in message
         assert "validation error" not in message.lower() and "pydantic" not in message
         errors = [r for r in registry.logger.records if r[0] == "error"]
         assert errors and errors[0][2].get("exc_info") is True and "probe" in errors[0][1]

@@ -276,7 +276,10 @@ def booted_framework(make_framework):
 def qapp():
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
-    return QApplication.instance() or QApplication([])
+    yield QApplication.instance() or QApplication([])
+    # Qt objects a GUI test leaves unreachable die now, on the GUI thread. Left to a later garbage collection, they
+    # died at a random point of another test (seen while it started a thread), which crashed the run with SIGSEGV.
+    gc.collect()
 
 
 def frameworks_left_running(framework_cls):

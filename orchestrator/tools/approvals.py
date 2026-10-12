@@ -7,11 +7,14 @@ approval window, and `llm-cli tools approvals` in a terminal. The person approve
 then runs the call itself, under the original caller, and the client reads the result with get_job_status.
 
 An approval is bound to the caller, the tool, the hash of the normalized arguments and the hash of the question text
-the person saw. It runs once, expires after 15 minutes, and ends with the session that asked or when the client
-withdraws it with cancel_job. If the question would read differently when the person approves (a fact behind it
-changed), nothing runs and the new question is shown instead. The approvals are kept in the per-user folder
-(`tool_approvals.json`, mode 0600), signed like the tool permissions; only framework code writes the file, and no
-tool, resource or prompt can create, list, approve or decline an approval.
+the person saw, and the question shows the facts the tool looked up for it (two-phase confirmation). It runs once,
+expires after 15 minutes, and ends with the session that asked or when the client withdraws it with cancel_job. If the
+question would read differently when the person approves (a fact behind it changed), nothing runs and the new question
+is shown instead; otherwise the handler gets exactly the facts that were shown. A pending approval is a question to
+the person, so the limits on questions apply to it (a recent "no" to the same call, a paused tool, 30 questions per
+hour, 5 open ones per client), and a "no" here counts like a "no" in any other window. The approvals are kept in the
+per-user folder (`tool_approvals.json`, mode 0600), signed like the tool permissions; only framework code writes the
+file, and no tool, resource or prompt can create, list, approve or decline an approval.
 """
 
 import hashlib
@@ -27,8 +30,9 @@ from typing import Any, Callable, Dict, List, Literal, Optional, Tuple
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from orchestrator.tools.confirmation import MAX_FRAMEWORK_DESCRIPTION, describe_call, visible
+from orchestrator.tools.confirmation import MAX_FRAMEWORK, visible
 from orchestrator.tools.grants import DECLINED_COOLDOWN, DURATION_LABELS, GrantOffer
+from orchestrator.tools.registry import caller_label
 from orchestrator.tools.signing import SIGNATURE_FIELD, SignatureError, sign, verify
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
@@ -71,17 +75,6 @@ def question_sha256(question: str) -> str:
     return hashlib.sha256(question.encode("utf-8", "surrogatepass")).hexdigest()
 
 
-def caller_label(actor: str) -> str:
-    """The caller class as a person reads it (the client's own name is shown separately, as self-reported)."""
-    if actor == "mcp":
-        return "all local stdio clients"
-    if actor.startswith("mcp:"):
-        return f"the MCP token '{actor[4:]}'"
-    if actor == "ditto":
-        return "Ditto"
-    return actor
-
-
 def actor_label(actor: str) -> str:
     """Who acted, as the start of a sentence a person reads ("The client with the MCP token 'laptop'"), never the raw
     caller id."""
@@ -110,7 +103,7 @@ class ApprovalRecord(BaseModel):
     tool: str = Field(max_length=64)
     title: str = Field(max_length=200)
     args_sha256: str = Field(pattern=_SHA256)
-    question: str = Field(max_length=MAX_FRAMEWORK_DESCRIPTION + 2000)
+    question: str = Field(max_length=MAX_FRAMEWORK + 2000)
     question_sha256: str = Field(pattern=_SHA256)
     created: str
     expires: str
@@ -366,6 +359,7 @@ class _Waiting:
     question_sha256: str
     expires: datetime
     running: bool = False
+    facts: Any = None        # what the tool looked up for the question shown (CallFacts), None for a tool without
 
 
 @dataclass
@@ -385,25 +379,26 @@ class ApprovalService:
 
     # --- the question --------------------------------------------------------------------------------------------
 
-    def question(self, spec: Any, inp: Any, ctx: Any) -> str:
+    def question(self, spec: Any, inp: Any, ctx: Any, facts: Any = None) -> str:
         """The question the framework's window shows: the caller class first, the client's own name marked as
-        self-reported, then every argument (with repaired values marked), up to 16,000 characters (CallTooLong
-        otherwise)."""
-        from orchestrator.tools.registry import repair_marks
-        marks, renamed = repair_marks(getattr(ctx, "repairs", []) or [])
+        self-reported, then the registry's question (confirmation text v2: the consequence and the facts the tool
+        looked up, who asks, every argument with its speaking name and the repaired values marked), up to 16,000
+        characters (CallTooLong otherwise)."""
         client = visible(ctx.client) if getattr(ctx, "client", "") else "unnamed client"
         shared = " (they share one set of permissions)" if ctx.actor == "mcp" else ""
         header = f"Caller: {caller_label(ctx.actor)}{shared}\nClient: {client} (self-reported)\n"
-        return header + describe_call(spec, inp.model_dump(mode="json"), actor="This AI client", marks=marks,
-                                      renamed=renamed, limit=MAX_FRAMEWORK_DESCRIPTION)
+        return header + self.registry.question_text(spec, inp.model_dump(mode="json"), ctx, facts, MAX_FRAMEWORK)
 
     # --- requests ------------------------------------------------------------------------------------------------
 
     def request(self, spec: Any, inp: Any, arguments: Dict[str, Any], ctx: Any, decision: Any) -> Any:
         """The job of the pending approval for this call: the waiting one when the same caller asked for the same
-        call already, else a new one (recorded as a question before it is shown; ToolError when the caller has too
-        many open approvals, AuditUnavailable when the question cannot be recorded)."""
-        from orchestrator.tools.registry import ToolError
+        call already, else a new one (recorded as a question before it is shown and counted toward the questions per
+        hour). The question shows the facts the tool looked up (ctx.facts); the handler is bound to them. LimitHit
+        when the caller has too many open approvals, the person declined this exact call recently, the tool's
+        questions are paused or the client asked too many questions this hour; AuditUnavailable when the question
+        cannot be recorded."""
+        from orchestrator.tools.registry import LimitHit, ToolError
         key = (ctx.owner, spec.name, arguments_sha256(arguments))
         if self._closed:
             raise ToolError(f"'{spec.title}' was not put to the person: the framework is shutting down.",
@@ -414,11 +409,15 @@ class ApprovalService:
                     return self.jobs.get(waiting.job_id)
             mine = sum(1 for w in self._waiting.values() if w.key[0] == ctx.owner)
         if mine >= MAX_PENDING_PER_CALLER:
-            raise ToolError(f"'{spec.title}' was not put to the person: this client already has "
-                            f"{MAX_PENDING_PER_CALLER} calls waiting for approval.", code="limit_reached",
-                            next="Wait until the person has decided the open ones (poll their jobs with "
-                                 "get_job_status), or withdraw one with cancel_job.")
-        question = self.question(spec, inp, ctx)
+            raise LimitHit(f"'{spec.title}' was not put to the person: this client already has "
+                           f"{MAX_PENDING_PER_CALLER} calls waiting for approval.", code="limit_reached",
+                           next="Wait until the person has decided the open ones (poll their jobs with "
+                                "get_job_status), or withdraw one with cancel_job.")
+        refusal = self.registry.question_refusal(spec, inp, ctx)  # a recent "no", a paused tool, too many questions
+        if refusal is not None:
+            raise refusal
+        facts = getattr(ctx, "facts", None)
+        question = self.question(spec, inp, ctx, facts)
         digest = question_sha256(question)
         offer = self.registry.grant_offer(spec, inp, ctx) if spec.grant is not None else None
         approval_id = f"ap_{secrets.token_hex(8)}"
@@ -437,6 +436,7 @@ class ApprovalService:
                                           question=question, question_sha256=digest, created=_iso(now),
                                           expires=_iso(expires), state="pending", job_id=job.job_id,
                                           pid=os.getpid(), owner=str(ctx.owner)[:120], grant=offer))
+            self.registry.asked(ctx)  # a pending approval counts toward the questions per hour
         except BaseException:
             self.jobs.update(job.job_id, state="failed", error={"code": "failed",
                                                                 "message": "The approval could not be recorded."})
@@ -444,14 +444,16 @@ class ApprovalService:
         self.jobs.update(job.job_id, note=f"Waiting for the person to approve '{spec.title}' in the framework.")
         with self._lock:
             self._waiting[approval_id] = _Waiting(approval_id, spec.name, dict(arguments), ctx, job.job_id, key,
-                                                  digest, expires)
+                                                  digest, expires, facts=facts)
         self._start()
         return job
 
     def request_grant(self, spec: Any, inp: Any, ctx: Any) -> Optional[ApprovalRecord]:
         """An elicitation was accepted with "ask the framework to stop asking for this": a request the person confirms
         (or not) in the framework's window. Never a standing approval by itself. At most one open request per caller
-        and tool; a scope the person declined is not requested again for 24 hours. None when nothing is requested."""
+        and tool; a scope the person declined is not requested again for 24 hours; a request is a question to the
+        person and counts toward the client's questions per hour (none is made once they are used up). None when
+        nothing is requested."""
         offer = self.registry.grant_offer(spec, inp, ctx)
         if offer is None:
             return None
@@ -466,6 +468,8 @@ class ApprovalService:
                     and json.dumps(record.grant.scopes, sort_keys=True) == scope_key
                     and now - _parse(record.decided_at or record.created) < DECLINED_COOLDOWN):
                 return None  # the person said no to this scope less than 24 hours ago
+        if self.registry.questions_full(ctx) is not None:
+            return None  # this client asked the person enough this hour
         client = visible(ctx.client) if getattr(ctx, "client", "") else "unnamed client"
         shared = " (they share one set of permissions)" if ctx.actor == "mcp" else ""
         question = (f"Caller: {caller_label(ctx.actor)}{shared}\nClient: {client} (self-reported)\n"
@@ -476,6 +480,7 @@ class ApprovalService:
         self.registry._audit(ctx, spec, self.registry.decide(spec, inp, ctx), "confirmation_requested", {},
                              confirm_channel=f"approval:{approval_id}", question_sha256=digest,
                              detail="The client asked to stop asking for such calls (a standing approval request).")
+        self.registry.asked(ctx)
         record = ApprovalRecord(id=approval_id, caller=ctx.actor, client=str(ctx.client or "")[:400], tool=spec.name,
                                 title=spec.title[:200], args_sha256=arguments_sha256({}), question=question,
                                 question_sha256=digest, created=_iso(now),
@@ -557,6 +562,11 @@ class ApprovalService:
                 return
         if how == "declined":
             self._refuse(item, "not_confirmed", "The person declined it in the framework.", "declined")
+            try:  # a "no" in the framework's window counts like any other: the same call is not asked again soon
+                spec = self.registry.get(item.tool)
+                self.registry.declined(spec, self.registry.validate_input(spec, item.arguments), item.ctx)
+            except Exception as e:
+                logger.warning(f"Could not record the 'no' to approval {item.approval_id}: {redact_secrets(str(e))}")
             self.jobs.update(item.job_id, state="failed", error={
                 "code": "declined", "message": "The person declined this call in the framework.",
                 "next": "Do not retry it unless the person asks for it."})
@@ -575,14 +585,18 @@ class ApprovalService:
             logger.warning(f"Could not audit the end of approval {item.approval_id}: {redact_secrets(str(e))}")
 
     def _approved(self, item: _Waiting, record: ApprovalRecord) -> None:
-        """Runs the approved call, unless its question would read differently now: then the new question is put to
-        the person instead (nothing runs)."""
+        """Runs the approved call, unless its question would read differently now (the tool's prepare runs again, so a
+        changed fact changes the question): then the new question is put to the person instead (nothing runs).
+        Otherwise the handler gets exactly the facts of the question the person saw, which it must use or refuse."""
         spec = self.registry.get(item.tool)
         try:
             inp = self.registry.validate_input(spec, item.arguments)
-            question = self.question(spec, inp, item.ctx)
-        except Exception as e:  # the call is no longer valid (a tool changed): it cannot run as approved
-            self._fail(item, "failed", f"The approved call can no longer be checked ({redact_secrets(str(e))}).")
+            facts = self.registry.look_up(spec, inp, item.ctx)  # looked up again, as the person decides now
+            question = self.question(spec, inp, item.ctx, facts)
+        except Exception as e:  # the call is no longer valid (a tool changed, a fact is gone): it cannot run
+            code = getattr(e, "code", "") or "failed"
+            self._fail(item, code if isinstance(code, str) else "failed",
+                       f"The approved call can no longer be checked ({redact_secrets(str(e))}).")
             return
         digest = question_sha256(question)
         if digest != record.question_sha256 or digest != item.question_sha256:
@@ -599,7 +613,7 @@ class ApprovalService:
             with self._lock:
                 if self._waiting.get(item.approval_id) is not item:  # withdrawn meanwhile: nothing is asked
                     return
-                item.question_sha256, item.expires = digest, expires
+                item.question_sha256, item.expires, item.facts = digest, expires, facts
             self.store.update(item.approval_id, state="pending", question=question, question_sha256=digest,
                               decided_by=None, decided_at=None, expires=_iso(expires), grant=offer, choice=None,
                               note="The question changed after it was approved; it is asked again.")
@@ -618,11 +632,15 @@ class ApprovalService:
 
         from orchestrator.tools.registry import ToolError
         job = self.jobs.get(item.job_id)
+        # The facts the person saw are the ones the handler must use; the rate was counted when the call was made.
         ctx = dataclasses.replace(item.ctx, confirm=None, confirm_channel=f"approval:{item.approval_id}",
                                   question_sha256=record.question_sha256, answer="accepted",
-                                  cancel=job.cancel_event, pending_approvals=False, notes=[])
+                                  cancel=job.cancel_event, pending_approvals=False, notes=[], facts=item.facts,
+                                  limits_checked=True)
         self.jobs.update(item.job_id, state="running", note=f"Approved in the framework ({record.decided_by}).")
         try:
+            # The quotas once more: minutes may have passed, and the client's unfinished builds may have grown.
+            self.registry.enforce_limits(self.registry.prepare(item.tool, item.arguments, ctx), ctx, rate_too=False)
             result = self.registry.call(item.tool, item.arguments, ctx, approved=True)
         except ToolError as e:
             self.store.update(item.approval_id, state="failed")

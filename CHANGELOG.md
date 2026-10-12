@@ -274,6 +274,24 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   without running the third time; after three input errors an error shows a valid example call. What was repaired
   is marked in the question, listed in the result's `notes` and recorded in the audit log. Tool arguments a local
   model sends with a code fence or in Python notation are read once more.
+- **Two-phase confirmation and question text v2** (Ditto and MCP clients): a question starts with the consequence
+  in plain words from facts the framework looked up, then who asks (an MCP client's self-reported name, version and
+  transport, and whose permissions apply), the facts the framework checked (external text labelled "not checked"),
+  and every argument with the speaking name of an id (a build's model and target, a local file's label). A tool can
+  look facts up before the question, and the call is bound to them: `resolve_healing` shows the pending proposal from
+  the framework's own state, refuses a proposal that changed after the question, and always asks before a
+  destructive fix (`docker_prune`), also when it is allowed. Ditto's GUI dialog and CLI prompt show questions up to
+  16,000 characters (a scrollable dialog, the pager); an MCP form stays at 4,000.
+- **Limits per client for tool calls** (Ditto and MCP clients): read tools 20 calls per 10 seconds, `start_build`
+  3 unfinished builds and 20 starts a day, 30 questions per hour, and a build queue of at most 20 unfinished requests
+  per framework process for AI callers (the person's own GUI and CLI builds are always queued); after a "no" the
+  same call is not asked again for 10 minutes, and three "no" to one tool pause its questions for 30 minutes. A limit hit is an audited `rate_limited` refusal that says when to
+  try again. The repeat guard lets a refused call run again 10 minutes after its last failure (it was refused until
+  the process ended), and Ditto stops calling tools early only after failures without progress, with up to 4 more
+  steps while it fixes an input error.
+- **`llm-cli tools audit` shows the newer audit fields in words**: who called (Ditto, all local stdio clients, a
+  named token, with the client's self-reported name), the tool's title and the name the AI wrote, the reason code and
+  how the person was asked with their answer; `--details` adds repairs, duration, result hash, links and session.
 - **`llm-cli ditto eval` records every tool call attempt**, not only those that reached a tool: the report's
   `tool_use` block gives tool calls per task, the share of malformed calls and of unknown tool names, repairs and
   repeat refusals.
@@ -472,6 +490,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
+- MCP questions of the 2026-07-28 protocol are kept per caller and session (one client's answer no longer closes
+  another client's identical question), an unanswered one is recorded as `unanswered` by a timer also when no
+  further request arrives, and the ones still open when a session ends are recorded as `client_disconnected`; the
+  permission check of a long-poll no longer reads the policy file on the server's event loop; every refusal with
+  the reason `failed` now carries a next step, and the build service's input refusals carry their own reason code;
+  an MCP confirmation that failed or got no answer in time is recorded with a reason code (`failed`,
+  `needs_person`) and its refusal names a next step.
+- Two-phase confirmation, the same on both paths: an MCP question too long for a form is recorded with reason
+  `limit_reached` and answer `unavailable` and names a next step, as in Ditto's windows; a question that a looked-up
+  fact made necessary is recorded with the decision `ask` (it said `allow`); `resolve_healing` decides nothing
+  without the facts of its question, and the first line of its question names the build, not only its id; a local
+  model or dataset an AI named that vanished before the build is named by its label in the refusal, never by its
+  real path.
+- Limits, the same on both paths: Ditto's early stop sees which field an input error is about (the registry dropped
+  it, so a model that fixed one field after another was stopped and its correct call was not run); a refusal of the
+  question limits (after a "no", a paused tool, too many questions) is no failed call on Ditto's path either (it
+  turned into "Stop retrying" there while an MCP client kept getting the plain refusal); a start that was refused, for
+  example by a full queue, no longer uses up one of the 20 builds a day; after the stop note a model that keeps
+  calling tools gets at most two more turns instead of the rest of its budget.
 - MCP server: a client that disconnects no longer leaves its builds running with nobody to clean up. The builds
   and jobs its session started are cancelled, each with an audit entry ("client disconnected"), the server waits
   up to 30 seconds for their containers to stop, and `llm-cli mcp serve` then shuts the framework down. A SIGTERM
@@ -617,8 +654,23 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   desktop session bus from the environment, gives every test a keyring file in its own home instead of the operating
   system's keyring (Secret Service, macOS Keychain, Windows Credential Manager), and fails the run when the real
   home's key, token, keyring or framework folders changed (it compares their listings and never opens a file).
+- **Pending approvals show the two-phase question and run bound to it.** A call that waits for you in the
+  framework shows the same question as any other window: the facts the framework looked up, the speaking names of
+  its ids, who asks. When you approve it, the facts are looked up again; if the question would read differently (a new
+  upstream commit, for example), you are asked again, otherwise the call runs with exactly the facts you saw. An MCP
+  question between 4,000 and 16,000 characters now becomes a pending approval instead of a refusal, a standing
+  approval is matched on the looked-up facts on the MCP path too (a client that could ask is not asked when one covers
+  the call), Ditto's scrollable dialog for long questions also offers "do not ask again", and an approved call's
+  quotas are checked again before it runs.
 
 ### Security
+- **AI clients never see the host path of a local model they named** (MCP clients and Ditto): the build's stage
+  text, the self-healing context, the build manifest's `model_source` and `list_artifacts` name it by its
+  `<label>:<relative path>` (an older manifest's host path by its label, else by the file name only).
+- **An MCP client can no longer skip a question's record and limits by sending an answer along with its call**
+  (2026-07-28 rounds): a round counts as an answer only to a question the framework asked that client and that is
+  still open. Before, any call that carried some answer was asked without the write-ahead `confirmation_requested`
+  entry and without the 10-minute wait after a "no", the pause after three "no" and the questions-per-hour count.
 - Ditto discards a healing fix or a build recommendation that contains a dangerous command (a download piped
   into a shell, deleting the root or home folder, world-writable permissions, overwriting a disk), whatever a
   build log or a model name told the model.
@@ -768,6 +820,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   saved revision of each file is kept in the keyring as well, so an older signed copy put back over it (a revoked
   standing approval or token would return) and a removed permission file deny everything too. Without a keyring the
   signature has no key, as for the audit chain; such a file is refused while the audit log is kept with a key.
+- **Pending approvals and requests to stop asking are questions like any other.** They count toward the 30
+  questions per hour; a "no" in the approval window stops the same call from being put to you again for 10 minutes
+  and counts toward pausing the tool, as a "no" in the client's dialog does; a recent "no", a paused tool or a used-up
+  hour refuses a new pending approval; and the limit of 5 open pending approvals is an audited refusal that never
+  counts as a failed call. Before, a client that could not ask could queue questions without these limits.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

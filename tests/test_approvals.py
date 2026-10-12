@@ -189,8 +189,8 @@ class TestPendingApproval:
         real_question = service.question
         changed = {"now": False}
 
-        def question(spec, inp, ctx):
-            text = real_question(spec, inp, ctx)
+        def question(spec, inp, ctx, facts=None):
+            text = real_question(spec, inp, ctx, facts)
             return text + "\n  upstream commit: 2b" if changed["now"] else text
         monkeypatch.setattr(service, "question", question)
 
