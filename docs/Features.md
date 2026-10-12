@@ -245,7 +245,22 @@ Deployment copies a finished build to a board over SSH and installs the model fi
   127.0.0.1 with the board's key), otherwise how to deploy it; it never points to a `llama-server` found on the
   board's `PATH`. For RKLLM it names the RKLLM runtime.
 - **Docker mode** (`--docker`, GUI option): also packs container images and starts them on the board. This mode
-  is experimental and not verified in this version.
+  is experimental and not verified in this version. An image goes into a package only when it is pinned by its
+  digest (`image_inference_runtime: name@sha256:...`) or was built on this computer (it exists here and was never
+  pulled); an image named only by a tag, such as the default `...:latest`, is refused with the reason before anything
+  is copied. A digest-pinned image that is not here is pulled by its digest, never by a tag, and a failed export
+  stops the package instead of leaving the image out.
+- **Trusted devices:** after a successful login to a board whose host key you confirmed (a deployment in the GUI or
+  with `llm-cli deploy run`, a probe with `llm-cli scan --device`, a `device runtime deploy`), the framework records
+  it in `~/.llm-framework/devices.json`: your label, address, user, the confirmed host key and whether the
+  framework's key logs in (paired); the device id is derived from the host key. `llm-cli deploy devices
+  list|add|remove` shows and manages them ([CLI](CLI_Usage.md#deploy-devices)). These are the only devices an AI
+  client or Ditto can name for a deploy, and only while the framework's `known_hosts` still holds that key; no tool
+  trusts, pairs or records a device.
+- **Errors with their reason:** packaging and deploying return why they failed (no Docker, an image not pinned, the
+  host key changed, `deploy.sh` exit status) instead of only logging it. A package is written under a temporary name
+  and renamed when complete. Without paramiko, `ssh` and `scp` never get the framework's standard input (over MCP
+  stdio that is the protocol stream).
 
 ### Runtime on the board (self-built llama.cpp)
 
@@ -525,6 +540,9 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `report_cannot_do` | read | Report that a task cannot be done, with the reason; the framework checks the reason against its own state |
 | `get_job_status` | read | State, progress and result of a long operation other than a build (a job); waits with `wait_seconds` |
 | `cancel_job` | local write | Stop a job (its own jobs without a question, another caller's only after one) |
+| `list_devices` | read | The devices you trusted and paired in the GUI or the CLI, by your label, with host key fingerprint and whether they are usable |
+| `create_deploy_package` | local write | Package a built model for a target's device profile (a job; images only digest-pinned or built here) |
+| `deploy_to_device` | external | Copy a package to a trusted, paired device and run its `deploy.sh` (always asked; the question shows the host key and the package hash; a job) |
 
 How a question with tools runs:
 
@@ -1292,6 +1310,23 @@ framework never sees it.
   folders the AI may use (a Hugging Face model folder as one entry, PyTorch pickle weights flagged, links out of the
   folder, hard-linked and hidden files and unfinished downloads left out; 50 per page), each with its file id and
   `<label>:<relative path>`, which `start_build` takes; a downloaded file shows up there too.
+- **Devices and deploy (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` shows the
+  [trusted devices](#deployment) with the label you gave, address, user, host key fingerprint, whether the device
+  is usable (paired, and its key still the trusted one) and the last deploy. `create_deploy_package` packages a
+  built model (artifact id) for a target's device profile (default: the target it was built for) as a job; the
+  output folder's disk must hold twice the model, and `include_docker_images` is refused unless every image is pinned
+  by its digest or built on this computer. Its result has the package id (`pkg_` and 16 hex characters), size and
+  sha256; a standing approval can cover it only without Docker images. `deploy_to_device` takes only a package id
+  and a device id. Before you are asked, the framework reads the device's host key (a key read, no login) and
+  refuses an unknown or changed key without writing anything (reason `needs_person`); an unpaired device is refused
+  too. The question shows the device by your label with user and address, the host key fingerprint you confirmed,
+  the package's name, size and sha256, the built model and the trust of its target. The deploy then runs as a job
+  without a password and refuses when the package's sha256 (computed from the same open file that is uploaded) or
+  the device's key differs from what you were shown. It is always asked (it can never be set to allow), never covered
+  by a standing approval, one per device at a time and six per hour per client. `cancel_job` closes the SSH session
+  and the job says the device state is unknown; nothing is retried. The job result has `success`, `exit_status`,
+  `device_state` (`ok`, `failed`, `unknown`) and the last 100 lines the device printed in `external_text`, marked as
+  external text. The `deploy_to_board` prompt leads through the same steps.
 - **Waiting and long operations:** `get_build_status` and `get_job_status` take `wait_seconds` (at most 50; a
   larger value is reduced with a note) and return as soon as the build or job changes or ends. The wait runs on the
   server's event loop without a worker thread, at most 4 at a time per client, and sends a progress notification

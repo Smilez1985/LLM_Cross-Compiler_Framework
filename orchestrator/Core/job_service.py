@@ -33,6 +33,9 @@ JOB_ID_RE = re.compile(r"^job_[a-z0-9]{16}$")
 MAX_WAIT_SECONDS = 50       # below Codex's 60 s default per tool call
 PROGRESS_EVERY = 5.0        # seconds between progress notifications while a client waits
 KEEP_SUMMARIES = 200
+# A job result's key for text from outside the framework (a list of strings, e.g. a device's output): get_job_status
+# returns it in a field marked as external text, never inside the plain result.
+EXTERNAL_KEY = "external_text"
 
 logger = get_logger("JobService")
 

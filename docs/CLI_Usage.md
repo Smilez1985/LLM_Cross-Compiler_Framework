@@ -331,9 +331,11 @@ Creates a ZIP file for the board: the model file, the build's manifest and model
 |---|---|
 | `ARTIFACT_NAME` | A build folder as shown by `list-artifacts` (relative to the output folder), or any existing path to a build folder or model file. |
 | `--profile TEXT` | **Required.** The target, e.g. `Rockchip` (used for device options in Docker mode). |
-| `--docker / --no-docker` | Also pack container images (default off). Experimental and not verified in this version; leave it off for a model file. |
+| `--docker / --no-docker` | Also pack container images (default off). Experimental and not verified in this version; leave it off for a model file. Each image (`image_inference_runtime`, and `image_qdrant` with the knowledge base) must be pinned by its digest (`name@sha256:...`) or built on this computer; an image named only by a tag, such as the default `...:latest`, is refused with the reason, and a failed image export stops the package. |
 
-Only model files are deployed without Docker; builds that produced several weight files are refused.
+Only model files are deployed without Docker; builds that produced several weight files are refused. A package that
+cannot be made prints the reason and exits with 1; the ZIP is written under a temporary name and renamed when it is
+complete.
 
 ```bash
 llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0 --profile Rockchip
@@ -343,6 +345,7 @@ llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0
 
 ```
 llm-cli deploy run PACKAGE_PATH --ip IP --user USER [--port 22] [--password TEXT] [--trust-fingerprint TEXT]
+                   [--label TEXT]
 ```
 
 Uploads a package over SSH to a private temporary folder on the board, runs `deploy.sh` there and removes the
@@ -357,10 +360,14 @@ a matching `llama-server` command if `llama-server` is installed on the board.
 | `--port INTEGER` | SSH port (default 22). |
 | `--password TEXT` | Only for the first connection: used once to install the framework's SSH key, never stored. Asked interactively when omitted. A password on the command line ends up in your shell history. |
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has exactly this SHA256 fingerprint (for scripts). |
+| `--label TEXT` | Your name for the board in the trusted devices (default: the label it already has, or its address). |
 
 First connection: the CLI shows the board's host key fingerprint and asks whether to trust it. Compare it with
 `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the board. Without a terminal and without
-`--trust-fingerprint` nothing is deployed. A board whose host key has changed is always refused.
+`--trust-fingerprint` nothing is deployed. A board whose host key has changed is always refused. After a successful
+deployment the board is added to the [trusted devices](#deploy-devices) (written to the audit log), so an AI client
+may deploy to it later, each time with your confirmation. `ssh` and `scp` (used when paramiko is missing) never
+get the framework's standard input.
 
 ```bash
 llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --ip 192.168.1.50 --user rock
@@ -369,6 +376,30 @@ llm-cli deploy run output/deploy_SmolLM2-135M-Instruct-Q4_0_1791801300.zip --ip 
 llm-cli deploy run output/deploy_model_1791801300.zip --ip 192.168.1.50 --user rock \
   --trust-fingerprint SHA256:AbCdEf...
 ```
+
+### deploy devices
+
+```
+llm-cli deploy devices list [--json]
+llm-cli deploy devices add HOST --user USER [--port 22] [--label TEXT]
+llm-cli deploy devices remove DEVICE_ID
+```
+
+The trusted devices (`~/.llm-framework/devices.json`): the only devices AI clients and Ditto may name for
+`deploy_to_device`, and every such deploy is still asked. A record holds your label, the address, the user, the host
+key you confirmed and whether the framework's own SSH key logs in there (paired); the device id is derived from the
+host key, the same id `llm-cli device list` shows. Records are written only by you: by `deploy run`,
+`scan --device` and `device runtime deploy` after a successful login, by the GUI's Deployment window after a
+deployment, and by `deploy devices add`. No tool writes, changes or removes one.
+
+| Command | Meaning |
+|---|---|
+| `list` | Every record with its host key and whether the key is still the trusted one in the framework's `known_hosts` (`trusted`, `CHANGED in known_hosts`, `not in known_hosts`), paired, and the last deploy. |
+| `add HOST --user USER` | Adds a board you trusted before this version (its host key is already in the framework's `known_hosts`). Needs a terminal: it shows the fingerprint and asks; it never trusts a new key and never asks for a password, and it marks the board as paired only when the framework's key logs in. |
+| `remove DEVICE_ID` | Removes the record (written to the audit log); AI tools can no longer name the device. Its `known_hosts` entry is kept. |
+
+A record is usable only while the framework's `known_hosts` holds exactly the key it names: after you removed a
+changed key there (to trust a reinstalled board again), trust the board again with `deploy run` or `scan --device`.
 
 ---
 
@@ -841,11 +872,13 @@ llm-cli ditto models download small-q2
 
 ## tools
 
-The framework tools are what Ditto and MCP clients use: 15 read-only tools (`list_targets`,
+The framework tools are what Ditto and MCP clients use: 16 read-only tools (`list_targets`,
 `get_target_capabilities`, `list_build_requests`, `get_build_status`, `read_build_log`, `list_artifacts`,
 `run_doctor`, `search_knowledge`, `list_knowledge_sources`, `read_knowledge_source`, `search_hf_models`,
-`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`) and 6 that change things on this computer
-(`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`, `download_hf_file`).
+`get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`, `list_devices`), 7 that change things on
+this computer (`start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`,
+`download_hf_file`, `create_deploy_package`) and `deploy_to_device`, which reaches a device you trusted (tier
+`external`: always asked).
 
 ### tools list
 

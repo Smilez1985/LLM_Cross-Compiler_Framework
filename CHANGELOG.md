@@ -522,6 +522,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   template, for Ditto's proposals, the wizard and the MCP tool. Their counts are soft limits (3, 30, 5): going above
   one is a warning the person's approval overrides, never a refusal; prebuilt llama.cpp stays refused.
 
+- **Deploy for AI clients** (MCP tools `list_devices`, `create_deploy_package`, `deploy_to_device`, prompt
+  `deploy_to_board`; decision 2): a client lists the devices you trusted and paired, packages a built model as a job
+  (the disk must hold twice the model) and deploys it as a job. Before the deploy is asked, the framework reads the
+  device's host key (no login) and refuses an unknown or changed key or an unpaired device; the question shows the
+  device by your label, the host key fingerprint, the package's sha256 and the trust of its target, and the deploy
+  refuses when the package or the key differs afterwards. It is always asked, never covered by a standing approval,
+  one per device at a time; `cancel_job` closes the SSH session and reports the device state as unknown. The device's
+  output comes back marked as external text (`get_job_status` field `external_text`). No input names an address, user,
+  port, password, fingerprint or path.
+- **Trusted devices** (`~/.llm-framework/devices.json`, `llm-cli deploy devices list|add|remove`, `deploy run
+  --label`): `deploy run`, `scan --device`, `device runtime deploy` and the GUI's Deployment window record a device
+  after you confirmed its host key and the framework logged in (written to the audit log); `devices add` takes over a
+  device you trusted before (terminal only, never a new key, never a password). Only these devices can be named by AI
+  tools, and only while the framework's `known_hosts` still holds that key; no tool writes a record.
+
 ### Changed
 - **One Hugging Face classification for builds and downloads**: `check_build_request` and `start_build` now read a model's licence, gating and files with the same rules as `get_hf_model_info` and `download_hf_file` (licences such as GPL, DeepSeek or Qwen research were "unknown" on the build path and "restrictive" on the download path), and both keep the same disk reserve.
 - **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
@@ -697,6 +712,10 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   try first) or unchecked, with a sentence built only from framework facts (a tool only by its registered name); "the hardware is not available" is
   contradicted for every tool that uses no device. Reports are audited as `cannot_reported`;
   `llm-cli tools audit --summary` counts them per caller.
+
+- **Packaging and deploying say why they failed**: `DeploymentManager` returns the reason (no Docker, an image not
+  pinned, the host key changed, the exit status of `deploy.sh`) instead of `None` or `False` with a log line (G23);
+  `llm-cli deploy package` prints it. A package is written under a temporary name and renamed when complete.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -1158,6 +1177,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Every Hugging Face call of a build now sends the stored token or `token=False`.
 - **Image builds never read the MCP protocol stream**: `docker buildx build` ran with the server's stdin, which over
   stdio is the protocol stream (G25); it now gets `stdin=DEVNULL`.
+- **Deployment packages take images only pinned by digest or built here**: the default inference image was
+  `...:latest` and a failed pull by tag was swallowed, so a package could carry whatever the registry served (G17).
+  An image now goes into a package only as `name@sha256:...` or when it was built on this computer; a tag is refused
+  with the reason, a missing pinned image is pulled by its digest only, and a failed export stops the package.
+- **Deploys never forward the MCP protocol stream**: without paramiko, `ssh` and `scp` ran with the framework's
+  stdin, which over MCP stdio is the protocol stream (G25); they now get `stdin=DEVNULL`.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

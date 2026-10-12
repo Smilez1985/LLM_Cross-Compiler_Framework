@@ -594,6 +594,23 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   MCP-Tool. Ihre Anzahlen sind weiche Grenzen (3, 30, 5): Darüber zu gehen ist eine Warnung, über die die Zustimmung der
   Person hinweggeht, nie eine Ablehnung; ein vorgebautes llama.cpp bleibt abgelehnt.
 
+- **Deployment für KI-Clients** (MCP-Tools `list_devices`, `create_deploy_package`, `deploy_to_device`, Prompt
+  `deploy_to_board`; Entscheidung 2): Ein Client listet die Geräte, denen du vertraut und die du gekoppelt hast,
+  paketiert ein gebautes Modell als Job (die Platte muss das Doppelte des Modells fassen) und überträgt es als Job.
+  Bevor das Deployment erfragt wird, liest das Framework den Host-Schlüssel des Geräts (keine Anmeldung) und lehnt
+  einen unbekannten oder geänderten Schlüssel oder ein nicht gekoppeltes Gerät ab; die Frage zeigt das Gerät mit
+  deinem Namen dafür, den Fingerabdruck des Host-Schlüssels, das sha256 des Pakets und das Vertrauen in sein Target,
+  und das Deployment bricht ab, wenn Paket oder Schlüssel danach abweichen. Es wird immer erfragt, nie von einer
+  Daueranfrage abgedeckt, eins je Gerät zur Zeit; `cancel_job` schließt die SSH-Sitzung und meldet den Zustand des
+  Geräts als unbekannt. Die Ausgabe des Geräts kommt als externer Text markiert zurück (`get_job_status`-Feld
+  `external_text`). Keine Eingabe nennt Adresse, Benutzer, Port, Passwort, Fingerabdruck oder Pfad.
+- **Vertraute Geräte** (`~/.llm-framework/devices.json`, `llm-cli deploy devices list|add|remove`, `deploy run
+  --label`): `deploy run`, `scan --device`, `device runtime deploy` und das Deployment-Fenster der GUI tragen ein
+  Gerät ein, nachdem du seinen Host-Schlüssel bestätigt hast und sich das Framework angemeldet hat (im Audit-Log
+  vermerkt); `devices add` übernimmt ein Gerät, dem du schon vorher vertraut hast (nur im Terminal, nie ein neuer
+  Schlüssel, nie ein Passwort). Nur diese Geräte können KI-Tools nennen, und nur, solange die `known_hosts` des
+  Frameworks noch genau diesen Schlüssel enthält; kein Tool schreibt einen Eintrag.
+
 ### Geändert
 - **Eine Hugging-Face-Einordnung für Builds und Downloads**: `check_build_request` und `start_build` lesen Lizenz, Zugangsbeschränkung und Dateien eines Modells jetzt nach denselben Regeln wie `get_hf_model_info` und `download_hf_file` (Lizenzen wie GPL, DeepSeek oder Qwen Research waren auf dem Build-Weg „unbekannt“ und auf dem Download-Weg „einschränkend“), und beide halten dieselbe Speicherreserve frei.
 - **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
@@ -791,6 +808,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   premature (mit den Tools, die zuerst zu versuchen sind) oder unchecked, mit einem Satz nur aus Fakten des
   Frameworks (ein Tool nur mit seinem registrierten Namen); „die Hardware ist nicht verfügbar“ wird für jedes Tool widersprochen, das kein Gerät nutzt. Meldungen
   werden als `cannot_reported` protokolliert; `llm-cli tools audit --summary` zählt sie je Aufrufer.
+
+- **Paketieren und Übertragen sagen, warum sie gescheitert sind**: `DeploymentManager` gibt den Grund zurück (kein
+  Docker, ein nicht festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`) statt `None`
+  oder `False` mit einer Logzeile (G23); `llm-cli deploy package` gibt ihn aus. Ein Paket wird unter einem vorläufigen
+  Namen geschrieben und erst umbenannt, wenn es vollständig ist.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -1309,6 +1331,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   `token=False`.
 - **Image-Builds lesen nie den MCP-Protokollstrom**: `docker buildx build` lief mit der Standardeingabe des Servers,
   die über stdio der Protokollstrom ist (G25); es bekommt jetzt `stdin=DEVNULL`.
+- **Deployment-Pakete nehmen Images nur per Digest festgelegt oder hier gebaut**: Das voreingestellte
+  Inferenz-Image war `...:latest`, und ein fehlgeschlagenes Ziehen über ein Tag wurde verschluckt, sodass ein Paket
+  enthalten konnte, was die Registry gerade auslieferte (G17). Ein Image kommt jetzt nur als `name@sha256:...` ins
+  Paket oder wenn es auf diesem Rechner gebaut wurde; ein Tag wird mit Grund abgelehnt, ein fehlendes festgelegtes
+  Image nur über seinen Digest gezogen, und ein fehlgeschlagener Export bricht das Paket ab.
+- **Deployments leiten nie den MCP-Protokollstrom weiter**: Ohne paramiko liefen `ssh` und `scp` mit der
+  Standardeingabe des Frameworks, die über MCP-stdio der Protokollstrom ist (G25); sie bekommen jetzt
+  `stdin=DEVNULL`.
 
 ## [3.0.0] - 2026-10-10
 **Release für Reparatur, Sicherheit und MCP.** Die Build-Pipeline funktioniert wieder von Anfang bis Ende (mit

@@ -242,7 +242,13 @@ secrets: [details](docs/Features.md#input-history).
    the temporary folder.
 
 Leave the Docker option off for a plain model file. With it, the package also contains container images; that
-mode is experimental and not verified in this version.
+mode is experimental and not verified in this version, and it takes an image only when it is pinned by its digest
+(`name@sha256:...`) or was built on your computer.
+
+After a successful deployment the board is one of your **trusted devices** (`llm-cli deploy devices list`). An AI
+client connected over MCP, or Ditto, can then package a build and deploy it to that board (`list_devices`,
+`create_deploy_package`, `deploy_to_device`), each time only after you confirmed a question that shows the board,
+its host key fingerprint and the package's hash. No AI can trust a new board or accept a changed host key.
 
 ### The board
 

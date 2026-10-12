@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Inputs and outputs of the job tools (get_job_status, cancel_job)."""
 
-from typing import Any, Dict, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -45,6 +45,11 @@ class JobStatusOut(BaseModel):
     state: JobState
     progress: JobProgress
     result: Optional[Dict[str, Any]] = None
+    # Text from outside the framework that a job's result carries (the output a device printed during a deploy):
+    # kept out of `result` and marked, so it is cleaned, capped and wrapped like every other external text.
+    external_text: List[UntrustedText] = Field(default_factory=list,
+                                               description="Text from outside the framework in the job's result "
+                                                           "(for example a device's output)")
     error: Optional[JobErrorOut] = None
     owner: str = Field(description="Caller class that started the job (mcp, ditto, ...)")
     yours: bool = Field(description="True if this client started the job (it may cancel it without a question)")

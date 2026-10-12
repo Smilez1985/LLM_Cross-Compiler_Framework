@@ -223,6 +223,39 @@ def probe_sha256(profile: Any) -> str:
     return hashlib.sha256(profile.to_text().encode("utf-8", "surrogatepass")).hexdigest()
 
 
+def target_marks(framework: Any, tid: str, index: Any = None) -> Dict[str, Any]:
+    """trust, untested and the AI's texts of one target, from its folder and target.yml (also used by the deploy
+    tools, whose question names the trust of the target a package was built for)."""
+    out: Dict[str, Any] = {"trust": "unknown", "untested": False}
+    try:
+        tm = getattr(framework, "target_manager", None)
+        folder, data = tm.folder_of(tid), tm.get_target(tid) or {}
+    except Exception:  # noqa: BLE001 - a stand-in framework or a target that vanished
+        return out
+    meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    trust = None
+    if folder is not None:
+        from orchestrator.Core.community_manager import trust_of_folder
+        try:
+            level, _ = trust_of_folder(folder, index)
+            trust = level.value if level is not None else None
+        except Exception:  # noqa: BLE001
+            trust = None
+    if trust is None:
+        if meta.get("provenance") == "ai-generated":
+            trust = "ai-generated"
+        elif folder is not None and folder.name in SHIPPED_TARGET_FOLDERS and \
+                folder.resolve().parent == SHIPPED_TEMPLATE.parent.resolve():
+            trust = "shipped"
+        else:
+            trust = "own"
+    out["trust"] = trust if trust in TRUST_VALUES else "unknown"
+    out["untested"] = bool(meta.get("untested")) or meta.get("provenance") == "ai-generated"
+    out["meta"] = meta
+    out["folder"] = folder
+    return out
+
+
 # --- registration -------------------------------------------------------------------------------------------------
 
 def register_target_tools(registry: ToolRegistry, framework: Any, *, service: Any, jobs: Any,
@@ -255,35 +288,7 @@ def register_target_tools(registry: ToolRegistry, framework: Any, *, service: An
             return None
 
     def marks(tid: str, index=None) -> Dict[str, Any]:
-        """trust, untested and the AI's texts of one target, from its folder and target.yml."""
-        out: Dict[str, Any] = {"trust": "unknown", "untested": False}
-        try:
-            tm = targets_manager()
-            folder, data = tm.folder_of(tid), tm.get_target(tid) or {}
-        except Exception:  # noqa: BLE001 - a stand-in framework or a target that vanished
-            return out
-        meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-        trust = None
-        if folder is not None:
-            from orchestrator.Core.community_manager import trust_of_folder
-            try:
-                level, _ = trust_of_folder(folder, index)
-                trust = level.value if level is not None else None
-            except Exception:  # noqa: BLE001
-                trust = None
-        if trust is None:
-            if meta.get("provenance") == "ai-generated":
-                trust = "ai-generated"
-            elif folder is not None and folder.name in SHIPPED_TARGET_FOLDERS and \
-                    folder.resolve().parent == SHIPPED_TEMPLATE.parent.resolve():
-                trust = "shipped"
-            else:
-                trust = "own"
-        out["trust"] = trust if trust in TRUST_VALUES else "unknown"
-        out["untested"] = bool(meta.get("untested")) or meta.get("provenance") == "ai-generated"
-        out["meta"] = meta
-        out["folder"] = folder
-        return out
+        return target_marks(framework, tid, index)
 
     # --- targets ---
 
