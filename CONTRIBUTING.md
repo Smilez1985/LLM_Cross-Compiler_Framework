@@ -299,10 +299,12 @@ docker build -t llm-framework/rockchip:dev /tmp/rockchip-context
 
 GitHub Actions are pinned by commit SHA with the version as a comment. Keep it that way for new actions.
 
-The Makefile targets `make build`, `make up`, `make gui`, `make test-container` and `make audit` do not work at the
-moment: they use `Docker Setup/docker-compose.yml`, which builds from an `orchestrator/Dockerfile` that does not
-exist, and `build`, `up` and `gui` also call the missing `scripts/setup_linux.sh`. A hardened headless image is on
-the [roadmap](docs/BLUEPRINT.md#roadmap). `make test` (Poetry), `make hooks` and `make secret-scan` work.
+**Framework container** (`framework-container.yml`): when `Docker Setup/`, `install.sh`, `requirements.txt`, the
+builder or the Makefile change, the CI builds the framework's image with `scripts/build_container_image.sh` (a local
+tag, never pushed), lints its Dockerfile and runs smoke tests. `make build`, `make up`, `make down`, `make doctor` and
+`make audit` work with it locally ([docs/Container_Setup.md](docs/Container_Setup.md)). No workflow, Makefile target,
+script or document pushes or pulls a framework image (`tests/test_container_setup.py`). `make test` (Poetry),
+`make hooks` and `make secret-scan` are unchanged.
 
 ---
 

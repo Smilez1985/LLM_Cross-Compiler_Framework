@@ -1,0 +1,13 @@
+# Read by BuildKit for "Docker Setup/Dockerfile" only. scripts/build_container_image.sh stages exactly the files the
+# repository ships, and the Dockerfile refuses any other context; this list is a second line of defence that keeps
+# large and personal folders out of a build context made from the repository folder itself.
+.git
+.venv
+**/__pycache__
+output
+cache
+models
+logs
+configs/config.yml
+.env
+.env.*

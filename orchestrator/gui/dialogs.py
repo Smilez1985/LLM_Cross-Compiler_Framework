@@ -356,38 +356,55 @@ class AIConfigurationDialog(QDialog):
 
         self._load_current_config()
 
-    # --- Ditto's tools: its own, or a framework elsewhere over MCP (MCP design T12) ---
+    # --- Ditto and the framework on another computer (design 6.1; MCP design T12) ---
+    REMOTE_INTRO = ("Ditto works with the framework on this computer. Choose another computer only if the framework "
+                    "is installed on a second computer too (for example a stronger build PC or a server): Ditto then "
+                    "reaches that installation through its MCP server, the way Claude Code does. Docker is not "
+                    "needed for this; SSH or a server address is enough.")
+
     def _remote_section(self) -> QGroupBox:
-        """Where Ditto's tools come from. MCP-client mode uses the MCP server of a framework running elsewhere (e.g.
-        the headless Docker image) with a named token, stored in the credential vault and never shown again."""
-        box = QGroupBox("Ditto's tools")
+        """Optional: Ditto uses the framework installed on a second computer (a stronger build PC, a server) through
+        that installation's MCP server, with a named token stored in the credential vault and never shown again.
+        Docker is not needed: SSH (as the command, or a tunnel to the server address) is enough. The texts are plain
+        text; the section is off (this computer) by default."""
+        box = QGroupBox("Another computer (optional)")
         form = QFormLayout(box)
+        self.lbl_remote_intro = QLabel(self.REMOTE_INTRO)
+        self.lbl_remote_intro.setWordWrap(True)
+        self.lbl_remote_intro.setTextFormat(Qt.PlainText)
+        form.addRow(self.lbl_remote_intro)
         self.cb_tool_source = QComboBox()
-        self.cb_tool_source.addItem("This framework's own tools", "local")
-        self.cb_tool_source.addItem("The tools of a framework elsewhere (MCP-client mode)", "mcp")
-        self.cb_tool_source.setToolTip("In MCP-client mode Ditto uses the tools, task prompts, permissions and audit "
-                                       "log of the framework it connects to, never this framework's tools.")
-        form.addRow("Tool source:", self.cb_tool_source)
+        self.cb_tool_source.addItem("This computer (default)", "local")
+        self.cb_tool_source.addItem("The framework on another computer", "mcp")
+        self.cb_tool_source.setToolTip("With another computer, Ditto uses the tools, task prompts, permissions and "
+                                       "audit log of the framework installed there.")
+        form.addRow("Ditto works with:", self.cb_tool_source)
         self.cb_mcp_transport = QComboBox()
-        self.cb_mcp_transport.addItem("Command (stdio)", "stdio")
-        self.cb_mcp_transport.addItem("Server address (HTTP)", "http")
+        self.cb_mcp_transport.addItem("Command (stdio), for example over SSH", "stdio")
+        self.cb_mcp_transport.addItem("Server address (HTTP), for example through an SSH tunnel", "http")
         form.addRow("Connection:", self.cb_mcp_transport)
         self.txt_mcp_command = QLineEdit()
-        self.txt_mcp_command.setPlaceholderText("docker exec -i <container> llm-cli mcp serve")
-        self.txt_mcp_command.setToolTip("The command that starts the framework's MCP server; the token reaches it "
+        self.txt_mcp_command.setPlaceholderText("ssh -T -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve")
+        self.txt_mcp_command.setToolTip("The command that starts the framework's MCP server on the other computer, "
+                                        "for example over SSH (the SSH server there must accept the variable: "
+                                        "AcceptEnv LCF_MCP_TOKEN, and llm-cli must be a command there, not only an "
+                                        "alias). For a framework container you built yourself: "
+                                        "docker exec -i <container> llm-cli mcp serve. The token reaches the server "
                                         "as the environment variable LCF_MCP_TOKEN, never on the command line.")
         form.addRow("Command:", self.txt_mcp_command)
         self.txt_mcp_url = QLineEdit()
         self.txt_mcp_url.setPlaceholderText("http://127.0.0.1:8765/mcp")
-        self.txt_mcp_url.setToolTip("https, or plain http only to a loopback address (a container port published "
-                                    "to 127.0.0.1); no user name or password in the address.")
+        self.txt_mcp_url.setToolTip("https, or plain http only to a loopback address: for example the other "
+                                    "computer's server reached through an SSH tunnel (ssh -N -L "
+                                    "8765:127.0.0.1:8765 user@build-box), or a container port published to "
+                                    "127.0.0.1. No user name or password in the address.")
         form.addRow("Server address:", self.txt_mcp_url)
         self.txt_mcp_name = QLineEdit()
         self.txt_mcp_name.setPlaceholderText("e.g. build box (shown in Ditto's questions)")
         form.addRow("Name:", self.txt_mcp_name)
         self.txt_mcp_token = QLineEdit()
         self.txt_mcp_token.setEchoMode(QLineEdit.Password)
-        self.txt_mcp_token.setToolTip("Create it on the framework's machine with 'llm-cli mcp token add NAME --link "
+        self.txt_mcp_token.setToolTip("Create it on the other computer with 'llm-cli mcp token add NAME --link "
                                       "ditto' (Ditto's own permissions then apply there). It is stored in the "
                                       "credential vault and never shown again.")
         form.addRow("Named token:", self.txt_mcp_token)
@@ -416,9 +433,12 @@ class AIConfigurationDialog(QDialog):
         self.txt_mcp_token.setPlaceholderText("******** (stored in the vault; type a new one to replace it)" if stored
                                               else "Paste the named token (llm-cli mcp token add NAME --link ditto)")
         self.lbl_mcp.setText("" if not remote else
-                             "Ditto then uses only that framework's tools and task prompts; its permissions for "
-                             "this token apply there, and its questions are answered here." if stored else
-                             "Ditto's MCP-client mode does not start without a named token.")
+                             "While this is on, Ditto uses the tools and task prompts of the framework on that "
+                             "computer instead of this computer's; its permissions for this token apply there, and "
+                             "its questions are answered here. This computer's files, targets and settings stay as "
+                             "they are; switching starts a new conversation, and choosing this computer again brings "
+                             "its own tools back." if stored else
+                             "Ditto does not use another computer without a named token.")
 
     def _load_remote_settings(self) -> None:
         import shlex
@@ -447,25 +467,26 @@ class AIConfigurationDialog(QDialog):
         try:
             argv = shlex.split(command_text) if command_text else []
         except ValueError as e:
-            QMessageBox.warning(self, "Ditto's Tools", f"The command cannot be read: {e}")
+            QMessageBox.warning(self, "Another Computer", f"The command cannot be read: {e}")
             return None
         choice = {"source": source, "transport": transport, "command": argv, "url": url,
                   "name": self.txt_mcp_name.text().strip()[:80], "token": self.txt_mcp_token.text().strip()}
         if source != "mcp":
             return choice
         if transport == "stdio" and not argv:
-            QMessageBox.warning(self, "Ditto's Tools", "MCP-client mode over a command needs the command that starts "
-                                "the framework's MCP server, e.g. 'docker exec -i <container> llm-cli mcp serve'.")
+            QMessageBox.warning(self, "Another Computer", "A connection over a command needs the command that starts "
+                                "the framework's MCP server on the other computer, e.g. 'ssh -T -o "
+                                "SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve'.")
             return None
         if transport == "http":
             try:
                 check_url(url)
             except RemoteSetupError as e:
-                QMessageBox.warning(self, "Ditto's Tools", str(e))
+                QMessageBox.warning(self, "Another Computer", str(e))
                 return None
         if not choice["token"] and not self._remote_token_stored():
             from orchestrator.llm.remote_tools import TOKEN_NEXT
-            QMessageBox.warning(self, "Ditto's Tools", "Ditto's MCP-client mode does not start without a named "
+            QMessageBox.warning(self, "Another Computer", "Ditto does not use another computer without a named "
                                 "token. " + TOKEN_NEXT)
             return None
         return choice

@@ -24,6 +24,10 @@ MANIFEST_NAME=".lcf-installed-files"
 REPO_ROOT="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 # Paketindex, den pip erreichen muss (PIP_INDEX_URL, falls ein eigener Spiegel gesetzt ist)
 PACKAGE_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple/}"
+# LCF_CONTAINER_BUILD=1 setzt nur "Docker Setup/Dockerfile" (scripts/build_container_image.sh): Dieselbe Installation
+# läuft dann in einem Image, das auf diesem Rechner gebaut wird. Ohne Docker-Engine im Image (sie installiert dort
+# niemand) und ohne docker-Gruppe; alles andere ist wie auf dem Rechner selbst.
+CONTAINER_BUILD="${LCF_CONTAINER_BUILD:-0}"
 
 # Farben
 RED='\033[0;31m'
@@ -86,6 +90,12 @@ setup_system() {
         log_error "Python 3.11 bis 3.14 wird benötigt, gefunden: $(python3 --version 2>&1). Bitte eine passende Version installieren (z. B. Debian 12, Ubuntu 24.04 oder 'uv python install 3.13')."
     fi
 
+    # In einem selbst gebauten Framework-Image gibt es keine Docker-Engine und keine docker-Gruppe.
+    if [ "$CONTAINER_BUILD" = "1" ]; then
+        log_info "Container-Build: Docker wird im Image nicht installiert."
+        return 0
+    fi
+
     # Docker Check (Übernommen aus setup_linux.sh)
     if ! command -v docker &> /dev/null; then
         log_warn "Docker fehlt. Starte Auto-Installer..."
@@ -117,7 +127,8 @@ shipped_files() {
             done
         )
     else
-        (cd "$REPO_ROOT" && find . \( -name .git -o -name .venv -o -name __pycache__ -o -name build -o -name dist \
+        # build/ und dist/ nur auf oberster Ebene: orchestrator/runtime/build/ ist ein Paket des Frameworks.
+        (cd "$REPO_ROOT" && find . \( -name .git -o -name .venv -o -name __pycache__ -o -path ./build -o -path ./dist \
             -o -path ./output -o -path ./cache -o -path ./models -o -path ./logs \) -prune \
             -o -type f ! -path ./configs/config.yml -printf '%P\0')
     fi
@@ -192,12 +203,18 @@ setup_venv() {
     
     # Wir führen dies als REAL_USER aus, damit das Venv nicht root gehört
     REAL_USER="${SUDO_USER:-$USER}"
+    # sudo fehlt auf minimalen Systemen (und im Framework-Image); runuser (util-linux) tut dort dasselbe.
+    local as_user=(sudo -u "$REAL_USER")
+    if ! command -v sudo &> /dev/null; then as_user=(runuser -u "$REAL_USER" --); fi
     
-    sudo -u "$REAL_USER" bash <<EOF
+    # Scheitert ein Schritt (kein venv, ein Paket nicht erreichbar), bricht die Installation ab: Sonst meldete sie
+    # "abgeschlossen" mit einer leeren Umgebung, und ein Container-Image würde trotzdem gebaut.
+    if ! "${as_user[@]}" bash <<EOF
+    set -e
     cd "$INSTALL_DIR"
     python3 -m venv .venv
-    ./.venv/bin/pip install --upgrade pip > /dev/null
-    
+    ./.venv/bin/pip install --upgrade pip > /dev/null || echo "⚠️ pip ließ sich nicht aktualisieren; weiter mit der vorhandenen Version."
+
     echo "Installiere Abhängigkeiten..."
     if [ -f requirements.txt ]; then
         ./.venv/bin/pip install -r requirements.txt > /dev/null
@@ -206,6 +223,9 @@ setup_venv() {
         ./.venv/bin/pip install pyyaml requests psutil > /dev/null
     fi
 EOF
+    then
+        log_error "Die Python-Umgebung in $INSTALL_DIR/.venv ließ sich nicht einrichten (Meldungen oben); die Installation ist nicht fertig. Proxy oder eigener Spiegel: sudo -E ./install.sh bzw. PIP_INDEX_URL."
+    fi
 }
 
 # --- SCHRITT 4: KONFIGURATION & LAUNCHER ---
@@ -234,7 +254,7 @@ finish() {
     
     # Hinweis zum Docker Group Refresh
     REAL_USER="${SUDO_USER:-$USER}"
-    if ! groups "$REAL_USER" | grep &>/dev/null "\bdocker\b"; then
+    if [ "$CONTAINER_BUILD" != "1" ] && ! groups "$REAL_USER" | grep &>/dev/null "\bdocker\b"; then
         log_warn "Du wurdest zur Docker-Gruppe hinzugefügt."
         log_warn "Bitte einmal aus- und einloggen (oder 'newgrp docker' nutzen)."
     fi

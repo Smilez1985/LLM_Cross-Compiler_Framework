@@ -1,24 +1,35 @@
 #!/usr/bin/env python3
 """
-Ditto's MCP-client mode (MCP design T12; DECISIONS round 2 item 2: Ditto is hybrid).
+Ditto and the framework on another computer: Ditto's MCP-client mode (MCP design T12; DECISIONS round 2 item 2 and
+round 5 d: Ditto is hybrid; design 6.1).
 
-Ditto keeps its in-process path (ToolRegistry.call with the actor "ditto") and can instead work as an MCP client of a
-framework running elsewhere, for example the headless Docker image: it lists that server's tools with their closed
-input schemas, gives them to its model, sends tools/call with the model's arguments exactly as the model wrote them,
-fetches the server's task prompts, and answers the server's questions (elicitations) with its own dialog or prompt,
-which names the server. The registry, the policy, the fool-proof layer (an unknown argument is refused there with a
-suggestion, never dropped) and the audit log that run are the server's.
+"Another framework" is not a different program: it is the same framework installed on a second computer (a stronger
+build PC, a server, a lab PC with the boards). Ditto keeps its in-process path (ToolRegistry.call with the actor
+"ditto") and can instead work as an MCP client of that installation, through its MCP server, the same door Claude
+Code uses: it lists that server's tools with their closed input schemas, gives them to its model, sends tools/call
+with the model's arguments exactly as the model wrote them, fetches the server's task prompts, and answers the
+server's questions (elicitations) with its own dialog or prompt, which names the server. The registry, the policy,
+the fool-proof layer (an unknown argument is refused there with a suggestion, never dropped) and the audit log that
+run are the server's.
+
+Docker is not needed for this. The connection is a command (stdio) or a server address (HTTP), and neither depends
+on Docker: SSH reaches the other computer, either as the command (`ssh -T -o SendEnv=LCF_MCP_TOKEN user@build-box
+llm-cli mcp serve`, with `AcceptEnv LCF_MCP_TOKEN` in the SSH server's configuration there) or as a tunnel to the
+server's loopback address (`ssh -N -L 8765:127.0.0.1:8765 user@build-box`, then http://127.0.0.1:8765/mcp). A
+framework container the person built locally (no framework image is published) is one alternative:
+`docker exec -i <container> llm-cli mcp serve`.
 
 Rules of this mode:
-- Identity is a named token, created on the framework's machine with `llm-cli mcp token add NAME --link ditto` (so the
+- Identity is a named token, created on the other computer with `llm-cli mcp token add NAME --link ditto` (so the
   server uses Ditto's own policy and standing approvals by reference) and stored in Ditto's credential vault
   (`ditto_mcp_token`). Over stdio it reaches the server as the environment variable LCF_MCP_TOKEN of the started
   process, over HTTP as the bearer header. It never appears in a tool argument, a result, a prompt or a log, and the
   mode does not start without it (Ditto never runs as the shared local caller "mcp" with another policy).
 - The server and the transport are chosen in Ditto's AI settings (`ai_ditto_*`), which only the person changes (GUI
   or CLI); an AI cannot (update_settings never writes an ai_* key).
-- One tool source per conversation: in this mode no in-process tool is listed, and the server's prompts are used only
-  with the server's tools.
+- One tool source per conversation (in this version): in this mode no in-process tool is listed, and the server's
+  prompts are used only with the server's tools; switching the source starts a new conversation. This computer's
+  files, targets and settings stay as they are, and switching back brings the in-process tools back.
 - Ditto cannot check a remote server, so every result from it (the server's notes and summary line included), every
   error text, every prompt text and every tool description is treated as untrusted data.
 """
@@ -46,7 +57,7 @@ CONNECT_TIMEOUT = 60.0
 MAX_DESCRIPTION = 2048
 MAX_RESULT = 60000
 
-TOKEN_NEXT = ("On the framework's machine run 'llm-cli mcp token add NAME --link ditto' (Ditto's own permissions "
+TOKEN_NEXT = ("On the other computer run 'llm-cli mcp token add NAME --link ditto' (Ditto's own permissions "
               "then apply there), then store the token here with 'llm-cli ditto remote set ... --with-token' or in "
               "the GUI's AI settings.")
 
@@ -57,9 +68,9 @@ class RemoteSetupError(ValueError):
 
 @dataclass(frozen=True)
 class RemoteServer:
-    """Where Ditto's tools come from in MCP-client mode."""
+    """The framework on another computer whose tools Ditto uses in MCP-client mode."""
     transport: str                        # "stdio" or "http"
-    command: Tuple[str, ...] = ()         # stdio: the program and its arguments, e.g. docker exec -i lcf llm-cli mcp serve
+    command: Tuple[str, ...] = ()         # stdio: the program and its arguments, e.g. ssh ... llm-cli mcp serve
     url: str = ""                         # http: the server's endpoint, e.g. http://127.0.0.1:8765/mcp
     name: str = ""                        # the person's name for it, shown in dialogs
 
@@ -84,8 +95,9 @@ def _loopback(host: str) -> bool:
 
 def check_url(url: str) -> str:
     """An HTTP server address Ditto may send its token to: no user info in it; plain http only to a loopback address
-    (a server published to the host's loopback, `-p 127.0.0.1:PORT:PORT`), https otherwise, so the bearer token never
-    crosses a network in clear text."""
+    (the other computer's server reached through an SSH tunnel, or a container port published to the host's
+    loopback, `-p 127.0.0.1:PORT:PORT`), https otherwise, so the bearer token never crosses a network in clear
+    text."""
     parts = urlsplit(url or "")
     if parts.scheme not in ("http", "https") or not parts.hostname:
         raise RemoteSetupError("The MCP server address must be an http(s) URL, e.g. http://127.0.0.1:8765/mcp.")
@@ -94,8 +106,9 @@ def check_url(url: str) -> str:
                                "in the credential vault.")
     if parts.scheme == "http" and not _loopback(parts.hostname):
         raise RemoteSetupError("Plain http is accepted only for a loopback address (the token would cross the "
-                               "network in clear text): use https, or publish the container's port to "
-                               "127.0.0.1 and connect there.")
+                               "network in clear text): use https, or reach the other computer's server through an "
+                               "SSH tunnel (ssh -N -L 8765:127.0.0.1:8765 user@build-box) and connect to "
+                               "http://127.0.0.1:8765/mcp.")
     return url
 
 
@@ -103,10 +116,12 @@ CONTAINER_CLIS = ("docker", "podman", "nerdctl")
 
 
 def with_token_env(command: Tuple[str, ...]) -> Tuple[str, ...]:
-    """The stdio command as Ditto starts it. `docker exec` (podman, nerdctl) does not hand its own environment to the
-    process in the container, so without `-e LCF_MCP_TOKEN` the server there would run without the token, as the
-    shared local caller "mcp" with another policy. The name-only form passes the value from Ditto's environment of
-    the started process, so the token never appears on the command line."""
+    """The stdio command as Ditto starts it. For a framework container (one alternative to SSH): `docker exec`
+    (podman, nerdctl) does not hand its own environment to the process in the container, so without
+    `-e LCF_MCP_TOKEN` the server there would run without the token, as the shared local caller "mcp" with another
+    policy. The name-only form passes the value from Ditto's environment of the started process, so the token never
+    appears on the command line. Other commands (ssh among them) are left as they are; ssh passes the variable with
+    `-o SendEnv=LCF_MCP_TOKEN` when the SSH server there accepts it."""
     cmd = list(command)
     if not cmd:
         return tuple(cmd)
@@ -140,9 +155,11 @@ def remote_server(config: Any) -> Optional[RemoteServer]:
             command = shlex.split(command)
         command = tuple(str(c) for c in command if str(c))
         if not command:
-            raise RemoteSetupError("Ditto's MCP-client mode over stdio needs the command that starts the server, e.g. "
-                                   "'docker exec -i <container> llm-cli mcp serve': llm-cli ditto remote set "
-                                   "--command \"...\".")
+            raise RemoteSetupError("Ditto's connection to another computer over stdio needs the command that starts "
+                                   "the framework's MCP server there, e.g. 'ssh -T -o SendEnv=LCF_MCP_TOKEN "
+                                   "user@build-box llm-cli mcp serve' (or, for a framework container you built "
+                                   "yourself, 'docker exec -i <container> llm-cli mcp serve'): llm-cli ditto remote "
+                                   "set --command \"...\".")
         return RemoteServer("stdio", command=command, name=name)
     if transport == "http":
         return RemoteServer("http", url=check_url(str(value(URL_SETTING, "") or "")), name=name)
@@ -309,10 +326,10 @@ class RemoteConnection:
 
     def _check_identity(self) -> None:
         """A stdio server that did not receive the token (a command that does not pass the environment on, such as
-        ssh or a container runtime without -e LCF_MCP_TOKEN) runs as the shared local caller "mcp" with another
-        policy than Ditto's: the mode refuses that. Checked with the server's own get_status (permissions section,
-        which names the caller); when the server does not offer it, nothing can be checked here. Over HTTP a server
-        refuses a request without a valid token anyway."""
+        ssh without -o SendEnv=LCF_MCP_TOKEN or a container runtime without -e LCF_MCP_TOKEN) runs as the shared
+        local caller "mcp" with another policy than Ditto's: the mode refuses that. Checked with the server's own
+        get_status (permissions section, which names the caller); when the server does not offer it, nothing can be
+        checked here. Over HTTP a server refuses a request without a valid token anyway."""
         if self.server.transport != "stdio":
             return
         try:
@@ -329,8 +346,10 @@ class RemoteConnection:
             raise RemoteSetupError(f"The framework at {self.server.label()} did not receive Ditto's named token (it "
                                    "treats Ditto as the shared local caller, with other permissions than Ditto's), so "
                                    "Ditto does not use it. The command must pass the environment variable "
-                                   f"{TOKEN_ENV} on to the server, e.g. 'docker exec -i -e {TOKEN_ENV} <container> "
-                                   "llm-cli mcp serve': llm-cli ditto remote set --command \"...\".")
+                                   f"{TOKEN_ENV} on to the server: over SSH 'ssh -T -o SendEnv={TOKEN_ENV} "
+                                   f"user@build-box llm-cli mcp serve' (the SSH server there needs 'AcceptEnv "
+                                   f"{TOKEN_ENV}'), for a framework container 'docker exec -i -e {TOKEN_ENV} "
+                                   "<container> llm-cli mcp serve': llm-cli ditto remote set --command \"...\".")
 
     def _stop_loop(self) -> None:
         if self._loop is not None:

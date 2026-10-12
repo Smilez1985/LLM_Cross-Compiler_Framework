@@ -1,153 +1,47 @@
-version: '3.8'
+# The LLM Cross-Compiler Framework in a container (Docker Compose v2: docker compose -f "Docker Setup/docker-compose.yml").
+#
+# The image is built on this computer with scripts/build_container_image.sh (make build); no framework image is
+# published, and compose never pulls one (pull_policy: never). Guide: docs/Container_Setup.md.
+#
+#   make up      starts the headless framework as the container lcf-framework (kept running for docker exec)
+#   make gui     starts the GUI (explicit option: image built with make build-gui, your X11 display passed in)
+#   make down    stops both; the data volume stays
+#
+# Everything personal (settings, credential vault, audit log, MCP tokens, models, builds) lives in the volume
+# lcf-data, mounted at /data. No port is published: AI clients reach the MCP server over stdio
+# (docker exec -i lcf-framework llm-cli mcp serve), from another computer over SSH to this one.
 
-# LLM Cross-Compiler Framework - Docker Compose Configuration
-# DIREKTIVE: Goldstandard, Modular Infrastructure, Security Hardened.
-# STATUS: PRODUCTION READY v1.3.0
+name: lcf
 
 services:
-  # ============================================================================
-  # DOCKER SOCKET PROXY (Security Layer)
-  # Isolates the Docker Daemon from the Orchestrator to prevent breakout attacks.
-  # ============================================================================
-  socket-proxy:
-    image: tecnativa/docker-socket-proxy
-    container_name: llm-socket-proxy
+  framework:
+    image: ${LCF_IMAGE:-lcf-framework:local}
+    pull_policy: never
+    container_name: lcf-framework
+    command: ["sleep", "infinity"]
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      # Allow only necessary operations for building and running containers
-      - BUILD=1
-      - CONTAINERS=1
-      - IMAGES=1
-      - EXEC=1       
-      - NETWORKS=1
-      - VOLUMES=1
-      # DENY dangerous operations explicitly
-      - EVENTS=0
-      - PING=1
-      - VERSION=1
-      - INFO=1
-      - AUTH=0
-      - SECRETS=0
-      - SWARM=0
-      - SYSTEM=0     # Blocks 'docker system prune' etc.
-    networks:
-      - llm-framework
+      - lcf-data:/data
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
-    # Security Context
+
+  gui:
+    profiles: ["gui"]
+    image: ${LCF_GUI_IMAGE:-lcf-framework:local-gui}
+    pull_policy: never
+    container_name: lcf-framework-gui
+    command: ["llm-framework"]
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - QT_X11_NO_MITSHM=1
+    volumes:
+      - lcf-data:/data
+      - /tmp/.X11-unix:/tmp/.X11-unix:ro
+    cap_drop: [ALL]
     security_opt:
       - no-new-privileges:true
 
-  # ============================================================================
-  # ORCHESTRATOR SERVICE (Management Node)
-  # The central brain. Talks to Docker only via the Proxy.
-  # ============================================================================
-  orchestrator:
-    build:
-      context: ..
-      dockerfile: orchestrator/Dockerfile
-      args:
-        USER_ID: ${UID:-1000}
-        GROUP_ID: ${GID:-1000}
-        VERSION: ${VERSION:-1.3.0}
-    image: llm-framework/orchestrator:${VERSION:-1.3.0}
-    container_name: llm-orchestrator
-    hostname: orchestrator
-    
-    environment:
-      # SECURITY: Use Proxy instead of raw socket mount
-      - DOCKER_HOST=tcp://socket-proxy:2375
-      
-      # Framework Configuration
-      - FRAMEWORK_VERSION=${VERSION:-1.3.0}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - AI_SECURITY_LEVEL=${AI_SECURITY_LEVEL:-STRICT} 
-      - GUI_ENABLED=${GUI_ENABLED:-true}
-      - API_ENABLED=${API_ENABLED:-true}
-      - API_PORT=8000
-      - WEB_PORT=3000
-      
-      # User Mapping
-      - PUID=${UID:-1000}
-      - PGID=${GID:-1000}
-    
-    volumes:
-      # Data Persistence
-      - build_cache:/build-cache
-      
-      # Host Mappings (Configurable via ENV)
-      - ${OUTPUT_DIR:-../output}:/output
-      - ${MODELS_DIR:-../models}:/models:ro
-      - ${CONFIG_DIR:-../configs}:/configs:ro
-      
-      # Development Hot-Reload (Optional)
-      - ../orchestrator/config:/app/config:ro
-      - ../orchestrator/gui:/app/gui:ro
-    
-    ports:
-      - "${API_PORT:-8000}:8000"
-      - "${WEB_PORT:-3000}:3000"
-      - "${VNC_PORT:-5900}:5900"
-    
-    networks:
-      - llm-framework
-    
-    depends_on:
-      - socket-proxy
-
-  # ============================================================================
-  # MONITORING SERVICE (CTOP)
-  # Interactive container monitoring.
-  # ============================================================================
-  ctop:
-    image: quay.io/vektorlab/ctop:latest
-    container_name: llm-monitor
-    restart: unless-stopped
-    volumes:
-      # CTOP requires raw socket for stats reading (ReadOnly)
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    environment:
-      - CTOP_FILTER=llm-
-    networks:
-      - llm-framework
-    stdin_open: true
-    tty: true
-
-  # ============================================================================
-  # INFRASTRUCTURE SECURITY SCAN (TRIVY)
-  # Scans the Orchestrator image for vulnerabilities on startup.
-  # ============================================================================
-  trivy-infra-scanner:
-    image: aquasec/trivy:latest
-    container_name: llm-infra-scanner
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - trivy_cache:/root/.cache/
-    command: 
-      - image
-      - --exit-code
-      - "0" # Non-blocking for infra scan (logging only)
-      - --severity
-      - HIGH,CRITICAL
-      - llm-framework/orchestrator:${VERSION:-1.3.0}
-    depends_on:
-      - orchestrator
-    networks:
-      - llm-framework
-
-# ============================================================================
-# NETWORK & VOLUMES
-# ============================================================================
-networks:
-  llm-framework:
-    driver: bridge
-
 volumes:
-  build_cache:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${CACHE_DIR:-../cache}
-  trivy_cache:
-    driver: local
+  lcf-data:
+    name: lcf-data   # the same volume as in the builder's docker run examples

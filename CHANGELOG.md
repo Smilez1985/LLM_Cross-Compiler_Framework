@@ -36,10 +36,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   covers the next builds. A digest-pinned base image outside the Docker Official Images counts once a build with
   exactly that image was confirmed; a tag never does. The build standing approval's rule version is now 2, so
   standing approvals made under the narrower rule lapse.
-- **Ditto's MCP-client mode in the GUI** (MCP design T12): Configure AI Agent (Ditto) has a "Ditto's tools"
-  section with the tool source, a command (stdio) or a server address (HTTP, https or loopback only), a name and the
-  named token, which goes into the credential vault and is never shown again; saving the mode without a token, with
-  an unreadable command or with an address that would send the token in clear text is refused and stores nothing.
+- **Ditto and the framework on another computer, in the GUI** (MCP design T12, design 6.1): Configure AI Agent
+  (Ditto) has an "Another computer (optional)" section, off by default, which says in plain text that the other
+  framework is the same program installed on a second computer and that Docker is not needed (SSH or a server
+  address is enough): this computer or the framework on another computer, a command (stdio, for example over SSH)
+  or a server address (HTTP, https or loopback only, for example through an SSH tunnel), a name and the named token,
+  which goes into the credential vault and is never shown again; saving the connection without a token, with an
+  unreadable command or with an address that would send the token in clear text is refused and stores nothing.
   Ditto's GUI confirmation offers "Allow and ask it to stop asking..." for a remote framework's question only when
   that server's form offers it, with a warning first; it is only a request that a person confirms in that
   framework's own approval window.
@@ -62,9 +65,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   framework program writes into the folder or is queued for it, after the build changed, and when the folder is not
   the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
   outside MCP, and never prunes the snapshot it restores.
-- **Ditto as an MCP client of another framework** (MCP design T12; Ditto is hybrid): `llm-cli ditto remote set`
-  points Ditto at the MCP server of a framework running elsewhere, for example the headless Docker image (stdio
-  through a command such as `docker exec -i <container> llm-cli mcp serve`, or HTTP to an https or loopback address).
+- **Ditto and the framework on another computer** (MCP design T12; Ditto is hybrid; design 6.1): `llm-cli ditto
+  remote set` points Ditto at the MCP server of the framework installed on a second computer (a build PC, a server;
+  the same program, not a different one). Docker is not needed: SSH reaches it, as a tunnel to its loopback HTTP
+  address or as the stdio command (`ssh -T -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve`); a framework
+  container you built yourself is one alternative (`docker exec -i <container> llm-cli mcp serve`).
   That server's registry, permissions, fool-proof layer, questions and audit log apply; Ditto's identity there is a
   named token made with `llm-cli mcp token add NAME --link ditto`, so Ditto's own permissions apply in both modes at
   once and the audit log there shows `mcp:NAME`. The token is kept in Ditto's credential vault and reaches the server
@@ -73,6 +78,25 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   names the server. `llm-cli ditto remote show|test|off`. `llm-cli mcp serve --transport http --container` binds the
   container's interfaces inside a container only (named token, Host and Origin checks unchanged; publish the port to
   the host's loopback).
+- **The framework in a container, built on your own computer** (round 5 h): no framework image is published or
+  pulled. `scripts/build_container_image.sh` (`make build`) checks Docker, BuildKit and the checkout, stages exactly
+  the files the repository ships and builds `Docker Setup/Dockerfile` with a local tag (`lcf-framework:local`; a
+  name with a registry is refused), then prints how to run it. The Dockerfile runs the same installation as on bare
+  metal (`install.sh`, which leaves out only the Docker engine and the `docker` group with `LCF_CONTAINER_BUILD=1`
+  and uses `runuser` where `sudo` is missing) on Debian 13 slim pinned by digest, for a non-root user with your ids,
+  with the sources as a read-only build mount (no secret in any layer) and everything personal in the volume
+  `/data` (settings, vault, audit log, tokens, models, builds, datasets, logs); headless CLI and MCP server by
+  default (with the GLib library Qt's core needs, which the CLI imports), the GUI's desktop libraries only with
+  `--gui` (everything Qt's xcb platform plugin loads); a group with your group id that Debian has already is reused.
+  The build ends with a check that the command line imports and every system library Qt loads is there, and stops
+  naming what is missing. A build from the repository folder itself is refused. The compose file never pulls the image (`pull_policy:
+  never`), and every `docker run` the builder prints or the CI runs says `--pull never`; it publishes no port and
+  drops all capabilities; AI clients reach the MCP server over stdio (`docker exec -i lcf-framework llm-cli mcp
+  serve`, from another computer over SSH to the host). Targets you create and packs you install stay in the
+  container's program folder: `make down` only stops, and `make up`, `make gui` and `make clean` never replace or
+  remove a container that holds files of yours outside the volume; they list each one with full path, file name,
+  size and what it is (`make kept-files`, `scripts/container_kept_files.sh`). The target files' `docker.registry`
+  and `docker.tags` are documented as local image names only. Guide: `docs/Container_Setup.md`.
 - **Shared build state** (MCP design T11): every framework program (the GUI, a CLI call, each MCP server) writes a
   summary of each build request into the per-user folder (`build_requests/`), so the GUI status bar, `llm-cli build
   status`, `list_build_requests` and `get_build_status` see the same builds whichever program started them, also a
@@ -1073,7 +1097,19 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   `rsync --delete` deleted everything in `/opt` the repository does not ship: targets made with the module wizard
   or `llm-cli module create`, installed community packs, and the builds, cache, models and `configs/config.yml`.
   A list that cannot be made stops it before anything is copied or removed, a stale link is removed itself, never
-  the file it points to, and the copy of `install.sh` in `/opt` copies and removes nothing.
+  the file it points to, and the copy of `install.sh` in `/opt` copies and removes nothing. Installed from a folder
+  without version control (an unpacked archive), it skips only the top-level `build/` and `dist/` folders, no longer
+  every folder named `build` (among them the framework's own `orchestrator/runtime/build/`). When the Python
+  environment cannot be set up (no `venv` module, a pinned package the index does not offer), it stops with a
+  message; before, it reported the installation as finished with an empty environment.
+- `make build`, `make up`, `make gui`, `make down` and `Docker Setup/docker-compose.yml` work: the compose file built
+  from an `orchestrator/Dockerfile` that never existed, and the Makefile called the old `docker-compose` with it and
+  the missing `scripts/setup_linux.sh`. The Makefile uses `docker compose` (v2) and the builder; `make setup` and
+  `make test-container` are gone (they needed the missing files; tests run with `make test`), and so are the compose
+  services with unpinned third-party images and the Docker socket (socket proxy, ctop, Trivy). `make audit` scans an
+  archive of the image with the pinned Trivy version, without the Docker socket. `make clean` no longer deletes the
+  data volume, `output/` and `cache/` without asking: it removes only containers that hold nothing of yours outside
+  the volume and shows what holds data.
 - Deployment packages take user profiles, voice templates and prompts only from the config folder, never from a
   `config/` folder in the working directory.
 - The Hugging Face model browser can be opened again: **Tools > Hugging Face Model Browser...** (no menu led to it).
