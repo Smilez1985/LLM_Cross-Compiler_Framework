@@ -374,9 +374,19 @@ du Claude Desktop neu.
   braucht jeder Client sein eigenes benanntes Token: `llm-cli mcp token add NAME` zeigt es einmal, und der Client
   schickt es als `Authorization: Bearer <Token>`. Webseiten (Anfragen mit `Origin`-Header) werden abgewiesen.
 - **Ein Token pro Client:** Ein benanntes Token ist der Aufrufer im Audit-Log (`mcp:<Name>`) und hat eigene
-  Berechtigungen; ein neues darf nur lesen, bis du mehr erlaubst (`llm-cli tools permissions --token NAME`). Ein
+  Berechtigungen; ein neues darf nur lesen, bis du mehr erlaubst (`llm-cli tools permissions --token NAME`, oder in
+  der GUI unter Tools > Tool Permissions (Ditto / MCP), wo Tokens auch angelegt, rotiert und widerrufen werden). Ein
   stdio-Client bekommt sein eigenes Token mit `LCF_MCP_TOKEN` in seinem Server-Eintrag; ohne es teilen sich alle
   lokalen stdio-Clients deine eigenen Berechtigungen.
+- **Ressourcen:** Die Targets, die Capabilities eines Targets, Status und Log eines Builds, deine
+  Tool-Berechtigungen und die Dokumentation des Frameworks lassen sich auch als Ressourcen anhängen
+  (`lcf://targets`, `lcf://builds/<ID>/log`, `lcf://docs/Features`, ...). Sie folgen den Berechtigungen des
+  passenden Lese-Tools und landen wie ein Tool-Aufruf im Audit-Log; Clients mit Protokoll 2026-07-28 erfahren, wenn
+  sich ein Build oder die Berechtigungen ändern.
+- **Prompts:** Dittos Aufgaben für deinen Client, mit denselben Anweisungen und demselben Wissenskontext, den Ditto
+  bekommt: `ask_about_framework`, `convert_model_for_board`, `recommend_build_settings` und `diagnose_build_failure`
+  (in Claude Code als Slash-Befehle). Sie gewähren nichts; jeder Schritt läuft weiter über die Tools und deine
+  Berechtigungen, und ein Prompt zeigt nichts, was ein Lese-Tool, das du verbietest, zeigen würde.
 - Ein Tool zum Übertragen auf Boards gibt es über MCP nicht.
 
 **Ein Claude-Abo nutzen:** Anthropic erlaubt Drittanbieter-Apps nicht, die Anmeldung oder die Limits eines

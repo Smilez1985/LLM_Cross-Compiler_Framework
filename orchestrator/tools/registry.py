@@ -29,7 +29,8 @@ from orchestrator.tools.grants import NEVER_GRANT
 from orchestrator.tools.limits import Limiter, wait_text
 from orchestrator.tools.normalize import (NormalizeError, Repair, check_names_distinct, list_item_literal,
                                           normalize_arguments, resolve_name)
-from orchestrator.tools.output import UNTRUSTED_CHARS, ResultTooLarge, check_size, filtered_result
+from orchestrator.tools.output import (MAX_RESULT_BYTES, UNTRUSTED_CHARS, ResultTooLarge, check_size, filtered_result,
+                                       has_untrusted)
 from orchestrator.tools.mcp_tokens import ACTOR_PREFIX, TokenStore, TokenStoreError
 from orchestrator.tools.policy import (TIER_CAPS, Decision, DecisionRule, PolicyStore, ToolPolicy, ToolTier,
                                        restrictive_policy, stricter)
@@ -37,7 +38,7 @@ from orchestrator.tools.spec import (CHANNELS, DAY, LIMITS, CallerLimits, CallFa
                                      ToolLimits, example_problems)
 from orchestrator.utils.helpers import redact_secrets
 from orchestrator.utils.logging import get_logger
-from orchestrator.utils.untrusted import sanitize_untrusted
+from orchestrator.utils.untrusted import sanitize_untrusted, wrap_untrusted
 
 
 def datetime_now_iso() -> str:
@@ -211,6 +212,86 @@ class ToolSpec:
         return rule or TIER_CAPS.get(self.tier, Decision.ASK)
 
 
+@dataclass(frozen=True)
+class ResourceSpec:
+    """An MCP resource or resource template read through the registry like a read tool (design 4.4): the caller's
+    permission decides, the result is filtered, the read is audited as the pseudo-tool `read_resource:<uri>`.
+
+    `tool` names the read tool the resource mirrors: that tool's permission decides (a resource never shows what the
+    tool may not), its input model checks the parameters (`arguments` maps them to the tool's arguments) and its
+    output model filters the result. Without a tool, `read(params)` returns framework text (capped, secrets
+    redacted) and the caller's read permission decides. `listed()` gives the parameters of the concrete resources
+    to list (e.g. the documents that exist)."""
+    uri: str
+    name: str
+    title: str
+    description: str
+    mime_type: str
+    tool: str = ""
+    arguments: Callable[[Dict[str, str]], Dict[str, Any]] = field(default=lambda params: dict(params))
+    read: Optional[Callable[[Dict[str, str]], str]] = None
+    listed: Optional[Callable[[], List[Dict[str, str]]]] = None
+    # Completion of template parameters (MCP completion/complete): parameter -> f(arguments so far, ctx) -> values.
+    completions: Mapping[str, Callable[[Dict[str, str], "ToolContext"], List[str]]] = field(default_factory=dict)
+
+    @property
+    def audit_name(self) -> str:
+        return f"read_resource:{self.uri}"
+
+
+@dataclass(frozen=True)
+class PromptArg:
+    """One argument of a prompt: a string. Free text is only ever the last argument (Claude Code splits prompt
+    arguments on whitespace)."""
+    name: str
+    description: str
+    required: bool = False
+    max_chars: int = 200
+
+
+@dataclass(frozen=True)
+class PromptSpec:
+    """An MCP prompt read through the registry like a read tool (design 4.3, 4.4). `instructions` is a constant the
+    framework wrote (no argument value, no external text); `render(arguments, ctx)` builds the context message, with
+    every value from outside the framework inside a wrap_untrusted block. `tools` are the tools the prompt leads to:
+    it is offered only when all of them are registered, so a prompt never names a tool that does not exist. `reads`
+    are the read tools (among `tools`) whose data the context holds, such as a build's log: like a resource, a prompt
+    shows nothing those tools may not, so it is hidden while the caller's permissions deny one of them and refused
+    while one is set to "ask"."""
+    name: str
+    title: str
+    description: str
+    instructions: str
+    arguments: Tuple[PromptArg, ...]
+    render: Callable[[Dict[str, str], "ToolContext"], str]
+    tools: Tuple[str, ...] = ()
+    completions: Mapping[str, Callable[[Dict[str, str], "ToolContext"], List[str]]] = field(default_factory=dict)
+    reads: Tuple[str, ...] = ()
+
+    @property
+    def audit_name(self) -> str:
+        return f"get_prompt:{self.name}"
+
+
+MAX_PROMPT_CHARS = 24000  # a whole prompt (instructions and context)
+MAX_COMPLETIONS = 100     # values one completion returns (the MCP limit)
+
+
+@dataclass(frozen=True)
+class _Surface:
+    """A resource or prompt as the policy and the audit log see it: a read-tier pseudo-tool."""
+    name: str
+    title: str
+    tier: ToolTier = ToolTier.READ
+    default_decision: DecisionRule = None
+    max_decision: DecisionRule = None
+
+
+class ResourceUnknown(ToolInputError):
+    """No such resource, an unknown id or invalid parameters (MCP: invalid params, -32602)."""
+    code = "unknown_id"
+
+
 Confirm = Callable[[ToolSpec, BaseModel], bool]
 
 # The registry and actor of the call a handler runs for (handlers do not get the context; get_status reads it).
@@ -382,6 +463,8 @@ class ToolRegistry:
         self.limits = limits
         self.limiter = Limiter(clock or time.monotonic)
         self._tools: Dict[str, ToolSpec] = {}
+        self._resources: Dict[str, ResourceSpec] = {}  # by URI (template)
+        self._prompts: Dict[str, PromptSpec] = {}
         # Repeat guard and per-session counters (in memory; per caller and session).
         self._guard_lock = threading.Lock()
         self._failures: "OrderedDict[tuple, Dict[str, Any]]" = OrderedDict()
@@ -1304,3 +1387,312 @@ class ToolRegistry:
         result = filtered_result(result, notes)
         check_size(result, spec.paging_hint, spec.limits.max_result_bytes)
         return result
+
+    # --- resources (design 4.4): read like the read tools, filtered and audited ------------------------------------
+
+    def register_resource(self, spec: ResourceSpec) -> ResourceSpec:
+        if spec.uri in self._resources:
+            raise ValueError(f"Resource '{spec.uri}' is already registered.")
+        if spec.tool:
+            if self.get(spec.tool).tier != ToolTier.READ:
+                raise ValueError(f"Resource '{spec.uri}' may only mirror a read tool, not '{spec.tool}'.")
+        elif spec.read is None:
+            raise ValueError(f"Resource '{spec.uri}' needs a read tool or a read function.")
+        self._resources[spec.uri] = spec
+        return spec
+
+    def refuse_resource(self, uri: Any, ctx: ToolContext, detail: str = "") -> None:
+        """Audits a resource read refused before it reached a resource (an unknown URI, another scheme, a parameter
+        the SDK rejects, such as `..`), like an unknown tool name: the URI as written, cut and redacted."""
+        if self.audit is None:
+            return
+        shown = redact_secrets("".join(ch if ch.isprintable() else "?" for ch in str(uri))[:64])
+        try:
+            self.audit.record(ctx.actor, f"read_resource:{shown}", ToolTier.READ.value, Decision.DENY.value,
+                              "invalid_input", arguments={"uri": str(uri)[:500]}, detail=detail,
+                              extra={"client": ctx.client, "session": ctx.session, "reason_code": "unknown_id"})
+        except Exception as e:  # reads and refusals never fail on the audit log
+            self.logger.warning(f"Audit write failed: {redact_secrets(str(e))}")
+
+    def _decider(self, spec: ResourceSpec) -> Any:
+        """What the policy decides a resource as: the read tool it mirrors, or a read-tier pseudo-tool."""
+        return self._tools[spec.tool] if spec.tool else _Surface(spec.audit_name, spec.title)
+
+    def resources(self, caller: Optional[str] = None) -> List[ResourceSpec]:
+        """Every resource, or the ones `caller` may read (MCP lists only those, as it hides denied tools)."""
+        if caller is None:
+            return list(self._resources.values())
+        policy, section = self._policy_of(caller)
+        return [r for r in self._resources.values()
+                if policy.decide_tool(self._decider(r), None, section, owner=caller) != Decision.DENY]
+
+    def _read_rate(self, ctx: ToolContext, surface: Any, decision: Decision, arguments: Dict[str, Any]) -> None:
+        """The read rate of the limits table for a resource read or a prompt get, counted together with the read tool
+        calls of the same caller (design 4.4: the same rate limit as the read tools). A hit is audited
+        (`rate_limited`, reason code `limit_reached`) and raised as LimitHit, like a tool call's."""
+        rate = self.limits.read_rate
+        if rate is None:
+            return
+        wait = self.limiter.take(("rate", ctx.actor, "read"), rate.count, rate.per, rate.burst)
+        if wait is None:
+            return
+        message = (f"This client made too many read calls (read tools, resources and prompts together: at most "
+                   f"{rate.count} per {rate.per:g} seconds). Try again {wait_text(wait)}.")
+        self._audit(ctx, surface, decision, "rate_limited", arguments, detail=message, reason_code="limit_reached")
+        raise LimitHit(message, code="limit_reached",
+                       next="Wait, then read it again; tell the person if they are waiting for it.")
+
+    def read_resource(self, uri: str, params: Optional[Dict[str, str]], ctx: ToolContext) -> Tuple[str, bool]:
+        """Reads the resource `uri` (a registered URI or template) with its parameters for `ctx.actor`. Returns
+        (text, external): `external` means the text is wrapped as untrusted data. The caller's permission for the
+        mirrored read tool decides (a resource cannot ask, so "ask" refuses with the tool to call instead); the
+        result goes through the tool's output filter; every read is audited as `read_resource:<uri>` (fail-open,
+        like every read). ResourceUnknown: no such resource, an unknown id or invalid parameters."""
+        spec = self._resources.get(uri)
+        if spec is None:
+            raise ResourceUnknown(f"Unknown resource '{uri}'.", next="List the resources (resources/list).")
+        began, params = time.monotonic(), dict(params or {})
+        surface, mirrored = _Surface(spec.audit_name, spec.title), self._tools.get(spec.tool)
+        decider: Any = mirrored or surface
+        inp: Optional[BaseModel] = None
+        if mirrored is not None:
+            try:
+                normalized = normalize_arguments(mirrored, spec.arguments(params))
+                ctx = dataclasses.replace(ctx, repairs=list(normalized.repairs), notes=[])
+                inp = self.validate_input(mirrored, normalized.arguments)
+            except (NormalizeError, ToolInputError) as e:
+                self._audit(ctx, surface, self.decide(decider, None, ctx), "invalid_input", params, detail=str(e),
+                            reason_code=e.code)
+                raise ResourceUnknown(str(e), code=e.code) from None
+        decision = self.decide(decider, inp, ctx)
+        if decision != Decision.DENY:  # a denied read is refused as denied, not counted
+            self._read_rate(ctx, surface, decision, params)
+        if decision != Decision.ALLOW:
+            asks = decision == Decision.ASK
+            self._audit(ctx, surface, decision, "not_confirmed" if asks else "denied", params,
+                        reason_code="needs_person" if asks else "permission_denied",
+                        answer="unavailable" if asks else "")
+            if not asks:
+                raise ToolDenied(f"'{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
+            raise ToolDenied(f"Reading '{spec.title}' needs the person's confirmation, which reading a resource "
+                             "cannot ask for.", code="needs_person",
+                             next=(f"Call the tool {spec.tool} instead; it asks the person." if spec.tool
+                                   else UNASKED_HINT))
+
+        def end(outcome: str, detail: str = "", reason_code: str = "", text: str = "") -> None:
+            extra = {"result": {"sha256": text_sha256(text), "bytes": len(text.encode("utf-8"))}} if text else {}
+            self._audit(ctx, surface, decision, outcome, params, detail=detail, reason_code=reason_code,
+                        duration_ms=int((time.monotonic() - began) * 1000), **extra)
+
+        token = _CALL.set((self, ctx.actor))
+        try:
+            if mirrored is not None:
+                raw = mirrored.handler(inp, ctx) if mirrored.takes_context else mirrored.handler(inp)
+                result = self._output(mirrored, raw)
+                body = json.dumps(result.model_dump(mode="json")).replace("<", "\\u003c")
+                external = has_untrusted(mirrored.output_model)
+                try:
+                    source = spec.uri.format(**params)
+                except (KeyError, IndexError, ValueError):
+                    source = spec.uri
+                text = (wrap_untrusted(body, source=f"resource:{source}", max_len=len(body) + 1) if external
+                        else body)
+            else:
+                text, external = framework_text(spec.read(params)), False
+        except ResultTooLarge as e:
+            end("error", str(e), "limit_reached")
+            raise ToolError(f"{spec.title}: {e}", code="limit_reached") from None
+        except ValidationError as e:  # a schema or handler bug, as in _run
+            self.logger.error(f"Resource {spec.uri} produced invalid data: {e}", exc_info=True)
+            end("error", repr(e), "failed")
+            raise ToolError(f"{spec.title} failed (internal error; details are in the framework log).") from None
+        except (ToolError, ValueError, LookupError) as e:  # an unknown id, or a refusal with its own code
+            code = getattr(e, "code", None) or "failed"
+            message = external_error_text(getattr(e, "message", None) or str(e))
+            next_step = redact_secrets(getattr(e, "next", "") or "")
+            end("error", message, code)
+            if code in ("unknown_id", "invalid_value") or isinstance(e, LookupError):
+                raise ResourceUnknown(message, code="unknown_id", next=next_step) from None
+            raise ToolError(message, code=code, next=next_step, quoted=message) from None
+        except Exception as e:
+            self.logger.error(f"Resource {spec.uri} failed: {e}", exc_info=True)
+            end("error", repr(e), "failed")
+            message = external_error_text(str(e))
+            raise ToolError(f"{spec.title} failed: {message}", quoted=message) from None
+        finally:
+            _CALL.reset(token)
+        end("ok", text=text)
+        return text, external
+
+    # --- prompts (design 4.3, 4.4): read like a read tool, filtered and audited ----------------------------------------
+
+    def register_prompt(self, spec: PromptSpec) -> PromptSpec:
+        if spec.name in self._prompts:
+            raise ValueError(f"Prompt '{spec.name}' is already registered.")
+        names = [a.name for a in spec.arguments]
+        if len(names) != len(set(names)):
+            raise ValueError(f"Prompt '{spec.name}' declares an argument twice.")
+        if not set(spec.reads) <= set(spec.tools):
+            raise ValueError(f"Prompt '{spec.name}' reads tools it does not lead to: "
+                             f"{sorted(set(spec.reads) - set(spec.tools))}.")
+        self._prompts[spec.name] = spec
+        return spec
+
+    def missing_tools(self, spec: PromptSpec) -> List[str]:
+        """The tools a prompt leads to that are not registered (then it is not offered)."""
+        return [t for t in spec.tools if t not in self._tools]
+
+    def prompts(self, caller: Optional[str] = None) -> List[PromptSpec]:
+        """Every prompt, or the ones offered to `caller`: every tool it leads to is registered, its read permission
+        allows it (pseudo-tool get_prompt:<name>, read tier), and no read tool whose data it holds is denied."""
+        if caller is None:
+            return list(self._prompts.values())
+        policy, section = self._policy_of(caller)
+
+        def offered(p: PromptSpec) -> bool:
+            if self.missing_tools(p):
+                return False
+            deciders = [_Surface(p.audit_name, p.title)] + [self._tools[t] for t in p.reads]
+            return all(policy.decide_tool(d, None, section, owner=caller) != Decision.DENY for d in deciders)
+        return [p for p in self._prompts.values() if offered(p)]
+
+    def _prompt_decision(self, spec: PromptSpec, ctx: ToolContext) -> Tuple[Decision, str]:
+        """(the decision for getting a prompt, the read tool that decided it or ""): the prompt's own read
+        permission and that of every read tool whose data its context holds; deny before ask before allow."""
+        decision, holder = self.decide(_Surface(spec.audit_name, spec.title), None, ctx), ""
+        for tool in spec.reads:
+            if decision == Decision.DENY:
+                break
+            read = self.decide(self._tools[tool], None, ctx)
+            if read == Decision.DENY or (read == Decision.ASK and decision == Decision.ALLOW):
+                decision, holder = read, tool
+        return decision, holder
+
+    def get_prompt(self, name: Any, arguments: Any, ctx: ToolContext) -> Tuple[str, List[str]]:
+        """A prompt for `ctx.actor`: (description, [instructions, context]). The arguments are checked against the
+        prompt's own (an unknown one is refused with the valid names, never dropped); the read permission decides;
+        the context is built by the prompt (external text in untrusted blocks), secrets are redacted and the whole is
+        capped at MAX_PROMPT_CHARS; every get is audited as `get_prompt:<name>`. ResourceUnknown (invalid params):
+        no such prompt, a tool it needs is missing, invalid arguments or an unknown id."""
+        spec = self._prompts.get(name) if isinstance(name, str) else None
+        if spec is None:
+            from orchestrator.tools.normalize import suggest
+            close = suggest(str(name), [p.name for p in self.prompts(ctx.actor)])
+            shown = redact_secrets("".join(ch if ch.isprintable() else "?" for ch in str(name))[:64])
+            raise ResourceUnknown(f"Unknown prompt '{shown}'." + (f" Did you mean '{close[0]}'?" if close else ""),
+                                  next="List the prompts (prompts/list).", suggestions=close)
+        began, surface = time.monotonic(), _Surface(spec.audit_name, spec.title)
+        raw = dict(arguments) if isinstance(arguments, dict) else {}
+        missing = self.missing_tools(spec)
+        if missing:
+            message = (f"The prompt '{spec.name}' leads to the tool {', '.join(missing)}, which this framework "
+                       "version does not have yet.")
+            self._audit(ctx, surface, self.decide(surface, None, ctx), "error", raw, detail=message,
+                        reason_code="no_tool")
+            raise ResourceUnknown(message, code="no_tool", next="Do the task with the tools that are listed, or tell "
+                                                                "the user which tool is missing.")
+        known = {a.name: a for a in spec.arguments}
+        args: Dict[str, str] = {}
+        problems: List[str] = []
+        for key, value in raw.items():
+            if key not in known:
+                from orchestrator.tools.normalize import suggest
+                close = suggest(str(key), list(known))
+                shown = redact_secrets("".join(ch if ch.isprintable() else "?" for ch in str(key))[:64])
+                problems.append(f"unknown argument '{shown}'" + (f" (did you mean '{close[0]}'?)" if close else ""))
+            elif value is None:
+                continue
+            elif not isinstance(value, str):
+                problems.append(f"'{key}' must be text")
+            elif len(value) > known[key].max_chars:
+                problems.append(f"'{key}' is longer than {known[key].max_chars} characters")
+            elif value.strip():
+                args[key] = value.strip()
+        problems += [f"'{a.name}' is required" for a in spec.arguments if a.required and a.name not in args]
+        decision, holder = self._prompt_decision(spec, ctx)
+        if problems:
+            message = (f"Invalid arguments for the prompt {spec.name}: {'; '.join(problems)}. Valid arguments: "
+                       f"{', '.join(known) or 'none'}.")
+            self._audit(ctx, surface, decision, "invalid_input", raw, detail=message, reason_code="invalid_value")
+            raise ResourceUnknown(message, code="invalid_value", next=f"Get the prompt {spec.name} again with these "
+                                                                     "arguments fixed.")
+        if decision != Decision.DENY:  # a denied get is refused as denied, not counted
+            self._read_rate(ctx, surface, decision, args)
+        if decision != Decision.ALLOW:
+            asks = decision == Decision.ASK
+            self._audit(ctx, surface, decision, "not_confirmed" if asks else "denied", args,
+                        reason_code="needs_person" if asks else "permission_denied",
+                        answer="unavailable" if asks else "")
+            if asks and holder:
+                raise ToolDenied(f"The prompt '{spec.title}' holds what {holder} returns, which needs the person's "
+                                 "confirmation; getting a prompt cannot ask for it.", code="needs_person",
+                                 next=f"Call the tool {holder} instead; it asks the person.")
+            if asks:
+                raise ToolDenied(f"The prompt '{spec.title}' needs the person's confirmation, which getting a prompt "
+                                 "cannot ask for.", code="needs_person", next=UNASKED_HINT)
+            if holder:
+                raise ToolDenied(f"The prompt '{spec.title}' holds what {holder} returns, which your tool permissions "
+                                 "do not allow.", next=DENIED_HINT)
+            raise ToolDenied(f"The prompt '{spec.title}' is not allowed by your tool permissions.", next=DENIED_HINT)
+
+        def end(outcome: str, detail: str = "", reason_code: str = "", text: str = "") -> None:
+            extra = {"result": {"sha256": text_sha256(text), "bytes": len(text.encode("utf-8"))}} if text else {}
+            self._audit(ctx, surface, decision, outcome, args, detail=detail, reason_code=reason_code,
+                        duration_ms=int((time.monotonic() - began) * 1000), **extra)
+
+        token = _CALL.set((self, ctx.actor))
+        try:
+            context = redact_secrets(str(spec.render(dict(args), ctx) or ""))
+        except (ToolError, ValueError, LookupError) as e:
+            code = getattr(e, "code", None) or "failed"
+            message = external_error_text(getattr(e, "message", None) or str(e))
+            next_step = redact_secrets(getattr(e, "next", "") or "")
+            end("error", message, code)
+            if code in ("unknown_id", "invalid_value") or isinstance(e, LookupError):
+                raise ResourceUnknown(message, code="unknown_id", next=next_step) from None
+            raise ToolError(message, code=code, next=next_step, quoted=message) from None
+        except Exception as e:
+            self.logger.error(f"Prompt {spec.name} failed: {e}", exc_info=True)
+            end("error", repr(e), "failed")
+            message = external_error_text(str(e))
+            raise ToolError(f"{spec.title} failed: {message}", quoted=message) from None
+        finally:
+            _CALL.reset(token)
+        room = MAX_PROMPT_CHARS - len(spec.instructions)
+        if len(context) > room:
+            context = context[:max(0, room - 40)] + "\n[... truncated at the prompt limit ...]"
+        end("ok", text=spec.instructions + context)
+        return spec.description, [spec.instructions, context]
+
+    def complete(self, kind: str, ref: str, argument: str, value: str, context: Optional[Dict[str, str]],
+                 ctx: ToolContext) -> List[str]:
+        """Completion values for a prompt argument (kind "prompt") or a resource template parameter ("resource"):
+        only for a prompt or resource this caller is offered, filtered by what was typed (any letter case), at most
+        MAX_COMPLETIONS. A provider that fails gives nothing."""
+        if kind == "prompt":
+            spec: Any = self._prompts.get(ref)
+            offered = spec is not None and spec.name in {p.name for p in self.prompts(ctx.actor)}
+        else:
+            spec = self._resources.get(ref)
+            offered = spec is not None and spec.uri in {r.uri for r in self.resources(ctx.actor)}
+        provider = spec.completions.get(argument) if offered else None
+        if provider is None:
+            return []
+        token = _CALL.set((self, ctx.actor))
+        try:
+            values = provider(dict(context or {}), ctx)
+        except Exception:  # noqa: BLE001 - completions are hints
+            return []
+        finally:
+            _CALL.reset(token)
+        typed = (value or "").lower()
+        return [v for v in dict.fromkeys(str(x) for x in values or []) if v.lower().startswith(typed)][:MAX_COMPLETIONS]
+
+
+def framework_text(text: Any, limit: int = MAX_RESULT_BYTES) -> str:
+    """Text the framework wrote itself (its documents): secrets redacted, cut at `limit` bytes with a note."""
+    text = redact_secrets(str(text or ""))
+    data = text.encode("utf-8")
+    if len(data) <= limit:
+        return text
+    return data[:limit].decode("utf-8", "ignore") + "\n[... truncated ...]"

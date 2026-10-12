@@ -234,6 +234,33 @@ Einstellungen überschreiben sie: `ai_model` und `ai_effort` für alle Aufgaben,
 `ai_effort_<Aufgabe>` für eine Aufgabe. Aufwandsstufen sind `low`, `medium`, `high`, `xhigh` und `max`; jeder
 Anbieter übersetzt sie in das, was er versteht.
 
+### Ehrliches „kann ich nicht“ und ungetestete Hardware
+
+Die Aufgabentexte stehen in einem Modul (`orchestrator/llm/task_prompts.py`), das Ditto und die
+[MCP-Prompts](#mcp-server) teilen. Jeder von ihnen sagt dem Modell: Wenn es eine Aufgabe nicht erledigen kann, sagt es
+das mit dem konkreten Grund (welche Information fehlt, welche Fähigkeit oder welches Tool es nicht gibt, welche
+Berechtigung verweigert ist, welches Gerät oder welche Hardware nicht verfügbar ist, welches Limit erreicht ist) und
+behauptet nie ein Ergebnis, das es nicht bekommen hat; dass sich ein Ergebnis nicht auf echter Hardware testen lässt,
+ist kein Grund abzulehnen. Modulvorschläge und Build-Empfehlungen dürfen mit `cannot` und einem solchen Grund
+antworten. Wenn die eigene Prüfung des Frameworks in den Eingaben der Aufgabe findet, was die Aufgabe braucht (eine
+Probe oder das Board mit seinem SoC; Formate, die das Target anbietet), fragt Ditto das Modell noch einmal, und ein
+zweites `cannot` erreicht dich als „vom Framework nicht bestätigt“. Ohne Probe und ohne Board gibt es nichts, worauf
+ein Modul aufbauen könnte: Das sagt Ditto selbst und fragt kein Modell. Die Healing-Analyse hat kein `cannot`; eine
+unklare Ursache kommt mit einer niedrigen Sicherheit.
+
+**Modulvorschläge** dürfen jedes Basis-Image verwenden. Ditto bevorzugt ein Docker Official Image (`debian`,
+`ubuntu`) mit den Paketen des Herstellers; für jedes andere Image, zum Beispiel das Toolchain-Image eines Herstellers
+auf `nvcr.io`, muss es seinen Grund angeben (`base_image_reason`). Werte, die es geraten hat, listet es in
+`assumptions` auf (höchstens 10). Bevor das Modul angelegt wird, zeigen der Modul-Assistent und
+`llm-cli module generate-ai` das Basis-Image offen: Registry, Image, Digest (oder, ohne Digest, entweder dass das
+Modul das Image über sein Tag nutzt, bei der kurzen Liste von Basis-Images des Modulgenerators, oder dass der
+Generator es ablehnt, bis es festgelegt ist),
+„Docker Official Image“ oder „andere Registry: ...; fertiges Image seines Herausgebers, vom Framework nicht geprüft“,
+dass der Image-Build mit Netzwerkzugriff auf diesem Rechner außerhalb der Build-Sandbox läuft, und den Grund der KI.
+Der Assistent übernimmt das vorgeschlagene Image unverändert (ein Image mit „debian“ im Namen wird nicht mehr durch
+`debian:bookworm-slim` ersetzt). Das angelegte Modul sagt in seiner Beschreibung, dass es ungetestet ist, und nennt
+die Annahmen; seine Unterstützungsstufe ist community.
+
 ### Anbieter
 
 | ID | Art | Wo es läuft | Anmeldung heute |
@@ -946,6 +973,49 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Teil als nicht vertrauenswürdige Daten eingepackt, während die eigenen Ablehnungen des Frameworks und der nächste
   Schritt unverpackt bleiben (Dittos Modell bekommt solche Fehler ebenfalls in einem Block für nicht
   vertrauenswürdige Daten).
+- **Ressourcen:** Neben den Tools bietet der Server Ressourcen, die ein Client anhängen oder lesen kann:
+  `lcf://targets`, `lcf://targets/<Target>/capabilities`, `lcf://builds/<Request-ID>/status`,
+  `lcf://builds/<Request-ID>/log` (die letzten 200 Zeilen), `lcf://permissions` und die Dokumente der Installation
+  `lcf://docs/<Name>` (`CLI_Usage`, `Features`, `Module_Developer_Guide`, `BLUEPRINT` und ihre deutschen
+  `_DE`-Zwillinge; aufgeführt werden nur die vorhandenen). Eine Ressource liefert, was ihr Lese-Tool liefert, und wird
+  über die Tool-Registry gelesen: Deine Berechtigung für dieses Tool entscheidet (die Ressource eines verbotenen Tools
+  wird weder aufgeführt noch gelesen, und eine, deren Tool auf „fragen“ steht, wird mit dem Tool abgelehnt, das
+  stattdessen aufzurufen ist, weil das Lesen einer Ressource dich nicht fragen kann), derselbe Ausgabefilter bereinigt
+  sie (externer Text als nicht vertrauenswürdige Daten eingepackt, daher kommen diese Ressourcen als Text), und jedes
+  Lesen landet als `read_resource:<URI>` im Audit-Log. Eine unbekannte ID, ein Dokument außerhalb der Liste oder ein
+  Parameter mit `..`, einem absoluten Pfad oder einem NUL-Byte ist ein Fehler wegen ungültiger Parameter (-32602),
+  ebenfalls im Audit-Log, auch wenn der Server ihn ablehnt, bevor eine Ressource läuft (eine unbekannte URI oder ein
+  anderes Schema). Ein Dokument, das sich nicht lesen lässt, wird ohne seinen Pfad abgelehnt.
+- **Änderungsereignisse:** Ein Client mit Protokoll 2026-07-28 kann auf Änderungen hören (`subscriptions/listen`):
+  Die Listen der Tools, Prompts und Ressourcen ändern sich, wenn sich deine Berechtigungen oder die eines Tokens
+  ändern, und die Status- und Log-Ressourcen eines Builds melden jede Änderung, nur an den Aufrufer, der den Build
+  gestartet hat. Der Server veröffentlicht sie über seinen eigenen Ereignisbus; er prüft jede Sekunde auf Änderungen.
+  Auf den älteren Handshake-Revisionen kündigt er keine Änderungsmeldungen an, daher sehen diese Clients eine
+  geänderte Berechtigung bei ihrer nächsten Sitzung.
+- **Prompts:** Dittos Aufgaben für einen Client, der Dittos Arbeit übernimmt, mit demselben Aufgabentext und
+  demselben Wissenskontext, den Ditto bekommt (die meisten Clients zeigen sie als Slash-Befehle):
+  `ask_about_framework` (eine Frage; Auszüge aus der Wissensbasis und die Dokumentationsressourcen),
+  `convert_model_for_board` (Modell, Target, Board; die Capabilities des Targets und die Schritte von der Prüfung bis
+  zum gebauten Modell), `recommend_build_settings` (Modell, Target, Board, `use_knowledge`; die Formate und
+  Quantisierungstypen, die das Target für das Board anbietet) und `diagnose_build_failure` (ein Build-Request; sein
+  Zustand, das Ende seines Logs und drei Auszüge aus der Wissensbasis). `add_board` und `deploy_to_board` sind fertig
+  und werden angeboten, sobald es die Tools gibt, zu denen sie führen (ein Target-Modul anlegen, Pakete bauen und
+  übertragen). Ein Prompt gewährt nichts: Jeder Schritt läuft weiter über die Tools und deine Berechtigungen. Seine
+  erste Nachricht ist der eigene Text des Frameworks, bei jedem Aufruf derselbe; die zweite enthält den Kontext, in dem
+  jeder Wert von außerhalb des Frameworks (auch deine Argumente) als nicht vertrauenswürdige Daten eingepackt ist,
+  Secrets geschwärzt sind und der ganze Prompt auf 24.000 Zeichen begrenzt ist. Jeder Prompt trägt die Regel für das
+  ehrliche „kann ich nicht“ (siehe [Ditto](#ehrliches-kann-ich-nicht-und-ungetestete-hardware)). Ein Prompt wird wie
+  ein Lese-Tool gelesen: Deine Leseberechtigung entscheidet, ein unbekanntes Argument wird mit den gültigen Namen
+  abgelehnt (nie verworfen), und jeder Abruf landet als `get_prompt:<Name>` im Audit-Log. Ein Prompt zeigt nichts,
+  was ein Lese-Tool nicht darf: Einer, dessen Kontext enthält, was ein Lese-Tool liefert (Zustand und Log eines
+  Builds bei `diagnose_build_failure`, die Capabilities eines Targets bei `convert_model_for_board` und
+  `recommend_build_settings`), wird weder aufgeführt noch geliefert, solange du dieses Tool verbietest, und mit dem
+  aufzurufenden Tool abgelehnt, solange es auf „fragen“ steht; Auszüge aus der Wissensbasis kommen nur, solange
+  `search_knowledge` erlaubt ist. Die eigenen Texte des Targets (Format-Bezeichnungen und Hinweise aus
+  `target.yml`) sind ebenfalls externer Text.
+- **Vervollständigung:** Clients, die Argumente vervollständigen (VS Code), bekommen Target-IDs, die Boards eines
+  Targets, Dokumentnamen und die eigenen Build-Requests des Aufrufers, nur für Prompts und Ressourcen, die der
+  Aufrufer nutzen darf.
 - **Lokale Dateien für KI-Clients:** MCP-Clients und Ditto nennen nie einen Pfad. Ein lokales Modell oder ein
   Kalibrierungsdatensatz wird als `<Label>:<relativer Pfad>` in einem Ordner genannt, den die KI nutzen darf, zum
   Beispiel `models:qwen2.5-0.5b-instruct` oder `datasets:calib/de.txt`, oder über die Datei-ID (`lf_` und 16
@@ -1000,8 +1070,13 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   Loopback-Adresse (`--transport http`, Standard `http://127.0.0.1:8765/mcp`). Über HTTP schickt jeder Client sein
   eigenes benanntes Token als `Authorization: Bearer <Token>`; eine Anfrage mit `Origin`-Header (eine Webseite, auch
   ein CORS-Preflight) wird abgelehnt, der `Host`-Header muss eine Loopback-Adresse mit dem Port des Servers nennen
-  (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen und nimmt höchstens 1 MiB pro Anfrage an. Eine
-  Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet hat.
+  (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen, höchstens 4 je Token (damit ein Client die
+  anderen nicht aussperren kann), schließt eine Sitzung nach 10 Minuten ohne Anfrage und nimmt höchstens 1 MiB pro
+  Anfrage an. Eine Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet
+  hat (nach einer Rotation öffnet der Client eine neue Sitzung). Eine noch offene Anfrage (ein Warten, ein
+  Ereignisstrom, ein Listen-Strom) wird geschlossen, sobald ihr Token widerrufen oder rotiert wird, und ebenso die
+  Sitzungen dieses Tokens, sodass sie keinen Platz belegen. Was außerhalb einer vom Server geprüften Anfrage läuft,
+  bekommt keinerlei Berechtigungen, über stdio wie über HTTP.
 - **Benannte Tokens:** `llm-cli mcp token add NAME` legt ein Token für einen Client an und zeigt es einmal; das
   Framework behält nur seinen SHA-256 in `~/.llm-framework/mcp_tokens.json` (Modus 0600; solange andere Benutzer
   die Datei lesen oder ändern können oder sie einem anderen Benutzer gehört, wird kein Token angenommen und der
@@ -1012,11 +1087,16 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   einem anderen Rechner; eine Änderung an Dittos Berechtigungen gilt sofort auch dafür). `rotate` ersetzt ein Token,
   `revoke` löscht es mit seinen Berechtigungen; beides wirkt sofort, auch für einen laufenden Server, und die
   Aufrufe, die ein widerrufener stdio-Client noch schickt, werden abgelehnt und protokolliert. Ein
-  stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag: Der
-  Server liest sie einmal beim Start, entfernt sie aus seiner Umgebung und startet nicht mit einem Wert, der kein
-  gültiges Token ist. Ohne sie teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen
-  Berechtigungen. Tokens verwaltet nur ein Mensch an einem Terminal: Kein Tool kann sie anlegen, lesen oder ändern,
-  und kein Token erscheint in einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag.
+  stdio-Client bekommt sein eigenes Token über die Umgebungsvariable `LCF_MCP_TOKEN` in seinem Server-Eintrag:
+  `llm-cli` nimmt sie aus seiner Umgebung, bevor irgendein Befehl läuft (kein Befehl und kein Kindprozess erbt sie),
+  und gibt sie nur an `mcp serve` weiter, das nicht mit einem Wert startet, der kein gültiges Token ist. Ohne sie
+  teilen sich alle lokalen stdio-Clients den Aufrufer `mcp` und deine eigenen Berechtigungen. Tokens verwaltet nur
+  ein Mensch, an einem Terminal oder in der GUI (Tools > Tool Permissions (Ditto / MCP), Abschnitt „MCP tokens“:
+  auflisten, anlegen mit einmal gezeigtem Token, rotieren, widerrufen und die eigenen Berechtigungen jedes Tokens;
+  protokolliert mit dem Akteur `gui`): Kein Tool kann sie anlegen, lesen oder ändern, und kein Token erscheint in
+  einem Tool-Ergebnis, einer Logzeile oder einem Audit-Eintrag. Der Server liest den Token-Speicher bei jeder Prüfung
+  und merkt ihn sich anhand des SHA-256 der Dateibytes, sodass er eine Änderung auch dann sieht, wenn sie Größe und
+  Zeitstempel der Datei beibehält.
 - **Arbeitsordner:** Der Server liest nie Einstellungen und importiert nie Code aus dem Ordner, in dem er gestartet
   wird (der Client startet ihn mit `python -P`), und unter Windows startet er von dort keine Programme wie `docker`
   oder `git`. Ein Projektordner kann sein Verhalten nicht ändern.

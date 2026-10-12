@@ -646,7 +646,11 @@ def build_tool_registry(framework) -> ToolRegistry:
                                         anchor=_revision_anchor("tool_policy") if key else None), audit,
                             tokens=TokenStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed,
                                               anchor=_revision_anchor("mcp_tokens") if key else None))
-    register_framework_tools(registry, framework)
+    # Tools, resources and prompts all go through this one registry: the same policy, limits and audit (design S10/S11).
+    from orchestrator.tools.framework_prompts import register_framework_prompts
+    from orchestrator.tools.framework_resources import register_framework_resources
+    registry = register_framework_resources(register_framework_tools(registry, framework), framework)
+    registry = register_framework_prompts(registry, framework)
     # Pending approvals: a client that cannot ask gets its question shown in the framework instead (design 6.9).
     from orchestrator.tools.approvals import ApprovalService, ApprovalStore
     registry.attach_approvals(ApprovalService(ApprovalStore(state_dir, key=key, refuse_unkeyed=refuse_unkeyed),

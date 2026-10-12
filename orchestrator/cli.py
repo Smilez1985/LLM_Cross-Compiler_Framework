@@ -64,6 +64,7 @@ class FrameworkContext:
         self.verbose: bool = False
         self.quiet: bool = False
         self.http_client: Any = None  # reaches the providers for sign-in checks (tests: a mock transport)
+        self.mcp_token: Optional[str] = None  # LCF_MCP_TOKEN, taken from the environment for `mcp serve` only
         self.settings: Any = None  # the settings read without booting the framework (see _settings)
         self._initialized: bool = False
         
@@ -186,6 +187,10 @@ CLI_HELP = f"""
 def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool, log_level: str,
         debug_http: bool):
     """The help text is CLI_HELP (its version comes from orchestrator.__version__)."""
+    # The stdio client's MCP token: taken out of the environment before anything else runs, for every command, so
+    # no command and no child process ever inherits it; only `mcp serve` gets it, through the context.
+    from orchestrator.tools.mcp_tokens import ENV_VAR
+    ctx.mcp_token = os.environ.pop(ENV_VAR, None)
     # ConfigManager reads this file (and reports it on stderr if it cannot be read) wherever settings are needed.
     ctx.config_path = config
     ctx.log_level = "DEBUG" if verbose else ("ERROR" if quiet else log_level)
@@ -432,7 +437,7 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
 
     Ditto uses the provider's stored sign-in (llm-cli ditto login <provider>).
     """
-    from orchestrator.Core.ditto_manager import DittoError
+    from orchestrator.Core.ditto_manager import DittoError, proposal_facts
     ctx.require_framework()
     ditto = _ai_override(ctx, provider, model)
     try:
@@ -451,7 +456,8 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
 
     # The definition is shown in full before anything is written; the module generator checks it again.
     console.print("\n[bold green]AI analysis finished. Review the proposal:[/bold green]")
-    click.echo(json.dumps(definition.model_dump(), indent=2, ensure_ascii=False))
+    click.echo(json.dumps(definition.model_dump(exclude={"cannot"}), indent=2, ensure_ascii=False))
+    click.echo(proposal_facts(definition))
     if not Confirm.ask("Generate module with these settings?"):
         return
     fm = ctx.framework_manager
@@ -2563,8 +2569,10 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
     from orchestrator import mcp_server
     from orchestrator.tools.mcp_tokens import ENV_VAR
     mcp_server.no_programs_from_the_working_directory()
-    # Read once and removed before anything starts a child process (the token must not be inherited).
-    token = os.environ.pop(ENV_VAR, None)
+    # Taken from the environment by the cli() group before anything ran (the token must not be inherited).
+    token = getattr(ctx, "mcp_token", None)
+    if token is None:
+        token = os.environ.pop(ENV_VAR, None)
     if token is not None and transport != 'stdio':
         Console(stderr=True).print(f"[yellow]{ENV_VAR} is ignored over HTTP: each client sends its own "
                                    "token.[/yellow]")
