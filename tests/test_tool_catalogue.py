@@ -34,10 +34,19 @@ def test_the_catalogue_has_the_designed_size():
     assert (len(CORE), len(OPTIONAL), len(LATER)) == (37, 7, 2)
 
 
+def test_known_tools_is_exactly_the_pinned_catalogue():
+    """Ditto offers a tool of the framework on another computer only under a catalogue name (hybrid design 6.3 rule
+    2): framework_tools.KNOWN_TOOLS is that catalogue, one constant, kept equal to the sets pinned here."""
+    from orchestrator.tools.framework_tools import KNOWN_TOOLS
+    assert KNOWN_TOOLS == CORE | OPTIONAL | LATER
+
+
 def test_every_registered_tool_has_a_catalogue_name(booted_framework):
     names = [s.name for s in booted_framework.tool_registry.list()]
     assert len(names) == len(set(names)), "a tool is registered twice"
     assert set(names) <= CORE | OPTIONAL | LATER, sorted(set(names) - CORE - OPTIONAL - LATER)
+    from orchestrator.tools.framework_tools import KNOWN_TOOLS
+    assert set(names) <= KNOWN_TOOLS, "a registered tool missing from KNOWN_TOOLS is never offered from a remote"
     assert all(len(n) <= 39 for n in names), "names fit the clients' prefix limits (design 2.0)"
 
 

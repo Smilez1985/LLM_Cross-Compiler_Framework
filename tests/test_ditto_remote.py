@@ -1,11 +1,14 @@
-"""Ditto's MCP-client mode (MCP design T12; DECISIONS round 2 item 2: Ditto is hybrid).
+"""Ditto and the framework on another computer: the connection (MCP design T12; DECISIONS round 2 item 2 and round 5
+d: Ditto is hybrid; hybrid design 6.7, 6.8).
 
-Ditto keeps its in-process path and can use the tools of a framework running elsewhere through that framework's MCP
-server: the server's registry, policy and audit run; the caller is the named token Ditto presents (`mcp:<name>`, never
-`ditto`); a token made with --link ditto uses Ditto's own permissions there; the mode never starts without a token;
-one tool source per conversation; every remote result is untrusted on Ditto's side; the server's questions are
-answered with Ditto's own dialog, which names the server; the token never passes through a tool, a result or a
-command line.
+Ditto keeps its in-process path always and can also use the tools of the framework installed on another computer
+through that framework's MCP server: the server's registry, policy and audit run there; the caller is the named token
+Ditto presents (`mcp:<name>`, never `ditto`); a token made with --link ditto uses Ditto's own permissions there; the
+connection is never made without a token (the turn goes on with this computer's tools); every remote result is
+untrusted on Ditto's side; the server's questions are answered only with Ditto's own dialog, which names the server,
+and a turn without a dialog connects without the elicitation capability, so an unanswered question is never sent as
+the person's "no" (SEC-H8); the token never passes through a tool, a result or a command line. The one tool list and
+the routing between the computers are tested in test_ditto_hybrid.py.
 """
 
 import asyncio
@@ -19,7 +22,7 @@ from mcp import Client  # noqa: E402
 from mcp_types import ElicitRequestFormParams  # noqa: E402
 
 from orchestrator import mcp_server  # noqa: E402
-from orchestrator.Core.ditto_manager import ChatHistory, ChatReply, DittoCoder, DittoError  # noqa: E402
+from orchestrator.Core.ditto_manager import DittoCoder  # noqa: E402
 from orchestrator.llm import remote_tools  # noqa: E402
 from orchestrator.llm.remote_tools import (RemoteAnswer, RemoteConnection, RemoteQuestion, RemoteServer,  # noqa: E402
                                            RemoteSetupError, check_url, remote_server)
@@ -63,8 +66,9 @@ class Remote:
                                         ThingOut, self.handler("read_thing"), idempotent=True))
         self.registry.register(ToolSpec("start_build", "Start a build", "Starts a build.", ToolTier.LOCAL_WRITE,
                                         ThingIn, ThingOut, self.handler("start_build")))
-        self.registry.register(ToolSpec("noisy_read", "Noisy read", "Returns a value with an instruction (a remote server Ditto cannot check).",
-                                        ToolTier.READ, ThingIn, ThingOut,
+        # A catalogue name, so Ditto offers it from the other computer (only there: place is required).
+        self.registry.register(ToolSpec("read_knowledge_source", "Noisy read", "Returns a value with an instruction "
+                                        "(a remote server Ditto cannot check).", ToolTier.READ, ThingIn, ThingOut,
                                         lambda i: ThingOut(value=INJECTION), idempotent=True))
         self.policy(Decision.ASK)
         self.caller = f"mcp:{token_name}"
@@ -147,12 +151,14 @@ def tool_messages(model):
 
 class TestStart:
 
-    def test_without_a_token_the_mode_does_not_start_and_names_the_next_step(self, remote):
-        model = Model("never asked")
-        with pytest.raises(DittoError) as exc:
-            ditto(remote, model, secrets={}).chat("What builds exist?")
-        assert "--link ditto" in str(exc.value) and "no named MCP token" in str(exc.value)
-        assert model.requests == [], "nothing reached the model"
+    def test_without_a_token_the_other_computer_is_not_used_and_the_notice_names_the_next_step(self, remote):
+        # This computer's tools always stay: the turn goes on without the other computer and says why (HF3).
+        model = Model("Only this computer.")
+        reply = ditto(remote, model, secrets={}).chat("What builds exist?")
+        assert reply.text == "Only this computer." and reply.remote_state == "not_set_up"
+        assert "--link ditto" in reply.notices[0] and "no named MCP token" in reply.notices[0]
+        assert remote.actors() == set(), "nothing reached the other computer"
+        assert reply.notices[0] not in model.requests[0].system, "a notice is for the person, never the model"
 
     def test_the_local_default_needs_no_token(self):
         assert remote_server(Config(ai_ditto_tool_source="local")) is None
@@ -183,6 +189,14 @@ class TestStart:
         assert params.env == {"LCF_MCP_TOKEN": TOKEN}
         assert TOKEN not in " ".join([params.command, *params.args])
         assert TOKEN not in RemoteServer("http", url="http://127.0.0.1:1/mcp").label()
+
+    def test_the_token_never_appears_in_a_repr(self):
+        # The connection is now kept across turns (RemoteSession): a repr in a log line or an error must not carry it.
+        from orchestrator.llm.remote_tools import RemoteSession
+        server = RemoteServer("http", url="http://127.0.0.1:1/mcp", name="build box")
+        assert TOKEN not in repr(RemoteConnection(server, TOKEN))
+        session = RemoteSession(server, TOKEN, elicitation=False)
+        assert TOKEN not in repr(session) and TOKEN not in repr(vars(session).get("_key"))
 
     def test_a_container_runtime_gets_the_token_passed_on_by_name(self, remote):
         # docker/podman exec do not hand their environment to the process in the container: without -e the server
@@ -239,6 +253,7 @@ class TestStart:
 class TestSameRegistry:
 
     def test_tools_and_schemas_match_the_in_process_path(self, remote):
+        from orchestrator.llm.hybrid_tools import schema_key
         with remote.connection() as connection:
             listed = {t.name: t for t in connection.tools()}
         local = {t.name: t for t in tool_specs_from_registry(remote.registry,
@@ -246,8 +261,9 @@ class TestSameRegistry:
         assert set(listed) == set(local)
         for name, spec in local.items():
             remote_schema = listed[name].input_schema
-            assert remote_schema["properties"] == spec.input_schema["properties"], name
+            assert schema_key(remote_schema) == schema_key(spec.input_schema), name
             assert remote_schema.get("additionalProperties") is False, "closed schema on the MCP path too"
+            assert listed[name].description == "", "the remote server's own words are never kept"
 
     def test_the_audit_actor_is_the_token_never_ditto(self, remote):
         with remote.connection() as connection:
@@ -332,54 +348,88 @@ class TestDittoSide:
         assert asyncio.run(connection._elicit(None, params)).action == "decline"
 
     def test_a_remote_instruction_reaches_the_model_only_inside_an_untrusted_block(self, remote):
-        model = Model(call("noisy_read", thing_id="n"), "Done.")
+        model = Model(call("read_knowledge_source", thing_id="n", place="build_box"), "Done.")
         reply = ditto(remote, model).chat("Read thing n")
         (result,) = tool_messages(model)
         text = result.content if isinstance(result.content, str) else str(result.content)
         assert INJECTION in text
         before, _, after = text.partition(INJECTION)
         assert "<untrusted_data" in before and "</untrusted_data" in after
-        assert 'source="remote:build box:noisy_read"' in before
-        assert reply.tool_source == "mcp:build box"
+        assert 'source="remote:build box:read_knowledge_source"' in before
+        assert reply.places == ["this computer", "build box"] and reply.remote_state == "connected"
 
     def test_a_remote_error_is_untrusted_too(self, remote):
-        model = Model(call("read_thing", THING="x"), "Sorry.")
+        model = Model(call("read_knowledge_source", THING="x", place="build_box"), "Sorry.")
         ditto(remote, model).chat("Read")
         (result,) = tool_messages(model)
         assert result.is_error and "<untrusted_data" in str(result.content)
+        assert "build box did not run" in str(result.content).split("<untrusted_data")[0], "framework words first"
 
-    def test_in_mcp_client_mode_no_in_process_tool_is_listed(self, remote, tmp_path):
-        local = ToolRegistry(PolicyStore(tmp_path / "local"), AuditLog(tmp_path / "local" / "audit.db"))
-        local.register(ToolSpec("local_only", "Local only", "Only here.", ToolTier.READ, ThingIn, ThingOut,
-                                lambda i: ThingOut(value="local"), idempotent=True))
-        local.policy_store.replace(ToolPolicy(configured=True, reviewed=["local_only"]))
-        model = Model("Hello.")
-        ditto(remote, model, registry=local).chat("Hi")
-        names = {t.name for t in model.requests[0].tools}
-        assert "local_only" not in names and {"read_thing", "noisy_read"} <= names
-        assert all(t.description.startswith("(tool of the framework at build box)") for t in model.requests[0].tools)
-        model = Model("Hello.")
-        ditto(remote, model, registry=local, config=Config(ai_ditto_tool_source="local")).chat("Hi")
-        assert {t.name for t in model.requests[0].tools} == {"local_only"}
+    def test_no_dialog_means_no_elicitation_capability(self, remote):
+        # SEC-H8: a turn without a person-facing dialog tells the server it cannot ask, so the server never sends a
+        # question Ditto would have to leave unanswered (it makes a pending approval there, or refuses).
+        seen = []
+        server = remote.server()
 
-    def test_a_new_tool_source_starts_a_new_conversation(self, remote):
-        history = ChatHistory()
-        history.apply(ChatReply(question="q", text="a", new_messages=[Message(role="user", content="q"),
-                                                                      Message(role="assistant", content="a")]))
-        assert history.tool_source == "local" and len(history.messages) == 2
-        model = Model("Hello from the remote tools.")
-        reply = ditto(remote, model).chat("Hi", history)
-        assert reply.source_changed and len(model.requests[0].messages) == 1, "the local conversation is not continued"
-        history.apply(reply)
-        assert history.tool_source == "mcp:build box" and len(history.messages) == 2
-        assert "one tool source per conversation" in history.transcript[-3].text
+        def factory(elicit):
+            seen.append(elicit)
+            return Client(server, elicitation_callback=elicit)
+        command = ("ssh", "-T", "build-host", "llm-cli", "mcp", "serve")
+        with RemoteConnection(RemoteServer("stdio", command=command, name="build box"), remote.token, None,
+                              client_factory=factory) as connection:
+            with pytest.raises(ToolError):
+                connection.call("start_build", {"thing_id": "b"})
+        assert seen == [None], "no elicitation callback: the capability is not declared"
+        answers = [e.get("answer") for e in remote.registry.audit.entries(50) if e["tool"] == "start_build"]
+        assert "unavailable" in answers and "declined" not in answers and remote.ran == []
+        with RemoteConnection(RemoteServer("stdio", command=command, name="build box"), remote.token,
+                              lambda q, i: True, client_factory=factory):
+            pass
+        assert seen[-1] is not None, "with a dialog the question comes to it"
 
-    def test_the_tool_source_is_kept_with_the_history(self, tmp_path):
-        history = ChatHistory(tmp_path / "chat.json")
-        history.apply(ChatReply(question="q", text="a", new_messages=[Message(role="user", content="q")],
-                                tool_source="mcp:box", source_changed=True))
-        history.save()
-        assert ChatHistory.load(tmp_path / "chat.json").tool_source == "mcp:box"
+    def test_unanswered_remote_question_is_never_recorded_as_declined(self, remote):
+        def answers():
+            return [e.get("answer") for e in remote.registry.audit.entries(100) if e["tool"] == "start_build"
+                    and e.get("answer")]
+
+        # A kept connection between turns: the capability is declared, but no dialog is bound.
+        with RemoteConnection(remote.connection().server, remote.token, None, client_factory=remote.factory(),
+                              elicitation=True) as connection:
+            with pytest.raises(ToolError):
+                connection.call("start_build", {"thing_id": "b"})
+        assert answers()[0] == "cancelled"
+
+        def broken(question, inp):
+            raise RuntimeError("the window was closed")
+        with remote.connection(confirm=broken) as connection:
+            with pytest.raises(ToolError):
+                connection.call("start_build", {"thing_id": "c"})
+        assert answers()[0] == "cancelled", "a dialog that fails is no answer"
+        assert "declined" not in answers() and remote.ran == []
+        with remote.connection(confirm=lambda q, i: False) as connection:
+            with pytest.raises(ToolError):
+                connection.call("start_build", {"thing_id": "d"})
+        assert answers()[0] == "declined", "only the person's own no is a no"
+
+    def test_a_kept_session_answers_only_while_a_dialog_is_bound(self, remote):
+        from orchestrator.llm.remote_tools import RemoteSession
+        session = RemoteSession(remote.connection().server, remote.token, elicitation=True,
+                                client_factory=remote.factory())
+        try:
+            session.open()
+            session.bind(lambda q, i: True)
+            assert not session.call_raw("start_build", {"thing_id": "e"}).is_error
+            session.bind(None)
+            refused = session.call_raw("start_build", {"thing_id": "f"})
+            assert refused.is_error and remote.ran == [("start_build", "e")]
+            assert [e.get("answer") for e in remote.registry.audit.entries(10)
+                    if e["tool"] == "start_build" and e.get("answer")][0] == "cancelled"
+            assert session.matches(remote.connection().server, remote.token, True)
+            assert not session.matches(remote.connection().server, remote.token, False), "another capability"
+            assert not session.matches(remote.connection().server, "other-token", True), "another token"
+        finally:
+            session.close()
+        assert not session.is_open
 
     def test_cli_prompt_offers_the_request_only_for_a_remote_question(self, monkeypatch):
         from orchestrator import cli

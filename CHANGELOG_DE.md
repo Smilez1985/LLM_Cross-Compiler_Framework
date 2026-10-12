@@ -41,22 +41,6 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Digest gepinntes Basis-Image außerhalb der Docker Official Images zählt, sobald ein Build mit genau diesem Image
   bestätigt wurde; ein Tag nie. Die Regelversion des Build-Dauerauftrags ist jetzt 2, Daueraufträge nach der
   engeren Regel verfallen.
-- **Ditto und das Framework auf einem anderen Computer, in der GUI** (MCP-Entwurf T12, Entwurf 6.1): Configure AI
-  Agent (Ditto) hat einen Abschnitt „Another computer (optional)“, standardmäßig aus, der in einfachen Worten sagt,
-  dass das andere Framework dasselbe Programm auf einem zweiten Computer ist und dass Docker nicht nötig ist (SSH oder
-  eine Serveradresse genügt): dieser Computer oder das Framework auf einem anderen Computer, ein Befehl (stdio, zum
-  Beispiel über SSH) oder eine Serveradresse (HTTP, nur https oder Loopback, zum Beispiel über einen SSH-Tunnel), ein
-  Name und das benannte Token, das im Tresor für Zugangsdaten landet und nie wieder angezeigt wird; die Verbindung
-  ohne Token, mit einem nicht lesbaren Befehl oder mit einer Adresse zu speichern, die das Token im Klartext senden
-  würde, wird abgelehnt und speichert nichts. Dittos GUI-Bestätigung bietet „Allow and ask it to stop asking...“ für
-  die Rückfrage eines entfernten Frameworks nur an, wenn das Formular jenes Servers es anbietet, mit einer Warnung
-  vorab; es ist nur eine Anfrage, die eine Person im eigenen Freigabefenster jenes Frameworks bestätigt.
-- **Dittos Aufgaben nutzen die Aufgaben-Prompts des entfernten Frameworks** (MCP-Entwurf 4.3, T12): Im
-  MCP-Client-Modus holen Build-Empfehlung, Modulvorschlag und die Analyse eines entfernten Builds über seine
-  Request-ID ihren Kontext (Formate des Targets, Build-Log, Auszüge aus Dokumentation und Wissensbasis) aus den
-  MCP-Prompts `recommend_build_settings`, `add_board` und `diagnose_build_failure` jenes Frameworks, unter Dittos
-  eigenem Aufgabentext, als nicht vertrauenswürdige Daten; ein Prompt, den der Server nicht anbietet, wird mit dem
-  nächsten Schritt genannt. Eine Modelldatei auf diesem Rechner erreicht jenes Framework nur mit ihrem Dateinamen.
 - **Das Ende eines Deployments im Audit-Log**: Endet ein `deploy_to_device`-Job (erledigt, gescheitert oder
   abgebrochen), wird ein eigener Abschlusseintrag mit Job, Gerätenamen und Gerätezustand geschrieben, verknüpft mit dem
   `started`-Eintrag des Aufrufs.
@@ -73,20 +57,46 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   dafür wartet, nachdem sich der Build geändert hat und wenn der Ordner nicht der ist, den die Frage nannte. Eine
   Wiederherstellung sichert immer zuerst die aktuelle Wissensbasis (`pre_restore_<Zeit>`), auch außerhalb von MCP,
   und räumt den wiederherzustellenden Snapshot nie auf.
-- **Ditto und das Framework auf einem anderen Computer** (MCP-Entwurf T12; Ditto ist hybrid; Entwurf 6.1):
-  `llm-cli ditto remote set` richtet Ditto auf den MCP-Server des Frameworks aus, das auf einem zweiten Computer
-  installiert ist (ein Build-PC, ein Server; dasselbe Programm, kein anderes). Docker ist nicht nötig: SSH erreicht
-  es, als Tunnel zu seiner Loopback-HTTP-Adresse oder als stdio-Befehl (`ssh -T -o SendEnv=LCF_MCP_TOKEN
-  benutzer@build-box llm-cli mcp serve`); ein Framework-Container, den du selbst gebaut hast, ist eine Alternative
-  (`docker exec -i <container> llm-cli mcp serve`). Es gelten Registry, Berechtigungen, narrensichere Schicht, Rückfragen und Audit-Log jenes
-  Servers; Dittos Identität dort ist ein benanntes Token, angelegt mit `llm-cli mcp token add NAME --link ditto`,
-  sodass Dittos eigene Berechtigungen in beiden Modi zugleich gelten und das Audit-Log dort `mcp:NAME` zeigt. Das
-  Token liegt in Dittos Tresor für Zugangsdaten und erreicht den Server nur als `LCF_MCP_TOKEN` oder als
-  Bearer-Header; ohne Token startet der Modus nicht. Eine Tool-Quelle pro Unterhaltung; jedes entfernte Ergebnis,
-  jeder Fehler, Prompt und jede Tool-Beschreibung sind für Dittos Modell nicht vertrauenswürdige Daten; Dittos
-  Bestätigung nennt den Server. `llm-cli ditto remote show|test|off`. `llm-cli mcp serve --transport http --container`
-  bindet nur innerhalb eines Containers dessen Schnittstellen (benanntes Token, Host- und Origin-Prüfung unverändert;
-  den Port auf dem Loopback des Hosts veröffentlichen).
+- **Ditto kann zusätzlich das Framework auf einem anderen Computer nutzen** (MCP-Entwurf T12; ENTSCHEIDUNGEN Runde 5 d;
+  Hybrid-Entwurf 6.1-6.8): Die Tools dieses Computers bleiben immer, und das Framework, das auf einem zweiten Computer
+  installiert ist (ein Build-PC, ein Server; dasselbe Programm, kein anderes), bringt seine Tools in denselben Chat.
+  `llm-cli ditto remote set` oder der Abschnitt „Another computer (optional)“ in Configure AI Agent (standardmäßig
+  aus; er sagt in einfachen Worten, dass Docker nicht nötig ist) richtet die Verbindung ein: SSH erreicht es, als
+  Tunnel zu seiner Loopback-HTTP-Adresse oder als stdio-Befehl (`ssh -T -o SendEnv=LCF_MCP_TOKEN benutzer@build-box
+  llm-cli mcp serve`); ein Framework-Container, den du selbst gebaut hast, ist eine Alternative (`docker exec -i
+  <container> llm-cli mcp serve`). Dittos Modell bekommt eine Tool-Liste: ein Tool, das beide Computer mit demselben
+  Eingabeschema anbieten, einmal, mit optionalem `place`; ein Katalog-Tool, das nur der andere Computer anbietet, mit
+  Pflichtfeld `place`; das Tool einer anderen Framework-Version als `remote_<name>`. Von dort werden nur Namen aus
+  dem Tool-Katalog dieses Frameworks übernommen, immer mit Titeln und Beschreibungen dieses Computers (die
+  Tool-Beschreibungen des anderen Computers erreichen das Modell nie), und ein Tool, das der Katalog nicht kennt,
+  wird der Person genannt. Jeder Aufruf geht zu dem Computer, auf dem sein Objekt liegt (IDs, nur aus strukturierten
+  Ergebnissen gelernt, stehen in der signierten `ditto_places.json`, die „Clear chat“ behält): Ein Ort, der einer ID
+  widerspricht, wird abgelehnt (`wrong_place`), Objekte auf beiden Computern ebenso (`needs_transfer`); nichts wird
+  von selbst zwischen den Computern kopiert. Jeder entfernte Aufruf bekommt den vorab geschriebenen Eintrag `started`
+  dieses Computers und einen verknüpften Abschlusseintrag (`place`, `remote_server`; nie das Token oder ein Login),
+  und ein Aufruf, der etwas ändert, wird nicht geschickt, wenn dieser Eintrag nicht geschrieben werden kann; ein
+  lokaler Aufruf derselben Runde wird mit `place` `this_computer` festgehalten, und eine Runde, die ein entferntes
+  Ergebnis bekommen hat, wird markiert (`taint`). Registry, Berechtigungen, narrensichere Schicht, Rückfragen und
+  Audit-Log jenes Servers entscheiden jeden Aufruf dort; Dittos Identität dort ist ein benanntes Token, angelegt mit
+  `llm-cli mcp token add NAME --link ditto` (dort Dittos eigene Berechtigungen, Audit-Akteur `mcp:NAME`), das in
+  Dittos Tresor für Zugangsdaten liegt und nur als `LCF_MCP_TOKEN` oder als Bearer-Header gesendet wird; ohne Token
+  wird der andere Computer nicht genutzt. Jedes entfernte Ergebnis beginnt vor seinem nicht vertrauenswürdigen Block
+  mit einer Zeile des Frameworks, und eine Ablehnung von dort wird in Worten des Frameworks mit ihrem Grund-Code
+  genannt. Rückfragen jenes Servers werden nur in Dittos Dialog oder Eingabeaufforderung beantwortet, die den Server
+  nennen; eine Runde ohne beides verbindet sich ohne die Fähigkeit zu fragen, und eine Rückfrage, die niemand
+  beantworten konnte, wird abgebrochen, nie als „Nein“ der Person geschickt. Ein nicht erreichbarer Computer hält nie
+  eine Runde an und setzt nie die Unterhaltung zurück (Tools aus der zwischengespeicherten Liste sagen „Not reachable
+  now“; `llm-cli ditto ask` gibt den Hinweis auf stderr aus, der Chat zeigt ihn), und die Verbindung bleibt über
+  Runden hinweg bis zu 10 Minuten ohne Aufruf offen. Build-Empfehlung, Modulvorschlag und die Analyse eines entfernten
+  Builds über seine Request-ID holen ihren Kontext weiter aus den MCP-Prompts `recommend_build_settings`, `add_board`
+  und `diagnose_build_failure` jenes Frameworks, unter Dittos eigenem Aufgabentext, als nicht vertrauenswürdige Daten;
+  eine Modelldatei auf diesem Rechner erreicht jenes Framework nur mit ihrem Dateinamen. „Allow and ask it to stop
+  asking...“ der GUI für eine entfernte Rückfrage erscheint nur, wenn das Formular jenes Servers es anbietet, mit einer
+  Warnung vorab, und ist nur eine Anfrage, die eine Person im eigenen Freigabefenster jenes Frameworks bestätigt.
+  `llm-cli ditto remote show|test|off` (`test` zählt auch die Tools, die einmal, nur dort und getrennt angeboten
+  werden). `llm-cli mcp serve --transport http --container` bindet nur innerhalb eines Containers dessen
+  Schnittstellen (benanntes Token, Host- und Origin-Prüfung unverändert; den Port auf dem Loopback des Hosts
+  veröffentlichen).
 - **Das Framework in einem Container, auf deinem eigenen Computer gebaut** (Runde 5 h): Kein Framework-Image wird
   veröffentlicht oder geladen. `scripts/build_container_image.sh` (`make build`) prüft Docker, BuildKit und den
   Klon, stellt genau die Dateien bereit, die das Repository ausliefert, und baut `Docker Setup/Dockerfile` mit einem
@@ -594,7 +604,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   war er bis zum Ende des Prozesses gesperrt) und fasst die Aufrufe einer MCP-Verbindung über eine zufällige ID
   zusammen, nie über eine Speicheradresse, die eine spätere Verbindung wieder bekommen könnte; Ditto hört nur nach
   Fehlern ohne Fortschritt vorzeitig auf, Tools aufzurufen, mit bis zu 4 Schritten mehr, solange er einen
-  Eingabefehler behebt.
+  Eingabefehler behebt (ein Aufruf an den falschen Computer ist einer); ein Aufruf, der auf eine Entscheidung
+  wartet, zählt nie als Fehler.
 - **`llm-cli tools audit` zeigt die neueren Audit-Felder in Worten**: wer aufgerufen hat (Ditto, alle lokalen
   stdio-Clients, ein benanntes Token, mit dem Namen, den der Client selbst angibt), den Titel des Tools und den Namen,
   den die KI geschrieben hat, den Grundcode und wie der Mensch gefragt wurde, mit seiner Antwort; `--details` ergänzt

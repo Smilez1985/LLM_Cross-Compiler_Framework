@@ -36,21 +36,6 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   covers the next builds. A digest-pinned base image outside the Docker Official Images counts once a build with
   exactly that image was confirmed; a tag never does. The build standing approval's rule version is now 2, so
   standing approvals made under the narrower rule lapse.
-- **Ditto and the framework on another computer, in the GUI** (MCP design T12, design 6.1): Configure AI Agent
-  (Ditto) has an "Another computer (optional)" section, off by default, which says in plain text that the other
-  framework is the same program installed on a second computer and that Docker is not needed (SSH or a server
-  address is enough): this computer or the framework on another computer, a command (stdio, for example over SSH)
-  or a server address (HTTP, https or loopback only, for example through an SSH tunnel), a name and the named token,
-  which goes into the credential vault and is never shown again; saving the connection without a token, with an
-  unreadable command or with an address that would send the token in clear text is refused and stores nothing.
-  Ditto's GUI confirmation offers "Allow and ask it to stop asking..." for a remote framework's question only when
-  that server's form offers it, with a warning first; it is only a request that a person confirms in that
-  framework's own approval window.
-- **Ditto's tasks use the remote framework's task prompts** (MCP design 4.3, T12): in MCP-client mode build advice,
-  a module proposal and the analysis of a remote build by its request id take their context (target formats, build
-  log, documentation and knowledge excerpts) from that framework's MCP prompts `recommend_build_settings`,
-  `add_board` and `diagnose_build_failure`, under Ditto's own task text, as untrusted data; a prompt the server does
-  not offer is named with the next step. A model file on this computer reaches that framework by its file name only.
 - **A deploy's end in the audit log**: when a `deploy_to_device` job ends (done, failed or cancelled), its own end
   entry with the job, the device's label and the device state is written, linked to the call's `started` entry.
 - **Optional tools `delete_artifact` and `restore_knowledge_snapshot`** (MCP design T10): delete one built model
@@ -65,19 +50,41 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   framework program writes into the folder or is queued for it, after the build changed, and when the folder is not
   the one the question named. A restore always saves the current knowledge base first (`pre_restore_<time>`), also
   outside MCP, and never prunes the snapshot it restores.
-- **Ditto and the framework on another computer** (MCP design T12; Ditto is hybrid; design 6.1): `llm-cli ditto
-  remote set` points Ditto at the MCP server of the framework installed on a second computer (a build PC, a server;
-  the same program, not a different one). Docker is not needed: SSH reaches it, as a tunnel to its loopback HTTP
-  address or as the stdio command (`ssh -T -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve`); a framework
-  container you built yourself is one alternative (`docker exec -i <container> llm-cli mcp serve`).
-  That server's registry, permissions, fool-proof layer, questions and audit log apply; Ditto's identity there is a
-  named token made with `llm-cli mcp token add NAME --link ditto`, so Ditto's own permissions apply in both modes at
-  once and the audit log there shows `mcp:NAME`. The token is kept in Ditto's credential vault and reaches the server
-  only as `LCF_MCP_TOKEN` or as bearer header; the mode does not start without it. One tool source per conversation;
-  every remote result, error, prompt and tool description is untrusted data for Ditto's model; Ditto's confirmation
-  names the server. `llm-cli ditto remote show|test|off`. `llm-cli mcp serve --transport http --container` binds the
-  container's interfaces inside a container only (named token, Host and Origin checks unchanged; publish the port to
-  the host's loopback).
+- **Ditto can also use the framework on another computer** (MCP design T12; DECISIONS round 5 d; hybrid design
+  6.1-6.8): this computer's tools always stay, and the framework installed on a second computer (a build PC, a
+  server; the same program, not a different one) adds its tools in the same chat. `llm-cli ditto remote set` or the
+  section "Another computer (optional)" in Configure AI Agent (off by default; it says in plain text that Docker is
+  not needed) sets the connection: SSH reaches it, as a tunnel to its loopback HTTP address or as the stdio command
+  (`ssh -T -o SendEnv=LCF_MCP_TOKEN user@build-box llm-cli mcp serve`); a framework container you built yourself is
+  one alternative (`docker exec -i <container> llm-cli mcp serve`). Ditto's model gets one tool list: a tool both
+  computers offer with the same input schema once, with an optional `place`; a catalogue tool only the other
+  computer offers with `place` required; another framework version's tool as `remote_<name>`. Only names of this
+  framework's tool catalogue are taken from there, always with this computer's titles and descriptions (the other
+  computer's tool descriptions never reach the model), and a tool the catalogue does not know is named for the
+  person. Each call goes to the computer where its object lives (ids learned from structured results only, kept in
+  the signed `ditto_places.json`, which "Clear chat" keeps): a place that contradicts an id is refused
+  (`wrong_place`), objects on both computers too (`needs_transfer`); nothing is copied between the computers by
+  itself. Every remote call gets this computer's write-ahead `started` entry and a linked end entry (`place`,
+  `remote_server`; never the token or a login), and a call that changes something is not sent when that entry cannot
+  be written; a local call of the same turn is recorded with `place` `this_computer`, and a turn that received a
+  remote result is marked (`taint`). That server's registry, permissions, fool-proof layer, questions and audit log
+  decide each call there; Ditto's identity there is a named token made with `llm-cli mcp token add NAME --link
+  ditto` (Ditto's own permissions there, audit actor `mcp:NAME`), kept in Ditto's credential vault and sent only as
+  `LCF_MCP_TOKEN` or as bearer header; without it the other computer is not used. Every remote result starts with a
+  framework line before its untrusted block, and a refusal from there is named in framework words with its reason
+  code. That server's questions are answered only in Ditto's dialog or prompt, which names the server; a turn without
+  one connects without the ability to ask, and a question nobody could answer is cancelled, never sent as the
+  person's "no". A computer that cannot be reached never stops a turn or resets the conversation (tools from the
+  cached list say "Not reachable now"; `llm-cli ditto ask` prints the note on stderr, the chat shows it), and the
+  connection is kept across turns for up to 10 idle minutes. Build advice, a module proposal and the analysis of a
+  remote build by its request id still take their context from that framework's MCP prompts
+  `recommend_build_settings`, `add_board` and `diagnose_build_failure`, under Ditto's own task text, as untrusted
+  data; a model file on this computer reaches that framework by its file name only. The GUI's "Allow and ask it to
+  stop asking..." for a remote question appears only when that server's form offers it, with a warning first, and is
+  only a request a person confirms in that framework's own approval window. `llm-cli ditto remote show|test|off`
+  (`test` also counts the tools offered once, only there and separately). `llm-cli mcp serve --transport http
+  --container` binds the container's interfaces inside a container only (named token, Host and Origin checks
+  unchanged; publish the port to the host's loopback).
 - **The framework in a container, built on your own computer** (round 5 h): no framework image is published or
   pulled. `scripts/build_container_image.sh` (`make build`) checks Docker, BuildKit and the checkout, stages exactly
   the files the repository ships and builds `Docker Setup/Dockerfile` with a local tag (`lcf-framework:local`; a
@@ -519,7 +526,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   try again. The repeat guard lets a refused call run again 10 minutes after its last failure (it was refused until
   the process ended) and groups the calls of one MCP connection by a random id, never by a memory address a later
   connection could get again; Ditto stops calling tools early only after failures without progress, with up to 4
-  more steps while it fixes an input error.
+  more steps while it fixes an input error (a call sent to the wrong computer is one); a call that waits for a
+  decision is never counted as a failure.
 - **`llm-cli tools audit` shows the newer audit fields in words**: who called (Ditto, all local stdio clients, a
   named token, with the client's self-reported name), the tool's title and the name the AI wrote, the reason code and
   how the person was asked with their answer; `--details` adds repairs, duration, result hash, links and session.

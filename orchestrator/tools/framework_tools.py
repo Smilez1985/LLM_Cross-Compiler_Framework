@@ -177,6 +177,27 @@ NO_TOOL_ACTIONS = [
 ]
 MAX_LISTED_TOOLS = 40  # some clients cap the number of tools (Cursor: 40)
 
+# Every tool name of this framework's catalogue (design section 2.1: the core, optional and later tools; pinned by
+# tests/test_tool_catalogue.py). Ditto offers a tool of the framework on another computer only under one of these
+# names, always with this framework's own title and description (hybrid design 6.3 rule 2): a name outside the
+# catalogue, or a remote server's own text, never reaches the model. A new tool joins this set and the test.
+KNOWN_TOOLS = frozenset({
+    # core
+    "list_build_requests", "get_build_status", "read_build_log", "list_artifacts", "get_artifact_details",
+    "check_build_request", "start_build", "cancel_build", "resolve_healing", "propose_healing_fix",
+    "get_job_status", "cancel_job", "search_hf_models", "get_hf_model_info", "download_hf_file", "list_local_files",
+    "search_knowledge", "list_knowledge_sources", "read_knowledge_source", "crawl_docs_site",
+    "list_targets", "get_target_capabilities", "get_hardware_probe", "probe_local_hardware", "create_target_module",
+    "list_devices", "create_deploy_package", "deploy_to_device",
+    "list_packs", "add_pack_from_index", "export_pack", "start_recipe_build",
+    "run_doctor", "get_status", "get_settings", "update_settings", "report_cannot_do",
+    # optional (default deny until the person enables them)
+    "delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
+    "stop_local_runtime", "run_benchmark", "deploy_device_runtime",
+    # later
+    "probe_remote_device", "run_device_benchmark",
+})
+
 
 # --- notes and summary lines (framework facts only: ids the framework issued, states, counts) ------------------
 
