@@ -350,3 +350,68 @@ def test_a_community_target_of_another_author_is_not_exported(env):
 
 def test_community_manager_is_the_same_object(env):
     assert isinstance(env.cm, CommunityManager)
+
+
+# --- adversarial review (mcp-t-ingest-community-v) ----------------------------------------------------------------
+
+def test_an_image_a_dockerfile_copies_from_is_shown_like_a_base_image():
+    """COPY --from=<image> and RUN --mount=...,from=<image> pull a prebuilt image like FROM does: the person sees it."""
+    text = ("FROM debian:bookworm-slim AS build\nCOPY --from=build /x /x\nCOPY --from=0 /y /y\n"
+            "COPY --from=ghcr.io/someone/tools:latest /bin/t /bin/t\n"
+            "RUN --mount=type=bind,from=quay.io/vendor/sdk:1,target=/sdk make\n"
+            "ADD --chown=1:1 --from=build /z /z\n")
+    assert tools_community.dockerfile_bases(text) == ["debian:bookworm-slim", "ghcr.io/someone/tools:latest",
+                                                      "quay.io/vendor/sdk:1"]
+
+
+def test_a_target_pack_question_names_an_image_its_dockerfile_copies_from(env):
+    tools = "ghcr.io/someone/tools@sha256:" + "d" * 64   # pinned, so the quarantine check lets it through
+    docker = f"FROM {OFFICIAL}\nCOPY --from={tools} /bin/t /bin/t\n"
+    env.world.add(env.world.target_pack(dockerfile=docker))
+    env.world.publish()
+    asked = []
+    with pytest.raises(ToolError):
+        call(env, "add_pack_from_index", {"kind": "target", "pack_id": "demo-board"}, confirm=recording(asked, False))
+    assert tools in asked[0] and "other registry: ghcr.io" in asked[0]
+
+
+def test_a_standing_approval_asks_when_the_larger_reserve_would_not_stay_free(env):
+    """Design 6.5: a call under a standing approval must leave 20 GiB or 10 % free, or it asks instead."""
+    env.world.add(knowledge_pack(env.world, "rk-docs"), kind="knowledge", pack_id="rk-docs", version="1.0.0")
+    env.world.add(knowledge_pack(env.world, "more-docs"), kind="knowledge", pack_id="more-docs", version="1.0.0")
+    env.world.publish()
+    assert grant(env, "knowledge", "rk-docs") is not None
+    env.disk.free = 5 * 10 ** 10   # above the normal reserve (2 % of 1 TB), below the standing one (10 %)
+    asked = []
+    with pytest.raises(ToolError):
+        call(env, "add_pack_from_index", {"kind": "knowledge", "pack_id": "more-docs"}, confirm=recording(asked, False))
+    assert len(asked) == 1 and not (env.cm.knowledge_dir / "more-docs").exists()
+
+
+def test_an_mcp_question_without_an_answer_removes_the_quarantined_copy(env, monkeypatch):
+    """A timed-out elicitation (not a "no") is refused outside the registry's question: the copy goes at once too."""
+    import asyncio
+    pytest.importorskip("mcp")
+    from mcp import Client
+    from mcp_types import ElicitResult
+    from orchestrator import mcp_server
+    monkeypatch.setattr(mcp_server, "ELICITATION_TIMEOUT", 0.3)
+    env.registry.policy_store.replace(ToolPolicy(configured=True, overrides={"add_pack_from_index": Decision.ASK},
+                                                 reviewed=[s.name for s in env.registry.list()]))
+    env.world.add(env.world.target_pack())
+    env.world.publish()
+    server = mcp_server.build_mcp_server(SimpleNamespace(info=SimpleNamespace(version="t"),
+                                                         tool_registry=env.registry))
+
+    async def never(ctx, params):
+        await asyncio.sleep(5)
+        return ElicitResult(action="accept", content={"approve": True})
+
+    async def go():
+        async with Client(server, elicitation_callback=never, mode="legacy") as client:
+            return await client.call_tool("add_pack_from_index", {"kind": "target", "pack_id": "demo-board"})
+    result = asyncio.run(go())
+    assert result.is_error
+    end = [e for e in env.registry.audit.entries(50) if e["tool"] == "add_pack_from_index"][0]
+    assert end["outcome"] == "confirmation_timeout"
+    assert quarantined(env) == [] and not (env.cm.targets_dir / "demo-board").exists()

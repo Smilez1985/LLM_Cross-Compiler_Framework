@@ -286,3 +286,47 @@ def test_the_cli_notice_is_read_acknowledged_and_audited(tmp_path, monkeypatch):
     assert not CrawlNotice(state).needed() and CrawlNotice(state).acknowledged_via() == "cli"
     entries = [e for e in audit.entries() if e.get("tool") == "crawl_notice_acknowledged"]
     assert entries and entries[-1]["actor"] == "cli"
+
+
+# --- adversarial review (mcp-t-ingest-community-v) ------------------------------------------------------------------
+
+def bound_call(env, facts, arguments):
+    return env.registry.call("crawl_docs_site", arguments, ToolContext("mcp", facts=facts), approved=True)
+
+
+def test_the_daily_page_budget_is_checked_again_when_an_approved_crawl_starts(env, monkeypatch):
+    """Two questions answered later (pending approvals) were each planned against the same budget: the second start
+    must not take the client past the pages a day allows."""
+    monkeypatch.setattr(crawl_jobs, "PAGES_PER_DAY", 8)
+    env.rag.pages = 5
+    spec = env.registry.get("crawl_docs_site")
+    first_args, second_args = {"start_urls": [SITE], "max_pages": 5}, {"start_urls": [OTHER], "max_pages": 5}
+    first = env.registry.look_up(spec, spec.input_model(**first_args), ToolContext("mcp"))
+    second = env.registry.look_up(spec, spec.input_model(**second_args), ToolContext("mcp"))
+    wait_job(env, bound_call(env, first, first_args).job_id)   # 5 pages stored: 3 left
+    with pytest.raises(ToolError) as e:
+        bound_call(env, second, second_args)
+    assert e.value.code == "limit_reached" and len(env.rag.calls) == 1
+
+
+def test_offline_mode_switched_on_after_the_question_stops_the_start(env):
+    spec = env.registry.get("crawl_docs_site")
+    arguments = {"start_urls": [SITE]}
+    facts = env.registry.look_up(spec, spec.input_model(**arguments), ToolContext("mcp"))
+    env.settings["offline_mode"] = True
+    with pytest.raises(ToolError) as e:
+        bound_call(env, facts, arguments)
+    assert e.value.code == "not_supported" and env.rag.calls == []
+
+
+def test_a_knowledge_base_failure_reaches_the_client_without_a_folder_of_this_computer(env):
+    def broken(url, options, stop=None, progress=None):
+        env.rag.calls.append((url, dict(options)))
+        return {"success": False, "outcome": "failure", "snapshot": None,
+                "message": "Knowledge base unavailable: Could not open the knowledge base: Storage folder "
+                           "/home/pat/.local/share/lcf/qdrant is already accessed by another instance"}
+    env.rag.ingest_url = broken
+    out = call(env, {"start_urls": [SITE]}, confirm=lambda s, i: True)
+    job = wait_job(env, out.job_id)
+    text = str(job.result)
+    assert "/home/pat" not in text and "already accessed" in text and job.result["failed"][0]["address"] == SITE

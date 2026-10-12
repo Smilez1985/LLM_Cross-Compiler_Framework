@@ -43,21 +43,24 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   einmaligen Deep-Ingest-Hinweis nicht gelesen hast (`needs_person`), im Offline-Modus oder bei ausgeschalteter
   Wissensbasis; 1-5 öffentliche `http(s)`-Startadressen, vor der Frage geprüft; `max_pages` bis zur Einstellung und
   100, `max_depth` bis zur Einstellung und 3, mindestens eine Sekunde zwischen Anfragen; ein Crawl gleichzeitig je
-  Benutzer, 5 am Tag und 300 gespeicherte Seiten am Tag je Client. `cancel_job` hält nach der aktuellen Seite an und
+  Benutzer, 5 am Tag und 300 gespeicherte Seiten am Tag je Client (Budget und Offline-Modus werden beim Start eines
+  freigegebenen Crawls erneut geprüft). `cancel_job` hält nach der aktuellen Seite an und
   behält, was gespeichert ist; das Ergebnis enthält Zahlen und die übersprungenen oder fehlgeschlagenen Adressen mit
-  Gründen, nie Seitentext. Neu: `llm-cli tools crawl-notice` zeigt den Hinweis in einem Terminal und hält fest, dass
+  Gründen, nie Seitentext oder einen Ordner dieses Computers. Neu: `llm-cli tools crawl-notice` zeigt den Hinweis in einem Terminal und hält fest, dass
   du ihn gelesen hast.
 - **Der Community-Zoo für KI-Clients** (MCP-Tools `list_packs`, `add_pack_from_index`, `export_pack`): Ein Client
   listet den signierten Index und die installierten Packs (Details, Prüfung; `refresh` einmal pro Stunde), fügt ein
   Wissens-, Target- oder Rezept-Pack aus dem signierten Index hinzu (Vertrauensstufe verified oder community, nie
   zurückgezogen, nie aus einer Datei), nachdem du die in der Quarantäne geprüfte Zusammenfassung gesehen hast, bei
-  einem Target-Pack mit jedem Basis-Image klar benannt (Registry, Digest oder „not pinned“, Docker Official Image
+  einem Target-Pack mit jedem Image, das seine Dockerfiles beziehen (`FROM`, `COPY --from=`, `RUN --mount=...,from=`),
+  klar benannt (Registry, Digest oder „not pinned“, Docker Official Image
   oder andere Registry) und dass sein Image-Build mit Netzzugang läuft, und exportiert ein Pack in eine lokale Datei,
   mit deinem Schlüssel signiert (immer gefragt; ohne vorhandenen Schlüssel abgelehnt; liefert Zahlen der Bereinigung,
   nie den entfernten Text). Eine Kopie in der Quarantäne wird für dasselbe Pack und denselben Hash wiederverwendet
   und bei einem Nein, einer abgelehnten oder abgelaufenen Freigabe oder nach 20 Minuten entfernt. „Ja, und nicht mehr
   fragen“ gilt für eine Pack-Art, Vertrauensstufe und einen Index-Schlüssel (Wissens- und Rezept-Packs,
-  `verified`-Target-Packs); darunter installierte Packs sind mit `installed_via` markiert. Kein Tool veröffentlicht
+  `verified`-Target-Packs); darunter installierte Packs sind mit `installed_via` markiert; eine Installation darunter muss die größere
+  Speicherreserve (20 GiB oder 10 %) frei lassen, sonst wird gefragt. Kein Tool veröffentlicht
   einen Pull Request.
 - **Korrekturvorschläge von KI-Clients** (MCP-Tool `propose_healing_fix`): Ein Client, der einen gescheiterten Build
   analysiert, übergibt dem Framework Zusammenfassung, Ursache, manuellen Schritt und Sicherheit. Der Vorschlag
