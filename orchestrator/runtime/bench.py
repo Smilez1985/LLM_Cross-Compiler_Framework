@@ -371,10 +371,12 @@ class BenchRunner:
         return None
 
     @staticmethod
-    def _pinned_copy(model: Path, fd: int, folder: Path, sha256: Optional[str] = None) -> Path:
+    def _pinned_copy(model: Path, fd: int, folder: Path, sha256: Optional[str] = None,
+                     stop: Optional[threading.Event] = None) -> Path:
         """A file in the private folder `folder` that is exactly the open, checked model: a hard link of the open file
         where the system allows it, else a copy read from it. With `sha256` the copy is hashed while it is written and
-        must have that sha256 (BenchError otherwise; the copy is removed)."""
+        must have that sha256 (BenchError otherwise; the copy is removed). A set `stop` (a cancel) ends the copy at
+        once (BenchStopped; the partial copy is removed)."""
         import hmac
         linked = BenchRunner._pinned_link(fd, folder, model)
         if linked is not None:
@@ -386,6 +388,8 @@ class BenchRunner:
             with os.fdopen(out, "wb") as dst:
                 offset = 0
                 while True:
+                    if stop is not None and stop.is_set():
+                        raise BenchStopped()
                     chunk = os.pread(fd, 1 << 20, offset) if hasattr(os, "pread") else _read_at(fd, offset)
                     if not chunk:
                         break
@@ -433,12 +437,12 @@ class BenchRunner:
                 continue
 
     @contextlib.contextmanager
-    def _pinned_model(self, model: Path, fd: int, sha256: str, label: str):
+    def _pinned_model(self, model: Path, fd: int, sha256: str, label: str, stop: Optional[threading.Event] = None):
         """Yields a private file that is exactly the checked open model, for the sandbox mount, and removes its
         private folder afterwards (also on failure and cancel). In this order: a hard link next to the model; a hard
         link in one of the framework's own folders on the same file system; a copy read from the open file and hashed
         again in one of the framework's own folders (else next to the model) with room for it. BenchError when nothing
-        works."""
+        works; BenchStopped when `stop` is set meanwhile (a copy stops at once)."""
         open_st = os.fstat(fd)
         scratch = []
         for folder in self._scratch_folders():
@@ -482,7 +486,7 @@ class BenchRunner:
                     if made is None:
                         continue
                     try:
-                        source = self._pinned_copy(model, fd, made, sha256=sha256 or None)
+                        source = self._pinned_copy(model, fd, made, sha256=sha256 or None, stop=stop)
                         break
                     except BenchError:
                         raise
@@ -532,9 +536,11 @@ class BenchRunner:
             raise BenchError("the sandbox must have no network")
         env = {"HOME": CONTAINER_TMP, "LANG": "C", "LC_ALL": "C"}
         # the mounted file is exactly the checked open file: a private hard link or a checked copy (_pinned_model)
-        pinned = self._pinned_model(model, fd, sha256, label) if fd is not None else \
+        pinned = self._pinned_model(model, fd, sha256, label, stop=stop) if fd is not None else \
             contextlib.nullcontext(model.resolve())
         with pinned as source, tempfile.TemporaryDirectory(prefix="llm-bench-") as tmp:
+            if stop is not None and stop.is_set():  # cancelled while the private file was made: no container
+                raise BenchStopped()
             mounts = [Mount(build.bin_dir, "/opt/llama/bin", True), Mount(source, "/models/model.gguf", True)]
             log = Path(tmp) / "bench.log"
             extra = {"stop": stop} if stop is not None else {}

@@ -1090,8 +1090,8 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   folder in the framework's own cache or state folder on the same file system, else to a copy read from the checked
   open file and hashed again (its sha256 must be the checked one); only when nothing works does it refuse, with the
   reason (`insufficient_resources` or `needs_person`). The private folder is removed when the run ends, also on
-  failure and on `cancel_job`, which now also kills the sandbox container; a folder a crash left behind is removed by
-  a later run.
+  failure and on `cancel_job`, which now also kills the sandbox container, stops a copy that is still being written
+  and starts no container after the cancel; a folder a crash left behind is removed by a later run.
 - **Job ends in the audit log**: when recording a finished deploy in the device list failed, `deploy_to_device` wrote
   no end entry although the deploy had happened; the end entry is now written on every way out of the job (the
   result then says that the device list did not record it). `create_deploy_package`, the board runtime jobs
@@ -1370,9 +1370,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   its folder, with the checked list laid over its own name).
 - **Paths with spaces in errors toward an AI or the person**: a path with a space (a folder such as `My Models`, or a
   home folder whose user name holds one) was cut at the first space, so the label was wrong and a piece of the user
-  name or of the host path could remain. Quoted paths, the framework's folders and the home folder are now replaced
-  whole, and a space continues a path when the next word is clearly part of it (or, inside a known folder, the longer
-  path exists), so the error names a label or the file name only.
+  name or of the host path could remain. Quoted paths, the framework's folders and the home folder (also by its real
+  path when it is a link) are now replaced whole, a known folder further on in a path list (`/usr/bin:/home/...`) or
+  in a quoted text with more than one path starts a path of its own, and a space continues a path when the next word
+  is clearly part of it (or, inside a known folder, the longer path exists), so the error names a label or the file
+  name only.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

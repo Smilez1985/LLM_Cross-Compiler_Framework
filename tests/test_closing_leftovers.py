@@ -792,3 +792,135 @@ class TestRecipeDataset:
         monkeypatch.setattr(service, "start_build", lambda req, **kw: seen.update(kw) or "handle", raising=False)
         assert service.start_recipe("r", dataset_path=str(ds), local_paths=True) == "handle"
         assert seen["dataset_sha256"] == sha(self.CHECKED)
+
+
+# =====================================================================================================================
+# Review of the leftovers
+# =====================================================================================================================
+
+class TestPathsWithSpacesReview:
+    """Review: three ways a home folder with a space still left the user name in a label."""
+
+    @POSIX
+    def test_the_real_path_of_a_linked_home_folder_is_the_home_folder(self, tmp_path, monkeypatch):
+        """The framework resolves paths (realpath), so its errors name a linked home folder by its real path."""
+        from orchestrator.tools.tools_runtime import label_paths
+        real = tmp_path / "data" / "Jane Doe"
+        real.mkdir(parents=True)
+        (tmp_path / "linked home").symlink_to(real)
+        real = Path(os.path.realpath(real))
+        monkeypatch.setenv("HOME", str(tmp_path / "linked home"))
+        for text, expected in ((f"cannot open {real}", "cannot open the home folder"),
+                               (f"cannot open '{real}'", "cannot open 'the home folder'"),
+                               (f"cannot open {real}/notes.txt now", "cannot open notes.txt now"),
+                               (f"PATH={tmp_path}/bin:{real}", "PATH=bin:the home folder"),
+                               (f"a copy in /mnt{real} and {tmp_path}/linked home{real}",
+                                "a copy in mntthe home folder and the home folderthe home folder")):
+            out = label_paths(text, {})
+            assert out == expected
+            assert "Jane" not in out and "Doe" not in out
+
+    def test_a_home_folder_further_on_in_a_path_list(self, monkeypatch):
+        from orchestrator.tools.tools_runtime import label_paths
+        monkeypatch.setenv("HOME", "/home/Jane Doe")
+        for text, expected in (("PATH=/usr/bin:/home/Jane Doe", "PATH=bin:the home folder"),
+                               ("HOME=/home/Jane Doe|grep x", "HOME=the home folder|grep x"),
+                               ("not in /opt/tools|/home/Jane Doe or /usr/lib:/home/Jane Doe.",
+                                "not in tools|the home folder or lib:the home folder.")):
+            out = label_paths(text, {})
+            assert out == expected
+            assert "Jane" not in out and "Doe" not in out
+
+    def test_a_quoted_text_with_more_than_one_path(self, monkeypatch):
+        from orchestrator.tools.tools_runtime import label_paths
+        monkeypatch.setenv("HOME", "/home/Jane Doe")
+        for text, expected in (("'/home/Jane Doe/x.gguf and /home/Jane Doe'", "'x.gguf and the home folder'"),
+                               ('"/home/Jane Doe/a, /home/Jane Doe)"', '"a, the home folder)"'),
+                               ("copy in '/mnt/home/Jane Doe'", "copy in 'mntthe home folder'"),
+                               ("('/home/Jane Doe)' and `/home/Jane Doe's`)",
+                                "('the home folder)' and `the home folder's`)"),
+                               ("'/home/Jane Doe/My Models/x.gguf'", "'x.gguf'")):
+            out = label_paths(text, {})
+            assert out == expected
+            assert "Jane" not in out and "Doe" not in out
+
+
+@POSIX
+class TestSandboxCancelReview:
+    """Review: a cancel during the private copy went on copying and still started the container."""
+
+    def test_a_cancel_during_the_copy_stops_it_and_starts_no_container(self, sandbox_bench, monkeypatch):
+        env = sandbox_bench
+        env.model.write_bytes(b"GGUF" + b"x" * (3 << 20))
+        env.digest = sha(env.model.read_bytes())
+        bench = env.bench
+        monkeypatch.setattr(bench.BenchRunner, "_pinned_link", staticmethod(lambda fd, folder, model=None: None))
+        stop = threading.Event()
+        reads = []
+        real_pread, real_copy = os.pread, bench.BenchRunner._pinned_copy
+
+        def pread(fd, n, offset):
+            if stop.is_set():
+                reads.append(offset)
+            return real_pread(fd, n, offset)
+
+        def copy(*a, **k):
+            stop.set()  # the person cancels while the copy is written
+            return real_copy(*a, **k)
+        monkeypatch.setattr(bench.os, "pread", pread)
+        monkeypatch.setattr(bench.BenchRunner, "_pinned_copy", staticmethod(copy))
+        engine = FakeEngine()
+        with pytest.raises(bench.BenchStopped):
+            TestSandboxModelFile().run(env, env.make(engine), stop=stop)
+        assert engine.runs == [], "no container starts after a cancel"
+        assert len(reads) <= 1, "the copy stops at the cancel"
+        assert leftovers(env.tmp / "cache" / "bench", env.model.parent) == []
+
+    def test_a_cancel_while_the_link_is_made_starts_no_container(self, sandbox_bench, monkeypatch):
+        env = sandbox_bench
+        bench = env.bench
+        stop = threading.Event()
+        real_link = bench.BenchRunner._pinned_link
+
+        def link(*a, **k):
+            stop.set()
+            return real_link(*a, **k)
+        monkeypatch.setattr(bench.BenchRunner, "_pinned_link", staticmethod(link))
+        engine = FakeEngine()
+        with pytest.raises(bench.BenchStopped):
+            TestSandboxModelFile().run(env, env.make(engine), stop=stop)
+        assert engine.runs == [] and leftovers(env.model.parent, env.tmp / "cache" / "bench") == []
+
+
+def test_a_known_folder_that_holds_the_home_path_in_its_middle_keeps_its_label(monkeypatch):
+    """The home folder further on starts a path of its own, but never inside a known folder taken whole."""
+    from orchestrator.tools.tools_runtime import label_paths
+    monkeypatch.setenv("HOME", "/home/Jane Doe")
+    roots = {"/mnt/home/Jane Doe/models": "models"}
+    assert label_paths("cannot load /mnt/home/Jane Doe/models/x.gguf", roots) == "cannot load models:x.gguf"
+
+
+@pytest.mark.parametrize("home", ["/home/jane doe", "/home/Jane Doe", "/Users/jane doe smith"])
+def test_no_part_of_a_spaced_user_name_survives_generated_texts(home, monkeypatch):
+    """Property guard: the home folder with a space, in thousands of generated error texts (quoted, in path lists,
+    after '=' or '|', with tails and punctuation), never leaves a word of the user name."""
+    import random
+    import re
+    from orchestrator.tools.tools_runtime import label_paths
+    monkeypatch.setenv("HOME", home)
+    words = home.split("/")[-1].split()
+    rnd = random.Random(11)
+    tails = ["", "/", "/x.gguf", "/My Models/x.gguf", "/my models", "/my models/qwen", "/a b/c", ".", ":", ")", "'s"]
+    before = ["", " ", "=", ":", "|", "(", "'", '"', "`", "file://", "/mnt", "/usr/bin:", "[", "<", "--m="]
+    after = ["", " ", ".", ",", ";", ")", "'", '"', "`", ":", "!", " and", "\n", ">", "]", "|", "="]
+    roots = [{}, {home + "/My Models": "models"}, {home + "/data cache": "cache"}]
+    checked = 0
+    for _ in range(3000):
+        parts = [rnd.choice(before) + home + rnd.choice(tails) + rnd.choice(after) for _ in range(rnd.randint(1, 3))]
+        text = rnd.choice(["", "error: ", "cannot open "]) + rnd.choice(["", " "]).join(parts)
+        if re.search(re.escape(home) + r"[\w\-+@~]", text):
+            continue  # the home path glued to a name is another folder's name
+        out = label_paths(text, rnd.choice(roots))
+        checked += 1
+        assert not any(w in out for w in words), (text, out)
+    assert checked > 2500

@@ -34,7 +34,7 @@ import os
 import re
 import threading
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, Sequence
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -145,6 +145,9 @@ _PATH_START = re.compile(r"(?<![\w/.~-])(?:~/|/(?!/)|[A-Za-z]:[\\/])")
 # Characters that end a path's run of characters; a single space may still continue it (_path_end).
 _PATH_STOP = frozenset("'\"`,;()[]<>")
 _PATH_TRAILING = ".:!?"
+# Characters after a known folder's name that end it ("/home/Jane Doe|grep", "HOME=/home/Jane Doe=x"): never part of a
+# folder name in practice; '-', '_', '+', '@' and '~' are, so "/home/Jane Doe-old" names another folder.
+_KNOWN_END = frozenset("/\\") | _PATH_STOP | frozenset(_PATH_TRAILING) | frozenset("|=&*^%$#{}")
 _PATH_SEP = re.compile(r"[/\\]")
 # A quoted path ("No such file or directory: '/home/u/My Models/x.gguf'"): the quotes say where it ends.
 _QUOTED_PATH = re.compile("|".join(f"{q}((?:~/|/|[A-Za-z]:[\\\\/])[^{q}\\n]*){q}" for q in ("'", '"', "`")))
@@ -175,18 +178,28 @@ def _continues(word: str) -> bool:
     return True
 
 
-def _path_end(text: str, start: int, bases: List[str]) -> int:
+def _known_at(text: str, at: int, bases: List[str]) -> Optional[str]:
+    """The known folder (`bases`, longest first) whose whole name stands at `at` in `text`, if any."""
+    n = len(text)
+    for base in bases:
+        if text.startswith(base, at):
+            k = at + len(base)
+            if k == n or text[k].isspace() or text[k] in _KNOWN_END:
+                return base
+    return None
+
+
+def _path_end(text: str, start: int, bases: List[str], homes: Sequence[str] = ()) -> int:
     """Where the path that begins at `start` ends. A known folder (`bases`, longest first; it may hold spaces, e.g. a
     home folder 'C:\\Users\\Jane Doe') is taken whole. A single space continues the path when the next word is clearly
     the rest of a path ('/home/u/My Models/x.gguf') or, inside a known folder, the longer path exists on this computer
-    (only there: text from outside cannot probe other folders)."""
-    n, end = len(text), None
-    for base in bases:
-        if text.startswith(base, start):
-            k = start + len(base)
-            if k == n or text[k] in "/\\" or text[k].isspace() or text[k] in _PATH_STOP or text[k] in _PATH_TRAILING:
-                end = k
-                break
+    (only there: text from outside cannot probe other folders). A known folder further on, where a new path can begin
+    ('/usr/bin:/home/Jane Doe', 'a|/home/Jane Doe'), and the home folder (`homes`) anywhere further on
+    ('/mnt/home/Jane Doe') start a path of their own and are never taken into this one, so the user name is never
+    kept as the "file name" of a longer path."""
+    n = len(text)
+    base = _known_at(text, start, bases)
+    end = start + len(base) if base is not None else None
     if end is None:
         end = _run_end(text, start)
     elif end < n and text[end] in "/\\":
@@ -203,6 +216,19 @@ def _path_end(text: str, start: int, bases: List[str]) -> int:
         if not (_continues(word) or (known and _path_exists(longer))):
             break
         end = nxt
+    after = start + (len(base) if base is not None else 1)  # never inside the known folder taken whole at the start
+    for m in _PATH_START.finditer(text, after, end):
+        if _known_at(text, m.start(), bases) is not None:
+            end = m.start()
+            break
+    for home in homes:
+        stop = end - 1 + len(home)  # only an occurrence that begins inside this path
+        k = text.find(home, after, stop)
+        while k >= 0:
+            if _known_at(text, k, [home]) is not None:
+                end = k
+                break
+            k = text.find(home, k + 1, stop)
     return end
 
 
@@ -220,9 +246,12 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
                 if form and form not in ("/", "\\"):
                     pairs.add((form, label))
     ordered = sorted(pairs, key=lambda kv: (-len(kv[0]), kv[0]))
+    # The home folder as it is set and as its real path (the framework resolves paths, so its errors name a linked
+    # home folder by the folder it points to)
     home = str(Path.home())
-    home = home if home and home not in ("/", "\\") else ""
-    bases = sorted({root for root, _ in ordered} | ({home} if home else set()), key=lambda b: (-len(b), b))
+    homes = {home} | ({os.path.realpath(home)} if home and os.path.isabs(home) else set())
+    homes = sorted((h for h in homes if h and h not in ("/", "\\")), key=lambda h: (-len(h), h))
+    bases = sorted({root for root, _ in ordered} | set(homes), key=lambda b: (-len(b), b))
 
     def one(token: str) -> str:
         tail = ""
@@ -232,8 +261,12 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
             if token == root or token.startswith(root.rstrip("/\\") + os.sep) or token.startswith(root + "/"):
                 rel = token[len(root):].lstrip("/\\").replace("\\", "/")
                 return f"{label}:{rel}" + tail if rel else f"the {label} folder" + tail
-        if home and token.rstrip("/\\") == home:
+        if token.rstrip("/\\") in homes:
             return "the home folder" + tail
+        home_at = _known_at(token, 0, homes)
+        if home_at is not None and token[len(home_at):len(home_at) + 1] not in ("/", "\\"):
+            # the home folder and then text that is no part of a path ("'/home/Jane Doe)'", "/home/Jane Doe's")
+            return "the home folder" + token[len(home_at):] + tail
         name = _PATH_SEP.split(token.rstrip("/\\"))[-1]
         return (name or "a folder") + tail
 
@@ -243,28 +276,32 @@ def label_paths(text: str, roots: Dict[str, str]) -> str:
             start = find(text, pos)
             if start is None:
                 break
-            end = max(_path_end(text, start, known), start + 1)
+            end = max(_path_end(text, start, known, homes), start + 1)
             out += [text[pos:start], one(text[start:end])]
             pos = end
         return "".join(out) + text[pos:]
-
-    def quoted(m: "re.Match[str]") -> str:
-        inner = next(g for g in m.groups() if g is not None)
-        return m.group(0)[0] + one(inner) + m.group(0)[-1]
-
-    text = _QUOTED_PATH.sub(quoted, text or "")
 
     def next_start(text: str, pos: int) -> Optional[int]:
         m = _PATH_START.search(text, pos)
         return m.start() if m else None
 
+    def quoted(m: "re.Match[str]") -> str:
+        inner = next(g for g in m.groups() if g is not None)
+        q = m.group(0)[0]
+        if _PATH_START.search(inner, 1) is not None or any(inner.find(h, 1) >= 0 for h in homes):
+            # more than one path between the quotes ("'/home/u/x and /home/u'") or the home folder further in
+            # ("'/mnt/home/u'"): path by path, so the home folder's own name is never kept as if it were a file name
+            return q + replace(inner, next_start, bases) + q
+        return q + one(inner) + q
+
+    text = _QUOTED_PATH.sub(quoted, text or "")
     text = replace(text, next_start, bases)
     # What the start rule cannot see (a "file:///home/..." URL): any path left in the home folder, by its file name.
-    if home:
+    if homes:
         def next_home(text: str, pos: int) -> Optional[int]:
-            k = text.find(home, pos)
-            return k if k >= 0 else None
-        text = replace(text, next_home, [home])
+            found = [k for k in (text.find(h, pos) for h in homes) if k >= 0]
+            return min(found) if found else None
+        text = replace(text, next_home, homes)
     return text
 
 
