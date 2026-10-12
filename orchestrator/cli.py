@@ -189,6 +189,8 @@ def cli(ctx: FrameworkContext, config: Optional[str], verbose: bool, quiet: bool
     # no command and no child process ever inherits it; only `mcp serve` gets it, through the context.
     from orchestrator.tools.mcp_tokens import ENV_VAR
     ctx.mcp_token = os.environ.pop(ENV_VAR, None)
+    from orchestrator.Core.request_store import set_program
+    set_program("cli")  # shown with this process's builds in the shared build state
     # ConfigManager reads this file (and reports it on stderr if it cannot be read) wherever settings are needed.
     ctx.config_path = config
     ctx.log_level = "DEBUG" if verbose else ("ERROR" if quiet else log_level)
@@ -752,42 +754,94 @@ STATUS_ROWS = 20  # builds `build status` lists without --all
 @click.option('--all', '-a', is_flag=True, help=f'Show every kept build (default: the {STATUS_ROWS} newest)')
 @pass_context
 def build_status(ctx: FrameworkContext, request_id: Optional[str], all: bool):
-    """Status of builds, including those the GUI, the MCP server or another CLI call started (read from the build
-    records in the cache folder). REQUEST_ID: a request id (req_...) or a build id."""
+    """Status of builds, including those the GUI, the MCP server or another CLI call started (the shared build state
+    in the per-user folder, and the build records in the cache folder). REQUEST_ID: a request id (req_...) or a
+    build id."""
     from orchestrator.Core.build_records import read_records, records_dir
     config, resolve = _settings(ctx)
     folder = records_dir(resolve(config.get("cache_dir", "cache")))
     records = read_records(folder)
+    requests = _shared_requests(config)
+    by_request = {r.get("request_id"): r for r in requests}
+    with_builds = {r.get("request_id") for r in records}
+    # Requests without a build record yet (queued, preparing, or ended before a build ran)
+    waiting = [r for r in requests if r.get("request_id") not in with_builds]
     if request_id:
         matches = [r for r in records if request_id in (r.get("request_id"), r.get("build_id"))]
-        if not matches:
+        request = by_request.get(request_id)
+        if not matches and request is None:
             console.print(f"[red]Build '{escape(request_id)}' not found in {escape(str(folder))}.[/red]")
             sys.exit(1)
+        if request is not None:
+            _print_request_summary(request)
         for record in reversed(matches):  # attempts in order
             _print_build_record(record)
-        for rid in dict.fromkeys(r.get("request_id") for r in matches if r.get("request_id")):
+        for rid in dict.fromkeys([r.get("request_id") for r in matches if r.get("request_id")]
+                                 + ([request_id] if request is not None else [])):
             _print_client_proposals(_client_proposals(config, rid))
         return
-    if not records:
+    if not records and not waiting:
         console.print(f"[yellow]No builds found in {escape(str(folder))}.[/yellow]")
         return
-    shown = records if all else records[:STATUS_ROWS]
+    rows = sorted([("b", r) for r in records] + [("r", r) for r in waiting],
+                  key=lambda pair: str(pair[1].get("started") or ""), reverse=True)
+    shown = rows if all else rows[:STATUS_ROWS]
     table = Table(title="Builds")
     for column in ("Request", "Build", "Status", "Progress", "Target", "Format", "Quantization", "Model",
-                   "Started"):
+                   "Started", "Where"):
         table.add_column(column)
-    for r in shown:
+    for kind, r in shown:
+        if kind == "r":
+            summary = r.get("summary") if isinstance(r.get("summary"), dict) else {}
+            table.add_row(escape(str(r.get("request_id"))), "-", escape(str(r.get("status"))),
+                          f"{r.get('progress') or 0}%", escape(str(summary.get("target") or "-")),
+                          escape(str(summary.get("format") or "-")), escape(str(summary.get("quantization") or "-")),
+                          escape(str(summary.get("model") or "-")), escape(str(r.get("started") or "-")),
+                          escape(str(r.get("program") or "-")))
+            continue
+        where = (by_request.get(r.get("request_id")) or {}).get("program") or "-"
         table.add_row(escape(str(r.get("request_id") or "-")), escape(str(r.get("build_id"))),
                       escape(str(r.get("status"))), f"{r.get('progress') or 0}%", escape(str(r.get("target") or "-")),
                       escape(str(r.get("format") or "-")), escape(str(r.get("quantization") or "-")),
-                      escape(str(r.get("model") or "-")), escape(str(r.get("started") or "-")))
+                      escape(str(r.get("model") or "-")), escape(str(r.get("started") or "-")), escape(str(where)))
     console.print(table)
-    if len(records) > len(shown):
-        console.print(f"{len(records) - len(shown)} older builds: llm-cli build status --all")
+    if len(rows) > len(shown):
+        console.print(f"{len(rows) - len(shown)} older builds: llm-cli build status --all")
     proposed = sorted({p.request_id for p in _client_proposals(config)})
     if proposed:
         console.print(f"[magenta]AI clients proposed fixes for {len(proposed)} failed build(s): "
                       f"llm-cli build status {escape(proposed[-1])}[/magenta]")
+
+
+def _shared_requests(config) -> list:
+    """The build request summaries every framework process writes into the per-user folder (request_store)."""
+    from orchestrator.Core.request_store import for_config
+    try:
+        store = for_config(config)
+        return store.read() if store is not None else []
+    except OSError:
+        return []
+
+
+def _print_request_summary(r: dict) -> None:
+    summary = r.get("summary") if isinstance(r.get("summary"), dict) else {}
+    rows = [("Request", r.get("request_id")), ("Status", r.get("status")), ("Stage", r.get("stage")),
+            ("Progress", f"{r.get('progress') or 0}%"), ("Model", summary.get("model")),
+            ("Target", summary.get("target")), ("Board", summary.get("board")), ("Format", summary.get("format")),
+            ("Quantization", summary.get("quantization")), ("Optimization", summary.get("optimization")),
+            ("Started by", r.get("owner") or "the person"), ("Where", r.get("program")),
+            ("Started", r.get("started")), ("Ended", r.get("ended"))]
+    for label, value in rows:
+        if value not in (None, ""):
+            console.print(f"[bold]{label}:[/bold] {escape(str(value))}")
+    for error in r.get("errors") or []:
+        console.print(f"[bold]Error:[/bold] {escape(str(error))}")
+    if r.get("status") == "interrupted":
+        console.print("[yellow]The process that ran this request has ended before it finished.[/yellow]")
+    elif r.get("awaiting_decision"):
+        console.print(f"[yellow]Waits for a decision on a self-healing proposal in the {escape(str(r.get('program')))}"
+                      " that started it.[/yellow]")
+    console.print("")
 
 
 def _client_proposals(config, request_id: Optional[str] = None) -> list:
@@ -2844,6 +2898,8 @@ def mcp_serve(ctx: FrameworkContext, transport: str, host: str, port: int):
     from orchestrator import mcp_server
     from orchestrator.tools.mcp_tokens import ENV_VAR
     mcp_server.no_programs_from_the_working_directory()
+    from orchestrator.Core.request_store import set_program
+    set_program("mcp")
     # Taken from the environment by the cli() group before anything ran (the token must not be inherited).
     token = getattr(ctx, "mcp_token", None)
     if token is None:

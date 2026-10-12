@@ -287,9 +287,11 @@ $ echo $?
 llm-cli build status [REQUEST_ID] [-a|--all]
 ```
 
-Shows builds from the build records in the cache folder (`<cache_dir>/build_records/`): every program that builds
-(CLI, GUI, MCP server) writes one record per build with its request, model, target, format, quantization, status,
-stage and progress, so builds that another process started are listed too. Without an ID: a table of the 20 newest
+Shows builds from the shared build state: every program that builds (CLI, GUI, MCP server) writes a summary of each
+build request into the per-user folder (`build_requests/`) and one record per build into the cache folder
+(`<cache_dir>/build_records/`) with its request, model, target, format, quantization, status, stage and progress,
+so builds that another process started are listed too, including requests still waiting in its queue (column
+`Where`: the program that runs it). Without an ID: a table of the 20 newest
 builds; with a request ID (`req_...`) or a build ID: the details of each attempt, including the error of a failed
 build (credentials redacted). A build whose process has ended before the build finished is shown as `interrupted`.
 Exit code 1 if the ID is not found. The command needs neither the credential vault nor Docker. On Linux and macOS

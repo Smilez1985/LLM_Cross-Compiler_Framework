@@ -15,6 +15,7 @@ Updates v2.4.0:
 - Added Hyperparameter Tuning Tab placeholder.
 """
 
+import os
 import sys
 from pathlib import Path
 from PySide6.QtWidgets import (
@@ -373,6 +374,7 @@ class MainOrchestrator(QMainWindow):
         if not active_flows:
             self.ditto_avatar.set_state("idle")
             self.lbl_ditto_status.setText("Idle")
+            self._show_other_builds()
             return
 
         # A proposal waiting for the user's decision takes precedence over the most recent flow.
@@ -506,6 +508,31 @@ class MainOrchestrator(QMainWindow):
         from orchestrator.Core.client_proposals import ClientProposalStore
         state_dir = getattr(getattr(self.framework, "config", None), "user_state_dir", None)
         return ClientProposalStore(state_dir) if isinstance(state_dir, (str, Path)) else None
+
+    OTHER_BUILDS_EVERY = 10.0  # seconds between two reads of the shared build state
+
+    def _show_other_builds(self) -> None:
+        """Builds that another framework process (a CLI call, an MCP server) runs, from the shared build state in the
+        per-user folder, in the status bar: the person sees every build, wherever it was started."""
+        import time as _time
+        now = _time.monotonic()
+        if now - getattr(self, "_other_builds_at", -1e9) < self.OTHER_BUILDS_EVERY:
+            return
+        self._other_builds_at = now
+        store = getattr(getattr(self.framework, "orchestrator", None), "request_store", None)
+        try:
+            running = [r for r in (store.read() if store is not None else [])
+                       if r.get("pid") != os.getpid()
+                       and r.get("status") in ("queued", "preparing", "building", "healing", "awaiting_approval")]
+        except OSError:
+            return
+        if running:
+            latest = running[0]
+            summary = latest.get("summary") if isinstance(latest.get("summary"), dict) else {}
+            self.status.showMessage(
+                f"{len(running)} build(s) in other framework processes; newest: {summary.get('model') or '?'} for "
+                f"{summary.get('target') or '?'} ({latest.get('status')}, {latest.get('program')}). "
+                "Details: llm-cli build status", int(self.OTHER_BUILDS_EVERY * 1000) + 1000)
 
     def _notice_client_proposals(self):
         """A status bar notice when an AI client proposed a new fix (also from an MCP server in another process)."""

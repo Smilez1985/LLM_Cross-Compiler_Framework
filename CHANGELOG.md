@@ -10,6 +10,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
 ## [Unreleased]
 
 ### Added
+- **Shared build state** (MCP design T11): every framework program (the GUI, a CLI call, each MCP server) writes a
+  summary of each build request into the per-user folder (`build_requests/`), so the GUI status bar, `llm-cli build
+  status`, `list_build_requests` and `get_build_status` see the same builds whichever program started them, also a
+  request that still waits in another program's queue. Each summary names the model by its repo id or label (never a
+  host path), the caller class that started it (never an MCP session key) and the program that runs it (`started_in`,
+  column `Where`); errors are redacted. A request whose program ended before it finished is shown as interrupted.
+  Builds of another program stay read-only. The note that only this process's builds are visible is gone.
 - **Ditto uses the framework tools**: in the chat (GUI) and with `llm-cli ditto ask "<question>"`, Ditto can
   list targets, check capabilities, start and cancel builds, read logs, search the knowledge base and run the
   doctor, always within your tool permissions. Tools that need a confirmation show their title and every
