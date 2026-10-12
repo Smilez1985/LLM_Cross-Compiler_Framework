@@ -286,6 +286,12 @@ DELETION_KINDS = ("artifact", "model_file", "download", "knowledge_snapshot", "t
 # Docker's own objects have no host path; every other item is listed with its full path.
 NO_PATH_KINDS = ("docker_image", "build_cache")
 DeletionKind = Literal[DELETION_KINDS]  # type: ignore[valid-type]
+_WINDOWS_ABSOLUTE = re.compile(r"^(?:[A-Za-z]:[\\/]|\\\\)")
+
+
+def _looks_absolute(text: str) -> bool:
+    """An absolute path of any system (POSIX, the home folder, a Windows drive or share)."""
+    return text.startswith(("/", "~")) or bool(_WINDOWS_ABSOLUTE.match(text))
 
 
 class DeletionItem(BaseModel):
@@ -308,6 +314,12 @@ class DeletionItem(BaseModel):
                 raise ValueError(f"a {self.kind} has no host path")
         elif not self.full_path or not os.path.isabs(self.full_path):
             raise ValueError(f"a {self.kind} is listed with its full path")
+        elif "/" in self.file_name or "\\" in self.file_name:
+            raise ValueError("file_name is the item's name, not a path")
+        # The speaking name is what an AI sees of the item (ai_view): never its path, nor any absolute path.
+        name = self.speaking_name.strip()
+        if (self.full_path and self.full_path in name) or _looks_absolute(name):
+            raise ValueError("speaking_name is a label an AI may see, never a path")
         return self
 
 

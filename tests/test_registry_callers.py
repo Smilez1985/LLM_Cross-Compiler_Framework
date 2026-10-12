@@ -28,8 +28,8 @@ from orchestrator.tools.grants import NEVER_GRANT, tool_rule  # noqa: E402
 from orchestrator.tools.mcp_tokens import TokenStore  # noqa: E402
 from orchestrator.tools.output import ToolOutput  # noqa: E402
 from orchestrator.tools.policy import Decision, PolicyStore, ToolPolicy, ToolTier  # noqa: E402
-from orchestrator.tools.registry import (ToolContext, ToolError, ToolRegistry, ToolSpec,  # noqa: E402
-                                         current_question, deletion_rule_problems)
+from orchestrator.tools.registry import (PromptSpec, ResourceSpec, ToolContext, ToolError,  # noqa: E402
+                                         ToolRegistry, ToolSpec, current_question, deletion_rule_problems)
 from orchestrator.tools.spec import CallFacts, DeletionItem, DeletionPlan, GrantRule  # noqa: E402
 from test_mcp_server import answering  # noqa: E402
 
@@ -142,11 +142,73 @@ def test_callers_must_name_someone(registry):
         registry.register(spec("nobody", callers=()))
 
 
+def test_resources_and_prompts_follow_the_callers_of_their_tools(registry):
+    """A resource mirrors a read tool and a prompt holds what read tools return: neither shows a caller what the tool
+    itself is not offered to it (callers, visible_when, checked against the real actor). Otherwise a tool limited to
+    Ditto would still be readable by every MCP client through its resource or prompt."""
+    registry.register(spec("ditto_notes", ToolTier.READ, callers=("ditto",)))
+    registry.register_resource(ResourceSpec("lcf://ditto-notes", "ditto-notes", "Ditto notes", "Notes for Ditto",
+                                            "application/json", tool="ditto_notes"))
+    registry.register_prompt(PromptSpec("about_notes", "About notes", "Uses Ditto's notes", "Framework words.", (),
+                                        lambda args, ctx: "context", tools=("ditto_notes",), reads=("ditto_notes",)))
+    allow_all(registry)
+
+    assert [r.uri for r in registry.resources("ditto")] == ["lcf://ditto-notes"]
+    assert [p.name for p in registry.prompts("ditto")] == ["about_notes"]
+    registry.read_resource("lcf://ditto-notes", {}, ToolContext("ditto"))
+    registry.get_prompt("about_notes", {}, ToolContext("ditto"))
+    assert RAN == ["ditto_notes"]
+
+    for actor in ("mcp", "mcp:laptop", "mcp:remote-ditto"):  # a token linked to Ditto is not Ditto
+        assert registry.resources(actor) == [] and registry.prompts(actor) == [], actor
+        with pytest.raises(ToolError) as exc:
+            registry.read_resource("lcf://ditto-notes", {}, ToolContext(actor, session="s"))
+        assert exc.value.code == "not_supported", actor
+        entry = registry.audit.entries(1)[0]
+        assert (entry["actor"], entry["outcome"], entry["reason_code"]) == (actor, "denied", "not_supported")
+        with pytest.raises(ToolError) as exc:
+            registry.get_prompt("about_notes", {}, ToolContext(actor, session="s"))
+        assert exc.value.code == "not_supported", actor
+        entry = registry.audit.entries(1)[0]
+        assert (entry["actor"], entry["outcome"], entry["reason_code"]) == (actor, "denied", "not_supported")
+    assert RAN == ["ditto_notes"], "the hidden tool's handler never ran for another caller"
+
+
+def test_an_elicitation_answer_never_confirms_a_call_the_framework_window_must_ask(registry):
+    """The registry, not only the MCP server, refuses a client's form answer for a call that only the framework's own
+    window may ask about: a tool that takes no other channel, or one the person set to "confirm in the framework" for
+    this caller (also when they set it while the client's form was open)."""
+    registry.register(spec("bench", channels=("framework",)))
+    registry.register(spec("note"))
+    registry.policy_store.replace(ToolPolicy(configured=True, overrides={"bench": Decision.ASK, "note": Decision.ASK}))
+    answered = dict(confirm_channel="elicitation", answer="accepted", question_sha256="a" * 64)
+    with pytest.raises(ToolError) as exc:
+        registry.call("bench", {}, ToolContext("mcp", **answered), approved=True)
+    assert exc.value.code == "needs_person" and RAN == []
+    entry = registry.audit.entries(1)[0]
+    assert (entry["outcome"], entry["confirm_channel"]) == ("not_confirmed", "none")
+
+    registry.call("note", {}, ToolContext("mcp", **answered), approved=True)  # a form may confirm an ordinary call
+    assert RAN == ["note"]
+    registry.policy_store.replace(ToolPolicy(configured=True, overrides={"bench": Decision.ASK, "note": Decision.ASK},
+                                             framework_only=["note"]))
+    with pytest.raises(ToolError) as exc:
+        registry.call("note", {"text": "y"}, ToolContext("mcp", **answered), approved=True)
+    assert exc.value.code == "needs_person" and RAN == ["note"]
+    # The person's own answer in the framework still counts.
+    registry.call("note", {"text": "z"}, ToolContext("mcp", confirm_channel="approval:ap_0123456789abcdef",
+                                                     answer="accepted"), approved=True)
+    assert RAN == ["note", "note"]
+
+
 # --- the deletion rule (round 5 f) ---------------------------------------------------------------------------------
 
 REVIEWED_DESTRUCTIVE = {
-    # destructive, but nothing the person can see is deleted:
-    "restore_knowledge_snapshot": "the current knowledge base is saved as a snapshot first; nothing is pruned",
+    # NOT yet free of deletions (open, design WP7 and [A15]): the backup snapshot it takes first goes through
+    # RAGManager.create_snapshot, which still prunes the oldest knowledge snapshots beyond five (every ingest does the
+    # same). WP7 stops that automatic pruning; only then may a delegation cover this tool.
+    "restore_knowledge_snapshot": "takes a backup snapshot first; automatic snapshot pruning is removed in WP7",
+    # destructive, but nothing on this computer the person can see is deleted:
     "deploy_to_device": "replaces files on a board the person trusts; nothing on this computer is deleted",
     "deploy_device_runtime": "the previous runtime on the board stays as the fallback",
     # deletes only with one strategy: that call carries a deletion plan in its facts (WP7), then the rule applies

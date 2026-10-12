@@ -412,7 +412,12 @@ def _ditto_confirm(spec, inp) -> bool:
         click.echo(str(e), err=True)
         return False
     if not sys.stdin.isatty():
-        click.echo(text, err=True)
+        # Nobody may sit here and another program (an AI app running this command) may read it: the call and its
+        # arguments only, never the facts the framework's question shows the person alone (full paths, logins).
+        try:
+            click.echo(describe_call(spec, inp.model_dump(mode="json"), actor="Ditto", limit=MAX_FRAMEWORK), err=True)
+        except CallTooLong as e:
+            click.echo(str(e), err=True)
         click.echo("No terminal to confirm in: denied. Allow the tool with 'llm-cli tools permissions'.", err=True)
         return False
     long = len(text) > MAX_ELICITATION or len(text.splitlines()) > PAGED_QUESTION_LINES

@@ -565,11 +565,12 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 Tool Permissions (allowing the whole "external" class does not enable them), every call is asked, and they never get
 a standing approval. A deletion is decided only by you, in the framework's own window: Ditto's dialog or prompt, or
 for an MCP client a pending approval in the GUI or `llm-cli tools approvals`; the client's own form is never used for
-it. `delete_artifact` takes the id and the sha256 `list_artifacts` shows; it is refused for a
-folder outside the output folder (also through a link), while a build of any framework program writes into it or
-is queued for it, when the model file's sha256 changed since, and when the folder is no longer the one the question
-named. `restore_knowledge_snapshot` saves the current knowledge base as a snapshot `pre_restore_<time>` first and
-does not restore without that backup; the same backup rule now holds for every restore of a snapshot, and the
+it. The question there lists each item (the model folder and its golden ZIP) with its full path, file name, size and
+what it is; the AI sees labels and sizes only. `delete_artifact` takes the id and the sha256 `list_artifacts` shows;
+it is refused for a folder outside the output folder (also through a link), while a build of any framework program
+writes into it or is queued for it, when the model file's sha256 changed since, and when the folder is no longer the
+one the question named. `restore_knowledge_snapshot` saves the current knowledge base as a snapshot
+`pre_restore_<time>` first and does not restore without that backup; the same backup rule now holds for every restore of a snapshot, and the
 snapshot being restored is never pruned by it.
 
 How a question with tools runs:
