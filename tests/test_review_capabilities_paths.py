@@ -500,6 +500,10 @@ class FakeDeploymentManager:
         self.calls.append(kwargs)
         return Path(kwargs["output_dir"]) / "deploy_x.zip"
 
+    def create_package(self, artifact_path, profile_name, docker_config, output_dir, cancelled=None):
+        return self.create_deployment_package(artifact_path=artifact_path, profile_name=profile_name,
+                                              docker_config=docker_config, output_dir=output_dir)
+
 
 def framework_with_targets(make_framework, folder, rockchip=True):
     """A framework whose targets are a copy of the shipped Rockchip target.yml (optional) and a module-wizard

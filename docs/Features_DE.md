@@ -257,7 +257,24 @@ Das Deployment kopiert einen fertigen Build per SSH auf ein Board und installier
   installiert ist (auf 127.0.0.1 mit dem Schlüssel des Boards), sonst, wie du sie deployst; auf einen
   `llama-server` aus dem `PATH` des Boards verweist es nie. Für RKLLM nennt es die RKLLM-Runtime.
 - **Docker-Modus** (`--docker`, Option in der GUI): packt zusätzlich Container-Images ein und startet sie auf dem
-  Board. Dieser Modus ist experimentell und in dieser Version nicht geprüft.
+  Board. Dieser Modus ist experimentell und in dieser Version nicht geprüft. Ein Image kommt nur ins Paket, wenn es
+  per Digest festgelegt ist (`image_inference_runtime: name@sha256:...`) oder auf diesem Rechner gebaut wurde (es
+  liegt hier und wurde nie gezogen); ein Image, das nur über ein Tag benannt ist, etwa das voreingestellte
+  `...:latest`, wird mit Grund abgelehnt, bevor etwas kopiert wird. Ein per Digest festgelegtes Image, das hier fehlt,
+  wird über seinen Digest gezogen, nie über ein Tag, und ein fehlgeschlagener Export bricht das Paket ab, statt das
+  Image wegzulassen.
+- **Vertraute Geräte:** Nach einer erfolgreichen Anmeldung an einem Board, dessen Host-Schlüssel du bestätigt hast
+  (ein Deployment in der GUI oder mit `llm-cli deploy run`, eine Prüfung mit `llm-cli scan --device`, ein
+  `device runtime deploy`), trägt das Framework es in `~/.llm-framework/devices.json` ein: deinen Namen dafür,
+  Adresse, Benutzer, den bestätigten Host-Schlüssel und ob sich der Schlüssel des Frameworks anmeldet (gekoppelt); die
+  Geräte-ID wird aus dem Host-Schlüssel abgeleitet. `llm-cli deploy devices list|add|remove` zeigt und verwaltet sie
+  ([CLI](CLI_Usage_DE.md#deploy-devices)). Nur diese Geräte kann ein KI-Client oder Ditto für ein Deployment nennen,
+  und nur, solange die `known_hosts` des Frameworks noch genau diesen Schlüssel enthält; kein Tool vertraut einem
+  Gerät, koppelt es oder trägt es ein.
+- **Fehler mit Grund:** Paketieren und Übertragen melden, warum sie gescheitert sind (kein Docker, ein nicht
+  festgelegtes Image, ein geänderter Host-Schlüssel, der Exit-Status von `deploy.sh`), statt es nur zu protokollieren.
+  Ein Paket wird unter einem vorläufigen Namen geschrieben und erst umbenannt, wenn es vollständig ist. Ohne paramiko
+  bekommen `ssh` und `scp` nie die Standardeingabe des Frameworks (über MCP-stdio ist das der Protokollstrom).
 
 ### Laufzeit auf dem Board (selbst gebautes llama.cpp)
 
@@ -566,6 +583,9 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `report_cannot_do` | lesen | Melden, dass eine Aufgabe nicht machbar ist, mit Grund; das Framework prüft den Grund an seinem eigenen Zustand |
 | `get_job_status` | lesen | Zustand, Fortschritt und Ergebnis einer langen Operation außer einem Build (ein Job); wartet mit `wait_seconds` |
 | `cancel_job` | lokal schreiben | Einen Job stoppen (eigene Jobs ohne Frage, die eines anderen Aufrufers erst nach einer) |
+| `list_devices` | lesen | Die Geräte, denen du in der GUI oder CLI vertraut und die du gekoppelt hast, mit deinem Namen dafür, Fingerabdruck des Host-Schlüssels und ob sie nutzbar sind |
+| `create_deploy_package` | lokal schreiben | Ein gebautes Modell für das Geräteprofil eines Targets paketieren (ein Job; Images nur per Digest festgelegt oder hier gebaut) |
+| `deploy_to_device` | extern | Ein Paket auf ein vertrautes, gekoppeltes Gerät kopieren und dessen `deploy.sh` ausführen (immer mit Frage; die Frage zeigt Host-Schlüssel und Paket-Hash; ein Job) |
 
 So läuft eine Frage mit Tools ab:
 
@@ -1412,6 +1432,26 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   markiert, Links aus dem Ordner hinaus, mehrfach verlinkte und versteckte Dateien und unfertige Downloads
   weggelassen; 50 je Seite), jede mit Datei-ID und `<Label>:<relativer Pfad>`, die `start_build` annimmt; eine
   heruntergeladene Datei erscheint dort auch.
+- **Geräte und Deployment (`list_devices`, `create_deploy_package`, `deploy_to_device`):** `list_devices` zeigt die
+  [vertrauten Geräte](#übertragen-auf-das-board-deployment) mit deinem Namen dafür, Adresse, Benutzer,
+  Fingerabdruck des Host-Schlüssels, ob das Gerät nutzbar ist (gekoppelt und sein Schlüssel noch der vertraute) und
+  dem letzten Deployment. `create_deploy_package` paketiert ein gebautes Modell (Artefakt-ID) für das Geräteprofil
+  eines Targets (Standard: das Target, für das es gebaut wurde) als Job; die Platte des Ausgabeordners muss das
+  Doppelte des Modells fassen, und `include_docker_images` wird abgelehnt, solange nicht jedes Image per Digest
+  festgelegt oder auf diesem Rechner gebaut ist. Das Ergebnis enthält die Paket-ID (`pkg_` und 16 Hex-Zeichen), Größe
+  und sha256; eine Daueranfrage kann es nur ohne Docker-Images abdecken. `deploy_to_device` nimmt nur eine Paket-ID und
+  eine Geräte-ID. Bevor du gefragt wirst, liest das Framework den Host-Schlüssel des Geräts (nur das Lesen des
+  Schlüssels, keine Anmeldung) und lehnt einen unbekannten oder geänderten Schlüssel ab, ohne etwas zu schreiben
+  (Grund `needs_person`); ein nicht gekoppeltes Gerät wird ebenfalls abgelehnt. Die Frage zeigt das Gerät mit deinem
+  Namen dafür, Benutzer und Adresse, den Fingerabdruck des Host-Schlüssels, den du bestätigt hast, Name, Größe und
+  sha256 des Pakets, das gebaute Modell und das Vertrauen in sein Target. Das Deployment läuft dann als Job ohne
+  Passwort und bricht ab, wenn das sha256 des Pakets (berechnet aus derselben geöffneten Datei, die hochgeladen
+  wird) oder der Schlüssel des Geräts von dem abweicht, was dir gezeigt wurde. Es wird immer erfragt (es lässt sich
+  nie auf „erlauben“ stellen), nie von einer Daueranfrage abgedeckt, läuft eins je Gerät zur Zeit und sechs je Stunde
+  je Client. `cancel_job` schließt die SSH-Sitzung, und der Job sagt, dass der Zustand des Geräts unbekannt ist;
+  nichts wird wiederholt. Das Job-Ergebnis enthält `success`, `exit_status`, `device_state` (`ok`, `failed`,
+  `unknown`) und die letzten 100 Zeilen, die das Gerät ausgegeben hat, in `external_text`, als externer Text markiert.
+  Der Prompt `deploy_to_board` führt durch dieselben Schritte.
 - **Warten und lange Operationen:** `get_build_status` und `get_job_status` nehmen `wait_seconds` (höchstens 50; ein
   größerer Wert wird mit einem Hinweis verringert) und kehren zurück, sobald sich der Build oder Job ändert oder
   endet. Das Warten läuft in der Ereignisschleife des Servers ohne eigenen Thread, höchstens 4-mal gleichzeitig je

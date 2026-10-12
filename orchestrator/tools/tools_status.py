@@ -237,7 +237,7 @@ class CannotIn(BaseModel):
     reason: Literal[REASONS] = Field(description="Why it cannot be done")  # type: ignore[valid-type]
     missing: str = Field(min_length=1, max_length=300, description="What exactly is missing")
     tool: Optional[str] = Field(default=None, max_length=64, description="The tool that would do it or that failed")
-    action: Optional[Literal["sign_in", "change_permissions", "audit_log", "trust_device", "deploy_to_device",
+    action: Optional[Literal["sign_in", "change_permissions", "audit_log", "trust_device",
                              "deep_ingest_notice", "publish_pull_request",
                              "install_pack_from_file", "run_command"]] = Field(
         default=None, description="One of the framework's known actions without a tool")

@@ -16,24 +16,38 @@ from orchestrator.Core.config_manager import ConfigManager
 from orchestrator.Core.deployment_manager import DeploymentManager
 
 
+INFERENCE_PINNED = "ghcr.io/example/llm-runtime@sha256:" + "a" * 64
+QDRANT_PINNED = "qdrant/qdrant@sha256:" + "b" * 64
+
+
 class FakeImage:
-    def __init__(self, name):
+    def __init__(self, name, repo_digests=None):
         self.name = name
+        self.attrs = {"RepoDigests": list(repo_digests) if repo_digests is not None else [f"{name}@sha256:" + "c" * 64]}
 
     def save(self, named=True):
         yield f"tarball:{self.name}".encode()
 
 
 class FakeDockerClient:
-    def __init__(self):
+    """Images that are here: `local` (name -> RepoDigests; [] means built on this computer); pulled ones too."""
+
+    def __init__(self, local=None, fail_pull=False):
         self.pulled = []
         self.images = self
+        self.local = dict(local or {})
+        self.fail_pull = fail_pull
 
     def pull(self, name):
+        if self.fail_pull:
+            raise RuntimeError("registry unreachable")
         self.pulled.append(name)
+        self.local[name] = [name]
 
     def get(self, name):
-        return FakeImage(name)
+        if name not in self.local:
+            raise LookupError(f"no such image {name}")
+        return FakeImage(name, self.local[name])
 
 
 class FakeTargetManager:
@@ -52,7 +66,11 @@ class FakeFramework:
 
 @pytest.fixture
 def config(tmp_path):
-    return ConfigManager(tmp_path / "configs")
+    cfg = ConfigManager(tmp_path / "configs")
+    # Packages take only digest-pinned images or images built on this computer (MCP design G17).
+    cfg.set("image_inference_runtime", INFERENCE_PINNED)
+    cfg.set("image_qdrant", QDRANT_PINNED)
+    return cfg
 
 
 @pytest.fixture
@@ -199,7 +217,8 @@ class TestDockerPackages:
         inference, qdrant = config.get("image_inference_runtime"), config.get("image_qdrant")
         assert client.pulled == [inference, qdrant]
         tarballs = sorted(p.name for p in (pkg / "images").iterdir())
-        assert tarballs == sorted(f"{n.replace('/', '_').replace(':', '_')}.tar" for n in (inference, qdrant))
+        assert tarballs == sorted(f"{n.replace('/', '_').replace(':', '_').replace('@', '_')}.tar"
+                                  for n in (inference, qdrant))
 
         storage = list((pkg / "data" / "qdrant").iterdir())
         assert [p.name for p in storage] == [".keep"] and storage[0].stat().st_size == 0
@@ -220,11 +239,50 @@ class TestDockerPackages:
         assert "qdrant" not in script
         assert config.get("image_inference_runtime") in script
 
-    def test_without_docker_client_still_produces_script(self, tmp_path, config, artifact):
-        pkg = build_package(tmp_path, config, artifact, use_docker=True, docker_client=None, profile="")
-        script = (pkg / "deploy.sh").read_text()
-        assert "docker run -d --name llm-node" in script
-        assert "--device" not in script
+    def test_without_docker_the_images_are_not_silently_left_out(self, tmp_path, config, artifact):
+        """A package for an air-gapped device without its images would fail there: it is refused with the reason."""
+        from orchestrator.Core.deployment_manager import DeployError
+        dm = DeploymentManager(FakeFramework(config, None))
+        with pytest.raises(DeployError) as e:
+            dm.create_package(artifact, "", {"use_docker": True}, tmp_path / "out")
+        assert e.value.code == "needs_person"
+        assert not (tmp_path / "out").exists() or not list((tmp_path / "out").iterdir())
+
+    @pytest.mark.parametrize("image", ["ghcr.io/smilez1985/llm-runtime:latest", "qdrant/qdrant:v1.16.0",
+                                       "example/runtime", "example/runtime@sha256:short"])
+    def test_an_image_named_by_a_tag_is_refused_before_anything_is_pulled(self, tmp_path, config, artifact, image):
+        """G17: a tag names whatever the registry serves today; only a digest or an image built here is packaged."""
+        from orchestrator.Core.deployment_manager import DeployError
+        config.set("image_inference_runtime", image)
+        client = FakeDockerClient()
+        dm = DeploymentManager(FakeFramework(config, client))
+        with pytest.raises(DeployError, match="neither pinned by its digest") as e:
+            dm.create_package(artifact, "", {"use_docker": True}, tmp_path / "out")
+        assert e.value.code == "not_supported" and client.pulled == []
+        assert dm.create_deployment_package(artifact, "", {"use_docker": True}, tmp_path / "out") is None
+
+    def test_an_image_pulled_by_a_tag_earlier_is_still_refused(self, tmp_path, config, artifact):
+        from orchestrator.Core.deployment_manager import DeployError
+        config.set("image_inference_runtime", "example/runtime:1.0")
+        client = FakeDockerClient(local={"example/runtime:1.0": ["example/runtime@sha256:" + "d" * 64]})
+        with pytest.raises(DeployError):
+            DeploymentManager(FakeFramework(config, client)).create_package(artifact, "", {"use_docker": True},
+                                                                            tmp_path / "out")
+
+    def test_an_image_built_on_this_computer_is_packaged_without_a_pull(self, tmp_path, config, artifact):
+        config.set("image_inference_runtime", "llm-framework/inference:local")
+        client = FakeDockerClient(local={"llm-framework/inference:local": []})
+        pkg = build_package(tmp_path, config, artifact, use_docker=True, docker_client=client)
+        assert client.pulled == []
+        assert [p.name for p in (pkg / "images").iterdir()] == ["llm-framework_inference_local.tar"]
+
+    def test_a_failed_pull_stops_the_package(self, tmp_path, config, artifact):
+        from orchestrator.Core.deployment_manager import DeployError
+        client = FakeDockerClient(fail_pull=True)
+        with pytest.raises(DeployError, match="could not be packaged"):
+            DeploymentManager(FakeFramework(config, client)).create_package(artifact, "", {"use_docker": True},
+                                                                            tmp_path / "out")
+        assert not list((tmp_path / "out").glob("*.zip"))
 
     @pytest.mark.skipif(not shutil.which("bash"), reason="bash not available")
     @pytest.mark.parametrize("use_docker, rag", [(False, False), (True, False), (True, True)])
@@ -275,6 +333,8 @@ class TestSSHDeployment:
 
         def fake_run(args, **kwargs):
             assert isinstance(args, list) and not kwargs.get("shell")
+            # Over MCP stdio, an inherited stdin would forward the protocol stream to the device (G25).
+            assert kwargs.get("stdin") is subprocess.DEVNULL
             calls.append(args)
             return subprocess.CompletedProcess(args, 0, stdout="/tmp/llm_deploy.Ab12Cd34\n", stderr="")
 

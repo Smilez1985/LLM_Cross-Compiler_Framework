@@ -362,13 +362,15 @@ sequenceDiagram
    the client ends the session the same way (it interrupts the server like Ctrl+C instead of ending the process at
    once).
 
-The twenty-one tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
+The twenty-four tools: `list_targets`, `get_target_capabilities`, `list_build_requests`, `get_build_status`,
 `read_build_log`, `list_artifacts`, `run_doctor`, `search_knowledge`, `list_knowledge_sources`,
-`read_knowledge_source`, `search_hf_models`, `get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`
-(tier `read`) and `start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`,
-`download_hf_file` (tier `local_write`). Tools your permissions deny
-are not listed to the client. No tool of the `external` tier is registered, so neither AI clients nor Ditto can
-deploy to devices.
+`read_knowledge_source`, `search_hf_models`, `get_hf_model_info`, `list_local_files`, `get_status`, `get_job_status`,
+`list_devices` (tier `read`), `start_build`, `cancel_build`, `resolve_healing`, `cancel_job`, `propose_healing_fix`,
+`download_hf_file`, `create_deploy_package` (tier `local_write`) and `deploy_to_device` (tier `external`). Tools your
+permissions deny are not listed to the client. `deploy_to_device` is always asked (no setting allows it without a
+question) and reaches only a device you trusted and paired in the GUI or the CLI: the framework reads the device's
+host key before the question, refuses an unknown or changed key, shows the key's fingerprint and the package's
+sha256 in the question, and refuses the deploy when either differs afterwards.
 
 ### A question to Ditto (unreleased)
 
