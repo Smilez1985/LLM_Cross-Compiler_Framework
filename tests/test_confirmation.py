@@ -70,6 +70,18 @@ def test_the_question_shows_the_summary_in_the_framework_window_and_the_warning_
     assert form.index("Checked by the framework:") < form.index("Situation:") < form.index("Needs you")
 
 
+def test_the_summary_counts_only_what_is_still_to_download():
+    """A commit partly staged already downloads only the rest: the person's short line says that amount, not the
+    whole commit (the Download fact keeps both numbers)."""
+    facts = CallFacts(consequence="c", numbers={"size_class": "20gb", "download_bytes": 15 * 10 ** 9,
+                                                "cached_bytes": 10 * 10 ** 9, "needed_bytes": 39 * 10 ** 9},
+                      names={"model": "m", "target": "t"}, tool="start_build")
+    assert person_summary(facts, "en")[1] == "About 5.0 GB to download. About 39.0 GB of disk space needed."
+    staged = CallFacts(consequence="c", numbers={"download_bytes": 15 * 10 ** 9, "cached_bytes": 15 * 10 ** 9},
+                       names={"model": "m", "target": "t"}, tool="start_build")
+    assert not any("download" in line for line in person_summary(staged, "en")), "nothing left to download"
+
+
 def test_a_tool_without_classified_facts_keeps_its_question():
     facts = CallFacts(consequence="Changes item a1 on this computer.", facts=(Fact("Server value", "v1"),))
     text = describe_call(SPEC, {"item_id": "a1"}, facts=facts, limit=MAX_FRAMEWORK, person_view=True)
