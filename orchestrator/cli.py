@@ -295,16 +295,36 @@ def module():
     """Manage hardware target modules"""
     pass
 
+def _target_profile(probe_file, strict: bool):
+    """The hardware profile in a probe file of the target (schema 2, or schema 1 converted), for the runtime: block of
+    a new module. strict: a file that is no probe profile is an error; otherwise it gives None (a free-form probe
+    that only the AI reads)."""
+    from orchestrator.runtime.profile import ProfileError, read_profile
+    try:
+        return read_profile(Path(probe_file))
+    except (ProfileError, OSError, ValueError) as e:
+        if strict:
+            console.print(f"[red]{escape(str(probe_file))} is not a hardware probe profile: {escape(str(e))}[/red]")
+            sys.exit(1)
+        console.print("[yellow]The probe file is not a hardware probe profile (llm-cli scan writes one), so the "
+                      "module's runtime: block plans the device runtime when the device is probed.[/yellow]")
+        return None
+
+
 @module.command('create')
 @click.option('--name', prompt='Module Name', help='Name of the new target')
 @click.option('--arch', prompt='Architecture', type=click.Choice(['aarch64', 'x86_64', 'armv7l', 'riscv64']), help='CPU Architecture')
 @click.option('--sdk', prompt='SDK/Backend', default='None', help='Special SDK (e.g. CUDA, RKNN)')
+@click.option('--probe', 'probe_file', type=click.Path(exists=True, dir_okay=False), default=None,
+              help="Hardware probe of the target (llm-cli scan --device writes one): the module's runtime: block is "
+                   "the build recipe's plan for its device runtime")
 @pass_context
-def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
+def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str, probe_file: Optional[str]):
     """Create a new hardware target module interactively"""
-    
+
     console.print(f"\n[bold cyan]Creating new target module: {name}[/bold cyan]")
-    
+    profile = _target_profile(probe_file, strict=True) if probe_file else None
+
     # Interaktive Abfrage weiterer Details (CLI Wizard Style)
     base_os = click.prompt("Base Docker Image", default="debian:bookworm-slim")
     description = click.prompt("Description", default=f"Target for {name}")
@@ -313,8 +333,10 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
     packages_input = click.prompt("Packages", default="build-essential, cmake, git")
     packages = [p.strip() for p in packages_input.split(',')]
     
-    cpu_flags = click.prompt("Default CPU Flags", default="")
-    
+    # Advisory only: kept in the runtime: block of target.yml, never applied (llama.cpp's options come from the
+    # build recipe and the device's probe).
+    cpu_flags = click.prompt("CPU flags to note in the module (advisory, not applied)", default="")
+
     module_data = {
         "module_name": name,
         "architecture": arch,
@@ -334,8 +356,8 @@ def module_create(ctx: FrameworkContext, name: str, arch: str, sdk: str):
         config, resolve = _settings(ctx)
         targets_dir = resolve(config.get("targets_dir", "targets"))
         generator = ModuleGenerator(targets_dir)
-        
-        output_path = generator.generate_module(module_data)
+
+        output_path = generator.generate_module(module_data, profile=profile)
         
         console.print(f"\n[bold green]✅ Module successfully created![/bold green]")
         console.print(f"Location: {output_path}")
@@ -418,11 +440,14 @@ def generate_ai(ctx: FrameworkContext, probe_file, provider: Optional[str], mode
     click.echo(json.dumps(definition.model_dump(), indent=2, ensure_ascii=False))
     if not Confirm.ask("Generate module with these settings?"):
         return
+    console.print("[dim]cpu_flags and cmake_flags are kept in the module as advisory text; llama.cpp is built by the "
+                  "framework's recipe from the device's probe.[/dim]")
     fm = ctx.framework_manager
     targets_dir = fm.resolve_path(fm.config.get("targets_dir", "targets"))
     module_name = definition.module_name.replace(" ", "_")
+    profile = _target_profile(probe_file, strict=False)
     try:
-        path = ditto.save_module(definition, targets_dir, module_name=module_name)
+        path = ditto.save_module(definition, targets_dir, module_name=module_name, profile=profile)
     except ValueError as e:
         console.print(f"[bold red]The proposal was rejected:[/bold red] {escape(str(e))}")
         sys.exit(1)

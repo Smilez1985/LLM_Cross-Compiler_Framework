@@ -94,7 +94,9 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
    Importance Matrix, RKLLM, RKNN `i8`).
 3. **Image bauen:** das Docker-Image des Targets mit allen Toolkits (llama.cpp v0.6.0, RKLLM-Toolkit 1.3.1,
    RKNN-Toolkit2 2.3.2, jedes in einer eigenen Python-Umgebung). BuildKit wird genutzt, wenn vorhanden, und bei
-   einem Fehler wird die echte Ursache gemeldet. Spätere Builds nutzen Dockers Build-Cache.
+   einem Fehler wird die echte Ursache gemeldet. Spätere Builds nutzen Dockers Build-Cache. Die
+   Konvertierungswerkzeuge von llama.cpp ([unten](#konvertierungswerkzeuge-abgestimmt-auf-den-build-rechner))
+   entstehen in diesem Schritt aus dem festgelegten Commit mit den Optionen des Build-Rezepts für diesen Rechner.
 4. **Modell auf dem Host bereitstellen:** Ein Hugging-Face-Modell wird auf deinem Rechner heruntergeladen (mit dem
    Token `hf_token` für zugangsbeschränkte Modelle), ein lokaler Ordner bzw. eine Datei wird direkt verwendet. Die
    Container bekommen es nur lesend.
@@ -135,6 +137,38 @@ Weiteres Verhalten:
 - **Ausgabeordner:** CLI-Builds landen in `output/build_<Datum>_<Uhrzeit>/<Target>/<Modell>/<Quantisierung>/` in der
   Installation (oder in dem mit `-o` angegebenen Ordner), Builds aus der GUI, von Ditto oder von MCP-Clients in
   `output/<Target>/<Modell>/<Quantisierung>/`.
+
+### Konvertierungswerkzeuge abgestimmt auf den Build-Rechner
+
+Die Target-Images bauen die Konvertierungswerkzeuge von llama.cpp (`llama-quantize`, `llama-imatrix`,
+`llama-perplexity`, `llama-completion`, `llama-bench`) aus dem Quelltext nach demselben Rezept wie Dittos Server
+([Wie die Laufzeit gebaut wird](#wie-die-laufzeit-gebaut-wird-selbst-gebautes-llamacpp)); das mitgelieferte
+Rockchip-Target und die Vorlage für neue Targets nutzen dieselben Schritte.
+
+- **Der Pin, per Commit:** Die Engine übergibt `LLAMA_CPP_TAG` und `LLAMA_CPP_COMMIT`; das Image holt den Commit und
+  bricht ab, wenn `git rev-parse HEAD` ihn nicht zurückgibt, ein verschobener Tag kann also nicht ändern, was gebaut
+  wird. Auch die Einstellung `llama_cpp_version` kann ihn nicht verschieben; ein anderer Wert ergibt eine Warnung.
+- **Abgestimmt auf den Rechner, der sie ausführt:** Das Image läuft auf dem Build-Rechner, deshalb ist
+  `LLAMA_CMAKE_ARGS` der Plan des Rezepts für den Zweck `host-tools` aus einer Probe dieses Rechners, unmittelbar vor
+  dem Image-Build erstellt (oder aus dem gespeicherten Profil dieses Rechners, wenn die Probe scheitert): seine
+  CPU-Merkmale ausgeschrieben (AVX-512 nur, wo die CPU es hat, kein AVX2 auf einer CPU vor Haswell, also keine
+  unzulässige Instruktion), oder alle CPU-Varianten, von denen zur Laufzeit die beste gewählt wird, wenn die Probe
+  nicht jedes Merkmal erkennen konnte. Ohne Probe, oder mit einem Docker-Daemon auf einem anderen Rechner, gilt die
+  Vorgabe des Dockerfiles: die feste x86-64-Basis, die diese Werkzeuge immer hatten (AVX2, FMA, F16C, kein AVX-512),
+  ausgeschrieben.
+- **Jeder Build:** Nach diesen Optionen setzt das Image, was jeder Build hat (nichts wird beim Konfigurieren
+  heruntergeladen, keine Unterprozesse, Build-Nummer und Commit); Wörter, die nicht `-DNAME=WERT` sind, Optionen, die
+  bei jedem Setzen etwas herunterladen, und ein Konfigurationsprotokoll, das einen Download meldet, stoppen den Build,
+  und `llama-bench --version` muss den festgelegten Build und Commit melden. Build-Argumente eines Build-Auftrags
+  können die drei llama.cpp-Argumente nicht ersetzen, und CPU- oder CMake-Flags aus dem Modul-Assistenten oder von
+  einer KI erreichen sie nie.
+- **Festgehalten:** Das Build-Log nennt die Abstimmung, und `build_info.json` hält sie unter `llama_cpp_tools` fest
+  (Tag, Commit, Abstimmung, ID des Plans und seine Wörter).
+- **Gleiche Ausgabe:** Das GGUF, das `llama-quantize` schreibt, hängt nicht von dieser Abstimmung ab. Gemessen am Pin
+  mit GCC 13.3 an einem synthetischen llama-Modell von 6 MB: Q2_K, Q3_K_M, Q4_0, Q4_K_M, Q5_K_M, Q6_K, Q8_0, IQ4_NL,
+  IQ4_XS und TQ2_0 (ohne Importance-Matrix) waren aus drei Builds byteweise gleich: der Standard-Basis, AVX-512 mit
+  AMX und AVX ohne AVX2 und FMA. Der Bau der fünf Werkzeuge dauerte auf einer virtuellen Maschine mit 4 Kernen 3 bis
+  6 Minuten (`-j4`).
 
 ---
 
@@ -1019,10 +1053,25 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
 - **Neues Target aus einer Probe:** `llm-cli module generate-ai <Probe-Datei>` oder die KI-Analyse im Assistenten.
   Ditto schlägt Architektur, SDK, Basis-Image, Pakete, CPU- und CMake-Flags, Setup-Befehle und den
   Quantisierungsblock von `build.sh` vor; du siehst zuerst den ganzen Vorschlag.
+- **Die Geräte-Laufzeit im Modul:** Jede neue `target.yml` bekommt einen Block `runtime:`, den Plan des Build-Rezepts
+  für die llama.cpp-Laufzeit des Boards aus der Probe des Targets (die im Assistenten eingelesene Probe-Datei, die
+  Probe-Datei von `module generate-ai` oder `llm-cli module create --probe <Datei>`): Architektur, Betriebssystem, die
+  C-Bibliothek, die der Cross-Build nicht überschreiten darf, die Builder-Basis, die CPU-Optionen (für den RK3566
+  `armv8.2-a+dotprod+fp16`), die Backends und die Programme. Er sagt, dass llama.cpp aus dem Quelltext gebaut wird;
+  er ist eine Aufzeichnung, und die Laufzeit wird immer neu aus der eigenen Probe des Geräts geplant. CPU- und
+  CMake-Flags aus dem Assistenten oder von Ditto stehen dort unter `advisory` und werden nie angewendet.
+- **llama.cpp in neuen Targets:** Das Vorlagen-Dockerfile baut die Konvertierungswerkzeuge wie das Rockchip-Image
+  ([Konvertierungswerkzeuge abgestimmt auf den Build-Rechner](#konvertierungswerkzeuge-abgestimmt-auf-den-build-rechner)).
+  Die GPU-Vorlage nimmt CUDA 12.9.1 aus den Redist-Archiven von NVIDIA (Manifest per sha256 festgelegt, jedes Archiv
+  geprüft) auf Ubuntu 22.04, per Digest festgelegt; das vorgebaute Entwicklungs-Image von NVIDIA ist nur ein
+  ausdrücklicher Opt-in (ein Basis-Image, das du selbst wählst; Dittos Vorschläge enthalten nie eines), per Digest
+  festgelegt und als „not self-built“ gekennzeichnet.
 - **Prüfungen, bevor etwas geschrieben wird:** Namen, Images, Pakete und Flags werden streng geprüft; Shell-Code wird
   gegen eine Sperrliste und mit `bash -n` geprüft; Dateien werden nur innerhalb von `targets/` geschrieben; ein
   vorhandenes Target wird nie überschrieben. Setup-Befehle laufen später als Benutzer ohne Sonderrechte und ohne
-  Netzwerk.
+  Netzwerk. Ein Target, das ein vorgebautes llama.cpp-Image bezieht, llama.cpp-Programme aus einem anderen Image
+  kopiert, Release-Archive oder Programme herunterlädt oder ein llama.cpp-Paket installiert, wird abgelehnt: Das
+  Framework teilt Rezepte, keine Binärdateien.
 - **Wissens-Schnappschuss (auf Wunsch):** Auf der letzten Seite des Assistenten schreibt **Attach the knowledge
   crawled for this target** (standardmäßig aus, erst nach einem Deep Ingest im Assistenten wählbar) die Seiten, die
   von den Deep-Ingest-URLs des Assistenten gecrawlt wurden, bereinigt nach `knowledge/initial_knowledge.json` im
@@ -1166,9 +1215,11 @@ und **Import file...** im Hub:
 2. Ein Pack aus dem Index wird über Größe und sha256 aus dem Index gepinnt heruntergeladen.
 3. Das Pack wird in einen Quarantäne-Ordner (`.quarantine/` im Installationsordner) entpackt und geprüft: genau die
    aufgeführten Dateien mit ihren Hashes, keine Links, Sonder- oder Binärdateien, und die Prüfungen seiner Art.
-   Targets: ein gültiger Block `capabilities`, jedes Image, das eine Dockerfile zieht (`FROM`, `COPY --from`,
-   `RUN --mount=...,from=`), per Digest gepinnt, außer es ist ein offizielles Basis-Image, die Shell-Sperrliste auf
-   jeder Skriptzeile, die nicht aus der mitgelieferten Vorlage stammt, `bash -n`, keine Platzhalter der Vorlage.
+   Targets: ein gültiger Block `capabilities` (und `runtime`, falls vorhanden), jedes Image, das eine Dockerfile
+   zieht (`FROM`, `COPY --from`, `RUN --mount=...,from=`), per Digest gepinnt, außer es ist ein offizielles
+   Basis-Image, kein vorgebautes llama.cpp (Images, kopierte oder heruntergeladene Programme, Pakete), die
+   Shell-Sperrliste auf jeder Skriptzeile, die nicht aus der mitgelieferten Vorlage stammt, `bash -n`, keine
+   Platzhalter der Vorlage.
    Rezepte: das Schema für Rezepte und die Capabilities des Targets. Wissen: eine Liste von Seiten, jede mit ihrer
    Quelle.
 4. Eine Zusammenfassung (Art, ID, Version, Autor, Lizenz, Vertrauensstufe, Quelle, Dateien, Ziel und Hinweise wie

@@ -720,7 +720,7 @@ class TestModuleCreate:
             def __init__(self, targets_dir):
                 seen.append(Path(targets_dir))
 
-            def generate_module(self, data):
+            def generate_module(self, data, profile=None):
                 return seen[-1] / data["module_name"]
 
         monkeypatch.setattr(cli_module, "ModuleGenerator", Recorder)
@@ -744,6 +744,33 @@ class TestModuleCreate:
         assert self.create().code == 0
         assert generators == [REPO_ROOT / "custom-targets"]
         assert not generators[0].is_relative_to(tmp_path / "home")
+
+    def test_the_target_probe_becomes_the_runtime_plan(self, tmp_path, monkeypatch):
+        """--probe hands the target's profile to the generator (its runtime: block); a file that is no probe profile
+        is refused before anything is written."""
+        from orchestrator import cli as cli_module
+        got = []
+
+        class Recorder:
+            def __init__(self, targets_dir):
+                self.targets_dir = Path(targets_dir)
+
+            def generate_module(self, data, profile=None):
+                got.append(profile)
+                return self.targets_dir / data["module_name"]
+
+        monkeypatch.setattr(cli_module, "ModuleGenerator", Recorder)
+        write_user_config(tmp_path, targets_dir=str(tmp_path / "my-targets"))
+        probe = REPO_ROOT / "tests" / "fixtures" / "hardware_probe" / "schema2_rk3566_dietpi.txt"
+        result = invoke_plain("module", "create", "--name", "Zero", "--arch", "aarch64", "--sdk", "None",
+                              "--probe", str(probe), input="\n\n\n\n")
+        assert result.code == 0, result.out
+        assert got and got[0].get("SOC_MODEL") == "rk3566"
+        bad = tmp_path / "notes.txt"
+        bad.write_text("this is not a probe\n")
+        result = invoke_plain("module", "create", "--name", "Zero2", "--arch", "aarch64", "--sdk", "None",
+                              "--probe", str(bad), input="\n\n\n\n")
+        assert result.code == 1 and "is not a hardware probe profile" in " ".join(result.out.split()) and len(got) == 1
 
 
 # ---------------------------------------------------------------------------------------------------------------

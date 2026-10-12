@@ -246,10 +246,24 @@ class TestDerivedOptions:
         o = p.options()
         assert p.targets == ("llama-quantize", "llama-imatrix", "llama-perplexity", "llama-completion",
                              "llama-bench")
-        assert o["LLAMA_BUILD_SERVER"] == "OFF" and o["GGML_NATIVE"] == "ON", "tuned to the build host (D13)"
+        assert o["LLAMA_BUILD_SERVER"] == "OFF"
+        # Tuned to the build host (D13) with its probe's CPU features written out, not GGML_NATIVE inside the image
+        # build (design 4.3): the Ryzen 9 5900X has AVX2, no AVX-512.
+        assert o["GGML_NATIVE"] == "OFF" and o["GGML_AVX2"] == "ON" and o["GGML_AVX512"] == "OFF"
+        assert set(X86_FEATURES.values()) <= set(o) and "native" not in p.toolchain
         assert p.builder["base"] == "target-image" and "CMAKE_EXE_LINKER_FLAGS" not in o
         with pytest.raises(PlanError, match="CPU builds"):
             plan("host_tools_container", backend="cuda")
+
+    def test_host_tools_follow_the_build_host_probe(self):
+        old = plan("host_tools_container", profile=IVYBRIDGE)
+        assert old.options()["GGML_AVX"] == "ON" and old.options()["GGML_AVX2"] == "OFF", "no SIGILL before Haswell"
+        # A probe that could not tell the CPU features (a Windows build host): all variants, chosen at run time.
+        unknown = plan("host_tools_container", profile=changed(TWO_NVIDIA, SUPPORTS_AVX512="UNKNOWN"))
+        o = unknown.options()
+        assert o["GGML_CPU_ALL_VARIANTS"] == "ON" and o["GGML_BACKEND_DL"] == "ON" and o["BUILD_SHARED_LIBS"] == "ON"
+        assert o["CMAKE_INSTALL_RPATH"] == "$ORIGIN" and "CMAKE_EXE_LINKER_FLAGS" not in o
+        assert len({old.build_id, unknown.build_id, plan("host_tools_container").build_id}) == 3
 
     @pytest.mark.parametrize("flags, expected", [
         ({}, "armv8-a"),
@@ -617,7 +631,12 @@ class TestPin:
         assert {"derived", "reference"} <= kinds
         paths = {p.path for p in places}
         assert {"targets/Rockchip/dockerfile", "targets/Rockchip/target.yml", "targets/_template/target.yml",
+                "targets/_template/Dockerfile", "targets/_template/Dockerfile.gpu",
                 "configs/project_sources.yml", "configs/detailed_project_sources.yml"} <= paths
+        # Every Dockerfile that builds llama.cpp fetches the pinned commit, not only the tag.
+        commits = {p.path for p in places if p.what == "ARG LLAMA_CPP_COMMIT"}
+        assert commits == {"targets/Rockchip/dockerfile", "targets/_template/Dockerfile",
+                           "targets/_template/Dockerfile.gpu"}
 
     def test_legacy_places_are_reported_not_failed(self):
         legacy = [p for p in pins.pin_places(PIN) if p.kind == "legacy"]
@@ -641,9 +660,21 @@ class TestPin:
         # Variants of a target's Dockerfile (the template has Dockerfile.gpu) are pin places too.
         (root / "targets" / "Plain" / "Dockerfile.gpu").write_text(
             "FROM debian\nARG LLAMA_CPP_TAG=b4009\nRUN git clone https://github.com/ggml-org/llama.cpp /src\n")
-        bad = {(p.path, p.found) for p in pins.mismatches(pins.pin_places(PIN, root))}
-        assert bad == {("targets/Board/Dockerfile", "v0.6.0"), ("targets/Board/target.yml", "b4009"),
-                       ("targets/Other/Dockerfile", None), ("targets/Plain/Dockerfile.gpu", "b4009")}
+        # A Dockerfile that names llama.cpp needs the commit too: without ARG LLAMA_CPP_COMMIT it builds a moving tag.
+        (root / "targets" / "Fixed").mkdir()
+        (root / "targets" / "Fixed" / "dockerfile").write_text(
+            f"FROM debian\nARG LLAMA_CPP_TAG={PIN.tag}\nARG LLAMA_CPP_COMMIT={'0' * 40}\n")
+        (root / "targets" / "Fixed" / "target.yml").write_text(
+            f"docker:\n  build_args:\n    LLAMA_CPP_TAG: {PIN.tag}\n    LLAMA_CPP_COMMIT: '{PIN.commit}'\n")
+        bad = {(p.path, p.what, p.found) for p in pins.mismatches(pins.pin_places(PIN, root))}
+        assert bad == {("targets/Board/Dockerfile", "ARG LLAMA_CPP_TAG", "v0.6.0"),
+                       ("targets/Board/Dockerfile", "ARG LLAMA_CPP_COMMIT", None),
+                       ("targets/Board/target.yml", "docker.build_args.LLAMA_CPP_TAG", "b4009"),
+                       ("targets/Other/Dockerfile", "ARG LLAMA_CPP_TAG", None),
+                       ("targets/Other/Dockerfile", "ARG LLAMA_CPP_COMMIT", None),
+                       ("targets/Plain/Dockerfile.gpu", "ARG LLAMA_CPP_TAG", "b4009"),
+                       ("targets/Plain/Dockerfile.gpu", "ARG LLAMA_CPP_COMMIT", None),
+                       ("targets/Fixed/dockerfile", "ARG LLAMA_CPP_COMMIT", "0" * 40)}
 
     def test_settings_default_is_derived_from_the_pin(self, tmp_path):
         from orchestrator.Core.config_manager import ConfigManager
@@ -669,10 +700,8 @@ class TestPin:
         from orchestrator.Core.config_manager import ConfigManager
         monkeypatch.setattr(builder_module.docker, "from_env",
                             lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
-        monkeypatch.setattr(builder_module, "pinned_tag", lambda: "")
+        monkeypatch.setattr(builder_module, "pinned_source", lambda: None)
         engine = BuildEngine(ConfigManager(tmp_path / "configs"))
-        monkeypatch.setattr(engine, "_get_conf",
-                            lambda key, default=None: "" if key == "llama_cpp_version" else default)
         seen = {}
         monkeypatch.setattr(engine, "_build_with_buildkit", lambda *a, **k: seen.setdefault("built", True))
         monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
@@ -680,9 +709,34 @@ class TestPin:
         dockerfile.parent.mkdir()
         dockerfile.write_text("FROM scratch\n")
         config = type("C", (), {"target_arch": "rockchip", "build_id": "b1", "build_args": {}})()
-        with pytest.raises(Exception, match="No llama.cpp tag"):
+        with pytest.raises(Exception, match="No llama.cpp pin"):
             engine._build_docker_image(config, BuildProgress("b1", BuildStatus.QUEUED, ""), dockerfile)
         assert "built" not in seen
+
+    def test_the_setting_cannot_move_target_images_off_the_pin(self, tmp_path, monkeypatch):
+        """llama_cpp_version names a tag; target images build the pinned commit whatever it says (a tag can move,
+        and only the pin has a commit to check)."""
+        from orchestrator.Core import builder as builder_module
+        from orchestrator.Core.builder import BuildEngine, BuildProgress, BuildStatus
+        from orchestrator.Core.config_manager import ConfigManager
+        monkeypatch.setattr(builder_module.docker, "from_env",
+                            lambda: (_ for _ in ()).throw(RuntimeError("no docker")))
+        engine = BuildEngine(ConfigManager(tmp_path / "configs"))
+        monkeypatch.setattr(engine, "_get_conf",
+                            lambda key, default=None: "b4009" if key == "llama_cpp_version" else default)
+        seen = {}
+        monkeypatch.setattr(engine, "_build_with_buildkit", lambda tag, path, args, *a, **k: seen.update(args))
+        monkeypatch.setattr(engine, "_buildkit_available", lambda: True)
+        monkeypatch.setattr(engine, "docker_client", type("D", (), {"images": type("I", (), {
+            "get": staticmethod(lambda tag: tag)})})())
+        dockerfile = tmp_path / "ctx" / "Dockerfile"
+        dockerfile.parent.mkdir()
+        dockerfile.write_text("FROM scratch\n")
+        progress = BuildProgress("b1", BuildStatus.QUEUED, "")
+        config = type("C", (), {"target_arch": "rockchip", "build_id": "b1", "build_args": {}})()
+        engine._build_docker_image(config, progress, dockerfile)
+        assert seen["LLAMA_CPP_TAG"] == PIN.tag and seen["LLAMA_CPP_COMMIT"] == PIN.commit
+        assert any("llama_cpp_version (b4009) is not the llama.cpp pin" in w for w in progress.warnings)
 
     def test_the_pin_reader_fails_closed(self, tmp_path):
         broken = tmp_path / "llama_runtime.yml"

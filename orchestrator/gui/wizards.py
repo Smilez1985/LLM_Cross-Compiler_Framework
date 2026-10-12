@@ -211,7 +211,8 @@ class ModuleCreationWizard(QWizard):
         self.crawl_worker = None
         self._close_result = None   # closing waits for a running crawl to store its current page
         self.crawled_roots = set()  # URLs crawled in this wizard: the only pages a knowledge snapshot may hold
-        
+        self.probe_path = None      # the target's probe file: the runtime: block is planned from it
+
         self.signals = WizardSignals()
         self.signals.analysis_finished.connect(self.on_ai_finished)
         self.signals.analysis_error.connect(self.on_ai_error)
@@ -456,7 +457,7 @@ class ModuleCreationWizard(QWizard):
         layout.addWidget(self.rad_custom)
         
         self.custom_os_edit = QLineEdit()
-        self.custom_os_edit.setPlaceholderText("e.g. nvidia/cuda:12.2-devel-ubuntu22.04")
+        self.custom_os_edit.setPlaceholderText("e.g. ubuntu:24.04, or an image pinned by digest (name@sha256:...)")
         self.custom_os_edit.setEnabled(False)
         self.rad_custom.toggled.connect(lambda: self.custom_os_edit.setEnabled(self.rad_custom.isChecked()))
         layout.addWidget(self.custom_os_edit)
@@ -688,7 +689,8 @@ Setup commands:
     def run_standard_import(self):
         path, _ = QFileDialog.getOpenFileName(self, tr("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
         if not path: return
-        
+        self.probe_path = path
+
         self.status_label.setText("Parsing probe data...")
         
         try:
@@ -739,10 +741,10 @@ Setup commands:
             self.sdk_edit.setText(sdk)
             self.name_edit.setText(module_name_hint(name_hint))
             
-            # 3. Docker Base Image Logic
+            # 3. Docker Base Image Logic. CUDA targets get the GPU template, which provisions CUDA from NVIDIA's
+            # pinned redist archives; a prebuilt nvidia/cuda image is only an explicit opt-in pinned by digest.
             if sdk == "CUDA":
-                self.rad_custom.setChecked(True)
-                self.custom_os_edit.setText("nvidia/cuda:12.2.2-devel-ubuntu22.04")
+                self.rad_ubuntu.setChecked(True)
             elif sdk == "OpenVINO":
                 self.rad_ubuntu.setChecked(True) 
             else:
@@ -796,6 +798,17 @@ Setup commands:
             self.btn_import_ai.setEnabled(True)
             self.status_label.setText(f"{tr('msg.ai_ready')}: {self.ai_config.get('provider')}")
 
+    def _target_profile(self):
+        """The imported probe file as a hardware profile of the target (None without one, or when it is not a probe
+        profile): the module's runtime: block is the build recipe's plan from it."""
+        if not self.probe_path:
+            return None
+        from orchestrator.runtime.profile import ProfileError, read_profile
+        try:
+            return read_profile(Path(self.probe_path))
+        except (ProfileError, OSError, ValueError):
+            return None
+
     def _ditto(self):
         return getattr(self.framework_manager, "ditto_manager", None) if self.framework_manager else None
 
@@ -812,7 +825,8 @@ Setup commands:
 
         path, _ = QFileDialog.getOpenFileName(self, tr("menu.import_profile"), "", "Config (*.txt);;All Files (*)")
         if not path: return
-        
+        self.probe_path = path
+
         self._set_avatar_state("think") # ANIMATED SPRITE
         self.btn_import_ai.setEnabled(False)
         self.btn_import_std.setEnabled(False)
@@ -929,10 +943,12 @@ Setup commands:
             if not self.targets_dir.exists(): self.targets_dir.mkdir(parents=True, exist_ok=True)
             generator = ModuleGenerator(self.targets_dir)
             roots = sorted(self.crawled_roots) if self.chk_knowledge.isChecked() else None
+            profile = self._target_profile()
             if self.framework_manager:
-                output_path = generator.generate_module(self.module_data, self.framework_manager, knowledge_roots=roots)
+                output_path = generator.generate_module(self.module_data, self.framework_manager, knowledge_roots=roots,
+                                                        profile=profile)
             else:
-                output_path = generator.generate_module(self.module_data)
+                output_path = generator.generate_module(self.module_data, profile=profile)
             message = f"{tr('msg.module_created')}\n{output_path}"
             if roots and not (Path(output_path) / KNOWLEDGE_SNAPSHOT).is_file():
                 message += "\n\n" + ui_text("crawl.snapshot_missing")

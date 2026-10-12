@@ -6,7 +6,9 @@ source.py fetches, verifies and caches the pinned commit and moves it to air-gap
 executor.py runs a plan natively or in the builder container (builder.Dockerfile, no network); verify.py checks the
 result (ELF format and glibc symbol versions, --version, --list-devices, the server's refusal of --tools, the smoke
 run); store.py keeps verified builds with their stamps, applies retention and imports builds made elsewhere; pins.py
-checks every place that names the llama.cpp version against the one pin.
+checks every place that names the llama.cpp version against the one pin. host_tools.py turns the plan for the
+conversion tools of a target image into its build arguments; target_runtime.py writes the runtime: block of new
+target modules (the plan for the device runtime, from the target's probe).
 """
 
 from orchestrator.runtime.build.recipe import (BuildPlan, BuildStep, PlanError, ToolchainInfo, build_id_of,
