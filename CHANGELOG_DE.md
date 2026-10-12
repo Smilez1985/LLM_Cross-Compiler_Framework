@@ -611,6 +611,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Schlüssel, nie ein Passwort). Nur diese Geräte können KI-Tools nennen, und nur, solange die `known_hosts` des
   Frameworks noch genau diesen Schlüssel enthält; kein Tool schreibt einen Eintrag.
 
+- **Optionale Laufzeit-Tools für KI-Clients** (MCP-Tools `build_local_runtime`, `start_local_runtime`,
+  `stop_local_runtime`, `run_benchmark`, `probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark`;
+  Ressource `lcf://runtime/catalog`; Prompt `set_up_offline_assistant`): mit ihren Laufzeitpaketen registriert und
+  verborgen, bis du sie freigibst, auch wenn die ganze Stufe erlaubt ist. Der lokale Server ist immer aus dem
+  festgelegten Commit selbst gebaut (keine Prebuilt-Option, keine CMake-Option und kein Befehl als Eingabe); ein
+  fehlender Toolchain-Teil wird mit `needs_person` und `llm-cli ditto runtime install` abgelehnt; gestartet wird nur ein
+  geprüfter Build, und kein Ergebnis enthält seine Adresse oder seinen Schlüssel; eine abgebrochene Installation wird
+  nie aktiv, und ein abgebrochener Modell-Download behält seine `.part`-Datei. Ein nicht vertrauenswürdiges Modell wird
+  nativ nur nach deiner Zustimmung im eigenen Fenster des Frameworks gemessen, die zuerst ins Audit-Log geschrieben
+  wird, oder in der Docker-Sandbox. Die Board-Tools erreichen nur vertraute Geräte mit dem vertrauten Host-Schlüssel,
+  werden immer erfragt und nie von einer Daueranfrage abgedeckt.
+- **Benchmark-Läufe dieses Rechners** (`~/.llm-framework/benchmarks/`): `llama-bench`-Ergebnisse des selbst gebauten
+  Builds (Prompt- und Erzeugungsgeschwindigkeit, höchster Speicherbedarf) mit dem sha256 des Modells und der Build-ID;
+  `get_status` zeigt die neuesten.
+
 ### Geändert
 - **Eine Hugging-Face-Einordnung für Builds und Downloads**: `check_build_request` und `start_build` lesen Lizenz, Zugangsbeschränkung und Dateien eines Modells jetzt nach denselben Regeln wie `get_hf_model_info` und `download_hf_file` (Lizenzen wie GPL, DeepSeek oder Qwen Research waren auf dem Build-Weg „unbekannt“ und auf dem Download-Weg „einschränkend“), und beide halten dieselbe Speicherreserve frei.
 - **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;

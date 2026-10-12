@@ -287,7 +287,7 @@ llm-cli device runtime deploy 192.168.1.50          # install it over SSH and ch
   which is written to the audit log. Only a build that passes becomes the active one (and the systemd unit's); a
   build that fails is removed again and the previous build stays active.
 
-Not yet tested on a real board; the GUI and the MCP tools for it follow.
+Not yet tested on a real board; the GUI for it follows. AI clients reach the same steps through the optional MCP tools `probe_remote_device`, `deploy_device_runtime` and `run_device_benchmark`, which stay hidden until you enable them and are confirmed by you on every call.
 
 ### Probing the board's hardware
 

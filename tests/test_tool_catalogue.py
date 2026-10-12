@@ -21,15 +21,17 @@ CORE = {
     "list_packs", "add_pack_from_index", "export_pack", "start_recipe_build",
     "run_doctor", "get_status", "get_settings", "update_settings", "report_cannot_do",
 }
+# deploy_device_runtime (T14): the board's runtime as `llm-cli device runtime deploy` does it (the design expected it
+# inside the deploy package; the device runtime is deployed on its own).
 OPTIONAL = {"delete_artifact", "restore_knowledge_snapshot", "build_local_runtime", "start_local_runtime",
-            "stop_local_runtime", "run_benchmark"}
+            "stop_local_runtime", "run_benchmark", "deploy_device_runtime"}
 LATER = {"probe_remote_device", "run_device_benchmark"}
 # Built by phase T so far (T1-T6, T8); T7 (crawl) and T9 (community) add the rest of the core set.
 BUILT = CORE - {"crawl_docs_site", "list_packs", "add_pack_from_index", "export_pack", "start_recipe_build"}
 
 
 def test_the_catalogue_has_the_designed_size():
-    assert (len(CORE), len(OPTIONAL), len(LATER)) == (37, 6, 2)
+    assert (len(CORE), len(OPTIONAL), len(LATER)) == (37, 7, 2)
 
 
 def test_every_registered_tool_has_a_catalogue_name(booted_framework):

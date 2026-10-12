@@ -385,7 +385,10 @@ die deine Berechtigungen verweigern, werden dem Client nicht aufgeführt. `deplo
 Einstellung erlaubt es ohne Frage) und erreicht nur ein Gerät, dem du in der GUI oder CLI vertraut und das du
 gekoppelt hast: Das Framework liest den Host-Schlüssel des Geräts vor der Frage, lehnt einen unbekannten oder
 geänderten Schlüssel ab, zeigt in der Frage den Fingerabdruck des Schlüssels und das sha256 des Pakets und bricht
-das Deployment ab, wenn eins davon danach abweicht.
+das Deployment ab, wenn eins davon danach abweicht. Sieben optionale Tools (die lokale Laufzeit:
+`build_local_runtime`, `start_local_runtime`, `stop_local_runtime`, `run_benchmark`; die Laufzeit eines Boards:
+`probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark`) werden mit ihren Laufzeitpaketen registriert
+und bleiben verweigert, also nicht aufgeführt, bis du sie freigibst.
 
 ### Eine Frage an Ditto (unveröffentlicht)
 

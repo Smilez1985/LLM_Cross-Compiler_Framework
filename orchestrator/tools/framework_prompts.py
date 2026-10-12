@@ -79,6 +79,17 @@ DEPLOY_INSTRUCTIONS = (
     "confirms each deploy and sees the device's host key and the package's hash. If a device is not usable "
     "(not paired, or its host key changed), tell the user what the person has to do in the GUI or the CLI." + CLOSING)
 
+OFFLINE_INSTRUCTIONS = (
+    CLIENT_ROLE + "Set up Ditto's offline assistant on this computer: the framework's self-built llama.cpp server with "
+    "a catalog model. 1. Look at the hardware, the planned builds and the recommended model tier below (get_status "
+    "with the local_runtime and host sections shows them again). 2. Build the server with build_local_runtime "
+    "(backend auto unless the user wants another; model_tier: the recommended tier) and follow its job with "
+    "get_job_status. If it is refused because a toolchain part is missing, tell the user the command the refusal names: "
+    "only the person installs toolchains and accepts licences. 3. Start the server with start_local_runtime. 4. If the "
+    "user wants numbers, run_benchmark (kind: the tier speed) measures the tier's speed. These tools are optional: if one "
+    "is not available, say that the person enables it in the tool permissions. Never ask for a prebuilt download: the "
+    "server is always built from the pinned source." + CLOSING)
+
 
 def _block(label: str, text: str, source: str, max_len: int = 4000) -> str:
     return f"{label}:\n" + wrap_untrusted(text, source, max_len=max_len)
@@ -217,6 +228,22 @@ def register_framework_prompts(registry: ToolRegistry, framework,
         return "\n".join(f"{d.device_id}: {d.label}" + ("" if d.paired else " (not paired)") for d in rows) or \
             "none yet: the person trusts and pairs a device in the GUI or the CLI"
 
+    def offline(_args: Dict[str, str], ctx: ToolContext) -> str:
+        from orchestrator.runtime.llama_server import LocalLLMRuntime
+        try:
+            rt = LocalLLMRuntime.from_framework(framework)
+            hardware = rt.hardware().summary()
+            backend, reason = rt.recommend_backend()
+            model, why = rt.choose_tier()
+            installed = rt.installed()
+            facts = [f"Hardware: {hardware}", f"Planned builds: CPU build, then {backend} ({reason})",
+                     f"Recommended model tier: {model.tier} ({model.file}): {why}",
+                     "Built already: " + (f"{installed.name} ({installed.backend}, {installed.label})"
+                                          if installed is not None else "nothing yet")]
+        except Exception as e:  # noqa: BLE001 - a probe that fails: the client asks get_status
+            facts = [f"The hardware could not be read here ({e.__class__.__name__}); call get_status."]
+        return _block("This computer", "\n".join(facts), "hardware probe", 4000)
+
     def targets(_args: Dict[str, str], _ctx: ToolContext) -> List[str]:
         try:
             return list(service.target_choices()[0])
@@ -280,6 +307,11 @@ def register_framework_prompts(registry: ToolRegistry, framework,
                    (PromptArg("artifact_id", "The built model", required=True, max_chars=64),
                     PromptArg("device_id", "A paired device (optional)", max_chars=64)), deploy,
                    tools=("create_deploy_package", "deploy_to_device")),
+        PromptSpec("set_up_offline_assistant", "Set up the offline assistant",
+                   "Builds and starts Ditto's self-built local model server on this computer with a catalog model "
+                   "(the optional local runtime tools).", OFFLINE_INSTRUCTIONS, (), offline,
+                   tools=("build_local_runtime", "start_local_runtime", "run_benchmark", "get_status",
+                          "get_job_status")),
     ]
     for spec in specs:
         registry.register_prompt(spec)

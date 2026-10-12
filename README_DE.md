@@ -301,7 +301,7 @@ llm-cli device runtime deploy 192.168.1.50          # per SSH installieren und a
   Build, der besteht, wird der aktive (und der der systemd-Unit); ein Build, der scheitert, wird wieder entfernt, und
   der vorige Build bleibt aktiv.
 
-Noch nicht auf einem echten Board getestet; die GUI und die MCP-Werkzeuge dafür folgen.
+Noch nicht auf einem echten Board getestet; die GUI dafür folgt. KI-Clients erreichen dieselben Schritte über die optionalen MCP-Tools `probe_remote_device`, `deploy_device_runtime` und `run_device_benchmark`, die verborgen bleiben, bis du sie freigibst, und bei jedem Aufruf von dir bestätigt werden.
 
 ### Die Hardware des Boards untersuchen
 

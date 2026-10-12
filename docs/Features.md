@@ -543,6 +543,10 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `list_devices` | read | The devices you trusted and paired in the GUI or the CLI, by your label, with host key fingerprint and whether they are usable |
 | `create_deploy_package` | local write | Package a built model for a target's device profile (a job; images only digest-pinned or built here) |
 | `deploy_to_device` | external | Copy a package to a trusted, paired device and run its `deploy.sh` (always asked; the question shows the host key and the package hash; a job) |
+| `build_local_runtime` | local write | Optional, hidden until enabled: build llama-server for this computer from the pinned commit (a job; never prebuilt) |
+| `start_local_runtime` / `stop_local_runtime` | local write | Optional, hidden until enabled: start (a job) or stop Ditto's local server; never its address or key |
+| `run_benchmark` | local write | Optional, hidden until enabled: llama-bench on a catalog model or a built GGUF model; an untrusted model natively only after consent in the framework, or in the sandbox |
+| `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | external | Optional, hidden until enabled: probe a trusted board, install its self-built runtime, or check and benchmark it (always asked; jobs) |
 
 How a question with tools runs:
 
@@ -834,6 +838,42 @@ official prebuilt download stays only as the explicit choice `--prebuilt`, shown
 - **Measured** on a 4-core x86-64 virtual machine (GCC 13.3, `-j4`): `llama-server` and `llama-bench` at the pin in
   189 seconds including the checks, 28 MB of binaries; `ditto runtime install` with Ditto's CPU build
   (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 seconds including the checks.
+
+### Local runtime tools for AI clients (optional)
+
+Six optional MCP tools let an AI client (or Ditto) do what `llm-cli ditto runtime` and `llm-cli device runtime` do.
+Each is registered only when its runtime package exists in the installation, and each is denied, and so not listed,
+until you enable it in the tool permissions, also when you allowed the whole tier.
+
+- **`build_local_runtime`** builds llama-server for this computer from the pinned commit (CPU build first, then the
+  GPU build of `backend`: `auto`, `cpu`, `cuda`, `vulkan`, `rocm`, `metal`) as a job, and with `model_tier` fetches
+  that catalog model (pinned by size and sha256). The question shows the planned builds, the toolchain, whether the
+  pinned source must be fetched, the model and an estimate of the disk needed. There is no prebuilt option and no input
+  for a CMake option or a command. A missing toolchain part (a compiler, CMake, Docker, a GPU toolkit) is refused
+  before the question with reason `needs_person` and `llm-cli ditto runtime install`: only you install toolchains and
+  accept licences. `cancel_job` stops a model download between two chunks (its `.part` file is kept) and stops the
+  install before its next build or activation: a cancelled build is never made active.
+- **`start_local_runtime`** (a job; `tier`, `context_length`) and **`stop_local_runtime`** start and stop Ditto's
+  server. Only a build that passed its verification here is started. No result holds the server's address or its
+  per-start key.
+- **`run_benchmark`** measures prompt and generation speed and peak memory with the self-built `llama-bench`:
+  `tier_speed` for a downloaded catalog model, `artifact_speed` for a built GGUF model. A catalog model runs natively.
+  Any other model is untrusted (runtime decision D23): it runs natively only after your consent, which is asked in the
+  framework's own window (Ditto's dialog, the pending approvals of the GUI or `llm-cli tools approvals`, never a
+  client's dialog), is asked even when the tool is allowed, and is written to the audit log before the model is
+  loaded; with `sandbox: true` it runs in the Docker sandbox instead. Results are kept in
+  `~/.llm-framework/benchmarks/` (`runs/<run id>.json`, `index.jsonl`); `get_status` (section `local_runtime`) shows
+  the newest runs.
+- **Board tools** (tier `external`, always asked, never covered by a standing approval, only for a
+  [trusted device](#deployment) whose host key is still the trusted one, shown in the question):
+  `probe_remote_device` runs the read-only probe over SSH and stores it under the device id (as `scan --device`);
+  `deploy_device_runtime` builds the board's runtime in the builder container when needed and installs it as the
+  deploy settings you chose beforehand say (as `device runtime build` and `deploy`; activated only when its checks pass
+  on the board); `run_device_benchmark` runs the runtime checks with a short `llama-bench` on the model the deploy
+  settings name (as `device runtime verify --bench-model`), an untrusted model only with your consent in the
+  framework, written to the audit log first. The board's output comes back as external text.
+- The resource `lcf://runtime/catalog` holds the pinned commit and the model tiers; the prompt
+  `set_up_offline_assistant` leads a client through building, starting and measuring.
 
 ### Perplexity check of converted models
 

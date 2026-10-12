@@ -370,7 +370,10 @@ The twenty-four tools: `list_targets`, `get_target_capabilities`, `list_build_re
 permissions deny are not listed to the client. `deploy_to_device` is always asked (no setting allows it without a
 question) and reaches only a device you trusted and paired in the GUI or the CLI: the framework reads the device's
 host key before the question, refuses an unknown or changed key, shows the key's fingerprint and the package's
-sha256 in the question, and refuses the deploy when either differs afterwards.
+sha256 in the question, and refuses the deploy when either differs afterwards. Seven optional tools (the local
+runtime: `build_local_runtime`, `start_local_runtime`, `stop_local_runtime`, `run_benchmark`; a board's runtime:
+`probe_remote_device`, `deploy_device_runtime`, `run_device_benchmark`) are registered with their runtime packages and
+stay denied, and so unlisted, until you enable them.
 
 ### A question to Ditto (unreleased)
 

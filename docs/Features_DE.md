@@ -586,6 +586,10 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `list_devices` | lesen | Die Geräte, denen du in der GUI oder CLI vertraut und die du gekoppelt hast, mit deinem Namen dafür, Fingerabdruck des Host-Schlüssels und ob sie nutzbar sind |
 | `create_deploy_package` | lokal schreiben | Ein gebautes Modell für das Geräteprofil eines Targets paketieren (ein Job; Images nur per Digest festgelegt oder hier gebaut) |
 | `deploy_to_device` | extern | Ein Paket auf ein vertrautes, gekoppeltes Gerät kopieren und dessen `deploy.sh` ausführen (immer mit Frage; die Frage zeigt Host-Schlüssel und Paket-Hash; ein Job) |
+| `build_local_runtime` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-server für diesen Rechner aus dem festgelegten Commit bauen (ein Job; nie vorgebaut) |
+| `start_local_runtime` / `stop_local_runtime` | lokal schreiben | Optional, verborgen bis zur Freigabe: Dittos lokalen Server starten (ein Job) oder stoppen; nie seine Adresse oder sein Schlüssel |
+| `run_benchmark` | lokal schreiben | Optional, verborgen bis zur Freigabe: llama-bench auf einem Katalogmodell oder einem gebauten GGUF-Modell; ein nicht vertrauenswürdiges Modell nativ nur nach Zustimmung im Framework, oder in der Sandbox |
+| `probe_remote_device` / `deploy_device_runtime` / `run_device_benchmark` | extern | Optional, verborgen bis zur Freigabe: ein vertrautes Board prüfen, seine selbst gebaute Laufzeit installieren oder sie prüfen und messen (immer mit Frage; Jobs) |
 
 So läuft eine Frage mit Tools ab:
 
@@ -905,6 +909,47 @@ self-built“.
 - **Gemessen** auf einer virtuellen x86-64-Maschine mit 4 Kernen (GCC 13.3, `-j4`): `llama-server` und `llama-bench`
   am Pin in 189 Sekunden samt Prüfungen, 28 MB Programme; `ditto runtime install` mit dem CPU-Build für Ditto
   (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 Sekunden samt Prüfungen.
+
+### Laufzeit-Tools für KI-Clients (optional)
+
+Sechs optionale MCP-Tools lassen einen KI-Client (oder Ditto) tun, was `llm-cli ditto runtime` und
+`llm-cli device runtime` tun. Jedes wird nur registriert, wenn sein Laufzeitpaket in der Installation vorhanden ist,
+und jedes ist verweigert, also nicht aufgeführt, bis du es in den Tool-Berechtigungen freigibst, auch wenn du die
+ganze Stufe erlaubt hast.
+
+- **`build_local_runtime`** baut llama-server für diesen Rechner aus dem festgelegten Commit (zuerst der CPU-Build,
+  dann der GPU-Build von `backend`: `auto`, `cpu`, `cuda`, `vulkan`, `rocm`, `metal`) als Job und holt mit `model_tier`
+  dieses Katalogmodell (über Größe und sha256 festgelegt). Die Frage zeigt die geplanten Builds, die Toolchain, ob der
+  festgelegte Quellcode geholt werden muss, das Modell und eine Schätzung des nötigen Platzes. Es gibt keine
+  Prebuilt-Option und keine Eingabe für eine CMake-Option oder einen Befehl. Ein fehlender Toolchain-Teil (ein
+  Compiler, CMake, Docker, ein GPU-Toolkit) wird vor der Frage mit Grund `needs_person` und
+  `llm-cli ditto runtime install` abgelehnt: Nur du installierst Toolchains und nimmst Lizenzen an. `cancel_job` hält
+  einen Modell-Download zwischen zwei Blöcken an (seine `.part`-Datei bleibt) und hält die Installation vor ihrem
+  nächsten Build oder ihrer nächsten Aktivierung an: Ein abgebrochener Build wird nie aktiv.
+- **`start_local_runtime`** (ein Job; `tier`, `context_length`) und **`stop_local_runtime`** starten und stoppen
+  Dittos Server. Gestartet wird nur ein Build, der seine Prüfung hier bestanden hat. Kein Ergebnis enthält die
+  Adresse des Servers oder seinen Schlüssel für diesen Start.
+- **`run_benchmark`** misst Prompt- und Erzeugungsgeschwindigkeit und den höchsten Speicherbedarf mit dem selbst
+  gebauten `llama-bench`: `tier_speed` für ein heruntergeladenes Katalogmodell, `artifact_speed` für ein gebautes
+  GGUF-Modell. Ein Katalogmodell läuft nativ. Jedes andere Modell gilt als nicht vertrauenswürdig
+  (Laufzeit-Entscheidung D23): Es läuft nativ nur nach deiner Zustimmung, die im eigenen Fenster des Frameworks
+  erfragt wird (Dittos Dialog, die ausstehenden Freigaben der GUI oder `llm-cli tools approvals`, nie der Dialog eines
+  Clients), auch dann erfragt wird, wenn das Tool erlaubt ist, und ins Audit-Log geschrieben wird, bevor das Modell
+  geladen wird; mit `sandbox: true` läuft es stattdessen in der Docker-Sandbox. Ergebnisse liegen in
+  `~/.llm-framework/benchmarks/` (`runs/<Lauf-ID>.json`, `index.jsonl`); `get_status` (Abschnitt `local_runtime`)
+  zeigt die neuesten Läufe.
+- **Board-Tools** (Stufe `external`, immer mit Frage, nie von einer Daueranfrage abgedeckt, nur für ein
+  [vertrautes Gerät](#übertragen-auf-das-board-deployment), dessen Host-Schlüssel noch der vertraute ist und in der
+  Frage gezeigt wird): `probe_remote_device` führt die nur lesende Prüfung über SSH aus und speichert sie unter der
+  Geräte-ID (wie `scan --device`); `deploy_device_runtime` baut die Laufzeit des Boards bei Bedarf im
+  Builder-Container und installiert sie so, wie es die vorher von dir gewählten Deploy-Einstellungen sagen (wie
+  `device runtime build` und `deploy`; aktiv erst, wenn ihre Prüfungen auf dem Board bestehen);
+  `run_device_benchmark` führt die Laufzeitprüfungen mit einem kurzen `llama-bench` auf dem Modell aus, das die
+  Deploy-Einstellungen nennen (wie `device runtime verify --bench-model`), ein nicht vertrauenswürdiges Modell nur
+  mit deiner Zustimmung im Framework, die zuerst ins Audit-Log geschrieben wird. Die Ausgabe des Boards kommt als
+  externer Text zurück.
+- Die Ressource `lcf://runtime/catalog` enthält den festgelegten Commit und die Modellstufen; der Prompt
+  `set_up_offline_assistant` führt einen Client durch Bauen, Starten und Messen.
 
 ### Perplexity-Prüfung umgewandelter Modelle
 

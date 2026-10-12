@@ -341,7 +341,8 @@ class TestScope:
         assert DOWNLOAD_RULE.scope(dict(dl, license="llama3.1"), "this") is None
 
     def test_the_never_list_is_exact_and_enforced(self, env):
-        assert NEVER_GRANT == {"deploy_to_device", "probe_remote_device", "update_settings", "crawl_docs_site",
+        assert NEVER_GRANT == {"deploy_to_device", "probe_remote_device", "deploy_device_runtime",
+                               "run_device_benchmark", "update_settings", "crawl_docs_site",
                                "create_target_module", "export_pack", "resolve_healing", "cancel_build", "cancel_job",
                                "delete_artifact", "restore_knowledge_snapshot"}
         for name in sorted(NEVER_GRANT):

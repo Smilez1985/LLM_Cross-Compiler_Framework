@@ -514,6 +514,10 @@ def register_framework_tools(registry: ToolRegistry, framework) -> ToolRegistry:
     # Devices and deploy (design 2.7, T8): trusted devices by id, packages as jobs, deploys always asked.
     from orchestrator.tools.tools_deploy import register_deploy_tools
     register_deploy_tools(registry, framework, service=service, jobs=jobs, target_field=target_field)
+    # The optional local and device runtime tools (design 2.10, T14): registered with their runtime packages, hidden
+    # (denied) until the person enables them.
+    from orchestrator.tools.tools_runtime import register_runtime_tools
+    register_runtime_tools(registry, framework, service=service, jobs=jobs)
     return registry
 
 

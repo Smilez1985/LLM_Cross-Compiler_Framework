@@ -15,7 +15,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 import psutil
 import requests
@@ -30,6 +30,10 @@ class DownloadError(Exception):
 
 class IntegrityError(DownloadError):
     """A file that does not match its pin (or has none)."""
+
+
+class DownloadStopped(DownloadError):
+    """The download was stopped (its stop event was set); the `.part` file is kept for a later resume."""
 
 
 class _Retry(Exception):
@@ -128,8 +132,10 @@ class PinnedDownloader:
                              f"{_gib(free)} free.")
 
     def fetch(self, url: str, dest: Path, size: Optional[int], sha256: Optional[str],
-              progress: Optional[ProgressFn] = None, attempts: int = 5) -> Path:
-        """Resumable download into <dest>.part; the file only gets its final name after size and hash matched."""
+              progress: Optional[ProgressFn] = None, attempts: int = 5, stop: Optional[Any] = None) -> Path:
+        """Resumable download into <dest>.part; the file only gets its final name after size and hash matched. With a
+        `stop` event (threading.Event) that is set, the download ends between two chunks with DownloadStopped and the
+        `.part` file is kept, so a later call resumes it."""
         if not (sha256 and size):
             raise self.integrity_error(f"No sha256 and size pinned for {dest.name}; refusing to download it.")
         dest.parent.mkdir(parents=True, exist_ok=True)
@@ -148,8 +154,10 @@ class PinnedDownloader:
                     have = 0
                 if have == size:
                     break
+                if stop is not None and stop.is_set():
+                    raise DownloadStopped(f"The download of {dest.name} was stopped; the part is kept for a resume.")
                 try:
-                    self._download_range(url, part, have, size, dest.name, progress)
+                    self._download_range(url, part, have, size, dest.name, progress, stop)
                     if part.stat().st_size >= size:
                         break
                 except _Retry as e:
@@ -164,7 +172,7 @@ class PinnedDownloader:
             return dest
 
     def _download_range(self, url: str, part: Path, have: int, size: int, name: str,
-                        progress: Optional[ProgressFn]) -> None:
+                        progress: Optional[ProgressFn], stop: Optional[Any] = None) -> None:
         # identity: a compressed transfer would make the byte counts meaningless
         headers = {"Accept-Encoding": "identity", **({"Range": f"bytes={have}-"} if have else {})}
         try:
@@ -199,6 +207,9 @@ class PinnedDownloader:
                             continue
                         f.write(chunk)
                         have += len(chunk)
+                        if stop is not None and stop.is_set():
+                            raise DownloadStopped(f"The download of {name} was stopped; the part is kept for a "
+                                                  "resume.")
                         if have > size:
                             break  # more than pinned: the hash check refuses it
                         if progress:

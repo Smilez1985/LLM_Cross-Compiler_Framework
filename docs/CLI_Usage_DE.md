@@ -693,7 +693,10 @@ llm-cli ditto eval --kind retrieval --case retr-en-rknn-onnx-convert --case retr
 
 Der verwaltete llama.cpp-Server für Dittos Offline-Modus. Diese Befehle funktionieren ohne Docker und ohne
 Schlüsselbund. Dateien: `~/.llm-framework/runtime/llama.cpp/` (Builds und Zustand) und
-`~/.llm-framework/logs/llama-server.log`.
+`~/.llm-framework/logs/llama-server.log`. Die optionalen MCP-Tools `build_local_runtime`, `start_local_runtime`,
+`stop_local_runtime` und `run_benchmark` tun dasselbe für einen KI-Client, sobald du sie freigibst
+([Details](Features_DE.md#laufzeit-tools-für-ki-clients-optional)); `install --prebuilt` und das Installieren von
+Toolchain-Teilen bleiben Befehle nur für dich.
 
 #### ditto runtime status
 
@@ -1449,6 +1452,11 @@ aktualisiert den Eintrag.
 
 Was deployt ist (Build, Zeit, Startskript oder systemd, Ergebnis der Prüfungen) und ob es noch der Build ist, den
 das Profil des Boards, der Pin und das Rezept verlangen; wenn nicht, erneut bauen und deployen.
+
+Für ein [vertrautes Gerät](#deploy-devices) führen die optionalen MCP-Tools `probe_remote_device`,
+`deploy_device_runtime` und `run_device_benchmark` für einen KI-Client `scan --device`, `device runtime build` mit
+`deploy` und `device runtime verify --bench-model` aus, jedes von dir bestätigt; die Deploy-Einstellungen bleiben
+immer deine (`device settings`).
 
 ```bash
 llm-cli scan --device 192.0.2.10 --user dietpi --label "ZERO 3W"

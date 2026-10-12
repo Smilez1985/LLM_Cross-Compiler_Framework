@@ -213,33 +213,11 @@ class DatasetManager:
         first, then the CPU fallback, then any other stored build; each must have passed its verification here, match
         its manifest, be of the pinned commit and be built for this machine (OS, architecture, and the CPU of a
         -march=native build). The sandbox needs a build made in the builder container (it runs in that image)."""
-        from orchestrator.runtime.build.verify import VerifyError
-        store = self._store_obj()
-        pin = self._catalog_obj().llama_cpp.source
-        refs = store.references()
-        order = [refs.get("active"), refs.get("fallback")]
-        builds = [store.get(i) for i in order if i] + store.list_builds()
-        seen = set()
-        machine = self._host()
-        for build in builds:
-            if build is None or build.build_id in seen:
-                continue
-            seen.add(build.build_id)
-            target = build.plan.get("target") or {}
-            if not build.verified or PERPLEXITY not in (build.manifest.get("files") or {}):
-                continue
-            if pin is None or build.commit != pin.commit or (target.get("os"), target.get("arch")) != machine:
-                continue
-            if sandbox and not build.manifest.get("builder_image"):
-                continue
-            if self._cpu_problem(build.plan):
-                continue
-            if store.check_files(build):
-                continue
-            try:
-                return build, build.binary(PERPLEXITY)
-            except VerifyError:
-                continue
+        from orchestrator.runtime.bench import find_program_build
+        found = find_program_build(self._store_obj(), self._catalog_obj(), self._host(), PERPLEXITY, sandbox=sandbox,
+                                   cpu_problem=self._cpu_problem)
+        if found is not None:
+            return found
         if sandbox:
             raise PerplexityError("The Docker sandbox runs a llama.cpp build made in the framework's builder container, "
                                   "and there is none: llm-cli ditto runtime install --placement container")
