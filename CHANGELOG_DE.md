@@ -36,6 +36,32 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   IDs benannt, nie über Pfade; ihr ganzer Text ist als nicht vertrauenswürdig markiert. Ein Tool-Aufruf lädt nie das
   Embedding- oder Reranking-Modell herunter: Ohne Embedding-Modell wird die Suche mit dem nächsten Schritt abgelehnt,
   statt einen Download von etwa einem Gigabyte zu starten, und die Ablehnung nennt keinen Ordner.
+- **Deep Ingest für KI-Clients** (MCP-Tool `crawl_docs_site`, Entscheidung vom 11.10.2026): Ein KI-Client oder Ditto
+  kann Dokumentations-Websites in die Wissensbasis aufnehmen, als Job, mit genau dem Crawler und den Opt-out-Prüfungen
+  der GUI (robots.txt, Robots-Anweisungen einschließlich `noai`, TDMRep). Du wirst jedes Mal gefragt (nie „nicht mehr
+  fragen“, ein „erlauben“ pro Tool wird gedeckelt), und die Frage nennt jede Startadresse. Abgelehnt, solange du den
+  einmaligen Deep-Ingest-Hinweis nicht gelesen hast (`needs_person`), im Offline-Modus oder bei ausgeschalteter
+  Wissensbasis; 1-5 öffentliche `http(s)`-Startadressen, vor der Frage geprüft; `max_pages` bis zur Einstellung und
+  100, `max_depth` bis zur Einstellung und 3, mindestens eine Sekunde zwischen Anfragen; ein Crawl gleichzeitig je
+  Benutzer, 5 am Tag und 300 gespeicherte Seiten am Tag je Client (Budget und Offline-Modus werden beim Start eines
+  freigegebenen Crawls erneut geprüft). `cancel_job` hält nach der aktuellen Seite an und
+  behält, was gespeichert ist; das Ergebnis enthält Zahlen und die übersprungenen oder fehlgeschlagenen Adressen mit
+  Gründen, nie Seitentext oder einen Ordner dieses Computers. Neu: `llm-cli tools crawl-notice` zeigt den Hinweis in einem Terminal und hält fest, dass
+  du ihn gelesen hast.
+- **Der Community-Zoo für KI-Clients** (MCP-Tools `list_packs`, `add_pack_from_index`, `export_pack`): Ein Client
+  listet den signierten Index und die installierten Packs (Details, Prüfung; `refresh` einmal pro Stunde), fügt ein
+  Wissens-, Target- oder Rezept-Pack aus dem signierten Index hinzu (Vertrauensstufe verified oder community, nie
+  zurückgezogen, nie aus einer Datei), nachdem du die in der Quarantäne geprüfte Zusammenfassung gesehen hast, bei
+  einem Target-Pack mit jedem Image, das seine Dockerfiles beziehen (`FROM`, `COPY --from=`, `RUN --mount=...,from=`),
+  klar benannt (Registry, Digest oder „not pinned“, Docker Official Image
+  oder andere Registry) und dass sein Image-Build mit Netzzugang läuft, und exportiert ein Pack in eine lokale Datei,
+  mit deinem Schlüssel signiert (immer gefragt; ohne vorhandenen Schlüssel abgelehnt; liefert Zahlen der Bereinigung,
+  nie den entfernten Text). Eine Kopie in der Quarantäne wird für dasselbe Pack und denselben Hash wiederverwendet
+  und bei einem Nein, einer abgelehnten oder abgelaufenen Freigabe oder nach 20 Minuten entfernt. „Ja, und nicht mehr
+  fragen“ gilt für eine Pack-Art, Vertrauensstufe und einen Index-Schlüssel (Wissens- und Rezept-Packs,
+  `verified`-Target-Packs); darunter installierte Packs sind mit `installed_via` markiert; eine Installation darunter muss die größere
+  Speicherreserve (20 GiB oder 10 %) frei lassen, sonst wird gefragt. Kein Tool veröffentlicht
+  einen Pull Request.
 - **Korrekturvorschläge von KI-Clients** (MCP-Tool `propose_healing_fix`): Ein Client, der einen gescheiterten Build
   analysiert, übergibt dem Framework Zusammenfassung, Ursache, manuellen Schritt und Sicherheit. Der Vorschlag
   durchläuft dieselben Prüfungen wie Dittos eigene Analyse, einschließlich des Filters für gefährliche Befehle, wird
@@ -595,6 +621,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Person hinweggeht, nie eine Ablehnung; ein vorgebautes llama.cpp bleibt abgelehnt.
 
 ### Geändert
+- **Der Deep-Ingest-Hinweis hält wieder fest, wer ihn gelesen hat**: Seine Zustandsdatei speichert, wo er bestätigt
+  wurde (`via`: `gui` oder `cli`), und das Lesen landet im Audit-Log (Akteur `gui` oder `cli`). Nur eine Person
+  bestätigt ihn; `CrawlNotice.acknowledge` lehnt jeden anderen Weg ab.
+- **Ein Target-Pack übernimmt nie den Namen eines anderen Targets**: Ein Target-Pack, dessen ID (oder angegebene
+  Target-ID) ohne Rücksicht auf Groß- und Kleinschreibung und Trennzeichen der eines vorhandenen Targets gleicht, wird
+  abgelehnt, im Community Hub, in der CLI und über MCP.
 - **Eine Hugging-Face-Einordnung für Builds und Downloads**: `check_build_request` und `start_build` lesen Lizenz, Zugangsbeschränkung und Dateien eines Modells jetzt nach denselben Regeln wie `get_hf_model_info` und `download_hf_file` (Lizenzen wie GPL, DeepSeek oder Qwen Research waren auf dem Build-Weg „unbekannt“ und auf dem Download-Weg „einschränkend“), und beide halten dieselbe Speicherreserve frei.
 - **MCP über HTTP**: Ein Token hält höchstens 4 der 8 Sitzungen, damit ein Client die anderen nicht aussperren kann;
   eine Sitzung schließt nach 10 Minuten ohne Anfrage (die Vorgabe des SDK sind 30); eine noch offene Anfrage, wenn ihr
@@ -1056,6 +1088,12 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   vorgeschlagen, wenn Dockers Datenverzeichnis voll ist.
 
 ### Sicherheit
+- **robots.txt lässt sich nicht mehr über Crawl-Optionen abschalten**: Der Crawler nimmt nur seine eigenen
+  Optionsschlüssel (Seiten, Tiefe, Pause, PDFs, Sprachen) und übergeht jeden anderen Schlüssel, auch
+  `respect_robots`, mit einer Log-Zeile; der Schalter für Tests mit einem nachgebildeten Web ist ein eigener
+  Schlüsselwort-Parameter, den kein Produktcode übergibt (ein Wächtertest prüft das). Zeichenketten im Ergebnis eines
+  Jobs (etwa die Adressen, die ein Crawl übersprungen hat, und die Gründe der Websites) werden jetzt wie der Rest des
+  Job-Status als externer Text bereinigt, gekürzt und markiert.
 - **Der Filter für gefährliche Befehle lässt sich nicht mehr mit unsichtbaren Zeichen oder Zeichen in voller
   Breite umgehen** (Healing-Analysen und Empfehlungen von Ditto sowie Korrekturvorschläge von KI-Clients): Er
   prüft den Text auch so, wie GUI und CLI ihn zeigen (normalisiert, unsichtbare Zeichen und Verbinder entfernt),

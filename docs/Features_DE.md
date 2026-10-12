@@ -552,6 +552,10 @@ Im Chat (GUI) und mit `llm-cli ditto ask` kann Ditto dieselben Tools wie MCP-Cli
 | `search_knowledge` | lesen | In der Wissensbasis suchen; jeder Auszug mit Quellen-ID, Adresse oder Pack, Art (`web`, `pack`, `docs`), Vertrauensstufe, Aufnahmedatum und Position; `kind` grenzt die Suche ein |
 | `list_knowledge_sources` | lesen | Was die Wissensbasis enthält: jede Quelle mit ID, Titel, Art, Vertrauensstufe, Aufnahmedatum und Zahl der Auszüge (50 je Seite) |
 | `read_knowledge_source` | lesen | Die Auszüge einer Quelle in ihrer Reihenfolge, über die Quellen-ID (höchstens 20 je Aufruf) |
+| `list_packs` | lesen | Community-Packs des signierten Index und die installierten mit Vertrauensstufe; Details, Prüfung installierter Packs ([Details](#packs-für-ki-clients)) |
+| `add_pack_from_index` | extern | Ein Wissens-, Target- oder Rezept-Pack aus dem signierten Index hinzufügen, als Job; immer gefragt mit der geprüften Zusammenfassung und jedem Basis-Image eines Target-Packs |
+| `export_pack` | lokal schreiben | Ein Target-, Rezept- oder Wissens-Pack in eine lokale Datei exportieren, mit deinem Schlüssel signiert; immer gefragt, nichts wird hochgeladen |
+| `crawl_docs_site` | lokal schreiben | Deep Ingest von 1 bis 5 öffentlichen Dokumentations-Websites in die Wissensbasis, als Job; immer gefragt mit jeder Startadresse, erst nachdem eine Person den Hinweis gelesen hat ([Details](#deep-ingest-durch-einen-ki-client)) |
 | `start_build` | lokal schreiben | Einen Build starten (muss zu den Capabilities des Targets passen); die Frage zeigt Commit, Größe, Speicherplatz und Hardware-Schätzung |
 | `cancel_build` | lokal schreiben | Einen Build abbrechen (eigene Builds ohne Frage, die eines anderen Aufrufers erst nach einer) |
 | `resolve_healing` | lokal schreiben | Einen Self-Healing-Vorschlag annehmen oder verwerfen |
@@ -1041,7 +1045,8 @@ Der eingebettete Speicher wird davon getrennt nach 30 Sekunden ohne Zugriff frei
 
 Deep Ingest liest Dokumentationsseiten aus dem Web in die Wissensbasis ein. Du startest es mit **Deep Ingest (Add
 Docs)** im Modul-Assistenten (**Tools > Create Hardware Module...**); die Wissensbasis muss eingeschaltet sein. Einen
-CLI-Befehl dafür gibt es in dieser Version nicht.
+CLI-Befehl dafür gibt es in dieser Version nicht. KI-Clients und Ditto können mit dem Tool `crawl_docs_site` um einen
+Crawl bitten ([unten](#deep-ingest-durch-einen-ki-client)); du bestätigst jeden einzeln.
 
 Text- und Data-Mining öffentlich zugänglicher Inhalte ist erlaubt, solange der Rechteinhaber es sich nicht
 maschinenlesbar vorbehalten hat (EU-Richtlinie 2019/790, Art. 4; § 44b UrhG). Deshalb prüft der Crawler diese
@@ -1059,8 +1064,11 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
 - Er ist eine Information, keine rechtliche Bestätigung: eine Schaltfläche, **Verstanden** (englische Oberfläche:
   *Understood*, auch Esc), nichts zum Ankreuzen.
 - Er erscheint einmal pro Benutzer und erneut, wenn sich sein Text in einer Sprache ändert. Die Zustandsdatei
-  `crawl_notice.json` im persönlichen Ordner (`~/.llm-framework`) speichert einen Hash seiner Texte. Lässt sich
-  dieser Ordner nicht nutzen, erscheint der Hinweis jedes Mal.
+  `crawl_notice.json` im persönlichen Ordner (`~/.llm-framework`) speichert einen Hash seiner Texte, wann er gelesen
+  wurde und wo (`via`: `gui`, oder `cli` für `llm-cli tools crawl-notice`); das Lesen landet auch im Audit-Log. Lässt
+  sich dieser Ordner nicht nutzen, erscheint der Hinweis jedes Mal.
+- Nur eine Person bestätigt ihn, in der GUI oder mit `llm-cli tools crawl-notice` in einem Terminal. Solange er nicht
+  gelesen ist, wird `crawl_docs_site` mit dem Grund `needs_person` und diesen beiden Orten abgelehnt.
 
 ### Was der Crawler beachtet
 
@@ -1125,6 +1133,39 @@ Option *Respect robots.txt* und die Einstellung `crawler_respect_robots` gibt es
   complete response within 60 s“, unlesbares PDF, zu viele Weiterleitungen). Jede Seite, die ankommt
   (HTTP 200), zählt zur Seitengrenze, ob gespeichert oder nicht. Vorbehalte von Sites und Fehler machen das
   Ergebnis zu „teilweise“, die übrigen Gründe nicht.
+
+### Deep Ingest durch einen KI-Client
+
+Mit `crawl_docs_site` kann ein MCP-Client oder Ditto Dokumentation in die Wissensbasis aufnehmen (Entscheidung vom
+11.10.2026): derselbe Crawler mit denselben Opt-out-Prüfungen wie in der GUI, als Job.
+
+- **Immer gefragt, mit jeder Startadresse.** Voreinstellung und Obergrenze sind "nachfragen" (ein "erlauben" pro Tool
+  wird gedeckelt), und es bietet nie „ja, und nicht mehr fragen“ an. Die erste Zeile der Frage sagt, was passiert (Websites,
+  Seiten je Startadresse, Linktiefe, die Pause, dass die Opt-outs beachtet werden und sich nicht abschalten
+  lassen), dann eine Zeile je Startadresse (markiert als vom KI-Client angegeben), die behaltenen Sprachen, PDFs, der
+  Snapshot und dass das Embedding-Modell einmal heruntergeladen werden kann.
+- **Vor der Frage geprüft:** Der Hinweis muss gelesen sein (sonst `needs_person`); Offline-Modus aus und Wissensbasis
+  an (`not_supported`); 1 bis 5 Startadressen, jede eine öffentliche `http(s)`-Adresse, die die SSRF-Prüfung besteht
+  (`invalid_value` für alles andere); `max_pages` je Startadresse von 1 bis `crawler_max_pages` (nie über 100),
+  `max_depth` von 1 bis `crawler_max_depth` (nie über 3; Voreinstellung 2); ein Wert über der Grenze wird mit dem
+  erlaubten Bereich abgelehnt, nie verkleinert.
+- **Nichts erreicht die Opt-outs oder die Pause:** Das Tool nimmt keinen robots-Schalter und keine Pause (ein
+  unbekanntes Argument wird abgelehnt); der Crawler wartet mindestens `crawler_rate_limit` und nie weniger als eine
+  Sekunde. Der Crawler übergeht jeden anderen Schlüssel in einem Options-Dictionary, robots.txt lässt sich also von
+  nirgends abschalten; Tests nutzen einen eigenen Schlüsselwort-Schalter, den kein Produktcode übergibt (ein
+  Wächtertest prüft das).
+- **Grenzen:** ein Crawl gleichzeitig je Benutzer (auch über Framework-Prozesse hinweg, Sperrdatei `crawl.lock` im
+  persönlichen Ordner), 5 Crawls am Tag je Client und höchstens 300 gespeicherte Seiten am Tag je Client. Das
+  Seitenbudget und der Offline-Modus werden beim Start eines freigegebenen Crawls erneut geprüft, damit später
+  beantwortete Fragen zusammen nie über das Budget gehen.
+- **Als Job:** Der Aufruf gibt eine Job-ID zurück; `get_job_status` zeigt "Seite n von höchstens m" (keine Adresse);
+  `cancel_job` hält nach der aktuellen Seite an und behält, was gespeichert ist. Vor jeder Startadresse wird ein
+  Snapshot angelegt. Das Ergebnis enthält den Ausgang (`success`, `partial`, `failure`), gespeicherte Seiten und
+  Abschnitte, die übersprungenen Adressen mit Grund und ob eine Website sie vorbehalten hat (höchstens 50), die
+  fehlgeschlagenen (höchstens 50) und den Namen des Snapshots; nie Seitentext (der Client liest Seiten mit
+  `search_knowledge` oder `read_knowledge_source`). Adressen und Gründe im Ergebnis eines Jobs sind externer Text und
+  werden wie anderer externer Text markiert und bereinigt.
+- Die Seiten sind als `crawled` markiert, wie die eines Deep Ingest in der GUI.
 
 ### Gesprochene Ansagen
 
@@ -2017,6 +2058,51 @@ gesperrtes Pack zeigt eine abgeschaltete Schaltfläche **Revoked**.
   öffnet sich die Upload-Seite des Repositorys im Browser: Leg die Datei dort ab, und GitHub forkt das Repository für
   dich.
 - Ohne `community_repo` (heute der Standard) wird nichts übergeben; das Pack liegt fertig in seinem Ordner.
+
+### Packs für KI-Clients
+
+MCP-Clients und Ditto nutzen den Zoo mit drei Tools (Entscheidungen vom 11.10.2026): Packs kommen nur aus dem
+signierten Index und verlassen diesen Rechner nur als lokale Datei, die du selbst veröffentlichst.
+
+- **`list_packs`** (lesen): die Einträge des Index und die installierten Packs mit Art, ID, Version, Titel, Autor,
+  Lizenz, Vertrauensstufe (`verified`, `community`, `local`, `revoked`), installierter Version und dem Grund eines
+  Rückzugs. Es liest den zwischengespeicherten Index; `refresh` lädt den signierten Index neu (einmal pro Stunde je
+  Client; nicht im Offline-Modus). `pack_id` ergänzt die Beschreibung eines Packs, Downloadgröße und sha256 und bei
+  einem installierten Rezept seine festgelegten Werte; `verify` ergänzt die Prüfung der installierten Packs
+  (zurückgezogen, seit der Installation geändert). Titel, Autoren, Beschreibungen und Rezepte sind externer Text;
+  Ordner erscheinen nur als Labels.
+- **`add_pack_from_index`** (extern, immer gefragt): ein Wissens-, Target- oder Rezept-Pack aus dem signierten Index
+  mit Vertrauensstufe `verified` oder `community`, als Job. Nie ein zurückgezogenes Pack, nie ein Pack aus einer Datei
+  und nie ein verschlüsseltes (die bleiben im Community Hub und bei `llm-cli zoo install --file`). Bevor du gefragt
+  wirst, lädt das Framework den aktuellen Index, prüft den Speicherplatz (die doppelte Pack-Größe plus Reserve), lädt
+  das festgelegte Pack in die Quarantäne und prüft es; eine Ablehnung nennt ihren Grund. Die Frage zeigt das Pack mit
+  Autor und Lizenz (als Text aus dem Index markiert), die Vertrauensstufe, die sha256, die Dateien, wohin es kommt
+  (`targets/<id>`, `community/recipes/<id>`, `community/knowledge/<id>`), die Hinweise des Packs und bei einem
+  Target-Pack, dass es Build-Skripte und ein Dockerfile hinzufügt, dessen Image-Build mit Netzzugang läuft, mit jedem
+  Image, das ein Dockerfile bezieht (`FROM`, `COPY --from=`, `RUN --mount=...,from=`), klar benannt: Registry, Image, Tag, Digest oder „not pinned by digest“ und „Docker
+  Official Image“ oder „other registry: ...; prebuilt image made by its publisher, not checked by the framework“.
+  Der Job installiert genau die Kopie aus der Quarantäne mit der gezeigten sha256. Die Kopie wird wiederverwendet,
+  solange nach demselben Pack und Hash gefragt wird, und entfernt, wenn du nein sagst, wenn eine wartende Freigabe
+  abgelehnt wird oder abläuft, oder nach 20 Minuten ohne Nutzung. Ein Target-Pack, dessen ID ohne Rücksicht auf
+  Groß- und Kleinschreibung und Trennzeichen der eines vorhandenen Targets gleicht (`my_board` neben `My-Board`), wird
+  abgelehnt, auch im Community Hub und in der CLI. 5 Importe am Tag je Client.
+- **„Ja, und nicht mehr fragen“** für Packs, nur im eigenen Freigabefenster des Frameworks: Es gilt für eine Pack-Art,
+  eine Vertrauensstufe und den Schlüssel, der den Index signiert hat, für Wissens- und Rezept-Packs beider
+  Vertrauensstufen und für `verified`-Target-Packs; ein `community`-Target-Pack fragt immer. Ein neuer
+  Signaturschlüssel des Index macht es ungültig. Jede Installation darunter landet mit ihrer ID im Audit-Log und
+  erscheint als Hinweis in der GUI; ein solches Pack ist in seiner `.lcf-provenance.json` und in `list_packs` mit
+  `installed_via: grant:<id>` markiert. Für alle lokalen stdio-Clients gemeinsam werden nur der engste Umfang und
+  höchstens 30 Tage angeboten. Eine Installation darunter muss die größere Speicherreserve einer dauerhaften Freigabe
+  frei lassen (20 GiB oder 10 %), sonst wird gefragt.
+- **`export_pack`** (lokal schreiben, immer gefragt, nie „nicht mehr fragen“): ein Target- (über die Target-ID),
+  Rezept- (über die `artifact_id` eines fertigen Builds) oder Wissens-Pack, mit Datenschutz-Bereinigung und mit
+  deinem Community-Schlüssel signiert, nach `community/contributions/`. Die erste Zeile der Frage sagt „Creates a pack
+  signed with your key <Schlüssel-ID> as author <Autor>“. Es lehnt ab, solange kein Signaturschlüssel existiert (es
+  legt nie einen an; das tust du mit `llm-cli zoo keys`), und für ein Community-Target eines anderen Autors. Der
+  Autor ist standardmäßig der deines letzten Exports. Das Ergebnis enthält die Datei als Label, die Schlüssel-ID und
+  je Datei, wie viele Zeilen die Bereinigung geändert hat, nie den entfernten Text. Ein Wissens-Export läuft als
+  Job. Es nimmt keine Empfänger, keine Passphrase, keinen Ausgabeordner und keine Pull-Request-Option: Veröffentlichen
+  bleibt dein Schritt (`llm-cli zoo export --pr` oder der Hub).
 
 ### Werkzeuge für Maintainer
 

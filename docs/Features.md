@@ -511,6 +511,10 @@ In the chat (GUI) and with `llm-cli ditto ask`, Ditto can use the same tools as 
 | `search_knowledge` | read | Search the knowledge base; every excerpt with its source id, address or pack, kind (`web`, `pack`, `docs`), trust, date added and position; `kind` narrows the search |
 | `list_knowledge_sources` | read | What the knowledge base holds: every source with id, title, kind, trust, date added and number of excerpts (50 per page) |
 | `read_knowledge_source` | read | One source's excerpts in their order, by source id (at most 20 per call) |
+| `list_packs` | read | Community packs of the signed index and the installed ones with trust; details, verification of installed packs ([details](#packs-for-ai-clients)) |
+| `add_pack_from_index` | external | Add a knowledge, target or recipe pack from the signed index, as a job; always asked with the checked summary and every base image of a target pack |
+| `export_pack` | local write | Export a target, recipe or knowledge pack to a local file signed with your key; always asked, nothing uploaded |
+| `crawl_docs_site` | local write | Deep Ingest of 1 to 5 public documentation sites into the knowledge base, as a job; always asked with every start address, only after a person read the notice ([details](#deep-ingest-by-an-ai-client)) |
 | `start_build` | local write | Start a build (must match the target's capabilities); the question shows commit, size, disk and hardware estimate |
 | `cancel_build` | local write | Cancel a build (its own builds without a question, another caller's only after one) |
 | `resolve_healing` | local write | Approve or dismiss a self-healing proposal |
@@ -958,7 +962,8 @@ embedded storage is released separately, after 30 idle seconds (see **Storage** 
 
 Deep Ingest reads documentation pages from the web into the knowledge base. Start it with **Deep Ingest (Add Docs)**
 in the module wizard (**Tools > Create Hardware Module...**); the knowledge base must be on. There is no CLI command
-for it in this version.
+for it in this version. AI clients and Ditto can ask for a crawl with the tool `crawl_docs_site`
+([below](#deep-ingest-by-an-ai-client)); you confirm each one.
 
 Text and data mining of publicly accessible content is permitted unless the rightsholder reserved it in
 machine-readable form (EU Directive 2019/790, Art. 4; German UrhG § 44b). So the crawler checks these signals itself
@@ -974,8 +979,11 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   or a community pack keeps the source and licence of every page and needs your explicit release.
 - It is information, not a legal confirmation: one button, **Understood** (also Esc), nothing to tick.
 - It is shown once per user and again when its text changes in any language. The state file `crawl_notice.json` in
-  the per-user folder (`~/.llm-framework`) stores a hash of its texts. If that folder cannot be used, the notice is
-  shown every time.
+  the per-user folder (`~/.llm-framework`) stores a hash of its texts, when it was read and where (`via`: `gui`, or
+  `cli` for `llm-cli tools crawl-notice`); reading it is also written to the audit log. If that folder cannot be
+  used, the notice is shown every time.
+- Only a person acknowledges it, in the GUI or with `llm-cli tools crawl-notice` in a terminal. While it is not
+  read, `crawl_docs_site` is refused with the reason `needs_person` and these two places.
 
 ### What the crawler honours
 
@@ -1035,6 +1043,36 @@ robots.txt* option and the setting `crawler_respect_robots` are gone.
   installed", and every page that could not be fetched or read (HTTP status, "no complete response within 60 s",
   unreadable PDF, too many redirects). Each page that arrives (HTTP 200) counts toward the page
   limit, stored or not. Site reservations and failures make the outcome partial; the other reasons do not.
+
+### Deep Ingest by an AI client
+
+`crawl_docs_site` lets an MCP client or Ditto add documentation to the knowledge base (decision of 2026-10-11): the
+same crawler with the same opt-out checks as the GUI, as a job.
+
+- **Always asked, with every start address.** Default and cap are "ask" (a per-tool "allow" is capped), and it never
+  offers "do not ask again". The question's first line says what happens (sites, pages per start address, link
+  depth, the delay, that the opt-outs are honoured and cannot be switched off), then one line per start address
+  (marked as given by the AI client), the languages kept, PDFs, the snapshot, and that the embedding model may be
+  downloaded once.
+- **Checked before the question:** the notice must be read (`needs_person` otherwise); offline mode off and the
+  knowledge base on (`not_supported`); 1 to 5 start addresses, each a public `http(s)` address that passes the
+  SSRF check (`invalid_value` for anything else); `max_pages` per start address from 1 to `crawler_max_pages`
+  (never above 100), `max_depth` from 1 to `crawler_max_depth` (never above 3; default 2); a value above the limit
+  is refused with the allowed range, never reduced.
+- **Nothing reaches the opt-outs or the delay:** the tool takes no robots switch and no delay (an unknown argument
+  is refused); the crawler waits at least `crawler_rate_limit`, and never less than one second. The crawler ignores
+  any other key in an options dict, so robots.txt cannot be switched off from anywhere; tests use a separate
+  keyword-only flag that no product code passes (a guard test checks it).
+- **Limits:** one crawl at a time per user (also across framework processes, lock file `crawl.lock` in the per-user
+  folder), 5 crawls a day per client and at most 300 stored pages a day per client. The page budget and offline
+  mode are checked again when an approved crawl starts, so questions answered later never add up past the budget.
+- **As a job:** the call returns a job id; `get_job_status` shows "page n of at most m" (no address);
+  `cancel_job` stops after the current page and keeps what is stored. A snapshot is taken before each start
+  address. The result has the outcome (`success`, `partial`, `failure`), pages and chunks stored, the skipped
+  addresses with reason and whether a site reserved them (at most 50), the failed ones (at most 50), and the
+  snapshot name; never page text (the client reads pages with `search_knowledge` or `read_knowledge_source`). The
+  addresses and reasons in a job's result are external text, marked and cleaned like other external text.
+- The pages are marked `crawled`, like those of a Deep Ingest in the GUI.
 
 ### Spoken announcements
 
@@ -1840,6 +1878,47 @@ encrypted to your key), and **Build** on an installed recipe fills in the Builde
   `gh` and `git` use their own stored credentials. Otherwise, or if that fails, the repository's upload page opens in
   the browser: drop the file there, and GitHub forks the repository for you.
 - Without `community_repo` (the default today) nothing is handed over; the pack stays ready in its folder.
+
+### Packs for AI clients
+
+MCP clients and Ditto use the zoo with three tools (decisions of 2026-10-11): packs come only from the signed index,
+and leave this computer only as a local file you publish yourself.
+
+- **`list_packs`** (read): the index entries and the installed packs with kind, id, version, title, author, licence,
+  trust (`verified`, `community`, `local`, `revoked`), installed version and the revocation reason. It reads the
+  cached index; `refresh` downloads the signed index anew (once an hour per client; not in offline mode).
+  `pack_id` adds one pack's description, download size and sha256, and for an installed recipe its pinned values;
+  `verify` adds the check of the installed packs (revoked, changed since installed). Titles, authors, descriptions
+  and recipes are external text; folders appear as labels only.
+- **`add_pack_from_index`** (external, always asked): a knowledge, target or recipe pack from the signed index with
+  trust `verified` or `community`, as a job. Never a revoked pack, never a pack from a file and never an encrypted
+  one (those stay in the Community Hub and `llm-cli zoo install --file`). Before you are asked the framework loads
+  the current index, checks the disk (twice the pack size plus the reserve), downloads the pinned pack into
+  quarantine and validates it; a refusal names its reason. The question shows the pack with author and licence
+  (marked as index text), the trust level, the sha256, the files, where it goes (`targets/<id>`,
+  `community/recipes/<id>`, `community/knowledge/<id>`), the pack's notes, and for a target pack that it adds build
+  scripts and a Dockerfile whose image build runs with network access, with every image every Dockerfile pulls
+  (`FROM`, `COPY --from=`, `RUN --mount=...,from=`) shown plainly: registry, image, tag, digest or "not pinned by digest", and "Docker Official Image" or "other
+  registry: ...; prebuilt image made by its publisher, not checked by the framework". The job installs exactly the
+  quarantined copy with the sha256 shown. The copy is reused while the same pack and hash are asked about, and
+  removed when you say no, when a pending approval is declined or expires, or after 20 minutes without use. A target
+  pack whose id equals an existing target's ignoring case and separators (`my_board` next to `My-Board`) is refused,
+  in the Community Hub and the CLI too. 5 imports a day per client.
+- **"Yes, and do not ask again"** for packs, given only in the framework's own approval window: it covers one pack
+  kind, one trust level and the key that signed the index, for knowledge and recipe packs of both trust levels and
+  for `verified` target packs; a `community` target pack always asks. A new index signing key voids it. Each install
+  under it is audited with its id and shown as a GUI notice; such a pack is marked `installed_via: grant:<id>` in its
+  `.lcf-provenance.json` and in `list_packs`. For all local stdio clients together only the narrowest scope and at
+  most 30 days are offered. An install under it must leave the larger disk reserve of a standing approval free (20 GiB
+  or 10 %), or it asks.
+- **`export_pack`** (local write, always asked, never "do not ask again"): a target (by target id), recipe (by the
+  `artifact_id` of a finished build) or knowledge pack, privacy-scrubbed and signed with your community key, into
+  `community/contributions/`. The question's first line says "Creates a pack signed with your key <key id> as author
+  <author>". It refuses while no signing key exists (it never creates one; you do that with `llm-cli zoo keys`) and
+  for another author's community target. The author defaults to the one of your last export. The result has the
+  file as a label, the key id and per file how many lines the scrub changed, never the removed text. A knowledge
+  export runs as a job. It takes no recipients, passphrase, output folder or pull-request option: publishing stays
+  your step (`llm-cli zoo export --pr` or the hub).
 
 ### Maintainer tools
 

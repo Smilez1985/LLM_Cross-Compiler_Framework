@@ -31,6 +31,28 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   takes `kind` and `rerank`. Sources are named by ids, never by paths; all their text is marked untrusted. A tool call
   never downloads the embedding or reranking model: without the embedding model the search is refused with the next
   step instead of starting a download of about a gigabyte, and the refusal names no folder.
+- **Deep Ingest for AI clients** (MCP tool `crawl_docs_site`, decision of 2026-10-11): an AI client or Ditto can add
+  documentation sites to the knowledge base, as a job, with exactly the GUI's crawler and opt-out checks (robots.txt,
+  robots directives incl. `noai`, TDMRep). You are asked every time (never "do not ask again", a per-tool "allow" is
+  capped) and the question lists every start address. Refused while you have not read the one-time Deep Ingest
+  notice (`needs_person`), in offline mode or with the knowledge base off; 1-5 public `http(s)` start addresses,
+  checked before the question; `max_pages` up to the setting and 100, `max_depth` up to the setting and 3, at least
+  one second between requests; one crawl at a time per user, 5 a day and 300 stored pages a day per client (the budget and offline mode are
+  checked again when an approved crawl starts).
+  `cancel_job` stops after the current page and keeps what is stored; the result has counts and the skipped or
+  failed addresses with reasons, never page text or a folder of this computer. New: `llm-cli tools crawl-notice` shows the notice in a terminal
+  and records that you read it.
+- **The community zoo for AI clients** (MCP tools `list_packs`, `add_pack_from_index`, `export_pack`): a client lists
+  the signed index and the installed packs (details, verification; `refresh` once an hour), adds a knowledge, target
+  or recipe pack from the signed index (trust verified or community, never revoked, never from a file) after you
+  saw the summary checked in quarantine, for a target pack with every image its Dockerfiles pull (`FROM`, `COPY --from=`,
+  `RUN --mount=...,from=`) shown plainly (registry, digest or "not pinned", Docker Official Image or another registry) and that its image build runs with network, and exports a
+  pack to a local file signed with your key (always asked; refused without an existing key; returns scrub counts,
+  never the removed text). A quarantined copy is reused for the same pack and hash and removed on a "no", a declined
+  or expired approval, or after 20 minutes. "Yes, and do not ask again" covers one pack kind, trust level and index
+  key (knowledge and recipe packs, `verified` target packs); packs installed under it are marked `installed_via`; an install under it must leave the larger disk reserve
+  (20 GiB or 10 %) free, or it asks.
+  No tool publishes a pull request.
 - **Fix proposals from AI clients** (MCP tool `propose_healing_fix`): a client that analyses a failed build hands its
   summary, cause, manual step and confidence to the framework. It passes the same checks as Ditto's own analysis,
   including the dangerous-command filter, is confirmed by you like any local change, is accepted only for a failed
@@ -523,6 +545,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   one is a warning the person's approval overrides, never a refusal; prebuilt llama.cpp stays refused.
 
 ### Changed
+- **The Deep Ingest notice records who read it again**: its state file stores where it was acknowledged (`via`:
+  `gui` or `cli`), and reading it is written to the audit log (actor `gui` or `cli`). Only a person acknowledges it;
+  `CrawlNotice.acknowledge` refuses any other channel.
+- **A target pack never takes another target's name**: installing a target pack whose id (or declared target id)
+  equals an existing target's ignoring case and separators is refused, in the Community Hub, the CLI and over MCP.
 - **One Hugging Face classification for builds and downloads**: `check_build_request` and `start_build` now read a model's licence, gating and files with the same rules as `get_hf_model_info` and `download_hf_file` (licences such as GPL, DeepSeek or Qwen research were "unknown" on the build path and "restrictive" on the download path), and both keep the same disk reserve.
 - **MCP over HTTP**: one token holds at most 4 of the 8 sessions, so one client cannot lock the others out; a session
   closes after 10 minutes without a request (the SDK's default is 30); a request still open when its token is revoked
@@ -936,6 +963,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   folders on the full disk with their sizes, and pruning Docker is proposed only when Docker's data root is full.
 
 ### Security
+- **robots.txt can no longer be switched off through crawl options**: the crawler takes only its own option keys
+  (pages, depth, delay, PDFs, languages) and ignores any other key, including `respect_robots`, with a log line; the
+  switch for tests with a fake web is a separate keyword-only flag that no product code passes (a guard test checks
+  it). Strings in a job's result (for example the addresses a crawl skipped and the sites' reasons) are now cleaned,
+  capped and marked as external text like the rest of a job's status.
 - **The dangerous-command filter can no longer be bypassed with invisible or full-width characters** (Ditto's
   healing analyses and recommendations, and fix proposals of AI clients): it checks the text also as the GUI and
   the CLI show it (normalized, invisible characters and joiners removed), so `r<zero-width space>m -rf ~` or

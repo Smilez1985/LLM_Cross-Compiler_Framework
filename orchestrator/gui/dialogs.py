@@ -884,9 +884,12 @@ class CrawlNoticeDialog(QMessageBox):
             QTimer.singleShot(0, lambda: self._announcer(self._spoken))
 
 
-def show_crawl_notice_once(parent, config, announcer: Optional[Callable[[str], Any]] = None) -> None:
+def show_crawl_notice_once(parent, config, announcer: Optional[Callable[[str], Any]] = None,
+                           registry=None) -> None:
     """Shows the notice before the user's first crawl, and again after its text changed (every time when the
-    per-user state directory cannot be used)."""
+    per-user state directory cannot be used). The acknowledgement records that a person read it in the GUI, and
+    goes into the audit log (actor gui) when the tool registry is given: AI clients may crawl (crawl_docs_site)
+    only after it."""
     try:
         notice = CrawlNotice(config.user_state_dir)
         if not notice.needed():
@@ -897,7 +900,11 @@ def show_crawl_notice_once(parent, config, announcer: Optional[Callable[[str], A
     CrawlNoticeDialog(parent, announcer).exec()
     try:
         if notice is not None:
-            notice.acknowledge()
+            notice.acknowledge("gui")
+            if registry is not None:
+                problem = audit_person(registry, "crawl_notice_acknowledged", {"via": "gui"})
+                if problem:
+                    logging.getLogger(__name__).warning(f"The Deep Ingest notice was not audited ({problem}).")
     except OSError as e:
         logging.getLogger(__name__).warning(f"Could not remember the Deep Ingest notice ({e}); it is shown again.")
 

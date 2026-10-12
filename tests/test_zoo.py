@@ -1121,6 +1121,38 @@ class TestCli:
 def test_mcp_and_ditto_have_no_zoo_or_upload_tools(booted_framework):
     names = {spec.name for spec in booted_framework.tool_registry.list()}
     assert not any(word in name for name in names for word in ("zoo", "community", "upload", "install"))
+    # Packs reach AI callers only from the signed index and only to a local file (MCP design T9; DECISIONS round 1
+    # item 3): never a pull request, never a publication, never a pack from a file.
+    assert not any(word in name for name in names for word in ("submit", "publish", "pull_request"))
+    assert {"list_packs", "add_pack_from_index", "export_pack"} <= names
+    for name in ("add_pack_from_index", "export_pack"):
+        fields = set(booted_framework.tool_registry.get(name).input_model.model_fields)
+        assert not fields & {"file", "path", "url", "pr", "repo", "recipients", "passphrase", "out", "out_dir"}, name
+
+
+def test_automation_code_never_publishes_or_installs_a_pack_from_a_file():
+    """No code an AI drives (the MCP server, Ditto, the tools, the provider layer) reaches submit_contribution (a
+    pull request under the person's GitHub login) or prepare_install_file (an unreviewed pack an AI could write)."""
+    import ast
+    from conftest import REPO_ROOT
+    files = [REPO_ROOT / "orchestrator/mcp_server.py", REPO_ROOT / "orchestrator/Core/ditto_manager.py"]
+    for folder in ("orchestrator/tools", "orchestrator/llm"):
+        files += sorted((REPO_ROOT / folder).rglob("*.py"))
+    forbidden = {"submit_contribution", "_submit_with_gh", "prepare_install_file", "decrypt_pack", "verify_file"}
+    offenders = []
+    for path in files:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = []
+            if isinstance(node, ast.Attribute):
+                names.append(node.attr)
+            elif isinstance(node, ast.Name):
+                names.append(node.id)
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                names.append(node.value)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                names += [a.name for a in node.names]
+            offenders += [f"{path.relative_to(REPO_ROOT)}:{node.lineno}: {n}" for n in names if n in forbidden]
+    assert len(files) > 5 and offenders == []
 
 
 # --- GUI ------------------------------------------------------------------------------------------------------

@@ -978,6 +978,19 @@ llm-cli tools folders list
 llm-cli tools folders remove mymodels
 ```
 
+### tools crawl-notice
+
+```
+llm-cli tools crawl-notice
+```
+
+Shows the one-time Deep Ingest notice (what the crawler reads, which opt-outs it honours, that the knowledge stays on
+this computer) and asks whether you have read it. AI clients and Ditto can ask to crawl documentation sites
+(`crawl_docs_site`) only after a person read it, here or in the GUI's Deep Ingest; no tool can acknowledge it. It
+needs a terminal (piped answers are refused); the acknowledgement is stored with `via: cli` in
+`~/.llm-framework/crawl_notice.json` and written to the audit log (actor `cli`). When the notice is already read, it
+is shown and nothing changes; after its text changes it must be read again.
+
 ---
 
 ## mcp
@@ -1431,6 +1444,10 @@ came out. The framework never uploads anything by itself; sharing is always a st
 `community_index_url` and `community_repo` are empty, and `configs/community_keys.yml` lists no publisher key. Until
 then `zoo list` shows only installed packs, installing by ID and `zoo export --pr` stop with a message, and packs
 are shared as files (`zoo install --file`).
+
+AI clients and Ditto use the same zoo through the tools `list_packs`, `add_pack_from_index` (signed index only,
+always asked) and `export_pack` (to a local file, always asked); they cannot install a pack from a file, open a pull
+request or create your keys ([details](Features.md#packs-for-ai-clients)).
 
 How packs are protected:
 

@@ -1016,6 +1016,20 @@ llm-cli tools folders list
 llm-cli tools folders remove mymodels
 ```
 
+### tools crawl-notice
+
+```
+llm-cli tools crawl-notice
+```
+
+Zeigt den einmaligen Deep-Ingest-Hinweis (was der Crawler liest, welche Opt-outs er beachtet, dass das Wissen auf
+diesem Rechner bleibt) und fragt, ob du ihn gelesen hast. KI-Clients und Ditto können erst dann darum bitten,
+Dokumentations-Websites zu crawlen (`crawl_docs_site`), wenn eine Person ihn gelesen hat, hier oder im Deep Ingest
+der GUI; kein Tool kann ihn bestätigen. Der Befehl braucht ein Terminal (weitergeleitete Antworten werden
+abgelehnt); die Bestätigung wird mit `via: cli` in `~/.llm-framework/crawl_notice.json` gespeichert und ins
+Audit-Log geschrieben (Akteur `cli`). Ist der Hinweis schon gelesen, wird er gezeigt und nichts ändert sich; nach
+einer Änderung seines Textes muss er erneut gelesen werden.
+
 ---
 
 ## mcp
@@ -1487,6 +1501,11 @@ immer ein Schritt, den du anstößt.
 Einstellungen `community_index_url` und `community_repo` sind leer, und `configs/community_keys.yml` enthält keinen
 Herausgeber-Schlüssel. Bis dahin zeigt `zoo list` nur installierte Pakete, Installieren per ID und
 `zoo export --pr` brechen mit einer Meldung ab, und Pakete werden als Dateien geteilt (`zoo install --file`).
+
+KI-Clients und Ditto nutzen denselben Zoo über die Tools `list_packs`, `add_pack_from_index` (nur signierter Index,
+immer gefragt) und `export_pack` (in eine lokale Datei, immer gefragt); sie können kein Paket aus einer Datei
+installieren, keinen Pull Request öffnen und deine Schlüssel nicht anlegen
+([Details](Features_DE.md#packs-für-ki-clients)).
 
 So sind Pakete geschützt:
 

@@ -587,7 +587,8 @@ läuft auf deinem Rechner:
   `rag_reranker`).
 
 Dokumentation nimmst du mit **Deep Ingest (Add Docs)** im Modul-Assistenten auf (**Tools > Create Hardware
-Module...**). Vor deinem ersten Crawl sagt ein einmaliger Hinweis, was gelesen und behalten wird; er ist eine
+Module...**), oder ein KI-Client oder Ditto bittet mit `crawl_docs_site` um einen Crawl (du bestätigst jeden und siehst
+jede Startadresse). Vor deinem ersten Crawl sagt ein einmaliger Hinweis, was gelesen und behalten wird; er ist eine
 Information, keine Bestätigung. Der Crawler sperrt private Netzwerkadressen, begrenzt Seitenzahl und Tiefe und
 beachtet diese maschinenlesbaren Opt-outs einer Website: robots.txt, den Header `X-Robots-Tag`, robots-Meta-Tags
 (auch `noai`) und das TDM Reservation Protocol. Keine dieser Prüfungen lässt sich abschalten. Der Assistent zeigt
@@ -686,7 +687,8 @@ Die Einstellungen zu Wissensbasis, Deep Ingest und Community erklärt [docs/Feat
 - **Anmeldung im Browser und bei Cloud-Plattformen** (OAuth, AWS, Google Cloud, Azure) gibt es noch nicht; Ditto
   meldet sich mit API-Schlüsseln an, lokale Engines brauchen keine Anmeldung, und ein Profil aus `ant auth login`
   ist eine erweiterte Möglichkeit.
-- **Deep Ingest** läuft nur aus dem Modul-Assistenten in der GUI; einen CLI-Befehl dafür gibt es nicht.
+- **Deep Ingest** hat keinen CLI-Befehl: Du startest es im Modul-Assistenten in der GUI oder bestätigst das
+  `crawl_docs_site` eines KI-Clients.
 - **Community-Zoo:** Ein Community-Repository, ein Index oder ein Maintainer-Schlüssel ist noch nicht veröffentlicht
   (`configs/community_keys.yml` ist leer, `community_index_url` und `community_repo` sind leer); installieren lassen
   sich deshalb nur Pack-Dateien.
