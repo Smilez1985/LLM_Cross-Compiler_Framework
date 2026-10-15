@@ -118,7 +118,10 @@ Der Installer:
 1. prüft die Internetverbindung (HTTPS zum Paketindex `pypi.org` oder zu `PIP_INDEX_URL`, wenn du einen Spiegel
    setzt; hinter einem Proxy startest du ihn mit `sudo -E`, damit `https_proxy` erhalten bleibt) und Python
    (installiert es mit `apt`, falls es fehlt, und verlangt dann 3.11 bis 3.14),
-2. installiert Docker über `get.docker.com`, falls es fehlt, und nimmt deinen Benutzer in die Gruppe `docker` auf,
+2. installiert Docker über `get.docker.com`, falls es fehlt, und nimmt deinen Benutzer in die Gruppe `docker` auf.
+   Er sagt, was das heißt: Wer in der Gruppe ist, steuert den Docker-Dienst, und der läuft als root; jedes
+   Programm, das als dein Benutzer läuft, kann damit Root-Rechte auf diesem Rechner bekommen
+   (`sudo gpasswd -d BENUTZER docker` macht es rückgängig; danach kann das Framework ohne sudo nicht bauen),
 3. kopiert die Dateien, die das Repository ausliefert, nach `/opt/llm-conversion-framework` (Eigentümer ist dein
    Benutzer) und führt sie in `.lcf-installed-files` auf. Ein erneuter Aufruf aktualisiert diese Dateien und
    entfernt nur Dateien, die ein früherer Aufruf kopiert hat und die das Repository nicht mehr ausliefert; alles

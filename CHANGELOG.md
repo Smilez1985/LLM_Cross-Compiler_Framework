@@ -989,6 +989,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   conversation its file does not show.
 
 ### Deprecated
+- `--password VALUE` on `deploy run`, `scan --device` and `device runtime deploy`: every user sees the value in the
+  process list, and it stays in the shell history. It still works and prints a warning; use `--password` without a
+  value (hidden prompt) or `--password-stdin`.
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
   list. Use the hidden prompt or `--with-token`.
 - `llm-cli build start --parallel`: it never had an effect (one call runs one build). It is hidden from the help
@@ -1311,6 +1314,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   method.
 
 ### Security
+- **Device passwords no longer belong on the command line** (sixth-round design 4.3): `deploy run`, `scan --device`
+  and `device runtime deploy` ask with hidden input when `--password` has no value, and `--password-stdin` reads one
+  line from a pipe (refused on a terminal, where the password would be shown while you type). paramiko's loggers are
+  held at INFO or higher while a login authenticates, so a password never reaches a log, also at DEBUG.
+- **The Trivy scan no longer gets the Docker socket** (released in 3.0.0): the scanner container had the host's Docker
+  socket, which gives root rights on this computer even when mounted read-only. The builder now saves the image to an
+  archive in a private folder (0700) of the build, and Trivy reads only that file, read-only, without capabilities and
+  with `no-new-privileges`. The log says when the archive is saved and removed again; without room for it on the cache
+  disk the scan is skipped with a warning that names the sizes.
+- **The loopback MCP HTTP listener ignores proxy headers and writes no access log:** uvicorn trusted
+  `X-Forwarded-For` and `X-Forwarded-Proto` from 127.0.0.1, so every local program could claim another address.
+  `mcp serve --transport http` now runs with `proxy_headers=False` and `access_log=False`.
+- **The installer says what the `docker` group means:** `install.sh` still adds you to the group without asking
+  (seventh round, item 6) and now says plainly that its members control the Docker service, which runs as root, so
+  every program running as your user can get root rights; it also names the command that undoes it.
 - **`run_doctor` gives AI clients no host path** (released in 3.0.0): the findings an AI read named the per-user
   folder, the audit log, pack folders, the disk folders and whatever path a crashed check's error quoted, user name
   included. What an AI reads now names the framework's folders by label (`state:audit.db`, "the state folder",

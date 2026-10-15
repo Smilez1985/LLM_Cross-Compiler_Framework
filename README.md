@@ -114,7 +114,10 @@ The installer:
 1. checks the internet connection (HTTPS to the package index `pypi.org`, or `PIP_INDEX_URL` if you set a
    mirror; behind a proxy start it with `sudo -E` so `https_proxy` is kept) and Python (installs it with `apt` if
    it is missing, then requires 3.11 to 3.14),
-2. installs Docker via `get.docker.com` if it is missing and adds your user to the `docker` group,
+2. installs Docker via `get.docker.com` if it is missing and adds your user to the `docker` group. It says what
+   that means: members of the group control the Docker service, which runs as root, so every program that runs
+   as your user can get root rights on this computer (`sudo gpasswd -d USER docker` undoes it; the framework
+   then cannot build without sudo),
 3. copies the files the repository ships to `/opt/llm-conversion-framework` (owned by your user) and lists them
    in `.lcf-installed-files`. Running it again updates those files and removes only files that an earlier run
    copied and the repository no longer ships; everything else there stays: your own targets (module wizard,

@@ -104,8 +104,11 @@ Ein Build läuft in diesen Schritten; jeder wird protokolliert:
    angegeben). Ein lokales Modell oder ein Datensatz, den Ditto oder ein MCP-Client genannt hat, wird unmittelbar
    vor jedem Containerstart erneut geprüft ([Lokale Dateien für KI-Clients](#mcp-server)).
 5. **Sicherheits-Scan:** Trivy durchsucht das Image nach Schwachstellen der Stufen HIGH und CRITICAL (Einstellung
-   `enable_security_scan`, festgelegtes Image `aquasec/trivy:0.75.0`). Funde erscheinen als Warnung im Log, nicht
-   als Fehler. Ein Scan, der nicht innerhalb des Zeitlimits des Builds (`build_timeout`) fertig wird, wird mit
+   `enable_security_scan`, festgelegtes Image `aquasec/trivy:0.75.0`). Der Scanner bekommt nie den Docker-Socket:
+   Das Image wird als Archiv in einem privaten Ordner des Builds gespeichert, Trivy liest nur diese Datei
+   (schreibgeschützt, ohne Capabilities), und das Log sagt, wann das Archiv gespeichert und wieder entfernt wird.
+   Ist auf der Cache-Platte kein Platz für das Archiv, wird der Scan mit einer Warnung übersprungen, die die
+   Größen nennt. Funde erscheinen als Warnung im Log, nicht als Fehler. Ein Scan, der nicht innerhalb des Zeitlimits des Builds (`build_timeout`) fertig wird, wird mit
    einer Warnung gestoppt.
 6. **Importance Matrix** (nur GGUF, wenn gewählt).
 7. **Konvertieren und quantisieren** in Containern mit Sandbox ([Build-Sandbox](#build-sandbox)).
@@ -1831,7 +1834,8 @@ Konto oder Schlüssel an; das Framework sieht das nie.
   ein CORS-Preflight) wird abgelehnt, der `Host`-Header muss eine Loopback-Adresse mit dem Port des Servers nennen
   (gegen DNS-Rebinding), und der Server hält höchstens 8 Sitzungen, höchstens 4 je Token (damit ein Client die
   anderen nicht aussperren kann), schließt eine Sitzung nach 10 Minuten ohne Anfrage und nimmt höchstens 1 MiB pro
-  Anfrage an. Eine Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet
+  Anfrage an. Er beachtet `X-Forwarded-For` und `X-Forwarded-Proto` nicht und schreibt kein Zugriffsprotokoll.
+  Eine Sitzung, und eine offene Fragerunde des Protokolls 2026-07-28, gehört dem Token, das sie geöffnet
   hat (nach einer Rotation öffnet der Client eine neue Sitzung). Eine noch offene Anfrage (ein Warten, ein
   Ereignisstrom, ein Listen-Strom) wird geschlossen, sobald ihr Token widerrufen oder rotiert wird, und ebenso die
   Sitzungen dieses Tokens, sodass sie keinen Platz belegen. Was außerhalb einer vom Server geprüften Anfrage läuft,
@@ -2613,8 +2617,6 @@ Was noch nicht funktioniert, damit dich nichts überrascht:
 - **Community-Zoo:** Ein Community-Repository, ein Index oder ein Maintainer-Schlüssel ist noch nicht veröffentlicht
   (`configs/community_keys.yml` ist leer, `community_index_url` und `community_repo` sind leer); installieren lassen
   sich deshalb nur Pack-Dateien, und ein Pull Request hat kein Repository, an das er gehen kann.
-- **Sicherheits-Scan:** Der Trivy-Container bekommt den Docker-Socket, um das Image zu lesen; ein Scan ohne Socket ist
-  geplant.
 - Kleinere Lücken der CLI stehen in [CLI_Usage_DE.md](CLI_Usage_DE.md#bekannte-einschränkungen).
 
 Was geplant ist: [Roadmap](BLUEPRINT_DE.md#roadmap). Was sich geändert hat: [CHANGELOG](../CHANGELOG_DE.md).

@@ -375,7 +375,8 @@ llm-cli deploy package build_20261011_141500/Rockchip/SmolLM2-135M-Instruct/Q4_0
 ### deploy run
 
 ```
-llm-cli deploy run PACKAGE_PATH --ip IP --user USER [--port 22] [--password TEXT] [--trust-fingerprint TEXT]
+llm-cli deploy run PACKAGE_PATH --ip IP --user USER [--port 22] [--password [VALUE] | --password-stdin]
+                   [--trust-fingerprint TEXT]
                    [--label TEXT]
 ```
 
@@ -389,7 +390,8 @@ a matching `llama-server` command if `llama-server` is installed on the board.
 | `--ip TEXT` | **Required.** The board's IP address. |
 | `--user TEXT` | **Required.** User on the board. |
 | `--port INTEGER` | SSH port (default 22). |
-| `--password TEXT` | Only for the first connection: used once to install the framework's SSH key, never stored. Asked interactively when omitted. A password on the command line ends up in your shell history. |
+| `--password` | Only for the first connection: used once to install the framework's SSH key, never stored. Without a value it is asked with hidden input; when you give nothing on a terminal it is asked too (Enter if the key is already installed). `--password VALUE` still works for scripts but is deprecated and prints a warning: every user sees the value in the process list, and it stays in your shell history. |
+| `--password-stdin` | Reads the password from standard input (one line), for example piped from a password manager. Refused on a terminal, where it would be shown while you type; use `--password` there. |
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has exactly this SHA256 fingerprint (for scripts). |
 | `--label TEXT` | Your name for the board in the trusted devices (default: the label it already has, or its address). |
 
@@ -1129,6 +1131,8 @@ to another user. Requests with an `Origin` header (web pages, CORS preflights) a
 the `Host` header must be `127.0.0.1`, `localhost` or `[::1]` with the server's port, and the server keeps at most
 8 sessions, at most 4 of them per token (so one client cannot lock the others out; beyond that a new session is
 refused with status 503), closes a session after 10 minutes without a request, and takes at most 1 MiB per request.
+It ignores `X-Forwarded-For` and `X-Forwarded-Proto` (no local program can claim another address) and writes no
+access log.
 A request that is still open (a wait, an event stream) is closed as soon as its token is revoked or rotated, and so
 are that token's sessions (a session belongs to the token value that opened it; after `rotate` the client opens a
 new one). The old shared token file `mcp_http_token` is no longer accepted.
@@ -1317,7 +1321,8 @@ llm-cli module generate-ai target_hardware_config.txt --provider local
 
 ```
 llm-cli scan [--output TEXT] [--json] [--script]
-llm-cli scan --device HOST --user TEXT [--port N] [--password TEXT] [--trust-fingerprint TEXT] [--label TEXT]
+llm-cli scan --device HOST --user TEXT [--port N] [--password [VALUE] | --password-stdin]
+             [--trust-fingerprint TEXT] [--label TEXT]
              [--output TEXT] [--json]
 llm-cli scan --import FILE [--label TEXT]
 ```
@@ -1365,7 +1370,7 @@ read, 2 for wrong options.
 | `--device HOST` | Probe this board over SSH (host name or IP address) instead of this computer. |
 | `--user TEXT` | SSH user on the board (needed with `--device`). |
 | `--port N` | SSH port of the board (default 22). |
-| `--password TEXT` | Only for the first connection: used once to install the framework's SSH key, never stored (asked interactively when omitted). |
+| `--password`, `--password-stdin` | Only for the first connection: used once to install the framework's SSH key, never stored. As for [deploy run](#deploy-run): without a value asked with hidden input (also when you give nothing on a terminal), or one line from a pipe; `--password VALUE` is deprecated and warns. |
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has this SHA256 fingerprint. |
 | `--label TEXT` | Your name for the board in the profile store (with `--device` or `--import`). |
 | `--import FILE` | Store a board's probe file in the probe store and print its probe id (not together with `--device`). |
@@ -1394,7 +1399,8 @@ llm-cli device list [--json]
 llm-cli device settings DEVICE [--install user|systemd] [--user NAME] [--port N] [--model PATH] [--confirm-sudo]
 llm-cli device runtime plan DEVICE [--json]
 llm-cli device runtime build DEVICE [--jobs N] [--mirror URL] [--yes]
-llm-cli device runtime deploy DEVICE [--user NAME] [--password TEXT] [--bench-model PATH] [--allow-untrusted-model]
+llm-cli device runtime deploy DEVICE [--user NAME] [--password [VALUE] | --password-stdin] [--bench-model PATH]
+                              [--allow-untrusted-model]
 llm-cli device runtime verify DEVICE [--user NAME] [--bench-model PATH] [--allow-untrusted-model]
 llm-cli device runtime status DEVICE [--json]
 ```
@@ -1441,8 +1447,9 @@ stored is only packed again. Exit code 1 when Docker does not answer, the build 
 
 Installs the built runtime on the board as the deploy settings say, then checks it there. The board must be the one
 the profile was made with (same host key; a new board at the old address is refused) and already trusted;
-`--password` pairs a board that has no framework key yet (used once, never stored). The SSH user comes from the
-deploy settings or `--user`.
+`--password` pairs a board that has no framework key yet (used once, never stored; without a value it is asked with
+hidden input, `--password-stdin` reads it from a pipe, and `--password VALUE` is deprecated and warns). The SSH user
+comes from the deploy settings or `--user`.
 
 1. The board is inspected: user ID (root is refused), home folder, architecture (it must match the build), init
    system, and the tools the deployment needs. With the systemd setting, `sudo -n true` must work; otherwise nothing

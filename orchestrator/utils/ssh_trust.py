@@ -10,11 +10,14 @@ SSH trust for device probing and deployment.
 """
 
 import base64
+import contextlib
 import hashlib
+import logging
 import os
 import shlex
 import socket
 import tempfile
+import threading
 from pathlib import Path
 from typing import List, Optional, Tuple
 
@@ -138,6 +141,38 @@ if paramiko is not None:
             raise UnknownHostKey(host.strip("[]"), int(port or 22), key)
 
 
+_quiet_lock = threading.Lock()
+_quiet_users = 0
+_quiet_saved: List[Tuple[logging.Logger, int]] = []
+
+
+@contextlib.contextmanager
+def paramiko_quiet():
+    """Holds paramiko's loggers at INFO or higher while a connection authenticates, also when the framework logs at
+    DEBUG: a password or key material must never reach a log file. Levels come back when the last login is done."""
+    global _quiet_users, _quiet_saved
+    with _quiet_lock:
+        if _quiet_users == 0:
+            names = ["paramiko"] + sorted(n for n in logging.Logger.manager.loggerDict if n.startswith("paramiko."))
+            for name in names:
+                logger = logging.getLogger(name)
+                # A child without its own level follows "paramiko"; only explicit levels below INFO are raised.
+                level = logger.getEffectiveLevel() if name == "paramiko" else logger.level or logging.INFO
+                if level < logging.INFO:
+                    _quiet_saved.append((logger, logger.level))
+                    logger.setLevel(logging.INFO)
+        _quiet_users += 1
+    try:
+        yield
+    finally:
+        with _quiet_lock:
+            _quiet_users -= 1
+            if _quiet_users == 0:
+                for logger, level in _quiet_saved:
+                    logger.setLevel(level)
+                _quiet_saved = []
+
+
 def connect(host: str, user: str, state_dir: Path, port: int = 22, password: Optional[str] = None,
             timeout: float = 10.0):
     """An authenticated SSHClient for a device whose host key is already trusted.
@@ -150,9 +185,10 @@ def connect(host: str, user: str, state_dir: Path, port: int = 22, password: Opt
         client.load_host_keys(str(path))
     client.set_missing_host_key_policy(TofuPolicy())
     try:
-        client.connect(host, port=port, username=user, key_filename=str(private), password=password,
-                       look_for_keys=False, allow_agent=False, timeout=timeout, banner_timeout=timeout,
-                       auth_timeout=timeout)
+        with paramiko_quiet():
+            client.connect(host, port=port, username=user, key_filename=str(private), password=password,
+                           look_for_keys=False, allow_agent=False, timeout=timeout, banner_timeout=timeout,
+                           auth_timeout=timeout)
     except paramiko.BadHostKeyException:
         client.close()
         raise HostKeyChanged(host, port) from None
