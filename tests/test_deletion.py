@@ -35,7 +35,7 @@ DELETION_SITES = {
     ("orchestrator/Core/artifact_store.py", "ArtifactStore.delete"): PERSON,
     ("orchestrator/Core/knowledge_snapshots.py", "delete_snapshots"): PERSON,
     ("orchestrator/Core/trash.py", "Trash.empty"): PERSON,
-    ("orchestrator/Core/doctor.py", "delete_framework_images"): PERSON,
+    ("orchestrator/Core/mojo/docker_objects.py", "delete_framework_images"): PERSON,
     # old runtime builds and device packages: the person's list (`ditto runtime prune`, `device runtime prune`); a
     # build or a deployment deletes none of them any more (they were kept to a count without a list)
     ("orchestrator/runtime/llama_server.py", "LocalLLMRuntime.delete_old_builds.take"): PERSON,
