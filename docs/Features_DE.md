@@ -1145,7 +1145,9 @@ fehlt; die Installer führen den Befehl als ihren Ditto-Schritt aus (`install.sh
 - **Idempotent:** Ist Ditto in einer der beiden Arten da, passiert nichts, und der Befehl sagt, was er gefunden hat.
   Ist nichts installiert, installiert `auto` direkt; geht das hier nicht (zum Beispiel kein Compiler und keine
   Builder-Basis für die C-Bibliothek dieses Rechners), nimmt er Docker und sagt warum. Geht keins von beiden, nennt
-  er beide Gründe.
+  er beide Gründe. Solange Docker nicht erreichbar ist (zum Beispiel noch nicht gestartet), bleibt der Docker-Modus,
+  wie du ihn gewählt hast, und nichts wird geändert. Ist die aufgezeichnete Art weg und die andere da, sagt der Befehl,
+  dass die Art gewechselt hat. `ensure` entfernt unterwegs nichts: Kein alter Build wird durch Aufräumen entfernt.
 - **Dittos Image** wird auf diesem Rechner aus `orchestrator/runtime/build/ditto-runtime.Dockerfile` in zwei Stufen
   gebaut, auf einem Docker Official Image des Katalogs als Basis (`build_bases`: Debian, Ubuntu oder Alpine, per Digest
   festgelegt): `runtime-base` fügt nur die Laufzeit-Bibliotheken hinzu (OpenMP und C++-Laufzeit; für einen
@@ -1157,7 +1159,9 @@ fehlt; die Installer führen den Befehl als ihren Ditto-Schritt aus (`install.sh
   Kennzeichnung als Dittos Laufzeit (`org.llm-framework.ditto-runtime`), wird nie als fertiges Image geholt und nie
   hochgeladen und vor dem Gebrauch in Containern aus ihm selbst geprüft: `llama-server` und `llama-bench` nennen den
   festgelegten Build und Commit, der Server lehnt `--tools` ab, und ein GPU-Build sieht sein Gerät, wenn die GPU
-  durchgereicht wird. Der Docker-Modus braucht in dieser Version Linux.
+  durchgereicht wird. Ein Image mit Dittos Kennzeichnung, das aus einer Registry kommt (es hat einen
+  Repository-Digest), wird nie benutzt. Die Programme im Image bekommen den Modus 0755, damit sie für deinen Benutzer
+  auch dann laufen, wenn sie mit einer strengen umask gebaut wurden. Der Docker-Modus braucht in dieser Version Linux.
 - **Der Container** hält die Startregeln jedes Servers ein: die Befehlszeile aus `server_policy.py` (keine verbotene
   Option, die Schlüsseldatei, keine Web-Oberfläche, keine Slots, offline); in seinem eigenen Netzwerk-Namensraum hört
   er auf allen Schnittstellen des Containers, und sein Port wird nur auf 127.0.0.1 veröffentlicht, also erreicht ihn
@@ -1182,13 +1186,15 @@ fehlt; die Installer führen den Befehl als ihren Ditto-Schritt aus (`install.sh
   KI-Einstellungen; die Liste wird vorher noch einmal ermittelt, und hat sie sich geändert, wird nichts entfernt, und
   das Entfernen wird ins Audit-Log geschrieben, bevor etwas entfernt wird. Ohne Terminal wird nichts entfernt, und die
   Liste wird angezeigt. Dittos Images werden sonst nie gelöscht, und die Builds eines Boards im selben Speicher
-  werden nie aufgelistet.
+  werden nie aufgelistet. Ist Docker nach einem Wechsel zur direkten Art nicht erreichbar, sagt der Befehl, dass
+  Dittos Images und Container nicht in der Liste stehen, und wie du sie später auflistest.
 - **Das Modell:** `ensure` bietet das Modell der gewählten oder empfohlenen Stufe an, wenn es fehlt, zuerst mit
   Quelle, Größe und Lizenz; mit `-y` lädt es nur ein Modell unter freier Lizenz. Jede andere Lizenz nimmst du selbst
   an.
 - **Für KI-Clients:** `get_status` (`local_runtime`) zeigt die Art, den Namen des Images und ob es umgepackt oder neu
-  gebaut wurde; `start_local_runtime` startet den Server der aufgezeichneten Art. Die Art wechseln und die alte Art
-  entfernen darf nur die Person: Kein Tool tut eins davon.
+  gebaut wurde; `start_local_runtime` startet den Server der aufgezeichneten Art, und sein Ergebnis nennt, was läuft
+  (im Docker-Modus den Build des Images). Die Art wechseln und die alte Art entfernen darf nur die Person: Kein Tool
+  tut eins davon, und `build_local_runtime` entfernt keinen alten Build.
 - **Die KI-Einstellungen** zeigen, wo der Server läuft, und bieten den Wechsel über denselben Code-Pfad wie der
   Befehl an, mit derselben Liste der Reste danach.
 

@@ -284,10 +284,13 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Dittos lokaler Server direkt oder in Docker** (DECISIONS Runde 7 D): `llm-cli ditto runtime ensure [--mode
   auto|bare-metal|docker] [--force]` installiert ihn, wenn er fehlt, und tut nichts, wenn er da ist (in einer der
   beiden Arten). Ist nichts installiert, wählt er direkt (ohne den Aufwand von Docker), oder Docker, wenn direkt hier
-  nicht geht, und sagt warum. Der Docker-Modus startet Dittos Image, auf deinem Rechner aus demselben festgelegten
-  llama.cpp-Rezept gebaut, auf einem Docker Official Image als Basis, per Digest festgelegt
+  nicht geht, und sagt warum. Solange Docker nicht erreichbar ist, bleibt der Docker-Modus, wie du ihn gewählt hast;
+  ist die aufgezeichnete Art weg, sagt der Befehl, dass die Art gewechselt hat. `ensure` entfernt unterwegs nichts
+  (kein alter Build wird durch Aufräumen entfernt). Der Docker-Modus startet Dittos Image, auf deinem Rechner aus
+  demselben festgelegten llama.cpp-Rezept gebaut, auf einem Docker Official Image als Basis, per Digest festgelegt
   (`orchestrator/runtime/build/ditto-runtime.Dockerfile`, zwei Stufen); es wird nie als fertiges Image geholt und nie
-  hochgeladen und vor dem Gebrauch in Containern aus ihm selbst geprüft. Der Container hält die Startregeln jedes
+  hochgeladen, ein Image mit Dittos Kennzeichnung aus einer Registry wird nie benutzt, und es wird vor dem Gebrauch in
+  Containern aus ihm selbst geprüft. Der Container hält die Startregeln jedes
   Servers ein (`server_policy.py`): Der Port wird nur auf 127.0.0.1 veröffentlicht, Modellordner und Schlüsseldatei
   des Starts werden schreibgeschützt eingebunden, er läuft als dein Benutzer ohne Capabilities auf einem
   schreibgeschützten Wurzeldateisystem, Docker entfernt ihn, wenn er stoppt, und die GPU wird durchgereicht, wo das
@@ -835,7 +838,8 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   festgelegten Commit selbst gebaut (keine Prebuilt-Option, keine CMake-Option und kein Befehl als Eingabe); ein
   fehlender Toolchain-Teil wird mit `needs_person` und `llm-cli ditto runtime install` abgelehnt; gestartet wird nur ein
   geprüfter Build, und kein Ergebnis enthält seine Adresse oder seinen Schlüssel; eine abgebrochene Installation wird
-  nie aktiv, und ein abgebrochener Modell-Download behält seine `.part`-Datei. Ein nicht vertrauenswürdiges Modell wird
+  nie aktiv, und ein abgebrochener Modell-Download behält seine `.part`-Datei; der Build einer KI entfernt keinen
+  alten Build (alte Builds bleiben, bis du sie entfernst). Ein nicht vertrauenswürdiges Modell wird
   nativ nur nach deiner Zustimmung im eigenen Fenster des Frameworks gemessen, die zuerst ins Audit-Log geschrieben
   wird, oder in der Docker-Sandbox. Die Board-Tools erreichen nur vertraute Geräte mit dem vertrauten Host-Schlüssel,
   werden immer erfragt und nie von einer Daueranfrage abgedeckt; ihre Fakten, Folgen, Fortschritte, Prüfergebnisse und

@@ -179,8 +179,10 @@ def detect(rt: Any, container_build: bool = False) -> Detection:
         except Exception:  # noqa: BLE001 - the daemon went away meanwhile
             images = []
             problem = "the Docker daemon did not answer"
-        current = [i for i in images if i.role == "image" and pin is not None
+        current = [i for i in images if i.role == "image" and pin is not None and not i.pulled
                    and i.labels.get(cs.LABEL_COMMIT) == pin.commit]
+        notes += [f"Docker: the image {i.name} has Ditto's labels but was pulled from a registry, so it is not used "
+                  "(Ditto's image is only ever built on this computer)" for i in images if i.role == "image" and i.pulled]
         saved = record.get("docker") or {}
         verified = next((i for i in current if i.image_id == saved.get("image_id")
                          and i.labels.get(cs.LABEL_BUILD) == saved.get("build_id")), None)
@@ -192,8 +194,12 @@ def detect(rt: Any, container_build: bool = False) -> Detection:
             docker = Found("docker", _docker_summary(newest, saved, False), build_id=newest.labels.get(cs.LABEL_BUILD),
                            image=newest, verified=False)
         for image in images:
-            if image.role == "image" and image not in current:
+            if image.role == "image" and image not in current and not image.pulled:
                 notes.append(f"Docker: the image {image.name} is of another llama.cpp commit and is not used")
+        if record.get("mode") == "docker" and saved.get("image_id") and verified is None:
+            gone = not any(i.image_id == saved.get("image_id") for i in images)
+            notes.append(f"Docker: the recorded image {saved.get('tag') or str(saved['image_id'])[7:19]} "
+                         + ("is no longer there" if gone else "is no longer Ditto's image of the pinned commit"))
     elif record.get("mode") == "docker":
         notes.append(f"Docker: {problem}")
     return Detection(bare, docker, record.get("mode"), notes, problem)
@@ -221,12 +227,22 @@ def ensure(rt: Any, *, mode: str = "auto", force: bool = False, placement: str =
     lines = _Told(say)
     lines += det.lines()
     if not force:
+        if det.recorded == "docker" and det.docker is None and det.docker_problem:
+            # The person chose Docker mode and Docker cannot be asked now (not started yet, for example): that is no
+            # reason to change the mode behind the person's back.
+            lines.append(f"Ditto's runtime mode is Docker, but Docker cannot be used now ({det.docker_problem}); "
+                         "nothing was changed. Start Docker, or switch with: llm-cli ditto runtime ensure --mode "
+                         "bare-metal --force")
+            return EnsureResult("skipped", "docker", list(lines))
         for found in det.found():
             if found.mode == "docker" and not found.verified:
                 checked = _verify_found_image(rt, found, lines, say)
                 if checked is None:
                     continue
             if det.recorded != found.mode:
+                if det.recorded:
+                    lines.append(f"The recorded mode was {mode_label(det.recorded)}, and it is not installed any "
+                                 f"more (see above); Ditto's runtime mode is now {mode_label(found.mode)}.")
                 rt.record_mode(found.mode, _docker_record_of(rt, found) if found.mode == "docker" else None)
             lines.append(f"Nothing to do: Ditto's runtime is installed ({mode_label(found.mode)}).")
             if mode not in ("auto", found.mode):
@@ -259,7 +275,21 @@ def ensure(rt: Any, *, mode: str = "auto", force: bool = False, placement: str =
     rt.record_mode(mode, record)
     lines.append(f"Ditto's runtime mode is now {mode_label(mode)}.")
     plan = leftovers(rt, mode) if (force or switched) else None
+    if (force or switched) and mode == "bare-metal" and (old == "docker" or rt.mode_record().get("docker")):
+        unlisted = _docker_unlisted(rt)
+        if unlisted:
+            lines.append(f"Ditto's images and containers could not be listed ({unlisted}), so none of them is in the "
+                         "list. To see them, start Docker and run: llm-cli ditto runtime ensure --mode bare-metal "
+                         "--force (nothing is built again then).")
     return EnsureResult(action, mode, list(lines), leftovers=plan)
+
+
+def _docker_unlisted(rt: Any) -> Optional[str]:
+    """Why Ditto's images and containers cannot be listed now (Docker cannot be asked), or None."""
+    try:
+        return rt.docker().unavailable()
+    except Exception as e:  # noqa: BLE001 - the docker module is missing
+        return f"Docker cannot be used from the framework ({type(e).__name__})"
 
 
 def _stop_server(rt: Any) -> bool:
@@ -348,7 +378,8 @@ def _make_bare_metal(rt: Any, placement: str, backend: str, jobs: Optional[int],
     plan = rt.plan_install(backend=backend, placement=placement)
     for line in plan.describe():
         say(line)
-    result = rt.install(plan, jobs=jobs, log=say, fetch_source=fetch_source, cancelled=cancelled)
+    # prune=False: old builds stay; what the person may remove is listed after the switch (leftovers)
+    result = rt.install(plan, jobs=jobs, log=say, fetch_source=fetch_source, cancelled=cancelled, prune=False)
     lines.append(f"Built for bare metal ({plan.placement} build): active build {result.active.build_id[:16]} "
                  f"({result.active.backend}), verified on this computer"
                  + (f"; CPU fallback {result.fallback.build_id[:16]}" if result.fallback.build_id !=

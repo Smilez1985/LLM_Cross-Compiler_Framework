@@ -97,6 +97,7 @@ class ImageInfo:
     labels: Mapping[str, str]
     size: int
     created: str = ""
+    repo_digests: Tuple[str, ...] = ()   # RepoDigests of docker inspect: set only for an image of a registry
 
     @property
     def role(self) -> str:
@@ -106,6 +107,12 @@ class ImageInfo:
     @property
     def name(self) -> str:
         return self.tags[0] if self.tags else f"{self.image_id[7:19]} (no name)"
+
+    @property
+    def pulled(self) -> bool:
+        """The image came from a registry (or was pushed to one): anyone can put Ditto's labels on such an image, and
+        Ditto's image is only ever built on this computer, so it is never used."""
+        return bool(self.repo_digests)
 
 
 @dataclass(frozen=True)
@@ -131,7 +138,8 @@ def _image_info(image: Any) -> ImageInfo:
         size = 0
     return ImageInfo(image_id=str(getattr(image, "id", "") or ""), tags=tuple(getattr(image, "tags", None) or ()),
                      labels=dict(getattr(image, "labels", None) or {}), size=size,
-                     created=str(attrs.get("Created") or "")[:19])
+                     created=str(attrs.get("Created") or "")[:19],
+                     repo_digests=tuple(str(d) for d in (attrs.get("RepoDigests") or ())))
 
 
 def _container_info(container: Any) -> ContainerInfo:
@@ -363,7 +371,7 @@ def build_runtime_base(docker: DittoDocker, base: Any, backend: str, log: Path,
     _check_base(base, backend)
     tag = base_tag(base, backend, dockerfile)
     existing = docker.image(tag)
-    if existing is not None and existing.role == "base":
+    if existing is not None and existing.role == "base" and not existing.pulled:
         return existing
     with tempfile.TemporaryDirectory(prefix="ditto-runtime-ctx-") as ctx:
         shutil.copyfile(dockerfile, Path(ctx) / "Dockerfile")
@@ -374,6 +382,16 @@ def build_runtime_base(docker: DittoDocker, base: Any, backend: str, log: Path,
     if built is None or built.role != "base":
         raise ContainerError(f"the image {tag} was not found after its build (log: {log})")
     return built
+
+
+def _readable(folder: Path) -> None:
+    """Gives the folder and every file in it (never through a link) mode 0755: readable and runnable by everyone."""
+    for root, dirs, files in os.walk(folder, followlinks=False):
+        for name in [*dirs, *files]:
+            path = Path(root) / name
+            if not path.is_symlink():
+                path.chmod(0o755)  # copies in a build context: everyone may run them, nobody else may change them
+    folder.chmod(0o755)
 
 
 def build_runtime_image(docker: DittoDocker, build: Any, base: Any, made_by: str, log: Path,
@@ -395,6 +413,9 @@ def build_runtime_image(docker: DittoDocker, build: Any, base: Any, made_by: str
             if copied.is_symlink() or not copied.is_file() or sha256_file(copied) != digest:
                 raise ContainerError(f"{name} of build {build.build_id[:16]} does not match its manifest; no image "
                                      "was built")
+        # COPY keeps each file's mode and gives it to root; the server runs as the host user, so a build made under a
+        # strict umask (0700) would not run in the container. The copies get 0755, the build store stays as it is.
+        _readable(context / "bin")
         labels = {LABEL: "image", LABEL_BUILD: build.build_id, LABEL_COMMIT: build.commit, LABEL_BASE: base.id,
                   LABEL_BACKEND: backend, LABEL_MADE_BY: made_by}
         docker.build_stage(context, tag, {"BASE": base.image, "LIBC": base.libc, "BACKEND": backend}, labels,
@@ -428,6 +449,10 @@ def verify_image(docker: DittoDocker, image: ImageInfo, pin: Any, gpu: GpuPassth
     if image.role != "image" or pin is None or commit != pin.commit:
         report.checks.append(Check("image", False, f"the image is not Ditto's image of the pinned commit (labels: "
                                                    f"{image.role or 'none'}, commit {commit[:12] or '?'})"))
+        return report
+    if image.pulled:
+        report.checks.append(Check("image", False, "the image came from a registry (it was pulled); Ditto's image is "
+                                                   "only ever built on this computer"))
         return report
     report.checks.append(Check("image", True, f"{image.name}, commit {commit[:12]}"))
     report.ran_binaries = True

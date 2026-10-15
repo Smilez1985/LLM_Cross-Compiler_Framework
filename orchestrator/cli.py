@@ -2043,8 +2043,9 @@ def runtime_install(ctx: FrameworkContext, backend: str, placement: str, jobs: O
               show_default=True, help='GPU backend (as for install)')
 @click.option('--jobs', type=click.IntRange(1, 256), default=None, help='Parallel compile jobs of a build')
 @click.option('--no-model', is_flag=True, help="Do not offer the download of the recommended model")
-@click.option('--yes', '-y', is_flag=True, help="Do not ask before building, fetching the source or downloading a "
-              "model under a permissive licence (its size and licence are still shown first); removes nothing")
+@click.option('--yes', '-y', is_flag=True, help="Do not ask before fetching the source or downloading a model under a "
+              "permissive licence (its size and licence are still shown first; the build starts without a question "
+              "anyway); removes nothing")
 @pass_context
 def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str, backend: str, jobs: Optional[int],
                    no_model: bool, yes: bool):

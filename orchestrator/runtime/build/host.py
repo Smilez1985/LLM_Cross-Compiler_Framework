@@ -221,10 +221,11 @@ def _planned(role: str, plan: BuildPlan, store: BuildStore) -> PlannedBuild:
 def install_host_runtime(plan: HostPlan, *, store: BuildStore, source: Optional[Path], executor: BuildExecutor,
                          verifier: Verifier, smoke_model: Optional[SmokeModelFile] = None, jobs: Optional[int] = None,
                          keep_last: int = DEFAULT_KEEP, log: Optional[Callable[[str], None]] = None,
-                         cancelled: Optional[Callable[[], bool]] = None) -> HostInstallResult:
+                         cancelled: Optional[Callable[[], bool]] = None, prune: bool = True) -> HostInstallResult:
     """Builds (or reuses) the CPU build, verifies it and makes it the fallback and the active build; then the GPU build,
     which becomes the active build once it is verified. Old builds are removed by retention (never the active build,
-    the fallback or the build a running server uses). Raises HostBuildError when the CPU build fails; nothing is
+    the fallback or the build a running server uses); prune=False removes nothing (`ditto runtime ensure` and an AI's
+    build: a deletion is the person's, from a list). Raises HostBuildError when the CPU build fails; nothing is
     activated then and the previous builds stay as they were. `cancelled()` is checked before every build and every
     activation: once it says yes, nothing more is activated (a cancelled build is never activated, runtime design P6);
     before the CPU build is active that raises HostBuildError, after it the GPU build is left out."""
@@ -285,7 +286,7 @@ def install_host_runtime(plan: HostPlan, *, store: BuildStore, source: Optional[
                 problems.append(f"{e}{where}; the CPU build stays active")
             except StoreError as e:
                 problems.append(f"{gpu.backend}: {e}; the CPU build stays active")
-    removed = store.prune(keep_last=keep_last, purpose=PURPOSE)  # never a device's build (same store)
+    removed = store.prune(keep_last=keep_last, purpose=PURPOSE) if prune else []  # never a device's build
     missing = plan.requested not in ("auto", "cpu") and active.backend != plan.requested
     return HostInstallResult(active=active, fallback=fallback, built=built, reused=reused, problems=problems,
                              removed=removed, requested_missing=missing)
