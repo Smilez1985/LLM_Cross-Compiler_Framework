@@ -1827,6 +1827,14 @@ def _sigterm_ends_the_session():
             signal.signal(signal.SIGTERM, previous)
 
 
+def http_server_config(app, host: str, port: int):
+    """uvicorn settings of the HTTP listener. proxy_headers=False: no X-Forwarded-For or X-Forwarded-Proto replaces
+    the address the connection really comes from (uvicorn trusts them from 127.0.0.1 by default, which is every local
+    program here). access_log=False: no line per request in any log."""
+    import uvicorn
+    return uvicorn.Config(app, host=host, port=port, log_level="warning", proxy_headers=False, access_log=False)
+
+
 def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: int = 8765,
           stdio_token: Optional[str] = None, container: bool = False) -> None:
     """Runs the server until the client (stdio) or the process (HTTP) ends it. The session's builds and jobs are
@@ -1865,8 +1873,7 @@ def serve(framework, transport: str = "stdio", host: str = "127.0.0.1", port: in
         if container:
             print(f"Container mode: publish the port to the host's loopback only (docker run -p "
                   f"127.0.0.1:{port}:{port} ...) and connect to http://127.0.0.1:{port}/mcp.", file=sys.stderr)
-        config = uvicorn.Config(http_app(server, tokens, host, port), host=host, port=port, log_level="warning")
-        anyio.run(uvicorn.Server(config).serve)
+        anyio.run(uvicorn.Server(http_server_config(http_app(server, tokens, host, port), host, port)).serve)
     finally:
         shutdown = getattr(framework, "shutdown", None)
         if callable(shutdown):

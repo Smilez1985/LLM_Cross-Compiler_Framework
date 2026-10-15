@@ -138,6 +138,8 @@ class OptimizationLevel(Enum):
 
 TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"
+# Where the Trivy container sees the saved image (read-only); it never sees the Docker socket.
+SCAN_ARCHIVE = "/scan/image.tar"
 # owner/name as used on huggingface.co; no path traversal
 HF_REPO_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 TARGET_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -967,18 +969,26 @@ class BuildEngine:
         progress.add_log(f"Scanning image {image_tag} for vulnerabilities...")
         build_id = build_id or progress.build_id
         container = None
+        folder = None
         try:
-            scan_cmd = ["image", "--exit-code", "1", "--severity", "HIGH,CRITICAL", image_tag]
+            # The scanner never gets the Docker socket (whoever holds it is root on this computer): the image is saved
+            # to an archive in a private folder, and Trivy reads only that file, read-only, without capabilities.
+            folder, archive = self._save_image_for_scan(image_tag, progress, build_id)
+            if archive is None:
+                return
+            scan_cmd = ["image", "--input", SCAN_ARCHIVE, "--exit-code", "1", "--severity", "HIGH,CRITICAL"]
             trivy_image = self._get_conf('image_trivy', "aquasec/trivy:0.75.0")
 
             # Detached and registered like the stage containers, so cancel_build can stop it.
             container = self.docker_client.containers.run(
-                trivy_image, 
+                trivy_image,
                 command=scan_cmd,
                 volumes={
-                    '/var/run/docker.sock': {'bind': '/var/run/docker.sock', 'mode': 'ro'}, 
+                    str(archive): {'bind': SCAN_ARCHIVE, 'mode': 'ro'},
                     'trivy_cache': {'bind': '/root/.cache/', 'mode': 'rw'}
                 },
+                cap_drop=["ALL"],
+                security_opt=["no-new-privileges:true"],
                 detach=True,
             )
             with self._lock:
@@ -1031,6 +1041,43 @@ class BuildEngine:
                     container.remove(force=True)
                 except Exception:
                     pass
+            if folder is not None:
+                # The framework's own temporary copy of the image, made for this scan only (the image itself stays).
+                shutil.rmtree(folder, ignore_errors=True)
+                progress.add_log("Removed the temporary image archive of the scan.")
+
+    def _save_image_for_scan(self, image_tag: str, progress: BuildProgress,
+                             build_id: str) -> Tuple[Optional[Path], Optional[Path]]:
+        """(private folder, archive): `docker save` of the image into a new folder only this user can open, inside the
+        build's temporary folder. (None, None) when the cache disk has no room for it: the scan is skipped with a
+        warning that says how much it needs."""
+        import tempfile
+        from orchestrator.Core.disk_plan import gb, reserve_for
+        image = self.docker_client.images.get(image_tag)
+        size = int((getattr(image, "attrs", None) or {}).get("Size") or 0)
+        parent = self.cache_dir / "builds" / build_id
+        parent.mkdir(parents=True, exist_ok=True)
+        usage = shutil.disk_usage(parent)
+        floor = reserve_for(usage.total) // 2
+        if usage.free - size < floor:
+            progress.add_warning(f"Security scan skipped: the scanner reads a saved copy of the image (about "
+                                 f"{gb(size)}), and the cache disk has {gb(usage.free)} free, of which {gb(floor)} "
+                                 "must stay free.")
+            return None, None
+        folder = Path(tempfile.mkdtemp(prefix="trivy-", dir=parent))  # mode 0700
+        archive = folder / "image.tar"
+        try:
+            with open(archive, "wb") as f:
+                for chunk in image.save(named=True):
+                    self._check_cancelled(progress)
+                    f.write(chunk)
+        except BaseException:  # cancelled or the disk ran full: no half archive stays behind
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
+        # Readable for the scanner, which runs without capabilities; the folder around it stays private (0700).
+        os.chmod(archive, 0o644)
+        progress.add_log(f"Saved the image to a temporary archive for the scan ({gb(archive.stat().st_size)}).")
+        return folder, archive
 
     def _hf_token(self) -> Optional[str]:
         sm = self.secrets_manager or (getattr(self.framework, "secrets_manager", None) if self.framework else None)

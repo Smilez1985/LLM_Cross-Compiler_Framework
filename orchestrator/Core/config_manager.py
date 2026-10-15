@@ -328,7 +328,8 @@ class ConfigManager:
             
             # --- SSOT: Centralized Image Definitions (v2.3) ---
             ConfigSchema("image_trivy", str, False, "aquasec/trivy:0.75.0", "Security Scanner Image (pinned: 'latest' was compromised in 2026-03)"),
-            ConfigSchema("enable_security_scan", bool, False, True, "Scan built images with Trivy"),
+            ConfigSchema("enable_security_scan", bool, False, True,
+                         "Scan built images with Trivy (from a saved archive of the image, never the Docker socket)"),
             ConfigSchema("llama_cpp_version", str, False, pinned_tag(),
                          "llama.cpp tag of the pin in llama_runtime.yml; target images build the pin's commit, and "
                          "another value only gives a warning"),

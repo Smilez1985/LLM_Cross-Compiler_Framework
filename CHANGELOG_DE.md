@@ -1131,6 +1131,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   nicht zeigt.
 
 ### Veraltet
+- `--password WERT` bei `deploy run`, `scan --device` und `device runtime deploy`: Jeder Benutzer sieht den Wert in
+  der Prozessliste, und er bleibt im Shell-Verlauf. Es funktioniert weiter und gibt eine Warnung aus; nimm `--password`
+  ohne Wert (verdeckte Abfrage) oder `--password-stdin`.
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
   Prozessliste. Nutze die verdeckte Abfrage oder `--with-token`.
 - `llm-cli build start --parallel`: Die Option hatte nie eine Wirkung (ein Aufruf startet einen Build). Sie ist in
@@ -1490,6 +1493,24 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   private.
 
 ### Sicherheit
+- **Gerätepasswörter gehören nicht mehr auf die Befehlszeile** (Design der sechsten Runde, 4.3): `deploy run`,
+  `scan --device` und `device runtime deploy` fragen verdeckt, wenn `--password` keinen Wert hat, und
+  `--password-stdin` liest eine Zeile aus einer Weiterleitung (in einem Terminal abgelehnt, wo das Passwort beim Tippen
+  sichtbar wäre). Die Logger von paramiko bleiben während der Anmeldung auf INFO oder höher, sodass ein Passwort nie in
+  ein Log gelangt, auch nicht bei DEBUG.
+- **Der Trivy-Scan bekommt den Docker-Socket nicht mehr** (veröffentlicht in 3.0.0): Der Scanner-Container hatte den
+  Docker-Socket des Rechners, der Root-Rechte auf diesem Rechner gibt, auch schreibgeschützt eingebunden. Der Builder
+  speichert das Image jetzt als Archiv in einem privaten Ordner (0700) des Builds, und Trivy liest nur diese Datei,
+  schreibgeschützt, ohne Capabilities und mit `no-new-privileges`. Das Log sagt, wann das Archiv gespeichert und wieder
+  entfernt wird; ohne Platz dafür auf der Cache-Platte wird der Scan mit einer Warnung übersprungen, die die Größen
+  nennt.
+- **Der MCP-HTTP-Listener auf Loopback beachtet keine Proxy-Header und schreibt kein Zugriffsprotokoll:** uvicorn
+  vertraute `X-Forwarded-For` und `X-Forwarded-Proto` von 127.0.0.1, sodass jedes lokale Programm eine andere Adresse
+  vorgeben konnte. `mcp serve --transport http` läuft jetzt mit `proxy_headers=False` und `access_log=False`.
+- **Der Installer sagt, was die Gruppe `docker` bedeutet:** `install.sh` nimmt dich weiter ohne Nachfrage in die
+  Gruppe auf (siebte Runde, Punkt 6) und sagt jetzt klar, dass ihre Mitglieder den Docker-Dienst steuern, der als root
+  läuft, sodass jedes Programm, das als dein Benutzer läuft, Root-Rechte bekommen kann; er nennt auch den Befehl, der es
+  rückgängig macht.
 - **`run_doctor` gibt KI-Clients keinen Pfad des Rechners** (veröffentlicht in 3.0.0): die Befunde, die eine KI las,
   nannten den persönlichen Ordner, das Audit-Log, Pack-Ordner, die Ordner der Speicherplatz-Prüfung und jeden Pfad,
   den der Fehler einer abgestürzten Prüfung zitierte, samt Benutzernamen. Was eine KI liest, nennt die Ordner des

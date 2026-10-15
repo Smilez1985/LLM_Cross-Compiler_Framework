@@ -107,8 +107,10 @@ setup_system() {
     # Docker Permissions
     # Wir nehmen den User, der sudo aufgerufen hat (SUDO_USER), nicht root!
     REAL_USER="${SUDO_USER:-$USER}"
+    # Ohne Nachfrage (siebte Runde, Punkt 6), aber mit klaren Worten, was die Gruppe bedeutet.
     if ! groups "$REAL_USER" | grep &>/dev/null "\bdocker\b"; then
-        log_info "Füge User '$REAL_USER' zur Docker-Gruppe hinzu..."
+        log_info "Füge User '$REAL_USER' zur Gruppe docker hinzu: Das Framework baut damit die Werkzeuge zum Cross-Kompilieren in Containern."
+        log_warn "Was das heißt: Wer in der Gruppe docker ist, steuert den Docker-Dienst, und der läuft als root. Jedes Programm, das als '$REAL_USER' läuft, kann damit Root-Rechte auf diesem Rechner bekommen. Rückgängig machen: sudo gpasswd -d $REAL_USER docker (danach kann das Framework ohne sudo nicht mehr bauen)."
         usermod -aG docker "$REAL_USER"
     fi
 }

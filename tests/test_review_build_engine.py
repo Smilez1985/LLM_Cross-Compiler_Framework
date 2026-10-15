@@ -22,6 +22,7 @@ SAFETY seconds, so a regression fails the test instead of hanging it.
 
 import asyncio
 import json
+import os
 import subprocess
 import threading
 import time
@@ -198,6 +199,7 @@ class FakeDockerClient:
         self.events = []         # (container name, event), in order
         self.created = []        # containers.create(...) calls
         self.scans = []          # Trivy containers started through containers.run
+        self.scan_runs = []      # their containers.run arguments, with each mounted file as it was at the start
         self.buildx = []         # FakeBuildx processes
         self.everything = []
         self.stage_options = {}  # container name (exact, else prefix) -> FakeContainer options
@@ -205,18 +207,28 @@ class FakeDockerClient:
         self.on_scan_run = None  # called while containers.run is still in flight
         self.buildx_factory = FakeBuildx
         self.containers = SimpleNamespace(run=self._run, create=self._create)
-        self.images = SimpleNamespace(get=lambda tag: SimpleNamespace(id=f"sha256:{tag}", tags=[tag]),
+        self.images = SimpleNamespace(get=self._image,
                                       remove=lambda tag, **kw: self.events.append((tag, "image-remove")),
                                       prune=lambda filters=None: None)
 
     def ping(self):
         return True
 
+    @staticmethod
+    def _image(tag):
+        # save(): what `docker save` streams; the security scan reads that archive and never gets the socket
+        return SimpleNamespace(id=f"sha256:{tag}", tags=[tag], attrs={"Size": 9},
+                               save=lambda named=False: iter([b"image", b".tar"]))
+
     def container(self, name):
         return next((c for c in self.everything if c.name == name), None)
 
     def _run(self, image, command=None, volumes=None, detach=False, **kwargs):
         assert detach, "the scan must run detached, or cancel_build cannot reach it"
+        files = {host: (Path(host).read_bytes(), Path(host).stat().st_mode & 0o777,
+                        Path(host).parent.stat().st_mode & 0o777)
+                 for host in (volumes or {}) if Path(host).is_absolute() and Path(host).is_file()}
+        self.scan_runs.append(dict(image=image, command=command, volumes=volumes, files=files, **kwargs))
         scan = FakeContainer(self, f"trivy-{len(self.scans) + 1}", running=True, **self.scan_options)
         self.scans.append(scan)
         self.everything.append(scan)
@@ -1510,3 +1522,59 @@ class TestCalibrationDataFailure:
 
         state = asyncio.run(scenario())
         assert state.status == OrchestrationStatus.ERROR and fake_orchestrator.build_engine.configs == []
+
+
+# ---------------------------------------------------------------------------------------------------
+# The security scan reads a saved archive: the scanner never gets the Docker socket (round-6 design, S0 b)
+# ---------------------------------------------------------------------------------------------------
+
+class TestScanWithoutTheDockerSocket:
+    TAG = "llm-framework/rockchip:b1"
+
+    @staticmethod
+    def scan(engine, tag=TAG):
+        progress = BuildProgress("b1", BuildStatus.BUILDING, "")
+        engine._builds["b1"] = progress
+        engine._scan_image_security(tag, progress, build_id="b1")
+        return progress
+
+    def test_trivy_scan_mounts_no_docker_socket(self, engine, client):
+        progress = self.scan(engine)
+        (run,) = client.scan_runs
+        mounts = {str(host): bind["bind"] for host, bind in run["volumes"].items()}
+        assert not any("docker.sock" in text for pair in mounts.items() for text in pair), mounts
+        archive = next(host for host, target in mounts.items() if target == builder_module.SCAN_ARCHIVE)
+        assert run["volumes"][archive]["mode"] == "ro"
+        assert run["command"][:3] == ["image", "--input", builder_module.SCAN_ARCHIVE]
+        assert self.TAG not in run["command"], "Trivy reads the archive, not the image through the daemon"
+        assert run["cap_drop"] == ["ALL"] and "no-new-privileges:true" in run["security_opt"]
+        content, mode, folder_mode = run["files"][archive]
+        assert content == b"image.tar", "the archive is what docker save streamed"
+        if os.name == "posix":
+            assert mode == 0o644 and folder_mode == 0o700, "readable for the scanner, inside a private folder"
+        assert not Path(archive).parent.exists(), "the temporary archive is removed after the scan"
+        assert any("Removed the temporary image archive" in line for line in progress.logs)
+        assert any("Security scan passed." in line for line in progress.logs)
+
+    def test_no_room_for_the_archive_skips_the_scan_and_says_why(self, engine, client, monkeypatch):
+        monkeypatch.setattr(builder_module.shutil, "disk_usage", lambda path: SimpleNamespace(
+            total=100 * 1000 ** 3, used=100 * 1000 ** 3, free=0))
+        progress = self.scan(engine)
+        assert client.scan_runs == []
+        assert any("Security scan skipped" in w and "must stay free" in w for w in progress.warnings)
+        assert not list((engine.cache_dir / "builds" / "b1").glob("trivy-*"))
+
+    def test_a_cancel_while_the_image_is_saved_leaves_no_archive(self, engine, client):
+        progress = BuildProgress("b1", BuildStatus.BUILDING, "")
+        engine._builds["b1"] = progress
+
+        def save(named=False):
+            yield b"first part"
+            progress.status = BuildStatus.CANCELLED
+            yield b"second part"
+
+        client.images.get = lambda tag: SimpleNamespace(id="sha256:x", tags=[tag], attrs={"Size": 9}, save=save)
+        with pytest.raises(BuildCancelled):
+            engine._scan_image_security(self.TAG, progress, build_id="b1")
+        assert client.scan_runs == []
+        assert not list((engine.cache_dir / "builds" / "b1").glob("trivy-*"))
