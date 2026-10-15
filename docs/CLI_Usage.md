@@ -390,7 +390,7 @@ a matching `llama-server` command if `llama-server` is installed on the board.
 | `--ip TEXT` | **Required.** The board's IP address. |
 | `--user TEXT` | **Required.** User on the board. |
 | `--port INTEGER` | SSH port (default 22). |
-| `--password` | Only for the first connection: used once to install the framework's SSH key, never stored. Without a value it is asked with hidden input; when you give nothing on a terminal it is asked too (Enter if the key is already installed). `--password VALUE` still works for scripts but is deprecated and prints a warning: every user sees the value in the process list, and it stays in your shell history. |
+| `--password` | Only for the first connection: used once to install the framework's SSH key, never stored. Without a value it is asked with hidden input; when you give nothing on a terminal it is asked too (Enter if the key is already installed). `--password VALUE` still works for scripts but is deprecated and prints a warning: every user sees the value in the process list, and it stays in your shell history. A value that starts with `-` is read as another option: give such a password at the prompt or with `--password-stdin`. |
 | `--password-stdin` | Reads the password from standard input (one line), for example piped from a password manager. Refused on a terminal, where it would be shown while you type; use `--password` there. |
 | `--trust-fingerprint TEXT` | Trust a new board without asking if its host key has exactly this SHA256 fingerprint (for scripts). |
 | `--label TEXT` | Your name for the board in the trusted devices (default: the label it already has, or its address). |

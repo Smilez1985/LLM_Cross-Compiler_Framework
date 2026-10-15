@@ -72,8 +72,8 @@ supported_boards:
 
 # Docker configuration
 docker:
-  # A local image name: the builder builds the image on this computer (each build tagged
-  # llm-framework/rockchip:<build id>); it is never pushed or pulled.
+  # A local image name: the builder builds its images on this computer under this name
+  # (llm-framework/rockchip:<tag>); they are never pushed or pulled.
   image_name: "llm-framework/rockchip"
   # No registry: the framework publishes no images. Nothing reads this field.
   registry: ""

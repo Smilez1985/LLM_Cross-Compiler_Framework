@@ -1543,6 +1543,10 @@ class TestScanWithoutTheDockerSocket:
         (run,) = client.scan_runs
         mounts = {str(host): bind["bind"] for host, bind in run["volumes"].items()}
         assert not any("docker.sock" in text for pair in mounts.items() for text in pair), mounts
+        # Nothing else of this computer either (a socket under another name, /var/run, /run): the archive and the
+        # scanner's own database volume only.
+        assert sorted(mounts.values()) == ["/root/.cache/", builder_module.SCAN_ARCHIVE], mounts
+        assert "trivy_cache" in mounts and not run.get("privileged") and run.get("network_mode") != "host"
         archive = next(host for host, target in mounts.items() if target == builder_module.SCAN_ARCHIVE)
         assert run["volumes"][archive]["mode"] == "ro"
         assert run["command"][:3] == ["image", "--input", builder_module.SCAN_ARCHIVE]
@@ -1555,6 +1559,20 @@ class TestScanWithoutTheDockerSocket:
         assert not Path(archive).parent.exists(), "the temporary archive is removed after the scan"
         assert any("Removed the temporary image archive" in line for line in progress.logs)
         assert any("Security scan passed." in line for line in progress.logs)
+
+    def test_a_refused_scan_names_the_archive_by_label_not_by_its_host_path(self, engine, client):
+        """Docker names a bind mount's host path when it refuses it, and build warnings reach AI clients
+        (get_build_status): the cache folder appears as 'cache:...', never with the user's folders."""
+        def refuse(image, command=None, volumes=None, detach=False, **kwargs):
+            host = next(h for h, bind in volumes.items() if bind["bind"] == builder_module.SCAN_ARCHIVE)
+            raise RuntimeError(f'invalid mount config for type "bind": bind source path does not exist: {host}')
+
+        client.containers.run = refuse
+        progress = self.scan(engine)
+        (warning,) = [w for w in progress.warnings if w.startswith("Security scan failed to run")]
+        assert str(engine.cache_dir) not in warning and os.path.realpath(engine.cache_dir) not in warning
+        assert "cache:builds/b1/trivy-" in warning and warning.endswith("image.tar")
+        assert not list((engine.cache_dir / "builds" / "b1").glob("trivy-*")), "the archive is removed anyway"
 
     def test_no_room_for_the_archive_skips_the_scan_and_says_why(self, engine, client, monkeypatch):
         monkeypatch.setattr(builder_module.shutil, "disk_usage", lambda path: SimpleNamespace(

@@ -138,13 +138,13 @@ class OptimizationLevel(Enum):
 
 TERMINAL_STATES = ("completed", "failed", "cancelled")
 IMAGE_LABEL = "org.llm-framework.target"
-# Where the Trivy container sees the saved image (read-only); it never sees the Docker socket.
-SCAN_ARCHIVE = "/scan/image.tar"
 # owner/name as used on huggingface.co; no path traversal
 HF_REPO_ID = re.compile(r"^[A-Za-z0-9][\w.-]*/[\w.-]+$")
 TARGET_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
 COMMIT_ID = re.compile(r"^[0-9a-f]{40}$")
 IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
+# Where the Trivy container sees the saved image (read-only); it never sees the Docker socket.
+SCAN_ARCHIVE = "/scan/image.tar"
 
 
 def repo_override_names(name: str) -> List[str]:
@@ -1031,7 +1031,9 @@ class BuildEngine:
             raise
         except Exception as e:
             self._check_cancelled(progress)
-            progress.add_warning(f"Security scan failed to run: {e}")
+            # Docker and the file system name the archive's host path; build warnings reach AI clients too.
+            from orchestrator.tools.tools_runtime import label_paths
+            progress.add_warning(f"Security scan failed to run: {label_paths(str(e), {str(self.cache_dir): 'cache'})}")
         finally:
             if container is not None:
                 with self._lock:
