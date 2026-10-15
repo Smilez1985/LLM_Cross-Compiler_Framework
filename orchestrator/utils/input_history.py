@@ -17,7 +17,7 @@ import os
 import re
 import unicodedata
 from pathlib import Path
-from typing import Dict, Iterable, List, Literal, Optional, get_args
+from typing import Dict, Iterable, List, Literal, Optional, Tuple, get_args
 from urllib.parse import unquote_plus, urlsplit
 
 from pydantic import BaseModel, ConfigDict, field_validator
@@ -145,9 +145,27 @@ class InputHistory:
         data.fields[field] = _bounded(accepted + data.fields.get(field, []))
         return self._save(data)
 
-    def clear(self) -> bool:
-        """Forgets everything: the file and the copy of a damaged one are removed."""
-        for path in (self.path, self.path.with_name(self.path.name + ".bad")):
+    def _paths(self) -> Tuple[Path, Path]:
+        return self.path, self.path.with_name(self.path.name + ".bad")
+
+    def files(self) -> List[Tuple[Path, int]]:
+        """The files clear() removes now, with their sizes in bytes, for the person's question: the history and the
+        copy of a damaged one, as far as they exist."""
+        found = []
+        for path in self._paths():
+            try:
+                found.append((path, path.lstat().st_size))
+            except OSError:
+                continue
+        return found
+
+    def clear(self, only: Optional[Iterable[Path]] = None) -> bool:
+        """Forgets everything: the file and the copy of a damaged one are removed. `only`: just those of them the
+        person was shown (a copy that appeared since stays)."""
+        allowed = None if only is None else {Path(p) for p in only}
+        for path in self._paths():
+            if allowed is not None and path not in allowed:
+                continue
             try:
                 path.unlink(missing_ok=True)
             except OSError as e:

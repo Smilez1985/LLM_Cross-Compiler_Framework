@@ -31,6 +31,7 @@ from orchestrator.Core.framework import FrameworkManager
 from orchestrator.Core.orchestrator import OrchestrationStatus
 from orchestrator.utils import input_history
 from orchestrator.utils.announce import SETTING as AUDIO_SETTING
+from orchestrator.utils.localization import current_language
 from orchestrator.utils.localization import get_instance as get_i18n
 from orchestrator.utils.localization import ui_text
 
@@ -39,7 +40,7 @@ from orchestrator.gui.dialogs import SecretInputDialog, HealingConfirmDialog, AI
 from orchestrator.gui.wizards import ModuleCreationWizard
 from orchestrator.gui.builder_tab import BuilderTab
 from orchestrator.gui.chat_window import ChatWindow
-from orchestrator.gui.plain import button_text, notify, plain_box, plain_tooltip
+from orchestrator.gui.plain import ask, button_text, notify, one_line, plain_box, plain_tooltip
 from orchestrator.gui.sign_in import STORAGE_CHOICE_CODES, UserConfigSnapshot, choose_storage_at_start
 from orchestrator.gui.deployment_window import DeploymentWindow
 
@@ -80,6 +81,21 @@ class DittoAvatar(QLabel):
         if event.button() == Qt.LeftButton:
             self.clicked.emit()
         super().mousePressEvent(event)
+
+
+def _app_sender(caller: str, client: str = ""):
+    """The sender of a chat notice about what an AI app (or Ditto) did: the app by its trusted caller id, its own name
+    only as its claim, so the chat names it in the person's language and in its own look (design 5.2 R4, R5). None
+    for a caller that is no app (the notice is then the framework's)."""
+    from orchestrator.Core.chat_feed import FeedWriter
+    try:
+        if caller == "ditto":
+            return FeedWriter.sender("ditto", "ditto")
+        if caller == "mcp" or caller.startswith("mcp:"):
+            return FeedWriter.sender("client", caller, client=client or "")
+    except ValueError:
+        pass
+    return None
 
 # ============================================================================
 # MAIN WINDOW CLASS
@@ -280,6 +296,8 @@ class MainOrchestrator(QMainWindow):
         notifier = getattr(self, "approval_notifier", None)
         if notifier is not None:  # questions that wait come from the pending approvals, never from feed rows alone
             panel.link_approvals(notifier.store, notifier.changed)
+        if self.i18n is not None:  # the dock, its View menu entries and the toolbar button follow the language too
+            self.i18n.language_changed.connect(self._chat_language_changed)
 
         self.gui_state = GuiState.load(getattr(self.framework.config, "user_state_dir", None))
         if self.gui_state.geometry:
@@ -288,6 +306,13 @@ class MainOrchestrator(QMainWindow):
             self.restoreState(GuiState.decode(self.gui_state.dock_state))
         self.chat_dock.setVisible(self.gui_state.chat_panel_visible)
         panel.apply_state(self.gui_state)
+
+    def _chat_language_changed(self, lang: str):
+        self.chat_dock.retranslate(lang)
+        self.view_menu.setTitle(ui_text("chat.view.menu", lang))
+        self.act_focus_chat.setText(ui_text("chat.view.focus", lang))
+        self.btn_chat.setToolTip(plain_tooltip(ui_text("chat.toolbar.tip", lang)))
+        self._update_chat_button(self.chat_window.unread_count(), self.chat_window.pending_count())
 
     def _toggle_chat(self):
         if self.chat_dock.isHidden():
@@ -402,11 +427,18 @@ class MainOrchestrator(QMainWindow):
         QTimer.singleShot(30000, self.btn_revoke_grant.hide)
         chat = getattr(self, "chat_window", None)
         if chat is not None:  # the same notice in the chat (what it covers is quoted: it names packs and models)
-            params = {"who": actor_label(actor), "title": tool_title(registry, tool)}
-            if summary:
-                chat.post_notice("chat.notice.grant_used", {**params, "covers": summary}, external=("covers",))
+            sender, title = _app_sender(actor), tool_title(registry, tool)
+            if sender is not None:  # under the app's own bubble: its name in the person's language (R4)
+                if summary:
+                    chat.post_notice("chat.notice.grant_used_by", {"title": title, "covers": summary},
+                                     external=("covers",), sender=sender)
+                else:
+                    chat.post_notice("chat.notice.grant_used_by_plain", {"title": title}, sender=sender)
+            elif summary:
+                chat.post_notice("chat.notice.grant_used", {"who": actor_label(actor), "title": title,
+                                                            "covers": summary}, external=("covers",))
             else:
-                chat.post_notice("chat.notice.grant_used_plain", params)
+                chat.post_notice("chat.notice.grant_used_plain", {"who": actor_label(actor), "title": title})
 
     def _revoke_used_grant(self):
         registry = getattr(self.framework, "tool_registry", None)
@@ -565,13 +597,34 @@ class MainOrchestrator(QMainWindow):
             QMessageBox.warning(self, self.i18n.t("settings.not_saved.title"), self.i18n.t("settings.not_saved"))
 
     def _clear_input_history(self):
+        """Asks with the full list of what goes (full path, file name, size, what it is; "No" is the default) and
+        deletes only the files it listed: every deletion the person can see lists exactly what it deletes."""
+        from orchestrator.gui.chat_panel.panel import size_text
         t = self.i18n.t
-        answer = QMessageBox.question(self, t("history.clear.title"), t("history.clear.question"),
-                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if answer != QMessageBox.Yes:
-            return
         history = input_history.for_config(self.framework.config)
-        if history is None or not history.clear():
+        if history is None:
+            QMessageBox.warning(self, t("history.clear.title"), t("history.clear.failed"))
+            return
+        files = history.files()
+        if not files:
+            QMessageBox.information(self, t("history.clear.title"), ui_text("chat.clear.input_history.empty"))
+            return
+        lang, items = current_language(), []
+        for path, size in files:
+            kind = "damaged_" if path != history.path else ""
+            items.append("\n".join((
+                ui_text(f"chat.clear.input_history.{kind}name"),
+                ui_text("chat.clear.path", path=one_line(str(path.resolve()))),
+                ui_text("chat.clear.file", name=one_line(path.name)),
+                ui_text("chat.clear.size", size=size_text(size, lang)),
+                ui_text("chat.clear.what_label", what=ui_text(f"chat.clear.input_history.{kind}what")))))
+        if not ask(self, t("history.clear.title"), t("history.clear.question") + "\n\n" + "\n\n".join(items)):
+            return
+        listed = {path for path, _ in files}
+        if [f for f in history.files() if f[0] in listed] != files:   # changed while asked: the list is not true
+            QMessageBox.warning(self, t("history.clear.title"), ui_text("chat.clear.input_history.changed"))
+            return
+        if not history.clear(only=listed):
             QMessageBox.warning(self, t("history.clear.title"), t("history.clear.failed"))
             return
         self.builder_tab.reload_history()
@@ -662,10 +715,15 @@ class MainOrchestrator(QMainWindow):
             self.status.showMessage(proposal_notice(new[-1]), 15000)
             chat = getattr(self, "chat_window", None)
             for p in new if chat is not None else ():
-                # Who proposed it and for which build, quoted: the client's own name and the build's label are not
-                # the framework's words.
-                chat.post_notice("chat.notice.proposal", {"who": p.who(), "build": p.request or p.request_id},
-                                 external=("who", "build"))
+                # Under the proposing app's bubble (its trusted name; its own name only as its claim, R4, R5); the
+                # build's label is quoted: it names a model, which is not the framework's word.
+                sender = _app_sender(p.proposed_by, p.client)
+                if sender is not None:
+                    chat.post_notice("chat.notice.proposal_by", {"build": p.request or p.request_id},
+                                     external=("build",), sender=sender)
+                else:
+                    chat.post_notice("chat.notice.proposal", {"who": p.who(), "build": p.request or p.request_id},
+                                     external=("who", "build"))
 
     def _open_client_proposals(self):
         from orchestrator.gui.proposals_window import ClientProposalsDialog

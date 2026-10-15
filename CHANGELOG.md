@@ -374,7 +374,9 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   boards offers recent boards as suggestions). The history is per user (`input_history.json` in the per-user
   state directory), at most 20 entries per field, and never holds secrets: values that look like an API key or
   token, URLs with a user name or password and URLs with a credential or session parameter (such as `?token=`
-  or `;jsessionid=`) are not remembered. *Tools > Clear Input History...* forgets it.
+  or `;jsessionid=`) are not remembered. *Tools > Clear Input History...* forgets it after a question that lists
+  each file it deletes (the history and the copy of a damaged one: full path, file name, size, what it is; "No" is
+  the default), and deletes only those.
 - **Signed community packs**: a pack is a zip with a manifest (sha256, size and mode of every file) and an
   optional Ed25519 author signature; the author's public key is pinned at the first install, and another key
   under the same author name is shown with a warning. Reading a pack accepts exactly the listed files, never links
@@ -691,12 +693,14 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   Panel**, Ctrl+Shift+C writes in it, a click on Ditto or the toolbar button **AI Chat (n)** shows it; movable to the
   left, floatable) with your conversation with Ditto, notices and the records of what AI apps did, read once a second
   from the signed chat feed of every framework process without ever waiting on it. Questions that wait come from the
-  pending approvals and stay under **Needs you** with who asks, what and the time left; a new one shows a hidden panel
-  without taking the keyboard focus (setting `chat_panel_auto_show`, which an AI cannot change). A filter (All, Needs
+  pending approvals and stay under **Needs you** with who asks, what and the time left (counted again while it
+  waits); a new one shows a hidden panel without taking the keyboard focus and never moves the keyboard away from the
+  question you are on (setting `chat_panel_auto_show`, which an AI cannot change). A filter (All, Needs
   you, Decisions, Ditto chat), routine decisions of one app folded into one line, "New since you last looked" with a
   summary counted from the entries, speaking names in AI text with "Show the original words", keyboard moves between
   entries, screen-reader announcements (questions with priority) and English/German texts
-  (`orchestrator/utils/l10n_chat.py`). Where the panel sits, whether it is shown, its filter and the newest entry you
+  (`orchestrator/utils/l10n_chat.py`; the dock, its View menu entries and the toolbar button follow a language change,
+  and German texts name the menus as the window shows them). Where the panel sits, whether it is shown, its filter and the newest entry you
   saw are kept in `gui_state.json` in the per-user folder (never in QSettings); a damaged file gives the defaults.
 
 ### Changed
@@ -907,11 +911,13 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   adds a line. The status-bar notices for a fix proposal of an AI client and for a use of a standing approval also
   arrive in the chat.
 - **"Clear chat" lists what it deletes before it asks**: the former "Clear History" deleted Ditto's whole chat history
-  after a plain "Are you sure?". The question now lists, for Ditto's conversation (`chat_history.json`) and for the
-  conversation rows of the chat feed, the full path, the file name, the size and what it is, says how many records of
-  what AI apps did are only hidden (never deleted), and has "No, keep everything" as the default. Both parts are
-  written to the audit log (`feed_cleared`, with the hash of what was shown) before anything is deleted; without the
-  audit log, or when the chat changed while you were asked, nothing is deleted.
+  after a plain "Are you sure?". The question now lists, for Ditto's conversation (`chat_history.json` as the file holds
+  it now, also when another window or the terminal saved it since) and for the conversation rows of the chat feed, the
+  full path, the file name, the size and what it is, says how many records of what AI apps did are only hidden (never
+  deleted), and has "No, keep everything" as the default. Both parts are written to the audit log (`feed_cleared`, with
+  the hash of what was shown) before anything is deleted. Nothing is deleted without the audit log (also when there is
+  no chat feed), when the chat or Ditto's conversation changed while you were asked, or when the window holds a
+  conversation its file does not show.
 
 ### Deprecated
 - `llm-cli secrets set --password`: a value on the command line ends up in the shell history and the process
@@ -1498,9 +1504,12 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   escapes; a value from outside the framework is quoted and stays on its line, so a file name cannot pose as a line of
   the framework's own text; nothing is clickable inline (an address opens only after a question showing it whole); an
   app's look comes from its caller id, never from its own name, and an app calling itself Ditto, the framework or the
-  system is shown as calling itself so. Message boxes, tooltips, desktop notifications and button labels of the new
-  and touched windows go through `gui/plain.py` (plain-text boxes, escaped tooltips, notifications without markup
-  characters, no keyboard mnemonic from an "&" in a name); no key on a chat entry approves or clicks anything.
+  system is shown as calling itself so. Only rows from Ditto get Ditto's picture, and a notice about what an app did
+  stands under that app's trusted name; a tool name Ditto's model made up, or a tool of the framework on another
+  computer, is quoted, never shown as the framework's words; guillemets in AI text are shown as escapes, so only the
+  framework writes a speaking name «like this». Message boxes, tooltips, desktop notifications and button labels of
+  the new and touched windows go through `gui/plain.py` (plain-text boxes, escaped tooltips, notifications without
+  markup characters, no keyboard mnemonic from an "&" in a name); no key on a chat entry approves or clicks anything.
 
 ## [3.0.0] - 2026-10-10
 **Repair, security and MCP release.** The build pipeline works end to end again (verified with real

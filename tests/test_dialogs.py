@@ -1309,15 +1309,18 @@ class TestMainWindowWiring:
             win.builder_tab.reload_history()
             win.deployment_window.reload_history()
             assert win.builder_tab.model_input.itemText(0) == "org/recent-model"
+            # The question is a plain-text box that lists the file (full path, file name, size, what it is).
+            from orchestrator.gui import plain
             questions = []
             answer = main_window.QMessageBox.No
-            monkeypatch.setattr(main_window.QMessageBox, "question",
-                                lambda *a: questions.append(a[2]) or answer)
+            monkeypatch.setattr(plain, "_exec", lambda box: questions.append(box.text()) or answer)
             win.act_clear_history.trigger()
             assert history.get("model") == ["org/recent-model"], "No keeps the history"
             answer = main_window.QMessageBox.Yes
             win.act_clear_history.trigger()
             assert len(questions) == 2 and "URLs" in questions[0]
+            assert f"Full path: {history.path.resolve()}" in questions[0]
+            assert "File name: input_history.json" in questions[0]
             assert not history.path.exists()
             models = [win.builder_tab.model_input.itemText(i) for i in range(win.builder_tab.model_input.count())]
             assert "org/recent-model" not in models and win.deployment_window.cb_device.count() == 0

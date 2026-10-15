@@ -20,7 +20,8 @@ Rendering rules:
 * R6 AI text inside a bubble the framework wrote (a recorded reason, a note, an app's reply) sits in an AiTextBox
   with the caption "In its own words (AI text, not checked by the framework)".
 * R7 exact framework ids in AI text are shown as their speaking names «like this»; the stored text is unchanged and
-  "Show the original words" shows it; ids inside code keep their form and get a legend line.
+  "Show the original words" shows it; ids inside code keep their form and get a legend line. Guillemets the text
+  holds itself are shown as escapes next to the names, so only the framework writes «name».
 
 Bubble buttons have no mnemonics (button_text doubles every "&"), there is no default button, and Enter or Space on a
 bubble does nothing: no key approves anything. Interactive question and decision bubbles are later packages: they
@@ -44,7 +45,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QFrame, QHBoxLayout, Q
 from orchestrator.Core.chat_feed import TEXTS as FEED_TEXTS
 from orchestrator.Core.chat_feed import FeedEntry, FeedSender, StoredEntry, caller_words, feed_text
 from orchestrator.Core.speaking_names import SpeakingNames
-from orchestrator.gui.chat_panel.segments import blocks, has_names, split_segments
+from orchestrator.gui.chat_panel.segments import blocks, has_marks, has_names, shown_blocks, split_segments
 from orchestrator.gui.plain import ask, button_text, display_text, one_line, plain_label
 from orchestrator.utils.localization import LocalizationManager
 
@@ -254,8 +255,9 @@ class LongTextDialog(QDialog):
 
 
 class MessageBody(QWidget):
-    """Text an AI wrote, rendered by R7: speaking names «like this», code monospace with a legend, more than 20
-    lines cut with "Show all"; "Show the original words" switches to the stored text, unchanged."""
+    """Text an AI wrote, rendered by R7: speaking names «like this» (guillemets of the text itself as escapes), code
+    monospace with a legend, more than 20 lines cut with "Show all"; "Show the original words" switches to the stored
+    text, unchanged."""
 
     def __init__(self, value: str, lang: str = "en", names: Optional[SpeakingNames] = None,
                  parent: Optional[QWidget] = None):
@@ -272,7 +274,7 @@ class MessageBody(QWidget):
         self.content_layout.setSpacing(4)
         self.layout_.addWidget(self.content)
         self.btn_original: Optional[QPushButton] = None
-        if has_names(self.segments):
+        if has_names(self.segments) or has_marks(self.segments):
             self.btn_original = make_button(text("chat.bubble.original_words", lang))
             self.btn_original.setCheckable(True)
             self.btn_original.toggled.connect(self.show_original)
@@ -293,13 +295,16 @@ class MessageBody(QWidget):
     def _render(self) -> None:
         while self.content_layout.count():
             item = self.content_layout.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
+            widget = item.widget()
+            if widget is not None:   # gone at once (hidden and out of the bubble), not only at the next event loop turn
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
         budget = MAX_LINES
         whole = []
         cut = False
-        for block in blocks(self.segments, self.original):
-            body = display_text(block.text)
+        for block in shown_blocks(self.segments, self.original):
+            body = block.text   # hidden characters already escaped
             whole.append(body)
             lines = body.split("\n")
             if budget <= 0:
@@ -516,11 +521,18 @@ class ClientBubble(Bubble):
 
 
 class NoticeBubble(Bubble):
-    """A notice of the framework (full width, "Warning:" spelled out) or one of Ditto's tool notes."""
+    """A notice of the framework (full width, "Warning:" spelled out), one of Ditto's tool notes, or a notice about
+    what an AI app did: then under the app's trusted name, its own claim about its name small below (R4, R5), and the
+    sentence marked as the framework's."""
 
     def build(self) -> None:
-        self.add_header(with_avatar=self.entry.sender.role == "ditto")
+        sender = self.entry.sender
+        self.add_header(with_avatar=sender.role == "ditto")
+        if sender.role == "client" and sender.client:
+            self.add_caption(self_name_text(sender.client, self.lang))
         self.add_text(framework_text(self.entry, self.lang), warning=self.entry.level == "warning")
+        if sender.role == "client":
+            self.add_caption(text("chat.bubble.written_by_framework", self.lang))
 
 
 class RecordBubble(Bubble):
@@ -667,13 +679,28 @@ class ApprovalBubble(Bubble):
         key = "chat.pending.grant_request" if getattr(record, "kind", "call") == "grant_request" \
             else "chat.pending.title"
         self.add_text(text(key, self.lang, title=one_line(record.title)), warning=True)
-        try:
-            minutes = max(1, math.ceil(record.seconds_left() / 60))
-            self.add_caption(text("chat.pending.left", self.lang, minutes=minutes))
-        except Exception:  # noqa: BLE001 - a record without an expiry still shows its question
-            pass
+        self.lbl_left = self.add_caption("")
+        self._left_text()
         button = self.add_action(make_button(text("chat.pending.open", self.lang)))
         button.clicked.connect(lambda: self.open_requested.emit(record.id))
+
+    def _left_text(self) -> bool:
+        """Shows the time left; True when the text changed."""
+        try:
+            minutes = max(1, math.ceil(self.record.seconds_left() / 60))
+            value = text("chat.pending.left", self.lang, minutes=minutes)
+        except Exception:  # noqa: BLE001 - a record without an expiry still shows its question
+            value = ""
+        changed = value != self.lbl_left.text()
+        self.lbl_left.setText(value)
+        self.lbl_left.setVisible(bool(value))
+        return changed
+
+    def refresh_time(self) -> None:
+        """Counts the time left again (the list does this while the question waits); the accessible description
+        changes only when the minutes do, so a screen reader is not told the same thing every 30 seconds."""
+        if self._left_text():
+            self.update_accessibility()
 
 
 # --- which bubble shows which row ----------------------------------------------------------------------------------
@@ -710,7 +737,10 @@ def make_bubble(stored: StoredEntry, lang: str = "en", names: Optional[SpeakingN
     has no feed; < 0: the panel could not save it (the bubble says so)."""
     entry = stored.entry
     cls = BUBBLES.get(entry.kind, NoticeBubble)
-    if entry.sender.role == "person" and cls is RecordBubble:
+    role = entry.sender.role
+    if cls is DittoBubble and role != "ditto":   # Ditto's avatar and look follow the trusted sender, never the kind
+        cls = ClientBubble if role == "client" else RecordBubble
+    if role == "person" and cls is RecordBubble:
         cls = PersonBubble if entry.person_text else NoticeBubble
     return cls(entry, row_id=stored.row_id, lang=lang, names=names, parent=parent)
 

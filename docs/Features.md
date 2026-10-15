@@ -524,8 +524,9 @@ gives the defaults).
   verify is not shown, and the panel says how many were skipped. Without the feed it shows Ditto's conversation as
   before and says that new messages are not kept.
 - **Questions that wait** come from the pending approvals, never from chat entries alone, and stay at the bottom
-  under **Needs you**: who asks, what, and the time left. **Open in the approvals window…** decides them there. A new
-  question shows a hidden panel without taking the keyboard focus; switch this off in the panel's **⋯** menu (the
+  under **Needs you**: who asks, what, and the time left, counted again while the question waits. **Open in the
+  approvals window…** decides them there. A new question shows a hidden panel without taking the keyboard focus, and
+  never moves the keyboard away from the question you are on; switch the showing off in the panel's **⋯** menu (the
   setting `chat_panel_auto_show` cannot be changed by an AI).
 - **Filter:** All, Needs you, Decisions, Ditto chat. Routine decisions of one app within ten minutes are folded into
   one line ("Claude Code did 6 things", **Show**). **New since you last looked** marks the first new entry, with a
@@ -536,19 +537,24 @@ gives the defaults).
   left with its picture; an AI app's on the left under the name the framework knows it by, with the name the app gives
   itself small below (an app that calls itself Ditto, the framework or the system is shown as calling itself so).
   Framework notices span the whole width and spell out "Warning:"; values from outside the framework are quoted and
-  stay on their line. AI text inside a framework entry sits in a box captioned "In its own words (AI text, not
+  stay on their line (also a tool name Ditto's model made up, or a tool of the framework on another computer). A
+  notice about what an app did (a fix proposal, a use of a standing approval) stands under that app's name, marked
+  "written by the framework"; only entries from Ditto get Ditto's picture. AI text inside a framework entry sits in a box captioned "In its own words (AI text, not
   checked by the framework)".
 - **Speaking names:** ids the framework made (a job, a build, a question) in an AI's text are shown by name «like
   this»; **Show the original words** shows the text exactly as written. Ids inside code keep their form and get a
-  legend line.
+  legend line. Only the framework writes «»: guillemets in the text itself are shown as escapes (`\u00ab`,
+  `\u00bb`), so an AI cannot make its own words look like a name the framework looked up.
 - **Keyboard and screen readers:** Enter sends, Shift+Enter adds a line, Up in an empty message field moves to the
   newest entry, Up/Down and Home/End move between entries, Escape goes back to the message field. Every entry has an
   accessible name (sender and time), and new entries are announced to screen readers, questions with priority. No
   key approves anything.
-- **Clear chat…** asks first and lists, for Ditto's conversation (`chat_history.json`) and for the chat messages in
-  the chat feed (`chat_feed.sqlite`), the full path, the file name, the size and what it is; **No, keep everything**
-  is the default. The records of what AI apps did are only hidden from the panel, never deleted. The clear is written
-  to the audit log before anything is deleted; without the audit log nothing is deleted.
+- **Clear chat…** asks first and lists, for Ditto's conversation (`chat_history.json`, as the file holds it now, also
+  when another window or the terminal saved it since) and for the chat messages in the chat feed
+  (`chat_feed.sqlite`), the full path, the file name, the size and what it is; **No, keep everything** is the
+  default. The records of what AI apps did are only hidden from the panel, never deleted. The clear is written to the
+  audit log before anything is deleted. Nothing is deleted without the audit log, when Ditto's conversation changed
+  while you were asked, or when this window holds a conversation its file does not show (restart and try again).
 
 Answering a question with Yes or No right in the chat, "Why?" and undo come with later work; until then the
 approvals window decides.
@@ -1850,8 +1856,8 @@ The GUI's input fields offer what you used recently, newest first.
   `?token=`, `?api_key=`, `#access_token=`, `;jsessionid=` or `?sid=`), `user:password@host`, text with control
   characters and values longer than 1000 characters. The same rules apply to a file edited by hand.
 - A damaged file starts an empty history; the old file is kept as `input_history.json.bad`.
-- **Tools > Clear Input History...** asks once, then deletes the file and the `.bad` copy, and the fields are
-  refilled at once.
+- **Tools > Clear Input History...** first lists the file and the `.bad` copy (full path, file name, size, what it
+  is; "No" is the default), then deletes only what it listed, and the fields are refilled at once.
 
 ---
 

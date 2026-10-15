@@ -53,6 +53,27 @@ LOAD_TRIES = 5             # a busy feed at start is read again once a second, t
 FILTERS = ("all", "needs_you", "decisions", "ditto")
 
 
+def holds_conversation(data: bytes) -> bool:
+    """Whether the bytes of chat_history.json hold a conversation: any message or transcript line, an old plain list
+    with entries, or anything that cannot be read (clearing would replace it, so it is listed too)."""
+    if not data.strip():
+        return False
+    try:
+        raw = json.loads(data.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return True
+    if isinstance(raw, list):
+        return bool(raw)
+    if isinstance(raw, dict):
+        return bool(raw.get("messages") or raw.get("transcript"))
+    return True
+
+
+class HistoryNotListable(OSError):
+    """This window holds a conversation of Ditto that its file does not show (the file is gone or cannot be read):
+    it cannot be listed, so "Clear chat" deletes nothing."""
+
+
 def size_text(size: int, lang: str = "en") -> str:
     """A size as the person reads it, with the exact bytes."""
     if size < 1024:
@@ -436,9 +457,11 @@ class ChatPanel(QWidget):
         return None
 
     def post_notice(self, text_key: str, params: Optional[dict] = None, external: tuple = (),
-                    level: str = "info") -> Optional[StoredEntry]:
-        """A framework notice in the chat (the main window's notices: a fix proposal, a standing approval used)."""
-        return self._post("notice", FeedSender(role="framework"), text_key=text_key, params=params or {},
+                    level: str = "info", sender: Optional[FeedSender] = None) -> Optional[StoredEntry]:
+        """A framework notice in the chat (the main window's notices: a fix proposal, a standing approval used).
+        `sender`: the AI app (or Ditto) the notice is about, by its trusted caller id, so the bubble names it in the
+        person's language with its own claim marked (design 5.2 R4, R5); the framework when not given."""
+        return self._post("notice", sender or FeedSender(role="framework"), text_key=text_key, params=params or {},
                           external=external, level=level)
 
     # --- seen, unread, questions -----------------------------------------------------------------------------------
@@ -592,11 +615,23 @@ class ChatPanel(QWidget):
         self.worker.tool_used.connect(self._on_tool_used)
         self.worker.start()
 
+    def _framework_title(self, use: Any) -> bool:
+        """Whether a tool note's title is the framework's own: the title of a tool registered here. A name the model
+        made up (an unknown tool) or a tool of the framework on another computer is the AI's or that framework's
+        word, never this framework's."""
+        registry = getattr(self.framework, "tool_registry", None)
+        try:
+            return bool(use.title) and registry.get(use.name).title == use.title
+        except Exception:  # noqa: BLE001 - unknown tool, no registry: outside text
+            return False
+
     def _on_tool_used(self, use: Any) -> None:
         key = "chat.tool.used" if use.ok else "chat.tool.not_run"
-        # A tool's title is the framework's; why it did not run can quote a handler's error (outside text).
+        # Why it did not run can quote a handler's error, and a title the framework did not give is the model's or
+        # another framework's word: both outside text, quoted on the framework's line (design 5.2 R2).
+        external = ["detail"] if self._framework_title(use) else ["title", "detail"]
         self._post("ditto_tool_note", self._ditto_sender(), text_key=key,
-                   params={"title": use.title, "detail": use.detail or "-"}, external=["detail"])
+                   params={"title": use.title, "detail": use.detail or "-"}, external=external)
 
     def _on_ai_response(self, reply: Any) -> None:
         self._set_thinking(False)
@@ -636,19 +671,27 @@ class ChatPanel(QWidget):
     # --- "Clear chat" ----------------------------------------------------------------------------------------------
 
     def _history_item(self) -> Optional[HistoryItem]:
-        """Ditto's conversation file as the question lists it; None when there is nothing in it."""
-        if not self.history.messages and not self.history.transcript:
-            return None
+        """Ditto's conversation file as the question lists it: what is on disk now (another window or the terminal
+        may have written it since this window read it), bound to its bytes. None when neither the file nor this
+        window holds a conversation; HistoryNotListable when this window holds one that the file does not show
+        (it could not be listed, so it is never cleared)."""
         path = Path(self.history_file)
         try:
             data = path.read_bytes()
-        except OSError:
+        except FileNotFoundError:
+            data = b""
+        except OSError as e:
+            raise HistoryNotListable(type(e).__name__) from None
+        if not holds_conversation(data):
+            if self.history.messages or self.history.transcript:
+                raise HistoryNotListable("not in its file")
             return None
         return HistoryItem(full_path=str(path.resolve()), file_name=path.name, size_bytes=len(data),
                            content_sha256=hashlib.sha256(data).hexdigest())
 
     def _audit(self) -> Any:
-        return getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        audit = getattr(getattr(self.framework, "tool_registry", None), "audit", None)
+        return audit if callable(getattr(audit, "record", None)) else None
 
     def _tell(self, kind: str, message: str) -> None:
         plain_box(self, kind, text("chat.clear.title", self.lang), message)
@@ -656,8 +699,13 @@ class ChatPanel(QWidget):
     def _confirm_clear_history(self) -> bool:
         """Asks with the full list (path, file name, size, what it is; No is the default) and clears only what the
         person saw: the conversation rows of the feed (the records of what AIs did are hidden, not deleted) and
-        Ditto's conversation. Returns True when something was cleared."""
+        Ditto's conversation file. Nothing is asked, and nothing deleted, without the audit log (every clear is
+        recorded before anything goes) or when this window holds a conversation it cannot list. Returns True when
+        something was cleared."""
         if self.worker is not None and self.worker.isRunning():
+            return False
+        if self._audit() is None:
+            self._tell("warning", text("chat.clear.failed", self.lang, reason=text("chat.clear.no_audit", self.lang)))
             return False
         plan: Optional[ClearPlan] = None
         if self.feed is not None and not self._feed_failed:
@@ -666,7 +714,12 @@ class ChatPanel(QWidget):
             except Exception as e:  # noqa: BLE001 - sqlite or file errors: nothing is deleted
                 self._tell("warning", text("chat.clear.failed", self.lang, reason=one_line(type(e).__name__)))
                 return False
-        history = self._history_item()
+        try:
+            history = self._history_item()
+        except HistoryNotListable:
+            self._tell("warning", text("chat.clear.failed", self.lang,
+                                       reason=text("chat.clear.history_unlisted", self.lang)))
+            return False
         if history is None and (plan is None or (not plan.rows and not plan.hidden_records)):
             self._tell("information", text("chat.clear.empty", self.lang))
             return False
@@ -676,6 +729,16 @@ class ChatPanel(QWidget):
 
     def _clear(self, history: Optional[HistoryItem], plan: Optional[ClearPlan]) -> bool:
         audit = self._audit()
+        if audit is None:   # every clear is recorded before anything is deleted
+            self._tell("warning", text("chat.clear.failed", self.lang, reason=text("chat.clear.no_audit", self.lang)))
+            return False
+        try:
+            unchanged = self._history_item() == history
+        except HistoryNotListable:
+            unchanged = False
+        if not unchanged:   # checked before anything goes: a changed conversation leaves the messages too
+            self._tell("warning", text("chat.clear.changed", self.lang))
+            return False
         cleared_feed = False
         if plan is not None:
             try:
@@ -695,22 +758,24 @@ class ChatPanel(QWidget):
             return cleared_feed
 
         if history is not None:
-            if self._history_item() != history:
-                return failed(text("chat.clear.changed", self.lang))
-            if audit is not None:
-                try:   # write-ahead: Ditto's conversation is cleared only once its clearing is recorded
-                    audit.record("gui", "chat_history", "framework", "person", "feed_cleared", approved=True,
-                                 arguments={"bytes": history.size_bytes},
-                                 detail="Ditto's conversation cleared (chat_history.json)",
-                                 extra={"deletion_sha256": history.sha256(), "answered_by": "person",
-                                        "confirm_channel": "framework-gui"})
-                except Exception as e:  # noqa: BLE001 - the reason without a host path
-                    return failed(one_line(type(e).__name__))
-            elif plan is not None:
-                return failed(text("chat.clear.no_audit", self.lang))
-        self.history.clear()
-        if not self.history.save():
-            return failed("OSError")
+            try:
+                unchanged = self._history_item() == history
+            except HistoryNotListable:
+                unchanged = False
+            if not unchanged:   # it changed in the moment the messages were cleared: Ditto's conversation stays
+                return failed(text("chat.clear.history_changed", self.lang))
+            try:   # write-ahead: Ditto's conversation is cleared only once its clearing is recorded
+                audit.record("gui", "chat_history", "framework", "person", "feed_cleared", approved=True,
+                             arguments={"bytes": history.size_bytes},
+                             detail="Ditto's conversation cleared (chat_history.json)",
+                             extra={"deletion_sha256": history.sha256(), "answered_by": "person",
+                                    "confirm_channel": "framework-gui"})
+            except Exception as e:  # noqa: BLE001 - the reason without a host path
+                return failed(one_line(type(e).__name__))
+            self.history.clear()
+            if not self.history.save():
+                self.history = ChatHistory.load(self.history_file)   # this window keeps what the file still has
+                return failed("OSError")
         self.header.warn("")
         self._reload()
         return True

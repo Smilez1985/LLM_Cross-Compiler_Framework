@@ -7,7 +7,9 @@ The chat panel's list of bubbles (delegation design 5.1, 5.4 and 5.9).
 * "New since you last looked" marks the first row the person has not seen, with a framework summary counted from the
   rows (away_summary): what Ditto answered, what AI apps decided, results, blocked work, and what needs the person.
 * Routine decisions of one app within ten minutes are folded into one group bubble (LAY-L8).
-* Questions that wait come from the pending-approvals store and stay at the bottom under "Needs you".
+* Questions that wait come from the pending-approvals store and stay at the bottom under "Needs you". The bubble of a
+  question that stays is kept when another arrives or ends (the keyboard stays where the person was), and its time
+  left is counted again every 30 seconds.
 * Keyboard: Up/Down move between bubbles, Home/End to the first and last, Escape back to the composer. New rows are
   announced to screen readers: questions assertively, everything else politely. No key approves anything.
 """
@@ -23,11 +25,12 @@ from orchestrator.Core.chat_feed import FeedEntry, StoredEntry
 from orchestrator.Core.speaking_names import SpeakingNames
 from orchestrator.gui.chat_panel.bubbles import (ApprovalBubble, Bubble, GroupBubble, groupable, local_time,
                                                  make_bubble, make_button, text, text_label)
-from orchestrator.gui.plain import button_text
+from orchestrator.gui.plain import button_text, one_line
 
 PAGE = 100                      # rows shown at first, and per "Show earlier messages"
 GROUP_MIN = 3                   # routine decisions of one app folded from this many on
 GROUP_WINDOW = timedelta(minutes=10)
+TIME_LEFT_MS = 30_000           # how often the time left of a waiting question is counted again
 QUESTION_KINDS = frozenset({"blocked", "approval"})
 
 
@@ -133,6 +136,9 @@ class FeedView(QScrollArea):
         self.pill.setVisible(False)
         self.pill.clicked.connect(self.scroll_to_bottom)
         self.verticalScrollBar().valueChanged.connect(self._scrolled)
+        self.time_timer = QTimer(self)
+        self.time_timer.setInterval(TIME_LEFT_MS)
+        self.time_timer.timeout.connect(self.refresh_times)
 
         self._rows: List[_Row] = []                     # in display order (separator included)
         self._bubbles: Dict[str, Bubble] = {}           # entry id -> bubble (group members included)
@@ -256,28 +262,58 @@ class FeedView(QScrollArea):
 
     def set_pending(self, records: List[Any]) -> List[ApprovalBubble]:
         """The questions that wait now (pending-approvals store records), under "Needs you"; returns the bubbles of
-        questions that were not shown before (they are announced assertively)."""
-        before = {b.record.id for b in self._pending}
-        for bubble in self._pending:
+        questions that were not shown before (they are announced assertively). The bubble of a question that is
+        still the same (same record, same language) is kept, so the keyboard focus stays on it."""
+        old = {b.record.id: b for b in self._pending}
+        window_focus = self.window().focusWidget()
+        focused = next((b for b in self._pending if b is window_focus or b.hasFocus()), None)
+        kept, new = [], []
+        for record in records:
+            bubble = old.pop(record.id, None)
+            if bubble is not None and (bubble.record != record or bubble.lang != self.lang):
+                old[f"changed:{record.id}"] = bubble
+                bubble = None
+            if bubble is None:
+                bubble = ApprovalBubble(record, lang=self.lang, parent=self.pending_box)
+                bubble.open_requested.connect(self.open_approval.emit)
+                bubble.navigate.connect(lambda delta, b=bubble: self.move_focus(b, delta))
+                bubble.jump.connect(self.jump)
+                bubble.escape.connect(self.escape_pressed.emit)
+                if record.id not in {b.record.id for b in self._pending}:
+                    new.append(bubble)
+                elif focused is not None and focused.record.id == record.id:
+                    focused = bubble   # the same question, shown anew: the focus moves with it
+            else:
+                bubble.refresh_time()
+            kept.append(bubble)
+        for bubble in old.values():
+            self.pending_layout.removeWidget(bubble)
             bubble.setParent(None)
             bubble.deleteLater()
-        self._pending = []
-        new = []
-        for record in records:
-            bubble = ApprovalBubble(record, lang=self.lang, parent=self.pending_box)
-            bubble.open_requested.connect(self.open_approval.emit)
-            bubble.navigate.connect(lambda delta, b=bubble: self.move_focus(b, delta))
-            bubble.jump.connect(self.jump)
-            bubble.escape.connect(self.escape_pressed.emit)
+        for bubble in kept:   # in the store's order, below the "Needs you" title
+            self.pending_layout.removeWidget(bubble)
             self.pending_layout.addWidget(bubble)
-            self._pending.append(bubble)
-            if record.id not in before:
-                new.append(bubble)
+        self._pending = kept
         self.pending_box.setVisible(bool(self._pending) and self.filter in ("all", "needs_you"))
+        if kept:
+            self.time_timer.start()
+        else:
+            self.time_timer.stop()
+        if focused is not None and focused not in kept:   # the question the person was on has ended
+            if not self.focus_last():
+                self.escape_pressed.emit()
+        elif focused is not None and focused is not self.window().focusWidget():
+            self.focus_bubble(focused)
         for bubble in new:
-            self.announce(text("chat.pending.announce", self.lang, title=bubble.record.title), assertive=True)
+            self.announce(text("chat.pending.announce", self.lang, title=one_line(bubble.record.title)),
+                          assertive=True)
         self._update_empty()
         return new
+
+    def refresh_times(self) -> None:
+        """Counts the time left of every waiting question again."""
+        for bubble in self._pending:
+            bubble.refresh_time()
 
     def set_separator(self, after_row_id: int, summary: str) -> bool:
         """Marks the first saved row newer than `after_row_id` with "New since you last looked" and `summary`;
