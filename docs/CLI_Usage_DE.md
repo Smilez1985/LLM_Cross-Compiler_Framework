@@ -153,8 +153,8 @@ die Targets und ihre Capabilities, ob der persönliche Ordner privat ist, den Se
 Schlüsselbund, die Tool-Berechtigungen, das Audit-Log, den Chat-Verlauf (unveröffentlicht: er lässt sich
 schreiben, seine neuesten Einträge stimmen), die mitgelieferten Kalibrierungsdaten und die installierten
 Community-Pakete (zurückgezogen, verändert oder aus einer Datei importiert) und die Snapshots der Wissensbasis
-(unveröffentlicht: mehr als fünf ergeben eine Erinnerung). Zu jedem Befund gibt es einen Hinweis, wie du ihn
-behebst.
+(unveröffentlicht: wie viele, ihre Größe und wo; es gibt keine Grenze, ihre Zahl ist also nie eine Warnung). Zu jedem
+Befund gibt es einen Hinweis, wie du ihn behebst.
 
 | Option | Bedeutung |
 |---|---|
@@ -186,9 +186,10 @@ damit sich die Änderung rückgängig machen lässt. Der Befehl listet jeden Sna
 Zeitpunkt, Größe, was er ist (zum Beispiel "backup of the knowledge base taken before a Deep Ingest") und vollem
 Pfad. Er löscht nichts. Die GUI zeigt dieselbe Liste unter **Tools > Knowledge Snapshots...**.
 
-Das Framework löscht keinen Snapshot von selbst. Bei mehr als fünf erinnern dich `llm-cli doctor` und der Chat;
-lösche die Dateien, die du nicht mehr brauchst, selbst, zum Beispiel im Dateimanager. Ein Papierkorb und ein
-Lösch-Dialog im Framework folgen.
+Es gibt keine Grenze: Das Framework behält so viele Snapshots, wie die Platte fasst, löscht keinen von selbst, und
+keine Anzahl bringt eine Erinnerung oder eine Warnung. Um Platz zu schaffen, kopierst du die, die du behalten willst,
+woandershin (Export, zum Beispiel auf einen USB-Datenträger oder eine Netzwerkfreigabe) oder löschst die, die du
+nicht mehr brauchst, selbst, zum Beispiel im Dateimanager. Ein Papierkorb und ein Lösch-Dialog im Framework folgen.
 
 ```bash
 llm-cli knowledge snapshots

@@ -215,11 +215,15 @@ das Framework nur feste, eingebaute Korrekturen an:
 | Problem | Was das Framework nach deinem „Ja“ tut |
 |---|---|
 | Speichermangel beim Kompilieren des Images | Setzt `build_jobs` auf 1 und versucht es erneut |
-| Platte voll | Entfernt verwaiste Framework-Images und den Docker-Build-Cache, dann neuer Versuch |
 | Netzwerkproblem | Versucht es einmal erneut |
 
-Alles andere, auch jeder KI-Vorschlag, wird als manueller Schritt angezeigt und nie ausgeführt. Ein erneuter Versuch
-bekommt eine eigene Build-ID (`<job>_r1`), und beide Logs bleiben erhalten.
+Alles andere, auch jeder KI-Vorschlag, wird als manueller Schritt angezeigt und nie ausgeführt. Eine volle Platte ist
+ebenfalls ein solcher manueller Schritt, weil das Framework nichts ohne deine Liste löscht (unveröffentlicht; bisher
+entfernte ein „Ja“ die verwaisten Images des Frameworks und leerte den ganzen Docker-Build-Cache, auch den anderer
+Projekte): Ist Dockers Platte voll, führst du `llm-cli doctor --fix --tier 2` im Terminal aus, das die verwaisten
+Build-Images des Frameworks listet und nur die löscht, die du bestätigst, und startest den Build dann neu. Den
+Docker-Build-Cache leert das Framework nie. Ein erneuter Versuch bekommt eine eigene Build-ID (`<job>_r1`), und beide
+Logs bleiben erhalten.
 
 **Vorschläge von KI-Clients.** Ein MCP-Client, der Dittos Aufgabe übernimmt (Prompt `diagnose_build_failure`), kann
 dem Framework mit dem Tool `propose_healing_fix` seine eigene Analyse eines gescheiterten Builds übergeben: eine
@@ -1122,11 +1126,12 @@ Die Wissensbasis gibt Ditto und MCP-Clients Dokumentation zum Durchsuchen (Einst
   neue Fassung nicht mehr hat, werden entfernt. Codeblöcke und Tabellen bleiben ganz, außer sie sind größer als der
   Kontext des Modells ([Große Codeblöcke und Tabellen](#große-codeblöcke-und-tabellen)).
 - **Schnappschüsse:** Vor jedem Crawl wird die Wissensbasis als Schnappschuss in
-  `~/.llm-framework/knowledge_snapshots` gesichert. Das Framework löscht keinen davon von selbst (unveröffentlicht;
-  bisher blieben auf jedem Weg nur die neuesten 5): Bei mehr als fünf erinnern dich `llm-cli doctor` und der Chat,
-  und **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli knowledge snapshots` listet jeden mit vollem Pfad,
-  Namen, Größe und was er ist, damit du entscheidest, welche gelöscht werden. Ein Papierkorb und ein Lösch-Dialog im Framework folgen. Einen Schnappschuss
-  wiederherstellen kann man über GUI oder CLI noch nicht.
+  `~/.llm-framework/knowledge_snapshots` gesichert. Es gibt keine Grenze (unveröffentlicht; bisher blieben auf jedem
+  Weg nur die neuesten 5): Das Framework behält so viele, wie die Platte fasst, löscht keinen von selbst, und keine
+  Anzahl bringt eine Erinnerung oder eine Warnung. **Tools > Knowledge Snapshots...** in der GUI oder `llm-cli
+  knowledge snapshots` listet jeden mit vollem Pfad, Namen, Größe und was er ist; um Platz zu schaffen, kopierst du
+  die, die du behalten willst, woandershin (Export) oder löschst die, die du auswählst, selbst. Ein Papierkorb und ein
+  Lösch-Dialog im Framework folgen. Einen Schnappschuss wiederherstellen kann man über GUI oder CLI noch nicht.
 - **Suche:** hybrid. Dichte Vektoren finden die Bedeutung, BM25 findet exakte Begriffe wie Fehlercodes und
   Compiler-Flags; beide Ranglisten werden mit Reciprocal Rank Fusion verbunden. Derselbe Text aus mehreren Quellen
   kommt nur einmal. Danach kann ein Cross-Encoder die Ergebnisse neu bewerten ([Reranking](#reranking)).
@@ -1848,8 +1853,8 @@ Verfügung.
 
 **Was eine Rückfrage zeigt** (Dittos GUI-Dialog und CLI-Abfrage, das Formular eines MCP-Clients), in dieser
 Reihenfolge: die Folge in einfachen Worten, aus dem, was das Framework nachgeschlagen hat, mit IDs, denen ihr
-sprechender Name folgt (zum Beispiel "Deletes the Docker build cache and the dangling framework images on this
-computer, then retries build request req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); wer
+sprechender Name folgt (zum Beispiel "Sets the framework setting build_jobs to 1 (fewer parallel compile jobs for
+image builds), then retries build request req_1a2b3c4d (models:qwen/model.gguf for Rockchip (gguf Q4_K_M)) once."); wer
 fragt (Ditto oder der MCP-Client mit dem Namen, der Version und dem Transport, die er angibt, und wessen
 Berechtigungen gelten: alle lokalen stdio-Clients oder ein benanntes Token); die Fakten, die das Framework geprüft
 hat, wobei Text von außerhalb des Frameworks (ein Build-Log, der Vorschlag einer KI) als "not checked" gekennzeichnet
@@ -1857,9 +1862,9 @@ und maskiert ist; dann jedes Argument vollständig, reparierte Werte markiert un
 dahinter (Modell und Ziel einer Build-Anfrage, `<label>:<relativer Pfad>` einer lokalen Datei, der Name eines
 Ziels). Manche Tools schlagen Fakten vor der Rückfrage nach (zweistufige Bestätigung), und der Aufruf ist dann
 genau an das gebunden, was dir gezeigt wurde: Wer einen Selbstheilungs-Vorschlag genehmigt, wendet den Vorschlag aus
-der Rückfrage an, und einer, der sich inzwischen geändert hat, wird abgelehnt, ohne dass etwas angewendet wird; ein
-zerstörender Fix (`docker_prune`, der den Docker-Build-Cache löscht) wird auch dann erfragt, wenn `resolve_healing`
-erlaubt ist; ein Nachschlagen, das scheitert (kein offener Vorschlag), lehnt den Aufruf ab, bevor etwas gefragt
+der Rückfrage an, und einer, der sich inzwischen geändert hat, wird abgelehnt, ohne dass etwas angewendet wird; die
+Freigabe eines manuellen Schritts (auch einer vollen Docker-Platte, `docker_prune`: keine Selbstheilungs-Strategie
+löscht etwas) wird abgelehnt, bevor etwas gefragt wird; ein Nachschlagen, das scheitert (kein offener Vorschlag), lehnt den Aufruf ab, bevor etwas gefragt
 wird; ohne die nachgeschlagenen Fakten wird über einen Vorschlag gar nicht entschieden. Ein 2026-07-28-Client, der in
 einer zweiten Runde antwortet, bekommt die Fakten der Rückfrage, die er beantwortet hat. Eine Runde zählt nur als
 Antwort auf eine Rückfrage, die das Framework genau diesem Client gestellt hat und die noch offen ist: Eine Antwort,
@@ -2106,7 +2111,7 @@ Einzelheiten: [Module_Developer_Guide_DE.md](Module_Developer_Guide_DE.md).
 | KI | Tool-Berechtigungen eingerichtet und lesbar, Audit-Log intakt (geändert, entfernt, falscher Schlüssel, fehlender Anker, kein Schlüssel); der Chat-Verlauf lässt sich schreiben und seine neuesten Einträge stimmen (geänderte oder fremde Einträge, kein Schlüssel; unveröffentlicht) |
 | Daten | mitgelieferte Kalibrierungsdaten intakt (Prüfsummen) |
 | Community | installierte Community-Packs gegen den zwischengespeicherten Index: gesperrt (Fehler), seit der Installation verändert (Warnung), Vertrauensstufe `local` (Information) |
-| Wissen | mehr Snapshots der Wissensbasis als die üblichen fünf (Information, eine Erinnerung; nichts wird gelöscht; unveröffentlicht) |
+| Wissen | wie viele Snapshots der Wissensbasis es gibt, ihre Größe und ihr Ordner (keine Grenze: ihre Zahl ist nie eine Warnung; nichts wird gelöscht; unveröffentlicht) |
 | Laufzeit | der genutzte selbst gebaute llama.cpp-Build: veränderte Dateien (Fehler), älter als der Pin (Warnung); das vorgefertigte Archiv, als nicht selbst gebaut gekennzeichnet, genutzt oder installiert, aber nicht genutzt (Information); ob dieser Rechner die Werkzeuge für einen nativen Build hat (Information) |
 
 `--fix` wendet die automatischen Korrekturen bis `--tier` an und prüft danach erneut. Stufe 1 macht den

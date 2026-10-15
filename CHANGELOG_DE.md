@@ -137,10 +137,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
 - **Lokale Wissensbasis** auf lokalen Embeddings (FastEmbed, ONNX auf der CPU) und einem eingebetteten
   Qdrant-Speicher: kein Vektordatenbank-Server und keine Cloud-Embeddings nötig, und sie funktioniert offline,
   sobald ihre Modelle heruntergeladen sind. Vor jeder Aufnahme und jeder Wiederherstellung sichert sie einen
-  Snapshot in `knowledge_snapshots/` des persönlichen Ordners; keiner wird je von selbst gelöscht, auf keinem Weg
-  (Runde 5 f). Bei mehr als fünf erinnern dich `llm-cli doctor` und ein Chat-Hinweis, und `llm-cli knowledge
-  snapshots` (in der GUI: Tools > Knowledge Snapshots...) listet jeden mit vollem Pfad, Namen, Größe und was er ist,
-  damit du entscheidest, welche gelöscht werden.
+  Snapshot in `knowledge_snapshots/` des persönlichen Ordners. Es gibt keine Grenze: Sie behält so viele, wie die
+  Platte fasst, löscht keinen von selbst, auf keinem Weg (Runde 5 f), und keine Anzahl bringt eine Erinnerung oder
+  eine Warnung. `llm-cli knowledge snapshots` (in der GUI: Tools > Knowledge Snapshots...) listet jeden mit vollem
+  Pfad, Namen, Größe und was er ist, damit du die, die du auswählst, löschst oder exportierst (woandershin kopierst).
 - **Die Wissensbasis, die Ditto nutzt, für KI-Clients** (MCP-Tools `list_knowledge_sources` und
   `read_knowledge_source`, Ressource `lcf://knowledge/sources/<Quellen-ID>`): Ein Client, der Dittos Aufgabe
   übernimmt, sieht, was die Wissensbasis enthält, und liest die Auszüge einer Quelle der Reihe nach.
@@ -586,9 +586,10 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Text als "not checked" gekennzeichnet), und jedes Argument mit dem sprechenden Namen einer ID (Modell und Ziel eines
   Builds, das Label einer lokalen Datei). Ein Tool kann Fakten vor der Rückfrage nachschlagen, und der Aufruf ist an
   sie gebunden: `resolve_healing` zeigt den offenen Vorschlag aus dem eigenen Zustand des Frameworks, lehnt einen
-  Vorschlag ab, der sich nach der Rückfrage geändert hat, und fragt vor einem zerstörenden Fix (`docker_prune`) immer,
-  auch wenn das Tool erlaubt ist. Dittos GUI-Dialog und CLI-Abfrage zeigen Rückfragen bis zu 16.000 Zeichen (ein
-  scrollbarer Dialog, der Pager); ein MCP-Formular bleibt bei 4.000.
+  Vorschlag ab, der sich nach der Rückfrage geändert hat, und lehnt die Freigabe eines manuellen Schritts ab, bevor
+  etwas gefragt wird (auch einer vollen Docker-Platte, `docker_prune`: keine Selbstheilungs-Strategie löscht etwas).
+  Dittos GUI-Dialog und CLI-Abfrage zeigen Rückfragen bis zu 16.000 Zeichen (ein scrollbarer Dialog, der Pager); ein
+  MCP-Formular bleibt bei 4.000.
 - **Grenzen je Client für Tool-Aufrufe** (Ditto und MCP-Clients): lesende Tools 20 Aufrufe in 10 Sekunden,
   `start_build` 3 unfertige Builds und 20 Starts am Tag, 30 Rückfragen pro Stunde und eine Build-Warteschlange von
   höchstens 20 unfertigen Anfragen je Framework-Prozess für KI-Aufrufer (die eigenen GUI- und CLI-Builds des
@@ -938,9 +939,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   sind und dass der Client eine Aufgabe, die er nicht erledigen kann, mit dem konkreten Grund meldet.
 - **MCP-Clients sehen nur die Tools, die sie nutzen dürfen**: Tools, die deine Berechtigungen verweigern, fehlen in
   der Tool-Liste (dieselben Tools, die Ditto bei denselben Berechtigungen bekommt); ein Aufruf eines solchen Tools
-  wird trotzdem abgelehnt und festgehalten. `destructiveHint` folgt der eigenen Angabe jedes Tools statt seiner
-  Stufe (`resolve_healing` ist zerstörend, weil eine seiner Korrekturen den Docker-Build-Cache löscht), und Tools,
-  die andere Geräte erreichen, bitten den Client, bei jedem Aufruf seine eigene Rückfrage zu zeigen
+  wird trotzdem abgelehnt und festgehalten. `destructiveHint` folgt der eigenen Angabe jedes Tools statt seiner Stufe
+  (`resolve_healing` bleibt als zerstörend markiert: es ändert eine Einstellung und wiederholt einen Build), und
+  Tools, die andere Geräte erreichen, bitten den Client, bei jedem Aufruf seine eigene Rückfrage zu zeigen
   (`anthropic/requiresUserInteraction`).
 - Eine lokale Modelldatei wird allein in die Build-Container eingebunden, nicht mehr zusammen mit dem Ordner, in
   dem sie liegt (ein Modell, das Dateien daneben braucht, etwa externe ONNX-Daten, wird als Ordner angegeben). Eine
@@ -1057,13 +1058,21 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Gerät.
 
 ### Behoben
-- **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte
-  den ganzen Build-Cache des Docker-Daemons, auch den anderer Projekte, und löschte die verwaisten Images des
-  Frameworks, ohne sie zu zeigen. Der Build-Cache wird nicht mehr angerührt (er lässt sich nicht auf das Framework
-  beschränken). Stufe 2 listet jetzt die verwaisten Build-Images des Frameworks, jedes mit Namen, Image-ID, Größe und
-  was es ist, und löscht genau diese Liste, per Image-ID und ohne Prune, erst nach deinem Ja im Terminal (die Vorgabe
-  ist Nein). Ohne Terminal und mit `--json` listet es sie nur; das Löschen wird zuerst auditiert und abgelehnt, wenn
-  sich die Liste inzwischen geändert hat. Kein Tool, keine Ressource und kein Prompt erreicht es, eine KI-App oder
+- **Das „Docker-Aufräumen“ der Selbstheilung löscht nichts mehr** (veröffentlicht in 3.0.0; Runde 5 f): Wer den
+  Vorschlag für eine volle Docker-Platte freigab (`docker_prune`, im GUI-Dialog, an der CLI-Abfrage oder über
+  `resolve_healing`), ließ die verwaisten Images des Frameworks löschen, ohne dass sie gezeigt wurden, und den ganzen
+  Build-Cache des Docker-Daemons leeren, auch den anderer Projekte. Jetzt ist es ein manueller Schritt: Der Vorschlag
+  verweist auf `llm-cli doctor --fix --tier 2`, das die verwaisten Build-Images des Frameworks listet und nur die
+  löscht, die du bestätigst, und eine Freigabe wird abgelehnt, bevor etwas gefragt wird. Kein Code des Frameworks
+  leert den Docker-Build-Cache mehr.
+- **`llm-cli doctor --fix --tier 2` löscht nicht mehr ohne Liste** (veröffentlicht in 3.0.0; Runde 5 f): es leerte den
+  ganzen Build-Cache des Docker-Daemons, auch den anderer Projekte, und löschte die verwaisten Images des Frameworks,
+  ohne sie zu zeigen. Der Build-Cache wird nicht mehr angerührt (er lässt sich nicht auf das Framework beschränken).
+  Stufe 2 listet jetzt die verwaisten Build-Images des Frameworks, jedes mit Namen, Image-ID, Größe und was es ist,
+  und löscht genau diese Liste, per Image-ID und ohne Prune, erst nach deinem Ja im Terminal (die Vorgabe ist Nein).
+  Ohne Terminal und mit `--json` listet es sie nur; das Löschen wird zuerst auditiert und abgelehnt, wenn sich die
+  Liste inzwischen geändert hat, und ein Image, das inzwischen einen Namen bekommen hat (ein Build eines anderen
+  Framework-Programms), bleibt erhalten. Kein Tool, keine Ressource und kein Prompt erreicht es, eine KI-App oder
   Ditto kann es also weder ausführen noch unter einer Vollmacht bekommen. Die Befunde zum Speicherplatz sagen, was
   Stufe 2 listet, statt ein Aufräumen zu versprechen.
 - **Eine Reparatur wird genannt, wie auch immer der Aufruf endet** (Befund eines echten Laufs mit Claude Code 2.1.296

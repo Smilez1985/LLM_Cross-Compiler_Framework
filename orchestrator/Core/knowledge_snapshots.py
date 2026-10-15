@@ -1,27 +1,29 @@
 #!/usr/bin/env python3
 """
-Knowledge-base snapshots as the person sees them, and the reminder when there are more than usual.
+Knowledge-base snapshots as the person sees them.
 
 Before every Deep Ingest, every index of the framework's own code and every restore, the knowledge base is saved as a
-snapshot (`knowledge_snapshots/` in the per-user folder), so the change can be undone. Nothing deletes a snapshot by
-itself, on any channel (round 5 f: deleting always asks the person, with the list): above MAX_SNAPSHOTS the doctor
-and the chat remind the person, and `llm-cli knowledge snapshots` lists each one with its full path, file name, size
-and what it is. Deleting them is the person's decision; the trash and the framework's deletion dialog follow (design
-WP7).
+snapshot (`knowledge_snapshots/` in the per-user folder), so the change can be undone. There is no limit: the framework
+keeps as many as the disk holds and deletes none by itself, on any channel, and no count of them reminds or warns
+(DECISIONS, sixth round; round 5 f: deleting always asks the person, with the full list). `llm-cli knowledge
+snapshots` and Tools > Knowledge Snapshots... list each one with its full path, file name, size and what it is; to
+free space the person deletes the ones they choose or exports them (copies them elsewhere). The trash and the
+framework's deletion dialog follow (design WP7).
 
 This module reads the folder only; it never opens the knowledge base itself (no embedding model, no Qdrant).
 """
 
-import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, List
 
 FOLDER = "knowledge_snapshots"
 SUFFIX = ".jsonl.gz"
-MAX_SNAPSHOTS = 5   # the usual number; more only bring a reminder, never a deletion
-REMINDER_KEY = "chat.notice.snapshots_over_cap"
+# What the person's listings say about keeping and deleting (the CLI and the GUI show the same words).
+KEEPING_NOTE = ("There is no limit: the framework keeps as many snapshots as the disk holds and deletes no snapshot by "
+                "itself. To free space, copy the ones you want to keep elsewhere (export) or delete the ones you no "
+                "longer need yourself; a trash and a deletion dialog in the framework follow.")
 
 # What a snapshot is, by the prefix the framework gives its name.
 _WHAT = (("pre_ingest_", "backup of the knowledge base taken before a Deep Ingest"),
@@ -84,40 +86,5 @@ def size_text(n: int) -> str:
     return f"{n / 1000 ** 3:.1f} GB" if n >= 10 ** 9 else f"{n / 1000 ** 2:.1f} MB"
 
 
-def over_cap(snapshots: List[SnapshotFile]) -> bool:
-    return len(snapshots) > MAX_SNAPSHOTS
-
-
-# Which programs may write the chat reminder: the ones the chat feed knows (request_store.set_program names the
-# process at its entry point; an unnamed process writes no reminder, the doctor still reports it).
-_FEED_PROGRAMS = {"gui": "gui", "cli": "cli", "mcp": "mcp"}
-
-
-def remind_over_cap(framework: Any, snapshots: List[SnapshotFile]) -> Optional[Any]:
-    """Posts the chat reminder that the knowledge base keeps more snapshots than usual (a framework notice; the full
-    folder only in what the person sees). Returns the stored row, or None when nothing was written: not over the cap,
-    no chat feed, a process without a known program, or the feed could not be written (it fails open; the doctor
-    reports the same)."""
-    if not over_cap(snapshots):
-        return None
-    store = getattr(framework, "chat_feed", None)
-    if store is None:
-        return None
-    from orchestrator.Core.request_store import program
-    kind = _FEED_PROGRAMS.get(program())
-    if kind is None:
-        return None
-    from orchestrator.Core.chat_feed import FeedSender, FeedWriter
-    total = sum(s.size_bytes for s in snapshots)
-    folder = os.path.dirname(str(snapshots[-1].path))
-    try:
-        return FeedWriter(store, kind).write(
-            "notice", FeedSender(role="framework"), text_key=REMINDER_KEY,
-            params={"n": str(len(snapshots)), "size": size_text(total), "cap": str(MAX_SNAPSHOTS)},
-            facts_person=[{"label": "Folder", "value": folder, "person_only": True}], level="warning")
-    except Exception:  # noqa: BLE001 - a reminder never stops the snapshot or the ingest
-        return None
-
-
-__all__ = ["FOLDER", "MAX_SNAPSHOTS", "REMINDER_KEY", "SUFFIX", "SnapshotFile", "list_snapshots", "over_cap",
-           "remind_over_cap", "size_text", "snapshot_files", "snapshot_folder"]
+__all__ = ["FOLDER", "KEEPING_NOTE", "SUFFIX", "SnapshotFile", "list_snapshots", "size_text", "snapshot_files",
+           "snapshot_folder"]

@@ -152,7 +152,8 @@ Checks Python, the Docker daemon and buildx, free disk space for the cache and o
 their capabilities, the privacy of the personal folder, the secrets store and the keyring, the tool
 permissions, the audit log, the chat feed (unreleased: it can be written, its newest entries verify), the shipped
 calibration data, the installed community packs (revoked, changed or imported from a file) and the knowledge
-snapshots (unreleased: more than five is a reminder). Each finding comes with a hint how to fix it.
+snapshots (unreleased: how many, their size and where; there is no limit, so their number is never a warning). Each
+finding comes with a hint how to fix it.
 
 | Option | Meaning |
 |---|---|
@@ -184,9 +185,10 @@ lists every snapshot, oldest first, with its name, when it was taken, its size, 
 the knowledge base taken before a Deep Ingest") and its full path. It deletes nothing. The GUI shows the same list
 under **Tools > Knowledge Snapshots...**.
 
-The framework deletes no snapshot by itself. With more than five, `llm-cli doctor` and the chat remind you; delete
-the files you no longer need yourself, for example in your file manager. A trash and a deletion dialog in the
-framework follow.
+There is no limit: the framework keeps as many snapshots as the disk holds, deletes none by itself, and no number of
+them brings a reminder or a warning. To free space, copy the ones you want to keep elsewhere (export, for example to a
+USB disk or a network share) or delete the ones you no longer need yourself, for example in your file manager. A
+trash and a deletion dialog in the framework follow.
 
 ```bash
 llm-cli knowledge snapshots

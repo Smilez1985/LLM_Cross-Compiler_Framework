@@ -122,10 +122,6 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "caller.token": "the AI app with your connection '{name}'",
         "caller.self_name": "calls itself '{client}'",
         "caller.framework": "the framework",
-        "chat.notice.snapshots_over_cap": "The knowledge base now keeps {n} snapshots ({size}), more than the usual "
-                                          "{cap}. None is deleted by itself: Tools > Knowledge Snapshots... (or "
-                                          "'llm-cli knowledge snapshots') lists them with full path, name and "
-                                          "size, and you decide which to delete.",
     },
     "de": {
         "chat.feed.unverified": "{n} Chat-Einträge konnten nicht geprüft werden (außerhalb des Frameworks geändert "
@@ -161,11 +157,6 @@ TEXTS: Dict[str, Dict[str, str]] = {
         "caller.token": "die KI-App mit deiner Verbindung „{name}“",
         "caller.self_name": "nennt sich „{client}“",
         "caller.framework": "das Framework",
-        "chat.notice.snapshots_over_cap": "Die Wissensbasis hat jetzt {n} Snapshots ({size}), mehr als die üblichen "
-                                          "{cap}. Keiner wird von selbst gelöscht: Tools > Knowledge "
-                                          "Snapshots... (oder 'llm-cli knowledge snapshots') listet sie mit "
-                                          "vollem Pfad, Namen und Größe, und du entscheidest, welche gelöscht "
-                                          "werden.",
     },
 }
 

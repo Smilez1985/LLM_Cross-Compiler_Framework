@@ -26,8 +26,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, Iterator, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-from orchestrator.Core.knowledge_snapshots import (MAX_SNAPSHOTS, SUFFIX, list_snapshots,
-                                                  remind_over_cap, snapshot_files)
+from orchestrator.Core.knowledge_snapshots import SUFFIX, list_snapshots, snapshot_files
 from orchestrator.rag.chunking import PREAMBLE_RESERVE_TOKENS, chunk_document, passage_text, point_id
 from orchestrator.rag.embeddings import (DenseEmbedder, EmbeddingModelSpec, FastEmbedDenseEmbedder,
                                          FastEmbedSparseEmbedder, SparseEmbedder, check_vectors, recommend_model,
@@ -655,8 +654,8 @@ class RAGManager:
 
     def create_snapshot(self, name: Optional[str] = None) -> Optional[str]:
         """Saves the active collection (vectors included) to a file; returns its name, None if empty or failed.
-        No snapshot is ever deleted here, on any channel (round 5 f): with more than MAX_SNAPSHOTS the chat reminds
-        the person (the doctor reports it too), and the person decides which to delete."""
+        No snapshot is ever deleted here, on any channel, and there is no limit (DECISIONS, sixth round: as many as
+        the disk holds); the person deletes or exports them, with the full list (`llm-cli knowledge snapshots`)."""
         name = sanitize_filename(name or f"snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}") or "snapshot"
         path = self.snapshot_dir / f"{name}{SUFFIX}"
         try:
@@ -667,7 +666,6 @@ class RAGManager:
         if not count:
             return None
         self.logger.info(f"Knowledge base snapshot {name}: {count} chunks.")
-        remind_over_cap(getattr(self, "framework", None), self.snapshot_listing())
         return name
 
     def _snapshot_files(self) -> List[Path]:
@@ -677,11 +675,13 @@ class RAGManager:
         """Every snapshot with its full path, size and time, oldest first (knowledge_snapshots.SnapshotFile)."""
         return list_snapshots(self.snapshot_dir)
 
-    def _prune_snapshots(self, keep: Optional[Path] = None) -> None:
-        """Deletes the oldest snapshots beyond MAX_SNAPSHOTS. Nothing in the framework calls it any more: deleting
-        snapshots waits for the person's confirmed cleanup with the full list (the trash and the deletion dialog,
-        design WP7), which is the only place that may call it."""
-        for old in self._snapshot_files()[:-MAX_SNAPSHOTS]:
+    def _prune_snapshots(self, keep_newest: int, keep: Optional[Path] = None) -> None:
+        """Deletes the oldest snapshots beyond the newest `keep_newest`. Nothing in the framework calls it: there is no
+        limit of its own (DECISIONS, sixth round), and deleting snapshots waits for the person's confirmed cleanup
+        with the full list (the trash and the deletion dialog, design WP7), the only place that may call it, with
+        the choice the person made."""
+        files = self._snapshot_files()
+        for old in files[:max(0, len(files) - max(0, int(keep_newest)))]:
             if keep is not None and old == keep:
                 continue
             try:

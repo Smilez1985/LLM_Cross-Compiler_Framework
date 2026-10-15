@@ -423,9 +423,10 @@ Nothing is changed without your yes.
 4. **Waiting for you.** The build status becomes `awaiting_approval`. You decide in the GUI dialog, at the prompt
    of a running `llm-cli build start`, or through the tool `resolve_healing`. Without a decision within
    `healing_approval_timeout` (default 900 seconds) the proposal is dismissed.
-5. **Only fixed actions.** An approved proposal is applied only if it is one of three framework-defined
-   strategies: lower `build_jobs` to 1, remove dangling framework images and the Docker build cache, or simply
-   retry. The job is then retried once. Command text from patterns or AI is shown read-only and never executed;
+5. **Only fixed actions.** An approved proposal is applied only if it is one of two framework-defined
+   strategies (`AUTOMATIC_STRATEGIES` in `self_healing_manager.py`): lower `build_jobs` to 1, or simply retry. The
+   job is then retried once. Neither deletes anything: a full Docker disk (`docker_prune`) is a manual step that
+   points to `llm-cli doctor --fix --tier 2`, which deletes only the listed images the person confirms. Command text from patterns or AI is shown read-only and never executed;
    approving a manual step through MCP is refused.
 
 ### The local model for offline mode (unreleased)
@@ -494,9 +495,9 @@ judge that yourself.
    `crawler_max_pages` (default 50) and the languages `crawler_languages` (default `en` and `de`) come from the
    settings. There is no switch for robots.txt or any other opt-out. Before each start URL the knowledge base
    saves a snapshot of itself in `knowledge_snapshots/` (an empty knowledge base gets none). No snapshot is deleted
-   by itself (`orchestrator/Core/knowledge_snapshots.py`): above five, the doctor and a chat notice remind the
-   person, and `llm-cli knowledge snapshots` lists them with full path, name and size. Neither the GUI nor the CLI
-   can restore a snapshot yet.
+   by itself and there is no limit (`orchestrator/Core/knowledge_snapshots.py`): no number of them brings a
+   reminder or a warning, and `llm-cli knowledge snapshots` lists them with full path, name and size for the
+   person, who deletes or exports them. Neither the GUI nor the CLI can restore a snapshot yet.
 4. **Checks before the request.** For each URL, breadth-first, in this order: the SSRF check of the address (see
    [Security model](#security-model)), then, with PDF downloads off, the skip of a URL ending in `.pdf`, the
    origin's robots.txt and `/.well-known/tdmrep.json` (origin: scheme, host and port; each file fetched once). Both

@@ -3,7 +3,7 @@
 A tool's `prepare` looks up the facts only the server knows before the question; the question shows the
 consequence first, who asks, the facts (external text labelled) and every argument with its speaking name; the
 handler is bound to exactly the facts that were shown (resolve_healing refuses a changed proposal); a 2026-07-28
-retry that answers the question gets the same facts; a fact can make an allowed call ask (docker_prune). People see
+retry that answers the question gets the same facts; a fact can make an allowed call ask. People see
 speaking names, AI callers never see the host path of a local model they pinned.
 """
 
@@ -371,27 +371,40 @@ def healing(tmp_path):
 
 class TestResolveHealing:
 
-    def test_docker_prune_says_it_deletes_the_build_cache_and_asks_although_allowed(self, healing):
-        proposal = healing.pending(HealingStrategy.DOCKER_PRUNE)
+    def test_a_setting_change_names_the_build_and_the_proposal(self, healing):
+        proposal = healing.pending(HealingStrategy.CONFIG_ADJUSTMENT, summary="Out of memory")
+        healing.registry.policy_store.replace(ToolPolicy(configured=True, overrides={"resolve_healing": Decision.ASK},
+                                                         reviewed=[s.name for s in healing.registry.list()]))
         shown = []
         healing.registry.call("resolve_healing", {"request_id": "req_1", "approve": True},
                               ToolContext("ditto", confirm=lambda s, i: shown.append(current_question()) or True))
         lines = shown[0].splitlines()
-        assert lines[0].startswith("Deletes the Docker build cache") and "req_1" in lines[0]
+        assert lines[0].startswith("Sets the framework setting build_jobs to 1") and "req_1" in lines[0]
         assert ("  Build request: req_1: models:qwen/model.gguf for Rockchip (gguf Q4_K_M)" in lines), \
             "a speaking name for the person"
-        assert "  Proposal (from the build log analysis, not checked): Disk full" in lines
-        assert any(line.startswith("  Strategy: docker_prune (destructive") for line in lines)
+        assert "  Proposal (from the build log analysis, not checked): Out of memory" in lines
+        assert "  Strategy: config_adjustment" in lines
         assert healing.decided == [("req_1", True, proposal)], "the decision is about the proposal that was shown"
 
+    def test_approving_the_docker_cleanup_is_refused_and_deletes_nothing(self, healing):
+        """docker_prune deleted the framework's dangling images and every project's build cache after a plain yes
+        (released in 3.0.0). It is a manual step now: an approval is refused before anything is asked, even when the
+        tool is allowed; the person frees space with 'llm-cli doctor --fix --tier 2' and its list."""
+        healing.pending(HealingStrategy.DOCKER_PRUNE)
+        asked = []
+        with pytest.raises(ToolError) as exc:
+            healing.registry.call("resolve_healing", {"request_id": "req_1", "approve": True},
+                                  ToolContext("ditto", confirm=lambda s, i: asked.append(1) or True))
+        assert exc.value.code == "not_supported" and asked == [] and healing.decided == []
+
     @pytest.mark.parametrize("mode", MODES)
-    def test_docker_prune_over_mcp_is_asked_too(self, healing, mode):
+    def test_approving_the_docker_cleanup_over_mcp_is_refused_too(self, healing, mode):
         healing.pending(HealingStrategy.DOCKER_PRUNE)
         asked = []
         result = mcp_call(healing.registry, "resolve_healing", {"request_id": "req_1", "approve": True},
                           answering(asked), mode)
-        assert not result.is_error, text_of(result)
-        assert len(asked) == 1 and asked[0].message.startswith("Deletes the Docker build cache")
+        assert result.is_error and "manual step" in text_of(result)
+        assert asked == [] and healing.decided == []
 
     def test_a_harmless_strategy_runs_without_a_question_when_allowed(self, healing):
         healing.pending(HealingStrategy.RETRY_BUILD)
@@ -399,10 +412,12 @@ class TestResolveHealing:
         assert healing.decided[0][:2] == ("req_1", True)
 
     def test_a_changed_proposal_is_refused_and_nothing_is_applied(self, healing):
-        healing.pending(HealingStrategy.DOCKER_PRUNE, summary="first")
+        healing.pending(HealingStrategy.CONFIG_ADJUSTMENT, summary="first")
+        healing.registry.policy_store.replace(ToolPolicy(configured=True, overrides={"resolve_healing": Decision.ASK},
+                                                         reviewed=[s.name for s in healing.registry.list()]))
 
         def answer(spec, inp):  # while the person reads, a new proposal replaces the one shown
-            healing.pending(HealingStrategy.DOCKER_PRUNE, summary="second")
+            healing.pending(HealingStrategy.CONFIG_ADJUSTMENT, summary="second")
             return True
         with pytest.raises(ToolError) as exc:
             healing.registry.call("resolve_healing", {"request_id": "req_1", "approve": True},

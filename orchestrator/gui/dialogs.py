@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QCheckBox, QGroupBox, QTableWidget, QTableWidgetItem, QHeaderView, QWidget
 )
 from PySide6.QtCore import Qt, QTimer
+from orchestrator.Core.self_healing_manager import AUTOMATIC_STRATEGIES
 from orchestrator.gui.worker_relay import worker_relay
 from orchestrator.llm.auth.signin import plain_http_to_remote
 from orchestrator.llm.auth.spec import KEY_TYPES
@@ -130,7 +131,7 @@ class HealingConfirmDialog(QDialog):
     Only fixed, framework-defined actions are applied; command text (from heuristics or AI) is advice
     for the user and is never executed by the framework, so it is shown read-only.
     """
-    AUTOMATIC = {"config_adjustment", "docker_prune", "retry_build"}
+    AUTOMATIC = AUTOMATIC_STRATEGIES  # none of them deletes anything; a full Docker disk is a manual step
 
     def __init__(self, proposal, parent=None):
         super().__init__(parent)

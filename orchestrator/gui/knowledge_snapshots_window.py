@@ -3,9 +3,10 @@
 The knowledge base's snapshots as the person sees them (Tools > Knowledge Snapshots...).
 
 Every snapshot with its name, when it was taken, its size, what it is and its full path. The window deletes nothing:
-the framework deletes no snapshot by itself (round 5 f), and until the trash and the framework's deletion dialog
-exist (design WP7) the person removes the files they no longer need themselves, for example in the file manager this
-window opens. Every text is plain text.
+there is no limit and the framework deletes no snapshot by itself (DECISIONS, sixth round; round 5 f). Until the
+trash and the framework's deletion dialog exist (design WP7) the person copies the ones to keep elsewhere (export) or
+removes the ones they no longer need themselves, for example in the file manager this window opens. Every text is
+plain text.
 """
 
 from pathlib import Path
@@ -15,7 +16,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (QAbstractItemView, QDialog, QDialogButtonBox, QHeaderView, QLabel, QPushButton,
                                QTableWidget, QTableWidgetItem, QVBoxLayout)
 
-from orchestrator.Core.knowledge_snapshots import MAX_SNAPSHOTS, list_snapshots, size_text, snapshot_folder
+from orchestrator.Core.knowledge_snapshots import KEEPING_NOTE, list_snapshots, size_text, snapshot_folder
 
 COLUMNS = ("Snapshot", "Taken", "Size", "What it is", "Full path")
 
@@ -54,12 +55,7 @@ class KnowledgeSnapshotsDialog(QDialog):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
-        if len(self.snapshots) > MAX_SNAPSHOTS:
-            note = (f"More than the usual {MAX_SNAPSHOTS}. The framework deletes none by itself: delete the files you "
-                    "no longer need yourself (a trash and a deletion dialog in the framework follow).")
-        else:
-            note = "The framework deletes no snapshot by itself."
-        self.note = _plain(note)
+        self.note = _plain(KEEPING_NOTE)
         layout.addWidget(self.note)
         buttons = QDialogButtonBox(QDialogButtonBox.Close, self)
         self.open_folder = QPushButton("Open the folder", self)

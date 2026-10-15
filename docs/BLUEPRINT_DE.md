@@ -440,9 +440,11 @@ würde, und wartet. Ohne dein Ja wird nichts verändert.
 4. **Warten auf dich.** Der Build-Status wird `awaiting_approval`. Du entscheidest im GUI-Dialog, an der Rückfrage
    eines laufenden `llm-cli build start` oder über das Tool `resolve_healing`. Ohne Entscheidung innerhalb von
    `healing_approval_timeout` (Vorgabe 900 Sekunden) wird der Vorschlag verworfen.
-5. **Nur feste Maßnahmen.** Ein freigegebener Vorschlag wird nur angewendet, wenn er eine von drei im Framework
-   festgelegten Strategien ist: `build_jobs` auf 1 senken, verwaiste Framework-Images und den Docker-Build-Cache
-   entfernen oder einfach neu versuchen. Der Job wird dann einmal wiederholt. Befehlstext aus Mustern oder von der
+5. **Nur feste Maßnahmen.** Ein freigegebener Vorschlag wird nur angewendet, wenn er eine von zwei im Framework
+   festgelegten Strategien ist (`AUTOMATIC_STRATEGIES` in `self_healing_manager.py`): `build_jobs` auf 1 senken oder
+   einfach neu versuchen. Der Job wird dann einmal wiederholt. Keine davon löscht etwas: Eine volle Docker-Platte
+   (`docker_prune`) ist ein manueller Schritt, der auf `llm-cli doctor --fix --tier 2` verweist, das nur die
+   gelisteten Images löscht, die die Person bestätigt. Befehlstext aus Mustern oder von der
    KI wird nur angezeigt und nie ausgeführt; die Freigabe eines manuellen Schritts über MCP wird abgelehnt.
 
 ### Das lokale Modell für den Offline-Modus (unveröffentlicht)
@@ -517,10 +519,10 @@ Das musst du nicht selbst beurteilen.
    entscheiden. Das Seitenlimit `crawler_max_pages` (Vorgabe 50) und die Sprachen `crawler_languages`
    (Vorgabe `en` und `de`) kommen aus den Einstellungen. Einen Schalter für robots.txt oder einen anderen
    Nutzungsvorbehalt gibt es nicht. Vor jeder Start-URL speichert die Wissensbasis einen Snapshot von sich in
-   `knowledge_snapshots/` (eine leere Wissensbasis bekommt keinen). Kein Snapshot wird von selbst gelöscht
-   (`orchestrator/Core/knowledge_snapshots.py`): Über fünf erinnern der Doctor und ein Chat-Hinweis die Person, und
-   `llm-cli knowledge snapshots` listet sie mit vollem Pfad, Namen und Größe. Weder die GUI noch die CLI kann einen
-   Snapshot bisher wiederherstellen.
+   `knowledge_snapshots/` (eine leere Wissensbasis bekommt keinen). Kein Snapshot wird von selbst gelöscht,
+   und es gibt keine Grenze (`orchestrator/Core/knowledge_snapshots.py`): Keine Anzahl bringt eine Erinnerung oder
+   eine Warnung, und `llm-cli knowledge snapshots` listet sie mit vollem Pfad, Namen und Größe für die Person, die
+   sie löscht oder exportiert. Weder die GUI noch die CLI kann einen Snapshot bisher wiederherstellen.
 4. **Prüfungen vor der Anfrage.** Für jede URL, in der Breite zuerst, in dieser Reihenfolge: die SSRF-Prüfung der
    Adresse (siehe [Sicherheitsmodell](#sicherheitsmodell)), dann bei ausgeschalteten PDF-Downloads das Überspringen
    einer URL, die auf `.pdf` endet, die robots.txt und die `/.well-known/tdmrep.json` des Ursprungs (Schema, Host

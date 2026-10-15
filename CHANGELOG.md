@@ -119,10 +119,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   replaced by stable placeholders that are mapped back locally in the answer.
 - **Local knowledge base** on local embeddings (FastEmbed, ONNX on the CPU) and an embedded Qdrant store: no
   vector-database server and no cloud embeddings needed, and it works offline once its models are downloaded.
-  Before every ingest and every restore it saves a snapshot in `knowledge_snapshots/` of the per-user folder; none
-  is ever deleted by itself, on any channel (round 5 f). With more than five, `llm-cli doctor` and a chat notice
-  remind you, and `llm-cli knowledge snapshots` (in the GUI: Tools > Knowledge Snapshots...) lists each one with its
-  full path, name, size and what it is, so you decide which to delete.
+  Before every ingest and every restore it saves a snapshot in `knowledge_snapshots/` of the per-user folder. There
+  is no limit: it keeps as many as the disk holds, deletes none by itself, on any channel (round 5 f), and no number
+  of them brings a reminder or a warning. `llm-cli knowledge snapshots` (in the GUI: Tools > Knowledge Snapshots...)
+  lists each one with its full path, name, size and what it is, so you delete or export (copy elsewhere) the ones
+  you choose.
 - **The knowledge base Ditto uses, for AI clients** (MCP tools `list_knowledge_sources` and
   `read_knowledge_source`, resource `lcf://knowledge/sources/<source id>`): a client that does Ditto's job sees what
   the knowledge base holds and reads one source's excerpts in order. `search_knowledge` now gives every excerpt its
@@ -509,14 +510,15 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   without running the third time; after three input errors an error shows a valid example call. What was repaired
   is marked in the question, listed in the result's `notes` and recorded in the audit log. Tool arguments a local
   model sends with a code fence or in Python notation are read once more.
-- **Two-phase confirmation and question text v2** (Ditto and MCP clients): a question starts with the consequence
-  in plain words from facts the framework looked up, then who asks (an MCP client's self-reported name, version and
-  transport, and whose permissions apply), the facts the framework checked (external text labelled "not checked"),
-  and every argument with the speaking name of an id (a build's model and target, a local file's label). A tool can
-  look facts up before the question, and the call is bound to them: `resolve_healing` shows the pending proposal from
-  the framework's own state, refuses a proposal that changed after the question, and always asks before a
-  destructive fix (`docker_prune`), also when it is allowed. Ditto's GUI dialog and CLI prompt show questions up to
-  16,000 characters (a scrollable dialog, the pager); an MCP form stays at 4,000.
+- **Two-phase confirmation and question text v2** (Ditto and MCP clients): a question starts with the consequence in
+  plain words from facts the framework looked up, then who asks (an MCP client's self-reported name, version and
+  transport, and whose permissions apply), the facts the framework checked (external text labelled "not checked"), and
+  every argument with the speaking name of an id (a build's model and target, a local file's label). A tool can look
+  facts up before the question, and the call is bound to them: `resolve_healing` shows the pending proposal from the
+  framework's own state, refuses a proposal that changed after the question, and refuses to approve a manual step
+  before anything is asked (a full Docker disk, `docker_prune`, included: no healing strategy deletes anything).
+  Ditto's GUI dialog and CLI prompt show questions up to 16,000 characters (a scrollable dialog, the pager); an MCP
+  form stays at 4,000.
 - **Limits per client for tool calls** (Ditto and MCP clients): read tools 20 calls per 10 seconds, `start_build`
   3 unfinished builds and 20 starts a day, 30 questions per hour, and a build queue of at most 20 unfinished requests
   per framework process for AI callers (the person's own GUI and CLI builds are always queued); after a "no" the
@@ -821,11 +823,11 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   reachable; no excerpt matched" or that only the builds of this process are listed); a pending self-healing
   proposal's `suggested_step` is now `manual_step_text`, text for the person to read. The server instructions say
   how to treat marked fields and that a task the client cannot do is reported with its specific reason.
-- **MCP clients see only the tools they may use**: tools your permissions deny are left out of the tool list (the
-  same tools Ditto gets for the same permissions); a call to one is still refused and audited. `destructiveHint`
-  follows each tool's own flag instead of its tier (`resolve_healing` is destructive, because one of its fixes
-  deletes the Docker build cache), and tools that reach other devices ask the client to show its own prompt on
-  every call (`anthropic/requiresUserInteraction`).
+- **MCP clients see only the tools they may use**: tools your permissions deny are left out of the tool list (the same
+  tools Ditto gets for the same permissions); a call to one is still refused and audited. `destructiveHint` follows
+  each tool's own flag instead of its tier (`resolve_healing` stays marked destructive: it changes a setting and
+  retries a build), and tools that reach other devices ask the client to show its own prompt on every call
+  (`anthropic/requiresUserInteraction`).
 - A local model file is mounted into the build containers alone, no longer together with the folder it lies in
   (a model that needs files next to it, such as ONNX external data, is given as its folder). An RKNN sample list
   next to a model file now gets its own folder mount.
@@ -927,14 +929,21 @@ Planned work is listed in the [roadmap](docs/BLUEPRINT.md#roadmap), not here.
   knowledge base uses embedded Qdrant). `image_qdrant` stays: deployment packages ship Qdrant to the device.
 
 ### Fixed
-- **`llm-cli doctor --fix --tier 2` no longer deletes without a list** (released in 3.0.0; round 5 f): it cleared
-  the whole build cache of the Docker daemon, other projects' too, and deleted the framework's dangling images
-  without showing them. The build cache is no longer touched (it cannot be limited to the framework). Tier 2 now
-  lists the framework's dangling build images, each with its name, image id, size and what it is, and deletes
-  exactly that list, by image id and without a prune, only after your yes at a terminal (the default answer is no).
-  Without a terminal and with `--json` it only lists them; the deletion is audited first and refused when the list
-  changed in between. No tool, resource or prompt reaches it, so an AI app or Ditto can neither run it nor get it
-  under a delegation. The disk findings say what tier 2 lists instead of promising a cleanup.
+- **The self-healing "Docker cleanup" deletes nothing any more** (released in 3.0.0; round 5 f): approving the
+  proposal for a full Docker disk (`docker_prune`, in the GUI dialog, at the CLI prompt or through `resolve_healing`)
+  removed the framework's dangling images without showing them and cleared the whole build cache of the Docker
+  daemon, other projects' too. It is now a manual step: the proposal points to `llm-cli doctor --fix --tier 2`, which
+  lists the framework's dangling build images and deletes only those you confirm, and an approval is refused before
+  anything is asked. No code of the framework clears Docker's build cache any more.
+- **`llm-cli doctor --fix --tier 2` no longer deletes without a list** (released in 3.0.0; round 5 f): it cleared the
+  whole build cache of the Docker daemon, other projects' too, and deleted the framework's dangling images without
+  showing them. The build cache is no longer touched (it cannot be limited to the framework). Tier 2 now lists the
+  framework's dangling build images, each with its name, image id, size and what it is, and deletes exactly that list,
+  by image id and without a prune, only after your yes at a terminal (the default answer is no). Without a terminal
+  and with `--json` it only lists them; the deletion is audited first and refused when the list changed in between,
+  and an image that got a name meanwhile (a build of another framework process) is kept. No tool, resource or prompt
+  reaches it, so an AI app or Ditto can neither run it nor get it under a delegation. The disk findings say what tier
+  2 lists instead of promising a cleanup.
 - **A repair is named however the call ends** (finding of a real Claude Code 2.1.296 run over stdio, protocol
   2026-07-28): a declared alias the call used (`quant` read as `quantization`) was recorded in the audit log, but a
   call refused before or instead of the question (too little disk space found by the look-up, a limit, an invalid
