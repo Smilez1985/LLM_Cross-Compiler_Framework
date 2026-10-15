@@ -422,7 +422,9 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   Benutzer (`input_history.json` im Zustandsordner des Benutzers), hat höchstens 20 Einträge je Feld und enthält
   nie Secrets: Werte, die wie ein API-Schlüssel oder Token aussehen, URLs mit Benutzername oder Passwort und URLs
   mit einem Zugangs- oder Sitzungsparameter (etwa `?token=` oder `;jsessionid=`) werden nicht gemerkt.
-  *Werkzeuge > Eingabeverlauf löschen...* vergisst ihn.
+  *Werkzeuge > Eingabeverlauf löschen...* vergisst ihn nach einer Frage, die jede Datei aufzählt, die gelöscht wird
+  (den Verlauf und die Kopie eines beschädigten: vollständiger Pfad, Dateiname, Größe, was es ist; „Nein“ ist die
+  Vorgabe), und löscht nur diese.
 - **Signierte Community-Packs**: Ein Pack ist ein Zip mit einem Manifest (sha256, Größe und Rechte jeder Datei)
   und einer optionalen Ed25519-Signatur des Autors; der öffentliche Schlüssel des Autors wird bei der ersten
   Installation festgehalten, und ein anderer Schlüssel unter demselben Autorennamen wird mit einer Warnung
@@ -791,12 +793,15 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   (n)** zeigt ihn; nach links verschiebbar, frei schwebend möglich) mit deinem Gespräch mit Ditto, Hinweisen und den
   Einträgen darüber, was KI-Apps getan haben, einmal pro Sekunde aus dem signierten Chat-Verlauf aller Prozesse des
   Frameworks gelesen, ohne je darauf zu warten. Wartende Fragen kommen aus den ausstehenden Freigaben und bleiben unter
-  **Braucht dich** mit wer fragt, was und wie viel Zeit bleibt; eine neue zeigt einen verborgenen Bereich, ohne den
-  Tastaturfokus zu nehmen (Einstellung `chat_panel_auto_show`, die keine KI ändern kann). Ein Filter (Alles, Braucht
+  **Braucht dich** mit wer fragt, was und wie viel Zeit bleibt (neu gezählt, solange sie wartet); eine neue zeigt
+  einen verborgenen Bereich, ohne den Tastaturfokus zu nehmen, und holt die Tastatur nie von der Frage weg, auf der du
+  gerade bist (Einstellung `chat_panel_auto_show`, die keine KI ändern kann). Ein Filter (Alles, Braucht
   dich, Entscheidungen, Chat mit Ditto), Routine-Entscheidungen einer App in einer Zeile zusammengefasst, „Neu, seit
   du zuletzt geschaut hast“ mit einer aus den Einträgen gezählten Zusammenfassung, sprechende Namen in KI-Text mit
   „Ursprüngliche Worte zeigen“, Tastaturwege zwischen den Einträgen, Ansagen für Bildschirmleser (Fragen mit Vorrang)
-  und englische/deutsche Texte (`orchestrator/utils/l10n_chat.py`). Wo der Bereich sitzt, ob er gezeigt wird, sein
+  und englische/deutsche Texte (`orchestrator/utils/l10n_chat.py`; der Bereich, seine Einträge im Menü „Ansicht“
+  und die Schaltfläche der Werkzeugleiste folgen einem Sprachwechsel, und deutsche Texte nennen die Menüs so, wie das
+  Fenster sie zeigt). Wo der Bereich sitzt, ob er gezeigt wird, sein
   Filter und der neueste gesehene Eintrag stehen in `gui_state.json` im Benutzerordner (nie in QSettings); eine
   beschädigte Datei ergibt die Vorgaben.
 
@@ -1034,12 +1039,14 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   mit den alten Attributnamen. Enter sendet, Umschalt+Enter fügt eine Zeile ein. Die Hinweise der Statusleiste zu einem
   Korrekturvorschlag eines KI-Clients und zur Nutzung einer Dauerfreigabe kommen auch im Chat an.
 - **„Chat leeren“ zählt auf, was es löscht, bevor es fragt**: Das frühere „Clear History“ löschte Dittos ganzen
-  Chatverlauf nach einem bloßen „Sind Sie sicher?“. Die Frage nennt jetzt für Dittos Gespräch (`chat_history.json`)
-  und für die Gesprächszeilen des Chat-Verlaufs den vollständigen Pfad, den Dateinamen, die Größe und was es ist, sagt,
+  Chatverlauf nach einem bloßen „Sind Sie sicher?“. Die Frage nennt jetzt für Dittos Gespräch (`chat_history.json`,
+  so wie die Datei es jetzt hält, auch wenn ein anderes Fenster oder das Terminal es inzwischen gespeichert hat) und
+  für die Gesprächszeilen des Chat-Verlaufs den vollständigen Pfad, den Dateinamen, die Größe und was es ist, sagt,
   wie viele Einträge darüber, was KI-Apps getan haben, nur ausgeblendet (nie gelöscht) werden, und hat „Nein, alles
   behalten“ als Vorgabe. Beide Teile werden ins Audit-Log geschrieben (`feed_cleared`, mit dem Hash des Gezeigten),
-  bevor etwas gelöscht wird; ohne Audit-Log, oder wenn sich der Chat geändert hat, während du gefragt wurdest, wird
-  nichts gelöscht.
+  bevor etwas gelöscht wird. Nichts wird gelöscht ohne Audit-Log (auch ohne Chat-Verlauf), wenn sich der Chat oder
+  Dittos Gespräch geändert hat, während du gefragt wurdest, oder wenn das Fenster ein Gespräch hält, das seine Datei
+  nicht zeigt.
 
 ### Veraltet
 - `llm-cli secrets set --password`: Ein Wert auf der Kommandozeile landet im Shell-Verlauf und in der
@@ -1706,7 +1713,11 @@ Geplante Arbeiten stehen in der [Roadmap](docs/BLUEPRINT_DE.md#roadmap), nicht h
   des Frameworks steht in Anführungszeichen und bleibt in seiner Zeile, sodass ein Dateiname nicht als Zeile des
   Frameworks auftreten kann; nichts ist inline anklickbar (eine Adresse öffnet sich nur nach einer Frage, die sie ganz
   zeigt); das Aussehen einer App kommt aus ihrer Aufrufer-Kennung, nie aus ihrem eigenen Namen, und eine App, die sich
-  Ditto, das Framework oder das System nennt, wird als „nennt sich so“ gezeigt. Meldungsfenster, Tooltips,
+  Ditto, das Framework oder das System nennt, wird als „nennt sich so“ gezeigt. Nur Zeilen von Ditto bekommen
+  Dittos Bild, und ein Hinweis darauf, was eine App getan hat, steht unter dem vertrauenswürdigen Namen dieser App;
+  ein Werkzeugname, den sich Dittos Modell ausgedacht hat, oder ein Werkzeug des Frameworks auf einem anderen Computer
+  steht in Anführungszeichen, nie als Worte des Frameworks; Guillemets in KI-Text erscheinen als Escape-Folgen, sodass
+  nur das Framework einen sprechenden Namen «so» schreibt. Meldungsfenster, Tooltips,
   Desktop-Benachrichtigungen und Beschriftungen von Schaltflächen der neuen und geänderten Fenster laufen über
   `gui/plain.py` (Meldungsfenster mit reinem Text, maskierte Tooltips, Benachrichtigungen ohne Markup-Zeichen, kein
   Tastenkürzel aus einem „&“ in einem Namen); keine Taste auf einem Chat-Eintrag gibt etwas frei oder klickt etwas.

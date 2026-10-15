@@ -719,7 +719,11 @@ class TestChatWindow:
                 return False
 
         monkeypatch.setattr(chat_window, "ChatWorker", FakeWorker)
-        framework = SimpleNamespace(config=ConfigManager(tmp_path / "configs"), ditto_manager=object())
+        # The tools registered here: only their titles are the framework's words in a tool note (design 5.2 R2).
+        titles = {"list_targets": "List targets"}
+        registry = SimpleNamespace(get=lambda name: SimpleNamespace(title=titles[name]))
+        framework = SimpleNamespace(config=ConfigManager(tmp_path / "configs"), ditto_manager=object(),
+                                    tool_registry=registry)
         win = chat_window.ChatWindow(framework)
         win.started = started
         return win

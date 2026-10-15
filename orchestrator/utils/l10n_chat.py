@@ -7,8 +7,9 @@ The feed's own texts (who decided, the framework's explanation, "Clear chat" cou
 panel shows them through chat_feed.feed_text. German terms: "Freigabe" (approval), "ausstehende Freigabe" (pending
 approval), "Dauerfreigabe" (standing approval), "Vollmacht" (delegation).
 
-Every key has the same {placeholders} in both languages (tests/test_chat_panel.py). This module imports nothing from
-the framework.
+Every key has the same {placeholders} in both languages (tests/test_chat_panel.py). The main window's menus are not
+translated, so a German text names a menu as it is shown ("Tools > Configure AI Agent (Ditto)…"). This module
+imports nothing from the framework.
 """
 
 TEXTS = {
@@ -116,6 +117,11 @@ TEXTS = {
                                 "Proposals from AI Clients.",
         "chat.notice.grant_used": "{who} ran '{title}' under your standing approval ({covers}).",
         "chat.notice.grant_used_plain": "{who} ran '{title}' under your standing approval.",
+        # the same notices under the app's own bubble (its name is the bubble's header)
+        "chat.notice.proposal_by": "Proposed a fix for the build {build} (AI-generated). Read it in Tools > Fix "
+                                   "Proposals from AI Clients.",
+        "chat.notice.grant_used_by": "Ran '{title}' under your standing approval ({covers}).",
+        "chat.notice.grant_used_by_plain": "Ran '{title}' under your standing approval.",
 
         # questions that wait (from the pending approvals, never from feed rows alone)
         "chat.pending.header": "{who} asks:",
@@ -139,6 +145,7 @@ TEXTS = {
         "chat.kind.relay_question": "Your question to the app that decided.",
         "chat.kind.client_reply": "The app's answer.",
         "chat.kind.notice": "A notice.",
+        "chat.kind.ditto_answer": "An answer.",
 
         # "Clear chat"
         "chat.clear.title": "Clear chat?",
@@ -165,14 +172,28 @@ TEXTS = {
                                      "({reason}).",
         "chat.clear.done": "Chat cleared.",
         "chat.clear.no_audit": "the audit log is not available",
+        "chat.clear.history_unlisted": "this window holds a conversation with Ditto that its file chat_history.json "
+                                       "does not show, so it cannot be listed. Restart the program and try again",
+        "chat.clear.history_changed": "it changed while you were asked; look at the list again",
         "chat.size.bytes": "{n} bytes",
         "chat.size.kb": "{kb} KB ({n} bytes)",
         "chat.size.mb": "{mb} MB ({n} bytes)",
+
+        # Tools > Clear Input History (the same list as "Clear chat")
+        "chat.clear.input_history.name": "Input history",
+        "chat.clear.input_history.what": "the recently used models, targets, boards, URLs, devices and datasets the "
+                                         "input fields offer. The file is removed.",
+        "chat.clear.input_history.damaged_name": "Copy of a damaged input history",
+        "chat.clear.input_history.damaged_what": "the input history as it was when it could no longer be read, kept "
+                                                 "for you. The file is removed.",
+        "chat.clear.input_history.empty": "The input history is empty; there is nothing to delete.",
+        "chat.clear.input_history.changed": "The input history changed while you were asked; nothing was deleted. "
+                                            "Look at the list again.",
     },
     "de": {
         "chat.panel.title": "KI-Chat",
         "chat.panel.heading": "Ditto und deine KI-Apps",
-        "chat.panel.access_tip": "Anbieter und Anmeldung, die Ditto nutzt (Werkzeuge > KI-Agent einrichten)",
+        "chat.panel.access_tip": "Anbieter und Anmeldung, die Ditto nutzt (Tools > Configure AI Agent)",
         "chat.panel.thinking": "Ditto denkt nach…",
         "chat.menu.button": "Mehr",
         "chat.menu.clear": "Chat leeren…",
@@ -204,8 +225,8 @@ TEXTS = {
         "chat.composer.remove_about_tip": "Entfernt den Bezug (Escape)",
         "chat.composer.input_name": "Deine Nachricht an Ditto",
         "chat.composer.no_ditto": "Ditto ist nicht verfügbar: der KI-Assistent ist nicht gestartet (siehe Protokoll).",
-        "chat.composer.not_set_up": "Ditto kann noch nicht antworten: richte eine KI ein unter Werkzeuge > KI-Agent "
-                                    "einrichten (Ditto)…",
+        "chat.composer.not_set_up": "Ditto kann noch nicht antworten: richte eine KI ein unter Tools > Configure AI "
+                                    "Agent (Ditto)…",
 
         "chat.view.earlier": "Frühere Nachrichten zeigen",
         "chat.view.new_messages": "Neue Nachrichten ↓",
@@ -265,9 +286,13 @@ TEXTS = {
         "chat.notice.source_remote": "Ditto nutzt jetzt die Werkzeuge des Frameworks auf {name}: ein neues Gespräch.",
         "chat.notice.error": "Ditto konnte nicht antworten: {error}",
         "chat.notice.proposal": "{who} hat eine Korrektur für den Build {build} vorgeschlagen (KI-erzeugt). Lies sie "
-                                "unter Werkzeuge > Korrekturvorschläge von KI-Clients.",
+                                "unter Tools > Fix Proposals from AI Clients.",
         "chat.notice.grant_used": "{who} hat „{title}“ mit deiner Dauerfreigabe ausgeführt ({covers}).",
         "chat.notice.grant_used_plain": "{who} hat „{title}“ mit deiner Dauerfreigabe ausgeführt.",
+        "chat.notice.proposal_by": "Hat eine Korrektur für den Build {build} vorgeschlagen (KI-erzeugt). Lies sie "
+                                   "unter Tools > Fix Proposals from AI Clients.",
+        "chat.notice.grant_used_by": "Hat „{title}“ mit deiner Dauerfreigabe ausgeführt ({covers}).",
+        "chat.notice.grant_used_by_plain": "Hat „{title}“ mit deiner Dauerfreigabe ausgeführt.",
 
         "chat.pending.header": "{who} fragt:",
         "chat.pending.title": "„{title}“ wartet auf deine Entscheidung.",
@@ -289,6 +314,7 @@ TEXTS = {
         "chat.kind.relay_question": "Deine Frage an die App, die entschieden hat.",
         "chat.kind.client_reply": "Die Antwort der App.",
         "chat.kind.notice": "Ein Hinweis.",
+        "chat.kind.ditto_answer": "Eine Antwort.",
 
         "chat.clear.title": "Chat leeren?",
         "chat.clear.intro": "Das löscht Folgendes endgültig:",
@@ -315,8 +341,23 @@ TEXTS = {
                                      "werden ({reason}).",
         "chat.clear.done": "Chat geleert.",
         "chat.clear.no_audit": "das Prüfprotokoll ist nicht verfügbar",
+        "chat.clear.history_unlisted": "dieses Fenster hält ein Gespräch mit Ditto, das seine Datei chat_history.json "
+                                       "nicht zeigt, also kann es nicht aufgezählt werden. Starte das Programm neu "
+                                       "und versuche es noch einmal",
+        "chat.clear.history_changed": "es hat sich geändert, während du gefragt wurdest; sieh dir die Liste noch "
+                                      "einmal an",
         "chat.size.bytes": "{n} Bytes",
         "chat.size.kb": "{kb} KB ({n} Bytes)",
         "chat.size.mb": "{mb} MB ({n} Bytes)",
+
+        "chat.clear.input_history.name": "Eingabeverlauf",
+        "chat.clear.input_history.what": "die zuletzt verwendeten Modelle, Targets, Boards, URLs, Geräte und "
+                                         "Datensätze, die die Eingabefelder anbieten. Die Datei wird entfernt.",
+        "chat.clear.input_history.damaged_name": "Kopie eines beschädigten Eingabeverlaufs",
+        "chat.clear.input_history.damaged_what": "der Eingabeverlauf, wie er war, als er sich nicht mehr lesen ließ, "
+                                                 "für dich aufbewahrt. Die Datei wird entfernt.",
+        "chat.clear.input_history.empty": "Der Eingabeverlauf ist leer; es gibt nichts zu löschen.",
+        "chat.clear.input_history.changed": "Der Eingabeverlauf hat sich geändert, während du gefragt wurdest; nichts "
+                                            "wurde gelöscht. Sieh dir die Liste noch einmal an.",
     },
 }

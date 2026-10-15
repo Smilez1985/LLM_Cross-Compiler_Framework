@@ -569,9 +569,10 @@ die Vorgaben).
   sagt, wie viele übersprungen wurden. Ohne den Verlauf zeigt er Dittos Gespräch wie bisher und sagt, dass neue
   Nachrichten nicht behalten werden.
 - **Wartende Fragen** kommen aus den ausstehenden Freigaben, nie allein aus Chat-Einträgen, und bleiben unten unter
-  **Braucht dich**: wer fragt, was, und wie viel Zeit bleibt. **Im Freigabe-Fenster öffnen…** entscheidet sie dort.
-  Eine neue Frage zeigt einen verborgenen Bereich, ohne den Tastaturfokus zu nehmen; das lässt sich im Menü **⋯** des
-  Bereichs abschalten (die Einstellung `chat_panel_auto_show` kann keine KI ändern).
+  **Braucht dich**: wer fragt, was, und wie viel Zeit bleibt, neu gezählt, solange die Frage wartet. **Im
+  Freigabe-Fenster öffnen…** entscheidet sie dort. Eine neue Frage zeigt einen verborgenen Bereich, ohne den
+  Tastaturfokus zu nehmen, und holt die Tastatur nie von der Frage weg, auf der du gerade bist; das Zeigen lässt sich
+  im Menü **⋯** des Bereichs abschalten (die Einstellung `chat_panel_auto_show` kann keine KI ändern).
 - **Filter:** Alles, Braucht dich, Entscheidungen, Chat mit Ditto. Routine-Entscheidungen einer App innerhalb von
   zehn Minuten werden zu einer Zeile zusammengefasst („Claude Code hat 6 Dinge erledigt“, **Zeigen**). **Neu, seit du
   zuletzt geschaut hast** markiert den ersten neuen Eintrag, mit einer Zusammenfassung, die aus den Einträgen selbst
@@ -583,19 +584,27 @@ die Vorgaben).
   Framework sie kennt, mit dem Namen, den die App sich selbst gibt, klein darunter (eine App, die sich Ditto, das
   Framework oder das System nennt, wird als „nennt sich so“ gezeigt). Hinweise des Frameworks gehen über die ganze
   Breite und schreiben „Warnung:“ aus; Werte von außerhalb des Frameworks stehen in Anführungszeichen und bleiben in
-  ihrer Zeile. KI-Text in einem Eintrag des Frameworks steht in einem Kasten mit der Überschrift „In eigenen Worten
+  ihrer Zeile (auch ein Werkzeugname, den sich Dittos Modell ausgedacht hat, oder ein Werkzeug des Frameworks auf einem
+  anderen Computer). Ein Hinweis darauf, was eine App getan hat (ein Korrekturvorschlag, die Nutzung einer
+  Dauerfreigabe), steht unter dem Namen dieser App, als „vom Framework geschrieben“ markiert; nur Einträge von Ditto
+  bekommen Dittos Bild. KI-Text in einem Eintrag des Frameworks steht in einem Kasten mit der Überschrift „In eigenen Worten
   (KI-Text, vom Framework nicht geprüft)“.
 - **Sprechende Namen:** Kennungen, die das Framework vergeben hat (ein Auftrag, ein Build, eine Frage), erscheinen in
   KI-Text mit ihrem Namen «so»; **Ursprüngliche Worte zeigen** zeigt den Text genau so, wie er geschrieben wurde.
-  Kennungen in Code behalten ihre Form und bekommen eine Legendenzeile.
+  Kennungen in Code behalten ihre Form und bekommen eine Legendenzeile. Nur das Framework schreibt «»: Guillemets im
+  Text selbst erscheinen als Escape-Folgen (`\u00ab`, `\u00bb`), sodass eine KI ihre eigenen Worte nicht wie einen
+  Namen aussehen lassen kann, den das Framework nachgeschlagen hat.
 - **Tastatur und Bildschirmleser:** Enter sendet, Umschalt+Enter fügt eine Zeile ein, Pfeil hoch in einem leeren
   Nachrichtenfeld geht zum neuesten Eintrag, Pfeil hoch/runter und Pos1/Ende gehen zwischen den Einträgen, Escape
   zurück ins Nachrichtenfeld. Jeder Eintrag hat einen zugänglichen Namen (Absender und Zeit), und neue Einträge werden
   Bildschirmlesern angesagt, Fragen mit Vorrang. Keine Taste gibt etwas frei.
-- **Chat leeren…** fragt zuerst und nennt für Dittos Gespräch (`chat_history.json`) und für die Chat-Nachrichten im
+- **Chat leeren…** fragt zuerst und nennt für Dittos Gespräch (`chat_history.json`, so wie die Datei es jetzt hält,
+  auch wenn ein anderes Fenster oder das Terminal es inzwischen gespeichert hat) und für die Chat-Nachrichten im
   Chat-Verlauf (`chat_feed.sqlite`) den vollständigen Pfad, den Dateinamen, die Größe und was es ist; **Nein, alles
   behalten** ist die Vorgabe. Die Einträge darüber, was KI-Apps getan haben, werden nur im Bereich ausgeblendet, nie
-  gelöscht. Das Leeren wird ins Audit-Log geschrieben, bevor etwas gelöscht wird; ohne Audit-Log wird nichts gelöscht.
+  gelöscht. Das Leeren wird ins Audit-Log geschrieben, bevor etwas gelöscht wird. Nichts wird gelöscht ohne Audit-Log,
+  wenn sich Dittos Gespräch geändert hat, während du gefragt wurdest, oder wenn dieses Fenster ein Gespräch hält, das
+  seine Datei nicht zeigt (neu starten und noch einmal versuchen).
 
 Eine Frage direkt im Chat mit Ja oder Nein beantworten, „Warum?“ und Rückgängig kommen mit späterer Arbeit; bis
 dahin entscheidet das Freigabe-Fenster.
@@ -2035,8 +2044,9 @@ Die Eingabefelder der GUI bieten an, was du zuletzt verwendet hast, das Neueste 
   `user:password@host`, Text mit Steuerzeichen und Werte mit mehr als 1000 Zeichen. Dieselben Regeln gelten für eine
   von Hand bearbeitete Datei.
 - Eine beschädigte Datei beginnt einen leeren Verlauf; die alte Datei bleibt als `input_history.json.bad` erhalten.
-- **Tools > Eingabeverlauf löschen...** (englische Oberfläche: *Clear Input History...*) fragt einmal nach, löscht
-  dann die Datei und die `.bad`-Kopie, und die Felder werden sofort neu gefüllt.
+- **Tools > Eingabeverlauf löschen...** (englische Oberfläche: *Clear Input History...*) zählt zuerst die Datei und
+  die `.bad`-Kopie auf (vollständiger Pfad, Dateiname, Größe, was es ist; „Nein“ ist die Vorgabe), löscht dann nur, was
+  es aufgezählt hat, und die Felder werden sofort neu gefüllt.
 
 ---
 
