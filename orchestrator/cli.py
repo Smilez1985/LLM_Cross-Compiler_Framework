@@ -1873,7 +1873,8 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
     inst = status.installed
     if as_json:
         click.echo(json.dumps({
-            "build": status.build, "hardware": hardware.model_dump(mode="json"),
+            "build": status.build, "hardware": hardware.model_dump(mode="json"), "mode": status.mode,
+            "docker": status.docker, "container": status.container,
             "installed": _installed_json(inst), "problems": status.problems, "rebuild": status.rebuild,
             "recommended_backend": backend, "backend_reason": backend_reason,
             "prebuilt_option": prebuilt.asset.id if prebuilt.asset else None, "prebuilt_reason": prebuilt.reason,
@@ -1886,9 +1887,11 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
     table.add_column("", style="cyan")
     table.add_column("")
     table.add_row("Hardware", escape(hardware.summary()))
+    _runtime_mode_rows(table, status)
     if inst is not None:
         style = "yellow" if inst.origin == "prebuilt" else "green"
-        table.add_row("In use", f"[{style}]{_installed_line(inst)}[/{style}]")
+        table.add_row("In use" if status.mode != "docker" else "Bare metal",
+                      f"[{style}]{_installed_line(inst)}[/{style}]")
         if inst.build_id:
             built = [f"{inst.placement or '?'} build"]
             if inst.duration_s is not None:
@@ -1915,7 +1918,8 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
                                             f"self-built): {prebuilt.reason}"))
     if status.running:
         health = "[green]ready[/green]" if status.healthy else "[yellow]starting / not answering[/yellow]"
-        table.add_row("Server", f"{health} {escape(str(status.base_url))} (pid {status.pid}, "
+        where = f"container {status.container}" if status.container else f"pid {status.pid}"
+        table.add_row("Server", f"{health} {escape(str(status.base_url))} ({escape(where)}, "
                                 f"model {escape(str(status.model))}, ctx {status.ctx})")
     else:
         table.add_row("Server", "stopped")
@@ -1924,6 +1928,19 @@ def runtime_status(ctx: FrameworkContext, as_json: bool):
         table.add_row("Chosen model", escape(f"{preferred} (llm-cli ditto runtime start --model auto resets it)"))
     table.add_row("Log", escape(str(status.log_file)))
     console.print(table)
+
+
+def _runtime_mode_rows(table: Table, status) -> None:
+    """The runtime mode and, in Docker mode, Ditto's verified image (its name, ID, build, base and how it was made)."""
+    if status.mode != "docker":
+        table.add_row("Mode", "bare metal (llm-cli ditto runtime ensure --mode docker --force switches)")
+        return
+    image = status.docker or {}
+    table.add_row("Mode", "Docker (llm-cli ditto runtime ensure --mode bare-metal --force switches)")
+    table.add_row("In use", "[green]" + escape(
+        f"image {image.get('tag') or '?'} ({str(image.get('image_id') or '')[7:19]}), build "
+        f"{str(image.get('build_id') or '')[:16]} ({image.get('backend') or '?'}, {image.get('made_by') or '?'}, on "
+        f"{image.get('base') or '?'}), verified in a container at {image.get('verified_at') or '?'}") + "[/green]")
 
 
 @ditto_runtime.command('install')
@@ -2005,8 +2022,130 @@ def runtime_install(ctx: FrameworkContext, backend: str, placement: str, jobs: O
     if rt.endpoint() is not None:
         console.print("The running server keeps running; the next start uses the new build "
                       "(llm-cli ditto runtime start).")
+    if rt.mode() == "docker":
+        console.print("Ditto's server runs in Docker mode; this bare-metal build is used after a switch: llm-cli ditto "
+                      "runtime ensure --mode bare-metal --force")
     if result.requested_missing:
         sys.exit(1)
+
+
+@ditto_runtime.command('ensure')
+@click.option('--mode', type=click.Choice(['auto', 'bare-metal', 'docker']), default='auto', show_default=True,
+              help="auto: keep what is installed, and when nothing is, install bare metal (no Docker overhead), or "
+              "Docker when bare metal is not possible. bare-metal or docker: the mode of a new installation (with "
+              "--force: switch to it)")
+@click.option('--force', is_flag=True, help="Switch to --mode although Ditto is installed in the other mode: the "
+              "models are reused, only the runtime is made again (repackaged where possible); then the old mode's "
+              "leftovers are listed for your confirmation. Needs a terminal")
+@click.option('--placement', type=click.Choice(['auto', 'native', 'container']), default='auto', show_default=True,
+              help="Where a build runs (as for install): with this machine's toolchain or in the builder container")
+@click.option('--backend', type=click.Choice(['auto', 'cpu', 'vulkan', 'cuda', 'rocm', 'metal']), default='auto',
+              show_default=True, help='GPU backend (as for install)')
+@click.option('--jobs', type=click.IntRange(1, 256), default=None, help='Parallel compile jobs of a build')
+@click.option('--no-model', is_flag=True, help="Do not offer the download of the recommended model")
+@click.option('--yes', '-y', is_flag=True, help="Do not ask before building, fetching the source or downloading a "
+              "model under a permissive licence (its size and licence are still shown first); removes nothing")
+@pass_context
+def runtime_ensure(ctx: FrameworkContext, mode: str, force: bool, placement: str, backend: str, jobs: Optional[int],
+                   no_model: bool, yes: bool):
+    """Install Ditto's local runtime when it is not there, bare metal or in Docker (running it again does nothing)"""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    from orchestrator.runtime.runtime_mode import RuntimeModeError, ensure
+    if force and mode == "auto":
+        _usage("--force needs a mode: --mode bare-metal or --mode docker.")
+    if force:
+        _require_terminal("llm-cli ditto runtime ensure --force")  # switching the mode is your decision
+    rt = _local_runtime(ctx)
+
+    def fetch_ok() -> bool:
+        pin = rt.catalog.llama_cpp.source
+        text = f"the pinned llama.cpp source ({pin.tag}, commit {pin.commit[:12]}, about 215 MB)"
+        if yes:
+            console.print(f"Fetching {escape(text)} from GitHub (checked by its commit).")
+            return True
+        if not _interactive():
+            console.print(f"[yellow]{escape(text[0].upper() + text[1:])} is not cached yet; run this in a terminal "
+                          "or with -y to fetch it.[/yellow]")
+            return False
+        return click.confirm(f"{text[0].upper() + text[1:]} is not cached yet. Fetch it now?", default=True)
+
+    try:
+        result = ensure(rt, mode=mode, force=force, placement=placement, backend=backend, jobs=jobs,
+                        log=lambda msg: console.print(escape(msg)), fetch_source=fetch_ok,
+                        container_build=os.environ.get("LCF_CONTAINER_BUILD") == "1")
+    except (RuntimeModeError, LocalRuntimeError) as e:
+        _runtime_failure(e)
+    if result.leftovers is not None:
+        _runtime_leftovers(ctx, rt, result.leftovers)
+    if not no_model:
+        _offer_ditto_model(rt, yes)
+
+
+def _runtime_leftovers(ctx: FrameworkContext, rt, plan) -> None:
+    """The old mode's leftovers: the full list (name, full path or ID, file name, size, what each is), then exactly
+    that list is removed after your yes at a terminal (default no). Without a terminal nothing is removed."""
+    from orchestrator.Core.knowledge_snapshots import size_text
+    from orchestrator.runtime.runtime_mode import LeftoversChanged, RuntimeModeError, remove_leftovers
+    table = Table(title=f"Leftovers of the old mode: {len(plan.items)}, {size_text(plan.total_bytes)}")
+    for column in ("Name", "Full path or ID", "File name", "Size", "What it is"):
+        table.add_column(column, overflow="fold")
+    for item in plan.items:
+        table.add_row(escape(item.speaking_name), escape(item.full_path or item.file_name), escape(item.file_name),
+                      size_text(item.size_bytes), escape(item.what))
+    console.print(table)
+    console.print("Image sizes include layers other images may share, so less space can be freed.")
+    if not _interactive():
+        console.print("[yellow]Nothing was removed: run 'llm-cli ditto runtime ensure --mode "
+                      f"{escape(rt.mode())} --force' yourself in a terminal to confirm this list.[/yellow]")
+        return
+    if not click.confirm(f"Remove exactly these {len(plan.items)} objects?", default=False):
+        console.print("Nothing was removed; they stay until you remove them.")
+        return
+    try:
+        removal = remove_leftovers(rt, plan, actor="cli", audit=_device_audit(ctx, _state_dir(ctx)))
+    except (LeftoversChanged, RuntimeModeError, PermissionError) as e:
+        console.print(f"[yellow]{escape(str(e))}[/yellow]")
+        return
+    for name in removal.deleted:
+        console.print(f"[green]Removed: {escape(name)}[/green]")
+    for name, reason in removal.failed:
+        console.print(f"[yellow]Kept: {escape(name)} ({escape(reason)})[/yellow]")
+    console.print(f"{len(removal.deleted)} removed, about {size_text(removal.freed_bytes)}.")
+
+
+def _offer_ditto_model(rt, yes: bool) -> None:
+    """The model of the chosen or recommended tier: nothing when it is there; otherwise its source, size and licence
+    first, then the download after your yes (with -y only under a permissive licence; any other licence is yours to
+    accept with 'llm-cli ditto models download')."""
+    from orchestrator.runtime.llama_server import LocalRuntimeError
+    from orchestrator.runtime.runtime_mode import PERMISSIVE_LICENCES
+    preferred = rt.preferred_tier()
+    model, why = (rt.catalog.model(preferred), "chosen earlier") if preferred else rt.choose_tier()
+    if rt.model_state(model) != "missing":
+        console.print(f"Model: {escape(model.file)} is there; nothing to download (the models folder is shared by "
+                      "both modes).")
+        return
+    console.print(f"Model for Ditto: {escape(model.repo)} / {escape(model.file)}, {_gib(model.size)}, licence "
+                  f"{escape(model.license)} ({escape(why)}).")
+    if not model.pinned:
+        console.print("[red]It has no pinned size and sha256, so it is not downloaded.[/red]")
+        return
+    if yes and model.license.lower() in PERMISSIVE_LICENCES:
+        console.print(f"Downloading it into {escape(str(rt.models_dir))} (checked by size and sha256).")
+    elif not _interactive():
+        console.print(f"Not downloaded without a terminal. Download it yourself: llm-cli ditto models download "
+                      f"{escape(model.tier)}")
+        return
+    elif not click.confirm(f"Download {_gib(model.size)} into {rt.models_dir}? The licence ({model.license}) is yours "
+                           "to accept.", default=True):
+        return
+    bar, update = _download_progress()
+    try:
+        with bar:
+            path = rt.download_model(model.tier, progress=update)
+    except LocalRuntimeError as e:
+        _runtime_failure(e)
+    console.print(f"[green]Verified and saved: {escape(str(path))}[/green]")
 
 
 @ditto_runtime.command('import')
@@ -2084,7 +2223,8 @@ def runtime_start(ctx: FrameworkContext, tier: Optional[str], ctx_len: Optional[
     except LocalRuntimeError as e:
         _runtime_failure(e)
     status = rt.status()
-    console.print(f"[green]Running:[/green] {escape(ep.base_url)} model {escape(ep.model)} (pid {ep.pid}, "
+    where = f"container {status.container}" if status.container else f"pid {ep.pid}"
+    console.print(f"[green]Running:[/green] {escape(ep.base_url)} model {escape(ep.model)} ({escape(where)}, "
                   f"ctx {status.ctx})")
     console.print("Ditto uses it as the 'local' AI provider; the API key changes with every start and is readable "
                   "only by you.")
@@ -2365,6 +2505,10 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
             from orchestrator.runtime.llama_server import LocalRuntimeError
             rt = _local_runtime(ctx)
             before = rt.endpoint()  # a server you started yourself keeps running
+
+            def same_server(a, b) -> bool:
+                # pid and port: a server in Ditto's container has no process of this computer (pid 0)
+                return (a.pid, getattr(a, "port", None)) == (b.pid, getattr(b, "port", None))
             for tier in tiers:
                 try:
                     with console.status(f"Starting llama-server with {tier} ..."):
@@ -2374,9 +2518,10 @@ def ditto_eval(ctx: FrameworkContext, cases_file: Optional[Path], provider: Opti
                     _runtime_failure(e)
                 finally:
                     running = rt.endpoint()
-                    if before is None or running is None or running.pid != before.pid:
+                    if before is None or running is None or not same_server(running, before):
                         rt.stop()  # the eval's own server (or what is left of a failed start)
-            if before is not None and getattr(rt.endpoint(), "pid", None) != before.pid:
+            after = rt.endpoint()
+            if before is not None and (after is None or not same_server(after, before)):
                 console.print(f"[yellow]Your llama-server ({escape(before.model)}) was replaced for the evaluation; "
                               "start it again with: llm-cli ditto runtime start[/yellow]")
         else:

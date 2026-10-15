@@ -348,6 +348,7 @@ class AIConfigurationDialog(QDialog):
         form.addRow("", self.chk_offline)
 
         layout.addLayout(form)
+        layout.addWidget(self._runtime_mode_section())
         layout.addWidget(self._remote_section())
 
         buttons = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
@@ -356,6 +357,12 @@ class AIConfigurationDialog(QDialog):
         layout.addWidget(buttons)
 
         self._load_current_config()
+
+    def _runtime_mode_section(self) -> QGroupBox:
+        """Ditto's local server: bare metal or in Docker, with the switch (gui/runtime_mode_box.py)."""
+        from orchestrator.gui.runtime_mode_box import RuntimeModeBox
+        self.runtime_mode_box = RuntimeModeBox(self.framework, self)
+        return self.runtime_mode_box
 
     # --- Ditto and the framework on another computer (design 6.1; MCP design T12) ---
     REMOTE_INTRO = ("Ditto always works with the framework on this computer. If the framework is installed on a "

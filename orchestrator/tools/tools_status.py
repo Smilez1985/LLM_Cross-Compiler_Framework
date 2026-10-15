@@ -117,6 +117,12 @@ class HostSection(BaseModel):
 
 class LocalRuntimeSection(BaseModel):
     installed: bool
+    mode: str = Field(default="bare-metal", description="Where Ditto's server runs: bare-metal or docker. Only the "
+                      "person switches it (llm-cli ditto runtime ensure --mode ... --force, or the AI settings)")
+    docker_image: Optional[str] = Field(default=None, description="Docker mode: the name of Ditto's image, built and "
+                                        "verified on this computer")
+    docker_made_by: Optional[str] = Field(default=None, description="Docker mode: repackaged (the bare-metal build) "
+                                          "or rebuilt (in the builder container)")
     origin: Optional[str] = Field(default=None, description="self-built, imported, or prebuilt (not self-built)")
     build_id: Optional[str] = None
     commit: Optional[str] = None
@@ -491,10 +497,15 @@ def local_runtime_section(framework) -> LocalRuntimeSection:
     from orchestrator.runtime.llama_server import LocalLLMRuntime
     status = LocalLLMRuntime.from_framework(framework).status()
     inst = status.installed
-    section = LocalRuntimeSection(installed=inst is not None, running=status.running, healthy=status.healthy,
-                                  model=status.model, tier=status.tier,
+    mode = getattr(status, "mode", None) or "bare-metal"
+    image = getattr(status, "docker", None) if mode == "docker" else None
+    section = LocalRuntimeSection(installed=inst is not None or bool(image), running=status.running,
+                                  healthy=status.healthy, model=status.model, tier=status.tier, mode=mode,
                                   rebuild=_scrub_paths(status.rebuild) if status.rebuild else None,
                                   problems=[_scrub_paths(p) for p in status.problems][:20])
+    if image:  # the image's name and how it was made: no path and no user name
+        section.docker_image = sanitize_untrusted(str(image.get("tag") or ""), 120) or None
+        section.docker_made_by = image.get("made_by") if image.get("made_by") in ("repackaged", "rebuilt") else None
     if inst is not None:
         section.origin = inst.origin if inst.origin != "prebuilt" else "prebuilt (not self-built)"
         section.build_id, section.commit, section.backend = inst.build_id, inst.commit, inst.backend

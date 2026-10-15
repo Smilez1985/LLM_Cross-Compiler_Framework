@@ -28,6 +28,9 @@ PACKAGE_INDEX_URL="${PIP_INDEX_URL:-https://pypi.org/simple/}"
 # läuft dann in einem Image, das auf diesem Rechner gebaut wird. Ohne Docker-Engine im Image (sie installiert dort
 # niemand) und ohne docker-Gruppe; alles andere ist wie auf dem Rechner selbst.
 CONTAINER_BUILD="${LCF_CONTAINER_BUILD:-0}"
+# Dittos lokale Laufzeit (selbst gebauter llama-server und sein Modell): --ditto=auto|bare-metal|docker|skip, für
+# unbeaufsichtigte Läufe auch LCF_DITTO=... (ohne Rückfragen; Größe und Lizenz des Modells werden trotzdem gezeigt).
+DITTO_CHOICE="${LCF_DITTO:-auto}"
 
 # Farben
 RED='\033[0;31m'
@@ -242,6 +245,54 @@ EOF
     chmod +x /usr/local/bin/llm-framework
 }
 
+# --- DITTO: LOKALE LAUFZEIT ---
+# Liest --ditto=WERT aus den Argumenten des Installers (sonst LCF_DITTO, sonst auto). Ein unbekannter Wert bricht ab,
+# bevor irgendetwas installiert wird.
+ditto_option() {
+    local arg
+    for arg in "$@"; do
+        case "$arg" in
+            --ditto=*) DITTO_CHOICE="${arg#--ditto=}" ;;
+        esac
+    done
+    case "$DITTO_CHOICE" in
+        auto|bare-metal|docker|skip) ;;
+        *) log_error "Unbekannter Wert für --ditto: '$DITTO_CHOICE' (auto, bare-metal, docker oder skip)." ;;
+    esac
+}
+
+# Richtet Dittos lokale Laufzeit ein: 'llm-cli ditto runtime ensure' als die Person, die installiert (nie als root).
+# Idempotent: Ist Ditto schon da (direkt oder in Docker), tut der Befehl nichts und sagt das. Der Schritt lässt die
+# Installation nie scheitern: Ein Fehler wird gemeldet, und die Installation geht weiter. Ein Wechsel der Art
+# (--force) und das Entfernen der alten Art bleiben der Person überlassen.
+setup_ditto() {
+    log_info "[Ditto] Lokale Laufzeit für Ditto ($DITTO_CHOICE)..."
+    if [ "$DITTO_CHOICE" = "skip" ]; then
+        log_info "Übersprungen (--ditto=skip). Später: llm-cli ditto runtime ensure"
+        return 0
+    fi
+    if [ "$CONTAINER_BUILD" = "1" ]; then
+        log_info "Container-Build: Ditto wird hier nicht eingerichtet. Der Docker-Modus ist im Framework-Container nicht verfügbar (darin gibt es keine Docker-Engine), und eine im Image gebaute Laufzeit passte nicht zur Hardware, auf der der Container später läuft. Im laufenden Container: docker exec -it lcf-framework llm-cli ditto runtime ensure"
+        return 0
+    fi
+    local real_user="${SUDO_USER:-$USER}"
+    if [ "$real_user" = "root" ] || [ -z "$real_user" ]; then
+        log_warn "Ditto wird für deinen Benutzer eingerichtet, nicht für root: Starte das Skript mit sudo als dein Benutzer, oder führe später als dein Benutzer aus: llm-cli ditto runtime ensure"
+        return 0
+    fi
+    # sudo übernimmt nur die Proxy-Variablen (für den Quellcode und das Modell), nie die übrige Umgebung von root.
+    local as_user=(sudo -H --preserve-env=https_proxy,HTTPS_PROXY,http_proxy,HTTP_PROXY,no_proxy,NO_PROXY -u "$real_user")
+    if ! command -v sudo &> /dev/null; then as_user=(runuser -u "$real_user" --); fi
+    local args=(ditto runtime ensure --mode "$DITTO_CHOICE")
+    if [ -n "${LCF_DITTO:-}" ]; then args+=(--yes); fi
+    if (cd "$INSTALL_DIR" && "${as_user[@]}" "$INSTALL_DIR/.venv/bin/python" -m orchestrator.cli "${args[@]}"); then
+        log_success "Ditto: fertig (Meldungen oben)."
+    else
+        log_warn "Ditto ließ sich nicht einrichten (Meldungen oben); die Installation ist trotzdem fertig. Später erneut: llm-cli ditto runtime ensure"
+    fi
+    return 0
+}
+
 # --- SCHRITT 5: ABSCHLUSS ---
 finish() {
     log_success "[5/5] Installation abgeschlossen!"
@@ -262,11 +313,13 @@ finish() {
 
 # --- MAIN ---
 main() {
+    ditto_option "$@"
     check_root
     setup_system
     deploy_files
     setup_venv
     configure
+    setup_ditto
     finish
 }
 

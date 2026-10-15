@@ -565,7 +565,8 @@ def ui_text(key: str, lang: Optional[str] = None, **values: Any) -> str:
 # The texts of newer parts live in modules of their own, so parallel work never edits this file at the same place:
 # warnings and blockers (l10n_facts), the chat panel (l10n_chat). Each holds a plain `TEXTS = {"en": {...}, "de":
 # {...}}` and imports nothing from the framework. A module that does not exist yet is skipped.
-TEXT_MODULES = ("orchestrator.utils.l10n_facts", "orchestrator.utils.l10n_chat")
+TEXT_MODULES = ("orchestrator.utils.l10n_facts", "orchestrator.utils.l10n_chat",
+                "orchestrator.utils.l10n_runtime")  # Ditto's runtime mode in the AI settings
 
 
 def merge_text_modules(table: Optional[Dict[str, Dict[str, str]]] = None,

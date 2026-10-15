@@ -7,6 +7,7 @@ on:
       - "entrypoint.sh"
       - "orchestrator/utils/build_context.py"
       - "orchestrator/Core/builder.py"
+      - "orchestrator/runtime/build/*.Dockerfile"
       - ".github/workflows/docker.yml"
   push:
     branches: [main]
@@ -15,6 +16,7 @@ on:
       - "entrypoint.sh"
       - "orchestrator/utils/build_context.py"
       - "orchestrator/Core/builder.py"
+      - "orchestrator/runtime/build/*.Dockerfile"
       - ".github/workflows/docker.yml"
   schedule:
     - cron: "41 3 * * 0"
@@ -40,6 +42,7 @@ jobs:
           - targets/_template/Dockerfile
           - targets/_template/Dockerfile.gpu
           - orchestrator/runtime/build/builder.Dockerfile
+          - orchestrator/runtime/build/ditto-runtime.Dockerfile
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

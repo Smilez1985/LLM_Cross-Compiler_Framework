@@ -1134,6 +1134,64 @@ self-built“.
   am Pin in 189 Sekunden samt Prüfungen, 28 MB Programme; `ditto runtime install` mit dem CPU-Build für Ditto
   (`llama-server`, `llama-cli`, `llama-bench`, `llama-perplexity`) in 195 Sekunden samt Prüfungen.
 
+### Direkt oder in Docker (Art der Laufzeit)
+
+Dittos lokaler Server (der selbst gebaute `llama-server` und sein Modell) läuft direkt auf dem Rechner (bare metal,
+der Standard, ohne den Aufwand von Docker) oder in Docker. `llm-cli ditto runtime ensure` installiert ihn, wenn er
+fehlt; die Installer führen den Befehl als ihren Ditto-Schritt aus (`install.sh --ditto=auto|bare-metal|docker|skip`,
+`install.bat --ditto=...` oder `LCF_DITTO` für einen unbeaufsichtigten Lauf). Die Art steht in
+`~/.llm-framework/runtime/llama.cpp/mode.json`.
+
+- **Idempotent:** Ist Ditto in einer der beiden Arten da, passiert nichts, und der Befehl sagt, was er gefunden hat.
+  Ist nichts installiert, installiert `auto` direkt; geht das hier nicht (zum Beispiel kein Compiler und keine
+  Builder-Basis für die C-Bibliothek dieses Rechners), nimmt er Docker und sagt warum. Geht keins von beiden, nennt
+  er beide Gründe.
+- **Dittos Image** wird auf diesem Rechner aus `orchestrator/runtime/build/ditto-runtime.Dockerfile` in zwei Stufen
+  gebaut, auf einem Docker Official Image des Katalogs als Basis (`build_bases`: Debian, Ubuntu oder Alpine, per Digest
+  festgelegt): `runtime-base` fügt nur die Laufzeit-Bibliotheken hinzu (OpenMP und C++-Laufzeit; für einen
+  Vulkan-Build den Vulkan-Loader und die Treiber von Mesa), `ditto` die Programme eines geprüften Builds. Die Programme
+  kommen aus dem direkten Build, wenn die C-Bibliothek der Basis passt (ein Build des Builder-Containers kommt auf
+  seine eigene Basis, ein nativer Build auf die älteste Basis mit derselben C-Bibliothek, die mindestens so neu ist wie
+  die dieses Rechners): „repackaged“ (umgepackt). Sonst wird llama.cpp im Builder-Container neu gebaut, für die Basis
+  des Images geplant und in einem Container der Laufzeit-Basis geprüft: „rebuilt“ (neu gebaut). Das Image trägt die
+  Kennzeichnung als Dittos Laufzeit (`org.llm-framework.ditto-runtime`), wird nie als fertiges Image geholt und nie
+  hochgeladen und vor dem Gebrauch in Containern aus ihm selbst geprüft: `llama-server` und `llama-bench` nennen den
+  festgelegten Build und Commit, der Server lehnt `--tools` ab, und ein GPU-Build sieht sein Gerät, wenn die GPU
+  durchgereicht wird. Der Docker-Modus braucht in dieser Version Linux.
+- **Der Container** hält die Startregeln jedes Servers ein: die Befehlszeile aus `server_policy.py` (keine verbotene
+  Option, die Schlüsseldatei, keine Web-Oberfläche, keine Slots, offline); in seinem eigenen Netzwerk-Namensraum hört
+  er auf allen Schnittstellen des Containers, und sein Port wird nur auf 127.0.0.1 veröffentlicht, also erreicht ihn
+  nichts außerhalb dieses Rechners (der Schlüssel des Starts schützt ihn weiter vor anderen Containern). Modellordner
+  und Schlüsseldatei werden schreibgeschützt eingebunden (die Modelle werden nicht kopiert), er läuft als dein
+  Benutzer, ohne Capabilities und ohne Rechteausweitung, mit schreibgeschütztem Wurzeldateisystem und einem
+  Init-Prozess, und Docker entfernt ihn, wenn er stoppt. Er wird über die ID des Images angelegt, also holt Docker für
+  ihn nie etwas. Die GPU wird durchgereicht, wo das geht: NVIDIA-GPUs über das NVIDIA Container Toolkit (Docker nennt
+  eine Laufzeit `nvidia`), AMD- und Intel-GPUs als `/dev/dri` mit den Gruppen seiner Render-Knoten; wo nicht, sagt
+  der Hinweis warum, und das Image bekommt den CPU-Build. `runtime start`, `stop` und `status` folgen dem Container,
+  und der Schlüssel erreicht die Anbieter-Schicht nur, solange der aufgezeichnete Container mit Dittos Kennzeichnung
+  und dem aufgezeichneten Port läuft.
+- **Ein Wechsel** (`--force`, braucht ein Terminal, oder die KI-Einstellungen) behält die Modelle: Nichts wird noch
+  einmal heruntergeladen, der Container bindet denselben Ordner ein. Nur der Server wird neu erzeugt, umgepackt, wo
+  das geht: der direkte Build ins Image, oder der Build des Images in die direkte Art, sobald er seine Prüfungen auf
+  diesem Rechner selbst bestanden hat (ein Build, der nur im Container geprüft wurde, läuft vorher nie hier). Wo das
+  nicht geht, wird der Grund gezeigt und der Server neu gebaut. Der Server der alten Art wird gestoppt. Der
+  Build-Speicher behält den Build, aus dem das Image gemacht wurde, also braucht ein Wechsel zurück keinen neuen Build.
+- **Die Reste der alten Art** werden aufgelistet, nachdem die neue Art geprüft ist: Dittos Build-Ordner mit
+  vollständigem Pfad, Ordnername, Build-ID und Größe, Dittos Images und Container mit Name, ID und Größe, und was
+  jedes ist. Entfernt wird nur genau die Liste, die du bestätigst („Nein“ ist vorgewählt), im Terminal oder in den
+  KI-Einstellungen; die Liste wird vorher noch einmal ermittelt, und hat sie sich geändert, wird nichts entfernt, und
+  das Entfernen wird ins Audit-Log geschrieben, bevor etwas entfernt wird. Ohne Terminal wird nichts entfernt, und die
+  Liste wird angezeigt. Dittos Images werden sonst nie gelöscht, und die Builds eines Boards im selben Speicher
+  werden nie aufgelistet.
+- **Das Modell:** `ensure` bietet das Modell der gewählten oder empfohlenen Stufe an, wenn es fehlt, zuerst mit
+  Quelle, Größe und Lizenz; mit `-y` lädt es nur ein Modell unter freier Lizenz. Jede andere Lizenz nimmst du selbst
+  an.
+- **Für KI-Clients:** `get_status` (`local_runtime`) zeigt die Art, den Namen des Images und ob es umgepackt oder neu
+  gebaut wurde; `start_local_runtime` startet den Server der aufgezeichneten Art. Die Art wechseln und die alte Art
+  entfernen darf nur die Person: Kein Tool tut eins davon.
+- **Die KI-Einstellungen** zeigen, wo der Server läuft, und bieten den Wechsel über denselben Code-Pfad wie der
+  Befehl an, mit derselben Liste der Reste danach.
+
 ### Laufzeit-Tools für KI-Clients (optional)
 
 Sechs optionale MCP-Tools lassen einen KI-Client (oder Ditto) tun, was `llm-cli ditto runtime` und
